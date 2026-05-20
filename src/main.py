@@ -21,7 +21,6 @@ except Exception as exc:  # pragma: no cover - fallback CLI
     QT_IMPORT_ERROR = exc
 
 
-
 def render_cli_event(event) -> None:
     if event.kind == "clear":
         return
