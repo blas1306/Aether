@@ -5,7 +5,7 @@ from PySide6 import QtGui  # type: ignore
 
 from ui.code_editor import CodeEditor
 from ui.editor_api import EditorAPI
-from ui.editor_factory import create_editor
+from ui.editor_factory import DEFAULT_EDITOR_KIND, create_editor
 
 
 @pytest.fixture
@@ -116,6 +116,15 @@ def test_native_widget_remains_available_as_escape_hatch(editor: CodeEditor) -> 
     assert editor.native_widget() is editor
 
 
+def test_default_editor_kind_remains_qt_plain(qapp) -> None:
+    assert DEFAULT_EDITOR_KIND == "qt_plain"
+    editor: EditorAPI = create_editor()
+    try:
+        assert isinstance(editor.native_widget(), CodeEditor)
+    finally:
+        editor.native_widget().close()
+
+
 @pytest.mark.parametrize("kind", ["qt_plain", "experimental"])
 def test_create_editor_kinds_return_basic_editor_api(kind: str, qapp) -> None:
     editor: EditorAPI = create_editor(kind)
@@ -130,6 +139,18 @@ def test_create_editor_kinds_return_basic_editor_api(kind: str, qapp) -> None:
         editor.native_widget().close()
 
 
+def test_create_editor_codemirror_reports_missing_webengine_clearly(monkeypatch, qapp) -> None:
+    import ui.codemirror_editor as codemirror_editor
+
+    def fail_webengine_import():
+        raise RuntimeError("CodeMirrorEditor requires PySide6 QtWebEngine support.")
+
+    monkeypatch.setattr(codemirror_editor, "_load_qt_webengine", fail_webengine_import)
+
+    with pytest.raises(RuntimeError, match="CodeMirrorEditor requires PySide6 QtWebEngine support"):
+        create_editor("codemirror")
+
+
 def test_create_editor_unknown_kind_raises_clear_error() -> None:
-    with pytest.raises(ValueError, match="Unknown editor kind 'missing'.*qt_plain.*experimental"):
+    with pytest.raises(ValueError, match="Unknown editor kind 'missing'.*qt_plain.*experimental.*codemirror"):
         create_editor("missing")
