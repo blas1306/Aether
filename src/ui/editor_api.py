@@ -113,6 +113,32 @@ class EditorAPI(Protocol):
         """Replace externally supplied completion candidates."""
         ...
 
+    def set_autocomplete_document_kind(self, document_kind: str) -> None:
+        """Set the document kind used by syntax and completion behavior.
+
+        Current values are convention-based strings such as `"script"` and
+        `"mtex_document"`. Future adapters should normalize unsupported values
+        to their closest supported behavior rather than failing.
+        """
+        ...
+
+    def set_autocomplete_workspace_provider(
+        self,
+        provider: Callable[[], list[dict[str, str]]] | None,
+    ) -> None:
+        """Set the provider used to expose workspace symbols to completions."""
+        ...
+
+    def set_surface_theme(
+        self,
+        *,
+        background: str,
+        line_number_color: str = "#b0b0b0",
+        current_line_color: str = "#404040",
+    ) -> None:
+        """Apply editor-surface colors requested by the application shell."""
+        ...
+
     def focus_editor(self) -> None:
         """Move keyboard focus into the editor surface."""
         ...

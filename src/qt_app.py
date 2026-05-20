@@ -53,6 +53,7 @@ from ui.code_editor import (
     STRING_COLOR,
 )
 from ui.editor_api import EditorAPI
+from ui.editor_factory import DEFAULT_EDITOR_KIND, create_editor
 
 try:  # pragma: no cover - depende de la instalacion del usuario
     from PySide6 import QtCore, QtGui, QtWidgets  # type: ignore
@@ -78,6 +79,33 @@ AUTO_COMPILE_DEBOUNCE_MS = 900
 INTERACTIVE_MENU_CONTEXT = "interactive"
 STUDIO_MENU_CONTEXT = "studio"
 SNIPPET_CURSOR_MARKER = "<|cursor|>"
+
+
+def _is_editor_api(value) -> bool:
+    required_methods = (
+        "get_text",
+        "set_text",
+        "get_cursor_position",
+        "set_cursor_position",
+        "get_cursor_line_column",
+        "go_to_line",
+        "has_selection",
+        "get_selected_text",
+        "get_selection_start_line",
+        "insert_text_at_cursor",
+        "is_modified",
+        "set_modified",
+        "connect_modification_changed",
+        "set_diagnostics",
+        "clear_diagnostics",
+        "set_completions",
+        "set_autocomplete_document_kind",
+        "set_autocomplete_workspace_provider",
+        "set_surface_theme",
+        "focus_editor",
+    )
+    return all(callable(getattr(value, method_name, None)) for method_name in required_methods)
+
 
 DARK_APP_STYLESHEET = f"""
 QWidget {{
@@ -342,7 +370,8 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         self.project_workspace_widget: ProjectWorkspaceWidget | None = None
         self.logs_output_widget: LogsOutputWidget | None = None
         self.mtex_file_tree: QtWidgets.QTreeWidget | None = None
-        self.mtex_editor: CodeEditor | None = None
+        self.editor_kind = DEFAULT_EDITOR_KIND
+        self.mtex_editor: EditorAPI | None = None
         self.mtex_file_label: QtWidgets.QLabel | None = None
         self.auto_compile_checkbox: QtWidgets.QCheckBox | None = None
         self.build_status_label: QtWidgets.QLabel | None = None
@@ -1266,7 +1295,7 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         self.project_stack = QtWidgets.QStackedWidget()
         self.project_home_widget = ProjectHomeWidget(root)
         self.project_workspace_widget = ProjectWorkspaceWidget(
-            editor_factory=CodeEditor,
+            editor_factory=lambda: create_editor(self.editor_kind),
             preview_factory=PdfPreviewWidget,
             preview_message=self._preview_message,
             project_manager=self.project_manager,
@@ -1450,7 +1479,7 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         if not doc:
             return None
         widget = doc.get("widget")
-        return widget if isinstance(widget, CodeEditor) else None
+        return widget if _is_editor_api(widget) else None
 
     def _is_studio_workspace_active(self) -> bool:
         return bool(
@@ -1556,7 +1585,7 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         self._create_script_document(name=name, path=None, content="", announce=not initial)
 
     def _create_script_document(self, name: str, path: Path | None, content: str, announce: bool) -> None:
-        editor = CodeEditor(enable_autocomplete=True)
+        editor = create_editor(self.editor_kind, enable_autocomplete=True)
         editor.set_autocomplete_document_kind("script")
         editor.set_autocomplete_workspace_provider(self._current_workspace_snapshot)
         editor.set_surface_theme(
@@ -1594,7 +1623,7 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         if idx >= 0:
             self.script_tab_widget.setTabText(idx, title)
 
-    def _mark_script_dirty(self, widget: CodeEditor) -> None:
+    def _mark_script_dirty(self, widget: EditorAPI) -> None:
         doc = next((d for d in self.script_docs if d["widget"] is widget), None)
         if not doc:
             return

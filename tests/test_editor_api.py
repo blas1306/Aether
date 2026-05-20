@@ -4,6 +4,8 @@ import pytest
 from PySide6 import QtGui  # type: ignore
 
 from ui.code_editor import CodeEditor
+from ui.editor_api import EditorAPI
+from ui.editor_factory import create_editor
 
 
 @pytest.fixture
@@ -112,3 +114,22 @@ def test_modification_changed_callback_contract(editor: CodeEditor, qapp) -> Non
 
 def test_native_widget_remains_available_as_escape_hatch(editor: CodeEditor) -> None:
     assert editor.native_widget() is editor
+
+
+@pytest.mark.parametrize("kind", ["qt_plain", "experimental"])
+def test_create_editor_kinds_return_basic_editor_api(kind: str, qapp) -> None:
+    editor: EditorAPI = create_editor(kind)
+    try:
+        editor.set_text(f"{kind}\nbody\n")
+        assert editor.get_text() == f"{kind}\nbody\n"
+        assert editor.go_to_line(2, 1)
+        assert editor.get_cursor_line_column() == (2, 1)
+        editor.insert_text_at_cursor("X")
+        assert editor.get_text() == f"{kind}\nbXody\n"
+    finally:
+        editor.native_widget().close()
+
+
+def test_create_editor_unknown_kind_raises_clear_error() -> None:
+    with pytest.raises(ValueError, match="Unknown editor kind 'missing'.*qt_plain.*experimental"):
+        create_editor("missing")
