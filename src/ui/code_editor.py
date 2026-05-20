@@ -439,6 +439,10 @@ class CodeEditor(QtWidgets.QPlainTextEdit):  # type: ignore[misc]
         cursor.setPosition(max(0, min(int(pos), len(self.toPlainText()))))
         self.setTextCursor(cursor)
 
+    def get_cursor_line_column(self) -> tuple[int, int]:
+        cursor = self.textCursor()
+        return cursor.blockNumber() + 1, cursor.positionInBlock()
+
     def go_to_line(self, line: int, column: int = 0) -> bool:
         block = self.document().findBlockByNumber(max(0, int(line) - 1))
         if not block.isValid():
@@ -448,6 +452,38 @@ class CodeEditor(QtWidgets.QPlainTextEdit):  # type: ignore[misc]
         self.centerCursor()
         self.ensureCursorVisible()
         return True
+
+    def has_selection(self) -> bool:
+        return self.textCursor().hasSelection()
+
+    def get_selected_text(self) -> str:
+        return self.textCursor().selectedText().replace("\u2029", "\n")
+
+    def get_selection_start_line(self) -> int | None:
+        cursor = self.textCursor()
+        if not cursor.hasSelection():
+            return None
+        selection_start = min(cursor.selectionStart(), cursor.selectionEnd())
+        return self.document().findBlock(selection_start).blockNumber() + 1
+
+    def insert_text_at_cursor(self, text: str, cursor_offset: int = 0) -> None:
+        cursor = self.textCursor()
+        cursor.beginEditBlock()
+        cursor.insertText(text)
+        if cursor_offset:
+            position = max(0, min(cursor.position() + int(cursor_offset), len(self.toPlainText())))
+            cursor.setPosition(position)
+        cursor.endEditBlock()
+        self.setTextCursor(cursor)
+
+    def is_modified(self) -> bool:
+        return self.document().isModified()
+
+    def set_modified(self, value: bool) -> None:
+        self.document().setModified(value)
+
+    def connect_modification_changed(self, callback: Callable[[bool], None]) -> None:
+        self.modificationChanged.connect(callback)
 
     def set_diagnostics(self, diagnostics) -> None:
         self._diagnostics = list(diagnostics or [])

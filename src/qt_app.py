@@ -1293,7 +1293,7 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         self.project_workspace_widget.compile_requested.connect(self._compile_current_mtex)
         self.project_workspace_widget.logs_output_requested.connect(self._show_logs_output_widget)
         self.project_workspace_widget.file_open_requested.connect(self._handle_project_file_activation)
-        self.mtex_editor.native_widget().modificationChanged.connect(lambda changed: self._update_mtex_dirty(changed))
+        self.mtex_editor.connect_modification_changed(lambda changed: self._update_mtex_dirty(changed))
         self.mtex_editor.text_changed.connect(self._on_active_mtex_text_changed)
         if self.auto_compile_checkbox is not None:
             self.auto_compile_checkbox.toggled.connect(self._set_auto_compile_enabled)
@@ -1842,7 +1842,7 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         self.auto_compile_controller.set_enabled(enabled)
         if not enabled:
             self._auto_compile_timer.stop()
-        elif self.mtex_editor is not None and self.mtex_editor.native_widget().document().isModified():
+        elif self.mtex_editor is not None and self.mtex_editor.is_modified():
             self.schedule_auto_build()
         if persist:
             self._save_ui_preferences()
@@ -1993,20 +1993,8 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
             return
         marker_index = template.find(SNIPPET_CURSOR_MARKER)
         text = template.replace(SNIPPET_CURSOR_MARKER, "")
-        native = editor.native_widget()
-        cursor = native.textCursor()
-        cursor.beginEditBlock()
-        cursor.insertText(text)
-        if marker_index >= 0:
-            backtrack = len(text) - marker_index
-            if backtrack > 0:
-                cursor.movePosition(
-                    QtGui.QTextCursor.MoveOperation.Left,
-                    QtGui.QTextCursor.MoveMode.MoveAnchor,
-                    backtrack,
-                )
-        cursor.endEditBlock()
-        native.setTextCursor(cursor)
+        cursor_offset = marker_index - len(text) if marker_index >= 0 else 0
+        editor.insert_text_at_cursor(text, cursor_offset=cursor_offset)
         editor.focus_editor()
         self._refresh_menu_bar_for_active_context()
 
@@ -2071,7 +2059,7 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         return "cancel"
 
     def _can_leave_project_workspace(self) -> bool:
-        if self.mtex_editor is None or not self.mtex_editor.native_widget().document().isModified():
+        if self.mtex_editor is None or not self.mtex_editor.is_modified():
             return True
         choice = self._ask_mtex_close_confirmation()
         if choice == "cancel":
@@ -2224,7 +2212,7 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         if self.mtex_file_label is not None:
             self.mtex_file_label.setText(path.name)
         if self.mtex_editor is not None:
-            self.mtex_editor.native_widget().document().setModified(False)
+            self.mtex_editor.set_modified(False)
         self._refresh_mtex_file_tree()
         self._refresh_menu_bar_for_active_context()
         return True
@@ -2258,7 +2246,7 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         self._ignore_mtex_text_changes = True
         try:
             self.mtex_editor.set_text(content)
-            self.mtex_editor.native_widget().document().setModified(False)
+            self.mtex_editor.set_modified(False)
             self.current_mtex_path = path
             if self.project_workspace_widget is not None:
                 self.project_workspace_widget.set_notebook_source(content, path=path)
@@ -2580,14 +2568,11 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
             self.append_output("There is no active editor to run.")
             return
         widget_api: EditorAPI = doc["widget"]
-        widget = widget_api.native_widget()
-        cursor = widget.textCursor()
-        if not cursor.hasSelection():
+        if not widget_api.has_selection():
             self.append_output("Select a block in the editor to run only that part.")
             return
-        seleccion = cursor.selectedText().replace("\u2029", "\n")
-        selection_start = min(cursor.selectionStart(), cursor.selectionEnd())
-        selection_start_line = widget.document().findBlock(selection_start).blockNumber() + 1
+        seleccion = widget_api.get_selected_text()
+        selection_start_line = widget_api.get_selection_start_line() or 1
         runtime = runtime_for_file(doc.get("path") or doc.get("name"))
         if runtime == AETHER_RUNTIME:
             self._run_aether_selection(doc, seleccion)
@@ -2730,7 +2715,7 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
     def _current_mtex_cursor_line(self) -> int | None:
         if self.mtex_editor is None:
             return None
-        return self.mtex_editor.native_widget().textCursor().blockNumber() + 1
+        return self.mtex_editor.get_cursor_line_column()[0]
 
     def _move_mtex_cursor_to_line(self, line_number: int) -> bool:
         if self.mtex_editor is None:
