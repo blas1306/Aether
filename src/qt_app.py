@@ -9,7 +9,8 @@ from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import replace
 from pathlib import Path
 
-from actions import AppAction, ActionRegistry
+from actions import ActionRegistry
+from actions.app_actions import register_main_window_actions
 from auto_compile import AutoCompileController, CompileTrigger
 from app_preferences import AppPreferences, AppPreferencesStore
 from console_engine import MathRuntime, capture_to_events
@@ -812,49 +813,7 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
     def _initialize_app_actions(self) -> None:
         if self._app_actions_initialized:
             return
-        self.action_registry.register(
-            AppAction(
-                id="file.open",
-                label="Open",
-                callback=self._open_current_context_file,
-                enabled=self._can_open_current_context_file,
-            )
-        )
-        self.action_registry.register(
-            AppAction(
-                id="file.save",
-                label="Save",
-                callback=self._save_current_context_file,
-                shortcut="Ctrl+S",
-                enabled=self._can_save_current_context_file,
-            )
-        )
-        self.action_registry.register(
-            AppAction(
-                id="run.current",
-                label="Run Script",
-                callback=self.run_script,
-                shortcut="Ctrl+Enter",
-                enabled=self._can_run_current_action,
-            )
-        )
-        self.action_registry.register(
-            AppAction(
-                id="build.current",
-                label="Compile",
-                callback=self._compile_current_mtex,
-                shortcut="Ctrl+Enter",
-                enabled=self._can_build_current_action,
-            )
-        )
-        self.action_registry.register(
-            AppAction(
-                id="repl.open_aether",
-                label="Open Aether REPL",
-                callback=self._open_aether_repl,
-                enabled=lambda: True,
-            )
-        )
+        register_main_window_actions(self, self.action_registry)
         self._app_actions_initialized = True
 
     def _run_action(self, action_id: str) -> None:
