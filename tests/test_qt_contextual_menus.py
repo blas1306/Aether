@@ -2,10 +2,94 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6 import QtGui  # type: ignore
+from PySide6 import QtCore, QtGui, QtWidgets  # type: ignore
 
 from qt_app import MathTeXQtWindow
 from project_system import ProjectManager
+
+
+class EditorApiWidgetWithoutTextCursor(QtWidgets.QWidget):  # type: ignore[misc]
+    text_changed = QtCore.Signal()
+    cursor_changed = QtCore.Signal()
+    request_completion = QtCore.Signal()
+    run_requested = QtCore.Signal()
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._text = ""
+        self._modified = False
+        self._selection = False
+
+    def native_widget(self):
+        return self
+
+    def get_text(self) -> str:
+        return self._text
+
+    def set_text(self, text: str) -> None:
+        self._text = text
+
+    def get_cursor_position(self) -> int:
+        return 0
+
+    def set_cursor_position(self, pos: int) -> None:
+        del pos
+
+    def get_cursor_line_column(self) -> tuple[int, int]:
+        return (1, 0)
+
+    def go_to_line(self, line: int, column: int = 0) -> bool:
+        del line, column
+        return True
+
+    def has_selection(self) -> bool:
+        return self._selection
+
+    def get_selected_text(self) -> str:
+        return "selected" if self._selection else ""
+
+    def get_selection_start_line(self) -> int | None:
+        return 1 if self._selection else None
+
+    def insert_text_at_cursor(self, text: str, cursor_offset: int = 0) -> None:
+        del cursor_offset
+        self._text += text
+
+    def is_modified(self) -> bool:
+        return self._modified
+
+    def set_modified(self, value: bool) -> None:
+        self._modified = value
+
+    def connect_modification_changed(self, callback) -> None:
+        del callback
+
+    def set_diagnostics(self, diagnostics) -> None:
+        del diagnostics
+
+    def clear_diagnostics(self) -> None:
+        pass
+
+    def set_completions(self, completions) -> None:
+        del completions
+
+    def set_autocomplete_document_kind(self, document_kind: str) -> None:
+        del document_kind
+
+    def set_autocomplete_workspace_provider(self, provider) -> None:
+        del provider
+
+    def set_surface_theme(
+        self,
+        *,
+        background: str,
+        line_number_color: str = "#b0b0b0",
+        current_line_color: str = "#404040",
+    ) -> None:
+        del background, line_number_color, current_line_color
+
+    def focus_editor(self) -> None:
+        self.setFocus()
 
 
 def _menu_titles(window: MathTeXQtWindow) -> list[str]:
@@ -52,6 +136,97 @@ def test_menu_bar_switches_between_interactive_and_studio(
             "Toggle Auto Compile",
             "Show Logs & Output Files",
         ]
+    finally:
+        window.close()
+        qapp.processEvents()
+
+
+def test_aether_ui_object_names_replace_mathlab_visual_names(
+    tmp_path: Path,
+    monkeypatch,
+    qapp,
+) -> None:
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "appdata"))
+    window = MathTeXQtWindow()
+
+    try:
+        qapp.processEvents()
+        object_names = {widget.objectName() for widget in window.findChildren(QtWidgets.QWidget)}
+
+        renamed_object_names = [
+            "aetherStatusButton",
+            "aetherToolbarCard",
+            "aetherPanel",
+            "aetherPanelMuted",
+            "aetherPanelPrimary",
+            "aetherPanelTitle",
+            "aetherPanelSubtitle",
+            "aetherToolbarTitle",
+            "aetherToolbarSubtitle",
+            "aetherToolbarIconButton",
+            "aetherToolbarUtilityButton",
+            "aetherScriptTabs",
+            "aetherWorkspaceTable",
+        ]
+        for object_name in renamed_object_names:
+            assert object_name in object_names
+            assert object_name.replace("aether", "mathLab", 1) not in object_names
+
+        plot_path = tmp_path / "plot.png"
+        pixmap = QtGui.QPixmap(2, 2)
+        pixmap.fill(QtGui.QColor("#ffffff"))
+        assert pixmap.save(str(plot_path))
+        window._handle_plot_generated(str(plot_path), "demo")
+        qapp.processEvents()
+
+        plot_root_names = {
+            plot_window.centralWidget().objectName()
+            for plot_window in window._plot_windows
+            if plot_window.centralWidget() is not None
+        }
+        assert "aetherPlotRoot" in plot_root_names
+        assert "aetherPlotRoot".replace("aether", "mathLab", 1) not in plot_root_names
+    finally:
+        for plot_window in list(window._plot_windows):
+            plot_window.close()
+        window.close()
+        qapp.processEvents()
+
+
+def test_codemirror_script_tabs_update_menu_without_qplaintextedit_api(
+    tmp_path: Path,
+    monkeypatch,
+    qapp,
+) -> None:
+    created_kinds: list[str] = []
+
+    def fake_create_editor(kind: str, parent=None, *, enable_autocomplete: bool = False):
+        del parent, enable_autocomplete
+        created_kinds.append(kind)
+        return EditorApiWidgetWithoutTextCursor()
+
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("AETHER_EDITOR_KIND", "codemirror")
+    monkeypatch.setattr("qt_app.create_editor", fake_create_editor)
+
+    window = MathTeXQtWindow()
+
+    try:
+        assert window.editor_kind == "codemirror"
+        window._new_script_file()
+        window._new_script_file()
+        qapp.processEvents()
+
+        assert window.script_tab_widget.count() == 2
+        assert created_kinds[-2:] == ["codemirror", "codemirror"]
+
+        window.script_tab_widget.setCurrentIndex(0)
+        window._update_menu_action_states()
+        window.script_tab_widget.setCurrentIndex(1)
+        window._update_menu_action_states()
+
+        run_selection = window._menu_actions["interactive_run_selection"]
+        assert not run_selection.isEnabled()
     finally:
         window.close()
         qapp.processEvents()

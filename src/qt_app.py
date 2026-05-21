@@ -9,6 +9,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import replace
 from pathlib import Path
 
+from actions import AppAction, ActionRegistry
 from auto_compile import AutoCompileController, CompileTrigger
 from app_preferences import AppPreferences, AppPreferencesStore
 from console_engine import MathRuntime, capture_to_events
@@ -53,7 +54,7 @@ from ui.code_editor import (
     STRING_COLOR,
 )
 from ui.editor_api import EditorAPI
-from ui.editor_factory import DEFAULT_EDITOR_KIND, create_editor
+from ui.editor_factory import configured_editor_kind, create_editor
 
 try:  # pragma: no cover - depende de la instalacion del usuario
     from PySide6 import QtCore, QtGui, QtWidgets  # type: ignore
@@ -370,7 +371,7 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         self.project_workspace_widget: ProjectWorkspaceWidget | None = None
         self.logs_output_widget: LogsOutputWidget | None = None
         self.mtex_file_tree: QtWidgets.QTreeWidget | None = None
-        self.editor_kind = DEFAULT_EDITOR_KIND
+        self.editor_kind = configured_editor_kind()
         self.mtex_editor: EditorAPI | None = None
         self.mtex_file_label: QtWidgets.QLabel | None = None
         self.auto_compile_checkbox: QtWidgets.QCheckBox | None = None
@@ -397,10 +398,12 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         self.dir_combo: QtWidgets.QComboBox | None = None
         self.workspace_dock: QtWidgets.QDockWidget | None = None
         self.workspace_table: QtWidgets.QTableWidget | None = None
+        self.action_registry = ActionRegistry()
+        self._app_actions_initialized = False
         self._menu_actions: dict[str, QtGui.QAction] = {}
         self._register_plot_listener()
         self._build_ui()
-        self._apply_mathlab_stylesheet()
+        self._apply_aether_stylesheet()
         self._restore_ui_preferences()
         self._set_build_status("Build: Ready")
         self.console_widget.clear()
@@ -447,13 +450,13 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         status.addPermanentWidget(self.runtime_status_label)
         self._set_runtime_status("Ready", tone="neutral", message="Ready")
         self.console_restore_btn = QtWidgets.QPushButton("Restore Console to Panel")
-        self.console_restore_btn.setObjectName("mathLabStatusButton")
+        self.console_restore_btn.setObjectName("aetherStatusButton")
         if self.console_restore_btn is not None:
             self.console_restore_btn.setVisible(False)
             self.console_restore_btn.clicked.connect(self._restore_console_dock)
             status.addPermanentWidget(self.console_restore_btn)
 
-    def _apply_mathlab_stylesheet(self) -> None:
+    def _apply_aether_stylesheet(self) -> None:
         self.setStyleSheet(
             f"""
             QStatusBar {{
@@ -464,91 +467,91 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
             QStatusBar::item {{
                 border: none;
             }}
-            QPushButton#mathLabStatusButton {{
+            QPushButton#aetherStatusButton {{
                 background: #262b31;
                 border: 1px solid #3a424c;
                 border-radius: 6px;
                 color: #d7dce1;
                 padding: 4px 10px;
             }}
-            QPushButton#mathLabStatusButton:hover {{
+            QPushButton#aetherStatusButton:hover {{
                 background: #2d333a;
                 border-color: #4b5561;
             }}
-            QFrame#mathLabToolbarCard {{
+            QFrame#aetherToolbarCard {{
                 background: {AETHER_TOOLBAR_BG};
                 border: 1px solid {AETHER_BORDER};
                 border-radius: 10px;
             }}
-            QFrame#mathLabPanel,
-            QFrame#mathLabPanelMuted,
-            QFrame#mathLabPanelPrimary {{
+            QFrame#aetherPanel,
+            QFrame#aetherPanelMuted,
+            QFrame#aetherPanelPrimary {{
                 background: {AETHER_PANEL_BG};
                 border-radius: 10px;
             }}
-            QFrame#mathLabPanel {{
+            QFrame#aetherPanel {{
                 border: 1px solid {AETHER_BORDER};
             }}
-            QFrame#mathLabPanelMuted {{
+            QFrame#aetherPanelMuted {{
                 border: 1px solid #44484f;
             }}
-            QFrame#mathLabPanelPrimary {{
+            QFrame#aetherPanelPrimary {{
                 border: 1px solid #4a4f58;
             }}
-            QLabel#mathLabPanelTitle {{
+            QLabel#aetherPanelTitle {{
                 color: {AETHER_TEXT};
                 background: transparent;
                 border: none;
                 font-size: 13px;
                 font-weight: 600;
             }}
-            QLabel#mathLabPanelSubtitle {{
+            QLabel#aetherPanelSubtitle {{
                 color: {AETHER_MUTED_TEXT};
                 background: transparent;
                 border: none;
                 font-size: 11px;
             }}
-            QLabel#mathLabToolbarTitle {{
+            QLabel#aetherToolbarTitle {{
                 color: {AETHER_TEXT};
                 background: transparent;
                 border: none;
                 font-size: 14px;
                 font-weight: 600;
             }}
-            QLabel#mathLabToolbarSubtitle {{
+            QLabel#aetherToolbarSubtitle {{
                 color: {AETHER_MUTED_TEXT};
                 background: transparent;
                 border: none;
                 font-size: 11px;
             }}
-            QToolButton#mathLabToolbarIconButton,
-            QToolButton#mathLabToolbarUtilityButton,
-            QFrame#mathLabPanel QPushButton,
-            QFrame#mathLabPanelMuted QPushButton,
-            QFrame#mathLabPanelPrimary QPushButton {{
+            QToolButton#aetherToolbarIconButton,
+            QToolButton#aetherToolbarUtilityButton,
+            QFrame#aetherPanel QPushButton,
+            QFrame#aetherPanelMuted QPushButton,
+            QFrame#aetherPanelPrimary QPushButton {{
                 background: #262b31;
                 border: 1px solid #3a424c;
                 border-radius: 6px;
                 color: #d7dce1;
             }}
-            QToolButton#mathLabToolbarIconButton:hover,
-            QToolButton#mathLabToolbarUtilityButton:hover,
-            QFrame#mathLabPanel QPushButton:hover,
-            QFrame#mathLabPanelMuted QPushButton:hover,
-            QFrame#mathLabPanelPrimary QPushButton:hover {{
+            QToolButton#aetherToolbarIconButton:hover,
+            QToolButton#aetherToolbarUtilityButton:hover,
+            QFrame#aetherPanel QPushButton:hover,
+            QFrame#aetherPanelMuted QPushButton:hover,
+            QFrame#aetherPanelPrimary QPushButton:hover {{
                 background: #2d333a;
                 border-color: #4b5561;
             }}
-            QToolButton#mathLabToolbarUtilityButton {{
+            QToolButton#aetherToolbarUtilityButton {{
                 padding: 3px 6px;
             }}
-            QTabWidget#mathLabScriptTabs::pane {{
+            QTabWidget#aetherScriptTabs::pane {{
                 background: #20252a;
                 border: 1px solid {AETHER_BORDER};
                 border-radius: 10px;
                 top: -1px;
             }}
-            QTabWidget#mathLabScriptTabs QTabBar::tab {{
+            QTabWidget#aetherScriptTabs QTabBar::tab {{
                 background: #262b31;
                 color: {AETHER_MUTED_TEXT};
                 border: 1px solid {AETHER_BORDER};
@@ -558,7 +561,7 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
                 padding: 7px 12px;
                 margin-right: 3px;
             }}
-            QTabWidget#mathLabScriptTabs QTabBar::tab:selected {{
+            QTabWidget#aetherScriptTabs QTabBar::tab:selected {{
                 background: {AETHER_EDITOR_BG};
                 color: {AETHER_TEXT};
             }}
@@ -569,7 +572,7 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
                 border: 1px solid #333942;
                 padding: 4px 8px;
             }}
-            QTableWidget#mathLabWorkspaceTable {{
+            QTableWidget#aetherWorkspaceTable {{
                 background: #1b1f24;
                 alternate-background-color: #20252b;
                 color: {AETHER_TEXT};
@@ -578,22 +581,22 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
                 gridline-color: #313740;
                 padding: 4px;
             }}
-            QTableWidget#mathLabWorkspaceTable::item {{
+            QTableWidget#aetherWorkspaceTable::item {{
                 padding: 4px 2px;
             }}
-            QTableWidget#mathLabWorkspaceTable QHeaderView::section {{
+            QTableWidget#aetherWorkspaceTable QHeaderView::section {{
                 background: #262b31;
                 color: {AETHER_MUTED_TEXT};
                 border: 1px solid #3a424c;
                 padding: 4px 6px;
             }}
-            QWidget#mathLabPlotRoot {{
+            QWidget#aetherPlotRoot {{
                 background: #181b1f;
             }}
         """
         )
 
-    def _create_mathlab_panel(
+    def _create_aether_panel(
         self,
         title: str,
         subtitle: str,
@@ -604,9 +607,9 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         frame = QtWidgets.QFrame()
         frame.setObjectName(
             {
-                "muted": "mathLabPanelMuted",
-                "primary": "mathLabPanelPrimary",
-            }.get(variant, "mathLabPanel")
+                "muted": "aetherPanelMuted",
+                "primary": "aetherPanelPrimary",
+            }.get(variant, "aetherPanel")
         )
         layout = QtWidgets.QVBoxLayout(frame)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -615,9 +618,9 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         header.setContentsMargins(0, 0, 0, 0)
         header.setSpacing(2)
         title_label = QtWidgets.QLabel(title)
-        title_label.setObjectName("mathLabPanelTitle")
+        title_label.setObjectName("aetherPanelTitle")
         subtitle_label = QtWidgets.QLabel(subtitle)
-        subtitle_label.setObjectName("mathLabPanelSubtitle")
+        subtitle_label.setObjectName("aetherPanelSubtitle")
         header.addWidget(title_label)
         header.addWidget(subtitle_label)
         layout.addLayout(header)
@@ -708,7 +711,7 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
 
     def _make_script_icon_button(self, icon: QtGui.QIcon, tooltip: str) -> QtWidgets.QToolButton:
         button = QtWidgets.QToolButton()
-        button.setObjectName("mathLabToolbarIconButton")
+        button.setObjectName("aetherToolbarIconButton")
         button.setAutoRaise(False)
         button.setText("")
         button.setToolTip(tooltip)
@@ -721,10 +724,18 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
     def _initialize_menu_actions(self) -> None:
         if self._menu_actions:
             return
+        self._initialize_app_actions()
         self._menu_actions = {
             "interactive_new_script": self._make_menu_action("New Script", self._new_script_file),
-            "interactive_open_script": self._make_menu_action("Open Script...", self._open_mtex_in_script),
-            "interactive_save_script": self._make_menu_action("Save", self._save_script_file, shortcut="Ctrl+S"),
+            "interactive_open_script": self._make_menu_action(
+                "Open Script...",
+                lambda _checked=False: self._run_action("file.open"),
+            ),
+            "interactive_save_script": self._make_menu_action(
+                "Save",
+                lambda _checked=False: self._run_action("file.save"),
+                shortcut="Ctrl+S",
+            ),
             "interactive_save_script_as": self._make_menu_action("Save As...", self._save_script_file_as, shortcut="Ctrl+Shift+S"),
             "interactive_close_script": self._make_menu_action("Close Script", self._close_current_script),
             "interactive_exit": self._make_menu_action("Exit", self.close),
@@ -734,7 +745,7 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
             "interactive_reset_layout": self._make_menu_action("Reset Panel Layout", self._reset_interactive_panel_layout),
             "interactive_run_script": self._make_menu_action(
                 "Run Script",
-                self.run_script,
+                lambda _checked=False: self._run_action("run.current"),
                 shortcut=["Ctrl+Enter", "Ctrl+Return"],
             ),
             "interactive_run_selection": self._make_menu_action("Run Selection", self.run_selection),
@@ -744,8 +755,15 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
             "studio_new_project": self._make_menu_action("New Project", self._create_project),
             "studio_open_project": self._make_menu_action("Open Project...", self._choose_and_open_project),
             "studio_project_home": self._make_menu_action("Project Home", self._return_to_project_home),
-            "studio_open_mtex": self._make_menu_action("Open .mtex File...", self._open_mtex_file),
-            "studio_save_mtex": self._make_menu_action("Save", self._save_mtex_file, shortcut="Ctrl+S"),
+            "studio_open_mtex": self._make_menu_action(
+                "Open .mtex File...",
+                lambda _checked=False: self._run_action("file.open"),
+            ),
+            "studio_save_mtex": self._make_menu_action(
+                "Save",
+                lambda _checked=False: self._run_action("file.save"),
+                shortcut="Ctrl+S",
+            ),
             "studio_save_mtex_as": self._make_menu_action("Save As...", self._save_mtex_file_as, shortcut="Ctrl+Shift+S"),
             "studio_show_project_files": self._make_menu_action("Show Project Files", self._focus_project_files_panel),
             "studio_show_preview": self._make_menu_action("Show PDF Preview", self._focus_pdf_preview_panel),
@@ -761,7 +779,7 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
             "studio_refresh_tree": self._make_menu_action("Refresh File Tree", self._refresh_mtex_file_tree),
             "studio_compile": self._make_menu_action(
                 "Compile",
-                self._compile_current_mtex,
+                lambda _checked=False: self._run_action("build.current"),
                 shortcut=["Ctrl+Enter", "Ctrl+Return"],
             ),
             "studio_toggle_auto_compile": self._make_menu_action(
@@ -790,6 +808,99 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
             "help_interactive": self._make_menu_action("Aether / Legacy Help", self._show_interactive_help),
             "help_studio": self._make_menu_action("MTeX Studio Help", self._show_studio_help),
         }
+
+    def _initialize_app_actions(self) -> None:
+        if self._app_actions_initialized:
+            return
+        self.action_registry.register(
+            AppAction(
+                id="file.open",
+                label="Open",
+                callback=self._open_current_context_file,
+                enabled=self._can_open_current_context_file,
+            )
+        )
+        self.action_registry.register(
+            AppAction(
+                id="file.save",
+                label="Save",
+                callback=self._save_current_context_file,
+                shortcut="Ctrl+S",
+                enabled=self._can_save_current_context_file,
+            )
+        )
+        self.action_registry.register(
+            AppAction(
+                id="run.current",
+                label="Run Script",
+                callback=self.run_script,
+                shortcut="Ctrl+Enter",
+                enabled=self._can_run_current_action,
+            )
+        )
+        self.action_registry.register(
+            AppAction(
+                id="build.current",
+                label="Compile",
+                callback=self._compile_current_mtex,
+                shortcut="Ctrl+Enter",
+                enabled=self._can_build_current_action,
+            )
+        )
+        self.action_registry.register(
+            AppAction(
+                id="repl.open_aether",
+                label="Open Aether REPL",
+                callback=self._open_aether_repl,
+                enabled=lambda: True,
+            )
+        )
+        self._app_actions_initialized = True
+
+    def _run_action(self, action_id: str) -> None:
+        self.action_registry.run(action_id)
+        self._update_menu_action_states()
+
+    def _can_open_current_context_file(self) -> bool:
+        if self._current_menu_context() == STUDIO_MENU_CONTEXT:
+            return self.current_project is not None
+        return True
+
+    def _open_current_context_file(self) -> None:
+        if self._current_menu_context() == STUDIO_MENU_CONTEXT:
+            self._open_mtex_file()
+            return
+        self._open_mtex_in_script()
+
+    def _can_save_current_context_file(self) -> bool:
+        if self._current_menu_context() == STUDIO_MENU_CONTEXT:
+            return self._is_studio_workspace_active() and self.current_mtex_path is not None
+        return hasattr(self, "script_tab_widget") and self._current_script_doc() is not None
+
+    def _save_current_context_file(self) -> None:
+        if self._current_menu_context() == STUDIO_MENU_CONTEXT:
+            self._save_mtex_file()
+            return
+        self._save_script_file()
+
+    def _can_run_current_action(self) -> bool:
+        return (
+            self._current_menu_context() == INTERACTIVE_MENU_CONTEXT
+            and hasattr(self, "script_tab_widget")
+            and self._current_script_doc() is not None
+        )
+
+    def _can_build_current_action(self) -> bool:
+        return self._current_menu_context() == STUDIO_MENU_CONTEXT and self.current_project is not None
+
+    def _open_aether_repl(self) -> None:
+        self._set_active_main_tab(0)
+        changed = self.console_engine is not self.aether_repl
+        self.console_engine = self.aether_repl
+        if hasattr(self, "console_widget") and self.console_widget is not None:
+            self.console_widget.set_engine(self.aether_repl, clear=changed)
+        self._apply_repl_panel_profile()
+        self._show_console()
 
     def _make_menu_action(
         self,
@@ -1030,20 +1141,25 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         has_editor = context_editor is not None
         studio_workspace_active = self._is_studio_workspace_active()
         has_project = self.current_project is not None
-        has_current_mtex = studio_workspace_active and self.current_mtex_path is not None
         has_logs_or_project = has_project or self.latest_mtex_execution_result is not None
 
         for key in ("edit_undo", "edit_redo", "edit_cut", "edit_copy", "edit_paste", "edit_select_all"):
             actions[key].setEnabled(has_editor)
 
         actions["interactive_new_script"].setEnabled(interactive_context_active)
-        actions["interactive_open_script"].setEnabled(interactive_context_active)
-        actions["interactive_save_script"].setEnabled(interactive_context_active and has_script_doc)
+        actions["interactive_open_script"].setEnabled(
+            interactive_context_active and self.action_registry.is_enabled("file.open")
+        )
+        actions["interactive_save_script"].setEnabled(
+            interactive_context_active and self.action_registry.is_enabled("file.save")
+        )
         actions["interactive_save_script_as"].setEnabled(interactive_context_active and has_script_doc)
         actions["interactive_close_script"].setEnabled(interactive_context_active and has_script_doc)
-        actions["interactive_run_script"].setEnabled(interactive_context_active and has_script_doc)
+        actions["interactive_run_script"].setEnabled(
+            interactive_context_active and self.action_registry.is_enabled("run.current")
+        )
         actions["interactive_run_selection"].setEnabled(
-            interactive_context_active and script_editor is not None and script_editor.textCursor().hasSelection()
+            interactive_context_active and script_editor is not None and script_editor.has_selection()
         )
         actions["interactive_show_console"].setEnabled(interactive_context_active and self.console_dock is not None)
         actions["interactive_show_workspace"].setEnabled(interactive_context_active and self.workspace_dock is not None)
@@ -1060,8 +1176,12 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         actions["studio_new_project"].setEnabled(studio_context_active)
         actions["studio_open_project"].setEnabled(studio_context_active)
         actions["studio_project_home"].setEnabled(studio_context_active and has_project)
-        actions["studio_open_mtex"].setEnabled(studio_context_active and has_project)
-        actions["studio_save_mtex"].setEnabled(studio_context_active and has_current_mtex)
+        actions["studio_open_mtex"].setEnabled(
+            studio_context_active and self.action_registry.is_enabled("file.open")
+        )
+        actions["studio_save_mtex"].setEnabled(
+            studio_context_active and self.action_registry.is_enabled("file.save")
+        )
         actions["studio_save_mtex_as"].setEnabled(studio_context_active and studio_workspace_active and self.mtex_editor is not None)
         actions["studio_show_project_files"].setEnabled(studio_context_active and studio_workspace_active and self.mtex_file_tree is not None)
         actions["studio_show_preview"].setEnabled(studio_context_active and studio_workspace_active and self.preview is not None)
@@ -1081,7 +1201,9 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         )
         actions["studio_show_logs"].setEnabled(studio_context_active and has_logs_or_project)
         actions["studio_refresh_tree"].setEnabled(studio_context_active and has_project)
-        actions["studio_compile"].setEnabled(studio_context_active and has_project)
+        actions["studio_compile"].setEnabled(
+            studio_context_active and self.action_registry.is_enabled("build.current")
+        )
         actions["studio_toggle_auto_compile"].setEnabled(studio_context_active and has_project and self.auto_compile_checkbox is not None)
         if self.auto_compile_checkbox is not None:
             actions["studio_toggle_auto_compile"].setChecked(self.auto_compile_checkbox.isChecked())
@@ -1103,7 +1225,7 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         layout.setSpacing(10)
 
         toolbar_card = QtWidgets.QFrame()
-        toolbar_card.setObjectName("mathLabToolbarCard")
+        toolbar_card.setObjectName("aetherToolbarCard")
         toolbar_layout = QtWidgets.QVBoxLayout(toolbar_card)
         toolbar_layout.setContentsMargins(10, 10, 10, 10)
         toolbar_layout.setSpacing(8)
@@ -1112,9 +1234,9 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         toolbar_header.setContentsMargins(0, 0, 0, 0)
         toolbar_header.setSpacing(2)
         toolbar_title = QtWidgets.QLabel("Aether")
-        toolbar_title.setObjectName("mathLabToolbarTitle")
+        toolbar_title.setObjectName("aetherToolbarTitle")
         toolbar_subtitle = QtWidgets.QLabel("Working directory and execution shortcuts")
-        toolbar_subtitle.setObjectName("mathLabToolbarSubtitle")
+        toolbar_subtitle.setObjectName("aetherToolbarSubtitle")
         toolbar_header.addWidget(toolbar_title)
         toolbar_header.addWidget(toolbar_subtitle)
         toolbar_layout.addLayout(toolbar_header)
@@ -1160,7 +1282,7 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
 
         style = self.style()
         up_btn = QtWidgets.QToolButton()
-        up_btn.setObjectName("mathLabToolbarUtilityButton")
+        up_btn.setObjectName("aetherToolbarUtilityButton")
         up_btn.setToolTip("Go up one level")
         up_btn.setAutoRaise(True)
         up_btn.setIcon(style.standardIcon(QtWidgets.QStyle.StandardPixmap.SP_ArrowUp))
@@ -1168,7 +1290,7 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         directory_row.addWidget(up_btn)
 
         browse_btn = QtWidgets.QToolButton()
-        browse_btn.setObjectName("mathLabToolbarUtilityButton")
+        browse_btn.setObjectName("aetherToolbarUtilityButton")
         browse_btn.setToolTip("Choose directory")
         browse_btn.setAutoRaise(True)
         browse_btn.setIcon(style.standardIcon(QtWidgets.QStyle.StandardPixmap.SP_DirClosedIcon))
@@ -1220,11 +1342,11 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         layout.addWidget(toolbar_card)
 
         self.script_tab_widget = QtWidgets.QTabWidget()
-        self.script_tab_widget.setObjectName("mathLabScriptTabs")
+        self.script_tab_widget.setObjectName("aetherScriptTabs")
         self.script_tab_widget.setTabsClosable(True)
         self.script_tab_widget.tabCloseRequested.connect(self._request_close_script_tab)
         self.script_tab_widget.currentChanged.connect(lambda _idx: self._handle_script_tab_changed())
-        editor_panel = self._create_mathlab_panel(
+        editor_panel = self._create_aether_panel(
             "Editor",
             "Edit and run the active .mtx or .ae script",
             self.script_tab_widget,
@@ -1232,11 +1354,11 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         )
         layout.addWidget(editor_panel, 1)
 
-        run_all.clicked.connect(self.run_script)
+        run_all.clicked.connect(lambda _checked=False: self._run_action("run.current"))
         run_sel.clicked.connect(self.run_selection)
         new_btn.clicked.connect(lambda: self._new_script_file())
-        open_btn.clicked.connect(self._open_mtex_in_script)
-        save_btn.clicked.connect(self._save_script_file)
+        open_btn.clicked.connect(lambda _checked=False: self._run_action("file.open"))
+        save_btn.clicked.connect(lambda _checked=False: self._run_action("file.save"))
         save_as_btn.clicked.connect(self._save_script_file_as)
 
         # No se crea archivo vacio al iniciar; el usuario abre o crea manualmente.
@@ -1317,9 +1439,9 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         self.project_home_widget.open_project_requested.connect(self._choose_and_open_project)
         self.project_home_widget.project_activated.connect(self._open_project_from_path)
         self.project_workspace_widget.home_requested.connect(self._return_to_project_home)
-        self.project_workspace_widget.save_requested.connect(self._save_mtex_file)
+        self.project_workspace_widget.save_requested.connect(lambda: self._run_action("file.save"))
         self.project_workspace_widget.save_as_requested.connect(self._save_mtex_file_as)
-        self.project_workspace_widget.compile_requested.connect(self._compile_current_mtex)
+        self.project_workspace_widget.compile_requested.connect(lambda: self._run_action("build.current"))
         self.project_workspace_widget.logs_output_requested.connect(self._show_logs_output_widget)
         self.project_workspace_widget.file_open_requested.connect(self._handle_project_file_activation)
         self.mtex_editor.connect_modification_changed(lambda changed: self._update_mtex_dirty(changed))
@@ -1357,14 +1479,14 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
     def _build_console_dock(self) -> None:
         profile = self.console_engine.profile
         dock = QtWidgets.QDockWidget(profile.title, self)
-        panel = self._create_mathlab_panel(
+        panel = self._create_aether_panel(
             profile.title,
             profile.subtitle,
             self.console_widget,
             variant="muted",
         )
-        self.console_panel_title_label = panel.findChild(QtWidgets.QLabel, "mathLabPanelTitle")
-        self.console_panel_subtitle_label = panel.findChild(QtWidgets.QLabel, "mathLabPanelSubtitle")
+        self.console_panel_title_label = panel.findChild(QtWidgets.QLabel, "aetherPanelTitle")
+        self.console_panel_subtitle_label = panel.findChild(QtWidgets.QLabel, "aetherPanelSubtitle")
         dock.setWidget(panel)
         dock.setObjectName("ConsoleDock")
         dock.setAllowedAreas(
@@ -1517,7 +1639,7 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
             | QtWidgets.QDockWidget.DockWidgetFeature.DockWidgetFloatable
         )
         table = QtWidgets.QTableWidget()
-        table.setObjectName("mathLabWorkspaceTable")
+        table.setObjectName("aetherWorkspaceTable")
         table.setColumnCount(4)
         table.setHorizontalHeaderLabels(["Name", "Type", "Shape", "Summary"])
         table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -1528,7 +1650,7 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         table.setSortingEnabled(True)
         self._apply_workspace_column_layout(table)
         dock.setWidget(
-            self._create_mathlab_panel(
+            self._create_aether_panel(
                 "Workspace",
                 "Variables and values from the current session",
                 table,
@@ -2700,12 +2822,12 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
 
         scroll.setWidget(container)
         plot_root = QtWidgets.QWidget()
-        plot_root.setObjectName("mathLabPlotRoot")
+        plot_root.setObjectName("aetherPlotRoot")
         plot_layout = QtWidgets.QVBoxLayout(plot_root)
         plot_layout.setContentsMargins(10, 10, 10, 10)
         plot_layout.setSpacing(0)
         plot_layout.addWidget(
-            self._create_mathlab_panel(
+            self._create_aether_panel(
                 "Plots",
                 "Generated figures from the current session",
                 scroll,
