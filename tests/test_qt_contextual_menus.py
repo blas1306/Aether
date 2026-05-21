@@ -107,6 +107,11 @@ def _menu_actions(window: MathTeXQtWindow, menu_title: str) -> list[str]:
     return []
 
 
+def _assert_in_order(entries: list[str], expected: list[str]) -> None:
+    positions = [entries.index(item) for item in expected]
+    assert positions == sorted(positions)
+
+
 def test_menu_bar_switches_between_interactive_and_studio(
     tmp_path: Path,
     monkeypatch,
@@ -119,6 +124,10 @@ def test_menu_bar_switches_between_interactive_and_studio(
         qapp.processEvents()
 
         assert _menu_titles(window) == ["File", "Edit", "View", "Run", "Tools", "Help"]
+        _assert_in_order(
+            _menu_actions(window, "File"),
+            ["New Script", "Open Script...", "Save"],
+        )
 
         assert _menu_actions(window, "Run") == [
             "Run Script",
@@ -131,6 +140,10 @@ def test_menu_bar_switches_between_interactive_and_studio(
         qapp.processEvents()
 
         assert _menu_titles(window) == ["File", "Edit", "Insert", "View", "Build", "Help"]
+        _assert_in_order(
+            _menu_actions(window, "File"),
+            ["New Project", "Open Project...", "Open .mtex File..."],
+        )
         assert _menu_actions(window, "Build") == [
             "Compile",
             "Toggle Auto Compile",

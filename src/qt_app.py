@@ -11,6 +11,7 @@ from pathlib import Path
 
 from actions import ActionRegistry
 from actions.app_actions import register_main_window_actions
+from actions.menu_specs import INTERACTIVE_MENU_SPEC, STUDIO_MENU_SPEC, MenuSpec
 from auto_compile import AutoCompileController, CompileTrigger
 from app_preferences import AppPreferences, AppPreferencesStore
 from console_engine import MathRuntime, capture_to_events
@@ -955,139 +956,26 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
             self._build_interactive_menus(menu_bar)
 
     def _build_interactive_menus(self, menu_bar: QtWidgets.QMenuBar) -> None:
-        self._add_menu(
-            menu_bar,
-            "File",
-            [
-                "interactive_new_script",
-                "interactive_open_script",
-                None,
-                "interactive_save_script",
-                "interactive_save_script_as",
-                None,
-                "interactive_close_script",
-                None,
-                "interactive_exit",
-            ],
-        )
-        self._add_menu(
-            menu_bar,
-            "Edit",
-            [
-                "edit_undo",
-                "edit_redo",
-                None,
-                "edit_cut",
-                "edit_copy",
-                "edit_paste",
-                None,
-                "edit_select_all",
-            ],
-        )
-        view_menu = self._add_menu(
-            menu_bar,
-            "View",
-            [
-                "interactive_show_console",
-                "interactive_show_workspace",
-                "interactive_restore_console",
-                None,
-                "interactive_reset_layout",
-            ],
-        )
-        if self.console_dock is not None:
+        built_menus = self._build_menus_from_spec(menu_bar, INTERACTIVE_MENU_SPEC)
+        view_menu = built_menus.get("View")
+        if view_menu is not None and self.console_dock is not None:
             view_menu.addSeparator()
             toggle_action = self.console_dock.toggleViewAction()
             toggle_action.setText("Console")
             view_menu.addAction(toggle_action)
-        self._add_menu(
-            menu_bar,
-            "Run",
-            [
-                "interactive_run_script",
-                "interactive_run_selection",
-                None,
-                "interactive_clear_console",
-            ],
-        )
-        self._add_menu(
-            menu_bar,
-            "Tools",
-            [
-                "interactive_choose_directory",
-                "interactive_parent_directory",
-            ],
-        )
-        self._add_menu(menu_bar, "Help", ["help_about", "help_interactive"])
 
     def _build_studio_menus(self, menu_bar: QtWidgets.QMenuBar) -> None:
-        self._add_menu(
-            menu_bar,
-            "File",
-            [
-                "studio_new_project",
-                "studio_open_project",
-                "studio_project_home",
-                None,
-                "studio_open_mtex",
-                None,
-                "studio_save_mtex",
-                "studio_save_mtex_as",
-            ],
-        )
-        self._add_menu(
-            menu_bar,
-            "Edit",
-            [
-                "edit_undo",
-                "edit_redo",
-                None,
-                "edit_cut",
-                "edit_copy",
-                "edit_paste",
-                None,
-                "edit_select_all",
-            ],
-        )
-        self._add_menu(
-            menu_bar,
-            "Insert",
-            [
-                "studio_insert_section",
-                "studio_insert_subsection",
-                None,
-                "studio_insert_equation",
-                "studio_insert_code",
-                "studio_insert_table",
-                "studio_insert_figure",
-                "studio_insert_mathtex",
-            ],
-        )
-        self._add_menu(
-            menu_bar,
-            "View",
-            [
-                "studio_show_project_files",
-                "studio_show_preview",
-                None,
-                "studio_go_to_code_location_in_pdf",
-                "studio_go_to_pdf_location_in_code",
-                None,
-                "studio_show_logs",
-                "studio_refresh_tree",
-            ],
-        )
-        self._add_menu(
-            menu_bar,
-            "Build",
-            [
-                "studio_compile",
-                "studio_toggle_auto_compile",
-                None,
-                "studio_show_logs",
-            ],
-        )
-        self._add_menu(menu_bar, "Help", ["help_about", "help_studio"])
+        self._build_menus_from_spec(menu_bar, STUDIO_MENU_SPEC)
+
+    def _build_menus_from_spec(
+        self,
+        menu_bar: QtWidgets.QMenuBar,
+        spec: MenuSpec,
+    ) -> dict[str, QtWidgets.QMenu]:
+        return {
+            title: self._add_menu(menu_bar, title, entries)
+            for title, entries in spec.items()
+        }
 
     def _add_menu(self, menu_bar: QtWidgets.QMenuBar, title: str, entries: list[str | None]) -> QtWidgets.QMenu:
         menu = menu_bar.addMenu(title)
