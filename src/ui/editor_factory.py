@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from typing import Literal
+import os
+import warnings
+from collections.abc import Mapping
+from typing import Literal, cast
 
 from ui.code_editor import CodeEditor
 from ui.editor_api import EditorAPI
@@ -9,6 +12,28 @@ EditorKind = Literal["qt_plain", "experimental", "codemirror"]
 
 DEFAULT_EDITOR_KIND: EditorKind = "qt_plain"
 SUPPORTED_EDITOR_KINDS: tuple[str, ...] = ("qt_plain", "experimental", "codemirror")
+AETHER_EDITOR_KIND_ENV = "AETHER_EDITOR_KIND"
+
+
+def configured_editor_kind(environ: Mapping[str, str] | None = None) -> EditorKind:
+    """Resolve the editor implementation selected for this process."""
+    source = os.environ if environ is None else environ
+    raw_kind = source.get(AETHER_EDITOR_KIND_ENV)
+    if raw_kind is None:
+        return DEFAULT_EDITOR_KIND
+
+    kind = raw_kind.strip()
+    if kind in SUPPORTED_EDITOR_KINDS:
+        return cast(EditorKind, kind)
+
+    supported = ", ".join(SUPPORTED_EDITOR_KINDS)
+    warnings.warn(
+        f"Invalid {AETHER_EDITOR_KIND_ENV}={raw_kind!r}. "
+        f"Supported kinds: {supported}. Falling back to {DEFAULT_EDITOR_KIND!r}.",
+        RuntimeWarning,
+        stacklevel=2,
+    )
+    return DEFAULT_EDITOR_KIND
 
 
 def create_editor(

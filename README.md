@@ -401,6 +401,18 @@ python -m pip install -r requirements.txt
 python src/main.py
 ```
 
+### Experimental CodeMirror Editor
+
+The default editor remains `qt_plain`. To manually start the real app with the
+offline CodeMirror prototype for one process, set `AETHER_EDITOR_KIND`:
+
+```bash
+AETHER_EDITOR_KIND=codemirror ./.venv/bin/python src/main.py
+```
+
+Supported values are `qt_plain`, `experimental`, and `codemirror`. Invalid
+values emit a clear warning and fall back to `qt_plain`.
+
 ---
 
 ## CLI Mode

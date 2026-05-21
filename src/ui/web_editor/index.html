@@ -1,0 +1,48 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Aether CodeMirror Editor</title>
+  <link rel="stylesheet" href="./editor.css">
+  <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+</head>
+<body>
+  <div id="editor"></div>
+  <div id="status"></div>
+  <script>
+    window.__pythonBridge = null;
+    window.__pendingReady = false;
+    window.__pendingError = null;
+
+    window.notifyPythonReady = function notifyPythonReady() {
+      if (window.__pythonBridge) {
+        window.__pythonBridge.editorReady();
+      } else {
+        window.__pendingReady = true;
+      }
+    };
+
+    window.notifyPythonError = function notifyPythonError(message) {
+      if (window.__pythonBridge) {
+        window.__pythonBridge.editorError(String(message));
+      } else {
+        window.__pendingError = String(message);
+      }
+    };
+
+    if (window.qt && window.qt.webChannelTransport) {
+      new QWebChannel(window.qt.webChannelTransport, function(channel) {
+        window.__pythonBridge = channel.objects.codeMirrorBridge;
+        if (window.__pendingReady) {
+          window.__pythonBridge.editorReady();
+        }
+        if (window.__pendingError) {
+          window.__pythonBridge.editorError(window.__pendingError);
+        }
+      });
+    }
+  </script>
+  <script type="module" src="./editor.js"></script>
+</body>
+</html>

@@ -1,182 +1,12 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Callable
 
 from PySide6 import QtCore, QtWidgets  # type: ignore
 
-
-CODEMIRROR_HTML = """
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    html, body, #editor {
-      width: 100%;
-      height: 100%;
-      margin: 0;
-      overflow: hidden;
-      background: #1e1e1e;
-    }
-    body {
-      color: #e3e6ea;
-      font-family: Consolas, "Liberation Mono", monospace;
-    }
-    .cm-editor {
-      height: 100%;
-      font-size: 15px;
-    }
-    .cm-scroller {
-      font-family: Consolas, "Liberation Mono", monospace;
-    }
-    #status {
-      box-sizing: border-box;
-      display: none;
-      height: 100%;
-      padding: 16px;
-      color: #ffd7d7;
-      background: #1e1e1e;
-      font: 13px Consolas, "Liberation Mono", monospace;
-      white-space: pre-wrap;
-    }
-  </style>
-  <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
-</head>
-<body>
-  <div id="editor"></div>
-  <div id="status"></div>
-  <script>
-    window.__pythonBridge = null;
-    window.__pendingReady = false;
-    window.__pendingError = null;
-
-    function notifyReady() {
-      if (window.__pythonBridge) {
-        window.__pythonBridge.editorReady();
-      } else {
-        window.__pendingReady = true;
-      }
-    }
-
-    function notifyError(message) {
-      if (window.__pythonBridge) {
-        window.__pythonBridge.editorError(String(message));
-      } else {
-        window.__pendingError = String(message);
-      }
-    }
-
-    if (window.qt && window.qt.webChannelTransport) {
-      new QWebChannel(window.qt.webChannelTransport, function(channel) {
-        window.__pythonBridge = channel.objects.codeMirrorBridge;
-        if (window.__pendingReady) {
-          window.__pythonBridge.editorReady();
-        }
-        if (window.__pendingError) {
-          window.__pythonBridge.editorError(window.__pendingError);
-        }
-      });
-    }
-  </script>
-  <script type="module">
-    async function boot() {
-      try {
-        const codeMirrorModule = await import("https://esm.sh/codemirror@6.0.2?bundle");
-        const {EditorView, minimalSetup} = codeMirrorModule;
-
-        let suppressChange = false;
-        const theme = EditorView.theme({
-          "&": {backgroundColor: "#1e1e1e", color: "#e3e6ea"},
-          ".cm-content": {caretColor: "#ffffff"},
-          ".cm-cursor": {borderLeftColor: "#ffffff"},
-          ".cm-gutters": {
-            backgroundColor: "#1e1e1e",
-            color: "#858585",
-            borderRightColor: "#343a40"
-          },
-          ".cm-activeLine": {backgroundColor: "#2b3036"},
-          ".cm-activeLineGutter": {backgroundColor: "#2b3036"},
-          ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": {
-            backgroundColor: "#315f8f"
-          }
-        }, {dark: true});
-
-        const notifyTextChanged = EditorView.updateListener.of((update) => {
-          if (update.docChanged && !suppressChange && window.__pythonBridge) {
-            window.__pythonBridge.editorTextChanged(
-              update.state.doc.toString(),
-              update.state.selection.main.head
-            );
-          }
-          if (update.selectionSet && window.__pythonBridge) {
-            window.__pythonBridge.editorCursorChanged(update.state.selection.main.head);
-          }
-        });
-
-        const view = new EditorView({
-          doc: "",
-          extensions: [
-            minimalSetup,
-            notifyTextChanged,
-            theme
-          ],
-          parent: document.getElementById("editor")
-        });
-
-        function clampPosition(pos) {
-          const length = view.state.doc.length;
-          return Math.max(0, Math.min(Number(pos) || 0, length));
-        }
-
-        window.codeMirrorAdapter = {
-          setText(text) {
-            suppressChange = true;
-            try {
-              view.dispatch({
-                changes: {from: 0, to: view.state.doc.length, insert: String(text)}
-              });
-            } finally {
-              suppressChange = false;
-            }
-          },
-          setCursorPosition(pos) {
-            const position = clampPosition(pos);
-            view.dispatch({selection: {anchor: position}, scrollIntoView: true});
-          },
-          goToLine(line, column) {
-            const lineNumber = Number(line) || 1;
-            const col = Math.max(0, Number(column) || 0);
-            if (lineNumber < 1 || lineNumber > view.state.doc.lines) {
-              return false;
-            }
-            const targetLine = view.state.doc.line(lineNumber);
-            const position = targetLine.from + Math.min(col, targetLine.length);
-            view.dispatch({selection: {anchor: position}, scrollIntoView: true});
-            view.focus();
-            return true;
-          },
-          focusEditor() {
-            view.focus();
-          }
-        };
-
-        notifyReady();
-      } catch (error) {
-        const status = document.getElementById("status");
-        document.getElementById("editor").style.display = "none";
-        status.style.display = "block";
-        status.textContent = "CodeMirror failed to load.\\n" + String(error);
-        notifyError(status.textContent);
-      }
-    }
-
-    boot();
-  </script>
-</body>
-</html>
-"""
+WEB_EDITOR_INDEX = Path(__file__).with_name("web_editor") / "index.html"
 
 
 class _CodeMirrorBridge(QtCore.QObject):  # type: ignore[misc]
@@ -204,13 +34,13 @@ class _CodeMirrorBridge(QtCore.QObject):  # type: ignore[misc]
 
 def _load_qt_webengine():
     try:
-        from PySide6 import QtWebChannel, QtWebEngineWidgets  # type: ignore
+        from PySide6 import QtWebChannel, QtWebEngineCore, QtWebEngineWidgets  # type: ignore
     except Exception as exc:
         raise RuntimeError(
             "CodeMirrorEditor requires PySide6 QtWebEngine support. "
             "Install a PySide6 build that provides QtWebEngineWidgets and QtWebChannel."
         ) from exc
-    return QtWebChannel, QtWebEngineWidgets
+    return QtWebChannel, QtWebEngineCore, QtWebEngineWidgets
 
 
 class CodeMirrorEditor(QtWidgets.QWidget):  # type: ignore[misc]
@@ -225,7 +55,7 @@ class CodeMirrorEditor(QtWidgets.QWidget):  # type: ignore[misc]
     def __init__(self, parent=None, *, enable_autocomplete: bool = False) -> None:
         super().__init__(parent)
         del enable_autocomplete
-        QtWebChannel, QtWebEngineWidgets = _load_qt_webengine()
+        QtWebChannel, QtWebEngineCore, QtWebEngineWidgets = _load_qt_webengine()
 
         self._text = ""
         self._cursor_position = 0
@@ -243,6 +73,7 @@ class CodeMirrorEditor(QtWidgets.QWidget):  # type: ignore[misc]
         self._channel = QtWebChannel.QWebChannel(self._view.page())
         self._channel.registerObject("codeMirrorBridge", self._bridge)
         self._view.page().setWebChannel(self._channel)
+        self._allow_local_file_access(QtWebEngineCore)
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -253,8 +84,9 @@ class CodeMirrorEditor(QtWidgets.QWidget):  # type: ignore[misc]
         self._bridge.load_error.connect(self._on_editor_load_error)
         self._bridge.text_changed.connect(self._on_js_text_changed)
         self._bridge.cursor_changed.connect(self._on_js_cursor_changed)
+        self._view.loadFinished.connect(self._on_page_load_finished)
 
-        self._view.setHtml(CODEMIRROR_HTML, QtCore.QUrl("https://codemirror.local/"))
+        self._load_local_editor()
 
     def native_widget(self) -> QtWidgets.QWidget:
         return self
@@ -385,6 +217,34 @@ class CodeMirrorEditor(QtWidgets.QWidget):  # type: ignore[misc]
 
     def _run_editor_js(self, expression: str) -> None:
         self._view.page().runJavaScript(expression)
+
+    def _allow_local_file_access(self, QtWebEngineCore) -> None:
+        settings = self._view.page().settings()
+        web_attribute = QtWebEngineCore.QWebEngineSettings.WebAttribute
+        settings.setAttribute(web_attribute.LocalContentCanAccessFileUrls, True)
+
+    def _load_local_editor(self) -> None:
+        if not WEB_EDITOR_INDEX.exists():
+            self._load_error = f"CodeMirror web editor asset not found: {WEB_EDITOR_INDEX}"
+            self._view.setHtml(self._missing_asset_html(self._load_error))
+            return
+        self._view.load(QtCore.QUrl.fromLocalFile(str(WEB_EDITOR_INDEX)))
+
+    def _on_page_load_finished(self, ok: bool) -> None:
+        if not ok and self._load_error is None:
+            self._load_error = f"CodeMirror web editor failed to load: {WEB_EDITOR_INDEX}"
+
+    def _missing_asset_html(self, message: str) -> str:
+        escaped = (
+            message.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+        )
+        return (
+            "<!doctype html><html><body style=\"margin:0;padding:16px;"
+            "background:#1e1e1e;color:#ffd7d7;font:13px monospace;\">"
+            f"{escaped}</body></html>"
+        )
 
     def _offset_for_line_column(self, line: int, column: int) -> int | None:
         target_line = int(line)

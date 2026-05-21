@@ -4,8 +4,14 @@ import pytest
 from PySide6 import QtGui  # type: ignore
 
 from ui.code_editor import CodeEditor
+from ui.codemirror_editor import WEB_EDITOR_INDEX
 from ui.editor_api import EditorAPI
-from ui.editor_factory import DEFAULT_EDITOR_KIND, create_editor
+from ui.editor_factory import (
+    AETHER_EDITOR_KIND_ENV,
+    DEFAULT_EDITOR_KIND,
+    configured_editor_kind,
+    create_editor,
+)
 
 
 @pytest.fixture
@@ -125,6 +131,32 @@ def test_default_editor_kind_remains_qt_plain(qapp) -> None:
         editor.native_widget().close()
 
 
+def test_configured_editor_kind_without_env_uses_default(monkeypatch) -> None:
+    monkeypatch.delenv(AETHER_EDITOR_KIND_ENV, raising=False)
+
+    assert configured_editor_kind() == DEFAULT_EDITOR_KIND
+
+
+def test_configured_editor_kind_uses_codemirror_env(monkeypatch) -> None:
+    monkeypatch.setenv(AETHER_EDITOR_KIND_ENV, "codemirror")
+
+    assert configured_editor_kind() == "codemirror"
+
+
+def test_configured_editor_kind_invalid_env_warns_and_falls_back(monkeypatch) -> None:
+    monkeypatch.setenv(AETHER_EDITOR_KIND_ENV, "missing")
+
+    with pytest.warns(
+        RuntimeWarning,
+        match=(
+            "Invalid AETHER_EDITOR_KIND='missing'. "
+            "Supported kinds: qt_plain, experimental, codemirror. "
+            "Falling back to 'qt_plain'."
+        ),
+    ):
+        assert configured_editor_kind() == DEFAULT_EDITOR_KIND
+
+
 @pytest.mark.parametrize("kind", ["qt_plain", "experimental"])
 def test_create_editor_kinds_return_basic_editor_api(kind: str, qapp) -> None:
     editor: EditorAPI = create_editor(kind)
@@ -149,6 +181,21 @@ def test_create_editor_codemirror_reports_missing_webengine_clearly(monkeypatch,
 
     with pytest.raises(RuntimeError, match="CodeMirrorEditor requires PySide6 QtWebEngine support"):
         create_editor("codemirror")
+
+
+def test_codemirror_web_assets_are_local() -> None:
+    assert WEB_EDITOR_INDEX.exists()
+    editor_js = WEB_EDITOR_INDEX.with_name("editor.js")
+    vendor_bundle = WEB_EDITOR_INDEX.parent / "vendor" / "codemirror.bundle.js"
+
+    html = WEB_EDITOR_INDEX.read_text(encoding="utf-8")
+    js = editor_js.read_text(encoding="utf-8")
+
+    assert editor_js.exists()
+    assert vendor_bundle.exists()
+    assert "esm.sh" not in html
+    assert "esm.sh" not in js
+    assert 'from "./vendor/codemirror.bundle.js"' in js
 
 
 def test_create_editor_unknown_kind_raises_clear_error() -> None:
