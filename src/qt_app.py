@@ -728,15 +728,8 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         self._initialize_app_actions()
         self._menu_actions = {
             "interactive_new_script": self._make_menu_action("New Script", self._new_script_file),
-            "interactive_open_script": self._make_menu_action(
-                "Open Script...",
-                lambda _checked=False: self._run_action("file.open"),
-            ),
-            "interactive_save_script": self._make_menu_action(
-                "Save",
-                lambda _checked=False: self._run_action("file.save"),
-                shortcut="Ctrl+S",
-            ),
+            "interactive_open_script": self._make_registered_qaction("file.open", "Open Script..."),
+            "interactive_save_script": self._make_registered_qaction("file.save", "Save"),
             "interactive_save_script_as": self._make_menu_action("Save As...", self._save_script_file_as, shortcut="Ctrl+Shift+S"),
             "interactive_close_script": self._make_menu_action("Close Script", self._close_current_script),
             "interactive_exit": self._make_menu_action("Exit", self.close),
@@ -744,10 +737,10 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
             "interactive_show_workspace": self._make_menu_action("Show/Focus Workspace", self._show_workspace_panel),
             "interactive_restore_console": self._make_menu_action("Restore Console to Panel", self._restore_console_dock),
             "interactive_reset_layout": self._make_menu_action("Reset Panel Layout", self._reset_interactive_panel_layout),
-            "interactive_run_script": self._make_menu_action(
+            "interactive_run_script": self._make_registered_qaction(
+                "run.current",
                 "Run Script",
-                lambda _checked=False: self._run_action("run.current"),
-                shortcut=["Ctrl+Enter", "Ctrl+Return"],
+                shortcut_aliases=("Ctrl+Return",),
             ),
             "interactive_run_selection": self._make_menu_action("Run Selection", self.run_selection),
             "interactive_clear_console": self._make_menu_action("Clear Console", self._clear_console_output),
@@ -756,15 +749,8 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
             "studio_new_project": self._make_menu_action("New Project", self._create_project),
             "studio_open_project": self._make_menu_action("Open Project...", self._choose_and_open_project),
             "studio_project_home": self._make_menu_action("Project Home", self._return_to_project_home),
-            "studio_open_mtex": self._make_menu_action(
-                "Open .mtex File...",
-                lambda _checked=False: self._run_action("file.open"),
-            ),
-            "studio_save_mtex": self._make_menu_action(
-                "Save",
-                lambda _checked=False: self._run_action("file.save"),
-                shortcut="Ctrl+S",
-            ),
+            "studio_open_mtex": self._make_registered_qaction("file.open", "Open .mtex File..."),
+            "studio_save_mtex": self._make_registered_qaction("file.save", "Save"),
             "studio_save_mtex_as": self._make_menu_action("Save As...", self._save_mtex_file_as, shortcut="Ctrl+Shift+S"),
             "studio_show_project_files": self._make_menu_action("Show Project Files", self._focus_project_files_panel),
             "studio_show_preview": self._make_menu_action("Show PDF Preview", self._focus_pdf_preview_panel),
@@ -778,10 +764,10 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
             ),
             "studio_show_logs": self._make_menu_action("Show Logs & Output Files", self._show_logs_output_widget),
             "studio_refresh_tree": self._make_menu_action("Refresh File Tree", self._refresh_mtex_file_tree),
-            "studio_compile": self._make_menu_action(
+            "studio_compile": self._make_registered_qaction(
+                "build.current",
                 "Compile",
-                lambda _checked=False: self._run_action("build.current"),
-                shortcut=["Ctrl+Enter", "Ctrl+Return"],
+                shortcut_aliases=("Ctrl+Return",),
             ),
             "studio_toggle_auto_compile": self._make_menu_action(
                 "Toggle Auto Compile",
@@ -880,6 +866,35 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         action.setCheckable(checkable)
         action.triggered.connect(slot)
         return action
+
+    def _make_registered_qaction(
+        self,
+        action_id: str,
+        text: str | None = None,
+        *,
+        shortcut_aliases: tuple[str, ...] = (),
+    ) -> QtGui.QAction:
+        app_action = self.action_registry.get(action_id)
+        action = QtGui.QAction(text or app_action.label, self)
+        shortcuts = []
+        if app_action.shortcut:
+            shortcuts.append(QtGui.QKeySequence(app_action.shortcut))
+        shortcuts.extend(QtGui.QKeySequence(value) for value in shortcut_aliases)
+        if shortcuts:
+            action.setShortcuts(shortcuts)
+        action.triggered.connect(lambda _checked=False, action_id=action_id: self._run_action(action_id))
+        action.setEnabled(self.action_registry.is_enabled(action_id))
+        return action
+
+    def _sync_registered_qaction_enabled(
+        self,
+        menu_action_id: str,
+        app_action_id: str,
+        context_enabled: bool = True,
+    ) -> None:
+        self._menu_actions[menu_action_id].setEnabled(
+            context_enabled and self.action_registry.is_enabled(app_action_id)
+        )
 
     def _current_menu_context(self) -> str:
         return STUDIO_MENU_CONTEXT if self._is_studio_tab_active() else INTERACTIVE_MENU_CONTEXT
@@ -1106,17 +1121,11 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
             actions[key].setEnabled(has_editor)
 
         actions["interactive_new_script"].setEnabled(interactive_context_active)
-        actions["interactive_open_script"].setEnabled(
-            interactive_context_active and self.action_registry.is_enabled("file.open")
-        )
-        actions["interactive_save_script"].setEnabled(
-            interactive_context_active and self.action_registry.is_enabled("file.save")
-        )
+        self._sync_registered_qaction_enabled("interactive_open_script", "file.open", interactive_context_active)
+        self._sync_registered_qaction_enabled("interactive_save_script", "file.save", interactive_context_active)
         actions["interactive_save_script_as"].setEnabled(interactive_context_active and has_script_doc)
         actions["interactive_close_script"].setEnabled(interactive_context_active and has_script_doc)
-        actions["interactive_run_script"].setEnabled(
-            interactive_context_active and self.action_registry.is_enabled("run.current")
-        )
+        self._sync_registered_qaction_enabled("interactive_run_script", "run.current", interactive_context_active)
         actions["interactive_run_selection"].setEnabled(
             interactive_context_active and script_editor is not None and script_editor.has_selection()
         )
@@ -1135,12 +1144,8 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         actions["studio_new_project"].setEnabled(studio_context_active)
         actions["studio_open_project"].setEnabled(studio_context_active)
         actions["studio_project_home"].setEnabled(studio_context_active and has_project)
-        actions["studio_open_mtex"].setEnabled(
-            studio_context_active and self.action_registry.is_enabled("file.open")
-        )
-        actions["studio_save_mtex"].setEnabled(
-            studio_context_active and self.action_registry.is_enabled("file.save")
-        )
+        self._sync_registered_qaction_enabled("studio_open_mtex", "file.open", studio_context_active)
+        self._sync_registered_qaction_enabled("studio_save_mtex", "file.save", studio_context_active)
         actions["studio_save_mtex_as"].setEnabled(studio_context_active and studio_workspace_active and self.mtex_editor is not None)
         actions["studio_show_project_files"].setEnabled(studio_context_active and studio_workspace_active and self.mtex_file_tree is not None)
         actions["studio_show_preview"].setEnabled(studio_context_active and studio_workspace_active and self.preview is not None)
@@ -1160,9 +1165,7 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         )
         actions["studio_show_logs"].setEnabled(studio_context_active and has_logs_or_project)
         actions["studio_refresh_tree"].setEnabled(studio_context_active and has_project)
-        actions["studio_compile"].setEnabled(
-            studio_context_active and self.action_registry.is_enabled("build.current")
-        )
+        self._sync_registered_qaction_enabled("studio_compile", "build.current", studio_context_active)
         actions["studio_toggle_auto_compile"].setEnabled(studio_context_active and has_project and self.auto_compile_checkbox is not None)
         if self.auto_compile_checkbox is not None:
             actions["studio_toggle_auto_compile"].setChecked(self.auto_compile_checkbox.isChecked())
