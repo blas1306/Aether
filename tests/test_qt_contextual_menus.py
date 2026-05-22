@@ -5,7 +5,6 @@ from pathlib import Path
 from PySide6 import QtCore, QtGui, QtWidgets  # type: ignore
 
 from qt_app import MathTeXQtWindow
-from project_system import ProjectManager
 
 
 class EditorApiWidgetWithoutTextCursor(QtWidgets.QWidget):  # type: ignore[misc]
@@ -112,7 +111,7 @@ def _assert_in_order(entries: list[str], expected: list[str]) -> None:
     assert positions == sorted(positions)
 
 
-def test_menu_bar_switches_between_interactive_and_studio(
+def test_menu_bar_is_aether_only(
     tmp_path: Path,
     monkeypatch,
     qapp,
@@ -135,20 +134,9 @@ def test_menu_bar_switches_between_interactive_and_studio(
             "Clear Console",
         ]
 
-        assert window.central_tabs is not None
-        window.central_tabs.setCurrentIndex(1)
-        qapp.processEvents()
-
-        assert _menu_titles(window) == ["File", "Edit", "Insert", "View", "Build", "Help"]
-        _assert_in_order(
-            _menu_actions(window, "File"),
-            ["New Project", "Open Project...", "Open .mtex File..."],
-        )
-        assert _menu_actions(window, "Build") == [
-            "Compile",
-            "Toggle Auto Compile",
-            "Show Logs & Output Files",
-        ]
+        assert window.central_tabs is None
+        assert "Build" not in _menu_titles(window)
+        assert "Insert" not in _menu_titles(window)
     finally:
         window.close()
         qapp.processEvents()
@@ -252,14 +240,13 @@ def test_main_tab_uses_aether_name_and_editor_runs_show_script_banner(
 ) -> None:
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "appdata"))
     window = MathTeXQtWindow()
-    script_path = tmp_path / "demo_script.mtx"
-    script_path.write_text("x = 1;\ny = 2;\n", encoding="utf-8")
+    script_path = tmp_path / "demo_script.ae"
+    script_path.write_text('println("ok");\n', encoding="utf-8")
 
     try:
-        assert window.central_tabs is not None
-        assert window.central_tabs.tabText(0) == "Aether"
+        assert window.central_tabs is None
 
-        window._open_mtex_in_script(script_path)
+        window._open_script_file(script_path)
         qapp.processEvents()
         assert window.console_widget is not None
         window.console_widget.clear()
@@ -267,9 +254,8 @@ def test_main_tab_uses_aether_name_and_editor_runs_show_script_banner(
         window.run_script()
         qapp.processEvents()
         run_all_output = window.console_widget.output.toPlainText()
-        assert ">> demo_script.mtx" in run_all_output
-        assert "[Running script]" not in run_all_output
-        assert "[Script finished]" not in run_all_output
+        assert ">> demo_script.ae" in run_all_output
+        assert "ok" in run_all_output
 
         window.console_widget.clear()
         assert window.script_docs
@@ -277,13 +263,14 @@ def test_main_tab_uses_aether_name_and_editor_runs_show_script_banner(
         editor.setFocus()
         cursor = editor.textCursor()
         cursor.setPosition(0)
-        cursor.setPosition(len("x = 1;"), QtGui.QTextCursor.MoveMode.KeepAnchor)
+        cursor.setPosition(len('println("ok");'), QtGui.QTextCursor.MoveMode.KeepAnchor)
         editor.setTextCursor(cursor)
 
         window.run_selection()
         qapp.processEvents()
         run_selection_output = window.console_widget.output.toPlainText()
-        assert ">> demo_script.mtx" in run_selection_output
+        assert ">> demo_script.ae" in run_selection_output
+        assert "ok" in run_selection_output
     finally:
         window.close()
         qapp.processEvents()
@@ -311,7 +298,7 @@ def test_console_defaults_to_aether_repl_when_no_file_is_open(
         qapp.processEvents()
 
 
-def test_active_script_extension_selects_repl_panel(
+def test_legacy_script_extension_is_rejected_and_repl_stays_aether(
     tmp_path: Path,
     monkeypatch,
     qapp,
@@ -322,59 +309,46 @@ def test_active_script_extension_selects_repl_panel(
     mtx_path = tmp_path / "legacy.mtx"
     ae_path.write_text("x = 5;\n", encoding="utf-8")
     mtx_path.write_text("x = 5;\n", encoding="utf-8")
+    messages: list[str] = []
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "information",
+        staticmethod(lambda *args: messages.append(args[-1])),
+    )
 
     try:
-        window._open_mtex_in_script(ae_path)
+        window._open_script_file(ae_path)
         qapp.processEvents()
         assert window.console_dock is not None
         assert window.console_dock.windowTitle() == "Aether REPL"
         assert window.console_widget.prompt_label.text() == "aether>"
 
-        window._open_mtex_in_script(mtx_path)
+        window._open_script_file(mtx_path)
         qapp.processEvents()
-        assert window.console_dock.windowTitle() == "MathLab Legacy Console"
-        assert window.console_widget.prompt_label.text() == "mathlab>"
-        assert "MathLab Legacy console ready for .mtx files." in window.console_widget.output.toPlainText()
+        assert window.console_dock.windowTitle() == "Aether REPL"
+        assert window.console_widget.prompt_label.text() == "aether>"
+        assert messages
+        assert "legacy format" in messages[-1].lower()
     finally:
         window.close()
         qapp.processEvents()
 
 
-def test_studio_insert_menu_inserts_mathtex_block(
+def test_mtex_and_notebook_surfaces_are_not_visible(
     tmp_path: Path,
     monkeypatch,
     qapp,
 ) -> None:
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "appdata"))
     window = MathTeXQtWindow()
-    manager = ProjectManager()
-    project = manager.create_project("MenuProject", tmp_path)
 
     try:
-        window._open_project(project)
-        assert window.central_tabs is not None
-        window.central_tabs.setCurrentIndex(1)
         qapp.processEvents()
-
-        assert window.mtex_editor is not None
-        window.mtex_editor.setPlainText("")
-        window.mtex_editor.moveCursor(QtGui.QTextCursor.MoveOperation.End)
-
-        insert_entries = _menu_actions(window, "Insert")
-        assert "MathTeX Block" in insert_entries
-
-        action = window._menu_actions["studio_insert_mathtex"]
-        action.trigger()
-        qapp.processEvents()
-
-        text = window.mtex_editor.toPlainText()
-        assert "\\begin{code}" in text
-        assert "\\end{code}" in text
+        assert not hasattr(window, "project_workspace_widget")
+        assert not hasattr(window, "mtex_editor")
+        assert not hasattr(window, "preview")
+        assert not hasattr(window, "notebook_editor_view")
+        assert "Insert" not in _menu_titles(window)
     finally:
-        if window.mtex_editor is not None:
-            window.mtex_editor.document().setModified(False)
-        window._reset_auto_compile_runtime()
-        window.current_project = None
-        window.current_mtex_path = None
         window.close()
         qapp.processEvents()

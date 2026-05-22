@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 from aether import AetherSession
-from console_engine import MathRuntime
 from language_runtime import (
     AETHER_RUNTIME,
-    MATHLAB_LEGACY_RUNTIME,
-    MATHLAB_RUNTIME,
+    UNKNOWN_RUNTIME,
     create_session_for_language,
     run_source_for_file,
     runtime_for_file,
@@ -16,9 +14,10 @@ def test_runtime_for_aether_file_returns_aether() -> None:
     assert runtime_for_file("demo.ae") == AETHER_RUNTIME
 
 
-def test_runtime_for_mtx_file_returns_mathlab_legacy() -> None:
-    assert runtime_for_file("legacy.mtx") == MATHLAB_RUNTIME
-    assert MATHLAB_LEGACY_RUNTIME is MATHLAB_RUNTIME
+def test_runtime_for_legacy_files_returns_unknown() -> None:
+    assert runtime_for_file("legacy.mtx") == UNKNOWN_RUNTIME
+    assert runtime_for_file("document.mtex") == UNKNOWN_RUNTIME
+    assert runtime_for_file("notebook.mtn") == UNKNOWN_RUNTIME
 
 
 def test_run_aether_source_returns_output() -> None:
@@ -42,5 +41,18 @@ def test_create_session_for_language_returns_aether_session() -> None:
     assert isinstance(create_session_for_language("aether"), AetherSession)
 
 
-def test_create_session_for_language_returns_mathlab_runtime() -> None:
-    assert isinstance(create_session_for_language(".mtx"), MathRuntime)
+def test_legacy_source_is_rejected_without_running_mathlab() -> None:
+    result = run_source_for_file("legacy.mtx", "a = 1;")
+
+    assert not result.success
+    assert result.runtime == UNKNOWN_RUNTIME
+    assert "Legacy format '.mtx' is not supported by Aether Studio" in (result.error or "")
+
+
+def test_create_session_for_language_rejects_legacy_runtime() -> None:
+    try:
+        create_session_for_language(".mtx")
+    except ValueError as exc:
+        assert "No session is registered" in str(exc)
+    else:  # pragma: no cover - defensive assertion
+        raise AssertionError("Expected .mtx session creation to be rejected")

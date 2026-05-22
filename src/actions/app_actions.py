@@ -35,15 +35,6 @@ def register_main_window_actions(window: Any, registry: ActionRegistry) -> None:
     )
     registry.register(
         AppAction(
-            id="build.current",
-            label="Compile",
-            callback=window._compile_current_mtex,
-            shortcut="Ctrl+Enter",
-            enabled=window._can_build_current_action,
-        )
-    )
-    registry.register(
-        AppAction(
             id="repl.open_aether",
             label="Open Aether REPL",
             callback=window._open_aether_repl,

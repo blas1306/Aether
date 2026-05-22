@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+pytest.skip("MTeX auto-compile workflow retired from active Aether Studio surface.", allow_module_level=True)
+
 from qt_app import MathTeXQtWindow
 from project_system import ProjectManager
 

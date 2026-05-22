@@ -1,47 +1,21 @@
 ﻿
 from __future__ import annotations
 
-import shutil
 import sys
-import tempfile
-import os
-from contextlib import redirect_stderr, redirect_stdout
-from dataclasses import replace
 from pathlib import Path
 
 from actions import ActionRegistry
 from actions.app_actions import register_main_window_actions
-from actions.menu_specs import INTERACTIVE_MENU_SPEC, STUDIO_MENU_SPEC, MenuSpec
-from auto_compile import AutoCompileController, CompileTrigger
-from app_preferences import AppPreferences, AppPreferencesStore
-from console_engine import MathRuntime, capture_to_events
-from diagnostics import diagnostic_line_offset
-from editor_pdf_sync import EditorPdfSyncMap
+from actions.menu_specs import INTERACTIVE_MENU_SPEC, MenuSpec
 from latex_lang import (
-    env_ast,
     register_plot_listener,
     set_plot_mode,
     unregister_plot_listener,
     change_working_dir,
     get_working_dir,
 )
-from language_runtime import AETHER_RUNTIME, MATHLAB_RUNTIME, runtime_for_file, run_source_for_file
-from mtex_executor import (
-    ejecutar_mtex,
-    explain_latex_build_failure,
-    split_code_statements,
-    split_code_statements_with_lines,
-    summarize_latex_build_failure,
-)
-from execution_results import StructuredLogCollector, variable_summaries_from_snapshot, ExecutionResult
-from logs_output_widget import LogsOutputWidget
-from notebook_file import new_notebook_document, save_notebook_file
-from pdf_preview import PdfPreviewWidget
-from project_outputs import ProjectOutputManager
-from project_system import ProjectInfo, ProjectManager, ProjectRegistry, default_projects_root
-from notebook_editor_view import NotebookEditorView
-from project_widgets import ProjectCreationDialog, ProjectHomeWidget, ProjectWorkspaceWidget
-from repl import ReplController, create_aether_repl, create_mathlab_repl
+from language_runtime import LEGACY_SUFFIXES, run_source_for_file
+from repl import ReplController, create_aether_repl
 from ui.console_widget import ConsoleWidget as DockConsoleWidget
 from ui.code_editor import (
     BRACKET_ERROR_BG,
@@ -78,10 +52,7 @@ AETHER_STATUS_PALETTE = {
     "error": ("#ffd7d7", "#5a2222", "#d47b7b"),
 }
 QT_AVAILABLE = True
-AUTO_COMPILE_DEBOUNCE_MS = 900
 INTERACTIVE_MENU_CONTEXT = "interactive"
-STUDIO_MENU_CONTEXT = "studio"
-SNIPPET_CURSOR_MARKER = "<|cursor|>"
 
 
 def _is_editor_api(value) -> bool:
@@ -303,7 +274,7 @@ QSplitter::handle {{
 
 
 def apply_dark_qt_theme(app: QtWidgets.QApplication | None = None) -> None:
-    """Force MathTeX to use a dark Qt theme regardless of the OS theme."""
+    """Force Aether Studio to use a dark Qt theme regardless of the OS theme."""
     app = app or QtWidgets.QApplication.instance()
     if app is None:
         return
@@ -350,46 +321,13 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         set_plot_mode("interactive")
         self.setWindowTitle("Aether Studio")
         self.resize(1200, 720)
-        self._temp_preview_dir = tempfile.TemporaryDirectory(prefix="mathtex_preview_")
-        self._temp_preview_path = Path(self._temp_preview_dir.name)
-        self._temp_preview_path.mkdir(parents=True, exist_ok=True)
-        self.runtime = MathRuntime()
-        # .mtx compatibility path: keep the MathLab Legacy REPL alive while Aether
-        # becomes the primary editor/runtime experience.
-        self.mathlab_repl = create_mathlab_repl(self.runtime)
         self.aether_repl = create_aether_repl()
         self.console_engine: ReplController = self.aether_repl
         self._plot_listener_registered = False
         self._plot_windows: list[QtWidgets.QMainWindow] = []
         self._untitled_counter = 1
-        self.project_manager = ProjectManager()
-        self.output_manager = ProjectOutputManager()
-        self.project_registry = ProjectRegistry()
-        self.preferences_store = AppPreferencesStore()
-        self.current_project: ProjectInfo | None = None
-        self.latest_mtex_execution_result: ExecutionResult | None = None
-        self.project_stack: QtWidgets.QStackedWidget | None = None
-        self.project_home_widget: ProjectHomeWidget | None = None
-        self.project_workspace_widget: ProjectWorkspaceWidget | None = None
-        self.logs_output_widget: LogsOutputWidget | None = None
-        self.mtex_file_tree: QtWidgets.QTreeWidget | None = None
         self.editor_kind = configured_editor_kind()
-        self.mtex_editor: EditorAPI | None = None
-        self.mtex_file_label: QtWidgets.QLabel | None = None
-        self.auto_compile_checkbox: QtWidgets.QCheckBox | None = None
-        self.build_status_label: QtWidgets.QLabel | None = None
-        self.preview: PdfPreviewWidget | None = None
-        self.current_mtex_path: Path | None = None
         self.script_docs: list[dict] = []
-        self.last_generated_pdf: Path | None = None
-        self._preview_message = "Compile an .mtex file to preview it."
-        self.auto_compile_controller = AutoCompileController(enabled=False)
-        self._ignore_mtex_text_changes = False
-        self._auto_compile_timer = QtCore.QTimer(self)
-        self._auto_compile_timer.setSingleShot(True)
-        self._auto_compile_timer.setInterval(AUTO_COMPILE_DEBOUNCE_MS)
-        self._auto_compile_timer.timeout.connect(self.trigger_auto_build)
-        self._editor_pdf_sync = EditorPdfSyncMap()
         self.console_dock: QtWidgets.QDockWidget | None = None
         self.console_panel_title_label: QtWidgets.QLabel | None = None
         self.console_panel_subtitle_label: QtWidgets.QLabel | None = None
@@ -406,24 +344,16 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         self._register_plot_listener()
         self._build_ui()
         self._apply_aether_stylesheet()
-        self._restore_ui_preferences()
-        self._set_build_status("Build: Ready")
+        self._set_runtime_status("Ready", tone="neutral", message="Ready")
         self.console_widget.clear()
         self._build_console_dock()
         self._build_workspace_dock()
-        self.logs_output_widget = LogsOutputWidget(self)
         self._sync_console_for_active_tab()
-        self._load_recent_projects()
 
     # ----- UI -------------------------------------------------------------
     def _build_ui(self) -> None:
-        central_tabs = QtWidgets.QTabWidget()
-        central_tabs.addTab(self._build_script_tab(), "Aether")
-        central_tabs.addTab(self._build_mtex_tab(), "MTeX Studio")
-        central_tabs.addTab(self._build_notebook_tab(), "Notebook")
-        central_tabs.currentChanged.connect(lambda _idx: self._handle_active_context_changed())
-        self.central_tabs = central_tabs
-        self.setCentralWidget(central_tabs)
+        self.central_tabs = None
+        self.setCentralWidget(self._build_script_tab())
         self._init_restore_buttons()
 
         self.console_widget = DockConsoleWidget(
@@ -436,11 +366,6 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         self.console_widget.executed.connect(self.refresh_workspace_view)
         self.console_widget.restarted.connect(self.refresh_workspace_view)
         self._initialize_menu_actions()
-        if self.project_workspace_widget is not None:
-            self.project_workspace_widget.set_sync_actions(
-                forward_action=self._menu_actions.get("studio_go_to_code_location_in_pdf"),
-                inverse_action=self._menu_actions.get("studio_go_to_pdf_location_in_code"),
-            )
         self._refresh_menu_bar_for_active_context()
 
     def _init_restore_buttons(self) -> None:
@@ -648,9 +573,7 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         self.statusBar().showMessage(message or state)
 
     def _on_console_command_started(self, _command: str) -> None:
-        profile = self.console_engine.profile
-        label = "Aether input" if profile.id == "aether" else "MathLab Legacy command"
-        self._set_runtime_status("Running", tone="info", message=f"Running {label}...")
+        self._set_runtime_status("Running", tone="info", message="Running Aether input...")
 
     def _on_console_command_finished(self, success: bool) -> None:
         if success:
@@ -747,34 +670,6 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
             "interactive_clear_console": self._make_menu_action("Clear Console", self._clear_console_output),
             "interactive_choose_directory": self._make_menu_action("Choose Working Directory...", self._select_directory),
             "interactive_parent_directory": self._make_menu_action("Go to Parent Directory", self._go_parent_directory),
-            "studio_new_project": self._make_menu_action("New Project", self._create_project),
-            "studio_open_project": self._make_menu_action("Open Project...", self._choose_and_open_project),
-            "studio_project_home": self._make_menu_action("Project Home", self._return_to_project_home),
-            "studio_open_mtex": self._make_registered_qaction("file.open", "Open .mtex File..."),
-            "studio_save_mtex": self._make_registered_qaction("file.save", "Save"),
-            "studio_save_mtex_as": self._make_menu_action("Save As...", self._save_mtex_file_as, shortcut="Ctrl+Shift+S"),
-            "studio_show_project_files": self._make_menu_action("Show Project Files", self._focus_project_files_panel),
-            "studio_show_preview": self._make_menu_action("Show PDF Preview", self._focus_pdf_preview_panel),
-            "studio_go_to_code_location_in_pdf": self._make_menu_action(
-                "Go to code location in PDF",
-                self._go_to_code_location_in_pdf,
-            ),
-            "studio_go_to_pdf_location_in_code": self._make_menu_action(
-                "Go to PDF location in code",
-                self._go_to_pdf_location_in_code,
-            ),
-            "studio_show_logs": self._make_menu_action("Show Logs & Output Files", self._show_logs_output_widget),
-            "studio_refresh_tree": self._make_menu_action("Refresh File Tree", self._refresh_mtex_file_tree),
-            "studio_compile": self._make_registered_qaction(
-                "build.current",
-                "Compile",
-                shortcut_aliases=("Ctrl+Return",),
-            ),
-            "studio_toggle_auto_compile": self._make_menu_action(
-                "Toggle Auto Compile",
-                self._toggle_auto_compile_from_menu,
-                checkable=True,
-            ),
             "edit_undo": self._make_menu_action("Undo", lambda: self._invoke_context_editor("undo"), shortcut=QtGui.QKeySequence.StandardKey.Undo),
             "edit_redo": self._make_menu_action("Redo", lambda: self._invoke_context_editor("redo"), shortcut=QtGui.QKeySequence.StandardKey.Redo),
             "edit_cut": self._make_menu_action("Cut", lambda: self._invoke_context_editor("cut"), shortcut=QtGui.QKeySequence.StandardKey.Cut),
@@ -785,16 +680,8 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
                 lambda: self._invoke_context_editor("selectAll"),
                 shortcut=QtGui.QKeySequence.StandardKey.SelectAll,
             ),
-            "studio_insert_section": self._make_menu_action("Section", lambda: self._insert_named_mtex_snippet("section")),
-            "studio_insert_subsection": self._make_menu_action("Subsection", lambda: self._insert_named_mtex_snippet("subsection")),
-            "studio_insert_equation": self._make_menu_action("Equation Block", lambda: self._insert_named_mtex_snippet("equation")),
-            "studio_insert_code": self._make_menu_action("Code Block", lambda: self._insert_named_mtex_snippet("verbatim")),
-            "studio_insert_table": self._make_menu_action("Table Skeleton", lambda: self._insert_named_mtex_snippet("table")),
-            "studio_insert_figure": self._make_menu_action("Figure Skeleton", lambda: self._insert_named_mtex_snippet("figure")),
-            "studio_insert_mathtex": self._make_menu_action("MathTeX Block", lambda: self._insert_named_mtex_snippet("mathtex")),
             "help_about": self._make_menu_action("About Aether Studio", self._show_about_dialog),
-            "help_interactive": self._make_menu_action("Aether / Legacy Help", self._show_interactive_help),
-            "help_studio": self._make_menu_action("MTeX Studio Help", self._show_studio_help),
+            "help_interactive": self._make_menu_action("Aether Help", self._show_interactive_help),
         }
 
     def _initialize_app_actions(self) -> None:
@@ -808,25 +695,15 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         self._update_menu_action_states()
 
     def _can_open_current_context_file(self) -> bool:
-        if self._current_menu_context() == STUDIO_MENU_CONTEXT:
-            return self.current_project is not None
         return True
 
     def _open_current_context_file(self) -> None:
-        if self._current_menu_context() == STUDIO_MENU_CONTEXT:
-            self._open_mtex_file()
-            return
-        self._open_mtex_in_script()
+        self._open_script_file()
 
     def _can_save_current_context_file(self) -> bool:
-        if self._current_menu_context() == STUDIO_MENU_CONTEXT:
-            return self._is_studio_workspace_active() and self.current_mtex_path is not None
         return hasattr(self, "script_tab_widget") and self._current_script_doc() is not None
 
     def _save_current_context_file(self) -> None:
-        if self._current_menu_context() == STUDIO_MENU_CONTEXT:
-            self._save_mtex_file()
-            return
         self._save_script_file()
 
     def _can_run_current_action(self) -> bool:
@@ -836,11 +713,7 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
             and self._current_script_doc() is not None
         )
 
-    def _can_build_current_action(self) -> bool:
-        return self._current_menu_context() == STUDIO_MENU_CONTEXT and self.current_project is not None
-
     def _open_aether_repl(self) -> None:
-        self._set_active_main_tab(0)
         changed = self.console_engine is not self.aether_repl
         self.console_engine = self.aether_repl
         if hasattr(self, "console_widget") and self.console_widget is not None:
@@ -898,16 +771,10 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         )
 
     def _current_menu_context(self) -> str:
-        return STUDIO_MENU_CONTEXT if self._is_studio_tab_active() else INTERACTIVE_MENU_CONTEXT
+        return INTERACTIVE_MENU_CONTEXT
 
     def _set_active_main_tab(self, index: int) -> None:
-        tabs = self.central_tabs
-        if tabs is None:
-            return
-        if tabs.currentIndex() != index:
-            tabs.setCurrentIndex(index)
-        else:
-            self._handle_active_context_changed()
+        self._handle_active_context_changed()
 
     def _handle_active_context_changed(self) -> None:
         self._sync_repl_for_active_script()
@@ -919,11 +786,6 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         self._refresh_menu_bar_for_active_context()
 
     def _current_repl_controller(self) -> ReplController:
-        doc = self._current_script_doc() if hasattr(self, "script_tab_widget") else None
-        runtime = runtime_for_file((doc or {}).get("path") or (doc or {}).get("name"))
-        # Only .mtx files opt into MathLab Legacy; unknown/untitled scripts use Aether.
-        if runtime == MATHLAB_RUNTIME:
-            return self.mathlab_repl
         return self.aether_repl
 
     def _sync_repl_for_active_script(self) -> None:
@@ -950,10 +812,7 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         self._update_menu_action_states()
         menu_bar = self.menuBar()
         menu_bar.clear()
-        if self._current_menu_context() == STUDIO_MENU_CONTEXT:
-            self._build_studio_menus(menu_bar)
-        else:
-            self._build_interactive_menus(menu_bar)
+        self._build_interactive_menus(menu_bar)
 
     def _build_interactive_menus(self, menu_bar: QtWidgets.QMenuBar) -> None:
         built_menus = self._build_menus_from_spec(menu_bar, INTERACTIVE_MENU_SPEC)
@@ -965,7 +824,7 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
             view_menu.addAction(toggle_action)
 
     def _build_studio_menus(self, menu_bar: QtWidgets.QMenuBar) -> None:
-        self._build_menus_from_spec(menu_bar, STUDIO_MENU_SPEC)
+        return
 
     def _build_menus_from_spec(
         self,
@@ -994,16 +853,12 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         if not actions:
             return
 
-        interactive_context_active = self._current_menu_context() == INTERACTIVE_MENU_CONTEXT
-        studio_context_active = not interactive_context_active
+        interactive_context_active = True
         script_doc = self._current_script_doc() if hasattr(self, "script_tab_widget") else None
         has_script_doc = script_doc is not None
         script_editor = self._active_script_editor()
         context_editor = self._context_editor()
         has_editor = context_editor is not None
-        studio_workspace_active = self._is_studio_workspace_active()
-        has_project = self.current_project is not None
-        has_logs_or_project = has_project or self.latest_mtex_execution_result is not None
 
         for key in ("edit_undo", "edit_redo", "edit_cut", "edit_copy", "edit_paste", "edit_select_all"):
             actions[key].setEnabled(has_editor)
@@ -1028,45 +883,6 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         actions["interactive_clear_console"].setEnabled(interactive_context_active)
         actions["interactive_choose_directory"].setEnabled(interactive_context_active)
         actions["interactive_parent_directory"].setEnabled(interactive_context_active)
-
-        actions["studio_new_project"].setEnabled(studio_context_active)
-        actions["studio_open_project"].setEnabled(studio_context_active)
-        actions["studio_project_home"].setEnabled(studio_context_active and has_project)
-        self._sync_registered_qaction_enabled("studio_open_mtex", "file.open", studio_context_active)
-        self._sync_registered_qaction_enabled("studio_save_mtex", "file.save", studio_context_active)
-        actions["studio_save_mtex_as"].setEnabled(studio_context_active and studio_workspace_active and self.mtex_editor is not None)
-        actions["studio_show_project_files"].setEnabled(studio_context_active and studio_workspace_active and self.mtex_file_tree is not None)
-        actions["studio_show_preview"].setEnabled(studio_context_active and studio_workspace_active and self.preview is not None)
-        actions["studio_go_to_code_location_in_pdf"].setEnabled(
-            studio_context_active
-            and studio_workspace_active
-            and self.mtex_editor is not None
-            and self.preview is not None
-            and self.preview.current_pdf_path() is not None
-        )
-        actions["studio_go_to_pdf_location_in_code"].setEnabled(
-            studio_context_active
-            and studio_workspace_active
-            and self.mtex_editor is not None
-            and self.preview is not None
-            and self.preview.current_pdf_path() is not None
-        )
-        actions["studio_show_logs"].setEnabled(studio_context_active and has_logs_or_project)
-        actions["studio_refresh_tree"].setEnabled(studio_context_active and has_project)
-        self._sync_registered_qaction_enabled("studio_compile", "build.current", studio_context_active)
-        actions["studio_toggle_auto_compile"].setEnabled(studio_context_active and has_project and self.auto_compile_checkbox is not None)
-        if self.auto_compile_checkbox is not None:
-            actions["studio_toggle_auto_compile"].setChecked(self.auto_compile_checkbox.isChecked())
-        for key in (
-            "studio_insert_section",
-            "studio_insert_subsection",
-            "studio_insert_equation",
-            "studio_insert_code",
-            "studio_insert_table",
-            "studio_insert_figure",
-            "studio_insert_mathtex",
-        ):
-            actions[key].setEnabled(studio_context_active and studio_workspace_active and self.mtex_editor is not None)
 
     def _build_script_tab(self) -> QtWidgets.QWidget:
         root = QtWidgets.QWidget()
@@ -1176,7 +992,7 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         run_sel_icon = self._compose_icon(run_all_icon, cursor_icon)
 
         new_btn = self._make_script_icon_button(new_icon, "New File")
-        open_btn = self._make_script_icon_button(open_icon, "Open .mtx or .ae")
+        open_btn = self._make_script_icon_button(open_icon, "Open .ae")
         save_btn = self._make_script_icon_button(save_icon, "Save")
         save_as_btn = self._make_script_icon_button(save_as_icon, "Save As...")
         run_all = self._make_script_icon_button(run_all_icon, "Run All (Ctrl+Enter)")
@@ -1198,7 +1014,7 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         self.script_tab_widget.currentChanged.connect(lambda _idx: self._handle_script_tab_changed())
         editor_panel = self._create_aether_panel(
             "Editor",
-            "Edit and run the active .mtx or .ae script",
+            "Edit and run the active .ae script",
             self.script_tab_widget,
             variant="primary",
         )
@@ -1251,60 +1067,6 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         if not directory:
             return
         self._apply_working_dir(Path(directory))
-
-    # ----- Arbol de archivos (MTeX Studio) --------------------------------
-    def _refresh_mtex_file_tree(self) -> None:
-        if self.project_workspace_widget is None:
-            return
-        self.project_workspace_widget.refresh_file_tree()
-        self._refresh_menu_bar_for_active_context()
-
-    def _build_mtex_tab(self) -> QtWidgets.QWidget:
-        root = QtWidgets.QWidget()
-        layout = QtWidgets.QVBoxLayout(root)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        self.project_stack = QtWidgets.QStackedWidget()
-        self.project_home_widget = ProjectHomeWidget(root)
-        self.project_workspace_widget = ProjectWorkspaceWidget(
-            editor_factory=lambda: create_editor(self.editor_kind),
-            preview_factory=PdfPreviewWidget,
-            preview_message=self._preview_message,
-            project_manager=self.project_manager,
-            parent=root,
-        )
-        self.project_stack.addWidget(self.project_home_widget)
-        self.project_stack.addWidget(self.project_workspace_widget)
-        layout.addWidget(self.project_stack, 1)
-
-        self.mtex_file_tree = self.project_workspace_widget.file_tree
-        self.mtex_editor = self.project_workspace_widget.editor_widget
-        self.mtex_file_label = self.project_workspace_widget.file_label
-        self.auto_compile_checkbox = self.project_workspace_widget.auto_compile_checkbox
-        self.build_status_label = self.project_workspace_widget.build_status_label
-        self.preview = self.project_workspace_widget.preview_widget
-        self.mtex_editor.set_autocomplete_document_kind("mtex_document")
-
-        self.project_home_widget.new_project_requested.connect(self._create_project)
-        self.project_home_widget.open_project_requested.connect(self._choose_and_open_project)
-        self.project_home_widget.project_activated.connect(self._open_project_from_path)
-        self.project_workspace_widget.home_requested.connect(self._return_to_project_home)
-        self.project_workspace_widget.save_requested.connect(lambda: self._run_action("file.save"))
-        self.project_workspace_widget.save_as_requested.connect(self._save_mtex_file_as)
-        self.project_workspace_widget.compile_requested.connect(lambda: self._run_action("build.current"))
-        self.project_workspace_widget.logs_output_requested.connect(self._show_logs_output_widget)
-        self.project_workspace_widget.file_open_requested.connect(self._handle_project_file_activation)
-        self.mtex_editor.connect_modification_changed(lambda changed: self._update_mtex_dirty(changed))
-        self.mtex_editor.text_changed.connect(self._on_active_mtex_text_changed)
-        if self.auto_compile_checkbox is not None:
-            self.auto_compile_checkbox.toggled.connect(self._set_auto_compile_enabled)
-
-        self._show_project_home()
-        return root
-
-    def _build_notebook_tab(self) -> QtWidgets.QWidget:
-        self.notebook_editor_view = NotebookEditorView(parent=self)
-        return self.notebook_editor_view
 
     # ----- Consola --------------------------------------------------------
     def append_output(self, text: str, ensure_newline: bool = True) -> None:
@@ -1378,10 +1140,6 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
 
     def _on_console_dock_state_changed(self) -> None:
         dock = self.console_dock
-        if self._is_studio_tab_active():
-            if self.console_restore_btn:
-                self.console_restore_btn.setVisible(False)
-            return
         floating = dock.isFloating() if dock else False
         visible = dock.isVisible() if dock else False
         need_restore = floating or not visible
@@ -1399,21 +1157,10 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
             pass
 
     def _is_studio_tab_active(self) -> bool:
-        tabs = self.central_tabs
-        if tabs is None:
-            return False
-        return tabs.currentIndex() == 1
+        return False
 
     def _sync_console_for_active_tab(self) -> None:
         dock = self.console_dock
-        if self._is_studio_tab_active():
-            if dock is not None:
-                dock.hide()
-            if self.workspace_dock is not None:
-                self.workspace_dock.hide()
-            if self.console_restore_btn:
-                self.console_restore_btn.setVisible(False)
-            return
         if dock is not None:
             dock.show()
             self._on_console_dock_state_changed()
@@ -1453,22 +1200,7 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         widget = doc.get("widget")
         return widget if _is_editor_api(widget) else None
 
-    def _is_studio_workspace_active(self) -> bool:
-        return bool(
-            self.current_project is not None
-            and self.project_stack is not None
-            and self.project_workspace_widget is not None
-            and self.project_stack.currentWidget() is self.project_workspace_widget
-        )
-
-    def _active_mtex_editor(self) -> EditorAPI | None:
-        if not self._is_studio_workspace_active() or self.mtex_editor is None:
-            return None
-        return self.mtex_editor
-
     def _context_editor(self) -> EditorAPI | None:
-        if self._current_menu_context() == STUDIO_MENU_CONTEXT:
-            return self._active_mtex_editor()
         return self._active_script_editor()
 
     def _invoke_context_editor(self, method_name: str) -> None:
@@ -1669,12 +1401,12 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
             self,
             "Save Script",
             str(get_working_dir() / initial),
-            "Script Files (*.ae *.mtx);;Aether Files (*.ae);;MathLab Legacy Files (*.mtx);;All Files (*)",
+            "Aether Files (*.ae);;All Files (*)",
         )
         if not filename:
             return None
         path = Path(filename)
-        if path.suffix.lower() not in {".mtx", ".ae"}:
+        if path.suffix.lower() != ".ae":
             path = path.with_suffix(".ae")
         return path
 
@@ -1686,10 +1418,15 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         path.write_text(content, encoding="utf-8")
 
     def _persist_script_document(self, doc: dict, path: Path) -> bool:
+        if self._is_legacy_file_path(path):
+            self._show_legacy_file_message(path)
+            return False
+        if path.suffix.lower() != ".ae":
+            path = path.with_suffix(".ae")
         try:
             self._write_script_document(doc, path)
         except OSError as exc:
-            QtWidgets.QMessageBox.critical(self, "MathTeX", f"Could not save the file.\n{exc}")
+            QtWidgets.QMessageBox.critical(self, "Aether Studio", f"Could not save the file.\n{exc}")
             return False
         doc["path"] = path
         doc["name"] = path.name
@@ -1745,7 +1482,7 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
                 continue
         return None
 
-    def _open_mtex_in_script(self, path: Path | str | None = None) -> None:
+    def _open_script_file(self, path: Path | str | None = None) -> None:
         # The clicked signal from Qt can pass a boolean "checked" flag; normalize that away.
         if isinstance(path, bool):
             path = None
@@ -1756,11 +1493,21 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
                 self,
                 "Open Script File",
                 str(get_working_dir()),
-                "Script Files (*.ae *.mtx);;Aether Files (*.ae);;MathLab Legacy Files (*.mtx);;All Files (*)",
+                "Aether Files (*.ae);;All Files (*)",
             )
             if not filename:
                 return
             path = Path(filename)
+        if self._is_legacy_file_path(path):
+            self._show_legacy_file_message(path)
+            return
+        if path.suffix.lower() != ".ae":
+            QtWidgets.QMessageBox.information(
+                self,
+                "Aether Studio",
+                "Aether Studio opens and runs .ae scripts only.",
+            )
+            return
         existing_doc = self._find_script_doc_by_path(path)
         if existing_doc:
             widget = existing_doc.get("widget")
@@ -1774,148 +1521,23 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         try:
             content = path.read_text(encoding="utf-8")
         except OSError as exc:
-            QtWidgets.QMessageBox.critical(self, "MathTeX", f"Could not open the file.\n{exc}")
+            QtWidgets.QMessageBox.critical(self, "Aether Studio", f"Could not open the file.\n{exc}")
             return
         self._create_script_document(name=path.name, path=path, content=content, announce=False)
         self._set_active_main_tab(0)
-    # ----- MTeX workspace -------------------------------------------------
-    def _load_recent_projects(self) -> None:
-        self.project_registry.load()
-        self.project_registry.remove_missing_projects()
-        self.project_registry.save()
-        self._refresh_project_home()
 
-    def _refresh_project_home(self) -> None:
-        if self.project_home_widget is None:
-            return
-        self.project_home_widget.set_projects(self.project_registry.list_projects())
+    def _is_legacy_file_path(self, path: Path) -> bool:
+        return path.suffix.lower() in LEGACY_SUFFIXES
 
-    def _show_project_home(self) -> None:
-        if self.project_stack is None or self.project_home_widget is None:
-            return
-        self.project_stack.setCurrentWidget(self.project_home_widget)
-        self._set_active_main_tab(1)
-        self._update_window_title()
-        self._refresh_menu_bar_for_active_context()
-
-    def _show_project_workspace(self) -> None:
-        if self.project_stack is None or self.project_workspace_widget is None:
-            return
-        self.project_stack.setCurrentWidget(self.project_workspace_widget)
-        self._set_active_main_tab(1)
-        self._update_window_title()
-        self._refresh_menu_bar_for_active_context()
-
-    def _reset_auto_compile_runtime(self) -> None:
-        self._auto_compile_timer.stop()
-        self.auto_compile_controller.reset()
-
-    def _restore_ui_preferences(self) -> None:
-        preferences = self.preferences_store.load()
-        if self.auto_compile_checkbox is None:
-            self.auto_compile_controller.set_enabled(preferences.auto_compile_enabled)
-            return
-        self.auto_compile_checkbox.blockSignals(True)
-        self.auto_compile_checkbox.setChecked(preferences.auto_compile_enabled)
-        self.auto_compile_checkbox.blockSignals(False)
-        self._set_auto_compile_enabled(preferences.auto_compile_enabled, persist=False)
-
-    def _save_ui_preferences(self) -> None:
-        enabled = self.auto_compile_checkbox.isChecked() if self.auto_compile_checkbox is not None else False
-        try:
-            self.preferences_store.save(AppPreferences(auto_compile_enabled=enabled))
-        except OSError:
-            pass
-
-    def _set_build_status(self, text: str, tone: str = "neutral") -> None:
-        if self.project_workspace_widget is not None:
-            self.project_workspace_widget.set_build_status(text, tone=tone)
-        state = {
-            "neutral": ("Ready", "neutral"),
-            "info": ("Running", "info"),
-            "success": ("Done", "success"),
-            "warning": ("Error", "warning"),
-            "error": ("Error", "error"),
-        }.get(tone, ("Ready", "neutral"))
-        self._set_runtime_status(state[0], tone=state[1], message=text)
-
-    def _set_auto_compile_enabled(self, enabled: bool, *, persist: bool = True) -> None:
-        self.auto_compile_controller.set_enabled(enabled)
-        if not enabled:
-            self._auto_compile_timer.stop()
-        elif self.mtex_editor is not None and self.mtex_editor.is_modified():
-            self.schedule_auto_build()
-        if persist:
-            self._save_ui_preferences()
-        self._update_menu_action_states()
-
-    def _is_auto_compile_target_active(self) -> bool:
-        if self.current_project is None or self.current_mtex_path is None:
-            return False
-        if self.current_mtex_path.suffix.lower() != ".mtex":
-            return False
-        if self.project_stack is not None and self.project_workspace_widget is not None:
-            return self.project_stack.currentWidget() is self.project_workspace_widget
-        return True
-
-    def _on_active_mtex_text_changed(self) -> None:
-        self._refresh_editor_pdf_sync_source()
-        if self._ignore_mtex_text_changes or not self._is_auto_compile_target_active():
-            return
-        self.schedule_auto_build()
-
-    def schedule_auto_build(self) -> None:
-        if not self._is_auto_compile_target_active():
-            self._auto_compile_timer.stop()
-            return
-        decision = self.auto_compile_controller.on_document_edited()
-        if decision.kind == "schedule":
-            self._auto_compile_timer.start()
-        elif decision.kind == "queued":
-            self._auto_compile_timer.stop()
-
-    def trigger_auto_build(self) -> None:
-        self._auto_compile_timer.stop()
-        self._request_current_mtex_compile("auto")
-
-    def _clear_execution_result(self, message: str | None = None) -> None:
-        self.latest_mtex_execution_result = None
-        if self.logs_output_widget is not None:
-            self.logs_output_widget.clear_result(message)
-
-    def _show_logs_output_widget(self) -> None:
-        if self.logs_output_widget is None:
-            self.logs_output_widget = LogsOutputWidget(self)
-        if self.latest_mtex_execution_result is not None:
-            self.logs_output_widget.set_execution_result(self.latest_mtex_execution_result)
-        self.logs_output_widget.show()
-        self.logs_output_widget.raise_()
-        self.logs_output_widget.activateWindow()
-
-    def _focus_project_files_panel(self) -> None:
-        if not self._is_studio_workspace_active() or self.mtex_file_tree is None:
-            return
-        self.mtex_file_tree.setFocus()
-
-    def _focus_pdf_preview_panel(self) -> None:
-        if not self._is_studio_workspace_active() or self.preview is None:
-            return
-        self.preview.setFocus()
-
-    def _go_to_code_location_in_pdf(self) -> None:
-        if self._sync_editor_position_to_preview():
-            self._focus_pdf_preview_panel()
-
-    def _go_to_pdf_location_in_code(self) -> None:
-        if self._sync_preview_position_to_editor():
-            if self.mtex_editor is not None:
-                self.mtex_editor.focus_editor()
-
-    def _toggle_auto_compile_from_menu(self) -> None:
-        if self.auto_compile_checkbox is None or not self._is_studio_workspace_active():
-            return
-        self.auto_compile_checkbox.toggle()
-        self._update_menu_action_states()
+    def _show_legacy_file_message(self, path: Path) -> None:
+        QtWidgets.QMessageBox.information(
+            self,
+            "Aether Studio",
+            (
+                f"{path.name} uses a legacy format ({path.suffix}).\n"
+                "Aether Studio now supports .ae scripts only. Use or convert this file to .ae."
+            ),
+        )
 
     def _clear_console_output(self) -> None:
         if hasattr(self, "console_widget") and self.console_widget is not None:
@@ -1926,31 +1548,21 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
             self,
             "About Aether Studio",
             (
-                "Aether Studio is migrating toward Aether as the primary language:\n\n"
-                "- Aether for .ae scripts, the default REPL, and new notebook code blocks.\n"
-                "- MathLab Legacy for .mtx scripts, legacy console, workspace, and working directory.\n"
-                "- MTeX Studio for projects, .mtex documents, PDF preview, and build outputs."
+                "Aether Studio is focused on the Aether workflow:\n\n"
+                "- .ae scripts in the editor.\n"
+                "- Aether REPL and workspace inspection.\n"
+                "- Working directory controls for local script workflows."
             ),
         )
 
     def _show_interactive_help(self) -> None:
-        if self._open_documentation_file("docs/guia_de_uso.md"):
-            self.append_output("[Help] Opened the Aether / Legacy guide.")
+        if self._open_documentation_file("docs/aether/AETHER_V0_SPEC.md"):
+            self.append_output("[Help] Opened the Aether guide.")
             return
         QtWidgets.QMessageBox.information(
             self,
-            "Aether / Legacy Help",
-            "The guide file could not be opened. Aether is the default; .mtx files continue to use MathLab Legacy.",
-        )
-
-    def _show_studio_help(self) -> None:
-        if self._open_documentation_file("docs/guia_de_uso.md"):
-            self.append_output("[Help] Opened the MathTeX guide for the MTeX Studio workflow.")
-            return
-        QtWidgets.QMessageBox.information(
-            self,
-            "MTeX Studio Help",
-            "The guide file could not be opened. Check docs/guia_de_uso.md for .mtex syntax, code blocks, plots, and tables.",
+            "Aether Help",
+            "The guide file could not be opened. Aether Studio supports .ae scripts and the Aether REPL.",
         )
 
     def _open_documentation_file(self, relative_path: str) -> bool:
@@ -1959,548 +1571,19 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
             return False
         return QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(str(doc_path)))
 
-    def _insert_named_mtex_snippet(self, snippet_name: str) -> None:
-        snippets = {
-            "section": "\n\\section{" + SNIPPET_CURSOR_MARKER + "}\n\n",
-            "subsection": "\n\\subsection{" + SNIPPET_CURSOR_MARKER + "}\n\n",
-            "equation": "\n\\begin{equation}\n    " + SNIPPET_CURSOR_MARKER + "\n\\end{equation}\n",
-            "verbatim": "\n\\begin{verbatim}\n" + SNIPPET_CURSOR_MARKER + "\n\\end{verbatim}\n",
-            "table": (
-                "\n\\begin{table}[ht]\n"
-                "    \\centering\n"
-                "    \\table{tabla_demo}\n"
-                "    \\caption{" + SNIPPET_CURSOR_MARKER + "}\n"
-                "    \\label{tab:demo}\n"
-                "\\end{table}\n"
-            ),
-            "figure": (
-                "\n\\begin{figure}[ht]\n"
-                "    \\centering\n"
-                "    \\plot{mi_plot}\n"
-                "    \\caption{" + SNIPPET_CURSOR_MARKER + "}\n"
-                "    \\label{fig:mi-plot}\n"
-                "\\end{figure}\n"
-            ),
-            "mathtex": "\n\\begin{code}\n" + SNIPPET_CURSOR_MARKER + "\n\\end{code}\n",
-        }
-        template = snippets.get(snippet_name)
-        if template is None:
-            return
-        self._insert_mtex_snippet(template)
-
-    def _insert_mtex_snippet(self, template: str) -> None:
-        editor = self._active_mtex_editor()
-        if editor is None:
-            return
-        marker_index = template.find(SNIPPET_CURSOR_MARKER)
-        text = template.replace(SNIPPET_CURSOR_MARKER, "")
-        cursor_offset = marker_index - len(text) if marker_index >= 0 else 0
-        editor.insert_text_at_cursor(text, cursor_offset=cursor_offset)
-        editor.focus_editor()
-        self._refresh_menu_bar_for_active_context()
-
     def _update_window_title(self) -> None:
         self.setWindowTitle("Aether Studio")
 
-    def _project_root_dir(self) -> Path | None:
-        if self.current_project is None:
-            return None
-        return self.current_project.path
-
-    def _project_dialog_dir(self) -> Path:
-        if self.current_mtex_path is not None:
-            return self.current_mtex_path.parent
-        root_dir = self._project_root_dir()
-        if root_dir is not None:
-            return root_dir
-        return get_working_dir()
-
-    def _is_inside_current_project(self, path: Path) -> bool:
-        root_dir = self._project_root_dir()
-        if root_dir is None:
-            return False
-        try:
-            path.resolve().relative_to(root_dir.resolve())
-            return True
-        except ValueError:
-            return False
-
-    def _ensure_project_path(self, path: Path) -> bool:
-        if self.current_project is None:
-            QtWidgets.QMessageBox.information(self, "MathTeX", "Open a project first.")
-            return False
-        if self._is_inside_current_project(path):
-            return True
-        QtWidgets.QMessageBox.warning(
-            self,
-            "MathTeX",
-            "Project files must stay inside the current project folder.",
-        )
-        return False
-
-    def _ask_mtex_close_confirmation(self) -> str:
-        location = str(self.current_mtex_path) if self.current_mtex_path else "current document"
-        dialog = QtWidgets.QMessageBox(self)
-        dialog.setWindowTitle("Unsaved Changes")
-        dialog.setText(
-            f"The file {location} has unsaved changes.\n"
-            "Do you want to cancel, save, or discard those changes?"
-        )
-        dialog.setStandardButtons(
-            QtWidgets.QMessageBox.StandardButton.Save
-            | QtWidgets.QMessageBox.StandardButton.Discard
-            | QtWidgets.QMessageBox.StandardButton.Cancel
-        )
-        dialog.setDefaultButton(QtWidgets.QMessageBox.StandardButton.Save)
-        result = dialog.exec()
-        if result == QtWidgets.QMessageBox.StandardButton.Save:
-            return "save"
-        if result == QtWidgets.QMessageBox.StandardButton.Discard:
-            return "discard"
-        return "cancel"
-
-    def _can_leave_project_workspace(self) -> bool:
-        if self.mtex_editor is None or not self.mtex_editor.is_modified():
-            return True
-        choice = self._ask_mtex_close_confirmation()
-        if choice == "cancel":
-            return False
-        if choice == "save":
-            return self._save_mtex_file()
-        return True
-
-    def _create_project(self) -> None:
-        dialog = ProjectCreationDialog(default_projects_root(), self)
-        if dialog.exec() != int(QtWidgets.QDialog.DialogCode.Accepted):
-            return
-        try:
-            project = self.project_manager.create_project(dialog.project_name(), dialog.base_dir())
-        except (FileExistsError, OSError, ValueError) as exc:
-            QtWidgets.QMessageBox.critical(self, "New Project", str(exc))
-            return
-        self.project_registry.add_project(project)
-        self.project_registry.save()
-        self._refresh_project_home()
-        self._open_project(project)
-
-    def _choose_and_open_project(self) -> None:
-        start_dir = self._project_root_dir() or default_projects_root()
-        directory = QtWidgets.QFileDialog.getExistingDirectory(self, "Open Project", str(start_dir))
-        if not directory:
-            return
-        self._open_project_from_path(directory)
-
-    def _open_project_from_path(self, path: str | Path) -> None:
-        try:
-            project = self.project_manager.open_project(path)
-        except (FileNotFoundError, NotADirectoryError, OSError, ValueError) as exc:
-            QtWidgets.QMessageBox.critical(self, "Open Project", str(exc))
-            return
-        self._open_project(project)
-
-    def _open_project(self, project: ProjectInfo) -> None:
-        if not self._can_leave_project_workspace():
-            return
-        self._reset_auto_compile_runtime()
-        self._clear_editor_pdf_sync_state()
-        self.current_project = project
-        self.project_registry.add_project(project)
-        self.project_registry.save()
-        self._refresh_project_home()
-        if self.project_workspace_widget is not None:
-            self.project_workspace_widget.set_project(project)
-        self.current_mtex_path = None
-        self.last_generated_pdf = None
-        self._clear_execution_result("Compile a project file to inspect logs, output files, and variables.")
-        self._set_build_status("Build: Ready")
-        self._open_mtex_file(project.main_path)
-        self._show_project_workspace()
-        self.append_output(f"[Project] Opened {project.name}")
-        self._refresh_menu_bar_for_active_context()
-
-    def _return_to_project_home(self) -> None:
-        if not self._can_leave_project_workspace():
-            return
-        self._reset_auto_compile_runtime()
-        self._clear_editor_pdf_sync_state()
-        self.current_project = None
-        self.current_mtex_path = None
-        self.last_generated_pdf = None
-        self._clear_execution_result("Open a project and compile to inspect logs, output files, and variables.")
-        if self.project_workspace_widget is not None:
-            self.project_workspace_widget.clear_workspace()
-        self._set_build_status("Build: Ready")
-        self._show_project_home()
-        self._refresh_menu_bar_for_active_context()
-
-    def _handle_project_file_activation(self, path: str) -> None:
-        file_path = Path(path)
-        if file_path.suffix.lower() in {".mtx", ".ae"}:
-            self._open_mtex_in_script(file_path)
-            return
-        if file_path.suffix.lower() == ".mtn":
-            self._open_notebook_file(file_path)
-            return
-        self._open_mtex_file(file_path)
-
-    def _open_notebook_file(self, path: Path) -> None:
-        if self.notebook_editor_view is None:
-            return
-        try:
-            if path.exists() and path.stat().st_size == 0:
-                save_notebook_file(new_notebook_document(), path)
-            self.notebook_editor_view.load_path(path)
-        except (OSError, ValueError) as exc:
-            QtWidgets.QMessageBox.critical(self, "Notebook", f"Could not open the notebook.\n{exc}")
-            return
-        self._set_active_main_tab(2)
-        self._refresh_menu_bar_for_active_context()
-
-    def _update_mtex_dirty(self, changed: bool) -> None:
-        if self.mtex_file_label is None:
-            return
-        if not self.current_mtex_path:
-            self.mtex_file_label.setText("No file open")
-            self._refresh_menu_bar_for_active_context()
-            return
-        mark = "*" if changed else ""
-        self.mtex_file_label.setText(f"{mark}{self.current_mtex_path.name}")
-        self._refresh_menu_bar_for_active_context()
-
-    def _prompt_mtex_destination(self):
-        initial = self.current_mtex_path.name if self.current_mtex_path else "main.mtex"
-        filename, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self,
-            "Save .mtex File",
-            str(self._project_dialog_dir() / initial),
-            "MathTeX Files (*.mtex);;All Files (*)",
-        )
-        if not filename:
-            return None
-        path = Path(filename)
-        if path.suffix.lower() != ".mtex":
-            path = path.with_suffix(".mtex")
-        if not self._ensure_project_path(path):
-            return None
-        return path
-
-    def _write_mtex_to_path(self, path: Path) -> None:
-        if self.mtex_editor is None:
-            raise RuntimeError("MTeX editor is not available.")
-        if self.project_workspace_widget is not None:
-            self.project_workspace_widget.sync_notebook_to_editor_if_active()
-        content = self.mtex_editor.get_text()
-        path.write_text(content, encoding="utf-8")
-
-    def _persist_mtex(self, path: Path, announce: bool = False) -> bool:
-        if not self._ensure_project_path(path):
-            return False
-        previous_path = self.current_mtex_path
-        try:
-            self._write_mtex_to_path(path)
-        except OSError as exc:
-            QtWidgets.QMessageBox.critical(self, "MathTeX", f"Could not save the file.\n{exc}")
-            return False
-        if (
-            self.current_project is not None
-            and previous_path is not None
-            and previous_path.resolve() == self.current_project.main_path.resolve()
-        ):
-            relative_main = path.resolve().relative_to(self.current_project.path.resolve()).as_posix()
-            self.current_project = replace(self.current_project, main_file=relative_main)
-            self.project_manager.write_project_metadata(self.current_project)
-        self.current_mtex_path = path
-        if self.mtex_file_label is not None:
-            self.mtex_file_label.setText(path.name)
-        if self.mtex_editor is not None:
-            self.mtex_editor.set_modified(False)
-        self._refresh_mtex_file_tree()
-        self._refresh_menu_bar_for_active_context()
-        return True
-
-    def _open_mtex_file(self, path: Path | str | None = None) -> None:
-        if isinstance(path, bool):
-            path = None
-        if isinstance(path, str):
-            path = Path(path)
-        if path is None:
-            filename, _ = QtWidgets.QFileDialog.getOpenFileName(
-                self,
-                "Open .mtex File",
-                str(self._project_dialog_dir()),
-                "MathTeX Files (*.mtex);;All Files (*)",
-            )
-            if not filename:
-                return
-            path = Path(filename)
-        if not self._ensure_project_path(path):
-            return
-        try:
-            content = path.read_text(encoding="utf-8")
-        except OSError as exc:
-            QtWidgets.QMessageBox.critical(self, "MathTeX", f"Could not open the file.\n{exc}")
-            return
-        if self.mtex_editor is None or self.preview is None:
-            return
-        self._auto_compile_timer.stop()
-        self.auto_compile_controller.clear_pending_auto_rebuild()
-        self._ignore_mtex_text_changes = True
-        try:
-            self.mtex_editor.set_text(content)
-            self.mtex_editor.set_modified(False)
-            self.current_mtex_path = path
-            if self.project_workspace_widget is not None:
-                self.project_workspace_widget.set_notebook_source(content, path=path)
-            if self.mtex_file_label is not None:
-                self.mtex_file_label.setText(path.name)
-            self._refresh_editor_pdf_sync_source()
-            existing_pdf = self._derive_output_pdf_path(path)
-            if existing_pdf.exists():
-                self._load_pdf_preview(existing_pdf)
-                self._refresh_editor_pdf_sync_artifacts(path)
-            else:
-                self.last_generated_pdf = None
-                self._editor_pdf_sync.update_compiled_landmarks(toc_path=None, aux_path=None)
-                self._editor_pdf_sync.update_trace_artifact(None)
-                self.preview.set_message("Compile to refresh the preview.")
-        finally:
-            self._ignore_mtex_text_changes = False
-        self._set_active_main_tab(1)
-        self._refresh_menu_bar_for_active_context()
-
-    def _save_mtex_file(self) -> bool:
-        if self.current_mtex_path is None:
-            return self._save_mtex_file_as() is not None
-        return self._persist_mtex(self.current_mtex_path)
-
-    def _save_mtex_file_as(self):
-        destination = self._prompt_mtex_destination()
-        if not destination:
-            return None
-        if self._persist_mtex(destination):
-            return destination
-        return None
-
-    def _write_preview_temp_file(self):
-        destination = self._temp_preview_path / "preview.mtex"
-        try:
-            self._write_mtex_to_path(destination)
-        except OSError as exc:
-            self.append_output(f"[MTeX] Could not write temporary draft: {exc}")
-            return None
-        return destination
-
-    def _resolve_current_mtex_compile_path(self) -> Path | None:
-        if self.current_project is None:
-            QtWidgets.QMessageBox.information(self, "MathTeX", "Open a project before compiling.")
-            return None
-        if self.current_mtex_path:
-            path = self.current_mtex_path
-            if path.suffix.lower() != ".mtex":
-                QtWidgets.QMessageBox.information(
-                    self,
-                    "MathTeX",
-                    "Only .mtex documents can be compiled to PDF in MTeX Studio.\n"
-                    "Open .mtx scripts in MathLab Legacy and use Run All instead.",
-                )
-                return None
-            if not self._persist_mtex(path, announce=False):
-                return None
-        else:
-            path = self._write_preview_temp_file()
-            if not path:
-                return None
-        return path
-
-    def _request_current_mtex_compile(self, trigger: CompileTrigger = "manual") -> None:
-        if trigger == "manual":
-            self._auto_compile_timer.stop()
-            self.auto_compile_controller.clear_pending_auto_rebuild()
-        decision = self.auto_compile_controller.request_build(trigger)
-        if decision.kind != "start" or decision.trigger is None:
-            return
-        self._execute_current_mtex_compile(decision.trigger)
-
-    def _execute_current_mtex_compile(self, trigger: CompileTrigger) -> None:
-        next_trigger: CompileTrigger | None = trigger
-        while next_trigger is not None:
-            path = self._resolve_current_mtex_compile_path()
-            if path is None:
-                return
-            self.auto_compile_controller.begin_build()
-            follow_up = None
-            try:
-                self._run_mtex_compilation(path, trigger=next_trigger)
-            finally:
-                follow_up = self.auto_compile_controller.finish_build()
-            if follow_up.kind == "start" and follow_up.trigger is not None:
-                next_trigger = follow_up.trigger
-            else:
-                next_trigger = None
-
-    def _compile_current_mtex(self) -> None:
-        self._request_current_mtex_compile("manual")
-
-    def _build_artifacts_for_source(self, source_path: Path):
-        project_root = self.current_project.path if self.current_project is not None else source_path.parent
-        output_basename = source_path.stem
-        if self.current_project is not None:
-            try:
-                if source_path.resolve() == self.current_project.main_path.resolve():
-                    output_basename = self.current_project.name
-            except OSError:
-                output_basename = source_path.stem
-        return self.output_manager.artifacts_for_source(
-            source_path,
-            project_root=project_root,
-            output_basename=output_basename,
-        )
-
-    def _derive_output_pdf_path(self, source_path: Path) -> Path:
-        return self._build_artifacts_for_source(source_path).pdf_path
-
-    def _load_pdf_preview(self, pdf_path: Path) -> None:
-        if self.preview is None:
-            return
-        if not pdf_path or not pdf_path.exists():
-            self.preview.set_message(f"Generated PDF not found.\n{pdf_path}")
-            self._update_menu_action_states()
-            return
-        if self.preview.load_pdf(pdf_path, preserve_state=True):
-            self.last_generated_pdf = pdf_path
-        self._update_menu_action_states()
-
-    def _capture_current_variable_summaries(self):
-        try:
-            return variable_summaries_from_snapshot(self.runtime.workspace_snapshot())
-        except Exception:
-            return []
-
-    def _run_mtex_compilation(self, path: Path, trigger: CompileTrigger = "manual") -> None:
-        artifacts = self._build_artifacts_for_source(path)
-        artifacts.build_dir.mkdir(parents=True, exist_ok=True)
-        collector = StructuredLogCollector()
-        trigger_label = "Auto compile" if trigger == "auto" else "Manual compile"
-        status_prefix = "Auto build" if trigger == "auto" else "Manual build"
-        self._set_build_status(f"Build: {status_prefix} in progress...", tone="info")
-        collector.add_entry(f"{trigger_label} started for {path}", source="app")
-        collector.add_entry(f"Build directory: {artifacts.build_dir}", source="app")
-        generated_pdf = None
-        try:
-            with redirect_stdout(collector.stream("stdout")), redirect_stderr(collector.stream("stderr")):
-                generated_pdf = ejecutar_mtex(
-                    str(path),
-                    env_ast,
-                    abrir_pdf=False,
-                    build_dir=artifacts.build_dir,
-                    output_basename=artifacts.tex_path.stem,
-                )
-        except Exception as exc:  # pragma: no cover - defensivo
-            collector.add_entry(f"Unexpected error during compilation: {exc}", level="error", source="app")
-        self._refresh_mtex_file_tree()
-        generated_pdf_path = Path(generated_pdf) if generated_pdf else None
-        success = generated_pdf_path is not None and generated_pdf_path.exists()
-        available_pdf = generated_pdf_path if success else (artifacts.pdf_path if artifacts.pdf_path.exists() else None)
-        kept_previous_pdf = False
-        if success and generated_pdf_path is not None:
-            collector.add_entry(f"{trigger_label} finished successfully. PDF updated: {generated_pdf_path}", source="app")
-            self._load_pdf_preview(generated_pdf_path)
-            self._refresh_editor_pdf_sync_artifacts(path)
-            if artifacts.trace_path.exists():
-                collector.add_entry(
-                    f"Forward sync trace updated: {artifacts.trace_path.name}",
-                    source="sync",
-                )
-            if artifacts.synctex_path.exists():
-                collector.add_entry(
-                    f"SyncTeX artifact ready: {artifacts.synctex_path.name}",
-                    source="sync",
-                )
-            self._set_build_status(f"Build: {status_prefix} succeeded", tone="success")
-        else:
-            latex_summary = summarize_latex_build_failure(artifacts.compile_log_path)
-            if latex_summary:
-                collector.add_entry(f"LaTeX error summary: {latex_summary}", level="error", source="latex")
-            latex_explanation = explain_latex_build_failure(artifacts.compile_log_path, artifacts.tex_path)
-            if latex_explanation:
-                collector.add_entry(f"Probable cause: {latex_explanation}", level="warning", source="latex")
-            collector.add_entry(
-                f"{trigger_label} failed or did not produce a new PDF.",
-                level="error",
-                source="app",
-            )
-            if available_pdf is not None:
-                collector.add_entry(f"Keeping last available PDF preview: {available_pdf}", source="app")
-                self.last_generated_pdf = available_pdf
-                kept_previous_pdf = True
-            elif self.last_generated_pdf is not None and self.last_generated_pdf.exists():
-                collector.add_entry(
-                    f"Keeping last available PDF preview: {self.last_generated_pdf}",
-                    source="app",
-                )
-                available_pdf = self.last_generated_pdf
-                kept_previous_pdf = True
-            elif self.preview is not None:
-                self.preview.set_message("Compilation failed. No PDF is available yet. Check the console output.")
-            if kept_previous_pdf:
-                self._set_build_status(
-                    f"Build: {status_prefix} failed, showing last valid PDF",
-                    tone="warning",
-                )
-            else:
-                self._set_build_status(f"Build: {status_prefix} failed", tone="error")
-        collector.add_entry(f"{trigger_label} finished.", source="app")
-
-        result = collector.build_result(
-            success=success,
-            source_path=path,
-            pdf_path=available_pdf,
-            build_dir=artifacts.build_dir,
-            output_files=self.output_manager.list_output_files(artifacts.build_dir),
-            variables=self._capture_current_variable_summaries(),
-        )
-        self.latest_mtex_execution_result = result
-        if self.logs_output_widget is not None:
-            self.logs_output_widget.set_execution_result(result)
-        self._update_menu_action_states()
-
-    def _get_current_pdf_path(self):
-        if self.last_generated_pdf and Path(self.last_generated_pdf).exists():
-            return Path(self.last_generated_pdf)
-        if self.current_mtex_path:
-            candidate = self._derive_output_pdf_path(self.current_mtex_path)
-            if candidate.exists():
-                return candidate
-        return None
-
-    def _download_mtex_pdf(self) -> None:
-        pdf_path = self._get_current_pdf_path()
-        if not pdf_path:
-            QtWidgets.QMessageBox.information(self, "MathTeX", "Compile an .mtex file before downloading the PDF.")
-            return
-        destination, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self,
-            "Download PDF",
-            str(self._project_dialog_dir() / pdf_path.name),
-            "PDF (*.pdf);;All Files (*)",
-        )
-        if not destination:
-            return
-        try:
-            shutil.copyfile(pdf_path, destination)
-        except OSError as exc:
-            QtWidgets.QMessageBox.critical(self, "MathTeX", f"Could not copy the PDF.\n{exc}")
-            return
-        self.append_output(f"[MTeX] PDF exportado a {destination}")
     # ----- Ejecucion ------------------------------------------------------
     def _execute_line(self, line: str, echo: bool = True) -> bool:
         stripped = line.strip()
         if not stripped:
             return True
+        events = self.console_engine.execute_line(stripped)
         if echo:
             self.append_output(f"{self.console_engine.prompt}{stripped}")
-        events = capture_to_events(self.runtime.execute_console_line(stripped))
-        self.console_widget.render_events(events)
+        if hasattr(self, "console_widget") and self.console_widget is not None:
+            self.console_widget.render_events(events)
         self.refresh_workspace_view()
         return not any(event.kind == "error" for event in events)
 
@@ -2515,35 +1598,9 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
             return
         widget: EditorAPI = doc["widget"]
         contenido = widget.get_text()
-        runtime = runtime_for_file(doc.get("path") or doc.get("name"))
-        if runtime == AETHER_RUNTIME:
-            self._run_aether_script(doc, contenido)
+        if not self._script_doc_is_aether_supported(doc):
             return
-        statements = split_code_statements_with_lines(contenido)
-        if not statements:
-            self.append_output("There is no code to run.")
-            return
-        self.runtime.reset_environment()
-        self.refresh_workspace_view()
-        script_name = self._script_banner_name(doc)
-        self._set_runtime_status("Running", tone="info", message=f"Running {script_name}...")
-        self.append_output(f">> {script_name}")
-        aborted = False
-        try:
-            for statement in statements:
-                with diagnostic_line_offset(statement.start_line - 1):
-                    ok = self._execute_line(statement.text, echo=False)
-                if not ok:
-                    aborted = True
-                    self.append_output("[Execution stopped due to an error]\n")
-                    break
-        finally:
-            self._append_prompt()
-            self.refresh_workspace_view()
-            if aborted:
-                self._set_runtime_status("Error", tone="error", message=f"{script_name} stopped due to an error.")
-            else:
-                self._set_runtime_status("Done", tone="success", message=f"{script_name} finished.")
+        self._run_aether_script(doc, contenido)
 
     def _run_aether_script(self, doc: dict, source: str) -> None:
         if not source.strip():
@@ -2573,37 +1630,27 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
             self.append_output("Select a block in the editor to run only that part.")
             return
         seleccion = widget_api.get_selected_text()
-        selection_start_line = widget_api.get_selection_start_line() or 1
-        runtime = runtime_for_file(doc.get("path") or doc.get("name"))
-        if runtime == AETHER_RUNTIME:
-            self._run_aether_selection(doc, seleccion)
+        if not self._script_doc_is_aether_supported(doc):
             return
-        statements = split_code_statements_with_lines(seleccion)
-        if not statements:
-            self.append_output("The selection is empty.")
-            return
-        script_name = self._script_banner_name(doc)
-        self._set_runtime_status("Running", tone="info", message=f"Running selection from {script_name}...")
-        self.append_output("[Running selection]")
-        self.append_output(f">> {script_name}")
-        aborted = False
-        try:
-            for statement in statements:
-                with diagnostic_line_offset(selection_start_line + statement.start_line - 2):
-                    ok = self._execute_line(statement.text, echo=False)
-                if not ok:
-                    aborted = True
-                    self.append_output("[Execution stopped due to an error]\n")
-                    break
-            if not aborted:
-                self.append_output("[Selection finished]\n")
-        finally:
-            self._append_prompt()
-            self.refresh_workspace_view()
-            if aborted:
-                self._set_runtime_status("Error", tone="error", message=f"Selection from {script_name} stopped due to an error.")
-            else:
-                self._set_runtime_status("Done", tone="success", message=f"Selection from {script_name} finished.")
+        self._run_aether_selection(doc, seleccion)
+
+    def _script_doc_is_aether_supported(self, doc: dict) -> bool:
+        location = doc.get("path") or doc.get("name")
+        if location:
+            suffix = Path(str(location)).suffix.lower()
+            if suffix in LEGACY_SUFFIXES:
+                self._show_legacy_file_message(Path(str(location)))
+                self._set_runtime_status("Error", tone="error", message="Legacy file format is not supported.")
+                return False
+            if suffix and suffix != ".ae":
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "Aether Studio",
+                    "Aether Studio runs .ae scripts only.",
+                )
+                self._set_runtime_status("Error", tone="error", message="Unsupported script format.")
+                return False
+        return True
 
     def _run_aether_selection(self, doc: dict, source: str) -> None:
         if not source.strip():
@@ -2691,67 +1738,8 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
         self._plot_windows.append(window)
         window.destroyed.connect(lambda *_: self._plot_windows.remove(window) if window in self._plot_windows else None)
 
-    def _clear_editor_pdf_sync_state(self) -> None:
-        self._editor_pdf_sync.clear()
-
-    def _refresh_editor_pdf_sync_source(self) -> None:
-        if self.mtex_editor is None:
-            self._editor_pdf_sync.update_source("")
-            return
-        self._editor_pdf_sync.update_source(self.mtex_editor.get_text())
-
-    def _refresh_editor_pdf_sync_artifacts(self, source_path: Path | None) -> None:
-        if source_path is None:
-            self._editor_pdf_sync.update_compiled_landmarks(toc_path=None, aux_path=None)
-            self._editor_pdf_sync.update_trace_artifact(None)
-            return
-        artifacts = self._build_artifacts_for_source(source_path)
-        # Prefer explicit trace metadata and SyncTeX over document-text heuristics.
-        self._editor_pdf_sync.update_trace_artifact(artifacts.trace_path)
-        self._editor_pdf_sync.update_compiled_landmarks(
-            toc_path=artifacts.toc_path,
-            aux_path=artifacts.aux_path,
-        )
-
-    def _current_mtex_cursor_line(self) -> int | None:
-        if self.mtex_editor is None:
-            return None
-        return self.mtex_editor.get_cursor_line_column()[0]
-
-    def _move_mtex_cursor_to_line(self, line_number: int) -> bool:
-        if self.mtex_editor is None:
-            return False
-        return self.mtex_editor.go_to_line(line_number)
-
-    def _sync_editor_position_to_preview(self) -> bool:
-        if not self._is_studio_workspace_active() or self.preview is None:
-            return False
-        if self.preview.current_pdf_path() is None:
-            return False
-        line_number = self._current_mtex_cursor_line()
-        if line_number is None:
-            return False
-        target = self._editor_pdf_sync.resolve_target_for_line(line_number)
-        if target is None:
-            return False
-        return self.preview.jump_to_page_index(target.page_index)
-
-    def _sync_preview_position_to_editor(self) -> bool:
-        if not self._is_studio_workspace_active() or self.preview is None:
-            return False
-        page_index = self.preview.current_page_index()
-        if page_index is None:
-            return False
-        target = self._editor_pdf_sync.resolve_source_target_for_page(page_index)
-        if target is None:
-            return False
-        return self._move_mtex_cursor_to_line(target.line_number)
-
     # ----- Eventos --------------------------------------------------------
     def closeEvent(self, event) -> None:  # noqa: N802
-        if not self._can_leave_project_workspace():
-            event.ignore()
-            return
         self._unregister_plot_listener()
         for win in list(self._plot_windows):
             try:
@@ -2759,12 +1747,6 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
             except Exception:
                 pass
         self._plot_windows = []
-        if self._temp_preview_dir is not None:
-            try:
-                self._temp_preview_dir.cleanup()
-            except Exception:
-                pass
-            self._temp_preview_dir = None
         super().closeEvent(event)
 
 

@@ -5,6 +5,8 @@ from pathlib import Path
 import pytest
 from PySide6 import QtGui
 
+pytest.skip("MTeX PDF sync workflow retired from active Aether Studio surface.", allow_module_level=True)
+
 from editor_pdf_sync import MtexTraceArtifact, TRACE_ARTIFACT_VERSION, TraceMappingSpan, write_trace_artifact
 from project_system import ProjectManager
 from qt_app import MathTeXQtWindow

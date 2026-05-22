@@ -3,11 +3,15 @@ from __future__ import annotations
 import sys
 
 STARTUP_IMPORT_ERROR: ModuleNotFoundError | None = None
-ConsoleEngine = None
-MathRuntime = None
+AetherSession = None
+AETHER_ERRORS: tuple[type[Exception], ...] = ()
+format_aether_error = None
 
 try:
-    from console_engine import ConsoleEngine, MathRuntime
+    from aether import AetherRuntimeError, AetherSession, AetherSyntaxError, AetherTypeError
+    from language_runtime import format_aether_error
+
+    AETHER_ERRORS = (AetherSyntaxError, AetherTypeError, AetherRuntimeError)
 except ModuleNotFoundError as exc:
     STARTUP_IMPORT_ERROR = exc
 
@@ -21,27 +25,20 @@ except Exception as exc:  # pragma: no cover - fallback CLI
     QT_IMPORT_ERROR = exc
 
 
-def render_cli_event(event) -> None:
-    if event.kind == "clear":
-        return
-    print(event.text)
-
-
 def run_cli() -> None:
-    """Traditional REPL kept for compatibility with the previous workflow."""
-    if STARTUP_IMPORT_ERROR is not None or ConsoleEngine is None or MathRuntime is None:
+    """Run the Aether text-mode REPL."""
+    if STARTUP_IMPORT_ERROR is not None or AetherSession is None or format_aether_error is None:
         _print_missing_dependency_help()
         return
 
-    runtime = MathRuntime()
-    engine = ConsoleEngine(runtime)
+    session = AetherSession()
 
-    print("Welcome to MathTeX CLI")
+    print("Welcome to Aether Studio CLI")
     print("Type '\\exit', or '\\quit' to leave.\n")
 
     while True:
         try:
-            raw_input = input(engine.prompt)
+            raw_input = input("aether> ")
         except EOFError:
             print("Goodbye!")
             break
@@ -53,9 +50,17 @@ def run_cli() -> None:
             print("Goodbye!")
             break
 
-        events = engine.execute_line(raw_input)
-        for event in events:
-            render_cli_event(event)
+        if not raw_input.strip():
+            continue
+
+        try:
+            result = session.run(raw_input)
+        except AETHER_ERRORS as exc:
+            print(format_aether_error(exc))
+            continue
+
+        if result.output:
+            print(result.output, end="" if result.output.endswith("\n") else "\n")
 
 
 def repl() -> None:

@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+pytest.skip("MTeX project context switching retired from active Aether Studio surface.", allow_module_level=True)
+
 from qt_app import MathTeXQtWindow
 from notebook_file import new_notebook_document, save_notebook_file
 from project_system import ProjectManager

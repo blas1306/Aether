@@ -21,9 +21,6 @@ class FakeMainWindow:
     def run_script(self) -> None:
         self.calls.append("run.current")
 
-    def _compile_current_mtex(self) -> None:
-        self.calls.append("build.current")
-
     def _open_aether_repl(self) -> None:
         self.calls.append("repl.open_aether")
 
@@ -36,9 +33,6 @@ class FakeMainWindow:
     def _can_run_current_action(self) -> bool:
         return self.can_run
 
-    def _can_build_current_action(self) -> bool:
-        return self.can_build
-
 
 def test_register_main_window_actions_registers_expected_action_contracts() -> None:
     window = FakeMainWindow()
@@ -50,7 +44,6 @@ def test_register_main_window_actions_registers_expected_action_contracts() -> N
         "file.open": ("Open", None, True),
         "file.save": ("Save", "Ctrl+S", False),
         "run.current": ("Run Script", "Ctrl+Enter", True),
-        "build.current": ("Compile", "Ctrl+Enter", False),
         "repl.open_aether": ("Open Aether REPL", None, True),
     }
 
@@ -71,7 +64,6 @@ def test_register_main_window_actions_uses_window_callbacks() -> None:
         "file.open",
         "file.save",
         "run.current",
-        "build.current",
         "repl.open_aether",
     ):
         registry.run(action_id)
@@ -80,6 +72,5 @@ def test_register_main_window_actions_uses_window_callbacks() -> None:
         "file.open",
         "file.save",
         "run.current",
-        "build.current",
         "repl.open_aether",
     ]

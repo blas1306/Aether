@@ -14,7 +14,6 @@ def test_qt_app_creates_minimal_action_registry(tmp_path, monkeypatch, qapp) -> 
             "file.save",
             "file.open",
             "run.current",
-            "build.current",
             "repl.open_aether",
         ]
 
@@ -41,16 +40,13 @@ def test_registered_menu_qactions_use_action_registry(tmp_path, monkeypatch, qap
 
     try:
         calls: list[str] = []
-        for action_id in ("file.open", "file.save", "run.current", "build.current"):
+        for action_id in ("file.open", "file.save", "run.current"):
             window.action_registry.get(action_id).callback = lambda action_id=action_id: calls.append(action_id)
 
         migrated_actions = {
             "interactive_open_script": ("file.open", "Open Script...", set()),
             "interactive_save_script": ("file.save", "Save", {"Ctrl+S"}),
             "interactive_run_script": ("run.current", "Run Script", {"Ctrl+Enter", "Ctrl+Return"}),
-            "studio_open_mtex": ("file.open", "Open .mtex File...", set()),
-            "studio_save_mtex": ("file.save", "Save", {"Ctrl+S"}),
-            "studio_compile": ("build.current", "Compile", {"Ctrl+Enter", "Ctrl+Return"}),
         }
 
         for menu_action_id, (_action_id, label, shortcuts) in migrated_actions.items():
@@ -75,9 +71,6 @@ def test_registered_menu_qactions_use_action_registry(tmp_path, monkeypatch, qap
             "file.open",
             "file.save",
             "run.current",
-            "file.open",
-            "file.save",
-            "build.current",
         ]
     finally:
         window.close()
