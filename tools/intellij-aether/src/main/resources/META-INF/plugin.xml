@@ -1,0 +1,46 @@
+<idea-plugin>
+  <id>com.aetherstudio.intellij</id>
+  <name>Aether</name>
+  <vendor email="dev@aetherstudio.local">Aether Studio</vendor>
+
+  <depends>com.intellij.modules.platform</depends>
+  <depends>com.intellij.modules.lsp</depends>
+
+  <extensions defaultExtensionNs="com.intellij">
+    <fileType name="Aether"
+              language="Aether"
+              implementationClass="com.aetherstudio.intellij.AetherFileType"
+              fieldName="INSTANCE"
+              extensions="ae"/>
+    <lang.parserDefinition language="Aether"
+                           implementationClass="com.aetherstudio.intellij.AetherParserDefinition"/>
+    <lang.syntaxHighlighterFactory language="Aether"
+                                   implementationClass="com.aetherstudio.intellij.AetherSyntaxHighlighterFactory"/>
+    <runLineMarkerContributor language="Aether"
+                              implementationClass="com.aetherstudio.intellij.AetherRunLineMarkerContributor"/>
+    <applicationService serviceImplementation="com.aetherstudio.intellij.AetherSettingsState"/>
+    <projectService serviceImplementation="com.aetherstudio.intellij.AetherConsoleService"/>
+    <applicationConfigurable parentId="tools" instance="com.aetherstudio.intellij.AetherConfigurable"/>
+    <configurationType implementation="com.aetherstudio.intellij.AetherRunConfigurationType"/>
+    <runConfigurationProducer implementation="com.aetherstudio.intellij.AetherRunConfigurationProducer"/>
+    <toolWindow id="Aether"
+                anchor="bottom"
+                icon="/icons/aether.svg"
+                factoryClass="com.aetherstudio.intellij.AetherToolWindowFactory"/>
+  </extensions>
+
+  <extensions defaultExtensionNs="com.intellij.platform">
+    <lsp.serverSupportProvider implementation="com.aetherstudio.intellij.AetherLspServerSupportProvider"/>
+  </extensions>
+
+  <actions>
+    <action id="Aether.RunFile"
+            class="com.aetherstudio.intellij.RunAetherFileAction"
+            text="Run Aether File"
+            description="Run the current Aether file">
+      <add-to-group group-id="RunMenu" anchor="last"/>
+      <add-to-group group-id="EditorPopupMenu" anchor="first"/>
+      <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+    </action>
+  </actions>
+</idea-plugin>

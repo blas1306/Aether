@@ -12,6 +12,13 @@ venv/
 node_modules/
 
 # =========================
+# Gradle / IntelliJ plugin
+# =========================
+.gradle/
+.intellijPlatform/
+**/build/
+
+# =========================
 # IDE
 # =========================
 .vscode/

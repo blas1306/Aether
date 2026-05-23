@@ -104,7 +104,7 @@ class TypeChecker:
             initializer=statement.initializer,
             scope=scope,
         ):
-            self._raise_implicit_conversion_error(value_type, statement.type_name)
+            self._raise_implicit_conversion_error(value_type, statement.type_name, statement)
         scope.define_local(
             statement.name,
             VariableSymbol(statement.name, statement.type_name),
@@ -128,7 +128,7 @@ class TypeChecker:
             if existing is None:
                 raise AetherTypeError("Cannot infer type of empty matrix literal.")
             if not is_array_type(existing.type_name):
-                self._raise_implicit_conversion_error(ArrayType("int"), existing.type_name)
+                self._raise_implicit_conversion_error(ArrayType("int"), existing.type_name, statement)
             return
         value_type = self._expression_type(statement.expression, scope)
         if existing is None:
@@ -141,7 +141,7 @@ class TypeChecker:
             initializer=statement.expression,
             scope=scope,
         ):
-            self._raise_implicit_conversion_error(value_type, existing.type_name)
+            self._raise_implicit_conversion_error(value_type, existing.type_name, statement)
 
     def _assign_index(self, statement: ast.IndexAssignment, scope: Scope[VariableSymbol]) -> None:
         assigned_name = _assignment_root_name(statement.array)
@@ -160,7 +160,7 @@ class TypeChecker:
         if is_array_type(element_type):
             raise AetherTypeError("Assigning a whole matrix row is not supported yet.")
         if not can_implicitly_convert(value_type, element_type):
-            self._raise_implicit_conversion_error(value_type, element_type)
+            self._raise_implicit_conversion_error(value_type, element_type, statement)
 
     def _check_for_in(self, statement: ast.ForInStatement, scope: Scope[VariableSymbol]) -> None:
         iterable_type = self._expression_type(statement.iterable, scope)
@@ -218,7 +218,7 @@ class TypeChecker:
             raise AetherTypeError("Cannot return outside of a function.")
         value_type = self._expression_type(statement.expression, scope)
         if value_type is not UNKNOWN_TYPE and not can_implicitly_convert(value_type, self.current_return_type):
-            self._raise_implicit_conversion_error(value_type, self.current_return_type)
+            self._raise_implicit_conversion_error(value_type, self.current_return_type, statement)
 
     def _require_condition_type(self, expression: ast.Expression, scope: Scope[VariableSymbol], construct: str) -> None:
         condition_type = self._expression_type(expression, scope)
@@ -422,10 +422,17 @@ class TypeChecker:
             return True
         return can_implicitly_convert(value_type, target_type)
 
-    def _raise_implicit_conversion_error(self, value_type: AetherType, target_type: AetherType) -> None:
+    def _raise_implicit_conversion_error(
+        self,
+        value_type: AetherType,
+        target_type: AetherType,
+        location: object | None = None,
+    ) -> None:
         raise AetherTypeError(
             f"Cannot implicitly convert '{type_to_string(value_type)}' to '{type_to_string(target_type)}'. "
-            f"Use {type_to_string(target_type)}(...) for explicit conversion."
+            f"Use {type_to_string(target_type)}(...) for explicit conversion.",
+            line=getattr(location, "line", None),
+            column=getattr(location, "column", None),
         )
 
     def _can_assign_array_literal(

@@ -69,7 +69,7 @@ int sumaCuadrados(int n) {
 
 f(x) = sin(x);
 
-println(sumatoria(5));
-println(sumatoriav2(5));
-println(sumaCuadrados(6));
-println(f(0));
+println("Prueba 1: ", sumatoria(5));
+println("Prueba 2: ", sumatoriav2(5));
+println("Prueba 3: ", sumaCuadrados(6));
+println("Prueba 4: ", f(0));

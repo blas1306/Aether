@@ -1,0 +1,23 @@
+# Aether IntelliJ Plugin
+
+Primer corte del plugin Aether para IDEs IntelliJ.
+
+Incluye:
+
+- tipo de archivo `.ae`;
+- resaltado sintactico basico;
+- icono de ejecucion en el gutter para archivos `.ae`;
+- language server Python por stdio;
+- accion `Run Aether File`;
+- run configuration para ejecutar el archivo `.ae` actual desde el boton verde de IntelliJ;
+- tool window `Aether` para stdout/stderr con rerun, stop y clear;
+- setting `Aether > Python interpreter` para sobreescribir el Python usado.
+
+Por defecto el plugin busca `.venv/bin/python` en el proyecto abierto y cae a `python3`.
+
+Comandos utiles desde la raiz del repo:
+
+```bash
+./gradlew :tools:intellij-aether:test
+./gradlew :tools:intellij-aether:runIde
+```

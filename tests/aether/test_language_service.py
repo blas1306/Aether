@@ -1,0 +1,58 @@
+from __future__ import annotations
+
+from aether import analyze_source, completion_items, run_source
+
+
+def test_analyze_source_reports_syntax_error_location() -> None:
+    diagnostics = analyze_source("println(")
+
+    assert len(diagnostics) == 1
+    diagnostic = diagnostics[0]
+    assert diagnostic.severity == "error"
+    assert diagnostic.line == 1
+    assert diagnostic.column >= 1
+    assert "AetherSyntaxError" in diagnostic.message
+
+
+def test_analyze_source_reports_type_error() -> None:
+    diagnostics = analyze_source("println(missing);")
+
+    assert len(diagnostics) == 1
+    assert diagnostics[0].severity == "error"
+    assert "Undefined variable 'missing'" in diagnostics[0].message
+
+
+def test_analyze_source_reports_implicit_conversion_location() -> None:
+    diagnostics = analyze_source('println("ok");\nint n = 28;\nint m = sqrt(n);\n')
+
+    assert len(diagnostics) == 1
+    diagnostic = diagnostics[0]
+    assert "Cannot implicitly convert 'double' to 'int'" in diagnostic.message
+    assert diagnostic.line == 3
+
+
+def test_analyze_source_accepts_valid_program() -> None:
+    assert analyze_source('x = 1; println(x);') == []
+
+
+def test_run_source_returns_output() -> None:
+    result = run_source('println("hola");')
+
+    assert result.success
+    assert result.output == "hola\n"
+    assert result.error is None
+
+
+def test_run_source_returns_error_without_raising() -> None:
+    result = run_source("println(missing);")
+
+    assert not result.success
+    assert result.output == ""
+    assert "Undefined variable 'missing'" in (result.error or "")
+
+
+def test_completion_items_include_keywords_builtins_and_symbols() -> None:
+    items = completion_items("value = 1;\nfunction double square(double x) { return x*x; }\n", 2, 1)
+    labels = {item.label for item in items}
+
+    assert {"if", "for", "println", "sqrt", "value", "square"} <= labels

@@ -97,36 +97,45 @@ class Parser:
             iterable = self._expression()
             return ast.ForInStatement(variable, iterable, self._block())
         if self._match(TokenType.RETURN):
+            return_token = self._previous()
             expression = self._expression()
             self._consume(TokenType.SEMICOLON, "Expected ';' after return value.")
-            return ast.ReturnStatement(expression)
+            return ast.ReturnStatement(expression, return_token.line, return_token.column)
         if self._looks_like_var_declaration():
             return self._var_declaration()
         expression = self._expression()
         if self._match(TokenType.EQUAL):
+            equals = self._previous()
             value = self._expression()
             self._consume(TokenType.SEMICOLON, "Expected ';' after assignment.")
             if isinstance(expression, ast.Identifier):
-                return ast.Assignment(expression.name, value)
+                return ast.Assignment(expression.name, value, equals.line, equals.column)
             if isinstance(expression, ast.IndexExpression):
-                return ast.IndexAssignment(expression.array, expression.index, value)
+                return ast.IndexAssignment(expression.array, expression.index, value, equals.line, equals.column)
             raise self._error(self._previous(), "Invalid assignment target.")
         if self._match(TokenType.PLUS_EQUAL):
+            plus_equals = self._previous()
             value = self._expression()
             self._consume(TokenType.SEMICOLON, "Expected ';' after assignment.")
             if isinstance(expression, ast.Identifier):
-                return ast.Assignment(expression.name, ast.BinaryExpression(expression, "+", value))
+                return ast.Assignment(
+                    expression.name,
+                    ast.BinaryExpression(expression, "+", value),
+                    plus_equals.line,
+                    plus_equals.column,
+                )
             raise self._error(self._previous(), "Invalid assignment target.")
         self._consume(TokenType.SEMICOLON, "Expected ';' after expression.")
         return ast.ExpressionStatement(expression)
 
     def _var_declaration(self) -> ast.VarDeclaration:
+        declaration_token = self._peek()
         type_name = self._parse_type_annotation("Expected type name.")
         name = self._consume(TokenType.IDENTIFIER, "Expected variable name.").lexeme
         self._consume(TokenType.EQUAL, "Expected '=' in variable declaration.")
         initializer = self._expression()
         self._consume(TokenType.SEMICOLON, "Expected ';' after variable declaration.")
-        return ast.VarDeclaration(type_name, name, initializer)
+        return ast.VarDeclaration(type_name, name, initializer, declaration_token.line, declaration_token.column)
 
     def _block(self) -> list[ast.Statement]:
         self._consume(TokenType.LEFT_BRACE, "Expected '{' before block.")

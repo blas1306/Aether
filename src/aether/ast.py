@@ -35,12 +35,16 @@ class VarDeclaration:
     type_name: AetherType
     name: str
     initializer: Expression
+    line: int = 1
+    column: int = 1
 
 
 @dataclass(frozen=True)
 class Assignment:
     name: str
     expression: Expression
+    line: int = 1
+    column: int = 1
 
 
 @dataclass(frozen=True)
@@ -48,6 +52,8 @@ class IndexAssignment:
     array: Expression
     index: Expression
     expression: Expression
+    line: int = 1
+    column: int = 1
 
 
 @dataclass(frozen=True)
@@ -93,6 +99,8 @@ class ExpressionFunctionDeclaration:
 @dataclass(frozen=True)
 class ReturnStatement:
     expression: Expression
+    line: int = 1
+    column: int = 1
 
 
 @dataclass(frozen=True)
