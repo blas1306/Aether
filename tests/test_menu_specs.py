@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from actions.menu_specs import INTERACTIVE_MENU_SPEC, STUDIO_MENU_SPEC
+from actions.menu_specs import INTERACTIVE_MENU_SPEC
 
 
 def test_interactive_menu_spec_contains_expected_menus_and_entries() -> None:
@@ -21,24 +21,4 @@ def test_interactive_menu_spec_contains_expected_menus_and_entries() -> None:
         "interactive_run_selection",
         None,
         "interactive_clear_console",
-    ]
-
-
-def test_studio_menu_spec_contains_expected_menus_and_entries() -> None:
-    assert list(STUDIO_MENU_SPEC) == ["File", "Edit", "Insert", "View", "Build", "Help"]
-    assert STUDIO_MENU_SPEC["File"] == [
-        "studio_new_project",
-        "studio_open_project",
-        "studio_project_home",
-        None,
-        "studio_open_mtex",
-        None,
-        "studio_save_mtex",
-        "studio_save_mtex_as",
-    ]
-    assert STUDIO_MENU_SPEC["Build"] == [
-        "studio_compile",
-        "studio_toggle_auto_compile",
-        None,
-        "studio_show_logs",
     ]

@@ -9,12 +9,15 @@ from mathtex_ast import (
     ExprStmtNode,
     IndexAssignNode,
     IndexNode,
+    ListLiteralNode,
     MatrixLiteralNode,
     NumberNode,
     RangeNode,
     SliceNode,
     SymbolNode,
+    TupleLiteralNode,
     UnaryOpNode,
+    VectorLiteralNode,
 )
 
 
@@ -23,9 +26,27 @@ def ast_to_python(node: ASTNode) -> str:
         return repr(node.value)
     if isinstance(node, SymbolNode):
         return node.name
-    if isinstance(node, MatrixLiteralNode):
+    if isinstance(node, TupleLiteralNode):
+        inner = ", ".join(ast_to_python(val) for val in node.values)
+        if len(node.values) == 1:
+            inner += ","
+        return f"({inner})"
+    if isinstance(node, VectorLiteralNode):
+        inner = ", ".join(ast_to_python(val) for val in node.values)
+        return f"Matrix([[{inner}]])"
+    if isinstance(node, ListLiteralNode):
         inner = ", ".join(ast_to_python(val) for val in node.values)
         return f"[{inner}]"
+    if isinstance(node, MatrixLiteralNode):
+        rows: list[str] = []
+        for val in node.values:
+            if isinstance(val, (VectorLiteralNode, ListLiteralNode, MatrixLiteralNode)):
+                row_inner = ", ".join(ast_to_python(item) for item in val.values)
+                rows.append(f"[{row_inner}]")
+            else:
+                rows.append(f"[{ast_to_python(val)}]")
+        inner = ", ".join(rows)
+        return f"Matrix([{inner}])"
     if isinstance(node, UnaryOpNode):
         return f"({node.op}{ast_to_python(node.operand)})"
     if isinstance(node, BinOpNode):
@@ -57,7 +78,13 @@ def ast_to_python(node: ASTNode) -> str:
     if isinstance(node, SliceNode):
         return ast_to_python(node.value)
     if isinstance(node, CallNode):
-        args_code = [ast_to_python(arg) for arg in node.args]
+        def _arg_to_python(arg: ASTNode) -> str:
+            if node.func_name == "Matrix" and isinstance(arg, (VectorLiteralNode, ListLiteralNode)):
+                inner = ", ".join(ast_to_python(val) for val in arg.values)
+                return f"[{inner}]"
+            return ast_to_python(arg)
+
+        args_code = [_arg_to_python(arg) for arg in node.args]
         if node.keywords:
             for kw_name, kw_val in node.keywords:
                 args_code.append(f"{kw_name}={ast_to_python(kw_val)}")

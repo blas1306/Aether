@@ -51,6 +51,7 @@ def build_runtime_shared_symbols(
         "_mt_adj": runtime_helpers["mt_adj"],
         "_mt_call": runtime_helpers["mt_call"],
         "_mt_apply_symbol": runtime_helpers["mt_apply_symbol"],
+        "_mt_matrix_literal": runtime_helpers["mt_matrix_literal"],
         "_oct_range": octave_helpers["range"],
         "_oct_get1": octave_helpers["get1"],
         "_oct_get2": octave_helpers["get2"],

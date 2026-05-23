@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PySide6 import QtCore, QtGui, QtWidgets  # type: ignore
 
-from qt_app import MathTeXQtWindow
+from qt_app import AetherStudioWindow
 
 
 class EditorApiWidgetWithoutTextCursor(QtWidgets.QWidget):  # type: ignore[misc]
@@ -91,11 +91,11 @@ class EditorApiWidgetWithoutTextCursor(QtWidgets.QWidget):  # type: ignore[misc]
         self.setFocus()
 
 
-def _menu_titles(window: MathTeXQtWindow) -> list[str]:
+def _menu_titles(window: AetherStudioWindow) -> list[str]:
     return [action.text().replace("&", "") for action in window.menuBar().actions()]
 
 
-def _menu_actions(window: MathTeXQtWindow, menu_title: str) -> list[str]:
+def _menu_actions(window: AetherStudioWindow, menu_title: str) -> list[str]:
     for action in window.menuBar().actions():
         if action.text().replace("&", "") != menu_title:
             continue
@@ -117,7 +117,7 @@ def test_menu_bar_is_aether_only(
     qapp,
 ) -> None:
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "appdata"))
-    window = MathTeXQtWindow()
+    window = AetherStudioWindow()
 
     try:
         qapp.processEvents()
@@ -148,7 +148,7 @@ def test_aether_ui_object_names_replace_mathlab_visual_names(
     qapp,
 ) -> None:
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "appdata"))
-    window = MathTeXQtWindow()
+    window = AetherStudioWindow()
 
     try:
         qapp.processEvents()
@@ -210,7 +210,7 @@ def test_codemirror_script_tabs_update_menu_without_qplaintextedit_api(
     monkeypatch.setenv("AETHER_EDITOR_KIND", "codemirror")
     monkeypatch.setattr("qt_app.create_editor", fake_create_editor)
 
-    window = MathTeXQtWindow()
+    window = AetherStudioWindow()
 
     try:
         assert window.editor_kind == "codemirror"
@@ -239,7 +239,7 @@ def test_main_tab_uses_aether_name_and_editor_runs_show_script_banner(
     qapp,
 ) -> None:
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "appdata"))
-    window = MathTeXQtWindow()
+    window = AetherStudioWindow()
     script_path = tmp_path / "demo_script.ae"
     script_path.write_text('println("ok");\n', encoding="utf-8")
 
@@ -282,9 +282,10 @@ def test_console_defaults_to_aether_repl_when_no_file_is_open(
     qapp,
 ) -> None:
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "appdata"))
-    window = MathTeXQtWindow()
+    window = AetherStudioWindow()
 
     try:
+        assert isinstance(window, AetherStudioWindow)
         assert window.windowTitle() == "Aether Studio"
         assert window.console_widget is not None
         console_text = window.console_widget.output.toPlainText()
@@ -304,11 +305,16 @@ def test_legacy_script_extension_is_rejected_and_repl_stays_aether(
     qapp,
 ) -> None:
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "appdata"))
-    window = MathTeXQtWindow()
+    window = AetherStudioWindow()
     ae_path = tmp_path / "scratch.ae"
-    mtx_path = tmp_path / "legacy.mtx"
+    legacy_paths = [
+        tmp_path / "legacy.mtx",
+        tmp_path / "legacy.mtex",
+        tmp_path / "legacy.mtn",
+    ]
     ae_path.write_text("x = 5;\n", encoding="utf-8")
-    mtx_path.write_text("x = 5;\n", encoding="utf-8")
+    for legacy_path in legacy_paths:
+        legacy_path.write_text("x = 5;\n", encoding="utf-8")
     messages: list[str] = []
     monkeypatch.setattr(
         QtWidgets.QMessageBox,
@@ -323,12 +329,13 @@ def test_legacy_script_extension_is_rejected_and_repl_stays_aether(
         assert window.console_dock.windowTitle() == "Aether REPL"
         assert window.console_widget.prompt_label.text() == "aether>"
 
-        window._open_script_file(mtx_path)
-        qapp.processEvents()
-        assert window.console_dock.windowTitle() == "Aether REPL"
-        assert window.console_widget.prompt_label.text() == "aether>"
-        assert messages
-        assert "legacy format" in messages[-1].lower()
+        for legacy_path in legacy_paths:
+            window._open_script_file(legacy_path)
+            qapp.processEvents()
+            assert window.console_dock.windowTitle() == "Aether REPL"
+            assert window.console_widget.prompt_label.text() == "aether>"
+            assert messages
+            assert "legacy format" in messages[-1].lower()
     finally:
         window.close()
         qapp.processEvents()
@@ -340,7 +347,7 @@ def test_mtex_and_notebook_surfaces_are_not_visible(
     qapp,
 ) -> None:
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "appdata"))
-    window = MathTeXQtWindow()
+    window = AetherStudioWindow()
 
     try:
         qapp.processEvents()

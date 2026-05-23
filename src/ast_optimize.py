@@ -15,12 +15,15 @@ from mathtex_ast import (
     ExprStmtNode,
     IndexAssignNode,
     IndexNode,
+    ListLiteralNode,
     MatrixLiteralNode,
     NumberNode,
     RangeNode,
     SliceNode,
     SymbolNode,
+    TupleLiteralNode,
     UnaryOpNode,
+    VectorLiteralNode,
 )
 
 
@@ -36,6 +39,20 @@ _CONST_CALL_FUNCS = {
     "log": math.log,
     "sqrt": math.sqrt,
 }
+
+_LITERAL_NODE_TYPES = (MatrixLiteralNode, TupleLiteralNode, VectorLiteralNode, ListLiteralNode)
+
+
+def _rebuild_literal(node: ASTNode, values: list[ASTNode]) -> ASTNode:
+    if isinstance(node, MatrixLiteralNode):
+        return MatrixLiteralNode(values)
+    if isinstance(node, TupleLiteralNode):
+        return TupleLiteralNode(values)
+    if isinstance(node, VectorLiteralNode):
+        return VectorLiteralNode(values)
+    if isinstance(node, ListLiteralNode):
+        return ListLiteralNode(values)
+    raise TypeError(f"Unsupported literal node: {type(node)}")
 
 
 def _is_number_node(node: ASTNode) -> bool:
@@ -77,6 +94,12 @@ def _expr_key(node: ASTNode) -> tuple:
         return ("slice", _expr_key(node.value))
     if isinstance(node, MatrixLiteralNode):
         return ("mat", tuple(_expr_key(v) for v in node.values))
+    if isinstance(node, TupleLiteralNode):
+        return ("tuple", tuple(_expr_key(v) for v in node.values))
+    if isinstance(node, VectorLiteralNode):
+        return ("vec", tuple(_expr_key(v) for v in node.values))
+    if isinstance(node, ListLiteralNode):
+        return ("list", tuple(_expr_key(v) for v in node.values))
     if isinstance(node, ExprStmtNode):
         return ("expr", _expr_key(node.expr))
     if isinstance(node, IndexAssignNode):
@@ -98,7 +121,7 @@ def _expr_cost(node: ASTNode) -> int:
         return 1
     if isinstance(node, SymbolNode):
         return 1
-    if isinstance(node, MatrixLiteralNode):
+    if isinstance(node, (MatrixLiteralNode, TupleLiteralNode, VectorLiteralNode, ListLiteralNode)):
         return 1 + sum(_expr_cost(v) for v in node.values)
     if isinstance(node, UnaryOpNode):
         return 1 + _expr_cost(node.operand)
@@ -246,11 +269,11 @@ def pass_constant_folding(node: ASTNode, env: dict[str, Any]) -> tuple[ASTNode, 
                 changed = True
                 return RangeNode(start_new, step_new, end_new)
             return n
-        if isinstance(n, MatrixLiteralNode):
+        if isinstance(n, _LITERAL_NODE_TYPES):
             vals_new = [fold(v) for v in n.values]
             if any(v1 is not v2 for v1, v2 in zip(n.values, vals_new)):
                 changed = True
-                return MatrixLiteralNode(vals_new)
+                return _rebuild_literal(n, vals_new)
             return n
         return n
 
@@ -373,11 +396,11 @@ def pass_simplify(node: ASTNode, env: dict[str, Any]) -> tuple[ASTNode, bool, st
                 changed = True
                 return RangeNode(start_new, step_new, end_new)
             return n
-        if isinstance(n, MatrixLiteralNode):
+        if isinstance(n, _LITERAL_NODE_TYPES):
             vals_new = [simplify(v) for v in n.values]
             if any(v1 is not v2 for v1, v2 in zip(n.values, vals_new)):
                 changed = True
-                return MatrixLiteralNode(vals_new)
+                return _rebuild_literal(n, vals_new)
             return n
         return n
 
@@ -433,7 +456,7 @@ def pass_cse(node: ASTNode, env: dict[str, Any]) -> tuple[ASTNode, bool, str]:
                     collect(n.step)
                 if n.end is not None:
                     collect(n.end)
-            elif isinstance(n, MatrixLiteralNode):
+            elif isinstance(n, _LITERAL_NODE_TYPES):
                 for v in n.values:
                     collect(v)
 
@@ -492,10 +515,10 @@ def pass_cse(node: ASTNode, env: dict[str, Any]) -> tuple[ASTNode, bool, str]:
                 if start_new is not n.start or step_new is not n.step or end_new is not n.end:
                     return RangeNode(start_new, step_new, end_new)
                 return n
-            if isinstance(n, MatrixLiteralNode):
+            if isinstance(n, _LITERAL_NODE_TYPES):
                 vals_new = [replace(v, True) for v in n.values]
                 if any(v1 is not v2 for v1, v2 in zip(n.values, vals_new)):
-                    return MatrixLiteralNode(vals_new)
+                    return _rebuild_literal(n, vals_new)
                 return n
             return n
 

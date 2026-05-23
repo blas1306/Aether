@@ -97,7 +97,8 @@ from NewtonMultiVariable import NewtonMultiVariable
 - definicion de funciones: `function ... end`
 - condicionales: `if`, `elif`, `else`
 - bucles: `for`, `while`, `repeat`, `until`
-- matrices y vectores: `[1, 2; 3, 4]`, `[1; 2; 3]`
+- tuplas: `(a, b)` y `(a,)`; `(a)` solo agrupa una expresion
+- vectores y matrices: `[a, b, c]` es vector 1D, `[a b; c d]` es matriz
 - solucion de sistemas lineales: `x = A | b`
 - derivadas simbolicas: `\diff(f, x)`
 - solucion simbolica: `\solve(...)`
@@ -113,6 +114,20 @@ from NewtonMultiVariable import NewtonMultiVariable
 - Una sentencia puede ocupar varias lineas si hay corchetes o parentesis abiertos.
 - El `;` sirve para silenciar salida cuando corresponde.
 - Los comentarios con `#` y `%` son soportados.
+
+### Literales matematicos
+
+La sintaxis recomendada separa tuplas, vectores y matrices:
+
+```text
+t = (1, "hola", true)  # tupla inmutable y heterogenea
+v = [1, 2, 3]          # vector 1D
+r = [1 2 3]            # matriz fila 1x3
+c = [1; 2; 3]          # matriz columna 3x1
+A = [1 2; 3 4]         # matriz 2x2
+```
+
+La coma dentro de `[]` indica vector 1D. Los espacios separan columnas de una matriz y `;` separa filas. La forma anidada `[[1, 2], [3, 4]]` sigue aceptada por compatibilidad, pero para matrices nuevas se recomienda `[1 2; 3 4]`.
 
 ## 4. Flujo recomendado para `.mtex`
 

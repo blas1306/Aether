@@ -25,6 +25,21 @@ class MatrixLiteralNode(ASTNode):
 
 
 @dataclass
+class TupleLiteralNode(ASTNode):
+    values: Sequence[ASTNode]
+
+
+@dataclass
+class VectorLiteralNode(ASTNode):
+    values: Sequence[ASTNode]
+
+
+@dataclass
+class ListLiteralNode(ASTNode):
+    values: Sequence[ASTNode]
+
+
+@dataclass
 class UnaryOpNode(ASTNode):
     op: str
     operand: ASTNode
@@ -160,9 +175,14 @@ def _convert_python_ast(node: ast.AST) -> ASTNode:
     if isinstance(node, ast.Attribute):
         return SymbolNode(_attr_to_str(node))
     if isinstance(node, ast.List):
-        return MatrixLiteralNode([_convert_python_ast(elt) for elt in node.elts])
+        values = [_convert_python_ast(elt) for elt in node.elts]
+        if values and all(isinstance(value, (VectorLiteralNode, ListLiteralNode)) for value in values):
+            return MatrixLiteralNode(values)
+        if any(isinstance(value, NumberNode) and isinstance(value.value, str) for value in values):
+            return ListLiteralNode(values)
+        return VectorLiteralNode(values)
     if isinstance(node, ast.Tuple):
-        return MatrixLiteralNode([_convert_python_ast(elt) for elt in node.elts])
+        return TupleLiteralNode([_convert_python_ast(elt) for elt in node.elts])
     if isinstance(node, ast.UnaryOp):
         op_cls = type(node.op)
         if op_cls not in _UNARY_OP_SYMBOLS:
@@ -201,6 +221,9 @@ def _convert_python_ast(node: ast.AST) -> ASTNode:
         return combined if combined is not None else left
     if isinstance(node, ast.Call):
         func_name = _attr_to_str(node.func)
+        if func_name == "_mt_matrix_literal" and len(node.args) == 1 and isinstance(node.args[0], ast.List):
+            rows = [_convert_python_ast(elt) for elt in node.args[0].elts]
+            return MatrixLiteralNode(rows)
         args = [_convert_python_ast(arg) for arg in node.args]
         keywords: list[tuple[str, ASTNode]] = []
         for kw in node.keywords:

@@ -129,8 +129,10 @@ from parser_statements import parse_mathtex_line as _parse_mathtex_line_impl
 from numeric_format import format_value_for_display, reset_numeric_format, set_numeric_format
 
 try:
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8")
 except Exception:
     pass
 
@@ -1861,6 +1863,10 @@ def _mt_to_matrix(value: Any, label: str) -> Matrix:
     raise ValueError(f"{label} must be a matrix/vector.")
 
 
+def _mt_matrix_literal(rows: Any) -> Matrix:
+    return Matrix(rows)
+
+
 def _mt_solve_linear_system(spec: _LinearSolveSpec) -> Matrix:
     sol, _mode = _mt_solve_linear_system_with_mode(spec)
     return sol
@@ -2124,6 +2130,7 @@ _RUNTIME_SHARED_SYMBOLS = build_runtime_shared_symbols(
         "mt_adj": _mt_adj,
         "mt_call": _mt_call,
         "mt_apply_symbol": _mt_apply_symbol,
+        "mt_matrix_literal": _mt_matrix_literal,
     },
     octave_helpers={
         "range": _oct_range,

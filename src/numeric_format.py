@@ -161,7 +161,7 @@ def matrix_to_latex(value: Any) -> str:
     try:
         if isinstance(value, MatrixBase):
             mat = sp.Matrix(value)
-        elif isinstance(value, (list, tuple, np.ndarray)):
+        elif isinstance(value, (list, np.ndarray)):
             mat = sp.Matrix(value)
         else:
             return format_value_for_display(value)

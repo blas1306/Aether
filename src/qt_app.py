@@ -314,7 +314,7 @@ def apply_dark_qt_theme(app: QtWidgets.QApplication | None = None) -> None:
     app.setStyleSheet(DARK_APP_STYLESHEET)
 
 
-class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
+class AetherStudioWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
     def __init__(self) -> None:
         super().__init__()
         apply_dark_qt_theme()
@@ -823,9 +823,6 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
             toggle_action.setText("Console")
             view_menu.addAction(toggle_action)
 
-    def _build_studio_menus(self, menu_bar: QtWidgets.QMenuBar) -> None:
-        return
-
     def _build_menus_from_spec(
         self,
         menu_bar: QtWidgets.QMenuBar,
@@ -1155,9 +1152,6 @@ class MathTeXQtWindow(QtWidgets.QMainWindow):  # type: ignore[misc]
             self.console_widget.input.setFocus()
         except Exception:
             pass
-
-    def _is_studio_tab_active(self) -> bool:
-        return False
 
     def _sync_console_for_active_tab(self) -> None:
         dock = self.console_dock
@@ -1757,7 +1751,7 @@ def launch_qt_gui() -> bool:
     QtCore.QCoreApplication.setAttribute(QtCore.Qt.ApplicationAttribute.AA_DontUseNativeDialogs, True)
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     apply_dark_qt_theme(app)
-    window = MathTeXQtWindow()
+    window = AetherStudioWindow()
     window.show()
     try:
         app.exec()

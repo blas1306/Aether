@@ -655,6 +655,27 @@ def _is_string_literal(token: str) -> bool:
 
 
 def _rewrite_inline_semicolon_matrices(expr: str) -> str:
+    def _matrix_literal_replacement(inner: str) -> str | None:
+        rows = [row.strip() for row in _split_top_level(inner, ";")]
+        has_row_separator = len(rows) > 1
+        if not has_row_separator:
+            tokens = [token.strip() for token in _split_matrix_row(inner) if token.strip()]
+            top_level_commas = _split_top_level(inner, ",")
+            if len(tokens) <= 1 or len(top_level_commas) > 1:
+                return None
+            rows = [inner.strip()]
+
+        if not all(rows):
+            return None
+
+        matrix_rows: list[str] = []
+        for row in rows:
+            tokens = [token.strip() for token in _split_matrix_row(row) if token.strip()]
+            if not tokens:
+                return None
+            matrix_rows.append("[" + ", ".join(tokens) + "]")
+        return "_mt_matrix_literal([" + ", ".join(matrix_rows) + "])"
+
     out: list[str] = []
     i = 0
     while i < len(expr):
@@ -687,22 +708,11 @@ def _rewrite_inline_semicolon_matrices(expr: str) -> str:
             continue
 
         inner = _rewrite_inline_semicolon_matrices(expr[i + 1 : end])
-        rows = [row.strip() for row in _split_top_level(inner, ";")]
-        if len(rows) > 1 and all(rows):
-            matrix_rows: list[str] = []
-            valid_matrix = True
-            for row in rows:
-                tokens = [token.strip() for token in _split_matrix_row(row) if token.strip()]
-                if not tokens:
-                    valid_matrix = False
-                    break
-                matrix_rows.append("[" + ", ".join(tokens) + "]")
-            if valid_matrix:
-                out.append("Matrix([" + ", ".join(matrix_rows) + "])")
-            else:
-                out.append("[" + inner + "]")
-        else:
+        replacement = _matrix_literal_replacement(inner)
+        if replacement is None:
             out.append("[" + inner + "]")
+        else:
+            out.append(replacement)
         i = end + 1
     return "".join(out)
 

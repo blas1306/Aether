@@ -433,5 +433,3 @@ class NotebookEditorView(QtWidgets.QWidget):  # type: ignore[misc]
         }
         """
 
-
-MathTeXNotebookView = NotebookEditorView

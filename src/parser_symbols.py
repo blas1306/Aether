@@ -75,5 +75,7 @@ def build_parser_base_symbols(
         "Function": sympy_objects["Function"],
         "Sum": sympy_objects["Sum"],
         "Product": sympy_objects["Product"],
+        "true": True,
+        "false": False,
         "lambda_kw": greek_symbols.get("lambda"),
     }

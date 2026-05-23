@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from PySide6 import QtGui  # type: ignore
 
-from qt_app import MathTeXQtWindow
+from qt_app import AetherStudioWindow
 
 
 def test_qt_app_creates_minimal_action_registry(tmp_path, monkeypatch, qapp) -> None:
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "appdata"))
-    window = MathTeXQtWindow()
+    window = AetherStudioWindow()
 
     try:
         action_ids = [
@@ -36,7 +36,7 @@ def _shortcut_texts(action: QtGui.QAction) -> set[str]:
 
 def test_registered_menu_qactions_use_action_registry(tmp_path, monkeypatch, qapp) -> None:
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "appdata"))
-    window = MathTeXQtWindow()
+    window = AetherStudioWindow()
 
     try:
         calls: list[str] = []
