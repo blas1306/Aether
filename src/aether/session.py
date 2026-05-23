@@ -19,8 +19,12 @@ class _SessionSnapshot:
     checker_variables: dict[str, VariableSymbol]
     checker_functions: dict[str, FunctionSymbol]
     checker_expression_functions: dict[str, ast.ExpressionFunctionDeclaration]
+    checker_imported_modules: set[str]
+    checker_builtin_aliases: dict[str, str]
     runtime_values: dict[str, AetherValue]
     runtime_functions: dict[str, Function]
+    imported_modules: set[str]
+    runtime_builtin_aliases: dict[str, str]
 
 
 class AetherSession:
@@ -68,17 +72,25 @@ class AetherSession:
             checker_variables=deepcopy(self._type_checker.global_scope.symbols),
             checker_functions=deepcopy(self._type_checker.functions),
             checker_expression_functions=deepcopy(self._type_checker.expression_functions),
+            checker_imported_modules=deepcopy(self._type_checker.imported_modules),
+            checker_builtin_aliases=deepcopy(self._type_checker.builtin_aliases),
             runtime_values=deepcopy(self._interpreter.global_env.variable_scope.symbols),
             runtime_functions=deepcopy(self._interpreter.global_env.functions),
+            imported_modules=deepcopy(self._interpreter.imported_modules),
+            runtime_builtin_aliases=deepcopy(self._interpreter.builtin_aliases),
         )
 
     def _restore(self, snapshot: _SessionSnapshot) -> None:
         self._type_checker.global_scope.symbols = deepcopy(snapshot.checker_variables)
         self._type_checker.functions = deepcopy(snapshot.checker_functions)
         self._type_checker.expression_functions = deepcopy(snapshot.checker_expression_functions)
+        self._type_checker.imported_modules = deepcopy(snapshot.checker_imported_modules)
+        self._type_checker.builtin_aliases = deepcopy(snapshot.checker_builtin_aliases)
         self._type_checker.expression_function_call_stack.clear()
         self._interpreter.global_env.variable_scope.symbols = deepcopy(snapshot.runtime_values)
         self._interpreter.global_env.functions = deepcopy(snapshot.runtime_functions)
+        self._interpreter.imported_modules = deepcopy(snapshot.imported_modules)
+        self._interpreter.builtin_aliases = deepcopy(snapshot.runtime_builtin_aliases)
 
 
 def _value_shape(value: AetherValue) -> str:

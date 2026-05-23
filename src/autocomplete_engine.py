@@ -124,7 +124,7 @@ SNIPPET_SUGGESTIONS: tuple[CommandSuggestion, ...] = (
 )
 
 
-def _line_context(line_text: str, cursor_col: int) -> tuple[bool, int | None]:
+def _line_context(line_text: str, cursor_col: int, *, percent_comments: bool = False) -> tuple[bool, int | None]:
     in_string: str | None = None
     escaped = False
     index = 0
@@ -148,7 +148,7 @@ def _line_context(line_text: str, cursor_col: int) -> tuple[bool, int | None]:
             index += 1
             continue
 
-        if char == "#" or (char == "%" and (index == 0 or line_text[index - 1] != "\\")):
+        if char == "#" or (percent_comments and char == "%" and (index == 0 or line_text[index - 1] != "\\")):
             return False, index
         if char == "/" and next_char == "/":
             return False, index
@@ -158,24 +158,28 @@ def _line_context(line_text: str, cursor_col: int) -> tuple[bool, int | None]:
     return in_string is not None, None
 
 
-def is_comment_context(line_text: str, cursor_col: int) -> bool:
+def is_comment_context(line_text: str, cursor_col: int, *, percent_comments: bool = False) -> bool:
     if cursor_col < 0 or cursor_col > len(line_text):
         return False
-    _in_string, comment_start = _line_context(line_text, cursor_col)
+    _in_string, comment_start = _line_context(line_text, cursor_col, percent_comments=percent_comments)
     return comment_start is not None and cursor_col > comment_start
 
 
-def is_string_context(line_text: str, cursor_col: int) -> bool:
+def is_string_context(line_text: str, cursor_col: int, *, percent_comments: bool = False) -> bool:
     if cursor_col < 0 or cursor_col > len(line_text):
         return False
-    in_string, _comment_start = _line_context(line_text, cursor_col)
+    in_string, _comment_start = _line_context(line_text, cursor_col, percent_comments=percent_comments)
     return in_string
 
 
-def detect_command_prefix(line_text: str, cursor_col: int) -> AutocompleteMatch | None:
+def detect_command_prefix(line_text: str, cursor_col: int, *, percent_comments: bool = False) -> AutocompleteMatch | None:
     if cursor_col < 0 or cursor_col > len(line_text):
         return None
-    if is_comment_context(line_text, cursor_col) or is_string_context(line_text, cursor_col):
+    if is_comment_context(line_text, cursor_col, percent_comments=percent_comments) or is_string_context(
+        line_text,
+        cursor_col,
+        percent_comments=percent_comments,
+    ):
         return None
 
     start = cursor_col
@@ -198,10 +202,14 @@ def detect_command_prefix(line_text: str, cursor_col: int) -> AutocompleteMatch 
     )
 
 
-def detect_identifier_prefix(line_text: str, cursor_col: int) -> AutocompleteMatch | None:
+def detect_identifier_prefix(line_text: str, cursor_col: int, *, percent_comments: bool = False) -> AutocompleteMatch | None:
     if cursor_col < 0 or cursor_col > len(line_text):
         return None
-    if is_comment_context(line_text, cursor_col) or is_string_context(line_text, cursor_col):
+    if is_comment_context(line_text, cursor_col, percent_comments=percent_comments) or is_string_context(
+        line_text,
+        cursor_col,
+        percent_comments=percent_comments,
+    ):
         return None
 
     start = cursor_col
@@ -227,10 +235,14 @@ def detect_identifier_prefix(line_text: str, cursor_col: int) -> AutocompleteMat
     )
 
 
-def detect_member_prefix(line_text: str, cursor_col: int) -> AutocompleteMatch | None:
+def detect_member_prefix(line_text: str, cursor_col: int, *, percent_comments: bool = False) -> AutocompleteMatch | None:
     if cursor_col < 0 or cursor_col > len(line_text):
         return None
-    if is_comment_context(line_text, cursor_col) or is_string_context(line_text, cursor_col):
+    if is_comment_context(line_text, cursor_col, percent_comments=percent_comments) or is_string_context(
+        line_text,
+        cursor_col,
+        percent_comments=percent_comments,
+    ):
         return None
 
     token_start = cursor_col
@@ -264,11 +276,11 @@ def detect_member_prefix(line_text: str, cursor_col: int) -> AutocompleteMatch |
     )
 
 
-def detect_autocomplete_match(line_text: str, cursor_col: int) -> AutocompleteMatch | None:
+def detect_autocomplete_match(line_text: str, cursor_col: int, *, percent_comments: bool = False) -> AutocompleteMatch | None:
     return (
-        detect_command_prefix(line_text, cursor_col)
-        or detect_member_prefix(line_text, cursor_col)
-        or detect_identifier_prefix(line_text, cursor_col)
+        detect_command_prefix(line_text, cursor_col, percent_comments=percent_comments)
+        or detect_member_prefix(line_text, cursor_col, percent_comments=percent_comments)
+        or detect_identifier_prefix(line_text, cursor_col, percent_comments=percent_comments)
     )
 
 
@@ -430,7 +442,7 @@ def _stdlib_member_suggestions(qualifier: str, prefix: str) -> list[CommandSugge
                 category="modules",
                 kind="module",
                 source="stdlib",
-                priority=420,
+                priority=460,
                 match_text=child,
             )
         )
@@ -559,7 +571,8 @@ def build_autocomplete_suggestions(
     *,
     catalog: Sequence[CommandSuggestion] = COMMAND_CATALOG,
 ) -> list[CommandSuggestion]:
-    match = detect_autocomplete_match(request.line_text, request.cursor_col)
+    percent_comments = request.document_kind == "mtex_document" and not _looks_like_code_line(request.line_text)
+    match = detect_autocomplete_match(request.line_text, request.cursor_col, percent_comments=percent_comments)
     if match is None:
         return []
 

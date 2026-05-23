@@ -19,11 +19,14 @@ class TokenType(str, Enum):
     WHILE = "WHILE"
     FOR = "FOR"
     IN = "IN"
+    IMPORT = "IMPORT"
     PLUS = "+"
     PLUS_EQUAL = "+="
     MINUS = "-"
     STAR = "*"
     SLASH = "/"
+    BACKSLASH = "\\"
+    PERCENT = "%"
     CARET = "^"
     COLON = ":"
     EQUAL = "="
@@ -57,6 +60,7 @@ KEYWORDS: dict[str, TokenType] = {
     "while": TokenType.WHILE,
     "for": TokenType.FOR,
     "in": TokenType.IN,
+    "import": TokenType.IMPORT,
     "true": TokenType.BOOLEAN_LITERAL,
     "false": TokenType.BOOLEAN_LITERAL,
     **{type_name: TokenType.TYPE for type_name in AETHER_TYPES},

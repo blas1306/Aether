@@ -134,7 +134,7 @@ class AutocompleteEngineTests(unittest.TestCase):
             AutocompleteRequest(
                 line_text="re",
                 cursor_col=2,
-                document_text="# fake = 1\n% bogus(x) = x\nrealValue = 2\nre",
+                document_text="# fake = 1\n// bogus(x) = x\nrealValue = 2\nre",
             )
         )
 
@@ -269,8 +269,9 @@ class AutocompleteEngineTests(unittest.TestCase):
     def test_math_namespace_suggests_real_submodules(self):
         suggestions = build_autocomplete_suggestions(AutocompleteRequest(line_text="Math.", cursor_col=len("Math.")))
 
-        self.assertEqual([item.name for item in suggestions], ["LinearAlgebra"])
+        self.assertEqual([item.name for item in suggestions], ["LinearAlgebra", "mod"])
         self.assertEqual(suggestions[0].kind, "module")
+        self.assertEqual(suggestions[1].kind, "function")
 
     def test_math_linear_algebra_suggests_real_functions_only(self):
         suggestions = build_autocomplete_suggestions(
@@ -282,9 +283,9 @@ class AutocompleteEngineTests(unittest.TestCase):
         self.assertIn("matmul", names)
         self.assertIn("inner", names)
         self.assertIn("norm", names)
+        self.assertIn("solve", names)
         self.assertNotIn("det", names)
         self.assertNotIn("inv", names)
-        self.assertNotIn("solve", names)
 
     def test_aether_variables_are_suggested_by_prefix(self):
         suggestions = build_autocomplete_suggestions(
@@ -357,8 +358,29 @@ class AutocompleteEngineTests(unittest.TestCase):
     def test_does_not_suggest_inside_comments(self):
         suggestions = build_autocomplete_suggestions(
             AutocompleteRequest(
-                line_text=r"value = 1 % \pl",
-                cursor_col=len(r"value = 1 % \pl"),
+                line_text=r"value = 1 # \pl",
+                cursor_col=len(r"value = 1 # \pl"),
+            )
+        )
+
+        self.assertEqual(suggestions, [])
+
+    def test_percent_is_not_a_script_comment_for_autocomplete(self):
+        suggestions = build_autocomplete_suggestions(
+            AutocompleteRequest(
+                line_text="value = 5 % Math.",
+                cursor_col=len("value = 5 % Math."),
+            )
+        )
+
+        self.assertEqual([item.name for item in suggestions], ["LinearAlgebra", "mod"])
+
+    def test_percent_remains_mtex_text_comment_for_autocomplete(self):
+        suggestions = build_autocomplete_suggestions(
+            AutocompleteRequest(
+                line_text=r"% \pl",
+                cursor_col=len(r"% \pl"),
+                document_kind="mtex_document",
             )
         )
 

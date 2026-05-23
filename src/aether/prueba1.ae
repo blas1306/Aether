@@ -1,15 +1,17 @@
+import Math.LinearAlgebra
+
 println("Hello World!");
 
 A = [1 2; 3 4];
 println(A);
 
-B = Math.LinearAlgebra.transpose(A);
+B = transpose(A);
 println(B);
 
 U = [1 2];
 V = [3; 4];
 
-println(Math.LinearAlgebra.matmul(U, V));
+println(matmul(U, V));
 
 for v in V {
     println(v);
@@ -25,7 +27,7 @@ int fib(int n) {
     if (n <= 1) {
         return n;
     }
-    
+
     return fib(n-1) + fib(n-2);
 }
 
@@ -33,19 +35,19 @@ println(fib(4));
 
 double sumatoria(int a) {
     double suma = 0.0;
-    
+
     if a < 0 {
         println("Suma invalida");
     } else {
         suma = a*(a+1)/2;
     }
-    
+
     return suma;
 }
 
 double sumatoriav2(int a2) {
     double sumav2 = 0.0;
-    
+
     if a2 > 0 {
         int i = 1;
         while i < a2 + 1 {
@@ -53,7 +55,7 @@ double sumatoriav2(int a2) {
             i = i + 1;
         }
     }
-    
+
     return sumav2;
 }
 

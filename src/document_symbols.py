@@ -233,11 +233,7 @@ def _split_document_statements(document_text: str) -> list[str]:
             continue
 
         next_char = document_text[index + 1] if index + 1 < len(document_text) else ""
-        if (
-            char == "#"
-            or (char == "%" and (index == 0 or document_text[index - 1] != "\\"))
-            or (char == "/" and next_char == "/")
-        ):
+        if char == "#" or (char == "/" and next_char == "/"):
             while index < len(document_text) and document_text[index] != "\n":
                 index += 1
             continue

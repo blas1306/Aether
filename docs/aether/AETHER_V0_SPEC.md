@@ -135,6 +135,7 @@ Arithmetic operators:
 - `-`
 - `*`
 - `/`
+- `%`
 
 `/` is always real division. Integer division is not implemented with `/`.
 
@@ -142,6 +143,30 @@ Arithmetic operators:
 int a = 5;
 int b = 2;
 double c = a / b; // c = 2.5
+```
+
+`%` computes a truncating remainder, matching Java/C#/C/C++ sign behavior. It is defined as:
+
+```text
+a % b = a - trunc(a / b) * b
+```
+
+The divisor must not be zero:
+
+```aether
+println(5 % 3);    // 2
+println(-5 % 3);   // -2
+println(5 % -3);   // 2
+println(-5 % -3);  // -2
+```
+
+Use `Math.mod(a, b)` for floor/Python-like modulo:
+
+```aether
+println(Math.mod(5, 3));    // 2
+println(Math.mod(-5, 3));   // 1
+println(Math.mod(5, -3));   // -1
+println(Math.mod(-5, -3));  // -2
 ```
 
 Promotion rules follow the wider numeric type. Important cases:
@@ -343,11 +368,12 @@ Math.LinearAlgebra.inner(u, v)
 Math.LinearAlgebra.norm(v)
 Math.LinearAlgebra.transpose(A)
 Math.LinearAlgebra.matmul(A, B)
+Math.LinearAlgebra.solve(A, b)
 ```
 
 This namespace is a simulated builtin namespace for now, implemented through the Aether stdlib registry rather than a real module loader. There is no real import system, module system, package loader, or `using`/`import` behavior yet. Calls are resolved by their full builtin names, such as `"Math.LinearAlgebra.inner"`. This keeps program meaning stable: future imports must not make the same source code mean something else.
 
-Only explicit namespace calls are supported. The unqualified names `inner(...)`, `norm(...)`, `transpose(...)`, and `matmul(...)` are not introduced by this feature.
+Only explicit namespace calls are supported. The unqualified names `inner(...)`, `norm(...)`, `transpose(...)`, `matmul(...)`, and `solve(...)` are not introduced by this feature.
 
 `Math.LinearAlgebra.inner(u, v)` computes the usual Euclidean inner product:
 
@@ -428,6 +454,23 @@ println(Math.LinearAlgebra.matmul([1 2], [3 4; 5 6]));      // [13 16]
 `matmul` returns a new matrix and does not mutate either operand. It uses existing numeric promotion rules: `int` with `int` remains `int`, while combinations involving `float` or `double` widen as usual.
 
 The `*` operator is still not matrix multiplication in Aether v0. Matrix multiplication is available only through the explicit `Math.LinearAlgebra.matmul(A, B)` builtin.
+
+`Math.LinearAlgebra.solve(A, b)` solves linear systems with Julia-like left-division semantics. The expression `A \ b` is equivalent to `Math.LinearAlgebra.solve(A, b)`.
+
+The coefficient argument `A` must be a numeric mathematical matrix. The right-hand side `b` must be a numeric mathematical vector or matrix with `rows(b) == rows(A)`. Row-vector right-hand sides with matching length are treated as column vectors. The result is a `Matrix<double>` or `Vector<double>`:
+
+```aether
+A = [2 1; 1 3];
+b = [1; 2];
+println(A \ b); // [0.2;
+                //  0.6]
+
+B = [2 4; 8 12];
+println(Math.LinearAlgebra.solve([2 0; 0 4], B)); // [1.0 2.0;
+                                                  //  2.0 3.0]
+```
+
+Square full-rank systems use a direct solve. Rectangular or rank-deficient systems use a least-squares/minimum-norm solution. No implicit narrowing to `int` is performed.
 
 ## Matrix Arithmetic
 
@@ -642,10 +685,12 @@ Aether v0 recognizes these builtins:
 - `log(x)`
 - `sqrt(x)`
 - `abs(x)`
+- `Math.mod(a, b)`
 - `Math.LinearAlgebra.inner(u, v)`
 - `Math.LinearAlgebra.norm(v)`
 - `Math.LinearAlgebra.transpose(A)`
 - `Math.LinearAlgebra.matmul(A, B)`
+- `Math.LinearAlgebra.solve(A, b)`
 - `int(...)`
 - `float(...)`
 - `double(...)`
@@ -665,9 +710,9 @@ println(x);
 
 `rows(matrix)` and `cols(matrix)` accept one `Matrix<T>` or `Vector<T>` argument and return `int` dimensions.
 
-`sin(x)`, `cos(x)`, `tan(x)`, `exp(x)`, `ln(x)`, `log(x)`, and `sqrt(x)` accept one numeric scalar and return `double`. `ln(x)` is the natural logarithm. `log(x)` is base 10. `ln`, `log`, and `sqrt` reject values outside their real domains. `abs(x)` accepts one numeric scalar and returns the same numeric type.
+`sin(x)`, `cos(x)`, `tan(x)`, `exp(x)`, `ln(x)`, `log(x)`, and `sqrt(x)` accept one numeric scalar and return `double`. `ln(x)` is the natural logarithm. `log(x)` is base 10. `ln`, `log`, and `sqrt` reject values outside their real domains. `abs(x)` accepts one numeric scalar and returns the same numeric type. `Math.mod(a, b)` accepts two numeric scalars and returns floor/Python-like modulo.
 
-`Math.LinearAlgebra.inner(u, v)`, `Math.LinearAlgebra.norm(v)`, `Math.LinearAlgebra.transpose(A)`, and `Math.LinearAlgebra.matmul(A, B)` are explicit simulated-namespace builtins for numeric mathematical vectors and matrices. See `Math.LinearAlgebra` above.
+`Math.LinearAlgebra.inner(u, v)`, `Math.LinearAlgebra.norm(v)`, `Math.LinearAlgebra.transpose(A)`, `Math.LinearAlgebra.matmul(A, B)`, and `Math.LinearAlgebra.solve(A, b)` are explicit simulated-namespace builtins for numeric mathematical vectors and matrices. See `Math.LinearAlgebra` above.
 
 ## Errors
 

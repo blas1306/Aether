@@ -5,6 +5,7 @@ import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 
 class AetherCommandLineTest {
     @Test
@@ -76,6 +77,34 @@ class AetherCommandLineTest {
             listOf("-m", "aether_lsp.run_file", "/tmp/example.ae"),
             AetherCommandLine.runFileArguments("/tmp/example.ae"),
         )
+    }
+
+    @Test
+    fun `highlighting lexer treats backslash as operator`() {
+        val lexer = AetherHighlightingLexer()
+
+        lexer.start("A \\ b", 0, 5, 0)
+        val tokenTypes = mutableListOf<String>()
+        while (lexer.tokenType != null) {
+            tokenTypes.add(lexer.tokenType.toString())
+            lexer.advance()
+        }
+
+        assertTrue(tokenTypes.contains(AetherTokenTypes.OPERATOR.toString()))
+    }
+
+    @Test
+    fun `highlighting lexer treats percent as operator`() {
+        val lexer = AetherHighlightingLexer()
+
+        lexer.start("a % b", 0, 5, 0)
+        val tokenTypes = mutableListOf<String>()
+        while (lexer.tokenType != null) {
+            tokenTypes.add(lexer.tokenType.toString())
+            lexer.advance()
+        }
+
+        assertTrue(tokenTypes.contains(AetherTokenTypes.OPERATOR.toString()))
     }
 
     @Test

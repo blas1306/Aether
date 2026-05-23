@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from math import cos, exp, log, log10, sin, sqrt, tan
+from math import cos, exp, floor, log, log10, sin, sqrt, tan
 
 from ..errors import AetherRuntimeError, AetherTypeError
 from ..formatting import format_value
@@ -38,6 +38,7 @@ def builtin_definitions() -> list[BuiltinDefinition]:
         BuiltinDefinition("log", _constant_runtime(log_builtin), _math_unary_type("log"), _exactly_one("log")),
         BuiltinDefinition("sqrt", _constant_runtime(sqrt_builtin), _sqrt_type, _exactly_one("sqrt")),
         BuiltinDefinition("abs", _constant_runtime(abs_builtin), _abs_type, _exactly_one("abs")),
+        BuiltinDefinition("Math.mod", _constant_runtime(mod_builtin), _math_binary_type("Math.mod"), _exactly_two("Math.mod")),
     ]
     definitions.extend(
         BuiltinDefinition(
@@ -62,6 +63,14 @@ def _exactly_one(label: str):
     def validate(arg_count: int) -> None:
         if arg_count != 1:
             raise AetherTypeError(f"{label}(...) expects exactly one argument.")
+
+    return validate
+
+
+def _exactly_two(label: str):
+    def validate(arg_count: int) -> None:
+        if arg_count != 2:
+            raise AetherTypeError(f"{label}(...) expects exactly two arguments.")
 
     return validate
 
@@ -169,6 +178,19 @@ def abs_builtin(args: list[AetherValue]) -> AetherValue:
     return AetherValue(value.type_name, abs(value.value))
 
 
+def mod_builtin(args: list[AetherValue]) -> AetherValue:
+    left, right = _require_numeric_binary_args(args, "Math.mod")
+    if right.value == 0:
+        raise AetherRuntimeError("Math.mod(...) is undefined for divisor zero.")
+    result_type = common_primitive_type([left.type_name, right.type_name], label="Math.mod")
+    result = left.value - floor(left.value / right.value) * right.value
+    if result_type == "int":
+        result = int(result)
+    else:
+        result = float(result)
+    return AetherValue(result_type, result)
+
+
 def _require_numeric_unary_arg(args: list[AetherValue], label: str) -> AetherValue:
     if len(args) != 1:
         raise AetherTypeError(f"{label}(...) expects exactly one argument.")
@@ -176,6 +198,18 @@ def _require_numeric_unary_arg(args: list[AetherValue], label: str) -> AetherVal
     if value.type_name not in NUMERIC_TYPES:
         raise AetherTypeError(f"{label}(...) expects a numeric argument, got '{type_to_string(value.type_name)}'.")
     return value
+
+
+def _require_numeric_binary_args(args: list[AetherValue], label: str) -> tuple[AetherValue, AetherValue]:
+    if len(args) != 2:
+        raise AetherTypeError(f"{label}(...) expects exactly two arguments.")
+    left, right = args
+    if left.type_name not in NUMERIC_TYPES or right.type_name not in NUMERIC_TYPES:
+        raise AetherTypeError(
+            f"{label}(...) expects numeric arguments, got "
+            f"'{type_to_string(left.type_name)}' and '{type_to_string(right.type_name)}'."
+        )
+    return left, right
 
 
 def _print_type(arg_types: list[AetherType | None]) -> AetherType | None:
@@ -236,6 +270,23 @@ def _math_unary_type(label: str):
         if argument_type not in NUMERIC_TYPES:
             raise AetherTypeError(f"{label}(...) expects a numeric argument, got '{type_to_string(argument_type)}'.")
         return "double"
+
+    return infer
+
+
+def _math_binary_type(label: str):
+    def infer(arg_types: list[AetherType | None]) -> AetherType | None:
+        if len(arg_types) != 2:
+            raise AetherTypeError(f"{label}(...) expects exactly two arguments.")
+        left_type, right_type = arg_types
+        if left_type is None or right_type is None:
+            return None
+        if left_type not in NUMERIC_TYPES or right_type not in NUMERIC_TYPES:
+            raise AetherTypeError(
+                f"{label}(...) expects numeric arguments, got "
+                f"'{type_to_string(left_type)}' and '{type_to_string(right_type)}'."
+            )
+        return common_primitive_type([left_type, right_type], label=label)
 
     return infer
 

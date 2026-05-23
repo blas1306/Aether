@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import trunc
+from pathlib import Path
 
 from . import ast
 from .errors import AetherRuntimeError, AetherTypeError
+from .lexer import lex
+from .parser import Parser
 from .scope import Scope
 from .stdlib import BuiltinFunction, make_builtins
+from .stdlib.registry import builtin_aliases_for_import
 from .types import (
     AetherType,
     AetherRange,
@@ -25,6 +30,10 @@ from .types import (
     promote_numeric,
     type_to_string,
 )
+
+
+LINEAR_ALGEBRA_MODULE = "Math.LinearAlgebra"
+LINEAR_ALGEBRA_SOLVE = "Math.LinearAlgebra.solve"
 
 
 @dataclass
@@ -88,6 +97,8 @@ class Interpreter:
         self.global_env = Environment()
         self.output_parts: list[str] = []
         self.builtins: dict[str, BuiltinFunction] = make_builtins(self.output_parts.append)
+        self.builtin_aliases: dict[str, str] = {}
+        self.imported_modules: set[str] = set()
 
     def interpret(self, program: ast.Program) -> Environment:
         for statement in program.statements:
@@ -161,6 +172,9 @@ class Interpreter:
             return
         if isinstance(statement, ast.ExpressionStatement):
             self._evaluate(statement.expression, env)
+            return
+        if isinstance(statement, ast.ImportStatement):
+            self._import_module(statement.module_name)
             return
         if isinstance(statement, ast.IfStatement):
             condition = self._evaluate(statement.condition, env)
@@ -312,7 +326,8 @@ class Interpreter:
         return index
 
     def _call(self, callee: str, args: list[AetherValue], env: Environment) -> AetherValue:
-        builtin = self.builtins.get(callee)
+        builtin_name = self.builtin_aliases.get(callee, callee)
+        builtin = self.builtins.get(builtin_name)
         if builtin is not None:
             return builtin(args)
         function = env.get_function(callee)
@@ -338,8 +353,12 @@ class Interpreter:
         raise AetherRuntimeError(f"Function '{callee}' ended without returning a value.")
 
     def _evaluate_binary(self, left: AetherValue, operator: str, right: AetherValue) -> AetherValue:
-        if operator in {"+", "-", "*", "/", "^"}:
+        if operator in {"+", "-", "*", "/", "%", "^"}:
             return self._numeric_or_string_binary(left, operator, right)
+        if operator == "\\":
+            if LINEAR_ALGEBRA_MODULE not in self.imported_modules:
+                raise AetherRuntimeError("Operator '\\' requires import Math.LinearAlgebra.")
+            return self.builtins[LINEAR_ALGEBRA_SOLVE]([left, right])
         if operator in {"==", "!="}:
             if not _types_comparable_for_equality(left.type_name, right.type_name):
                 raise AetherTypeError(
@@ -378,6 +397,8 @@ class Interpreter:
         scalar_array_result = _evaluate_scalar_array_binary(left, operator, right)
         if scalar_array_result is not None:
             return scalar_array_result
+        if operator == "%" and (left.type_name not in NUMERIC_TYPES or right.type_name not in NUMERIC_TYPES):
+            raise AetherTypeError("Operator '%' requires numeric operands.")
         if left.type_name == "string" or right.type_name == "string":
             raise AetherTypeError(f"Operator '{operator}' cannot mix string with non-string values.")
         if left.type_name == "boolean" or right.type_name == "boolean":
@@ -398,6 +419,10 @@ class Interpreter:
             value = left.value * right.value
         elif operator == "/":
             value = left.value / right.value
+        elif operator == "%":
+            if right.value == 0:
+                raise AetherRuntimeError("Operator '%' is undefined for divisor zero.")
+            value = left.value - trunc(left.value / right.value) * right.value
         elif operator == "^":
             if left.type_name == "int" and right.type_name == "int" and right.value < 0:
                 result_type = "double"
@@ -409,6 +434,26 @@ class Interpreter:
         else:
             value = float(value)
         return AetherValue(result_type, value)
+
+    def _import_module(self, module_name: str) -> None:
+        if module_name in self.imported_modules:
+            return
+        if module_name == "Math" or module_name.startswith("Math."):
+            self.builtin_aliases.update(builtin_aliases_for_import(module_name))
+            self.imported_modules.add(module_name)
+            return
+        module_path = Path(module_name.replace(".", "/"))
+        if module_path.suffix == "":
+            module_path = module_path.with_suffix(".ae")
+        if not module_path.is_absolute():
+            module_path = Path.cwd() / module_path
+        if not module_path.is_file():
+            raise AetherRuntimeError(f"Module '{module_name}' not found.")
+        source = module_path.read_text(encoding="utf-8")
+        tokens = lex(source)
+        program = Parser(tokens).parse()
+        self.interpret(program)
+        self.imported_modules.add(module_name)
 
     def _require_boolean(self, value: AetherValue, construct: str) -> None:
         if value.type_name != "boolean":

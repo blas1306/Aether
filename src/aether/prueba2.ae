@@ -1,3 +1,5 @@
+import Math.LinearAlgebra
+
 f(x) = x^2 + 1;
 println("f(4) = ", f(4));
 
@@ -6,19 +8,21 @@ boolean EsPrimo(int p) {
         while (p % i == 0) {
             return false;
         }
-        return true;
     }
 
     return true;
 }
 
 println(EsPrimo(5));
+println(EsPrimo(57));
 
 A = [3 2; 1 0; 0 0];
 b = [5; 3; 0];
 
 m = rows(A);
 n = cols(A);
+x = A \ b;
 
 println("Filas de A: ", m);
 println("Columnas de A: ", n);
+println("x = ", x);

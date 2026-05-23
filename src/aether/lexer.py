@@ -53,6 +53,8 @@ class Lexer:
             "-": TokenType.MINUS,
             "*": TokenType.STAR,
             "/": TokenType.SLASH,
+            "\\": TokenType.BACKSLASH,
+            "%": TokenType.PERCENT,
             "^": TokenType.CARET,
         }
         if char == "+":

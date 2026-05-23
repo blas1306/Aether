@@ -91,6 +91,12 @@ class Parser:
             return ast.IfStatement(condition, body, else_body)
         if self._match(TokenType.WHILE):
             return ast.WhileStatement(self._expression(), self._block())
+        if self._match(TokenType.IMPORT):
+            module_name = self._consume(TokenType.IDENTIFIER, "Expected module name after 'import'.").lexeme
+            while self._match(TokenType.DOT):
+                module_name += "." + self._consume(TokenType.IDENTIFIER, "Expected identifier after '.'.").lexeme
+            self._consume_optional_import_terminator()
+            return ast.ImportStatement(module_name)
         if self._match(TokenType.FOR):
             variable = self._consume(TokenType.IDENTIFIER, "Expected loop variable after 'for'.").lexeme
             self._consume(TokenType.IN, "Expected 'in' after loop variable.")
@@ -120,7 +126,7 @@ class Parser:
             if isinstance(expression, ast.Identifier):
                 return ast.Assignment(
                     expression.name,
-                    ast.BinaryExpression(expression, "+", value),
+                    ast.BinaryExpression(expression, "+", value, plus_equals.line, plus_equals.column),
                     plus_equals.line,
                     plus_equals.column,
                 )
@@ -163,64 +169,64 @@ class Parser:
     def _logical_or(self) -> ast.Expression:
         expr = self._logical_and()
         while self._match(TokenType.PIPE_PIPE):
-            operator = self._previous().lexeme
-            self._require_expression_after_operator(self._previous())
+            operator = self._previous()
+            self._require_expression_after_operator(operator)
             right = self._logical_and()
-            expr = ast.BinaryExpression(expr, operator, right)
+            expr = ast.BinaryExpression(expr, operator.lexeme, right, operator.line, operator.column)
         return expr
 
     def _logical_and(self) -> ast.Expression:
         expr = self._equality()
         while self._match(TokenType.AMP_AMP):
-            operator = self._previous().lexeme
-            self._require_expression_after_operator(self._previous())
+            operator = self._previous()
+            self._require_expression_after_operator(operator)
             right = self._equality()
-            expr = ast.BinaryExpression(expr, operator, right)
+            expr = ast.BinaryExpression(expr, operator.lexeme, right, operator.line, operator.column)
         return expr
 
     def _equality(self) -> ast.Expression:
         expr = self._comparison()
         while self._match(TokenType.EQUAL_EQUAL, TokenType.BANG_EQUAL):
-            operator = self._previous().lexeme
-            self._require_expression_after_operator(self._previous())
+            operator = self._previous()
+            self._require_expression_after_operator(operator)
             right = self._comparison()
-            expr = ast.BinaryExpression(expr, operator, right)
+            expr = ast.BinaryExpression(expr, operator.lexeme, right, operator.line, operator.column)
         return expr
 
     def _comparison(self) -> ast.Expression:
         expr = self._term()
         while self._match(TokenType.LESS, TokenType.LESS_EQUAL, TokenType.GREATER, TokenType.GREATER_EQUAL):
-            operator = self._previous().lexeme
-            self._require_expression_after_operator(self._previous())
+            operator = self._previous()
+            self._require_expression_after_operator(operator)
             right = self._term()
-            expr = ast.BinaryExpression(expr, operator, right)
+            expr = ast.BinaryExpression(expr, operator.lexeme, right, operator.line, operator.column)
         return expr
 
     def _term(self) -> ast.Expression:
         expr = self._factor()
         while self._match(TokenType.PLUS, TokenType.MINUS):
-            operator = self._previous().lexeme
-            self._require_expression_after_operator(self._previous())
+            operator = self._previous()
+            self._require_expression_after_operator(operator)
             right = self._factor()
-            expr = ast.BinaryExpression(expr, operator, right)
+            expr = ast.BinaryExpression(expr, operator.lexeme, right, operator.line, operator.column)
         return expr
 
     def _factor(self) -> ast.Expression:
         expr = self._power()
-        while self._match(TokenType.STAR, TokenType.SLASH):
-            operator = self._previous().lexeme
-            self._require_expression_after_operator(self._previous())
+        while self._match(TokenType.STAR, TokenType.SLASH, TokenType.BACKSLASH, TokenType.PERCENT):
+            operator = self._previous()
+            self._require_expression_after_operator(operator)
             right = self._power()
-            expr = ast.BinaryExpression(expr, operator, right)
+            expr = ast.BinaryExpression(expr, operator.lexeme, right, operator.line, operator.column)
         return expr
 
     def _power(self) -> ast.Expression:
         expr = self._unary()
         if self._match(TokenType.CARET):
-            operator = self._previous().lexeme
-            self._require_expression_after_operator(self._previous())
+            operator = self._previous()
+            self._require_expression_after_operator(operator)
             right = self._power()
-            expr = ast.BinaryExpression(expr, operator, right)
+            expr = ast.BinaryExpression(expr, operator.lexeme, right, operator.line, operator.column)
         return expr
 
     def _unary(self) -> ast.Expression:
@@ -285,6 +291,14 @@ class Parser:
         if self._check(token_type):
             return self._advance()
         raise self._error(self._peek(), message)
+
+    def _consume_optional_import_terminator(self) -> None:
+        import_end = self._previous()
+        if self._match(TokenType.SEMICOLON):
+            return
+        if self._is_at_end() or self._peek().line > import_end.line:
+            return
+        raise self._error(self._peek(), "Expected ';' or newline after import statement.")
 
     def _parse_type_annotation(self, message: str) -> AetherType:
         token = self._consume_type(message)

@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from . import ast
 from .errors import AetherRuntimeError, AetherTypeError
+from .lexer import lex
+from .parser import Parser
 from .scope import Scope
 from .symbols import FunctionSymbol, VariableSymbol
 from .stdlib import infer_builtin_type, is_builtin, validate_builtin_arity
+from .stdlib.registry import builtin_aliases_for_import
 from .types import (
     AetherType,
     ArrayType,
@@ -23,6 +28,8 @@ from .types import (
 
 
 UNKNOWN_TYPE: AetherType | None = None
+LINEAR_ALGEBRA_MODULE = "Math.LinearAlgebra"
+LINEAR_ALGEBRA_SOLVE = "Math.LinearAlgebra.solve"
 
 
 class TypeChecker:
@@ -33,6 +40,8 @@ class TypeChecker:
         self.expression_function_call_stack: set[str] = set()
         self.current_return_type: AetherType | None = None
         self.loop_variable_stack: list[tuple[str, Scope[VariableSymbol]]] = []
+        self.imported_modules: set[str] = set()
+        self.builtin_aliases: dict[str, str] = {}
 
     def check(self, program: ast.Program) -> None:
         self._check_statements(program.statements, self.global_scope)
@@ -73,10 +82,38 @@ class TypeChecker:
         if isinstance(statement, ast.ExpressionFunctionDeclaration):
             self._declare_expression_function(statement)
             return
+        if isinstance(statement, ast.ImportStatement):
+            self._check_import(statement.module_name)
+            return
         if isinstance(statement, ast.ReturnStatement):
             self._check_return(statement, scope)
             return
         raise AetherRuntimeError(f"Unsupported statement {statement!r}.")
+
+    def _check_import(self, module_name: str) -> None:
+        if module_name in self.imported_modules:
+            return
+        if module_name == "Math" or module_name.startswith("Math."):
+            self.builtin_aliases.update(builtin_aliases_for_import(module_name))
+            self.imported_modules.add(module_name)
+            return
+        module_path = Path(module_name.replace(".", "/"))
+        if module_path.suffix == "":
+            module_path = module_path.with_suffix(".ae")
+        if not module_path.is_absolute():
+            module_path = Path.cwd() / module_path
+        if not module_path.is_file():
+            raise AetherTypeError(f"Module '{module_name}' not found.")
+        source = module_path.read_text(encoding="utf-8")
+        tokens = lex(source)
+        program = Parser(tokens).parse()
+        module_checker = TypeChecker()
+        module_checker._check_statements(program.statements, module_checker.global_scope)
+        for name, symbol in module_checker.global_scope.symbols.items():
+            self.global_scope.define_local(name, symbol)
+        self.functions.update(module_checker.functions)
+        self.expression_functions.update(module_checker.expression_functions)
+        self.imported_modules.add(module_name)
 
     def _declare_variable(self, statement: ast.VarDeclaration, scope: Scope[VariableSymbol]) -> None:
         if (
@@ -268,6 +305,10 @@ class TypeChecker:
             if left_type != "boolean" or right_type != "boolean":
                 raise AetherTypeError(f"Operator '{operator}' requires boolean operands.")
             return "boolean"
+        if operator == "%":
+            if left_type not in NUMERIC_TYPES or right_type not in NUMERIC_TYPES:
+                raise AetherTypeError("Operator '%' requires numeric operands.")
+            return promote_numeric(left_type, right_type, operator)
         if operator in {"+", "-", "*", "/", "^"}:
             if operator == "+" and left_type == "string" and right_type == "string":
                 return "string"
@@ -284,6 +325,14 @@ class TypeChecker:
             if is_array_type(left_type) or is_array_type(right_type) or is_matrix_type(left_type) or is_matrix_type(right_type):
                 raise AetherTypeError(f"Operator '{operator}' requires numeric operands.")
             return promote_numeric(left_type, right_type, operator)
+        if operator == "\\":
+            if LINEAR_ALGEBRA_MODULE not in self.imported_modules:
+                raise AetherTypeError(
+                    "Operator '\\' requires import Math.LinearAlgebra.",
+                    line=expression.line,
+                    column=expression.column,
+                )
+            return infer_builtin_type(LINEAR_ALGEBRA_SOLVE, [left_type, right_type])
         if operator in {"==", "!="}:
             if not _types_comparable_for_equality(left_type, right_type):
                 raise AetherTypeError(
@@ -356,10 +405,11 @@ class TypeChecker:
         return array_element_type(array_type)
 
     def _call_type(self, expression: ast.CallExpression, scope: Scope[VariableSymbol]) -> AetherType | None:
-        if is_builtin(expression.callee):
-            validate_builtin_arity(expression.callee, len(expression.arguments))
+        builtin_name = self.builtin_aliases.get(expression.callee, expression.callee)
+        if is_builtin(builtin_name):
+            validate_builtin_arity(builtin_name, len(expression.arguments))
             argument_types = [self._expression_type(argument, scope) for argument in expression.arguments]
-            return infer_builtin_type(expression.callee, argument_types)
+            return infer_builtin_type(builtin_name, argument_types)
         function = self.functions.get(expression.callee)
         if function is None:
             raise AetherTypeError(f"Undefined function '{expression.callee}'.")

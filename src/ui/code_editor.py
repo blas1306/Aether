@@ -50,10 +50,11 @@ KEYWORD_PATTERN = re.compile(
     re.IGNORECASE,
 )
 LOGICAL_OPERATOR_PATTERN = re.compile(r"&&|\|\|")
-COMMENT_PATTERN = re.compile(r"(?<!\\)%.*|#.*")
+SCRIPT_COMMENT_PATTERN = re.compile(r"#.*|//.*")
+MTEX_TEXT_COMMENT_PATTERN = re.compile(r"(?<!\\)%.*")
 STRING_PATTERN = re.compile(r"(\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*')")
 NUMBER_PATTERN = re.compile(r"\b\d+(?:\.\d+)?\b")
-PUNCT_PATTERN = re.compile(r"[=+\-*/%^<>{}\[\](),.;:|]")
+PUNCT_PATTERN = re.compile(r"[=+\-*/%\\^<>{}\[\](),.;:|]")
 INDENTATION = " " * 4
 EDITOR_BG = "#353535"
 TEXT_FG = "#ffffff"
@@ -139,16 +140,16 @@ class MathSyntaxHighlighter(QtGui.QSyntaxHighlighter):  # type: ignore[misc]
         return spans
 
     def highlightBlock(self, text: str) -> None:  # noqa: N802 - API Qt
+        keyword_spans = self._keyword_spans(text)
+        comment_spans = self._comment_spans(text, keyword_spans)
         for match in STRING_PATTERN.finditer(text):
             self.setFormat(match.start(), match.end() - match.start(), self._formats["string"])
-        for match in COMMENT_PATTERN.finditer(text):
-            self.setFormat(match.start(), match.end() - match.start(), self._formats["comment"])
-        keyword_spans = self._keyword_spans(text)
+        for start, end in comment_spans:
+            self.setFormat(start, end - start, self._formats["comment"])
         skip = []
         for match in STRING_PATTERN.finditer(text):
             skip.append((match.start(), match.end()))
-        for match in COMMENT_PATTERN.finditer(text):
-            skip.append((match.start(), match.end()))
+        skip.extend(comment_spans)
 
         def _skipped(pos: int) -> bool:
             return any(a <= pos < b for a, b in skip)
@@ -205,6 +206,21 @@ class MathSyntaxHighlighter(QtGui.QSyntaxHighlighter):  # type: ignore[misc]
                     continue
                 self.setFormat(name_start, len(name), self._formats["import_name"])
                 search_pos = idx + len(name)
+
+    def _comment_spans(self, text: str, code_spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
+        def _in_code(pos: int) -> bool:
+            return any(start <= pos < end for start, end in code_spans)
+
+        spans: list[tuple[int, int]] = []
+        for match in SCRIPT_COMMENT_PATTERN.finditer(text):
+            if self._document_kind == "mtex_document" and not _in_code(match.start()):
+                continue
+            spans.append((match.start(), match.end()))
+        if self._document_kind == "mtex_document":
+            for match in MTEX_TEXT_COMMENT_PATTERN.finditer(text):
+                if not _in_code(match.start()):
+                    spans.append((match.start(), match.end()))
+        return spans
 
 
 class LineNumberArea(QtWidgets.QWidget):  # type: ignore[misc]

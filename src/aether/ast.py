@@ -62,6 +62,11 @@ class ExpressionStatement:
 
 
 @dataclass(frozen=True)
+class ImportStatement:
+    module_name: str
+
+
+@dataclass(frozen=True)
 class IfStatement:
     condition: Expression
     body: list[Statement]
@@ -125,6 +130,8 @@ class BinaryExpression:
     left: Expression
     operator: str
     right: Expression
+    line: int = 1
+    column: int = 1
 
 
 @dataclass(frozen=True)

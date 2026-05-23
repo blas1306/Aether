@@ -45,6 +45,18 @@ def builtin_names() -> tuple[str, ...]:
     return tuple(sorted(_definitions()))
 
 
+def builtin_aliases_for_import(module_name: str) -> dict[str, str]:
+    prefix = module_name + "."
+    aliases: dict[str, str] = {}
+    for builtin_name in _definitions():
+        if not builtin_name.startswith(prefix):
+            continue
+        alias = builtin_name[len(prefix) :]
+        if "." not in alias:
+            aliases[alias] = builtin_name
+    return aliases
+
+
 def call_builtin(name: str, args: list[AetherValue], write_output: OutputWriter) -> AetherValue:
     builtin = get_builtin(name, write_output)
     if builtin is None:
