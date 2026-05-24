@@ -300,26 +300,28 @@ def matrix_values(value):
     return [[element.value for element in row.value] for row in value.value]
 
 
-def array_values(value):
-    return [element.value for element in value.value]
-
-
 def test_matrix_space_separated_literal():
     result = run_aether("x = [1 2 3];")
     assert result.env["x"].type_name == MatrixType("int", 1, 3)
     assert matrix_values(result.env["x"]) == [[1, 2, 3]]
 
 
-def test_matrix_comma_separated_row_literal():
+def test_comma_separated_literal_is_vector():
     result = run_aether("x = [1, 2, 3];")
-    assert result.env["x"].type_name == MatrixType("int", 1, 3)
-    assert matrix_values(result.env["x"]) == [[1, 2, 3]]
-
-
-def test_matrix_semicolon_column_literal():
-    result = run_aether("x = [1; 2; 3];")
-    assert result.env["x"].type_name == MatrixType("int", 3, 1)
+    assert result.env["x"].type_name == MatrixType("int", 3, 1, vector=True)
     assert matrix_values(result.env["x"]) == [[1], [2], [3]]
+
+
+def test_semicolon_separated_literal_is_vector():
+    result = run_aether("x = [1; 2; 3];")
+    assert result.env["x"].type_name == MatrixType("int", 3, 1, vector=True)
+    assert matrix_values(result.env["x"]) == [[1], [2], [3]]
+
+
+def test_single_element_bracket_literal_is_vector():
+    result = run_aether("x = [1];")
+    assert result.env["x"].type_name == MatrixType("int", 1, 1, vector=True)
+    assert matrix_values(result.env["x"]) == [[1]]
 
 
 def test_matrix_2x2_literal():
@@ -362,7 +364,8 @@ def test_explicit_matrix_int_rejects_double():
 
 def test_explicit_vector_row():
     result = run_aether("Vector<int> row = [1 2 3];")
-    assert result.env["row"].type_name == MatrixType("int", 1, 3, vector=True)
+    assert result.env["row"].type_name == MatrixType("int", 3, 1, vector=True)
+    assert matrix_values(result.env["row"]) == [[1], [2], [3]]
 
 
 def test_explicit_vector_column():
@@ -375,32 +378,9 @@ def test_explicit_vector_rejects_2d_matrix():
         run_aether("Vector<int> bad = [1 2; 3 4];")
 
 
-def test_array_constructor_ints():
-    result = run_aether("a = array(1, 2, 3);")
-    assert result.env["a"].type_name == ArrayType("int")
-    assert array_values(result.env["a"]) == [1, 2, 3]
-
-
-def test_array_constructor_strings():
-    result = run_aether('a = array("a", "b");')
-    assert result.env["a"].type_name == ArrayType("string")
-    assert array_values(result.env["a"]) == ["a", "b"]
-
-
-def test_array_constructor_promotes_numeric():
-    result = run_aether("a = array(1, 2.5);")
-    assert result.env["a"].type_name == ArrayType("double")
-    assert array_values(result.env["a"]) == [1.0, 2.5]
-
-
-def test_array_constructor_rejects_mixed_types():
-    with pytest.raises(AetherTypeError):
-        run_aether('a = array(1, "x");')
-
-
-def test_array_constructor_empty_is_error():
-    with pytest.raises(AetherTypeError):
-        run_aether("a = array();")
+def test_array_constructor_is_removed():
+    with pytest.raises(AetherTypeError, match="Undefined function 'array'"):
+        run_aether("a = array(1, 2, 3);")
 
 
 def test_bracket_literal_is_matrix_not_array():
@@ -408,9 +388,9 @@ def test_bracket_literal_is_matrix_not_array():
     assert isinstance(result.env["x"].type_name, MatrixType)
 
 
-def test_array_constructor_is_array():
-    result = run_aether("x = array(1, 2, 3);")
-    assert isinstance(result.env["x"].type_name, ArrayType)
+def test_array_constructor_empty_is_removed():
+    with pytest.raises(AetherTypeError, match="Undefined function 'array'"):
+        run_aether("x = array();")
 
 
 def test_empty_array_with_explicit_type_is_valid():
@@ -423,10 +403,10 @@ def test_empty_array_with_explicit_type_is_valid():
     assert result.env["x"].value == []
 
 
-def test_length_array_returns_int():
-    result = run_aether("x = array(1, 2, 3); n = length(x);")
+def test_length_empty_array_returns_int():
+    result = run_aether("int[] xs = []; n = length(xs);")
     assert result.env["n"].type_name == "int"
-    assert result.env["n"].value == 3
+    assert result.env["n"].value == 0
 
 
 def test_length_matrix_is_error():
@@ -440,19 +420,29 @@ def test_matrix_rows_cols_builtin():
 
 
 def test_matrix_index_reads_zero_based():
-    result = run_aether("A = [1 2; 3 4]; println(A[0][1]); println(A[1][0]);")
+    result = run_aether("A = [1 2; 3 4]; println(A[0, 1]); println(A[1, 0]);")
     assert result.output == "2\n3\n"
 
 
+def test_vector_index_reads_zero_based_element():
+    result = run_aether("v = [10, 20, 30]; println(v[0]); println(v[2]);")
+    assert result.output == "10\n30\n"
+
+
 def test_matrix_index_assignment_updates_element():
-    result = run_aether("A = [1 2; 3 4]; A[1][0] = 99; println(A);")
-    assert result.output == "[1 2;\n 99 4]\n"
+    result = run_aether("A = [1 2; 3 4]; A[1, 0] = 99; println(A);")
+    assert result.output == "[1 2; 99 4]\n"
+
+
+def test_vector_index_assignment_updates_element():
+    result = run_aether("v = [10, 20, 30]; v[1] = 99; println(v);")
+    assert result.output == "[10, 99, 30]\n"
 
 
 def test_matrix_index_assignment_respects_element_type():
     with pytest.raises(AetherTypeError):
-        run_aether("A = [1 2; 3 4]; A[0][0] = 2.5;")
-    result = run_aether("A = [1 2.5; 3 4]; A[0][0] = 2.5; println(A[0][0]);")
+        run_aether("A = [1 2; 3 4]; A[0, 0] = 2.5;")
+    result = run_aether("A = [1 2.5; 3 4]; A[0, 0] = 2.5; println(A[0, 0]);")
     assert result.output == "2.5\n"
 
 
@@ -463,12 +453,12 @@ def test_print_row_vector_pretty():
 
 def test_print_column_vector_pretty():
     result = run_aether("println([1; 2; 3]);")
-    assert result.output == "[1;\n 2;\n 3]\n"
+    assert result.output == "[1, 2, 3]\n"
 
 
 def test_print_matrix_pretty():
     result = run_aether("println([1 2; 3 4]);")
-    assert result.output == "[1 2;\n 3 4]\n"
+    assert result.output == "[1 2; 3 4]\n"
 
 
 def test_print_one_by_one_matrix_as_scalar():
@@ -478,32 +468,27 @@ def test_print_one_by_one_matrix_as_scalar():
 
 def test_print_double_matrix_pretty():
     result = run_aether("println([1.0 2.5; 3 4]);")
-    assert result.output == "[1.0 2.5;\n 3.0 4.0]\n"
+    assert result.output == "[1.0 2.5; 3.0 4.0]\n"
 
 
 def test_print_string_matrix_pretty_if_supported():
     result = run_aether('println(["a" "b"; "c" "d"]);')
-    assert result.output == '["a" "b";\n "c" "d"]\n'
+    assert result.output == '["a" "b"; "c" "d"]\n'
 
 
 def test_print_boolean_matrix_pretty_if_supported():
     result = run_aether("println([true false; false true]);")
-    assert result.output == "[true false;\n false true]\n"
-
-
-def test_print_array_distinct_from_matrix():
-    result = run_aether("println(array(1, 2, 3));")
-    assert result.output == "array(1, 2, 3)\n"
+    assert result.output == "[true false; false true]\n"
 
 
 def test_matrix_addition_still_works():
     result = run_aether("println([1 2; 3 4] + [5 6; 7 8]);")
-    assert result.output == "[6 8;\n 10 12]\n"
+    assert result.output == "[6 8; 10 12]\n"
 
 
 def test_matrix_scalar_multiplication_still_works():
     result = run_aether("println([1 2; 3 4] * 2); println(2 * [1 2; 3 4]);")
-    assert result.output == "[2 4;\n 6 8]\n[2 4;\n 6 8]\n"
+    assert result.output == "[2 4; 6 8]\n[2 4; 6 8]\n"
 
 
 def test_matrix_vector_like_addition_same_shape():
@@ -523,16 +508,16 @@ def test_matrix_multiplication_not_supported_yet():
 
 def test_matrix_negative_index_runtime_error():
     with pytest.raises(AetherRuntimeError):
-        run_aether("A = [1 2; 3 4]; println(A[-1][0]);")
+        run_aether("A = [1 2; 3 4]; println(A[-1, 0]);")
     with pytest.raises(AetherRuntimeError):
-        run_aether("A = [1 2; 3 4]; println(A[0][-1]);")
+        run_aether("A = [1 2; 3 4]; println(A[0, -1]);")
 
 
 def test_matrix_out_of_bounds_runtime_error():
     with pytest.raises(AetherRuntimeError):
-        run_aether("A = [1 2; 3 4]; println(A[2][0]);")
+        run_aether("A = [1 2; 3 4]; println(A[2, 0]);")
     with pytest.raises(AetherRuntimeError):
-        run_aether("A = [1 2; 3 4]; println(A[0][2]);")
+        run_aether("A = [1 2; 3 4]; println(A[0, 2]);")
 
 
 def test_matrix_cannot_be_if_condition():
@@ -540,9 +525,14 @@ def test_matrix_cannot_be_if_condition():
         run_aether('if [true] { println("bad"); }')
 
 
-def test_length_accepts_array():
-    result = run_aether("a = array(1, 2, 3); println(length(a));")
-    assert result.output == "3\n"
+def test_matrix_single_index_is_rejected():
+    with pytest.raises(AetherTypeError, match="A\\[i, j\\]"):
+        run_aether("A = [1 2 3; 4 5 6]; println(A[0]);")
+
+
+def test_length_accepts_explicit_array():
+    result = run_aether("int[] xs = []; println(length(xs));")
+    assert result.output == "0\n"
 
 
 def test_length_rejects_row_vector():
@@ -550,9 +540,9 @@ def test_length_rejects_row_vector():
         run_aether("println(length([1 2 3]));")
 
 
-def test_length_rejects_column_vector():
-    with pytest.raises(AetherTypeError):
-        run_aether("println(length([1; 2; 3]));")
+def test_length_accepts_vector_literal():
+    result = run_aether("println(length([1; 2; 3])); println(length([1, 2, 3]));")
+    assert result.output == "3\n3\n"
 
 
 def test_length_rejects_matrix():
@@ -577,52 +567,52 @@ def test_rows_cols_matrix():
 
 def test_rows_rejects_array():
     with pytest.raises(AetherTypeError):
-        run_aether("a = array(1, 2, 3); rows(a);")
+        run_aether("int[] xs = []; rows(xs);")
 
 
 def test_cols_rejects_array():
     with pytest.raises(AetherTypeError):
-        run_aether("a = array(1, 2, 3); cols(a);")
+        run_aether("int[] xs = []; cols(xs);")
 
 
 def test_array_plus_matrix_error():
     with pytest.raises(AetherTypeError):
-        run_aether("array(1, 2, 3) + [1 2 3];")
+        run_aether("int[] xs = []; xs + [1 2];")
 
 
 def test_matrix_plus_array_error():
     with pytest.raises(AetherTypeError):
-        run_aether("[1 2 3] + array(1, 2, 3);")
+        run_aether("int[] xs = []; [1 2] + xs;")
 
 
 def test_array_minus_matrix_error():
     with pytest.raises(AetherTypeError):
-        run_aether("array(1, 2, 3) - [1 2 3];")
+        run_aether("int[] xs = []; xs - [1 2];")
 
 
 def test_matrix_minus_array_error():
     with pytest.raises(AetherTypeError):
-        run_aether("[1 2 3] - array(1, 2, 3);")
+        run_aether("int[] xs = []; [1 2] - xs;")
 
 
 def test_array_times_matrix_error():
     with pytest.raises(AetherTypeError):
-        run_aether("array(1, 2, 3) * [1 2 3];")
+        run_aether("int[] xs = []; xs * [1 2];")
 
 
 def test_matrix_times_array_error():
     with pytest.raises(AetherTypeError):
-        run_aether("[1 2 3] * array(1, 2, 3);")
+        run_aether("int[] xs = []; [1 2] * xs;")
 
 
 def test_array_eq_matrix_error():
     with pytest.raises(AetherTypeError):
-        run_aether("array(1, 2, 3) == [1 2 3];")
+        run_aether("int[] xs = []; xs == [1 2];")
 
 
 def test_matrix_eq_array_error():
     with pytest.raises(AetherTypeError):
-        run_aether("[1 2 3] == array(1, 2, 3);")
+        run_aether("int[] xs = []; [1 2] == xs;")
 
 
 def test_explicit_matrix_int_valid():
@@ -649,8 +639,8 @@ def test_explicit_matrix_string_rejects_ints():
 
 def test_explicit_vector_row_valid():
     result = run_aether("Vector<int> row = [1 2 3];")
-    assert result.env["row"].type_name == MatrixType("int", 1, 3, vector=True)
-    assert matrix_values(result.env["row"]) == [[1, 2, 3]]
+    assert result.env["row"].type_name == MatrixType("int", 3, 1, vector=True)
+    assert matrix_values(result.env["row"]) == [[1], [2], [3]]
 
 
 def test_explicit_vector_column_valid():
@@ -661,8 +651,8 @@ def test_explicit_vector_column_valid():
 
 def test_explicit_vector_double_valid():
     result = run_aether("Vector<double> v = [1 2.5 3];")
-    assert result.env["v"].type_name == MatrixType("double", 1, 3, vector=True)
-    assert matrix_values(result.env["v"]) == [[1.0, 2.5, 3.0]]
+    assert result.env["v"].type_name == MatrixType("double", 3, 1, vector=True)
+    assert matrix_values(result.env["v"]) == [[1.0], [2.5], [3.0]]
 
 
 def test_explicit_vector_rejects_2x2_matrix():
@@ -675,36 +665,20 @@ def test_explicit_vector_int_rejects_double():
         run_aether("Vector<int> v = [1 2.5 3];")
 
 
-def test_array_constructor_rejects_vector_elements():
-    with pytest.raises(AetherTypeError):
-        run_aether("array([1 2 3], [4 5 6]);")
-
-
-def test_array_constructor_rejects_matrix_element():
-    with pytest.raises(AetherTypeError):
-        run_aether("array([1 2; 3 4]);")
-
-
 def test_matrix_vector_array_printing_stable():
     result = run_aether(
         """
 println([1 2 3]);
-println([1; 2; 3]);
-println([1 2; 3 4]);
-println(array(1, 2, 3));
-"""
+    println([1; 2; 3]);
+    println([1 2; 3 4]);
+    """
     )
-    assert result.output == "[1 2 3]\n[1;\n 2;\n 3]\n[1 2;\n 3 4]\narray(1, 2, 3)\n"
+    assert result.output == "[1 2 3]\n[1, 2, 3]\n[1 2; 3 4]\n"
 
 
-def test_array_index_reads_zero_based():
-    result = run_aether("println(array(1, 2, 3)[0]);")
-    assert result.output == "1\n"
-
-
-def test_matrix_row_extraction_is_transitional_array_value():
-    result = run_aether("A = [1 2; 3 4]; println(A[0]);")
-    assert result.output == "array(1, 2)\n"
+def test_matrix_row_extraction_uses_two_dimensional_indexing_now():
+    with pytest.raises(AetherTypeError, match="A\\[i, j\\]"):
+        run_aether("A = [1 2; 3 4]; println(A[0]);")
 
 
 def test_inner_row_vectors():
@@ -739,7 +713,7 @@ def test_inner_rejects_matrix():
 
 def test_inner_rejects_array():
     with pytest.raises(AetherTypeError):
-        run_aether("Math.LinearAlgebra.inner(array(1, 2, 3), array(4, 5, 6));")
+        run_aether("int[] xs = []; Math.LinearAlgebra.inner(xs, xs);")
 
 
 def test_inner_rejects_length_mismatch():
@@ -778,7 +752,7 @@ def test_norm_rejects_matrix():
 
 def test_norm_rejects_array():
     with pytest.raises(AetherTypeError):
-        run_aether("Math.LinearAlgebra.norm(array(1, 2, 3));")
+        run_aether("int[] xs = []; Math.LinearAlgebra.norm(xs);")
 
 
 def test_norm_rejects_non_numeric():
@@ -790,13 +764,13 @@ def test_transpose_row_vector():
     result = run_aether("x = Math.LinearAlgebra.transpose([1 2 3]); println(x);")
     assert result.env["x"].type_name == MatrixType("int", 3, 1)
     assert matrix_values(result.env["x"]) == [[1], [2], [3]]
-    assert result.output == "[1;\n 2;\n 3]\n"
+    assert result.output == "[1; 2; 3]\n"
 
 
 def test_print_transpose_pretty():
     result = run_aether("println(Math.LinearAlgebra.transpose([1 2; 3 4]));")
 
-    assert result.output == "[1 3;\n 2 4]\n"
+    assert result.output == "[1 3; 2 4]\n"
 
 
 def test_transpose_column_vector():
@@ -810,7 +784,7 @@ def test_transpose_matrix():
     result = run_aether("x = Math.LinearAlgebra.transpose([1 2; 3 4]); println(x);")
     assert result.env["x"].type_name == MatrixType("int", 2, 2)
     assert matrix_values(result.env["x"]) == [[1, 3], [2, 4]]
-    assert result.output == "[1 3;\n 2 4]\n"
+    assert result.output == "[1 3; 2 4]\n"
 
 
 def test_transpose_does_not_mutate_original():
@@ -818,19 +792,19 @@ def test_transpose_does_not_mutate_original():
         """
 A = [1 2; 3 4];
 B = Math.LinearAlgebra.transpose(A);
-B[0][1] = 99;
+B[0, 1] = 99;
 println(A);
 println(B);
 """
     )
     assert matrix_values(result.env["A"]) == [[1, 2], [3, 4]]
     assert matrix_values(result.env["B"]) == [[1, 99], [2, 4]]
-    assert result.output == "[1 2;\n 3 4]\n[1 99;\n 2 4]\n"
+    assert result.output == "[1 2; 3 4]\n[1 99; 2 4]\n"
 
 
 def test_transpose_rejects_array():
     with pytest.raises(AetherTypeError):
-        run_aether("Math.LinearAlgebra.transpose(array(1, 2, 3));")
+        run_aether("int[] xs = []; Math.LinearAlgebra.transpose(xs);")
 
 
 def test_transpose_rejects_scalar():
@@ -856,7 +830,7 @@ println(C);
     )
     assert result.env["C"].type_name == MatrixType("int", 2, 2)
     assert matrix_values(result.env["C"]) == [[19, 22], [43, 50]]
-    assert result.output == "[19 22;\n 43 50]\n"
+    assert result.output == "[19 22; 43 50]\n"
 
 
 def test_matmul_row_column():
@@ -876,7 +850,7 @@ println(C);
 def test_print_matmul_pretty():
     result = run_aether("println(Math.LinearAlgebra.matmul([1 2; 3 4], [5; 6]));")
 
-    assert result.output == "[17;\n 39]\n"
+    assert result.output == "[17; 39]\n"
 
 
 def test_matmul_column_row():
@@ -890,7 +864,7 @@ println(C);
     )
     assert result.env["C"].type_name == MatrixType("int", 3, 3)
     assert matrix_values(result.env["C"]) == [[4, 5, 6], [8, 10, 12], [12, 15, 18]]
-    assert result.output == "[4 5 6;\n 8 10 12;\n 12 15 18]\n"
+    assert result.output == "[4 5 6; 8 10 12; 12 15 18]\n"
 
 
 def test_matmul_matrix_column_vector():
@@ -904,7 +878,7 @@ println(C);
     )
     assert result.env["C"].type_name == MatrixType("int", 2, 1)
     assert matrix_values(result.env["C"]) == [[17], [39]]
-    assert result.output == "[17;\n 39]\n"
+    assert result.output == "[17; 39]\n"
 
 
 def test_matmul_row_vector_matrix():
@@ -933,7 +907,7 @@ def test_matmul_does_not_mutate_operands():
 A = [1 2; 3 4];
 B = [5 6; 7 8];
 C = Math.LinearAlgebra.matmul(A, B);
-C[0][0] = 99;
+C[0, 0] = 99;
 println(A);
 println(B);
 println(C);
@@ -942,7 +916,7 @@ println(C);
     assert matrix_values(result.env["A"]) == [[1, 2], [3, 4]]
     assert matrix_values(result.env["B"]) == [[5, 6], [7, 8]]
     assert matrix_values(result.env["C"]) == [[99, 22], [43, 50]]
-    assert result.output == "[1 2;\n 3 4]\n[5 6;\n 7 8]\n[99 22;\n 43 50]\n"
+    assert result.output == "[1 2; 3 4]\n[5 6; 7 8]\n[99 22; 43 50]\n"
 
 
 def test_matmul_rejects_incompatible_shapes():
@@ -952,7 +926,7 @@ def test_matmul_rejects_incompatible_shapes():
 
 def test_matmul_rejects_array():
     with pytest.raises(AetherTypeError):
-        run_aether("Math.LinearAlgebra.matmul(array(1, 2), array(3, 4));")
+        run_aether("int[] xs = []; Math.LinearAlgebra.matmul(xs, xs);")
 
 
 def test_matmul_rejects_non_numeric():
@@ -976,6 +950,52 @@ println(cols(C));
     assert result.env["C"].type_name == MatrixType("int", 2, 2)
     assert matrix_values(result.env["C"]) == [[58, 64], [139, 154]]
     assert result.output == "2\n2\n"
+
+
+def test_linear_algebra_zeros_matrix():
+    result = run_aether("Z = Math.LinearAlgebra.zeros(2, 3); println(Z);")
+
+    assert result.env["Z"].type_name == MatrixType("double", 2, 3)
+    assert matrix_values(result.env["Z"]) == [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]
+    assert result.output == "[0.0 0.0 0.0; 0.0 0.0 0.0]\n"
+
+
+def test_linear_algebra_ones_matrix():
+    result = run_aether("O = Math.LinearAlgebra.ones(3, 2); println(O);")
+
+    assert result.env["O"].type_name == MatrixType("double", 3, 2)
+    assert matrix_values(result.env["O"]) == [[1.0, 1.0], [1.0, 1.0], [1.0, 1.0]]
+    assert result.output == "[1.0 1.0; 1.0 1.0; 1.0 1.0]\n"
+
+
+def test_linear_algebra_zeros_and_ones_aliases_after_import():
+    result = run_aether(
+        """
+import Math.LinearAlgebra
+Z = zeros(1, 2);
+O = ones(2, 1);
+println(Z);
+println(O);
+"""
+    )
+
+    assert result.env["Z"].type_name == MatrixType("double", 1, 2)
+    assert result.env["O"].type_name == MatrixType("double", 2, 1)
+    assert result.output == "[0.0 0.0]\n[1.0; 1.0]\n"
+
+
+def test_linear_algebra_matrix_factory_dimensions_must_be_int():
+    with pytest.raises(AetherTypeError, match="expects integer dimensions"):
+        run_aether("Math.LinearAlgebra.zeros(2.0, 3);")
+    with pytest.raises(AetherTypeError, match="expects integer dimensions"):
+        run_aether("Math.LinearAlgebra.ones(2, 3.0);")
+
+
+def test_linear_algebra_matrix_factory_dimensions_must_be_positive():
+    with pytest.raises(AetherTypeError, match="expects positive dimensions"):
+        run_aether("Math.LinearAlgebra.zeros(0, 3);")
+    with pytest.raises(AetherTypeError, match="expects positive dimensions"):
+        run_aether("Math.LinearAlgebra.ones(2, -1);")
 
 
 def test_math_linear_algebra_namespace_call():
@@ -1003,12 +1023,6 @@ def test_sqrt_rejects_non_numeric():
 def test_stdlib_core_println_still_works():
     result = run_aether('println("stdlib");')
     assert result.output == "stdlib\n"
-
-
-def test_stdlib_array_still_works():
-    result = run_aether("a = array(1, 2, 3);")
-    assert result.env["a"].type_name == ArrayType("int")
-    assert array_values(result.env["a"]) == [1, 2, 3]
 
 
 def test_stdlib_rows_cols_still_work():

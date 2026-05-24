@@ -4,15 +4,27 @@ f(x) = x^2 + 1;
 println("f(4) = ", f(4));
 
 boolean EsPrimo(int p) {
-    for i in 2:int(sqrt(p)) {
-        while (p % i == 0) {
+    if p <= 1 {
+        println("No existen numeros primos menores que 2");
+    }
+
+    if p == 2 {
+        return true;
+    }
+
+    if p > 2 {
+        for i in 2:int(sqrt(p)) {
+            while (p % i == 0) {
             return false;
+            }
         }
     }
 
     return true;
 }
 
+EsPrimo(1);
+println(EsPrimo(2));
 println(EsPrimo(5));
 println(EsPrimo(57));
 
@@ -27,3 +39,15 @@ x = A \ b;
 println("Filas de A: ", m);
 println("Columnas de A: ", n);
 println("x = ", x);
+
+double triple(double y) {
+    return 3*y;
+}
+
+println(triple(3));
+
+int numPrimos(int a) {
+    return int(a*ln(a));
+}
+
+println(numPrimos(4));

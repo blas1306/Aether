@@ -66,12 +66,6 @@ println(s);
     assert result.output == "18\n"
 
 
-def test_for_iterates_array_constructor() -> None:
-    result = run_aether("v = array(10, 20, 30); for x in v { println(x); }")
-
-    assert result.output == "10\n20\n30\n"
-
-
 def test_for_iterates_vector_literal() -> None:
     result = run_aether("v = [10, 20, 30]; for x in v { println(x); }")
 

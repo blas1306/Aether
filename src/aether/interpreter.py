@@ -2,14 +2,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import trunc
+import os
 from pathlib import Path
+
+from plot_backend import PlotBackend
 
 from . import ast
 from .errors import AetherRuntimeError, AetherTypeError
+from .formatting import format_value
 from .lexer import lex
 from .parser import Parser
 from .scope import Scope
-from .stdlib import BuiltinFunction, make_builtins
+from .stdlib import BuiltinFunction, is_builtin_namespace, make_builtins
 from .stdlib.registry import builtin_aliases_for_import
 from .types import (
     AetherType,
@@ -93,10 +97,17 @@ class _ReturnSignal(Exception):
 
 
 class Interpreter:
-    def __init__(self) -> None:
+    def __init__(self, *, plot_mode: str | None = None, plot_output_dir: str | Path | None = None) -> None:
         self.global_env = Environment()
         self.output_parts: list[str] = []
-        self.builtins: dict[str, BuiltinFunction] = make_builtins(self.output_parts.append)
+        self.plot_backend = PlotBackend(
+            plot_mode=_default_plot_mode(plot_mode),
+            output_dir=_default_plot_output_dir(plot_output_dir),
+        )
+        self.builtins: dict[str, BuiltinFunction] = make_builtins(
+            self.output_parts.append,
+            plot_backend=self.plot_backend,
+        )
         self.builtin_aliases: dict[str, str] = {}
         self.imported_modules: set[str] = set()
 
@@ -170,6 +181,9 @@ class Interpreter:
         if isinstance(statement, ast.IndexAssignment):
             self._assign_index(statement, env)
             return
+        if isinstance(statement, ast.MatrixIndexAssignment):
+            self._assign_matrix_index(statement, env)
+            return
         if isinstance(statement, ast.ExpressionStatement):
             self._evaluate(statement.expression, env)
             return
@@ -216,6 +230,8 @@ class Interpreter:
     def _evaluate(self, expression: ast.Expression, env: Environment) -> AetherValue:
         if isinstance(expression, ast.Literal):
             return AetherValue(expression.type_name, expression.value)
+        if isinstance(expression, ast.InterpolatedString):
+            return AetherValue("string", self._interpolate_string(expression, env))
         if isinstance(expression, ast.Identifier):
             return env.get(expression.name)
         if isinstance(expression, ast.UnaryExpression):
@@ -242,6 +258,8 @@ class Interpreter:
             return self._evaluate_matrix_literal(expression, env)
         if isinstance(expression, ast.IndexExpression):
             return self._read_index(expression.array, expression.index, env)
+        if isinstance(expression, ast.MatrixIndexExpression):
+            return self._read_matrix_index(expression.matrix, expression.row, expression.column, env)
         raise AetherRuntimeError(f"Unsupported expression {expression!r}.")
 
     def _evaluate_range(self, expression: ast.RangeExpression, env: Environment) -> AetherValue:
@@ -291,6 +309,14 @@ class Interpreter:
         for row in evaluated_rows:
             coerced_row = coerce_array_literal_value(AetherValue(ArrayType(element_type), row), row_type)
             rows.append(coerced_row)
+        if expression.vector:
+            vector_rows = [
+                AetherValue(row_type, [element])
+                for row in rows
+                for element in row.value
+            ]
+            value = AetherValue(MatrixType(element_type, len(vector_rows), 1, vector=True), vector_rows)
+            return coerce_matrix_value(value, target_type) if target_type is not None else value
         inferred_type = MatrixType(element_type, len(rows), row_lengths[0])
         value = AetherValue(inferred_type, rows)
         return coerce_matrix_value(value, target_type) if target_type is not None else value
@@ -299,21 +325,56 @@ class Interpreter:
         array_value = self._evaluate(array_expression, env)
         index_value = self._evaluate(index_expression, env)
         index = self._require_array_index(array_value, index_value)
+        if isinstance(array_value.type_name, MatrixType) and array_value.type_name.vector:
+            return _vector_elements(array_value)[index]
+        if isinstance(array_value.type_name, MatrixType):
+            raise AetherTypeError("Matrix values require two-dimensional indexing with A[i, j].")
         return array_value.value[index]
+
+    def _read_matrix_index(
+        self,
+        matrix_expression: ast.Expression,
+        row_expression: ast.Expression,
+        column_expression: ast.Expression,
+        env: Environment,
+    ) -> AetherValue:
+        matrix_value = self._evaluate(matrix_expression, env)
+        row_value = self._evaluate(row_expression, env)
+        column_value = self._evaluate(column_expression, env)
+        row, column = self._require_matrix_indices(matrix_value, row_value, column_value)
+        return matrix_value.value[row].value[column]
 
     def _assign_index(self, statement: ast.IndexAssignment, env: Environment) -> None:
         array_value = self._evaluate(statement.array, env)
         index_value = self._evaluate(statement.index, env)
         index = self._require_array_index(array_value, index_value)
         value = self._evaluate(statement.expression, env)
+        if isinstance(array_value.type_name, MatrixType) and not array_value.type_name.vector:
+            raise AetherTypeError("Matrix values require two-dimensional indexing with A[i, j].")
         element_type = (
-            matrix_row_type(array_value.type_name)
+            array_value.type_name.element_type
+            if isinstance(array_value.type_name, MatrixType) and array_value.type_name.vector
+            else matrix_row_type(array_value.type_name)
             if isinstance(array_value.type_name, MatrixType)
             else array_element_type(array_value.type_name)
         )
         if is_array_type(element_type):
             raise AetherTypeError("Assigning a whole matrix row is not supported yet.")
+        if isinstance(array_value.type_name, MatrixType) and array_value.type_name.vector:
+            _assign_vector_element(array_value, index, coerce_implicit(value, element_type))
+            return
         array_value.value[index] = coerce_implicit(value, element_type)
+
+    def _assign_matrix_index(self, statement: ast.MatrixIndexAssignment, env: Environment) -> None:
+        matrix_value = self._evaluate(statement.matrix, env)
+        row_value = self._evaluate(statement.row, env)
+        column_value = self._evaluate(statement.column_index, env)
+        row, column = self._require_matrix_indices(matrix_value, row_value, column_value)
+        value = self._evaluate(statement.expression, env)
+        matrix_type = matrix_value.type_name
+        if not isinstance(matrix_type, MatrixType):
+            raise AetherTypeError(f"Two-dimensional indexing expects a matrix, got '{type_to_string(matrix_type)}'.")
+        matrix_value.value[row].value[column] = coerce_implicit(value, matrix_type.element_type)
 
     def _require_array_index(self, array_value: AetherValue, index_value: AetherValue) -> int:
         if not is_indexable_type(array_value.type_name):
@@ -324,6 +385,29 @@ class Interpreter:
         if index < 0 or index >= len(array_value.value):
             raise AetherRuntimeError(f"Array index {index} out of bounds for length {len(array_value.value)}.")
         return index
+
+    def _require_matrix_indices(
+        self,
+        matrix_value: AetherValue,
+        row_value: AetherValue,
+        column_value: AetherValue,
+    ) -> tuple[int, int]:
+        if not isinstance(matrix_value.type_name, MatrixType):
+            raise AetherTypeError(f"Two-dimensional indexing expects a matrix, got '{type_to_string(matrix_value.type_name)}'.")
+        if row_value.type_name != "int" or column_value.type_name != "int":
+            raise AetherTypeError(
+                f"Matrix indices must be int, got '{type_to_string(row_value.type_name)}' "
+                f"and '{type_to_string(column_value.type_name)}'."
+            )
+        row = row_value.value
+        column = column_value.value
+        rows = len(matrix_value.value)
+        cols = len(matrix_value.value[0].value) if matrix_value.value else 0
+        if row < 0 or row >= rows:
+            raise AetherRuntimeError(f"Matrix row index {row} out of bounds for {rows} rows.")
+        if column < 0 or column >= cols:
+            raise AetherRuntimeError(f"Matrix column index {column} out of bounds for {cols} columns.")
+        return row, column
 
     def _call(self, callee: str, args: list[AetherValue], env: Environment) -> AetherValue:
         builtin_name = self.builtin_aliases.get(callee, callee)
@@ -438,7 +522,7 @@ class Interpreter:
     def _import_module(self, module_name: str) -> None:
         if module_name in self.imported_modules:
             return
-        if module_name == "Math" or module_name.startswith("Math."):
+        if is_builtin_namespace(module_name):
             self.builtin_aliases.update(builtin_aliases_for_import(module_name))
             self.imported_modules.add(module_name)
             return
@@ -458,6 +542,24 @@ class Interpreter:
     def _require_boolean(self, value: AetherValue, construct: str) -> None:
         if value.type_name != "boolean":
             raise AetherTypeError(f"The condition of '{construct}' must be boolean, got '{value.type_name}'.")
+
+    def _interpolate_string(self, expression: ast.InterpolatedString, env: Environment) -> str:
+        parts: list[str] = []
+        for part in expression.parts:
+            if isinstance(part, str):
+                parts.append(part)
+                continue
+            parts.append(format_value(self._evaluate(part, env)))
+        return "".join(parts)
+
+
+def _default_plot_mode(mode: str | None) -> str:
+    token = (mode or os.environ.get("AETHER_PLOT_MODE") or "interactive").strip().lower()
+    return "document" if token == "document" else "interactive"
+
+
+def _default_plot_output_dir(output_dir: str | Path | None) -> str | Path:
+    return output_dir or os.environ.get("AETHER_PLOT_DIR") or "."
 
 
 def _iterable_values(value: AetherValue) -> list[AetherValue] | AetherRange:
@@ -489,6 +591,14 @@ def _vector_elements(value: AetherValue) -> list[AetherValue]:
     if len(rows[0].value) == 1:
         return [row.value[0] for row in rows]
     raise AetherTypeError(f"Cannot iterate over value of type '{type_to_string(value.type_name)}'.")
+
+
+def _assign_vector_element(value: AetherValue, index: int, element: AetherValue) -> None:
+    rows = value.value
+    if len(rows) == 1:
+        rows[0].value[index] = element
+        return
+    rows[index].value[0] = element
 
 
 def _array_type_from_values(elements: list[AetherValue]) -> ArrayType:

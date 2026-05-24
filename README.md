@@ -24,6 +24,14 @@ println(x + y);
 
 Use `print(...)` or `println(...)` for visible output. Expression auto-printing is not part of Aether v0 yet.
 
+Strings support Aether interpolation with `$expr$`:
+
+```aether
+n = 4;
+println("n = $n$");
+println("Precio: \$10");
+```
+
 ## REPL
 
 The lower console is backed by a persistent `AetherSession`.
@@ -63,7 +71,7 @@ python3 src/main.py
 Run focused tests from the project virtual environment:
 
 ```bash
-.venv/bin/python -m pytest -q -s tests/aether tests/test_language_runtime.py
+.venv/bin/python -m pytest -q tests/aether tests/test_aether_lsp_server.py tests/test_repl_controller.py
 ```
 
 See [docs/aether/AETHER_V0_SPEC.md](docs/aether/AETHER_V0_SPEC.md) for the current language specification.

@@ -106,5 +106,5 @@ class AetherHighlightingLexer : LexerBase() {
 
     private fun Char.isIdentifierStart(): Boolean = this == '_' || isLetter()
     private fun Char.isIdentifierPart(): Boolean = isIdentifierStart() || isDigit()
-    private fun Char.isOperatorOrPunctuation(): Boolean = this in "()[]{}.,:;+-*/\\%=!<>|&"
+    private fun Char.isOperatorOrPunctuation(): Boolean = this in "()[]{}.,:;+-*/\\%^=!<>|&"
 }

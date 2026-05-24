@@ -253,6 +253,42 @@ class PlotBackend:
         self._apply_axes_state()
         return self._render(output_name=output_name)
 
+    def scatter(
+        self,
+        *args: Any,
+        output_name: str | None = None,
+    ) -> str | bytes | None:
+        if len(args) == 1:
+            y_vals = self._to_vector(args[0], "y")
+            x_vals = np.arange(1, len(y_vals) + 1, dtype=float)
+        elif len(args) == 2:
+            x_vals = self._to_vector(args[0], "x")
+            y_vals = self._to_vector(args[1], "y")
+        else:
+            raise PlotDataError("scatter accepts: scatter(y), scatter(x, y).")
+
+        if len(x_vals) != len(y_vals):
+            raise PlotDataError(f"x and y must have the same length (x={len(x_vals)}, y={len(y_vals)}).")
+        if len(x_vals) == 0:
+            raise PlotDataError("x and y cannot be empty.")
+
+        axes = self._ensure_axes()
+        if not self.hold:
+            axes.cla()
+
+        axes.scatter(x_vals, y_vals)
+        self._apply_axes_state()
+        return self._render(output_name=output_name)
+
+    def savefig(self, output_name: str) -> str:
+        if self.current_figure is None:
+            raise PlotBackendError("There is no active figure to save.")
+        target = self._build_savefig_path(output_name)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        self.current_figure.savefig(target, format="png", bbox_inches="tight")
+        self._last_document_target = target
+        return str(target)
+
     def _ensure_axes(self):
         if self.plot_mode == "interactive":
             _ensure_matplotlib()
@@ -400,6 +436,17 @@ class PlotBackend:
             return self.output_dir / name
         unique = f"plot_{uuid.uuid4().hex[:10]}.png"
         return self.output_dir / unique
+
+    def _build_savefig_path(self, output_name: str) -> Path:
+        name = str(output_name).strip()
+        if not name:
+            raise PlotBackendError("savefig(path): path cannot be empty.")
+        target = Path(name)
+        if target.suffix.lower() != ".png":
+            target = target.with_suffix(".png")
+        if not target.is_absolute():
+            target = self.output_dir / target
+        return target
 
     def _coerce_legend_text(self, value: Any) -> str:
         if isinstance(value, str):

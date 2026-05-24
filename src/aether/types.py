@@ -237,12 +237,21 @@ def coerce_matrix_value(value: AetherValue, target_type: MatrixType) -> AetherVa
     if cols is None:
         cols = len(value.value[0].value) if value.value else 0
     source_type = MatrixType(source_type.element_type, rows, cols, source_type.vector)
-    if not can_implicitly_convert(source_type, target_type):
+    check_type = _normalized_vector_type(source_type) if target_type.vector else source_type
+    if not can_implicitly_convert(check_type, target_type):
         raise AetherTypeError(
             f"Cannot implicitly convert '{type_to_string(value.type_name)}' to '{type_to_string(target_type)}'. "
             f"Use {type_to_string(target_type)}(...) for explicit conversion."
         )
     row_type = ArrayType(target_type.element_type)
+    if target_type.vector:
+        vector_elements = _matrix_vector_elements(value)
+        coerced_vector_rows = [
+            coerce_array_literal_value(AetherValue(ArrayType(source_type.element_type), [element]), row_type)
+            for element in vector_elements
+        ]
+        concrete_type = MatrixType(target_type.element_type, len(coerced_vector_rows), 1, vector=True)
+        return AetherValue(concrete_type, coerced_vector_rows)
     coerced_rows: list[AetherValue] = []
     for row in value.value:
         coerced_rows.append(coerce_array_literal_value(row, row_type))
@@ -321,3 +330,27 @@ def _coerce_python_value(value: object, target_type: AetherType) -> object:
     if target_type == "boolean":
         return bool(value)
     raise AetherTypeError(f"Unknown type '{target_type}'.")
+
+
+def _normalized_vector_type(type_name: MatrixType) -> MatrixType:
+    if type_name.rows is None or type_name.cols is None:
+        return MatrixType(type_name.element_type, vector=True)
+    if type_name.rows <= 0 or type_name.cols <= 0 or (type_name.rows > 1 and type_name.cols > 1):
+        return type_name
+    length = type_name.cols if type_name.rows == 1 else type_name.rows
+    return MatrixType(type_name.element_type, length, 1, vector=True)
+
+
+def _matrix_vector_elements(value: AetherValue) -> list[AetherValue]:
+    if not isinstance(value.type_name, MatrixType):
+        raise AetherTypeError(f"Expected matrix type, got '{type_to_string(value.type_name)}'.")
+    rows = value.value
+    if not rows:
+        return []
+    if len(rows) == 1:
+        return list(rows[0].value)
+    if len(rows[0].value) == 1:
+        return [row.value[0] for row in rows]
+    raise AetherTypeError(
+        f"Cannot implicitly convert '{type_to_string(value.type_name)}' to 'Vector<{value.type_name.element_type}>'."
+    )

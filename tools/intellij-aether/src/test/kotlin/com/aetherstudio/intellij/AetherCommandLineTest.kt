@@ -108,6 +108,42 @@ class AetherCommandLineTest {
     }
 
     @Test
+    fun `highlighting lexer treats caret as operator`() {
+        val lexer = AetherHighlightingLexer()
+
+        lexer.start("x^2", 0, 3, 0)
+        val tokenTypes = mutableListOf<String>()
+        while (lexer.tokenType != null) {
+            tokenTypes.add(lexer.tokenType.toString())
+            lexer.advance()
+        }
+
+        assertTrue(tokenTypes.contains(AetherTokenTypes.OPERATOR.toString()))
+        assertTrue(!tokenTypes.contains(AetherTokenTypes.BAD_CHARACTER.toString()))
+    }
+
+    @Test
+    fun `typing support knows matching braces`() {
+        assertEquals(')', AetherTypingSupport.matchingClosing('('))
+        assertEquals(']', AetherTypingSupport.matchingClosing('['))
+        assertEquals('}', AetherTypingSupport.matchingClosing('{'))
+    }
+
+    @Test
+    fun `enter between braces inserts inner indent and places caret inside block`() {
+        val insertion = AetherTypingSupport.enterBetweenBracesInsertion("    if ok {}", "    if ok {".length)
+
+        assertNotNull(insertion)
+        assertEquals("\n        \n    ", insertion.text)
+        assertEquals("\n        ".length, insertion.caretShift)
+    }
+
+    @Test
+    fun `enter support ignores offsets that are not between braces`() {
+        assertEquals(null, AetherTypingSupport.enterBetweenBracesInsertion("if ok { value }", "if ok { ".length))
+    }
+
+    @Test
     fun `plugin xml registers aether surface`() {
         val resource = javaClass.classLoader.getResource("META-INF/plugin.xml")
         assertNotNull(resource)
@@ -117,6 +153,8 @@ class AetherCommandLineTest {
         assertContains(xml, "Aether.RunFile")
         assertContains(xml, "lang.parserDefinition")
         assertContains(xml, "runLineMarkerContributor")
+        assertContains(xml, "AetherTypedHandler")
+        assertContains(xml, "AetherEnterHandler")
         assertContains(xml, "configurationType")
         assertContains(xml, "runConfigurationProducer")
         assertContains(xml, "EditorPopupMenu")

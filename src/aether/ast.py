@@ -57,6 +57,16 @@ class IndexAssignment:
 
 
 @dataclass(frozen=True)
+class MatrixIndexAssignment:
+    matrix: Expression
+    row: Expression
+    column_index: Expression
+    expression: Expression
+    line: int = 1
+    column: int = 1
+
+
+@dataclass(frozen=True)
 class ExpressionStatement:
     expression: Expression
 
@@ -115,6 +125,13 @@ class Literal:
 
 
 @dataclass(frozen=True)
+class InterpolatedString:
+    parts: list[str | Expression]
+    line: int = 1
+    column: int = 1
+
+
+@dataclass(frozen=True)
 class Identifier:
     name: str
 
@@ -155,9 +172,17 @@ class ArrayLiteral:
 @dataclass(frozen=True)
 class MatrixLiteral:
     rows: list[list[Expression]]
+    vector: bool = False
 
 
 @dataclass(frozen=True)
 class IndexExpression:
     array: Expression
     index: Expression
+
+
+@dataclass(frozen=True)
+class MatrixIndexExpression:
+    matrix: Expression
+    row: Expression
+    column: Expression

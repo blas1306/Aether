@@ -8,7 +8,7 @@ from .lexer import lex
 from .parser import Parser
 from .scope import Scope
 from .symbols import FunctionSymbol, VariableSymbol
-from .stdlib import infer_builtin_type, is_builtin, validate_builtin_arity
+from .stdlib import infer_builtin_type, is_builtin, is_builtin_namespace, validate_builtin_arity
 from .stdlib.registry import builtin_aliases_for_import
 from .types import (
     AetherType,
@@ -60,6 +60,9 @@ class TypeChecker:
         if isinstance(statement, ast.IndexAssignment):
             self._assign_index(statement, scope)
             return
+        if isinstance(statement, ast.MatrixIndexAssignment):
+            self._assign_matrix_index(statement, scope)
+            return
         if isinstance(statement, ast.ExpressionStatement):
             self._expression_type(statement.expression, scope)
             return
@@ -93,7 +96,7 @@ class TypeChecker:
     def _check_import(self, module_name: str) -> None:
         if module_name in self.imported_modules:
             return
-        if module_name == "Math" or module_name.startswith("Math."):
+        if is_builtin_namespace(module_name):
             self.builtin_aliases.update(builtin_aliases_for_import(module_name))
             self.imported_modules.add(module_name)
             return
@@ -193,11 +196,38 @@ class TypeChecker:
             raise AetherTypeError(f"Cannot index non-indexable value of type '{type_to_string(array_type)}'.")
         if index_type != "int":
             raise AetherTypeError(f"Array index must be int, got '{type_to_string(index_type)}'.")
-        element_type = matrix_row_type(array_type) if isinstance(array_type, MatrixType) else array_element_type(array_type)
+        if isinstance(array_type, MatrixType) and not array_type.vector:
+            raise AetherTypeError("Matrix values require two-dimensional indexing with A[i, j].")
+        element_type = (
+            array_type.element_type
+            if isinstance(array_type, MatrixType) and array_type.vector
+            else matrix_row_type(array_type)
+            if isinstance(array_type, MatrixType)
+            else array_element_type(array_type)
+        )
         if is_array_type(element_type):
             raise AetherTypeError("Assigning a whole matrix row is not supported yet.")
         if not can_implicitly_convert(value_type, element_type):
             self._raise_implicit_conversion_error(value_type, element_type, statement)
+
+    def _assign_matrix_index(self, statement: ast.MatrixIndexAssignment, scope: Scope[VariableSymbol]) -> None:
+        assigned_name = _assignment_root_name(statement.matrix)
+        if assigned_name is not None and self._is_active_loop_variable_assignment(assigned_name, scope):
+            raise AetherTypeError(f"Cannot assign to loop variable '{assigned_name}' inside its own for-loop.")
+        matrix_type = self._expression_type(statement.matrix, scope)
+        row_type = self._expression_type(statement.row, scope)
+        column_type = self._expression_type(statement.column_index, scope)
+        value_type = self._expression_type(statement.expression, scope)
+        if matrix_type is UNKNOWN_TYPE or row_type is UNKNOWN_TYPE or column_type is UNKNOWN_TYPE or value_type is UNKNOWN_TYPE:
+            return
+        if not isinstance(matrix_type, MatrixType):
+            raise AetherTypeError(f"Two-dimensional indexing expects a matrix, got '{type_to_string(matrix_type)}'.")
+        if row_type != "int" or column_type != "int":
+            raise AetherTypeError(
+                f"Matrix indices must be int, got '{type_to_string(row_type)}' and '{type_to_string(column_type)}'."
+            )
+        if not can_implicitly_convert(value_type, matrix_type.element_type):
+            self._raise_implicit_conversion_error(value_type, matrix_type.element_type, statement)
 
     def _check_for_in(self, statement: ast.ForInStatement, scope: Scope[VariableSymbol]) -> None:
         iterable_type = self._expression_type(statement.iterable, scope)
@@ -267,6 +297,11 @@ class TypeChecker:
     def _expression_type(self, expression: ast.Expression, scope: Scope[VariableSymbol]) -> AetherType | None:
         if isinstance(expression, ast.Literal):
             return expression.type_name
+        if isinstance(expression, ast.InterpolatedString):
+            for part in expression.parts:
+                if not isinstance(part, str):
+                    self._expression_type(part, scope)
+            return "string"
         if isinstance(expression, ast.Identifier):
             symbol = scope.lookup(expression.name)
             if symbol is None:
@@ -293,6 +328,8 @@ class TypeChecker:
             return self._matrix_literal_type(expression, scope)
         if isinstance(expression, ast.IndexExpression):
             return self._index_type(expression, scope)
+        if isinstance(expression, ast.MatrixIndexExpression):
+            return self._matrix_index_type(expression, scope)
         raise AetherRuntimeError(f"Unsupported expression {expression!r}.")
 
     def _binary_type(self, expression: ast.BinaryExpression, scope: Scope[VariableSymbol]) -> AetherType | None:
@@ -389,6 +426,8 @@ class TypeChecker:
         if any(element_type is UNKNOWN_TYPE for element_type in element_types):
             return UNKNOWN_TYPE
         common_type = _common_primitive_type(element_types)
+        if expression.vector:
+            return MatrixType(common_type, sum(row_lengths), 1, vector=True)
         return MatrixType(common_type, len(expression.rows), row_lengths[0])
 
     def _index_type(self, expression: ast.IndexExpression, scope: Scope[VariableSymbol]) -> AetherType | None:
@@ -400,9 +439,25 @@ class TypeChecker:
             raise AetherTypeError(f"Cannot index non-indexable value of type '{type_to_string(array_type)}'.")
         if index_type != "int":
             raise AetherTypeError(f"Array index must be int, got '{type_to_string(index_type)}'.")
+        if isinstance(array_type, MatrixType) and array_type.vector:
+            return array_type.element_type
         if isinstance(array_type, MatrixType):
-            return matrix_row_type(array_type)
+            raise AetherTypeError("Matrix values require two-dimensional indexing with A[i, j].")
         return array_element_type(array_type)
+
+    def _matrix_index_type(self, expression: ast.MatrixIndexExpression, scope: Scope[VariableSymbol]) -> AetherType | None:
+        matrix_type = self._expression_type(expression.matrix, scope)
+        row_type = self._expression_type(expression.row, scope)
+        column_type = self._expression_type(expression.column, scope)
+        if matrix_type is UNKNOWN_TYPE or row_type is UNKNOWN_TYPE or column_type is UNKNOWN_TYPE:
+            return UNKNOWN_TYPE
+        if not isinstance(matrix_type, MatrixType):
+            raise AetherTypeError(f"Two-dimensional indexing expects a matrix, got '{type_to_string(matrix_type)}'.")
+        if row_type != "int" or column_type != "int":
+            raise AetherTypeError(
+                f"Matrix indices must be int, got '{type_to_string(row_type)}' and '{type_to_string(column_type)}'."
+            )
+        return matrix_type.element_type
 
     def _call_type(self, expression: ast.CallExpression, scope: Scope[VariableSymbol]) -> AetherType | None:
         builtin_name = self.builtin_aliases.get(expression.callee, expression.callee)
@@ -552,6 +607,8 @@ def _assignment_root_name(expression: ast.Expression) -> str | None:
         return expression.name
     if isinstance(expression, ast.IndexExpression):
         return _assignment_root_name(expression.array)
+    if isinstance(expression, ast.MatrixIndexExpression):
+        return _assignment_root_name(expression.matrix)
     return None
 
 

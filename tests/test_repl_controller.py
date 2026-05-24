@@ -46,7 +46,7 @@ def test_aether_repl_workspace_updates_from_session() -> None:
             "shape": "2x2",
             "class": "Matrix<int>",
             "size": "2x2",
-            "summary": "[1 2;\n 3 4]",
+            "summary": "[1 2; 3 4]",
         }
     ]
 

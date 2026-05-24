@@ -16,6 +16,8 @@
                            implementationClass="com.aetherstudio.intellij.AetherParserDefinition"/>
     <lang.syntaxHighlighterFactory language="Aether"
                                    implementationClass="com.aetherstudio.intellij.AetherSyntaxHighlighterFactory"/>
+    <typedHandler implementation="com.aetherstudio.intellij.AetherTypedHandler"/>
+    <enterHandlerDelegate implementation="com.aetherstudio.intellij.AetherEnterHandler"/>
     <runLineMarkerContributor language="Aether"
                               implementationClass="com.aetherstudio.intellij.AetherRunLineMarkerContributor"/>
     <applicationService serviceImplementation="com.aetherstudio.intellij.AetherSettingsState"/>

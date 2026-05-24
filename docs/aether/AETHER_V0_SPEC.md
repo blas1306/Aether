@@ -189,6 +189,17 @@ string s = "hola" + " mundo"; // valid
 
 `string + numeric` and `numeric + string` are not allowed.
 
+String literals support interpolation with `$expr$`. The expression is parsed as Aether, typechecked in the current scope, evaluated at runtime, and formatted with the same display rules used by `print(...)` and `println(...)`.
+
+```aether
+n = 4;
+println("n = $n$");       // n = 4
+println("n^2 = $n^2$");   // n^2 = 16
+println("Precio: \$10");  // Precio: $10
+```
+
+Empty interpolation (`$$` or `$   $`), unclosed interpolation, invalid embedded expressions, and undefined names inside interpolation are errors.
+
 Booleans do not participate in arithmetic:
 
 ```aether
@@ -217,33 +228,12 @@ Not supported in v0:
 
 ## Arrays 1D
 
-Aether now separates programming arrays from mathematical vectors and matrices:
+Aether separates the internal array representation from mathematical vectors and matrices:
 
 - `[ ... ]` creates a mathematical `Matrix<T>` literal.
-- `array(...)` creates a programming array/list, written as `T[]`.
+- The public `array(...)` constructor is not part of Aether v0.
 
-Arrays are homogeneous, mutable, one-dimensional, and indexed from zero.
-
-```aether
-a = array(1, 2, 3);       // int[]
-b = array("a", "b");     // string[]
-c = array(true, false);   // boolean[]
-println(a[0]);            // prints 1
-a[0] = 10;
-```
-
-`array(...)` infers a homogeneous primitive scalar element type. Numeric values use normal widening:
-
-- `array(1, 2, 3) -> int[]`
-- `array(1, 2.5) -> double[]`
-- `array(1, "x")` is a type error.
-- `array()` is a type error because the element type cannot be inferred yet.
-- `array([1 2 3])` is a type error.
-- `array([1 2; 3 4])` is a type error.
-
-For Aether v0, `array(...)` only accepts these scalar primitive element types: `int`, `float`, `double`, `string`, and `boolean`. It does not accept `Matrix<T>`, `Vector<T>`, or nested arrays as elements.
-
-Array element types are still written with `[]` after a primitive type:
+Array element types are still used internally and can be written with `[]` after a primitive type:
 
 - `int[]`
 - `float[]`
@@ -258,9 +248,9 @@ int[] xs = []; // valid
 x = [];        // error
 ```
 
-Non-empty `[ ... ]` literals are not array literals anymore. Use `array(...)` for programming arrays. Arrays are programming containers; they are intentionally separate from mathematical `Matrix<T>` and `Vector<T>` values.
+Non-empty `[ ... ]` literals are not array literals anymore, and non-empty programming-array literals are not exposed in Aether v0. Empty typed arrays remain a transitional compatibility feature.
 
-The builtin `length(array)` returns the array length as an `int`. `length(...)` only accepts arrays; use `rows(matrix)` and `cols(matrix)` for matrices.
+The builtin `length(array)` returns the array length as an `int` for internal array values. `length(...)` does not accept matrices; use `rows(matrix)` and `cols(matrix)` for matrices.
 
 ## Vectors And Matrices
 
@@ -307,8 +297,7 @@ Matrices are mutable and zero-based. `A[0]` currently returns the first row as a
 A = [1 2; 3 4];
 println(A[0][1]); // 2
 A[1][0] = 99;
-println(A);       // [1 2;
-                  //  99 4]
+println(A);       // [1 2; 99 4]
 ```
 
 `rows(matrix)` and `cols(matrix)` return matrix dimensions as `int` values. They accept row vectors, column vectors, and 2D matrices:
@@ -324,23 +313,17 @@ println(cols([1 2; 3 4]));   // 2
 
 `length(matrix)` is a type error in the separated model. `rows(array)` and `cols(array)` are also type errors.
 
-`print(...)` and `println(...)` render `Matrix<T>` and `Vector<T>` values with a mathematical display format:
+`print(...)` and `println(...)` render `Matrix<T>` and `Vector<T>` values with a compact mathematical display format:
 
 ```aether
 println([1 2 3]);        // [1 2 3]
-println([1; 2; 3]);      // [1;
-                         //  2;
-                         //  3]
-println([1 2; 3 4]);     // [1 2;
-                         //  3 4]
-println([1.0 2.5; 3 4]); // [1.0 2.5;
-                         //  3.0 4.0]
+println([1; 2; 3]);      // [1; 2; 3]
+println([1 2; 3 4]);     // [1 2; 3 4]
+println([1.0 2.5; 3 4]); // [1.0 2.5; 3.0 4.0]
 println(["a" "b";
-         "c" "d"]);      // ["a" "b";
-                         //  "c" "d"]
+         "c" "d"]);      // ["a" "b"; "c" "d"]
 println([true false;
-         false true]);   // [true false;
-                         //  false true]
+         false true]);   // [true false; false true]
 ```
 
 Matrix values with shape `1x1` print as scalars. This keeps mathematical results readable even when the internal value remains a matrix:
@@ -349,15 +332,9 @@ Matrix values with shape `1x1` print as scalars. This keeps mathematical results
 println(Math.LinearAlgebra.matmul([1 2], [3; 4])); // 11
 ```
 
-Programming arrays from `array(...)` keep a distinct display and are not rendered as mathematical vectors:
+Internal array values use comma-separated list display and are not rendered as mathematical vectors. Runtime types remain distinct: `Matrix<T>`/`Vector<T>` for bracket literals, and `T[]` for internal arrays.
 
-```aether
-println(array(1, 2, 3)); // array(1, 2, 3)
-```
-
-This display format is stable for v0. Runtime types remain distinct: `Matrix<T>`/`Vector<T>` for bracket literals, and `T[]` for `array(...)`.
-
-Matrix equality compares by shape and content. Incompatible element types are type errors. Comparing `Matrix<T>` or `Vector<T>` with a programming array is an `AetherTypeError`.
+Matrix equality compares by shape and content. Incompatible element types are type errors. Comparing `Matrix<T>` or `Vector<T>` with an internal array is an `AetherTypeError`.
 
 ## Math.LinearAlgebra
 
@@ -381,7 +358,7 @@ Only explicit namespace calls are supported. The unqualified names `inner(...)`,
 sum(u_i * v_i)
 ```
 
-Both arguments must be mathematical vectors represented as `Matrix<T>` or `Vector<T>` values with shape `1xN` or `Nx1`. Row-row, column-column, row-column, and column-row combinations are valid when the effective lengths match. General matrices with both dimensions greater than one are errors. Programming arrays from `array(...)` are not vectors for this API.
+Both arguments must be mathematical vectors represented as `Matrix<T>` or `Vector<T>` values with shape `1xN` or `Nx1`. Row-row, column-column, row-column, and column-row combinations are valid when the effective lengths match. General matrices with both dimensions greater than one are errors. Internal arrays are not vectors for this API.
 
 Vector elements must be numeric: `int`, `float`, or `double`. `boolean` and `string` vector elements are errors. The result uses the existing numeric promotion rules:
 
@@ -395,7 +372,6 @@ These are errors:
 
 ```aether
 Math.LinearAlgebra.inner([1 2; 3 4], [1 2; 3 4]);
-Math.LinearAlgebra.inner(array(1, 2, 3), array(4, 5, 6));
 Math.LinearAlgebra.inner([1 2 3], [1 2]);
 ```
 
@@ -405,7 +381,7 @@ Math.LinearAlgebra.inner([1 2 3], [1 2]);
 sqrt(inner(v, v))
 ```
 
-The argument rules are the same: `v` must be a numeric mathematical row or column vector, not a general matrix and not an `array(...)`. The result is a `double` in the current implementation:
+The argument rules are the same: `v` must be a numeric mathematical row or column vector, not a general matrix and not an internal array. The result is a `double` in the current implementation:
 
 ```aether
 println(Math.LinearAlgebra.norm([3 4]));     // 5.0
@@ -417,15 +393,12 @@ Basic real numeric builtins such as `sin(x)`, `cos(x)`, `exp(x)`, `ln(x)`, `log(
 `Math.LinearAlgebra.transpose(A)` returns a new transposed matrix:
 
 ```aether
-println(Math.LinearAlgebra.transpose([1 2 3]));    // [1;
-                                                   //  2;
-                                                   //  3]
+println(Math.LinearAlgebra.transpose([1 2 3]));    // [1; 2; 3]
 println(Math.LinearAlgebra.transpose([1; 2; 3]));  // [1 2 3]
-println(Math.LinearAlgebra.transpose([1 2; 3 4])); // [1 3;
-                                                   //  2 4]
+println(Math.LinearAlgebra.transpose([1 2; 3 4])); // [1 3; 2 4]
 ```
 
-The argument must be a mathematical `Matrix<T>` or `Vector<T>` with numeric elements. Programming arrays from `array(...)`, scalar values, and matrices with `boolean` or `string` elements are errors for this linear algebra builtin. `transpose` does not mutate the original value. Shape rules are:
+The argument must be a mathematical `Matrix<T>` or `Vector<T>` with numeric elements. Internal arrays, scalar values, and matrices with `boolean` or `string` elements are errors for this linear algebra builtin. `transpose` does not mutate the original value. Shape rules are:
 
 - `1xN -> Nx1`
 - `Nx1 -> 1xN`
@@ -437,17 +410,13 @@ The argument must be a mathematical `Matrix<T>` or `Vector<T>` with numeric elem
 if A is m x n and B is n x p, matmul(A, B) is m x p
 ```
 
-Both arguments must be mathematical `Matrix<T>` or `Vector<T>` values with numeric elements. Programming arrays from `array(...)`, scalar values, and matrices with `boolean` or `string` elements are errors. The inner dimensions must match. Row and column vectors follow their matrix shapes:
+Both arguments must be mathematical `Matrix<T>` or `Vector<T>` values with numeric elements. Internal arrays, scalar values, and matrices with `boolean` or `string` elements are errors. The inner dimensions must match. Row and column vectors follow their matrix shapes:
 
 ```aether
-println(Math.LinearAlgebra.matmul([1 2; 3 4], [5 6; 7 8])); // [19 22;
-                                                           //  43 50]
+println(Math.LinearAlgebra.matmul([1 2; 3 4], [5 6; 7 8])); // [19 22; 43 50]
 println(Math.LinearAlgebra.matmul([1 2 3], [4; 5; 6]));     // 32
-println(Math.LinearAlgebra.matmul([1; 2; 3], [4 5 6]));     // [4 5 6;
-                                                           //  8 10 12;
-                                                           //  12 15 18]
-println(Math.LinearAlgebra.matmul([1 2; 3 4], [5; 6]));     // [17;
-                                                           //  39]
+println(Math.LinearAlgebra.matmul([1; 2; 3], [4 5 6]));     // [4 5 6; 8 10 12; 12 15 18]
+println(Math.LinearAlgebra.matmul([1 2; 3 4], [5; 6]));     // [17; 39]
 println(Math.LinearAlgebra.matmul([1 2], [3 4; 5 6]));      // [13 16]
 ```
 
@@ -462,12 +431,10 @@ The coefficient argument `A` must be a numeric mathematical matrix. The right-ha
 ```aether
 A = [2 1; 1 3];
 b = [1; 2];
-println(A \ b); // [0.2;
-                //  0.6]
+println(A \ b); // [0.2; 0.6]
 
 B = [2 4; 8 12];
-println(Math.LinearAlgebra.solve([2 0; 0 4], B)); // [1.0 2.0;
-                                                  //  2.0 3.0]
+println(Math.LinearAlgebra.solve([2 0; 0 4], B)); // [1.0 2.0; 2.0 3.0]
 ```
 
 Square full-rank systems use a direct solve. Rectangular or rank-deficient systems use a least-squares/minimum-norm solution. No implicit narrowing to `int` is performed.
@@ -481,16 +448,7 @@ println([1 2 3] + [4 5 6]); // [5 7 9]
 [1 2 3] + [1; 2; 3];        // error, 1x3 vs 3x1
 ```
 
-Programming arrays do not participate in matrix/vector arithmetic or equality. These are type errors:
-
-```aether
-array(1, 2, 3) + [1 2 3];
-[1 2 3] + array(1, 2, 3);
-array(1, 2, 3) - [1 2 3];
-[1 2 3] * array(1, 2, 3);
-array(1, 2, 3) == [1 2 3];
-[1 2 3] == array(1, 2, 3);
-```
+Internal arrays do not participate in matrix/vector arithmetic or equality.
 
 Supported scalar operations are:
 
@@ -673,7 +631,6 @@ Aether v0 recognizes these builtins:
 
 - `print(...)`
 - `println(...)`
-- `array(...)`
 - `length(array)`
 - `rows(matrix)`
 - `cols(matrix)`
@@ -704,9 +661,9 @@ print("x = ");
 println(x);
 ```
 
-`array(...)` creates a homogeneous 1D programming array of primitive scalar values. It requires at least one argument in v0 and rejects `Matrix<T>`/`Vector<T>` arguments.
+`array(...)` is not a recognized builtin in Aether v0.
 
-`length(array)` accepts one array argument and returns an `int`.
+`length(array)` accepts one internal array argument and returns an `int`.
 
 `rows(matrix)` and `cols(matrix)` accept one `Matrix<T>` or `Vector<T>` argument and return `int` dimensions.
 
@@ -744,7 +701,7 @@ The `.ae` editor now selects an `Aether REPL` panel backed by a persistent `Aeth
 
 ## Editor Integration
 
-`.ae` files are the active Aether script format in the editor and use the persistent Aether REPL for interactive input. Legacy `.mtx`, `.mtex`, and `.mtn` workflows are outside the active Aether Studio surface.
+`.ae` files are the active Aether script format in the editor and use the persistent Aether REPL for interactive input. Legacy `.mtx`, `.mtex`, and `.mtn` workflows are outside the active Aether Studio surface. A basic Aether LSP server exists for diagnostics and completions; a full IDE protocol feature set is not part of v0.
 
 ## Not Implemented Yet
 
@@ -758,7 +715,7 @@ The following are intentionally not implemented in Aether v0:
 - modules/packages
 - JIT
 - Rust core
-- LSP
+- full LSP feature set
 - formatter
 - notebooks `.aen`
 - documents `.aed`

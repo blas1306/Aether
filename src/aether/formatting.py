@@ -14,17 +14,19 @@ def format_value(value: AetherValue) -> str:
 
 
 def format_matrix(value: AetherValue) -> str:
+    if value.type_name.vector:
+        return "[" + ", ".join(format_matrix_element(element) for element in _vector_elements(value)) + "]"
     rows = _matrix_rows(value)
     if len(rows) == 1 and len(rows[0]) == 1:
         return format_matrix_element(rows[0][0])
     if len(rows) == 1:
         return "[" + " ".join(format_matrix_element(element) for element in rows[0]) + "]"
     rendered_rows = [" ".join(format_matrix_element(element) for element in row) for row in rows]
-    return "[" + ";\n ".join(rendered_rows) + "]"
+    return "[" + "; ".join(rendered_rows) + "]"
 
 
 def format_array(value: AetherValue) -> str:
-    return "array(" + ", ".join(format_array_element(element) for element in value.value) + ")"
+    return "[" + ", ".join(format_array_element(element) for element in value.value) + "]"
 
 
 def format_range(value: AetherValue) -> str:
@@ -56,6 +58,17 @@ def format_array_element(value: AetherValue) -> str:
 
 def _matrix_rows(value: AetherValue) -> list[list[AetherValue]]:
     return [list(row.value) for row in value.value]
+
+
+def _vector_elements(value: AetherValue) -> list[AetherValue]:
+    rows = _matrix_rows(value)
+    if not rows:
+        return []
+    if len(rows) == 1:
+        return rows[0]
+    if len(rows[0]) == 1:
+        return [row[0] for row in rows]
+    return [element for row in rows for element in row]
 
 
 def _escape_string(value: object) -> str:

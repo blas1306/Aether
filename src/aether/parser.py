@@ -2,8 +2,12 @@ from __future__ import annotations
 
 from . import ast
 from .errors import AetherSyntaxError
+from .lexer import lex
 from .tokens import AETHER_TYPES, PRIMITIVE_TYPES, Token, TokenType
 from .types import AetherType, ArrayType, MatrixType
+
+
+STRING_ESCAPES = {'"': '"', "\\": "\\", "$": "$", "n": "\n", "t": "\t", "r": "\r"}
 
 
 class Parser:
@@ -17,6 +21,12 @@ class Parser:
         while not self._is_at_end():
             statements.append(self._declaration_or_statement())
         return ast.Program(statements)
+
+    def parse_expression(self) -> ast.Expression:
+        expression = self._expression()
+        if not self._is_at_end():
+            raise self._error(self._peek(), "Expected end of expression.")
+        return expression
 
     def _declaration_or_statement(self) -> ast.Statement:
         if self._match(TokenType.FUNCTION):
@@ -116,6 +126,15 @@ class Parser:
             self._consume(TokenType.SEMICOLON, "Expected ';' after assignment.")
             if isinstance(expression, ast.Identifier):
                 return ast.Assignment(expression.name, value, equals.line, equals.column)
+            if isinstance(expression, ast.MatrixIndexExpression):
+                return ast.MatrixIndexAssignment(
+                    expression.matrix,
+                    expression.row,
+                    expression.column,
+                    value,
+                    equals.line,
+                    equals.column,
+                )
             if isinstance(expression, ast.IndexExpression):
                 return ast.IndexAssignment(expression.array, expression.index, value, equals.line, equals.column)
             raise self._error(self._previous(), "Invalid assignment target.")
@@ -238,6 +257,11 @@ class Parser:
         expr = self._primary()
         while self._match(TokenType.LEFT_BRACKET):
             index = self._expression()
+            if self._match(TokenType.COMMA):
+                column = self._expression()
+                self._consume(TokenType.RIGHT_BRACKET, "Expected ']' after matrix index.")
+                expr = ast.MatrixIndexExpression(expr, index, column)
+                continue
             self._consume(TokenType.RIGHT_BRACKET, "Expected ']' after index.")
             expr = ast.IndexExpression(expr, index)
         return expr
@@ -250,7 +274,7 @@ class Parser:
         if self._match(TokenType.FLOAT_LITERAL):
             return ast.Literal(self._previous().literal, "double")
         if self._match(TokenType.STRING_LITERAL):
-            return ast.Literal(self._previous().literal, "string")
+            return self._string_literal_expression(self._previous())
         if self._match(TokenType.IDENTIFIER, TokenType.TYPE):
             name = self._previous().lexeme
             dotted = False
@@ -279,6 +303,80 @@ class Parser:
             self._consume(TokenType.RIGHT_PAREN, "Expected ')' after expression.")
             return expr
         raise self._error(self._peek(), "Expected expression.")
+
+    def _string_literal_expression(self, token: Token) -> ast.Expression:
+        if not self._has_interpolation_start(token.lexeme):
+            return ast.Literal(token.literal, "string")
+        return ast.InterpolatedString(self._parse_interpolated_string_parts(token), token.line, token.column)
+
+    def _has_interpolation_start(self, lexeme: str) -> bool:
+        raw = lexeme[1:-1]
+        index = 0
+        while index < len(raw):
+            if raw[index] == "\\":
+                index += 2
+                continue
+            if raw[index] == "$":
+                return True
+            index += 1
+        return False
+
+    def _parse_interpolated_string_parts(self, token: Token) -> list[str | ast.Expression]:
+        raw = token.lexeme[1:-1]
+        parts: list[str | ast.Expression] = []
+        text: list[str] = []
+        index = 0
+        while index < len(raw):
+            char = raw[index]
+            if char == "\\":
+                text.append(self._decode_string_escape(raw, index, token))
+                index += 2
+                continue
+            if char == "$":
+                if text:
+                    parts.append("".join(text))
+                    text = []
+                expression_source, index = self._read_interpolation_expression(raw, index + 1, token)
+                expression_source = expression_source.strip()
+                if not expression_source:
+                    raise self._error(token, "Interpolacion de string vacia.")
+                parts.append(self._parse_interpolation_expression(expression_source, token))
+                continue
+            text.append(char)
+            index += 1
+        if text:
+            parts.append("".join(text))
+        return parts
+
+    def _read_interpolation_expression(self, raw: str, start: int, token: Token) -> tuple[str, int]:
+        expression: list[str] = []
+        index = start
+        while index < len(raw):
+            char = raw[index]
+            if char == "\\":
+                expression.append(self._decode_string_escape(raw, index, token))
+                index += 2
+                continue
+            if char == "$":
+                return "".join(expression), index + 1
+            expression.append(char)
+            index += 1
+        raise self._error(token, "Interpolacion de string sin cerrar.")
+
+    def _decode_string_escape(self, raw: str, index: int, token: Token) -> str:
+        if index + 1 >= len(raw):
+            raise self._error(token, "Secuencia de escape sin cerrar en string.")
+        escaped = raw[index + 1]
+        value = STRING_ESCAPES.get(escaped)
+        if value is None:
+            raise self._error(token, f"Secuencia de escape no soportada '\\{escaped}'.")
+        return value
+
+    def _parse_interpolation_expression(self, source: str, token: Token) -> ast.Expression:
+        try:
+            return Parser(lex(source)).parse_expression()
+        except AetherSyntaxError as exc:
+            raise self._error(token, f"Expresion de interpolacion invalida {source!r}: {exc}") from exc
 
     def _match(self, *token_types: TokenType) -> bool:
         for token_type in token_types:
@@ -404,6 +502,7 @@ class Parser:
         if self._match(TokenType.RIGHT_BRACKET):
             return ast.MatrixLiteral([])
         rows: list[list[ast.Expression]] = []
+        has_space_columns = False
         while True:
             row: list[ast.Expression] = []
             if self._check(TokenType.SEMICOLON) or self._check(TokenType.RIGHT_BRACKET):
@@ -417,6 +516,7 @@ class Parser:
                 if self._check(TokenType.SEMICOLON) or self._check(TokenType.RIGHT_BRACKET):
                     break
                 if self._can_start_expression(self._peek()):
+                    has_space_columns = True
                     continue
                 raise self._error(self._peek(), "Expected column separator, row separator, or ']'.")
             rows.append(row)
@@ -425,7 +525,7 @@ class Parser:
             if self._check(TokenType.RIGHT_BRACKET):
                 raise self._error(self._previous(), "Trailing ';' in matrix literal is not supported.")
         self._consume(TokenType.RIGHT_BRACKET, "Expected ']' after matrix literal.")
-        return ast.MatrixLiteral(rows)
+        return ast.MatrixLiteral(rows, vector=not has_space_columns)
 
     def _can_start_expression(self, token: Token) -> bool:
         return token.type in {

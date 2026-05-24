@@ -7,7 +7,7 @@ from scipy import linalg as scipy_linalg
 
 from ...errors import AetherTypeError
 from ...types import AetherType, AetherValue, ArrayType, MatrixType, NUMERIC_TYPES, type_to_string
-from ..registry import BuiltinDefinition, BuiltinFunction, OutputWriter, RuntimeFactory
+from ..registry import BuiltinDefinition, BuiltinFunction, RuntimeContext, RuntimeFactory
 
 
 INNER_NAME = "Math.LinearAlgebra.inner"
@@ -15,6 +15,8 @@ NORM_NAME = "Math.LinearAlgebra.norm"
 TRANSPOSE_NAME = "Math.LinearAlgebra.transpose"
 MATMUL_NAME = "Math.LinearAlgebra.matmul"
 SOLVE_NAME = "Math.LinearAlgebra.solve"
+ZEROS_NAME = "Math.LinearAlgebra.zeros"
+ONES_NAME = "Math.LinearAlgebra.ones"
 
 
 def builtin_definitions() -> list[BuiltinDefinition]:
@@ -24,11 +26,13 @@ def builtin_definitions() -> list[BuiltinDefinition]:
         BuiltinDefinition(TRANSPOSE_NAME, _constant_runtime(transpose_builtin), _transpose_type, _exactly_one(TRANSPOSE_NAME)),
         BuiltinDefinition(MATMUL_NAME, _constant_runtime(matmul_builtin), _matmul_type, _exactly_two(MATMUL_NAME)),
         BuiltinDefinition(SOLVE_NAME, _constant_runtime(solve_builtin), _solve_type, _exactly_two(SOLVE_NAME)),
+        BuiltinDefinition(ZEROS_NAME, _constant_runtime(zeros_builtin), _matrix_factory_type(ZEROS_NAME), _exactly_two(ZEROS_NAME)),
+        BuiltinDefinition(ONES_NAME, _constant_runtime(ones_builtin), _matrix_factory_type(ONES_NAME), _exactly_two(ONES_NAME)),
     ]
 
 
 def _constant_runtime(function: BuiltinFunction) -> RuntimeFactory:
-    def factory(_write_output: OutputWriter) -> BuiltinFunction:
+    def factory(_context: RuntimeContext) -> BuiltinFunction:
         return function
 
     return factory
@@ -169,6 +173,16 @@ def solve_builtin(args: list[AetherValue]) -> AetherValue:
     return _float_array_to_matrix_value(solution, vector=rhs_is_vector and solution.shape[1] == 1)
 
 
+def zeros_builtin(args: list[AetherValue]) -> AetherValue:
+    rows, cols = _matrix_factory_dimensions(args, ZEROS_NAME)
+    return _filled_double_matrix(rows, cols, 0.0)
+
+
+def ones_builtin(args: list[AetherValue]) -> AetherValue:
+    rows, cols = _matrix_factory_dimensions(args, ONES_NAME)
+    return _filled_double_matrix(rows, cols, 1.0)
+
+
 def _inner_type(arg_types: list[AetherType | None]) -> AetherType | None:
     if len(arg_types) != 2:
         raise AetherTypeError(f"{INNER_NAME}(...) expects exactly two arguments.")
@@ -241,6 +255,48 @@ def _solve_type(arg_types: list[AetherType | None]) -> AetherType | None:
             f"{SOLVE_NAME}(...) requires rows(A) == rows(b), got {left_matrix_type.rows} and {right_rows}."
         )
     return MatrixType("double", left_matrix_type.cols, right_cols, result_is_vector)
+
+
+def _matrix_factory_type(label: str):
+    def infer(arg_types: list[AetherType | None]) -> AetherType | None:
+        if len(arg_types) != 2:
+            raise AetherTypeError(f"{label}(...) expects exactly two arguments.")
+        row_type, col_type = arg_types
+        if row_type is None or col_type is None:
+            return None
+        if row_type != "int" or col_type != "int":
+            raise AetherTypeError(
+                f"{label}(...) expects integer dimensions, got "
+                f"'{type_to_string(row_type)}' and '{type_to_string(col_type)}'."
+            )
+        return MatrixType("double")
+
+    return infer
+
+
+def _matrix_factory_dimensions(args: list[AetherValue], label: str) -> tuple[int, int]:
+    if len(args) != 2:
+        raise AetherTypeError(f"{label}(...) expects exactly two arguments.")
+    rows_arg, cols_arg = args
+    if rows_arg.type_name != "int" or cols_arg.type_name != "int":
+        raise AetherTypeError(
+            f"{label}(...) expects integer dimensions, got "
+            f"'{type_to_string(rows_arg.type_name)}' and '{type_to_string(cols_arg.type_name)}'."
+        )
+    rows = int(rows_arg.value)
+    cols = int(cols_arg.value)
+    if rows <= 0 or cols <= 0:
+        raise AetherTypeError(f"{label}(...) expects positive dimensions, got {rows}x{cols}.")
+    return rows, cols
+
+
+def _filled_double_matrix(rows: int, cols: int, fill: float) -> AetherValue:
+    row_type = ArrayType("double")
+    matrix_rows = [
+        AetherValue(row_type, [AetherValue("double", fill) for _col_index in range(cols)])
+        for _row_index in range(rows)
+    ]
+    return AetherValue(MatrixType("double", rows, cols), matrix_rows)
 
 
 def _vector_elements(value: AetherValue, label: str) -> tuple[list[AetherValue], str]:

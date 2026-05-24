@@ -31,7 +31,7 @@ int fib(int n) {
     return fib(n-1) + fib(n-2);
 }
 
-println(fib(4));
+println("fib($4$) = $fib(4)$");
 
 double sumatoria(int a) {
     double suma = 0.0;
@@ -75,3 +75,4 @@ println("Prueba 1: ", sumatoria(5));
 println("Prueba 2: ", sumatoriav2(5));
 println("Prueba 3: ", sumaCuadrados(6));
 println("Prueba 4: ", f(0));
+

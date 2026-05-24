@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from .result import AetherRunResult
 from .session import AetherSession
 
 
-def run_aether(source: str) -> AetherRunResult:
-    return AetherSession().run(source)
+def run_aether(
+    source: str,
+    *,
+    plot_mode: str | None = None,
+    plot_output_dir: str | Path | None = None,
+) -> AetherRunResult:
+    return AetherSession(plot_mode=plot_mode, plot_output_dir=plot_output_dir).run(source)

@@ -8,15 +8,14 @@ from ..formatting import format_value
 from ..types import (
     AetherType,
     AetherValue,
-    ArrayType,
+    MatrixType,
     NUMERIC_TYPES,
-    coerce_array_literal_value,
     explicit_cast,
     is_array_type,
     is_matrix_type,
     type_to_string,
 )
-from .registry import BuiltinDefinition, BuiltinFunction, OutputWriter, RuntimeFactory
+from .registry import BuiltinDefinition, BuiltinFunction, OutputWriter, RuntimeContext, RuntimeFactory
 
 
 CAST_BUILTINS = {"int", "float", "double", "string", "boolean"}
@@ -24,10 +23,9 @@ CAST_BUILTINS = {"int", "float", "double", "string", "boolean"}
 
 def builtin_definitions() -> list[BuiltinDefinition]:
     definitions = [
-        BuiltinDefinition("print", _make_print_builtin, _print_type),
-        BuiltinDefinition("println", _make_println_builtin, _print_type),
+        BuiltinDefinition("print", _make_print_runtime, _print_type),
+        BuiltinDefinition("println", _make_println_runtime, _print_type),
         BuiltinDefinition("length", _constant_runtime(length_builtin), _length_type, _exactly_one("length")),
-        BuiltinDefinition("array", _constant_runtime(array_builtin), _array_type, _array_arity),
         BuiltinDefinition("rows", _constant_runtime(rows_builtin), _rows_type, _exactly_one("rows")),
         BuiltinDefinition("cols", _constant_runtime(cols_builtin), _cols_type, _exactly_one("cols")),
         BuiltinDefinition("sin", _constant_runtime(math_unary_builtin("sin", sin)), _math_unary_type("sin"), _exactly_one("sin")),
@@ -53,7 +51,7 @@ def builtin_definitions() -> list[BuiltinDefinition]:
 
 
 def _constant_runtime(function: BuiltinFunction) -> RuntimeFactory:
-    def factory(_write_output: OutputWriter) -> BuiltinFunction:
+    def factory(_context: RuntimeContext) -> BuiltinFunction:
         return function
 
     return factory
@@ -75,11 +73,6 @@ def _exactly_two(label: str):
     return validate
 
 
-def _array_arity(arg_count: int) -> None:
-    if arg_count == 0:
-        raise AetherTypeError("array(...) cannot infer the type of an empty array.")
-
-
 def _make_print_builtin(write_output: OutputWriter) -> BuiltinFunction:
     def print_builtin(args: list[AetherValue]) -> AetherValue:
         if not args:
@@ -90,6 +83,10 @@ def _make_print_builtin(write_output: OutputWriter) -> BuiltinFunction:
     return print_builtin
 
 
+def _make_print_runtime(context: RuntimeContext) -> BuiltinFunction:
+    return _make_print_builtin(context.write_output)
+
+
 def _make_println_builtin(write_output: OutputWriter) -> BuiltinFunction:
     def println_builtin(args: list[AetherValue]) -> AetherValue:
         if not args:
@@ -98,6 +95,10 @@ def _make_println_builtin(write_output: OutputWriter) -> BuiltinFunction:
         return AetherValue("boolean", True)
 
     return println_builtin
+
+
+def _make_println_runtime(context: RuntimeContext) -> BuiltinFunction:
+    return _make_println_builtin(context.write_output)
 
 
 def cast_builtin(target_type: str) -> BuiltinFunction:
@@ -113,17 +114,11 @@ def length_builtin(args: list[AetherValue]) -> AetherValue:
     if len(args) != 1:
         raise AetherTypeError("length(...) expects exactly one argument.")
     value = args[0]
+    if isinstance(value.type_name, MatrixType) and value.type_name.vector:
+        return AetherValue("int", _vector_length(value))
     if not is_array_type(value.type_name):
         raise AetherTypeError(f"length(...) expects an array argument, got '{type_to_string(value.type_name)}'.")
     return AetherValue("int", len(value.value))
-
-
-def array_builtin(args: list[AetherValue]) -> AetherValue:
-    if not args:
-        raise AetherTypeError("array(...) cannot infer the type of an empty array.")
-    element_type = common_primitive_type([arg.type_name for arg in args], label="array")
-    array_type = ArrayType(element_type)
-    return coerce_array_literal_value(AetherValue(array_type, args), array_type)
 
 
 def rows_builtin(args: list[AetherValue]) -> AetherValue:
@@ -222,19 +217,11 @@ def _length_type(arg_types: list[AetherType | None]) -> AetherType | None:
     argument_type = arg_types[0]
     if argument_type is None:
         return None
+    if isinstance(argument_type, MatrixType) and argument_type.vector:
+        return "int"
     if not is_array_type(argument_type):
         raise AetherTypeError(f"length(...) expects an array argument, got '{type_to_string(argument_type)}'.")
     return "int"
-
-
-def _array_type(arg_types: list[AetherType | None]) -> AetherType | None:
-    if not arg_types:
-        raise AetherTypeError("array(...) cannot infer the type of an empty array.")
-    if any(argument_type is None for argument_type in arg_types):
-        return None
-    if not all(isinstance(argument_type, str) for argument_type in arg_types):
-        raise AetherTypeError("array(...) expects scalar primitive homogeneous compatible elements.")
-    return ArrayType(common_primitive_type(arg_types, label="array"))
 
 
 def _rows_type(arg_types: list[AetherType | None]) -> AetherType | None:
@@ -254,6 +241,15 @@ def _matrix_dimension_type(arg_types: list[AetherType | None], label: str) -> Ae
     if not is_matrix_type(argument_type):
         raise AetherTypeError(f"{label}(...) expects a matrix argument, got '{type_to_string(argument_type)}'.")
     return "int"
+
+
+def _vector_length(value: AetherValue) -> int:
+    rows = value.value
+    if not rows:
+        return 0
+    if len(rows) == 1:
+        return len(rows[0].value)
+    return len(rows)
 
 
 def _sqrt_type(arg_types: list[AetherType | None]) -> AetherType | None:

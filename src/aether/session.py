@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from pathlib import Path
 
 from . import ast
 from .interpreter import Function, Interpreter
@@ -30,9 +31,9 @@ class _SessionSnapshot:
 class AetherSession:
     """Persistent Aether execution session for REPL-like workflows."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, plot_mode: str | None = None, plot_output_dir: str | Path | None = None) -> None:
         self._type_checker = TypeChecker()
-        self._interpreter = Interpreter()
+        self._interpreter = Interpreter(plot_mode=plot_mode, plot_output_dir=plot_output_dir)
 
     def run(self, source: str) -> AetherRunResult:
         snapshot = self._snapshot()

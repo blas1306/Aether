@@ -146,7 +146,7 @@ class Lexer:
         if self._is_at_end():
             raise self._syntax_error("Unterminated escape sequence.")
         char = self._advance()
-        escapes = {'"': '"', "\\": "\\", "n": "\n", "t": "\t", "r": "\r"}
+        escapes = {'"': '"', "\\": "\\", "$": "$", "n": "\n", "t": "\t", "r": "\r"}
         if char not in escapes:
             raise self._syntax_error(f"Unsupported escape sequence '\\{char}'.")
         return escapes[char]

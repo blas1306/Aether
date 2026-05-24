@@ -28,6 +28,40 @@ tasks {
     test {
         useJUnitPlatform()
     }
+
+    val seedRunIdeHighContrastSettings by registering {
+        val optionsDir = rootProject.layout.projectDirectory.dir(
+            ".intellijPlatform/sandbox/intellij-aether/IU-2026.1/config/options"
+        )
+        outputs.upToDateWhen { false }
+
+        doLast {
+            val dir = optionsDir.asFile
+            dir.mkdirs()
+            dir.resolve("colors.scheme.xml").writeText(
+                """
+                <application>
+                  <component name="EditorColorsManagerImpl">
+                    <global_color_scheme name="High contrast" />
+                  </component>
+                </application>
+                """.trimIndent()
+            )
+            dir.resolve("laf.xml").writeText(
+                """
+                <application>
+                  <component name="LafManager">
+                    <laf themeId="JetBrainsHighContrastTheme" />
+                  </component>
+                </application>
+                """.trimIndent()
+            )
+        }
+    }
+
+    named("runIde") {
+        dependsOn(seedRunIdeHighContrastSettings)
+    }
 }
 
 intellijPlatform {
