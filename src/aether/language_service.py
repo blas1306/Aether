@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -62,9 +63,15 @@ def run_source(
     *,
     plot_mode: str | None = None,
     plot_output_dir: str | Path | None = None,
+    output_writer: Callable[[str], None] | None = None,
 ) -> RunResult:
     try:
-        result: AetherRunResult = run_aether(source, plot_mode=plot_mode, plot_output_dir=plot_output_dir)
+        result: AetherRunResult = run_aether(
+            source,
+            plot_mode=plot_mode,
+            plot_output_dir=plot_output_dir,
+            output_writer=output_writer,
+        )
     except AETHER_ERRORS as exc:
         return RunResult(success=False, error=f"{type(exc).__name__}: {exc}")
     return RunResult(success=True, output=result.output)

@@ -6,7 +6,7 @@ import numpy as np
 from scipy import linalg as scipy_linalg
 
 from ...errors import AetherTypeError
-from ...types import AetherType, AetherValue, ArrayType, MatrixType, NUMERIC_TYPES, type_to_string
+from ...types import AetherType, AetherValue, ArrayType, MatrixType, NUMERIC_TYPES, TransposeVectorType, VectorType, type_to_string
 from ..registry import BuiltinDefinition, BuiltinFunction, RuntimeContext, RuntimeFactory
 
 
@@ -85,6 +85,12 @@ def transpose_builtin(args: list[AetherValue]) -> AetherValue:
     if len(args) != 1:
         raise AetherTypeError(f"{TRANSPOSE_NAME}(...) expects exactly one argument.")
     value = args[0]
+    if isinstance(value.type_name, TransposeVectorType):
+        return value.value
+    if isinstance(value.type_name, VectorType):
+        if value.type_name.element_type not in NUMERIC_TYPES:
+            raise AetherTypeError(f"{TRANSPOSE_NAME}(...) expects a vector with numeric elements.")
+        return AetherValue(TransposeVectorType(value.type_name.element_type, len(value.value)), value)
     matrix_type = _require_numeric_matrix_type(value.type_name, TRANSPOSE_NAME)
     rows = len(value.value)
     cols = len(value.value[0].value) if value.value else 0
@@ -101,6 +107,8 @@ def matmul_builtin(args: list[AetherValue]) -> AetherValue:
         raise AetherTypeError(f"{MATMUL_NAME}(...) expects exactly two arguments.")
     left = args[0]
     right = args[1]
+    if isinstance(left.type_name, MatrixType) and isinstance(right.type_name, VectorType):
+        return _matrix_vector_multiply(left, right, MATMUL_NAME)
     left_type = _require_numeric_matrix_type(left.type_name, MATMUL_NAME)
     right_type = _require_numeric_matrix_type(right.type_name, MATMUL_NAME)
     left_rows, left_cols = _runtime_shape(left)
@@ -133,16 +141,17 @@ def solve_builtin(args: list[AetherValue]) -> AetherValue:
     left = args[0]
     right = args[1]
     _require_numeric_matrix_type(left.type_name, SOLVE_NAME)
-    _require_numeric_matrix_type(right.type_name, SOLVE_NAME)
+    if not isinstance(right.type_name, VectorType):
+        _require_numeric_matrix_type(right.type_name, SOLVE_NAME)
     left_rows, left_cols = _runtime_shape(left)
-    right_rows, right_cols = _runtime_shape(right)
+    normalized_right = _vector_to_column_matrix(right) if isinstance(right.type_name, VectorType) else right
+    right_rows, right_cols = _runtime_shape(normalized_right)
     if left_rows == 0 or left_cols == 0:
         raise AetherTypeError(f"{SOLVE_NAME}(...) does not accept an empty coefficient matrix.")
     if right_rows == 0 or right_cols == 0:
         raise AetherTypeError(f"{SOLVE_NAME}(...) does not accept an empty right-hand side.")
 
-    rhs_is_vector = _is_runtime_vector_like(right)
-    normalized_right = right
+    rhs_is_vector = isinstance(right.type_name, VectorType) or _is_runtime_vector_like(right)
     if right_rows == 1 and right_cols == left_rows and left_rows != 1:
         normalized_right = transpose_builtin([right])
         right_rows, right_cols = _runtime_shape(normalized_right)
@@ -170,7 +179,9 @@ def solve_builtin(args: list[AetherValue]) -> AetherValue:
     if solution.shape[0] != left_cols and solution.shape[1] == left_cols:
         solution = solution.T
     solution[np.abs(solution) < 1e-12] = 0.0
-    return _float_array_to_matrix_value(solution, vector=rhs_is_vector and solution.shape[1] == 1)
+    if rhs_is_vector and solution.shape[1] == 1:
+        return _float_array_to_vector_value(solution[:, 0])
+    return _float_array_to_matrix_value(solution)
 
 
 def zeros_builtin(args: list[AetherValue]) -> AetherValue:
@@ -214,6 +225,12 @@ def _transpose_type(arg_types: list[AetherType | None]) -> AetherType | None:
     argument_type = arg_types[0]
     if argument_type is None:
         return None
+    if isinstance(argument_type, TransposeVectorType):
+        return VectorType(argument_type.element_type, argument_type.length)
+    if isinstance(argument_type, VectorType):
+        if argument_type.element_type not in NUMERIC_TYPES:
+            raise AetherTypeError(f"{TRANSPOSE_NAME}(...) expects a vector with numeric elements.")
+        return TransposeVectorType(argument_type.element_type, argument_type.length)
     matrix_type = _require_numeric_matrix_type(argument_type, TRANSPOSE_NAME)
     rows = matrix_type.rows
     cols = matrix_type.cols
@@ -227,6 +244,17 @@ def _matmul_type(arg_types: list[AetherType | None]) -> AetherType | None:
     if left_type is None or right_type is None:
         return None
     left_matrix_type = _require_numeric_matrix_type(left_type, MATMUL_NAME)
+    if isinstance(right_type, VectorType):
+        if (
+            left_matrix_type.cols is not None
+            and right_type.length is not None
+            and left_matrix_type.cols != right_type.length
+        ):
+            raise AetherTypeError(
+                f"{MATMUL_NAME}(...) requires compatible shapes, got "
+                f"{left_matrix_type.rows}x{left_matrix_type.cols} and {right_type.length}."
+            )
+        return VectorType(_promote_numeric_types(left_matrix_type.element_type, right_type.element_type), left_matrix_type.rows)
     right_matrix_type = _require_numeric_matrix_type(right_type, MATMUL_NAME)
     if (
         left_matrix_type.cols is not None
@@ -248,6 +276,12 @@ def _solve_type(arg_types: list[AetherType | None]) -> AetherType | None:
     if left_type is None or right_type is None:
         return None
     left_matrix_type = _require_numeric_matrix_type(left_type, SOLVE_NAME)
+    if isinstance(right_type, VectorType):
+        if left_matrix_type.rows is not None and right_type.length is not None and left_matrix_type.rows != right_type.length:
+            raise AetherTypeError(
+                f"{SOLVE_NAME}(...) requires rows(A) == rows(b), got {left_matrix_type.rows} and {right_type.length}."
+            )
+        return VectorType("double", left_matrix_type.cols)
     right_matrix_type = _require_numeric_matrix_type(right_type, SOLVE_NAME)
     right_rows, right_cols, result_is_vector = _normalized_rhs_type_shape(left_matrix_type, right_matrix_type)
     if left_matrix_type.rows is not None and right_rows is not None and left_matrix_type.rows != right_rows:
@@ -299,7 +333,46 @@ def _filled_double_matrix(rows: int, cols: int, fill: float) -> AetherValue:
     return AetherValue(MatrixType("double", rows, cols), matrix_rows)
 
 
+def _matrix_vector_multiply(matrix: AetherValue, vector: AetherValue, label: str) -> AetherValue:
+    matrix_type = _require_numeric_matrix_type(matrix.type_name, label)
+    if not isinstance(vector.type_name, VectorType):
+        raise AetherTypeError(f"{label}(...) expects a Vector right operand.")
+    if vector.type_name.element_type not in NUMERIC_TYPES:
+        raise AetherTypeError(f"{label}(...) expects vectors with numeric elements.")
+    rows, cols = _runtime_shape(matrix)
+    if cols != len(vector.value):
+        raise AetherTypeError(f"{label}(...) requires compatible shapes, got {rows}x{cols} and {len(vector.value)}.")
+    result_element_type = _promote_numeric_types(matrix_type.element_type, vector.type_name.element_type)
+    result: list[AetherValue] = []
+    for row_index in range(rows):
+        total = 0
+        for col_index in range(cols):
+            total += matrix.value[row_index].value[col_index].value * vector.value[col_index].value
+        if result_element_type == "int":
+            total = int(total)
+        else:
+            total = float(total)
+        result.append(AetherValue(result_element_type, total))
+    return AetherValue(VectorType(result_element_type, len(result)), result)
+
+
+def _vector_to_column_matrix(value: AetherValue) -> AetherValue:
+    if not isinstance(value.type_name, VectorType):
+        raise AetherTypeError(f"Expected vector type, got '{type_to_string(value.type_name)}'.")
+    row_type = ArrayType(value.type_name.element_type)
+    rows = [AetherValue(row_type, [element]) for element in value.value]
+    return AetherValue(MatrixType(value.type_name.element_type, len(rows), 1), rows)
+
+
 def _vector_elements(value: AetherValue, label: str) -> tuple[list[AetherValue], str]:
+    if isinstance(value.type_name, VectorType):
+        if value.type_name.element_type not in NUMERIC_TYPES:
+            raise AetherTypeError(f"{label}(...) expects vectors with numeric elements.")
+        return list(value.value), value.type_name.element_type
+    if isinstance(value.type_name, TransposeVectorType):
+        if value.type_name.element_type not in NUMERIC_TYPES:
+            raise AetherTypeError(f"{label}(...) expects vectors with numeric elements.")
+        return list(value.value.value), value.type_name.element_type
     if not isinstance(value.type_name, MatrixType):
         raise AetherTypeError(f"{label}(...) expects mathematical vector arguments, got '{type_to_string(value.type_name)}'.")
     element_type = value.type_name.element_type
@@ -341,6 +414,10 @@ def _float_array_to_matrix_value(values: np.ndarray, *, vector: bool = False) ->
     return AetherValue(MatrixType("double", rows, cols, vector), result_rows)
 
 
+def _float_array_to_vector_value(values: np.ndarray) -> AetherValue:
+    return AetherValue(VectorType("double", int(values.shape[0])), [AetherValue("double", float(value)) for value in values])
+
+
 def _require_numeric_matrix_type(type_name: AetherType, label: str) -> MatrixType:
     if not isinstance(type_name, MatrixType):
         raise AetherTypeError(f"{label}(...) expects a mathematical matrix argument, got '{type_to_string(type_name)}'.")
@@ -350,6 +427,10 @@ def _require_numeric_matrix_type(type_name: AetherType, label: str) -> MatrixTyp
 
 
 def _require_numeric_vector_type(type_name: AetherType, label: str) -> int | None:
+    if isinstance(type_name, (VectorType, TransposeVectorType)):
+        if type_name.element_type not in NUMERIC_TYPES:
+            raise AetherTypeError(f"{label}(...) expects vectors with numeric elements.")
+        return type_name.length
     if not isinstance(type_name, MatrixType):
         raise AetherTypeError(f"{label}(...) expects mathematical vector arguments, got '{type_to_string(type_name)}'.")
     if type_name.element_type not in NUMERIC_TYPES:

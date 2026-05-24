@@ -16,11 +16,14 @@ from .types import (
     MatrixType,
     NUMERIC_TYPES,
     RangeType,
+    TransposeVectorType,
+    VectorType,
     array_element_type,
     can_implicitly_convert,
     is_array_type,
     is_indexable_type,
     is_matrix_type,
+    is_vector_like_type,
     matrix_row_type,
     promote_numeric,
     type_to_string,
@@ -187,6 +190,8 @@ class TypeChecker:
         assigned_name = _assignment_root_name(statement.array)
         if assigned_name is not None and self._is_active_loop_variable_assignment(assigned_name, scope):
             raise AetherTypeError(f"Cannot assign to loop variable '{assigned_name}' inside its own for-loop.")
+        if isinstance(statement.index, (ast.FullSlice, ast.RangeExpression)):
+            raise AetherTypeError("Slice assignment is not supported yet.")
         array_type = self._expression_type(statement.array, scope)
         index_type = self._expression_type(statement.index, scope)
         value_type = self._expression_type(statement.expression, scope)
@@ -196,10 +201,14 @@ class TypeChecker:
             raise AetherTypeError(f"Cannot index non-indexable value of type '{type_to_string(array_type)}'.")
         if index_type != "int":
             raise AetherTypeError(f"Array index must be int, got '{type_to_string(index_type)}'.")
+        if isinstance(array_type, TransposeVectorType):
+            raise AetherTypeError("Cannot assign through a transposed vector view.")
         if isinstance(array_type, MatrixType) and not array_type.vector:
             raise AetherTypeError("Matrix values require two-dimensional indexing with A[i, j].")
         element_type = (
             array_type.element_type
+            if isinstance(array_type, VectorType)
+            else array_type.element_type
             if isinstance(array_type, MatrixType) and array_type.vector
             else matrix_row_type(array_type)
             if isinstance(array_type, MatrixType)
@@ -214,6 +223,11 @@ class TypeChecker:
         assigned_name = _assignment_root_name(statement.matrix)
         if assigned_name is not None and self._is_active_loop_variable_assignment(assigned_name, scope):
             raise AetherTypeError(f"Cannot assign to loop variable '{assigned_name}' inside its own for-loop.")
+        if isinstance(statement.row, (ast.FullSlice, ast.RangeExpression)) or isinstance(
+            statement.column_index,
+            (ast.FullSlice, ast.RangeExpression),
+        ):
+            raise AetherTypeError("Slice assignment is not supported yet.")
         matrix_type = self._expression_type(statement.matrix, scope)
         row_type = self._expression_type(statement.row, scope)
         column_type = self._expression_type(statement.column_index, scope)
@@ -346,9 +360,24 @@ class TypeChecker:
             if left_type not in NUMERIC_TYPES or right_type not in NUMERIC_TYPES:
                 raise AetherTypeError("Operator '%' requires numeric operands.")
             return promote_numeric(left_type, right_type, operator)
+        if operator in {".+", ".-", ".*"}:
+            elementwise_type = _elementwise_binary_type(left_type, operator[1], right_type)
+            if elementwise_type is not None:
+                return elementwise_type
+            raise AetherTypeError(
+                f"Operator '{operator}' is not defined for '{type_to_string(left_type)}' and '{type_to_string(right_type)}'."
+            )
         if operator in {"+", "-", "*", "/", "^"}:
             if operator == "+" and left_type == "string" and right_type == "string":
                 return "string"
+            if operator in {"+", "-"}:
+                algebraic_type = _algebraic_addition_type(left_type, operator, right_type)
+                if algebraic_type is not None:
+                    return algebraic_type
+            if operator == "*":
+                algebraic_type = _algebraic_multiplication_type(left_type, right_type)
+                if algebraic_type is not None:
+                    return algebraic_type
             array_array_type = _array_array_binary_type(left_type, operator, right_type)
             if array_array_type is not None:
                 return array_array_type
@@ -427,18 +456,30 @@ class TypeChecker:
             return UNKNOWN_TYPE
         common_type = _common_primitive_type(element_types)
         if expression.vector:
-            return MatrixType(common_type, sum(row_lengths), 1, vector=True)
+            return VectorType(common_type, sum(row_lengths))
         return MatrixType(common_type, len(expression.rows), row_lengths[0])
 
     def _index_type(self, expression: ast.IndexExpression, scope: Scope[VariableSymbol]) -> AetherType | None:
         array_type = self._expression_type(expression.array, scope)
-        index_type = self._expression_type(expression.index, scope)
+        index_type = self._index_component_type(expression.index, scope)
         if array_type is UNKNOWN_TYPE or index_type is UNKNOWN_TYPE:
             return UNKNOWN_TYPE
         if not is_indexable_type(array_type):
             raise AetherTypeError(f"Cannot index non-indexable value of type '{type_to_string(array_type)}'.")
+        if index_type == "slice":
+            if isinstance(array_type, VectorType):
+                return VectorType(array_type.element_type)
+            if isinstance(array_type, TransposeVectorType):
+                return TransposeVectorType(array_type.element_type)
+            if isinstance(array_type, MatrixType) and array_type.vector:
+                return VectorType(array_type.element_type)
+            raise AetherTypeError("Matrix values require two-dimensional indexing with A[i, j].")
         if index_type != "int":
             raise AetherTypeError(f"Array index must be int, got '{type_to_string(index_type)}'.")
+        if isinstance(array_type, VectorType):
+            return array_type.element_type
+        if isinstance(array_type, TransposeVectorType):
+            return array_type.element_type
         if isinstance(array_type, MatrixType) and array_type.vector:
             return array_type.element_type
         if isinstance(array_type, MatrixType):
@@ -447,24 +488,45 @@ class TypeChecker:
 
     def _matrix_index_type(self, expression: ast.MatrixIndexExpression, scope: Scope[VariableSymbol]) -> AetherType | None:
         matrix_type = self._expression_type(expression.matrix, scope)
-        row_type = self._expression_type(expression.row, scope)
-        column_type = self._expression_type(expression.column, scope)
+        row_type = self._index_component_type(expression.row, scope)
+        column_type = self._index_component_type(expression.column, scope)
         if matrix_type is UNKNOWN_TYPE or row_type is UNKNOWN_TYPE or column_type is UNKNOWN_TYPE:
             return UNKNOWN_TYPE
         if not isinstance(matrix_type, MatrixType):
             raise AetherTypeError(f"Two-dimensional indexing expects a matrix, got '{type_to_string(matrix_type)}'.")
+        row_is_slice = row_type == "slice"
+        column_is_slice = column_type == "slice"
+        if row_is_slice and column_is_slice:
+            return MatrixType(matrix_type.element_type)
+        if row_is_slice or column_is_slice:
+            return VectorType(matrix_type.element_type)
         if row_type != "int" or column_type != "int":
             raise AetherTypeError(
                 f"Matrix indices must be int, got '{type_to_string(row_type)}' and '{type_to_string(column_type)}'."
             )
         return matrix_type.element_type
 
+    def _index_component_type(self, expression: ast.Expression, scope: Scope[VariableSymbol]) -> AetherType | str | None:
+        if isinstance(expression, ast.FullSlice):
+            return "slice"
+        component_type = self._expression_type(expression, scope)
+        if isinstance(component_type, RangeType):
+            return "slice"
+        return component_type
+
     def _call_type(self, expression: ast.CallExpression, scope: Scope[VariableSymbol]) -> AetherType | None:
         builtin_name = self.builtin_aliases.get(expression.callee, expression.callee)
         if is_builtin(builtin_name):
+            self._check_builtin_keyword_arguments(builtin_name, expression, scope)
+            self._check_builtin_function_arguments(builtin_name, expression)
             validate_builtin_arity(builtin_name, len(expression.arguments))
-            argument_types = [self._expression_type(argument, scope) for argument in expression.arguments]
+            argument_types = [
+                self._expression_type_allowing_builtin_function_ref(argument, scope, builtin_name)
+                for argument in expression.arguments
+            ]
             return infer_builtin_type(builtin_name, argument_types)
+        if expression.keyword_arguments:
+            raise AetherTypeError(f"Function '{expression.callee}' does not accept keyword arguments.")
         function = self.functions.get(expression.callee)
         if function is None:
             raise AetherTypeError(f"Undefined function '{expression.callee}'.")
@@ -484,6 +546,62 @@ class TypeChecker:
             if argument_type is not UNKNOWN_TYPE and not can_implicitly_convert(argument_type, parameter.type_name):
                 self._raise_implicit_conversion_error(argument_type, parameter.type_name)
         return function.return_type
+
+    def _expression_type_allowing_builtin_function_ref(
+        self,
+        expression: ast.Expression,
+        scope: Scope[VariableSymbol],
+        builtin_name: str,
+    ) -> AetherType | None:
+        if _is_plots_builtin(builtin_name) and isinstance(expression, ast.Identifier):
+            if scope.lookup(expression.name) is None and expression.name in self.functions:
+                return "function"
+        return self._expression_type(expression, scope)
+
+    def _check_builtin_function_arguments(self, builtin_name: str, expression: ast.CallExpression) -> None:
+        if not _is_function_plot_builtin(builtin_name):
+            return
+        if not expression.arguments:
+            return
+        first = expression.arguments[0]
+        if not isinstance(first, ast.Identifier):
+            return
+        function = self.functions.get(first.name)
+        if function is None:
+            return
+        if len(function.parameters) != 1:
+            raise AetherTypeError(f"{expression.callee}(f, a, b) expects function '{first.name}' to take exactly one argument.")
+
+    def _check_builtin_keyword_arguments(
+        self,
+        builtin_name: str,
+        expression: ast.CallExpression,
+        scope: Scope[VariableSymbol],
+    ) -> None:
+        if not expression.keyword_arguments:
+            return
+        if not _is_plots_builtin(builtin_name):
+            raise AetherTypeError(f"Builtin '{expression.callee}' does not accept keyword arguments.")
+        allowed = _PLOTS_KEYWORD_TYPES.get(builtin_name)
+        if allowed is None:
+            raise AetherTypeError(f"Builtin '{expression.callee}' does not accept keyword arguments.")
+        for name, value in expression.keyword_arguments.items():
+            expected = allowed.get(name)
+            if expected is None:
+                raise AetherTypeError(f"{expression.callee}(...) got unknown keyword argument '{name}'.")
+            value_type = self._expression_type(value, scope)
+            if value_type is UNKNOWN_TYPE:
+                continue
+            if expected == "numeric":
+                if value_type not in NUMERIC_TYPES:
+                    raise AetherTypeError(f"Keyword argument '{name}' expects a numeric value, got '{type_to_string(value_type)}'.")
+                continue
+            if expected == "string_or_boolean":
+                if value_type not in {"string", "boolean"}:
+                    raise AetherTypeError(f"Keyword argument '{name}' expects string or boolean, got '{type_to_string(value_type)}'.")
+                continue
+            if value_type != expected:
+                raise AetherTypeError(f"Keyword argument '{name}' expects '{expected}', got '{type_to_string(value_type)}'.")
 
     def _expression_function_return_type(
         self,
@@ -589,6 +707,8 @@ def _iterable_element_type(type_name: AetherType) -> AetherType | None:
         return type_name.element_type
     if isinstance(type_name, ArrayType):
         return type_name.element_type
+    if isinstance(type_name, VectorType):
+        return type_name.element_type
     if isinstance(type_name, MatrixType) and _is_vector_like_matrix_type(type_name):
         return type_name.element_type
     return None
@@ -610,6 +730,39 @@ def _assignment_root_name(expression: ast.Expression) -> str | None:
     if isinstance(expression, ast.MatrixIndexExpression):
         return _assignment_root_name(expression.matrix)
     return None
+
+
+_COMMON_PLOT_KEYWORDS: dict[str, str] = {
+    "label": "string",
+    "color": "string",
+    "marker": "string",
+    "linestyle": "string",
+    "linewidth": "numeric",
+    "alpha": "numeric",
+    "title": "string",
+    "xlabel": "string",
+    "ylabel": "string",
+    "legend": "string_or_boolean",
+}
+
+_PLOTS_KEYWORD_TYPES: dict[str, dict[str, str]] = {
+    "Plots.plot": {**_COMMON_PLOT_KEYWORDS, "n": "int"},
+    "Plots.plot!": {**_COMMON_PLOT_KEYWORDS, "n": "int"},
+    "Plots.scatter": _COMMON_PLOT_KEYWORDS,
+    "Plots.scatter!": _COMMON_PLOT_KEYWORDS,
+    "Plots.bar": _COMMON_PLOT_KEYWORDS,
+    "Plots.bar!": _COMMON_PLOT_KEYWORDS,
+    "Plots.histogram": {**_COMMON_PLOT_KEYWORDS, "bins": "int"},
+    "Plots.histogram!": {**_COMMON_PLOT_KEYWORDS, "bins": "int"},
+}
+
+
+def _is_plots_builtin(name: str) -> bool:
+    return name.startswith("Plots.")
+
+
+def _is_function_plot_builtin(name: str) -> bool:
+    return name in {"Plots.plot", "Plots.plot!"}
 
 
 def _common_array_element_type(element_types: list[AetherType | None]) -> AetherType:
@@ -645,6 +798,11 @@ def _common_primitive_type(primitive_types: list[AetherType]) -> str:
 def _types_comparable_for_equality(left_type: AetherType, right_type: AetherType) -> bool:
     if left_type == right_type:
         return True
+    if isinstance(left_type, VectorType) and isinstance(right_type, VectorType):
+        return left_type.length == right_type.length and _types_comparable_for_equality(
+            left_type.element_type,
+            right_type.element_type,
+        )
     if isinstance(left_type, ArrayType) and isinstance(right_type, ArrayType):
         return _types_comparable_for_equality(left_type.element_type, right_type.element_type)
     if isinstance(left_type, MatrixType) and isinstance(right_type, MatrixType):
@@ -652,9 +810,133 @@ def _types_comparable_for_equality(left_type: AetherType, right_type: AetherType
             left_type.element_type,
             right_type.element_type,
         )
-    if is_array_type(left_type) or is_array_type(right_type) or is_matrix_type(left_type) or is_matrix_type(right_type):
+    if (
+        is_array_type(left_type)
+        or is_array_type(right_type)
+        or is_matrix_type(left_type)
+        or is_matrix_type(right_type)
+        or is_vector_like_type(left_type)
+        or is_vector_like_type(right_type)
+    ):
         return False
     return left_type in {"int", "float", "double"} and right_type in {"int", "float", "double"}
+
+
+def _algebraic_addition_type(left_type: AetherType, operator: str, right_type: AetherType) -> AetherType | None:
+    if isinstance(left_type, VectorType) and isinstance(right_type, VectorType):
+        return _vector_vector_elementwise_type(left_type, operator, right_type, operator)
+    if isinstance(left_type, TransposeVectorType) and isinstance(right_type, TransposeVectorType):
+        vector_type = _vector_vector_elementwise_type(
+            VectorType(left_type.element_type, left_type.length),
+            operator,
+            VectorType(right_type.element_type, right_type.length),
+            operator,
+        )
+        return TransposeVectorType(vector_type.element_type, vector_type.length)
+    return None
+
+
+def _algebraic_multiplication_type(left_type: AetherType, right_type: AetherType) -> AetherType | None:
+    if left_type in NUMERIC_TYPES and right_type in NUMERIC_TYPES:
+        return None
+    if left_type in NUMERIC_TYPES and isinstance(right_type, VectorType):
+        return VectorType(promote_numeric(left_type, _numeric_vector_scalar_type(right_type), "*"), right_type.length)
+    if right_type in NUMERIC_TYPES and isinstance(left_type, VectorType):
+        return VectorType(promote_numeric(_numeric_vector_scalar_type(left_type), right_type, "*"), left_type.length)
+    if left_type in NUMERIC_TYPES and isinstance(right_type, TransposeVectorType):
+        return TransposeVectorType(promote_numeric(left_type, _numeric_transpose_vector_scalar_type(right_type), "*"), right_type.length)
+    if right_type in NUMERIC_TYPES and isinstance(left_type, TransposeVectorType):
+        return TransposeVectorType(promote_numeric(_numeric_transpose_vector_scalar_type(left_type), right_type, "*"), left_type.length)
+    if isinstance(left_type, VectorType) and isinstance(right_type, VectorType):
+        raise AetherTypeError("Operator '*' between Vector and Vector is ambiguous; use transpose(v) * w for dot product, v * transpose(w) for outer product, or v .* w for elementwise multiplication.")
+    if isinstance(left_type, MatrixType) and isinstance(right_type, MatrixType):
+        if left_type.cols is not None and right_type.rows is not None and left_type.cols != right_type.rows:
+            raise AetherTypeError(
+                f"Operator '*' requires compatible matrix shapes, got {left_type.rows}x{left_type.cols} and {right_type.rows}x{right_type.cols}."
+            )
+        return MatrixType(
+            promote_numeric(_numeric_matrix_scalar_type(left_type), _numeric_matrix_scalar_type(right_type), "*"),
+            left_type.rows,
+            right_type.cols,
+        )
+    if isinstance(left_type, MatrixType) and isinstance(right_type, VectorType):
+        if left_type.cols is not None and right_type.length is not None and left_type.cols != right_type.length:
+            raise AetherTypeError(
+                f"Operator '*' requires compatible Matrix and Vector shapes, got {left_type.rows}x{left_type.cols} and {right_type.length}."
+            )
+        return VectorType(
+            promote_numeric(_numeric_matrix_scalar_type(left_type), _numeric_vector_scalar_type(right_type), "*"),
+            left_type.rows,
+        )
+    if isinstance(left_type, TransposeVectorType) and isinstance(right_type, VectorType):
+        if left_type.length is not None and right_type.length is not None and left_type.length != right_type.length:
+            raise AetherTypeError(f"Operator '*' requires vectors with the same length, got {left_type.length} and {right_type.length}.")
+        return promote_numeric(_numeric_transpose_vector_scalar_type(left_type), _numeric_vector_scalar_type(right_type), "*")
+    if isinstance(left_type, VectorType) and isinstance(right_type, TransposeVectorType):
+        return MatrixType(
+            promote_numeric(_numeric_vector_scalar_type(left_type), _numeric_transpose_vector_scalar_type(right_type), "*"),
+            left_type.length,
+            right_type.length,
+        )
+    return None
+
+
+def _elementwise_binary_type(left_type: AetherType, operator: str, right_type: AetherType) -> AetherType | None:
+    if left_type in NUMERIC_TYPES and right_type in NUMERIC_TYPES:
+        return promote_numeric(left_type, right_type, operator)
+    if left_type in NUMERIC_TYPES and isinstance(right_type, VectorType):
+        return VectorType(promote_numeric(left_type, _numeric_vector_scalar_type(right_type), operator), right_type.length)
+    if right_type in NUMERIC_TYPES and isinstance(left_type, VectorType):
+        return VectorType(promote_numeric(_numeric_vector_scalar_type(left_type), right_type, operator), left_type.length)
+    if left_type in NUMERIC_TYPES and isinstance(right_type, TransposeVectorType):
+        return TransposeVectorType(promote_numeric(left_type, _numeric_transpose_vector_scalar_type(right_type), operator), right_type.length)
+    if right_type in NUMERIC_TYPES and isinstance(left_type, TransposeVectorType):
+        return TransposeVectorType(promote_numeric(_numeric_transpose_vector_scalar_type(left_type), right_type, operator), left_type.length)
+    if left_type in NUMERIC_TYPES and isinstance(right_type, MatrixType):
+        return MatrixType(promote_numeric(left_type, _numeric_matrix_scalar_type(right_type), operator), right_type.rows, right_type.cols)
+    if right_type in NUMERIC_TYPES and isinstance(left_type, MatrixType):
+        return MatrixType(promote_numeric(_numeric_matrix_scalar_type(left_type), right_type, operator), left_type.rows, left_type.cols)
+    if isinstance(left_type, VectorType) and isinstance(right_type, VectorType):
+        return _vector_vector_elementwise_type(left_type, operator, right_type, f".{operator}")
+    if isinstance(left_type, TransposeVectorType) and isinstance(right_type, TransposeVectorType):
+        vector_type = _vector_vector_elementwise_type(
+            VectorType(left_type.element_type, left_type.length),
+            operator,
+            VectorType(right_type.element_type, right_type.length),
+            f".{operator}",
+        )
+        return TransposeVectorType(vector_type.element_type, vector_type.length)
+    if isinstance(left_type, MatrixType) and isinstance(right_type, MatrixType):
+        if (
+            left_type.rows is not None
+            and right_type.rows is not None
+            and left_type.cols is not None
+            and right_type.cols is not None
+            and (left_type.rows != right_type.rows or left_type.cols != right_type.cols)
+        ):
+            raise AetherTypeError(
+                f"Operator '.{operator}' requires matrices with the same shape, got '{type_to_string(left_type)}' and '{type_to_string(right_type)}'."
+            )
+        return MatrixType(
+            promote_numeric(_numeric_matrix_scalar_type(left_type), _numeric_matrix_scalar_type(right_type), operator),
+            left_type.rows or right_type.rows,
+            left_type.cols or right_type.cols,
+        )
+    return None
+
+
+def _vector_vector_elementwise_type(
+    left_type: VectorType,
+    operator: str,
+    right_type: VectorType,
+    label: str,
+) -> VectorType:
+    if left_type.length is not None and right_type.length is not None and left_type.length != right_type.length:
+        raise AetherTypeError(f"Operator '{label}' requires vectors with the same length, got {left_type.length} and {right_type.length}.")
+    return VectorType(
+        promote_numeric(_numeric_vector_scalar_type(left_type), _numeric_vector_scalar_type(right_type), operator),
+        left_type.length or right_type.length,
+    )
 
 
 def _scalar_array_binary_type(left_type: AetherType, operator: str, right_type: AetherType) -> AetherType | None:
@@ -707,6 +989,18 @@ def _numeric_matrix_scalar_type(matrix_type: MatrixType) -> str:
     if matrix_type.element_type not in NUMERIC_TYPES:
         raise AetherTypeError("Matrix operations require numeric elements.")
     return matrix_type.element_type
+
+
+def _numeric_vector_scalar_type(vector_type: VectorType) -> str:
+    if vector_type.element_type not in NUMERIC_TYPES:
+        raise AetherTypeError("Vector operations require numeric elements.")
+    return vector_type.element_type
+
+
+def _numeric_transpose_vector_scalar_type(vector_type: TransposeVectorType) -> str:
+    if vector_type.element_type not in NUMERIC_TYPES:
+        raise AetherTypeError("Vector operations require numeric elements.")
+    return vector_type.element_type
 
 
 def check_program(program: ast.Program) -> None:

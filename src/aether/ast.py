@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from .types import AetherType
@@ -159,9 +159,15 @@ class RangeExpression:
 
 
 @dataclass(frozen=True)
+class FullSlice:
+    pass
+
+
+@dataclass(frozen=True)
 class CallExpression:
     callee: str
     arguments: list[Expression]
+    keyword_arguments: dict[str, Expression] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

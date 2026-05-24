@@ -43,6 +43,16 @@ def test_run_source_returns_output() -> None:
     assert result.error is None
 
 
+def test_run_source_can_stream_output_while_retaining_result() -> None:
+    chunks: list[str] = []
+
+    result = run_source('println("a"); print("b");', output_writer=chunks.append)
+
+    assert result.success
+    assert result.output == "a\nb"
+    assert chunks == ["a\n", "b"]
+
+
 def test_run_source_returns_error_without_raising() -> None:
     result = run_source("println(missing);")
 

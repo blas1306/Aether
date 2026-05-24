@@ -10,6 +10,8 @@ from ..types import (
     AetherValue,
     MatrixType,
     NUMERIC_TYPES,
+    TransposeVectorType,
+    VectorType,
     explicit_cast,
     is_array_type,
     is_matrix_type,
@@ -114,6 +116,10 @@ def length_builtin(args: list[AetherValue]) -> AetherValue:
     if len(args) != 1:
         raise AetherTypeError("length(...) expects exactly one argument.")
     value = args[0]
+    if isinstance(value.type_name, VectorType):
+        return AetherValue("int", len(value.value))
+    if isinstance(value.type_name, TransposeVectorType):
+        return AetherValue("int", len(value.value.value))
     if isinstance(value.type_name, MatrixType) and value.type_name.vector:
         return AetherValue("int", _vector_length(value))
     if not is_array_type(value.type_name):
@@ -218,6 +224,8 @@ def _length_type(arg_types: list[AetherType | None]) -> AetherType | None:
     if argument_type is None:
         return None
     if isinstance(argument_type, MatrixType) and argument_type.vector:
+        return "int"
+    if isinstance(argument_type, (VectorType, TransposeVectorType)):
         return "int"
     if not is_array_type(argument_type):
         raise AetherTypeError(f"length(...) expects an array argument, got '{type_to_string(argument_type)}'.")

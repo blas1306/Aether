@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 from .result import AetherRunResult
@@ -11,5 +12,10 @@ def run_aether(
     *,
     plot_mode: str | None = None,
     plot_output_dir: str | Path | None = None,
+    output_writer: Callable[[str], None] | None = None,
 ) -> AetherRunResult:
-    return AetherSession(plot_mode=plot_mode, plot_output_dir=plot_output_dir).run(source)
+    return AetherSession(
+        plot_mode=plot_mode,
+        plot_output_dir=plot_output_dir,
+        output_writer=output_writer,
+    ).run(source)

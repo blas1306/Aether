@@ -7,7 +7,7 @@ from aether.ast import Assignment, BinaryExpression
 from aether.errors import AetherTypeError
 from aether.lexer import lex
 from aether.parser import Parser
-from aether.types import MatrixType
+from aether.types import MatrixType, VectorType
 
 
 LINEAR_ALGEBRA_IMPORT = "import Math.LinearAlgebra\n"
@@ -24,6 +24,16 @@ def _assert_matrix_values(result, name: str, expected: list[list[float]]) -> Non
     assert len(actual) == len(expected)
     for actual_row, expected_row in zip(actual, expected):
         assert actual_row == pytest.approx(expected_row)
+
+
+def _vector_values(result, name: str) -> list[float]:
+    value = result.env[name]
+    assert isinstance(value.type_name, VectorType)
+    return [element.value for element in value.value]
+
+
+def _assert_vector_values(result, name: str, expected: list[float]) -> None:
+    assert _vector_values(result, name) == pytest.approx(expected)
 
 
 def test_leftdivide_parses_as_binary_operator() -> None:
@@ -46,8 +56,8 @@ x = A \\ b;
 """
     )
 
-    _assert_matrix_values(result, "x", [[0.2], [0.6]])
-    assert result.env["x"].type_name == MatrixType("double", 2, 1, True)
+    _assert_vector_values(result, "x", [0.2, 0.6])
+    assert result.env["x"].type_name == VectorType("double", 2)
 
 
 def test_linear_algebra_solve_builtin_matches_leftdivide() -> None:
@@ -59,7 +69,7 @@ x = Math.LinearAlgebra.solve(A, b);
 """
     )
 
-    _assert_matrix_values(result, "x", [[0.2], [0.6]])
+    _assert_vector_values(result, "x", [0.2, 0.6])
 
 
 def test_leftdivide_returns_least_squares_solution_for_overdetermined_system() -> None:
@@ -72,7 +82,7 @@ x = A \\ b;
 """
     )
 
-    _assert_matrix_values(result, "x", [[5 / 6], [5 / 6]])
+    _assert_vector_values(result, "x", [5 / 6, 5 / 6])
 
 
 def test_leftdivide_returns_minimum_norm_solution_for_rank_deficient_system() -> None:
@@ -85,7 +95,7 @@ x = A \\ b;
 """
     )
 
-    _assert_matrix_values(result, "x", [[0.5], [0.5]])
+    _assert_vector_values(result, "x", [0.5, 0.5])
 
 
 def test_leftdivide_supports_multiple_right_hand_sides() -> None:

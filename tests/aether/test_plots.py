@@ -5,6 +5,9 @@ from pathlib import Path
 import pytest
 
 from aether import AetherRuntimeError, AetherSession, AetherTypeError, analyze_source, completion_items, run_aether
+from aether.ast import CallExpression, ExpressionStatement
+from aether.lexer import lex
+from aether.parser import Parser
 
 
 def test_import_plots_plot_vector_creates_png_in_document_mode(tmp_path: Path) -> None:
@@ -121,3 +124,94 @@ def test_plots_completions_include_qualified_and_imported_names() -> None:
 
 def test_analyze_source_accepts_imported_plot_alias() -> None:
     assert analyze_source("import Plots\nplot([1; 2; 3]);") == []
+
+
+def test_plots_v2_parser_accepts_bang_calls_and_keyword_arguments() -> None:
+    program = Parser(lex('plot!(x, y, label="datos", color="red");')).parse()
+    statement = program.statements[0]
+
+    assert isinstance(statement, ExpressionStatement)
+    call = statement.expression
+    assert isinstance(call, CallExpression)
+    assert call.callee == "plot!"
+    assert len(call.arguments) == 2
+    assert set(call.keyword_arguments) == {"label", "color"}
+
+
+def test_plots_v2_keyword_styles_and_mutating_series(tmp_path: Path) -> None:
+    result = run_aether(
+        """
+import Plots
+x = [1; 2; 3; 4];
+y = [1; 4; 9; 16];
+plot(x, y, label="cuadrados", color="blue", linewidth=2, title="Ajuste", xlabel="x", ylabel="y");
+scatter!(x, y, label="datos", marker="x", color="red");
+path = savefig("styled");
+""",
+        plot_mode="document",
+        plot_output_dir=tmp_path,
+    )
+
+    assert Path(result.env["path"].value).exists()
+
+
+def test_plots_v2_plot_function_samples_expression_function(tmp_path: Path) -> None:
+    result = run_aether(
+        """
+import Plots
+f(x) = x^2 + 1;
+plot(f, 0, 3, n=12, label="f", color="green");
+path = savefig("function_plot");
+""",
+        plot_mode="document",
+        plot_output_dir=tmp_path,
+    )
+
+    assert Path(result.env["path"].value).exists()
+
+
+def test_plots_v2_plot_function_rejects_wrong_arity() -> None:
+    with pytest.raises(AetherTypeError, match="take exactly one argument"):
+        run_aether(
+            """
+import Plots
+f(x, y) = x + y;
+plot(f, 0, 1);
+""",
+            plot_mode="document",
+        )
+
+
+def test_plots_v2_unknown_keyword_is_clear() -> None:
+    with pytest.raises(AetherTypeError, match="unknown keyword argument 'colour'"):
+        run_aether(
+            """
+import Plots
+plot([1; 2; 3], colour="red");
+""",
+            plot_mode="document",
+        )
+
+
+def test_plots_v2_bar_histogram_and_matrix_columns(tmp_path: Path) -> None:
+    result = run_aether(
+        """
+import Plots
+x = [1; 2; 3];
+Y = [1 2; 4 5; 9 10];
+plot(x, Y, label="series");
+bar!(x, [2; 3; 4], color="gray", alpha=0.5);
+histogram!([1; 1; 2; 3; 3; 3], bins=3, label="hist");
+path = savefig("mixed");
+""",
+        plot_mode="document",
+        plot_output_dir=tmp_path,
+    )
+
+    assert Path(result.env["path"].value).exists()
+
+
+def test_lexer_keeps_not_equal_after_identifier() -> None:
+    result = run_aether("x = 1; println(x != 2);")
+
+    assert result.output == "true\n"

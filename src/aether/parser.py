@@ -4,7 +4,7 @@ from . import ast
 from .errors import AetherSyntaxError
 from .lexer import lex
 from .tokens import AETHER_TYPES, PRIMITIVE_TYPES, Token, TokenType
-from .types import AetherType, ArrayType, MatrixType
+from .types import AetherType, ArrayType, MatrixType, VectorType
 
 
 STRING_ESCAPES = {'"': '"', "\\": "\\", "$": "$", "n": "\n", "t": "\t", "r": "\r"}
@@ -223,7 +223,7 @@ class Parser:
 
     def _term(self) -> ast.Expression:
         expr = self._factor()
-        while self._match(TokenType.PLUS, TokenType.MINUS):
+        while self._match(TokenType.PLUS, TokenType.MINUS, TokenType.DOT_PLUS, TokenType.DOT_MINUS):
             operator = self._previous()
             self._require_expression_after_operator(operator)
             right = self._factor()
@@ -232,7 +232,7 @@ class Parser:
 
     def _factor(self) -> ast.Expression:
         expr = self._power()
-        while self._match(TokenType.STAR, TokenType.SLASH, TokenType.BACKSLASH, TokenType.PERCENT):
+        while self._match(TokenType.STAR, TokenType.DOT_STAR, TokenType.SLASH, TokenType.BACKSLASH, TokenType.PERCENT):
             operator = self._previous()
             self._require_expression_after_operator(operator)
             right = self._power()
@@ -256,15 +256,20 @@ class Parser:
     def _postfix(self) -> ast.Expression:
         expr = self._primary()
         while self._match(TokenType.LEFT_BRACKET):
-            index = self._expression()
+            index = self._index_component()
             if self._match(TokenType.COMMA):
-                column = self._expression()
+                column = self._index_component()
                 self._consume(TokenType.RIGHT_BRACKET, "Expected ']' after matrix index.")
                 expr = ast.MatrixIndexExpression(expr, index, column)
                 continue
             self._consume(TokenType.RIGHT_BRACKET, "Expected ']' after index.")
             expr = ast.IndexExpression(expr, index)
         return expr
+
+    def _index_component(self) -> ast.Expression:
+        if self._match(TokenType.COLON):
+            return ast.FullSlice()
+        return self._expression()
 
     def _primary(self) -> ast.Expression:
         if self._match(TokenType.BOOLEAN_LITERAL):
@@ -284,13 +289,25 @@ class Parser:
                 name = f"{name}.{part}"
             if self._match(TokenType.LEFT_PAREN):
                 arguments: list[ast.Expression] = []
+                keyword_arguments: dict[str, ast.Expression] = {}
+                saw_keyword_argument = False
                 if not self._check(TokenType.RIGHT_PAREN):
                     while True:
-                        arguments.append(self._expression())
+                        if self._check(TokenType.IDENTIFIER) and self._check_next(TokenType.EQUAL):
+                            saw_keyword_argument = True
+                            keyword_name = self._advance().lexeme
+                            if keyword_name in keyword_arguments:
+                                raise self._error(self._previous(), f"Duplicate keyword argument '{keyword_name}'.")
+                            self._consume(TokenType.EQUAL, "Expected '=' after keyword argument name.")
+                            keyword_arguments[keyword_name] = self._expression()
+                        else:
+                            if saw_keyword_argument:
+                                raise self._error(self._peek(), "Positional arguments cannot follow keyword arguments.")
+                            arguments.append(self._expression())
                         if not self._match(TokenType.COMMA):
                             break
                 self._consume(TokenType.RIGHT_PAREN, "Expected ')' after arguments.")
-                return ast.CallExpression(name, arguments)
+                return ast.CallExpression(name, arguments, keyword_arguments)
             if dotted:
                 raise self._error(self._previous(), "Dotted names are only supported for builtin calls.")
             if name in AETHER_TYPES:
@@ -406,7 +423,9 @@ class Parser:
             if element_token.lexeme not in PRIMITIVE_TYPES:
                 raise self._error(element_token, f"Expected primitive element type inside {token.lexeme}<...>.")
             self._consume(TokenType.GREATER, f"Expected '>' after {token.lexeme} element type.")
-            return MatrixType(element_token.lexeme, vector=token.lexeme == "Vector")
+            if token.lexeme == "Vector":
+                return VectorType(element_token.lexeme)
+            return MatrixType(element_token.lexeme)
         type_name: AetherType = token.lexeme
         while self._match(TokenType.LEFT_BRACKET):
             self._consume(TokenType.RIGHT_BRACKET, "Expected ']' after '[' in array type.")

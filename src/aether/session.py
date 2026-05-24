@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,7 +13,7 @@ from .result import AetherRunResult
 from .symbols import FunctionSymbol, VariableSymbol
 from .typechecker import TypeChecker
 from .formatting import format_value
-from .types import AetherValue, ArrayType, MatrixType, type_to_string
+from .types import AetherValue, ArrayType, MatrixType, TransposeVectorType, VectorType, type_to_string
 
 
 @dataclass(frozen=True)
@@ -31,9 +32,19 @@ class _SessionSnapshot:
 class AetherSession:
     """Persistent Aether execution session for REPL-like workflows."""
 
-    def __init__(self, *, plot_mode: str | None = None, plot_output_dir: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        plot_mode: str | None = None,
+        plot_output_dir: str | Path | None = None,
+        output_writer: Callable[[str], None] | None = None,
+    ) -> None:
         self._type_checker = TypeChecker()
-        self._interpreter = Interpreter(plot_mode=plot_mode, plot_output_dir=plot_output_dir)
+        self._interpreter = Interpreter(
+            plot_mode=plot_mode,
+            plot_output_dir=plot_output_dir,
+            output_writer=output_writer,
+        )
 
     def run(self, source: str) -> AetherRunResult:
         snapshot = self._snapshot()
@@ -104,6 +115,10 @@ def _value_shape(value: AetherValue) -> str:
         if cols is None:
             cols = len(value.value[0].value) if value.value else 0
         return f"{rows}x{cols}"
+    if isinstance(type_name, TransposeVectorType):
+        return f"{len(value.value.value)}"
+    if isinstance(type_name, VectorType):
+        return f"{len(value.value)}"
     if isinstance(type_name, ArrayType):
         return f"{len(value.value)}"
     return "1x1"

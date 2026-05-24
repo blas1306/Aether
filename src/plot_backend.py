@@ -11,15 +11,25 @@ FigureCanvasAgg = None
 Figure = None
 
 
-def _ensure_matplotlib() -> None:
+def _ensure_matplotlib(*, prefer_interactive: bool = False) -> None:
     global plt, FigureCanvasAgg, Figure
     if plt is not None and FigureCanvasAgg is not None and Figure is not None:
+        if prefer_interactive and _is_noninteractive_backend(str(plt.get_backend()).lower()):
+            try:
+                plt.switch_backend("qtagg")
+            except Exception:
+                pass
         return
     import matplotlib
 
     backend = str(matplotlib.get_backend()).lower()
-    if "tk" in backend:
-        matplotlib.use("qtagg")
+    if prefer_interactive and _is_noninteractive_backend(backend):
+        try:
+            matplotlib.use("qtagg", force=True)
+        except Exception:
+            pass
+    elif "tk" in backend:
+        matplotlib.use("qtagg", force=True)
     import matplotlib.pyplot as _plt
     from matplotlib.backends.backend_agg import FigureCanvasAgg as _FigureCanvasAgg
     from matplotlib.figure import Figure as _Figure
@@ -27,6 +37,10 @@ def _ensure_matplotlib() -> None:
     plt = _plt
     FigureCanvasAgg = _FigureCanvasAgg
     Figure = _Figure
+
+
+def _is_noninteractive_backend(backend: str) -> bool:
+    return backend in {"agg", "cairo", "pdf", "pgf", "ps", "svg", "template"} or backend.endswith("agg")
 
 
 class PlotBackendError(ValueError):
@@ -93,6 +107,8 @@ class PlotBackend:
         self._figure_states: dict[int, dict[str, Any]] = {}
         self._active_figure_id = 1
         self.on_image = on_image
+        self._external_qt_app = self._detect_existing_qt_app()
+        self._interactive_show_requested = False
         self._figure_states[1] = self._new_state()
         self._load_state(1)
         self.set_mode(plot_mode)
@@ -107,6 +123,7 @@ class PlotBackend:
     def reset(self) -> None:
         self._figure_states.clear()
         self._active_figure_id = 1
+        self._interactive_show_requested = False
         self._figure_states[1] = self._new_state()
         self._load_state(1)
 
@@ -213,6 +230,8 @@ class PlotBackend:
         self,
         *args: Any,
         output_name: str | None = None,
+        append: bool = False,
+        style: dict[str, Any] | None = None,
     ) -> str | bytes | None:
         x_vals: np.ndarray
         y_vals: np.ndarray
@@ -244,11 +263,15 @@ class PlotBackend:
             raise PlotDataError("x and y cannot be empty.")
 
         axes = self._ensure_axes()
-        if not self.hold:
+        if not self.hold and not append:
             axes.cla()
 
         plot_kwargs = self._parse_fmt(fmt) if fmt is not None else {}
+        if style:
+            plot_kwargs.update(style)
         axes.plot(x_vals, y_vals, **plot_kwargs)
+        if plot_kwargs.get("label"):
+            self.legend_visible = True
 
         self._apply_axes_state()
         return self._render(output_name=output_name)
@@ -257,6 +280,8 @@ class PlotBackend:
         self,
         *args: Any,
         output_name: str | None = None,
+        append: bool = False,
+        style: dict[str, Any] | None = None,
     ) -> str | bytes | None:
         if len(args) == 1:
             y_vals = self._to_vector(args[0], "y")
@@ -273,10 +298,71 @@ class PlotBackend:
             raise PlotDataError("x and y cannot be empty.")
 
         axes = self._ensure_axes()
-        if not self.hold:
+        if not self.hold and not append:
             axes.cla()
 
-        axes.scatter(x_vals, y_vals)
+        scatter_kwargs = dict(style or {})
+        axes.scatter(x_vals, y_vals, **scatter_kwargs)
+        if scatter_kwargs.get("label"):
+            self.legend_visible = True
+            axes.legend(loc=self.legend_location)
+        self._apply_axes_state()
+        return self._render(output_name=output_name)
+
+    def bar(
+        self,
+        *args: Any,
+        output_name: str | None = None,
+        append: bool = False,
+        style: dict[str, Any] | None = None,
+    ) -> str | bytes | None:
+        if len(args) == 1:
+            y_vals = self._to_vector(args[0], "y")
+            x_vals = np.arange(1, len(y_vals) + 1, dtype=float)
+        elif len(args) == 2:
+            x_vals = self._to_vector(args[0], "x")
+            y_vals = self._to_vector(args[1], "y")
+        else:
+            raise PlotDataError("bar accepts: bar(y), bar(x, y).")
+        if len(x_vals) != len(y_vals):
+            raise PlotDataError(f"x and y must have the same length (x={len(x_vals)}, y={len(y_vals)}).")
+        if len(x_vals) == 0:
+            raise PlotDataError("x and y cannot be empty.")
+
+        axes = self._ensure_axes()
+        if not self.hold and not append:
+            axes.cla()
+        bar_kwargs = dict(style or {})
+        axes.bar(x_vals, y_vals, **bar_kwargs)
+        if bar_kwargs.get("label"):
+            self.legend_visible = True
+            axes.legend(loc=self.legend_location)
+        self._apply_axes_state()
+        return self._render(output_name=output_name)
+
+    def histogram(
+        self,
+        values: Any,
+        *,
+        bins: int | None = None,
+        output_name: str | None = None,
+        append: bool = False,
+        style: dict[str, Any] | None = None,
+    ) -> str | bytes | None:
+        y_vals = self._to_vector(values, "y")
+        if len(y_vals) == 0:
+            raise PlotDataError("y cannot be empty.")
+
+        axes = self._ensure_axes()
+        if not self.hold and not append:
+            axes.cla()
+        hist_kwargs = dict(style or {})
+        if bins is not None:
+            hist_kwargs["bins"] = bins
+        axes.hist(y_vals, **hist_kwargs)
+        if hist_kwargs.get("label"):
+            self.legend_visible = True
+            axes.legend(loc=self.legend_location)
         self._apply_axes_state()
         return self._render(output_name=output_name)
 
@@ -291,7 +377,7 @@ class PlotBackend:
 
     def _ensure_axes(self):
         if self.plot_mode == "interactive":
-            _ensure_matplotlib()
+            _ensure_matplotlib(prefer_interactive=True)
             needs_new = (
                 self.current_figure is None
                 or self.current_axes is None
@@ -330,7 +416,8 @@ class PlotBackend:
             return
         axes = self.current_axes
         lines = list(axes.get_lines())
-        if not lines:
+        handles, auto_labels = axes.get_legend_handles_labels()
+        if not lines and not handles:
             existing = axes.get_legend()
             if existing is not None:
                 existing.remove()
@@ -342,7 +429,7 @@ class PlotBackend:
                 existing.remove()
             return
 
-        if self.legend_labels:
+        if self.legend_labels and lines:
             for idx, line in enumerate(lines):
                 if idx < len(self.legend_labels):
                     line.set_label(self.legend_labels[idx])
@@ -353,7 +440,9 @@ class PlotBackend:
                 if line.get_label().startswith("_"):
                     line.set_label(f"data{idx}")
 
-        axes.legend(loc=self.legend_location)
+        handles, auto_labels = axes.get_legend_handles_labels()
+        if handles:
+            axes.legend(loc=self.legend_location)
 
     def _render(self, output_name: str | None = None) -> str | bytes | None:
         if self.current_figure is None:
@@ -373,25 +462,26 @@ class PlotBackend:
         return None
 
     def _show_interactive(self) -> None:
-        _ensure_matplotlib()
-        # En apps GUI con event loop activo, evitar relanzarlo con show bloqueante.
-        try:
-            backend = str(plt.get_backend()).lower()
-        except Exception:
-            backend = ""
-        if "qt" in backend:
-            qt_app = None
-            try:
-                from PySide6.QtWidgets import QApplication  # type: ignore
+        _ensure_matplotlib(prefer_interactive=True)
+        plt.show(block=False)
+        self._interactive_show_requested = True
+        plt.pause(0.001)
 
-                qt_app = QApplication.instance()
-            except Exception:
-                qt_app = None
-            if qt_app is not None:
-                plt.show(block=False)
-                plt.pause(0.001)
-                return
-        plt.show()
+    def wait_for_interactive_plots(self) -> None:
+        if self.plot_mode != "interactive" or not self._interactive_show_requested or self._external_qt_app:
+            return
+        _ensure_matplotlib(prefer_interactive=True)
+        self._interactive_show_requested = False
+        plt.show(block=True)
+
+    @staticmethod
+    def _detect_existing_qt_app() -> bool:
+        try:
+            from PySide6.QtWidgets import QApplication  # type: ignore
+
+            return QApplication.instance() is not None
+        except Exception:
+            return False
 
     def _redraw_interactive(self) -> None:
         if self.plot_mode != "interactive":

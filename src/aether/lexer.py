@@ -48,7 +48,6 @@ class Lexer:
             "]": TokenType.RIGHT_BRACKET,
             ",": TokenType.COMMA,
             ";": TokenType.SEMICOLON,
-            ".": TokenType.DOT,
             ":": TokenType.COLON,
             "-": TokenType.MINUS,
             "*": TokenType.STAR,
@@ -59,6 +58,18 @@ class Lexer:
         }
         if char == "+":
             self._add_token(TokenType.PLUS_EQUAL if self._match("=") else TokenType.PLUS)
+            return
+        if char == ".":
+            if self._match("+"):
+                self._add_token(TokenType.DOT_PLUS)
+                return
+            if self._match("-"):
+                self._add_token(TokenType.DOT_MINUS)
+                return
+            if self._match("*"):
+                self._add_token(TokenType.DOT_STAR)
+                return
+            self._add_token(TokenType.DOT)
             return
         if char in single_char_tokens:
             self._add_token(single_char_tokens[char])
@@ -100,6 +111,8 @@ class Lexer:
 
     def _identifier(self) -> None:
         while self._peek().isalnum() or self._peek() == "_":
+            self._advance()
+        if self._peek() == "!" and self._peek_next() != "=":
             self._advance()
         text = self.source[self.start : self.current]
         token_type = KEYWORDS.get(text, TokenType.IDENTIFIER)

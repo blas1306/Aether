@@ -43,7 +43,7 @@ println(matmul([1 2], [3; 4]));
 """
     )
 
-    assert result.output == "[1 3; 2 4]\n11\n"
+    assert result.output == "[1 3; 2 4]\n[11]\n"
 
 
 def test_builtin_namespace_members_require_import_for_unqualified_calls() -> None:
