@@ -48,6 +48,14 @@ class Assignment:
 
 
 @dataclass(frozen=True)
+class DestructuringAssignment:
+    names: list[str]
+    expression: Expression
+    line: int = 1
+    column: int = 1
+
+
+@dataclass(frozen=True)
 class IndexAssignment:
     array: Expression
     index: Expression
@@ -140,6 +148,8 @@ class Identifier:
 class UnaryExpression:
     operator: str
     operand: Expression
+    line: int = 1
+    column: int = 1
 
 
 @dataclass(frozen=True)
@@ -172,6 +182,11 @@ class CallExpression:
 
 @dataclass(frozen=True)
 class ArrayLiteral:
+    elements: list[Expression]
+
+
+@dataclass(frozen=True)
+class TupleLiteral:
     elements: list[Expression]
 
 

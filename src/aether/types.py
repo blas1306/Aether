@@ -151,7 +151,28 @@ class RangeType:
         return hash(("Range", self.element_type))
 
 
-AetherType = str | ArrayType | MatrixType | VectorType | TransposeVectorType | RangeType
+@dataclass(frozen=True, eq=False)
+class TupleType:
+    element_types: tuple["AetherType", ...]
+
+    def __post_init__(self) -> None:
+        if len(self.element_types) < 2:
+            raise AetherTypeError("Tuple types require at least two elements.")
+        for element_type in self.element_types:
+            if not is_known_type(element_type):
+                raise AetherTypeError(f"Unknown tuple element type '{type_to_string(element_type)}'.")
+
+    def __str__(self) -> str:
+        return "(" + ", ".join(type_to_string(element_type) for element_type in self.element_types) + ")"
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, TupleType) and self.element_types == other.element_types
+
+    def __hash__(self) -> int:
+        return hash(("Tuple", self.element_types))
+
+
+AetherType = str | ArrayType | MatrixType | VectorType | TransposeVectorType | RangeType | TupleType
 
 
 @dataclass(frozen=True)
@@ -205,6 +226,8 @@ def type_to_string(type_name: AetherType) -> str:
 def is_known_type(type_name: AetherType) -> bool:
     if isinstance(type_name, ArrayType):
         return is_known_type(type_name.element_type)
+    if isinstance(type_name, TupleType):
+        return all(is_known_type(element_type) for element_type in type_name.element_types)
     if isinstance(type_name, MatrixType):
         return type_name.element_type in TYPE_NAMES
     if isinstance(type_name, (VectorType, TransposeVectorType)):
@@ -244,6 +267,43 @@ def is_indexable_type(type_name: AetherType) -> bool:
     return isinstance(type_name, (ArrayType, MatrixType, VectorType, TransposeVectorType))
 
 
+def shape_dimensions(value: AetherValue) -> list[int]:
+    type_name = value.type_name
+    if isinstance(type_name, VectorType):
+        return [len(value.value)]
+    if isinstance(type_name, TransposeVectorType):
+        return [1, len(value.value.value)]
+    if isinstance(type_name, MatrixType):
+        rows = len(value.value)
+        cols = len(value.value[0].value) if value.value else 0
+        return [rows, cols]
+    if isinstance(type_name, ArrayType):
+        return [len(value.value)]
+    if isinstance(type_name, str) and type_name in TYPE_NAMES:
+        return []
+    raise AetherTypeError(f"size(...) is not defined for '{type_to_string(type_name)}'.")
+
+
+def shape_dimension_count(type_name: AetherType) -> int:
+    if isinstance(type_name, VectorType):
+        return 1
+    if isinstance(type_name, (MatrixType, TransposeVectorType)):
+        return 2
+    if isinstance(type_name, ArrayType):
+        return 1
+    if isinstance(type_name, str) and type_name in TYPE_NAMES:
+        return 0
+    raise AetherTypeError(f"size(...) is not defined for '{type_to_string(type_name)}'.")
+
+
+def shape_vector_value(value: AetherValue) -> AetherValue:
+    dimensions = shape_dimensions(value)
+    return AetherValue(
+        VectorType("int", len(dimensions)),
+        [AetherValue("int", dimension) for dimension in dimensions],
+    )
+
+
 def array_element_type(type_name: AetherType) -> AetherType:
     if not isinstance(type_name, ArrayType):
         raise AetherTypeError(f"Expected array type, got '{type_to_string(type_name)}'.")
@@ -257,6 +317,15 @@ def matrix_row_type(type_name: AetherType) -> ArrayType:
 
 
 def can_implicitly_convert(from_type: AetherType, to_type: AetherType) -> bool:
+    if isinstance(from_type, TupleType) or isinstance(to_type, TupleType):
+        if not isinstance(from_type, TupleType) or not isinstance(to_type, TupleType):
+            return False
+        if len(from_type.element_types) != len(to_type.element_types):
+            return False
+        return all(
+            can_implicitly_convert(source_type, target_type)
+            for source_type, target_type in zip(from_type.element_types, to_type.element_types)
+        )
     if isinstance(from_type, RangeType) or isinstance(to_type, RangeType):
         return from_type == to_type
     if isinstance(from_type, TransposeVectorType) or isinstance(to_type, TransposeVectorType):
@@ -301,6 +370,8 @@ def coerce_implicit(value: AetherValue, target_type: AetherType) -> AetherValue:
         raise AetherTypeError(f"Unknown type '{type_to_string(target_type)}'.")
     if value.type_name == target_type:
         return value
+    if isinstance(target_type, TupleType):
+        return coerce_tuple_value(value, target_type)
     if isinstance(target_type, VectorType):
         return coerce_vector_value(value, target_type)
     if isinstance(target_type, TransposeVectorType):
@@ -313,6 +384,42 @@ def coerce_implicit(value: AetherValue, target_type: AetherType) -> AetherValue:
             f"Use {type_to_string(target_type)}(...) for explicit conversion."
         )
     return AetherValue(target_type, _coerce_python_value(value.value, target_type))
+
+
+def coerce_return_value(value: AetherValue, target_type: AetherType) -> AetherValue:
+    if isinstance(target_type, TupleType):
+        if not isinstance(value.type_name, TupleType):
+            raise AetherTypeError(
+                f"Cannot implicitly convert '{type_to_string(value.type_name)}' to '{type_to_string(target_type)}'."
+            )
+        if len(value.type_name.element_types) != len(target_type.element_types):
+            raise AetherTypeError("Tuple return type arity mismatch.")
+        return AetherValue(
+            target_type,
+            tuple(
+                coerce_return_value(element, element_type)
+                for element, element_type in zip(value.value, target_type.element_types)
+            ),
+        )
+    if target_type == "float" and value.type_name == "double":
+        return AetherValue("float", float(value.value))
+    return coerce_implicit(value, target_type)
+
+
+def coerce_tuple_value(value: AetherValue, target_type: TupleType) -> AetherValue:
+    if not isinstance(value.type_name, TupleType):
+        raise AetherTypeError(
+            f"Cannot implicitly convert '{type_to_string(value.type_name)}' to '{type_to_string(target_type)}'."
+        )
+    if len(value.type_name.element_types) != len(target_type.element_types):
+        raise AetherTypeError("Tuple return type arity mismatch.")
+    return AetherValue(
+        target_type,
+        tuple(
+            coerce_implicit(element, element_type)
+            for element, element_type in zip(value.value, target_type.element_types)
+        ),
+    )
 
 
 def coerce_vector_value(value: AetherValue, target_type: VectorType) -> AetherValue:

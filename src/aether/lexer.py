@@ -55,6 +55,7 @@ class Lexer:
             "\\": TokenType.BACKSLASH,
             "%": TokenType.PERCENT,
             "^": TokenType.CARET,
+            "'": TokenType.APOSTROPHE,
         }
         if char == "+":
             self._add_token(TokenType.PLUS_EQUAL if self._match("=") else TokenType.PLUS)

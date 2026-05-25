@@ -410,6 +410,30 @@ def _builtin_suggestions(prefix: str) -> list[CommandSuggestion]:
                 cursor_backtrack=1,
             )
         )
+    
+    # Also include package functions whose short names match the prefix
+    for name in builtin_names():
+        if "." not in name or name in keyword_names:
+            continue
+        # Extract the short name (part after the last dot)
+        short_name = name.rsplit(".", 1)[-1]
+        if not _match_prefix(short_name, prefix):
+            continue
+        suggestions.append(
+            CommandSuggestion(
+                name=short_name,
+                label=short_name,
+                insert_text=f"{short_name}()",
+                signature=f"{name}(...)",
+                description="Aether stdlib function.",
+                category="stdlib",
+                kind="function",
+                source="stdlib",
+                priority=240,
+                match_text=short_name,
+                cursor_backtrack=1,
+            )
+        )
     return suggestions
 
 

@@ -87,6 +87,27 @@ class AutocompleteEngineTests(unittest.TestCase):
         self.assertEqual(by_name["i"].kind, "variable")
         self.assertEqual(by_name["i"].origin, "for_loop_variable")
 
+    def test_document_symbols_include_ranges_types_and_imports(self):
+        symbols = extract_document_symbols(
+            "import Math.LinearAlgebra\n"
+            "double square(double x) {\n"
+            "    return x*x;\n"
+            "}\n"
+            "Matrix < double > A = [1 2];\n"
+        )
+
+        by_name = {item.name: item for item in symbols}
+
+        self.assertEqual(by_name["Math.LinearAlgebra"].kind, "module")
+        self.assertEqual(by_name["Math.LinearAlgebra"].origin, "import")
+        self.assertEqual(by_name["Math.LinearAlgebra"].selection_range.start_character, len("import "))
+        self.assertEqual(by_name["square"].kind, "function")
+        self.assertEqual(by_name["square"].type_name, "double")
+        self.assertEqual(by_name["square"].detail, "double square(double x)")
+        self.assertEqual(by_name["square"].selection_range.start_line, 1)
+        self.assertEqual(by_name["A"].type_name, "Matrix<double>")
+        self.assertEqual(by_name["A"].detail, "Matrix<double> A")
+
     def test_document_variable_before_cursor_appears_without_runtime_state(self):
         suggestions = build_autocomplete_suggestions(
             AutocompleteRequest(
@@ -405,6 +426,56 @@ class AutocompleteEngineTests(unittest.TestCase):
 
         self.assertEqual(suggestions[0].name, r"\plot()")
         self.assertEqual(suggestions[0].source, "catalog")
+
+    def test_package_functions_suggested_by_short_name_prefix(self):
+        """Test that package functions like Plots.plot are suggested when typing short prefixes."""
+        suggestions = build_autocomplete_suggestions(AutocompleteRequest(line_text="p", cursor_col=1))
+        names = [item.name for item in suggestions]
+        
+        # Plots functions should appear
+        self.assertIn("plot", names)
+        self.assertIn("plot!", names)
+        
+        # print and println should also appear
+        self.assertIn("print", names)
+        self.assertIn("println", names)
+
+    def test_linear_algebra_inner_function_suggested_by_prefix(self):
+        """Test that Math.LinearAlgebra.inner is suggested when typing 'i'."""
+        suggestions = build_autocomplete_suggestions(AutocompleteRequest(line_text="i", cursor_col=1))
+        names = [item.name for item in suggestions]
+        
+        self.assertIn("inner", names)
+        # Verify it has the full qualified signature
+        inner_sugg = next(s for s in suggestions if s.name == "inner")
+        self.assertEqual(inner_sugg.signature, "Math.LinearAlgebra.inner(...)")
+
+    def test_linear_algebra_norm_function_suggested_by_prefix(self):
+        """Test that Math.LinearAlgebra.norm is suggested when typing 'no'."""
+        suggestions = build_autocomplete_suggestions(AutocompleteRequest(line_text="no", cursor_col=2))
+        names = [item.name for item in suggestions]
+        
+        self.assertIn("norm", names)
+        norm_sugg = next(s for s in suggestions if s.name == "norm")
+        self.assertEqual(norm_sugg.signature, "Math.LinearAlgebra.norm(...)")
+
+    def test_linear_algebra_transpose_function_suggested_by_prefix(self):
+        """Test that Math.LinearAlgebra.transpose is suggested when typing 'tr'."""
+        suggestions = build_autocomplete_suggestions(AutocompleteRequest(line_text="tr", cursor_col=2))
+        names = [item.name for item in suggestions]
+        
+        self.assertIn("transpose", names)
+        transpose_sugg = next(s for s in suggestions if s.name == "transpose")
+        self.assertEqual(transpose_sugg.signature, "Math.LinearAlgebra.transpose(...)")
+
+    def test_plots_scatter_function_suggested_by_prefix(self):
+        """Test that Plots.scatter is suggested when typing 'sc'."""
+        suggestions = build_autocomplete_suggestions(AutocompleteRequest(line_text="sc", cursor_col=2))
+        names = [item.name for item in suggestions]
+        
+        self.assertIn("scatter", names)
+        scatter_sugg = next(s for s in suggestions if s.name == "scatter")
+        self.assertEqual(scatter_sugg.signature, "Plots.scatter(...)")
 
 
 if __name__ == "__main__":

@@ -54,6 +54,13 @@ def test_keywords_do_not_highlight() -> None:
     assert find_occurrences(text, text.index("double")) == []
 
 
+def test_and_or_do_not_highlight_as_keywords() -> None:
+    text = "and x\nor y\n"
+
+    assert find_occurrences(text, text.index("and")) == []
+    assert find_occurrences(text, text.index("or")) == []
+
+
 def test_backslash_command_occurrences_are_supported() -> None:
     text = "\\alpha = \\alpha + beta\n"
 

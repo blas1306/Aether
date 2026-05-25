@@ -9,16 +9,43 @@ from dataclasses import asdict
 from typing import Any, BinaryIO
 
 from aether import analyze_source
+from aether.stdlib.registry import builtin_aliases_for_import, builtin_names, is_builtin_namespace
 from autocomplete_engine import (
     AutocompleteRequest,
     build_autocomplete_suggestions,
     detect_autocomplete_match,
 )
 from command_catalog import CommandSuggestion
+from document_symbols import (
+    SourceRange,
+    extract_document_symbol_occurrences,
+    extract_document_symbols,
+    identifier_at_offset,
+    symbol_before_offset,
+)
 
 
 JsonObject = dict[str, Any]
 DIAGNOSTIC_DEBOUNCE_SECONDS = 0.35
+FALLBACK_BUILTIN_NAMES = {
+    "abs",
+    "cols",
+    "cos",
+    "exp",
+    "length",
+    "ln",
+    "log",
+    "Math.LinearAlgebra.eig",
+    "Math.LinearAlgebra.solve",
+    "Math.mod",
+    "plot",
+    "print",
+    "println",
+    "rows",
+    "sin",
+    "sqrt",
+    "tan",
+}
 
 
 class AetherLanguageServer:
@@ -65,6 +92,10 @@ class AetherLanguageServer:
             return None
         if method == "textDocument/completion":
             return self._response(message, self._completion_result(message.get("params") or {}))
+        if method == "textDocument/documentSymbol":
+            return self._response(message, self._document_symbol_result(message.get("params") or {}))
+        if method == "textDocument/hover":
+            return self._response(message, self._hover_result(message.get("params") or {}))
         if "id" in message:
             return self._error_response(message, code=-32601, message=f"Method not found: {method}")
         return None
@@ -81,6 +112,8 @@ class AetherLanguageServer:
                     "triggerCharacters": _completion_trigger_characters(),
                     "resolveProvider": False,
                 },
+                "documentSymbolProvider": True,
+                "hoverProvider": True,
             }
         }
 
@@ -217,6 +250,54 @@ class AetherLanguageServer:
             items = []
         return {"isIncomplete": False, "items": items}
 
+    def _document_symbol_result(self, params: JsonObject) -> list[JsonObject]:
+        document = params.get("textDocument") or {}
+        uri = document.get("uri", "")
+        source = self.documents.get(uri, "")
+        try:
+            return [_lsp_document_symbol(symbol) for symbol in extract_document_symbol_occurrences(source)]
+        except Exception:
+            return []
+
+    def _hover_result(self, params: JsonObject) -> JsonObject | None:
+        document = params.get("textDocument") or {}
+        position = params.get("position") or {}
+        uri = document.get("uri", "")
+        source = self.documents.get(uri, "")
+        if not source:
+            return None
+
+        line = int(position.get("line", 0))
+        character = int(position.get("character", 0))
+        line_starts = _line_start_offsets(source)
+        offset = _position_to_offset(source, line_starts, line, character)
+        token = _hover_token_at_offset(source, offset)
+        if token is None:
+            return None
+        name, token_start, token_end = token
+
+        symbol = symbol_before_offset(source, name, offset)
+        if symbol is not None:
+            return _lsp_hover(
+                _symbol_hover_markdown(symbol),
+                _lsp_range_from_offsets(source, line_starts, token_start, token_end),
+            )
+
+        builtin_name = _resolve_builtin_hover_name(source, name)
+        if builtin_name is not None:
+            return _lsp_hover(
+                _builtin_hover_markdown(name, builtin_name),
+                _lsp_range_from_offsets(source, line_starts, token_start, token_end),
+            )
+
+        if _safe_is_builtin_namespace(name):
+            return _lsp_hover(
+                f"```aether\n{name}\n```\n\nAether namespace.",
+                _lsp_range_from_offsets(source, line_starts, token_start, token_end),
+            )
+
+        return None
+
     def _read_message(self) -> JsonObject | None:
         headers: dict[str, str] = {}
         while True:
@@ -246,6 +327,144 @@ class AetherLanguageServer:
 
     def _error_response(self, request: JsonObject, *, code: int, message: str) -> JsonObject:
         return {"jsonrpc": "2.0", "id": request.get("id"), "error": {"code": code, "message": message}}
+
+
+def _lsp_document_symbol(symbol) -> JsonObject:
+    item: JsonObject = {
+        "name": symbol.name,
+        "kind": _document_symbol_kind(symbol.kind),
+        "range": _source_range_to_lsp(symbol.range),
+        "selectionRange": _source_range_to_lsp(symbol.selection_range),
+    }
+    if symbol.detail:
+        item["detail"] = symbol.detail
+    return item
+
+
+def _document_symbol_kind(kind: str) -> int:
+    return {
+        "module": 2,
+        "function": 12,
+        "variable": 13,
+    }.get(kind, 13)
+
+
+def _source_range_to_lsp(source_range: SourceRange) -> JsonObject:
+    return {
+        "start": {"line": source_range.start_line, "character": source_range.start_character},
+        "end": {"line": source_range.end_line, "character": source_range.end_character},
+    }
+
+
+def _lsp_hover(markdown: str, hover_range: JsonObject) -> JsonObject:
+    return {
+        "contents": {"kind": "markdown", "value": markdown},
+        "range": hover_range,
+    }
+
+
+def _symbol_hover_markdown(symbol) -> str:
+    signature = symbol.detail or symbol.signature
+    description = {
+        "function": "User function defined in this document.",
+        "module": "Aether import.",
+        "variable": "Variable defined in this document.",
+    }.get(symbol.kind, "Aether symbol.")
+    if symbol.origin == "for_loop_variable":
+        description = "Loop variable defined in this document."
+    return f"```aether\n{signature}\n```\n\n{description}"
+
+
+def _builtin_hover_markdown(name: str, builtin_name: str) -> str:
+    if name == builtin_name:
+        signature = f"{name}(...)"
+        description = "Aether builtin."
+    else:
+        signature = f"{name}(...) -> {builtin_name}(...)"
+        description = "Aether builtin imported into the current document."
+    return f"```aether\n{signature}\n```\n\n{description}"
+
+
+def _resolve_builtin_hover_name(source: str, name: str) -> str | None:
+    names = _safe_builtin_names()
+    if name in names:
+        return name
+    for symbol in extract_document_symbols(source):
+        if symbol.origin != "import" or not _safe_is_builtin_namespace(symbol.name):
+            continue
+        builtin_name = _safe_builtin_aliases_for_import(symbol.name).get(name)
+        if builtin_name is not None:
+            return builtin_name
+    return None
+
+
+def _safe_builtin_names() -> set[str]:
+    try:
+        return set(builtin_names())
+    except Exception:
+        return set(FALLBACK_BUILTIN_NAMES)
+
+
+def _safe_is_builtin_namespace(name: str) -> bool:
+    try:
+        return is_builtin_namespace(name)
+    except Exception:
+        prefix = f"{name}."
+        return any(item.startswith(prefix) for item in FALLBACK_BUILTIN_NAMES)
+
+
+def _safe_builtin_aliases_for_import(module_name: str) -> dict[str, str]:
+    try:
+        return builtin_aliases_for_import(module_name)
+    except Exception:
+        prefix = f"{module_name}."
+        return {
+            builtin_name[len(prefix) :]: builtin_name
+            for builtin_name in FALLBACK_BUILTIN_NAMES
+            if builtin_name.startswith(prefix) and "." not in builtin_name[len(prefix) :]
+        }
+
+
+def _hover_token_at_offset(source: str, offset: int) -> tuple[str, int, int] | None:
+    if not source:
+        return None
+    offset = min(max(0, offset), len(source) - 1)
+    if not _is_hover_identifier_char(source[offset]) and offset > 0:
+        offset -= 1
+    if not _is_hover_identifier_char(source[offset]):
+        return None
+
+    start = offset
+    while start > 0 and _is_hover_identifier_char(source[start - 1]):
+        start -= 1
+    end = offset + 1
+    while end < len(source) and _is_hover_identifier_char(source[end]):
+        end += 1
+
+    while start < end and source[start] == ".":
+        start += 1
+    while end > start and source[end - 1] == ".":
+        end -= 1
+    if start >= end:
+        return None
+    name = source[start:end]
+    if identifier_at_offset(source, offset) != name:
+        return None
+    return name, start, end
+
+
+def _is_hover_identifier_char(char: str) -> bool:
+    return char.isalnum() or char in "_.!"
+
+
+def _lsp_range_from_offsets(source: str, line_starts: list[int], start_offset: int, end_offset: int) -> JsonObject:
+    source_len = len(source)
+    start = _offset_to_position(line_starts, min(max(0, start_offset), source_len))
+    end = _offset_to_position(line_starts, min(max(start_offset, end_offset), source_len))
+    return {
+        "start": {"line": start[0], "character": start[1]},
+        "end": {"line": end[0], "character": end[1]},
+    }
 
 
 def _document_version(document: JsonObject, default: int | None = None) -> int | None:

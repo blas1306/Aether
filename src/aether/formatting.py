@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .types import AetherRange, AetherValue, ArrayType, MatrixType, RangeType, TransposeVectorType, VectorType
+from .types import AetherRange, AetherValue, ArrayType, MatrixType, RangeType, TransposeVectorType, TupleType, VectorType
 
 
 def format_value(value: AetherValue) -> str:
@@ -14,6 +14,8 @@ def format_value(value: AetherValue) -> str:
         return format_array(value)
     if isinstance(value.type_name, RangeType):
         return format_range(value)
+    if isinstance(value.type_name, TupleType):
+        return format_tuple(value)
     return format_scalar(value)
 
 
@@ -39,6 +41,10 @@ def format_matrix(value: AetherValue) -> str:
 
 def format_array(value: AetherValue) -> str:
     return "[" + ", ".join(format_array_element(element) for element in value.value) + "]"
+
+
+def format_tuple(value: AetherValue) -> str:
+    return "(" + ", ".join(format_array_element(element) for element in value.value) + ")"
 
 
 def format_range(value: AetherValue) -> str:

@@ -4,7 +4,6 @@ import Plots
 boolean EsPrimo2(int pp) {
     if pp <= 1 {
         println("No existen numeros primos menores que 2");
-        return false;
     }
 
     if pp == 2 || pp == 3 {
@@ -28,12 +27,12 @@ EsPrimo2(1);
 println(EsPrimo2(2));
 println(EsPrimo2(25));
 
-n = [1; 2; 3; 4; 5; 6; 7; 8; 9; 10];
-p = [2; 3; 5; 7; 11; 13; 17; 19; 23; 29];
+n = [1; 2; 3; 4; 5; 6; 7; 8; 9; 10; 11; 12];
+p = [2; 3; 5; 7; 11; 13; 17; 19; 23; 29; 31; 37];
 
-A = ones(10, 2);
+A = ones(12, 2);
 
-for i in 0:9 {
+for i in 0:11 {
     A[i, 1] = n[i]*ln(n[i]);
 }
 
@@ -48,7 +47,16 @@ title("Numeros primos y ajuste");
 xlabel("n");
 ylabel("p_n");
 plot(n, p, ".", label="p_n", color="red");
-plot!(f, 1, 11);
+plot!(f, 1, 13, label="ajuste");
 
 err2 = norm(p - A*z)^2;
 println("err2 = ", err2);
+
+int p_n(int x) {
+    pp_n = int(f(x));
+    if EsPrimo2(pp_n) == false {
+        return pp_n + int(ln(x)/z[0]);
+    }
+
+    return pp_n;
+}

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from aether.errors import AetherTypeError
+from aether.errors import AetherRuntimeError, AetherTypeError
 from aether.runner import run_aether
 from aether.types import MatrixType, TransposeVectorType, VectorType
 
@@ -13,6 +13,198 @@ def values(vector):
 
 def matrix_values(matrix):
     return [[element.value for element in row.value] for row in matrix.value]
+
+
+def test_size_reports_scalar_as_zero_dimensional_shape() -> None:
+    result = run_aether(
+        """
+s = size(5);
+println(s);
+println(length(s));
+"""
+    )
+
+    assert result.env["s"].type_name == VectorType("int", 0)
+    assert values(result.env["s"]) == []
+    assert result.output == "[]\n0\n"
+
+
+def test_size_reports_vector_as_one_dimensional_and_indexable() -> None:
+    result = run_aether(
+        """
+s = size([1, 2, 3]);
+n = s[0];
+ok = s == [3];
+println(s);
+println(n);
+println(ok);
+"""
+    )
+
+    assert result.env["s"].type_name == VectorType("int", 1)
+    assert values(result.env["s"]) == [3]
+    assert result.env["n"].value == 3
+    assert result.env["ok"].value is True
+    assert result.output == "[3]\n3\ntrue\n"
+
+
+def test_size_reports_matrix_shape_and_rows_cols_delegate_to_it() -> None:
+    result = run_aether(
+        """
+A = [1 2 3 4; 5 6 7 8; 9 10 11 12];
+s = size(A);
+m = s[0];
+n = s[1];
+ok = s == [3, 4];
+println(s);
+println(m);
+println(n);
+println(rows(A));
+println(cols(A));
+println(columns(A));
+println(ok);
+"""
+    )
+
+    assert result.env["s"].type_name == VectorType("int", 2)
+    assert values(result.env["s"]) == [3, 4]
+    assert result.env["m"].value == 3
+    assert result.env["n"].value == 4
+    assert result.env["ok"].value is True
+    assert result.output == "[3, 4]\n3\n4\n3\n4\n4\ntrue\n"
+
+
+def test_size_preserves_transpose_vector_row_orientation() -> None:
+    result = run_aether(
+        """
+import Math.LinearAlgebra
+v = [1, 2, 3];
+t = transpose(v);
+s = size(t);
+println(s);
+println(s[0]);
+println(s[1]);
+println(rows(t));
+println(cols(t));
+println(columns(t));
+"""
+    )
+
+    assert result.env["t"].type_name == TransposeVectorType("int", 3)
+    assert result.env["s"].type_name == VectorType("int", 2)
+    assert values(result.env["s"]) == [1, 3]
+    assert result.output == "[1, 3]\n1\n3\n1\n3\n3\n"
+
+
+def test_size_scalar_shape_has_no_dimension_index() -> None:
+    with pytest.raises(AetherRuntimeError):
+        run_aether("println(size(5)[0]);")
+
+
+def test_bracket_concat_horizontally_combines_matrix_blocks() -> None:
+    result = run_aether(
+        """
+A = [1 2; 3 4];
+B = [5 6; 7 8];
+C = [A B];
+println(C);
+"""
+    )
+
+    assert result.env["C"].type_name == MatrixType("int", 2, 4)
+    assert matrix_values(result.env["C"]) == [[1, 2, 5, 6], [3, 4, 7, 8]]
+    assert result.output == "[1 2 5 6; 3 4 7 8]\n"
+
+
+def test_bracket_concat_vertically_combines_matrix_blocks() -> None:
+    result = run_aether(
+        """
+A = [1 2; 3 4];
+B = [5 6; 7 8];
+C = [A; B];
+println(C);
+"""
+    )
+
+    assert result.env["C"].type_name == MatrixType("int", 4, 2)
+    assert matrix_values(result.env["C"]) == [[1, 2], [3, 4], [5, 6], [7, 8]]
+    assert result.output == "[1 2; 3 4; 5 6; 7 8]\n"
+
+
+def test_bracket_concat_combines_matrix_block_grid() -> None:
+    result = run_aether(
+        """
+A = [1 2; 3 4];
+B = [5; 6];
+C = [7 8];
+D = [9];
+E = [A B; C D];
+println(E);
+"""
+    )
+
+    assert result.env["E"].type_name == MatrixType("int", 3, 3)
+    assert matrix_values(result.env["E"]) == [[1, 2, 5], [3, 4, 6], [7, 8, 9]]
+    assert result.output == "[1 2 5; 3 4 6; 7 8 9]\n"
+
+
+def test_bracket_concat_vectors_as_columns_for_horizontal_concat() -> None:
+    result = run_aether(
+        """
+v = [1, 2];
+w = [3, 4];
+C = [v w];
+println(C);
+"""
+    )
+
+    assert result.env["C"].type_name == MatrixType("int", 2, 2)
+    assert matrix_values(result.env["C"]) == [[1, 3], [2, 4]]
+    assert result.output == "[1 3; 2 4]\n"
+
+
+def test_bracket_concat_pure_vector_vcat_returns_vector() -> None:
+    result = run_aether(
+        """
+v = [1, 2];
+w = [3, 4];
+c = [v; w];
+println(c);
+"""
+    )
+
+    assert result.env["c"].type_name == VectorType("int", 4)
+    assert values(result.env["c"]) == [1, 2, 3, 4]
+    assert result.output == "[1, 2, 3, 4]\n"
+
+
+def test_bracket_concat_promotes_numeric_element_types() -> None:
+    result = run_aether(
+        """
+A = [1 2];
+B = [3.5 4.5];
+C = [A; B];
+println(C);
+"""
+    )
+
+    assert result.env["C"].type_name == MatrixType("double", 2, 2)
+    assert matrix_values(result.env["C"]) == [[1.0, 2.0], [3.5, 4.5]]
+    assert result.output == "[1.0 2.0; 3.5 4.5]\n"
+
+
+def test_bracket_concat_rejects_incompatible_block_dimensions() -> None:
+    with pytest.raises(AetherTypeError, match="same number of rows"):
+        run_aether("A = [1 2; 3 4]; B = [5 6]; C = [A B];")
+    with pytest.raises(AetherTypeError, match="same number of columns"):
+        run_aether("A = [1 2]; B = [3 4 5]; C = [A; B];")
+
+
+def test_bracket_concat_rejects_single_or_comma_separated_matrix_blocks() -> None:
+    with pytest.raises(AetherTypeError, match="',' is not supported"):
+        run_aether("A = [1 2; 3 4]; C = [A];")
+    with pytest.raises(AetherTypeError, match="',' is not supported"):
+        run_aether("A = [1 2; 3 4]; B = [5 6; 7 8]; C = [A, B];")
 
 
 def test_vectors_are_1d_values_and_simple_indexing_returns_scalar() -> None:

@@ -12,7 +12,8 @@ object AetherTokenTypes {
     val BAD_CHARACTER = IElementType("AETHER_BAD_CHARACTER", AetherLanguage)
 
     val KEYWORDS = setOf(
-        "and",
+        "&&",
+        "||",
         "as",
         "boolean",
         "break",
@@ -29,7 +30,6 @@ object AetherTokenTypes {
         "int",
         "Matrix",
         "not",
-        "or",
         "return",
         "string",
         "true",

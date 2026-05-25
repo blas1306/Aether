@@ -1,0 +1,38 @@
+import Math.LinearAlgebra
+
+(Matrix<double> u, Matrix<double> s, Matrix<double> v) svd(Matrix<double> A) {
+
+    m, n = size(A);
+    p = rank(A);
+
+    u = zeros(m, m);
+    s = zeros(m, n);
+    v = zeros(n, n);
+
+    Vec, Vap = eig(A' * A);
+
+    l = diag(Vap);
+
+    lambda, idx = sort(l, "descend");
+
+    v = Vec[:, idx];
+
+    if p < n {
+        v_old = v[:, 0:(p-1)];
+        v_new = N(v_old');
+        v = [v_old v_new];
+    }
+
+    sigma = sqrt(lambda);
+
+    for i in 0:(p-1) {
+        s[i, i] = sigma[i];
+        u[:, i] = (A*v[:, i]) / sigma[i];
+    }
+
+    if p < m {
+        u_old = u[:, 1:p];
+        u_new = N(u_old');
+        u = [u_old u_new];
+    }
+}

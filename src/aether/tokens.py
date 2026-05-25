@@ -50,6 +50,7 @@ class TokenType(str, Enum):
     COMMA = ","
     SEMICOLON = ";"
     DOT = "."
+    APOSTROPHE = "'"
 
 
 AETHER_TYPES = {"int", "float", "double", "string", "boolean", "Matrix", "Vector"}

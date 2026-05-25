@@ -24,12 +24,14 @@ from .types import (
     MatrixType,
     NUMERIC_TYPES,
     RangeType,
+    TupleType,
     TransposeVectorType,
     VectorType,
     array_element_type,
     coerce_array_literal_value,
     coerce_implicit,
     coerce_matrix_value,
+    coerce_return_value,
     coerce_vector_value,
     is_array_type,
     is_indexable_type,
@@ -43,6 +45,7 @@ from .types import (
 
 LINEAR_ALGEBRA_MODULE = "Math.LinearAlgebra"
 LINEAR_ALGEBRA_SOLVE = "Math.LinearAlgebra.solve"
+LINEAR_ALGEBRA_CONJTRANSPOSE = "Math.LinearAlgebra.conjtranspose"
 
 
 @dataclass
@@ -209,6 +212,9 @@ class Interpreter:
                 return
             env.assign(statement.name, self._evaluate(statement.expression, env))
             return
+        if isinstance(statement, ast.DestructuringAssignment):
+            self._assign_destructuring(statement, env)
+            return
         if isinstance(statement, ast.IndexAssignment):
             self._assign_index(statement, env)
             return
@@ -271,6 +277,10 @@ class Interpreter:
                 if operand.type_name not in {"int", "float", "double"}:
                     raise AetherTypeError("Unary '-' requires a numeric operand.")
                 return AetherValue(operand.type_name, -operand.value)
+            if expression.operator == "'":
+                if LINEAR_ALGEBRA_MODULE not in self.imported_modules:
+                    raise AetherRuntimeError("Operator \"'\" requires import Math.LinearAlgebra.")
+                return self.builtins[LINEAR_ALGEBRA_CONJTRANSPOSE]([operand])
             raise AetherRuntimeError(f"Unsupported unary operator '{expression.operator}'.")
         if isinstance(expression, ast.BinaryExpression):
             if expression.operator in {"&&", "||"}:
@@ -284,6 +294,8 @@ class Interpreter:
             return self._evaluate_call(expression, env)
         if isinstance(expression, ast.ArrayLiteral):
             return self._evaluate_array_literal(expression, env)
+        if isinstance(expression, ast.TupleLiteral):
+            return self._evaluate_tuple_literal(expression, env)
         if isinstance(expression, ast.MatrixLiteral):
             return self._evaluate_matrix_literal(expression, env)
         if isinstance(expression, ast.IndexExpression):
@@ -320,6 +332,12 @@ class Interpreter:
         inferred_type = _array_type_from_values(elements)
         return coerce_array_literal_value(AetherValue(inferred_type, elements), inferred_type)
 
+    def _evaluate_tuple_literal(self, expression: ast.TupleLiteral, env: Environment) -> AetherValue:
+        elements = tuple(self._evaluate(element, env) for element in expression.elements)
+        if len(elements) < 2:
+            raise AetherTypeError("Tuple literals require at least two elements.")
+        return AetherValue(TupleType(tuple(element.type_name for element in elements)), elements)
+
     def _evaluate_matrix_literal(
         self,
         expression: ast.MatrixLiteral,
@@ -329,10 +347,19 @@ class Interpreter:
         if not expression.rows:
             raise AetherTypeError("Cannot infer type of empty matrix literal.")
         row_lengths = [len(row) for row in expression.rows]
-        if any(length == 0 for length in row_lengths) or any(length != row_lengths[0] for length in row_lengths):
+        if any(length == 0 for length in row_lengths):
             raise AetherTypeError("Matrix literals must be rectangular; ragged rows are not supported.")
         evaluated_rows = [[self._evaluate(element, env) for element in row] for row in expression.rows]
         flat_elements = [element for row in evaluated_rows for element in row]
+        if not all(isinstance(element.type_name, str) for element in flat_elements):
+            value = _evaluate_matrix_concat_literal(expression, evaluated_rows)
+            if isinstance(target_type, VectorType):
+                return coerce_vector_value(value, target_type)
+            if isinstance(target_type, MatrixType):
+                return coerce_matrix_value(value, target_type)
+            return value
+        if any(length != row_lengths[0] for length in row_lengths):
+            raise AetherTypeError("Matrix literals must be rectangular; ragged rows are not supported.")
         element_type = _common_primitive_type([element.type_name for element in flat_elements])
         row_type = ArrayType(element_type)
         rows: list[AetherValue] = []
@@ -481,6 +508,15 @@ class Interpreter:
             return
         array_value.value[index] = coerce_implicit(value, element_type)
 
+    def _assign_destructuring(self, statement: ast.DestructuringAssignment, env: Environment) -> None:
+        value = self._evaluate(statement.expression, env)
+        if not isinstance(value.type_name, TupleType):
+            raise AetherTypeError(f"Cannot destructure value of type {type_to_string(value.type_name)}.")
+        if len(value.value) != len(statement.names):
+            raise AetherTypeError(f"Destructuring expected {len(value.value)} values but got {len(statement.names)}.")
+        for name, element in zip(statement.names, value.value):
+            env.assign(name, element)
+
     def _assign_matrix_index(self, statement: ast.MatrixIndexAssignment, env: Environment) -> None:
         matrix_value = self._evaluate(statement.matrix, env)
         row_value = self._evaluate(statement.row, env)
@@ -587,15 +623,15 @@ class Interpreter:
         if isinstance(declaration, ast.ExpressionFunctionDeclaration):
             local_env = Environment(parent=self.global_env)
             for parameter, arg in zip(declaration.parameters, args):
-                local_env.define(parameter.name, arg, forbid_shadowing=True)
+                local_env.define(parameter.name, arg)
             return self._evaluate(declaration.expression, local_env)
         local_env = Environment(parent=self.global_env)
         for parameter, arg in zip(declaration.parameters, args):
-            local_env.define(parameter.name, coerce_implicit(arg, parameter.type_name), forbid_shadowing=True)
+            local_env.define(parameter.name, coerce_implicit(arg, parameter.type_name))
         try:
             self._execute_block(declaration.body, local_env)
         except _ReturnSignal as signal:
-            return coerce_implicit(signal.value, declaration.return_type)
+            return coerce_return_value(signal.value, declaration.return_type)
         raise AetherRuntimeError(f"Function '{callee}' ended without returning a value.")
 
     def _evaluate_binary(self, left: AetherValue, operator: str, right: AetherValue) -> AetherValue:
@@ -725,6 +761,95 @@ class Interpreter:
         return "".join(parts)
 
 
+@dataclass(frozen=True)
+class _ConcatBlockValue:
+    element_type: str
+    rows: list[list[AetherValue]]
+    vector_kind: str | None = None
+
+    @property
+    def row_count(self) -> int:
+        return len(self.rows)
+
+    @property
+    def col_count(self) -> int:
+        return len(self.rows[0]) if self.rows else 0
+
+
+def _evaluate_matrix_concat_literal(
+    expression: ast.MatrixLiteral,
+    evaluated_rows: list[list[AetherValue]],
+) -> AetherValue:
+    if expression.vector:
+        if len(evaluated_rows) == 1 or any(len(row) != 1 for row in evaluated_rows):
+            raise AetherTypeError("Matrix concatenation with ',' is not supported for matrix or vector blocks.")
+
+    block_rows = [[_concat_block_value(value) for value in row] for row in evaluated_rows]
+    element_type = _common_primitive_type([block.element_type for row in block_rows for block in row])
+    if _is_pure_vector_vcat_literal(expression, block_rows):
+        elements = [
+            coerce_implicit(element, element_type)
+            for block_row in block_rows
+            for element in _single_vector_block_elements(block_row[0])
+        ]
+        return AetherValue(VectorType(element_type, len(elements)), elements)
+
+    rows: list[list[AetherValue]] = []
+    row_widths: list[int] = []
+    for block_row in block_rows:
+        row_height = _concat_block_row_height(block_row)
+        row_widths.append(sum(block.col_count for block in block_row))
+        for row_index in range(row_height):
+            rows.append(
+                [
+                    coerce_implicit(element, element_type)
+                    for block in block_row
+                    for element in block.rows[row_index]
+                ]
+            )
+    if row_widths and any(width != row_widths[0] for width in row_widths):
+        raise AetherTypeError("Concatenated matrix rows must have the same number of columns.")
+    row_type = ArrayType(element_type)
+    matrix_rows = [AetherValue(row_type, row) for row in rows]
+    return AetherValue(MatrixType(element_type, len(matrix_rows), row_widths[0] if row_widths else 0), matrix_rows)
+
+
+def _concat_block_value(value: AetherValue) -> _ConcatBlockValue:
+    if isinstance(value.type_name, str):
+        return _ConcatBlockValue(value.type_name, [[value]])
+    if isinstance(value.type_name, VectorType):
+        return _ConcatBlockValue(value.type_name.element_type, [[element] for element in value.value], "vector")
+    if isinstance(value.type_name, TransposeVectorType):
+        return _ConcatBlockValue(value.type_name.element_type, [list(value.value.value)], "transpose_vector")
+    if isinstance(value.type_name, MatrixType):
+        return _ConcatBlockValue(
+            value.type_name.element_type,
+            [list(row.value) for row in value.value],
+            "matrix_vector" if value.type_name.vector else None,
+        )
+    raise AetherTypeError("Matrix concatenation only supports scalar, Vector<T>, TransposeVector<T>, and Matrix<T> blocks.")
+
+
+def _concat_block_row_height(blocks: list[_ConcatBlockValue]) -> int:
+    heights = [block.row_count for block in blocks]
+    if heights and any(height != heights[0] for height in heights):
+        raise AetherTypeError("Concatenated matrix blocks in a row must have the same number of rows.")
+    return heights[0] if heights else 0
+
+
+def _is_pure_vector_vcat_literal(expression: ast.MatrixLiteral, blocks: list[list[_ConcatBlockValue]]) -> bool:
+    return (
+        expression.vector
+        and len(blocks) > 1
+        and all(len(row) == 1 for row in blocks)
+        and all(row[0].vector_kind == "vector" for row in blocks)
+    )
+
+
+def _single_vector_block_elements(block: _ConcatBlockValue) -> list[AetherValue]:
+    return [row[0] for row in block.rows]
+
+
 def _default_plot_mode(mode: str | None) -> str:
     token = (mode or os.environ.get("AETHER_PLOT_MODE") or "interactive").strip().lower()
     return "document" if token == "document" else "interactive"
@@ -829,6 +954,16 @@ def _common_primitive_type(primitive_types: list[AetherType]) -> str:
 def _types_comparable_for_equality(left_type: AetherType, right_type: AetherType) -> bool:
     if left_type == right_type:
         return True
+    if isinstance(left_type, VectorType) and isinstance(right_type, VectorType):
+        return left_type.length == right_type.length and _types_comparable_for_equality(
+            left_type.element_type,
+            right_type.element_type,
+        )
+    if isinstance(left_type, TransposeVectorType) and isinstance(right_type, TransposeVectorType):
+        return left_type.length == right_type.length and _types_comparable_for_equality(
+            left_type.element_type,
+            right_type.element_type,
+        )
     if isinstance(left_type, ArrayType) and isinstance(right_type, ArrayType):
         return _types_comparable_for_equality(left_type.element_type, right_type.element_type)
     if isinstance(left_type, MatrixType) and isinstance(right_type, MatrixType):
@@ -1236,6 +1371,15 @@ def _apply_array_element_operator(
 
 
 def _values_equal(left: AetherValue, right: AetherValue) -> bool:
+    if isinstance(left.type_name, VectorType) and isinstance(right.type_name, VectorType):
+        if len(left.value) != len(right.value):
+            return False
+        return all(
+            _values_equal(left_element, right_element)
+            for left_element, right_element in zip(left.value, right.value)
+        )
+    if isinstance(left.type_name, TransposeVectorType) and isinstance(right.type_name, TransposeVectorType):
+        return _values_equal(left.value, right.value)
     if isinstance(left.type_name, MatrixType) and isinstance(right.type_name, MatrixType):
         if len(left.value) != len(right.value):
             return False

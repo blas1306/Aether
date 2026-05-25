@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from . import ast
@@ -16,6 +17,7 @@ from .types import (
     MatrixType,
     NUMERIC_TYPES,
     RangeType,
+    TupleType,
     TransposeVectorType,
     VectorType,
     array_element_type,
@@ -33,6 +35,7 @@ from .types import (
 UNKNOWN_TYPE: AetherType | None = None
 LINEAR_ALGEBRA_MODULE = "Math.LinearAlgebra"
 LINEAR_ALGEBRA_SOLVE = "Math.LinearAlgebra.solve"
+LINEAR_ALGEBRA_CONJTRANSPOSE = "Math.LinearAlgebra.conjtranspose"
 
 
 class TypeChecker:
@@ -42,6 +45,7 @@ class TypeChecker:
         self.expression_functions: dict[str, ast.ExpressionFunctionDeclaration] = {}
         self.expression_function_call_stack: set[str] = set()
         self.current_return_type: AetherType | None = None
+        self.current_function_name: str | None = None
         self.loop_variable_stack: list[tuple[str, Scope[VariableSymbol]]] = []
         self.imported_modules: set[str] = set()
         self.builtin_aliases: dict[str, str] = {}
@@ -59,6 +63,9 @@ class TypeChecker:
             return
         if isinstance(statement, ast.Assignment):
             self._assign_variable(statement, scope)
+            return
+        if isinstance(statement, ast.DestructuringAssignment):
+            self._assign_destructuring(statement, scope)
             return
         if isinstance(statement, ast.IndexAssignment):
             self._assign_index(statement, scope)
@@ -186,6 +193,32 @@ class TypeChecker:
         ):
             self._raise_implicit_conversion_error(value_type, existing.type_name, statement)
 
+    def _assign_destructuring(self, statement: ast.DestructuringAssignment, scope: Scope[VariableSymbol]) -> None:
+        value_type = self._expression_type(statement.expression, scope)
+        if value_type is UNKNOWN_TYPE:
+            return
+        if not isinstance(value_type, TupleType):
+            raise AetherTypeError(
+                f"Cannot destructure value of type {type_to_string(value_type)}.",
+                line=statement.line,
+                column=statement.column,
+            )
+        if len(value_type.element_types) != len(statement.names):
+            raise AetherTypeError(
+                f"Destructuring expected {len(value_type.element_types)} values but got {len(statement.names)}.",
+                line=statement.line,
+                column=statement.column,
+            )
+        for name, element_type in zip(statement.names, value_type.element_types):
+            if self._is_active_loop_variable_assignment(name, scope):
+                raise AetherTypeError(f"Cannot assign to loop variable '{name}' inside its own for-loop.")
+            existing = scope.lookup(name)
+            if existing is None:
+                scope.define_local(name, VariableSymbol(name, element_type))
+                continue
+            if not can_implicitly_convert(element_type, existing.type_name):
+                self._raise_implicit_conversion_error(element_type, existing.type_name, statement)
+
     def _assign_index(self, statement: ast.IndexAssignment, scope: Scope[VariableSymbol]) -> None:
         assigned_name = _assignment_root_name(statement.array)
         if assigned_name is not None and self._is_active_loop_variable_assignment(assigned_name, scope):
@@ -273,13 +306,16 @@ class TypeChecker:
         self.functions[statement.name] = FunctionSymbol(statement.name, statement.return_type, parameters)
         function_scope: Scope[VariableSymbol] = Scope(parent=self.global_scope)
         for parameter in parameters:
-            function_scope.define_local(parameter.name, parameter, forbid_shadowing=True)
+            function_scope.define_local(parameter.name, parameter)
         previous_return_type = self.current_return_type
+        previous_function_name = self.current_function_name
         self.current_return_type = statement.return_type
+        self.current_function_name = statement.name
         try:
             self._check_statements(statement.body, function_scope)
         finally:
             self.current_return_type = previous_return_type
+            self.current_function_name = previous_function_name
         if not self._statements_always_return(statement.body):
             raise AetherTypeError(f"Function '{statement.name}' may not return a value on all paths.")
 
@@ -291,15 +327,31 @@ class TypeChecker:
         self.expression_functions[statement.name] = statement
         function_scope: Scope[VariableSymbol] = Scope(parent=self.global_scope)
         for parameter in parameters:
-            function_scope.define_local(parameter.name, parameter, forbid_shadowing=True)
+            function_scope.define_local(parameter.name, parameter)
         self._expression_type(statement.expression, function_scope)
 
     def _check_return(self, statement: ast.ReturnStatement, scope: Scope[VariableSymbol]) -> None:
         if self.current_return_type is None:
             raise AetherTypeError("Cannot return outside of a function.")
         value_type = self._expression_type(statement.expression, scope)
-        if value_type is not UNKNOWN_TYPE and not can_implicitly_convert(value_type, self.current_return_type):
-            self._raise_implicit_conversion_error(value_type, self.current_return_type, statement)
+        if value_type is not UNKNOWN_TYPE and not self._can_return(
+            value_type,
+            self.current_return_type,
+            statement.expression,
+            scope,
+        ):
+            prefix = ""
+            if isinstance(value_type, TupleType) and isinstance(self.current_return_type, TupleType):
+                if len(value_type.element_types) != len(self.current_return_type.element_types):
+                    prefix = "Tuple return type arity mismatch: "
+            function_name = self.current_function_name or "<anonymous>"
+            raise AetherTypeError(
+                f"{prefix}Function {function_name} declares return type {type_to_string(self.current_return_type)} "
+                f"but returned {type_to_string(value_type)}. "
+                f"Cannot implicitly convert '{type_to_string(value_type)}' to '{type_to_string(self.current_return_type)}'.",
+                line=statement.line,
+                column=statement.column,
+            )
 
     def _require_condition_type(self, expression: ast.Expression, scope: Scope[VariableSymbol], construct: str) -> None:
         condition_type = self._expression_type(expression, scope)
@@ -329,6 +381,14 @@ class TypeChecker:
                 if operand_type not in {"int", "float", "double"}:
                     raise AetherTypeError("Unary '-' requires a numeric operand.")
                 return operand_type
+            if expression.operator == "'":
+                if LINEAR_ALGEBRA_MODULE not in self.imported_modules:
+                    raise AetherTypeError(
+                        "Operator \"'\" requires import Math.LinearAlgebra.",
+                        line=expression.line,
+                        column=expression.column,
+                    )
+                return infer_builtin_type(LINEAR_ALGEBRA_CONJTRANSPOSE, [operand_type])
             raise AetherRuntimeError(f"Unsupported unary operator '{expression.operator}'.")
         if isinstance(expression, ast.BinaryExpression):
             return self._binary_type(expression, scope)
@@ -338,6 +398,8 @@ class TypeChecker:
             return self._call_type(expression, scope)
         if isinstance(expression, ast.ArrayLiteral):
             return self._array_literal_type(expression, scope)
+        if isinstance(expression, ast.TupleLiteral):
+            return self._tuple_literal_type(expression, scope)
         if isinstance(expression, ast.MatrixLiteral):
             return self._matrix_literal_type(expression, scope)
         if isinstance(expression, ast.IndexExpression):
@@ -443,21 +505,30 @@ class TypeChecker:
         if not expression.rows:
             raise AetherTypeError("Cannot infer type of empty matrix literal.")
         row_lengths = [len(row) for row in expression.rows]
-        if any(length == 0 for length in row_lengths) or any(length != row_lengths[0] for length in row_lengths):
+        if any(length == 0 for length in row_lengths):
             raise AetherTypeError("Matrix literals must be rectangular; ragged rows are not supported.")
         element_types: list[AetherType | None] = []
         for row in expression.rows:
             for element in row:
-                element_type = self._expression_type(element, scope)
-                if element_type is not UNKNOWN_TYPE and not isinstance(element_type, str):
-                    raise AetherTypeError("Matrix literals must contain scalar homogeneous compatible elements.")
-                element_types.append(element_type)
+                element_types.append(self._expression_type(element, scope))
         if any(element_type is UNKNOWN_TYPE for element_type in element_types):
             return UNKNOWN_TYPE
-        common_type = _common_primitive_type(element_types)
-        if expression.vector:
-            return VectorType(common_type, sum(row_lengths))
-        return MatrixType(common_type, len(expression.rows), row_lengths[0])
+        if all(isinstance(element_type, str) for element_type in element_types):
+            if any(length != row_lengths[0] for length in row_lengths):
+                raise AetherTypeError("Matrix literals must be rectangular; ragged rows are not supported.")
+            common_type = _common_primitive_type(element_types)
+            if expression.vector:
+                return VectorType(common_type, sum(row_lengths))
+            return MatrixType(common_type, len(expression.rows), row_lengths[0])
+        return _concat_matrix_literal_type(expression, element_types)
+
+    def _tuple_literal_type(self, expression: ast.TupleLiteral, scope: Scope[VariableSymbol]) -> AetherType | None:
+        if len(expression.elements) < 2:
+            raise AetherTypeError("Tuple literals require at least two elements.")
+        element_types = [self._expression_type(element, scope) for element in expression.elements]
+        if any(element_type is UNKNOWN_TYPE for element_type in element_types):
+            return UNKNOWN_TYPE
+        return TupleType(tuple(element_types))
 
     def _index_type(self, expression: ast.IndexExpression, scope: Scope[VariableSymbol]) -> AetherType | None:
         array_type = self._expression_type(expression.array, scope)
@@ -614,7 +685,7 @@ class TypeChecker:
             return UNKNOWN_TYPE
         function_scope: Scope[VariableSymbol] = Scope(parent=self.global_scope)
         for parameter, argument_type in zip(declaration.parameters, argument_types):
-            function_scope.define_local(parameter.name, VariableSymbol(parameter.name, argument_type), forbid_shadowing=True)
+            function_scope.define_local(parameter.name, VariableSymbol(parameter.name, argument_type))
         self.expression_function_call_stack.add(declaration.name)
         try:
             return self._expression_type(declaration.expression, function_scope)
@@ -642,6 +713,32 @@ class TypeChecker:
         if is_matrix_type(value_type) or is_matrix_type(target_type):
             return can_implicitly_convert(value_type, target_type)
         if target_type == "float" and isinstance(initializer, ast.Literal) and value_type == "double":
+            return True
+        return can_implicitly_convert(value_type, target_type)
+
+    def _can_return(
+        self,
+        value_type: AetherType,
+        target_type: AetherType,
+        expression: ast.Expression,
+        scope: Scope[VariableSymbol],
+    ) -> bool:
+        if isinstance(value_type, TupleType) or isinstance(target_type, TupleType):
+            if not isinstance(value_type, TupleType) or not isinstance(target_type, TupleType):
+                return False
+            if len(value_type.element_types) != len(target_type.element_types):
+                return False
+            if not isinstance(expression, ast.TupleLiteral):
+                return can_implicitly_convert(value_type, target_type)
+            return all(
+                self._can_return(element_value_type, element_target_type, element, scope)
+                for element_value_type, element_target_type, element in zip(
+                    value_type.element_types,
+                    target_type.element_types,
+                    expression.elements,
+                )
+            )
+        if target_type == "float" and isinstance(expression, ast.Literal) and value_type == "double":
             return True
         return can_implicitly_convert(value_type, target_type)
 
@@ -763,6 +860,96 @@ def _is_plots_builtin(name: str) -> bool:
 
 def _is_function_plot_builtin(name: str) -> bool:
     return name in {"Plots.plot", "Plots.plot!"}
+
+
+@dataclass(frozen=True)
+class _ConcatBlockType:
+    element_type: str
+    rows: int | None
+    cols: int | None
+    vector_kind: str | None = None
+
+
+def _concat_matrix_literal_type(
+    expression: ast.MatrixLiteral,
+    element_types: list[AetherType | None],
+) -> AetherType:
+    if expression.vector:
+        if len(expression.rows) == 1 or any(len(row) != 1 for row in expression.rows):
+            raise AetherTypeError("Matrix concatenation with ',' is not supported for matrix or vector blocks.")
+
+    blocks: list[list[_ConcatBlockType]] = []
+    cursor = 0
+    for row in expression.rows:
+        block_row: list[_ConcatBlockType] = []
+        for _element in row:
+            block_row.append(_concat_block_type(element_types[cursor]))
+            cursor += 1
+        blocks.append(block_row)
+
+    common_type = _common_primitive_type([block.element_type for row in blocks for block in row])
+    row_heights: list[int | None] = []
+    row_widths: list[int | None] = []
+    for block_row in blocks:
+        row_heights.append(_concat_row_height(block_row))
+        row_widths.append(_concat_row_width(block_row))
+    _require_same_known_dimension(row_widths, "Concatenated matrix rows must have the same number of columns.")
+    rows = _sum_known_dimensions(row_heights)
+    cols = _first_known_dimension(row_widths)
+
+    if _is_pure_vector_vcat(expression, blocks):
+        return VectorType(common_type, rows)
+    return MatrixType(common_type, rows, cols)
+
+
+def _concat_block_type(type_name: AetherType | None) -> _ConcatBlockType:
+    if isinstance(type_name, str):
+        return _ConcatBlockType(type_name, 1, 1)
+    if isinstance(type_name, VectorType):
+        return _ConcatBlockType(type_name.element_type, type_name.length, 1, "vector")
+    if isinstance(type_name, TransposeVectorType):
+        return _ConcatBlockType(type_name.element_type, 1, type_name.length, "transpose_vector")
+    if isinstance(type_name, MatrixType):
+        return _ConcatBlockType(type_name.element_type, type_name.rows, type_name.cols, "matrix_vector" if type_name.vector else None)
+    raise AetherTypeError("Matrix concatenation only supports scalar, Vector<T>, TransposeVector<T>, and Matrix<T> blocks.")
+
+
+def _concat_row_height(blocks: list[_ConcatBlockType]) -> int | None:
+    heights = [block.rows for block in blocks]
+    _require_same_known_dimension(heights, "Concatenated matrix blocks in a row must have the same number of rows.")
+    return _first_known_dimension(heights)
+
+
+def _concat_row_width(blocks: list[_ConcatBlockType]) -> int | None:
+    return _sum_known_dimensions([block.cols for block in blocks])
+
+
+def _require_same_known_dimension(dimensions: list[int | None], message: str) -> None:
+    known = [dimension for dimension in dimensions if dimension is not None]
+    if known and any(dimension != known[0] for dimension in known):
+        raise AetherTypeError(message)
+
+
+def _first_known_dimension(dimensions: list[int | None]) -> int | None:
+    for dimension in dimensions:
+        if dimension is not None:
+            return dimension
+    return None
+
+
+def _sum_known_dimensions(dimensions: list[int | None]) -> int | None:
+    if any(dimension is None for dimension in dimensions):
+        return None
+    return sum(dimension for dimension in dimensions if dimension is not None)
+
+
+def _is_pure_vector_vcat(expression: ast.MatrixLiteral, blocks: list[list[_ConcatBlockType]]) -> bool:
+    return (
+        expression.vector
+        and len(blocks) > 1
+        and all(len(row) == 1 for row in blocks)
+        and all(row[0].vector_kind == "vector" for row in blocks)
+    )
 
 
 def _common_array_element_type(element_types: list[AetherType | None]) -> AetherType:

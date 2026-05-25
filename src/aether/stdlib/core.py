@@ -14,7 +14,9 @@ from ..types import (
     VectorType,
     explicit_cast,
     is_array_type,
-    is_matrix_type,
+    shape_dimension_count,
+    shape_dimensions,
+    shape_vector_value,
     type_to_string,
 )
 from .registry import BuiltinDefinition, BuiltinFunction, OutputWriter, RuntimeContext, RuntimeFactory
@@ -28,8 +30,10 @@ def builtin_definitions() -> list[BuiltinDefinition]:
         BuiltinDefinition("print", _make_print_runtime, _print_type),
         BuiltinDefinition("println", _make_println_runtime, _print_type),
         BuiltinDefinition("length", _constant_runtime(length_builtin), _length_type, _exactly_one("length")),
+        BuiltinDefinition("size", _constant_runtime(size_builtin), _size_type, _exactly_one("size")),
         BuiltinDefinition("rows", _constant_runtime(rows_builtin), _rows_type, _exactly_one("rows")),
         BuiltinDefinition("cols", _constant_runtime(cols_builtin), _cols_type, _exactly_one("cols")),
+        BuiltinDefinition("columns", _constant_runtime(cols_builtin), _columns_type, _exactly_one("columns")),
         BuiltinDefinition("sin", _constant_runtime(math_unary_builtin("sin", sin)), _math_unary_type("sin"), _exactly_one("sin")),
         BuiltinDefinition("cos", _constant_runtime(math_unary_builtin("cos", cos)), _math_unary_type("cos"), _exactly_one("cos")),
         BuiltinDefinition("tan", _constant_runtime(math_unary_builtin("tan", tan)), _math_unary_type("tan"), _exactly_one("tan")),
@@ -127,22 +131,30 @@ def length_builtin(args: list[AetherValue]) -> AetherValue:
     return AetherValue("int", len(value.value))
 
 
+def size_builtin(args: list[AetherValue]) -> AetherValue:
+    if len(args) != 1:
+        raise AetherTypeError("size(...) expects exactly one argument.")
+    return shape_vector_value(args[0])
+
+
 def rows_builtin(args: list[AetherValue]) -> AetherValue:
     if len(args) != 1:
         raise AetherTypeError("rows(...) expects exactly one argument.")
     value = args[0]
-    if not is_matrix_type(value.type_name):
+    dimensions = shape_dimensions(value)
+    if len(dimensions) < 2:
         raise AetherTypeError(f"rows(...) expects a matrix argument, got '{type_to_string(value.type_name)}'.")
-    return AetherValue("int", len(value.value))
+    return AetherValue("int", dimensions[0])
 
 
 def cols_builtin(args: list[AetherValue]) -> AetherValue:
     if len(args) != 1:
         raise AetherTypeError("cols(...) expects exactly one argument.")
     value = args[0]
-    if not is_matrix_type(value.type_name):
+    dimensions = shape_dimensions(value)
+    if len(dimensions) < 2:
         raise AetherTypeError(f"cols(...) expects a matrix argument, got '{type_to_string(value.type_name)}'.")
-    return AetherValue("int", len(value.value[0].value) if value.value else 0)
+    return AetherValue("int", dimensions[1])
 
 
 def math_unary_builtin(label: str, function: Callable[[float], float]) -> BuiltinFunction:
@@ -232,6 +244,15 @@ def _length_type(arg_types: list[AetherType | None]) -> AetherType | None:
     return "int"
 
 
+def _size_type(arg_types: list[AetherType | None]) -> AetherType | None:
+    if len(arg_types) != 1:
+        raise AetherTypeError("size(...) expects exactly one argument.")
+    argument_type = arg_types[0]
+    if argument_type is None:
+        return VectorType("int")
+    return VectorType("int", shape_dimension_count(argument_type))
+
+
 def _rows_type(arg_types: list[AetherType | None]) -> AetherType | None:
     return _matrix_dimension_type(arg_types, "rows")
 
@@ -240,13 +261,17 @@ def _cols_type(arg_types: list[AetherType | None]) -> AetherType | None:
     return _matrix_dimension_type(arg_types, "cols")
 
 
+def _columns_type(arg_types: list[AetherType | None]) -> AetherType | None:
+    return _matrix_dimension_type(arg_types, "columns")
+
+
 def _matrix_dimension_type(arg_types: list[AetherType | None], label: str) -> AetherType | None:
     if len(arg_types) != 1:
         raise AetherTypeError(f"{label}(...) expects exactly one argument.")
     argument_type = arg_types[0]
     if argument_type is None:
         return None
-    if not is_matrix_type(argument_type):
+    if shape_dimension_count(argument_type) < 2:
         raise AetherTypeError(f"{label}(...) expects a matrix argument, got '{type_to_string(argument_type)}'.")
     return "int"
 

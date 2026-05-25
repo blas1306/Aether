@@ -43,6 +43,7 @@ class AetherHighlightingLexer : LexerBase() {
             char == '"' -> consumeString()
             char.isDigit() -> consumeNumber()
             char.isIdentifierStart() -> consumeIdentifier()
+            char in "&|" && tokenStart + 1 < endOffset && buffer[tokenStart + 1] == char -> consumeLogicalOperator()
             char.isOperatorOrPunctuation() -> {
                 tokenEnd = tokenStart + 1
                 tokenType = AetherTokenTypes.OPERATOR
@@ -102,6 +103,12 @@ class AetherHighlightingLexer : LexerBase() {
         }
         val text = buffer.subSequence(tokenStart, tokenEnd).toString()
         tokenType = if (text in AetherTokenTypes.KEYWORDS) AetherTokenTypes.KEYWORD else AetherTokenTypes.IDENTIFIER
+    }
+
+    private fun consumeLogicalOperator() {
+        tokenEnd = tokenStart + 2
+        val text = buffer.subSequence(tokenStart, tokenEnd).toString()
+        tokenType = if (text in AetherTokenTypes.KEYWORDS) AetherTokenTypes.KEYWORD else AetherTokenTypes.OPERATOR
     }
 
     private fun Char.isIdentifierStart(): Boolean = this == '_' || isLetter()

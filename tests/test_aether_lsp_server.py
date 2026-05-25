@@ -43,6 +43,28 @@ def _completion_items_for(source: str, *, line: int, character: int) -> list[dic
     return result["items"]
 
 
+def _document_symbols_for(source: str) -> list[dict]:
+    from aether_lsp.server import AetherLanguageServer
+
+    uri = "file:///tmp/symbols.ae"
+    language_server = AetherLanguageServer(reader=BytesIO(), writer=BytesIO())
+    language_server.documents[uri] = source
+
+    return language_server._document_symbol_result({"textDocument": {"uri": uri}})
+
+
+def _hover_for(source: str, *, line: int, character: int) -> dict | None:
+    from aether_lsp.server import AetherLanguageServer
+
+    uri = "file:///tmp/hover.ae"
+    language_server = AetherLanguageServer(reader=BytesIO(), writer=BytesIO())
+    language_server.documents[uri] = source
+
+    return language_server._hover_result(
+        {"textDocument": {"uri": uri}, "position": {"line": line, "character": character}}
+    )
+
+
 def _item_by_label(items: list[dict], label: str) -> dict:
     for item in items:
         if item["label"] == label:
@@ -199,6 +221,61 @@ def test_lsp_completion_stays_quiet_inside_strings_and_comments() -> None:
     assert _completion_items_for("// pri", line=0, character=len("// pri")) == []
 
 
+def test_lsp_document_symbols_include_functions_variables_and_imports() -> None:
+    source = (
+        "import Math.LinearAlgebra\n"
+        "double square(double x) {\n"
+        "    return x*x;\n"
+        "}\n"
+        "value = square(2);\n"
+    )
+
+    symbols = _document_symbols_for(source)
+    by_name = {item["name"]: item for item in symbols}
+
+    assert by_name["Math.LinearAlgebra"]["kind"] == 2
+    assert by_name["Math.LinearAlgebra"]["detail"] == "import Math.LinearAlgebra"
+    assert by_name["square"]["kind"] == 12
+    assert by_name["square"]["detail"] == "double square(double x)"
+    assert by_name["square"]["selectionRange"] == {
+        "start": {"line": 1, "character": len("double ")},
+        "end": {"line": 1, "character": len("double square")},
+    }
+    assert by_name["value"]["kind"] == 13
+
+
+def test_lsp_hover_returns_document_symbol_details() -> None:
+    source = "double square(double x) { return x*x; }\nvalue = square(2);\n"
+
+    function_hover = _hover_for(source, line=1, character=len("value = s"))
+    variable_hover = _hover_for(source, line=1, character=1)
+
+    assert function_hover is not None
+    assert "double square(double x)" in function_hover["contents"]["value"]
+    assert function_hover["range"] == {
+        "start": {"line": 1, "character": len("value = ")},
+        "end": {"line": 1, "character": len("value = square")},
+    }
+    assert variable_hover is not None
+    assert "Variable defined in this document" in variable_hover["contents"]["value"]
+
+
+def test_lsp_hover_returns_builtin_and_imported_alias_details() -> None:
+    source = "import Math.LinearAlgebra\nprintln(1);\nsolve(A, b);\n"
+
+    println_hover = _hover_for(source, line=1, character=1)
+    solve_hover = _hover_for(source, line=2, character=1)
+
+    assert println_hover is not None
+    assert "println(...)" in println_hover["contents"]["value"]
+    assert solve_hover is not None
+    assert "solve(...) -> Math.LinearAlgebra.solve(...)" in solve_hover["contents"]["value"]
+
+
+def test_lsp_hover_returns_none_for_empty_position() -> None:
+    assert _hover_for("value = 1;\n", line=0, character=len("value = ")) is None
+
+
 def test_lsp_server_initializes_publishes_diagnostics_and_completes() -> None:
     process = subprocess.Popen(
         [sys.executable, "-m", "aether_lsp.server", "--stdio"],
@@ -219,6 +296,8 @@ def test_lsp_server_initializes_publishes_diagnostics_and_completes() -> None:
         completion_provider = initialized["result"]["capabilities"]["completionProvider"]
         assert "p" in completion_provider["triggerCharacters"]
         assert "\\" in completion_provider["triggerCharacters"]
+        assert initialized["result"]["capabilities"]["documentSymbolProvider"] is True
+        assert initialized["result"]["capabilities"]["hoverProvider"] is True
 
         uri = "file:///tmp/demo.ae"
         process.stdin.write(
@@ -258,11 +337,26 @@ def test_lsp_server_initializes_publishes_diagnostics_and_completes() -> None:
         labels = {item["label"] for item in completion["result"]["items"]}
         assert "println" in labels
 
-        process.stdin.write(_message({"jsonrpc": "2.0", "id": 3, "method": "shutdown", "params": None}))
+        process.stdin.write(
+            _message(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "textDocument/documentSymbol",
+                    "params": {"textDocument": {"uri": uri}},
+                }
+            )
+        )
+        process.stdin.flush()
+        symbols = _read_message(process.stdout)
+        assert symbols["id"] == 3
+        assert symbols["result"] == []
+
+        process.stdin.write(_message({"jsonrpc": "2.0", "id": 4, "method": "shutdown", "params": None}))
         process.stdin.write(_message({"jsonrpc": "2.0", "method": "exit"}))
         process.stdin.flush()
         shutdown = _read_message(process.stdout)
-        assert shutdown["id"] == 3
+        assert shutdown["id"] == 4
     finally:
         try:
             process.communicate(timeout=2)

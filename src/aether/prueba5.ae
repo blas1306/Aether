@@ -1,0 +1,20 @@
+import Math.LinearAlgebra
+
+(Matrix<double> u, Matrix<double> s, Matrix<double> v) f(Matrix<double> B) {
+    int m = 3;
+    int n = 2;
+
+    u = zeros(m, m);
+    s = zeros(m, n);
+    v = zeros(n, n);
+
+    return (u, s, v);
+}
+
+A = [3 2; 1 0; 0 0];
+
+u, s, v = f(A);
+
+println("u = ", u);
+println("s = ", s);
+println("v = ", v);

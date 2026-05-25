@@ -258,13 +258,13 @@ Aether supports mathematical matrix literals with MATLAB/Julia-like bracket synt
 
 ```aether
 [1 2 3]       // Matrix<int>, shape 1x3
-[1, 2, 3]     // Matrix<int>, shape 1x3
-[1; 2; 3]     // Matrix<int>, shape 3x1
+[1, 2, 3]     // Vector<int>, length 3
+[1; 2; 3]     // Vector<int>, length 3
 [1 2; 3 4]    // Matrix<int>, shape 2x2
 [1 2; 3.0 4]  // Matrix<double>, shape 2x2
 ```
 
-Spaces and commas separate columns. Semicolons separate rows. All rows must have the same number of columns. Elements must be homogeneous or numerically promotable:
+Spaces separate matrix columns. Commas preserve Aether's vector literal form for scalar values. Semicolons separate rows or vector entries. All matrix rows must have the same number of columns. Elements must be homogeneous or numerically promotable:
 
 - `int -> float`
 - `int -> double`
@@ -275,6 +275,23 @@ Mixed incompatible elements are type errors:
 ```aether
 [1 "x"]; // error
 [1 2; 3]; // error, ragged rows
+```
+
+Bracket literals also support Julia-style block concatenation for existing scalar, vector, transposed-vector, and matrix values:
+
+```aether
+A = [1 2; 3 4];
+B = [5 6; 7 8];
+[A B]        // [1 2 5 6; 3 4 7 8]
+[A; B]       // [1 2; 3 4; 5 6; 7 8]
+[A [9; 10]]  // [1 2 9; 3 4 10]
+```
+
+For block concatenation, `Vector<T>` values are treated as columns and `TransposeVector<T>` values are treated as rows. A pure vertical concatenation of vectors, such as `[v; w]`, returns a `Vector<T>`. Comma-separated matrix or vector blocks are intentionally not supported in v0:
+
+```aether
+[A];    // error
+[A, B]; // error
 ```
 
 Explicit mathematical types are:
@@ -346,11 +363,17 @@ Math.LinearAlgebra.norm(v)
 Math.LinearAlgebra.transpose(A)
 Math.LinearAlgebra.matmul(A, B)
 Math.LinearAlgebra.solve(A, b)
+Math.LinearAlgebra.eig(A)
 ```
 
-This namespace is a simulated builtin namespace for now, implemented through the Aether stdlib registry rather than a real module loader. There is no real import system, module system, package loader, or `using`/`import` behavior yet. Calls are resolved by their full builtin names, such as `"Math.LinearAlgebra.inner"`. This keeps program meaning stable: future imports must not make the same source code mean something else.
+This namespace is a simulated builtin namespace for now, implemented through the Aether stdlib registry. Calls can always be resolved by their full builtin names, such as `"Math.LinearAlgebra.inner"`. A builtin `import Math.LinearAlgebra` also exposes the direct aliases in this namespace.
 
-Only explicit namespace calls are supported. The unqualified names `inner(...)`, `norm(...)`, `transpose(...)`, `matmul(...)`, and `solve(...)` are not introduced by this feature.
+Importing the builtin namespace exposes unqualified aliases for direct use:
+
+```aether
+import Math.LinearAlgebra
+S, D = eig(A);
+```
 
 `Math.LinearAlgebra.inner(u, v)` computes the usual Euclidean inner product:
 
@@ -438,6 +461,16 @@ println(Math.LinearAlgebra.solve([2 0; 0 4], B)); // [1.0 2.0; 2.0 3.0]
 ```
 
 Square full-rank systems use a direct solve. Rectangular or rank-deficient systems use a least-squares/minimum-norm solution. No implicit narrowing to `int` is performed.
+
+`Math.LinearAlgebra.eig(A)` computes a real diagonalization of a square numeric matrix. It returns a tuple `(S, D)` where the columns of `S` are eigenvectors and `D` is diagonal, so `A * S == S * D` up to floating-point tolerance:
+
+```aether
+import Math.LinearAlgebra
+A = [1 1; 0 2];
+S, D = eig(A);
+```
+
+The result uses `Matrix<double>` values. Matrices that are not square, are not diagonalizable, or require complex eigenvalues/eigenvectors are errors in Aether v0.
 
 ## Matrix Arithmetic
 
@@ -648,6 +681,7 @@ Aether v0 recognizes these builtins:
 - `Math.LinearAlgebra.transpose(A)`
 - `Math.LinearAlgebra.matmul(A, B)`
 - `Math.LinearAlgebra.solve(A, b)`
+- `Math.LinearAlgebra.eig(A)`
 - `int(...)`
 - `float(...)`
 - `double(...)`
@@ -669,7 +703,7 @@ println(x);
 
 `sin(x)`, `cos(x)`, `tan(x)`, `exp(x)`, `ln(x)`, `log(x)`, and `sqrt(x)` accept one numeric scalar and return `double`. `ln(x)` is the natural logarithm. `log(x)` is base 10. `ln`, `log`, and `sqrt` reject values outside their real domains. `abs(x)` accepts one numeric scalar and returns the same numeric type. `Math.mod(a, b)` accepts two numeric scalars and returns floor/Python-like modulo.
 
-`Math.LinearAlgebra.inner(u, v)`, `Math.LinearAlgebra.norm(v)`, `Math.LinearAlgebra.transpose(A)`, `Math.LinearAlgebra.matmul(A, B)`, and `Math.LinearAlgebra.solve(A, b)` are explicit simulated-namespace builtins for numeric mathematical vectors and matrices. See `Math.LinearAlgebra` above.
+`Math.LinearAlgebra.inner(u, v)`, `Math.LinearAlgebra.norm(v)`, `Math.LinearAlgebra.transpose(A)`, `Math.LinearAlgebra.matmul(A, B)`, `Math.LinearAlgebra.solve(A, b)`, and `Math.LinearAlgebra.eig(A)` are explicit simulated-namespace builtins for numeric mathematical vectors and matrices. See `Math.LinearAlgebra` above.
 
 ## Errors
 

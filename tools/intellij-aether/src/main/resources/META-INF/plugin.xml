@@ -36,6 +36,13 @@
   </extensions>
 
   <actions>
+    <action id="Aether.NewFile"
+            class="com.aetherstudio.intellij.NewAetherFileAction"
+            text="Aether File"
+            description="Create a new Aether file"
+            icon="/icons/aether.svg">
+      <add-to-group group-id="NewGroup" anchor="last"/>
+    </action>
     <action id="Aether.RunFile"
             class="com.aetherstudio.intellij.RunAetherFileAction"
             text="Run Aether File"

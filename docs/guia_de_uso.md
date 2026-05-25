@@ -91,6 +91,16 @@ col = [1; 2; 3];
 A = [1 2; 3 4];
 ```
 
+Tambien podes concatenar bloques con corchetes al estilo Julia:
+
+```aether
+B = [5 6; 7 8];
+println([A B]);  // [1 2 5 6; 3 4 7 8]
+println([A; B]); // [1 2; 3 4; 5 6; 7 8]
+```
+
+En concatenacion, `Vector<T>` se usa como columna y `TransposeVector<T>` como fila. Las comas siguen reservadas para vectores escalares como `[1, 2, 3]`; `[A, B]` no concatena matrices en v0.
+
 Las matrices imprimen en formato compacto:
 
 ```aether
@@ -116,6 +126,6 @@ println(Math.LinearAlgebra.matmul(A, [5; 6]));
 - Dimensiones: `rows(matrix)`, `cols(matrix)`, `length(array interno)`
 - Numericos: `sin`, `cos`, `tan`, `exp`, `ln`, `log`, `sqrt`, `abs`
 - Modulo de piso: `Math.mod(a, b)`
-- Algebra lineal: `Math.LinearAlgebra.inner`, `norm`, `transpose`, `matmul`, `solve`
+- Algebra lineal: `Math.LinearAlgebra.inner`, `norm`, `transpose`, `matmul`, `solve`, `eig`
 
 Para la especificacion completa, consulta `docs/aether/AETHER_V0_SPEC.md`.

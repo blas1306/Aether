@@ -4,7 +4,7 @@ from . import ast
 from .errors import AetherSyntaxError
 from .lexer import lex
 from .tokens import AETHER_TYPES, PRIMITIVE_TYPES, Token, TokenType
-from .types import AetherType, ArrayType, MatrixType, VectorType
+from .types import AetherType, ArrayType, MatrixType, TupleType, VectorType
 
 
 STRING_ESCAPES = {'"': '"', "\\": "\\", "$": "$", "n": "\n", "t": "\t", "r": "\r"}
@@ -119,6 +119,8 @@ class Parser:
             return ast.ReturnStatement(expression, return_token.line, return_token.column)
         if self._looks_like_var_declaration():
             return self._var_declaration()
+        if self._looks_like_destructuring_assignment():
+            return self._destructuring_assignment()
         expression = self._expression()
         if self._match(TokenType.EQUAL):
             equals = self._previous()
@@ -152,6 +154,18 @@ class Parser:
             raise self._error(self._previous(), "Invalid assignment target.")
         self._consume(TokenType.SEMICOLON, "Expected ';' after expression.")
         return ast.ExpressionStatement(expression)
+
+    def _destructuring_assignment(self) -> ast.DestructuringAssignment:
+        first = self._consume(TokenType.IDENTIFIER, "Expected variable name in destructuring assignment.")
+        names = [first.lexeme]
+        while self._match(TokenType.COMMA):
+            if self._check(TokenType.EQUAL):
+                raise self._error(self._peek(), "Single-element destructuring assignment is not supported.")
+            names.append(self._consume(TokenType.IDENTIFIER, "Expected variable name after ','.").lexeme)
+        equals = self._consume(TokenType.EQUAL, "Expected '=' after destructuring assignment target.")
+        value = self._expression()
+        self._consume(TokenType.SEMICOLON, "Expected ';' after assignment.")
+        return ast.DestructuringAssignment(names, value, equals.line, equals.column)
 
     def _var_declaration(self) -> ast.VarDeclaration:
         declaration_token = self._peek()
@@ -250,20 +264,28 @@ class Parser:
 
     def _unary(self) -> ast.Expression:
         if self._match(TokenType.MINUS):
-            return ast.UnaryExpression(self._previous().lexeme, self._unary())
+            operator = self._previous()
+            return ast.UnaryExpression(operator.lexeme, self._unary(), operator.line, operator.column)
         return self._postfix()
 
     def _postfix(self) -> ast.Expression:
         expr = self._primary()
-        while self._match(TokenType.LEFT_BRACKET):
-            index = self._index_component()
-            if self._match(TokenType.COMMA):
-                column = self._index_component()
-                self._consume(TokenType.RIGHT_BRACKET, "Expected ']' after matrix index.")
-                expr = ast.MatrixIndexExpression(expr, index, column)
+        while True:
+            if self._match(TokenType.LEFT_BRACKET):
+                index = self._index_component()
+                if self._match(TokenType.COMMA):
+                    column = self._index_component()
+                    self._consume(TokenType.RIGHT_BRACKET, "Expected ']' after matrix index.")
+                    expr = ast.MatrixIndexExpression(expr, index, column)
+                    continue
+                self._consume(TokenType.RIGHT_BRACKET, "Expected ']' after index.")
+                expr = ast.IndexExpression(expr, index)
                 continue
-            self._consume(TokenType.RIGHT_BRACKET, "Expected ']' after index.")
-            expr = ast.IndexExpression(expr, index)
+            if self._match(TokenType.APOSTROPHE):
+                operator = self._previous()
+                expr = ast.UnaryExpression(operator.lexeme, expr, operator.line, operator.column)
+                continue
+            break
         return expr
 
     def _index_component(self) -> ast.Expression:
@@ -317,6 +339,16 @@ class Parser:
             return self._matrix_literal()
         if self._match(TokenType.LEFT_PAREN):
             expr = self._expression()
+            if self._match(TokenType.COMMA):
+                if self._check(TokenType.RIGHT_PAREN):
+                    raise self._error(self._peek(), "Single-element tuple literals are not supported.")
+                elements = [expr, self._expression()]
+                while self._match(TokenType.COMMA):
+                    if self._check(TokenType.RIGHT_PAREN):
+                        raise self._error(self._peek(), "Trailing comma in tuple literal is not supported.")
+                    elements.append(self._expression())
+                self._consume(TokenType.RIGHT_PAREN, "Expected ')' after tuple literal.")
+                return ast.TupleLiteral(elements)
             self._consume(TokenType.RIGHT_PAREN, "Expected ')' after expression.")
             return expr
         raise self._error(self._peek(), "Expected expression.")
@@ -416,21 +448,38 @@ class Parser:
         raise self._error(self._peek(), "Expected ';' or newline after import statement.")
 
     def _parse_type_annotation(self, message: str) -> AetherType:
+        if self._match(TokenType.LEFT_PAREN):
+            element_types = [self._parse_tuple_type_element()]
+            if not self._match(TokenType.COMMA):
+                raise self._error(self._peek(), "Tuple return types require at least two element types.")
+            element_types.append(self._parse_tuple_type_element())
+            while self._match(TokenType.COMMA):
+                element_types.append(self._parse_tuple_type_element())
+            self._consume(TokenType.RIGHT_PAREN, "Expected ')' after tuple return type.")
+            return TupleType(tuple(element_types))
         token = self._consume_type(message)
         if token.lexeme in {"Matrix", "Vector"}:
-            self._consume(TokenType.LESS, f"Expected '<' after {token.lexeme}.")
-            element_token = self._consume(TokenType.TYPE, f"Expected element type inside {token.lexeme}<...>.")
-            if element_token.lexeme not in PRIMITIVE_TYPES:
-                raise self._error(element_token, f"Expected primitive element type inside {token.lexeme}<...>.")
-            self._consume(TokenType.GREATER, f"Expected '>' after {token.lexeme} element type.")
+            element_type = "double"
+            if self._match(TokenType.LESS):
+                element_token = self._consume(TokenType.TYPE, f"Expected element type inside {token.lexeme}<...>.")
+                if element_token.lexeme not in PRIMITIVE_TYPES:
+                    raise self._error(element_token, f"Expected primitive element type inside {token.lexeme}<...>.")
+                self._consume(TokenType.GREATER, f"Expected '>' after {token.lexeme} element type.")
+                element_type = element_token.lexeme
             if token.lexeme == "Vector":
-                return VectorType(element_token.lexeme)
-            return MatrixType(element_token.lexeme)
+                return VectorType(element_type)
+            return MatrixType(element_type)
         type_name: AetherType = token.lexeme
         while self._match(TokenType.LEFT_BRACKET):
             self._consume(TokenType.RIGHT_BRACKET, "Expected ']' after '[' in array type.")
             type_name = ArrayType(type_name)
         return type_name
+
+    def _parse_tuple_type_element(self) -> AetherType:
+        element_type = self._parse_type_annotation("Expected tuple element type.")
+        if self._check(TokenType.IDENTIFIER) and self._check_next_any(TokenType.COMMA, TokenType.RIGHT_PAREN):
+            self._advance()
+        return element_type
 
     def _consume_type(self, message: str) -> Token:
         token = self._consume(TokenType.TYPE, message)
@@ -443,6 +492,19 @@ class Parser:
         if cursor is None or cursor + 1 >= len(self.tokens):
             return False
         return self.tokens[cursor].type == TokenType.IDENTIFIER and self.tokens[cursor + 1].type == TokenType.EQUAL
+
+    def _looks_like_destructuring_assignment(self) -> bool:
+        if self.current + 3 >= len(self.tokens) or self.tokens[self.current].type != TokenType.IDENTIFIER:
+            return False
+        cursor = self.current + 1
+        saw_comma = False
+        while cursor < len(self.tokens) and self.tokens[cursor].type == TokenType.COMMA:
+            saw_comma = True
+            cursor += 1
+            if cursor >= len(self.tokens) or self.tokens[cursor].type != TokenType.IDENTIFIER:
+                return False
+            cursor += 1
+        return saw_comma and cursor < len(self.tokens) and self.tokens[cursor].type == TokenType.EQUAL
 
     def _looks_like_function_declaration(self) -> bool:
         cursor = self._type_annotation_end_cursor(self.current)
@@ -498,13 +560,25 @@ class Parser:
         )
 
     def _type_annotation_end_cursor(self, start: int) -> int | None:
-        if start >= len(self.tokens) or self.tokens[start].type != TokenType.TYPE:
+        if start >= len(self.tokens):
+            return None
+        if self.tokens[start].type == TokenType.LEFT_PAREN:
+            cursor = self._tuple_type_element_end_cursor(start + 1)
+            if cursor is None or cursor >= len(self.tokens) or self.tokens[cursor].type != TokenType.COMMA:
+                return None
+            while cursor < len(self.tokens) and self.tokens[cursor].type == TokenType.COMMA:
+                cursor = self._tuple_type_element_end_cursor(cursor + 1)
+                if cursor is None:
+                    return None
+            if cursor >= len(self.tokens) or self.tokens[cursor].type != TokenType.RIGHT_PAREN:
+                return None
+            return cursor + 1
+        if self.tokens[start].type != TokenType.TYPE:
             return None
         cursor = start + 1
-        if self.tokens[start].lexeme in {"Matrix", "Vector"}:
+        if self.tokens[start].lexeme in {"Matrix", "Vector"} and cursor < len(self.tokens) and self.tokens[cursor].type == TokenType.LESS:
             if (
                 cursor + 2 >= len(self.tokens)
-                or self.tokens[cursor].type != TokenType.LESS
                 or self.tokens[cursor + 1].type != TokenType.TYPE
                 or self.tokens[cursor + 1].lexeme not in PRIMITIVE_TYPES
                 or self.tokens[cursor + 2].type != TokenType.GREATER
@@ -515,6 +589,18 @@ class Parser:
             if self.tokens[cursor + 1].type != TokenType.RIGHT_BRACKET:
                 return None
             cursor += 2
+        return cursor
+
+    def _tuple_type_element_end_cursor(self, start: int) -> int | None:
+        cursor = self._type_annotation_end_cursor(start)
+        if cursor is None:
+            return None
+        if (
+            cursor + 1 < len(self.tokens)
+            and self.tokens[cursor].type == TokenType.IDENTIFIER
+            and self.tokens[cursor + 1].type in {TokenType.COMMA, TokenType.RIGHT_PAREN}
+        ):
+            return cursor + 1
         return cursor
 
     def _matrix_literal(self) -> ast.MatrixLiteral:
@@ -568,6 +654,11 @@ class Parser:
         if self.current + 1 >= len(self.tokens):
             return False
         return self.tokens[self.current + 1].type == token_type
+
+    def _check_next_any(self, *token_types: TokenType) -> bool:
+        if self.current + 1 >= len(self.tokens):
+            return False
+        return self.tokens[self.current + 1].type in token_types
 
     def _advance(self) -> Token:
         if not self._is_at_end():

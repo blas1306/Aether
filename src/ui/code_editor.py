@@ -33,8 +33,6 @@ EDITOR_KEYWORDS = (
     "if",
     "elif",
     "else",
-    "and",
-    "or",
     "while",
     "function",
     "return",
