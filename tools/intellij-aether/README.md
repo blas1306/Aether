@@ -11,7 +11,7 @@ Incluye:
 - language server Python por stdio;
 - accion `Run Aether File`;
 - run configuration para ejecutar el archivo `.ae` actual desde el boton verde de IntelliJ;
-- tool window `Aether` para stdout/stderr con rerun, stop y clear;
+- ejecucion en la consola estandar de Run de IntelliJ;
 - setting `Aether > Python interpreter` para sobreescribir el Python usado.
 - estructura/outline del archivo via LSP;
 - hover contextual para funciones, variables, imports y builtins Aether.

@@ -8,6 +8,7 @@ import com.intellij.execution.configurations.RunConfiguration
 import com.intellij.execution.configurations.RunConfigurationBase
 import com.intellij.execution.configurations.RunProfileState
 import com.intellij.execution.configurations.RuntimeConfigurationError
+import com.intellij.execution.configurations.RuntimeConfigurationWarning
 import com.intellij.execution.process.OSProcessHandler
 import com.intellij.execution.process.ProcessHandler
 import com.intellij.execution.runners.ExecutionEnvironment
@@ -32,7 +33,11 @@ class AetherRunConfiguration(
         }
         val file = File(filePath)
         if (!file.isFile || file.extension != AetherFileType.defaultExtension) {
-            throw RuntimeConfigurationError("Aether run configurations require an existing .ae file.")
+            throw RuntimeConfigurationError("Aether run configurations require an existing .ae file: $filePath")
+        }
+        val resolution = AetherCommandLine.resolvePython(project.basePath, AetherSettingsState.getInstance().state.pythonPath)
+        if (resolution.warning != null) {
+            throw RuntimeConfigurationWarning(resolution.warning)
         }
     }
 

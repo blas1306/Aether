@@ -5,22 +5,33 @@ import com.intellij.openapi.project.Project
 import java.io.File
 
 object AetherCommandLine {
+    data class PythonResolution(
+        val executable: String,
+        val warning: String? = null,
+    )
+
     fun pythonExecutable(projectBasePath: String?, configuredPython: String?): String {
+        return resolvePython(projectBasePath, configuredPython).executable
+    }
+
+    fun resolvePython(projectBasePath: String?, configuredPython: String?): PythonResolution {
         val configured = configuredPython?.trim().orEmpty()
         if (configured.isNotEmpty() && isUsableConfiguredPython(projectBasePath, configured)) {
-            return resolvedConfiguredPython(projectBasePath, configured)
+            return PythonResolution(resolvedConfiguredPython(projectBasePath, configured))
         }
 
-        val basePath = projectBasePath ?: return "python3"
-        val unixVenv = File(basePath, ".venv/bin/python")
-        if (unixVenv.isUsableExecutable()) {
-            return unixVenv.path
+        val projectPython = projectVenvPython(projectBasePath)
+        if (projectPython != null) {
+            val warning = configured.takeIf { it.looksLikeFilePath() }?.let {
+                "Configured Python interpreter '$it' is not executable; using project .venv."
+            }
+            return PythonResolution(projectPython.path, warning)
         }
-        val windowsVenv = File(basePath, ".venv/Scripts/python.exe")
-        if (windowsVenv.isUsableExecutable()) {
-            return windowsVenv.path
+
+        val warning = configured.takeIf { it.looksLikeFilePath() }?.let {
+            "Configured Python interpreter '$it' is not executable; falling back to python3."
         }
-        return "python3"
+        return PythonResolution("python3", warning)
     }
 
     fun sourcePath(projectBasePath: String?): String? {
@@ -41,10 +52,23 @@ object AetherCommandLine {
 
     private fun baseCommandLine(project: Project): GeneralCommandLine {
         val settings = AetherSettingsState.getInstance().state
-        val commandLine = GeneralCommandLine(pythonExecutable(project.basePath, settings.pythonPath))
+        val commandLine = GeneralCommandLine(resolvePython(project.basePath, settings.pythonPath).executable)
         project.basePath?.let { commandLine.withWorkDirectory(it) }
         sourcePath(project.basePath)?.let { commandLine.environment["PYTHONPATH"] = it }
         return commandLine
+    }
+
+    private fun projectVenvPython(projectBasePath: String?): File? {
+        val basePath = projectBasePath ?: return null
+        val unixVenv = File(basePath, ".venv/bin/python")
+        if (unixVenv.isUsableExecutable()) {
+            return unixVenv
+        }
+        val windowsVenv = File(basePath, ".venv/Scripts/python.exe")
+        if (windowsVenv.isUsableExecutable()) {
+            return windowsVenv
+        }
+        return null
     }
 
     private fun isUsableConfiguredPython(projectBasePath: String?, configured: String): Boolean {

@@ -5,9 +5,11 @@ import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import com.intellij.testFramework.LightVirtualFile
 
 class AetherCommandLineTest {
     @Test
@@ -66,6 +68,15 @@ class AetherCommandLineTest {
     @Test
     fun `fallback python is python3`() {
         assertEquals("python3", AetherCommandLine.pythonExecutable(null, ""))
+    }
+
+    @Test
+    fun `broken configured python path falls back to python3 with warning when no venv exists`() {
+        val resolution = AetherCommandLine.resolvePython("/tmp/project-without-venv", " /missing/aether/python ")
+
+        assertEquals("python3", resolution.executable)
+        assertContains(resolution.warning.orEmpty(), "not executable")
+        assertContains(resolution.warning.orEmpty(), "falling back to python3")
     }
 
     @Test
@@ -205,6 +216,52 @@ class AetherCommandLineTest {
     }
 
     @Test
+    fun `run action support finds explicit ae file before other contexts`() {
+        val explicit = LightVirtualFile("demo.ae")
+        val psi = LightVirtualFile("other.ae")
+        val editor = LightVirtualFile("scratch.ae")
+
+        assertEquals(
+            explicit,
+            AetherRunActionSupport.currentAetherFile(explicit, psi, editor),
+        )
+    }
+
+    @Test
+    fun `run action support falls back to psi and editor ae files`() {
+        val psi = LightVirtualFile("fromPsi.ae")
+        val editor = LightVirtualFile("fromEditor.ae")
+
+        assertEquals(
+            psi,
+            AetherRunActionSupport.currentAetherFile(LightVirtualFile("notes.txt"), psi, editor),
+        )
+        assertEquals(
+            editor,
+            AetherRunActionSupport.currentAetherFile(LightVirtualFile("notes.txt"), null, editor),
+        )
+    }
+
+    @Test
+    fun `run action support rejects non ae files`() {
+        assertNull(
+            AetherRunActionSupport.currentAetherFile(
+                LightVirtualFile("notes.txt"),
+                LightVirtualFile("script.py"),
+                LightVirtualFile("legacy.mtx"),
+            )
+        )
+    }
+
+    @Test
+    fun `run action support validates ae file existence`() {
+        val missing = LightVirtualFile("missing.ae")
+
+        assertContains(AetherRunActionSupport.validationError(missing).orEmpty(), "does not exist")
+        assertContains(AetherRunActionSupport.validationError(LightVirtualFile("notes.txt")).orEmpty(), ".ae")
+    }
+
+    @Test
     fun `plugin xml registers aether surface`() {
         val resource = javaClass.classLoader.getResource("META-INF/plugin.xml")
         assertNotNull(resource)
@@ -223,6 +280,8 @@ class AetherCommandLineTest {
         assertContains(xml, "runConfigurationProducer")
         assertContains(xml, "EditorPopupMenu")
         assertContains(xml, "lsp.serverSupportProvider")
-        assertContains(xml, "toolWindow id=\"Aether\"")
+        assertFalse(xml.contains("toolWindow id=\"Aether\""))
+        assertFalse(xml.contains("AetherConsoleService"))
+        assertFalse(xml.contains("AetherToolWindowFactory"))
     }
 }
