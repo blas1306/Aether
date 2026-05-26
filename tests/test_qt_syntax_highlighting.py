@@ -57,29 +57,6 @@ def test_editor_cursor_is_wider_for_visibility(qapp) -> None:
     editor.close()
 
 
-def test_mtex_keywords_are_highlighted_only_inside_code_blocks(qapp) -> None:
-    editor = CodeEditor()
-    editor.set_autocomplete_document_kind("mtex_document")
-    editor.setPlainText(
-        "if outside\n"
-        "\\begin{code}\n"
-        "if inside\n"
-        "# if comment\n"
-        "\\end{code}\n"
-        "% if outside comment\n"
-        "if outside again\n"
-    )
-    qapp.processEvents()
-
-    assert not _has_color_at(editor, 0, 0, 2, "#a30101")
-    assert _has_color_at(editor, 2, 0, 2, "#a30101")
-    assert not _has_color_at(editor, 3, 2, 2, "#a30101")
-    assert not _has_color_at(editor, 5, 2, 2, "#a30101")
-    assert not _has_color_at(editor, 6, 0, 2, "#a30101")
-
-    editor.close()
-
-
 def test_import_statement_highlights_keyword_and_module_name(qapp) -> None:
     editor = CodeEditor()
     editor.set_autocomplete_document_kind("script")
@@ -107,24 +84,16 @@ def test_from_import_statement_highlights_dotted_module_and_imported_names(qapp)
     editor.close()
 
 
-def test_punctuation_is_visible_in_script_and_mtex_code_blocks(qapp) -> None:
+def test_punctuation_is_visible_in_aether_scripts(qapp) -> None:
     assert PUNCT_COLOR != STRING_COLOR
 
     script_editor = CodeEditor()
     script_editor.set_autocomplete_document_kind("script")
     script_editor.setPlainText("A = [1, (2 + 3); {4, 5}] \\ b % 2\n")
-
-    mtex_editor = CodeEditor()
-    mtex_editor.set_autocomplete_document_kind("mtex_document")
-    mtex_editor.setPlainText("\\section{A}\n\\begin{code}\nA = [1, (2 + 3); {4, 5}] \\ b % 2\n\\end{code}\n")
     qapp.processEvents()
 
     punctuation_positions = (2, 4, 6, 8, 11, 14, 15, 17, 19, 22, 23, 25, 29)
-    assert _has_color_at(mtex_editor, 0, 8, 1, PUNCT_COLOR)
-    assert _has_color_at(mtex_editor, 0, 10, 1, PUNCT_COLOR)
     for position in punctuation_positions:
         assert _has_color_at(script_editor, 0, position, 1, PUNCT_COLOR)
-        assert _has_color_at(mtex_editor, 2, position, 1, PUNCT_COLOR)
 
     script_editor.close()
-    mtex_editor.close()

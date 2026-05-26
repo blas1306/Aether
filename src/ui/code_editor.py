@@ -50,7 +50,6 @@ KEYWORD_PATTERN = re.compile(
 )
 LOGICAL_OPERATOR_PATTERN = re.compile(r"&&|\|\|")
 SCRIPT_COMMENT_PATTERN = re.compile(r"#.*|//.*")
-MTEX_TEXT_COMMENT_PATTERN = re.compile(r"(?<!\\)%.*")
 STRING_PATTERN = re.compile(r"(\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*')")
 NUMBER_PATTERN = re.compile(r"\b\d+(?:\.\d+)?\b")
 PUNCT_PATTERN = re.compile(r"[=+\-*/%\\^<>{}\[\](),.;:|]")
@@ -77,16 +76,14 @@ IMPORT_PATTERN = re.compile(
 FROM_IMPORT_PATTERN = re.compile(
     r"\bfrom\b\s+(?P<module>[A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)*)\s+(?:\bimport\b(?:\s+(?P<names>[A-Za-z0-9_,\s]*))?)?"
 )
-CODE_BLOCK_MARKER_PATTERN = re.compile(r"\\begin\{code\}|\\end\{code\}|\\codeblock|\\endcodeblock")
 
-class MathSyntaxHighlighter(QtGui.QSyntaxHighlighter):  # type: ignore[misc]
+
+class AetherSyntaxHighlighter(QtGui.QSyntaxHighlighter):  # type: ignore[misc]
     _STATE_TEXT = 0
-    _STATE_CODE = 1
 
     def __init__(self, document):
         super().__init__(document)
         assert QtGui is not None
-        self._document_kind = "script"
         self._formats = {
             "keyword": self._make_format(QtGui.QColor("#a30101")),
             "comment": self._make_format(QtGui.QColor("#00aa00")),
@@ -105,38 +102,12 @@ class MathSyntaxHighlighter(QtGui.QSyntaxHighlighter):  # type: ignore[misc]
         return fmt
 
     def set_document_kind(self, document_kind: str) -> None:
-        normalized = "mtex_document" if document_kind == "mtex_document" else "script"
-        if self._document_kind == normalized:
-            return
-        self._document_kind = normalized
+        del document_kind
         self.rehighlight()
 
     def _keyword_spans(self, text: str) -> list[tuple[int, int]]:
-        if self._document_kind != "mtex_document":
-            self.setCurrentBlockState(self._STATE_TEXT)
-            return [(0, len(text))]
-
-        spans: list[tuple[int, int]] = []
-        in_code = self.previousBlockState() == self._STATE_CODE
-        segment_start = 0
-
-        for match in CODE_BLOCK_MARKER_PATTERN.finditer(text):
-            marker = match.group(0)
-            opens_code = marker in {r"\begin{code}", r"\codeblock"}
-            if in_code and match.start() > segment_start:
-                spans.append((segment_start, match.start()))
-            if opens_code:
-                in_code = True
-                segment_start = match.end()
-            else:
-                in_code = False
-                segment_start = match.end()
-
-        if in_code and segment_start < len(text):
-            spans.append((segment_start, len(text)))
-
-        self.setCurrentBlockState(self._STATE_CODE if in_code else self._STATE_TEXT)
-        return spans
+        self.setCurrentBlockState(self._STATE_TEXT)
+        return [(0, len(text))]
 
     def highlightBlock(self, text: str) -> None:  # noqa: N802 - API Qt
         keyword_spans = self._keyword_spans(text)
@@ -212,13 +183,7 @@ class MathSyntaxHighlighter(QtGui.QSyntaxHighlighter):  # type: ignore[misc]
 
         spans: list[tuple[int, int]] = []
         for match in SCRIPT_COMMENT_PATTERN.finditer(text):
-            if self._document_kind == "mtex_document" and not _in_code(match.start()):
-                continue
             spans.append((match.start(), match.end()))
-        if self._document_kind == "mtex_document":
-            for match in MTEX_TEXT_COMMENT_PATTERN.finditer(text):
-                if not _in_code(match.start()):
-                    spans.append((match.start(), match.end()))
         return spans
 
 
@@ -417,7 +382,7 @@ class CodeEditor(QtWidgets.QPlainTextEdit):  # type: ignore[misc]
             }}
         """
         )
-        self.highlighter = MathSyntaxHighlighter(self.document())
+        self.highlighter = AetherSyntaxHighlighter(self.document())
         self._indent_guide_renderer = QtIndentGuideRenderer(self, indent_width=len(INDENTATION))
         self.line_number_area = LineNumberArea(self)
         self.blockCountChanged.connect(self.update_line_number_area_width)
@@ -958,7 +923,7 @@ class CodeEditor(QtWidgets.QPlainTextEdit):  # type: ignore[misc]
         popup.show_suggestions(self, suggestions)
 
     def set_autocomplete_document_kind(self, document_kind: str) -> None:
-        self._autocomplete_document_kind = document_kind
+        self._autocomplete_document_kind = "script"
         self.highlighter.set_document_kind(document_kind)
 
     def set_autocomplete_workspace_provider(

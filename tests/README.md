@@ -2,7 +2,7 @@
 
 ## Proposito
 
-La suite protege contratos reales del lenguaje Aether v0, la REPL, el LSP basico y las piezas heredadas que todavia viven en el repositorio. La prioridad no es cobertura cosmetica: es mantener estable la superficie activa `.ae` mientras el codigo legacy se limpia de forma controlada.
+La suite protege contratos reales del lenguaje Aether v0, la REPL, el LSP basico y la superficie activa del editor. La prioridad no es cobertura cosmetica: es mantener estable la superficie activa `.ae` mientras el codigo legacy queda aislado.
 
 ## Como correrla
 
@@ -24,7 +24,7 @@ Los tests cargan `src/` automaticamente desde `tests/conftest.py`, asi que puede
 
 - Aether v0: parser, typechecker, runtime, stdlib, matrices, algebra lineal, strings, imports rechazados y sesion persistente.
 - Editor/LSP: diagnosticos, completions, REPL controller, resaltado y acciones no visuales.
-- Legacy protegido: runtime MathTeX/MTeX, documentos `.mtex`, proyectos, plots, notebooks y PDF mientras sigan en el arbol.
+- Legacy aislado: las pruebas del runtime historico, documentos antiguos, proyectos, notebooks y PDF viven fuera de la suite activa.
 
 ## Contratos importantes
 

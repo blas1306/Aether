@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from typing import Protocol
+
 from PySide6 import QtCore, QtGui, QtWidgets  # type: ignore
 
-from console_engine import ConsoleEngine, ConsoleEvent
+from repl.events import ConsoleEvent
 
 CONSOLE_OUTPUT_BG = "#1e1e1e"
 CONSOLE_PANEL_TEXT = "#d4d4d4"
@@ -15,6 +17,25 @@ CONSOLE_INPUT_BG = "#181b1f"
 CONSOLE_BUTTON_BG = "#262b31"
 CONSOLE_BUTTON_BORDER = "#3a424c"
 CONSOLE_BUTTON_HOVER = "#2d333a"
+
+
+class ConsoleEngine(Protocol):
+    prompt: str
+
+    def execute_line(self, line: str) -> list[ConsoleEvent]:
+        ...
+
+    def clear_console(self) -> list[ConsoleEvent]:
+        ...
+
+    def reset_environment(self) -> list[ConsoleEvent]:
+        ...
+
+    def history_prev(self, current_buffer: str) -> str:
+        ...
+
+    def history_next(self) -> str:
+        ...
 
 
 class ConsoleInput(QtWidgets.QLineEdit):  # type: ignore[misc]
@@ -75,35 +96,35 @@ class ConsoleWidget(QtWidgets.QWidget):  # type: ignore[misc]
         )
 
         self.terminal_frame = QtWidgets.QFrame(self)
-        self.terminal_frame.setObjectName("mathLabConsoleRoot")
+        self.terminal_frame.setObjectName("aetherConsoleRoot")
         self.terminal_frame.setStyleSheet(
             f"""
-            QFrame#mathLabConsoleRoot {{
+            QFrame#aetherConsoleRoot {{
                 background: {CONSOLE_OUTPUT_BG};
                 border: 1px solid {CONSOLE_BORDER};
                 border-radius: 8px;
             }}
-            QFrame#mathLabConsoleInputRow {{
+            QFrame#aetherConsoleInputRow {{
                 background: {CONSOLE_INPUT_BG};
                 border-top: 1px solid {CONSOLE_BORDER};
                 border-bottom-left-radius: 8px;
                 border-bottom-right-radius: 8px;
             }}
-            QLabel#mathLabConsolePromptLabel {{
+            QLabel#aetherConsolePromptLabel {{
                 color: {CONSOLE_PROMPT};
                 font-family: Consolas;
                 font-size: 11pt;
                 font-weight: 600;
                 background: transparent;
             }}
-            QToolButton#mathLabConsoleUtilityButton {{
+            QToolButton#aetherConsoleUtilityButton {{
                 background: {CONSOLE_BUTTON_BG};
                 border: 1px solid {CONSOLE_BUTTON_BORDER};
                 border-radius: 6px;
                 color: {CONSOLE_PANEL_TEXT};
                 padding: 4px 10px;
             }}
-            QToolButton#mathLabConsoleUtilityButton:hover {{
+            QToolButton#aetherConsoleUtilityButton:hover {{
                 background: {CONSOLE_BUTTON_HOVER};
                 border-color: #4b5561;
             }}
@@ -129,16 +150,16 @@ class ConsoleWidget(QtWidgets.QWidget):  # type: ignore[misc]
         )
 
         self.input_row = QtWidgets.QFrame(self.terminal_frame)
-        self.input_row.setObjectName("mathLabConsoleInputRow")
+        self.input_row.setObjectName("aetherConsoleInputRow")
         self.prompt_label = QtWidgets.QLabel(self.engine.prompt.rstrip(), self.input_row)
-        self.prompt_label.setObjectName("mathLabConsolePromptLabel")
+        self.prompt_label.setObjectName("aetherConsolePromptLabel")
         self.input = ConsoleInput(engine, self.input_row)
         self.clear_btn = QtWidgets.QToolButton(self.input_row)
-        self.clear_btn.setObjectName("mathLabConsoleUtilityButton")
+        self.clear_btn.setObjectName("aetherConsoleUtilityButton")
         self.clear_btn.setText("Clear")
         self.clear_btn.setToolTip("Clear the REPL transcript (Ctrl+L).")
         self.restart_btn = QtWidgets.QToolButton(self.input_row)
-        self.restart_btn.setObjectName("mathLabConsoleUtilityButton")
+        self.restart_btn.setObjectName("aetherConsoleUtilityButton")
         self.restart_btn.setText("Restart REPL")
         self.restart_btn.setToolTip("Restart the current REPL session.")
 

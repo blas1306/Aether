@@ -10,7 +10,7 @@ from document_symbols import DocumentSymbol, extract_document_symbols
 
 
 AutocompleteKind = Literal["command", "identifier", "member"]
-DocumentKind = Literal["script", "mtex_document"]
+DocumentKind = Literal["script"]
 
 
 @dataclass(frozen=True)
@@ -567,9 +567,6 @@ def _score_suggestion(
         elif suggestion.kind == "variable":
             score -= 40
 
-    if document_kind == "mtex_document" and suggestion.kind == "keyword":
-        score -= 25
-
     exact_case_bias = 1 if candidate.startswith(prefix) else 0
     length_bias = -len(candidate)
     return (score, exact_case_bias, length_bias, candidate.casefold())
@@ -598,8 +595,7 @@ def build_autocomplete_suggestions(
     *,
     catalog: Sequence[CommandSuggestion] = COMMAND_CATALOG,
 ) -> list[CommandSuggestion]:
-    percent_comments = request.document_kind == "mtex_document" and not _looks_like_code_line(request.line_text)
-    match = detect_autocomplete_match(request.line_text, request.cursor_col, percent_comments=percent_comments)
+    match = detect_autocomplete_match(request.line_text, request.cursor_col)
     if match is None:
         return []
 

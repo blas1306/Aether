@@ -116,9 +116,9 @@ class EditorAPI(Protocol):
     def set_autocomplete_document_kind(self, document_kind: str) -> None:
         """Set the document kind used by syntax and completion behavior.
 
-        Current values are convention-based strings such as `"script"` and
-        `"mtex_document"`. Future adapters should normalize unsupported values
-        to their closest supported behavior rather than failing.
+        The active Aether surface uses `"script"`. Future adapters should
+        normalize unsupported values to their closest supported behavior rather
+        than failing.
         """
         ...
 

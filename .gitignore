@@ -58,8 +58,6 @@ tmp_test_projects/
 tmpw*/
 tmp_*.tex
 tmp_*.pdf
-tmp_*.mtex
-untitled*.mtex
 
 # =========================
 # Sistema

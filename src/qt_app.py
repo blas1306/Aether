@@ -7,7 +7,7 @@ from pathlib import Path
 from actions import ActionRegistry
 from actions.app_actions import register_main_window_actions
 from actions.menu_specs import INTERACTIVE_MENU_SPEC, MenuSpec
-from latex_lang import (
+from aether.runtime_state import (
     register_plot_listener,
     set_plot_mode,
     unregister_plot_listener,
@@ -24,7 +24,6 @@ from ui.code_editor import (
     EDITOR_BG,
     EDITOR_MATCH_BG,
     INDENTATION,
-    MathSyntaxHighlighter,
     OCCURRENCE_MATCH_BG,
     PUNCT_COLOR,
     STRING_COLOR,

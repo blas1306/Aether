@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from console_engine import ConsoleCapture, ConsoleEvent, MathRuntime, capture_to_events
 from repl.aether_repl import AetherReplBackend
+from repl.events import ConsoleCapture, ConsoleEvent, capture_to_events
 
 
 class ReplBackend(Protocol):
@@ -39,19 +39,6 @@ AETHER_PROFILE = ReplProfile(
         "Use print(...) or println(...) for output. Ctrl+L clears the transcript."
     ),
 )
-
-MATHLAB_PROFILE = ReplProfile(
-    id="mathlab",
-    title="MathLab Legacy Console",
-    subtitle="Interactive MathLab Legacy console session",
-    prompt="mathlab> ",
-    welcome_text=(
-        "Welcome to Aether Studio\n"
-        "MathLab Legacy console ready for .mtx files.\n"
-        "Enter runs the current command. Use Up/Down for history and Ctrl+L to clear."
-    ),
-)
-
 
 class ReplController:
     def __init__(self, backend: ReplBackend, profile: ReplProfile) -> None:
@@ -121,34 +108,5 @@ class ReplController:
         return [text]
 
 
-class MathLabReplBackend:
-    """Adapter for the .mtx MathLab Legacy runtime used by the compatibility REPL."""
-
-    def __init__(self, runtime: MathRuntime) -> None:
-        self.runtime = runtime
-
-    def split_console_input(self, text: str) -> list[str]:
-        return self.runtime.split_console_input(text)
-
-    def execute_console_line(self, line: str) -> ConsoleCapture:
-        return self.runtime.execute_console_line(line)
-
-    def reset_environment(self) -> None:
-        self.runtime.reset_environment()
-
-    def workspace_snapshot(self) -> list[dict[str, str]]:
-        return self.runtime.workspace_snapshot()
-
-
 def create_aether_repl() -> ReplController:
     return ReplController(AetherReplBackend(), AETHER_PROFILE)
-
-
-def create_mathlab_repl(runtime: MathRuntime | None = None) -> ReplController:
-    """Create the existing MathLab Legacy REPL; kept for public compatibility."""
-    return ReplController(MathLabReplBackend(runtime or MathRuntime()), MATHLAB_PROFILE)
-
-
-def create_legacy_mathlab_repl(runtime: MathRuntime | None = None) -> ReplController:
-    """Explicit alias for the .mtx MathLab Legacy REPL."""
-    return create_mathlab_repl(runtime)

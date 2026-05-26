@@ -22,10 +22,6 @@ class SourceRunResult:
 
 
 AETHER_RUNTIME = FileRuntime("aether", "Aether", (".ae",))
-# Legacy public names remain available for callers that still import them, but
-# Aether Studio no longer routes files to this runtime.
-MATHLAB_RUNTIME = FileRuntime("mathlab", "MathLab Legacy", (".mtx",))
-MATHLAB_LEGACY_RUNTIME = MATHLAB_RUNTIME
 UNKNOWN_RUNTIME = FileRuntime("unknown", "Current editor", ())
 LEGACY_SUFFIXES = {".mtx", ".mtex", ".mtn"}
 

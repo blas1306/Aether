@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from aether import AetherRuntimeError, AetherSession, AetherSyntaxError, AetherTypeError
-from console_engine import ConsoleCapture
 from language_runtime import format_aether_error
+from repl.events import ConsoleCapture
 
 AETHER_REPL_ERRORS = (AetherSyntaxError, AetherTypeError, AetherRuntimeError)
 

@@ -10,7 +10,7 @@ from platformdirs import user_config_dir
 
 APP_PREFERENCES_FILENAME = "ui_preferences.json"
 APP_PREFERENCES_VERSION = 1
-APP_STORAGE_NAME = "MTeX Studio"
+APP_STORAGE_NAME = "Aether Studio"
 
 
 def default_preferences_path() -> Path:

@@ -39,4 +39,4 @@ def test_default_preferences_path_uses_platformdirs(monkeypatch, tmp_path: Path)
 
     assert path == tmp_path / "config-home" / "ui_preferences.json"
     assert captured["args"] == ()
-    assert captured["kwargs"] == {"appname": "MTeX Studio", "appauthor": False}
+    assert captured["kwargs"] == {"appname": "Aether Studio", "appauthor": False}
