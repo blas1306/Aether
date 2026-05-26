@@ -82,9 +82,9 @@ def test_modulo_rejects_non_numeric_operands_in_lsp() -> None:
     builtin_diagnostics = analyze_source("x = Math.mod([1 2], 2);")
 
     assert len(percent_diagnostics) == 1
-    assert "requires numeric operands" in percent_diagnostics[0].message
+    assert "requires real numeric operands" in percent_diagnostics[0].message
     assert len(builtin_diagnostics) == 1
-    assert "expects numeric arguments" in builtin_diagnostics[0].message
+    assert "expects real numeric arguments" in builtin_diagnostics[0].message
 
 
 def test_unqualified_mod_is_not_a_builtin() -> None:

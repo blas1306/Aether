@@ -80,6 +80,38 @@ println(n);
     assert result.output == "2\n2\n"
 
 
+def test_vector_result_can_be_destructured() -> None:
+    result = run_aether(
+        """
+import Math.LinearAlgebra
+A = [3 2; 1 0; 0 0];
+m, n = size(A);
+println(m);
+println(n);
+"""
+    )
+
+    assert result.output == "3\n2\n"
+    assert result.env["m"].type_name == "int"
+    assert result.env["n"].type_name == "int"
+
+
+def test_eig_result_can_be_destructured() -> None:
+    result = run_aether(
+        """
+import Math.LinearAlgebra
+A = [3 2; 1 0; 0 0];
+Vec, Vap = eig(A' * A);
+println(rows(Vec));
+println(cols(Vec));
+println(rows(Vap));
+println(cols(Vap));
+"""
+    )
+
+    assert result.output == "2\n2\n2\n2\n"
+
+
 def test_named_tuple_return_type_elements_can_be_destructured() -> None:
     result = run_aether(
         """

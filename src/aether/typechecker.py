@@ -16,6 +16,7 @@ from .types import (
     ArrayType,
     MatrixType,
     NUMERIC_TYPES,
+    REAL_NUMERIC_TYPES,
     RangeType,
     TupleType,
     TransposeVectorType,
@@ -36,6 +37,7 @@ UNKNOWN_TYPE: AetherType | None = None
 LINEAR_ALGEBRA_MODULE = "Math.LinearAlgebra"
 LINEAR_ALGEBRA_SOLVE = "Math.LinearAlgebra.solve"
 LINEAR_ALGEBRA_CONJTRANSPOSE = "Math.LinearAlgebra.conjtranspose"
+INPUT_TARGET_TYPES = {"int", "float", "string", "boolean"}
 
 
 class TypeChecker:
@@ -147,6 +149,14 @@ class TypeChecker:
                 forbid_shadowing=True,
             )
             return
+        if isinstance(statement.initializer, ast.InputCall):
+            self._input_call_type(statement.initializer, scope, statement.type_name)
+            scope.define_local(
+                statement.name,
+                VariableSymbol(statement.name, statement.type_name),
+                forbid_shadowing=True,
+            )
+            return
         value_type = self._expression_type(statement.initializer, scope)
         if value_type is not UNKNOWN_TYPE and not self._can_assign(
             value_type,
@@ -180,6 +190,12 @@ class TypeChecker:
             if not is_array_type(existing.type_name):
                 self._raise_implicit_conversion_error(ArrayType("int"), existing.type_name, statement)
             return
+        if isinstance(statement.expression, ast.InputCall):
+            if existing is None:
+                self._input_call_type(statement.expression, scope, None)
+                return
+            self._input_call_type(statement.expression, scope, existing.type_name)
+            return
         value_type = self._expression_type(statement.expression, scope)
         if existing is None:
             if value_type is not UNKNOWN_TYPE:
@@ -197,19 +213,41 @@ class TypeChecker:
         value_type = self._expression_type(statement.expression, scope)
         if value_type is UNKNOWN_TYPE:
             return
-        if not isinstance(value_type, TupleType):
+        if isinstance(value_type, TupleType):
+            element_types = list(value_type.element_types)
+        elif isinstance(value_type, VectorType):
+            if value_type.length is not None and value_type.length != len(statement.names):
+                raise AetherTypeError(
+                    f"Destructuring expected {value_type.length} values but got {len(statement.names)}.",
+                    line=statement.line,
+                    column=statement.column,
+                )
+            element_types = [value_type.element_type] * len(statement.names)
+        elif isinstance(value_type, TransposeVectorType):
+            if value_type.length is not None and value_type.length != len(statement.names):
+                raise AetherTypeError(
+                    f"Destructuring expected {value_type.length} values but got {len(statement.names)}.",
+                    line=statement.line,
+                    column=statement.column,
+                )
+            element_types = [value_type.element_type] * len(statement.names)
+        elif isinstance(value_type, MatrixType) and _is_vector_like_matrix_type(value_type):
+            if value_type.rows is not None and value_type.cols is not None:
+                matrix_length = value_type.rows * value_type.cols
+                if matrix_length != len(statement.names):
+                    raise AetherTypeError(
+                        f"Destructuring expected {matrix_length} values but got {len(statement.names)}.",
+                        line=statement.line,
+                        column=statement.column,
+                    )
+            element_types = [value_type.element_type] * len(statement.names)
+        else:
             raise AetherTypeError(
                 f"Cannot destructure value of type {type_to_string(value_type)}.",
                 line=statement.line,
                 column=statement.column,
             )
-        if len(value_type.element_types) != len(statement.names):
-            raise AetherTypeError(
-                f"Destructuring expected {len(value_type.element_types)} values but got {len(statement.names)}.",
-                line=statement.line,
-                column=statement.column,
-            )
-        for name, element_type in zip(statement.names, value_type.element_types):
+        for name, element_type in zip(statement.names, element_types):
             if self._is_active_loop_variable_assignment(name, scope):
                 raise AetherTypeError(f"Cannot assign to loop variable '{name}' inside its own for-loop.")
             existing = scope.lookup(name)
@@ -378,9 +416,18 @@ class TypeChecker:
             if operand_type is UNKNOWN_TYPE:
                 return UNKNOWN_TYPE
             if expression.operator == "-":
-                if operand_type not in {"int", "float", "double"}:
-                    raise AetherTypeError("Unary '-' requires a numeric operand.")
-                return operand_type
+                if operand_type in NUMERIC_TYPES:
+                    return operand_type
+                if isinstance(operand_type, VectorType):
+                    _numeric_vector_scalar_type(operand_type)
+                    return operand_type
+                if isinstance(operand_type, TransposeVectorType):
+                    _numeric_transpose_vector_scalar_type(operand_type)
+                    return operand_type
+                if isinstance(operand_type, MatrixType):
+                    _numeric_matrix_scalar_type(operand_type)
+                    return operand_type
+                raise AetherTypeError("Unary '-' requires a numeric operand.")
             if expression.operator == "'":
                 if LINEAR_ALGEBRA_MODULE not in self.imported_modules:
                     raise AetherTypeError(
@@ -396,6 +443,8 @@ class TypeChecker:
             return self._range_type(expression, scope)
         if isinstance(expression, ast.CallExpression):
             return self._call_type(expression, scope)
+        if isinstance(expression, ast.InputCall):
+            return self._input_call_type(expression, scope, None)
         if isinstance(expression, ast.ArrayLiteral):
             return self._array_literal_type(expression, scope)
         if isinstance(expression, ast.TupleLiteral):
@@ -419,8 +468,8 @@ class TypeChecker:
                 raise AetherTypeError(f"Operator '{operator}' requires boolean operands.")
             return "boolean"
         if operator == "%":
-            if left_type not in NUMERIC_TYPES or right_type not in NUMERIC_TYPES:
-                raise AetherTypeError("Operator '%' requires numeric operands.")
+            if left_type not in REAL_NUMERIC_TYPES or right_type not in REAL_NUMERIC_TYPES:
+                raise AetherTypeError("Operator '%' requires real numeric operands.")
             return promote_numeric(left_type, right_type, operator)
         if operator in {".+", ".-", ".*"}:
             elementwise_type = _elementwise_binary_type(left_type, operator[1], right_type)
@@ -469,8 +518,8 @@ class TypeChecker:
                 )
             return "boolean"
         if operator in {"<", "<=", ">", ">="}:
-            if left_type not in {"int", "float", "double"} or right_type not in {"int", "float", "double"}:
-                raise AetherTypeError(f"Operator '{operator}' requires numeric operands.")
+            if left_type not in REAL_NUMERIC_TYPES or right_type not in REAL_NUMERIC_TYPES:
+                raise AetherTypeError(f"Operator '{operator}' requires real numeric operands.")
             return "boolean"
         raise AetherRuntimeError(f"Unsupported binary operator '{operator}'.")
 
@@ -618,6 +667,40 @@ class TypeChecker:
                 self._raise_implicit_conversion_error(argument_type, parameter.type_name)
         return function.return_type
 
+    def _input_call_type(
+        self,
+        expression: ast.InputCall,
+        scope: Scope[VariableSymbol],
+        target_type: AetherType | None,
+    ) -> AetherType | None:
+        if len(expression.arguments) > 1:
+            raise AetherTypeError(
+                "input(...) expects zero or one argument.",
+                line=expression.line,
+                column=expression.column,
+            )
+        if expression.arguments:
+            prompt_type = self._expression_type(expression.arguments[0], scope)
+            if prompt_type is not UNKNOWN_TYPE and prompt_type != "string":
+                raise AetherTypeError(
+                    f"input(...) prompt must be string, got '{type_to_string(prompt_type)}'.",
+                    line=expression.line,
+                    column=expression.column,
+                )
+        if target_type is None:
+            raise AetherTypeError(
+                "input() requires a typed assignment context.",
+                line=expression.line,
+                column=expression.column,
+            )
+        if target_type not in INPUT_TARGET_TYPES:
+            raise AetherTypeError(
+                f"input() supports int, float, string, and boolean targets, got '{type_to_string(target_type)}'.",
+                line=expression.line,
+                column=expression.column,
+            )
+        return target_type
+
     def _expression_type_allowing_builtin_function_ref(
         self,
         expression: ast.Expression,
@@ -664,7 +747,7 @@ class TypeChecker:
             if value_type is UNKNOWN_TYPE:
                 continue
             if expected == "numeric":
-                if value_type not in NUMERIC_TYPES:
+                if value_type not in REAL_NUMERIC_TYPES:
                     raise AetherTypeError(f"Keyword argument '{name}' expects a numeric value, got '{type_to_string(value_type)}'.")
                 continue
             if expected == "string_or_boolean":
@@ -974,6 +1057,8 @@ def _common_primitive_type(primitive_types: list[AetherType]) -> str:
     if len(unique_types) == 1:
         return primitive_types[0]
     if unique_types <= NUMERIC_TYPES:
+        if "complex" in unique_types:
+            return "complex"
         if "double" in unique_types:
             return "double"
         if "float" in unique_types:
@@ -1006,7 +1091,7 @@ def _types_comparable_for_equality(left_type: AetherType, right_type: AetherType
         or is_vector_like_type(right_type)
     ):
         return False
-    return left_type in {"int", "float", "double"} and right_type in {"int", "float", "double"}
+    return left_type in NUMERIC_TYPES and right_type in NUMERIC_TYPES
 
 
 def _algebraic_addition_type(left_type: AetherType, operator: str, right_type: AetherType) -> AetherType | None:

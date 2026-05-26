@@ -32,8 +32,7 @@ println(EsPrimo(57));
 A = [3 2; 1 0; 0 0];
 b = [5; 3; 0];
 
-m = rows(A);
-n = cols(A);
+m, n = size(A);
 x = A \ b;
 
 println("Filas de A: ", m);
@@ -47,7 +46,3 @@ double triple(double y) {
 }
 
 println(triple(3));
-
-int numPrimos(int a) {
-    return int(a*ln(a));
-}

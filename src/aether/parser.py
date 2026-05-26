@@ -15,6 +15,7 @@ class Parser:
         self.tokens = tokens
         self.current = 0
         self.expression_function_name: str | None = None
+        self.matrix_literal_depth = 0
 
     def parse(self) -> ast.Program:
         statements: list[ast.Statement] = []
@@ -239,6 +240,9 @@ class Parser:
         expr = self._factor()
         while self._match(TokenType.PLUS, TokenType.MINUS, TokenType.DOT_PLUS, TokenType.DOT_MINUS):
             operator = self._previous()
+            if self._is_matrix_signed_column_boundary(operator):
+                self.current -= 1
+                break
             self._require_expression_after_operator(operator)
             right = self._factor()
             expr = ast.BinaryExpression(expr, operator.lexeme, right, operator.line, operator.column)
@@ -300,6 +304,8 @@ class Parser:
             return ast.Literal(self._previous().literal, "int")
         if self._match(TokenType.FLOAT_LITERAL):
             return ast.Literal(self._previous().literal, "double")
+        if self._match(TokenType.IMAG_LITERAL):
+            return ast.Literal(self._previous().literal, "complex")
         if self._match(TokenType.STRING_LITERAL):
             return self._string_literal_expression(self._previous())
         if self._match(TokenType.IDENTIFIER, TokenType.TYPE):
@@ -310,6 +316,7 @@ class Parser:
                 part = self._consume(TokenType.IDENTIFIER, "Expected identifier after '.'.").lexeme
                 name = f"{name}.{part}"
             if self._match(TokenType.LEFT_PAREN):
+                call_token = self._previous()
                 arguments: list[ast.Expression] = []
                 keyword_arguments: dict[str, ast.Expression] = {}
                 saw_keyword_argument = False
@@ -329,6 +336,10 @@ class Parser:
                         if not self._match(TokenType.COMMA):
                             break
                 self._consume(TokenType.RIGHT_PAREN, "Expected ')' after arguments.")
+                if name == "input":
+                    if keyword_arguments:
+                        raise self._error(call_token, "input() does not accept keyword arguments.")
+                    return ast.InputCall(arguments, call_token.line, call_token.column)
                 return ast.CallExpression(name, arguments, keyword_arguments)
             if dotted:
                 raise self._error(self._previous(), "Dotted names are only supported for builtin calls.")
@@ -604,39 +615,74 @@ class Parser:
         return cursor
 
     def _matrix_literal(self) -> ast.MatrixLiteral:
-        if self._match(TokenType.RIGHT_BRACKET):
-            return ast.MatrixLiteral([])
-        rows: list[list[ast.Expression]] = []
-        has_space_columns = False
-        while True:
-            row: list[ast.Expression] = []
-            if self._check(TokenType.SEMICOLON) or self._check(TokenType.RIGHT_BRACKET):
-                raise self._error(self._peek(), "Expected expression in matrix literal.")
-            while not self._check(TokenType.SEMICOLON) and not self._check(TokenType.RIGHT_BRACKET):
-                row.append(self._expression())
-                if self._match(TokenType.COMMA):
-                    if self._check(TokenType.SEMICOLON) or self._check(TokenType.RIGHT_BRACKET):
-                        raise self._error(self._previous(), "Trailing comma in matrix literal is not supported.")
-                    continue
+        self.matrix_literal_depth += 1
+        try:
+            if self._match(TokenType.RIGHT_BRACKET):
+                return ast.MatrixLiteral([])
+            rows: list[list[ast.Expression]] = []
+            has_space_columns = False
+            while True:
+                row: list[ast.Expression] = []
                 if self._check(TokenType.SEMICOLON) or self._check(TokenType.RIGHT_BRACKET):
+                    raise self._error(self._peek(), "Expected expression in matrix literal.")
+                while not self._check(TokenType.SEMICOLON) and not self._check(TokenType.RIGHT_BRACKET):
+                    row.append(self._expression())
+                    if self._match(TokenType.COMMA):
+                        if self._check(TokenType.SEMICOLON) or self._check(TokenType.RIGHT_BRACKET):
+                            raise self._error(self._previous(), "Trailing comma in matrix literal is not supported.")
+                        continue
+                    if self._check(TokenType.SEMICOLON) or self._check(TokenType.RIGHT_BRACKET):
+                        break
+                    if self._can_start_expression(self._peek()):
+                        has_space_columns = True
+                        continue
+                    raise self._error(self._peek(), "Expected column separator, row separator, or ']'.")
+                rows.append(row)
+                if not self._match(TokenType.SEMICOLON):
                     break
-                if self._can_start_expression(self._peek()):
-                    has_space_columns = True
-                    continue
-                raise self._error(self._peek(), "Expected column separator, row separator, or ']'.")
-            rows.append(row)
-            if not self._match(TokenType.SEMICOLON):
-                break
-            if self._check(TokenType.RIGHT_BRACKET):
-                raise self._error(self._previous(), "Trailing ';' in matrix literal is not supported.")
-        self._consume(TokenType.RIGHT_BRACKET, "Expected ']' after matrix literal.")
-        return ast.MatrixLiteral(rows, vector=not has_space_columns)
+                if self._check(TokenType.RIGHT_BRACKET):
+                    raise self._error(self._previous(), "Trailing ';' in matrix literal is not supported.")
+            self._consume(TokenType.RIGHT_BRACKET, "Expected ']' after matrix literal.")
+            return ast.MatrixLiteral(rows, vector=not has_space_columns)
+        finally:
+            self.matrix_literal_depth -= 1
+
+    def _is_matrix_signed_column_boundary(self, operator: Token) -> bool:
+        if self.matrix_literal_depth == 0 or operator.type != TokenType.MINUS:
+            return False
+        if self._is_at_end():
+            return False
+        operand = self._peek()
+        return (
+            self._has_whitespace_before(operator)
+            and self._tokens_touch(operator, operand)
+            and self._can_start_expression(operand)
+        )
+
+    def _has_whitespace_before(self, token: Token) -> bool:
+        token_index = self._token_index(token)
+        if token_index is None or token_index == 0:
+            return False
+        previous = self.tokens[token_index - 1]
+        if previous.line != token.line:
+            return False
+        return token.column > previous.column + len(previous.lexeme)
+
+    def _tokens_touch(self, left: Token, right: Token) -> bool:
+        return left.line == right.line and right.column == left.column + len(left.lexeme)
+
+    def _token_index(self, token: Token) -> int | None:
+        for index, candidate in enumerate(self.tokens):
+            if candidate is token:
+                return index
+        return None
 
     def _can_start_expression(self, token: Token) -> bool:
         return token.type in {
             TokenType.BOOLEAN_LITERAL,
             TokenType.INT_LITERAL,
             TokenType.FLOAT_LITERAL,
+            TokenType.IMAG_LITERAL,
             TokenType.STRING_LITERAL,
             TokenType.IDENTIFIER,
             TokenType.TYPE,

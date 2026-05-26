@@ -9,6 +9,7 @@ class TokenType(str, Enum):
     IDENTIFIER = "IDENTIFIER"
     INT_LITERAL = "INT_LITERAL"
     FLOAT_LITERAL = "FLOAT_LITERAL"
+    IMAG_LITERAL = "IMAG_LITERAL"
     STRING_LITERAL = "STRING_LITERAL"
     BOOLEAN_LITERAL = "BOOLEAN_LITERAL"
     TYPE = "TYPE"
@@ -53,8 +54,8 @@ class TokenType(str, Enum):
     APOSTROPHE = "'"
 
 
-AETHER_TYPES = {"int", "float", "double", "string", "boolean", "Matrix", "Vector"}
-PRIMITIVE_TYPES = {"int", "float", "double", "string", "boolean"}
+AETHER_TYPES = {"int", "float", "double", "complex", "string", "boolean", "Matrix", "Vector"}
+PRIMITIVE_TYPES = {"int", "float", "double", "complex", "string", "boolean"}
 
 KEYWORDS: dict[str, TokenType] = {
     "function": TokenType.FUNCTION,

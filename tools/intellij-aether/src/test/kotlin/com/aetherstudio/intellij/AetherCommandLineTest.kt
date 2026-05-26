@@ -148,6 +148,36 @@ class AetherCommandLineTest {
     }
 
     @Test
+    fun `highlighting lexer treats apostrophe operator as operator`() {
+        val lexer = AetherHighlightingLexer()
+
+        lexer.start("A'", 0, 2, 0)
+        val tokenTypes = mutableListOf<String>()
+        while (lexer.tokenType != null) {
+            tokenTypes.add(lexer.tokenType.toString())
+            lexer.advance()
+        }
+
+        assertTrue(tokenTypes.contains(AetherTokenTypes.OPERATOR.toString()))
+        assertTrue(!tokenTypes.contains(AetherTokenTypes.BAD_CHARACTER.toString()))
+    }
+
+    @Test
+    fun `highlighting lexer treats single quoted string as string`() {
+        val lexer = AetherHighlightingLexer()
+
+        lexer.start("'hola'", 0, 6, 0)
+        val tokenTypes = mutableListOf<String>()
+        while (lexer.tokenType != null) {
+            tokenTypes.add(lexer.tokenType.toString())
+            lexer.advance()
+        }
+
+        assertTrue(tokenTypes.contains(AetherTokenTypes.STRING.toString()))
+        assertTrue(!tokenTypes.contains(AetherTokenTypes.BAD_CHARACTER.toString()))
+    }
+
+    @Test
     fun `typing support knows matching braces`() {
         assertEquals(')', AetherTypingSupport.matchingClosing('('))
         assertEquals(']', AetherTypingSupport.matchingClosing('['))

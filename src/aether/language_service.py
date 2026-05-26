@@ -64,6 +64,7 @@ def run_source(
     plot_mode: str | None = None,
     plot_output_dir: str | Path | None = None,
     output_writer: Callable[[str], None] | None = None,
+    input_reader: Callable[[], str] | None = None,
 ) -> RunResult:
     try:
         result: AetherRunResult = run_aether(
@@ -71,6 +72,7 @@ def run_source(
             plot_mode=plot_mode,
             plot_output_dir=plot_output_dir,
             output_writer=output_writer,
+            input_reader=input_reader,
         )
     except AETHER_ERRORS as exc:
         return RunResult(success=False, error=f"{type(exc).__name__}: {exc}")

@@ -25,6 +25,7 @@ EDITOR_KEYWORDS = (
     "int",
     "float",
     "double",
+    "complex",
     "string",
     "boolean",
     "Matrix",
@@ -1004,6 +1005,9 @@ class CodeEditor(QtWidgets.QPlainTextEdit):  # type: ignore[misc]
         insert_text = suggestion.insert_text
         cursor_backtrack = suggestion.cursor_backtrack
         if insert_text.endswith("()") and suffix_text.lstrip().startswith("("):
+            insert_text = suggestion.name
+            cursor_backtrack = None
+        if insert_text.endswith("<>") and suffix_text.lstrip().startswith("<"):
             insert_text = suggestion.name
             cursor_backtrack = None
 

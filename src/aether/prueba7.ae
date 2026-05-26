@@ -1,0 +1,17 @@
+int fibo(int n) {
+    if n <= 1 {
+        return n;
+    } else {
+        return fibo(n - 1) + fibo(n - 2);
+    }
+}
+
+while true {
+    int n = input("Ingrese un numero natural: ");
+
+    if n <= 0 {
+        println("Numero ingresado menor que 0. Intente nuevamente");
+    } else {
+        println("F_{$n$} = ", fibo(n));
+    }
+}

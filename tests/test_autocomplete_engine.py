@@ -287,6 +287,19 @@ class AutocompleteEngineTests(unittest.TestCase):
         self.assertEqual(suggestions[0].name, "int")
         self.assertEqual(suggestions[0].kind, "keyword")
 
+    def test_matrix_and_vector_type_completions_insert_angle_pair(self):
+        matrix_suggestions = build_autocomplete_suggestions(AutocompleteRequest(line_text="Mat", cursor_col=3))
+        vector_suggestions = build_autocomplete_suggestions(AutocompleteRequest(line_text="Vec", cursor_col=3))
+
+        self.assertEqual(matrix_suggestions[0].name, "Matrix")
+        self.assertEqual(matrix_suggestions[0].kind, "keyword")
+        self.assertEqual(matrix_suggestions[0].insert_text, "Matrix<>")
+        self.assertEqual(matrix_suggestions[0].cursor_backtrack, 1)
+        self.assertEqual(vector_suggestions[0].name, "Vector")
+        self.assertEqual(vector_suggestions[0].kind, "keyword")
+        self.assertEqual(vector_suggestions[0].insert_text, "Vector<>")
+        self.assertEqual(vector_suggestions[0].cursor_backtrack, 1)
+
     def test_math_namespace_suggests_real_submodules(self):
         suggestions = build_autocomplete_suggestions(AutocompleteRequest(line_text="Math.", cursor_col=len("Math.")))
 

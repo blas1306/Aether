@@ -59,6 +59,8 @@ def format_range(value: AetherValue) -> str:
 def format_scalar(value: AetherValue) -> str:
     if value.type_name == "boolean":
         return "true" if value.value else "false"
+    if value.type_name == "complex":
+        return _format_complex(value.value)
     return str(value.value)
 
 
@@ -91,3 +93,28 @@ def _vector_elements(value: AetherValue) -> list[AetherValue]:
 
 def _escape_string(value: object) -> str:
     return str(value).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\t", "\\t")
+
+
+def _format_complex(value: object) -> str:
+    complex_value = complex(value)
+    real = _clean_zero(complex_value.real)
+    imag = _clean_zero(complex_value.imag)
+    if imag == 0:
+        return _format_complex_component(real)
+    imag_abs = abs(imag)
+    imag_text = "im" if imag_abs == 1 else f"{_format_complex_component(imag_abs)}im"
+    if real == 0:
+        return imag_text if imag > 0 else f"-{imag_text}"
+    sign = "+" if imag > 0 else "-"
+    return f"{_format_complex_component(real)} {sign} {imag_text}"
+
+
+def _clean_zero(value: float) -> float:
+    return 0.0 if abs(value) < 1e-12 else value
+
+
+def _format_complex_component(value: float) -> str:
+    value = float(value)
+    if value.is_integer():
+        return f"{value:.1f}"
+    return f"{value:.12g}"

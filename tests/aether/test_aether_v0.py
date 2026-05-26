@@ -73,6 +73,17 @@ def test_float_to_double_assignment_allowed():
     assert result.env["y"].value == pytest.approx(5.2)
 
 
+def test_scientific_notation_literals_are_doubles():
+    result = run_aether("a = 1e-8; b = 2.5E3; c = 1e+2;")
+
+    assert result.env["a"].type_name == "double"
+    assert result.env["a"].value == pytest.approx(1e-8)
+    assert result.env["b"].type_name == "double"
+    assert result.env["b"].value == pytest.approx(2500.0)
+    assert result.env["c"].type_name == "double"
+    assert result.env["c"].value == pytest.approx(100.0)
+
+
 def test_string_numeric_addition_error():
     with pytest.raises(AetherTypeError):
         run_aether('x = "value: " + 5;')
@@ -332,6 +343,29 @@ def test_matrix_2x2_literal():
     result = run_aether("A = [1 2; 3 4];")
     assert result.env["A"].type_name == MatrixType("int", 2, 2)
     assert matrix_values(result.env["A"]) == [[1, 2], [3, 4]]
+
+
+def test_matrix_literal_accepts_signed_space_separated_elements():
+    result = run_aether("A = [1 -1; -2 3];")
+
+    assert result.env["A"].type_name == MatrixType("int", 2, 2)
+    assert matrix_values(result.env["A"]) == [[1, -1], [-2, 3]]
+
+
+def test_matrix_literal_preserves_spaced_subtraction_expression():
+    result = run_aether("A = [1 - 1 2; 0 2];")
+
+    assert result.env["A"].type_name == MatrixType("int", 2, 2)
+    assert matrix_values(result.env["A"]) == [[0, 2], [0, 2]]
+
+
+def test_unary_minus_accepts_vectors_and_matrices():
+    result = run_aether("v = -[1; -2; 3]; A = -[1 -2; -3 4];")
+
+    assert result.env["v"].type_name == VectorType("int", 3)
+    assert vector_values(result.env["v"]) == [-1, 2, -3]
+    assert result.env["A"].type_name == MatrixType("int", 2, 2)
+    assert matrix_values(result.env["A"]) == [[-1, 2], [3, -4]]
 
 
 def test_matrix_rejects_ragged_rows():
@@ -1016,9 +1050,11 @@ def test_sqrt_basic():
     assert result.output == "5.0\n"
 
 
-def test_sqrt_rejects_negative():
-    with pytest.raises(AetherRuntimeError):
-        run_aether("sqrt(-1);")
+def test_sqrt_negative_returns_complex():
+    result = run_aether("x = sqrt(-1); println(x);")
+    assert result.env["x"].type_name == "complex"
+    assert result.env["x"].value == pytest.approx(1j)
+    assert result.output == "im\n"
 
 
 def test_sqrt_rejects_non_numeric():

@@ -126,6 +126,6 @@ println(Math.LinearAlgebra.matmul(A, [5; 6]));
 - Dimensiones: `rows(matrix)`, `cols(matrix)`, `length(array interno)`
 - Numericos: `sin`, `cos`, `tan`, `exp`, `ln`, `log`, `sqrt`, `abs`
 - Modulo de piso: `Math.mod(a, b)`
-- Algebra lineal: `Math.LinearAlgebra.inner`, `norm`, `transpose`, `matmul`, `solve`, `eig`
+- Algebra lineal: `Math.LinearAlgebra.inner`, `norm`, `transpose`, `matmul`, `solve`, `eig`, `LU`, `LDU`
 
 Para la especificacion completa, consulta `docs/aether/AETHER_V0_SPEC.md`.

@@ -270,6 +270,45 @@ def test_ife_snippet_inserts_else_branch(editor: CodeEditor, qapp) -> None:
     assert editor.textCursor().selectedText() == "condition"
 
 
+@pytest.mark.parametrize(("prefix", "expected_text"), [("Mat", "Matrix<>"), ("Vec", "Vector<>")])
+def test_type_autocomplete_inserts_angle_pair_with_cursor_inside(
+    editor: CodeEditor,
+    qapp,
+    prefix: str,
+    expected_text: str,
+) -> None:
+    _show_completion_for_text(editor, qapp, prefix)
+
+    _press_key(editor, QtCore.Qt.Key.Key_Tab)
+    qapp.processEvents()
+
+    assert editor.toPlainText() == expected_text
+    assert editor.textCursor().position() == len(expected_text) - 1
+
+
+def test_type_autocomplete_does_not_duplicate_existing_angle_pair(editor: CodeEditor, qapp) -> None:
+    editor.setPlainText("Matrix<double>")
+    qapp.processEvents()
+    editor._hide_autocomplete()
+    cursor = editor.textCursor()
+    cursor.setPosition(len("Matrix"))
+    editor.setTextCursor(cursor)
+    qapp.processEvents()
+    editor._show_autocomplete_manually()
+    qapp.processEvents()
+
+    assert editor._autocomplete_popup is not None
+    current = editor._autocomplete_popup.current_suggestion()
+    assert current is not None
+    assert current.name == "Matrix"
+
+    _press_key(editor, QtCore.Qt.Key.Key_Tab)
+    qapp.processEvents()
+
+    assert editor.toPlainText() == "Matrix<double>"
+    assert editor.textCursor().position() == len("Matrix")
+
+
 def test_snippet_acceptance_keeps_auto_pairs_working(editor: CodeEditor, qapp) -> None:
     _show_completion_for_text(editor, qapp, "fn")
     _press_key(editor, QtCore.Qt.Key.Key_Tab)

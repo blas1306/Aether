@@ -7,12 +7,14 @@ from typing import Any
 from .errors import AetherTypeError
 
 
-TYPE_NAMES = {"int", "float", "double", "string", "boolean"}
-NUMERIC_TYPES = {"int", "float", "double"}
+TYPE_NAMES = {"int", "float", "double", "complex", "string", "boolean"}
+REAL_NUMERIC_TYPES = {"int", "float", "double"}
+NUMERIC_TYPES = REAL_NUMERIC_TYPES | {"complex"}
 WIDENING: dict[str, set[str]] = {
-    "int": {"float", "double"},
-    "float": {"double"},
-    "double": set(),
+    "int": {"float", "double", "complex"},
+    "float": {"double", "complex"},
+    "double": {"complex"},
+    "complex": set(),
     "string": set(),
     "boolean": set(),
 }
@@ -214,6 +216,8 @@ def infer_type(value: object) -> str:
         return "int"
     if isinstance(value, float):
         return "double"
+    if isinstance(value, complex):
+        return "complex"
     if isinstance(value, str):
         return "string"
     raise AetherTypeError(f"Cannot infer Aether type for value {value!r}.")
@@ -523,8 +527,10 @@ def explicit_cast(target_type: str, value: AetherValue) -> AetherValue:
         raise AetherTypeError(f"Unknown type '{target_type}'.")
     if target_type == "boolean" and value.type_name != "boolean":
         raise AetherTypeError(f"Cannot explicitly convert '{value.type_name}' to 'boolean' yet.")
-    if target_type in {"int", "float", "double"} and value.type_name not in NUMERIC_TYPES:
+    if target_type in REAL_NUMERIC_TYPES and (value.type_name not in REAL_NUMERIC_TYPES):
         raise AetherTypeError(f"Cannot explicitly convert '{value.type_name}' to '{target_type}'.")
+    if target_type == "complex" and value.type_name not in NUMERIC_TYPES:
+        raise AetherTypeError(f"Cannot explicitly convert '{value.type_name}' to 'complex'.")
     if target_type != "string" and value.type_name == "string":
         raise AetherTypeError(f"Cannot explicitly convert 'string' to '{target_type}'.")
     if target_type == "string":
@@ -537,6 +543,8 @@ def explicit_cast(target_type: str, value: AetherValue) -> AetherValue:
 def promote_numeric(left_type: str, right_type: str, operator: str) -> str:
     if left_type not in NUMERIC_TYPES or right_type not in NUMERIC_TYPES:
         raise AetherTypeError(f"Operator '{operator}' requires numeric operands.")
+    if "complex" in {left_type, right_type}:
+        return "complex"
     if operator == "/":
         if "double" in {left_type, right_type}:
             return "double"
@@ -557,6 +565,8 @@ def _coerce_python_value(value: object, target_type: AetherType) -> object:
         return trunc(value)  # type: ignore[arg-type]
     if target_type in {"float", "double"}:
         return float(value)  # type: ignore[arg-type]
+    if target_type == "complex":
+        return complex(value)  # type: ignore[arg-type]
     if target_type == "string":
         return str(value)
     if target_type == "boolean":

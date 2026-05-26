@@ -181,6 +181,13 @@ class CallExpression:
 
 
 @dataclass(frozen=True)
+class InputCall:
+    arguments: list[Expression]
+    line: int = 1
+    column: int = 1
+
+
+@dataclass(frozen=True)
 class ArrayLiteral:
     elements: list[Expression]
 

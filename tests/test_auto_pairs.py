@@ -40,6 +40,7 @@ def test_auto_pair_helpers_cover_supported_pairs() -> None:
     assert closing_for_opening("(") == ")"
     assert closing_for_opening("[") == "]"
     assert closing_for_opening("{") == "}"
+    assert closing_for_opening("<") == ">"
     assert closing_for_opening('"') == '"'
     assert closing_for_opening("'") == "'"
 
@@ -47,8 +48,10 @@ def test_auto_pair_helpers_cover_supported_pairs() -> None:
 def test_empty_pair_and_skip_over_helpers() -> None:
     assert empty_pair_at("{ }", 1) is None
     assert empty_pair_at("{}", 1) == ("{", "}")
+    assert empty_pair_at("<>", 1) == ("<", ">")
     assert should_skip_closing("print()", len("print("), ")")
     assert should_skip_closing("{}", 1, "}")
+    assert should_skip_closing("<>", 1, ">")
 
 
 def test_smart_enter_helper_indents_nested_empty_braces() -> None:
@@ -77,6 +80,15 @@ def test_typing_brace_produces_pair_with_cursor_in_middle(qapp) -> None:
     assert editor.textCursor().position() == 1
 
 
+def test_typing_less_than_produces_pair_with_cursor_in_middle(qapp) -> None:
+    editor = CodeEditor()
+
+    _press_text(editor, "<")
+
+    assert editor.toPlainText() == "<>"
+    assert editor.textCursor().position() == 1
+
+
 def test_skip_over_closing_parenthesis(qapp) -> None:
     editor = CodeEditor()
     editor.setPlainText("print()")
@@ -96,6 +108,17 @@ def test_skip_over_closing_brace(qapp) -> None:
     _press_text(editor, "}")
 
     assert editor.toPlainText() == "{}"
+    assert editor.textCursor().position() == 2
+
+
+def test_skip_over_greater_than(qapp) -> None:
+    editor = CodeEditor()
+    editor.setPlainText("<>")
+    _set_cursor(editor, 1)
+
+    _press_text(editor, ">")
+
+    assert editor.toPlainText() == "<>"
     assert editor.textCursor().position() == 2
 
 

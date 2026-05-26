@@ -40,7 +40,14 @@ class AetherHighlightingLexer : LexerBase() {
             char.isWhitespace() -> consumeWhitespace()
             char == '#' -> consumeLineComment()
             char == '/' && tokenStart + 1 < endOffset && buffer[tokenStart + 1] == '/' -> consumeLineComment()
-            char == '"' -> consumeString()
+            char == '"' || char == '\'' -> {
+                if (char == '\'' && isApostropheOperatorPosition(tokenStart)) {
+                    tokenEnd = tokenStart + 1
+                    tokenType = AetherTokenTypes.OPERATOR
+                } else {
+                    consumeString()
+                }
+            }
             char.isDigit() -> consumeNumber()
             char.isIdentifierStart() -> consumeIdentifier()
             char in "&|" && tokenStart + 1 < endOffset && buffer[tokenStart + 1] == char -> consumeLogicalOperator()
@@ -72,6 +79,7 @@ class AetherHighlightingLexer : LexerBase() {
     }
 
     private fun consumeString() {
+        val quote = buffer[tokenStart]
         tokenEnd = tokenStart + 1
         var escaped = false
         while (tokenEnd < endOffset) {
@@ -81,11 +89,25 @@ class AetherHighlightingLexer : LexerBase() {
                 escaped = false
             } else if (char == '\\') {
                 escaped = true
-            } else if (char == '"') {
+            } else if (char == quote) {
                 break
             }
         }
         tokenType = AetherTokenTypes.STRING
+    }
+
+    private fun isApostropheOperatorPosition(index: Int): Boolean {
+        if (index <= startOffset) {
+            return false
+        }
+        var previous = index - 1
+        while (previous >= startOffset && buffer[previous].isWhitespace()) {
+            previous--
+        }
+        if (previous < startOffset) {
+            return false
+        }
+        return buffer[previous].isLetterOrDigit() || buffer[previous] in ")]}_."
     }
 
     private fun consumeNumber() {
@@ -113,5 +135,5 @@ class AetherHighlightingLexer : LexerBase() {
 
     private fun Char.isIdentifierStart(): Boolean = this == '_' || isLetter()
     private fun Char.isIdentifierPart(): Boolean = isIdentifierStart() || isDigit()
-    private fun Char.isOperatorOrPunctuation(): Boolean = this in "()[]{}.,:;+-*/\\%^=!<>|&"
+    private fun Char.isOperatorOrPunctuation(): Boolean = this in "()[]{}.,:;+-*/\\%^=!<>|&'"
 }

@@ -37,11 +37,12 @@ println(x);
 
 ## Primitive Types
 
-Aether v0 has five primitive types:
+Aether v0 has six primitive types:
 
 - `int`
 - `float`
 - `double`
+- `complex`
 - `string`
 - `boolean`
 
@@ -53,6 +54,7 @@ Aether supports inference for assignments without explicit type annotations.
 |---|---|
 | `5` | `int` |
 | `5.2` | `double` |
+| `im`, `2im`, `1 + 2im` | `complex` |
 | `"hola"` | `string` |
 | `true` / `false` | `boolean` |
 
@@ -90,10 +92,16 @@ Only safe widening conversions are implicit:
 
 - `int -> float`
 - `int -> double`
+- `int -> complex`
 - `float -> double`
+- `float -> complex`
+- `double -> complex`
 
 Lossy or cross-domain conversions are not implicit:
 
+- `complex -> double`
+- `complex -> float`
+- `complex -> int`
 - `double -> float`
 - `double -> int`
 - `float -> int`
@@ -114,6 +122,7 @@ Aether v0 supports casts as function calls:
 - `int(expr)`
 - `float(expr)`
 - `double(expr)`
+- `complex(expr)`
 - `string(expr)`
 - `boolean(expr)`
 
@@ -124,6 +133,8 @@ int x = int(3.9); // x = 3
 ```
 
 `string(value)` converts a value to its textual representation.
+
+`complex(value)` converts a numeric value to complex, and `complex(real, imag)` constructs `real + imag*im`.
 
 `boolean(number)` and `boolean(string)` are not implemented in v0 and must fail.
 
@@ -178,8 +189,20 @@ Promotion rules follow the wider numeric type. Important cases:
 - `float + double -> double`
 - `float + float -> float`
 - `double + double -> double`
+- `double + complex -> complex`
+- `complex + complex -> complex`
 
 The same numeric promotion model applies to `-`, `*`, and `/`, except that `/` is real division.
+
+Complex values use `im` as the imaginary unit:
+
+```aether
+z = 1 + 2im;
+w = complex(3, -4);
+println(z * w);
+```
+
+The alias `i` is not reserved; use `im` for imaginary literals. Ordered comparisons and `%` require real numeric operands and reject `complex`.
 
 Strings:
 
@@ -364,6 +387,8 @@ Math.LinearAlgebra.transpose(A)
 Math.LinearAlgebra.matmul(A, B)
 Math.LinearAlgebra.solve(A, b)
 Math.LinearAlgebra.eig(A)
+Math.LinearAlgebra.LU(A)
+Math.LinearAlgebra.LDU(A)
 ```
 
 This namespace is a simulated builtin namespace for now, implemented through the Aether stdlib registry. Calls can always be resolved by their full builtin names, such as `"Math.LinearAlgebra.inner"`. A builtin `import Math.LinearAlgebra` also exposes the direct aliases in this namespace.
@@ -411,7 +436,17 @@ println(Math.LinearAlgebra.norm([3 4]));     // 5.0
 println(Math.LinearAlgebra.norm([1 2 2]));   // 3.0
 ```
 
-Basic real numeric builtins such as `sin(x)`, `cos(x)`, `exp(x)`, `ln(x)`, `log(x)`, and `sqrt(x)` are available globally. They accept numeric scalar arguments; complex numbers are not implemented in Aether v0.
+Basic real numeric builtins such as `sin(x)`, `cos(x)`, `exp(x)`, `ln(x)`, and `log(x)` are available globally and accept real numeric scalar arguments. Complex-aware scalar builtins are:
+
+- `complex(x)` and `complex(real, imag)`
+- `real(z)`
+- `imag(z)`
+- `conj(z)`
+- `abs(z)`
+- `angle(z)`
+- `sqrt(z)`
+
+`sqrt(real_non_negative)` returns `double`; `sqrt(negative_real)` and `sqrt(complex)` return `complex`.
 
 `Math.LinearAlgebra.transpose(A)` returns a new transposed matrix:
 
@@ -443,7 +478,7 @@ println(Math.LinearAlgebra.matmul([1 2; 3 4], [5; 6]));     // [17; 39]
 println(Math.LinearAlgebra.matmul([1 2], [3 4; 5 6]));      // [13 16]
 ```
 
-`matmul` returns a new matrix and does not mutate either operand. It uses existing numeric promotion rules: `int` with `int` remains `int`, while combinations involving `float` or `double` widen as usual.
+`matmul` returns a new matrix and does not mutate either operand. It uses existing numeric promotion rules: `int` with `int` remains `int`, combinations involving `float` or `double` widen as usual, and combinations involving `complex` produce `complex`.
 
 The `*` operator is still not matrix multiplication in Aether v0. Matrix multiplication is available only through the explicit `Math.LinearAlgebra.matmul(A, B)` builtin.
 
@@ -460,7 +495,7 @@ B = [2 4; 8 12];
 println(Math.LinearAlgebra.solve([2 0; 0 4], B)); // [1.0 2.0; 2.0 3.0]
 ```
 
-Square full-rank systems use a direct solve. Rectangular or rank-deficient systems use a least-squares/minimum-norm solution. No implicit narrowing to `int` is performed.
+Square full-rank systems use a direct solve. Rectangular or rank-deficient systems use a least-squares/minimum-norm solution. No implicit narrowing to `int` is performed. Complex-valued systems are not supported yet and raise an explicit error.
 
 `Math.LinearAlgebra.eig(A)` computes a real diagonalization of a square numeric matrix. It returns a tuple `(S, D)` where the columns of `S` are eigenvectors and `D` is diagonal, so `A * S == S * D` up to floating-point tolerance:
 
@@ -470,7 +505,25 @@ A = [1 1; 0 2];
 S, D = eig(A);
 ```
 
-The result uses `Matrix<double>` values. Matrices that are not square, are not diagonalizable, or require complex eigenvalues/eigenvectors are errors in Aether v0.
+The result uses `Matrix<double>` values. Matrices that are not square, are not diagonalizable, require complex eigenvalues/eigenvectors, or already contain `complex` elements are errors in Aether v0.
+
+`Math.LinearAlgebra.LU(A)` computes an LU factorization of a square real numeric matrix with row pivoting. It returns a tuple `(P, L, U)` where `P` is a permutation matrix, `L` is unit lower-triangular, and `U` is upper-triangular, so `P * A == L * U` up to floating-point tolerance:
+
+```aether
+import Math.LinearAlgebra
+A = [2 1; 4 5];
+P, L, U = LU(A);
+```
+
+`Math.LinearAlgebra.LDU(A)` computes the corresponding LDU factorization. It returns `(P, L, D, U)` where `P` is a permutation matrix, `L` is unit lower-triangular, `D` is diagonal, and `U` is unit upper-triangular, so `P * A == L * D * U` up to floating-point tolerance:
+
+```aether
+import Math.LinearAlgebra
+A = [4 8; 2 6];
+P, L, D, U = LDU(A);
+```
+
+The result uses `Matrix<double>` values. Matrices that are not square or contain `complex` elements are errors in Aether v0. `LDU` also requires nonzero diagonal pivots after the LU factorization, because the upper factor is normalized through the diagonal factor.
 
 ## Matrix Arithmetic
 
@@ -682,6 +735,8 @@ Aether v0 recognizes these builtins:
 - `Math.LinearAlgebra.matmul(A, B)`
 - `Math.LinearAlgebra.solve(A, b)`
 - `Math.LinearAlgebra.eig(A)`
+- `Math.LinearAlgebra.LU(A)`
+- `Math.LinearAlgebra.LDU(A)`
 - `int(...)`
 - `float(...)`
 - `double(...)`
@@ -701,9 +756,9 @@ println(x);
 
 `rows(matrix)` and `cols(matrix)` accept one `Matrix<T>` or `Vector<T>` argument and return `int` dimensions.
 
-`sin(x)`, `cos(x)`, `tan(x)`, `exp(x)`, `ln(x)`, `log(x)`, and `sqrt(x)` accept one numeric scalar and return `double`. `ln(x)` is the natural logarithm. `log(x)` is base 10. `ln`, `log`, and `sqrt` reject values outside their real domains. `abs(x)` accepts one numeric scalar and returns the same numeric type. `Math.mod(a, b)` accepts two numeric scalars and returns floor/Python-like modulo.
+`sin(x)`, `cos(x)`, `tan(x)`, `exp(x)`, `ln(x)`, and `log(x)` accept one real numeric scalar and return `double`. `sqrt(x)` accepts numeric scalars and returns `double` for non-negative real inputs or `complex` for negative/complex inputs. `abs(x)` accepts one numeric scalar and returns `double` for `complex` inputs. `real(x)`, `imag(x)`, `conj(x)`, and `angle(x)` are available for numeric scalars. `Math.mod(a, b)` accepts two real numeric scalars and returns floor/Python-like modulo.
 
-`Math.LinearAlgebra.inner(u, v)`, `Math.LinearAlgebra.norm(v)`, `Math.LinearAlgebra.transpose(A)`, `Math.LinearAlgebra.matmul(A, B)`, `Math.LinearAlgebra.solve(A, b)`, and `Math.LinearAlgebra.eig(A)` are explicit simulated-namespace builtins for numeric mathematical vectors and matrices. See `Math.LinearAlgebra` above.
+`Math.LinearAlgebra.inner(u, v)`, `Math.LinearAlgebra.norm(v)`, `Math.LinearAlgebra.transpose(A)`, `Math.LinearAlgebra.matmul(A, B)`, `Math.LinearAlgebra.solve(A, b)`, `Math.LinearAlgebra.eig(A)`, `Math.LinearAlgebra.LU(A)`, and `Math.LinearAlgebra.LDU(A)` are explicit simulated-namespace builtins for numeric mathematical vectors and matrices. See `Math.LinearAlgebra` above.
 
 ## Errors
 

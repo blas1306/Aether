@@ -20,3 +20,7 @@ class AetherTypeError(AetherError):
 
 class AetherRuntimeError(AetherError):
     """Raised when Aether execution fails at runtime."""
+
+
+class AetherInputError(AetherRuntimeError):
+    """Raised when user input cannot be read or converted."""

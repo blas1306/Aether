@@ -5,11 +5,12 @@ from dataclasses import dataclass
 from math import trunc
 import os
 from pathlib import Path
+import sys
 
 from plot_backend import PlotBackend
 
 from . import ast
-from .errors import AetherRuntimeError, AetherTypeError
+from .errors import AetherInputError, AetherRuntimeError, AetherTypeError
 from .formatting import format_value
 from .lexer import lex
 from .parser import Parser
@@ -23,6 +24,7 @@ from .types import (
     ArrayType,
     MatrixType,
     NUMERIC_TYPES,
+    REAL_NUMERIC_TYPES,
     RangeType,
     TupleType,
     TransposeVectorType,
@@ -118,10 +120,13 @@ class Interpreter:
         plot_mode: str | None = None,
         plot_output_dir: str | Path | None = None,
         output_writer: Callable[[str], None] | None = None,
+        input_reader: Callable[[], str] | None = None,
     ) -> None:
         self.global_env = Environment()
         self.output_parts: list[str] = []
         self.output_writer = output_writer
+        self._uses_default_input_reader = input_reader is None
+        self.input_reader = input_reader or sys.stdin.readline
         self.plot_backend = PlotBackend(
             plot_mode=_default_plot_mode(plot_mode),
             output_dir=_default_plot_output_dir(plot_output_dir),
@@ -183,7 +188,7 @@ class Interpreter:
                 )
                 env.define(statement.name, coerced, forbid_shadowing=True)
                 return
-            value = self._evaluate(statement.initializer, env)
+            value = self._evaluate_with_expected_type(statement.initializer, env, statement.type_name)
             if (
                 statement.type_name == "float"
                 and isinstance(statement.initializer, ast.Literal)
@@ -209,6 +214,9 @@ class Interpreter:
             if isinstance(statement.expression, ast.ArrayLiteral) and current is not None and is_array_type(current.type_name):
                 value = self._evaluate_array_literal(statement.expression, env, current.type_name)
                 env.assign(statement.name, value, array_literal_context=True)
+                return
+            if current is not None:
+                env.assign(statement.name, self._evaluate_with_expected_type(statement.expression, env, current.type_name))
                 return
             env.assign(statement.name, self._evaluate(statement.expression, env))
             return
@@ -274,9 +282,7 @@ class Interpreter:
         if isinstance(expression, ast.UnaryExpression):
             operand = self._evaluate(expression.operand, env)
             if expression.operator == "-":
-                if operand.type_name not in {"int", "float", "double"}:
-                    raise AetherTypeError("Unary '-' requires a numeric operand.")
-                return AetherValue(operand.type_name, -operand.value)
+                return _negate_value(operand)
             if expression.operator == "'":
                 if LINEAR_ALGEBRA_MODULE not in self.imported_modules:
                     raise AetherRuntimeError("Operator \"'\" requires import Math.LinearAlgebra.")
@@ -292,6 +298,8 @@ class Interpreter:
             return self._evaluate_range(expression, env)
         if isinstance(expression, ast.CallExpression):
             return self._evaluate_call(expression, env)
+        if isinstance(expression, ast.InputCall):
+            raise AetherInputError("input() requires a typed assignment context.")
         if isinstance(expression, ast.ArrayLiteral):
             return self._evaluate_array_literal(expression, env)
         if isinstance(expression, ast.TupleLiteral):
@@ -303,6 +311,47 @@ class Interpreter:
         if isinstance(expression, ast.MatrixIndexExpression):
             return self._read_matrix_index(expression.matrix, expression.row, expression.column, env)
         raise AetherRuntimeError(f"Unsupported expression {expression!r}.")
+
+    def _evaluate_with_expected_type(
+        self,
+        expression: ast.Expression,
+        env: Environment,
+        expected_type: AetherType,
+    ) -> AetherValue:
+        if isinstance(expression, ast.InputCall):
+            return self._evaluate_input_call(expression, env, expected_type)
+        return self._evaluate(expression, env)
+
+    def _evaluate_input_call(
+        self,
+        expression: ast.InputCall,
+        env: Environment,
+        expected_type: AetherType,
+    ) -> AetherValue:
+        if expected_type not in {"int", "float", "string", "boolean"}:
+            raise AetherInputError(
+                f"input() supports int, float, string, and boolean targets, got '{type_to_string(expected_type)}'."
+            )
+        if len(expression.arguments) > 1:
+            raise AetherTypeError("input(...) expects zero or one argument.")
+        if expression.arguments:
+            prompt = self._evaluate(expression.arguments[0], env)
+            if prompt.type_name != "string":
+                raise AetherTypeError(f"input(...) prompt must be string, got '{type_to_string(prompt.type_name)}'.")
+            self._write_prompt(str(prompt.value))
+        raw = self.input_reader()
+        if raw == "":
+            raise AetherInputError("input() reached end of file.")
+        text = raw[:-1] if raw.endswith("\n") else raw
+        if text.endswith("\r"):
+            text = text[:-1]
+        return _convert_input_text(text, expected_type)
+
+    def _write_prompt(self, prompt: str) -> None:
+        if self.output_writer is None and self._uses_default_input_reader:
+            print(prompt, end="", flush=True)
+            return
+        self._write_output(prompt)
 
     def _evaluate_range(self, expression: ast.RangeExpression, env: Environment) -> AetherValue:
         start = self._evaluate(expression.start, env)
@@ -510,11 +559,17 @@ class Interpreter:
 
     def _assign_destructuring(self, statement: ast.DestructuringAssignment, env: Environment) -> None:
         value = self._evaluate(statement.expression, env)
-        if not isinstance(value.type_name, TupleType):
+        if isinstance(value.type_name, TupleType):
+            elements = list(value.value)
+        elif isinstance(value.type_name, (VectorType, TransposeVectorType)) or (
+            isinstance(value.type_name, MatrixType) and _is_vector_like_matrix(value)
+        ):
+            elements = _vector_elements(value)
+        else:
             raise AetherTypeError(f"Cannot destructure value of type {type_to_string(value.type_name)}.")
-        if len(value.value) != len(statement.names):
-            raise AetherTypeError(f"Destructuring expected {len(value.value)} values but got {len(statement.names)}.")
-        for name, element in zip(statement.names, value.value):
+        if len(elements) != len(statement.names):
+            raise AetherTypeError(f"Destructuring expected {len(elements)} values but got {len(statement.names)}.")
+        for name, element in zip(statement.names, elements):
             env.assign(name, element)
 
     def _assign_matrix_index(self, statement: ast.MatrixIndexAssignment, env: Environment) -> None:
@@ -650,8 +705,8 @@ class Interpreter:
             result = _values_equal(left, right)
             return AetherValue("boolean", result if operator == "==" else not result)
         if operator in {"<", "<=", ">", ">="}:
-            if left.type_name not in {"int", "float", "double"} or right.type_name not in {"int", "float", "double"}:
-                raise AetherTypeError(f"Operator '{operator}' requires numeric operands.")
+            if left.type_name not in REAL_NUMERIC_TYPES or right.type_name not in REAL_NUMERIC_TYPES:
+                raise AetherTypeError(f"Operator '{operator}' requires real numeric operands.")
             return AetherValue("boolean", _compare_values(left.value, operator, right.value))
         raise AetherRuntimeError(f"Unsupported binary operator '{operator}'.")
 
@@ -689,8 +744,8 @@ class Interpreter:
         scalar_array_result = _evaluate_scalar_array_binary(left, operator, right)
         if scalar_array_result is not None:
             return scalar_array_result
-        if operator == "%" and (left.type_name not in NUMERIC_TYPES or right.type_name not in NUMERIC_TYPES):
-            raise AetherTypeError("Operator '%' requires numeric operands.")
+        if operator == "%" and (left.type_name not in REAL_NUMERIC_TYPES or right.type_name not in REAL_NUMERIC_TYPES):
+            raise AetherTypeError("Operator '%' requires real numeric operands.")
         if left.type_name == "string" or right.type_name == "string":
             raise AetherTypeError(f"Operator '{operator}' cannot mix string with non-string values.")
         if left.type_name == "boolean" or right.type_name == "boolean":
@@ -721,11 +776,7 @@ class Interpreter:
             value = left.value**right.value
         else:
             raise AetherRuntimeError(f"Unsupported numeric operator '{operator}'.")
-        if result_type == "int":
-            value = int(value)
-        else:
-            value = float(value)
-        return AetherValue(result_type, value)
+        return _coerced_numeric_result(value, result_type)
 
     def _import_module(self, module_name: str) -> None:
         if module_name in self.imported_modules:
@@ -859,6 +910,30 @@ def _default_plot_output_dir(output_dir: str | Path | None) -> str | Path:
     return output_dir or os.environ.get("AETHER_PLOT_DIR") or "."
 
 
+def _convert_input_text(text: str, target_type: AetherType) -> AetherValue:
+    if target_type == "string":
+        return AetherValue("string", text)
+    stripped = text.strip()
+    try:
+        if target_type == "int":
+            if not stripped or stripped.lstrip("+-").isdigit() is False:
+                raise ValueError
+            return AetherValue("int", int(stripped, 10))
+        if target_type == "float":
+            return AetherValue("float", float(stripped))
+        if target_type == "boolean":
+            if stripped == "true":
+                return AetherValue("boolean", True)
+            if stripped == "false":
+                return AetherValue("boolean", False)
+            raise ValueError
+    except ValueError as exc:
+        raise AetherInputError(f'cannot convert "{text}" to {type_to_string(target_type)}') from exc
+    raise AetherInputError(
+        f"input() supports int, float, string, and boolean targets, got '{type_to_string(target_type)}'."
+    )
+
+
 def _iterable_values(value: AetherValue) -> list[AetherValue] | AetherRange:
     if isinstance(value.type_name, RangeType):
         if not isinstance(value.value, AetherRange):
@@ -943,6 +1018,8 @@ def _common_primitive_type(primitive_types: list[AetherType]) -> str:
     if len(unique_types) == 1:
         return primitive_types[0]
     if unique_types <= NUMERIC_TYPES:
+        if "complex" in unique_types:
+            return "complex"
         if "double" in unique_types:
             return "double"
         if "float" in unique_types:
@@ -973,7 +1050,7 @@ def _types_comparable_for_equality(left_type: AetherType, right_type: AetherType
         )
     if is_array_type(left_type) or is_array_type(right_type) or is_matrix_type(left_type) or is_matrix_type(right_type):
         return False
-    return left_type in {"int", "float", "double"} and right_type in {"int", "float", "double"}
+    return left_type in NUMERIC_TYPES and right_type in NUMERIC_TYPES
 
 
 def _evaluate_scalar_array_binary(left: AetherValue, operator: str, right: AetherValue) -> AetherValue | None:
@@ -1085,6 +1162,43 @@ def _evaluate_elementwise_binary(
 
 def _is_numeric_scalar(value: AetherValue) -> bool:
     return value.type_name in NUMERIC_TYPES
+
+
+def _negate_value(value: AetherValue) -> AetherValue:
+    if value.type_name in NUMERIC_TYPES:
+        return AetherValue(value.type_name, -value.value)
+    if isinstance(value.type_name, VectorType):
+        return _negate_vector(value)
+    if isinstance(value.type_name, TransposeVectorType):
+        vector = _negate_vector(value.value)
+        return AetherValue(TransposeVectorType(vector.type_name.element_type, len(vector.value)), vector)
+    if isinstance(value.type_name, MatrixType):
+        return _negate_matrix(value)
+    raise AetherTypeError("Unary '-' requires a numeric operand.")
+
+
+def _negate_vector(vector: AetherValue) -> AetherValue:
+    element_type = _numeric_vector_scalar_type(vector.type_name)
+    return AetherValue(
+        VectorType(element_type, len(vector.value)),
+        [AetherValue(element.type_name, -element.value) for element in vector.value],
+    )
+
+
+def _negate_matrix(matrix: AetherValue) -> AetherValue:
+    element_type = _numeric_matrix_scalar_type(matrix.type_name)
+    row_type = ArrayType(element_type)
+    rows = [
+        AetherValue(
+            row_type,
+            [AetherValue(element.type_name, -element.value) for element in row.value],
+        )
+        for row in matrix.value
+    ]
+    return AetherValue(
+        MatrixType(element_type, matrix.type_name.rows, matrix.type_name.cols, matrix.type_name.vector),
+        rows,
+    )
 
 
 def _scale_vector(vector: AetherValue, scalar: AetherValue) -> AetherValue:
@@ -1254,6 +1368,8 @@ def _numeric_vector_scalar_type(vector_type: AetherType) -> str:
 def _coerced_numeric_result(value: object, result_type: str) -> AetherValue:
     if result_type == "int":
         return AetherValue("int", int(value))  # type: ignore[arg-type]
+    if result_type == "complex":
+        return AetherValue("complex", complex(value))  # type: ignore[arg-type]
     return AetherValue(result_type, float(value))  # type: ignore[arg-type]
 
 
@@ -1316,11 +1432,7 @@ def _apply_scalar_to_element(
         result = element.value / scalar_value.value
     else:
         raise AetherRuntimeError(f"Unsupported scalar array operator '{operator}'.")
-    if result_element_type == "int":
-        result = int(result)
-    else:
-        result = float(result)
-    return AetherValue(result_element_type, result)
+    return _coerced_numeric_result(result, result_element_type)
 
 
 def _map_matrix_matrix(
@@ -1363,11 +1475,7 @@ def _apply_array_element_operator(
         result = left.value * right.value
     else:
         raise AetherRuntimeError(f"Unsupported array operator '{operator}'.")
-    if result_element_type == "int":
-        result = int(result)
-    else:
-        result = float(result)
-    return AetherValue(result_element_type, result)
+    return _coerced_numeric_result(result, result_element_type)
 
 
 def _values_equal(left: AetherValue, right: AetherValue) -> bool:

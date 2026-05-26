@@ -29,9 +29,13 @@ JsonObject = dict[str, Any]
 DIAGNOSTIC_DEBOUNCE_SECONDS = 0.35
 FALLBACK_BUILTIN_NAMES = {
     "abs",
+    "angle",
     "cols",
+    "complex",
+    "conj",
     "cos",
     "exp",
+    "imag",
     "length",
     "ln",
     "log",
@@ -41,6 +45,7 @@ FALLBACK_BUILTIN_NAMES = {
     "plot",
     "print",
     "println",
+    "real",
     "rows",
     "sin",
     "sqrt",

@@ -1,20 +1,28 @@
 import Math.LinearAlgebra
 
-(Matrix<double> u, Matrix<double> s, Matrix<double> v) f(Matrix<double> B) {
-    int m = 3;
-    int n = 2;
-
-    u = zeros(m, m);
-    s = zeros(m, n);
-    v = zeros(n, n);
-
-    return (u, s, v);
+Vector<double> F(Vector<double> x) {
+    return [x[0]^2 + x[1]^2 - 4, x[0] - x[1]];
 }
 
-A = [3 2; 1 0; 0 0];
+Matrix<double> J_F(Vector<double> x) {
+    return [2*x[0] 2*x[1]; 1 -1];
+}
 
-u, s, v = f(A);
+Vector<double> x0 = [1, 1];
+double tol = 1e-8;
+int maxiter = 100;
 
-println("u = ", u);
-println("s = ", s);
-println("v = ", v);
+Vector<double> xn = x0;
+double res = norm(F(xn));
+int iter = 0;
+
+while (res > tol && iter < maxiter) {
+    z = J_F(xn) \ (-F(xn));
+    xn = xn + z;
+    res = norm(F(xn));
+    iter += 1;
+}
+
+println("xn = ", xn);
+println("res = ", res);
+println("iter = ", iter);

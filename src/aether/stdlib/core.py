@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import cmath
 from math import cos, exp, floor, log, log10, sin, sqrt, tan
 
 from ..errors import AetherRuntimeError, AetherTypeError
@@ -10,6 +11,7 @@ from ..types import (
     AetherValue,
     MatrixType,
     NUMERIC_TYPES,
+    REAL_NUMERIC_TYPES,
     TransposeVectorType,
     VectorType,
     explicit_cast,
@@ -29,6 +31,7 @@ def builtin_definitions() -> list[BuiltinDefinition]:
     definitions = [
         BuiltinDefinition("print", _make_print_runtime, _print_type),
         BuiltinDefinition("println", _make_println_runtime, _print_type),
+        BuiltinDefinition("input", _constant_runtime(_input_runtime), _input_type, _zero_or_one("input")),
         BuiltinDefinition("length", _constant_runtime(length_builtin), _length_type, _exactly_one("length")),
         BuiltinDefinition("size", _constant_runtime(size_builtin), _size_type, _exactly_one("size")),
         BuiltinDefinition("rows", _constant_runtime(rows_builtin), _rows_type, _exactly_one("rows")),
@@ -42,6 +45,11 @@ def builtin_definitions() -> list[BuiltinDefinition]:
         BuiltinDefinition("log", _constant_runtime(log_builtin), _math_unary_type("log"), _exactly_one("log")),
         BuiltinDefinition("sqrt", _constant_runtime(sqrt_builtin), _sqrt_type, _exactly_one("sqrt")),
         BuiltinDefinition("abs", _constant_runtime(abs_builtin), _abs_type, _exactly_one("abs")),
+        BuiltinDefinition("complex", _constant_runtime(complex_builtin), _complex_type, _one_or_two("complex")),
+        BuiltinDefinition("real", _constant_runtime(real_builtin), _real_part_type("real"), _exactly_one("real")),
+        BuiltinDefinition("imag", _constant_runtime(imag_builtin), _real_part_type("imag"), _exactly_one("imag")),
+        BuiltinDefinition("conj", _constant_runtime(conj_builtin), _conj_type, _exactly_one("conj")),
+        BuiltinDefinition("angle", _constant_runtime(angle_builtin), _real_part_type("angle"), _exactly_one("angle")),
         BuiltinDefinition("Math.mod", _constant_runtime(mod_builtin), _math_binary_type("Math.mod"), _exactly_two("Math.mod")),
     ]
     definitions.extend(
@@ -77,6 +85,26 @@ def _exactly_two(label: str):
             raise AetherTypeError(f"{label}(...) expects exactly two arguments.")
 
     return validate
+
+
+def _one_or_two(label: str):
+    def validate(arg_count: int) -> None:
+        if arg_count not in {1, 2}:
+            raise AetherTypeError(f"{label}(...) expects one or two arguments.")
+
+    return validate
+
+
+def _zero_or_one(label: str):
+    def validate(arg_count: int) -> None:
+        if arg_count not in {0, 1}:
+            raise AetherTypeError(f"{label}(...) expects zero or one argument.")
+
+    return validate
+
+
+def _input_runtime(_args: list[AetherValue]) -> AetherValue:
+    raise AetherRuntimeError("input() requires a typed assignment context.")
 
 
 def _make_print_builtin(write_output: OutputWriter) -> BuiltinFunction:
@@ -159,21 +187,21 @@ def cols_builtin(args: list[AetherValue]) -> AetherValue:
 
 def math_unary_builtin(label: str, function: Callable[[float], float]) -> BuiltinFunction:
     def builtin(args: list[AetherValue]) -> AetherValue:
-        value = _require_numeric_unary_arg(args, label)
+        value = _require_real_numeric_unary_arg(args, label)
         return AetherValue("double", function(value.value))
 
     return builtin
 
 
 def ln_builtin(args: list[AetherValue]) -> AetherValue:
-    value = _require_numeric_unary_arg(args, "ln")
+    value = _require_real_numeric_unary_arg(args, "ln")
     if value.value <= 0:
         raise AetherRuntimeError("ln(...) is only defined for positive real numbers.")
     return AetherValue("double", log(value.value))
 
 
 def log_builtin(args: list[AetherValue]) -> AetherValue:
-    value = _require_numeric_unary_arg(args, "log")
+    value = _require_real_numeric_unary_arg(args, "log")
     if value.value <= 0:
         raise AetherRuntimeError("log(...) is only defined for positive real numbers.")
     return AetherValue("double", log10(value.value))
@@ -181,6 +209,8 @@ def log_builtin(args: list[AetherValue]) -> AetherValue:
 
 def sqrt_builtin(args: list[AetherValue]) -> AetherValue:
     value = _require_numeric_unary_arg(args, "sqrt")
+    if value.type_name == "complex" or value.value < 0:
+        return AetherValue("complex", cmath.sqrt(value.value))
     if value.value < 0:
         raise AetherRuntimeError("sqrt(...) is only defined for non-negative real numbers in Aether v0.")
     return AetherValue("double", sqrt(value.value))
@@ -188,11 +218,45 @@ def sqrt_builtin(args: list[AetherValue]) -> AetherValue:
 
 def abs_builtin(args: list[AetherValue]) -> AetherValue:
     value = _require_numeric_unary_arg(args, "abs")
+    if value.type_name == "complex":
+        return AetherValue("double", abs(value.value))
     return AetherValue(value.type_name, abs(value.value))
 
 
+def complex_builtin(args: list[AetherValue]) -> AetherValue:
+    if len(args) not in {1, 2}:
+        raise AetherTypeError("complex(...) expects one or two arguments.")
+    if any(arg.type_name not in NUMERIC_TYPES for arg in args):
+        raise AetherTypeError("complex(...) expects numeric arguments.")
+    if len(args) == 1:
+        return AetherValue("complex", complex(args[0].value))
+    return AetherValue("complex", complex(args[0].value) + complex(args[1].value) * 1j)
+
+
+def real_builtin(args: list[AetherValue]) -> AetherValue:
+    value = _require_numeric_unary_arg(args, "real")
+    return AetherValue("double", float(complex(value.value).real))
+
+
+def imag_builtin(args: list[AetherValue]) -> AetherValue:
+    value = _require_numeric_unary_arg(args, "imag")
+    return AetherValue("double", float(complex(value.value).imag))
+
+
+def conj_builtin(args: list[AetherValue]) -> AetherValue:
+    value = _require_numeric_unary_arg(args, "conj")
+    if value.type_name == "complex":
+        return AetherValue("complex", complex(value.value).conjugate())
+    return value
+
+
+def angle_builtin(args: list[AetherValue]) -> AetherValue:
+    value = _require_numeric_unary_arg(args, "angle")
+    return AetherValue("double", float(cmath.phase(complex(value.value))))
+
+
 def mod_builtin(args: list[AetherValue]) -> AetherValue:
-    left, right = _require_numeric_binary_args(args, "Math.mod")
+    left, right = _require_real_numeric_binary_args(args, "Math.mod")
     if right.value == 0:
         raise AetherRuntimeError("Math.mod(...) is undefined for divisor zero.")
     result_type = common_primitive_type([left.type_name, right.type_name], label="Math.mod")
@@ -213,6 +277,13 @@ def _require_numeric_unary_arg(args: list[AetherValue], label: str) -> AetherVal
     return value
 
 
+def _require_real_numeric_unary_arg(args: list[AetherValue], label: str) -> AetherValue:
+    value = _require_numeric_unary_arg(args, label)
+    if value.type_name not in REAL_NUMERIC_TYPES:
+        raise AetherTypeError(f"{label}(...) expects a real numeric argument, got '{type_to_string(value.type_name)}'.")
+    return value
+
+
 def _require_numeric_binary_args(args: list[AetherValue], label: str) -> tuple[AetherValue, AetherValue]:
     if len(args) != 2:
         raise AetherTypeError(f"{label}(...) expects exactly two arguments.")
@@ -225,8 +296,26 @@ def _require_numeric_binary_args(args: list[AetherValue], label: str) -> tuple[A
     return left, right
 
 
+def _require_real_numeric_binary_args(args: list[AetherValue], label: str) -> tuple[AetherValue, AetherValue]:
+    left, right = _require_numeric_binary_args(args, label)
+    if left.type_name not in REAL_NUMERIC_TYPES or right.type_name not in REAL_NUMERIC_TYPES:
+        raise AetherTypeError(
+            f"{label}(...) expects real numeric arguments, got "
+            f"'{type_to_string(left.type_name)}' and '{type_to_string(right.type_name)}'."
+        )
+    return left, right
+
+
 def _print_type(arg_types: list[AetherType | None]) -> AetherType | None:
     return "boolean"
+
+
+def _input_type(arg_types: list[AetherType | None]) -> AetherType | None:
+    if len(arg_types) not in {0, 1}:
+        raise AetherTypeError("input(...) expects zero or one argument.")
+    if arg_types and arg_types[0] is not None and arg_types[0] != "string":
+        raise AetherTypeError(f"input(...) prompt must be string, got '{type_to_string(arg_types[0])}'.")
+    return None
 
 
 def _length_type(arg_types: list[AetherType | None]) -> AetherType | None:
@@ -286,7 +375,14 @@ def _vector_length(value: AetherValue) -> int:
 
 
 def _sqrt_type(arg_types: list[AetherType | None]) -> AetherType | None:
-    return _math_unary_type("sqrt")(arg_types)
+    if len(arg_types) != 1:
+        raise AetherTypeError("sqrt(...) expects exactly one argument.")
+    argument_type = arg_types[0]
+    if argument_type is None:
+        return None
+    if argument_type not in NUMERIC_TYPES:
+        raise AetherTypeError(f"sqrt(...) expects a numeric argument, got '{type_to_string(argument_type)}'.")
+    return "complex" if argument_type == "complex" else "double"
 
 
 def _math_unary_type(label: str):
@@ -296,8 +392,8 @@ def _math_unary_type(label: str):
         argument_type = arg_types[0]
         if argument_type is None:
             return None
-        if argument_type not in NUMERIC_TYPES:
-            raise AetherTypeError(f"{label}(...) expects a numeric argument, got '{type_to_string(argument_type)}'.")
+        if argument_type not in REAL_NUMERIC_TYPES:
+            raise AetherTypeError(f"{label}(...) expects a real numeric argument, got '{type_to_string(argument_type)}'.")
         return "double"
 
     return infer
@@ -310,9 +406,9 @@ def _math_binary_type(label: str):
         left_type, right_type = arg_types
         if left_type is None or right_type is None:
             return None
-        if left_type not in NUMERIC_TYPES or right_type not in NUMERIC_TYPES:
+        if left_type not in REAL_NUMERIC_TYPES or right_type not in REAL_NUMERIC_TYPES:
             raise AetherTypeError(
-                f"{label}(...) expects numeric arguments, got "
+                f"{label}(...) expects real numeric arguments, got "
                 f"'{type_to_string(left_type)}' and '{type_to_string(right_type)}'."
             )
         return common_primitive_type([left_type, right_type], label=label)
@@ -328,6 +424,40 @@ def _abs_type(arg_types: list[AetherType | None]) -> AetherType | None:
         return None
     if argument_type not in NUMERIC_TYPES:
         raise AetherTypeError(f"abs(...) expects a numeric argument, got '{type_to_string(argument_type)}'.")
+    return "double" if argument_type == "complex" else argument_type
+
+
+def _complex_type(arg_types: list[AetherType | None]) -> AetherType | None:
+    if len(arg_types) not in {1, 2}:
+        raise AetherTypeError("complex(...) expects one or two arguments.")
+    for argument_type in arg_types:
+        if argument_type is not None and argument_type not in NUMERIC_TYPES:
+            raise AetherTypeError(f"complex(...) expects numeric arguments, got '{type_to_string(argument_type)}'.")
+    return "complex"
+
+
+def _real_part_type(label: str):
+    def infer(arg_types: list[AetherType | None]) -> AetherType | None:
+        if len(arg_types) != 1:
+            raise AetherTypeError(f"{label}(...) expects exactly one argument.")
+        argument_type = arg_types[0]
+        if argument_type is None:
+            return None
+        if argument_type not in NUMERIC_TYPES:
+            raise AetherTypeError(f"{label}(...) expects a numeric argument, got '{type_to_string(argument_type)}'.")
+        return "double"
+
+    return infer
+
+
+def _conj_type(arg_types: list[AetherType | None]) -> AetherType | None:
+    if len(arg_types) != 1:
+        raise AetherTypeError("conj(...) expects exactly one argument.")
+    argument_type = arg_types[0]
+    if argument_type is None:
+        return None
+    if argument_type not in NUMERIC_TYPES:
+        raise AetherTypeError(f"conj(...) expects a numeric argument, got '{type_to_string(argument_type)}'.")
     return argument_type
 
 
@@ -347,6 +477,8 @@ def common_primitive_type(primitive_types: list[AetherType | None], *, label: st
     if len(unique_types) == 1:
         return primitive_types[0]
     if unique_types <= NUMERIC_TYPES:
+        if "complex" in unique_types:
+            return "complex"
         if "double" in unique_types:
             return "double"
         if "float" in unique_types:

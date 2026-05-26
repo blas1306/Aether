@@ -51,6 +51,7 @@ def _keyword_entry(
     signature: str | None = None,
     category: str = "keywords",
     priority: int = 120,
+    cursor_backtrack: int | None = None,
 ) -> CommandSuggestion:
     resolved_insert = insert_text or name
     resolved_signature = signature or resolved_insert
@@ -65,6 +66,7 @@ def _keyword_entry(
         source="language",
         priority=priority,
         match_text=name,
+        cursor_backtrack=cursor_backtrack,
     )
 
 
@@ -81,11 +83,12 @@ KEYWORD_SUGGESTIONS: tuple[CommandSuggestion, ...] = (
     _keyword_entry("int", "Integer type.", category="types", priority=105),
     _keyword_entry("double", "Double precision numeric type.", category="types", priority=105),
     _keyword_entry("float", "Floating point numeric type.", category="types", priority=105),
+    _keyword_entry("complex", "Complex numeric type.", category="types", priority=105),
     _keyword_entry("string", "String type.", category="types", priority=105),
     _keyword_entry("boolean", "Boolean type.", category="types", priority=105),
     _keyword_entry("bool", "Boolean type alias.", insert_text="boolean", signature="boolean", category="types", priority=70),
-    _keyword_entry("Matrix", "Matrix type.", category="types", priority=95),
-    _keyword_entry("Vector", "Vector type.", category="types", priority=95),
+    _keyword_entry("Matrix", "Matrix type.", insert_text="Matrix<>", category="types", priority=300, cursor_backtrack=1),
+    _keyword_entry("Vector", "Vector type.", insert_text="Vector<>", category="types", priority=300, cursor_backtrack=1),
 )
 
 

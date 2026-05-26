@@ -15,6 +15,17 @@ def test_finds_simple_pair() -> None:
     assert match.is_valid
 
 
+def test_finds_angle_pair() -> None:
+    text = "Matrix<double>"
+
+    match = find_bracket_match(text, text.index("<") + 1)
+
+    assert match is not None
+    assert match.anchor_pos == text.index("<")
+    assert match.match_pos == text.index(">")
+    assert match.is_valid
+
+
 def test_finds_nested_pair() -> None:
     text = "{ [ (x) ] }"
 

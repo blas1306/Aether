@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-OPEN_TO_CLOSE = {"(": ")", "[": "]", "{": "}"}
+OPEN_TO_CLOSE = {"(": ")", "[": "]", "{": "}", "<": ">"}
 CLOSE_TO_OPEN = {closing: opening for opening, closing in OPEN_TO_CLOSE.items()}
 BRACKETS = set(OPEN_TO_CLOSE) | set(CLOSE_TO_OPEN)
 

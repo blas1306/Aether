@@ -120,6 +120,9 @@ class Lexer:
         literal: object | None = None
         if token_type == TokenType.BOOLEAN_LITERAL:
             literal = text == "true"
+        if text == "im":
+            token_type = TokenType.IMAG_LITERAL
+            literal = 1j
         self._add_token(token_type, literal)
 
     def _number(self) -> None:
@@ -131,7 +134,21 @@ class Lexer:
             self._advance()
             while self._peek().isdigit():
                 self._advance()
+        if self._peek() in {"e", "E"} and self._can_start_exponent():
+            is_float = True
+            self._advance()
+            if self._peek() in {"+", "-"}:
+                self._advance()
+            while self._peek().isdigit():
+                self._advance()
         text = self.source[self.start : self.current]
+        if self._peek() == "i" and self._peek_next() == "m" and not self._peek_after_next().isalnum() and self._peek_after_next() != "_":
+            self._advance()
+            self._advance()
+            text = self.source[self.start : self.current - 2]
+            value = float(text) if is_float else int(text)
+            self._add_token(TokenType.IMAG_LITERAL, complex(0.0, value))
+            return
         if is_float:
             self._add_token(TokenType.FLOAT_LITERAL, float(text))
         else:
@@ -184,6 +201,19 @@ class Lexer:
         if self.current + 1 >= len(self.source):
             return "\0"
         return self.source[self.current + 1]
+
+    def _peek_after_next(self) -> str:
+        if self.current + 2 >= len(self.source):
+            return "\0"
+        return self.source[self.current + 2]
+
+    def _can_start_exponent(self) -> bool:
+        next_char = self._peek_next()
+        if next_char.isdigit():
+            return True
+        if next_char in {"+", "-"}:
+            return self._peek_after_next().isdigit()
+        return False
 
     def _advance(self) -> str:
         char = self.source[self.current]
