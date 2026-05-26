@@ -54,6 +54,26 @@ s = size(K);
     assert _vector_values(result, "s") == [2, 0]
 
 
+def test_null_space_returns_complex_kernel_basis_for_complex_matrix() -> None:
+    result = run_aether(
+        """
+import Math.LinearAlgebra
+A = [1 im];
+K = N(A);
+Z = A * K;
+s = size(K);
+"""
+    )
+
+    kernel = np.array(_matrix_values(result, "K"), dtype=np.complex128)
+    residual = np.array(_matrix_values(result, "Z"), dtype=np.complex128)
+
+    assert result.env["K"].type_name == MatrixType("complex", 2, 1)
+    assert _vector_values(result, "s") == [2, 1]
+    assert np.allclose(residual, np.zeros((1, 1)), atol=1e-10)
+    assert np.allclose(kernel.conj().T @ kernel, np.eye(1), atol=1e-10)
+
+
 def test_range_returns_column_space_basis_columns() -> None:
     result = run_aether(
         """
@@ -74,6 +94,26 @@ s = size(B);
     assert np.allclose(projection, original, atol=1e-10)
 
 
+def test_range_returns_complex_column_space_basis_for_complex_matrix() -> None:
+    result = run_aether(
+        """
+import Math.LinearAlgebra
+A = [1 im; 0 0; 0 0];
+B = R(A);
+s = size(B);
+"""
+    )
+
+    original = np.array([[1.0, 1j], [0.0, 0.0], [0.0, 0.0]], dtype=np.complex128)
+    basis = np.array(_matrix_values(result, "B"), dtype=np.complex128)
+    projection = basis @ basis.conj().T @ original
+
+    assert result.env["B"].type_name == MatrixType("complex", 3, 1)
+    assert _vector_values(result, "s") == [3, 1]
+    assert np.allclose(basis.conj().T @ basis, np.eye(1), atol=1e-10)
+    assert np.allclose(projection, original, atol=1e-10)
+
+
 def test_rank_returns_matrix_rank_as_int() -> None:
     result = run_aether(
         """
@@ -91,6 +131,21 @@ println(r2);
     assert result.env["r2"].type_name == "int"
     assert result.env["r2"].value == 2
     assert result.output == "2\n2\n"
+
+
+def test_rank_accepts_complex_matrices() -> None:
+    result = run_aether(
+        """
+import Math.LinearAlgebra
+A = [1 im; 2 2im; 0 1];
+r = rank(A);
+println(r);
+"""
+    )
+
+    assert result.env["r"].type_name == "int"
+    assert result.env["r"].value == 2
+    assert result.output == "2\n"
 
 
 def test_rank_of_zero_matrix_is_zero() -> None:

@@ -93,6 +93,49 @@ R2 = L2 * D2 * U2;
     assert np.allclose(_matrix_values(result, "R2"), _matrix_values(result, "PA2"), atol=1e-10)
 
 
+def test_lu_returns_complex_factors_for_complex_matrix() -> None:
+    result = run_aether(
+        """
+import Math.LinearAlgebra
+A = [0 1 + im; 2 3];
+P, L, U = LU(A);
+PA = P * A;
+R = L * U;
+"""
+    )
+
+    assert result.env["P"].type_name == MatrixType("double", 2, 2)
+    assert result.env["L"].type_name == MatrixType("complex", 2, 2)
+    assert result.env["U"].type_name == MatrixType("complex", 2, 2)
+    assert np.allclose(
+        np.array(_matrix_values(result, "R"), dtype=np.complex128),
+        np.array(_matrix_values(result, "PA"), dtype=np.complex128),
+        atol=1e-10,
+    )
+
+
+def test_ldu_returns_complex_factors_for_complex_matrix() -> None:
+    result = run_aether(
+        """
+import Math.LinearAlgebra
+A = [2 1 + im; 4 3];
+P, L, D, U = LDU(A);
+PA = P * A;
+R = L * D * U;
+"""
+    )
+
+    assert result.env["P"].type_name == MatrixType("double", 2, 2)
+    assert result.env["L"].type_name == MatrixType("complex", 2, 2)
+    assert result.env["D"].type_name == MatrixType("complex", 2, 2)
+    assert result.env["U"].type_name == MatrixType("complex", 2, 2)
+    assert np.allclose(
+        np.array(_matrix_values(result, "R"), dtype=np.complex128),
+        np.array(_matrix_values(result, "PA"), dtype=np.complex128),
+        atol=1e-10,
+    )
+
+
 def test_lu_and_ldu_reject_non_square_matrices() -> None:
     with pytest.raises(AetherTypeError, match="expects a square matrix"):
         run_aether(

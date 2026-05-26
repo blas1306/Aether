@@ -187,11 +187,13 @@ def solve_builtin(args: list[AetherValue]) -> AetherValue:
         raise AetherTypeError(f"{SOLVE_NAME}(...) expects exactly two arguments.")
     left = args[0]
     right = args[1]
-    _require_real_matrix_type(left.type_name, SOLVE_NAME)
-    if not isinstance(right.type_name, VectorType):
-        _require_real_matrix_type(right.type_name, SOLVE_NAME)
-    elif right.type_name.element_type == "complex":
-        raise AetherTypeError(f"{SOLVE_NAME}(...) complex not supported yet.")
+    left_matrix_type = _require_numeric_matrix_type(left.type_name, SOLVE_NAME)
+    if isinstance(right.type_name, VectorType):
+        if right.type_name.element_type not in NUMERIC_TYPES:
+            raise AetherTypeError(f"{SOLVE_NAME}(...) expects a vector with numeric elements.")
+        right_element_type = right.type_name.element_type
+    else:
+        right_element_type = _require_numeric_matrix_type(right.type_name, SOLVE_NAME).element_type
     left_rows, left_cols = _runtime_shape(left)
     normalized_right = _vector_to_column_matrix(right) if isinstance(right.type_name, VectorType) else right
     right_rows, right_cols = _runtime_shape(normalized_right)
@@ -211,8 +213,8 @@ def solve_builtin(args: list[AetherValue]) -> AetherValue:
             f"{SOLVE_NAME}(...) requires rows(A) == rows(b), got {left_rows} and {right_rows}."
         )
 
-    left_array = _matrix_to_float_array(left)
-    right_array = _matrix_to_float_array(normalized_right)
+    left_array = _matrix_to_numeric_array(left)
+    right_array = _matrix_to_numeric_array(normalized_right)
     try:
         if left_rows == left_cols:
             if np.linalg.matrix_rank(left_array) == left_cols:
@@ -224,53 +226,50 @@ def solve_builtin(args: list[AetherValue]) -> AetherValue:
     except Exception as exc:
         raise AetherTypeError(f"{SOLVE_NAME}(...) could not solve the linear system: {exc}") from exc
 
-    solution = np.atleast_2d(np.asarray(solution, dtype=float))
+    solution = np.atleast_2d(np.asarray(solution))
     if solution.shape[0] != left_cols and solution.shape[1] == left_cols:
         solution = solution.T
-    solution[np.abs(solution) < 1e-12] = 0.0
+    result_element_type = _promote_numeric_types(left_matrix_type.element_type, right_element_type)
     if rhs_is_vector and solution.shape[1] == 1:
-        return _float_array_to_vector_value(solution[:, 0])
-    return _float_array_to_matrix_value(solution)
+        return _numeric_array_to_vector_value(solution[:, 0], element_type=result_element_type)
+    return _numeric_array_to_matrix_value(solution, element_type=result_element_type)
 
 
 def eig_builtin(args: list[AetherValue]) -> AetherValue:
     if len(args) != 1:
         raise AetherTypeError(f"{EIG_NAME}(...) expects exactly one argument.")
-    _require_real_matrix_type(args[0].type_name, EIG_NAME)
+    matrix_type = _require_numeric_matrix_type(args[0].type_name, EIG_NAME)
     rows, cols = _runtime_shape(args[0])
     if rows == 0 or cols == 0:
         raise AetherTypeError(f"{EIG_NAME}(...) does not accept an empty matrix.")
     if rows != cols:
         raise AetherTypeError(f"{EIG_NAME}(...) expects a square matrix, got {rows}x{cols}.")
 
-    matrix = _matrix_to_float_array(args[0])
+    matrix = _matrix_to_numeric_array(args[0])
     try:
         eigenvalues, eigenvectors = scipy_linalg.eig(matrix)
     except Exception as exc:
         raise AetherTypeError(f"{EIG_NAME}(...) could not compute the diagonalization: {exc}") from exc
 
-    if np.max(np.abs(np.imag(eigenvalues))) > 1e-10 or np.max(np.abs(np.imag(eigenvectors))) > 1e-10:
-        raise AetherTypeError(f"{EIG_NAME}(...) only supports real diagonalizations in Aether v0.")
-
-    eigenvectors = np.real(eigenvectors)
     if np.linalg.matrix_rank(eigenvectors, tol=1e-10) < rows:
         raise AetherTypeError(f"{EIG_NAME}(...) could not diagonalize the matrix; it is not diagonalizable.")
 
-    diagonal = np.diag(np.real(eigenvalues))
-    s_value = _float_array_to_matrix_value(_clean_float_array(eigenvectors))
-    d_value = _float_array_to_matrix_value(_clean_float_array(diagonal))
+    diagonal = np.diag(eigenvalues)
+    result_element_type = _decomposition_result_element_type(eigenvectors, diagonal, prefer_complex=matrix_type.element_type == "complex")
+    s_value = _numeric_array_to_matrix_value(eigenvectors, element_type=result_element_type)
+    d_value = _numeric_array_to_matrix_value(diagonal, element_type=result_element_type)
     return AetherValue(TupleType((s_value.type_name, d_value.type_name)), (s_value, d_value))
 
 
 def svd_builtin(args: list[AetherValue]) -> AetherValue:
     if len(args) != 1:
         raise AetherTypeError(f"{SVD_NAME}(...) expects exactly one argument.")
-    _require_real_matrix_type(args[0].type_name, SVD_NAME)
+    matrix_type = _require_numeric_matrix_type(args[0].type_name, SVD_NAME)
     rows, cols = _runtime_shape(args[0])
     if rows == 0 or cols == 0:
         raise AetherTypeError(f"{SVD_NAME}(...) does not accept an empty matrix.")
 
-    matrix = _matrix_to_float_array(args[0])
+    matrix = _matrix_to_numeric_array(args[0])
     try:
         u_matrix, singular_values, vh_matrix = scipy_linalg.svd(matrix, full_matrices=True)
     except Exception as exc:
@@ -280,9 +279,10 @@ def svd_builtin(args: list[AetherValue]) -> AetherValue:
     for index, singular_value in enumerate(singular_values):
         sigma_matrix[index, index] = singular_value
 
-    u_value = _float_array_to_matrix_value(_clean_float_array(u_matrix))
-    sigma_value = _float_array_to_matrix_value(_clean_float_array(sigma_matrix))
-    v_value = _float_array_to_matrix_value(_clean_float_array(vh_matrix.T))
+    unitary_element_type = "complex" if matrix_type.element_type == "complex" else "double"
+    u_value = _numeric_array_to_matrix_value(u_matrix, element_type=unitary_element_type)
+    sigma_value = _numeric_array_to_matrix_value(sigma_matrix, element_type="double")
+    v_value = _numeric_array_to_matrix_value(vh_matrix.conjugate().T, element_type=unitary_element_type)
     return AetherValue(
         TupleType((u_value.type_name, sigma_value.type_name, v_value.type_name)),
         (u_value, sigma_value, v_value),
@@ -292,17 +292,17 @@ def svd_builtin(args: list[AetherValue]) -> AetherValue:
 def lu_builtin(args: list[AetherValue]) -> AetherValue:
     if len(args) != 1:
         raise AetherTypeError(f"{LU_NAME}(...) expects exactly one argument.")
-    p_matrix, l_matrix, u_matrix = _lu_factor_arrays(args[0], LU_NAME)
-    p_value = _float_array_to_matrix_value(_clean_float_array(p_matrix))
-    l_value = _float_array_to_matrix_value(_clean_float_array(l_matrix))
-    u_value = _float_array_to_matrix_value(_clean_float_array(u_matrix))
+    p_matrix, l_matrix, u_matrix, factor_element_type = _lu_factor_arrays(args[0], LU_NAME)
+    p_value = _numeric_array_to_matrix_value(p_matrix, element_type="double")
+    l_value = _numeric_array_to_matrix_value(l_matrix, element_type=factor_element_type)
+    u_value = _numeric_array_to_matrix_value(u_matrix, element_type=factor_element_type)
     return AetherValue(TupleType((p_value.type_name, l_value.type_name, u_value.type_name)), (p_value, l_value, u_value))
 
 
 def ldu_builtin(args: list[AetherValue]) -> AetherValue:
     if len(args) != 1:
         raise AetherTypeError(f"{LDU_NAME}(...) expects exactly one argument.")
-    p_matrix, l_matrix, u_matrix = _lu_factor_arrays(args[0], LDU_NAME)
+    p_matrix, l_matrix, u_matrix, factor_element_type = _lu_factor_arrays(args[0], LDU_NAME)
     size = u_matrix.shape[0]
     d_matrix = np.zeros_like(u_matrix)
     unit_u = np.zeros_like(u_matrix)
@@ -315,10 +315,10 @@ def ldu_builtin(args: list[AetherValue]) -> AetherValue:
             unit_u[row_index, row_index] = 1.0
             continue
         unit_u[row_index, row_index:] = u_matrix[row_index, row_index:] / pivot
-    p_value = _float_array_to_matrix_value(_clean_float_array(p_matrix))
-    l_value = _float_array_to_matrix_value(_clean_float_array(l_matrix))
-    d_value = _float_array_to_matrix_value(_clean_float_array(d_matrix))
-    u_value = _float_array_to_matrix_value(_clean_float_array(unit_u))
+    p_value = _numeric_array_to_matrix_value(p_matrix, element_type="double")
+    l_value = _numeric_array_to_matrix_value(l_matrix, element_type=factor_element_type)
+    d_value = _numeric_array_to_matrix_value(d_matrix, element_type=factor_element_type)
+    u_value = _numeric_array_to_matrix_value(unit_u, element_type=factor_element_type)
     return AetherValue(
         TupleType((p_value.type_name, l_value.type_name, d_value.type_name, u_value.type_name)),
         (p_value, l_value, d_value, u_value),
@@ -338,24 +338,26 @@ def ones_builtin(args: list[AetherValue]) -> AetherValue:
 def null_space_builtin(args: list[AetherValue]) -> AetherValue:
     if len(args) != 1:
         raise AetherTypeError(f"{NULL_SPACE_NAME}(...) expects exactly one argument.")
-    _require_real_matrix_type(args[0].type_name, NULL_SPACE_NAME)
-    basis = scipy_linalg.null_space(_matrix_to_float_array(args[0]))
-    return _float_array_to_matrix_value(_clean_float_array(basis))
+    matrix_type = _require_numeric_matrix_type(args[0].type_name, NULL_SPACE_NAME)
+    basis = scipy_linalg.null_space(_matrix_to_numeric_array(args[0]))
+    result_element_type = "complex" if matrix_type.element_type == "complex" else "double"
+    return _numeric_array_to_matrix_value(basis, element_type=result_element_type)
 
 
 def range_builtin(args: list[AetherValue]) -> AetherValue:
     if len(args) != 1:
         raise AetherTypeError(f"{RANGE_NAME}(...) expects exactly one argument.")
-    _require_real_matrix_type(args[0].type_name, RANGE_NAME)
-    basis = scipy_linalg.orth(_matrix_to_float_array(args[0]))
-    return _float_array_to_matrix_value(_clean_float_array(basis))
+    matrix_type = _require_numeric_matrix_type(args[0].type_name, RANGE_NAME)
+    basis = scipy_linalg.orth(_matrix_to_numeric_array(args[0]))
+    result_element_type = "complex" if matrix_type.element_type == "complex" else "double"
+    return _numeric_array_to_matrix_value(basis, element_type=result_element_type)
 
 
 def rank_builtin(args: list[AetherValue]) -> AetherValue:
     if len(args) != 1:
         raise AetherTypeError(f"{RANK_NAME}(...) expects exactly one argument.")
-    _require_real_matrix_type(args[0].type_name, RANK_NAME)
-    rank = int(np.linalg.matrix_rank(_matrix_to_float_array(args[0])))
+    _require_numeric_matrix_type(args[0].type_name, RANK_NAME)
+    rank = int(np.linalg.matrix_rank(_matrix_to_numeric_array(args[0])))
     return AetherValue("int", rank)
 
 
@@ -448,22 +450,27 @@ def _solve_type(arg_types: list[AetherType | None]) -> AetherType | None:
     left_type, right_type = arg_types
     if left_type is None or right_type is None:
         return None
-    left_matrix_type = _require_real_matrix_type(left_type, SOLVE_NAME)
+    left_matrix_type = _require_numeric_matrix_type(left_type, SOLVE_NAME)
     if isinstance(right_type, VectorType):
-        if right_type.element_type == "complex":
-            raise AetherTypeError(f"{SOLVE_NAME}(...) complex not supported yet.")
+        if right_type.element_type not in NUMERIC_TYPES:
+            raise AetherTypeError(f"{SOLVE_NAME}(...) expects a vector with numeric elements.")
         if left_matrix_type.rows is not None and right_type.length is not None and left_matrix_type.rows != right_type.length:
             raise AetherTypeError(
                 f"{SOLVE_NAME}(...) requires rows(A) == rows(b), got {left_matrix_type.rows} and {right_type.length}."
             )
-        return VectorType("double", left_matrix_type.cols)
-    right_matrix_type = _require_real_matrix_type(right_type, SOLVE_NAME)
+        return VectorType(_promote_numeric_types(left_matrix_type.element_type, right_type.element_type), left_matrix_type.cols)
+    right_matrix_type = _require_numeric_matrix_type(right_type, SOLVE_NAME)
     right_rows, right_cols, result_is_vector = _normalized_rhs_type_shape(left_matrix_type, right_matrix_type)
     if left_matrix_type.rows is not None and right_rows is not None and left_matrix_type.rows != right_rows:
         raise AetherTypeError(
             f"{SOLVE_NAME}(...) requires rows(A) == rows(b), got {left_matrix_type.rows} and {right_rows}."
         )
-    return MatrixType("double", left_matrix_type.cols, right_cols, result_is_vector)
+    return MatrixType(
+        _promote_numeric_types(left_matrix_type.element_type, right_matrix_type.element_type),
+        left_matrix_type.cols,
+        right_cols,
+        result_is_vector,
+    )
 
 
 def _eig_type(arg_types: list[AetherType | None]) -> AetherType | None:
@@ -472,17 +479,18 @@ def _eig_type(arg_types: list[AetherType | None]) -> AetherType | None:
     argument_type = arg_types[0]
     if argument_type is None:
         return None
-    matrix_type = _require_real_matrix_type(argument_type, EIG_NAME)
+    matrix_type = _require_numeric_matrix_type(argument_type, EIG_NAME)
     if (
         matrix_type.rows is not None
         and matrix_type.cols is not None
         and matrix_type.rows != matrix_type.cols
     ):
         raise AetherTypeError(f"{EIG_NAME}(...) expects a square matrix, got {matrix_type.rows}x{matrix_type.cols}.")
+    result_element_type = "complex" if matrix_type.element_type == "complex" else "double"
     return TupleType(
         (
-            MatrixType("double", matrix_type.rows, matrix_type.cols),
-            MatrixType("double", matrix_type.rows, matrix_type.cols),
+            MatrixType(result_element_type, matrix_type.rows, matrix_type.cols),
+            MatrixType(result_element_type, matrix_type.rows, matrix_type.cols),
         )
     )
 
@@ -493,12 +501,13 @@ def _svd_type(arg_types: list[AetherType | None]) -> AetherType | None:
     argument_type = arg_types[0]
     if argument_type is None:
         return None
-    matrix_type = _require_real_matrix_type(argument_type, SVD_NAME)
+    matrix_type = _require_numeric_matrix_type(argument_type, SVD_NAME)
+    unitary_element_type = "complex" if matrix_type.element_type == "complex" else "double"
     return TupleType(
         (
-            MatrixType("double", matrix_type.rows, matrix_type.rows),
+            MatrixType(unitary_element_type, matrix_type.rows, matrix_type.rows),
             MatrixType("double", matrix_type.rows, matrix_type.cols),
-            MatrixType("double", matrix_type.cols, matrix_type.cols),
+            MatrixType(unitary_element_type, matrix_type.cols, matrix_type.cols),
         )
     )
 
@@ -517,15 +526,21 @@ def _lu_like_type(arg_types: list[AetherType | None], label: str, result_count: 
     argument_type = arg_types[0]
     if argument_type is None:
         return None
-    matrix_type = _require_real_matrix_type(argument_type, label)
+    matrix_type = _require_numeric_matrix_type(argument_type, label)
     if (
         matrix_type.rows is not None
         and matrix_type.cols is not None
         and matrix_type.rows != matrix_type.cols
     ):
         raise AetherTypeError(f"{label}(...) expects a square matrix, got {matrix_type.rows}x{matrix_type.cols}.")
-    result_type = MatrixType("double", matrix_type.rows, matrix_type.cols)
-    return TupleType(tuple(result_type for _index in range(result_count)))
+    factor_type = MatrixType(
+        "complex" if matrix_type.element_type == "complex" else "double",
+        matrix_type.rows,
+        matrix_type.cols,
+    )
+    if result_count == 3:
+        return TupleType((MatrixType("double", matrix_type.rows, matrix_type.cols), factor_type, factor_type))
+    return TupleType((MatrixType("double", matrix_type.rows, matrix_type.cols), factor_type, factor_type, factor_type))
 
 
 def _matrix_factory_type(label: str):
@@ -551,8 +566,9 @@ def _null_space_type(arg_types: list[AetherType | None]) -> AetherType | None:
     argument_type = arg_types[0]
     if argument_type is None:
         return None
-    matrix_type = _require_real_matrix_type(argument_type, NULL_SPACE_NAME)
-    return MatrixType("double", matrix_type.cols, None)
+    matrix_type = _require_numeric_matrix_type(argument_type, NULL_SPACE_NAME)
+    result_element_type = "complex" if matrix_type.element_type == "complex" else "double"
+    return MatrixType(result_element_type, matrix_type.cols, None)
 
 
 def _range_type(arg_types: list[AetherType | None]) -> AetherType | None:
@@ -561,8 +577,9 @@ def _range_type(arg_types: list[AetherType | None]) -> AetherType | None:
     argument_type = arg_types[0]
     if argument_type is None:
         return None
-    matrix_type = _require_real_matrix_type(argument_type, RANGE_NAME)
-    return MatrixType("double", matrix_type.rows, None)
+    matrix_type = _require_numeric_matrix_type(argument_type, RANGE_NAME)
+    result_element_type = "complex" if matrix_type.element_type == "complex" else "double"
+    return MatrixType(result_element_type, matrix_type.rows, None)
 
 
 def _rank_type(arg_types: list[AetherType | None]) -> AetherType | None:
@@ -571,7 +588,7 @@ def _rank_type(arg_types: list[AetherType | None]) -> AetherType | None:
     argument_type = arg_types[0]
     if argument_type is None:
         return None
-    _require_real_matrix_type(argument_type, RANK_NAME)
+    _require_numeric_matrix_type(argument_type, RANK_NAME)
     return "int"
 
 
@@ -674,36 +691,117 @@ def _matrix_to_float_array(value: AetherValue) -> np.ndarray:
     return np.array([[float(element.value) for element in row.value] for row in value.value], dtype=float)
 
 
-def _lu_factor_arrays(value: AetherValue, label: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    _require_real_matrix_type(value.type_name, label)
+def _matrix_to_numeric_array(value: AetherValue) -> np.ndarray:
+    matrix_type = _require_numeric_matrix_type(value.type_name, "matrix conversion")
+    if matrix_type.element_type == "complex":
+        return np.array([[complex(element.value) for element in row.value] for row in value.value], dtype=complex)
+    return _matrix_to_float_array(value)
+
+
+def _lu_factor_arrays(value: AetherValue, label: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, str]:
+    matrix_type = _require_numeric_matrix_type(value.type_name, label)
     rows, cols = _runtime_shape(value)
     if rows == 0 or cols == 0:
         raise AetherTypeError(f"{label}(...) does not accept an empty matrix.")
     if rows != cols:
         raise AetherTypeError(f"{label}(...) expects a square matrix, got {rows}x{cols}.")
 
-    scipy_p, lower, upper = scipy_linalg.lu(_matrix_to_float_array(value))
-    return scipy_p.T, lower, upper
+    scipy_p, lower, upper = scipy_linalg.lu(_matrix_to_numeric_array(value))
+    factor_element_type = "complex" if matrix_type.element_type == "complex" else "double"
+    return scipy_p.T, lower, upper, factor_element_type
 
 
 def _float_array_to_matrix_value(values: np.ndarray, *, vector: bool = False) -> AetherValue:
-    rows, cols = values.shape
-    row_type = ArrayType("double")
+    return _numeric_array_to_matrix_value(values, element_type="double", vector=vector)
+
+
+def _numeric_array_to_matrix_value(
+    values: np.ndarray,
+    *,
+    element_type: str | None = None,
+    vector: bool = False,
+) -> AetherValue:
+    cleaned = _clean_numeric_array(values)
+    if element_type is None:
+        element_type = _array_element_type(cleaned)
+    if element_type == "complex":
+        converted = np.asarray(cleaned, dtype=complex)
+    else:
+        converted = np.real(np.asarray(cleaned, dtype=complex)).astype(float)
+    rows, cols = converted.shape
+    row_type = ArrayType(element_type)
     result_rows = [
-        AetherValue(row_type, [AetherValue("double", float(values[row_index, col_index])) for col_index in range(cols)])
+        AetherValue(
+            row_type,
+            [
+                AetherValue(
+                    element_type,
+                    complex(converted[row_index, col_index])
+                    if element_type == "complex"
+                    else float(converted[row_index, col_index]),
+                )
+                for col_index in range(cols)
+            ],
+        )
         for row_index in range(rows)
     ]
-    return AetherValue(MatrixType("double", rows, cols, vector), result_rows)
+    return AetherValue(MatrixType(element_type, rows, cols, vector), result_rows)
 
 
 def _clean_float_array(values: np.ndarray) -> np.ndarray:
-    cleaned = np.asarray(values, dtype=float).copy()
+    return np.asarray(_clean_numeric_array(values), dtype=float)
+
+
+def _clean_numeric_array(values: np.ndarray) -> np.ndarray:
+    cleaned = np.asarray(values).copy()
+    if np.iscomplexobj(cleaned):
+        cleaned = cleaned.astype(complex)
+        real = cleaned.real
+        imag = cleaned.imag
+        real[np.abs(real) < 1e-12] = 0.0
+        imag[np.abs(imag) < 1e-12] = 0.0
+        return real + 1j * imag
+    cleaned = cleaned.astype(float)
     cleaned[np.abs(cleaned) < 1e-12] = 0.0
     return cleaned
 
 
+def _array_element_type(values: np.ndarray) -> str:
+    if values.size == 0:
+        return "double"
+    if np.iscomplexobj(values) and np.max(np.abs(np.imag(values))) > 1e-10:
+        return "complex"
+    return "double"
+
+
+def _decomposition_result_element_type(*values: np.ndarray, prefer_complex: bool = False) -> str:
+    if prefer_complex:
+        return "complex"
+    for value in values:
+        if np.iscomplexobj(value) and np.max(np.abs(np.imag(value))) > 1e-10:
+            return "complex"
+    return "double"
+
+
 def _float_array_to_vector_value(values: np.ndarray) -> AetherValue:
-    return AetherValue(VectorType("double", int(values.shape[0])), [AetherValue("double", float(value)) for value in values])
+    return _numeric_array_to_vector_value(values, element_type="double")
+
+
+def _numeric_array_to_vector_value(values: np.ndarray, *, element_type: str | None = None) -> AetherValue:
+    cleaned = _clean_numeric_array(np.asarray(values))
+    if element_type is None:
+        element_type = _array_element_type(cleaned)
+    if element_type == "complex":
+        converted = np.asarray(cleaned, dtype=complex)
+    else:
+        converted = np.real(np.asarray(cleaned, dtype=complex)).astype(float)
+    return AetherValue(
+        VectorType(element_type, int(converted.shape[0])),
+        [
+            AetherValue(element_type, complex(value) if element_type == "complex" else float(value))
+            for value in converted
+        ],
+    )
 
 
 def _require_numeric_matrix_type(type_name: AetherType, label: str) -> MatrixType:
@@ -712,13 +810,6 @@ def _require_numeric_matrix_type(type_name: AetherType, label: str) -> MatrixTyp
     if type_name.element_type not in NUMERIC_TYPES:
         raise AetherTypeError(f"{label}(...) expects a matrix with numeric elements.")
     return type_name
-
-
-def _require_real_matrix_type(type_name: AetherType, label: str) -> MatrixType:
-    matrix_type = _require_numeric_matrix_type(type_name, label)
-    if matrix_type.element_type == "complex":
-        raise AetherTypeError(f"{label}(...) complex not supported yet.")
-    return matrix_type
 
 
 def _require_numeric_vector_type(type_name: AetherType, label: str) -> int | None:

@@ -46,6 +46,46 @@ S, D = Math.LinearAlgebra.eig(A);
     assert np.allclose(_matrix_values(result, "D"), [[2.0, 0.0], [0.0, 3.0]], atol=1e-10)
 
 
+def test_eig_returns_complex_diagonalization_for_complex_matrix() -> None:
+    result = run_aether(
+        """
+import Math.LinearAlgebra
+A = [im 0; 0 2];
+S, D = eig(A);
+left = A * S;
+right = S * D;
+"""
+    )
+
+    left = np.array(_matrix_values(result, "left"), dtype=np.complex128)
+    right = np.array(_matrix_values(result, "right"), dtype=np.complex128)
+
+    assert result.env["S"].type_name == MatrixType("complex", 2, 2)
+    assert result.env["D"].type_name == MatrixType("complex", 2, 2)
+    assert np.allclose(left, right, atol=1e-10)
+    assert np.allclose(np.diag(np.array(_matrix_values(result, "D"), dtype=np.complex128)), [1j, 2.0], atol=1e-10)
+
+
+def test_eig_can_return_complex_diagonalization_for_real_matrix() -> None:
+    result = run_aether(
+        """
+import Math.LinearAlgebra
+A = [0 -1; 1 0];
+S, D = eig(A);
+left = A * S;
+right = S * D;
+"""
+    )
+
+    assert result.env["S"].type_name == MatrixType("complex", 2, 2)
+    assert result.env["D"].type_name == MatrixType("complex", 2, 2)
+    assert np.allclose(
+        np.array(_matrix_values(result, "left"), dtype=np.complex128),
+        np.array(_matrix_values(result, "right"), dtype=np.complex128),
+        atol=1e-10,
+    )
+
+
 def test_eig_rejects_defective_matrix() -> None:
     with pytest.raises(AetherTypeError, match="not diagonalizable"):
         run_aether(

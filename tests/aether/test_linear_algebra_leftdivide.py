@@ -112,6 +112,50 @@ X = A \\ B;
     assert result.env["X"].type_name == MatrixType("double", 2, 2, False)
 
 
+def test_leftdivide_solves_complex_square_system() -> None:
+    result = run_aether(
+        """
+import Math.LinearAlgebra
+Matrix<complex> A = [1 im; 2 3];
+Vector<complex> b = [1 + im; 4];
+x = A \\ b;
+r = A * x;
+"""
+    )
+
+    assert result.env["x"].type_name == VectorType("complex", 2)
+    assert _vector_values(result, "r") == pytest.approx([1 + 1j, 4])
+
+
+def test_solve_returns_complex_for_real_matrix_with_complex_rhs() -> None:
+    result = run_aether(
+        """
+import Math.LinearAlgebra
+A = [2 0; 0 4];
+b = [2 + 2im; 8];
+x = solve(A, b);
+"""
+    )
+
+    assert result.env["x"].type_name == VectorType("complex", 2)
+    assert _vector_values(result, "x") == pytest.approx([1 + 1j, 2])
+
+
+def test_leftdivide_returns_complex_least_squares_solution() -> None:
+    result = run_aether(
+        """
+import Math.LinearAlgebra
+Matrix<complex> A = [1 im; 1 im; 1 im];
+Vector<complex> b = [1; 2 + im; 2];
+x = A \\ b;
+normal_residual = A' * (A * x - b);
+"""
+    )
+
+    assert result.env["x"].type_name == VectorType("complex", 2)
+    assert _vector_values(result, "normal_residual") == pytest.approx([0, 0])
+
+
 def test_leftdivide_rejects_incompatible_dimensions() -> None:
     with pytest.raises(AetherTypeError, match=r"rows\(A\) == rows\(b\)"):
         run_aether(

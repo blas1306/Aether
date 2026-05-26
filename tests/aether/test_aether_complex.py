@@ -155,18 +155,3 @@ println(norm_value);
         "[0.0, 3.0 + 3.0im]",
         "6.0",
     ]
-
-
-def test_complex_linear_algebra_decompositions_are_explicitly_unsupported() -> None:
-    calls = [
-        "Math.LinearAlgebra.solve(A, [1; 2]);",
-        "Math.LinearAlgebra.eig(A);",
-        "Math.LinearAlgebra.SVD(A);",
-        "Math.LinearAlgebra.rank(A);",
-        "Math.LinearAlgebra.N(A);",
-        "Math.LinearAlgebra.R(A);",
-    ]
-
-    for call in calls:
-        with pytest.raises(AetherTypeError, match="complex not supported yet"):
-            run_aether(f"import Math.LinearAlgebra\nA = [1 im; 0 1];\n{call}")

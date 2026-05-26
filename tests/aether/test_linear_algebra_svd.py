@@ -47,6 +47,30 @@ R = U * S * Math.LinearAlgebra.transpose(V);
     assert np.allclose(_matrix_values(result, "R"), [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], atol=1e-10)
 
 
+def test_svd_returns_complex_unitary_factors_for_complex_matrix() -> None:
+    result = run_aether(
+        """
+import Math.LinearAlgebra
+A = [1 im; 2 0; 0 1 - im];
+U, S, V = SVD(A);
+R = U * S * V';
+"""
+    )
+
+    assert result.env["U"].type_name == MatrixType("complex", 3, 3)
+    assert result.env["S"].type_name == MatrixType("double", 3, 2)
+    assert result.env["V"].type_name == MatrixType("complex", 2, 2)
+    assert np.allclose(
+        np.array(_matrix_values(result, "R"), dtype=np.complex128),
+        np.array([[1.0, 1j], [2.0, 0.0], [0.0, 1.0 - 1j]], dtype=np.complex128),
+        atol=1e-10,
+    )
+    u_matrix = np.array(_matrix_values(result, "U"), dtype=np.complex128)
+    v_matrix = np.array(_matrix_values(result, "V"), dtype=np.complex128)
+    assert np.allclose(u_matrix.conj().T @ u_matrix, np.eye(3), atol=1e-10)
+    assert np.allclose(v_matrix.conj().T @ v_matrix, np.eye(2), atol=1e-10)
+
+
 def test_svd_rejects_non_matrix_arguments() -> None:
     with pytest.raises(AetherTypeError, match="expects a mathematical matrix argument"):
         run_aether(

@@ -390,6 +390,9 @@ Math.LinearAlgebra.eig(A)
 Math.LinearAlgebra.SVD(A)
 Math.LinearAlgebra.LU(A)
 Math.LinearAlgebra.LDU(A)
+Math.LinearAlgebra.N(A)
+Math.LinearAlgebra.R(A)
+Math.LinearAlgebra.rank(A)
 ```
 
 This namespace is a simulated builtin namespace for now, implemented through the Aether stdlib registry. Calls can always be resolved by their full builtin names, such as `"Math.LinearAlgebra.inner"`. A builtin `import Math.LinearAlgebra` also exposes the direct aliases in this namespace.
@@ -485,7 +488,7 @@ The `*` operator is still not matrix multiplication in Aether v0. Matrix multipl
 
 `Math.LinearAlgebra.solve(A, b)` solves linear systems with Julia-like left-division semantics. The expression `A \ b` is equivalent to `Math.LinearAlgebra.solve(A, b)`.
 
-The coefficient argument `A` must be a numeric mathematical matrix. The right-hand side `b` must be a numeric mathematical vector or matrix with `rows(b) == rows(A)`. Row-vector right-hand sides with matching length are treated as column vectors. The result is a `Matrix<double>` or `Vector<double>`:
+The coefficient argument `A` must be a numeric mathematical matrix. The right-hand side `b` must be a numeric mathematical vector or matrix with `rows(b) == rows(A)`. Row-vector right-hand sides with matching length are treated as column vectors. The result is a `Matrix<double>`/`Vector<double>` for real systems, or `Matrix<complex>`/`Vector<complex>` when either `A` or `b` is complex:
 
 ```aether
 A = [2 1; 1 3];
@@ -496,9 +499,9 @@ B = [2 4; 8 12];
 println(Math.LinearAlgebra.solve([2 0; 0 4], B)); // [1.0 2.0; 2.0 3.0]
 ```
 
-Square full-rank systems use a direct solve. Rectangular or rank-deficient systems use a least-squares/minimum-norm solution. No implicit narrowing to `int` is performed. Complex-valued systems are not supported yet and raise an explicit error.
+Square full-rank systems use a direct solve. Rectangular or rank-deficient systems use a least-squares/minimum-norm solution. No implicit narrowing to `int` is performed.
 
-`Math.LinearAlgebra.eig(A)` computes a real diagonalization of a square numeric matrix. It returns a tuple `(S, D)` where the columns of `S` are eigenvectors and `D` is diagonal, so `A * S == S * D` up to floating-point tolerance:
+`Math.LinearAlgebra.eig(A)` computes a diagonalization of a square numeric matrix over the real or complex numbers. It returns a tuple `(S, D)` where the columns of `S` are eigenvectors and `D` is diagonal, so `A * S == S * D` up to floating-point tolerance:
 
 ```aether
 import Math.LinearAlgebra
@@ -506,9 +509,9 @@ A = [1 1; 0 2];
 S, D = eig(A);
 ```
 
-The result uses `Matrix<double>` values. Matrices that are not square, are not diagonalizable, require complex eigenvalues/eigenvectors, or already contain `complex` elements are errors in Aether v0.
+The result uses `Matrix<double>` values when the factors are real and `Matrix<complex>` values when the input or the computed eigenstructure is complex. Matrices that are not square or are not diagonalizable are errors in Aether v0.
 
-`Math.LinearAlgebra.SVD(A)` computes a full singular value decomposition of a real numeric matrix. It returns a tuple `(U, S, V)` where `U` is `rows(A)xrows(A)`, `S` is `rows(A)xcols(A)`, and `V` is `cols(A)xcols(A)`, so `A == U * S * V'` up to floating-point tolerance:
+`Math.LinearAlgebra.SVD(A)` computes a full singular value decomposition of a real or complex numeric matrix. It returns a tuple `(U, S, V)` where `U` is `rows(A)xrows(A)`, `S` is `rows(A)xcols(A)`, and `V` is `cols(A)xcols(A)`, so `A == U * S * V'` up to floating-point tolerance:
 
 ```aether
 import Math.LinearAlgebra
@@ -517,9 +520,9 @@ U, S, V = SVD(A);
 println(U * S * V');
 ```
 
-The result uses `Matrix<double>` values. Empty matrices and matrices that contain `complex` elements are errors in Aether v0.
+For complex inputs, `U` and `V` use `Matrix<complex>` and `S` remains `Matrix<double>` because singular values are real. Empty matrices are errors in Aether v0.
 
-`Math.LinearAlgebra.LU(A)` computes an LU factorization of a square real numeric matrix with row pivoting. It returns a tuple `(P, L, U)` where `P` is a permutation matrix, `L` is unit lower-triangular, and `U` is upper-triangular, so `P * A == L * U` up to floating-point tolerance:
+`Math.LinearAlgebra.LU(A)` computes an LU factorization of a square real or complex numeric matrix with row pivoting. It returns a tuple `(P, L, U)` where `P` is a real permutation matrix, `L` is unit lower-triangular, and `U` is upper-triangular, so `P * A == L * U` up to floating-point tolerance:
 
 ```aether
 import Math.LinearAlgebra
@@ -527,7 +530,7 @@ A = [2 1; 4 5];
 P, L, U = LU(A);
 ```
 
-`Math.LinearAlgebra.LDU(A)` computes the corresponding LDU factorization. It returns `(P, L, D, U)` where `P` is a permutation matrix, `L` is unit lower-triangular, `D` is diagonal, and `U` is unit upper-triangular, so `P * A == L * D * U` up to floating-point tolerance:
+`Math.LinearAlgebra.LDU(A)` computes the corresponding LDU factorization. It returns `(P, L, D, U)` where `P` is a real permutation matrix, `L` is unit lower-triangular, `D` is diagonal, and `U` is unit upper-triangular, so `P * A == L * D * U` up to floating-point tolerance:
 
 ```aether
 import Math.LinearAlgebra
@@ -535,7 +538,19 @@ A = [4 8; 2 6];
 P, L, D, U = LDU(A);
 ```
 
-The result uses `Matrix<double>` values. Matrices that are not square or contain `complex` elements are errors in Aether v0. `LDU` also requires nonzero diagonal pivots after the LU factorization, because the upper factor is normalized through the diagonal factor.
+For complex inputs, `P` remains `Matrix<double>` and the other factors use `Matrix<complex>`. Matrices that are not square are errors in Aether v0. `LDU` also requires nonzero diagonal pivots after the LU factorization, because the upper factor is normalized through the diagonal factor.
+
+`Math.LinearAlgebra.N(A)` returns an orthonormal basis for the null space as columns. `Math.LinearAlgebra.R(A)` returns an orthonormal basis for the column space as columns. `Math.LinearAlgebra.rank(A)` returns the numeric matrix rank as an `int`:
+
+```aether
+import Math.LinearAlgebra
+A = [1 im; 0 0];
+K = N(A);
+B = R(A);
+r = rank(A);
+```
+
+For complex inputs, `N` and `R` return `Matrix<complex>`. For real inputs, they return `Matrix<double>`.
 
 ## Matrix Arithmetic
 
@@ -750,6 +765,9 @@ Aether v0 recognizes these builtins:
 - `Math.LinearAlgebra.SVD(A)`
 - `Math.LinearAlgebra.LU(A)`
 - `Math.LinearAlgebra.LDU(A)`
+- `Math.LinearAlgebra.N(A)`
+- `Math.LinearAlgebra.R(A)`
+- `Math.LinearAlgebra.rank(A)`
 - `int(...)`
 - `float(...)`
 - `double(...)`
@@ -771,7 +789,7 @@ println(x);
 
 `sin(x)`, `cos(x)`, `tan(x)`, `exp(x)`, `ln(x)`, and `log(x)` accept one real numeric scalar and return `double`. `sqrt(x)` accepts numeric scalars and returns `double` for non-negative real inputs or `complex` for negative/complex inputs. `abs(x)` accepts one numeric scalar and returns `double` for `complex` inputs. `real(x)`, `imag(x)`, `conj(x)`, and `angle(x)` are available for numeric scalars. `Math.mod(a, b)` accepts two real numeric scalars and returns floor/Python-like modulo.
 
-`Math.LinearAlgebra.inner(u, v)`, `Math.LinearAlgebra.norm(v)`, `Math.LinearAlgebra.transpose(A)`, `Math.LinearAlgebra.matmul(A, B)`, `Math.LinearAlgebra.solve(A, b)`, `Math.LinearAlgebra.eig(A)`, `Math.LinearAlgebra.SVD(A)`, `Math.LinearAlgebra.LU(A)`, and `Math.LinearAlgebra.LDU(A)` are explicit simulated-namespace builtins for numeric mathematical vectors and matrices. See `Math.LinearAlgebra` above.
+`Math.LinearAlgebra.inner(u, v)`, `Math.LinearAlgebra.norm(v)`, `Math.LinearAlgebra.transpose(A)`, `Math.LinearAlgebra.matmul(A, B)`, `Math.LinearAlgebra.solve(A, b)`, `Math.LinearAlgebra.eig(A)`, `Math.LinearAlgebra.SVD(A)`, `Math.LinearAlgebra.LU(A)`, `Math.LinearAlgebra.LDU(A)`, `Math.LinearAlgebra.N(A)`, `Math.LinearAlgebra.R(A)`, and `Math.LinearAlgebra.rank(A)` are explicit simulated-namespace builtins for numeric mathematical vectors and matrices. See `Math.LinearAlgebra` above.
 
 ## Errors
 
