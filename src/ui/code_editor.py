@@ -28,6 +28,7 @@ EDITOR_KEYWORDS = (
     "complex",
     "string",
     "boolean",
+    "void",
     "Matrix",
     "Vector",
     "for",

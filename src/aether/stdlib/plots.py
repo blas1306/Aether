@@ -7,7 +7,7 @@ from typing import Any
 from plot_backend import PlotBackendError
 
 from ..errors import AetherRuntimeError, AetherTypeError
-from ..types import AetherType, AetherValue, ArrayType, MatrixType, NUMERIC_TYPES, VectorType, type_to_string
+from ..types import AetherType, AetherValue, ArrayType, MatrixType, NUMERIC_TYPES, VOID_VALUE, VectorType, type_to_string
 from .registry import BuiltinDefinition, BuiltinFunction, RuntimeContext, RuntimeFactory
 
 
@@ -82,17 +82,17 @@ def _plot_runtime(command: str) -> RuntimeFactory:
                 if command in {"plot", "plot!"}:
                     options = _plot_options(kwargs, _PLOT_KEYWORDS)
                     _run_plot(backend, args, options, append=command.endswith("!"))
-                    return AetherValue("boolean", True)
+                    return _void_value()
                 if command in {"scatter", "scatter!"}:
                     options = _plot_options(kwargs, _SCATTER_KEYWORDS)
                     backend.scatter(*_vector_args(args, SCATTER_NAME), append=command.endswith("!"), style=_style_for("scatter", options))
                     _apply_axes_options(backend, options)
-                    return AetherValue("boolean", True)
+                    return _void_value()
                 if command in {"bar", "bar!"}:
                     options = _plot_options(kwargs, _BAR_KEYWORDS)
                     backend.bar(*_vector_args(args, BAR_NAME), append=command.endswith("!"), style=_style_for("bar", options))
                     _apply_axes_options(backend, options)
-                    return AetherValue("boolean", True)
+                    return _void_value()
                 if command in {"histogram", "histogram!"}:
                     options = _plot_options(kwargs, _HISTOGRAM_KEYWORDS)
                     _require_count(HISTOGRAM_NAME, args, 1)
@@ -103,32 +103,32 @@ def _plot_runtime(command: str) -> RuntimeFactory:
                         style=_style_for("histogram", options),
                     )
                     _apply_axes_options(backend, options)
-                    return AetherValue("boolean", True)
+                    return _void_value()
                 if command == "figure":
                     _require_count(FIGURE_NAME, args, 1)
                     _require_type(args[0], "int", FIGURE_NAME)
                     backend.set_figure(args[0].value)
-                    return AetherValue("boolean", True)
+                    return _void_value()
                 if command == "hold":
                     _require_count(HOLD_NAME, args, 1)
                     backend.set_hold(_on_off_value(args[0], HOLD_NAME))
-                    return AetherValue("boolean", True)
+                    return _void_value()
                 if command == "grid":
                     _require_count(GRID_NAME, args, 1)
                     backend.set_grid(_on_off_value(args[0], GRID_NAME))
-                    return AetherValue("boolean", True)
+                    return _void_value()
                 if command == "title":
                     backend.title(_single_string(args, TITLE_NAME))
-                    return AetherValue("boolean", True)
+                    return _void_value()
                 if command == "xlabel":
                     backend.xlabel(_single_string(args, XLABEL_NAME))
-                    return AetherValue("boolean", True)
+                    return _void_value()
                 if command == "ylabel":
                     backend.ylabel(_single_string(args, YLABEL_NAME))
-                    return AetherValue("boolean", True)
+                    return _void_value()
                 if command == "legend":
                     backend.legend(*[_require_string_value(arg, LEGEND_NAME) for arg in args])
-                    return AetherValue("boolean", True)
+                    return _void_value()
                 if command == "savefig":
                     path = backend.savefig(_single_string(args, SAVEFIG_NAME))
                     return AetherValue("string", path)
@@ -139,6 +139,10 @@ def _plot_runtime(command: str) -> RuntimeFactory:
         return builtin
 
     return factory
+
+
+def _void_value() -> AetherValue:
+    return AetherValue("void", VOID_VALUE)
 
 
 def _run_plot(backend: Any, args: list[AetherValue], options: _PlotOptions, *, append: bool) -> None:
@@ -380,7 +384,7 @@ def _plot_type(arg_types: list[AetherType | None]) -> AetherType | None:
     if len(arg_types) == 3 and arg_types[0] == _FUNCTION_TYPE:
         _require_numeric_scalar_type(arg_types[1], "a")
         _require_numeric_scalar_type(arg_types[2], "b")
-        return "boolean"
+        return "void"
     if len(arg_types) == 1:
         _require_numeric_vector_type(arg_types[0], "y")
     elif len(arg_types) == 2 and arg_types[1] == "string":
@@ -392,7 +396,7 @@ def _plot_type(arg_types: list[AetherType | None]) -> AetherType | None:
         _require_numeric_vector_type(arg_types[0], "x")
         _require_numeric_vector_type(arg_types[1], "y")
         _require_argument_type(arg_types[2], "string", PLOT_NAME)
-    return "boolean"
+    return "void"
 
 
 def _scatter_type(arg_types: list[AetherType | None]) -> AetherType | None:
@@ -403,7 +407,7 @@ def _scatter_type(arg_types: list[AetherType | None]) -> AetherType | None:
     else:
         _require_numeric_vector_type(arg_types[0], "x")
         _require_numeric_vector_type(arg_types[1], "y")
-    return "boolean"
+    return "void"
 
 
 def _bar_type(arg_types: list[AetherType | None]) -> AetherType | None:
@@ -414,12 +418,12 @@ def _histogram_type(arg_types: list[AetherType | None]) -> AetherType | None:
     if len(arg_types) != 1:
         raise AetherTypeError(f"{HISTOGRAM_NAME}(...) expects exactly one argument.")
     _require_numeric_vector_type(arg_types[0], "y")
-    return "boolean"
+    return "void"
 
 
 def _figure_type(arg_types: list[AetherType | None]) -> AetherType | None:
     _require_argument_type(arg_types[0] if arg_types else None, "int", FIGURE_NAME)
-    return "boolean"
+    return "void"
 
 
 def _on_off_type(label: str) -> Callable[[list[AetherType | None]], AetherType | None]:
@@ -431,7 +435,7 @@ def _on_off_type(label: str) -> Callable[[list[AetherType | None]], AetherType |
             return None
         if argument_type not in {"boolean", "string"}:
             raise AetherTypeError(f"{label}(...) expects a boolean or string argument.")
-        return "boolean"
+        return "void"
 
     return infer
 
@@ -441,7 +445,7 @@ def _text_type(label: str) -> Callable[[list[AetherType | None]], AetherType | N
         if len(arg_types) != 1:
             raise AetherTypeError(f"{label}(...) expects exactly one argument.")
         _require_argument_type(arg_types[0], "string", label)
-        return "boolean"
+        return "void"
 
     return infer
 
@@ -449,7 +453,7 @@ def _text_type(label: str) -> Callable[[list[AetherType | None]], AetherType | N
 def _legend_type(arg_types: list[AetherType | None]) -> AetherType | None:
     for argument_type in arg_types:
         _require_argument_type(argument_type, "string", LEGEND_NAME)
-    return "boolean"
+    return "void"
 
 
 def _savefig_type(arg_types: list[AetherType | None]) -> AetherType | None:

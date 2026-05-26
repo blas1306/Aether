@@ -1,9 +1,18 @@
 int fibo(int n) {
     if n <= 1 {
         return n;
-    } else {
-        return fibo(n - 1) + fibo(n - 2);
     }
+
+    int a = 0;
+    int b = 1;
+
+    for i in 2:n {
+        int c = a + b;
+        a = b;
+        b = c;
+    }
+
+    return b;
 }
 
 while true {

@@ -14,6 +14,7 @@ from ..types import (
     REAL_NUMERIC_TYPES,
     TransposeVectorType,
     VectorType,
+    VOID_VALUE,
     explicit_cast,
     is_array_type,
     shape_dimension_count,
@@ -112,7 +113,7 @@ def _make_print_builtin(write_output: OutputWriter) -> BuiltinFunction:
         if not args:
             raise AetherRuntimeError("print expects at least one argument.")
         write_output("".join(format_value(arg) for arg in args))
-        return AetherValue("boolean", True)
+        return AetherValue("void", VOID_VALUE)
 
     return print_builtin
 
@@ -126,7 +127,7 @@ def _make_println_builtin(write_output: OutputWriter) -> BuiltinFunction:
         if not args:
             raise AetherRuntimeError("println expects at least one argument.")
         write_output("".join(format_value(arg) for arg in args) + "\n")
-        return AetherValue("boolean", True)
+        return AetherValue("void", VOID_VALUE)
 
     return println_builtin
 
@@ -307,7 +308,7 @@ def _require_real_numeric_binary_args(args: list[AetherValue], label: str) -> tu
 
 
 def _print_type(arg_types: list[AetherType | None]) -> AetherType | None:
-    return "boolean"
+    return "void"
 
 
 def _input_type(arg_types: list[AetherType | None]) -> AetherType | None:

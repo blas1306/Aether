@@ -39,7 +39,7 @@ class Parser:
         return self._statement()
 
     def _function_declaration(self) -> ast.FunctionDeclaration:
-        return_type = self._parse_type_annotation("Expected function return type.")
+        return_type = self._parse_return_type_annotation("Expected function return type.")
         name = self._consume(TokenType.IDENTIFIER, "Expected function name.").lexeme
         self._consume(TokenType.LEFT_PAREN, "Expected '(' after function name.")
         parameters: list[ast.Parameter] = []
@@ -115,8 +115,8 @@ class Parser:
             return ast.ForInStatement(variable, iterable, self._block())
         if self._match(TokenType.RETURN):
             return_token = self._previous()
-            expression = self._expression()
-            self._consume(TokenType.SEMICOLON, "Expected ';' after return value.")
+            expression = None if self._check(TokenType.SEMICOLON) else self._expression()
+            self._consume(TokenType.SEMICOLON, "Expected ';' after return statement.")
             return ast.ReturnStatement(expression, return_token.line, return_token.column)
         if self._looks_like_var_declaration():
             return self._var_declaration()
@@ -458,6 +458,14 @@ class Parser:
             return
         raise self._error(self._peek(), "Expected ';' or newline after import statement.")
 
+    def _parse_return_type_annotation(self, message: str) -> AetherType:
+        if self._check(TokenType.TYPE) and self._peek().lexeme == "void":
+            token = self._advance()
+            if self._check(TokenType.LEFT_BRACKET):
+                raise self._error(token, "'void' cannot be used as an array type.")
+            return "void"
+        return self._parse_type_annotation(message)
+
     def _parse_type_annotation(self, message: str) -> AetherType:
         if self._match(TokenType.LEFT_PAREN):
             element_types = [self._parse_tuple_type_element()]
@@ -469,6 +477,8 @@ class Parser:
             self._consume(TokenType.RIGHT_PAREN, "Expected ')' after tuple return type.")
             return TupleType(tuple(element_types))
         token = self._consume_type(message)
+        if token.lexeme == "void":
+            raise self._error(token, "'void' is only valid as a function return type.")
         if token.lexeme in {"Matrix", "Vector"}:
             element_type = "double"
             if self._match(TokenType.LESS):

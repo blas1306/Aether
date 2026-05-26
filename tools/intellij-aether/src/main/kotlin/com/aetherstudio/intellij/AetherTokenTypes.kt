@@ -34,6 +34,7 @@ object AetherTokenTypes {
         "string",
         "true",
         "Vector",
+        "void",
         "while",
     )
 }

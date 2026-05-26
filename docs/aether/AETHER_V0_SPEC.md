@@ -673,7 +673,10 @@ Rules:
 - Parameters must be typed.
 - The official declaration form is `<return_type> <name>(params) { ... }`.
 - The old `function <return_type> ...` form is legacy/deprecated and kept only for temporary compatibility.
-- A return value is required on all evident paths.
+- Non-`void` functions require a return value on all evident paths.
+- `void` functions may end without a `return` and may use `return;` for early exit.
+- `void` is only valid as a block function return type. It is not a variable, parameter, tuple, array, matrix, or vector element type.
+- Calls to `void` functions are valid only as statements; they cannot be assigned, passed as arguments, returned from non-`void` functions, or used inside expressions.
 - Return values must match the declared return type, allowing safe widening.
 - Function call arity is checked.
 - Function argument types are checked, allowing safe widening.
@@ -726,6 +729,19 @@ int f(int x) {
 } // error: may not return on all paths
 ```
 
+Valid `void` procedure:
+
+```aether
+void emit(int x) {
+    if x < 0 {
+        return;
+    }
+    println(x);
+}
+
+emit(3);
+```
+
 Valid evident return:
 
 ```aether
@@ -768,6 +784,8 @@ Aether v0 recognizes these builtins:
 - `Math.LinearAlgebra.N(A)`
 - `Math.LinearAlgebra.R(A)`
 - `Math.LinearAlgebra.rank(A)`
+
+Side-effect builtins such as `print(...)`, `println(...)`, and plotting commands return `void`, except `savefig(...)`, which returns the output path as a `string`.
 - `int(...)`
 - `float(...)`
 - `double(...)`

@@ -10,6 +10,7 @@ from .errors import AetherTypeError
 TYPE_NAMES = {"int", "float", "double", "complex", "string", "boolean"}
 REAL_NUMERIC_TYPES = {"int", "float", "double"}
 NUMERIC_TYPES = REAL_NUMERIC_TYPES | {"complex"}
+VOID_VALUE = None
 WIDENING: dict[str, set[str]] = {
     "int": {"float", "double", "complex"},
     "float": {"double", "complex"},
@@ -391,6 +392,12 @@ def coerce_implicit(value: AetherValue, target_type: AetherType) -> AetherValue:
 
 
 def coerce_return_value(value: AetherValue, target_type: AetherType) -> AetherValue:
+    if target_type == "void":
+        if value.type_name != "void":
+            raise AetherTypeError(
+                f"Cannot implicitly convert '{type_to_string(value.type_name)}' to 'void'."
+            )
+        return AetherValue("void", VOID_VALUE)
     if isinstance(target_type, TupleType):
         if not isinstance(value.type_name, TupleType):
             raise AetherTypeError(

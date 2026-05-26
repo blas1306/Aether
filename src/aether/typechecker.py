@@ -131,6 +131,12 @@ class TypeChecker:
         self.imported_modules.add(module_name)
 
     def _declare_variable(self, statement: ast.VarDeclaration, scope: Scope[VariableSymbol]) -> None:
+        if _contains_void_type(statement.type_name):
+            raise AetherTypeError(
+                "'void' cannot be used as a variable type.",
+                line=statement.line,
+                column=statement.column,
+            )
         if (
             (
                 isinstance(statement.initializer, ast.ArrayLiteral)
@@ -158,6 +164,7 @@ class TypeChecker:
             )
             return
         value_type = self._expression_type(statement.initializer, scope)
+        self._reject_void_value(value_type, "assignment", statement)
         if value_type is not UNKNOWN_TYPE and not self._can_assign(
             value_type,
             statement.type_name,
@@ -197,6 +204,7 @@ class TypeChecker:
             self._input_call_type(statement.expression, scope, existing.type_name)
             return
         value_type = self._expression_type(statement.expression, scope)
+        self._reject_void_value(value_type, "assignment", statement)
         if existing is None:
             if value_type is not UNKNOWN_TYPE:
                 scope.define_local(statement.name, VariableSymbol(statement.name, value_type))
@@ -213,6 +221,7 @@ class TypeChecker:
         value_type = self._expression_type(statement.expression, scope)
         if value_type is UNKNOWN_TYPE:
             return
+        self._reject_void_value(value_type, "destructuring", statement)
         if isinstance(value_type, TupleType):
             element_types = list(value_type.element_types)
         elif isinstance(value_type, VectorType):
@@ -340,6 +349,9 @@ class TypeChecker:
     def _declare_function(self, statement: ast.FunctionDeclaration) -> None:
         if statement.name in self.functions:
             raise AetherTypeError(f"Function '{statement.name}' is already defined.")
+        for parameter in statement.parameters:
+            if _contains_void_type(parameter.type_name):
+                raise AetherTypeError(f"Parameter '{parameter.name}' cannot have type void.")
         parameters = tuple(VariableSymbol(parameter.name, parameter.type_name) for parameter in statement.parameters)
         self.functions[statement.name] = FunctionSymbol(statement.name, statement.return_type, parameters)
         function_scope: Scope[VariableSymbol] = Scope(parent=self.global_scope)
@@ -354,7 +366,7 @@ class TypeChecker:
         finally:
             self.current_return_type = previous_return_type
             self.current_function_name = previous_function_name
-        if not self._statements_always_return(statement.body):
+        if statement.return_type != "void" and not self._statements_always_return(statement.body):
             raise AetherTypeError(f"Function '{statement.name}' may not return a value on all paths.")
 
     def _declare_expression_function(self, statement: ast.ExpressionFunctionDeclaration) -> None:
@@ -366,11 +378,30 @@ class TypeChecker:
         function_scope: Scope[VariableSymbol] = Scope(parent=self.global_scope)
         for parameter in parameters:
             function_scope.define_local(parameter.name, parameter)
-        self._expression_type(statement.expression, function_scope)
+        return_type = self._expression_type(statement.expression, function_scope)
+        self._reject_void_value(return_type, f"expression function '{statement.name}' body")
 
     def _check_return(self, statement: ast.ReturnStatement, scope: Scope[VariableSymbol]) -> None:
         if self.current_return_type is None:
             raise AetherTypeError("Cannot return outside of a function.")
+        if statement.expression is None:
+            if self.current_return_type == "void":
+                return
+            function_name = self.current_function_name or "<anonymous>"
+            raise AetherTypeError(
+                f"Function {function_name} declares return type {type_to_string(self.current_return_type)} "
+                "but returned void.",
+                line=statement.line,
+                column=statement.column,
+            )
+        if self.current_return_type == "void":
+            self._expression_type(statement.expression, scope)
+            function_name = self.current_function_name or "<anonymous>"
+            raise AetherTypeError(
+                f"Void function {function_name} cannot return a value.",
+                line=statement.line,
+                column=statement.column,
+            )
         value_type = self._expression_type(statement.expression, scope)
         if value_type is not UNKNOWN_TYPE and not self._can_return(
             value_type,
@@ -462,6 +493,8 @@ class TypeChecker:
         right_type = self._expression_type(expression.right, scope)
         if left_type is UNKNOWN_TYPE or right_type is UNKNOWN_TYPE:
             return UNKNOWN_TYPE
+        self._reject_void_value(left_type, f"left operand of '{expression.operator}'", expression)
+        self._reject_void_value(right_type, f"right operand of '{expression.operator}'", expression)
         operator = expression.operator
         if operator in {"&&", "||"}:
             if left_type != "boolean" or right_type != "boolean":
@@ -533,6 +566,8 @@ class TypeChecker:
         if any(operand_type is UNKNOWN_TYPE for operand_type in operand_types):
             return UNKNOWN_TYPE
         for operand_type in operand_types:
+            self._reject_void_value(operand_type, "range expression")
+        for operand_type in operand_types:
             if operand_type != "int":
                 raise AetherTypeError(f"Range bounds and step must be int, got '{type_to_string(operand_type)}'.")
         return RangeType("int")
@@ -543,6 +578,8 @@ class TypeChecker:
         element_types = [self._expression_type(element, scope) for element in expression.elements]
         if any(element_type is UNKNOWN_TYPE for element_type in element_types):
             return UNKNOWN_TYPE
+        for element_type in element_types:
+            self._reject_void_value(element_type, "array literal")
         if all(is_array_type(element_type) for element_type in element_types):
             row_lengths = [len(element.elements) for element in expression.elements if isinstance(element, ast.ArrayLiteral)]
             if row_lengths and any(length != row_lengths[0] for length in row_lengths):
@@ -562,6 +599,8 @@ class TypeChecker:
                 element_types.append(self._expression_type(element, scope))
         if any(element_type is UNKNOWN_TYPE for element_type in element_types):
             return UNKNOWN_TYPE
+        for element_type in element_types:
+            self._reject_void_value(element_type, "matrix literal")
         if all(isinstance(element_type, str) for element_type in element_types):
             if any(length != row_lengths[0] for length in row_lengths):
                 raise AetherTypeError("Matrix literals must be rectangular; ragged rows are not supported.")
@@ -577,6 +616,8 @@ class TypeChecker:
         element_types = [self._expression_type(element, scope) for element in expression.elements]
         if any(element_type is UNKNOWN_TYPE for element_type in element_types):
             return UNKNOWN_TYPE
+        for element_type in element_types:
+            self._reject_void_value(element_type, "tuple literal")
         return TupleType(tuple(element_types))
 
     def _index_type(self, expression: ast.IndexExpression, scope: Scope[VariableSymbol]) -> AetherType | None:
@@ -644,6 +685,8 @@ class TypeChecker:
                 self._expression_type_allowing_builtin_function_ref(argument, scope, builtin_name)
                 for argument in expression.arguments
             ]
+            for argument_type in argument_types:
+                self._reject_void_value(argument_type, f"argument to {expression.callee}(...)")
             return infer_builtin_type(builtin_name, argument_types)
         if expression.keyword_arguments:
             raise AetherTypeError(f"Function '{expression.callee}' does not accept keyword arguments.")
@@ -657,12 +700,15 @@ class TypeChecker:
             )
         if function.return_type is UNKNOWN_TYPE:
             argument_types = [self._expression_type(argument, scope) for argument in expression.arguments]
+            for argument_type in argument_types:
+                self._reject_void_value(argument_type, f"argument to {expression.callee}(...)")
             declaration = self.expression_functions.get(expression.callee)
             if declaration is None:
                 return UNKNOWN_TYPE
             return self._expression_function_return_type(declaration, argument_types)
         for argument, parameter in zip(expression.arguments, function.parameters):
             argument_type = self._expression_type(argument, scope)
+            self._reject_void_value(argument_type, f"argument to {expression.callee}(...)")
             if argument_type is not UNKNOWN_TYPE and not can_implicitly_convert(argument_type, parameter.type_name):
                 self._raise_implicit_conversion_error(argument_type, parameter.type_name)
         return function.return_type
@@ -838,6 +884,20 @@ class TypeChecker:
             column=getattr(location, "column", None),
         )
 
+    def _reject_void_value(
+        self,
+        value_type: AetherType | None,
+        context: str,
+        location: object | None = None,
+    ) -> None:
+        if value_type != "void":
+            return
+        raise AetherTypeError(
+            f"Cannot use void value in {context}.",
+            line=getattr(location, "line", None),
+            column=getattr(location, "column", None),
+        )
+
     def _can_assign_array_literal(
         self,
         initializer: ast.ArrayLiteral,
@@ -892,6 +952,16 @@ def _iterable_element_type(type_name: AetherType) -> AetherType | None:
     if isinstance(type_name, MatrixType) and _is_vector_like_matrix_type(type_name):
         return type_name.element_type
     return None
+
+
+def _contains_void_type(type_name: AetherType | None) -> bool:
+    if type_name == "void":
+        return True
+    if isinstance(type_name, ArrayType):
+        return _contains_void_type(type_name.element_type)
+    if isinstance(type_name, TupleType):
+        return any(_contains_void_type(element_type) for element_type in type_name.element_types)
+    return False
 
 
 def _is_vector_like_matrix_type(type_name: MatrixType) -> bool:

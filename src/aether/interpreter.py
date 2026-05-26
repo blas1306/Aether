@@ -27,6 +27,7 @@ from .types import (
     REAL_NUMERIC_TYPES,
     RangeType,
     TupleType,
+    VOID_VALUE,
     TransposeVectorType,
     VectorType,
     array_element_type,
@@ -265,7 +266,10 @@ class Interpreter:
             env.define_function(Function(statement))
             return
         if isinstance(statement, ast.ReturnStatement):
-            raise _ReturnSignal(self._evaluate(statement.expression, env))
+            value = AetherValue("void", VOID_VALUE)
+            if statement.expression is not None:
+                value = self._evaluate(statement.expression, env)
+            raise _ReturnSignal(value)
         raise AetherRuntimeError(f"Unsupported statement {statement!r}.")
 
     def _execute_block(self, statements: list[ast.Statement], env: Environment) -> None:
@@ -687,6 +691,8 @@ class Interpreter:
             self._execute_block(declaration.body, local_env)
         except _ReturnSignal as signal:
             return coerce_return_value(signal.value, declaration.return_type)
+        if declaration.return_type == "void":
+            return AetherValue("void", VOID_VALUE)
         raise AetherRuntimeError(f"Function '{callee}' ended without returning a value.")
 
     def _evaluate_binary(self, left: AetherValue, operator: str, right: AetherValue) -> AetherValue:

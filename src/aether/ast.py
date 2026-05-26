@@ -121,7 +121,7 @@ class ExpressionFunctionDeclaration:
 
 @dataclass(frozen=True)
 class ReturnStatement:
-    expression: Expression
+    expression: Expression | None = None
     line: int = 1
     column: int = 1
 

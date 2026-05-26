@@ -1,21 +1,22 @@
+boolean esPrimo3(int p) {
+    if p == 2 || p == 3 {
+        return true;
+    }
+
+    for i in 2:int(sqrt(p)) {
+        if p % i == 0 {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 while true {
     int p = input("Ingrese un numero positivo: ");
+
     if p <= 1 {
-        println("Numero invalido. Intente nuevamente");
-    }
-
-    if p == 2 || p == 3 {
-        println("El numero $p$ es primo");
-    }
-
-    boolean esPrimo3(int p) {
-        for i in 2:int(sqrt(p)) {
-            if p % i == 0 {
-                return false;
-            }
-        }
-
-        return true;
+        println("Numero invalido. Ingrese un numero nuevamente");
     }
 
     if esPrimo3(p) == false {
