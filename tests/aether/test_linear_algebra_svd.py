@@ -1,0 +1,57 @@
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+from aether.errors import AetherTypeError
+from aether.runner import run_aether
+from aether.types import MatrixType
+
+
+def _matrix_values(result, name: str) -> list[list[float]]:
+    value = result.env[name]
+    assert isinstance(value.type_name, MatrixType)
+    return [[element.value for element in row.value] for row in value.value]
+
+
+def test_svd_returns_full_factors_for_imported_short_name() -> None:
+    result = run_aether(
+        """
+import Math.LinearAlgebra
+A = [3 2; 1 0; 0 0];
+U, S, V = SVD(A);
+R = U * S * V';
+"""
+    )
+
+    assert result.env["U"].type_name == MatrixType("double", 3, 3)
+    assert result.env["S"].type_name == MatrixType("double", 3, 2)
+    assert result.env["V"].type_name == MatrixType("double", 2, 2)
+    assert np.allclose(_matrix_values(result, "R"), [[3.0, 2.0], [1.0, 0.0], [0.0, 0.0]], atol=1e-10)
+    assert np.allclose(np.array(_matrix_values(result, "U")).T @ np.array(_matrix_values(result, "U")), np.eye(3), atol=1e-10)
+    assert np.allclose(np.array(_matrix_values(result, "V")).T @ np.array(_matrix_values(result, "V")), np.eye(2), atol=1e-10)
+
+
+def test_svd_returns_full_factors_for_qualified_name_and_wide_matrix() -> None:
+    result = run_aether(
+        """
+A = [1 2 3; 4 5 6];
+U, S, V = Math.LinearAlgebra.SVD(A);
+R = U * S * Math.LinearAlgebra.transpose(V);
+"""
+    )
+
+    assert result.env["U"].type_name == MatrixType("double", 2, 2)
+    assert result.env["S"].type_name == MatrixType("double", 2, 3)
+    assert result.env["V"].type_name == MatrixType("double", 3, 3)
+    assert np.allclose(_matrix_values(result, "R"), [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], atol=1e-10)
+
+
+def test_svd_rejects_non_matrix_arguments() -> None:
+    with pytest.raises(AetherTypeError, match="expects a mathematical matrix argument"):
+        run_aether(
+            """
+import Math.LinearAlgebra
+U, S, V = SVD([1, 2, 3]);
+"""
+        )

@@ -387,6 +387,7 @@ Math.LinearAlgebra.transpose(A)
 Math.LinearAlgebra.matmul(A, B)
 Math.LinearAlgebra.solve(A, b)
 Math.LinearAlgebra.eig(A)
+Math.LinearAlgebra.SVD(A)
 Math.LinearAlgebra.LU(A)
 Math.LinearAlgebra.LDU(A)
 ```
@@ -506,6 +507,17 @@ S, D = eig(A);
 ```
 
 The result uses `Matrix<double>` values. Matrices that are not square, are not diagonalizable, require complex eigenvalues/eigenvectors, or already contain `complex` elements are errors in Aether v0.
+
+`Math.LinearAlgebra.SVD(A)` computes a full singular value decomposition of a real numeric matrix. It returns a tuple `(U, S, V)` where `U` is `rows(A)xrows(A)`, `S` is `rows(A)xcols(A)`, and `V` is `cols(A)xcols(A)`, so `A == U * S * V'` up to floating-point tolerance:
+
+```aether
+import Math.LinearAlgebra
+A = [3 2; 1 0; 0 0];
+U, S, V = SVD(A);
+println(U * S * V');
+```
+
+The result uses `Matrix<double>` values. Empty matrices and matrices that contain `complex` elements are errors in Aether v0.
 
 `Math.LinearAlgebra.LU(A)` computes an LU factorization of a square real numeric matrix with row pivoting. It returns a tuple `(P, L, U)` where `P` is a permutation matrix, `L` is unit lower-triangular, and `U` is upper-triangular, so `P * A == L * U` up to floating-point tolerance:
 
@@ -735,6 +747,7 @@ Aether v0 recognizes these builtins:
 - `Math.LinearAlgebra.matmul(A, B)`
 - `Math.LinearAlgebra.solve(A, b)`
 - `Math.LinearAlgebra.eig(A)`
+- `Math.LinearAlgebra.SVD(A)`
 - `Math.LinearAlgebra.LU(A)`
 - `Math.LinearAlgebra.LDU(A)`
 - `int(...)`
@@ -758,7 +771,7 @@ println(x);
 
 `sin(x)`, `cos(x)`, `tan(x)`, `exp(x)`, `ln(x)`, and `log(x)` accept one real numeric scalar and return `double`. `sqrt(x)` accepts numeric scalars and returns `double` for non-negative real inputs or `complex` for negative/complex inputs. `abs(x)` accepts one numeric scalar and returns `double` for `complex` inputs. `real(x)`, `imag(x)`, `conj(x)`, and `angle(x)` are available for numeric scalars. `Math.mod(a, b)` accepts two real numeric scalars and returns floor/Python-like modulo.
 
-`Math.LinearAlgebra.inner(u, v)`, `Math.LinearAlgebra.norm(v)`, `Math.LinearAlgebra.transpose(A)`, `Math.LinearAlgebra.matmul(A, B)`, `Math.LinearAlgebra.solve(A, b)`, `Math.LinearAlgebra.eig(A)`, `Math.LinearAlgebra.LU(A)`, and `Math.LinearAlgebra.LDU(A)` are explicit simulated-namespace builtins for numeric mathematical vectors and matrices. See `Math.LinearAlgebra` above.
+`Math.LinearAlgebra.inner(u, v)`, `Math.LinearAlgebra.norm(v)`, `Math.LinearAlgebra.transpose(A)`, `Math.LinearAlgebra.matmul(A, B)`, `Math.LinearAlgebra.solve(A, b)`, `Math.LinearAlgebra.eig(A)`, `Math.LinearAlgebra.SVD(A)`, `Math.LinearAlgebra.LU(A)`, and `Math.LinearAlgebra.LDU(A)` are explicit simulated-namespace builtins for numeric mathematical vectors and matrices. See `Math.LinearAlgebra` above.
 
 ## Errors
 

@@ -161,6 +161,7 @@ def test_complex_linear_algebra_decompositions_are_explicitly_unsupported() -> N
     calls = [
         "Math.LinearAlgebra.solve(A, [1; 2]);",
         "Math.LinearAlgebra.eig(A);",
+        "Math.LinearAlgebra.SVD(A);",
         "Math.LinearAlgebra.rank(A);",
         "Math.LinearAlgebra.N(A);",
         "Math.LinearAlgebra.R(A);",

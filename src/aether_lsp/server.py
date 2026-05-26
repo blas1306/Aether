@@ -40,6 +40,7 @@ FALLBACK_BUILTIN_NAMES = {
     "ln",
     "log",
     "Math.LinearAlgebra.eig",
+    "Math.LinearAlgebra.SVD",
     "Math.LinearAlgebra.solve",
     "Math.mod",
     "plot",

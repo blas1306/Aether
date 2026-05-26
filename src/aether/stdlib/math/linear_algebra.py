@@ -27,6 +27,7 @@ CONJTRANSPOSE_NAME = "Math.LinearAlgebra.conjtranspose"
 MATMUL_NAME = "Math.LinearAlgebra.matmul"
 SOLVE_NAME = "Math.LinearAlgebra.solve"
 EIG_NAME = "Math.LinearAlgebra.eig"
+SVD_NAME = "Math.LinearAlgebra.SVD"
 LU_NAME = "Math.LinearAlgebra.LU"
 LDU_NAME = "Math.LinearAlgebra.LDU"
 ZEROS_NAME = "Math.LinearAlgebra.zeros"
@@ -50,6 +51,7 @@ def builtin_definitions() -> list[BuiltinDefinition]:
         BuiltinDefinition(MATMUL_NAME, _constant_runtime(matmul_builtin), _matmul_type, _exactly_two(MATMUL_NAME)),
         BuiltinDefinition(SOLVE_NAME, _constant_runtime(solve_builtin), _solve_type, _exactly_two(SOLVE_NAME)),
         BuiltinDefinition(EIG_NAME, _constant_runtime(eig_builtin), _eig_type, _exactly_one(EIG_NAME)),
+        BuiltinDefinition(SVD_NAME, _constant_runtime(svd_builtin), _svd_type, _exactly_one(SVD_NAME)),
         BuiltinDefinition(LU_NAME, _constant_runtime(lu_builtin), _lu_type, _exactly_one(LU_NAME)),
         BuiltinDefinition(LDU_NAME, _constant_runtime(ldu_builtin), _ldu_type, _exactly_one(LDU_NAME)),
         BuiltinDefinition(ZEROS_NAME, _constant_runtime(zeros_builtin), _matrix_factory_type(ZEROS_NAME), _exactly_two(ZEROS_NAME)),
@@ -260,6 +262,33 @@ def eig_builtin(args: list[AetherValue]) -> AetherValue:
     return AetherValue(TupleType((s_value.type_name, d_value.type_name)), (s_value, d_value))
 
 
+def svd_builtin(args: list[AetherValue]) -> AetherValue:
+    if len(args) != 1:
+        raise AetherTypeError(f"{SVD_NAME}(...) expects exactly one argument.")
+    _require_real_matrix_type(args[0].type_name, SVD_NAME)
+    rows, cols = _runtime_shape(args[0])
+    if rows == 0 or cols == 0:
+        raise AetherTypeError(f"{SVD_NAME}(...) does not accept an empty matrix.")
+
+    matrix = _matrix_to_float_array(args[0])
+    try:
+        u_matrix, singular_values, vh_matrix = scipy_linalg.svd(matrix, full_matrices=True)
+    except Exception as exc:
+        raise AetherTypeError(f"{SVD_NAME}(...) could not compute the decomposition: {exc}") from exc
+
+    sigma_matrix = np.zeros((rows, cols), dtype=float)
+    for index, singular_value in enumerate(singular_values):
+        sigma_matrix[index, index] = singular_value
+
+    u_value = _float_array_to_matrix_value(_clean_float_array(u_matrix))
+    sigma_value = _float_array_to_matrix_value(_clean_float_array(sigma_matrix))
+    v_value = _float_array_to_matrix_value(_clean_float_array(vh_matrix.T))
+    return AetherValue(
+        TupleType((u_value.type_name, sigma_value.type_name, v_value.type_name)),
+        (u_value, sigma_value, v_value),
+    )
+
+
 def lu_builtin(args: list[AetherValue]) -> AetherValue:
     if len(args) != 1:
         raise AetherTypeError(f"{LU_NAME}(...) expects exactly one argument.")
@@ -454,6 +483,22 @@ def _eig_type(arg_types: list[AetherType | None]) -> AetherType | None:
         (
             MatrixType("double", matrix_type.rows, matrix_type.cols),
             MatrixType("double", matrix_type.rows, matrix_type.cols),
+        )
+    )
+
+
+def _svd_type(arg_types: list[AetherType | None]) -> AetherType | None:
+    if len(arg_types) != 1:
+        raise AetherTypeError(f"{SVD_NAME}(...) expects exactly one argument.")
+    argument_type = arg_types[0]
+    if argument_type is None:
+        return None
+    matrix_type = _require_real_matrix_type(argument_type, SVD_NAME)
+    return TupleType(
+        (
+            MatrixType("double", matrix_type.rows, matrix_type.rows),
+            MatrixType("double", matrix_type.rows, matrix_type.cols),
+            MatrixType("double", matrix_type.cols, matrix_type.cols),
         )
     )
 
