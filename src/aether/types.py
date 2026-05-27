@@ -175,13 +175,57 @@ class TupleType:
         return hash(("Tuple", self.element_types))
 
 
-AetherType = str | ArrayType | MatrixType | VectorType | TransposeVectorType | RangeType | TupleType
+@dataclass(frozen=True, eq=False)
+class NullType:
+    def __str__(self) -> str:
+        return "null"
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, NullType)
+
+    def __hash__(self) -> int:
+        return hash("NullType")
+
+
+@dataclass(frozen=True, eq=False)
+class NullableType:
+    base_type: "AetherType"
+
+    def __post_init__(self) -> None:
+        if isinstance(self.base_type, (NullableType, NullType)):
+            raise AetherTypeError("Nullable types require a non-null base type.")
+        if isinstance(self.base_type, str):
+            if self.base_type == "void":
+                raise AetherTypeError("'void' cannot be nullable.")
+            return
+        if not is_known_type(self.base_type):
+            raise AetherTypeError(f"Unknown nullable base type '{type_to_string(self.base_type)}'.")
+
+    def __str__(self) -> str:
+        return f"{type_to_string(self.base_type)}?"
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, NullableType) and self.base_type == other.base_type
+
+    def __hash__(self) -> int:
+        return hash(("Nullable", self.base_type))
+
+
+AetherType = str | ArrayType | MatrixType | VectorType | TransposeVectorType | RangeType | TupleType | NullType | NullableType
+NULL_TYPE = NullType()
 
 
 @dataclass(frozen=True)
 class AetherValue:
     type_name: AetherType
     value: Any
+
+
+@dataclass
+class StructInstance:
+    type_name: str
+    fields: dict[str, AetherValue]
+    field_order: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -229,6 +273,10 @@ def type_to_string(type_name: AetherType) -> str:
 
 
 def is_known_type(type_name: AetherType) -> bool:
+    if isinstance(type_name, NullableType):
+        return is_known_type(type_name.base_type)
+    if isinstance(type_name, NullType):
+        return True
     if isinstance(type_name, ArrayType):
         return is_known_type(type_name.element_type)
     if isinstance(type_name, TupleType):
@@ -274,6 +322,10 @@ def is_indexable_type(type_name: AetherType) -> bool:
 
 def shape_dimensions(value: AetherValue) -> list[int]:
     type_name = value.type_name
+    if isinstance(type_name, NullableType):
+        if value.value is None:
+            raise AetherTypeError(f"size(...) is not defined for null '{type_to_string(type_name)}'.")
+        return shape_dimensions(AetherValue(type_name.base_type, value.value))
     if isinstance(type_name, VectorType):
         return [len(value.value)]
     if isinstance(type_name, TransposeVectorType):
@@ -290,6 +342,8 @@ def shape_dimensions(value: AetherValue) -> list[int]:
 
 
 def shape_dimension_count(type_name: AetherType) -> int:
+    if isinstance(type_name, NullableType):
+        return shape_dimension_count(type_name.base_type)
     if isinstance(type_name, VectorType):
         return 1
     if isinstance(type_name, (MatrixType, TransposeVectorType)):
@@ -322,6 +376,14 @@ def matrix_row_type(type_name: AetherType) -> ArrayType:
 
 
 def can_implicitly_convert(from_type: AetherType, to_type: AetherType) -> bool:
+    if isinstance(to_type, NullableType):
+        if isinstance(from_type, NullType):
+            return True
+        if isinstance(from_type, NullableType):
+            return can_implicitly_convert(from_type.base_type, to_type.base_type)
+        return can_implicitly_convert(from_type, to_type.base_type)
+    if isinstance(from_type, (NullType, NullableType)):
+        return from_type == to_type
     if isinstance(from_type, TupleType) or isinstance(to_type, TupleType):
         if not isinstance(from_type, TupleType) or not isinstance(to_type, TupleType):
             return False
@@ -371,10 +433,28 @@ def can_implicitly_convert(from_type: AetherType, to_type: AetherType) -> bool:
 
 
 def coerce_implicit(value: AetherValue, target_type: AetherType) -> AetherValue:
-    if not is_known_type(target_type):
-        raise AetherTypeError(f"Unknown type '{type_to_string(target_type)}'.")
     if value.type_name == target_type:
         return value
+    if not is_known_type(target_type):
+        raise AetherTypeError(f"Unknown type '{type_to_string(target_type)}'.")
+    if isinstance(target_type, NullableType):
+        if isinstance(value.type_name, NullType):
+            return AetherValue(target_type, None)
+        if isinstance(value.type_name, NullableType):
+            if value.value is None:
+                return AetherValue(target_type, None)
+            value = AetherValue(value.type_name.base_type, value.value)
+        coerced = coerce_implicit(value, target_type.base_type)
+        return AetherValue(target_type, coerced.value)
+    if isinstance(value.type_name, NullType):
+        raise AetherTypeError(
+            f"Cannot implicitly convert 'null' to '{type_to_string(target_type)}'. "
+            f"Use {type_to_string(target_type)}? for nullable values."
+        )
+    if isinstance(value.type_name, NullableType):
+        raise AetherTypeError(
+            f"Cannot implicitly convert '{type_to_string(value.type_name)}' to '{type_to_string(target_type)}'."
+        )
     if isinstance(target_type, TupleType):
         return coerce_tuple_value(value, target_type)
     if isinstance(target_type, VectorType):

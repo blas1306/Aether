@@ -1,0 +1,5 @@
+Matrix<double> A = [3 2; 1 0; 0 0];
+
+m, n = size(A);
+
+println("m = $m$, n = $n$");

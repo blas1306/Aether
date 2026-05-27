@@ -1,9 +1,13 @@
 from __future__ import annotations
 
-from .types import AetherRange, AetherValue, ArrayType, MatrixType, RangeType, TransposeVectorType, TupleType, VectorType
+from .types import AetherRange, AetherValue, ArrayType, MatrixType, NullableType, RangeType, StructInstance, TransposeVectorType, TupleType, VectorType
 
 
 def format_value(value: AetherValue) -> str:
+    if isinstance(value.type_name, NullableType):
+        if value.value is None:
+            return "null"
+        return format_value(AetherValue(value.type_name.base_type, value.value))
     if isinstance(value.type_name, VectorType):
         return format_vector(value)
     if isinstance(value.type_name, TransposeVectorType):
@@ -16,6 +20,8 @@ def format_value(value: AetherValue) -> str:
         return format_range(value)
     if isinstance(value.type_name, TupleType):
         return format_tuple(value)
+    if isinstance(value.value, StructInstance):
+        return format_struct(value.value)
     return format_scalar(value)
 
 
@@ -56,7 +62,17 @@ def format_range(value: AetherValue) -> str:
     return f"{range_value.start}:{range_value.step}:{range_value.end}"
 
 
+def format_struct(value: StructInstance) -> str:
+    fields = ", ".join(
+        f"{name}={format_value(value.fields[name])}"
+        for name in value.field_order
+    )
+    return f"{value.type_name}({fields})"
+
+
 def format_scalar(value: AetherValue) -> str:
+    if value.value is None:
+        return "null"
     if value.type_name == "boolean":
         return "true" if value.value else "false"
     if value.type_name == "complex":

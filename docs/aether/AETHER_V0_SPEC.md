@@ -64,6 +64,8 @@ Aether supports inference for assignments without explicit type annotations.
 float x = 5.2;
 ```
 
+`null` has no inferred variable type. A declaration or assignment like `x = null;` is an error because Aether cannot infer the intended nullable base type.
+
 ## Declarations and Assignments
 
 Explicit declarations:
@@ -85,6 +87,394 @@ A variable has a fixed type after it is created. This is true for both explicitl
 x = 5;
 x = "hola"; // error
 ```
+
+## Null and Nullable Types
+
+`null` is a special literal that belongs only to explicitly nullable types. It is not a member of every reference-like type.
+
+A nullable type is written by adding `?` to the base type:
+
+```aether
+string? name = null;
+int? maybeN = null;
+double? maybeX = null;
+Vector<double>? maybeV = null;
+Matrix<double>? maybeA = null;
+```
+
+Rules:
+
+- `null` can be assigned to `T?`.
+- A value of type `T` can be assigned to `T?`.
+- `null` cannot be assigned to non-nullable `T`.
+- `x = null;` without an explicit type is an error.
+- A variable inferred as non-nullable remains non-nullable.
+- `T?` is not automatically treated as `T`.
+
+```aether
+string? name = "Aether";
+name = null;
+name = "Aether";
+
+string title = null; // error
+x = null;            // error
+```
+
+Comparisons with `null` are supported:
+
+```aether
+string? name = null;
+
+if name == null {
+    println("empty");
+}
+```
+
+`print(...)` and `println(...)` render null values as `null`.
+
+Current limitation: v0 does not perform smart casts or null narrowing yet. Inside `if name != null { ... }`, `name` still has type `string?`.
+
+## Constants
+
+`const` declares a variable whose name cannot be reassigned after initialization:
+
+```aether
+const int maxIter = 100;
+const double tol = 1e-8;
+const name = "Aether";
+```
+
+`const` can be used with an explicit type or with local inference. Inferred constants use the same rules as inferred variables:
+
+```aether
+const n = 10; // n is int
+```
+
+In Aether v0, `const` prevents direct reassignment of the identifier:
+
+```aether
+const int n = 3;
+n = 4; // error: Cannot assign to constant 'n'
+n += 1; // error: Cannot assign to constant 'n'
+```
+
+This is not deep immutability yet. If a matrix or vector value can be mutated through element assignment today, `const` does not freeze its contents in v0.
+
+## Type Aliases
+
+`alias` declares a type synonym:
+
+```aether
+alias Real = double;
+alias Index = int;
+
+Real x = 2.5;
+double y = x; // valid: Real is not a nominal type
+```
+
+Aliases are compile-time type information and do not exist as runtime values. An alias must resolve to an existing type:
+
+```aether
+alias Real = double;
+alias Scalar = Real;
+alias RealVector = Vector<double>;
+```
+
+Alias chains are resolved transitively. Cycles are errors:
+
+```aether
+alias A = B;
+alias B = A; // error: Cyclic type alias involving 'A'
+
+alias Self = Self; // error
+```
+
+`Matrix<T>` and `Vector<T>` aliases work for the existing primitive element types supported by Aether v0. Full generic type parameters are still reserved for a future version.
+
+Invalid targets, duplicate alias names, and collisions with values/functions in the same scope are errors:
+
+```aether
+alias Foo = DoesNotExist; // error
+alias Real = double;
+alias Real = int;         // error
+int Real = 3;             // error
+```
+
+## Structs
+
+Aether v0 supports a minimal data-only `struct` form. A struct is a nominal type with an explicit list of typed fields, an automatic positional constructor, and field access with `.`.
+
+```aether
+public struct Point {
+    double x;
+    double y;
+}
+
+Point p = Point(1.0, 2.0);
+println(p.x);
+println(p.y);
+```
+
+Struct declarations are top-level only in this version. They may use `public` or `private` in the same way as other top-level declarations:
+
+```aether
+private struct InternalData {
+    int n;
+}
+```
+
+Fields must have explicit types and unique names:
+
+```aether
+struct Point {
+    double x;
+    double y;
+}
+```
+
+Field-level `public`, `private`, and `const` are not supported yet. Methods, nested declarations, custom constructors, and constructor overloads are also not supported inside structs.
+
+The automatic constructor is positional and checks the declared field types:
+
+```aether
+Point p = Point(1.0, 2.0); // valid
+Point q = Point(1.0);      // error: wrong argument count
+Point r = Point("x", 2.0); // error: incompatible field type
+```
+
+Local inference works with struct constructor calls:
+
+```aether
+p = Point(1.0, 2.0);
+println(p.x);
+```
+
+Struct aliases are type aliases. An alias can be used both as the annotated type and as the constructor name:
+
+```aether
+struct Point {
+    double x;
+    double y;
+}
+
+alias P = Point;
+P p = P(1.0, 2.0);
+```
+
+Struct fields may use existing aliases:
+
+```aether
+alias Real = double;
+
+struct Point {
+    Real x;
+    Real y;
+}
+```
+
+Structs may contain fields whose type is another visible struct:
+
+```aether
+struct Point {
+    double x;
+    double y;
+}
+
+struct Segment {
+    Point a;
+    Point b;
+}
+
+Segment s = Segment(Point(0.0, 0.0), Point(1.0, 1.0));
+println(s.a.x);
+println(s.b.y);
+```
+
+Struct values can be passed to and returned from functions:
+
+```aether
+Point origin() {
+    return Point(0.0, 0.0);
+}
+
+Point shift(Point p, double dx, double dy) {
+    return Point(p.x + dx, p.y + dy);
+}
+```
+
+Field reads are typechecked. Accessing a missing field or using field access on a non-struct value is an error:
+
+```aether
+println(p.z); // error
+
+int x = 3;
+println(x.y); // error
+```
+
+Field assignment is supported for this shallow data model:
+
+```aether
+Point p = Point(1.0, 2.0);
+p.x = 3.0;
+println(p.x); // 3.0
+```
+
+The assignment target must start from a variable or another field rooted in a variable. Assignment to a field on a temporary value is not supported:
+
+```aether
+Point(1.0, 2.0).x = 5.0; // error
+```
+
+This follows the current shallow `const` rule. A `const` binding prevents rebinding the variable name, but it does not deep-freeze the fields of the struct value yet.
+
+Structural equality is not implemented yet. Comparing structs with `==` or `!=` is an error in v0:
+
+```aether
+println(Point(1.0, 2.0) == Point(1.0, 2.0)); // error
+```
+
+`print(...)` and `println(...)` render structs with field names:
+
+```aether
+println(Point(1.0, 2.0)); // Point(x=1.0, y=2.0)
+```
+
+Packaged files export only public structs:
+
+```aether
+package Geometry;
+
+public struct Point {
+    double x;
+    double y;
+}
+
+private struct Hidden {
+    int value;
+}
+```
+
+```aether
+import Geometry;
+
+Point p = Point(1.0, 2.0); // valid
+Hidden h = Hidden(3);      // error: Hidden is private
+```
+
+A public struct cannot expose a private local type in one of its fields:
+
+```aether
+package Geometry;
+
+private struct Internal {
+    int x;
+}
+
+public struct Wrapper {
+    Internal value; // error
+}
+```
+
+Current struct limitations:
+
+- No methods inside structs.
+- No custom constructors or overloaded constructors.
+- No field visibility.
+- No new generic struct parameters.
+- No inheritance, interfaces, traits, or protocols.
+- No destructuring or pattern matching for structs.
+- No operator overloading for structs.
+- No structural equality for structs.
+- No deep `const`.
+- Struct lowering to IR/JIT is not implemented.
+
+## Visibility Modifiers
+
+Top-level declarations may be prefixed with `public` or `private`:
+
+```aether
+public int inc(int x) {
+    return x + 1;
+}
+
+private const int internalLimit = 100;
+public alias Real = double;
+```
+
+The accepted order in v0 is:
+
+- `public` or `private`
+- optional `const` for variable declarations
+- the declaration itself
+
+`public private` and repeated visibility modifiers are errors.
+
+Visibility is recorded in the AST and symbol metadata. Inside a single file, `public` and `private` do not restrict access between declarations. Across file imports, packaged files export only `public` declarations.
+
+In files with a `package` declaration, top-level declarations without a visibility modifier are private by default. In scripts without `package`, existing script behavior is preserved and unmodified top-level declarations are available to legacy file imports.
+
+## Packages and File Imports
+
+Aether v0 supports a first incremental multi-file module model without requiring declarations to live inside a class.
+
+```aether
+package Math.LinearAlgebra;
+
+public double norm(Vector<double> v) {
+    return 0.0;
+}
+
+private double helper(Vector<double> v) {
+    return 1.0;
+}
+```
+
+`package` is a top-level declaration. If present, it must be the first non-comment declaration in the file, before imports and normal declarations. A file may declare at most one package. The package name is stored as a dotted logical path such as `Math.LinearAlgebra`.
+
+Another file can import the package:
+
+```aether
+import Math.LinearAlgebra;
+
+println(norm([1; 2; 3]));
+```
+
+The initial file mapping is intentionally simple:
+
+```text
+Math.LinearAlgebra -> Math/LinearAlgebra.ae
+Config             -> Config.ae
+```
+
+Resolution is relative to the active source root. When running a saved file from the editor/runtime, the source root is the file's containing directory. Direct `run_aether(...)` calls can pass an explicit `source_root`; otherwise the current working directory is used to preserve existing script-import behavior.
+
+For packaged files, only `public` top-level variables/constants, aliases, structs, and functions are exported to importers:
+
+```aether
+package Math.Types;
+
+public alias Real = double;
+public const int DEFAULT_ITER = 100;
+```
+
+```aether
+import Math.Types;
+
+Real x = 2.5;
+println(DEFAULT_ITER);
+```
+
+`private` declarations and declarations without a modifier remain usable inside their own file but are not visible through imports. Attempting to use a private imported name is a type error. File imports also reject missing modules, import cycles, collisions with local symbols, and collisions between two imported modules exporting the same unqualified name.
+
+Builtin namespaces remain separate from file modules. A builtin import such as `import Math.LinearAlgebra` continues to expose the registered stdlib aliases. If a builtin namespace and a file module have the same name, the builtin namespace is preferred in this version.
+
+Current package/import limitations:
+
+- A package maps to one `.ae` file; multi-file packages are not implemented yet.
+- Specific imports, import aliases such as `import X as Y`, and explicit wildcards are not implemented yet.
+- Cyclic imports are rejected.
+- `private` is enforced across imports only; declarations in the same file can still use each other.
+- Classes, interfaces, exceptions, and package-level class visibility are outside this version.
 
 ## Implicit Conversions
 
@@ -649,6 +1039,30 @@ while x < 10 {
 }
 ```
 
+`break` and `continue` are supported inside `for` and `while` loops:
+
+```aether
+for i in 1:10 {
+    if i == 5 {
+        break;
+    }
+    println(i);
+}
+
+while true {
+    continue;
+}
+```
+
+`break` exits only the innermost loop. `continue` advances only the innermost loop. Using either statement outside a loop is an `AetherTypeError`:
+
+```aether
+break;    // error: break used outside of a loop.
+continue; // error: continue used outside of a loop.
+```
+
+Labeled breaks and labeled loops are not part of v0.
+
 Conditions must be `boolean`. Numeric and string values are not accepted as conditions.
 
 ```aether
@@ -849,8 +1263,8 @@ The following are intentionally not implemented in Aether v0:
 - slicing
 - broadcasting
 - comprehensions
-- imports
-- modules/packages
+- multi-file packages
+- import aliases and specific imports
 - JIT
 - Rust core
 - full LSP feature set

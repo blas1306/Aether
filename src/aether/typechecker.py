@@ -6,17 +6,21 @@ from pathlib import Path
 from . import ast
 from .errors import AetherRuntimeError, AetherTypeError
 from .lexer import lex
+from .modules import is_public_export, private_top_level_names, resolve_file_module_path
 from .parser import Parser
 from .scope import Scope
-from .symbols import FunctionSymbol, VariableSymbol
+from .symbols import FunctionSymbol, StructSymbol, VariableSymbol
 from .stdlib import infer_builtin_type, is_builtin, is_builtin_namespace, validate_builtin_arity
 from .stdlib.registry import builtin_aliases_for_import
+from .tokens import AETHER_TYPES, PRIMITIVE_TYPES
 from .types import (
     AetherType,
     ArrayType,
     MatrixType,
     NUMERIC_TYPES,
     REAL_NUMERIC_TYPES,
+    NullType,
+    NullableType,
     RangeType,
     TupleType,
     TransposeVectorType,
@@ -37,23 +41,102 @@ UNKNOWN_TYPE: AetherType | None = None
 LINEAR_ALGEBRA_MODULE = "Math.LinearAlgebra"
 LINEAR_ALGEBRA_SOLVE = "Math.LinearAlgebra.solve"
 LINEAR_ALGEBRA_CONJTRANSPOSE = "Math.LinearAlgebra.conjtranspose"
-INPUT_TARGET_TYPES = {"int", "float", "string", "boolean"}
+SCALAR_INPUT_TARGET_TYPES = {"int", "float", "string", "boolean"}
 
 
 class TypeChecker:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        source_root: str | Path | None = None,
+        import_stack: tuple[str, ...] = (),
+    ) -> None:
         self.global_scope: Scope[VariableSymbol] = Scope()
         self.functions: dict[str, FunctionSymbol] = {}
+        self.structs: dict[str, StructSymbol] = {}
         self.expression_functions: dict[str, ast.ExpressionFunctionDeclaration] = {}
         self.expression_function_call_stack: set[str] = set()
         self.current_return_type: AetherType | None = None
         self.current_function_name: str | None = None
+        self.loop_depth = 0
         self.loop_variable_stack: list[tuple[str, Scope[VariableSymbol]]] = []
         self.imported_modules: set[str] = set()
         self.builtin_aliases: dict[str, str] = {}
+        self.type_aliases: dict[str, AetherType] = {}
+        self.source_root = Path(source_root).expanduser().resolve() if source_root is not None else Path.cwd()
+        self.import_stack = import_stack
+        self.imported_symbol_origins: dict[str, str] = {}
+        self.private_imported_symbols: dict[str, set[str]] = {}
 
     def check(self, program: ast.Program) -> None:
+        self._declare_struct_headers(program.statements)
+        self._declare_type_aliases(program.statements)
+        self._define_struct_fields(program.statements, program.package_name)
         self._check_statements(program.statements, self.global_scope)
+        self._validate_type_aliases()
+
+    def _declare_struct_headers(self, statements: list[ast.Statement]) -> None:
+        for statement in statements:
+            if not isinstance(statement, ast.StructDeclaration):
+                continue
+            if statement.name in AETHER_TYPES or statement.name in self.type_aliases:
+                raise AetherTypeError(
+                    f"Struct '{statement.name}' conflicts with an existing type.",
+                    line=statement.line,
+                    column=statement.column,
+                )
+            if statement.name in self.structs:
+                raise AetherTypeError(
+                    f"Struct '{statement.name}' is already defined.",
+                    line=statement.line,
+                    column=statement.column,
+                )
+            if statement.name in self.functions:
+                raise AetherTypeError(
+                    f"Name '{statement.name}' is already defined as a function.",
+                    line=statement.line,
+                    column=statement.column,
+                )
+            if self.global_scope.lookup(statement.name) is not None:
+                raise AetherTypeError(
+                    f"Name '{statement.name}' is already defined as a variable.",
+                    line=statement.line,
+                    column=statement.column,
+                )
+            self.structs[statement.name] = StructSymbol(statement.name, (), statement.visibility)
+
+    def _declare_type_aliases(self, statements: list[ast.Statement]) -> None:
+        for statement in statements:
+            if isinstance(statement, ast.AliasDeclaration):
+                self._declare_alias(statement, self.global_scope)
+
+    def _define_struct_fields(self, statements: list[ast.Statement], package_name: str | None) -> None:
+        private_names = _private_type_names(statements, package_name)
+        for statement in statements:
+            if not isinstance(statement, ast.StructDeclaration):
+                continue
+            fields = tuple(
+                VariableSymbol(field.name, self._resolve_type_aliases(field.type_name, field))
+                for field in statement.fields
+            )
+            if is_public_export(statement.visibility, package_name):
+                for field in statement.fields:
+                    if _type_uses_private_name(field.type_name, private_names):
+                        raise AetherTypeError(
+                            f"Public struct '{statement.name}' cannot expose private field type "
+                            f"'{_first_private_type_name(field.type_name, private_names)}'.",
+                            line=field.line,
+                            column=field.column,
+                        )
+                for field_symbol in fields:
+                    private_struct = self._private_struct_type_name(field_symbol.type_name, package_name)
+                    if private_struct is not None:
+                        raise AetherTypeError(
+                            f"Public struct '{statement.name}' cannot expose private field type '{private_struct}'.",
+                            line=statement.line,
+                            column=statement.column,
+                        )
+            self.structs[statement.name] = StructSymbol(statement.name, fields, statement.visibility)
 
     def _check_statements(self, statements: list[ast.Statement], scope: Scope[VariableSymbol]) -> None:
         for statement in statements:
@@ -62,6 +145,13 @@ class TypeChecker:
     def _check_statement(self, statement: ast.Statement, scope: Scope[VariableSymbol]) -> None:
         if isinstance(statement, ast.VarDeclaration):
             self._declare_variable(statement, scope)
+            return
+        if isinstance(statement, ast.AliasDeclaration):
+            if statement.name in self.type_aliases and self.type_aliases[statement.name] == statement.target_type:
+                return
+            self._declare_alias(statement, scope)
+            return
+        if isinstance(statement, ast.StructDeclaration):
             return
         if isinstance(statement, ast.Assignment):
             self._assign_variable(statement, scope)
@@ -75,6 +165,9 @@ class TypeChecker:
         if isinstance(statement, ast.MatrixIndexAssignment):
             self._assign_matrix_index(statement, scope)
             return
+        if isinstance(statement, ast.FieldAssignment):
+            self._assign_field(statement, scope)
+            return
         if isinstance(statement, ast.ExpressionStatement):
             self._expression_type(statement.expression, scope)
             return
@@ -86,7 +179,11 @@ class TypeChecker:
             return
         if isinstance(statement, ast.WhileStatement):
             self._require_condition_type(statement.condition, scope, "while")
-            self._check_statements(statement.body, Scope(parent=scope))
+            self.loop_depth += 1
+            try:
+                self._check_statements(statement.body, Scope(parent=scope))
+            finally:
+                self.loop_depth -= 1
             return
         if isinstance(statement, ast.ForInStatement):
             self._check_for_in(statement, scope)
@@ -103,6 +200,14 @@ class TypeChecker:
         if isinstance(statement, ast.ReturnStatement):
             self._check_return(statement, scope)
             return
+        if isinstance(statement, ast.BreakStatement):
+            if self.loop_depth == 0:
+                raise AetherTypeError("break used outside of a loop.", line=statement.line, column=statement.column)
+            return
+        if isinstance(statement, ast.ContinueStatement):
+            if self.loop_depth == 0:
+                raise AetherTypeError("continue used outside of a loop.", line=statement.line, column=statement.column)
+            return
         raise AetherRuntimeError(f"Unsupported statement {statement!r}.")
 
     def _check_import(self, module_name: str) -> None:
@@ -112,26 +217,181 @@ class TypeChecker:
             self.builtin_aliases.update(builtin_aliases_for_import(module_name))
             self.imported_modules.add(module_name)
             return
-        module_path = Path(module_name.replace(".", "/"))
-        if module_path.suffix == "":
-            module_path = module_path.with_suffix(".ae")
-        if not module_path.is_absolute():
-            module_path = Path.cwd() / module_path
+        if module_name in self.import_stack:
+            raise AetherTypeError(f"Cyclic import involving '{module_name}'.")
+        module_path = resolve_file_module_path(module_name, self.source_root)
         if not module_path.is_file():
             raise AetherTypeError(f"Module '{module_name}' not found.")
         source = module_path.read_text(encoding="utf-8")
         tokens = lex(source)
         program = Parser(tokens).parse()
-        module_checker = TypeChecker()
-        module_checker._check_statements(program.statements, module_checker.global_scope)
-        for name, symbol in module_checker.global_scope.symbols.items():
-            self.global_scope.define_local(name, symbol)
-        self.functions.update(module_checker.functions)
-        self.expression_functions.update(module_checker.expression_functions)
+        if program.package_name is not None and program.package_name != module_name:
+            raise AetherTypeError(
+                f"Module '{module_name}' declares package '{program.package_name}'."
+            )
+        module_checker = TypeChecker(
+            source_root=self.source_root,
+            import_stack=(*self.import_stack, module_name),
+        )
+        module_checker.check(program)
+        for name, modules in module_checker.private_imported_symbols.items():
+            self.private_imported_symbols.setdefault(name, set()).update(modules)
+        self._record_private_imports(module_name, program)
+        for name, symbol in self._exported_variables(program, module_checker).items():
+            self._ensure_import_available(name, module_name)
+            self.global_scope.define_local(name, symbol, is_const=symbol.is_const)
+            self.imported_symbol_origins[name] = module_name
+        for name, symbol in self._exported_functions(program, module_checker).items():
+            self._ensure_import_available(name, module_name)
+            self.functions[name] = symbol
+            self.imported_symbol_origins[name] = module_name
+        for name, declaration in self._exported_expression_functions(program, module_checker).items():
+            self.expression_functions[name] = declaration
+        for name, symbol in self._exported_structs(program, module_checker).items():
+            self._ensure_import_available(name, module_name)
+            self.structs[name] = symbol
+            self.imported_symbol_origins[name] = module_name
+        for name, target_type in self._exported_aliases(program, module_checker).items():
+            self._ensure_import_available(name, module_name)
+            self.type_aliases[name] = target_type
+            self.imported_symbol_origins[name] = module_name
         self.imported_modules.add(module_name)
 
+    def _ensure_import_available(self, name: str, module_name: str) -> None:
+        existing_origin = self.imported_symbol_origins.get(name)
+        if existing_origin is not None and existing_origin != module_name:
+            raise AetherTypeError(
+                f"Import collision for symbol '{name}' exported by both '{existing_origin}' and '{module_name}'."
+            )
+        if self.global_scope.lookup(name) is not None or name in self.functions or name in self.type_aliases or name in self.structs:
+            raise AetherTypeError(
+                f"Import collision: symbol '{name}' from module '{module_name}' conflicts with an existing symbol."
+            )
+
+    def _record_private_imports(self, module_name: str, program: ast.Program) -> None:
+        for name in private_top_level_names(program):
+            self.private_imported_symbols.setdefault(name, set()).add(module_name)
+
+    def _exported_variables(
+        self,
+        program: ast.Program,
+        module_checker: "TypeChecker",
+    ) -> dict[str, VariableSymbol]:
+        if program.package_name is None:
+            return dict(module_checker.global_scope.symbols)
+        exports: dict[str, VariableSymbol] = {}
+        for statement in program.statements:
+            if isinstance(statement, ast.VarDeclaration) and is_public_export(statement.visibility, program.package_name):
+                symbol = module_checker.global_scope.lookup(statement.name)
+                if symbol is not None:
+                    exports[statement.name] = symbol
+        return exports
+
+    def _exported_aliases(
+        self,
+        program: ast.Program,
+        module_checker: "TypeChecker",
+    ) -> dict[str, AetherType]:
+        if program.package_name is None:
+            return dict(module_checker.type_aliases)
+        exports: dict[str, AetherType] = {}
+        for statement in program.statements:
+            if isinstance(statement, ast.AliasDeclaration) and is_public_export(statement.visibility, program.package_name):
+                exports[statement.name] = module_checker.type_aliases[statement.name]
+        return exports
+
+    def _exported_functions(
+        self,
+        program: ast.Program,
+        module_checker: "TypeChecker",
+    ) -> dict[str, FunctionSymbol]:
+        if program.package_name is None:
+            return dict(module_checker.functions)
+        exports: dict[str, FunctionSymbol] = {}
+        for statement in program.statements:
+            if isinstance(statement, (ast.FunctionDeclaration, ast.ExpressionFunctionDeclaration)) and is_public_export(
+                statement.visibility,
+                program.package_name,
+            ):
+                exports[statement.name] = module_checker.functions[statement.name]
+        return exports
+
+    def _exported_structs(
+        self,
+        program: ast.Program,
+        module_checker: "TypeChecker",
+    ) -> dict[str, StructSymbol]:
+        if program.package_name is None:
+            return dict(module_checker.structs)
+        exports: dict[str, StructSymbol] = {}
+        for statement in program.statements:
+            if isinstance(statement, ast.StructDeclaration) and is_public_export(statement.visibility, program.package_name):
+                exports[statement.name] = module_checker.structs[statement.name]
+        return exports
+
+    def _exported_expression_functions(
+        self,
+        program: ast.Program,
+        module_checker: "TypeChecker",
+    ) -> dict[str, ast.ExpressionFunctionDeclaration]:
+        if program.package_name is None:
+            return dict(module_checker.expression_functions)
+        exports: dict[str, ast.ExpressionFunctionDeclaration] = {}
+        for statement in program.statements:
+            if isinstance(statement, ast.ExpressionFunctionDeclaration) and is_public_export(
+                statement.visibility,
+                program.package_name,
+            ):
+                exports[statement.name] = module_checker.expression_functions[statement.name]
+        return exports
+
+    def _private_import_message(self, name: str) -> str | None:
+        modules = self.private_imported_symbols.get(name)
+        if not modules:
+            return None
+        module_list = "', '".join(sorted(modules))
+        return f"Symbol '{name}' is private in imported module '{module_list}'."
+
+    def _declare_alias(self, statement: ast.AliasDeclaration, scope: Scope[VariableSymbol]) -> None:
+        if statement.name in AETHER_TYPES or statement.name in self.type_aliases or statement.name in self.structs:
+            raise AetherTypeError(
+                f"Type alias '{statement.name}' is already defined.",
+                line=statement.line,
+                column=statement.column,
+            )
+        if scope.lookup(statement.name) is not None or statement.name in self.functions:
+            raise AetherTypeError(
+                f"Name '{statement.name}' is already defined.",
+                line=statement.line,
+                column=statement.column,
+            )
+        self.type_aliases[statement.name] = statement.target_type
+
     def _declare_variable(self, statement: ast.VarDeclaration, scope: Scope[VariableSymbol]) -> None:
-        if _contains_void_type(statement.type_name):
+        if statement.name in self.type_aliases:
+            raise AetherTypeError(
+                f"Name '{statement.name}' is already defined as a type alias.",
+                line=statement.line,
+                column=statement.column,
+            )
+        if scope is self.global_scope and statement.name in self.structs:
+            raise AetherTypeError(
+                f"Name '{statement.name}' is already defined as a struct.",
+                line=statement.line,
+                column=statement.column,
+            )
+        if scope is self.global_scope and statement.name in self.functions:
+            raise AetherTypeError(
+                f"Name '{statement.name}' is already defined as a function.",
+                line=statement.line,
+                column=statement.column,
+            )
+        declared_type = (
+            self._resolve_type_aliases(statement.type_name, statement)
+            if statement.type_name is not None
+            else None
+        )
+        if _contains_void_type(declared_type):
             raise AetherTypeError(
                 "'void' cannot be used as a variable type.",
                 line=statement.line,
@@ -147,41 +407,62 @@ class TypeChecker:
                 and not statement.initializer.rows
             )
         ):
-            if not is_array_type(statement.type_name):
+            if declared_type is None or not is_array_type(declared_type):
                 raise AetherTypeError("Cannot infer type of empty matrix literal.")
             scope.define_local(
                 statement.name,
-                VariableSymbol(statement.name, statement.type_name),
+                VariableSymbol(statement.name, declared_type, statement.is_const, statement.visibility),
                 forbid_shadowing=True,
+                is_const=statement.is_const,
             )
             return
         if isinstance(statement.initializer, ast.InputCall):
-            self._input_call_type(statement.initializer, scope, statement.type_name)
+            if declared_type is None:
+                self._input_call_type(statement.initializer, scope, None)
+                return
+            self._input_call_type(statement.initializer, scope, declared_type)
             scope.define_local(
                 statement.name,
-                VariableSymbol(statement.name, statement.type_name),
+                VariableSymbol(statement.name, declared_type, statement.is_const, statement.visibility),
                 forbid_shadowing=True,
+                is_const=statement.is_const,
             )
             return
         value_type = self._expression_type(statement.initializer, scope)
         self._reject_void_value(value_type, "assignment", statement)
-        if value_type is not UNKNOWN_TYPE and not self._can_assign(
+        if declared_type is None and isinstance(value_type, NullType):
+            raise AetherTypeError(
+                "Cannot infer type from null. Use an explicit nullable type.",
+                line=statement.line,
+                column=statement.column,
+            )
+        target_type = declared_type if declared_type is not None else value_type
+        if target_type is UNKNOWN_TYPE:
+            return
+        if declared_type is not None and value_type is not UNKNOWN_TYPE and not self._can_assign(
             value_type,
-            statement.type_name,
+            target_type,
             initializer=statement.initializer,
             scope=scope,
         ):
-            self._raise_implicit_conversion_error(value_type, statement.type_name, statement)
+            self._raise_implicit_conversion_error(value_type, target_type, statement)
         scope.define_local(
             statement.name,
-            VariableSymbol(statement.name, statement.type_name),
+            VariableSymbol(statement.name, target_type, statement.is_const, statement.visibility),
             forbid_shadowing=True,
+            is_const=statement.is_const,
         )
 
     def _assign_variable(self, statement: ast.Assignment, scope: Scope[VariableSymbol]) -> None:
         if self._is_active_loop_variable_assignment(statement.name, scope):
             raise AetherTypeError(f"Cannot assign to loop variable '{statement.name}' inside its own for-loop.")
         existing = scope.lookup(statement.name)
+        if existing is not None and existing.is_const:
+            raise AetherTypeError(
+                f"Cannot assign to constant '{statement.name}'.",
+                line=statement.line,
+                column=statement.column,
+            )
         if (
             (
                 isinstance(statement.expression, ast.ArrayLiteral)
@@ -206,6 +487,24 @@ class TypeChecker:
         value_type = self._expression_type(statement.expression, scope)
         self._reject_void_value(value_type, "assignment", statement)
         if existing is None:
+            if statement.name in self.type_aliases:
+                raise AetherTypeError(
+                    f"Name '{statement.name}' is already defined as a type alias.",
+                    line=statement.line,
+                    column=statement.column,
+                )
+            if scope is self.global_scope and statement.name in self.structs:
+                raise AetherTypeError(
+                    f"Name '{statement.name}' is already defined as a struct.",
+                    line=statement.line,
+                    column=statement.column,
+                )
+            if isinstance(value_type, NullType):
+                raise AetherTypeError(
+                    "Cannot infer type from null. Use an explicit nullable type.",
+                    line=statement.line,
+                    column=statement.column,
+                )
             if value_type is not UNKNOWN_TYPE:
                 scope.define_local(statement.name, VariableSymbol(statement.name, value_type))
             return
@@ -260,6 +559,12 @@ class TypeChecker:
             if self._is_active_loop_variable_assignment(name, scope):
                 raise AetherTypeError(f"Cannot assign to loop variable '{name}' inside its own for-loop.")
             existing = scope.lookup(name)
+            if existing is not None and existing.is_const:
+                raise AetherTypeError(
+                    f"Cannot assign to constant '{name}'.",
+                    line=statement.line,
+                    column=statement.column,
+                )
             if existing is None:
                 scope.define_local(name, VariableSymbol(name, element_type))
                 continue
@@ -323,6 +628,18 @@ class TypeChecker:
         if not can_implicitly_convert(value_type, matrix_type.element_type):
             self._raise_implicit_conversion_error(value_type, matrix_type.element_type, statement)
 
+    def _assign_field(self, statement: ast.FieldAssignment, scope: Scope[VariableSymbol]) -> None:
+        assigned_name = _assignment_root_name(statement.target)
+        if assigned_name is not None and self._is_active_loop_variable_assignment(assigned_name, scope):
+            raise AetherTypeError(f"Cannot assign to loop variable '{assigned_name}' inside its own for-loop.")
+        struct_type = self._expression_type(statement.target, scope)
+        value_type = self._expression_type(statement.expression, scope)
+        if struct_type is UNKNOWN_TYPE or value_type is UNKNOWN_TYPE:
+            return
+        field_type = self._field_type(struct_type, statement.field_name, statement)
+        if not can_implicitly_convert(value_type, field_type):
+            self._raise_implicit_conversion_error(value_type, field_type, statement)
+
     def _check_for_in(self, statement: ast.ForInStatement, scope: Scope[VariableSymbol]) -> None:
         iterable_type = self._expression_type(statement.iterable, scope)
         if iterable_type is UNKNOWN_TYPE:
@@ -337,9 +654,11 @@ class TypeChecker:
             forbid_shadowing=True,
         )
         self.loop_variable_stack.append((statement.variable, loop_scope))
+        self.loop_depth += 1
         try:
             self._check_statements(statement.body, loop_scope)
         finally:
+            self.loop_depth -= 1
             self.loop_variable_stack.pop()
 
     def _is_active_loop_variable_assignment(self, name: str, scope: Scope[VariableSymbol]) -> bool:
@@ -349,31 +668,48 @@ class TypeChecker:
     def _declare_function(self, statement: ast.FunctionDeclaration) -> None:
         if statement.name in self.functions:
             raise AetherTypeError(f"Function '{statement.name}' is already defined.")
-        for parameter in statement.parameters:
+        if statement.name in self.type_aliases:
+            raise AetherTypeError(f"Name '{statement.name}' is already defined as a type alias.")
+        if statement.name in self.structs:
+            raise AetherTypeError(f"Name '{statement.name}' is already defined as a struct.")
+        if self.global_scope.lookup(statement.name) is not None:
+            raise AetherTypeError(f"Name '{statement.name}' is already defined as a variable.")
+        return_type = self._resolve_type_aliases(statement.return_type, statement)
+        resolved_parameters = [
+            ast.Parameter(self._resolve_type_aliases(parameter.type_name), parameter.name)
+            for parameter in statement.parameters
+        ]
+        for parameter in resolved_parameters:
             if _contains_void_type(parameter.type_name):
                 raise AetherTypeError(f"Parameter '{parameter.name}' cannot have type void.")
-        parameters = tuple(VariableSymbol(parameter.name, parameter.type_name) for parameter in statement.parameters)
-        self.functions[statement.name] = FunctionSymbol(statement.name, statement.return_type, parameters)
+        parameters = tuple(VariableSymbol(parameter.name, parameter.type_name) for parameter in resolved_parameters)
+        self.functions[statement.name] = FunctionSymbol(statement.name, return_type, parameters, statement.visibility)
         function_scope: Scope[VariableSymbol] = Scope(parent=self.global_scope)
         for parameter in parameters:
             function_scope.define_local(parameter.name, parameter)
         previous_return_type = self.current_return_type
         previous_function_name = self.current_function_name
-        self.current_return_type = statement.return_type
+        self.current_return_type = return_type
         self.current_function_name = statement.name
         try:
             self._check_statements(statement.body, function_scope)
         finally:
             self.current_return_type = previous_return_type
             self.current_function_name = previous_function_name
-        if statement.return_type != "void" and not self._statements_always_return(statement.body):
+        if return_type != "void" and not self._statements_always_return(statement.body):
             raise AetherTypeError(f"Function '{statement.name}' may not return a value on all paths.")
 
     def _declare_expression_function(self, statement: ast.ExpressionFunctionDeclaration) -> None:
         if statement.name in self.functions:
             raise AetherTypeError(f"Function '{statement.name}' is already defined.")
+        if statement.name in self.type_aliases:
+            raise AetherTypeError(f"Name '{statement.name}' is already defined as a type alias.")
+        if statement.name in self.structs:
+            raise AetherTypeError(f"Name '{statement.name}' is already defined as a struct.")
+        if self.global_scope.lookup(statement.name) is not None:
+            raise AetherTypeError(f"Name '{statement.name}' is already defined as a variable.")
         parameters = tuple(VariableSymbol(parameter.name, UNKNOWN_TYPE) for parameter in statement.parameters)
-        self.functions[statement.name] = FunctionSymbol(statement.name, UNKNOWN_TYPE, parameters)
+        self.functions[statement.name] = FunctionSymbol(statement.name, UNKNOWN_TYPE, parameters, statement.visibility)
         self.expression_functions[statement.name] = statement
         function_scope: Scope[VariableSymbol] = Scope(parent=self.global_scope)
         for parameter in parameters:
@@ -440,6 +776,9 @@ class TypeChecker:
         if isinstance(expression, ast.Identifier):
             symbol = scope.lookup(expression.name)
             if symbol is None:
+                private_message = self._private_import_message(expression.name)
+                if private_message is not None:
+                    raise AetherTypeError(private_message)
                 raise AetherTypeError(f"Undefined variable '{expression.name}'.")
             return symbol.type_name
         if isinstance(expression, ast.UnaryExpression):
@@ -486,6 +825,11 @@ class TypeChecker:
             return self._index_type(expression, scope)
         if isinstance(expression, ast.MatrixIndexExpression):
             return self._matrix_index_type(expression, scope)
+        if isinstance(expression, ast.FieldAccess):
+            target_type = self._expression_type(expression.target, scope)
+            if target_type is UNKNOWN_TYPE:
+                return UNKNOWN_TYPE
+            return self._field_type(target_type, expression.field_name, expression)
         raise AetherRuntimeError(f"Unsupported expression {expression!r}.")
 
     def _binary_type(self, expression: ast.BinaryExpression, scope: Scope[VariableSymbol]) -> AetherType | None:
@@ -544,6 +888,8 @@ class TypeChecker:
                 )
             return infer_builtin_type(LINEAR_ALGEBRA_SOLVE, [left_type, right_type])
         if operator in {"==", "!="}:
+            if self._type_mentions_struct(left_type) or self._type_mentions_struct(right_type):
+                raise AetherTypeError("Struct equality is not supported yet.")
             if not _types_comparable_for_equality(left_type, right_type):
                 raise AetherTypeError(
                     f"Cannot compare '{type_to_string(left_type)}' and '{type_to_string(right_type)}' "
@@ -690,8 +1036,15 @@ class TypeChecker:
             return infer_builtin_type(builtin_name, argument_types)
         if expression.keyword_arguments:
             raise AetherTypeError(f"Function '{expression.callee}' does not accept keyword arguments.")
+        struct = self._constructor_struct(expression.callee)
+        if struct is not None:
+            self._check_struct_constructor(expression, struct, scope)
+            return struct.name
         function = self.functions.get(expression.callee)
         if function is None:
+            private_message = self._private_import_message(expression.callee)
+            if private_message is not None:
+                raise AetherTypeError(private_message)
             raise AetherTypeError(f"Undefined function '{expression.callee}'.")
         if len(expression.arguments) != len(function.parameters):
             raise AetherTypeError(
@@ -712,6 +1065,58 @@ class TypeChecker:
             if argument_type is not UNKNOWN_TYPE and not can_implicitly_convert(argument_type, parameter.type_name):
                 self._raise_implicit_conversion_error(argument_type, parameter.type_name)
         return function.return_type
+
+    def _constructor_struct(self, callee: str) -> StructSymbol | None:
+        try:
+            resolved = self._resolve_type_aliases(callee)
+        except AetherTypeError:
+            return None
+        if not isinstance(resolved, str):
+            return None
+        return self.structs.get(resolved)
+
+    def _check_struct_constructor(
+        self,
+        expression: ast.CallExpression,
+        struct: StructSymbol,
+        scope: Scope[VariableSymbol],
+    ) -> None:
+        if len(expression.arguments) != len(struct.fields):
+            raise AetherTypeError(
+                f"Struct '{struct.name}' constructor expects {len(struct.fields)} arguments "
+                f"but got {len(expression.arguments)}."
+            )
+        for argument, field in zip(expression.arguments, struct.fields):
+            argument_type = self._expression_type(argument, scope)
+            self._reject_void_value(argument_type, f"argument for field '{field.name}'")
+            if argument_type is not UNKNOWN_TYPE and not can_implicitly_convert(argument_type, field.type_name):
+                raise AetherTypeError(
+                    f"Cannot initialize field '{field.name}' of struct '{struct.name}': "
+                    f"Cannot implicitly convert '{type_to_string(argument_type)}' to '{type_to_string(field.type_name)}'."
+                )
+
+    def _field_type(
+        self,
+        target_type: AetherType,
+        field_name: str,
+        location: object | None = None,
+    ) -> AetherType:
+        resolved = self._resolve_type_aliases(target_type, location)
+        if not isinstance(resolved, str) or resolved not in self.structs:
+            raise AetherTypeError(
+                f"Cannot access field '{field_name}' on non-struct value of type '{type_to_string(resolved)}'.",
+                line=getattr(location, "line", None),
+                column=getattr(location, "column", None),
+            )
+        struct = self.structs[resolved]
+        for field in struct.fields:
+            if field.name == field_name:
+                return field.type_name
+        raise AetherTypeError(
+            f"Struct '{struct.name}' has no field '{field_name}'.",
+            line=getattr(location, "line", None),
+            column=getattr(location, "column", None),
+        )
 
     def _input_call_type(
         self,
@@ -739,9 +1144,9 @@ class TypeChecker:
                 line=expression.line,
                 column=expression.column,
             )
-        if target_type not in INPUT_TARGET_TYPES:
+        if not _is_supported_input_target_type(target_type):
             raise AetherTypeError(
-                f"input() supports int, float, string, and boolean targets, got '{type_to_string(target_type)}'.",
+                f"input() supports int, float, string, boolean, Vector, and Matrix targets, got '{type_to_string(target_type)}'.",
                 line=expression.line,
                 column=expression.column,
             )
@@ -878,8 +1283,7 @@ class TypeChecker:
         location: object | None = None,
     ) -> None:
         raise AetherTypeError(
-            f"Cannot implicitly convert '{type_to_string(value_type)}' to '{type_to_string(target_type)}'. "
-            f"Use {type_to_string(target_type)}(...) for explicit conversion.",
+            _implicit_conversion_message(value_type, target_type),
             line=getattr(location, "line", None),
             column=getattr(location, "column", None),
         )
@@ -897,6 +1301,113 @@ class TypeChecker:
             line=getattr(location, "line", None),
             column=getattr(location, "column", None),
         )
+
+    def _validate_type_aliases(self) -> None:
+        for alias_name in self.type_aliases:
+            self._resolve_type_aliases(alias_name)
+
+    def _resolve_type_aliases(
+        self,
+        type_name: AetherType | None,
+        location: object | None = None,
+        resolving: tuple[str, ...] = (),
+    ) -> AetherType:
+        if type_name is None:
+            raise AetherTypeError(
+                "Cannot infer type in this declaration.",
+                line=getattr(location, "line", None),
+                column=getattr(location, "column", None),
+            )
+        if isinstance(type_name, str):
+            if type_name in self.type_aliases:
+                if type_name in resolving:
+                    cycle_name = resolving[0] if resolving else type_name
+                    raise AetherTypeError(
+                        f"Cyclic type alias involving '{cycle_name}'.",
+                        line=getattr(location, "line", None),
+                        column=getattr(location, "column", None),
+                    )
+                return self._resolve_type_aliases(self.type_aliases[type_name], location, (*resolving, type_name))
+            if type_name in self.structs:
+                return type_name
+            if type_name not in AETHER_TYPES:
+                private_message = self._private_import_message(type_name)
+                if private_message is not None:
+                    raise AetherTypeError(
+                        private_message,
+                        line=getattr(location, "line", None),
+                        column=getattr(location, "column", None),
+                    )
+                raise AetherTypeError(
+                    f"Unknown type '{type_name}'.",
+                    line=getattr(location, "line", None),
+                    column=getattr(location, "column", None),
+                )
+            return type_name
+        if isinstance(type_name, ArrayType):
+            return ArrayType(self._resolve_type_aliases(type_name.element_type, location, resolving))
+        if isinstance(type_name, NullableType):
+            return NullableType(self._resolve_type_aliases(type_name.base_type, location, resolving))
+        if isinstance(type_name, TupleType):
+            return TupleType(tuple(self._resolve_type_aliases(element, location, resolving) for element in type_name.element_types))
+        if isinstance(type_name, MatrixType):
+            element_type = self._resolve_vector_matrix_element_type(type_name.element_type, location, resolving)
+            return MatrixType(element_type, type_name.rows, type_name.cols, type_name.vector)
+        if isinstance(type_name, VectorType):
+            element_type = self._resolve_vector_matrix_element_type(type_name.element_type, location, resolving)
+            return VectorType(element_type, type_name.length)
+        if isinstance(type_name, TransposeVectorType):
+            element_type = self._resolve_vector_matrix_element_type(type_name.element_type, location, resolving)
+            return TransposeVectorType(element_type, type_name.length)
+        if isinstance(type_name, RangeType):
+            return RangeType(self._resolve_vector_matrix_element_type(type_name.element_type, location, resolving))
+        return type_name
+
+    def _resolve_vector_matrix_element_type(
+        self,
+        element_type: str,
+        location: object | None = None,
+        resolving: tuple[str, ...] = (),
+    ) -> str:
+        resolved = self._resolve_type_aliases(element_type, location, resolving)
+        if not isinstance(resolved, str) or resolved not in PRIMITIVE_TYPES:
+            raise AetherTypeError(
+                f"Expected primitive element type, got '{type_to_string(resolved)}'.",
+                line=getattr(location, "line", None),
+                column=getattr(location, "column", None),
+            )
+        return resolved
+
+    def _private_struct_type_name(self, type_name: AetherType, package_name: str | None) -> str | None:
+        if package_name is None:
+            return None
+        if isinstance(type_name, str):
+            symbol = self.structs.get(type_name)
+            if symbol is not None and not is_public_export(symbol.visibility, package_name):
+                return type_name
+            return None
+        if isinstance(type_name, ArrayType):
+            return self._private_struct_type_name(type_name.element_type, package_name)
+        if isinstance(type_name, NullableType):
+            return self._private_struct_type_name(type_name.base_type, package_name)
+        if isinstance(type_name, TupleType):
+            for element_type in type_name.element_types:
+                private_name = self._private_struct_type_name(element_type, package_name)
+                if private_name is not None:
+                    return private_name
+        return None
+
+    def _type_mentions_struct(self, type_name: AetherType) -> bool:
+        resolved = self._resolve_type_aliases(type_name)
+        if isinstance(resolved, str):
+            return resolved in self.structs
+        if isinstance(resolved, ArrayType):
+            return self._type_mentions_struct(resolved.element_type)
+        if isinstance(resolved, NullableType):
+            return self._type_mentions_struct(resolved.base_type)
+        if isinstance(resolved, TupleType):
+            return any(self._type_mentions_struct(element_type) for element_type in resolved.element_types)
+        return False
 
     def _can_assign_array_literal(
         self,
@@ -957,11 +1468,45 @@ def _iterable_element_type(type_name: AetherType) -> AetherType | None:
 def _contains_void_type(type_name: AetherType | None) -> bool:
     if type_name == "void":
         return True
+    if isinstance(type_name, NullableType):
+        return _contains_void_type(type_name.base_type)
     if isinstance(type_name, ArrayType):
         return _contains_void_type(type_name.element_type)
     if isinstance(type_name, TupleType):
         return any(_contains_void_type(element_type) for element_type in type_name.element_types)
     return False
+
+
+def _private_type_names(statements: list[ast.Statement], package_name: str | None) -> set[str]:
+    if package_name is None:
+        return set()
+    names: set[str] = set()
+    for statement in statements:
+        if isinstance(statement, (ast.AliasDeclaration, ast.StructDeclaration)) and not is_public_export(
+            statement.visibility,
+            package_name,
+        ):
+            names.add(statement.name)
+    return names
+
+
+def _type_uses_private_name(type_name: AetherType, private_names: set[str]) -> bool:
+    return _first_private_type_name(type_name, private_names) is not None
+
+
+def _first_private_type_name(type_name: AetherType, private_names: set[str]) -> str | None:
+    if isinstance(type_name, str):
+        return type_name if type_name in private_names else None
+    if isinstance(type_name, ArrayType):
+        return _first_private_type_name(type_name.element_type, private_names)
+    if isinstance(type_name, NullableType):
+        return _first_private_type_name(type_name.base_type, private_names)
+    if isinstance(type_name, TupleType):
+        for element_type in type_name.element_types:
+            private_name = _first_private_type_name(element_type, private_names)
+            if private_name is not None:
+                return private_name
+    return None
 
 
 def _is_vector_like_matrix_type(type_name: MatrixType) -> bool:
@@ -972,6 +1517,10 @@ def _is_vector_like_matrix_type(type_name: MatrixType) -> bool:
     return type_name.rows == 1 or type_name.cols == 1
 
 
+def _is_supported_input_target_type(type_name: AetherType) -> bool:
+    return type_name in SCALAR_INPUT_TARGET_TYPES or isinstance(type_name, (VectorType, MatrixType))
+
+
 def _assignment_root_name(expression: ast.Expression) -> str | None:
     if isinstance(expression, ast.Identifier):
         return expression.name
@@ -979,6 +1528,8 @@ def _assignment_root_name(expression: ast.Expression) -> str | None:
         return _assignment_root_name(expression.array)
     if isinstance(expression, ast.MatrixIndexExpression):
         return _assignment_root_name(expression.matrix)
+    if isinstance(expression, ast.FieldAccess):
+        return _assignment_root_name(expression.target)
     return None
 
 
@@ -1140,6 +1691,16 @@ def _common_primitive_type(primitive_types: list[AetherType]) -> str:
 def _types_comparable_for_equality(left_type: AetherType, right_type: AetherType) -> bool:
     if left_type == right_type:
         return True
+    if isinstance(left_type, NullType):
+        return isinstance(right_type, NullableType)
+    if isinstance(right_type, NullType):
+        return isinstance(left_type, NullableType)
+    if isinstance(left_type, NullableType) and isinstance(right_type, NullableType):
+        return _types_comparable_for_equality(left_type.base_type, right_type.base_type)
+    if isinstance(left_type, NullableType):
+        return _types_comparable_for_equality(left_type.base_type, right_type)
+    if isinstance(right_type, NullableType):
+        return _types_comparable_for_equality(left_type, right_type.base_type)
     if isinstance(left_type, VectorType) and isinstance(right_type, VectorType):
         return left_type.length == right_type.length and _types_comparable_for_equality(
             left_type.element_type,
@@ -1162,6 +1723,18 @@ def _types_comparable_for_equality(left_type: AetherType, right_type: AetherType
     ):
         return False
     return left_type in NUMERIC_TYPES and right_type in NUMERIC_TYPES
+
+
+def _implicit_conversion_message(value_type: AetherType, target_type: AetherType) -> str:
+    if isinstance(value_type, NullType):
+        return (
+            f"Cannot assign null to non-nullable type '{type_to_string(target_type)}'. "
+            f"Use {type_to_string(target_type)}? for nullable values."
+        )
+    return (
+        f"Cannot implicitly convert '{type_to_string(value_type)}' to '{type_to_string(target_type)}'. "
+        f"Use {type_to_string(target_type)}(...) for explicit conversion."
+    )
 
 
 def _algebraic_addition_type(left_type: AetherType, operator: str, right_type: AetherType) -> AetherType | None:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from aether.errors import AetherRuntimeError, AetherTypeError
+from aether.errors import AetherRuntimeError, AetherSyntaxError, AetherTypeError
 from aether.runner import run_aether
 from aether.types import ArrayType, MatrixType, TransposeVectorType, VectorType
 
@@ -97,6 +97,115 @@ def test_boolean_numeric_addition_error():
 def test_inferred_variable_type_is_fixed():
     with pytest.raises(AetherTypeError, match="Cannot implicitly convert 'string' to 'int'"):
         run_aether('x = 5; x = "hola";')
+
+
+def test_nullable_string_accepts_null() -> None:
+    result = run_aether("string? name = null; println(name);")
+
+    assert result.output == "null\n"
+
+
+def test_nullable_string_accepts_value_and_null() -> None:
+    result = run_aether(
+        """
+string? name = "Aether";
+println(name);
+name = null;
+println(name);
+"""
+    )
+
+    assert result.output == "Aether\nnull\n"
+
+
+def test_non_nullable_string_rejects_null() -> None:
+    with pytest.raises(AetherTypeError, match="Cannot assign null to non-nullable type 'string'"):
+        run_aether("string name = null;")
+
+
+def test_non_nullable_int_rejects_null() -> None:
+    with pytest.raises(AetherTypeError, match="Cannot assign null to non-nullable type 'int'"):
+        run_aether("int x = null;")
+
+
+def test_null_assignment_without_type_cannot_be_inferred() -> None:
+    with pytest.raises(AetherTypeError, match="Cannot infer type from null"):
+        run_aether("x = null;")
+
+
+def test_inferred_non_nullable_variable_rejects_null() -> None:
+    with pytest.raises(AetherTypeError, match="Cannot assign null to non-nullable type 'string'"):
+        run_aether('x = "hola"; x = null;')
+
+
+def test_nullable_int_accepts_value_and_null() -> None:
+    result = run_aether(
+        """
+int? n = null;
+n = 3;
+println(n);
+n = null;
+println(n);
+"""
+    )
+
+    assert result.output == "3\nnull\n"
+
+
+def test_nullable_value_is_not_assignable_to_non_nullable_without_check() -> None:
+    with pytest.raises(AetherTypeError, match="Cannot implicitly convert 'string\\?' to 'string'"):
+        run_aether('string? maybeName = "Aether"; string name = maybeName;')
+
+
+def test_nullable_null_equality() -> None:
+    result = run_aether(
+        """
+string? name = null;
+
+if name == null {
+    println("empty");
+}
+"""
+    )
+
+    assert result.output == "empty\n"
+
+
+def test_nullable_null_inequality() -> None:
+    result = run_aether(
+        """
+string? name = "Aether";
+
+if name != null {
+    println(name);
+}
+"""
+    )
+
+    assert result.output == "Aether\n"
+
+
+def test_nullable_alias() -> None:
+    result = run_aether(
+        """
+alias Name = string;
+Name? x = null;
+println(x);
+"""
+    )
+
+    assert result.output == "null\n"
+
+
+def test_const_nullable_can_be_initialized_with_null() -> None:
+    result = run_aether("const string? name = null; println(name);")
+
+    assert result.output == "null\n"
+
+
+def test_const_nullable_rejects_reassignment() -> None:
+    with pytest.raises(AetherTypeError, match="Cannot assign to constant 'name'"):
+        run_aether('const string? name = null; name = "Aether";')
 
 
 def test_if_condition_must_be_boolean():
@@ -1085,3 +1194,226 @@ def test_stdlib_linear_algebra_inner_still_works():
 def test_stdlib_linear_algebra_norm_still_works():
     result = run_aether("println(Math.LinearAlgebra.norm([3 4]));")
     assert result.output == "5.0\n"
+
+
+def test_const_with_explicit_type():
+    result = run_aether("const int n = 10; println(n);")
+
+    assert result.env["n"].type_name == "int"
+    assert result.env["n"].value == 10
+    assert result.output == "10\n"
+
+
+def test_const_with_inferred_type():
+    result = run_aether("const n = 10; println(n + 1);")
+
+    assert result.env["n"].type_name == "int"
+    assert result.output == "11\n"
+
+
+def test_const_reassignment_is_rejected():
+    with pytest.raises(AetherTypeError, match="Cannot assign to constant 'n'"):
+        run_aether("const int n = 10; n = 11;")
+
+
+def test_const_plus_equal_reassignment_is_rejected():
+    with pytest.raises(AetherTypeError, match="Cannot assign to constant 'x'"):
+        run_aether("const int x = 3; x += 1;")
+
+
+def test_const_inside_function_scope_can_be_read():
+    result = run_aether(
+        """
+int f(int x) {
+    const int y = x + 1;
+    return y;
+}
+
+println(f(3));
+"""
+    )
+
+    assert result.output == "4\n"
+
+
+def test_const_inside_function_scope_cannot_be_reassigned():
+    with pytest.raises(AetherTypeError, match="Cannot assign to constant 'y'"):
+        run_aether(
+            """
+int f(int x) {
+    const int y = x + 1;
+    y = 5;
+    return y;
+}
+"""
+        )
+
+
+def test_normal_variable_remains_mutable():
+    result = run_aether("int n = 10; n = 11; println(n);")
+
+    assert result.env["n"].value == 11
+    assert result.output == "11\n"
+
+
+def test_basic_type_alias():
+    result = run_aether("alias Real = double; Real x = 2.5; println(x);")
+
+    assert result.env["x"].type_name == "double"
+    assert result.output == "2.5\n"
+
+
+def test_vector_type_alias():
+    result = run_aether("alias RealVector = Vector<double>; RealVector v = [1, 2]; println(v);")
+
+    assert result.env["v"].type_name == VectorType("double", 2)
+    assert result.output == "[1.0, 2.0]\n"
+
+
+def test_transitive_type_alias():
+    result = run_aether(
+        """
+alias Real = double;
+alias Scalar = Real;
+
+Scalar x = 2.5;
+println(x);
+"""
+    )
+
+    assert result.env["x"].type_name == "double"
+    assert result.output == "2.5\n"
+
+
+def test_type_alias_in_function_signature():
+    result = run_aether(
+        """
+alias Real = double;
+
+Real square(Real x) {
+    return x * x;
+}
+
+println(square(3.0));
+"""
+    )
+
+    assert result.output == "9.0\n"
+
+
+def test_invalid_type_alias_target_is_rejected():
+    with pytest.raises(AetherTypeError, match="Unknown type 'DoesNotExist'"):
+        run_aether("alias Foo = DoesNotExist;")
+
+
+def test_duplicate_type_alias_is_rejected():
+    with pytest.raises(AetherTypeError, match="Type alias 'Real' is already defined"):
+        run_aether("alias Real = double; alias Real = int;")
+
+
+def test_alias_colliding_with_variable_is_rejected():
+    with pytest.raises(AetherTypeError, match="Name 'x' is already defined"):
+        run_aether("int x = 3; alias x = double;")
+
+
+def test_variable_colliding_with_alias_is_rejected():
+    with pytest.raises(AetherTypeError, match="Name 'Real' is already defined as a type alias"):
+        run_aether("alias Real = double; int Real = 3;")
+
+
+def test_alias_colliding_with_function_is_rejected():
+    with pytest.raises(AetherTypeError, match="Name 'f' is already defined"):
+        run_aether(
+            """
+int f(int x) {
+    return x;
+}
+
+alias f = double;
+"""
+        )
+
+
+def test_function_colliding_with_variable_is_rejected():
+    with pytest.raises(AetherTypeError, match="Name 'f' is already defined as a variable"):
+        run_aether("int f = 1; int f(int x) { return x; }")
+
+
+def test_variable_colliding_with_function_is_rejected():
+    with pytest.raises(AetherTypeError, match="Name 'f' is already defined as a function"):
+        run_aether("int f(int x) { return x; } int f = 1;")
+
+
+def test_cyclic_type_aliases_are_rejected():
+    with pytest.raises(AetherTypeError, match="Cyclic type alias involving 'A'"):
+        run_aether("alias A = B; alias B = A;")
+
+
+def test_self_referential_type_alias_is_rejected():
+    with pytest.raises(AetherTypeError, match="Cyclic type alias involving 'A'"):
+        run_aether("alias A = A;")
+
+
+def test_alias_is_not_a_runtime_value():
+    with pytest.raises(AetherTypeError, match="Undefined variable 'Real'"):
+        run_aether("alias Real = double; println(Real);")
+
+
+def test_public_function_parses_and_executes():
+    result = run_aether(
+        """
+public int inc(int x) {
+    return x + 1;
+}
+
+println(inc(3));
+"""
+    )
+
+    assert result.output == "4\n"
+
+
+def test_private_function_parses_and_executes_in_same_file():
+    result = run_aether(
+        """
+private int helper(int x) {
+    return x * x;
+}
+
+println(helper(4));
+"""
+    )
+
+    assert result.output == "16\n"
+
+
+def test_public_const_parses_and_executes():
+    result = run_aether("public const int N = 5; println(N);")
+
+    assert result.env["N"].type_name == "int"
+    assert result.output == "5\n"
+
+
+def test_private_alias_parses_and_executes_in_same_file():
+    result = run_aether("private alias Real = double; Real x = 1.5; println(x);")
+
+    assert result.env["x"].type_name == "double"
+    assert result.output == "1.5\n"
+
+
+def test_combined_visibility_modifiers_are_rejected():
+    with pytest.raises(AetherSyntaxError, match="Cannot combine or repeat visibility modifiers"):
+        run_aether("public private int x = 3;")
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "public public int x = 3;",
+        "private private int x = 3;",
+        "private public int x = 3;",
+    ],
+)
+def test_duplicate_or_combined_visibility_modifiers_are_rejected(source):
+    with pytest.raises(AetherSyntaxError, match="Cannot combine or repeat visibility modifiers"):
+        run_aether(source)

@@ -4,7 +4,7 @@ import Plots
 f(x) = x^2 + 1;
 println("f(4) = ", f(4));
 
-boolean EsPrimo(int p) {
+public boolean EsPrimo(int p) {
     if p <= 1 {
         println("No existen numeros primos menores que 2");
     }
@@ -41,7 +41,7 @@ println("x = ", x);
 println("N(A) = ", N(A));
 println("R(A) = ", R(A));
 
-double triple(double y) {
+public double triple(double y) {
     return 3*y;
 }
 

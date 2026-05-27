@@ -43,10 +43,16 @@ AETHER_ERRORS = (AetherSyntaxError, AetherTypeError, AetherRuntimeError)
 _LOCATION_RE = re.compile(r"line (?P<line>\d+), column (?P<column>\d+)")
 _ASSIGNMENT_RE = re.compile(r"\b(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*(?:=|\+=)")
 _DECLARATION_RE = re.compile(
-    r"\b(?:int|float|double|string|boolean|Matrix\s*<\s*\w+\s*>|Vector\s*<\s*\w+\s*>)\s+"
+    r"\b(?:(?:public|private)\s+)?(?:const\s+)?"
+    r"(?:int|float|double|string|boolean|Matrix\s*<\s*\w+\s*>|Vector\s*<\s*\w+\s*>|[A-Z][A-Za-z0-9_]*)\s+"
     r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)\b"
 )
-_FUNCTION_RE = re.compile(r"\b(?:function\s+)?(?:int|float|double|string|boolean|Matrix|Vector)?(?:\s*<[^>]+>)?\s*(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\(")
+_FUNCTION_RE = re.compile(
+    r"\b(?:(?:public|private)\s+)?(?:function\s+)?"
+    r"(?:int|float|double|string|boolean|Matrix|Vector|[A-Z][A-Za-z0-9_]*)?(?:\s*<[^>]+>)?\s*"
+    r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\("
+)
+_STRUCT_RE = re.compile(r"\b(?:(?:public|private)\s+)?struct\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\b")
 
 
 def analyze_source(source: str) -> list[Diagnostic]:
@@ -130,6 +136,7 @@ def _symbol_names(source: str) -> set[str]:
     names: set[str] = set()
     names.update(match.group("name") for match in _ASSIGNMENT_RE.finditer(source))
     names.update(match.group("name") for match in _DECLARATION_RE.finditer(source))
+    names.update(match.group("name") for match in _STRUCT_RE.finditer(source))
     for match in _FUNCTION_RE.finditer(source):
         name = match.group("name")
         if name not in KEYWORDS:

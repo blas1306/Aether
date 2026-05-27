@@ -5,10 +5,13 @@ from typing import Protocol
 
 from .types import AetherType
 
+Visibility = str | None
+
 
 @dataclass(frozen=True)
 class Program:
     statements: list["Statement"]
+    package_name: str | None = None
 
 
 class Statement(Protocol):
@@ -32,11 +35,39 @@ class ExpressionParameter:
 
 @dataclass(frozen=True)
 class VarDeclaration:
-    type_name: AetherType
+    type_name: AetherType | None
     name: str
     initializer: Expression
     line: int = 1
     column: int = 1
+    is_const: bool = False
+    visibility: Visibility = None
+
+
+@dataclass(frozen=True)
+class AliasDeclaration:
+    name: str
+    target_type: AetherType
+    line: int = 1
+    column: int = 1
+    visibility: Visibility = None
+
+
+@dataclass(frozen=True)
+class StructField:
+    name: str
+    type_name: AetherType
+    line: int = 1
+    column: int = 1
+
+
+@dataclass(frozen=True)
+class StructDeclaration:
+    name: str
+    fields: list[StructField]
+    line: int = 1
+    column: int = 1
+    visibility: Visibility = None
 
 
 @dataclass(frozen=True)
@@ -69,6 +100,15 @@ class MatrixIndexAssignment:
     matrix: Expression
     row: Expression
     column_index: Expression
+    expression: Expression
+    line: int = 1
+    column: int = 1
+
+
+@dataclass(frozen=True)
+class FieldAssignment:
+    target: Expression
+    field_name: str
     expression: Expression
     line: int = 1
     column: int = 1
@@ -110,6 +150,7 @@ class FunctionDeclaration:
     name: str
     parameters: list[Parameter]
     body: list[Statement]
+    visibility: Visibility = None
 
 
 @dataclass(frozen=True)
@@ -117,6 +158,7 @@ class ExpressionFunctionDeclaration:
     name: str
     parameters: list[ExpressionParameter]
     expression: Expression
+    visibility: Visibility = None
 
 
 @dataclass(frozen=True)
@@ -127,9 +169,21 @@ class ReturnStatement:
 
 
 @dataclass(frozen=True)
+class BreakStatement:
+    line: int = 1
+    column: int = 1
+
+
+@dataclass(frozen=True)
+class ContinueStatement:
+    line: int = 1
+    column: int = 1
+
+
+@dataclass(frozen=True)
 class Literal:
     value: object
-    type_name: str
+    type_name: AetherType
 
 
 @dataclass(frozen=True)
@@ -214,3 +268,9 @@ class MatrixIndexExpression:
     matrix: Expression
     row: Expression
     column: Expression
+
+
+@dataclass(frozen=True)
+class FieldAccess:
+    target: Expression
+    field_name: str

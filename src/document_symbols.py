@@ -5,16 +5,20 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 
-DocumentSymbolKind = Literal["variable", "function", "module"]
-DocumentSymbolOrigin = Literal["assignment", "function_definition", "for_loop_variable", "import"]
+DocumentSymbolKind = Literal["variable", "function", "module", "type"]
+DocumentSymbolOrigin = Literal["assignment", "function_definition", "for_loop_variable", "import", "type_alias", "struct"]
 
 _IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_]\w*\Z")
 _SIMPLE_ASSIGN_RE = re.compile(r"^(?P<name>[A-Za-z_]\w*)\s*=\s*(?!=)")
 _TYPE_RE = r"(?:Matrix\s*<\s*\w+\s*>|Vector\s*<\s*\w+\s*>|[A-Za-z_]\w*)(?:\s*\[\s*\])?"
-_TYPED_VAR_RE = re.compile(rf"^(?P<type>{_TYPE_RE})\s+(?P<name>[A-Za-z_]\w*)\s*=\s*(?!=)")
+_VISIBILITY_RE = r"(?:(?:public|private)\s+)?"
+_TYPED_VAR_RE = re.compile(rf"^{_VISIBILITY_RE}(?:const\s+)?(?P<type>{_TYPE_RE})\s+(?P<name>[A-Za-z_]\w*)\s*=\s*(?!=)")
+_CONST_ASSIGN_RE = re.compile(rf"^{_VISIBILITY_RE}const\s+(?P<name>[A-Za-z_]\w*)\s*=\s*(?!=)")
+_ALIAS_RE = re.compile(rf"^{_VISIBILITY_RE}alias\s+(?P<name>[A-Za-z_]\w*)\s*=\s*(?P<type>{_TYPE_RE})\s*$", re.IGNORECASE)
+_STRUCT_RE = re.compile(rf"^{_VISIBILITY_RE}struct\s+(?P<name>[A-Za-z_]\w*)\s*\{{?", re.IGNORECASE)
 _INLINE_FUNCTION_RE = re.compile(r"^(?P<name>[A-Za-z_]\w*)\s*\((?P<params>[^()]*)\)\s*=\s*(?!=)")
 _AETHER_FUNCTION_RE = re.compile(
-    rf"^(?:function\s+)?(?P<return_type>{_TYPE_RE})\s+"
+    rf"^{_VISIBILITY_RE}(?:function\s+)?(?P<return_type>{_TYPE_RE})\s+"
     r"(?P<name>[A-Za-z_]\w*)\s*\((?P<params>[^()]*)\)\s*\{?",
     re.IGNORECASE,
 )
@@ -132,13 +136,65 @@ def _extract_symbol_from_statement(statement_span: _StatementSpan, line_starts: 
     leading_ws = len(statement_span.text) - len(statement_span.text.lstrip())
     return (
         _extract_import_symbol(statement, statement_span, leading_ws, line_starts)
+        or _extract_alias_symbol(statement, statement_span, leading_ws, line_starts)
+        or _extract_struct_symbol(statement, statement_span, leading_ws, line_starts)
         or _extract_aether_function_symbol(statement, statement_span, leading_ws, line_starts)
         or _extract_block_function_symbol(statement, statement_span, leading_ws, line_starts)
         or _extract_inline_function_symbol(statement, statement_span, leading_ws, line_starts)
         or _extract_for_loop_symbol(statement, statement_span, leading_ws, line_starts)
         or _extract_for_in_symbol(statement, statement_span, leading_ws, line_starts)
         or _extract_typed_var_symbol(statement, statement_span, leading_ws, line_starts)
+        or _extract_const_assignment_symbol(statement, statement_span, leading_ws, line_starts)
         or _extract_assignment_symbol(statement, statement_span, leading_ws, line_starts)
+    )
+
+
+def _extract_alias_symbol(
+    statement: str,
+    statement_span: _StatementSpan,
+    leading_ws: int,
+    line_starts: list[int],
+) -> DocumentSymbol | None:
+    match = _ALIAS_RE.match(statement)
+    if match is None:
+        return None
+    name = match.group("name")
+    type_name = _normalize_type_name(match.group("type"))
+    return _document_symbol(
+        statement_span,
+        line_starts,
+        name_start=leading_ws + match.start("name"),
+        name_end=leading_ws + match.end("name"),
+        name=name,
+        kind="type",
+        origin="type_alias",
+        signature=name,
+        detail=f"alias {name} = {type_name}",
+        type_name=type_name,
+    )
+
+
+def _extract_struct_symbol(
+    statement: str,
+    statement_span: _StatementSpan,
+    leading_ws: int,
+    line_starts: list[int],
+) -> DocumentSymbol | None:
+    match = _STRUCT_RE.match(statement)
+    if match is None:
+        return None
+    name = match.group("name")
+    return _document_symbol(
+        statement_span,
+        line_starts,
+        name_start=leading_ws + match.start("name"),
+        name_end=leading_ws + match.end("name"),
+        name=name,
+        kind="type",
+        origin="struct",
+        signature=name,
+        detail=f"struct {name}",
+        type_name=name,
     )
 
 
@@ -186,6 +242,28 @@ def _extract_typed_var_symbol(
         signature=name,
         detail=f"{type_name} {name}",
         type_name=type_name,
+    )
+
+
+def _extract_const_assignment_symbol(
+    statement: str,
+    statement_span: _StatementSpan,
+    leading_ws: int,
+    line_starts: list[int],
+) -> DocumentSymbol | None:
+    match = _CONST_ASSIGN_RE.match(statement)
+    if match is None:
+        return None
+    name = match.group("name")
+    return _document_symbol(
+        statement_span,
+        line_starts,
+        name_start=leading_ws + match.start("name"),
+        name_end=leading_ws + match.end("name"),
+        name=name,
+        kind="variable",
+        origin="assignment",
+        signature=name,
     )
 
 

@@ -350,6 +350,7 @@ def _lsp_document_symbol(symbol) -> JsonObject:
 def _document_symbol_kind(kind: str) -> int:
     return {
         "module": 2,
+        "type": 5,
         "function": 12,
         "variable": 13,
     }.get(kind, 13)
@@ -374,6 +375,7 @@ def _symbol_hover_markdown(symbol) -> str:
     description = {
         "function": "User function defined in this document.",
         "module": "Aether import.",
+        "type": "Type alias defined in this document.",
         "variable": "Variable defined in this document.",
     }.get(symbol.kind, "Aether symbol.")
     if symbol.origin == "for_loop_variable":

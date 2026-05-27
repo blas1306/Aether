@@ -1,0 +1,4 @@
+import Geometry;
+
+P p = P(1.0, 2.0);
+println(p.x);

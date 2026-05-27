@@ -1,15 +1,12 @@
-import Math.LinearAlgebra
+public int sumar(int a, int b) {
+    return a + b;
+}
 
-A = [3 2; 1 0; 0 0];
+while true {
+    int a = input("Ingrese el primer numero: ");
+    int b = input("Ingrese el segundo numero: ");
 
-m, n = size(A);
-p = rank(A);
+    c = sumar(a, b);
 
-u = zeros(m, m);
-s = zeros(m, n);
-v = zeros(n, n);
-
-Vec, Vap = eig(A' * A);
-
-println("Vec = ", Vec);
-println("Vap = ", Vap);
+    println("$a$ + $b$ = ", c);
+}

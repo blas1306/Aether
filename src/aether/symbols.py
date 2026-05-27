@@ -9,6 +9,8 @@ from .types import AetherType
 class VariableSymbol:
     name: str
     type_name: AetherType | None
+    is_const: bool = False
+    visibility: str | None = None
 
 
 @dataclass(frozen=True)
@@ -16,3 +18,11 @@ class FunctionSymbol:
     name: str
     return_type: AetherType | None
     parameters: tuple[VariableSymbol, ...]
+    visibility: str | None = None
+
+
+@dataclass(frozen=True)
+class StructSymbol:
+    name: str
+    fields: tuple[VariableSymbol, ...]
+    visibility: str | None = None

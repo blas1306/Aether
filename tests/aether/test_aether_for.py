@@ -116,3 +116,121 @@ println(sumaCuadrados(3));
 def test_for_rejects_2d_matrix_iteration_for_now() -> None:
     with pytest.raises(AetherTypeError, match="Cannot iterate over value of type 'Matrix<int>'"):
         run_aether("A = [1 2; 3 4]; for x in A { println(x); }")
+
+
+def test_break_in_for_stops_loop() -> None:
+    result = run_aether(
+        """
+for i in 1:10 {
+    if i == 4 {
+        break;
+    }
+
+    println(i);
+}
+"""
+    )
+
+    assert result.output == "1\n2\n3\n"
+
+
+def test_continue_in_for_skips_iteration() -> None:
+    result = run_aether(
+        """
+for i in 1:5 {
+    if i == 3 {
+        continue;
+    }
+
+    println(i);
+}
+"""
+    )
+
+    assert result.output == "1\n2\n4\n5\n"
+
+
+def test_break_in_while_stops_loop() -> None:
+    result = run_aether(
+        """
+i = 0;
+
+while true {
+    i = i + 1;
+
+    if i == 3 {
+        break;
+    }
+
+    println(i);
+}
+"""
+    )
+
+    assert result.output == "1\n2\n"
+
+
+def test_continue_in_while_skips_iteration() -> None:
+    result = run_aether(
+        """
+i = 0;
+
+while i < 5 {
+    i = i + 1;
+
+    if i == 3 {
+        continue;
+    }
+
+    println(i);
+}
+"""
+    )
+
+    assert result.output == "1\n2\n4\n5\n"
+
+
+def test_break_outside_loop_is_error() -> None:
+    with pytest.raises(AetherTypeError, match="break used outside of a loop\\."):
+        run_aether("break;")
+
+
+def test_continue_outside_loop_is_error() -> None:
+    with pytest.raises(AetherTypeError, match="continue used outside of a loop\\."):
+        run_aether("continue;")
+
+
+def test_break_in_nested_loop_only_stops_inner_loop() -> None:
+    result = run_aether(
+        """
+for i in 1:2 {
+    for j in 1:4 {
+        if j == 3 {
+            break;
+        }
+
+        println(j);
+    }
+}
+"""
+    )
+
+    assert result.output == "1\n2\n1\n2\n"
+
+
+def test_continue_in_nested_loop_only_affects_inner_loop() -> None:
+    result = run_aether(
+        """
+for i in 1:2 {
+    for j in 1:4 {
+        if j == 3 {
+            continue;
+        }
+
+        println(j);
+    }
+}
+"""
+    )
+
+    assert result.output == "1\n2\n4\n1\n2\n4\n"

@@ -51,7 +51,7 @@ def run_source_for_file(
 ) -> SourceRunResult:
     runtime = runtime_for_file(path)
     if runtime == AETHER_RUNTIME:
-        return _run_aether_source(source)
+        return _run_aether_source(source, path=path)
     suffix = _suffix_for_path(path)
     if suffix in LEGACY_SUFFIXES:
         return SourceRunResult(
@@ -73,9 +73,10 @@ def format_aether_error(exc: AetherSyntaxError | AetherTypeError | AetherRuntime
     return f"{type(exc).__name__}: {exc}"
 
 
-def _run_aether_source(source: str) -> SourceRunResult:
+def _run_aether_source(source: str, *, path: str | Path | None = None) -> SourceRunResult:
     try:
-        result = run_aether(source)
+        source_root = Path(path).parent if path is not None else None
+        result = run_aether(source, source_root=source_root)
     except AETHER_ERRORS as exc:
         return SourceRunResult(runtime=AETHER_RUNTIME, success=False, error=format_aether_error(exc))
     return SourceRunResult(runtime=AETHER_RUNTIME, success=True, output=result.output)

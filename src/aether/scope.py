@@ -13,13 +13,16 @@ T = TypeVar("T")
 class Scope(Generic[T]):
     parent: "Scope[T] | None" = None
     symbols: dict[str, T] = field(default_factory=dict)
+    constants: set[str] = field(default_factory=set)
 
-    def define_local(self, name: str, symbol: T, *, forbid_shadowing: bool = False) -> None:
+    def define_local(self, name: str, symbol: T, *, forbid_shadowing: bool = False, is_const: bool = False) -> None:
         if self.exists_local(name):
             raise AetherTypeError(f"Variable '{name}' is already defined in this scope.")
         if forbid_shadowing and self.exists_in_parent(name):
             raise AetherTypeError(f"Variable '{name}' already exists in an outer scope; shadowing is not allowed.")
         self.symbols[name] = symbol
+        if is_const:
+            self.constants.add(name)
 
     def exists_local(self, name: str) -> bool:
         return name in self.symbols
@@ -50,8 +53,14 @@ class Scope(Generic[T]):
         scope = self.resolve_scope(name)
         if scope is None:
             return False
+        if scope.is_const(name):
+            raise AetherTypeError(f"Cannot assign to constant '{name}'.")
         scope.symbols[name] = symbol
         return True
+
+    def is_const(self, name: str) -> bool:
+        scope = self.resolve_scope(name)
+        return scope is not None and name in scope.constants
 
     def as_dict(self) -> dict[str, T]:
         return dict(self.symbols)

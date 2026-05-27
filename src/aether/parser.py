@@ -4,7 +4,7 @@ from . import ast
 from .errors import AetherSyntaxError
 from .lexer import lex
 from .tokens import AETHER_TYPES, PRIMITIVE_TYPES, Token, TokenType
-from .types import AetherType, ArrayType, MatrixType, TupleType, VectorType
+from .types import AetherType, ArrayType, MatrixType, NULL_TYPE, NullableType, TupleType, VectorType
 
 
 STRING_ESCAPES = {'"': '"', "\\": "\\", "$": "$", "n": "\n", "t": "\t", "r": "\r"}
@@ -16,12 +16,23 @@ class Parser:
         self.current = 0
         self.expression_function_name: str | None = None
         self.matrix_literal_depth = 0
+        self.block_depth = 0
+        self.type_aliases: set[str] = set()
 
     def parse(self) -> ast.Program:
         statements: list[ast.Statement] = []
+        package_name: str | None = None
         while not self._is_at_end():
+            if self._match(TokenType.PACKAGE):
+                package_token = self._previous()
+                if package_name is not None:
+                    raise self._error(package_token, "Duplicate package declaration.")
+                if statements:
+                    raise self._error(package_token, "Package declaration must appear before other declarations.")
+                package_name = self._package_declaration()
+                continue
             statements.append(self._declaration_or_statement())
-        return ast.Program(statements)
+        return ast.Program(statements, package_name)
 
     def parse_expression(self) -> ast.Expression:
         expression = self._expression()
@@ -30,6 +41,33 @@ class Parser:
         return expression
 
     def _declaration_or_statement(self) -> ast.Statement:
+        if self._check(TokenType.PACKAGE):
+            raise self._error(self._peek(), "Package declaration must appear before other declarations.")
+        visibility = self._visibility_modifier()
+        if visibility is not None:
+            if self.block_depth > 0:
+                raise self._error(self._previous(), "Visibility modifiers are only supported on top-level declarations.")
+            if self._match(TokenType.FUNCTION):
+                return self._function_declaration(visibility)
+            if self._match(TokenType.CONST):
+                return self._var_declaration(is_const=True, visibility=visibility)
+            if self._match(TokenType.ALIAS):
+                return self._alias_declaration(visibility)
+            if self._match(TokenType.STRUCT):
+                return self._struct_declaration(visibility)
+            if self._looks_like_function_declaration():
+                return self._function_declaration(visibility)
+            if self._looks_like_expression_function_declaration():
+                return self._expression_function_declaration(visibility)
+            if self._looks_like_var_declaration():
+                return self._var_declaration(visibility=visibility)
+            raise self._error(self._peek(), "Expected declaration after visibility modifier.")
+        if self._match(TokenType.ALIAS):
+            return self._alias_declaration()
+        if self._match(TokenType.STRUCT):
+            if self.block_depth > 0:
+                raise self._error(self._previous(), "Struct declarations are only supported at top level.")
+            return self._struct_declaration()
         if self._match(TokenType.FUNCTION):
             return self._function_declaration()
         if self._looks_like_function_declaration():
@@ -38,7 +76,15 @@ class Parser:
             return self._expression_function_declaration()
         return self._statement()
 
-    def _function_declaration(self) -> ast.FunctionDeclaration:
+    def _visibility_modifier(self) -> ast.Visibility:
+        if not self._match(TokenType.PUBLIC, TokenType.PRIVATE):
+            return None
+        visibility = self._previous().lexeme
+        if self._check(TokenType.PUBLIC) or self._check(TokenType.PRIVATE):
+            raise self._error(self._peek(), "Cannot combine or repeat visibility modifiers.")
+        return visibility
+
+    def _function_declaration(self, visibility: ast.Visibility = None) -> ast.FunctionDeclaration:
         return_type = self._parse_return_type_annotation("Expected function return type.")
         name = self._consume(TokenType.IDENTIFIER, "Expected function name.").lexeme
         self._consume(TokenType.LEFT_PAREN, "Expected '(' after function name.")
@@ -52,9 +98,9 @@ class Parser:
                     break
         self._consume(TokenType.RIGHT_PAREN, "Expected ')' after parameters.")
         body = self._block()
-        return ast.FunctionDeclaration(return_type, name, parameters, body)
+        return ast.FunctionDeclaration(return_type, name, parameters, body, visibility)
 
-    def _expression_function_declaration(self) -> ast.ExpressionFunctionDeclaration:
+    def _expression_function_declaration(self, visibility: ast.Visibility = None) -> ast.ExpressionFunctionDeclaration:
         name = self._consume(TokenType.IDENTIFIER, "Expected function name.").lexeme
         self._consume(TokenType.LEFT_PAREN, "Expected '(' after function name.")
         parameters: list[ast.ExpressionParameter] = []
@@ -92,7 +138,48 @@ class Parser:
         finally:
             self.expression_function_name = previous_expression_function_name
         self._consume(TokenType.SEMICOLON, "Expected ';' after expression function declaration.")
-        return ast.ExpressionFunctionDeclaration(name, parameters, expression)
+        return ast.ExpressionFunctionDeclaration(name, parameters, expression, visibility)
+
+    def _alias_declaration(self, visibility: ast.Visibility = None) -> ast.AliasDeclaration:
+        alias_token = self._consume(TokenType.IDENTIFIER, "Expected alias name.")
+        self._consume(TokenType.EQUAL, "Expected '=' in alias declaration.")
+        target_type = self._parse_type_annotation("Expected type name in alias declaration.", allow_unknown_identifier=True)
+        self._consume(TokenType.SEMICOLON, "Expected ';' after alias declaration.")
+        self.type_aliases.add(alias_token.lexeme)
+        return ast.AliasDeclaration(alias_token.lexeme, target_type, alias_token.line, alias_token.column, visibility)
+
+    def _struct_declaration(self, visibility: ast.Visibility = None) -> ast.StructDeclaration:
+        if self.block_depth > 0:
+            raise self._error(self._previous(), "Struct declarations are only supported at top level.")
+        name_token = self._consume(TokenType.IDENTIFIER, "Expected struct name.")
+        self._consume(TokenType.LEFT_BRACE, "Expected '{' before struct fields.")
+        fields: list[ast.StructField] = []
+        field_names: set[str] = set()
+        while not self._check(TokenType.RIGHT_BRACE) and not self._is_at_end():
+            if self._check(TokenType.CONST):
+                raise self._error(self._peek(), "Struct fields cannot be const yet.")
+            if self._check(TokenType.PUBLIC) or self._check(TokenType.PRIVATE):
+                raise self._error(self._peek(), "Struct fields do not support visibility modifiers yet.")
+            if self._check(TokenType.FUNCTION) or self._check(TokenType.STRUCT):
+                raise self._error(self._peek(), "Methods and nested declarations are not supported inside structs.")
+            type_name = self._parse_type_annotation("Expected explicit field type in struct declaration.")
+            field_token = self._consume(TokenType.IDENTIFIER, "Expected field name.")
+            if self._check(TokenType.LEFT_PAREN):
+                raise self._error(field_token, "Methods inside struct are not supported yet.")
+            if field_token.lexeme in field_names:
+                raise self._error(field_token, f"Duplicate field '{field_token.lexeme}' in struct '{name_token.lexeme}'.")
+            field_names.add(field_token.lexeme)
+            fields.append(ast.StructField(field_token.lexeme, type_name, field_token.line, field_token.column))
+            self._consume(TokenType.SEMICOLON, "Expected ';' after struct field.")
+        self._consume(TokenType.RIGHT_BRACE, "Expected '}' after struct declaration.")
+        return ast.StructDeclaration(name_token.lexeme, fields, name_token.line, name_token.column, visibility)
+
+    def _package_declaration(self) -> str:
+        module_name = self._consume(TokenType.IDENTIFIER, "Expected package name after 'package'.").lexeme
+        while self._match(TokenType.DOT):
+            module_name += "." + self._consume(TokenType.IDENTIFIER, "Expected identifier after '.'.").lexeme
+        self._consume(TokenType.SEMICOLON, "Expected ';' after package declaration.")
+        return module_name
 
     def _statement(self) -> ast.Statement:
         if self._match(TokenType.IF):
@@ -118,6 +205,16 @@ class Parser:
             expression = None if self._check(TokenType.SEMICOLON) else self._expression()
             self._consume(TokenType.SEMICOLON, "Expected ';' after return statement.")
             return ast.ReturnStatement(expression, return_token.line, return_token.column)
+        if self._match(TokenType.BREAK):
+            break_token = self._previous()
+            self._consume(TokenType.SEMICOLON, "Expected ';' after break statement.")
+            return ast.BreakStatement(break_token.line, break_token.column)
+        if self._match(TokenType.CONTINUE):
+            continue_token = self._previous()
+            self._consume(TokenType.SEMICOLON, "Expected ';' after continue statement.")
+            return ast.ContinueStatement(continue_token.line, continue_token.column)
+        if self._match(TokenType.CONST):
+            return self._var_declaration(is_const=True)
         if self._looks_like_var_declaration():
             return self._var_declaration()
         if self._looks_like_destructuring_assignment():
@@ -140,6 +237,13 @@ class Parser:
                 )
             if isinstance(expression, ast.IndexExpression):
                 return ast.IndexAssignment(expression.array, expression.index, value, equals.line, equals.column)
+            if isinstance(expression, ast.FieldAccess):
+                if not self._is_field_assignment_lvalue(expression):
+                    raise self._error(
+                        equals,
+                        "Field assignment target must start from a variable; assigning to fields on temporaries is not supported.",
+                    )
+                return ast.FieldAssignment(expression.target, expression.field_name, value, equals.line, equals.column)
             raise self._error(self._previous(), "Invalid assignment target.")
         if self._match(TokenType.PLUS_EQUAL):
             plus_equals = self._previous()
@@ -168,22 +272,28 @@ class Parser:
         self._consume(TokenType.SEMICOLON, "Expected ';' after assignment.")
         return ast.DestructuringAssignment(names, value, equals.line, equals.column)
 
-    def _var_declaration(self) -> ast.VarDeclaration:
+    def _var_declaration(self, *, is_const: bool = False, visibility: ast.Visibility = None) -> ast.VarDeclaration:
         declaration_token = self._peek()
-        type_name = self._parse_type_annotation("Expected type name.")
+        type_name: AetherType | None = None
+        if not is_const or self._looks_like_var_declaration():
+            type_name = self._parse_type_annotation("Expected type name.")
         name = self._consume(TokenType.IDENTIFIER, "Expected variable name.").lexeme
         self._consume(TokenType.EQUAL, "Expected '=' in variable declaration.")
         initializer = self._expression()
         self._consume(TokenType.SEMICOLON, "Expected ';' after variable declaration.")
-        return ast.VarDeclaration(type_name, name, initializer, declaration_token.line, declaration_token.column)
+        return ast.VarDeclaration(type_name, name, initializer, declaration_token.line, declaration_token.column, is_const, visibility)
 
     def _block(self) -> list[ast.Statement]:
         self._consume(TokenType.LEFT_BRACE, "Expected '{' before block.")
         statements: list[ast.Statement] = []
-        while not self._check(TokenType.RIGHT_BRACE) and not self._is_at_end():
-            statements.append(self._declaration_or_statement())
-        self._consume(TokenType.RIGHT_BRACE, "Expected '}' after block.")
-        return statements
+        self.block_depth += 1
+        try:
+            while not self._check(TokenType.RIGHT_BRACE) and not self._is_at_end():
+                statements.append(self._declaration_or_statement())
+            self._consume(TokenType.RIGHT_BRACE, "Expected '}' after block.")
+            return statements
+        finally:
+            self.block_depth -= 1
 
     def _expression(self) -> ast.Expression:
         return self._range()
@@ -289,6 +399,10 @@ class Parser:
                 operator = self._previous()
                 expr = ast.UnaryExpression(operator.lexeme, expr, operator.line, operator.column)
                 continue
+            if self._match(TokenType.DOT):
+                field = self._consume(TokenType.IDENTIFIER, "Expected field name after '.'.")
+                expr = ast.FieldAccess(expr, field.lexeme)
+                continue
             break
         return expr
 
@@ -300,6 +414,8 @@ class Parser:
     def _primary(self) -> ast.Expression:
         if self._match(TokenType.BOOLEAN_LITERAL):
             return ast.Literal(self._previous().literal, "boolean")
+        if self._match(TokenType.NULL_LITERAL):
+            return ast.Literal(None, NULL_TYPE)
         if self._match(TokenType.INT_LITERAL):
             return ast.Literal(self._previous().literal, "int")
         if self._match(TokenType.FLOAT_LITERAL):
@@ -309,12 +425,11 @@ class Parser:
         if self._match(TokenType.STRING_LITERAL):
             return self._string_literal_expression(self._previous())
         if self._match(TokenType.IDENTIFIER, TokenType.TYPE):
-            name = self._previous().lexeme
-            dotted = False
+            parts = [self._previous().lexeme]
             while self._match(TokenType.DOT):
-                dotted = True
                 part = self._consume(TokenType.IDENTIFIER, "Expected identifier after '.'.").lexeme
-                name = f"{name}.{part}"
+                parts.append(part)
+            name = ".".join(parts)
             if self._match(TokenType.LEFT_PAREN):
                 call_token = self._previous()
                 arguments: list[ast.Expression] = []
@@ -341,8 +456,11 @@ class Parser:
                         raise self._error(call_token, "input() does not accept keyword arguments.")
                     return ast.InputCall(arguments, call_token.line, call_token.column)
                 return ast.CallExpression(name, arguments, keyword_arguments)
-            if dotted:
-                raise self._error(self._previous(), "Dotted names are only supported for builtin calls.")
+            if len(parts) > 1:
+                expr: ast.Expression = ast.Identifier(parts[0])
+                for part in parts[1:]:
+                    expr = ast.FieldAccess(expr, part)
+                return expr
             if name in AETHER_TYPES:
                 raise self._error(self._previous(), f"Type name '{name}' must be used as a call or declaration.")
             return ast.Identifier(name)
@@ -438,6 +556,14 @@ class Parser:
         except AetherSyntaxError as exc:
             raise self._error(token, f"Expresion de interpolacion invalida {source!r}: {exc}") from exc
 
+    def _is_field_assignment_lvalue(self, expression: ast.FieldAccess) -> bool:
+        target = expression.target
+        if isinstance(target, ast.Identifier):
+            return True
+        if isinstance(target, ast.FieldAccess):
+            return self._is_field_assignment_lvalue(target)
+        return False
+
     def _match(self, *token_types: TokenType) -> bool:
         for token_type in token_types:
             if self._check(token_type):
@@ -463,10 +589,12 @@ class Parser:
             token = self._advance()
             if self._check(TokenType.LEFT_BRACKET):
                 raise self._error(token, "'void' cannot be used as an array type.")
+            if self._check(TokenType.QUESTION):
+                raise self._error(self._peek(), "'void' cannot be nullable.")
             return "void"
-        return self._parse_type_annotation(message)
+        return self._parse_type_annotation(message, allow_unknown_identifier=True)
 
-    def _parse_type_annotation(self, message: str) -> AetherType:
+    def _parse_type_annotation(self, message: str, *, allow_unknown_identifier: bool = True) -> AetherType:
         if self._match(TokenType.LEFT_PAREN):
             element_types = [self._parse_tuple_type_element()]
             if not self._match(TokenType.COMMA):
@@ -475,8 +603,8 @@ class Parser:
             while self._match(TokenType.COMMA):
                 element_types.append(self._parse_tuple_type_element())
             self._consume(TokenType.RIGHT_PAREN, "Expected ')' after tuple return type.")
-            return TupleType(tuple(element_types))
-        token = self._consume_type(message)
+            return self._nullable_suffix(TupleType(tuple(element_types)))
+        token = self._consume_type(message, allow_unknown_identifier=allow_unknown_identifier)
         if token.lexeme == "void":
             raise self._error(token, "'void' is only valid as a function return type.")
         if token.lexeme in {"Matrix", "Vector"}:
@@ -488,13 +616,18 @@ class Parser:
                 self._consume(TokenType.GREATER, f"Expected '>' after {token.lexeme} element type.")
                 element_type = element_token.lexeme
             if token.lexeme == "Vector":
-                return VectorType(element_type)
-            return MatrixType(element_type)
+                return self._nullable_suffix(VectorType(element_type))
+            return self._nullable_suffix(MatrixType(element_type))
         type_name: AetherType = token.lexeme
         while self._match(TokenType.LEFT_BRACKET):
             self._consume(TokenType.RIGHT_BRACKET, "Expected ']' after '[' in array type.")
             type_name = ArrayType(type_name)
-        return type_name
+        return self._nullable_suffix(type_name)
+
+    def _nullable_suffix(self, type_name: AetherType) -> AetherType:
+        if not self._match(TokenType.QUESTION):
+            return type_name
+        return NullableType(type_name)
 
     def _parse_tuple_type_element(self) -> AetherType:
         element_type = self._parse_type_annotation("Expected tuple element type.")
@@ -502,9 +635,14 @@ class Parser:
             self._advance()
         return element_type
 
-    def _consume_type(self, message: str) -> Token:
-        token = self._consume(TokenType.TYPE, message)
-        if token.lexeme not in AETHER_TYPES:
+    def _consume_type(self, message: str, *, allow_unknown_identifier: bool = False) -> Token:
+        if self._check(TokenType.TYPE) or (
+            self._check(TokenType.IDENTIFIER) and (allow_unknown_identifier or self._peek().lexeme in self.type_aliases)
+        ):
+            token = self._advance()
+        else:
+            raise self._error(self._peek(), message)
+        if token.type == TokenType.TYPE and token.lexeme not in AETHER_TYPES:
             raise self._error(token, f"Unknown type '{token.lexeme}'.")
         return token
 
@@ -593,8 +731,11 @@ class Parser:
                     return None
             if cursor >= len(self.tokens) or self.tokens[cursor].type != TokenType.RIGHT_PAREN:
                 return None
-            return cursor + 1
-        if self.tokens[start].type != TokenType.TYPE:
+            cursor += 1
+            if cursor < len(self.tokens) and self.tokens[cursor].type == TokenType.QUESTION:
+                cursor += 1
+            return cursor
+        if self.tokens[start].type not in {TokenType.TYPE, TokenType.IDENTIFIER}:
             return None
         cursor = start + 1
         if self.tokens[start].lexeme in {"Matrix", "Vector"} and cursor < len(self.tokens) and self.tokens[cursor].type == TokenType.LESS:
@@ -610,7 +751,12 @@ class Parser:
             if self.tokens[cursor + 1].type != TokenType.RIGHT_BRACKET:
                 return None
             cursor += 2
+        if cursor < len(self.tokens) and self.tokens[cursor].type == TokenType.QUESTION:
+            cursor += 1
         return cursor
+
+    def _is_alias_type_token(self, index: int) -> bool:
+        return index < len(self.tokens) and self.tokens[index].type == TokenType.IDENTIFIER and self.tokens[index].lexeme in self.type_aliases
 
     def _tuple_type_element_end_cursor(self, start: int) -> int | None:
         cursor = self._type_annotation_end_cursor(start)
@@ -690,6 +836,7 @@ class Parser:
     def _can_start_expression(self, token: Token) -> bool:
         return token.type in {
             TokenType.BOOLEAN_LITERAL,
+            TokenType.NULL_LITERAL,
             TokenType.INT_LITERAL,
             TokenType.FLOAT_LITERAL,
             TokenType.IMAG_LITERAL,

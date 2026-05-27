@@ -1,0 +1,8 @@
+package Geometry;
+
+public struct Point {
+    double x;
+    double y;
+}
+
+public alias P = Point;

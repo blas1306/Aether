@@ -17,13 +17,13 @@ for v in V {
     println(v);
 }
 
-double doble(double x) {
+public double doble(double x) {
     return 2*x;
 }
 
 println(doble(3.0));
 
-int fib(int n) {
+public int fib(int n) {
     if (n <= 1) {
         return n;
     }
@@ -33,7 +33,7 @@ int fib(int n) {
 
 println("fib($4$) = $fib(4)$");
 
-double sumatoria(int a) {
+public double sumatoria(int a) {
     double suma = 0.0;
 
     if a < 0 {
@@ -45,7 +45,7 @@ double sumatoria(int a) {
     return suma;
 }
 
-double sumatoriav2(int a2) {
+public double sumatoriav2(int a2) {
     double sumav2 = 0.0;
 
     if a2 > 0 {
@@ -59,7 +59,7 @@ double sumatoriav2(int a2) {
     return sumav2;
 }
 
-int sumaCuadrados(int n) {
+public int sumaCuadrados(int n) {
     int suma = 0;
 
     for i in 1:n {

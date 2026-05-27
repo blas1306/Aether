@@ -10,13 +10,15 @@ import sys
 from plot_backend import PlotBackend
 
 from . import ast
-from .errors import AetherInputError, AetherRuntimeError, AetherTypeError
+from .errors import AetherInputError, AetherRuntimeError, AetherSyntaxError, AetherTypeError
 from .formatting import format_value
 from .lexer import lex
+from .modules import is_public_export, private_top_level_names, resolve_file_module_path
 from .parser import Parser
 from .scope import Scope
 from .stdlib import BuiltinFunction, is_builtin_namespace, make_builtins
 from .stdlib.registry import builtin_aliases_for_import
+from .tokens import AETHER_TYPES, PRIMITIVE_TYPES
 from .types import (
     AetherType,
     AetherRange,
@@ -25,7 +27,10 @@ from .types import (
     MatrixType,
     NUMERIC_TYPES,
     REAL_NUMERIC_TYPES,
+    NullType,
+    NullableType,
     RangeType,
+    StructInstance,
     TupleType,
     VOID_VALUE,
     TransposeVectorType,
@@ -54,6 +59,11 @@ LINEAR_ALGEBRA_CONJTRANSPOSE = "Math.LinearAlgebra.conjtranspose"
 @dataclass
 class Function:
     declaration: ast.FunctionDeclaration | ast.ExpressionFunctionDeclaration
+    closure: "Environment | None" = None
+    builtin_aliases: dict[str, str] | None = None
+    imported_modules: set[str] | None = None
+    type_aliases: dict[str, AetherType] | None = None
+    structs: dict[str, ast.StructDeclaration] | None = None
 
 
 @dataclass(frozen=True)
@@ -78,14 +88,16 @@ class Environment:
     def values(self) -> dict[str, AetherValue]:
         return self.variable_scope.symbols
 
-    def define(self, name: str, value: AetherValue, *, forbid_shadowing: bool = False) -> None:
-        self.variable_scope.define_local(name, value, forbid_shadowing=forbid_shadowing)
+    def define(self, name: str, value: AetherValue, *, forbid_shadowing: bool = False, is_const: bool = False) -> None:
+        self.variable_scope.define_local(name, value, forbid_shadowing=forbid_shadowing, is_const=is_const)
 
     def assign(self, name: str, value: AetherValue, *, array_literal_context: bool = False) -> None:
         scope = self.variable_scope.resolve_scope(name)
         if scope is None:
             self.variable_scope.define_local(name, value)
             return
+        if scope.is_const(name):
+            raise AetherTypeError(f"Cannot assign to constant '{name}'.")
         current = scope.symbols[name]
         if array_literal_context:
             scope.symbols[name] = coerce_array_literal_value(value, current.type_name)
@@ -114,10 +126,58 @@ class _ReturnSignal(Exception):
         self.value = value
 
 
+class _BreakSignal(Exception):
+    pass
+
+
+class _ContinueSignal(Exception):
+    pass
+
+
+class _FunctionContext:
+    def __init__(self, interpreter: "Interpreter", function: Function) -> None:
+        self.interpreter = interpreter
+        self.function = function
+        self.previous_builtin_aliases: dict[str, str] = {}
+        self.previous_imported_modules: set[str] = set()
+        self.previous_type_aliases: dict[str, AetherType] = {}
+        self.previous_structs: dict[str, ast.StructDeclaration] = {}
+
+    def __enter__(self) -> None:
+        self.previous_builtin_aliases = self.interpreter.builtin_aliases
+        self.previous_imported_modules = self.interpreter.imported_modules
+        self.previous_type_aliases = self.interpreter.type_aliases
+        self.previous_structs = self.interpreter.structs
+        self.interpreter.builtin_aliases = {
+            **self.previous_builtin_aliases,
+            **(self.function.builtin_aliases or {}),
+        }
+        self.interpreter.imported_modules = {
+            *self.previous_imported_modules,
+            *(self.function.imported_modules or set()),
+        }
+        self.interpreter.type_aliases = {
+            **self.previous_type_aliases,
+            **(self.function.type_aliases or {}),
+        }
+        self.interpreter.structs = {
+            **self.previous_structs,
+            **(self.function.structs or {}),
+        }
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        self.interpreter.builtin_aliases = self.previous_builtin_aliases
+        self.interpreter.imported_modules = self.previous_imported_modules
+        self.interpreter.type_aliases = self.previous_type_aliases
+        self.interpreter.structs = self.previous_structs
+
+
 class Interpreter:
     def __init__(
         self,
         *,
+        source_root: str | Path | None = None,
+        import_stack: tuple[str, ...] = (),
         plot_mode: str | None = None,
         plot_output_dir: str | Path | None = None,
         output_writer: Callable[[str], None] | None = None,
@@ -138,6 +198,12 @@ class Interpreter:
         )
         self.builtin_aliases: dict[str, str] = {}
         self.imported_modules: set[str] = set()
+        self.type_aliases: dict[str, AetherType] = {}
+        self.structs: dict[str, ast.StructDeclaration] = {}
+        self.source_root = Path(source_root).expanduser().resolve() if source_root is not None else Path.cwd()
+        self.import_stack = import_stack
+        self.imported_symbol_origins: dict[str, str] = {}
+        self.private_imported_symbols: dict[str, set[str]] = {}
         self._interpret_depth = 0
 
     def interpret(self, program: ast.Program) -> Environment:
@@ -165,39 +231,76 @@ class Interpreter:
 
     def _execute(self, statement: ast.Statement, env: Environment) -> None:
         if isinstance(statement, ast.VarDeclaration):
+            declared_type = self._resolve_type_aliases(statement.type_name) if statement.type_name is not None else None
             if isinstance(statement.initializer, ast.MatrixLiteral):
-                if not statement.initializer.rows and is_array_type(statement.type_name):
-                    env.define(statement.name, AetherValue(statement.type_name, []), forbid_shadowing=True)
+                if not statement.initializer.rows and declared_type is not None and is_array_type(declared_type):
+                    env.define(
+                        statement.name,
+                        AetherValue(declared_type, []),
+                        forbid_shadowing=True,
+                        is_const=statement.is_const,
+                    )
                     return
                 value = self._evaluate_matrix_literal(
                     statement.initializer,
                     env,
-                    statement.type_name if isinstance(statement.type_name, (MatrixType, VectorType)) else None,
+                    declared_type if isinstance(declared_type, (MatrixType, VectorType)) else None,
                 )
-                env.define(statement.name, coerce_implicit(value, statement.type_name), forbid_shadowing=True)
+                if declared_type is None:
+                    env.define(statement.name, value, forbid_shadowing=True, is_const=statement.is_const)
+                    return
+                env.define(
+                    statement.name,
+                    coerce_implicit(value, declared_type),
+                    forbid_shadowing=True,
+                    is_const=statement.is_const,
+                )
                 return
             if isinstance(statement.initializer, ast.ArrayLiteral):
                 value = self._evaluate_array_literal(
                     statement.initializer,
                     env,
-                    statement.type_name if is_array_type(statement.type_name) else None,
+                    declared_type if declared_type is not None and is_array_type(declared_type) else None,
                 )
-                coerced = (
-                    coerce_array_literal_value(value, statement.type_name)
-                    if is_array_type(statement.type_name)
-                    else coerce_implicit(value, statement.type_name)
-                )
-                env.define(statement.name, coerced, forbid_shadowing=True)
+                if declared_type is None:
+                    env.define(statement.name, value, forbid_shadowing=True, is_const=statement.is_const)
+                    return
+                coerced = coerce_array_literal_value(value, declared_type) if is_array_type(declared_type) else coerce_implicit(value, declared_type)
+                env.define(statement.name, coerced, forbid_shadowing=True, is_const=statement.is_const)
                 return
-            value = self._evaluate_with_expected_type(statement.initializer, env, statement.type_name)
+            if declared_type is None:
+                env.define(
+                    statement.name,
+                    self._evaluate(statement.initializer, env),
+                    forbid_shadowing=True,
+                    is_const=statement.is_const,
+                )
+                return
+            value = self._evaluate_with_expected_type(statement.initializer, env, declared_type)
             if (
-                statement.type_name == "float"
+                declared_type == "float"
                 and isinstance(statement.initializer, ast.Literal)
                 and value.type_name == "double"
             ):
-                env.define(statement.name, AetherValue("float", float(value.value)), forbid_shadowing=True)
+                env.define(
+                    statement.name,
+                    AetherValue("float", float(value.value)),
+                    forbid_shadowing=True,
+                    is_const=statement.is_const,
+                )
                 return
-            env.define(statement.name, coerce_implicit(value, statement.type_name), forbid_shadowing=True)
+            env.define(
+                statement.name,
+                coerce_implicit(value, declared_type),
+                forbid_shadowing=True,
+                is_const=statement.is_const,
+            )
+            return
+        if isinstance(statement, ast.AliasDeclaration):
+            self.type_aliases[statement.name] = statement.target_type
+            return
+        if isinstance(statement, ast.StructDeclaration):
+            self.structs[statement.name] = statement
             return
         if isinstance(statement, ast.Assignment):
             current = env.lookup(statement.name)
@@ -230,6 +333,9 @@ class Interpreter:
         if isinstance(statement, ast.MatrixIndexAssignment):
             self._assign_matrix_index(statement, env)
             return
+        if isinstance(statement, ast.FieldAssignment):
+            self._assign_field(statement, env)
+            return
         if isinstance(statement, ast.ExpressionStatement):
             self._evaluate(statement.expression, env)
             return
@@ -250,31 +356,59 @@ class Interpreter:
                 self._require_boolean(condition, "while")
                 if not condition.value:
                     break
-                self._execute_block(statement.body, Environment(parent=env))
+                try:
+                    self._execute_block(statement.body, Environment(parent=env))
+                except _ContinueSignal:
+                    continue
+                except _BreakSignal:
+                    break
             return
         if isinstance(statement, ast.ForInStatement):
             iterable = self._evaluate(statement.iterable, env)
             for item in _iterable_values(iterable):
                 loop_env = Environment(parent=env)
                 loop_env.define(statement.variable, item, forbid_shadowing=True)
-                self._execute_block(statement.body, loop_env)
+                try:
+                    self._execute_block(statement.body, loop_env)
+                except _ContinueSignal:
+                    continue
+                except _BreakSignal:
+                    break
             return
         if isinstance(statement, ast.FunctionDeclaration):
-            env.define_function(Function(statement))
+            env.define_function(self._function(statement, env))
             return
         if isinstance(statement, ast.ExpressionFunctionDeclaration):
-            env.define_function(Function(statement))
+            env.define_function(self._function(statement, env))
             return
         if isinstance(statement, ast.ReturnStatement):
             value = AetherValue("void", VOID_VALUE)
             if statement.expression is not None:
                 value = self._evaluate(statement.expression, env)
             raise _ReturnSignal(value)
+        if isinstance(statement, ast.BreakStatement):
+            raise _BreakSignal()
+        if isinstance(statement, ast.ContinueStatement):
+            raise _ContinueSignal()
         raise AetherRuntimeError(f"Unsupported statement {statement!r}.")
 
     def _execute_block(self, statements: list[ast.Statement], env: Environment) -> None:
         for statement in statements:
             self._execute(statement, env)
+
+    def _function(
+        self,
+        declaration: ast.FunctionDeclaration | ast.ExpressionFunctionDeclaration,
+        env: Environment,
+    ) -> Function:
+        return Function(
+            declaration,
+            env,
+            dict(self.builtin_aliases),
+            set(self.imported_modules),
+            dict(self.type_aliases),
+            dict(self.structs),
+        )
 
     def _evaluate(self, expression: ast.Expression, env: Environment) -> AetherValue:
         if isinstance(expression, ast.Literal):
@@ -314,6 +448,8 @@ class Interpreter:
             return self._read_index(expression.array, expression.index, env)
         if isinstance(expression, ast.MatrixIndexExpression):
             return self._read_matrix_index(expression.matrix, expression.row, expression.column, env)
+        if isinstance(expression, ast.FieldAccess):
+            return self._read_field(expression.target, expression.field_name, env)
         raise AetherRuntimeError(f"Unsupported expression {expression!r}.")
 
     def _evaluate_with_expected_type(
@@ -332,9 +468,9 @@ class Interpreter:
         env: Environment,
         expected_type: AetherType,
     ) -> AetherValue:
-        if expected_type not in {"int", "float", "string", "boolean"}:
+        if not _is_supported_input_target_type(expected_type):
             raise AetherInputError(
-                f"input() supports int, float, string, and boolean targets, got '{type_to_string(expected_type)}'."
+                f"input() supports int, float, string, boolean, Vector, and Matrix targets, got '{type_to_string(expected_type)}'."
             )
         if len(expression.arguments) > 1:
             raise AetherTypeError("input(...) expects zero or one argument.")
@@ -349,7 +485,26 @@ class Interpreter:
         text = raw[:-1] if raw.endswith("\n") else raw
         if text.endswith("\r"):
             text = text[:-1]
-        return _convert_input_text(text, expected_type)
+        return self._convert_input_text(text, expected_type, env)
+
+    def _convert_input_text(self, text: str, target_type: AetherType, env: Environment) -> AetherValue:
+        if isinstance(target_type, (VectorType, MatrixType)):
+            return self._convert_matrix_input_text(text, target_type, env)
+        return _convert_scalar_input_text(text, target_type)
+
+    def _convert_matrix_input_text(
+        self,
+        text: str,
+        target_type: VectorType | MatrixType,
+        env: Environment,
+    ) -> AetherValue:
+        try:
+            expression = Parser(lex(text.strip())).parse_expression()
+            if not isinstance(expression, ast.MatrixLiteral):
+                raise AetherTypeError("expected a vector or matrix literal")
+            return self._evaluate_matrix_literal(expression, env, target_type)
+        except (AetherSyntaxError, AetherTypeError, AetherRuntimeError) as exc:
+            raise AetherInputError(f'cannot convert "{text}" to {type_to_string(target_type)}: {exc}') from exc
 
     def _write_prompt(self, prompt: str) -> None:
         if self.output_writer is None and self._uses_default_input_reader:
@@ -587,6 +742,15 @@ class Interpreter:
             raise AetherTypeError(f"Two-dimensional indexing expects a matrix, got '{type_to_string(matrix_type)}'.")
         matrix_value.value[row].value[column] = coerce_implicit(value, matrix_type.element_type)
 
+    def _assign_field(self, statement: ast.FieldAssignment, env: Environment) -> None:
+        struct_value = self._evaluate(statement.target, env)
+        instance = self._require_struct_instance(struct_value, statement.field_name)
+        if statement.field_name not in instance.fields:
+            raise AetherTypeError(f"Struct '{instance.type_name}' has no field '{statement.field_name}'.")
+        field_type = instance.fields[statement.field_name].type_name
+        value = self._evaluate_with_expected_type(statement.expression, env, field_type)
+        instance.fields[statement.field_name] = coerce_implicit(value, field_type)
+
     def _require_array_index(self, array_value: AetherValue, index_value: AetherValue) -> int:
         if not is_indexable_type(array_value.type_name):
             raise AetherTypeError(f"Cannot index non-indexable value of type '{type_to_string(array_value.type_name)}'.")
@@ -632,8 +796,48 @@ class Interpreter:
             return self._call(expression.callee, args, named_args, env)
         if named_args:
             raise AetherRuntimeError(f"Function '{expression.callee}' does not accept keyword arguments.")
+        struct = self._constructor_struct(expression.callee)
+        if struct is not None:
+            args = [self._evaluate(arg, env) for arg in expression.arguments]
+            return self._construct_struct(struct, args)
         args = [self._evaluate(arg, env) for arg in expression.arguments]
         return self._call(expression.callee, args, {}, env)
+
+    def _constructor_struct(self, callee: str) -> ast.StructDeclaration | None:
+        try:
+            resolved = self._resolve_type_aliases(callee)
+        except AetherTypeError:
+            return None
+        if not isinstance(resolved, str):
+            return None
+        return self.structs.get(resolved)
+
+    def _construct_struct(self, declaration: ast.StructDeclaration, args: list[AetherValue]) -> AetherValue:
+        if len(args) != len(declaration.fields):
+            raise AetherRuntimeError(
+                f"Struct '{declaration.name}' constructor expects {len(declaration.fields)} arguments but got {len(args)}."
+            )
+        fields: dict[str, AetherValue] = {}
+        field_order: list[str] = []
+        for field, arg in zip(declaration.fields, args):
+            field_type = self._resolve_type_aliases(field.type_name)
+            fields[field.name] = coerce_implicit(arg, field_type)
+            field_order.append(field.name)
+        return AetherValue(declaration.name, StructInstance(declaration.name, fields, tuple(field_order)))
+
+    def _read_field(self, target: ast.Expression, field_name: str, env: Environment) -> AetherValue:
+        struct_value = self._evaluate(target, env)
+        instance = self._require_struct_instance(struct_value, field_name)
+        if field_name not in instance.fields:
+            raise AetherTypeError(f"Struct '{instance.type_name}' has no field '{field_name}'.")
+        return instance.fields[field_name]
+
+    def _require_struct_instance(self, value: AetherValue, field_name: str) -> StructInstance:
+        if isinstance(value.value, StructInstance):
+            return value.value
+        raise AetherTypeError(
+            f"Cannot access field '{field_name}' on non-struct value of type '{type_to_string(value.type_name)}'."
+        )
 
     def _evaluate_builtin_argument(self, expression: ast.Expression, env: Environment, builtin_name: str) -> AetherValue:
         if builtin_name.startswith("Plots.") and isinstance(expression, ast.Identifier):
@@ -679,21 +883,26 @@ class Interpreter:
             raise AetherRuntimeError(
                 f"Function '{callee}' expects {len(declaration.parameters)} arguments but got {len(args)}."
             )
-        if isinstance(declaration, ast.ExpressionFunctionDeclaration):
-            local_env = Environment(parent=self.global_env)
+        with self._function_context(function):
+            if isinstance(declaration, ast.ExpressionFunctionDeclaration):
+                local_env = Environment(parent=function.closure or self.global_env)
+                for parameter, arg in zip(declaration.parameters, args):
+                    local_env.define(parameter.name, arg)
+                return self._evaluate(declaration.expression, local_env)
+            local_env = Environment(parent=function.closure or self.global_env)
             for parameter, arg in zip(declaration.parameters, args):
-                local_env.define(parameter.name, arg)
-            return self._evaluate(declaration.expression, local_env)
-        local_env = Environment(parent=self.global_env)
-        for parameter, arg in zip(declaration.parameters, args):
-            local_env.define(parameter.name, coerce_implicit(arg, parameter.type_name))
-        try:
-            self._execute_block(declaration.body, local_env)
-        except _ReturnSignal as signal:
-            return coerce_return_value(signal.value, declaration.return_type)
-        if declaration.return_type == "void":
-            return AetherValue("void", VOID_VALUE)
-        raise AetherRuntimeError(f"Function '{callee}' ended without returning a value.")
+                local_env.define(parameter.name, coerce_implicit(arg, self._resolve_type_aliases(parameter.type_name)))
+            try:
+                self._execute_block(declaration.body, local_env)
+            except _ReturnSignal as signal:
+                return coerce_return_value(signal.value, self._resolve_type_aliases(declaration.return_type))
+            return_type = self._resolve_type_aliases(declaration.return_type)
+            if return_type == "void":
+                return AetherValue("void", VOID_VALUE)
+            raise AetherRuntimeError(f"Function '{callee}' ended without returning a value.")
+
+    def _function_context(self, function: Function) -> "_FunctionContext":
+        return _FunctionContext(self, function)
 
     def _evaluate_binary(self, left: AetherValue, operator: str, right: AetherValue) -> AetherValue:
         if operator in {"+", "-", ".+", ".-", "*", ".*", "/", "%", "^"}:
@@ -703,6 +912,8 @@ class Interpreter:
                 raise AetherRuntimeError("Operator '\\' requires import Math.LinearAlgebra.")
             return self.builtins[LINEAR_ALGEBRA_SOLVE]([left, right])
         if operator in {"==", "!="}:
+            if isinstance(left.value, StructInstance) or isinstance(right.value, StructInstance):
+                raise AetherTypeError("Struct equality is not supported yet.")
             if not _types_comparable_for_equality(left.type_name, right.type_name):
                 raise AetherTypeError(
                     f"Cannot compare '{type_to_string(left.type_name)}' and '{type_to_string(right.type_name)}' "
@@ -791,22 +1002,166 @@ class Interpreter:
             self.builtin_aliases.update(builtin_aliases_for_import(module_name))
             self.imported_modules.add(module_name)
             return
-        module_path = Path(module_name.replace(".", "/"))
-        if module_path.suffix == "":
-            module_path = module_path.with_suffix(".ae")
-        if not module_path.is_absolute():
-            module_path = Path.cwd() / module_path
+        if module_name in self.import_stack:
+            raise AetherRuntimeError(f"Cyclic import involving '{module_name}'.")
+        module_path = resolve_file_module_path(module_name, self.source_root)
         if not module_path.is_file():
             raise AetherRuntimeError(f"Module '{module_name}' not found.")
         source = module_path.read_text(encoding="utf-8")
         tokens = lex(source)
         program = Parser(tokens).parse()
-        self.interpret(program)
+        if program.package_name is not None and program.package_name != module_name:
+            raise AetherRuntimeError(
+                f"Module '{module_name}' declares package '{program.package_name}'."
+            )
+        module_interpreter = Interpreter(
+            source_root=self.source_root,
+            import_stack=(*self.import_stack, module_name),
+            plot_mode=self.plot_backend.plot_mode,
+            plot_output_dir=self.plot_backend.output_dir,
+            output_writer=self.output_writer,
+            input_reader=self.input_reader,
+        )
+        module_interpreter.interpret(program)
+        self._merge_module_runtime_exports(module_name, program, module_interpreter)
         self.imported_modules.add(module_name)
+
+    def _merge_module_runtime_exports(
+        self,
+        module_name: str,
+        program: ast.Program,
+        module_interpreter: "Interpreter",
+    ) -> None:
+        for name, modules in module_interpreter.private_imported_symbols.items():
+            self.private_imported_symbols.setdefault(name, set()).update(modules)
+        for name in private_top_level_names(program):
+            self.private_imported_symbols.setdefault(name, set()).add(module_name)
+        for name, value in self._exported_values(program, module_interpreter).items():
+            self._ensure_import_available(name, module_name)
+            is_const = module_interpreter.global_env.variable_scope.is_const(name)
+            self.global_env.define(name, value, is_const=is_const)
+            self.imported_symbol_origins[name] = module_name
+        for name, function in self._exported_functions(program, module_interpreter).items():
+            self._ensure_import_available(name, module_name)
+            self.global_env.functions[name] = function
+            self.imported_symbol_origins[name] = module_name
+        for name, declaration in self._exported_structs(program, module_interpreter).items():
+            self._ensure_import_available(name, module_name)
+            self.structs[name] = declaration
+            self.imported_symbol_origins[name] = module_name
+        for name, target_type in self._exported_aliases(program, module_interpreter).items():
+            self._ensure_import_available(name, module_name)
+            self.type_aliases[name] = target_type
+            self.imported_symbol_origins[name] = module_name
+
+    def _ensure_import_available(self, name: str, module_name: str) -> None:
+        existing_origin = self.imported_symbol_origins.get(name)
+        if existing_origin is not None and existing_origin != module_name:
+            raise AetherRuntimeError(
+                f"Import collision for symbol '{name}' exported by both '{existing_origin}' and '{module_name}'."
+            )
+        if name in self.global_env.values or name in self.global_env.functions or name in self.type_aliases or name in self.structs:
+            raise AetherRuntimeError(
+                f"Import collision: symbol '{name}' from module '{module_name}' conflicts with an existing symbol."
+            )
+
+    def _exported_values(
+        self,
+        program: ast.Program,
+        module_interpreter: "Interpreter",
+    ) -> dict[str, AetherValue]:
+        if program.package_name is None:
+            return dict(module_interpreter.global_env.values)
+        exports: dict[str, AetherValue] = {}
+        for statement in program.statements:
+            if isinstance(statement, ast.VarDeclaration) and is_public_export(statement.visibility, program.package_name):
+                exports[statement.name] = module_interpreter.global_env.get(statement.name)
+        return exports
+
+    def _exported_functions(
+        self,
+        program: ast.Program,
+        module_interpreter: "Interpreter",
+    ) -> dict[str, Function]:
+        if program.package_name is None:
+            return dict(module_interpreter.global_env.functions)
+        exports: dict[str, Function] = {}
+        for statement in program.statements:
+            if isinstance(statement, (ast.FunctionDeclaration, ast.ExpressionFunctionDeclaration)) and is_public_export(
+                statement.visibility,
+                program.package_name,
+            ):
+                exports[statement.name] = module_interpreter.global_env.functions[statement.name]
+        return exports
+
+    def _exported_structs(
+        self,
+        program: ast.Program,
+        module_interpreter: "Interpreter",
+    ) -> dict[str, ast.StructDeclaration]:
+        if program.package_name is None:
+            return dict(module_interpreter.structs)
+        exports: dict[str, ast.StructDeclaration] = {}
+        for statement in program.statements:
+            if isinstance(statement, ast.StructDeclaration) and is_public_export(statement.visibility, program.package_name):
+                exports[statement.name] = module_interpreter.structs[statement.name]
+        return exports
+
+    def _exported_aliases(
+        self,
+        program: ast.Program,
+        module_interpreter: "Interpreter",
+    ) -> dict[str, AetherType]:
+        if program.package_name is None:
+            return dict(module_interpreter.type_aliases)
+        exports: dict[str, AetherType] = {}
+        for statement in program.statements:
+            if isinstance(statement, ast.AliasDeclaration) and is_public_export(statement.visibility, program.package_name):
+                exports[statement.name] = module_interpreter.type_aliases[statement.name]
+        return exports
 
     def _require_boolean(self, value: AetherValue, construct: str) -> None:
         if value.type_name != "boolean":
             raise AetherTypeError(f"The condition of '{construct}' must be boolean, got '{value.type_name}'.")
+
+    def _resolve_type_aliases(self, type_name: AetherType | None, resolving: tuple[str, ...] = ()) -> AetherType:
+        if type_name is None:
+            raise AetherTypeError("Cannot infer type in this declaration.")
+        if isinstance(type_name, str):
+            if type_name in self.type_aliases:
+                if type_name in resolving:
+                    cycle_name = resolving[0] if resolving else type_name
+                    raise AetherTypeError(f"Cyclic type alias involving '{cycle_name}'.")
+                return self._resolve_type_aliases(self.type_aliases[type_name], (*resolving, type_name))
+            if type_name in self.structs:
+                return type_name
+            if type_name not in AETHER_TYPES:
+                raise AetherTypeError(f"Unknown type '{type_name}'.")
+            return type_name
+        if isinstance(type_name, ArrayType):
+            return ArrayType(self._resolve_type_aliases(type_name.element_type, resolving))
+        if isinstance(type_name, NullableType):
+            return NullableType(self._resolve_type_aliases(type_name.base_type, resolving))
+        if isinstance(type_name, TupleType):
+            return TupleType(tuple(self._resolve_type_aliases(element, resolving) for element in type_name.element_types))
+        if isinstance(type_name, MatrixType):
+            element_type = self._resolve_vector_matrix_element_type(type_name.element_type, resolving)
+            return MatrixType(element_type, type_name.rows, type_name.cols, type_name.vector)
+        if isinstance(type_name, VectorType):
+            element_type = self._resolve_vector_matrix_element_type(type_name.element_type, resolving)
+            return VectorType(element_type, type_name.length)
+        if isinstance(type_name, TransposeVectorType):
+            element_type = self._resolve_vector_matrix_element_type(type_name.element_type, resolving)
+            return TransposeVectorType(element_type, type_name.length)
+        if isinstance(type_name, RangeType):
+            return RangeType(self._resolve_vector_matrix_element_type(type_name.element_type, resolving))
+        return type_name
+
+    def _resolve_vector_matrix_element_type(self, element_type: str, resolving: tuple[str, ...] = ()) -> str:
+        resolved = self._resolve_type_aliases(element_type, resolving)
+        if not isinstance(resolved, str) or resolved not in PRIMITIVE_TYPES:
+            raise AetherTypeError(f"Expected primitive element type, got '{type_to_string(resolved)}'.")
+        return resolved
 
     def _interpolate_string(self, expression: ast.InterpolatedString, env: Environment) -> str:
         parts: list[str] = []
@@ -916,7 +1271,7 @@ def _default_plot_output_dir(output_dir: str | Path | None) -> str | Path:
     return output_dir or os.environ.get("AETHER_PLOT_DIR") or "."
 
 
-def _convert_input_text(text: str, target_type: AetherType) -> AetherValue:
+def _convert_scalar_input_text(text: str, target_type: AetherType) -> AetherValue:
     if target_type == "string":
         return AetherValue("string", text)
     stripped = text.strip()
@@ -936,8 +1291,12 @@ def _convert_input_text(text: str, target_type: AetherType) -> AetherValue:
     except ValueError as exc:
         raise AetherInputError(f'cannot convert "{text}" to {type_to_string(target_type)}') from exc
     raise AetherInputError(
-        f"input() supports int, float, string, and boolean targets, got '{type_to_string(target_type)}'."
+        f"input() supports int, float, string, boolean, Vector, and Matrix targets, got '{type_to_string(target_type)}'."
     )
+
+
+def _is_supported_input_target_type(type_name: AetherType) -> bool:
+    return type_name in {"int", "float", "string", "boolean"} or isinstance(type_name, (VectorType, MatrixType))
 
 
 def _iterable_values(value: AetherValue) -> list[AetherValue] | AetherRange:
@@ -1037,6 +1396,16 @@ def _common_primitive_type(primitive_types: list[AetherType]) -> str:
 def _types_comparable_for_equality(left_type: AetherType, right_type: AetherType) -> bool:
     if left_type == right_type:
         return True
+    if isinstance(left_type, NullType):
+        return isinstance(right_type, NullableType)
+    if isinstance(right_type, NullType):
+        return isinstance(left_type, NullableType)
+    if isinstance(left_type, NullableType) and isinstance(right_type, NullableType):
+        return _types_comparable_for_equality(left_type.base_type, right_type.base_type)
+    if isinstance(left_type, NullableType):
+        return _types_comparable_for_equality(left_type.base_type, right_type)
+    if isinstance(right_type, NullableType):
+        return _types_comparable_for_equality(left_type, right_type.base_type)
     if isinstance(left_type, VectorType) and isinstance(right_type, VectorType):
         return left_type.length == right_type.length and _types_comparable_for_equality(
             left_type.element_type,

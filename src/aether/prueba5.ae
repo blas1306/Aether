@@ -1,27 +1,37 @@
 import Math.LinearAlgebra
 
-Vector<double> F(Vector<double> x) {
-    return [x[0]^2 + x[1]^2 - 4, x[0] - x[1]];
+Vector<double> f = input("Ingrese el sistema igualado a 0: ");
+Matrix<double> jf = input("Ingrese la Jacobiana de dicho sistema: ");
+
+public Vector<double> F(Vector<double> x) {
+    mf = size(f)[0];
+    for i in 0:(mf - 1) {
+        f[i] = f[x[i]];
+    }
+
+    return f;
 }
 
-Matrix<double> J_F(Vector<double> x) {
-    return [2*x[0] 2*x[1]; 1 -1];
-}
-
-Vector<double> x0 = [1, 1];
+Vector<double> x0 = input("Ingrese un vector inicial: ");
 double tol = 1e-8;
 int maxiter = 100;
 
-Vector<double> xn = x0;
-double res = norm(F(xn));
-int iter = 0;
+public (Vector<double> xn, double res, int iter) SNL(Vector<double> x0) {
+    Vector<double> xn = x0;
+    double res = norm(F(xn));
+    int iter = 0;
 
-while (res > tol && iter < maxiter) {
-    z = J_F(xn) \ (-F(xn));
-    xn = xn + z;
-    res = norm(F(xn));
-    iter += 1;
+    while (res > tol && iter < maxiter) {
+        z = J_F(xn) \ (-F(xn));
+        xn = xn + z;
+        res = norm(F(xn));
+        iter += 1;
+    }
+
+    return (xn, res, iter);
 }
+
+xn, res, iter = SNL(x0);
 
 println("xn = ", xn);
 println("res = ", res);

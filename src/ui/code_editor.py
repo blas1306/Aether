@@ -31,13 +31,22 @@ EDITOR_KEYWORDS = (
     "void",
     "Matrix",
     "Vector",
+    "alias",
+    "struct",
+    "const",
+    "package",
+    "public",
+    "private",
     "for",
+    "break",
+    "continue",
     "if",
     "elif",
     "else",
     "while",
     "function",
     "return",
+    "null",
     "repeat",
     "until",
     "end",
@@ -53,7 +62,7 @@ LOGICAL_OPERATOR_PATTERN = re.compile(r"&&|\|\|")
 SCRIPT_COMMENT_PATTERN = re.compile(r"#.*|//.*")
 STRING_PATTERN = re.compile(r"(\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*')")
 NUMBER_PATTERN = re.compile(r"\b\d+(?:\.\d+)?\b")
-PUNCT_PATTERN = re.compile(r"[=+\-*/%\\^<>{}\[\](),.;:|]")
+PUNCT_PATTERN = re.compile(r"[=+\-*/%\\^<>{}\[\](),.;:|?]")
 INDENTATION = " " * 4
 EDITOR_BG = "#353535"
 TEXT_FG = "#ffffff"

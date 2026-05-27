@@ -1,7 +1,7 @@
 import Math.LinearAlgebra
 import Plots
 
-boolean EsPrimo2(int pp) {
+public boolean EsPrimo2(int pp) {
     if pp <= 1 {
         println("No existen numeros primos menores que 2");
     }
@@ -52,7 +52,7 @@ plot!(f, 1, 13, label="ajuste");
 err2 = norm(p - A*z)^2;
 println("err2 = ", err2);
 
-int p_n(int x) {
+public int p_n(int x) {
     pp_n = int(f(x));
     if EsPrimo2(pp_n) == false {
         return pp_n + int(ln(x)/z[0]);
