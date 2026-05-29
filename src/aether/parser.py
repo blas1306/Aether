@@ -23,22 +23,37 @@ class Parser:
         statements: list[ast.Statement] = []
         package_name: str | None = None
         while not self._is_at_end():
-            if self._match(TokenType.PACKAGE):
-                package_token = self._previous()
-                if package_name is not None:
-                    raise self._error(package_token, "Duplicate package declaration.")
-                if statements:
-                    raise self._error(package_token, "Package declaration must appear before other declarations.")
-                package_name = self._package_declaration()
-                continue
-            statements.append(self._declaration_or_statement())
+            package_name = self._parse_top_level_item(statements, package_name)
         return ast.Program(statements, package_name)
+
+    def parse_with_recovery(self) -> tuple[ast.Program, list[AetherSyntaxError]]:
+        statements: list[ast.Statement] = []
+        errors: list[AetherSyntaxError] = []
+        package_name: str | None = None
+        while not self._is_at_end():
+            try:
+                package_name = self._parse_top_level_item(statements, package_name)
+            except AetherSyntaxError as exc:
+                errors.append(exc)
+                self._synchronize()
+        return ast.Program(statements, package_name), errors
 
     def parse_expression(self) -> ast.Expression:
         expression = self._expression()
         if not self._is_at_end():
             raise self._error(self._peek(), "Expected end of expression.")
         return expression
+
+    def _parse_top_level_item(self, statements: list[ast.Statement], package_name: str | None) -> str | None:
+        if self._match(TokenType.PACKAGE):
+            package_token = self._previous()
+            if package_name is not None:
+                raise self._error(package_token, "Duplicate package declaration.")
+            if statements:
+                raise self._error(package_token, "Package declaration must appear before other declarations.")
+            return self._package_declaration()
+        statements.append(self._declaration_or_statement())
+        return package_name
 
     def _declaration_or_statement(self) -> ast.Statement:
         if self._check(TokenType.PACKAGE):
@@ -86,7 +101,8 @@ class Parser:
 
     def _function_declaration(self, visibility: ast.Visibility = None) -> ast.FunctionDeclaration:
         return_type = self._parse_return_type_annotation("Expected function return type.")
-        name = self._consume(TokenType.IDENTIFIER, "Expected function name.").lexeme
+        name_token = self._consume(TokenType.IDENTIFIER, "Expected function name.")
+        name = name_token.lexeme
         self._consume(TokenType.LEFT_PAREN, "Expected '(' after function name.")
         parameters: list[ast.Parameter] = []
         if not self._check(TokenType.RIGHT_PAREN):
@@ -98,10 +114,19 @@ class Parser:
                     break
         self._consume(TokenType.RIGHT_PAREN, "Expected ')' after parameters.")
         body = self._block()
-        return ast.FunctionDeclaration(return_type, name, parameters, body, visibility)
+        return ast.FunctionDeclaration(
+            return_type,
+            name,
+            parameters,
+            body,
+            visibility,
+            name_token.line,
+            name_token.column,
+        )
 
     def _expression_function_declaration(self, visibility: ast.Visibility = None) -> ast.ExpressionFunctionDeclaration:
-        name = self._consume(TokenType.IDENTIFIER, "Expected function name.").lexeme
+        name_token = self._consume(TokenType.IDENTIFIER, "Expected function name.")
+        name = name_token.lexeme
         self._consume(TokenType.LEFT_PAREN, "Expected '(' after function name.")
         parameters: list[ast.ExpressionParameter] = []
         parameter_names: set[str] = set()
@@ -138,7 +163,14 @@ class Parser:
         finally:
             self.expression_function_name = previous_expression_function_name
         self._consume(TokenType.SEMICOLON, "Expected ';' after expression function declaration.")
-        return ast.ExpressionFunctionDeclaration(name, parameters, expression, visibility)
+        return ast.ExpressionFunctionDeclaration(
+            name,
+            parameters,
+            expression,
+            visibility,
+            name_token.line,
+            name_token.column,
+        )
 
     def _alias_declaration(self, visibility: ast.Visibility = None) -> ast.AliasDeclaration:
         alias_token = self._consume(TokenType.IDENTIFIER, "Expected alias name.")
@@ -183,23 +215,27 @@ class Parser:
 
     def _statement(self) -> ast.Statement:
         if self._match(TokenType.IF):
+            if_token = self._previous()
             condition = self._expression()
             body = self._block()
             else_body = self._block() if self._match(TokenType.ELSE) else None
-            return ast.IfStatement(condition, body, else_body)
+            return ast.IfStatement(condition, body, else_body, if_token.line, if_token.column)
         if self._match(TokenType.WHILE):
-            return ast.WhileStatement(self._expression(), self._block())
+            while_token = self._previous()
+            return ast.WhileStatement(self._expression(), self._block(), while_token.line, while_token.column)
         if self._match(TokenType.IMPORT):
+            import_token = self._previous()
             module_name = self._consume(TokenType.IDENTIFIER, "Expected module name after 'import'.").lexeme
             while self._match(TokenType.DOT):
                 module_name += "." + self._consume(TokenType.IDENTIFIER, "Expected identifier after '.'.").lexeme
             self._consume_optional_import_terminator()
-            return ast.ImportStatement(module_name)
+            return ast.ImportStatement(module_name, import_token.line, import_token.column)
         if self._match(TokenType.FOR):
+            for_token = self._previous()
             variable = self._consume(TokenType.IDENTIFIER, "Expected loop variable after 'for'.").lexeme
             self._consume(TokenType.IN, "Expected 'in' after loop variable.")
             iterable = self._expression()
-            return ast.ForInStatement(variable, iterable, self._block())
+            return ast.ForInStatement(variable, iterable, self._block(), for_token.line, for_token.column)
         if self._match(TokenType.RETURN):
             return_token = self._previous()
             expression = None if self._check(TokenType.SEMICOLON) else self._expression()
@@ -386,14 +422,15 @@ class Parser:
         expr = self._primary()
         while True:
             if self._match(TokenType.LEFT_BRACKET):
+                bracket = self._previous()
                 index = self._index_component()
                 if self._match(TokenType.COMMA):
                     column = self._index_component()
                     self._consume(TokenType.RIGHT_BRACKET, "Expected ']' after matrix index.")
-                    expr = ast.MatrixIndexExpression(expr, index, column)
+                    expr = ast.MatrixIndexExpression(expr, index, column, bracket.line, bracket.column)
                     continue
                 self._consume(TokenType.RIGHT_BRACKET, "Expected ']' after index.")
-                expr = ast.IndexExpression(expr, index)
+                expr = ast.IndexExpression(expr, index, bracket.line, bracket.column)
                 continue
             if self._match(TokenType.APOSTROPHE):
                 operator = self._previous()
@@ -401,7 +438,7 @@ class Parser:
                 continue
             if self._match(TokenType.DOT):
                 field = self._consume(TokenType.IDENTIFIER, "Expected field name after '.'.")
-                expr = ast.FieldAccess(expr, field.lexeme)
+                expr = ast.FieldAccess(expr, field.lexeme, field.line, field.column)
                 continue
             break
         return expr
@@ -425,10 +462,14 @@ class Parser:
         if self._match(TokenType.STRING_LITERAL):
             return self._string_literal_expression(self._previous())
         if self._match(TokenType.IDENTIFIER, TokenType.TYPE):
-            parts = [self._previous().lexeme]
+            name_token = self._previous()
+            parts = [name_token.lexeme]
+            field_tokens: list[Token] = []
             while self._match(TokenType.DOT):
-                part = self._consume(TokenType.IDENTIFIER, "Expected identifier after '.'.").lexeme
+                field_token = self._consume(TokenType.IDENTIFIER, "Expected identifier after '.'.")
+                part = field_token.lexeme
                 parts.append(part)
+                field_tokens.append(field_token)
             name = ".".join(parts)
             if self._match(TokenType.LEFT_PAREN):
                 call_token = self._previous()
@@ -455,15 +496,15 @@ class Parser:
                     if keyword_arguments:
                         raise self._error(call_token, "input() does not accept keyword arguments.")
                     return ast.InputCall(arguments, call_token.line, call_token.column)
-                return ast.CallExpression(name, arguments, keyword_arguments)
+                return ast.CallExpression(name, arguments, keyword_arguments, name_token.line, name_token.column)
             if len(parts) > 1:
-                expr: ast.Expression = ast.Identifier(parts[0])
-                for part in parts[1:]:
-                    expr = ast.FieldAccess(expr, part)
+                expr: ast.Expression = ast.Identifier(parts[0], name_token.line, name_token.column)
+                for part, field_token in zip(parts[1:], field_tokens):
+                    expr = ast.FieldAccess(expr, part, field_token.line, field_token.column)
                 return expr
             if name in AETHER_TYPES:
                 raise self._error(self._previous(), f"Type name '{name}' must be used as a call or declaration.")
-            return ast.Identifier(name)
+            return ast.Identifier(name, name_token.line, name_token.column)
         if self._match(TokenType.LEFT_BRACKET):
             return self._matrix_literal()
         if self._match(TokenType.LEFT_PAREN):
@@ -583,6 +624,34 @@ class Parser:
         if self._is_at_end() or self._peek().line > import_end.line:
             return
         raise self._error(self._peek(), "Expected ';' or newline after import statement.")
+
+    def _synchronize(self) -> None:
+        if self._is_at_end():
+            return
+        error_line = self._peek().line
+        self._advance()
+        while not self._is_at_end():
+            if self._previous().type == TokenType.SEMICOLON:
+                return
+            if self._peek().type in {
+                TokenType.PACKAGE,
+                TokenType.IMPORT,
+                TokenType.PUBLIC,
+                TokenType.PRIVATE,
+                TokenType.CONST,
+                TokenType.ALIAS,
+                TokenType.STRUCT,
+                TokenType.FUNCTION,
+                TokenType.TYPE,
+                TokenType.IF,
+                TokenType.WHILE,
+                TokenType.FOR,
+                TokenType.RETURN,
+                TokenType.BREAK,
+                TokenType.CONTINUE,
+            } and self._peek().line > error_line:
+                return
+            self._advance()
 
     def _parse_return_type_annotation(self, message: str) -> AetherType:
         if self._check(TokenType.TYPE) and self._peek().lexeme == "void":

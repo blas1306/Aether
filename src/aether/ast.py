@@ -122,6 +122,8 @@ class ExpressionStatement:
 @dataclass(frozen=True)
 class ImportStatement:
     module_name: str
+    line: int = 1
+    column: int = 1
 
 
 @dataclass(frozen=True)
@@ -129,12 +131,16 @@ class IfStatement:
     condition: Expression
     body: list[Statement]
     else_body: list[Statement] | None = None
+    line: int = 1
+    column: int = 1
 
 
 @dataclass(frozen=True)
 class WhileStatement:
     condition: Expression
     body: list[Statement]
+    line: int = 1
+    column: int = 1
 
 
 @dataclass(frozen=True)
@@ -142,6 +148,8 @@ class ForInStatement:
     variable: str
     iterable: Expression
     body: list[Statement]
+    line: int = 1
+    column: int = 1
 
 
 @dataclass(frozen=True)
@@ -151,6 +159,8 @@ class FunctionDeclaration:
     parameters: list[Parameter]
     body: list[Statement]
     visibility: Visibility = None
+    line: int = 1
+    column: int = 1
 
 
 @dataclass(frozen=True)
@@ -159,6 +169,8 @@ class ExpressionFunctionDeclaration:
     parameters: list[ExpressionParameter]
     expression: Expression
     visibility: Visibility = None
+    line: int = 1
+    column: int = 1
 
 
 @dataclass(frozen=True)
@@ -196,6 +208,8 @@ class InterpolatedString:
 @dataclass(frozen=True)
 class Identifier:
     name: str
+    line: int = 1
+    column: int = 1
 
 
 @dataclass(frozen=True)
@@ -232,6 +246,8 @@ class CallExpression:
     callee: str
     arguments: list[Expression]
     keyword_arguments: dict[str, Expression] = field(default_factory=dict)
+    line: int = 1
+    column: int = 1
 
 
 @dataclass(frozen=True)
@@ -261,6 +277,8 @@ class MatrixLiteral:
 class IndexExpression:
     array: Expression
     index: Expression
+    line: int = 1
+    column: int = 1
 
 
 @dataclass(frozen=True)
@@ -268,9 +286,13 @@ class MatrixIndexExpression:
     matrix: Expression
     row: Expression
     column: Expression
+    line: int = 1
+    column_position: int = 1
 
 
 @dataclass(frozen=True)
 class FieldAccess:
     target: Expression
     field_name: str
+    line: int = 1
+    column: int = 1

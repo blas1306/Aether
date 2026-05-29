@@ -1,5 +1,37 @@
-Matrix<double> A = [3 2; 1 0; 0 0];
+import Math.LinearAlgebra
+import Plots
 
-m, n = size(A);
+Vector<double> MinCuad() {
+    Vector<double> t = input("Ingrese el vector t: ");
+    Vector<double> y = input("Ingrese el vector y: ");
 
-println("m = $m$, n = $n$");
+    st = size(t);
+    sy = size(y);
+
+    mt = st[0];
+    my = sy[0];
+
+    if mt != my {
+        println("Los vectores no tienen la mismas dimensiones. Intente nuevamente");
+    }
+
+    A = zeros(mt, 2);
+
+    z = A \ y;
+
+    f(x) = z[0] + z[1]*x;
+
+    grid(true);
+    title("Numeros primos y ajuste");
+    xlabel("t");
+    ylabel("y");
+    plot(t, y, ".", label="Datos", color="red");
+    plot!(f, z[0]-1, z[1]+1, label="Ajuste");
+
+    err2 = norm(y - A*z)^2;
+    println("err2 = ", err2);
+
+    return z;
+}
+
+MinCuad();

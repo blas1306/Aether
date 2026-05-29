@@ -6,7 +6,9 @@ import sys
 import threading
 from bisect import bisect_right
 from dataclasses import asdict
+from pathlib import Path
 from typing import Any, BinaryIO
+from urllib.parse import unquote, urlparse
 
 from aether import analyze_source
 from aether.stdlib.registry import builtin_aliases_for_import, builtin_names, is_builtin_namespace
@@ -212,7 +214,10 @@ class AetherLanguageServer:
 
     def _publish_diagnostics(self, uri: str, source: str, version: int | None = None) -> None:
         try:
-            diagnostics = [_lsp_diagnostic(item, source) for item in analyze_source(source)]
+            diagnostics = [
+                _lsp_diagnostic(item, source)
+                for item in analyze_source(source, source_root=_source_root_for_uri(uri))
+            ]
         except Exception as exc:
             diagnostics = [_internal_error_diagnostic(exc, source)]
         self._write_message(
@@ -478,6 +483,13 @@ def _lsp_range_from_offsets(source: str, line_starts: list[int], start_offset: i
 def _document_version(document: JsonObject, default: int | None = None) -> int | None:
     version = document.get("version", default)
     return version if isinstance(version, int) else default
+
+
+def _source_root_for_uri(uri: str) -> Path | None:
+    parsed = urlparse(uri)
+    if parsed.scheme != "file" or not parsed.path:
+        return None
+    return Path(unquote(parsed.path)).parent
 
 
 def _diagnostic_params(uri: str, diagnostics: list[JsonObject], version: int | None = None) -> JsonObject:

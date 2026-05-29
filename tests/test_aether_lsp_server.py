@@ -124,6 +124,67 @@ def test_lsp_diagnostics_include_document_versions() -> None:
     assert uri not in language_server.document_versions
 
 
+def test_lsp_diagnostics_resolve_imports_relative_to_document(tmp_path: Path) -> None:
+    from aether_lsp.server import AetherLanguageServer
+
+    (tmp_path / "Geometry.ae").write_text(
+        """
+package Geometry;
+
+public struct Point {
+    double x;
+    double y;
+}
+
+public alias P = Point;
+""",
+        encoding="utf-8",
+    )
+    uri = (tmp_path / "main.ae").as_uri()
+    output = BytesIO()
+    language_server = AetherLanguageServer(reader=BytesIO(), writer=output)
+
+    language_server._did_open(
+        {
+            "textDocument": {
+                "uri": uri,
+                "version": 1,
+                "text": "import Geometry;\nP p = P(1.0, 2.0);\n",
+            }
+        }
+    )
+
+    output.seek(0)
+    opened = _read_message(output)
+    assert opened["params"]["diagnostics"] == []
+
+
+def test_lsp_diagnostics_publish_multiple_errors_with_line_ranges() -> None:
+    from aether_lsp.server import AetherLanguageServer
+
+    uri = "file:///tmp/multiple.ae"
+    output = BytesIO()
+    language_server = AetherLanguageServer(reader=BytesIO(), writer=output)
+
+    language_server._did_open(
+        {
+            "textDocument": {
+                "uri": uri,
+                "version": 1,
+                "text": 'int a = "bad";\nboolean b = 1;\n',
+            }
+        }
+    )
+
+    output.seek(0)
+    opened = _read_message(output)
+    diagnostics = opened["params"]["diagnostics"]
+
+    assert len(diagnostics) == 2
+    assert [diagnostic["range"]["start"]["line"] for diagnostic in diagnostics] == [0, 1]
+    assert all(diagnostic["range"]["end"]["character"] > diagnostic["range"]["start"]["character"] for diagnostic in diagnostics)
+
+
 def test_lsp_diagnostic_clamps_eof_range_inside_document() -> None:
     from aether import Diagnostic
     from aether_lsp.server import _lsp_diagnostic

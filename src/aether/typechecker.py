@@ -67,6 +67,7 @@ class TypeChecker:
         self.import_stack = import_stack
         self.imported_symbol_origins: dict[str, str] = {}
         self.private_imported_symbols: dict[str, set[str]] = {}
+        self._diagnostic_errors: list[AetherTypeError] | None = None
 
     def check(self, program: ast.Program) -> None:
         self._declare_struct_headers(program.statements)
@@ -74,6 +75,25 @@ class TypeChecker:
         self._define_struct_fields(program.statements, program.package_name)
         self._check_statements(program.statements, self.global_scope)
         self._validate_type_aliases()
+
+    def check_collecting_errors(self, program: ast.Program) -> list[AetherTypeError]:
+        previous_errors = self._diagnostic_errors
+        self._diagnostic_errors = []
+        try:
+            for phase in (
+                lambda: self._declare_struct_headers(program.statements),
+                lambda: self._declare_type_aliases(program.statements),
+                lambda: self._define_struct_fields(program.statements, program.package_name),
+                lambda: self._check_statements(program.statements, self.global_scope),
+                self._validate_type_aliases,
+            ):
+                try:
+                    phase()
+                except AetherTypeError as exc:
+                    self._record_diagnostic_error(exc)
+            return list(self._diagnostic_errors)
+        finally:
+            self._diagnostic_errors = previous_errors
 
     def _declare_struct_headers(self, statements: list[ast.Statement]) -> None:
         for statement in statements:
@@ -140,7 +160,25 @@ class TypeChecker:
 
     def _check_statements(self, statements: list[ast.Statement], scope: Scope[VariableSymbol]) -> None:
         for statement in statements:
-            self._check_statement(statement, scope)
+            if self._diagnostic_errors is None:
+                self._check_statement(statement, scope)
+                continue
+            try:
+                self._check_statement(statement, scope)
+            except AetherTypeError as exc:
+                self._record_diagnostic_error(exc, statement)
+
+    def _record_diagnostic_error(self, exc: AetherTypeError, location: object | None = None) -> None:
+        if self._diagnostic_errors is None:
+            raise exc
+        line = exc.line
+        column = exc.column
+        if not isinstance(line, int) or not isinstance(column, int):
+            fallback_line, fallback_column = _source_location(location)
+            line = line if isinstance(line, int) else fallback_line
+            column = column if isinstance(column, int) else fallback_column
+            exc = AetherTypeError(str(exc), line=line, column=column)
+        self._diagnostic_errors.append(exc)
 
     def _check_statement(self, statement: ast.Statement, scope: Scope[VariableSymbol]) -> None:
         if isinstance(statement, ast.VarDeclaration):
@@ -1531,6 +1569,43 @@ def _assignment_root_name(expression: ast.Expression) -> str | None:
     if isinstance(expression, ast.FieldAccess):
         return _assignment_root_name(expression.target)
     return None
+
+
+def _source_location(node: object | None) -> tuple[int, int]:
+    if node is None:
+        return 1, 1
+    line = getattr(node, "line", None)
+    column = getattr(node, "column", None)
+    if isinstance(line, int) and isinstance(column, int):
+        return max(1, line), max(1, column)
+    column_position = getattr(node, "column_position", None)
+    if isinstance(line, int) and isinstance(column_position, int):
+        return max(1, line), max(1, column_position)
+    if isinstance(node, ast.ExpressionStatement):
+        return _source_location(node.expression)
+    if isinstance(node, (ast.IfStatement, ast.WhileStatement)):
+        return _source_location(node.condition)
+    if isinstance(node, ast.ForInStatement):
+        return _source_location(node.iterable)
+    if isinstance(node, ast.FieldAccess):
+        return _source_location(node.target)
+    if isinstance(node, ast.IndexExpression):
+        return _source_location(node.array)
+    if isinstance(node, ast.MatrixIndexExpression):
+        return _source_location(node.matrix)
+    if isinstance(node, ast.UnaryExpression):
+        return max(1, node.line), max(1, node.column)
+    if isinstance(node, ast.BinaryExpression):
+        return max(1, node.line), max(1, node.column)
+    if isinstance(node, ast.RangeExpression):
+        return _source_location(node.start)
+    if isinstance(node, ast.TupleLiteral) and node.elements:
+        return _source_location(node.elements[0])
+    if isinstance(node, ast.ArrayLiteral) and node.elements:
+        return _source_location(node.elements[0])
+    if isinstance(node, ast.MatrixLiteral) and node.rows and node.rows[0]:
+        return _source_location(node.rows[0][0])
+    return 1, 1
 
 
 _COMMON_PLOT_KEYWORDS: dict[str, str] = {

@@ -19,7 +19,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Could not read {path}: {exc}", file=sys.stderr)
         return 2
 
-    result = run_source(source, output_writer=_write_stdout)
+    result = run_source(source, source_root=path.parent, output_writer=_write_stdout)
     if not result.success:
         print(result.error or "Aether execution failed.", file=sys.stderr)
         return 1

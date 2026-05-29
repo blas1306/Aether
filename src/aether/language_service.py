@@ -55,18 +55,24 @@ _FUNCTION_RE = re.compile(
 _STRUCT_RE = re.compile(r"\b(?:(?:public|private)\s+)?struct\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\b")
 
 
-def analyze_source(source: str) -> list[Diagnostic]:
+def analyze_source(source: str, *, source_root: str | Path | None = None) -> list[Diagnostic]:
+    diagnostics: list[Diagnostic] = []
     try:
-        program = Parser(lex(source)).parse()
-        TypeChecker().check(program)
-    except AETHER_ERRORS as exc:
-        return [_diagnostic_from_error(exc)]
-    return []
+        tokens = lex(source)
+    except AetherSyntaxError as exc:
+        return [_diagnostic_from_error(exc, source)]
+    parser = Parser(tokens)
+    program, syntax_errors = parser.parse_with_recovery()
+    diagnostics.extend(_diagnostic_from_error(exc, source) for exc in syntax_errors)
+    type_errors = TypeChecker(source_root=source_root).check_collecting_errors(program)
+    diagnostics.extend(_diagnostic_from_error(exc, source) for exc in type_errors)
+    return diagnostics
 
 
 def run_source(
     source: str,
     *,
+    source_root: str | Path | None = None,
     plot_mode: str | None = None,
     plot_output_dir: str | Path | None = None,
     output_writer: Callable[[str], None] | None = None,
@@ -75,6 +81,7 @@ def run_source(
     try:
         result: AetherRunResult = run_aether(
             source,
+            source_root=source_root,
             plot_mode=plot_mode,
             plot_output_dir=plot_output_dir,
             output_writer=output_writer,
@@ -107,16 +114,17 @@ def completion_items(source: str, line: int, column: int) -> list[CompletionItem
     return items
 
 
-def _diagnostic_from_error(exc: Exception) -> Diagnostic:
+def _diagnostic_from_error(exc: Exception, source: str = "") -> Diagnostic:
     message = f"{type(exc).__name__}: {exc}"
     line, column = _extract_location(exc)
+    end_column = _diagnostic_end_column(source, line, column)
     return Diagnostic(
         message=message,
         severity="error",
         line=line,
         column=column,
         end_line=line,
-        end_column=column + 1,
+        end_column=end_column,
     )
 
 
@@ -130,6 +138,15 @@ def _extract_location(exc: Exception) -> tuple[int, int]:
     if match is None:
         return (1, 1)
     return (max(1, int(match.group("line"))), max(1, int(match.group("column"))))
+
+
+def _diagnostic_end_column(source: str, line: int, column: int) -> int:
+    if not source:
+        return column + 1
+    lines = source.splitlines()
+    if line < 1 or line > len(lines):
+        return column + 1
+    return max(column + 1, len(lines[line - 1]) + 1)
 
 
 def _symbol_names(source: str) -> set[str]:
