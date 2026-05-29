@@ -75,3 +75,15 @@ Run focused tests from the project virtual environment:
 ```
 
 See [docs/aether/AETHER_V0_SPEC.md](docs/aether/AETHER_V0_SPEC.md) for the current language specification.
+
+## Examples
+
+Example Aether programs are located in the [examples/](examples/) directory, organized by category:
+
+- **structs/** - Working with structs and field access
+- **linear_algebra/** - Vector and matrix operations
+- **nonlinear_systems/** - Solving non-linear systems of equations
+- **interactive/** - Examples requiring user input (not for automation)
+- **minimos_cuadrados/** - Least-squares polynomial fitting
+
+See [examples/README.md](examples/README.md) for details on each example.

@@ -200,6 +200,24 @@ alias Real = int;         // error
 int Real = 3;             // error
 ```
 
+### Alias Limitations
+
+Aliases of generic container types work when fully instantiated:
+
+```aether
+alias RealVector = Vector<double>;     // valid
+RealVector v = [1.0, 2.0];             // valid
+```
+
+However, using an alias of a primitive type as a type parameter does not yet work:
+
+```aether
+alias Real = double;
+Vector<Real> v = [1.0, 2.0];            // NOT YET supported; use Vector<double> instead
+```
+
+This limitation will be addressed when full generic type parameters are implemented.
+
 ## Structs
 
 Aether v0 supports a minimal data-only `struct` form. A struct is a nominal type with an explicit list of typed fields, an automatic positional constructor, and field access with `.`.
@@ -1259,20 +1277,32 @@ The `.ae` editor now selects an `Aether REPL` panel backed by a persistent `Aeth
 
 The following are intentionally not implemented in Aether v0:
 
-- ND tensors
-- slicing
-- broadcasting
-- comprehensions
-- multi-file packages
-- import aliases and specific imports
-- JIT
-- Rust core
-- full LSP feature set
-- formatter
-- notebooks `.aen`
-- documents `.aed`
-- package manager
-- integer division `//`
+### Arrays and Matrices
+
+- Full ND tensors (only 1D vectors and 2D matrices are supported)
+- Multidimensional slicing (only 1D vector slicing with `:` is supported; matrix slicing is not available)
+- Broadcasting semantics (implicit dimension expansion for operations)
+- Slice assignment (reading slices works; assignment to slices does not)
+
+### Language Features
+
+- Comprehensions (list, generator, etc.)
+- Methods in structs (structs have constructors and field access only)
+- Generics (aliases of generic types like `Vector<double>` work; generic type parameters for custom structs do not)
+- Exceptions / error handling
+- JIT compilation
+- Multi-file packages (each package maps to one `.ae` file)
+- Import aliases and specific imports (`import X as Y`, `from X import Y`)
+
+### Ecosystem
+
+- Rust core (currently Python-based)
+- Full LSP feature set
+- Formatter
+- Notebooks `.aen`
+- Documents `.aed`
+- Package manager
+- Integer division `//`
 
 ## Design Philosophy
 

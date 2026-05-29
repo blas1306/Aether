@@ -1136,6 +1136,9 @@ class Interpreter:
             if type_name in self.structs:
                 return type_name
             if type_name not in AETHER_TYPES:
+                private_message = self._private_import_message(type_name)
+                if private_message is not None:
+                    raise AetherTypeError(private_message)
                 raise AetherTypeError(f"Unknown type '{type_name}'.")
             return type_name
         if isinstance(type_name, ArrayType):
@@ -1156,6 +1159,14 @@ class Interpreter:
         if isinstance(type_name, RangeType):
             return RangeType(self._resolve_vector_matrix_element_type(type_name.element_type, resolving))
         return type_name
+
+    def _private_import_message(self, name: str) -> str | None:
+        """Check if a symbol was imported but is private, and return an error message if so."""
+        modules = self.private_imported_symbols.get(name)
+        if not modules:
+            return None
+        module_list = "', '".join(sorted(modules))
+        return f"Symbol '{name}' is private in imported module '{module_list}'."
 
     def _resolve_vector_matrix_element_type(self, element_type: str, resolving: tuple[str, ...] = ()) -> str:
         resolved = self._resolve_type_aliases(element_type, resolving)
