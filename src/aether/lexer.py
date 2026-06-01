@@ -230,7 +230,7 @@ class Lexer:
         return self.current >= len(self.source)
 
     def _syntax_error(self, message: str) -> AetherSyntaxError:
-        return AetherSyntaxError(f"{message} at line {self.start_line}, column {self.start_column}.")
+        return AetherSyntaxError(message, line=self.start_line, column=self.start_column)
 
 
 def lex(source: str) -> list[Token]:

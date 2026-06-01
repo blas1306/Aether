@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from .errors import AetherRuntimeError, AetherSyntaxError, AetherTypeError
+from .errors import AetherError, AetherRuntimeError, AetherSyntaxError, AetherTypeError
 from .lexer import lex
 from .parser import Parser
 from .result import AetherRunResult
@@ -88,7 +88,8 @@ def run_source(
             input_reader=input_reader,
         )
     except AETHER_ERRORS as exc:
-        return RunResult(success=False, error=f"{type(exc).__name__}: {exc}")
+        error = exc.format() if isinstance(exc, AetherError) else f"{type(exc).__name__}: {exc}"
+        return RunResult(success=False, error=error)
     return RunResult(success=True, output=result.output)
 
 
@@ -115,7 +116,7 @@ def completion_items(source: str, line: int, column: int) -> list[CompletionItem
 
 
 def _diagnostic_from_error(exc: Exception, source: str = "") -> Diagnostic:
-    message = f"{type(exc).__name__}: {exc}"
+    message = exc.format() if isinstance(exc, AetherError) else f"{type(exc).__name__}: {exc}"
     line, column = _extract_location(exc)
     end_column = _diagnostic_end_column(source, line, column)
     return Diagnostic(

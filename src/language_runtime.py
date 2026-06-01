@@ -70,7 +70,7 @@ def run_source_for_file(
 
 
 def format_aether_error(exc: AetherSyntaxError | AetherTypeError | AetherRuntimeError) -> str:
-    return f"{type(exc).__name__}: {exc}"
+    return f"{type(exc).__name__}: {getattr(exc, 'message', str(exc))}"
 
 
 def _run_aether_source(source: str, *, path: str | Path | None = None) -> SourceRunResult:

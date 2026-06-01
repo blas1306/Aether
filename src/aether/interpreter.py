@@ -10,7 +10,7 @@ import sys
 from plot_backend import PlotBackend
 
 from . import ast
-from .errors import AetherInputError, AetherRuntimeError, AetherSyntaxError, AetherTypeError
+from .errors import AetherError, AetherInputError, AetherRuntimeError, AetherSyntaxError, AetherTypeError
 from .formatting import format_value
 from .lexer import lex
 from .modules import is_public_export, private_top_level_names, resolve_file_module_path
@@ -416,28 +416,49 @@ class Interpreter:
         if isinstance(expression, ast.InterpolatedString):
             return AetherValue("string", self._interpolate_string(expression, env))
         if isinstance(expression, ast.Identifier):
-            return env.get(expression.name)
+            try:
+                return env.get(expression.name)
+            except AetherRuntimeError as exc:
+                raise _with_source_location(exc, expression) from exc
         if isinstance(expression, ast.UnaryExpression):
             operand = self._evaluate(expression.operand, env)
-            if expression.operator == "-":
-                return _negate_value(operand)
-            if expression.operator == "'":
-                if LINEAR_ALGEBRA_MODULE not in self.imported_modules:
-                    raise AetherRuntimeError("Operator \"'\" requires import Math.LinearAlgebra.")
-                return self.builtins[LINEAR_ALGEBRA_CONJTRANSPOSE]([operand])
-            raise AetherRuntimeError(f"Unsupported unary operator '{expression.operator}'.")
+            try:
+                if expression.operator == "-":
+                    return _negate_value(operand)
+                if expression.operator == "'":
+                    if LINEAR_ALGEBRA_MODULE not in self.imported_modules:
+                        raise AetherRuntimeError("Operator \"'\" requires import Math.LinearAlgebra.", kind="import")
+                    return self.builtins[LINEAR_ALGEBRA_CONJTRANSPOSE]([operand])
+                raise AetherRuntimeError(f"Unsupported unary operator '{expression.operator}'.")
+            except AetherError as exc:
+                raise _with_source_location(exc, expression) from exc
         if isinstance(expression, ast.BinaryExpression):
             if expression.operator in {"&&", "||"}:
-                return self._evaluate_logical(expression, env)
+                try:
+                    return self._evaluate_logical(expression, env)
+                except AetherError as exc:
+                    raise _with_source_location(exc, expression) from exc
             left = self._evaluate(expression.left, env)
             right = self._evaluate(expression.right, env)
-            return self._evaluate_binary(left, expression.operator, right)
+            try:
+                return self._evaluate_binary(left, expression.operator, right)
+            except AetherError as exc:
+                raise _with_source_location(exc, expression) from exc
         if isinstance(expression, ast.RangeExpression):
             return self._evaluate_range(expression, env)
         if isinstance(expression, ast.CallExpression):
-            return self._evaluate_call(expression, env)
+            try:
+                return self._evaluate_call(expression, env)
+            except AetherError as exc:
+                raise _with_source_location(exc, expression) from exc
         if isinstance(expression, ast.InputCall):
-            raise AetherInputError("input() requires a typed assignment context.")
+            raise AetherInputError(
+                "input() requires a typed assignment context.",
+                line=expression.line,
+                column=expression.column,
+                hint="assign input() to a variable with an explicit or existing type.",
+                kind="input",
+            )
         if isinstance(expression, ast.ArrayLiteral):
             return self._evaluate_array_literal(expression, env)
         if isinstance(expression, ast.TupleLiteral):
@@ -445,9 +466,15 @@ class Interpreter:
         if isinstance(expression, ast.MatrixLiteral):
             return self._evaluate_matrix_literal(expression, env)
         if isinstance(expression, ast.IndexExpression):
-            return self._read_index(expression.array, expression.index, env)
+            try:
+                return self._read_index(expression.array, expression.index, env)
+            except AetherError as exc:
+                raise _with_source_location(exc, expression) from exc
         if isinstance(expression, ast.MatrixIndexExpression):
-            return self._read_matrix_index(expression.matrix, expression.row, expression.column, env)
+            try:
+                return self._read_matrix_index(expression.matrix, expression.row, expression.column, env)
+            except AetherError as exc:
+                raise _with_source_location(exc, expression) from exc
         if isinstance(expression, ast.FieldAccess):
             return self._read_field(expression.target, expression.field_name, env)
         raise AetherRuntimeError(f"Unsupported expression {expression!r}.")
@@ -470,22 +497,35 @@ class Interpreter:
     ) -> AetherValue:
         if not _is_supported_input_target_type(expected_type):
             raise AetherInputError(
-                f"input() supports int, float, string, boolean, Vector, and Matrix targets, got '{type_to_string(expected_type)}'."
+                f"input() supports int, float, string, boolean, Vector, and Matrix targets, got '{type_to_string(expected_type)}'.",
+                line=expression.line,
+                column=expression.column,
+                hint="use input() only with a supported scalar, Vector<T>, or Matrix<T> target.",
+                kind="input",
             )
         if len(expression.arguments) > 1:
-            raise AetherTypeError("input(...) expects zero or one argument.")
+            raise AetherTypeError("input(...) expects zero or one argument.", line=expression.line, column=expression.column, kind="arity")
         if expression.arguments:
             prompt = self._evaluate(expression.arguments[0], env)
             if prompt.type_name != "string":
-                raise AetherTypeError(f"input(...) prompt must be string, got '{type_to_string(prompt.type_name)}'.")
+                raise AetherTypeError(
+                    f"input(...) prompt must be string, got '{type_to_string(prompt.type_name)}'.",
+                    line=expression.line,
+                    column=expression.column,
+                    hint="wrap the prompt in quotes or build a string expression.",
+                    kind="input",
+                )
             self._write_prompt(str(prompt.value))
         raw = self.input_reader()
         if raw == "":
-            raise AetherInputError("input() reached end of file.")
+            raise AetherInputError("input() reached end of file.", line=expression.line, column=expression.column, kind="input")
         text = raw[:-1] if raw.endswith("\n") else raw
         if text.endswith("\r"):
             text = text[:-1]
-        return self._convert_input_text(text, expected_type, env)
+        try:
+            return self._convert_input_text(text, expected_type, env)
+        except AetherInputError as exc:
+            raise _with_source_location(exc, expression) from exc
 
     def _convert_input_text(self, text: str, target_type: AetherType, env: Environment) -> AetherValue:
         if isinstance(target_type, (VectorType, MatrixType)):
@@ -504,7 +544,11 @@ class Interpreter:
                 raise AetherTypeError("expected a vector or matrix literal")
             return self._evaluate_matrix_literal(expression, env, target_type)
         except (AetherSyntaxError, AetherTypeError, AetherRuntimeError) as exc:
-            raise AetherInputError(f'cannot convert "{text}" to {type_to_string(target_type)}: {exc}') from exc
+            raise AetherInputError(
+                f'cannot convert "{text}" to {type_to_string(target_type)}: {_raw_error_message(exc)}',
+                hint="enter a bracket literal such as [1, 2, 3] for Vector<T> or [1 2; 3 4] for Matrix<T>.",
+                kind="input",
+            ) from exc
 
     def _write_prompt(self, prompt: str) -> None:
         if self.output_writer is None and self._uses_default_input_reader:
@@ -982,6 +1026,8 @@ class Interpreter:
         elif operator == "*":
             value = left.value * right.value
         elif operator == "/":
+            if right.value == 0:
+                raise AetherRuntimeError("Operator '/' is undefined for divisor zero.", kind="arithmetic")
             value = left.value / right.value
         elif operator == "%":
             if right.value == 0:
@@ -1300,10 +1346,92 @@ def _convert_scalar_input_text(text: str, target_type: AetherType) -> AetherValu
                 return AetherValue("boolean", False)
             raise ValueError
     except ValueError as exc:
-        raise AetherInputError(f'cannot convert "{text}" to {type_to_string(target_type)}') from exc
+        raise AetherInputError(
+            f'cannot convert "{text}" to {type_to_string(target_type)}',
+            hint=_input_conversion_hint(target_type),
+            kind="input",
+        ) from exc
     raise AetherInputError(
-        f"input() supports int, float, string, boolean, Vector, and Matrix targets, got '{type_to_string(target_type)}'."
+        f"input() supports int, float, string, boolean, Vector, and Matrix targets, got '{type_to_string(target_type)}'.",
+        hint="use input() only with a supported scalar, Vector<T>, or Matrix<T> target.",
+        kind="input",
     )
+
+
+def _input_conversion_hint(target_type: AetherType) -> str | None:
+    if target_type == "int":
+        return "enter a whole number, for example 42."
+    if target_type == "float":
+        return "enter a numeric value, for example 3.14."
+    if target_type == "boolean":
+        return "enter exactly true or false."
+    return None
+
+
+def _raw_error_message(exc: BaseException) -> str:
+    return getattr(exc, "message", str(exc))
+
+
+def _with_source_location(exc: AetherError, node: object | None) -> AetherError:
+    line, column = _source_location(node)
+    return type(exc)(
+        exc.message,
+        line=exc.line if isinstance(exc.line, int) else line,
+        column=exc.column if isinstance(exc.column, int) else column,
+        hint=exc.hint or _hint_for_error_message(exc.message),
+        kind=exc.kind or _kind_for_error_message(exc.message),
+    )
+
+
+def _source_location(node: object | None) -> tuple[int, int]:
+    if node is None:
+        return 1, 1
+    line = getattr(node, "line", None)
+    column = getattr(node, "column", None)
+    if isinstance(line, int) and isinstance(column, int):
+        return max(1, line), max(1, column)
+    column_position = getattr(node, "column_position", None)
+    if isinstance(line, int) and isinstance(column_position, int):
+        return max(1, line), max(1, column_position)
+    return 1, 1
+
+
+def _hint_for_error_message(message: str) -> str | None:
+    lowered = message.lower()
+    if "out of bounds" in lowered:
+        return "Aether uses zero-based indexing; valid indices run from 0 to length - 1."
+    if "undefined variable" in lowered:
+        return "declare the variable before using it, or check the spelling."
+    if "undefined function" in lowered:
+        return "define the function before calling it, import its module, or check the spelling."
+    if "expects" in lowered and "arguments" in lowered:
+        return "check the function declaration and pass exactly the declared parameters."
+    if "divisor zero" in lowered or "division by zero" in lowered:
+        return "check the divisor before performing the operation."
+    if "same shape" in lowered and "matri" in lowered:
+        return "matrix addition and elementwise operations require equal shapes."
+    if "compatible matrix shapes" in lowered or "compatible matrix and vector shapes" in lowered:
+        return "matrix multiplication requires the left column count to match the right row count."
+    if "requires numeric operands" in lowered or "not defined for" in lowered:
+        return "check operand types or use an explicit conversion before applying the operator."
+    return None
+
+
+def _kind_for_error_message(message: str) -> str | None:
+    lowered = message.lower()
+    if "input()" in lowered or "cannot convert" in lowered:
+        return "input"
+    if "undefined variable" in lowered or "undefined function" in lowered:
+        return "name"
+    if "out of bounds" in lowered:
+        return "index"
+    if "shape" in lowered or "length" in lowered:
+        return "shape"
+    if "argument" in lowered:
+        return "arity"
+    if "operator" in lowered or "operand" in lowered:
+        return "operator"
+    return None
 
 
 def _is_supported_input_target_type(type_name: AetherType) -> bool:
@@ -1815,6 +1943,8 @@ def _apply_scalar_to_element(
     if operator == "*":
         result = element.value * scalar_value.value
     elif operator == "/":
+        if scalar_value.value == 0:
+            raise AetherRuntimeError("Operator '/' is undefined for divisor zero.", kind="arithmetic")
         result = element.value / scalar_value.value
     else:
         raise AetherRuntimeError(f"Unsupported scalar array operator '{operator}'.")

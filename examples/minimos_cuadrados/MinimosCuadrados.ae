@@ -1,41 +1,49 @@
 import Math.LinearAlgebra
+import Plots
 
-Vector<double> t = [1, 2, 3, 4];
-Vector<double> y = [3, 7, 8, 10];
+Vector<double> t = [2, 3, 4, 5, 6];
+Vector<double> y = [3, 5, 7, 11, 13];
 Vector<double> base(double x) {
-    yt = [1, x, x^2];
+    yt = [1, x*ln(x)];
     return yt;
 }
 
-(Vector<double> z, double f) MinimosCuadrados(Vector<double> t, Vector<double> y, double x) {
-    st = size(t);
-    sy = size(y);
-    sbase = size(base(x));
+st = size(t);
+sy = size(y);
+sbase = size(base(1));
 
-    mt = st[0];
-    my = sy[0];
-    mbase = sbase[0];
+mt = st[0];
+my = sy[0];
+mbase = sbase[0];
 
-    A = zeros(mt, mbase);
+A = zeros(mt, mbase);
 
-    for i in 0:(mt - 1) {
-        for j in 0:(mbase - 1) {
-            A[i, j] = base(y[i])[j];
-        }
-    }
-
-    z = A \ y;
-
-    double f = 0;
-
+for i in 0:(mt - 1) {
     for j in 0:(mbase - 1) {
-        f = f + z[j]*base(x)[j];
+        A[i, j] = base(t[i])[j];
     }
-
-    return (z, f);
 }
 
-coef, modelo = MinimosCuadrados(t, y, 4);
+z = A \ y;
 
-println("z = ", coef);
-println("y(t) = ", modelo);
+double modelo(double x) {
+    double acc = 0;
+
+    for j in 0:(mbase - 1) {
+        acc = acc + z[j]*base(x)[j];
+    }
+
+    return acc;
+}
+
+println("z = ", z);
+
+err2 = norm(y - A*z)^2;
+println("err2 = ", err2);
+
+grid(true);
+title("Minimos Cuadrados");
+xlabel("t");
+ylabel("y");
+plot(t, y, ".", label="Datos", color="red");
+plot!(modelo, t[0]-1, t[mt-1]+1, label="Ajuste");

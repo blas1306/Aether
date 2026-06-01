@@ -947,7 +947,6 @@ class Parser:
         return self.tokens[self.current - 1]
 
     def _error(self, token: Token, message: str) -> AetherSyntaxError:
-        location = f"line {token.line}, column {token.column}"
         if token.type == TokenType.EOF:
-            return AetherSyntaxError(f"{message} at end of file ({location}).")
-        return AetherSyntaxError(f"{message} at {location}, near {token.lexeme!r}.")
+            return AetherSyntaxError(f"{message} at end of file.", line=token.line, column=token.column)
+        return AetherSyntaxError(f"{message} near {token.lexeme!r}.", line=token.line, column=token.column)

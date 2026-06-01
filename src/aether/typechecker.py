@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import ast
-from .errors import AetherRuntimeError, AetherTypeError
+from .errors import AetherError, AetherRuntimeError, AetherTypeError
 from .lexer import lex
 from .modules import is_public_export, private_top_level_names, resolve_file_module_path
 from .parser import Parser
@@ -177,7 +177,7 @@ class TypeChecker:
             fallback_line, fallback_column = _source_location(location)
             line = line if isinstance(line, int) else fallback_line
             column = column if isinstance(column, int) else fallback_column
-            exc = AetherTypeError(str(exc), line=line, column=column)
+            exc = AetherTypeError(exc.message, line=line, column=column, hint=exc.hint, kind=exc.kind)
         self._diagnostic_errors.append(exc)
 
     def _check_statement(self, statement: ast.Statement, scope: Scope[VariableSymbol]) -> None:
@@ -233,7 +233,7 @@ class TypeChecker:
             self._declare_expression_function(statement)
             return
         if isinstance(statement, ast.ImportStatement):
-            self._check_import(statement.module_name)
+            self._check_import(statement)
             return
         if isinstance(statement, ast.ReturnStatement):
             self._check_return(statement, scope)
@@ -248,7 +248,8 @@ class TypeChecker:
             return
         raise AetherRuntimeError(f"Unsupported statement {statement!r}.")
 
-    def _check_import(self, module_name: str) -> None:
+    def _check_import(self, statement: ast.ImportStatement) -> None:
+        module_name = statement.module_name
         if module_name in self.imported_modules:
             return
         if is_builtin_namespace(module_name):
@@ -256,10 +257,21 @@ class TypeChecker:
             self.imported_modules.add(module_name)
             return
         if module_name in self.import_stack:
-            raise AetherTypeError(f"Cyclic import involving '{module_name}'.")
+            raise AetherTypeError(
+                f"Cyclic import involving '{module_name}'.",
+                line=statement.line,
+                column=statement.column,
+                kind="import",
+            )
         module_path = resolve_file_module_path(module_name, self.source_root)
         if not module_path.is_file():
-            raise AetherTypeError(f"Module '{module_name}' not found.")
+            raise AetherTypeError(
+                f"Module '{module_name}' not found.",
+                line=statement.line,
+                column=statement.column,
+                hint="check the module name or the source root used to run Aether.",
+                kind="import",
+            )
         source = module_path.read_text(encoding="utf-8")
         tokens = lex(source)
         program = Parser(tokens).parse()
@@ -816,8 +828,14 @@ class TypeChecker:
             if symbol is None:
                 private_message = self._private_import_message(expression.name)
                 if private_message is not None:
-                    raise AetherTypeError(private_message)
-                raise AetherTypeError(f"Undefined variable '{expression.name}'.")
+                    raise AetherTypeError(private_message, line=expression.line, column=expression.column, kind="name")
+                raise AetherTypeError(
+                    f"Undefined variable '{expression.name}'.",
+                    line=expression.line,
+                    column=expression.column,
+                    hint="declare the variable before using it, or check the spelling.",
+                    kind="name",
+                )
             return symbol.type_name
         if isinstance(expression, ast.UnaryExpression):
             operand_type = self._expression_type(expression.operand, scope)
@@ -846,23 +864,41 @@ class TypeChecker:
                 return infer_builtin_type(LINEAR_ALGEBRA_CONJTRANSPOSE, [operand_type])
             raise AetherRuntimeError(f"Unsupported unary operator '{expression.operator}'.")
         if isinstance(expression, ast.BinaryExpression):
-            return self._binary_type(expression, scope)
+            try:
+                return self._binary_type(expression, scope)
+            except AetherTypeError as exc:
+                raise _with_source_location(exc, expression) from exc
         if isinstance(expression, ast.RangeExpression):
             return self._range_type(expression, scope)
         if isinstance(expression, ast.CallExpression):
-            return self._call_type(expression, scope)
+            try:
+                return self._call_type(expression, scope)
+            except AetherTypeError as exc:
+                raise _with_source_location(exc, expression) from exc
         if isinstance(expression, ast.InputCall):
-            return self._input_call_type(expression, scope, None)
+            try:
+                return self._input_call_type(expression, scope, None)
+            except AetherTypeError as exc:
+                raise _with_source_location(exc, expression) from exc
         if isinstance(expression, ast.ArrayLiteral):
             return self._array_literal_type(expression, scope)
         if isinstance(expression, ast.TupleLiteral):
             return self._tuple_literal_type(expression, scope)
         if isinstance(expression, ast.MatrixLiteral):
-            return self._matrix_literal_type(expression, scope)
+            try:
+                return self._matrix_literal_type(expression, scope)
+            except AetherTypeError as exc:
+                raise _with_source_location(exc, expression) from exc
         if isinstance(expression, ast.IndexExpression):
-            return self._index_type(expression, scope)
+            try:
+                return self._index_type(expression, scope)
+            except AetherTypeError as exc:
+                raise _with_source_location(exc, expression) from exc
         if isinstance(expression, ast.MatrixIndexExpression):
-            return self._matrix_index_type(expression, scope)
+            try:
+                return self._matrix_index_type(expression, scope)
+            except AetherTypeError as exc:
+                raise _with_source_location(exc, expression) from exc
         if isinstance(expression, ast.FieldAccess):
             target_type = self._expression_type(expression.target, scope)
             if target_type is UNKNOWN_TYPE:
@@ -1082,12 +1118,22 @@ class TypeChecker:
         if function is None:
             private_message = self._private_import_message(expression.callee)
             if private_message is not None:
-                raise AetherTypeError(private_message)
-            raise AetherTypeError(f"Undefined function '{expression.callee}'.")
+                raise AetherTypeError(private_message, line=expression.line, column=expression.column, kind="name")
+            raise AetherTypeError(
+                f"Undefined function '{expression.callee}'.",
+                line=expression.line,
+                column=expression.column,
+                hint="define the function before calling it, import its module, or check the spelling.",
+                kind="name",
+            )
         if len(expression.arguments) != len(function.parameters):
             raise AetherTypeError(
                 f"Function '{expression.callee}' expects {len(function.parameters)} arguments "
-                f"but got {len(expression.arguments)}."
+                f"but got {len(expression.arguments)}.",
+                line=expression.line,
+                column=expression.column,
+                hint="check the function declaration and pass exactly the declared parameters.",
+                kind="arity",
             )
         if function.return_type is UNKNOWN_TYPE:
             argument_types = [self._expression_type(argument, scope) for argument in expression.arguments]
@@ -1608,6 +1654,43 @@ def _source_location(node: object | None) -> tuple[int, int]:
     return 1, 1
 
 
+def _with_source_location(exc: AetherError, node: object | None) -> AetherError:
+    line, column = _source_location(node)
+    return type(exc)(
+        exc.message,
+        line=exc.line if isinstance(exc.line, int) else line,
+        column=exc.column if isinstance(exc.column, int) else column,
+        hint=exc.hint or _hint_for_error_message(exc.message),
+        kind=exc.kind or _kind_for_error_message(exc.message),
+    )
+
+
+def _hint_for_error_message(message: str) -> str | None:
+    lowered = message.lower()
+    if "same shape" in lowered and "matri" in lowered:
+        return "matrix addition and elementwise operations require equal shapes."
+    if "compatible matrix shapes" in lowered or "compatible matrix and vector shapes" in lowered:
+        return "matrix multiplication requires the left column count to match the right row count."
+    if "not defined for" in lowered or "requires numeric operands" in lowered:
+        return "check operand types or use an explicit conversion before applying the operator."
+    if "boolean values" in lowered:
+        return "booleans are only valid in logical expressions and comparisons."
+    if "string with non-string" in lowered:
+        return "string concatenation only supports string + string."
+    return None
+
+
+def _kind_for_error_message(message: str) -> str | None:
+    lowered = message.lower()
+    if "shape" in lowered or "length" in lowered:
+        return "shape"
+    if "argument" in lowered:
+        return "arity"
+    if "not defined for" in lowered or "operator" in lowered or "operand" in lowered:
+        return "operator"
+    return None
+
+
 _COMMON_PLOT_KEYWORDS: dict[str, str] = {
     "label": "string",
     "color": "string",
@@ -1905,7 +1988,8 @@ def _elementwise_binary_type(left_type: AetherType, operator: str, right_type: A
             and (left_type.rows != right_type.rows or left_type.cols != right_type.cols)
         ):
             raise AetherTypeError(
-                f"Operator '.{operator}' requires matrices with the same shape, got '{type_to_string(left_type)}' and '{type_to_string(right_type)}'."
+                f"Operator '.{operator}' requires matrices with the same shape, got "
+                f"{_matrix_type_label(left_type)} and {_matrix_type_label(right_type)}."
             )
         return MatrixType(
             promote_numeric(_numeric_matrix_scalar_type(left_type), _numeric_matrix_scalar_type(right_type), operator),
@@ -1965,7 +2049,7 @@ def _array_array_binary_type(left_type: AetherType, operator: str, right_type: A
     ):
         raise AetherTypeError(
             f"Operator '{operator}' requires matrices with the same shape, got "
-            f"'{type_to_string(left_type)}' and '{type_to_string(right_type)}'."
+            f"{_matrix_type_label(left_type)} and {_matrix_type_label(right_type)}."
         )
     left_element_type = _numeric_matrix_scalar_type(left_type)
     right_element_type = _numeric_matrix_scalar_type(right_type)
@@ -1979,6 +2063,13 @@ def _numeric_matrix_scalar_type(matrix_type: MatrixType) -> str:
     if matrix_type.element_type not in NUMERIC_TYPES:
         raise AetherTypeError("Matrix operations require numeric elements.")
     return matrix_type.element_type
+
+
+def _matrix_type_label(matrix_type: MatrixType) -> str:
+    shape = "unknown"
+    if matrix_type.rows is not None and matrix_type.cols is not None:
+        shape = f"{matrix_type.rows}x{matrix_type.cols}"
+    return f"{type_to_string(matrix_type)}({shape})"
 
 
 def _numeric_vector_scalar_type(vector_type: VectorType) -> str:

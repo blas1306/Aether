@@ -1,40 +1,38 @@
 import Math.LinearAlgebra
 
+float p = input("Ingrese el coeficiente p: ");
+float q = input("Ingrese el coeficiente q: ");
+
 Vector<double> F(Vector<double> x) {
-    Vector<double> F = [x[0]^2 + x[1]^2 - 2, x[0] - x[1]];
+    Vector<double> F = [x[0]*x[1]*((x[0]+x[1])^2 - x[0]*x[1]) + p/5, x[0]^5 + x[1]^5 + q];
     return F;
 }
 
-Matrix<double> JF(Vector<double> x) = {
-    Matrix<double> JF = [2*x[0] 2*x[1]; 1 -1];
+Matrix<double> JF(Vector<double> x) {
+    Matrix<double> JF = [x[1]*((x[0]+x[1])^2 + 2*x[0]) x[0]*((x[0]+x[1])^2 + 2*x[1]); 5*x[0]^4 5*x[1]^4];
     return JF;
 }
 
-Vector<double> x0 = [1, 1];
+Vector<double> x0 = [2, 1];
 double tol = 1e-8;
 int maxiter = 100;
 
-public (Vector<double> xn, double res, int iter) SNL(
-    Vector<double> F,
-    Vector<double> JF,
-    Vector<double> x0
-    ) {
-    Vector<double> xn = x0;
-    double res = norm(F(xn));
-    int iter = 0;
+Vector<double> xn = x0;
+double res = norm(F(xn));
+int iter = 0;
 
-    while (res > tol && iter < maxiter) {
-        z = JF(xn) \ (-F(xn));
-        xn = xn + z;
-        res = norm(F(xn));
-        iter += 1;
-    }
-
-    return (xn, res, iter);
+while (res > tol && iter < maxiter) {
+    z = JF(xn) \ (-F(xn));
+    xn = xn + z;
+    res = norm(F(xn));
+    iter += 1;
 }
-
-xn, res, iter = SNL(x0);
 
 println("xn = ", xn);
 println("res = ", res);
 println("iter = ", iter);
+
+xpol = xn[0] + xn[1];
+
+println("x^5 + $p$x + $q$ = 0");
+println("x = ", xpol);
