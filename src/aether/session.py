@@ -25,6 +25,7 @@ class _SessionSnapshot:
     checker_expression_functions: dict[str, ast.ExpressionFunctionDeclaration]
     checker_imported_modules: set[str]
     checker_builtin_aliases: dict[str, str]
+    checker_builtin_constant_aliases: dict[str, str]
     checker_type_aliases: dict[str, AetherType]
     checker_imported_symbol_origins: dict[str, str]
     checker_private_imported_symbols: dict[str, set[str]]
@@ -34,6 +35,7 @@ class _SessionSnapshot:
     runtime_structs: dict[str, ast.StructDeclaration]
     imported_modules: set[str]
     runtime_builtin_aliases: dict[str, str]
+    runtime_builtin_constant_aliases: dict[str, str]
     runtime_type_aliases: dict[str, AetherType]
     runtime_imported_symbol_origins: dict[str, str]
     runtime_private_imported_symbols: dict[str, set[str]]
@@ -102,6 +104,7 @@ class AetherSession:
             checker_expression_functions=deepcopy(self._type_checker.expression_functions),
             checker_imported_modules=deepcopy(self._type_checker.imported_modules),
             checker_builtin_aliases=deepcopy(self._type_checker.builtin_aliases),
+            checker_builtin_constant_aliases=deepcopy(self._type_checker.builtin_constant_aliases),
             checker_type_aliases=deepcopy(self._type_checker.type_aliases),
             checker_imported_symbol_origins=deepcopy(self._type_checker.imported_symbol_origins),
             checker_private_imported_symbols=deepcopy(self._type_checker.private_imported_symbols),
@@ -111,6 +114,7 @@ class AetherSession:
             runtime_structs=deepcopy(self._interpreter.structs),
             imported_modules=deepcopy(self._interpreter.imported_modules),
             runtime_builtin_aliases=deepcopy(self._interpreter.builtin_aliases),
+            runtime_builtin_constant_aliases=deepcopy(self._interpreter.builtin_constant_aliases),
             runtime_type_aliases=deepcopy(self._interpreter.type_aliases),
             runtime_imported_symbol_origins=deepcopy(self._interpreter.imported_symbol_origins),
             runtime_private_imported_symbols=deepcopy(self._interpreter.private_imported_symbols),
@@ -124,6 +128,7 @@ class AetherSession:
         self._type_checker.expression_functions = deepcopy(snapshot.checker_expression_functions)
         self._type_checker.imported_modules = deepcopy(snapshot.checker_imported_modules)
         self._type_checker.builtin_aliases = deepcopy(snapshot.checker_builtin_aliases)
+        self._type_checker.builtin_constant_aliases = deepcopy(snapshot.checker_builtin_constant_aliases)
         self._type_checker.type_aliases = deepcopy(snapshot.checker_type_aliases)
         self._type_checker.imported_symbol_origins = deepcopy(snapshot.checker_imported_symbol_origins)
         self._type_checker.private_imported_symbols = deepcopy(snapshot.checker_private_imported_symbols)
@@ -134,6 +139,7 @@ class AetherSession:
         self._interpreter.structs = deepcopy(snapshot.runtime_structs)
         self._interpreter.imported_modules = deepcopy(snapshot.imported_modules)
         self._interpreter.builtin_aliases = deepcopy(snapshot.runtime_builtin_aliases)
+        self._interpreter.builtin_constant_aliases = deepcopy(snapshot.runtime_builtin_constant_aliases)
         self._interpreter.type_aliases = deepcopy(snapshot.runtime_type_aliases)
         self._interpreter.imported_symbol_origins = deepcopy(snapshot.runtime_imported_symbol_origins)
         self._interpreter.private_imported_symbols = deepcopy(snapshot.runtime_private_imported_symbols)

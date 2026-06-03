@@ -436,6 +436,10 @@ class Parser:
                 operator = self._previous()
                 expr = ast.UnaryExpression(operator.lexeme, expr, operator.line, operator.column)
                 continue
+            if self._match(TokenType.BANG):
+                operator = self._previous()
+                expr = ast.UnaryExpression(operator.lexeme, expr, operator.line, operator.column)
+                continue
             if self._match(TokenType.DOT):
                 field = self._consume(TokenType.IDENTIFIER, "Expected field name after '.'.")
                 expr = ast.FieldAccess(expr, field.lexeme, field.line, field.column)

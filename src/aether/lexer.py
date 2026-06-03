@@ -83,7 +83,8 @@ class Lexer:
             if self._match("="):
                 self._add_token(TokenType.BANG_EQUAL)
                 return
-            raise self._syntax_error("Unexpected character '!'. Did you mean '!='?")
+            self._add_token(TokenType.BANG)
+            return
         if char == "&":
             if self._match("&"):
                 self._add_token(TokenType.AMP_AMP)
@@ -114,7 +115,7 @@ class Lexer:
     def _identifier(self) -> None:
         while self._peek().isalnum() or self._peek() == "_":
             self._advance()
-        if self._peek() == "!" and self._peek_next() != "=":
+        if self._peek() == "!" and self._peek_next_non_whitespace() == "(":
             self._advance()
         text = self.source[self.start : self.current]
         token_type = KEYWORDS.get(text, TokenType.IDENTIFIER)
@@ -207,6 +208,14 @@ class Lexer:
         if self.current + 2 >= len(self.source):
             return "\0"
         return self.source[self.current + 2]
+
+    def _peek_next_non_whitespace(self) -> str:
+        cursor = self.current + 1
+        while cursor < len(self.source) and self.source[cursor] in " \r\t":
+            cursor += 1
+        if cursor >= len(self.source):
+            return "\0"
+        return self.source[cursor]
 
     def _can_start_exponent(self) -> bool:
         next_char = self._peek_next()

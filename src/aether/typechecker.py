@@ -10,8 +10,8 @@ from .modules import is_public_export, private_top_level_names, resolve_file_mod
 from .parser import Parser
 from .scope import Scope
 from .symbols import FunctionSymbol, StructSymbol, VariableSymbol
-from .stdlib import infer_builtin_type, is_builtin, is_builtin_namespace, validate_builtin_arity
-from .stdlib.registry import builtin_aliases_for_import
+from .stdlib import infer_builtin_constant_type, infer_builtin_type, is_builtin, is_builtin_namespace, validate_builtin_arity
+from .stdlib.registry import builtin_aliases_for_import, builtin_constant_aliases_for_import
 from .tokens import AETHER_TYPES, PRIMITIVE_TYPES
 from .types import (
     AetherType,
@@ -62,6 +62,7 @@ class TypeChecker:
         self.loop_variable_stack: list[tuple[str, Scope[VariableSymbol]]] = []
         self.imported_modules: set[str] = set()
         self.builtin_aliases: dict[str, str] = {}
+        self.builtin_constant_aliases: dict[str, str] = {}
         self.type_aliases: dict[str, AetherType] = {}
         self.source_root = Path(source_root).expanduser().resolve() if source_root is not None else Path.cwd()
         self.import_stack = import_stack
@@ -254,6 +255,7 @@ class TypeChecker:
             return
         if is_builtin_namespace(module_name):
             self.builtin_aliases.update(builtin_aliases_for_import(module_name))
+            self.builtin_constant_aliases.update(builtin_constant_aliases_for_import(module_name))
             self.imported_modules.add(module_name)
             return
         if module_name in self.import_stack:
@@ -826,6 +828,11 @@ class TypeChecker:
         if isinstance(expression, ast.Identifier):
             symbol = scope.lookup(expression.name)
             if symbol is None:
+                constant_name = self.builtin_constant_aliases.get(expression.name, expression.name)
+                try:
+                    return infer_builtin_constant_type(constant_name)
+                except AetherRuntimeError:
+                    pass
                 private_message = self._private_import_message(expression.name)
                 if private_message is not None:
                     raise AetherTypeError(private_message, line=expression.line, column=expression.column, kind="name")
@@ -862,6 +869,8 @@ class TypeChecker:
                         column=expression.column,
                     )
                 return infer_builtin_type(LINEAR_ALGEBRA_CONJTRANSPOSE, [operand_type])
+            if expression.operator == "!":
+                return infer_builtin_type("Math.factorial", [operand_type])
             raise AetherRuntimeError(f"Unsupported unary operator '{expression.operator}'.")
         if isinstance(expression, ast.BinaryExpression):
             try:
@@ -900,6 +909,13 @@ class TypeChecker:
             except AetherTypeError as exc:
                 raise _with_source_location(exc, expression) from exc
         if isinstance(expression, ast.FieldAccess):
+            constant_name = _field_access_path(expression)
+            constant_root = _field_access_root_name(expression)
+            if constant_name is not None and constant_root is not None and scope.lookup(constant_root) is None:
+                try:
+                    return infer_builtin_constant_type(constant_name)
+                except AetherRuntimeError:
+                    pass
             target_type = self._expression_type(expression.target, scope)
             if target_type is UNKNOWN_TYPE:
                 return UNKNOWN_TYPE
@@ -1614,6 +1630,25 @@ def _assignment_root_name(expression: ast.Expression) -> str | None:
         return _assignment_root_name(expression.matrix)
     if isinstance(expression, ast.FieldAccess):
         return _assignment_root_name(expression.target)
+    return None
+
+
+def _field_access_path(expression: ast.Expression) -> str | None:
+    if isinstance(expression, ast.Identifier):
+        return expression.name
+    if isinstance(expression, ast.FieldAccess):
+        target = _field_access_path(expression.target)
+        if target is None:
+            return None
+        return f"{target}.{expression.field_name}"
+    return None
+
+
+def _field_access_root_name(expression: ast.Expression) -> str | None:
+    if isinstance(expression, ast.Identifier):
+        return expression.name
+    if isinstance(expression, ast.FieldAccess):
+        return _field_access_root_name(expression.target)
     return None
 
 

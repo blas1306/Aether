@@ -44,6 +44,7 @@ class TokenType(str, Enum):
     COLON = ":"
     EQUAL = "="
     EQUAL_EQUAL = "=="
+    BANG = "!"
     BANG_EQUAL = "!="
     AMP_AMP = "&&"
     PIPE_PIPE = "||"

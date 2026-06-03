@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 import cmath
-from math import cos, exp, floor, log, log10, sin, sqrt, tan
+from math import ceil, cos, exp, factorial as math_factorial, floor, log, log10, pi, sin, sqrt, tan
 
 from ..errors import AetherRuntimeError, AetherTypeError
 from ..formatting import format_value
@@ -22,7 +22,7 @@ from ..types import (
     shape_vector_value,
     type_to_string,
 )
-from .registry import BuiltinDefinition, BuiltinFunction, OutputWriter, RuntimeContext, RuntimeFactory
+from .registry import BuiltinConstantDefinition, BuiltinDefinition, BuiltinFunction, OutputWriter, RuntimeContext, RuntimeFactory
 
 
 CAST_BUILTINS = {"int", "float", "double", "string", "boolean"}
@@ -52,6 +52,9 @@ def builtin_definitions() -> list[BuiltinDefinition]:
         BuiltinDefinition("conj", _constant_runtime(conj_builtin), _conj_type, _exactly_one("conj")),
         BuiltinDefinition("angle", _constant_runtime(angle_builtin), _real_part_type("angle"), _exactly_one("angle")),
         BuiltinDefinition("Math.mod", _constant_runtime(mod_builtin), _math_binary_type("Math.mod"), _exactly_two("Math.mod")),
+        BuiltinDefinition("Math.factorial", _constant_runtime(factorial_builtin), _factorial_type, _exactly_one("Math.factorial")),
+        BuiltinDefinition("Math.floor", _constant_runtime(floor_builtin), _real_to_int_type("Math.floor"), _exactly_one("Math.floor")),
+        BuiltinDefinition("Math.ceil", _constant_runtime(ceil_builtin), _real_to_int_type("Math.ceil"), _exactly_one("Math.ceil")),
     ]
     definitions.extend(
         BuiltinDefinition(
@@ -63,6 +66,12 @@ def builtin_definitions() -> list[BuiltinDefinition]:
         for type_name in sorted(CAST_BUILTINS)
     )
     return definitions
+
+
+def builtin_constant_definitions() -> list[BuiltinConstantDefinition]:
+    return [
+        BuiltinConstantDefinition("Math.pi", "double", pi),
+    ]
 
 
 def _constant_runtime(function: BuiltinFunction) -> RuntimeFactory:
@@ -261,12 +270,32 @@ def mod_builtin(args: list[AetherValue]) -> AetherValue:
     if right.value == 0:
         raise AetherRuntimeError("Math.mod(...) is undefined for divisor zero.")
     result_type = common_primitive_type([left.type_name, right.type_name], label="Math.mod")
-    result = left.value - floor(left.value / right.value) * right.value
+    if left.type_name == "int" and right.type_name == "int":
+        result = left.value % right.value
+    else:
+        result = left.value - floor(left.value / right.value) * right.value
     if result_type == "int":
         result = int(result)
     else:
         result = float(result)
     return AetherValue(result_type, result)
+
+
+def factorial_builtin(args: list[AetherValue]) -> AetherValue:
+    value = _require_int_unary_arg(args, "Math.factorial")
+    if value.value < 0:
+        raise AetherRuntimeError("Math.factorial(...) requires a non-negative integer.")
+    return AetherValue("int", math_factorial(value.value))
+
+
+def floor_builtin(args: list[AetherValue]) -> AetherValue:
+    value = _require_real_numeric_unary_arg(args, "Math.floor")
+    return AetherValue("int", floor(value.value))
+
+
+def ceil_builtin(args: list[AetherValue]) -> AetherValue:
+    value = _require_real_numeric_unary_arg(args, "Math.ceil")
+    return AetherValue("int", ceil(value.value))
 
 
 def _require_numeric_unary_arg(args: list[AetherValue], label: str) -> AetherValue:
@@ -275,6 +304,13 @@ def _require_numeric_unary_arg(args: list[AetherValue], label: str) -> AetherVal
     value = args[0]
     if value.type_name not in NUMERIC_TYPES:
         raise AetherTypeError(f"{label}(...) expects a numeric argument, got '{type_to_string(value.type_name)}'.")
+    return value
+
+
+def _require_int_unary_arg(args: list[AetherValue], label: str) -> AetherValue:
+    value = _require_numeric_unary_arg(args, label)
+    if value.type_name != "int":
+        raise AetherTypeError(f"{label}(...) expects an int argument, got '{type_to_string(value.type_name)}'.")
     return value
 
 
@@ -413,6 +449,31 @@ def _math_binary_type(label: str):
                 f"'{type_to_string(left_type)}' and '{type_to_string(right_type)}'."
             )
         return common_primitive_type([left_type, right_type], label=label)
+
+    return infer
+
+
+def _factorial_type(arg_types: list[AetherType | None]) -> AetherType | None:
+    if len(arg_types) != 1:
+        raise AetherTypeError("Math.factorial(...) expects exactly one argument.")
+    argument_type = arg_types[0]
+    if argument_type is None:
+        return None
+    if argument_type != "int":
+        raise AetherTypeError(f"Math.factorial(...) expects an int argument, got '{type_to_string(argument_type)}'.")
+    return "int"
+
+
+def _real_to_int_type(label: str):
+    def infer(arg_types: list[AetherType | None]) -> AetherType | None:
+        if len(arg_types) != 1:
+            raise AetherTypeError(f"{label}(...) expects exactly one argument.")
+        argument_type = arg_types[0]
+        if argument_type is None:
+            return None
+        if argument_type not in REAL_NUMERIC_TYPES:
+            raise AetherTypeError(f"{label}(...) expects a real numeric argument, got '{type_to_string(argument_type)}'.")
+        return "int"
 
     return infer
 

@@ -17,7 +17,7 @@ from .modules import is_public_export, private_top_level_names, resolve_file_mod
 from .parser import Parser
 from .scope import Scope
 from .stdlib import BuiltinFunction, is_builtin_namespace, make_builtins
-from .stdlib.registry import builtin_aliases_for_import
+from .stdlib.registry import builtin_aliases_for_import, builtin_constant_aliases_for_import, get_builtin_constant
 from .tokens import AETHER_TYPES, PRIMITIVE_TYPES
 from .types import (
     AetherType,
@@ -61,6 +61,7 @@ class Function:
     declaration: ast.FunctionDeclaration | ast.ExpressionFunctionDeclaration
     closure: "Environment | None" = None
     builtin_aliases: dict[str, str] | None = None
+    builtin_constant_aliases: dict[str, str] | None = None
     imported_modules: set[str] | None = None
     type_aliases: dict[str, AetherType] | None = None
     structs: dict[str, ast.StructDeclaration] | None = None
@@ -139,18 +140,24 @@ class _FunctionContext:
         self.interpreter = interpreter
         self.function = function
         self.previous_builtin_aliases: dict[str, str] = {}
+        self.previous_builtin_constant_aliases: dict[str, str] = {}
         self.previous_imported_modules: set[str] = set()
         self.previous_type_aliases: dict[str, AetherType] = {}
         self.previous_structs: dict[str, ast.StructDeclaration] = {}
 
     def __enter__(self) -> None:
         self.previous_builtin_aliases = self.interpreter.builtin_aliases
+        self.previous_builtin_constant_aliases = self.interpreter.builtin_constant_aliases
         self.previous_imported_modules = self.interpreter.imported_modules
         self.previous_type_aliases = self.interpreter.type_aliases
         self.previous_structs = self.interpreter.structs
         self.interpreter.builtin_aliases = {
             **self.previous_builtin_aliases,
             **(self.function.builtin_aliases or {}),
+        }
+        self.interpreter.builtin_constant_aliases = {
+            **self.previous_builtin_constant_aliases,
+            **(self.function.builtin_constant_aliases or {}),
         }
         self.interpreter.imported_modules = {
             *self.previous_imported_modules,
@@ -167,6 +174,7 @@ class _FunctionContext:
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
         self.interpreter.builtin_aliases = self.previous_builtin_aliases
+        self.interpreter.builtin_constant_aliases = self.previous_builtin_constant_aliases
         self.interpreter.imported_modules = self.previous_imported_modules
         self.interpreter.type_aliases = self.previous_type_aliases
         self.interpreter.structs = self.previous_structs
@@ -197,6 +205,7 @@ class Interpreter:
             plot_backend=self.plot_backend,
         )
         self.builtin_aliases: dict[str, str] = {}
+        self.builtin_constant_aliases: dict[str, str] = {}
         self.imported_modules: set[str] = set()
         self.type_aliases: dict[str, AetherType] = {}
         self.structs: dict[str, ast.StructDeclaration] = {}
@@ -405,6 +414,7 @@ class Interpreter:
             declaration,
             env,
             dict(self.builtin_aliases),
+            dict(self.builtin_constant_aliases),
             set(self.imported_modules),
             dict(self.type_aliases),
             dict(self.structs),
@@ -419,6 +429,9 @@ class Interpreter:
             try:
                 return env.get(expression.name)
             except AetherRuntimeError as exc:
+                builtin_constant = get_builtin_constant(self.builtin_constant_aliases.get(expression.name, expression.name))
+                if builtin_constant is not None:
+                    return builtin_constant
                 raise _with_source_location(exc, expression) from exc
         if isinstance(expression, ast.UnaryExpression):
             operand = self._evaluate(expression.operand, env)
@@ -429,6 +442,8 @@ class Interpreter:
                     if LINEAR_ALGEBRA_MODULE not in self.imported_modules:
                         raise AetherRuntimeError("Operator \"'\" requires import Math.LinearAlgebra.", kind="import")
                     return self.builtins[LINEAR_ALGEBRA_CONJTRANSPOSE]([operand])
+                if expression.operator == "!":
+                    return self.builtins["Math.factorial"]([operand])
                 raise AetherRuntimeError(f"Unsupported unary operator '{expression.operator}'.")
             except AetherError as exc:
                 raise _with_source_location(exc, expression) from exc
@@ -476,6 +491,12 @@ class Interpreter:
             except AetherError as exc:
                 raise _with_source_location(exc, expression) from exc
         if isinstance(expression, ast.FieldAccess):
+            constant_name = _field_access_path(expression)
+            constant_root = _field_access_root_name(expression)
+            if constant_name is not None and constant_root is not None and env.lookup(constant_root) is None:
+                builtin_constant = get_builtin_constant(constant_name)
+                if builtin_constant is not None:
+                    return builtin_constant
             return self._read_field(expression.target, expression.field_name, env)
         raise AetherRuntimeError(f"Unsupported expression {expression!r}.")
 
@@ -1032,7 +1053,13 @@ class Interpreter:
         elif operator == "%":
             if right.value == 0:
                 raise AetherRuntimeError("Operator '%' is undefined for divisor zero.")
-            value = left.value - trunc(left.value / right.value) * right.value
+            if left.type_name == "int" and right.type_name == "int":
+                quotient = abs(left.value) // abs(right.value)
+                if (left.value < 0) != (right.value < 0):
+                    quotient = -quotient
+                value = left.value - quotient * right.value
+            else:
+                value = left.value - trunc(left.value / right.value) * right.value
         elif operator == "^":
             if left.type_name == "int" and right.type_name == "int" and right.value < 0:
                 result_type = "double"
@@ -1046,6 +1073,7 @@ class Interpreter:
             return
         if is_builtin_namespace(module_name):
             self.builtin_aliases.update(builtin_aliases_for_import(module_name))
+            self.builtin_constant_aliases.update(builtin_constant_aliases_for_import(module_name))
             self.imported_modules.add(module_name)
             return
         if module_name in self.import_stack:
@@ -1370,6 +1398,25 @@ def _input_conversion_hint(target_type: AetherType) -> str | None:
 
 def _raw_error_message(exc: BaseException) -> str:
     return getattr(exc, "message", str(exc))
+
+
+def _field_access_path(expression: ast.Expression) -> str | None:
+    if isinstance(expression, ast.Identifier):
+        return expression.name
+    if isinstance(expression, ast.FieldAccess):
+        target = _field_access_path(expression.target)
+        if target is None:
+            return None
+        return f"{target}.{expression.field_name}"
+    return None
+
+
+def _field_access_root_name(expression: ast.Expression) -> str | None:
+    if isinstance(expression, ast.Identifier):
+        return expression.name
+    if isinstance(expression, ast.FieldAccess):
+        return _field_access_root_name(expression.target)
+    return None
 
 
 def _with_source_location(exc: AetherError, node: object | None) -> AetherError:

@@ -10,7 +10,7 @@ from .lexer import lex
 from .parser import Parser
 from .result import AetherRunResult
 from .runner import run_aether
-from .stdlib.registry import builtin_names
+from .stdlib.registry import builtin_constant_names, builtin_names
 from .tokens import KEYWORDS
 from .typechecker import TypeChecker
 
@@ -108,8 +108,12 @@ def completion_items(source: str, line: int, column: int) -> list[CompletionItem
         add(keyword, "keyword")
     for builtin in builtin_names():
         add(builtin, "function", "Aether builtin")
+    for constant in builtin_constant_names():
+        add(constant, "constant", "Aether builtin constant")
     for builtin in _imported_builtin_aliases(source):
         add(builtin, "function", "Aether imported builtin")
+    for constant in _imported_builtin_constant_aliases(source):
+        add(constant, "constant", "Aether imported builtin constant")
     for name in sorted(_symbol_names(source)):
         add(name, "variable", "Aether symbol")
     return items
@@ -170,4 +174,15 @@ def _imported_builtin_aliases(source: str) -> set[str]:
         module_name = match.group(1)
         if is_builtin_namespace(module_name):
             aliases.update(builtin_aliases_for_import(module_name))
+    return aliases
+
+
+def _imported_builtin_constant_aliases(source: str) -> set[str]:
+    from .stdlib.registry import builtin_constant_aliases_for_import, is_builtin_namespace
+
+    aliases: set[str] = set()
+    for match in re.finditer(r"^\s*import\s+([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\b", source, re.MULTILINE):
+        module_name = match.group(1)
+        if is_builtin_namespace(module_name):
+            aliases.update(builtin_constant_aliases_for_import(module_name))
     return aliases
