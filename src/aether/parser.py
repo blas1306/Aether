@@ -4,7 +4,7 @@ from . import ast
 from .errors import AetherSyntaxError
 from .lexer import lex
 from .tokens import AETHER_TYPES, PRIMITIVE_TYPES, Token, TokenType
-from .types import AetherType, ArrayType, MatrixType, NULL_TYPE, NullableType, TupleType, VectorType
+from .types import AetherType, ArrayType, ListType, MatrixType, NULL_TYPE, NullableType, TupleType, VectorType
 
 
 STRING_ESCAPES = {'"': '"', "\\": "\\", "$": "$", "n": "\n", "t": "\t", "r": "\r"}
@@ -511,6 +511,8 @@ class Parser:
             return ast.Identifier(name, name_token.line, name_token.column)
         if self._match(TokenType.LEFT_BRACKET):
             return self._matrix_literal()
+        if self._match(TokenType.LEFT_BRACE):
+            return self._list_literal()
         if self._match(TokenType.LEFT_PAREN):
             expr = self._expression()
             if self._match(TokenType.COMMA):
@@ -680,7 +682,7 @@ class Parser:
         token = self._consume_type(message, allow_unknown_identifier=allow_unknown_identifier)
         if token.lexeme == "void":
             raise self._error(token, "'void' is only valid as a function return type.")
-        if token.lexeme in {"Matrix", "Vector"}:
+        if token.lexeme in {"List", "Matrix", "Vector"}:
             element_type = "double"
             if self._match(TokenType.LESS):
                 element_token = self._consume(TokenType.TYPE, f"Expected element type inside {token.lexeme}<...>.")
@@ -688,13 +690,14 @@ class Parser:
                     raise self._error(element_token, f"Expected primitive element type inside {token.lexeme}<...>.")
                 self._consume(TokenType.GREATER, f"Expected '>' after {token.lexeme} element type.")
                 element_type = element_token.lexeme
+            if token.lexeme == "List":
+                return self._nullable_suffix(ListType(element_type))
             if token.lexeme == "Vector":
                 return self._nullable_suffix(VectorType(element_type))
             return self._nullable_suffix(MatrixType(element_type))
         type_name: AetherType = token.lexeme
-        while self._match(TokenType.LEFT_BRACKET):
-            self._consume(TokenType.RIGHT_BRACKET, "Expected ']' after '[' in array type.")
-            type_name = ArrayType(type_name)
+        if self._check(TokenType.LEFT_BRACKET):
+            raise self._error(self._peek(), "Array type syntax 'T[]' is not public yet; use List<T>.")
         return self._nullable_suffix(type_name)
 
     def _nullable_suffix(self, type_name: AetherType) -> AetherType:
@@ -811,7 +814,7 @@ class Parser:
         if self.tokens[start].type not in {TokenType.TYPE, TokenType.IDENTIFIER}:
             return None
         cursor = start + 1
-        if self.tokens[start].lexeme in {"Matrix", "Vector"} and cursor < len(self.tokens) and self.tokens[cursor].type == TokenType.LESS:
+        if self.tokens[start].lexeme in {"List", "Matrix", "Vector"} and cursor < len(self.tokens) and self.tokens[cursor].type == TokenType.LESS:
             if (
                 cursor + 2 >= len(self.tokens)
                 or self.tokens[cursor + 1].type != TokenType.TYPE
@@ -820,10 +823,6 @@ class Parser:
             ):
                 return None
             cursor += 3
-        while cursor + 1 < len(self.tokens) and self.tokens[cursor].type == TokenType.LEFT_BRACKET:
-            if self.tokens[cursor + 1].type != TokenType.RIGHT_BRACKET:
-                return None
-            cursor += 2
         if cursor < len(self.tokens) and self.tokens[cursor].type == TokenType.QUESTION:
             cursor += 1
         return cursor
@@ -850,6 +849,7 @@ class Parser:
                 return ast.MatrixLiteral([])
             rows: list[list[ast.Expression]] = []
             has_space_columns = False
+            uses_commas = False
             while True:
                 row: list[ast.Expression] = []
                 if self._check(TokenType.SEMICOLON) or self._check(TokenType.RIGHT_BRACKET):
@@ -857,6 +857,7 @@ class Parser:
                 while not self._check(TokenType.SEMICOLON) and not self._check(TokenType.RIGHT_BRACKET):
                     row.append(self._expression())
                     if self._match(TokenType.COMMA):
+                        uses_commas = True
                         if self._check(TokenType.SEMICOLON) or self._check(TokenType.RIGHT_BRACKET):
                             raise self._error(self._previous(), "Trailing comma in matrix literal is not supported.")
                         continue
@@ -872,9 +873,34 @@ class Parser:
                 if self._check(TokenType.RIGHT_BRACKET):
                     raise self._error(self._previous(), "Trailing ';' in matrix literal is not supported.")
             self._consume(TokenType.RIGHT_BRACKET, "Expected ']' after matrix literal.")
-            return ast.MatrixLiteral(rows, vector=not has_space_columns)
+            orientation = None
+            if len(rows) == 1:
+                orientation = "row"
+            elif all(len(row) == 1 for row in rows):
+                orientation = "column"
+            return ast.MatrixLiteral(rows, vector=not has_space_columns, orientation=orientation, uses_commas=uses_commas)
         finally:
             self.matrix_literal_depth -= 1
+
+    def _list_literal(self) -> ast.ListLiteral:
+        if self._match(TokenType.RIGHT_BRACE):
+            return ast.ListLiteral([])
+        elements: list[ast.Expression] = []
+        while True:
+            if self._check(TokenType.RIGHT_BRACE):
+                raise self._error(self._peek(), "Expected expression in list literal.")
+            elements.append(self._expression())
+            if self._match(TokenType.COMMA):
+                if self._check(TokenType.RIGHT_BRACE):
+                    raise self._error(self._previous(), "Trailing comma in list literal is not supported.")
+                continue
+            if self._check(TokenType.RIGHT_BRACE):
+                break
+            if self._can_start_expression(self._peek()):
+                raise self._error(self._peek(), "Expected ',' between list elements.")
+            raise self._error(self._peek(), "Expected ',' or '}' in list literal.")
+        self._consume(TokenType.RIGHT_BRACE, "Expected '}' after list literal.")
+        return ast.ListLiteral(elements)
 
     def _is_matrix_signed_column_boundary(self, operator: Token) -> bool:
         if self.matrix_literal_depth == 0 or operator.type != TokenType.MINUS:
@@ -917,6 +943,7 @@ class Parser:
             TokenType.IDENTIFIER,
             TokenType.TYPE,
             TokenType.LEFT_BRACKET,
+            TokenType.LEFT_BRACE,
             TokenType.LEFT_PAREN,
             TokenType.MINUS,
         }

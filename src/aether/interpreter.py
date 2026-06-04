@@ -24,6 +24,7 @@ from .types import (
     AetherRange,
     AetherValue,
     ArrayType,
+    ListType,
     MatrixType,
     NUMERIC_TYPES,
     REAL_NUMERIC_TYPES,
@@ -38,13 +39,16 @@ from .types import (
     array_element_type,
     coerce_array_literal_value,
     coerce_implicit,
+    coerce_list_value,
     coerce_matrix_value,
     coerce_return_value,
     coerce_vector_value,
     is_array_type,
     is_indexable_type,
+    is_list_type,
     is_matrix_type,
     is_vector_like_type,
+    list_element_type,
     matrix_row_type,
     promote_numeric,
     type_to_string,
@@ -277,6 +281,18 @@ class Interpreter:
                 coerced = coerce_array_literal_value(value, declared_type) if is_array_type(declared_type) else coerce_implicit(value, declared_type)
                 env.define(statement.name, coerced, forbid_shadowing=True, is_const=statement.is_const)
                 return
+            if isinstance(statement.initializer, ast.ListLiteral):
+                value = self._evaluate_list_literal(
+                    statement.initializer,
+                    env,
+                    declared_type if declared_type is not None and is_list_type(declared_type) else None,
+                )
+                if declared_type is None:
+                    env.define(statement.name, value, forbid_shadowing=True, is_const=statement.is_const)
+                    return
+                coerced = coerce_list_value(value, declared_type) if is_list_type(declared_type) else coerce_implicit(value, declared_type)
+                env.define(statement.name, coerced, forbid_shadowing=True, is_const=statement.is_const)
+                return
             if declared_type is None:
                 env.define(
                     statement.name,
@@ -327,6 +343,10 @@ class Interpreter:
             if isinstance(statement.expression, ast.ArrayLiteral) and current is not None and is_array_type(current.type_name):
                 value = self._evaluate_array_literal(statement.expression, env, current.type_name)
                 env.assign(statement.name, value, array_literal_context=True)
+                return
+            if isinstance(statement.expression, ast.ListLiteral) and current is not None and is_list_type(current.type_name):
+                value = self._evaluate_list_literal(statement.expression, env, current.type_name)
+                env.assign(statement.name, value)
                 return
             if current is not None:
                 env.assign(statement.name, self._evaluate_with_expected_type(statement.expression, env, current.type_name))
@@ -476,6 +496,8 @@ class Interpreter:
             )
         if isinstance(expression, ast.ArrayLiteral):
             return self._evaluate_array_literal(expression, env)
+        if isinstance(expression, ast.ListLiteral):
+            return self._evaluate_list_literal(expression, env)
         if isinstance(expression, ast.TupleLiteral):
             return self._evaluate_tuple_literal(expression, env)
         if isinstance(expression, ast.MatrixLiteral):
@@ -605,6 +627,25 @@ class Interpreter:
         inferred_type = _array_type_from_values(elements)
         return coerce_array_literal_value(AetherValue(inferred_type, elements), inferred_type)
 
+    def _evaluate_list_literal(
+        self,
+        expression: ast.ListLiteral,
+        env: Environment,
+        target_type: AetherType | None = None,
+    ) -> AetherValue:
+        elements = [self._evaluate(element, env) for element in expression.elements]
+        if target_type is not None and is_list_type(target_type):
+            value = (
+                AetherValue(target_type, elements)
+                if not elements
+                else AetherValue(_list_type_from_values(elements), elements)
+            )
+            return coerce_list_value(value, target_type)
+        if not elements:
+            raise AetherTypeError("Cannot infer type of empty list literal.")
+        inferred_type = _list_type_from_values(elements)
+        return coerce_list_value(AetherValue(inferred_type, elements), inferred_type)
+
     def _evaluate_tuple_literal(self, expression: ast.TupleLiteral, env: Environment) -> AetherValue:
         elements = tuple(self._evaluate(element, env) for element in expression.elements)
         if len(elements) < 2:
@@ -641,13 +682,27 @@ class Interpreter:
             rows.append(coerced_row)
         if expression.vector:
             vector_elements = [element for row in rows for element in row.value]
-            value = AetherValue(VectorType(element_type, len(vector_elements)), vector_elements)
+            value = AetherValue(VectorType(element_type, len(vector_elements), expression.orientation), vector_elements)
             if isinstance(target_type, VectorType):
                 return coerce_vector_value(value, target_type)
             if isinstance(target_type, MatrixType):
                 legacy_rows = [AetherValue(row_type, [element]) for element in vector_elements]
                 legacy_value = AetherValue(MatrixType(element_type, len(legacy_rows), 1, vector=True), legacy_rows)
                 return coerce_matrix_value(legacy_value, target_type)
+            return value
+        if len(rows) == 1:
+            value = AetherValue(VectorType(element_type, row_lengths[0], "row"), list(rows[0].value))
+            if isinstance(target_type, VectorType):
+                return coerce_vector_value(value, target_type)
+            if isinstance(target_type, MatrixType):
+                return coerce_matrix_value(_vector_to_matrix_value(value), target_type)
+            return value
+        if all(length == 1 for length in row_lengths):
+            value = AetherValue(VectorType(element_type, len(rows), "column"), [row.value[0] for row in rows])
+            if isinstance(target_type, VectorType):
+                return coerce_vector_value(value, target_type)
+            if isinstance(target_type, MatrixType):
+                return coerce_matrix_value(_vector_to_matrix_value(value), target_type)
             return value
         inferred_type = MatrixType(element_type, len(rows), row_lengths[0])
         value = AetherValue(inferred_type, rows)
@@ -662,7 +717,7 @@ class Interpreter:
         if isinstance(index_expression, ast.FullSlice) or isinstance(index_expression, ast.RangeExpression):
             return self._read_vector_slice(array_value, index_expression, env)
         index_value = self._evaluate(index_expression, env)
-        index = self._require_array_index(array_value, index_value)
+        index = self._require_index(array_value, index_value)
         if isinstance(array_value.type_name, (VectorType, TransposeVectorType)):
             return _vector_elements(array_value)[index]
         if isinstance(array_value.type_name, MatrixType) and array_value.type_name.vector:
@@ -708,13 +763,14 @@ class Interpreter:
         if not is_vector_like_type(vector_value.type_name):
             raise AetherTypeError(f"Cannot slice non-vector value of type '{type_to_string(vector_value.type_name)}'.")
         elements = _vector_elements(vector_value)
-        indices = self._slice_indices(index_expression, env, len(elements), "Vector")
+        indices = self._slice_indices(index_expression, env, len(elements), "Vector", base=1)
         sliced = [elements[index] for index in indices]
         if isinstance(vector_value.type_name, TransposeVectorType):
-            vector = AetherValue(VectorType(vector_value.type_name.element_type, len(sliced)), sliced)
+            vector = AetherValue(VectorType(vector_value.type_name.element_type, len(sliced), "row"), sliced)
             return AetherValue(TransposeVectorType(vector_value.type_name.element_type, len(sliced)), vector)
         element_type = _vector_element_type(vector_value)
-        return AetherValue(VectorType(element_type, len(sliced)), sliced)
+        orientation = vector_value.type_name.orientation if isinstance(vector_value.type_name, VectorType) else None
+        return AetherValue(VectorType(element_type, len(sliced), orientation), sliced)
 
     def _matrix_index_selector(
         self,
@@ -729,31 +785,32 @@ class Interpreter:
         size = len(matrix_value.value) if axis == 0 else len(matrix_value.value[0].value) if matrix_value.value else 0
         label = "Matrix row" if axis == 0 else "Matrix column"
         if isinstance(expression, ast.FullSlice) or isinstance(expression, ast.RangeExpression):
-            return self._slice_indices(expression, env, size, label)
+            return self._slice_indices(expression, env, size, label, base=1)
         value = self._evaluate(expression, env)
         if value.type_name != "int":
             raise AetherTypeError(f"{label} index must be int or slice, got '{type_to_string(value.type_name)}'.")
-        index = value.value
+        index = value.value - 1
         if index < 0 or index >= size:
-            raise AetherRuntimeError(f"{label} index {index} out of bounds for {size}.")
+            raise AetherRuntimeError(f"{label} index {value.value} out of bounds for {size} ({_base_label(1)}).")
         return index
 
-    def _slice_indices(self, expression: ast.Expression, env: Environment, size: int, label: str) -> list[int]:
+    def _slice_indices(self, expression: ast.Expression, env: Environment, size: int, label: str, *, base: int) -> list[int]:
         if isinstance(expression, ast.FullSlice):
             return list(range(size))
         range_value = self._evaluate_range(expression, env) if isinstance(expression, ast.RangeExpression) else self._evaluate(expression, env)
         if not isinstance(range_value.type_name, RangeType) or not isinstance(range_value.value, AetherRange):
             raise AetherTypeError(f"{label} slice must be ':' or an int range.")
-        indices = [element.value for element in range_value.value]
-        for index in indices:
+        requested_indices = [element.value for element in range_value.value]
+        indices = [index - base for index in requested_indices]
+        for requested_index, index in zip(requested_indices, indices):
             if index < 0 or index >= size:
-                raise AetherRuntimeError(f"{label} index {index} out of bounds for {size}.")
+                raise AetherRuntimeError(f"{label} index {requested_index} out of bounds for {size} ({_base_label(base)}).")
         return indices
 
     def _assign_index(self, statement: ast.IndexAssignment, env: Environment) -> None:
         array_value = self._evaluate(statement.array, env)
         index_value = self._evaluate(statement.index, env)
-        index = self._require_array_index(array_value, index_value)
+        index = self._require_index(array_value, index_value)
         value = self._evaluate(statement.expression, env)
         if isinstance(array_value.type_name, TransposeVectorType):
             raise AetherTypeError("Cannot assign through a transposed vector view.")
@@ -770,6 +827,8 @@ class Interpreter:
             else matrix_row_type(array_value.type_name)
             if isinstance(array_value.type_name, MatrixType)
             else array_element_type(array_value.type_name)
+            if isinstance(array_value.type_name, ArrayType)
+            else list_element_type(array_value.type_name)
         )
         if is_array_type(element_type):
             raise AetherTypeError("Assigning a whole matrix row is not supported yet.")
@@ -816,15 +875,19 @@ class Interpreter:
         value = self._evaluate_with_expected_type(statement.expression, env, field_type)
         instance.fields[statement.field_name] = coerce_implicit(value, field_type)
 
-    def _require_array_index(self, array_value: AetherValue, index_value: AetherValue) -> int:
+    def _require_index(self, array_value: AetherValue, index_value: AetherValue) -> int:
         if not is_indexable_type(array_value.type_name):
             raise AetherTypeError(f"Cannot index non-indexable value of type '{type_to_string(array_value.type_name)}'.")
         if index_value.type_name != "int":
-            raise AetherTypeError(f"Array index must be int, got '{type_to_string(index_value.type_name)}'.")
-        index = index_value.value
+            raise AetherTypeError(f"Index must be int, got '{type_to_string(index_value.type_name)}'.")
+        base = _index_base(array_value.type_name)
+        index = index_value.value - base
         length = _indexable_length(array_value)
         if index < 0 or index >= length:
-            raise AetherRuntimeError(f"Array index {index} out of bounds for length {length}.")
+            label = _indexable_label(array_value.type_name)
+            raise AetherRuntimeError(
+                f"{label} index {index_value.value} out of bounds for length {length} ({_base_label(base)})."
+            )
         return index
 
     def _require_matrix_indices(
@@ -844,11 +907,13 @@ class Interpreter:
         column = column_value.value
         rows = len(matrix_value.value)
         cols = len(matrix_value.value[0].value) if matrix_value.value else 0
-        if row < 0 or row >= rows:
-            raise AetherRuntimeError(f"Matrix row index {row} out of bounds for {rows} rows.")
-        if column < 0 or column >= cols:
-            raise AetherRuntimeError(f"Matrix column index {column} out of bounds for {cols} columns.")
-        return row, column
+        row_index = row - 1
+        column_index = column - 1
+        if row_index < 0 or row_index >= rows:
+            raise AetherRuntimeError(f"Matrix row index {row} out of bounds for {rows} rows ({_base_label(1)}).")
+        if column_index < 0 or column_index >= cols:
+            raise AetherRuntimeError(f"Matrix column index {column} out of bounds for {cols} columns ({_base_label(1)}).")
+        return row_index, column_index
 
     def _evaluate_call(self, expression: ast.CallExpression, env: Environment) -> AetherValue:
         builtin_name = self.builtin_aliases.get(expression.callee, expression.callee)
@@ -1217,6 +1282,8 @@ class Interpreter:
             return type_name
         if isinstance(type_name, ArrayType):
             return ArrayType(self._resolve_type_aliases(type_name.element_type, resolving))
+        if isinstance(type_name, ListType):
+            return ListType(self._resolve_type_aliases(type_name.element_type, resolving))
         if isinstance(type_name, NullableType):
             return NullableType(self._resolve_type_aliases(type_name.base_type, resolving))
         if isinstance(type_name, TupleType):
@@ -1226,7 +1293,7 @@ class Interpreter:
             return MatrixType(element_type, type_name.rows, type_name.cols, type_name.vector)
         if isinstance(type_name, VectorType):
             element_type = self._resolve_vector_matrix_element_type(type_name.element_type, resolving)
-            return VectorType(element_type, type_name.length)
+            return VectorType(element_type, type_name.length, type_name.orientation)
         if isinstance(type_name, TransposeVectorType):
             element_type = self._resolve_vector_matrix_element_type(type_name.element_type, resolving)
             return TransposeVectorType(element_type, type_name.length)
@@ -1315,6 +1382,8 @@ def _concat_block_value(value: AetherValue) -> _ConcatBlockValue:
     if isinstance(value.type_name, str):
         return _ConcatBlockValue(value.type_name, [[value]])
     if isinstance(value.type_name, VectorType):
+        if value.type_name.orientation == "row":
+            return _ConcatBlockValue(value.type_name.element_type, [list(value.value)], "vector")
         return _ConcatBlockValue(value.type_name.element_type, [[element] for element in value.value], "vector")
     if isinstance(value.type_name, TransposeVectorType):
         return _ConcatBlockValue(value.type_name.element_type, [list(value.value.value)], "transpose_vector")
@@ -1340,6 +1409,7 @@ def _is_pure_vector_vcat_literal(expression: ast.MatrixLiteral, blocks: list[lis
         and len(blocks) > 1
         and all(len(row) == 1 for row in blocks)
         and all(row[0].vector_kind == "vector" for row in blocks)
+        and all(row[0].col_count == 1 for row in blocks)
     )
 
 
@@ -1492,6 +1562,8 @@ def _iterable_values(value: AetherValue) -> list[AetherValue] | AetherRange:
         return value.value
     if isinstance(value.type_name, ArrayType):
         return list(value.value)
+    if isinstance(value.type_name, ListType):
+        return list(value.value)
     if isinstance(value.type_name, VectorType):
         return list(value.value)
     if isinstance(value.type_name, MatrixType) and _is_vector_like_matrix(value):
@@ -1536,6 +1608,26 @@ def _indexable_length(value: AetherValue) -> int:
     return len(value.value)
 
 
+def _index_base(type_name: AetherType) -> int:
+    if isinstance(type_name, (VectorType, TransposeVectorType, MatrixType)):
+        return 1
+    return 0
+
+
+def _indexable_label(type_name: AetherType) -> str:
+    if isinstance(type_name, ListType):
+        return "List"
+    if isinstance(type_name, (VectorType, TransposeVectorType)):
+        return "Vector"
+    if isinstance(type_name, MatrixType):
+        return "Vector" if type_name.vector else "Matrix"
+    return "Array"
+
+
+def _base_label(base: int) -> str:
+    return "1-based" if base == 1 else "0-based"
+
+
 def _assign_vector_element(value: AetherValue, index: int, element: AetherValue) -> None:
     rows = value.value
     if len(rows) == 1:
@@ -1562,6 +1654,47 @@ def _array_type_from_values(elements: list[AetherValue]) -> ArrayType:
     raise AetherTypeError("Array literals must contain homogeneous compatible element types.")
 
 
+def _list_type_from_values(elements: list[AetherValue]) -> ListType:
+    element_types = [element.type_name for element in elements]
+    primitive_types = [element_type for element_type in element_types if isinstance(element_type, str)]
+    list_types = [element_type for element_type in element_types if isinstance(element_type, ListType)]
+    array_types = [element_type for element_type in element_types if isinstance(element_type, ArrayType)]
+    structured_types = [
+        element_type
+        for element_type in element_types
+        if not isinstance(element_type, (str, ArrayType, ListType))
+    ]
+    groups = sum(bool(group) for group in (primitive_types, list_types, array_types, structured_types))
+    if groups != 1:
+        raise AetherTypeError("List literals must contain homogeneous compatible element types.")
+    if primitive_types:
+        return ListType(_common_list_primitive_type(primitive_types))
+    if list_types:
+        first = list_types[0]
+        if all(element_type == first for element_type in list_types):
+            return ListType(first)
+    if array_types:
+        first = array_types[0]
+        if all(element_type == first for element_type in array_types):
+            return ListType(first)
+    if structured_types:
+        first = structured_types[0]
+        if all(element_type == first for element_type in structured_types):
+            return ListType(first)
+    raise AetherTypeError("List literals must contain homogeneous compatible element types.")
+
+
+def _vector_to_matrix_value(value: AetherValue) -> AetherValue:
+    if not isinstance(value.type_name, VectorType):
+        raise AetherTypeError(f"Expected vector type, got '{type_to_string(value.type_name)}'.")
+    row_type = ArrayType(value.type_name.element_type)
+    if value.type_name.orientation == "row":
+        rows = [AetherValue(row_type, list(value.value))]
+        return AetherValue(MatrixType(value.type_name.element_type, 1, len(value.value)), rows)
+    rows = [AetherValue(row_type, [element]) for element in value.value]
+    return AetherValue(MatrixType(value.type_name.element_type, len(value.value), 1, vector=True), rows)
+
+
 def _common_primitive_type(primitive_types: list[AetherType]) -> str:
     if not all(isinstance(type_name, str) for type_name in primitive_types):
         raise AetherTypeError("Array literals must contain homogeneous compatible element types.")
@@ -1577,6 +1710,13 @@ def _common_primitive_type(primitive_types: list[AetherType]) -> str:
             return "float"
         return "int"
     raise AetherTypeError("Array literals must contain homogeneous compatible element types.")
+
+
+def _common_list_primitive_type(primitive_types: list[AetherType]) -> str:
+    try:
+        return _common_primitive_type(primitive_types)
+    except AetherTypeError as exc:
+        raise AetherTypeError("List literals must contain homogeneous compatible element types.") from exc
 
 
 def _types_comparable_for_equality(left_type: AetherType, right_type: AetherType) -> bool:
@@ -1604,12 +1744,21 @@ def _types_comparable_for_equality(left_type: AetherType, right_type: AetherType
         )
     if isinstance(left_type, ArrayType) and isinstance(right_type, ArrayType):
         return _types_comparable_for_equality(left_type.element_type, right_type.element_type)
+    if isinstance(left_type, ListType) and isinstance(right_type, ListType):
+        return _types_comparable_for_equality(left_type.element_type, right_type.element_type)
     if isinstance(left_type, MatrixType) and isinstance(right_type, MatrixType):
         return left_type.rows == right_type.rows and left_type.cols == right_type.cols and _types_comparable_for_equality(
             left_type.element_type,
             right_type.element_type,
         )
-    if is_array_type(left_type) or is_array_type(right_type) or is_matrix_type(left_type) or is_matrix_type(right_type):
+    if (
+        is_array_type(left_type)
+        or is_array_type(right_type)
+        or is_list_type(left_type)
+        or is_list_type(right_type)
+        or is_matrix_type(left_type)
+        or is_matrix_type(right_type)
+    ):
         return False
     return left_type in NUMERIC_TYPES and right_type in NUMERIC_TYPES
 
@@ -1670,6 +1819,8 @@ def _evaluate_algebraic_multiplication(left: AetherValue, right: AetherValue) ->
         return _matrix_vector_multiply(left, right)
     if isinstance(left.type_name, TransposeVectorType) and isinstance(right.type_name, VectorType):
         return _dot_product(left.value, right)
+    if isinstance(left.type_name, TransposeVectorType) and isinstance(right.type_name, MatrixType):
+        return _transpose_vector_matrix_multiply(left.value, right)
     if isinstance(left.type_name, VectorType) and isinstance(right.type_name, TransposeVectorType):
         return _outer_product(left, right.value)
     return None
@@ -1896,6 +2047,24 @@ def _dot_product(left_transpose: AetherValue, right: AetherValue) -> AetherValue
     return _coerced_numeric_result(total, result_element_type)
 
 
+def _transpose_vector_matrix_multiply(left_transpose: AetherValue, matrix: AetherValue) -> AetherValue:
+    left = left_transpose
+    rows, cols = _matrix_shape(matrix)
+    if len(left.value) != rows:
+        raise AetherTypeError(f"Operator '*' requires compatible row Vector and Matrix shapes, got {len(left.value)} and {rows}x{cols}.")
+    left_element_type = _numeric_vector_scalar_type(left.type_name)
+    matrix_element_type = _numeric_matrix_scalar_type(matrix.type_name)
+    result_element_type = promote_numeric(left_element_type, matrix_element_type, "*")
+    result: list[AetherValue] = []
+    for col_index in range(cols):
+        total = 0
+        for row_index in range(rows):
+            total += left.value[row_index].value * matrix.value[row_index].value[col_index].value
+        result.append(_coerced_numeric_result(total, result_element_type))
+    vector = AetherValue(VectorType(result_element_type, len(result), "row"), result)
+    return AetherValue(TransposeVectorType(result_element_type, len(result)), vector)
+
+
 def _outer_product(left: AetherValue, right_transpose: AetherValue) -> AetherValue:
     left_element_type = _numeric_vector_scalar_type(left.type_name)
     right_element_type = _numeric_vector_scalar_type(right_transpose.type_name)
@@ -2056,6 +2225,10 @@ def _values_equal(left: AetherValue, right: AetherValue) -> bool:
             return False
         return all(_values_equal(left_row, right_row) for left_row, right_row in zip(left.value, right.value))
     if isinstance(left.type_name, ArrayType) and isinstance(right.type_name, ArrayType):
+        if len(left.value) != len(right.value):
+            return False
+        return all(_values_equal(left_element, right_element) for left_element, right_element in zip(left.value, right.value))
+    if isinstance(left.type_name, ListType) and isinstance(right.type_name, ListType):
         if len(left.value) != len(right.value):
             return False
         return all(_values_equal(left_element, right_element) for left_element, right_element in zip(left.value, right.value))

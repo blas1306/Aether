@@ -105,5 +105,5 @@ def test_void_is_not_valid_tuple_or_array_return_element() -> None:
     with pytest.raises(AetherSyntaxError, match="'void' is only valid as a function return type"):
         _parse("(void, int) f() { return (1, 2); }")
 
-    with pytest.raises(AetherSyntaxError, match="'void' cannot be used as an array type"):
-        _parse("void[] f() { return; }")
+    with pytest.raises(AetherSyntaxError, match="Type name 'List' must be used as a call or declaration"):
+        _parse("List<void> f() { return {}; }")

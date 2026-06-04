@@ -33,7 +33,7 @@ def test_size_reports_vector_as_one_dimensional_and_indexable() -> None:
     result = run_aether(
         """
 s = size([1, 2, 3]);
-n = s[0];
+n = s[1];
 ok = s == [3];
 println(s);
 println(n);
@@ -53,8 +53,8 @@ def test_size_reports_matrix_shape_and_rows_cols_delegate_to_it() -> None:
         """
 A = [1 2 3 4; 5 6 7 8; 9 10 11 12];
 s = size(A);
-m = s[0];
-n = s[1];
+m = s[1];
+n = s[2];
 ok = s == [3, 4];
 println(s);
 println(m);
@@ -71,7 +71,7 @@ println(ok);
     assert result.env["m"].value == 3
     assert result.env["n"].value == 4
     assert result.env["ok"].value is True
-    assert result.output == "[3, 4]\n3\n4\n3\n4\n4\ntrue\n"
+    assert result.output == "[3 4]\n3\n4\n3\n4\n4\ntrue\n"
 
 
 def test_size_preserves_transpose_vector_row_orientation() -> None:
@@ -82,8 +82,8 @@ v = [1, 2, 3];
 t = transpose(v);
 s = size(t);
 println(s);
-println(s[0]);
 println(s[1]);
+println(s[2]);
 println(rows(t));
 println(cols(t));
 println(columns(t));
@@ -93,12 +93,12 @@ println(columns(t));
     assert result.env["t"].type_name == TransposeVectorType("int", 3)
     assert result.env["s"].type_name == VectorType("int", 2)
     assert values(result.env["s"]) == [1, 3]
-    assert result.output == "[1, 3]\n1\n3\n1\n3\n3\n"
+    assert result.output == "[1 3]\n1\n3\n1\n3\n3\n"
 
 
 def test_size_scalar_shape_has_no_dimension_index() -> None:
     with pytest.raises(AetherRuntimeError):
-        run_aether("println(size(5)[0]);")
+        run_aether("println(size(5)[1]);")
 
 
 def test_bracket_concat_horizontally_combines_matrix_blocks() -> None:
@@ -148,7 +148,7 @@ println(E);
     assert result.output == "[1 2 5; 3 4 6; 7 8 9]\n"
 
 
-def test_bracket_concat_vectors_as_columns_for_horizontal_concat() -> None:
+def test_bracket_concat_row_vectors_horizontally_combines_columns() -> None:
     result = run_aether(
         """
 v = [1, 2];
@@ -158,12 +158,12 @@ println(C);
 """
     )
 
-    assert result.env["C"].type_name == MatrixType("int", 2, 2)
-    assert matrix_values(result.env["C"]) == [[1, 3], [2, 4]]
-    assert result.output == "[1 3; 2 4]\n"
+    assert result.env["C"].type_name == MatrixType("int", 1, 4)
+    assert matrix_values(result.env["C"]) == [[1, 2, 3, 4]]
+    assert result.output == "[1 2 3 4]\n"
 
 
-def test_bracket_concat_pure_vector_vcat_returns_vector() -> None:
+def test_bracket_concat_row_vectors_vertically_returns_matrix() -> None:
     result = run_aether(
         """
 v = [1, 2];
@@ -173,9 +173,9 @@ println(c);
 """
     )
 
-    assert result.env["c"].type_name == VectorType("int", 4)
-    assert values(result.env["c"]) == [1, 2, 3, 4]
-    assert result.output == "[1, 2, 3, 4]\n"
+    assert result.env["c"].type_name == MatrixType("int", 2, 2)
+    assert matrix_values(result.env["c"]) == [[1, 2], [3, 4]]
+    assert result.output == "[1 2; 3 4]\n"
 
 
 def test_bracket_concat_promotes_numeric_element_types() -> None:
@@ -208,7 +208,7 @@ def test_bracket_concat_rejects_single_or_comma_separated_matrix_blocks() -> Non
 
 
 def test_vectors_are_1d_values_and_simple_indexing_returns_scalar() -> None:
-    result = run_aether("v = [1, 2, 3]; a = v[0]; println(a);")
+    result = run_aether("v = [1, 2, 3]; a = v[1]; println(a);")
 
     assert result.env["v"].type_name == VectorType("int", 3)
     assert result.env["a"].type_name == "int"
@@ -222,7 +222,7 @@ import Math.LinearAlgebra
 v = [1, 2, 3];
 t = transpose(v);
 w = transpose(t);
-a = t[0];
+a = t[1];
 println(a);
 """
     )
@@ -325,10 +325,10 @@ def test_matrix_indexing_slices_lower_or_preserve_dimension_like_julia() -> None
     result = run_aether(
         """
 A = [1 2 3; 4 5 6; 7 8 9];
-a = A[0, 1];
-col = A[:, 0];
-row = A[0, :];
-part = A[0:1, 1];
+a = A[1, 2];
+col = A[:, 1];
+row = A[1, :];
+part = A[1:2, 2];
 whole = A[:, :];
 """
     )

@@ -3,7 +3,7 @@ import Math
 int GenPrimos(int n) {
     suma1 = 0;
 
-    for i in 1:(2^n) {
+    for i in 1:int(n^1.5) {
         suma2 = 0;
 
         for j in 1:i {
@@ -19,13 +19,6 @@ int GenPrimos(int n) {
     return p;
 }
 
-while true {
-    int n = input("Ingrese un numero: ");
-
-    if n <= 0 {
-        println("Pero que pelotudo que sos, pone un numero natural positivo");
-    } else {
-        pn = GenPrimos(n);
-        println("p_{$n$} = ", pn);
-    }
+for i in 1:50 {
+    println("p_{$i$} = ", GenPrimos(i));
 }

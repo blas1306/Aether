@@ -97,7 +97,7 @@ def test_interpolation_expression_is_typechecked():
 def test_strings_inside_collection_literals_still_parse():
     result = run_aether('println(["a", "b"]); println(["a" "b"]);')
 
-    assert result.output == '["a", "b"]\n["a" "b"]\n'
+    assert result.output == '["a" "b"]\n["a" "b"]\n'
 
 
 def test_interpolates_matrix_using_current_aether_format():

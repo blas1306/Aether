@@ -9,6 +9,7 @@ from ..formatting import format_value
 from ..types import (
     AetherType,
     AetherValue,
+    ListType,
     MatrixType,
     NUMERIC_TYPES,
     REAL_NUMERIC_TYPES,
@@ -17,6 +18,7 @@ from ..types import (
     VOID_VALUE,
     explicit_cast,
     is_array_type,
+    is_list_type,
     shape_dimension_count,
     shape_dimensions,
     shape_vector_value,
@@ -164,8 +166,8 @@ def length_builtin(args: list[AetherValue]) -> AetherValue:
         return AetherValue("int", len(value.value.value))
     if isinstance(value.type_name, MatrixType) and value.type_name.vector:
         return AetherValue("int", _vector_length(value))
-    if not is_array_type(value.type_name):
-        raise AetherTypeError(f"length(...) expects an array argument, got '{type_to_string(value.type_name)}'.")
+    if not is_array_type(value.type_name) and not is_list_type(value.type_name):
+        raise AetherTypeError(f"length(...) expects a List, array, or Vector argument, got '{type_to_string(value.type_name)}'.")
     return AetherValue("int", len(value.value))
 
 
@@ -365,8 +367,8 @@ def _length_type(arg_types: list[AetherType | None]) -> AetherType | None:
         return "int"
     if isinstance(argument_type, (VectorType, TransposeVectorType)):
         return "int"
-    if not is_array_type(argument_type):
-        raise AetherTypeError(f"length(...) expects an array argument, got '{type_to_string(argument_type)}'.")
+    if not is_array_type(argument_type) and not is_list_type(argument_type):
+        raise AetherTypeError(f"length(...) expects a List, array, or Vector argument, got '{type_to_string(argument_type)}'.")
     return "int"
 
 

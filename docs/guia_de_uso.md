@@ -81,14 +81,25 @@ println("Precio: \$10");
 
 `$...$` dentro de strings no es modo matematico LaTeX. Es interpolacion Aether. Las interpolaciones vacias, sin cerrar, invalidas o con variables no definidas son errores.
 
-## 5. Matrices y algebra lineal
+## 5. Listas, matrices y algebra lineal
 
-Los corchetes crean valores matematicos `Matrix<T>`:
+Las listas de programacion usan `List<T>` y literales con llaves. Son 0-based:
+
+```aether
+List<int> xs = {10, 20, 30};
+println(xs[0]); // 10
+```
+
+Los corchetes crean valores matematicos `Vector<T>` y `Matrix<T>`. Los vectores y matrices son 1-based:
 
 ```aether
 row = [1 2 3];
+alsoRow = [1, 2, 3];
 col = [1; 2; 3];
 A = [1 2; 3 4];
+
+println(row[1]);  // 1
+println(A[1, 1]); // 1
 ```
 
 Tambien podes concatenar bloques con corchetes al estilo Julia:
@@ -99,7 +110,7 @@ println([A B]);  // [1 2 5 6; 3 4 7 8]
 println([A; B]); // [1 2; 3 4; 5 6; 7 8]
 ```
 
-En concatenacion, `Vector<T>` se usa como columna y `TransposeVector<T>` como fila. Las comas siguen reservadas para vectores escalares como `[1, 2, 3]`; `[A, B]` no concatena matrices en v0.
+En concatenacion, la orientacion de `Vector<T>` se respeta: un vector fila aporta un bloque `1xN`, y un vector columna aporta `Nx1`. Las comas siguen reservadas para vectores escalares como `[1, 2, 3]`; `[A, B]` no concatena matrices en v0.
 
 Las matrices imprimen en formato compacto:
 
@@ -107,7 +118,7 @@ Las matrices imprimen en formato compacto:
 println([1 2; 3 4]); // [1 2; 3 4]
 ```
 
-`array(...)` no es un builtin publico de Aether v0. Los arrays solo permanecen como detalle interno/transicional; para dimensiones de matrices usa `rows(A)` y `cols(A)`.
+`array(...)`, `Array<T>` y `T[]` no son sintaxis publica de Aether v0. Usa `List<T>` para colecciones generales; para dimensiones de matrices usa `rows(A)` y `cols(A)`.
 
 Operaciones disponibles:
 
@@ -123,7 +134,7 @@ println(Math.LinearAlgebra.matmul(A, [5; 6]));
 ## 6. Builtins utiles
 
 - Salida: `print(...)`, `println(...)`
-- Dimensiones: `rows(matrix)`, `cols(matrix)`, `length(array interno)`
+- Dimensiones: `rows(matrix)`, `cols(matrix)`, `length(list_or_vector)`
 - Numericos: `sin`, `cos`, `tan`, `exp`, `ln`, `log`, `sqrt`, `abs`
 - Modulo de piso: `Math.mod(a, b)`
 - Algebra lineal: `Math.LinearAlgebra.inner`, `norm`, `transpose`, `matmul`, `solve`, `eig`, `SVD`, `LU`, `LDU`, `N`, `R`, `rank`

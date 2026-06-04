@@ -58,7 +58,7 @@ def test_null_space_returns_complex_kernel_basis_for_complex_matrix() -> None:
     result = run_aether(
         """
 import Math.LinearAlgebra
-A = [1 im];
+A = [1 im; 2 2im];
 K = N(A);
 Z = A * K;
 s = size(K);
@@ -70,7 +70,7 @@ s = size(K);
 
     assert result.env["K"].type_name == MatrixType("complex", 2, 1)
     assert _vector_values(result, "s") == [2, 1]
-    assert np.allclose(residual, np.zeros((1, 1)), atol=1e-10)
+    assert np.allclose(residual, np.zeros((2, 1)), atol=1e-10)
     assert np.allclose(kernel.conj().T @ kernel, np.eye(1), atol=1e-10)
 
 

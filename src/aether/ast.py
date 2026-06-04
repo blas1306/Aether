@@ -263,6 +263,11 @@ class ArrayLiteral:
 
 
 @dataclass(frozen=True)
+class ListLiteral:
+    elements: list[Expression]
+
+
+@dataclass(frozen=True)
 class TupleLiteral:
     elements: list[Expression]
 
@@ -271,6 +276,8 @@ class TupleLiteral:
 class MatrixLiteral:
     rows: list[list[Expression]]
     vector: bool = False
+    orientation: str | None = None
+    uses_commas: bool = False
 
 
 @dataclass(frozen=True)

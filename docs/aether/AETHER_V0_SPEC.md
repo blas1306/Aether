@@ -657,45 +657,45 @@ Not supported in v0:
 - `string < string`
 - `boolean < boolean`
 
-## Arrays 1D
+## Lists
 
-Aether separates the internal array representation from mathematical vectors and matrices:
+Aether separates general programming collections from mathematical vectors and matrices:
 
-- `[ ... ]` creates a mathematical `Matrix<T>` literal.
-- The public `array(...)` constructor is not part of Aether v0.
+- `List<T>` is the public dynamic collection type.
+- List literals use braces: `{1, 2, 3}`.
+- List indexing is 0-based: `xs[0]`.
+- `[ ... ]` is reserved for mathematical `Vector<T>` and `Matrix<T>` literals.
 
-Array element types are still used internally and can be written with `[]` after a primitive type:
-
-- `int[]`
-- `float[]`
-- `double[]`
-- `string[]`
-- `boolean[]`
-
-For compatibility during the transition, empty typed arrays remain valid:
+Examples:
 
 ```aether
-int[] xs = []; // valid
-x = [];        // error
+List<int> xs = {1, 2, 3};
+List<double> ys = {1.0, 2.0, 3.0};
+List<string> names = {"Ana", "Luis"};
+
+println(xs[0]); // 1
+println(names); // {"Ana", "Luis"}
 ```
 
-Non-empty `[ ... ]` literals are not array literals anymore, and non-empty programming-array literals are not exposed in Aether v0. Empty typed arrays remain a transitional compatibility feature.
+List elements must be homogeneous or numerically promotable. Lists use commas only; `{1 2 3}` is a syntax error.
 
-The builtin `length(array)` returns the array length as an `int` for internal array values. `length(...)` does not accept matrices; use `rows(matrix)` and `cols(matrix)` for matrices.
+`array(...)`, `Array<T>`, `int[]`, and other `T[]` spellings are not public Aether v0 syntax. Array values may still exist internally, for example as matrix rows, but user code should use `List<T>` for general collections.
+
+The builtin `length(list)` returns the list length as an `int`.
 
 ## Vectors And Matrices
 
-Aether supports mathematical matrix literals with MATLAB/Julia-like bracket syntax:
+Aether supports mathematical vector and matrix literals with MATLAB/Julia-like bracket syntax:
 
 ```aether
-[1 2 3]       // Matrix<int>, shape 1x3
-[1, 2, 3]     // Vector<int>, length 3
-[1; 2; 3]     // Vector<int>, length 3
+[1 2 3]       // Vector<int>, row orientation, length 3
+[1, 2, 3]     // Vector<int>, row orientation, length 3
+[1; 2; 3]     // Vector<int>, column orientation, length 3
 [1 2; 3 4]    // Matrix<int>, shape 2x2
 [1 2; 3.0 4]  // Matrix<double>, shape 2x2
 ```
 
-Spaces separate matrix columns. Commas preserve Aether's vector literal form for scalar values. Semicolons separate rows or vector entries. All matrix rows must have the same number of columns. Elements must be homogeneous or numerically promotable:
+Spaces or commas separate row-vector elements. Semicolons separate column-vector entries or matrix rows. All matrix rows must have the same number of columns. Elements must be homogeneous or numerically promotable:
 
 - `int -> float`
 - `int -> double`
@@ -718,7 +718,7 @@ B = [5 6; 7 8];
 [A [9; 10]]  // [1 2 9; 3 4 10]
 ```
 
-For block concatenation, `Vector<T>` values are treated as columns and `TransposeVector<T>` values are treated as rows. A pure vertical concatenation of vectors, such as `[v; w]`, returns a `Vector<T>`. Comma-separated matrix or vector blocks are intentionally not supported in v0:
+For block concatenation, vector orientation is respected: row vectors contribute `1xN` blocks and column vectors contribute `Nx1` blocks. Comma-separated matrix or vector blocks are intentionally not supported in v0:
 
 ```aether
 [A];    // error
@@ -735,31 +735,30 @@ Vector<int> col = [1; 2; 3];
 Vector<double> v = [1 2.5 3];
 ```
 
-`Matrix<T>` accepts any 2D shape. `Vector<T>` is a conceptual alias for a `Matrix<T>` whose shape is either `1xN` or `Nx1`; assigning a matrix with both `rows > 1` and `cols > 1` to `Vector<T>` is an `AetherTypeError`. Internally this implementation may represent vectors as `MatrixType(element_type, rows, cols)`.
+`Matrix<T>` accepts 2D matrix literals. `Vector<T>` is one public type, but runtime values store row or column orientation internally. `RowVector<T>` and `ColumnVector<T>` are not public types in v0.
 
 `Matrix<int>` and `Vector<int>` reject `double` values because narrowing is not implicit. `Matrix<double>` and `Vector<double>` accept `int` and `double` values. `Matrix<string>` does not accept numeric matrix literals.
 
-Matrices are mutable and zero-based. `A[0]` currently returns the first row as an internal array value; this is provisional. `A[0][1]` returns an element, and nested index assignment mutates the element:
+Vectors and matrices are indexed with 1-based mathematical indexing. Lists are the 0-based collection type.
 
 ```aether
 A = [1 2; 3 4];
-println(A[0][1]); // 2
-A[1][0] = 99;
+println(A[1, 2]); // 2
+A[2, 1] = 99;
 println(A);       // [1 2; 99 4]
+
+v = [10 20];
+println(v[1]);    // 10
 ```
 
-`rows(matrix)` and `cols(matrix)` return matrix dimensions as `int` values. They accept row vectors, column vectors, and 2D matrices:
+`rows(matrix)` and `cols(matrix)` return matrix dimensions as `int` values for 2D matrices:
 
 ```aether
-println(rows([1 2 3]));      // 1
-println(cols([1 2 3]));      // 3
-println(rows([1; 2; 3]));    // 3
-println(cols([1; 2; 3]));    // 1
 println(rows([1 2; 3 4]));   // 2
 println(cols([1 2; 3 4]));   // 2
 ```
 
-`length(matrix)` is a type error in the separated model. `rows(array)` and `cols(array)` are also type errors.
+`length(vector)` returns vector length. `rows(list)` and `cols(list)` are type errors.
 
 `print(...)` and `println(...)` render `Matrix<T>` and `Vector<T>` values with a compact mathematical display format:
 
@@ -774,15 +773,9 @@ println([true false;
          false true]);   // [true false; false true]
 ```
 
-Matrix values with shape `1x1` print as scalars. This keeps mathematical results readable even when the internal value remains a matrix:
+Runtime types remain distinct: `List<T>` for general collections, `Vector<T>` for oriented mathematical vectors, and `Matrix<T>` for 2D mathematical matrices. There is no implicit conversion between `List<T>` and `Vector<T>`.
 
-```aether
-println(Math.LinearAlgebra.matmul([1 2], [3; 4])); // 11
-```
-
-Internal array values use comma-separated list display and are not rendered as mathematical vectors. Runtime types remain distinct: `Matrix<T>`/`Vector<T>` for bracket literals, and `T[]` for internal arrays.
-
-Matrix equality compares by shape and content. Incompatible element types are type errors. Comparing `Matrix<T>` or `Vector<T>` with an internal array is an `AetherTypeError`.
+Matrix and vector equality compares compatible mathematical values by shape/length and content. Incompatible element types are type errors. Comparing `Matrix<T>` or `Vector<T>` with a `List<T>` is an `AetherTypeError`.
 
 ## Math.LinearAlgebra
 
@@ -1192,7 +1185,7 @@ Aether v0 recognizes these builtins:
 
 - `print(...)`
 - `println(...)`
-- `length(array)`
+- `length(list_or_vector)`
 - `rows(matrix)`
 - `cols(matrix)`
 - `sin(x)`
@@ -1233,9 +1226,9 @@ println(x);
 
 `array(...)` is not a recognized builtin in Aether v0.
 
-`length(array)` accepts one internal array argument and returns an `int`.
+`length(...)` accepts `List<T>` and `Vector<T>` values and returns an `int`.
 
-`rows(matrix)` and `cols(matrix)` accept one `Matrix<T>` or `Vector<T>` argument and return `int` dimensions.
+`rows(matrix)` and `cols(matrix)` accept one `Matrix<T>` argument and return `int` dimensions.
 
 `sin(x)`, `cos(x)`, `tan(x)`, `exp(x)`, `ln(x)`, and `log(x)` accept one real numeric scalar and return `double`. `sqrt(x)` accepts numeric scalars and returns `double` for non-negative real inputs or `complex` for negative/complex inputs. `abs(x)` accepts one numeric scalar and returns `double` for `complex` inputs. `real(x)`, `imag(x)`, `conj(x)`, and `angle(x)` are available for numeric scalars. `Math.mod(a, b)` accepts two real numeric scalars and returns floor/Python-like modulo.
 

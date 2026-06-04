@@ -71,7 +71,7 @@ def test_unqualified_plot_requires_import() -> None:
     [
         ("import Plots\nplot([1; 2], [1; 2; 3]);", "same length"),
         ("import Plots\nplot(1);", "numeric vector"),
-        ("import Plots\nint[] xs = []; plot(xs);", "empty vector"),
+        ("import Plots\nList<int> xs = {}; plot(xs);", "numeric vector"),
         ("import Plots\nplot([1 2; 3 4]);", "matrix shape 2x2"),
     ],
 )

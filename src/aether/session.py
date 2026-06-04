@@ -13,7 +13,7 @@ from .result import AetherRunResult
 from .symbols import FunctionSymbol, StructSymbol, VariableSymbol
 from .typechecker import TypeChecker
 from .formatting import format_value
-from .types import AetherType, AetherValue, ArrayType, MatrixType, TransposeVectorType, TupleType, VectorType, type_to_string
+from .types import AetherType, AetherValue, ArrayType, ListType, MatrixType, TransposeVectorType, TupleType, VectorType, type_to_string
 
 
 @dataclass(frozen=True)
@@ -160,6 +160,8 @@ def _value_shape(value: AetherValue) -> str:
     if isinstance(type_name, VectorType):
         return f"{len(value.value)}"
     if isinstance(type_name, ArrayType):
+        return f"{len(value.value)}"
+    if isinstance(type_name, ListType):
         return f"{len(value.value)}"
     if isinstance(type_name, TupleType):
         return f"{len(value.value)}"

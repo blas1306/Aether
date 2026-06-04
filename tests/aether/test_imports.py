@@ -25,7 +25,7 @@ println(Math.LinearAlgebra.transpose([1 2]));
 """
     )
 
-    assert result.output == "[1; 2]\n"
+    assert result.output == "[1 2]\n"
 
 
 def test_import_builtin_namespace_can_end_at_eof() -> None:
@@ -41,11 +41,11 @@ import Math.LinearAlgebra
 A = [1 2; 3 4];
 B = transpose(A);
 println(B);
-println(matmul([1 2], [3; 4]));
+println(transpose([1; 2]) * [3; 4]);
 """
     )
 
-    assert result.output == "[1 3; 2 4]\n[11]\n"
+    assert result.output == "[1 3; 2 4]\n11\n"
 
 
 def test_builtin_namespace_members_require_import_for_unqualified_calls() -> None:

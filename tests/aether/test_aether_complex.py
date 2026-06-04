@@ -113,8 +113,8 @@ def test_complex_matrix_and_vector_literals_and_assignment() -> None:
         """
 Matrix<complex> A = [1 2im; 3 4];
 Vector<complex> v = [1, im, 3];
-A[0, 0] = 5im;
-v[1] = 2 + im;
+A[1, 1] = 5im;
+v[2] = 2 + im;
 println(A);
 println(v);
 """
@@ -122,7 +122,7 @@ println(v);
 
     assert result.env["A"].type_name == MatrixType("complex", 2, 2)
     assert result.env["v"].type_name == VectorType("complex", 3)
-    assert result.output == "[5.0im 2.0im; 3.0 4.0]\n[1.0, 2.0 + im, 3.0]\n"
+    assert result.output == "[5.0im 2.0im; 3.0 4.0]\n[1.0 2.0 + im 3.0]\n"
 
 
 def test_complex_linear_algebra_supported_surface() -> None:
@@ -152,6 +152,6 @@ println(norm_value);
     assert result.output.splitlines()[:4] == [
         "[1.0 2.0; im 3.0 - im]",
         "[1.0 2.0; -im 3.0 + im]",
-        "[0.0, 3.0 + 3.0im]",
+        "[0.0 3.0 + 3.0im]",
         "6.0",
     ]

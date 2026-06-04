@@ -44,6 +44,28 @@ class ArrayType:
 
 
 @dataclass(frozen=True, eq=False)
+class ListType:
+    element_type: AetherType
+
+    def __post_init__(self) -> None:
+        if not is_known_type(self.element_type):
+            raise AetherTypeError(f"Unknown list element type '{type_to_string(self.element_type)}'.")
+
+    def __str__(self) -> str:
+        return f"List<{type_to_string(self.element_type)}>"
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, ListType):
+            return self.element_type == other.element_type
+        if isinstance(other, str):
+            return str(self) == other
+        return False
+
+    def __hash__(self) -> int:
+        return hash(("List", self.element_type))
+
+
+@dataclass(frozen=True, eq=False)
 class MatrixType:
     element_type: str
     rows: int | None = None
@@ -90,19 +112,27 @@ class MatrixType:
 class VectorType:
     element_type: str
     length: int | None = None
+    orientation: str | None = None
 
     def __post_init__(self) -> None:
         if self.element_type not in TYPE_NAMES:
             raise AetherTypeError(f"Unknown vector element type '{self.element_type}'.")
         if self.length is not None and self.length < 0:
             raise AetherTypeError("Vector length cannot be negative.")
+        if self.orientation not in {None, "row", "column"}:
+            raise AetherTypeError("Vector orientation must be 'row' or 'column'.")
 
     def __str__(self) -> str:
         return f"Vector<{self.element_type}>"
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, VectorType):
-            return self.element_type == other.element_type and self.length == other.length
+            orientations_compatible = (
+                self.orientation == other.orientation
+                or self.orientation is None
+                or other.orientation is None
+            )
+            return self.element_type == other.element_type and self.length == other.length and orientations_compatible
         if isinstance(other, str):
             return str(self) == other
         return False
@@ -211,7 +241,7 @@ class NullableType:
         return hash(("Nullable", self.base_type))
 
 
-AetherType = str | ArrayType | MatrixType | VectorType | TransposeVectorType | RangeType | TupleType | NullType | NullableType
+AetherType = str | ArrayType | ListType | MatrixType | VectorType | TransposeVectorType | RangeType | TupleType | NullType | NullableType
 NULL_TYPE = NullType()
 
 
@@ -279,6 +309,8 @@ def is_known_type(type_name: AetherType) -> bool:
         return True
     if isinstance(type_name, ArrayType):
         return is_known_type(type_name.element_type)
+    if isinstance(type_name, ListType):
+        return is_known_type(type_name.element_type)
     if isinstance(type_name, TupleType):
         return all(is_known_type(element_type) for element_type in type_name.element_types)
     if isinstance(type_name, MatrixType):
@@ -292,6 +324,10 @@ def is_known_type(type_name: AetherType) -> bool:
 
 def is_array_type(type_name: AetherType) -> bool:
     return isinstance(type_name, ArrayType)
+
+
+def is_list_type(type_name: AetherType) -> bool:
+    return isinstance(type_name, ListType)
 
 
 def is_matrix_type(type_name: AetherType) -> bool:
@@ -317,7 +353,7 @@ def is_range_type(type_name: AetherType) -> bool:
 
 
 def is_indexable_type(type_name: AetherType) -> bool:
-    return isinstance(type_name, (ArrayType, MatrixType, VectorType, TransposeVectorType))
+    return isinstance(type_name, (ArrayType, ListType, MatrixType, VectorType, TransposeVectorType))
 
 
 def shape_dimensions(value: AetherValue) -> list[int]:
@@ -336,6 +372,8 @@ def shape_dimensions(value: AetherValue) -> list[int]:
         return [rows, cols]
     if isinstance(type_name, ArrayType):
         return [len(value.value)]
+    if isinstance(type_name, ListType):
+        return [len(value.value)]
     if isinstance(type_name, str) and type_name in TYPE_NAMES:
         return []
     raise AetherTypeError(f"size(...) is not defined for '{type_to_string(type_name)}'.")
@@ -349,6 +387,8 @@ def shape_dimension_count(type_name: AetherType) -> int:
     if isinstance(type_name, (MatrixType, TransposeVectorType)):
         return 2
     if isinstance(type_name, ArrayType):
+        return 1
+    if isinstance(type_name, ListType):
         return 1
     if isinstance(type_name, str) and type_name in TYPE_NAMES:
         return 0
@@ -366,6 +406,12 @@ def shape_vector_value(value: AetherValue) -> AetherValue:
 def array_element_type(type_name: AetherType) -> AetherType:
     if not isinstance(type_name, ArrayType):
         raise AetherTypeError(f"Expected array type, got '{type_to_string(type_name)}'.")
+    return type_name.element_type
+
+
+def list_element_type(type_name: AetherType) -> AetherType:
+    if not isinstance(type_name, ListType):
+        raise AetherTypeError(f"Expected list type, got '{type_to_string(type_name)}'.")
     return type_name.element_type
 
 
@@ -395,6 +441,10 @@ def can_implicitly_convert(from_type: AetherType, to_type: AetherType) -> bool:
         )
     if isinstance(from_type, RangeType) or isinstance(to_type, RangeType):
         return from_type == to_type
+    if isinstance(from_type, ListType) or isinstance(to_type, ListType):
+        if not isinstance(from_type, ListType) or not isinstance(to_type, ListType):
+            return False
+        return can_implicitly_convert(from_type.element_type, to_type.element_type)
     if isinstance(from_type, TransposeVectorType) or isinstance(to_type, TransposeVectorType):
         return from_type == to_type
     if isinstance(from_type, VectorType) or isinstance(to_type, VectorType):
@@ -402,6 +452,12 @@ def can_implicitly_convert(from_type: AetherType, to_type: AetherType) -> bool:
             if not can_implicitly_convert(from_type.element_type, to_type.element_type):
                 return False
             if to_type.length is not None and from_type.length is not None and to_type.length != from_type.length:
+                return False
+            if (
+                to_type.orientation is not None
+                and from_type.orientation is not None
+                and to_type.orientation != from_type.orientation
+            ):
                 return False
             return True
         if isinstance(to_type, VectorType) and isinstance(from_type, MatrixType):
@@ -457,6 +513,8 @@ def coerce_implicit(value: AetherValue, target_type: AetherType) -> AetherValue:
         )
     if isinstance(target_type, TupleType):
         return coerce_tuple_value(value, target_type)
+    if isinstance(target_type, ListType):
+        return coerce_list_value(value, target_type)
     if isinstance(target_type, VectorType):
         return coerce_vector_value(value, target_type)
     if isinstance(target_type, TransposeVectorType):
@@ -513,6 +571,17 @@ def coerce_tuple_value(value: AetherValue, target_type: TupleType) -> AetherValu
     )
 
 
+def coerce_list_value(value: AetherValue, target_type: ListType) -> AetherValue:
+    if not isinstance(value.type_name, ListType):
+        raise AetherTypeError(
+            f"Cannot implicitly convert '{type_to_string(value.type_name)}' to '{type_to_string(target_type)}'."
+        )
+    return AetherValue(
+        target_type,
+        [coerce_implicit(element, target_type.element_type) for element in value.value],
+    )
+
+
 def coerce_vector_value(value: AetherValue, target_type: VectorType) -> AetherValue:
     if isinstance(value.type_name, VectorType):
         source_type = value.type_name
@@ -522,7 +591,7 @@ def coerce_vector_value(value: AetherValue, target_type: VectorType) -> AetherVa
                 f"Use {type_to_string(target_type)}(...) for explicit conversion."
             )
         return AetherValue(
-            VectorType(target_type.element_type, len(value.value)),
+            VectorType(target_type.element_type, len(value.value), value.type_name.orientation),
             [coerce_implicit(element, target_type.element_type) for element in value.value],
         )
     if isinstance(value.type_name, MatrixType):
@@ -532,7 +601,7 @@ def coerce_vector_value(value: AetherValue, target_type: VectorType) -> AetherVa
                 f"Use {type_to_string(target_type)}(...) for explicit conversion."
             )
         return AetherValue(
-            VectorType(target_type.element_type, len(_matrix_vector_elements(value))),
+            VectorType(target_type.element_type, len(_matrix_vector_elements(value)), target_type.orientation),
             [coerce_implicit(element, target_type.element_type) for element in _matrix_vector_elements(value)],
         )
     raise AetherTypeError(
@@ -646,7 +715,7 @@ def promote_numeric(left_type: str, right_type: str, operator: str) -> str:
 
 
 def _coerce_python_value(value: object, target_type: AetherType) -> object:
-    if isinstance(target_type, (ArrayType, MatrixType, VectorType, TransposeVectorType)):
+    if isinstance(target_type, (ArrayType, ListType, MatrixType, VectorType, TransposeVectorType)):
         raise AetherTypeError(f"Cannot coerce scalar value to '{target_type}'.")
     if target_type == "int":
         return trunc(value)  # type: ignore[arg-type]

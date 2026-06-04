@@ -16,6 +16,7 @@ from .tokens import AETHER_TYPES, PRIMITIVE_TYPES
 from .types import (
     AetherType,
     ArrayType,
+    ListType,
     MatrixType,
     NUMERIC_TYPES,
     REAL_NUMERIC_TYPES,
@@ -29,8 +30,10 @@ from .types import (
     can_implicitly_convert,
     is_array_type,
     is_indexable_type,
+    is_list_type,
     is_matrix_type,
     is_vector_like_type,
+    list_element_type,
     matrix_row_type,
     promote_numeric,
     type_to_string,
@@ -451,7 +454,7 @@ class TypeChecker:
             )
         if (
             (
-                isinstance(statement.initializer, ast.ArrayLiteral)
+                isinstance(statement.initializer, (ast.ArrayLiteral, ast.ListLiteral))
                 and not statement.initializer.elements
             )
             or (
@@ -459,7 +462,10 @@ class TypeChecker:
                 and not statement.initializer.rows
             )
         ):
-            if declared_type is None or not is_array_type(declared_type):
+            if isinstance(statement.initializer, ast.ListLiteral):
+                if declared_type is None or not is_list_type(declared_type):
+                    raise AetherTypeError("Cannot infer type of empty list literal.")
+            elif declared_type is None or not is_array_type(declared_type):
                 raise AetherTypeError("Cannot infer type of empty matrix literal.")
             scope.define_local(
                 statement.name,
@@ -517,7 +523,7 @@ class TypeChecker:
             )
         if (
             (
-                isinstance(statement.expression, ast.ArrayLiteral)
+                isinstance(statement.expression, (ast.ArrayLiteral, ast.ListLiteral))
                 and not statement.expression.elements
             )
             or (
@@ -526,7 +532,11 @@ class TypeChecker:
             )
         ):
             if existing is None:
-                raise AetherTypeError("Cannot infer type of empty matrix literal.")
+                raise AetherTypeError("Cannot infer type of empty list literal.")
+            if isinstance(statement.expression, ast.ListLiteral):
+                if not is_list_type(existing.type_name):
+                    self._raise_implicit_conversion_error(ListType("int"), existing.type_name, statement)
+                return
             if not is_array_type(existing.type_name):
                 self._raise_implicit_conversion_error(ArrayType("int"), existing.type_name, statement)
             return
@@ -637,7 +647,7 @@ class TypeChecker:
         if not is_indexable_type(array_type):
             raise AetherTypeError(f"Cannot index non-indexable value of type '{type_to_string(array_type)}'.")
         if index_type != "int":
-            raise AetherTypeError(f"Array index must be int, got '{type_to_string(index_type)}'.")
+            raise AetherTypeError(f"Index must be int, got '{type_to_string(index_type)}'.")
         if isinstance(array_type, TransposeVectorType):
             raise AetherTypeError("Cannot assign through a transposed vector view.")
         if isinstance(array_type, MatrixType) and not array_type.vector:
@@ -650,6 +660,8 @@ class TypeChecker:
             else matrix_row_type(array_type)
             if isinstance(array_type, MatrixType)
             else array_element_type(array_type)
+            if isinstance(array_type, ArrayType)
+            else list_element_type(array_type)
         )
         if is_array_type(element_type):
             raise AetherTypeError("Assigning a whole matrix row is not supported yet.")
@@ -891,6 +903,8 @@ class TypeChecker:
                 raise _with_source_location(exc, expression) from exc
         if isinstance(expression, ast.ArrayLiteral):
             return self._array_literal_type(expression, scope)
+        if isinstance(expression, ast.ListLiteral):
+            return self._list_literal_type(expression, scope)
         if isinstance(expression, ast.TupleLiteral):
             return self._tuple_literal_type(expression, scope)
         if isinstance(expression, ast.MatrixLiteral):
@@ -1023,6 +1037,17 @@ class TypeChecker:
         common_type = _common_array_element_type(element_types)
         return ArrayType(common_type)
 
+    def _list_literal_type(self, expression: ast.ListLiteral, scope: Scope[VariableSymbol]) -> AetherType | None:
+        if not expression.elements:
+            raise AetherTypeError("Cannot infer type of empty list literal.")
+        element_types = [self._expression_type(element, scope) for element in expression.elements]
+        if any(element_type is UNKNOWN_TYPE for element_type in element_types):
+            return UNKNOWN_TYPE
+        for element_type in element_types:
+            self._reject_void_value(element_type, "list literal")
+        common_type = _common_list_element_type(element_types)
+        return ListType(common_type)
+
     def _matrix_literal_type(self, expression: ast.MatrixLiteral, scope: Scope[VariableSymbol]) -> AetherType | None:
         if not expression.rows:
             raise AetherTypeError("Cannot infer type of empty matrix literal.")
@@ -1041,8 +1066,10 @@ class TypeChecker:
             if any(length != row_lengths[0] for length in row_lengths):
                 raise AetherTypeError("Matrix literals must be rectangular; ragged rows are not supported.")
             common_type = _common_primitive_type(element_types)
-            if expression.vector:
-                return VectorType(common_type, sum(row_lengths))
+            if len(expression.rows) == 1:
+                return VectorType(common_type, sum(row_lengths), "row")
+            if all(length == 1 for length in row_lengths):
+                return VectorType(common_type, len(expression.rows), "column")
             return MatrixType(common_type, len(expression.rows), row_lengths[0])
         return _concat_matrix_literal_type(expression, element_types)
 
@@ -1065,14 +1092,14 @@ class TypeChecker:
             raise AetherTypeError(f"Cannot index non-indexable value of type '{type_to_string(array_type)}'.")
         if index_type == "slice":
             if isinstance(array_type, VectorType):
-                return VectorType(array_type.element_type)
+                return VectorType(array_type.element_type, orientation=array_type.orientation)
             if isinstance(array_type, TransposeVectorType):
                 return TransposeVectorType(array_type.element_type)
             if isinstance(array_type, MatrixType) and array_type.vector:
                 return VectorType(array_type.element_type)
             raise AetherTypeError("Matrix values require two-dimensional indexing with A[i, j].")
         if index_type != "int":
-            raise AetherTypeError(f"Array index must be int, got '{type_to_string(index_type)}'.")
+            raise AetherTypeError(f"Index must be int, got '{type_to_string(index_type)}'.")
         if isinstance(array_type, VectorType):
             return array_type.element_type
         if isinstance(array_type, TransposeVectorType):
@@ -1081,7 +1108,9 @@ class TypeChecker:
             return array_type.element_type
         if isinstance(array_type, MatrixType):
             raise AetherTypeError("Matrix values require two-dimensional indexing with A[i, j].")
-        return array_element_type(array_type)
+        if isinstance(array_type, ArrayType):
+            return array_element_type(array_type)
+        return list_element_type(array_type)
 
     def _matrix_index_type(self, expression: ast.MatrixIndexExpression, scope: Scope[VariableSymbol]) -> AetherType | None:
         matrix_type = self._expression_type(expression.matrix, scope)
@@ -1338,12 +1367,18 @@ class TypeChecker:
             if not is_array_type(value_type):
                 return False
             return self._can_assign_array_literal(initializer, target_type, scope)
+        if isinstance(initializer, ast.ListLiteral) and is_list_type(target_type):
+            if not is_list_type(value_type):
+                return False
+            return self._can_assign_list_literal(initializer, target_type, scope)
         if isinstance(initializer, ast.MatrixLiteral) and isinstance(target_type, MatrixType):
             if not isinstance(value_type, MatrixType):
                 return False
             return can_implicitly_convert(value_type, target_type)
         if is_array_type(value_type) or is_array_type(target_type):
             return value_type == target_type
+        if is_list_type(value_type) or is_list_type(target_type):
+            return can_implicitly_convert(value_type, target_type)
         if is_matrix_type(value_type) or is_matrix_type(target_type):
             return can_implicitly_convert(value_type, target_type)
         if target_type == "float" and isinstance(initializer, ast.Literal) and value_type == "double":
@@ -1446,6 +1481,8 @@ class TypeChecker:
             return type_name
         if isinstance(type_name, ArrayType):
             return ArrayType(self._resolve_type_aliases(type_name.element_type, location, resolving))
+        if isinstance(type_name, ListType):
+            return ListType(self._resolve_type_aliases(type_name.element_type, location, resolving))
         if isinstance(type_name, NullableType):
             return NullableType(self._resolve_type_aliases(type_name.base_type, location, resolving))
         if isinstance(type_name, TupleType):
@@ -1455,7 +1492,7 @@ class TypeChecker:
             return MatrixType(element_type, type_name.rows, type_name.cols, type_name.vector)
         if isinstance(type_name, VectorType):
             element_type = self._resolve_vector_matrix_element_type(type_name.element_type, location, resolving)
-            return VectorType(element_type, type_name.length)
+            return VectorType(element_type, type_name.length, type_name.orientation)
         if isinstance(type_name, TransposeVectorType):
             element_type = self._resolve_vector_matrix_element_type(type_name.element_type, location, resolving)
             return TransposeVectorType(element_type, type_name.length)
@@ -1488,6 +1525,8 @@ class TypeChecker:
             return None
         if isinstance(type_name, ArrayType):
             return self._private_struct_type_name(type_name.element_type, package_name)
+        if isinstance(type_name, ListType):
+            return self._private_struct_type_name(type_name.element_type, package_name)
         if isinstance(type_name, NullableType):
             return self._private_struct_type_name(type_name.base_type, package_name)
         if isinstance(type_name, TupleType):
@@ -1502,6 +1541,8 @@ class TypeChecker:
         if isinstance(resolved, str):
             return resolved in self.structs
         if isinstance(resolved, ArrayType):
+            return self._type_mentions_struct(resolved.element_type)
+        if isinstance(resolved, ListType):
             return self._type_mentions_struct(resolved.element_type)
         if isinstance(resolved, NullableType):
             return self._type_mentions_struct(resolved.base_type)
@@ -1537,6 +1578,26 @@ class TypeChecker:
             return False
         return True
 
+    def _can_assign_list_literal(
+        self,
+        initializer: ast.ListLiteral,
+        target_type: ListType,
+        scope: Scope[VariableSymbol],
+    ) -> bool:
+        if not initializer.elements:
+            return True
+        target_element_type = list_element_type(target_type)
+        for element in initializer.elements:
+            element_type = self._expression_type(element, scope)
+            if element_type is UNKNOWN_TYPE:
+                return True
+            if can_implicitly_convert(element_type, target_element_type):
+                continue
+            if target_element_type == "float" and element_type == "double" and isinstance(element, ast.Literal):
+                continue
+            return False
+        return True
+
     def _statements_always_return(self, statements: list[ast.Statement]) -> bool:
         for statement in statements:
             if self._statement_always_returns(statement):
@@ -1558,6 +1619,8 @@ def _iterable_element_type(type_name: AetherType) -> AetherType | None:
         return type_name.element_type
     if isinstance(type_name, ArrayType):
         return type_name.element_type
+    if isinstance(type_name, ListType):
+        return type_name.element_type
     if isinstance(type_name, VectorType):
         return type_name.element_type
     if isinstance(type_name, MatrixType) and _is_vector_like_matrix_type(type_name):
@@ -1571,6 +1634,8 @@ def _contains_void_type(type_name: AetherType | None) -> bool:
     if isinstance(type_name, NullableType):
         return _contains_void_type(type_name.base_type)
     if isinstance(type_name, ArrayType):
+        return _contains_void_type(type_name.element_type)
+    if isinstance(type_name, ListType):
         return _contains_void_type(type_name.element_type)
     if isinstance(type_name, TupleType):
         return any(_contains_void_type(element_type) for element_type in type_name.element_types)
@@ -1598,6 +1663,8 @@ def _first_private_type_name(type_name: AetherType, private_names: set[str]) -> 
     if isinstance(type_name, str):
         return type_name if type_name in private_names else None
     if isinstance(type_name, ArrayType):
+        return _first_private_type_name(type_name.element_type, private_names)
+    if isinstance(type_name, ListType):
         return _first_private_type_name(type_name.element_type, private_names)
     if isinstance(type_name, NullableType):
         return _first_private_type_name(type_name.base_type, private_names)
@@ -1683,6 +1750,8 @@ def _source_location(node: object | None) -> tuple[int, int]:
     if isinstance(node, ast.TupleLiteral) and node.elements:
         return _source_location(node.elements[0])
     if isinstance(node, ast.ArrayLiteral) and node.elements:
+        return _source_location(node.elements[0])
+    if isinstance(node, ast.ListLiteral) and node.elements:
         return _source_location(node.elements[0])
     if isinstance(node, ast.MatrixLiteral) and node.rows and node.rows[0]:
         return _source_location(node.rows[0][0])
@@ -1803,6 +1872,8 @@ def _concat_block_type(type_name: AetherType | None) -> _ConcatBlockType:
     if isinstance(type_name, str):
         return _ConcatBlockType(type_name, 1, 1)
     if isinstance(type_name, VectorType):
+        if type_name.orientation == "row":
+            return _ConcatBlockType(type_name.element_type, 1, type_name.length, "vector")
         return _ConcatBlockType(type_name.element_type, type_name.length, 1, "vector")
     if isinstance(type_name, TransposeVectorType):
         return _ConcatBlockType(type_name.element_type, 1, type_name.length, "transpose_vector")
@@ -1846,6 +1917,7 @@ def _is_pure_vector_vcat(expression: ast.MatrixLiteral, blocks: list[list[_Conca
         and len(blocks) > 1
         and all(len(row) == 1 for row in blocks)
         and all(row[0].vector_kind == "vector" for row in blocks)
+        and all(row[0].cols == 1 for row in blocks)
     )
 
 
@@ -1864,6 +1936,36 @@ def _common_array_element_type(element_types: list[AetherType | None]) -> Aether
     raise AetherTypeError("Array literals must contain homogeneous compatible element types.")
 
 
+def _common_list_element_type(element_types: list[AetherType | None]) -> AetherType:
+    primitive_types = [element_type for element_type in element_types if isinstance(element_type, str)]
+    list_types = [element_type for element_type in element_types if isinstance(element_type, ListType)]
+    array_types = [element_type for element_type in element_types if isinstance(element_type, ArrayType)]
+    structured_types = [
+        element_type
+        for element_type in element_types
+        if element_type is not None
+        and not isinstance(element_type, (str, ArrayType, ListType))
+    ]
+    groups = sum(bool(group) for group in (primitive_types, list_types, array_types, structured_types))
+    if groups != 1:
+        raise AetherTypeError("List literals must contain homogeneous compatible element types.")
+    if primitive_types:
+        return _common_list_primitive_type(primitive_types)
+    if list_types:
+        first = list_types[0]
+        if all(can_implicitly_convert(element_type, first) and can_implicitly_convert(first, element_type) for element_type in list_types):
+            return first
+    if array_types:
+        first = array_types[0]
+        if all(element_type == first for element_type in array_types):
+            return first
+    if structured_types:
+        first = structured_types[0]
+        if all(element_type == first for element_type in structured_types):
+            return first
+    raise AetherTypeError("List literals must contain homogeneous compatible element types.")
+
+
 def _common_primitive_type(primitive_types: list[AetherType]) -> str:
     if not all(isinstance(type_name, str) for type_name in primitive_types):
         raise AetherTypeError("Array literals must contain homogeneous compatible element types.")
@@ -1879,6 +1981,13 @@ def _common_primitive_type(primitive_types: list[AetherType]) -> str:
             return "float"
         return "int"
     raise AetherTypeError("Array literals must contain homogeneous compatible element types.")
+
+
+def _common_list_primitive_type(primitive_types: list[AetherType]) -> str:
+    try:
+        return _common_primitive_type(primitive_types)
+    except AetherTypeError as exc:
+        raise AetherTypeError("List literals must contain homogeneous compatible element types.") from exc
 
 
 def _types_comparable_for_equality(left_type: AetherType, right_type: AetherType) -> bool:
@@ -1900,6 +2009,8 @@ def _types_comparable_for_equality(left_type: AetherType, right_type: AetherType
             right_type.element_type,
         )
     if isinstance(left_type, ArrayType) and isinstance(right_type, ArrayType):
+        return _types_comparable_for_equality(left_type.element_type, right_type.element_type)
+    if isinstance(left_type, ListType) and isinstance(right_type, ListType):
         return _types_comparable_for_equality(left_type.element_type, right_type.element_type)
     if isinstance(left_type, MatrixType) and isinstance(right_type, MatrixType):
         return left_type.rows == right_type.rows and left_type.cols == right_type.cols and _types_comparable_for_equality(
@@ -1980,6 +2091,15 @@ def _algebraic_multiplication_type(left_type: AetherType, right_type: AetherType
         if left_type.length is not None and right_type.length is not None and left_type.length != right_type.length:
             raise AetherTypeError(f"Operator '*' requires vectors with the same length, got {left_type.length} and {right_type.length}.")
         return promote_numeric(_numeric_transpose_vector_scalar_type(left_type), _numeric_vector_scalar_type(right_type), "*")
+    if isinstance(left_type, TransposeVectorType) and isinstance(right_type, MatrixType):
+        if left_type.length is not None and right_type.rows is not None and left_type.length != right_type.rows:
+            raise AetherTypeError(
+                f"Operator '*' requires compatible row Vector and Matrix shapes, got {left_type.length} and {right_type.rows}x{right_type.cols}."
+            )
+        return TransposeVectorType(
+            promote_numeric(_numeric_transpose_vector_scalar_type(left_type), _numeric_matrix_scalar_type(right_type), "*"),
+            right_type.cols,
+        )
     if isinstance(left_type, VectorType) and isinstance(right_type, TransposeVectorType):
         return MatrixType(
             promote_numeric(_numeric_vector_scalar_type(left_type), _numeric_transpose_vector_scalar_type(right_type), "*"),
