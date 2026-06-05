@@ -16,6 +16,8 @@ from ..types import (
     TransposeVectorType,
     VectorType,
     VOID_VALUE,
+    can_implicitly_convert,
+    coerce_implicit,
     explicit_cast,
     is_array_type,
     is_list_type,
@@ -36,6 +38,13 @@ def builtin_definitions() -> list[BuiltinDefinition]:
         BuiltinDefinition("println", _make_println_runtime, _print_type),
         BuiltinDefinition("input", _constant_runtime(_input_runtime), _input_type, _zero_or_one("input")),
         BuiltinDefinition("length", _constant_runtime(length_builtin), _length_type, _exactly_one("length")),
+        BuiltinDefinition("is_empty", _constant_runtime(is_empty_builtin), _is_empty_type, _exactly_one("is_empty")),
+        BuiltinDefinition("push", _constant_runtime(push_builtin), _push_type, _exactly_two("push")),
+        BuiltinDefinition("pop", _constant_runtime(pop_builtin), _pop_type, _exactly_one("pop")),
+        BuiltinDefinition("insert", _constant_runtime(insert_builtin), _insert_type, _exactly_three("insert")),
+        BuiltinDefinition("remove_at", _constant_runtime(remove_at_builtin), _remove_at_type, _exactly_two("remove_at")),
+        BuiltinDefinition("contains", _constant_runtime(contains_builtin), _contains_type, _exactly_two("contains")),
+        BuiltinDefinition("clear", _constant_runtime(clear_builtin), _clear_type, _exactly_one("clear")),
         BuiltinDefinition("size", _constant_runtime(size_builtin), _size_type, _exactly_one("size")),
         BuiltinDefinition("rows", _constant_runtime(rows_builtin), _rows_type, _exactly_one("rows")),
         BuiltinDefinition("cols", _constant_runtime(cols_builtin), _cols_type, _exactly_one("cols")),
@@ -95,6 +104,14 @@ def _exactly_two(label: str):
     def validate(arg_count: int) -> None:
         if arg_count != 2:
             raise AetherTypeError(f"{label}(...) expects exactly two arguments.")
+
+    return validate
+
+
+def _exactly_three(label: str):
+    def validate(arg_count: int) -> None:
+        if arg_count != 3:
+            raise AetherTypeError(f"{label}(...) expects exactly three arguments.")
 
     return validate
 
@@ -169,6 +186,59 @@ def length_builtin(args: list[AetherValue]) -> AetherValue:
     if not is_array_type(value.type_name) and not is_list_type(value.type_name):
         raise AetherTypeError(f"length(...) expects a List, array, or Vector argument, got '{type_to_string(value.type_name)}'.")
     return AetherValue("int", len(value.value))
+
+
+def is_empty_builtin(args: list[AetherValue]) -> AetherValue:
+    xs = _require_list_arg(args, "is_empty")
+    return AetherValue("boolean", len(xs.value) == 0)
+
+
+def push_builtin(args: list[AetherValue]) -> AetherValue:
+    xs = _require_list_arg(args, "push")
+    value = _coerce_list_element_arg(xs, args[1], "push")
+    xs.value.append(value)
+    return AetherValue("void", VOID_VALUE)
+
+
+def pop_builtin(args: list[AetherValue]) -> AetherValue:
+    xs = _require_list_arg(args, "pop")
+    if not xs.value:
+        raise AetherRuntimeError("pop() cannot be used on an empty List")
+    return xs.value.pop()
+
+
+def insert_builtin(args: list[AetherValue]) -> AetherValue:
+    xs = _require_list_arg(args, "insert")
+    index = _require_int_arg(args[1], "insert() index")
+    length = len(xs.value)
+    if index < 0 or index > length:
+        raise AetherRuntimeError(
+            f"insert() index must be between 0 and length(xs); got {index} for List of length {length}"
+        )
+    value = _coerce_list_element_arg(xs, args[2], "insert")
+    xs.value.insert(index, value)
+    return AetherValue("void", VOID_VALUE)
+
+
+def remove_at_builtin(args: list[AetherValue]) -> AetherValue:
+    xs = _require_list_arg(args, "remove_at")
+    index = _require_int_arg(args[1], "remove_at() index")
+    length = len(xs.value)
+    if index < 0 or index >= length:
+        raise AetherRuntimeError(f"remove_at() index {index} out of bounds for List of length {length}")
+    return xs.value.pop(index)
+
+
+def contains_builtin(args: list[AetherValue]) -> AetherValue:
+    xs = _require_list_arg(args, "contains")
+    value = _coerce_list_element_arg(xs, args[1], "contains")
+    return AetherValue("boolean", any(element.value == value.value for element in xs.value))
+
+
+def clear_builtin(args: list[AetherValue]) -> AetherValue:
+    xs = _require_list_arg(args, "clear")
+    xs.value.clear()
+    return AetherValue("void", VOID_VALUE)
 
 
 def size_builtin(args: list[AetherValue]) -> AetherValue:
@@ -345,6 +415,33 @@ def _require_real_numeric_binary_args(args: list[AetherValue], label: str) -> tu
     return left, right
 
 
+def _require_list_arg(args: list[AetherValue], label: str) -> AetherValue:
+    if not args:
+        raise AetherTypeError(f"{label}(...) expects a List argument.")
+    value = args[0]
+    if not isinstance(value.type_name, ListType):
+        raise AetherTypeError(f"{label}(...) expects a List argument, got '{type_to_string(value.type_name)}'.")
+    return value
+
+
+def _require_int_arg(value: AetherValue, label: str) -> int:
+    if value.type_name != "int":
+        raise AetherTypeError(f"{label} must be int, got '{type_to_string(value.type_name)}'.")
+    return value.value
+
+
+def _coerce_list_element_arg(xs: AetherValue, value: AetherValue, label: str) -> AetherValue:
+    if not isinstance(xs.type_name, ListType):
+        raise AetherTypeError(f"{label}(...) expects a List argument, got '{type_to_string(xs.type_name)}'.")
+    try:
+        return coerce_implicit(value, xs.type_name.element_type)
+    except AetherTypeError as exc:
+        raise AetherTypeError(
+            f"{label}(...) value of type '{type_to_string(value.type_name)}' is not assignable to "
+            f"'{type_to_string(xs.type_name.element_type)}'."
+        ) from exc
+
+
 def _print_type(arg_types: list[AetherType | None]) -> AetherType | None:
     return "void"
 
@@ -370,6 +467,56 @@ def _length_type(arg_types: list[AetherType | None]) -> AetherType | None:
     if not is_array_type(argument_type) and not is_list_type(argument_type):
         raise AetherTypeError(f"length(...) expects a List, array, or Vector argument, got '{type_to_string(argument_type)}'.")
     return "int"
+
+
+def _is_empty_type(arg_types: list[AetherType | None]) -> AetherType | None:
+    _require_list_type_args(arg_types, "is_empty", 1)
+    return "boolean"
+
+
+def _push_type(arg_types: list[AetherType | None]) -> AetherType | None:
+    list_type = _require_list_type_args(arg_types, "push", 2)
+    if list_type is None:
+        return None
+    _require_assignable_to_list_element(arg_types[1], list_type, "push")
+    return "void"
+
+
+def _pop_type(arg_types: list[AetherType | None]) -> AetherType | None:
+    list_type = _require_list_type_args(arg_types, "pop", 1)
+    if list_type is None:
+        return None
+    return list_type.element_type
+
+
+def _insert_type(arg_types: list[AetherType | None]) -> AetherType | None:
+    list_type = _require_list_type_args(arg_types, "insert", 3)
+    if list_type is None:
+        return None
+    _require_int_type(arg_types[1], "insert() index")
+    _require_assignable_to_list_element(arg_types[2], list_type, "insert")
+    return "void"
+
+
+def _remove_at_type(arg_types: list[AetherType | None]) -> AetherType | None:
+    list_type = _require_list_type_args(arg_types, "remove_at", 2)
+    if list_type is None:
+        return None
+    _require_int_type(arg_types[1], "remove_at() index")
+    return list_type.element_type
+
+
+def _contains_type(arg_types: list[AetherType | None]) -> AetherType | None:
+    list_type = _require_list_type_args(arg_types, "contains", 2)
+    if list_type is None:
+        return None
+    _require_assignable_to_list_element(arg_types[1], list_type, "contains")
+    return "boolean"
+
+
+def _clear_type(arg_types: list[AetherType | None]) -> AetherType | None:
+    _require_list_type_args(arg_types, "clear", 1)
+    return "void"
 
 
 def _size_type(arg_types: list[AetherType | None]) -> AetherType | None:
@@ -402,6 +549,36 @@ def _matrix_dimension_type(arg_types: list[AetherType | None], label: str) -> Ae
     if shape_dimension_count(argument_type) < 2:
         raise AetherTypeError(f"{label}(...) expects a matrix argument, got '{type_to_string(argument_type)}'.")
     return "int"
+
+
+def _require_list_type_args(arg_types: list[AetherType | None], label: str, count: int) -> ListType | None:
+    if len(arg_types) != count:
+        raise AetherTypeError(f"{label}(...) expects exactly {_argument_count_word(count)} arguments.")
+    argument_type = arg_types[0]
+    if argument_type is None:
+        return None
+    if not isinstance(argument_type, ListType):
+        raise AetherTypeError(f"{label}(...) expects a List argument, got '{type_to_string(argument_type)}'.")
+    return argument_type
+
+
+def _require_int_type(type_name: AetherType | None, label: str) -> None:
+    if type_name is not None and type_name != "int":
+        raise AetherTypeError(f"{label} must be int, got '{type_to_string(type_name)}'.")
+
+
+def _require_assignable_to_list_element(type_name: AetherType | None, list_type: ListType, label: str) -> None:
+    if type_name is None:
+        return
+    if not can_implicitly_convert(type_name, list_type.element_type):
+        raise AetherTypeError(
+            f"{label}(...) value of type '{type_to_string(type_name)}' is not assignable to "
+            f"'{type_to_string(list_type.element_type)}'."
+        )
+
+
+def _argument_count_word(count: int) -> str:
+    return {1: "one", 2: "two", 3: "three"}.get(count, str(count))
 
 
 def _vector_length(value: AetherValue) -> int:

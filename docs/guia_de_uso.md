@@ -90,6 +90,21 @@ List<int> xs = {10, 20, 30};
 println(xs[0]); // 10
 ```
 
+La API basica de listas usa funciones globales por ahora:
+
+```aether
+println(length(xs));
+println(is_empty(xs));
+push(xs, 40);
+println(pop(xs));
+insert(xs, 1, 15);
+println(remove_at(xs, 1));
+println(contains(xs, 20));
+clear(xs);
+```
+
+`insert` acepta indices `0 <= index <= length(xs)` y `remove_at` acepta `0 <= index < length(xs)`. `Vector<T>` y `Matrix<T>` no son listas y no aceptan `push`, `pop`, `insert`, `remove_at` ni `clear`.
+
 Los corchetes crean valores matematicos `Vector<T>` y `Matrix<T>`. Los vectores y matrices son 1-based:
 
 ```aether
@@ -134,7 +149,7 @@ println(Math.LinearAlgebra.matmul(A, [5; 6]));
 ## 6. Builtins utiles
 
 - Salida: `print(...)`, `println(...)`
-- Dimensiones: `rows(matrix)`, `cols(matrix)`, `length(list_or_vector)`
+- Dimensiones y listas: `rows(matrix)`, `cols(matrix)`, `length(list_or_vector)`, `is_empty(list)`, `push(list, value)`, `pop(list)`, `insert(list, index, value)`, `remove_at(list, index)`, `contains(list, value)`, `clear(list)`
 - Numericos: `sin`, `cos`, `tan`, `exp`, `ln`, `log`, `sqrt`, `abs`
 - Modulo de piso: `Math.mod(a, b)`
 - Algebra lineal: `Math.LinearAlgebra.inner`, `norm`, `transpose`, `matmul`, `solve`, `eig`, `SVD`, `LU`, `LDU`, `N`, `R`, `rank`

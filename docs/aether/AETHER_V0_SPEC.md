@@ -681,7 +681,24 @@ List elements must be homogeneous or numerically promotable. Lists use commas on
 
 `array(...)`, `Array<T>`, `int[]`, and other `T[]` spellings are not public Aether v0 syntax. Array values may still exist internally, for example as matrix rows, but user code should use `List<T>` for general collections.
 
-The builtin `length(list)` returns the list length as an `int`.
+The first `List<T>` API is exposed as global builtins rather than methods:
+
+```aether
+List<int> xs = {1, 2};
+
+println(length(xs));      // 2
+println(is_empty(xs));    // false
+push(xs, 3);              // {1, 2, 3}
+println(pop(xs));         // 3, xs is {1, 2}
+insert(xs, 1, 99);        // {1, 99, 2}
+println(remove_at(xs, 1)); // 99, xs is {1, 2}
+println(contains(xs, 2)); // true
+clear(xs);                // {}
+```
+
+All list operations use 0-based indices. `insert(xs, index, value)` accepts `0 <= index <= length(xs)`; `remove_at(xs, index)` accepts `0 <= index < length(xs)`. `push`, `insert`, `pop`, `remove_at`, and `clear` mutate the list. `pop` and `remove_at` return the removed element. `length` returns `int`; `is_empty` and `contains` return `boolean`; `push`, `insert`, and `clear` return `void`.
+
+`Vector<T>` and `Matrix<T>` are not lists. They do not accept list mutation builtins such as `push`, `pop`, `insert`, `remove_at`, or `clear`.
 
 ## Vectors And Matrices
 
@@ -1186,6 +1203,13 @@ Aether v0 recognizes these builtins:
 - `print(...)`
 - `println(...)`
 - `length(list_or_vector)`
+- `is_empty(list)`
+- `push(list, value)`
+- `pop(list)`
+- `insert(list, index, value)`
+- `remove_at(list, index)`
+- `contains(list, value)`
+- `clear(list)`
 - `rows(matrix)`
 - `cols(matrix)`
 - `sin(x)`
@@ -1227,6 +1251,8 @@ println(x);
 `array(...)` is not a recognized builtin in Aether v0.
 
 `length(...)` accepts `List<T>` and `Vector<T>` values and returns an `int`.
+
+`is_empty(...)`, `push(...)`, `pop(...)`, `insert(...)`, `remove_at(...)`, `contains(...)`, and `clear(...)` accept `List<T>` values. `push`, `insert`, and `contains` require a value assignable to `T`. `insert` and `remove_at` require an `int` index and use 0-based indexing.
 
 `rows(matrix)` and `cols(matrix)` accept one `Matrix<T>` argument and return `int` dimensions.
 

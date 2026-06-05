@@ -45,6 +45,7 @@ LINEAR_ALGEBRA_MODULE = "Math.LinearAlgebra"
 LINEAR_ALGEBRA_SOLVE = "Math.LinearAlgebra.solve"
 LINEAR_ALGEBRA_CONJTRANSPOSE = "Math.LinearAlgebra.conjtranspose"
 SCALAR_INPUT_TARGET_TYPES = {"int", "float", "string", "boolean"}
+LIST_MUTATING_BUILTINS = {"push", "pop", "insert", "remove_at", "clear"}
 
 
 class TypeChecker:
@@ -1146,6 +1147,7 @@ class TypeChecker:
             self._check_builtin_keyword_arguments(builtin_name, expression, scope)
             self._check_builtin_function_arguments(builtin_name, expression)
             validate_builtin_arity(builtin_name, len(expression.arguments))
+            self._check_builtin_const_mutation(builtin_name, expression, scope)
             argument_types = [
                 self._expression_type_allowing_builtin_function_ref(argument, scope, builtin_name)
                 for argument in expression.arguments
@@ -1194,6 +1196,22 @@ class TypeChecker:
             if argument_type is not UNKNOWN_TYPE and not can_implicitly_convert(argument_type, parameter.type_name):
                 self._raise_implicit_conversion_error(argument_type, parameter.type_name)
         return function.return_type
+
+    def _check_builtin_const_mutation(
+        self,
+        builtin_name: str,
+        expression: ast.CallExpression,
+        scope: Scope[VariableSymbol],
+    ) -> None:
+        if builtin_name not in LIST_MUTATING_BUILTINS or not expression.arguments:
+            return
+        first_argument = expression.arguments[0]
+        if isinstance(first_argument, ast.Identifier) and scope.is_const(first_argument.name):
+            raise AetherTypeError(
+                f"Cannot mutate constant List '{first_argument.name}' with {expression.callee}(...).",
+                line=first_argument.line,
+                column=first_argument.column,
+            )
 
     def _constructor_struct(self, callee: str) -> StructSymbol | None:
         try:
