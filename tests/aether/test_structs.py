@@ -353,6 +353,21 @@ println(p.x);
     assert result.output == "3.0\n"
 
 
+def test_struct_field_assignment_rejects_const_root() -> None:
+    with pytest.raises(AetherTypeError, match="Cannot mutate constant 'p'"):
+        run_aether(
+            """
+public struct Point {
+    int x;
+    int y;
+}
+
+const Point p = Point(1, 2);
+p.x = 9;
+"""
+        )
+
+
 def test_struct_prints_with_field_names() -> None:
     result = run_aether(
         """

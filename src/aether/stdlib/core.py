@@ -39,12 +39,15 @@ def builtin_definitions() -> list[BuiltinDefinition]:
         BuiltinDefinition("input", _constant_runtime(_input_runtime), _input_type, _zero_or_one("input")),
         BuiltinDefinition("length", _constant_runtime(length_builtin), _length_type, _exactly_one("length")),
         BuiltinDefinition("is_empty", _constant_runtime(is_empty_builtin), _is_empty_type, _exactly_one("is_empty")),
+        BuiltinDefinition("copy", _constant_runtime(copy_builtin), _copy_type, _exactly_one("copy")),
         BuiltinDefinition("push", _constant_runtime(push_builtin), _push_type, _exactly_two("push")),
         BuiltinDefinition("pop", _constant_runtime(pop_builtin), _pop_type, _exactly_one("pop")),
         BuiltinDefinition("insert", _constant_runtime(insert_builtin), _insert_type, _exactly_three("insert")),
         BuiltinDefinition("remove_at", _constant_runtime(remove_at_builtin), _remove_at_type, _exactly_two("remove_at")),
         BuiltinDefinition("contains", _constant_runtime(contains_builtin), _contains_type, _exactly_two("contains")),
         BuiltinDefinition("clear", _constant_runtime(clear_builtin), _clear_type, _exactly_one("clear")),
+        BuiltinDefinition("reverse", _constant_runtime(reverse_builtin), _reverse_type, _exactly_one("reverse")),
+        BuiltinDefinition("sort", _constant_runtime(sort_builtin), _sort_type, _exactly_one("sort")),
         BuiltinDefinition("size", _constant_runtime(size_builtin), _size_type, _exactly_one("size")),
         BuiltinDefinition("rows", _constant_runtime(rows_builtin), _rows_type, _exactly_one("rows")),
         BuiltinDefinition("cols", _constant_runtime(cols_builtin), _cols_type, _exactly_one("cols")),
@@ -193,6 +196,11 @@ def is_empty_builtin(args: list[AetherValue]) -> AetherValue:
     return AetherValue("boolean", len(xs.value) == 0)
 
 
+def copy_builtin(args: list[AetherValue]) -> AetherValue:
+    xs = _require_list_arg(args, "copy")
+    return AetherValue(xs.type_name, list(xs.value))
+
+
 def push_builtin(args: list[AetherValue]) -> AetherValue:
     xs = _require_list_arg(args, "push")
     value = _coerce_list_element_arg(xs, args[1], "push")
@@ -238,6 +246,19 @@ def contains_builtin(args: list[AetherValue]) -> AetherValue:
 def clear_builtin(args: list[AetherValue]) -> AetherValue:
     xs = _require_list_arg(args, "clear")
     xs.value.clear()
+    return AetherValue("void", VOID_VALUE)
+
+
+def reverse_builtin(args: list[AetherValue]) -> AetherValue:
+    xs = _require_list_arg(args, "reverse")
+    xs.value.reverse()
+    return AetherValue("void", VOID_VALUE)
+
+
+def sort_builtin(args: list[AetherValue]) -> AetherValue:
+    xs = _require_list_arg(args, "sort")
+    _require_sortable_list_type(xs.type_name, "sort")
+    xs.value.sort(key=lambda element: element.value)
     return AetherValue("void", VOID_VALUE)
 
 
@@ -519,6 +540,23 @@ def _clear_type(arg_types: list[AetherType | None]) -> AetherType | None:
     return "void"
 
 
+def _copy_type(arg_types: list[AetherType | None]) -> AetherType | None:
+    return _require_list_type_args(arg_types, "copy", 1)
+
+
+def _reverse_type(arg_types: list[AetherType | None]) -> AetherType | None:
+    _require_list_type_args(arg_types, "reverse", 1)
+    return "void"
+
+
+def _sort_type(arg_types: list[AetherType | None]) -> AetherType | None:
+    list_type = _require_list_type_args(arg_types, "sort", 1)
+    if list_type is None:
+        return None
+    _require_sortable_list_type(list_type, "sort")
+    return "void"
+
+
 def _size_type(arg_types: list[AetherType | None]) -> AetherType | None:
     if len(arg_types) != 1:
         raise AetherTypeError("size(...) expects exactly one argument.")
@@ -574,6 +612,16 @@ def _require_assignable_to_list_element(type_name: AetherType | None, list_type:
         raise AetherTypeError(
             f"{label}(...) value of type '{type_to_string(type_name)}' is not assignable to "
             f"'{type_to_string(list_type.element_type)}'."
+        )
+
+
+def _require_sortable_list_type(type_name: AetherType, label: str) -> None:
+    if not isinstance(type_name, ListType):
+        raise AetherTypeError(f"{label}(...) expects a List argument, got '{type_to_string(type_name)}'.")
+    if type_name.element_type not in {"int", "double", "string"}:
+        raise AetherTypeError(
+            f"{label}(...) only supports List<int>, List<double>, and List<string>, "
+            f"got '{type_to_string(type_name)}'."
         )
 
 

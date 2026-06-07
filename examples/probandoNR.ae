@@ -1,4 +1,4 @@
-(double x, double res, int iter) nr(double f(x), double df(x), double x0, double tol, int maxiter) {
+(double x, double res, int iter) nr(double f, double df, double x0, double tol, int maxiter) {
     x = x0;
     res = abs(f(x));
     iter = 0;

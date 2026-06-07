@@ -701,7 +701,13 @@ class Parser:
         token = self._consume_type(message, allow_unknown_identifier=allow_unknown_identifier)
         if token.lexeme == "void":
             raise self._error(token, "'void' is only valid as a function return type.")
-        if token.lexeme in {"List", "Matrix", "Vector"}:
+        if token.lexeme == "List":
+            element_type = "double"
+            if self._match(TokenType.LESS):
+                element_type = self._parse_type_annotation(f"Expected element type inside {token.lexeme}<...>.")
+                self._consume(TokenType.GREATER, f"Expected '>' after {token.lexeme} element type.")
+            return self._nullable_suffix(ListType(element_type))
+        if token.lexeme in {"Matrix", "Vector"}:
             element_type = "double"
             if self._match(TokenType.LESS):
                 element_token = self._consume(TokenType.TYPE, f"Expected element type inside {token.lexeme}<...>.")
@@ -709,8 +715,6 @@ class Parser:
                     raise self._error(element_token, f"Expected primitive element type inside {token.lexeme}<...>.")
                 self._consume(TokenType.GREATER, f"Expected '>' after {token.lexeme} element type.")
                 element_type = element_token.lexeme
-            if token.lexeme == "List":
-                return self._nullable_suffix(ListType(element_type))
             if token.lexeme == "Vector":
                 return self._nullable_suffix(VectorType(element_type))
             return self._nullable_suffix(MatrixType(element_type))
@@ -833,7 +837,12 @@ class Parser:
         if self.tokens[start].type not in {TokenType.TYPE, TokenType.IDENTIFIER}:
             return None
         cursor = start + 1
-        if self.tokens[start].lexeme in {"List", "Matrix", "Vector"} and cursor < len(self.tokens) and self.tokens[cursor].type == TokenType.LESS:
+        if self.tokens[start].lexeme == "List" and cursor < len(self.tokens) and self.tokens[cursor].type == TokenType.LESS:
+            cursor = self._type_annotation_end_cursor(cursor + 1)
+            if cursor is None or cursor >= len(self.tokens) or self.tokens[cursor].type != TokenType.GREATER:
+                return None
+            cursor += 1
+        elif self.tokens[start].lexeme in {"Matrix", "Vector"} and cursor < len(self.tokens) and self.tokens[cursor].type == TokenType.LESS:
             if (
                 cursor + 2 >= len(self.tokens)
                 or self.tokens[cursor + 1].type != TokenType.TYPE

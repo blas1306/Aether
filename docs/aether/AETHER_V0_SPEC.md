@@ -1,3 +1,4 @@
+
 # Aether v0 Language Specification
 
 ## Status
@@ -61,7 +62,7 @@ Aether supports inference for assignments without explicit type annotations.
 | `5` | `int` |
 | `5.2` | `double` |
 | `im`, `2im`, `1 + 2im` | `complex` |
-| `"hola"` | `string` |
+| `"hello"` | `string` |
 | `true` / `false` | `boolean` |
 
 `float` values must be requested explicitly:
@@ -164,7 +165,21 @@ n = 4; // error: Cannot assign to constant 'n'
 n += 1; // error: Cannot assign to constant 'n'
 ```
 
-This is not deep immutability yet. If a matrix or vector value can be mutated through element assignment today, `const` does not freeze its contents in v0.
+`const` also rejects mutations performed through that variable as the root of the assignment or mutating builtin call:
+
+```aether
+List<int> ys = {1, 2, 3};
+const List<int> zs = ys;
+
+zs[0] = 9;        // error: Cannot mutate constant 'zs'
+push(zs, 4);      // error: Cannot mutate constant 'zs'
+clear(zs);        // error: Cannot mutate constant 'zs'
+
+ys[0] = 9;        // ok
+push(ys, 4);      // ok
+```
+
+This is not deep immutability. `const` blocks mutation through the constant variable, but it does not freeze a shared object globally. A mutable alias to the same value can still mutate that value.
 
 ## Type Aliases
 
@@ -687,6 +702,19 @@ List elements must be homogeneous or numerically promotable. Lists use commas on
 
 `array(...)`, `Array<T>`, `int[]`, and other `T[]` spellings are not public Aether v0 syntax. Array values may still exist internally, for example as matrix rows, but user code should use `List<T>` for general collections.
 
+Lists support explicit range slices with inclusive, 0-based bounds:
+
+```aether
+List<int> xs = {10, 20, 30, 40, 50};
+
+List<int> a = xs[1:3];            // {20, 30, 40}
+List<int> b = xs[0:2:4];          // {10, 30, 50}
+List<int> c = xs[4:-1:2];         // {50, 40, 30}
+List<int> d = xs[0:length(xs)-1]; // shallow copy of the list container
+```
+
+The supported forms are `xs[start:end]` and `xs[start:step:end]`. `start`, `end`, and `step` must be `int` expressions. If `step` is omitted it is `1`; if `step > 0`, the slice reads indices while `i <= end`; if `step < 0`, it reads indices while `i >= end`. `step` cannot be `0`. Negative list slice indices are not supported. If any generated index is out of range, evaluation raises an `AetherRuntimeError`. The result has type `List<T>` and is a new list container with the selected elements. The forms `xs[:end]`, `xs[start:]`, and `xs[:]` are not supported for lists. Slice assignment remains unsupported.
+
 The first `List<T>` API is exposed as global builtins rather than methods:
 
 ```aether
@@ -694,17 +722,20 @@ List<int> xs = {1, 2};
 
 println(length(xs));      // 2
 println(is_empty(xs));    // false
+List<int> ys = copy(xs);  // ys is a new List<int> with the same elements
 push(xs, 3);              // {1, 2, 3}
 println(pop(xs));         // 3, xs is {1, 2}
 insert(xs, 1, 99);        // {1, 99, 2}
 println(remove_at(xs, 1)); // 99, xs is {1, 2}
 println(contains(xs, 2)); // true
+reverse(xs);              // {2, 1}
+sort(xs);                 // {1, 2}
 clear(xs);                // {}
 ```
 
-All list operations use 0-based indices. `insert(xs, index, value)` accepts `0 <= index <= length(xs)`; `remove_at(xs, index)` accepts `0 <= index < length(xs)`. `push`, `insert`, `pop`, `remove_at`, and `clear` mutate the list. `pop` and `remove_at` return the removed element. `length` returns `int`; `is_empty` and `contains` return `boolean`; `push`, `insert`, and `clear` return `void`.
+All list operations use 0-based indices. `insert(xs, index, value)` accepts `0 <= index <= length(xs)`; `remove_at(xs, index)` accepts `0 <= index < length(xs)`. `copy(xs)` returns a new `List<T>` container with the same elements as `xs`; it is a shallow copy, does not mutate `xs`, and is allowed for `const List<T>`. `push`, `insert`, `pop`, `remove_at`, `clear`, `reverse`, and `sort` mutate the list and reject a first argument whose expression is rooted in a `const` variable. `sort(xs)` sorts ascending and is supported only for `List<int>`, `List<double>`, and `List<string>`. `pop` and `remove_at` return the removed element. `length` returns `int`; `is_empty` and `contains` return `boolean`; `push`, `insert`, `clear`, `reverse`, and `sort` return `void`.
 
-`Vector<T>` and `Matrix<T>` are not lists. They do not accept list mutation builtins such as `push`, `pop`, `insert`, `remove_at`, or `clear`.
+`Vector<T>` and `Matrix<T>` are not lists. They do not accept list mutation builtins such as `push`, `pop`, `insert`, `remove_at`, `clear`, `reverse`, or `sort`.
 
 ## Vectors And Matrices
 
@@ -1236,12 +1267,15 @@ Aether v0 recognizes these builtins:
 - `println(...)`
 - `length(list_or_vector)`
 - `is_empty(list)`
+- `copy(list)`
 - `push(list, value)`
 - `pop(list)`
 - `insert(list, index, value)`
 - `remove_at(list, index)`
 - `contains(list, value)`
 - `clear(list)`
+- `reverse(list)`
+- `sort(list)`
 - `rows(matrix)`
 - `cols(matrix)`
 - `sin(x)`
@@ -1284,7 +1318,7 @@ println(x);
 
 `length(...)` accepts `List<T>` and `Vector<T>` values and returns an `int`.
 
-`is_empty(...)`, `push(...)`, `pop(...)`, `insert(...)`, `remove_at(...)`, `contains(...)`, and `clear(...)` accept `List<T>` values. `push`, `insert`, and `contains` require a value assignable to `T`. `insert` and `remove_at` require an `int` index and use 0-based indexing.
+`is_empty(...)`, `copy(...)`, `push(...)`, `pop(...)`, `insert(...)`, `remove_at(...)`, `contains(...)`, `clear(...)`, `reverse(...)`, and `sort(...)` accept `List<T>` values. `copy(xs)` returns a shallow copy of the list container and preserves `List<T>`. `push`, `insert`, and `contains` require a value assignable to `T`. `insert` and `remove_at` require an `int` index and use 0-based indexing. `push`, `pop`, `insert`, `remove_at`, `clear`, `reverse`, and `sort` reject mutation through a `const` list variable. `sort` orders ascending and currently supports only `List<int>`, `List<double>`, and `List<string>`.
 
 `rows(matrix)` and `cols(matrix)` accept one `Matrix<T>` argument and return `int` dimensions.
 

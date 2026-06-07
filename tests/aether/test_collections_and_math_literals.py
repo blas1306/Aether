@@ -71,6 +71,99 @@ println(v[1]);
     assert result.output == "10\n10\n"
 
 
+def test_list_slice_start_end_is_inclusive_and_zero_based() -> None:
+    result = run_aether(
+        """
+List<int> xs = {10, 20, 30, 40, 50};
+List<int> a = xs[1:3];
+println(a);
+"""
+    )
+
+    assert result.env["a"].type_name == ListType("int")
+    assert result.output == "{20, 30, 40}\n"
+
+
+def test_list_slice_start_step_end_is_inclusive() -> None:
+    result = run_aether(
+        """
+List<int> xs = {10, 20, 30, 40, 50};
+List<int> b = xs[0:2:4];
+println(b);
+"""
+    )
+
+    assert result.output == "{10, 30, 50}\n"
+
+
+def test_list_slice_negative_step_walks_backwards() -> None:
+    result = run_aether(
+        """
+List<int> xs = {10, 20, 30, 40, 50};
+List<int> c = xs[4:-1:2];
+println(c);
+"""
+    )
+
+    assert result.output == "{50, 40, 30}\n"
+
+
+def test_list_slice_can_copy_whole_container() -> None:
+    result = run_aether(
+        """
+List<int> xs = {10, 20, 30, 40, 50};
+List<int> d = xs[0:length(xs)-1];
+println(d);
+"""
+    )
+
+    assert result.output == "{10, 20, 30, 40, 50}\n"
+
+
+def test_list_slice_result_is_new_container() -> None:
+    result = run_aether(
+        """
+List<int> xs = {10, 20, 30};
+List<int> ys = xs[0:2];
+ys[0] = 99;
+println(xs);
+println(ys);
+"""
+    )
+
+    assert result.output == "{10, 20, 30}\n{99, 20, 30}\n"
+
+
+def test_list_slice_step_zero_is_runtime_error() -> None:
+    with pytest.raises(AetherRuntimeError, match="slice step cannot be 0"):
+        run_aether("List<int> xs = {10, 20, 30, 40}; xs[0:0:3];")
+
+
+def test_list_slice_negative_index_is_runtime_error() -> None:
+    with pytest.raises(AetherRuntimeError, match="negative list slice index"):
+        run_aether("List<int> xs = {10, 20, 30}; xs[-1:2];")
+
+
+def test_list_slice_out_of_range_index_is_runtime_error() -> None:
+    with pytest.raises(AetherRuntimeError, match="List slice index 3 out of bounds for length 3"):
+        run_aether("List<int> xs = {10, 20, 30}; xs[0:3];")
+
+
+def test_slice_on_non_list_indexing_context_fails() -> None:
+    with pytest.raises(AetherTypeError, match="Cannot index non-indexable value"):
+        run_aether("int x = 1; x[0:0];")
+
+
+def test_unsupported_list_slice_forms_fail() -> None:
+    for source in (
+        "List<int> xs = {10, 20, 30}; xs[:3];",
+        "List<int> xs = {10, 20, 30}; xs[1:];",
+        "List<int> xs = {10, 20, 30}; xs[:];",
+    ):
+        with pytest.raises((AetherSyntaxError, AetherTypeError)):
+            run_aether(source)
+
+
 def test_list_requires_commas() -> None:
     with pytest.raises(AetherSyntaxError, match="Expected ',' between list elements"):
         run_aether("x = {1 2 3};")
@@ -184,6 +277,98 @@ println(xs);
     assert result.output == "0\n{}\n"
 
 
+def test_copy_preserves_list_type_and_contents() -> None:
+    result = run_aether(
+        """
+List<int> xs = {1, 2};
+List<int> ys = copy(xs);
+println(xs);
+println(ys);
+"""
+    )
+
+    assert result.env["ys"].type_name == ListType("int")
+    assert result.output == "{1, 2}\n{1, 2}\n"
+
+
+def test_copy_is_shallow_container_copy() -> None:
+    result = run_aether(
+        """
+List<int> xs = {1, 2};
+List<int> ys = copy(xs);
+ys[0] = 9;
+println(xs);
+println(ys);
+"""
+    )
+
+    assert result.output == "{1, 2}\n{9, 2}\n"
+
+
+def test_copy_accepts_const_list() -> None:
+    result = run_aether(
+        """
+const List<int> xs = {1, 2};
+List<int> ys = copy(xs);
+ys[0] = 9;
+println(xs);
+println(ys);
+"""
+    )
+
+    assert result.output == "{1, 2}\n{9, 2}\n"
+
+
+def test_reverse_mutates_list_in_place() -> None:
+    result = run_aether(
+        """
+List<int> xs = {1, 2, 3};
+reverse(xs);
+println(xs);
+"""
+    )
+
+    assert result.output == "{3, 2, 1}\n"
+
+
+@pytest.mark.parametrize(
+    ("type_name", "values", "expected"),
+    [
+        ("int", "{3, 1, 2}", "{1, 2, 3}"),
+        ("double", "{3.0, 1.5, 2.25}", "{1.5, 2.25, 3.0}"),
+        ("string", '{"b", "a", "c"}', '{"a", "b", "c"}'),
+    ],
+)
+def test_sort_mutates_supported_list_types(type_name: str, values: str, expected: str) -> None:
+    result = run_aether(
+        f"""
+List<{type_name}> xs = {values};
+sort(xs);
+println(xs);
+"""
+    )
+
+    assert result.output == f"{expected}\n"
+
+
+@pytest.mark.parametrize("call", ["reverse(xs)", "sort(xs)"])
+def test_reorder_builtins_reject_const_list_root(call: str) -> None:
+    with pytest.raises(AetherTypeError, match="Cannot mutate constant 'xs'"):
+        run_aether(f"const List<int> xs = {{1, 2, 3}}; {call};")
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "List<boolean> xs = {true, false}; sort(xs);",
+        "List<List<int>> xs = {{2}, {1}}; sort(xs);",
+    ],
+)
+def test_sort_rejects_unsupported_list_element_types(source: str) -> None:
+    with pytest.raises(AetherTypeError, match="sort\\(\\.\\.\\.\\) only supports"):
+        run_aether(source)
+
+
 def test_list_mutation_builtins_reject_wrong_value_type() -> None:
     with pytest.raises(AetherTypeError, match="push\\(\\.\\.\\.\\) value of type 'string' is not assignable to 'int'"):
         run_aether('List<int> xs = {1}; push(xs, "bad");')
@@ -205,9 +390,110 @@ def test_list_mutation_builtins_reject_vector_and_matrix() -> None:
         run_aether("Matrix<int> A = [1 2; 3 4]; pop(A);")
 
 
-def test_list_mutation_builtins_reject_const_list() -> None:
-    with pytest.raises(AetherTypeError, match="Cannot mutate constant List 'xs' with push"):
-        run_aether("const List<int> xs = {1, 2}; push(xs, 3);")
+@pytest.mark.parametrize(
+    "call",
+    [
+        "push(xs, 4)",
+        "pop(xs)",
+        "insert(xs, 1, 4)",
+        "remove_at(xs, 0)",
+        "clear(xs)",
+    ],
+)
+def test_list_mutation_builtins_reject_const_list_root(call: str) -> None:
+    with pytest.raises(AetherTypeError, match="Cannot mutate constant 'xs'"):
+        run_aether(f"const List<int> xs = {{1, 2, 3}}; {call};")
+
+
+def test_list_mutation_builtin_rejects_const_indexed_root() -> None:
+    with pytest.raises(AetherTypeError, match="Cannot mutate constant 'xss'"):
+        run_aether(
+            """
+const List<List<int>> xss = {{1, 2}, {3, 4}};
+push(xss[0], 9);
+"""
+        )
+
+
+def test_index_assignment_rejects_const_list_root() -> None:
+    with pytest.raises(AetherTypeError, match="Cannot mutate constant 'xs'"):
+        run_aether(
+            """
+const List<int> xs = {1, 2, 3};
+xs[0] = 9;
+"""
+        )
+
+
+def test_matrix_index_assignment_rejects_const_matrix_root() -> None:
+    with pytest.raises(AetherTypeError, match="Cannot mutate constant 'A'"):
+        run_aether(
+            """
+const Matrix<int> A = [1 2; 3 4];
+A[1, 1] = 9;
+"""
+        )
+
+
+def test_index_assignment_rejects_const_vector_root() -> None:
+    with pytest.raises(AetherTypeError, match="Cannot mutate constant 'v'"):
+        run_aether(
+            """
+const Vector<int> v = [1, 2];
+v[1] = 9;
+"""
+        )
+
+
+def test_nested_index_assignment_rejects_const_root() -> None:
+    with pytest.raises(AetherTypeError, match="Cannot mutate constant 'xs'"):
+        run_aether(
+            """
+const List<List<int>> xs = {{1}, {2}};
+xs[0][0] = 9;
+"""
+        )
+
+
+def test_index_assignment_allows_mutable_list_root() -> None:
+    result = run_aether(
+        """
+List<int> xs = {1, 2, 3};
+xs[0] = 9;
+println(xs);
+"""
+    )
+
+    assert result.output == "{9, 2, 3}\n"
+
+
+def test_const_list_alias_blocks_const_root_but_not_mutable_alias() -> None:
+    with pytest.raises(AetherTypeError, match="Cannot mutate constant 'zs'"):
+        run_aether(
+            """
+List<int> ys = {1, 2, 3};
+const List<int> zs = ys;
+zs[0] = 9;
+"""
+        )
+
+    result = run_aether(
+        """
+List<int> ys = {1, 2, 3};
+const List<int> zs = ys;
+ys[0] = 9;
+push(ys, 4);
+println(ys);
+println(zs);
+"""
+    )
+
+    assert result.output == "{9, 2, 3, 4}\n{9, 2, 3, 4}\n"
+
+
+def test_slice_assignment_error_is_preserved() -> None:
+    with pytest.raises(AetherTypeError, match="Slice assignment is not supported yet\\."):
+        run_aether("List<int> xs = {1, 2, 3}; xs[0:3] = 9;")
 
 
 def test_ragged_matrix_literal_is_rejected() -> None:

@@ -733,6 +733,8 @@ class Interpreter:
     def _read_index(self, array_expression: ast.Expression, index_expression: ast.Expression, env: Environment) -> AetherValue:
         array_value = self._evaluate(array_expression, env)
         if isinstance(index_expression, ast.FullSlice) or isinstance(index_expression, ast.RangeExpression):
+            if isinstance(array_value.type_name, ListType):
+                return self._read_list_slice(array_value, index_expression, env)
             return self._read_vector_slice(array_value, index_expression, env)
         index_value = self._evaluate(index_expression, env)
         index = self._require_index(array_value, index_value)
@@ -789,6 +791,42 @@ class Interpreter:
         element_type = _vector_element_type(vector_value)
         orientation = vector_value.type_name.orientation if isinstance(vector_value.type_name, VectorType) else None
         return AetherValue(VectorType(element_type, len(sliced), orientation), sliced)
+
+    def _read_list_slice(
+        self,
+        list_value: AetherValue,
+        index_expression: ast.Expression,
+        env: Environment,
+    ) -> AetherValue:
+        if not isinstance(index_expression, ast.RangeExpression):
+            raise AetherTypeError("List slices require explicit start and end.")
+        start = self._evaluate_list_slice_component(index_expression.start, env, "start")
+        end = self._evaluate_list_slice_component(index_expression.end, env, "end")
+        step = (
+            self._evaluate_list_slice_component(index_expression.step, env, "step")
+            if index_expression.step is not None
+            else 1
+        )
+        if step == 0:
+            raise AetherRuntimeError("List slice step cannot be 0.")
+        if start < 0 or end < 0:
+            raise AetherRuntimeError("negative list slice index is not supported.")
+
+        length = len(list_value.value)
+        selected: list[AetherValue] = []
+        index = start
+        while index <= end if step > 0 else index >= end:
+            if index >= length:
+                raise AetherRuntimeError(f"List slice index {index} out of bounds for length {length} (0-based).")
+            selected.append(list_value.value[index])
+            index += step
+        return AetherValue(list_value.type_name, selected)
+
+    def _evaluate_list_slice_component(self, expression: ast.Expression, env: Environment, label: str) -> int:
+        value = self._evaluate(expression, env)
+        if value.type_name != "int":
+            raise AetherTypeError(f"List slice {label} must be int, got '{type_to_string(value.type_name)}'.")
+        return value.value
 
     def _matrix_index_selector(
         self,

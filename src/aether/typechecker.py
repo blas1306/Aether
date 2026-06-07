@@ -45,7 +45,7 @@ LINEAR_ALGEBRA_MODULE = "Math.LinearAlgebra"
 LINEAR_ALGEBRA_SOLVE = "Math.LinearAlgebra.solve"
 LINEAR_ALGEBRA_CONJTRANSPOSE = "Math.LinearAlgebra.conjtranspose"
 SCALAR_INPUT_TARGET_TYPES = {"int", "float", "string", "boolean"}
-LIST_MUTATING_BUILTINS = {"push", "pop", "insert", "remove_at", "clear"}
+LIST_MUTATING_BUILTINS = {"push", "pop", "insert", "remove_at", "clear", "reverse", "sort"}
 
 
 class TypeChecker:
@@ -655,6 +655,12 @@ class TypeChecker:
             raise AetherTypeError(f"Cannot assign to loop variable '{assigned_name}' inside its own for-loop.")
         if isinstance(statement.index, (ast.FullSlice, ast.RangeExpression)):
             raise AetherTypeError("Slice assignment is not supported yet.")
+        if assigned_name is not None and scope.is_const(assigned_name):
+            raise AetherTypeError(
+                f"Cannot mutate constant '{assigned_name}'.",
+                line=statement.line,
+                column=statement.column,
+            )
         array_type = self._expression_type(statement.array, scope)
         index_type = self._expression_type(statement.index, scope)
         value_type = self._expression_type(statement.expression, scope)
@@ -693,6 +699,12 @@ class TypeChecker:
             (ast.FullSlice, ast.RangeExpression),
         ):
             raise AetherTypeError("Slice assignment is not supported yet.")
+        if assigned_name is not None and scope.is_const(assigned_name):
+            raise AetherTypeError(
+                f"Cannot mutate constant '{assigned_name}'.",
+                line=statement.line,
+                column=statement.column,
+            )
         matrix_type = self._expression_type(statement.matrix, scope)
         row_type = self._expression_type(statement.row, scope)
         column_type = self._expression_type(statement.column_index, scope)
@@ -712,6 +724,12 @@ class TypeChecker:
         assigned_name = _assignment_root_name(statement.target)
         if assigned_name is not None and self._is_active_loop_variable_assignment(assigned_name, scope):
             raise AetherTypeError(f"Cannot assign to loop variable '{assigned_name}' inside its own for-loop.")
+        if assigned_name is not None and scope.is_const(assigned_name):
+            raise AetherTypeError(
+                f"Cannot mutate constant '{assigned_name}'.",
+                line=statement.line,
+                column=statement.column,
+            )
         struct_type = self._expression_type(statement.target, scope)
         value_type = self._expression_type(statement.expression, scope)
         if struct_type is UNKNOWN_TYPE or value_type is UNKNOWN_TYPE:
@@ -1107,13 +1125,19 @@ class TypeChecker:
         if not is_indexable_type(array_type):
             raise AetherTypeError(f"Cannot index non-indexable value of type '{type_to_string(array_type)}'.")
         if index_type == "slice":
+            if isinstance(array_type, ListType):
+                if isinstance(expression.index, ast.RangeExpression):
+                    return array_type
+                raise AetherTypeError("List slices require explicit start and end.")
             if isinstance(array_type, VectorType):
                 return VectorType(array_type.element_type, orientation=array_type.orientation)
             if isinstance(array_type, TransposeVectorType):
                 return TransposeVectorType(array_type.element_type)
             if isinstance(array_type, MatrixType) and array_type.vector:
                 return VectorType(array_type.element_type)
-            raise AetherTypeError("Matrix values require two-dimensional indexing with A[i, j].")
+            if isinstance(array_type, MatrixType):
+                raise AetherTypeError("Matrix values require two-dimensional indexing with A[i, j].")
+            raise AetherTypeError(f"Cannot slice value of type '{type_to_string(array_type)}'.")
         if index_type != "int":
             raise AetherTypeError(f"Index must be int, got '{type_to_string(index_type)}'.")
         if isinstance(array_type, VectorType):
@@ -1238,12 +1262,12 @@ class TypeChecker:
     ) -> None:
         if builtin_name not in LIST_MUTATING_BUILTINS or not expression.arguments:
             return
-        first_argument = expression.arguments[0]
-        if isinstance(first_argument, ast.Identifier) and scope.is_const(first_argument.name):
+        root_name = _assignment_root_name(expression.arguments[0])
+        if root_name is not None and scope.is_const(root_name):
             raise AetherTypeError(
-                f"Cannot mutate constant List '{first_argument.name}' with {expression.callee}(...).",
-                line=first_argument.line,
-                column=first_argument.column,
+                f"Cannot mutate constant '{root_name}'.",
+                line=expression.arguments[0].line,
+                column=expression.arguments[0].column,
             )
 
     def _constructor_struct(self, callee: str) -> StructSymbol | None:
