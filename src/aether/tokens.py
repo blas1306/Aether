@@ -18,6 +18,9 @@ class TokenType(str, Enum):
     RETURN = "RETURN"
     BREAK = "BREAK"
     CONTINUE = "CONTINUE"
+    TRY = "TRY"
+    CATCH = "CATCH"
+    THROW = "THROW"
     IF = "IF"
     ELSE = "ELSE"
     WHILE = "WHILE"
@@ -65,7 +68,7 @@ class TokenType(str, Enum):
     APOSTROPHE = "'"
 
 
-AETHER_TYPES = {"int", "float", "double", "complex", "string", "boolean", "List", "Matrix", "Vector", "void"}
+AETHER_TYPES = {"int", "float", "double", "complex", "string", "boolean", "List", "Matrix", "Vector", "Exception", "void"}
 PRIMITIVE_TYPES = {"int", "float", "double", "complex", "string", "boolean"}
 
 KEYWORDS: dict[str, TokenType] = {
@@ -73,6 +76,9 @@ KEYWORDS: dict[str, TokenType] = {
     "return": TokenType.RETURN,
     "break": TokenType.BREAK,
     "continue": TokenType.CONTINUE,
+    "try": TokenType.TRY,
+    "catch": TokenType.CATCH,
+    "throw": TokenType.THROW,
     "if": TokenType.IF,
     "else": TokenType.ELSE,
     "while": TokenType.WHILE,

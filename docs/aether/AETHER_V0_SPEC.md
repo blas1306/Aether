@@ -46,6 +46,12 @@ Aether v0 has six primitive types:
 - `string`
 - `boolean`
 
+Aether v0 also has a minimal builtin nominal runtime type:
+
+- `Exception`
+
+`Exception` values are used by the language exception feature. They currently expose `message` and `kind` fields.
+
 ## Type Inference
 
 Aether supports inference for assignments without explicit type annotations.
@@ -1011,6 +1017,9 @@ The following constructs create scopes:
 - `if` blocks
 - `else` blocks
 - `while` blocks
+- `for` blocks
+- `try` blocks
+- `catch` blocks
 - functions
 
 Variables created inside a block do not escape that block. Variables from outer scopes are visible and may be updated from an inner block. Shadowing is not allowed in v0.
@@ -1098,6 +1107,29 @@ if 1 {
     println("bad");
 } // error
 ```
+
+`throw` raises an Aether language exception and stops normal execution of the current statement path:
+
+```aether
+throw Exception("algo salio mal");
+throw "algo salio mal"; // shorthand; wrapped as Exception(message)
+```
+
+The thrown expression must be `string` or `Exception`. Throwing a string creates an `Exception` value whose `message` field is that string. Throwing any other type is an `AetherTypeError`.
+
+`try` / `catch` handles one exception value:
+
+```aether
+try {
+    risky();
+} catch (e) {
+    println(e.message);
+}
+```
+
+The catch variable is local to the `catch` block and has type `Exception`. If the `try` block completes normally, the `catch` block is skipped. If the `try` block throws, the rest of that block is skipped and the `catch` block runs. A `throw` inside the `catch` propagates outward. `return`, `break`, and `continue` keep their usual behavior inside `try` and `catch`.
+
+An uncaught language exception reaches the runner as an `AetherRuntimeError` whose message is the exception message. Aether v0 does not implement `finally`, multiple catches, exception hierarchies, stack traces, or generic exception types.
 
 ## Functions
 
@@ -1308,7 +1340,7 @@ The following are intentionally not implemented in Aether v0:
 - Comprehensions (list, generator, etc.)
 - Methods in structs (structs have constructors and field access only)
 - Generics (aliases of generic types like `Vector<double>` work; generic type parameters for custom structs do not)
-- Exceptions / error handling
+- Advanced exceptions (`finally`, multiple catches, hierarchies, stack traces)
 - JIT compilation
 - Multi-file packages (each package maps to one `.ae` file)
 - Import aliases and specific imports (`import X as Y`, `from X import Y`)

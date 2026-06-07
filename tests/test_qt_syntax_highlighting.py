@@ -35,6 +35,19 @@ def test_script_keywords_are_highlighted_but_not_inside_comments(qapp) -> None:
     editor.close()
 
 
+def test_exception_keywords_are_highlighted(qapp) -> None:
+    editor = CodeEditor()
+    editor.set_autocomplete_document_kind("script")
+    editor.setPlainText('try { throw "boom"; } catch (e) { println(e.message); }\n')
+    qapp.processEvents()
+
+    assert _has_color_at(editor, 0, 0, 3, "#a30101")
+    assert _has_color_at(editor, 0, 6, 5, "#a30101")
+    assert _has_color_at(editor, 0, 22, 5, "#a30101")
+
+    editor.close()
+
+
 def test_aether_types_are_highlighted_like_keywords(qapp) -> None:
     editor = CodeEditor()
     editor.set_autocomplete_document_kind("script")

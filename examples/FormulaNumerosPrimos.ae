@@ -3,7 +3,7 @@ import Math
 int GenPrimos(int n) {
     suma1 = 0;
 
-    for i in 1:int(n^1.5) {
+    for i in 1:int(2^n) {
         suma2 = 0;
 
         for j in 1:i {
@@ -12,13 +12,13 @@ int GenPrimos(int n) {
             }
         }
 
-        suma1 = suma1 + floor((n/suma2)^(1/n));
+        suma1 = suma1 + int((n/suma2)^(1/n));
     }
 
     p = 1 + suma1;
     return p;
 }
 
-for i in 1:50 {
+for i in 1:10 {
     println("p_{$i$} = ", GenPrimos(i));
 }

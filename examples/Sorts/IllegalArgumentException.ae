@@ -1,0 +1,3 @@
+public Exception IllegalArgumentException(string mensaje) {
+    return IllegalArgumentException(mensaje);
+}

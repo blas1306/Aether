@@ -251,6 +251,21 @@ class TypeChecker:
             if self.loop_depth == 0:
                 raise AetherTypeError("continue used outside of a loop.", line=statement.line, column=statement.column)
             return
+        if isinstance(statement, ast.ThrowStatement):
+            thrown_type = self._expression_type(statement.expression, scope)
+            if thrown_type is not UNKNOWN_TYPE and thrown_type not in {"string", "Exception"}:
+                raise AetherTypeError(
+                    f"throw expects string or Exception, got '{type_to_string(thrown_type)}'.",
+                    line=statement.line,
+                    column=statement.column,
+                )
+            return
+        if isinstance(statement, ast.TryCatchStatement):
+            self._check_statements(statement.try_body, Scope(parent=scope))
+            catch_scope: Scope[VariableSymbol] = Scope(parent=scope)
+            catch_scope.define_local(statement.catch_name, VariableSymbol(statement.catch_name, "Exception"), forbid_shadowing=True)
+            self._check_statements(statement.catch_body, catch_scope)
+            return
         raise AetherRuntimeError(f"Unsupported statement {statement!r}.")
 
     def _check_import(self, statement: ast.ImportStatement) -> None:
@@ -1143,6 +1158,24 @@ class TypeChecker:
 
     def _call_type(self, expression: ast.CallExpression, scope: Scope[VariableSymbol]) -> AetherType | None:
         builtin_name = self.builtin_aliases.get(expression.callee, expression.callee)
+        if expression.callee == "Exception":
+            if expression.keyword_arguments:
+                raise AetherTypeError("Exception(...) does not accept keyword arguments.")
+            if len(expression.arguments) != 1:
+                raise AetherTypeError(
+                    f"Exception(...) expects 1 argument but got {len(expression.arguments)}.",
+                    line=expression.line,
+                    column=expression.column,
+                    kind="arity",
+                )
+            argument_type = self._expression_type(expression.arguments[0], scope)
+            if argument_type is not UNKNOWN_TYPE and argument_type != "string":
+                raise AetherTypeError(
+                    f"Exception(...) message must be string, got '{type_to_string(argument_type)}'.",
+                    line=expression.line,
+                    column=expression.column,
+                )
+            return "Exception"
         if is_builtin(builtin_name):
             self._check_builtin_keyword_arguments(builtin_name, expression, scope)
             self._check_builtin_function_arguments(builtin_name, expression)
@@ -1249,6 +1282,14 @@ class TypeChecker:
         location: object | None = None,
     ) -> AetherType:
         resolved = self._resolve_type_aliases(target_type, location)
+        if resolved == "Exception":
+            if field_name in {"message", "kind"}:
+                return "string"
+            raise AetherTypeError(
+                f"Exception has no field '{field_name}'.",
+                line=getattr(location, "line", None),
+                column=getattr(location, "column", None),
+            )
         if not isinstance(resolved, str) or resolved not in self.structs:
             raise AetherTypeError(
                 f"Cannot access field '{field_name}' on non-struct value of type '{type_to_string(resolved)}'.",
@@ -1629,6 +1670,8 @@ class TypeChecker:
             if statement.else_body is None:
                 return False
             return self._statements_always_return(statement.body) and self._statements_always_return(statement.else_body)
+        if isinstance(statement, ast.TryCatchStatement):
+            return self._statements_always_return(statement.try_body) and self._statements_always_return(statement.catch_body)
         return False
 
 

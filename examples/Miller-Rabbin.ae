@@ -1,0 +1,93 @@
+import Math
+
+public Exception Pelotudo(string message) {
+    return Exception(message);
+}
+
+int powMod(int base, int exp, int m) {
+    int result = 1;
+    base = base % m;
+
+    while exp > 0 {
+        if exp % 2 == 1 {
+            result = (result * base) % m;
+        }
+
+        base = (base * base) % m;
+        exp = int(exp / 2);
+    }
+
+    return result;
+}
+
+boolean millerRabinBase(int p, int a, int d, int s) {
+    int x = powMod(a, d, p);
+
+    if x == 1 || x == p - 1 {
+        return true;
+    }
+
+    for r in 1:(s - 1) {
+        x = (x * x) % p;
+
+        if x == p - 1 {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+boolean MillerRabbin(int p) {
+    if p == 2 || p == 3 {
+        return true;
+    }
+
+    int d = p - 1;
+    int s = 0;
+
+    while (d % 2 == 0) {
+        d = int(d / 2);
+        s += 1;
+    }
+
+    for i in 1:4 {
+        int a = 2;
+
+        if i == 1 {
+            a = 2;
+        }
+
+        if i == 2 {
+            a = 3;
+        }
+
+        if i == 3 {
+            a = 5;
+        }
+
+        if i == 4 {
+            a = 7;
+        }
+
+        if a >= p {
+            continue;
+        }
+
+        if millerRabinBase(p, a, d, s) == false {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+while true {
+    int p = input("Ingrese un numero: ");
+
+    if MillerRabbin(p) {
+        println("El numero $p$ es probablemente primo");
+    } else {
+        println("El numero $p$ no es primo");
+    }
+}

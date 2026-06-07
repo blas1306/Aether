@@ -7,7 +7,7 @@ from typing import Any
 from .errors import AetherTypeError
 
 
-TYPE_NAMES = {"int", "float", "double", "complex", "string", "boolean"}
+TYPE_NAMES = {"int", "float", "double", "complex", "string", "boolean", "Exception"}
 REAL_NUMERIC_TYPES = {"int", "float", "double"}
 NUMERIC_TYPES = REAL_NUMERIC_TYPES | {"complex"}
 VOID_VALUE = None
@@ -249,6 +249,12 @@ NULL_TYPE = NullType()
 class AetherValue:
     type_name: AetherType
     value: Any
+
+
+@dataclass(frozen=True)
+class AetherExceptionValue:
+    message: str
+    kind: str = "Exception"
 
 
 @dataclass

@@ -1,0 +1,88 @@
+import IllegalArgumentException
+
+private boolean validarLista(List<int>? lista) {
+    if lista == null {
+        return false;
+    }
+
+    return true;
+}
+
+private List<int> copyOf(List<int> lista) {
+    List<int> nuevaLista = {};
+    int i = 0;
+
+    while i < length(lista) {
+        push(nuevaLista, lista[i]);
+        i += 1;
+    }
+
+    return nuevaLista;
+}
+
+private void swap(List<int> lista, int i, int j) {
+    int aux = lista[i];
+    lista[i] = lista[j];
+    lista[j] = aux;
+}
+
+// BubbleSort
+public List<int> bubbleSort(List<int> lista) {
+    List<int> nuevaLista = copyOf(lista);
+    int n = length(nuevaLista);
+    boolean huboIntercambio = true;
+
+    for pasada in 0:(n-2) {
+        huboIntercambio = false;
+
+        for j in 0:(n-2-pasada) {
+            if nuevaLista[j] > nuevaLista[j+1] {
+                swap(nuevaLista, j, j + 1);
+                huboIntercambio = true;
+            }
+        }
+    }
+
+    return nuevaLista;
+}
+
+// SelectionSort
+public List<int> selectionSort(List<int> lista) {
+    List<int> nuevaLista = copyOf(lista);
+    int n = length(nuevaLista);
+    for i in 0:(n-2) {
+        int indiceMinimo = i;
+
+        for j in (i+1):(n-1) {
+            if nuevaLista[j] < nuevaLista[indiceMinimo] {
+                indiceMinimo = j;
+            }
+        }
+
+        if indiceMinimo != i {
+            swap(nuevaLista, i, indiceMinimo);
+        }
+    }
+
+    return nuevaLista;
+}
+
+// InsertionSort
+public List<int> insertionSort(List<int> lista) {
+    List<int> nuevaLista = copyOf(lista);
+    int n = length(nuevaLista);
+
+    for i in 1:(n-1) {
+        int actual = nuevaLista[i];
+        int j = i - 1;
+
+        while (j >= 0 && nuevaLista[j] > actual) {
+            nuevaLista[j + 1] = nuevaLista[j];
+            j = j - 1;
+        }
+
+        nuevaLista[j + 1] = actual;
+    }
+
+    return nuevaLista;
+}

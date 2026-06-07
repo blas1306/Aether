@@ -126,3 +126,10 @@ def test_completion_items_include_keywords_builtins_and_symbols() -> None:
     labels = {item.label for item in items}
 
     assert {"if", "for", "println", "sqrt", "value", "square"} <= labels
+
+
+def test_completion_items_include_exception_keywords() -> None:
+    items = completion_items("tr", 1, 2)
+    labels = {item.label for item in items}
+
+    assert {"try", "catch", "throw"} <= labels

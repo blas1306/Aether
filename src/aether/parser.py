@@ -249,6 +249,22 @@ class Parser:
             continue_token = self._previous()
             self._consume(TokenType.SEMICOLON, "Expected ';' after continue statement.")
             return ast.ContinueStatement(continue_token.line, continue_token.column)
+        if self._match(TokenType.THROW):
+            throw_token = self._previous()
+            if not self._can_start_expression(self._peek()):
+                raise self._error(self._peek(), "Expected expression after 'throw'.")
+            expression = self._expression()
+            self._consume(TokenType.SEMICOLON, "Expected ';' after throw statement.")
+            return ast.ThrowStatement(expression, throw_token.line, throw_token.column)
+        if self._match(TokenType.TRY):
+            try_token = self._previous()
+            try_body = self._block()
+            self._consume(TokenType.CATCH, "Expected 'catch' after try block.")
+            self._consume(TokenType.LEFT_PAREN, "Expected '(' after 'catch'.")
+            catch_name = self._consume(TokenType.IDENTIFIER, "Expected catch variable name.").lexeme
+            self._consume(TokenType.RIGHT_PAREN, "Expected ')' after catch variable name.")
+            catch_body = self._block()
+            return ast.TryCatchStatement(try_body, catch_name, catch_body, try_token.line, try_token.column)
         if self._match(TokenType.CONST):
             return self._var_declaration(is_const=True)
         if self._looks_like_var_declaration():
@@ -655,6 +671,9 @@ class Parser:
                 TokenType.RETURN,
                 TokenType.BREAK,
                 TokenType.CONTINUE,
+                TokenType.TRY,
+                TokenType.CATCH,
+                TokenType.THROW,
             } and self._peek().line > error_line:
                 return
             self._advance()

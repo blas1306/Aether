@@ -1,0 +1,15 @@
+import Sortings
+
+public void main() {
+    List<int> lista = {5, 2, 3, 8, 1, 10, 9};
+
+    listaBubble = bubbleSort(lista);
+    listaSelection = selectionSort(lista);
+    listaInsertion = insertionSort(lista);
+
+    println("BubbleSort: ", listaBubble);
+    println("SelectionSort: ", listaSelection);
+    println("InsertionSort: ", listaInsertion);
+}
+
+main();

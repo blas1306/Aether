@@ -193,6 +193,22 @@ class ContinueStatement:
 
 
 @dataclass(frozen=True)
+class ThrowStatement:
+    expression: Expression
+    line: int = 1
+    column: int = 1
+
+
+@dataclass(frozen=True)
+class TryCatchStatement:
+    try_body: list[Statement]
+    catch_name: str
+    catch_body: list[Statement]
+    line: int = 1
+    column: int = 1
+
+
+@dataclass(frozen=True)
 class Literal:
     value: object
     type_name: AetherType
