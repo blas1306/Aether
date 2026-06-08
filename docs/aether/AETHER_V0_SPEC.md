@@ -856,7 +856,7 @@ List<int> d = xs[0:length(xs)-1]; // shallow copy of the list container
 
 The supported forms are `xs[start:end]` and `xs[start:step:end]`. `start`, `end`, and `step` must be `int` expressions. If `step` is omitted it is `1`; if `step > 0`, the slice reads indices while `i <= end`; if `step < 0`, it reads indices while `i >= end`. `step` cannot be `0`. Negative list slice indices are not supported. If any generated index is out of range, evaluation raises an `AetherRuntimeError`. The result has type `List<T>` and is a new list container with the selected elements. The forms `xs[:end]`, `xs[start:]`, and `xs[:]` are not supported for lists. Slice assignment remains unsupported.
 
-The first `List<T>` API is exposed as global builtins rather than methods:
+The original `List<T>` API remains exposed as global builtins:
 
 ```aether
 List<int> xs = {1, 2};
@@ -877,6 +877,72 @@ clear(xs);                // {}
 All list operations use 0-based indices. `insert(xs, index, value)` accepts `0 <= index <= length(xs)`; `remove_at(xs, index)` accepts `0 <= index < length(xs)`. `copy(xs)` returns a new `List<T>` container with the same elements as `xs`; it is a shallow copy, does not mutate `xs`, and is allowed for `const List<T>`. `push`, `insert`, `pop`, `remove_at`, `clear`, `reverse`, and `sort` mutate the list and reject a first argument whose expression is rooted in a `const` variable. `sort(xs)` sorts ascending and is supported only for `List<int>`, `List<double>`, and `List<string>`. `pop` and `remove_at` return the removed element. `length` returns `int`; `is_empty` and `contains` return `boolean`; `push`, `insert`, `clear`, `reverse`, and `sort` return `void`.
 
 `Array<T>`, `Vector<T>`, and `Matrix<T>` are not lists. They do not accept list mutation builtins such as `push`, `pop`, `insert`, `remove_at`, `clear`, `reverse`, or `sort`.
+
+## Native Properties And Methods
+
+Aether v0 supports a small set of native instance properties and methods on existing builtin container and mathematical types. This does not introduce user-defined methods inside `struct` or `class`, and it does not introduce interfaces.
+
+Native properties use field syntax and cannot be called:
+
+```aether
+List<int> xs = {1, 2, 3};
+Array<int> a = {1, 2, 3};
+Vector<double> v = [3 4];
+Matrix<double> A = [1 2; 3 4];
+
+println(xs.length); // 3
+println(a.length);  // 3
+println(v.length);  // 2
+println(A.rows);    // 2
+println(A.columns); // 2
+
+xs.length(); // error: length is a property, not a method.
+```
+
+Native methods use call syntax and are desugared to the existing builtins by passing the receiver as the first argument:
+
+```aether
+List<int> ys = xs.copy(); // copy(xs)
+xs.reverse();             // reverse(xs), mutates xs in place
+xs.sort();                // sort(xs), mutates xs in place
+
+Array<int> b = a.copy();       // copy(a)
+Matrix<double> B = A.transpose(); // Math.LinearAlgebra.transpose(A)
+double n = v.norm();           // Math.LinearAlgebra.norm(v)
+
+xs.copy(xs); // error: copy(...) expects exactly one argument.
+xs.copy;     // error: copy is a method and must be called.
+```
+
+Supported native properties:
+
+- `List<T>.length -> int`
+- `Array<T>.length -> int`
+- `Vector<T>.length -> int`
+- `Matrix<T>.rows -> int`
+- `Matrix<T>.columns -> int`
+
+Supported native methods:
+
+- `List<T>.copy() -> List<T>`
+- `List<T>.reverse() -> void`, mutates the list in place
+- `List<T>.sort() -> void`, mutates the list in place
+- `Array<T>.copy() -> Array<T>`
+- `Matrix<T>.transpose() -> Matrix<T>`
+- `Vector<T>.norm() -> double`
+
+The functional builtins remain valid and keep the same signatures: `length(xs)`, `copy(xs)`, `reverse(xs)`, `sort(xs)`, `rows(A)`, `columns(A)`, and `Math.LinearAlgebra.transpose(A)`/the imported `transpose(A)` alias still work.
+
+`const` follows the same mutation rules as the functional builtins. Read-only properties and non-mutating copy methods are valid on constants, while mutating methods are rejected when the receiver is rooted in a constant variable:
+
+```aether
+const List<int> xs = {1, 2};
+
+println(xs.length); // ok
+List<int> ys = xs.copy(); // ok
+xs.reverse(); // error: Cannot mutate constant 'xs'.
+xs.sort();    // error: Cannot mutate constant 'xs'.
+```
 
 ## Vectors And Matrices
 

@@ -277,6 +277,20 @@ def test_lsp_completion_supports_stdlib_member_context() -> None:
     assert _item_by_label(items, "LinearAlgebra")["kind"] == 9
 
 
+def test_lsp_completion_supports_native_member_context() -> None:
+    source = "List<int> xs = {1, 2};\nxs."
+    items = _completion_items_for(source, line=1, character=len("xs."))
+
+    length = _item_by_label(items, "length")
+    copy = _item_by_label(items, "copy")
+
+    assert length["kind"] == 10
+    assert length["textEdit"]["newText"] == "length"
+    assert copy["kind"] == 2
+    assert copy["textEdit"]["newText"] == "copy($0)"
+    assert copy["insertTextFormat"] == 2
+
+
 def test_lsp_completion_stays_quiet_inside_strings_and_comments() -> None:
     assert _completion_items_for('"pri', line=0, character=len('"pri')) == []
     assert _completion_items_for("// pri", line=0, character=len("// pri")) == []

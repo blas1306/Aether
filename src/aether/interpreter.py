@@ -14,6 +14,7 @@ from .errors import AetherError, AetherInputError, AetherRuntimeError, AetherSyn
 from .formatting import format_value
 from .lexer import lex
 from .modules import is_public_export, private_top_level_names, resolve_file_module_path
+from .native_members import native_member_set, native_method, native_property
 from .parser import Parser
 from .scope import Scope
 from .stdlib import BuiltinFunction, is_builtin_namespace, make_builtins
@@ -533,6 +534,11 @@ class Interpreter:
                 return self._evaluate_call(expression, env)
             except AetherError as exc:
                 raise _with_source_location(exc, expression) from exc
+        if isinstance(expression, ast.MethodCall):
+            try:
+                return self._evaluate_method_call(expression, env)
+            except AetherError as exc:
+                raise _with_source_location(exc, expression) from exc
         if isinstance(expression, ast.InputCall):
             raise AetherInputError(
                 "input() requires a typed assignment context.",
@@ -1035,6 +1041,9 @@ class Interpreter:
                 for arg in expression.arguments
             ]
             return self._call(expression.callee, args, named_args, env)
+        method_value = self._evaluate_dotted_native_method_call(expression, env)
+        if method_value is not None:
+            return method_value
         if named_args:
             raise AetherRuntimeError(f"Function '{expression.callee}' does not accept keyword arguments.")
         if self._constructor_enum(expression.callee) is not None:
@@ -1071,6 +1080,47 @@ class Interpreter:
         else:
             args = [self._evaluate(arg, env) for arg in expression.arguments]
         return self._call(expression.callee, args, {}, env)
+
+    def _evaluate_dotted_native_method_call(
+        self,
+        expression: ast.CallExpression,
+        env: Environment,
+    ) -> AetherValue | None:
+        receiver = _dotted_call_receiver(expression.callee, expression.line, expression.column)
+        if receiver is None:
+            return None
+        root_name, target, method_name = receiver
+        if env.lookup(root_name) is None:
+            return None
+        return self._evaluate_method_call(
+            ast.MethodCall(
+                target,
+                method_name,
+                expression.arguments,
+                expression.keyword_arguments,
+                expression.line,
+                expression.column,
+            ),
+            env,
+        )
+
+    def _evaluate_method_call(self, expression: ast.MethodCall, env: Environment) -> AetherValue:
+        receiver = self._evaluate(expression.target, env)
+        members = native_member_set(receiver.type_name)
+        if members is None:
+            raise AetherTypeError(
+                f"Type '{type_to_string(receiver.type_name)}' has no native method '{expression.method_name}'."
+            )
+        if expression.method_name in members.properties:
+            raise AetherTypeError(f"{expression.method_name} is a property, not a method.")
+        method = native_method(receiver.type_name, expression.method_name)
+        if method is None:
+            raise AetherTypeError(
+                f"Type '{type_to_string(receiver.type_name)}' has no native method '{expression.method_name}'."
+            )
+        args = [receiver, *[self._evaluate(arg, env) for arg in expression.arguments]]
+        named_args = {name: self._evaluate(value, env) for name, value in expression.keyword_arguments.items()}
+        return self._call(method.builtin_name, args, named_args, env)
 
     def _constructor_struct(self, callee: str) -> ast.StructDeclaration | None:
         try:
@@ -1136,6 +1186,16 @@ class Interpreter:
             if field_name == "kind":
                 return AetherValue("string", struct_value.value.kind)
             raise AetherTypeError(f"Exception has no field '{field_name}'.")
+        members = native_member_set(struct_value.type_name)
+        if members is not None:
+            native = native_property(struct_value.type_name, field_name)
+            if native is not None:
+                return self._call(native.builtin_name, [struct_value], {}, env)
+            if field_name in members.methods:
+                raise AetherTypeError(f"{field_name} is a method and must be called.")
+            raise AetherTypeError(
+                f"Type '{type_to_string(struct_value.type_name)}' has no native property '{field_name}'."
+            )
         instance = self._require_struct_instance(struct_value, field_name)
         if field_name not in instance.fields:
             raise AetherTypeError(f"Struct '{instance.type_name}' has no field '{field_name}'.")
@@ -1729,6 +1789,17 @@ def _field_access_root_name(expression: ast.Expression) -> str | None:
     if isinstance(expression, ast.FieldAccess):
         return _field_access_root_name(expression.target)
     return None
+
+
+def _dotted_call_receiver(callee: str, line: int = 1, column: int = 1) -> tuple[str, ast.Expression, str] | None:
+    parts = callee.split(".")
+    if len(parts) < 2:
+        return None
+    root_name = parts[0]
+    target: ast.Expression = ast.Identifier(root_name, line, column)
+    for part in parts[1:-1]:
+        target = ast.FieldAccess(target, part, line, column)
+    return root_name, target, parts[-1]
 
 
 def _with_source_location(exc: AetherError, node: object | None) -> AetherError:

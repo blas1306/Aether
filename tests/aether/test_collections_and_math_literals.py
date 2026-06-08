@@ -455,6 +455,142 @@ println(ys);
     assert result.output == "{1, 2}\n{9, 2}\n"
 
 
+def test_list_native_length_property() -> None:
+    result = run_aether("List<int> xs = {1, 2, 3}; println(xs.length);")
+
+    assert result.output == "3\n"
+
+
+def test_list_native_copy_method_creates_new_container() -> None:
+    result = run_aether(
+        """
+List<int> xs = {1, 2};
+List<int> ys = xs.copy();
+ys[0] = 9;
+println(xs);
+println(ys);
+"""
+    )
+
+    assert result.env["ys"].type_name == ListType("int")
+    assert result.output == "{1, 2}\n{9, 2}\n"
+
+
+def test_list_native_reverse_and_sort_mutate_in_place() -> None:
+    result = run_aether(
+        """
+List<int> xs = {3, 1, 2};
+xs.reverse();
+println(xs);
+xs.sort();
+println(xs);
+"""
+    )
+
+    assert result.output == "{2, 1, 3}\n{1, 2, 3}\n"
+
+
+def test_list_native_mutating_methods_reject_const_root() -> None:
+    with pytest.raises(AetherTypeError, match="Cannot mutate constant 'xs'"):
+        run_aether("const List<int> xs = {1, 2}; xs.reverse();")
+
+
+def test_list_native_readonly_members_accept_const_root() -> None:
+    result = run_aether(
+        """
+const List<int> xs = {1, 2};
+List<int> ys = xs.copy();
+ys[0] = 9;
+println(xs.length);
+println(xs);
+println(ys);
+"""
+    )
+
+    assert result.output == "2\n{1, 2}\n{9, 2}\n"
+
+
+def test_array_native_length_and_copy() -> None:
+    result = run_aether(
+        """
+Array<int> a = {1, 2, 3};
+Array<int> b = a.copy();
+b[0] = 9;
+println(a.length);
+println(a);
+println(b);
+"""
+    )
+
+    assert result.env["b"].type_name == ArrayType("int")
+    assert result.output == "3\nArray{1, 2, 3}\nArray{9, 2, 3}\n"
+
+
+def test_matrix_native_dimensions_and_transpose() -> None:
+    result = run_aether(
+        """
+Matrix<double> A = [1 2; 3 4];
+Matrix<double> B = A.transpose();
+println(A.rows);
+println(A.columns);
+println(B);
+"""
+    )
+
+    assert result.env["B"].type_name == MatrixType("double", 2, 2)
+    assert result.output == "2\n2\n[1.0 3.0; 2.0 4.0]\n"
+
+
+def test_vector_native_length_and_norm() -> None:
+    result = run_aether("Vector<double> v = [3 4]; println(v.length); println(v.norm());")
+
+    assert result.output == "2\n5.0\n"
+
+
+def test_native_property_called_as_method_fails_clearly() -> None:
+    with pytest.raises(AetherTypeError, match="length is a property, not a method"):
+        run_aether("List<int> xs = {1, 2}; xs.length();")
+
+
+def test_native_method_used_as_value_fails_clearly() -> None:
+    with pytest.raises(AetherTypeError, match="copy is a method and must be called"):
+        run_aether("List<int> xs = {1, 2}; println(xs.copy);")
+
+
+def test_native_unknown_property_and_method_fail() -> None:
+    with pytest.raises(AetherTypeError, match="has no native property 'unknown'"):
+        run_aether("List<int> xs = {1, 2}; println(xs.unknown);")
+
+    with pytest.raises(AetherTypeError, match="has no native method 'unknown'"):
+        run_aether("List<int> xs = {1, 2}; xs.unknown();")
+
+
+def test_native_methods_do_not_accept_explicit_receiver_argument() -> None:
+    with pytest.raises(AetherTypeError, match="copy\\(\\.\\.\\.\\) expects exactly one argument"):
+        run_aether("List<int> xs = {1, 2}; xs.copy(xs);")
+
+
+def test_function_style_builtins_still_work_with_native_members() -> None:
+    result = run_aether(
+        """
+import Math.LinearAlgebra
+List<int> xs = {3, 1, 2};
+println(length(xs));
+List<int> ys = copy(xs);
+reverse(ys);
+sort(xs);
+Matrix<double> A = [1 2; 3 4];
+println(ys);
+println(xs);
+println(rows(A));
+println(columns(A));
+println(transpose(A));
+"""
+    )
+
+    assert result.output == "3\n{2, 1, 3}\n{1, 2, 3}\n2\n2\n[1.0 3.0; 2.0 4.0]\n"
+
+
 def test_reverse_mutates_list_in_place() -> None:
     result = run_aether(
         """

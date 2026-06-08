@@ -497,6 +497,17 @@ class Parser:
                 field = self._consume(TokenType.IDENTIFIER, "Expected field name after '.'.")
                 expr = ast.FieldAccess(expr, field.lexeme, field.line, field.column)
                 continue
+            if self._match(TokenType.LEFT_PAREN) and isinstance(expr, ast.FieldAccess):
+                arguments, keyword_arguments = self._call_arguments()
+                expr = ast.MethodCall(
+                    expr.target,
+                    expr.field_name,
+                    arguments,
+                    keyword_arguments,
+                    expr.line,
+                    expr.column,
+                )
+                continue
             break
         return expr
 
@@ -530,25 +541,7 @@ class Parser:
             name = ".".join(parts)
             if self._match(TokenType.LEFT_PAREN):
                 call_token = self._previous()
-                arguments: list[ast.Expression] = []
-                keyword_arguments: dict[str, ast.Expression] = {}
-                saw_keyword_argument = False
-                if not self._check(TokenType.RIGHT_PAREN):
-                    while True:
-                        if self._check(TokenType.IDENTIFIER) and self._check_next(TokenType.EQUAL):
-                            saw_keyword_argument = True
-                            keyword_name = self._advance().lexeme
-                            if keyword_name in keyword_arguments:
-                                raise self._error(self._previous(), f"Duplicate keyword argument '{keyword_name}'.")
-                            self._consume(TokenType.EQUAL, "Expected '=' after keyword argument name.")
-                            keyword_arguments[keyword_name] = self._expression()
-                        else:
-                            if saw_keyword_argument:
-                                raise self._error(self._peek(), "Positional arguments cannot follow keyword arguments.")
-                            arguments.append(self._expression())
-                        if not self._match(TokenType.COMMA):
-                            break
-                self._consume(TokenType.RIGHT_PAREN, "Expected ')' after arguments.")
+                arguments, keyword_arguments = self._call_arguments()
                 if name == "input":
                     if keyword_arguments:
                         raise self._error(call_token, "input() does not accept keyword arguments.")
@@ -581,6 +574,28 @@ class Parser:
             self._consume(TokenType.RIGHT_PAREN, "Expected ')' after expression.")
             return expr
         raise self._error(self._peek(), "Expected expression.")
+
+    def _call_arguments(self) -> tuple[list[ast.Expression], dict[str, ast.Expression]]:
+        arguments: list[ast.Expression] = []
+        keyword_arguments: dict[str, ast.Expression] = {}
+        saw_keyword_argument = False
+        if not self._check(TokenType.RIGHT_PAREN):
+            while True:
+                if self._check(TokenType.IDENTIFIER) and self._check_next(TokenType.EQUAL):
+                    saw_keyword_argument = True
+                    keyword_name = self._advance().lexeme
+                    if keyword_name in keyword_arguments:
+                        raise self._error(self._previous(), f"Duplicate keyword argument '{keyword_name}'.")
+                    self._consume(TokenType.EQUAL, "Expected '=' after keyword argument name.")
+                    keyword_arguments[keyword_name] = self._expression()
+                else:
+                    if saw_keyword_argument:
+                        raise self._error(self._peek(), "Positional arguments cannot follow keyword arguments.")
+                    arguments.append(self._expression())
+                if not self._match(TokenType.COMMA):
+                    break
+        self._consume(TokenType.RIGHT_PAREN, "Expected ')' after arguments.")
+        return arguments, keyword_arguments
 
     def _string_literal_expression(self, token: Token) -> ast.Expression:
         if not self._has_interpolation_start(token.lexeme):

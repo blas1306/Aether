@@ -7,6 +7,7 @@ from . import ast
 from .errors import AetherError, AetherRuntimeError, AetherTypeError
 from .lexer import lex
 from .modules import is_public_export, private_top_level_names, resolve_file_module_path
+from .native_members import native_member_set, native_method, native_property
 from .parser import Parser
 from .scope import Scope
 from .symbols import EnumSymbol, FunctionSymbol, StructSymbol, VariableSymbol
@@ -1024,6 +1025,11 @@ class TypeChecker:
                 return self._call_type(expression, scope)
             except AetherTypeError as exc:
                 raise _with_source_location(exc, expression) from exc
+        if isinstance(expression, ast.MethodCall):
+            try:
+                return self._method_call_type(expression, scope)
+            except AetherTypeError as exc:
+                raise _with_source_location(exc, expression) from exc
         if isinstance(expression, ast.InputCall):
             try:
                 return self._input_call_type(expression, scope, None)
@@ -1310,6 +1316,9 @@ class TypeChecker:
             for argument_type in argument_types:
                 self._reject_void_value(argument_type, f"argument to {expression.callee}(...)")
             return infer_builtin_type(builtin_name, argument_types)
+        method_type = self._dotted_native_method_call_type(expression, scope)
+        if method_type is not None:
+            return method_type
         if expression.keyword_arguments:
             raise AetherTypeError(f"Function '{expression.callee}' does not accept keyword arguments.")
         if self._constructor_enum(expression.callee) is not None:
@@ -1360,6 +1369,63 @@ class TypeChecker:
                         continue
                 self._raise_implicit_conversion_error(argument_type, parameter.type_name)
         return function.return_type
+
+    def _dotted_native_method_call_type(
+        self,
+        expression: ast.CallExpression,
+        scope: Scope[VariableSymbol],
+    ) -> AetherType | None:
+        receiver = _dotted_call_receiver(expression.callee, expression.line, expression.column)
+        if receiver is None:
+            return None
+        root_name, target, method_name = receiver
+        if scope.lookup(root_name) is None:
+            return None
+        return self._method_call_type(
+            ast.MethodCall(
+                target,
+                method_name,
+                expression.arguments,
+                expression.keyword_arguments,
+                expression.line,
+                expression.column,
+            ),
+            scope,
+        )
+
+    def _method_call_type(self, expression: ast.MethodCall, scope: Scope[VariableSymbol]) -> AetherType | None:
+        target_type = self._expression_type(expression.target, scope)
+        if target_type is UNKNOWN_TYPE:
+            return UNKNOWN_TYPE
+        resolved = self._resolve_type_aliases(target_type, expression)
+        members = native_member_set(resolved)
+        if members is None:
+            raise AetherTypeError(
+                f"Type '{type_to_string(resolved)}' has no native method '{expression.method_name}'.",
+                line=expression.line,
+                column=expression.column,
+            )
+        if expression.method_name in members.properties:
+            raise AetherTypeError(
+                f"{expression.method_name} is a property, not a method.",
+                line=expression.line,
+                column=expression.column,
+            )
+        method = native_method(resolved, expression.method_name)
+        if method is None:
+            raise AetherTypeError(
+                f"Type '{type_to_string(resolved)}' has no native method '{expression.method_name}'.",
+                line=expression.line,
+                column=expression.column,
+            )
+        desugared = ast.CallExpression(
+            method.builtin_name,
+            [expression.target, *expression.arguments],
+            expression.keyword_arguments,
+            expression.line,
+            expression.column,
+        )
+        return self._call_type(desugared, scope)
 
     def _check_builtin_const_mutation(
         self,
@@ -1430,6 +1496,22 @@ class TypeChecker:
                 return "string"
             raise AetherTypeError(
                 f"Exception has no field '{field_name}'.",
+                line=getattr(location, "line", None),
+                column=getattr(location, "column", None),
+            )
+        members = native_member_set(resolved)
+        if members is not None:
+            native = native_property(resolved, field_name)
+            if native is not None:
+                return infer_builtin_type(native.builtin_name, [resolved])
+            if field_name in members.methods:
+                raise AetherTypeError(
+                    f"{field_name} is a method and must be called.",
+                    line=getattr(location, "line", None),
+                    column=getattr(location, "column", None),
+                )
+            raise AetherTypeError(
+                f"Type '{type_to_string(resolved)}' has no native property '{field_name}'.",
                 line=getattr(location, "line", None),
                 column=getattr(location, "column", None),
             )
@@ -1973,6 +2055,17 @@ def _field_access_root_name(expression: ast.Expression) -> str | None:
     return None
 
 
+def _dotted_call_receiver(callee: str, line: int = 1, column: int = 1) -> tuple[str, ast.Expression, str] | None:
+    parts = callee.split(".")
+    if len(parts) < 2:
+        return None
+    root_name = parts[0]
+    target: ast.Expression = ast.Identifier(root_name, line, column)
+    for part in parts[1:-1]:
+        target = ast.FieldAccess(target, part, line, column)
+    return root_name, target, parts[-1]
+
+
 def _source_location(node: object | None) -> tuple[int, int]:
     if node is None:
         return 1, 1
@@ -1990,6 +2083,8 @@ def _source_location(node: object | None) -> tuple[int, int]:
     if isinstance(node, ast.ForInStatement):
         return _source_location(node.iterable)
     if isinstance(node, ast.FieldAccess):
+        return _source_location(node.target)
+    if isinstance(node, ast.MethodCall):
         return _source_location(node.target)
     if isinstance(node, ast.IndexExpression):
         return _source_location(node.array)

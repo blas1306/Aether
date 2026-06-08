@@ -146,6 +146,14 @@ SNIPPET_SUGGESTIONS: tuple[CommandSuggestion, ...] = (
 )
 
 
+NATIVE_TYPE_MEMBERS: dict[str, tuple[tuple[str, str], ...]] = {
+    "List": (("length", "property"), ("copy", "method"), ("reverse", "method"), ("sort", "method")),
+    "Array": (("length", "property"), ("copy", "method")),
+    "Matrix": (("rows", "property"), ("columns", "property"), ("transpose", "method")),
+    "Vector": (("length", "property"), ("norm", "method")),
+}
+
+
 def _line_context(line_text: str, cursor_col: int, *, percent_comments: bool = False) -> tuple[bool, int | None]:
     in_string: str | None = None
     escaped = False
@@ -536,6 +544,67 @@ def _enum_member_suggestions(qualifier: str, prefix: str, document_text: str) ->
     ]
 
 
+def _native_member_suggestions(
+    qualifier: str,
+    prefix: str,
+    document_text: str,
+    workspace_items: Sequence[dict[str, str]],
+) -> list[CommandSuggestion]:
+    type_family = _native_member_type_family(qualifier, document_text, workspace_items)
+    if type_family is None:
+        return []
+    suggestions: list[CommandSuggestion] = []
+    for name, kind in NATIVE_TYPE_MEMBERS[type_family]:
+        if not _match_prefix(name, prefix):
+            continue
+        is_method = kind == "method"
+        suggestions.append(
+            CommandSuggestion(
+                name=name,
+                label=name,
+                insert_text=f"{name}()" if is_method else name,
+                signature=f"{type_family}.{name}{'()' if is_method else ''}",
+                description=f"Native {type_family} {kind}.",
+                category="members",
+                kind=kind,
+                source="language",
+                priority=430 if is_method else 440,
+                match_text=name,
+                cursor_backtrack=1 if is_method else None,
+            )
+        )
+    return suggestions
+
+
+def _native_member_type_family(
+    qualifier: str,
+    document_text: str,
+    workspace_items: Sequence[dict[str, str]],
+) -> str | None:
+    if "." in qualifier:
+        return None
+    for symbol in reversed(extract_document_symbols(document_text)):
+        if symbol.name == qualifier and symbol.type_name:
+            family = _type_family_from_name(symbol.type_name)
+            if family is not None:
+                return family
+    for item in workspace_items:
+        if str(item.get("name", "")).strip() != qualifier:
+            continue
+        family = _type_family_from_name(str(item.get("class", "")).strip())
+        if family is not None:
+            return family
+    return None
+
+
+def _type_family_from_name(type_name: str) -> str | None:
+    compact = re.sub(r"\s+", "", type_name)
+    for family in NATIVE_TYPE_MEMBERS:
+        if compact == family or compact.startswith(f"{family}<"):
+            return family
+    return None
+
+
 def _enum_variants(document_text: str) -> dict[str, list[str]]:
     enums: dict[str, list[str]] = {}
     for match in re.finditer(
@@ -661,6 +730,14 @@ def build_autocomplete_suggestions(
         raw = []
         if request.document_text:
             raw.extend(_enum_member_suggestions(match.qualifier, match.prefix, request.document_text))
+        raw.extend(
+            _native_member_suggestions(
+                match.qualifier,
+                match.prefix,
+                request.document_text,
+                request.workspace_items,
+            )
+        )
         raw.extend(_stdlib_member_suggestions(match.qualifier, match.prefix))
         return _dedupe_suggestions(raw, match, line_text=request.line_text, document_kind=request.document_kind)
 

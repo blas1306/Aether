@@ -47,6 +47,11 @@ _DECLARATION_RE = re.compile(
     r"(?:int|float|double|string|boolean|Array\s*<[^>]+>|List\s*<[^>]+>|Matrix\s*<[^>]+>|Vector\s*<[^>]+>|[A-Z][A-Za-z0-9_]*)\s+"
     r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)\b"
 )
+_TYPED_DECLARATION_RE = re.compile(
+    r"\b(?:(?:public|private)\s+)?(?:const\s+)?"
+    r"(?P<type>int|float|double|string|boolean|Array\s*<[^>]+>|List\s*<[^>]+>|Matrix\s*<[^>]+>|Vector\s*<[^>]+>|[A-Z][A-Za-z0-9_]*)\s+"
+    r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)\b"
+)
 _FUNCTION_RE = re.compile(
     r"\b(?:(?:public|private)\s+)?(?:function\s+)?"
     r"(?:int|float|double|string|boolean|Array|List|Matrix|Vector|[A-Z][A-Za-z0-9_]*)?(?:\s*<[^>]+>)?\s*"
@@ -57,6 +62,12 @@ _ENUM_RE = re.compile(
     r"\b(?:(?:public|private)\s+)?enum\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\{(?P<body>.*?)\}",
     re.DOTALL,
 )
+_NATIVE_TYPE_MEMBERS: dict[str, tuple[tuple[str, str], ...]] = {
+    "List": (("length", "property"), ("copy", "method"), ("reverse", "method"), ("sort", "method")),
+    "Array": (("length", "property"), ("copy", "method")),
+    "Matrix": (("rows", "property"), ("columns", "property"), ("transpose", "method")),
+    "Vector": (("length", "property"), ("norm", "method")),
+}
 
 
 def analyze_source(source: str, *, source_root: str | Path | None = None) -> list[Diagnostic]:
@@ -112,6 +123,13 @@ def completion_items(source: str, line: int, column: int) -> list[CompletionItem
         enum_name, variants = enum_context
         for variant in variants:
             add(variant, "enum", enum_name)
+        return items
+
+    native_context = _native_member_context(source, line, column)
+    if native_context is not None:
+        type_family, members = native_context
+        for member, kind in members:
+            add(member, kind, type_family)
         return items
 
     for keyword in sorted(KEYWORDS):
@@ -175,6 +193,38 @@ def _symbol_names(source: str) -> set[str]:
         if name not in KEYWORDS:
             names.add(name)
     return names
+
+
+def _native_member_context(source: str, line: int, column: int) -> tuple[str, tuple[tuple[str, str], ...]] | None:
+    prefix = _source_prefix(source, line, column)
+    match = re.search(r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)\.\s*[A-Za-z_][A-Za-z0-9_]*$", prefix)
+    if match is None:
+        match = re.search(r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)\.\s*$", prefix)
+    if match is None:
+        return None
+    variable_name = match.group("name")
+    type_name = _declared_variable_types(prefix).get(variable_name)
+    if type_name is None:
+        return None
+    type_family = _native_type_family(type_name)
+    if type_family is None:
+        return None
+    return type_family, _NATIVE_TYPE_MEMBERS[type_family]
+
+
+def _declared_variable_types(source: str) -> dict[str, str]:
+    declarations: dict[str, str] = {}
+    for match in _TYPED_DECLARATION_RE.finditer(source):
+        declarations[match.group("name")] = match.group("type")
+    return declarations
+
+
+def _native_type_family(type_name: str) -> str | None:
+    compact = re.sub(r"\s+", "", type_name)
+    for family in _NATIVE_TYPE_MEMBERS:
+        if compact == family or compact.startswith(f"{family}<"):
+            return family
+    return None
 
 
 def _imported_builtin_aliases(source: str) -> set[str]:

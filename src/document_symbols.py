@@ -10,7 +10,7 @@ DocumentSymbolOrigin = Literal["assignment", "function_definition", "for_loop_va
 
 _IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_]\w*\Z")
 _SIMPLE_ASSIGN_RE = re.compile(r"^(?P<name>[A-Za-z_]\w*)\s*=\s*(?!=)")
-_TYPE_RE = r"(?:Matrix\s*<\s*\w+\s*>|Vector\s*<\s*\w+\s*>|[A-Za-z_]\w*)(?:\s*\[\s*\])?"
+_TYPE_RE = r"(?:(?:Array|List|Matrix|Vector)\s*<\s*[^>]+\s*>|[A-Za-z_]\w*)(?:\s*\[\s*\])?"
 _VISIBILITY_RE = r"(?:(?:public|private)\s+)?"
 _TYPED_VAR_RE = re.compile(rf"^{_VISIBILITY_RE}(?:const\s+)?(?P<type>{_TYPE_RE})\s+(?P<name>[A-Za-z_]\w*)\s*=\s*(?!=)")
 _CONST_ASSIGN_RE = re.compile(rf"^{_VISIBILITY_RE}const\s+(?P<name>[A-Za-z_]\w*)\s*=\s*(?!=)")

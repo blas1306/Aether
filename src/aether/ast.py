@@ -283,6 +283,16 @@ class CallExpression:
 
 
 @dataclass(frozen=True)
+class MethodCall:
+    target: Expression
+    method_name: str
+    arguments: list[Expression]
+    keyword_arguments: dict[str, Expression] = field(default_factory=dict)
+    line: int = 1
+    column: int = 1
+
+
+@dataclass(frozen=True)
 class InputCall:
     arguments: list[Expression]
     line: int = 1
