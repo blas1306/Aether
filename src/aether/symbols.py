@@ -26,6 +26,7 @@ class StructSymbol:
     name: str
     fields: tuple[VariableSymbol, ...]
     visibility: str | None = None
+    methods: tuple[FunctionSymbol, ...] = ()
 
 
 @dataclass(frozen=True)

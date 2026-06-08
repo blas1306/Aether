@@ -241,7 +241,7 @@ This limitation will be addressed when full generic type parameters are implemen
 
 ## Structs
 
-Aether v0 supports a minimal data-only `struct` form. A struct is a nominal type with an explicit list of typed fields, an automatic positional constructor, and field access with `.`.
+Aether v0 supports a nominal `struct` form with an explicit list of typed fields, optional instance methods, an automatic positional constructor, and field/method access with `.`.
 
 ```aether
 public struct Point {
@@ -271,7 +271,75 @@ struct Point {
 }
 ```
 
-Field-level `public`, `private`, and `const` are not supported yet. Methods, nested declarations, custom constructors, and constructor overloads are also not supported inside structs.
+Field-level `public`, `private`, and `const` are not supported yet. Nested declarations, custom constructors, constructor overloads, static methods, generic methods, inheritance, and interfaces are also not supported inside structs.
+
+### Struct Methods
+
+Structs may declare instance methods after or between fields. Methods use the same typed parameter and return syntax as top-level functions, but they do not declare an explicit `self` parameter:
+
+```aether
+public struct Point {
+    double x;
+    double y;
+
+    double squaredNorm() {
+        return x*x + y*y;
+    }
+
+    double norm() {
+        return sqrt(squaredNorm());
+    }
+
+    Point scale(double k) {
+        return Point(x*k, y*k);
+    }
+}
+
+Point p = Point(3, 4);
+println(p.norm()); // 5.0
+Point q = p.scale(2);
+```
+
+The receiver is available implicitly inside the method. Field names resolve after local variables and parameters, so parameters can shadow fields:
+
+```aether
+struct S {
+    int x;
+
+    int f(int x) {
+        return x; // parameter, not field
+    }
+}
+```
+
+The explicit receiver name `this` is also available for field reads:
+
+```aether
+double sum() {
+    return this.x + this.y;
+}
+```
+
+Methods are looked up on the nominal struct type. Calling an unknown method, calling a method with the wrong arity, reading a method without `(...)`, or calling a field as a method is a type error. Fields and methods cannot share a name, and a struct cannot declare two methods with the same name. Methods may return any supported Aether type, including primitives, structs, enums, `List<T>`, `Array<T>`, `Vector<T>`, and `Matrix<T>`.
+
+Struct methods are non-mutating in this version. Assigning to an implicit field or to `this.field` inside a method is rejected:
+
+```aether
+struct Point {
+    double x;
+
+    void setX(double value) {
+        x = value;      // error
+        this.x = value; // error
+    }
+}
+```
+
+The diagnostic is:
+
+```text
+Mutating struct fields inside methods is not supported yet.
+```
 
 The automatic constructor is positional and checks the declared field types:
 
@@ -416,9 +484,10 @@ public struct Wrapper {
 
 Current struct limitations:
 
-- No methods inside structs.
 - No custom constructors or overloaded constructors.
 - No field visibility.
+- No mutating struct methods.
+- No static methods or generic methods.
 - No new generic struct parameters.
 - No inheritance, interfaces, traits, or protocols.
 - No destructuring or pattern matching for structs.
@@ -1582,7 +1651,6 @@ The following are intentionally not implemented in Aether v0:
 ### Language Features
 
 - Comprehensions (list, generator, etc.)
-- Methods in structs (structs have constructors and field access only)
 - Generics (aliases of generic types like `Vector<double>` work; generic type parameters for custom structs do not)
 - Advanced exceptions (`finally`, multiple catches, hierarchies, stack traces)
 - JIT compilation

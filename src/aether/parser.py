@@ -108,6 +108,14 @@ class Parser:
     def _function_declaration(self, visibility: ast.Visibility = None) -> ast.FunctionDeclaration:
         return_type = self._parse_return_type_annotation("Expected function return type.")
         name_token = self._consume(TokenType.IDENTIFIER, "Expected function name.")
+        return self._function_declaration_tail(return_type, name_token, visibility)
+
+    def _function_declaration_tail(
+        self,
+        return_type: AetherType,
+        name_token: Token,
+        visibility: ast.Visibility = None,
+    ) -> ast.FunctionDeclaration:
         name = name_token.lexeme
         self._consume(TokenType.LEFT_PAREN, "Expected '(' after function name.")
         parameters: list[ast.Parameter] = []
@@ -190,27 +198,68 @@ class Parser:
         if self.block_depth > 0:
             raise self._error(self._previous(), "Struct declarations are only supported at top level.")
         name_token = self._consume(TokenType.IDENTIFIER, "Expected struct name.")
-        self._consume(TokenType.LEFT_BRACE, "Expected '{' before struct fields.")
+        self._consume(TokenType.LEFT_BRACE, "Expected '{' before struct body.")
         fields: list[ast.StructField] = []
+        methods: list[ast.FunctionDeclaration] = []
         field_names: set[str] = set()
+        method_names: set[str] = set()
         while not self._check(TokenType.RIGHT_BRACE) and not self._is_at_end():
             if self._check(TokenType.CONST):
                 raise self._error(self._peek(), "Struct fields cannot be const yet.")
             if self._check(TokenType.PUBLIC) or self._check(TokenType.PRIVATE):
-                raise self._error(self._peek(), "Struct fields do not support visibility modifiers yet.")
-            if self._check(TokenType.FUNCTION) or self._check(TokenType.STRUCT):
-                raise self._error(self._peek(), "Methods and nested declarations are not supported inside structs.")
-            type_name = self._parse_type_annotation("Expected explicit field type in struct declaration.")
+                raise self._error(self._peek(), "Struct members do not support visibility modifiers yet.")
+            if self._check(TokenType.STRUCT) or self._check(TokenType.ENUM) or self._check(TokenType.ALIAS):
+                raise self._error(self._peek(), "Nested declarations are not supported inside structs.")
+            if self._match(TokenType.FUNCTION):
+                method = self._function_declaration()
+                self._add_struct_method(method, methods, method_names, field_names, name_token.lexeme)
+                continue
+            type_name = self._parse_return_type_annotation("Expected explicit field or method return type in struct declaration.")
             field_token = self._consume(TokenType.IDENTIFIER, "Expected field name.")
             if self._check(TokenType.LEFT_PAREN):
-                raise self._error(field_token, "Methods inside struct are not supported yet.")
+                method = self._function_declaration_tail(type_name, field_token)
+                self._add_struct_method(method, methods, method_names, field_names, name_token.lexeme)
+                continue
             if field_token.lexeme in field_names:
                 raise self._error(field_token, f"Duplicate field '{field_token.lexeme}' in struct '{name_token.lexeme}'.")
+            if field_token.lexeme in method_names:
+                raise self._error(
+                    field_token,
+                    f"Struct '{name_token.lexeme}' already has a method named '{field_token.lexeme}'.",
+                )
             field_names.add(field_token.lexeme)
             fields.append(ast.StructField(field_token.lexeme, type_name, field_token.line, field_token.column))
             self._consume(TokenType.SEMICOLON, "Expected ';' after struct field.")
         self._consume(TokenType.RIGHT_BRACE, "Expected '}' after struct declaration.")
-        return ast.StructDeclaration(name_token.lexeme, fields, name_token.line, name_token.column, visibility)
+        return ast.StructDeclaration(
+            name_token.lexeme,
+            fields,
+            name_token.line,
+            name_token.column,
+            visibility,
+            methods,
+        )
+
+    def _add_struct_method(
+        self,
+        method: ast.FunctionDeclaration,
+        methods: list[ast.FunctionDeclaration],
+        method_names: set[str],
+        field_names: set[str],
+        struct_name: str,
+    ) -> None:
+        if method.name in method_names:
+            raise self._error(
+                self._previous(),
+                f"Duplicate method '{method.name}' in struct '{struct_name}'.",
+            )
+        if method.name in field_names:
+            raise self._error(
+                self._previous(),
+                f"Struct '{struct_name}' already has a field named '{method.name}'.",
+            )
+        method_names.add(method.name)
+        methods.append(method)
 
     def _enum_declaration(self, visibility: ast.Visibility = None) -> ast.EnumDeclaration:
         if self.block_depth > 0:

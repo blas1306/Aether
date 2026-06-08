@@ -73,6 +73,7 @@ class Function:
     imported_modules: set[str] | None = None
     type_aliases: dict[str, AetherType] | None = None
     structs: dict[str, ast.StructDeclaration] | None = None
+    struct_methods: dict[str, dict[str, "Function"]] | None = None
     enums: dict[str, ast.EnumDeclaration] | None = None
 
 
@@ -87,6 +88,7 @@ class FunctionReference:
 class Environment:
     parent: "Environment | None" = None
     variable_scope: Scope[AetherValue] | None = None
+    method_receiver: AetherValue | None = None
 
     def __post_init__(self) -> None:
         if self.variable_scope is None:
@@ -158,6 +160,7 @@ class _FunctionContext:
         self.previous_imported_modules: set[str] = set()
         self.previous_type_aliases: dict[str, AetherType] = {}
         self.previous_structs: dict[str, ast.StructDeclaration] = {}
+        self.previous_struct_methods: dict[str, dict[str, Function]] = {}
         self.previous_enums: dict[str, ast.EnumDeclaration] = {}
 
     def __enter__(self) -> None:
@@ -166,6 +169,7 @@ class _FunctionContext:
         self.previous_imported_modules = self.interpreter.imported_modules
         self.previous_type_aliases = self.interpreter.type_aliases
         self.previous_structs = self.interpreter.structs
+        self.previous_struct_methods = self.interpreter.struct_methods
         self.previous_enums = self.interpreter.enums
         self.interpreter.builtin_aliases = {
             **self.previous_builtin_aliases,
@@ -187,6 +191,10 @@ class _FunctionContext:
             **self.previous_structs,
             **(self.function.structs or {}),
         }
+        self.interpreter.struct_methods = {
+            **self.previous_struct_methods,
+            **(self.function.struct_methods or {}),
+        }
         self.interpreter.enums = {
             **self.previous_enums,
             **(self.function.enums or {}),
@@ -198,6 +206,7 @@ class _FunctionContext:
         self.interpreter.imported_modules = self.previous_imported_modules
         self.interpreter.type_aliases = self.previous_type_aliases
         self.interpreter.structs = self.previous_structs
+        self.interpreter.struct_methods = self.previous_struct_methods
         self.interpreter.enums = self.previous_enums
 
 
@@ -230,6 +239,7 @@ class Interpreter:
         self.imported_modules: set[str] = set()
         self.type_aliases: dict[str, AetherType] = {}
         self.structs: dict[str, ast.StructDeclaration] = {}
+        self.struct_methods: dict[str, dict[str, Function]] = {}
         self.enums: dict[str, ast.EnumDeclaration] = {}
         self.source_root = Path(source_root).expanduser().resolve() if source_root is not None else Path.cwd()
         self.import_stack = import_stack
@@ -351,11 +361,21 @@ class Interpreter:
             return
         if isinstance(statement, ast.StructDeclaration):
             self.structs[statement.name] = statement
+            self.struct_methods[statement.name] = {
+                method.name: self._function(method, env)
+                for method in statement.methods
+            }
             return
         if isinstance(statement, ast.EnumDeclaration):
             self.enums[statement.name] = statement
             return
         if isinstance(statement, ast.Assignment):
+            if self._implicit_method_field(statement.name, env) is not None:
+                raise AetherTypeError(
+                    "Mutating struct fields inside methods is not supported yet.",
+                    line=statement.line,
+                    column=statement.column,
+                )
             current = env.lookup(statement.name)
             if isinstance(statement.expression, ast.MatrixLiteral) and current is not None:
                 if not statement.expression.rows and is_array_type(current.type_name):
@@ -391,12 +411,32 @@ class Interpreter:
             self._assign_destructuring(statement, env)
             return
         if isinstance(statement, ast.IndexAssignment):
+            assigned_name = _assignment_root_name(statement.array)
+            if assigned_name is not None and self._implicit_method_field(assigned_name, env) is not None:
+                raise AetherTypeError(
+                    "Mutating struct fields inside methods is not supported yet.",
+                    line=statement.line,
+                    column=statement.column,
+                )
             self._assign_index(statement, env)
             return
         if isinstance(statement, ast.MatrixIndexAssignment):
+            assigned_name = _assignment_root_name(statement.matrix)
+            if assigned_name is not None and self._implicit_method_field(assigned_name, env) is not None:
+                raise AetherTypeError(
+                    "Mutating struct fields inside methods is not supported yet.",
+                    line=statement.line,
+                    column=statement.column,
+                )
             self._assign_matrix_index(statement, env)
             return
         if isinstance(statement, ast.FieldAssignment):
+            if self._is_method_receiver_field_target(statement.target, env):
+                raise AetherTypeError(
+                    "Mutating struct fields inside methods is not supported yet.",
+                    line=statement.line,
+                    column=statement.column,
+                )
             self._assign_field(statement, env)
             return
         if isinstance(statement, ast.ExpressionStatement):
@@ -485,6 +525,7 @@ class Interpreter:
             set(self.imported_modules),
             dict(self.type_aliases),
             dict(self.structs),
+            {name: dict(methods) for name, methods in self.struct_methods.items()},
             dict(self.enums),
         )
 
@@ -497,6 +538,9 @@ class Interpreter:
             try:
                 return env.get(expression.name)
             except AetherRuntimeError as exc:
+                field_value = self._implicit_method_field(expression.name, env)
+                if field_value is not None:
+                    return field_value
                 builtin_constant = get_builtin_constant(self.builtin_constant_aliases.get(expression.name, expression.name))
                 if builtin_constant is not None:
                     return builtin_constant
@@ -1063,6 +1107,11 @@ class Interpreter:
             if len(args) != len(expression.arguments):
                 args = [self._evaluate(arg, env) for arg in expression.arguments]
             return self._construct_struct(struct, args)
+        receiver = self._method_receiver_value(env)
+        if receiver is not None and "." not in expression.callee:
+            method = self._struct_method_function(receiver.type_name, expression.callee)
+            if method is not None:
+                return self._call_struct_method(receiver, method, expression.arguments, named_args, env, expression)
         function = env.get_function(expression.callee)
         if function is not None and isinstance(function.declaration, ast.FunctionDeclaration) and len(
             expression.arguments
@@ -1108,6 +1157,14 @@ class Interpreter:
 
     def _evaluate_method_call(self, expression: ast.MethodCall, env: Environment) -> AetherValue:
         receiver = self._evaluate(expression.target, env)
+        if isinstance(receiver.value, StructInstance):
+            method = self._struct_method_function(receiver.value.type_name, expression.method_name)
+            if method is None:
+                if expression.method_name in receiver.value.fields:
+                    raise AetherTypeError(f"{expression.method_name} is a field, not a method.")
+                raise AetherTypeError(f"Struct '{receiver.value.type_name}' has no method '{expression.method_name}'.")
+            named_args = {name: self._evaluate(value, env) for name, value in expression.keyword_arguments.items()}
+            return self._call_struct_method(receiver, method, expression.arguments, named_args, env, expression)
         members = native_member_set(receiver.type_name)
         if members is None:
             raise AetherTypeError(
@@ -1200,6 +1257,8 @@ class Interpreter:
             )
         instance = self._require_struct_instance(struct_value, field_name)
         if field_name not in instance.fields:
+            if self._struct_method_function(instance.type_name, field_name) is not None:
+                raise AetherTypeError(f"{field_name} is a method and must be called.")
             raise AetherTypeError(f"Struct '{instance.type_name}' has no field '{field_name}'.")
         return instance.fields[field_name]
 
@@ -1276,6 +1335,107 @@ class Interpreter:
             if return_type == "void":
                 return AetherValue("void", VOID_VALUE)
             raise AetherRuntimeError(f"Function '{callee}' ended without returning a value.")
+
+    def _call_struct_method(
+        self,
+        receiver: AetherValue,
+        function: Function,
+        argument_expressions: list[ast.Expression],
+        named_args: dict[str, AetherValue],
+        env: Environment,
+        location: object | None = None,
+    ) -> AetherValue:
+        if named_args:
+            raise AetherRuntimeError(
+                f"Method '{function.declaration.name}' does not accept keyword arguments.",
+                line=getattr(location, "line", None),
+                column=getattr(location, "column", None),
+            )
+        declaration = function.declaration
+        if not isinstance(declaration, ast.FunctionDeclaration):
+            raise AetherRuntimeError(f"Invalid struct method '{declaration.name}'.")
+        if len(argument_expressions) != len(declaration.parameters):
+            raise AetherRuntimeError(
+                f"Method '{declaration.name}' expects {len(declaration.parameters)} arguments "
+                f"but got {len(argument_expressions)}.",
+                line=getattr(location, "line", None),
+                column=getattr(location, "column", None),
+                kind="arity",
+            )
+        with self._function_context(function):
+            parameter_types = [
+                self._resolve_type_aliases(parameter.type_name)
+                for parameter in declaration.parameters
+            ]
+            args = [
+                self._evaluate_with_expected_type(argument, env, parameter_type)
+                for argument, parameter_type in zip(argument_expressions, parameter_types)
+            ]
+            local_env = Environment(parent=function.closure or self.global_env, method_receiver=receiver)
+            local_env.define("this", receiver, is_const=True)
+            for parameter, parameter_type, arg in zip(declaration.parameters, parameter_types, args):
+                local_env.define(parameter.name, coerce_implicit(arg, parameter_type))
+            return_type = self._resolve_type_aliases(declaration.return_type)
+            previous_return_type = self.current_return_type
+            self.current_return_type = return_type
+            try:
+                try:
+                    self._execute_block(declaration.body, local_env)
+                except _ReturnSignal as signal:
+                    return coerce_return_value(signal.value, return_type)
+            finally:
+                self.current_return_type = previous_return_type
+            if return_type == "void":
+                return AetherValue("void", VOID_VALUE)
+            raise AetherRuntimeError(f"Method '{declaration.name}' ended without returning a value.")
+
+    def _struct_method_function(self, struct_name: AetherType, method_name: str) -> Function | None:
+        if not isinstance(struct_name, str):
+            return None
+        return self.struct_methods.get(struct_name, {}).get(method_name)
+
+    def _method_receiver_value(self, env: Environment) -> AetherValue | None:
+        cursor: Environment | None = env
+        while cursor is not None:
+            if cursor.method_receiver is not None and isinstance(cursor.method_receiver.value, StructInstance):
+                return cursor.method_receiver
+            cursor = cursor.parent
+        return None
+
+    def _method_receiver_env(self, env: Environment) -> Environment | None:
+        cursor: Environment | None = env
+        while cursor is not None:
+            if cursor.method_receiver is not None and isinstance(cursor.method_receiver.value, StructInstance):
+                return cursor
+            cursor = cursor.parent
+        return None
+
+    def _lookup_before_method_receiver(self, name: str, env: Environment) -> AetherValue | None:
+        receiver_env = self._method_receiver_env(env)
+        if receiver_env is None:
+            return None
+        cursor: Environment | None = env
+        while cursor is not None:
+            if name in cursor.values:
+                return cursor.values[name]
+            if cursor is receiver_env:
+                return None
+            cursor = cursor.parent
+        return None
+
+    def _implicit_method_field(self, name: str, env: Environment) -> AetherValue | None:
+        receiver = self._method_receiver_value(env)
+        if receiver is None or not isinstance(receiver.value, StructInstance):
+            return None
+        if self._lookup_before_method_receiver(name, env) is not None:
+            return None
+        return receiver.value.fields.get(name)
+
+    def _is_method_receiver_field_target(self, expression: ast.Expression, env: Environment) -> bool:
+        root_name = _assignment_root_name(expression)
+        if root_name == "this" and self._method_receiver_value(env) is not None:
+            return True
+        return root_name is not None and self._implicit_method_field(root_name, env) is not None
 
     def _function_context(self, function: Function) -> "_FunctionContext":
         return _FunctionContext(self, function)
@@ -1433,6 +1593,7 @@ class Interpreter:
         for name, declaration in self._exported_structs(program, module_interpreter).items():
             self._ensure_import_available(name, module_name)
             self.structs[name] = declaration
+            self.struct_methods[name] = dict(module_interpreter.struct_methods.get(name, {}))
             self.imported_symbol_origins[name] = module_name
         for name, declaration in self._exported_enums(program, module_interpreter).items():
             self._ensure_import_available(name, module_name)
@@ -1802,6 +1963,18 @@ def _dotted_call_receiver(callee: str, line: int = 1, column: int = 1) -> tuple[
     for part in parts[1:-1]:
         target = ast.FieldAccess(target, part, line, column)
     return root_name, target, parts[-1]
+
+
+def _assignment_root_name(expression: ast.Expression) -> str | None:
+    if isinstance(expression, ast.Identifier):
+        return expression.name
+    if isinstance(expression, ast.IndexExpression):
+        return _assignment_root_name(expression.array)
+    if isinstance(expression, ast.MatrixIndexExpression):
+        return _assignment_root_name(expression.matrix)
+    if isinstance(expression, ast.FieldAccess):
+        return _assignment_root_name(expression.target)
+    return None
 
 
 def _with_source_location(exc: AetherError, node: object | None) -> AetherError:

@@ -65,6 +65,7 @@ class TypeChecker:
         self.expression_function_call_stack: set[str] = set()
         self.current_return_type: AetherType | None = None
         self.current_function_name: str | None = None
+        self.current_method_struct: StructSymbol | None = None
         self.loop_depth = 0
         self.loop_variable_stack: list[tuple[str, Scope[VariableSymbol]]] = []
         self.imported_modules: set[str] = set()
@@ -195,6 +196,7 @@ class TypeChecker:
                 VariableSymbol(field.name, self._resolve_type_aliases(field.type_name, field))
                 for field in statement.fields
             )
+            methods = self._struct_method_symbols(statement)
             if is_public_export(statement.visibility, package_name):
                 for field in statement.fields:
                     if _type_uses_private_name(field.type_name, private_names):
@@ -212,7 +214,40 @@ class TypeChecker:
                             line=statement.line,
                             column=statement.column,
                         )
-            self.structs[statement.name] = StructSymbol(statement.name, fields, statement.visibility)
+            self.structs[statement.name] = StructSymbol(statement.name, fields, statement.visibility, methods)
+
+    def _struct_method_symbols(self, declaration: ast.StructDeclaration) -> tuple[FunctionSymbol, ...]:
+        symbols: list[FunctionSymbol] = []
+        names: set[str] = set()
+        field_names = {field.name for field in declaration.fields}
+        for method in declaration.methods:
+            if method.name in names:
+                raise AetherTypeError(
+                    f"Duplicate method '{method.name}' in struct '{declaration.name}'.",
+                    line=method.line,
+                    column=method.column,
+                )
+            if method.name in field_names:
+                raise AetherTypeError(
+                    f"Struct '{declaration.name}' cannot have a field and method both named '{method.name}'.",
+                    line=method.line,
+                    column=method.column,
+                )
+            return_type = self._resolve_type_aliases(method.return_type, method)
+            parameters = tuple(
+                VariableSymbol(parameter.name, self._resolve_type_aliases(parameter.type_name, method))
+                for parameter in method.parameters
+            )
+            for parameter in parameters:
+                if _contains_void_type(parameter.type_name):
+                    raise AetherTypeError(
+                        f"Parameter '{parameter.name}' cannot have type void.",
+                        line=method.line,
+                        column=method.column,
+                    )
+            names.add(method.name)
+            symbols.append(FunctionSymbol(method.name, return_type, parameters, method.visibility))
+        return tuple(symbols)
 
     def _check_statements(self, statements: list[ast.Statement], scope: Scope[VariableSymbol]) -> None:
         for statement in statements:
@@ -246,6 +281,7 @@ class TypeChecker:
             self._declare_alias(statement, scope)
             return
         if isinstance(statement, ast.StructDeclaration):
+            self._check_struct_methods(statement)
             return
         if isinstance(statement, ast.EnumDeclaration):
             return
@@ -612,6 +648,12 @@ class TypeChecker:
     def _assign_variable(self, statement: ast.Assignment, scope: Scope[VariableSymbol]) -> None:
         if self._is_active_loop_variable_assignment(statement.name, scope):
             raise AetherTypeError(f"Cannot assign to loop variable '{statement.name}' inside its own for-loop.")
+        if self._implicit_method_field(statement.name, scope) is not None:
+            raise AetherTypeError(
+                "Mutating struct fields inside methods is not supported yet.",
+                line=statement.line,
+                column=statement.column,
+            )
         existing = scope.lookup(statement.name)
         if existing is not None and existing.is_const:
             raise AetherTypeError(
@@ -741,6 +783,12 @@ class TypeChecker:
         assigned_name = _assignment_root_name(statement.array)
         if assigned_name is not None and self._is_active_loop_variable_assignment(assigned_name, scope):
             raise AetherTypeError(f"Cannot assign to loop variable '{assigned_name}' inside its own for-loop.")
+        if assigned_name is not None and self._implicit_method_field(assigned_name, scope) is not None:
+            raise AetherTypeError(
+                "Mutating struct fields inside methods is not supported yet.",
+                line=statement.line,
+                column=statement.column,
+            )
         if isinstance(statement.index, (ast.FullSlice, ast.RangeExpression)):
             raise AetherTypeError("Slice assignment is not supported yet.")
         if assigned_name is not None and scope.is_const(assigned_name):
@@ -785,6 +833,12 @@ class TypeChecker:
         assigned_name = _assignment_root_name(statement.matrix)
         if assigned_name is not None and self._is_active_loop_variable_assignment(assigned_name, scope):
             raise AetherTypeError(f"Cannot assign to loop variable '{assigned_name}' inside its own for-loop.")
+        if assigned_name is not None and self._implicit_method_field(assigned_name, scope) is not None:
+            raise AetherTypeError(
+                "Mutating struct fields inside methods is not supported yet.",
+                line=statement.line,
+                column=statement.column,
+            )
         if isinstance(statement.row, (ast.FullSlice, ast.RangeExpression)) or isinstance(
             statement.column_index,
             (ast.FullSlice, ast.RangeExpression),
@@ -815,6 +869,12 @@ class TypeChecker:
         assigned_name = _assignment_root_name(statement.target)
         if assigned_name is not None and self._is_active_loop_variable_assignment(assigned_name, scope):
             raise AetherTypeError(f"Cannot assign to loop variable '{assigned_name}' inside its own for-loop.")
+        if self._is_method_receiver_field_target(statement.target, scope):
+            raise AetherTypeError(
+                "Mutating struct fields inside methods is not supported yet.",
+                line=statement.line,
+                column=statement.column,
+            )
         if assigned_name is not None and scope.is_const(assigned_name):
             raise AetherTypeError(
                 f"Cannot mutate constant '{assigned_name}'.",
@@ -858,6 +918,39 @@ class TypeChecker:
         target_scope = scope.resolve_scope(name)
         return any(loop_name == name and loop_scope is target_scope for loop_name, loop_scope in self.loop_variable_stack)
 
+    def _lookup_before_global(self, name: str, scope: Scope[VariableSymbol]) -> VariableSymbol | None:
+        cursor: Scope[VariableSymbol] | None = scope
+        while cursor is not None and cursor is not self.global_scope:
+            if name in cursor.symbols:
+                return cursor.symbols[name]
+            cursor = cursor.parent
+        return None
+
+    def _implicit_method_field(self, name: str, scope: Scope[VariableSymbol]) -> VariableSymbol | None:
+        if self.current_method_struct is None:
+            return None
+        if self._lookup_before_global(name, scope) is not None:
+            return None
+        return self._struct_field_symbol(self.current_method_struct, name)
+
+    def _is_method_receiver_field_target(self, expression: ast.Expression, scope: Scope[VariableSymbol]) -> bool:
+        root_name = _assignment_root_name(expression)
+        if root_name == "this" and self.current_method_struct is not None:
+            return True
+        return root_name is not None and self._implicit_method_field(root_name, scope) is not None
+
+    def _struct_field_symbol(self, struct: StructSymbol, field_name: str) -> VariableSymbol | None:
+        for field in struct.fields:
+            if field.name == field_name:
+                return field
+        return None
+
+    def _struct_method_symbol(self, struct: StructSymbol, method_name: str) -> FunctionSymbol | None:
+        for method in struct.methods:
+            if method.name == method_name:
+                return method
+        return None
+
     def _declare_function(self, statement: ast.FunctionDeclaration) -> None:
         if statement.name in self.functions:
             raise AetherTypeError(f"Function '{statement.name}' is already defined.")
@@ -893,6 +986,35 @@ class TypeChecker:
             self.current_function_name = previous_function_name
         if return_type != "void" and not self._statements_always_return(statement.body):
             raise AetherTypeError(f"Function '{statement.name}' may not return a value on all paths.")
+
+    def _check_struct_methods(self, declaration: ast.StructDeclaration) -> None:
+        struct = self.structs[declaration.name]
+        for method in declaration.methods:
+            symbol = self._struct_method_symbol(struct, method.name)
+            if symbol is None:
+                continue
+            method_scope: Scope[VariableSymbol] = Scope(parent=self.global_scope)
+            method_scope.define_local("this", VariableSymbol("this", struct.name, is_const=True), is_const=True)
+            for parameter in symbol.parameters:
+                method_scope.define_local(parameter.name, parameter)
+            previous_return_type = self.current_return_type
+            previous_function_name = self.current_function_name
+            previous_method_struct = self.current_method_struct
+            self.current_return_type = symbol.return_type
+            self.current_function_name = f"{struct.name}.{method.name}"
+            self.current_method_struct = struct
+            try:
+                self._check_statements(method.body, method_scope)
+            finally:
+                self.current_return_type = previous_return_type
+                self.current_function_name = previous_function_name
+                self.current_method_struct = previous_method_struct
+            if symbol.return_type != "void" and not self._statements_always_return(method.body):
+                raise AetherTypeError(
+                    f"Method '{struct.name}.{method.name}' may not return a value on all paths.",
+                    line=method.line,
+                    column=method.column,
+                )
 
     def _declare_expression_function(self, statement: ast.ExpressionFunctionDeclaration) -> None:
         if statement.name in self.functions:
@@ -977,6 +1099,13 @@ class TypeChecker:
                     self._expression_type(part, scope)
             return "string"
         if isinstance(expression, ast.Identifier):
+            if self.current_method_struct is not None:
+                local_symbol = self._lookup_before_global(expression.name, scope)
+                if local_symbol is not None:
+                    return local_symbol.type_name
+                field_symbol = self._struct_field_symbol(self.current_method_struct, expression.name)
+                if field_symbol is not None:
+                    return field_symbol.type_name
             symbol = scope.lookup(expression.name)
             if symbol is None:
                 constant_name = self.builtin_constant_aliases.get(expression.name, expression.name)
@@ -1341,6 +1470,9 @@ class TypeChecker:
         if struct is not None:
             self._check_struct_constructor(expression, struct, scope)
             return struct.name
+        method_return_type = self._direct_struct_method_call_type(expression, scope)
+        if method_return_type is not None:
+            return method_return_type
         function = self.functions.get(expression.callee)
         if function is None:
             private_message = self._private_import_message(expression.callee)
@@ -1417,6 +1549,23 @@ class TypeChecker:
         if target_type is UNKNOWN_TYPE:
             return UNKNOWN_TYPE
         resolved = self._resolve_type_aliases(target_type, expression)
+        if isinstance(resolved, str) and resolved in self.structs:
+            struct = self.structs[resolved]
+            if self._struct_field_symbol(struct, expression.method_name) is not None:
+                raise AetherTypeError(
+                    f"{expression.method_name} is a field, not a method.",
+                    line=expression.line,
+                    column=expression.column,
+                )
+            method = self._struct_method_symbol(struct, expression.method_name)
+            if method is None:
+                raise AetherTypeError(
+                    f"Struct '{struct.name}' has no method '{expression.method_name}'.",
+                    line=expression.line,
+                    column=expression.column,
+                )
+            self._check_struct_method_arguments(method, expression.arguments, expression.keyword_arguments, scope, expression)
+            return method.return_type
         members = native_member_set(resolved)
         if members is None:
             raise AetherTypeError(
@@ -1437,6 +1586,14 @@ class TypeChecker:
                 line=expression.line,
                 column=expression.column,
             )
+        if method.builtin_name in LIST_MUTATING_BUILTINS:
+            root_name = _assignment_root_name(expression.target)
+            if root_name is not None and self._implicit_method_field(root_name, scope) is not None:
+                raise AetherTypeError(
+                    "Mutating struct fields inside methods is not supported yet.",
+                    line=expression.line,
+                    column=expression.column,
+                )
         desugared = ast.CallExpression(
             method.builtin_name,
             [expression.target, *expression.arguments],
@@ -1445,6 +1602,51 @@ class TypeChecker:
             expression.column,
         )
         return self._call_type(desugared, scope)
+
+    def _direct_struct_method_call_type(
+        self,
+        expression: ast.CallExpression,
+        scope: Scope[VariableSymbol],
+    ) -> AetherType | None:
+        if self.current_method_struct is None or "." in expression.callee:
+            return None
+        method = self._struct_method_symbol(self.current_method_struct, expression.callee)
+        if method is None:
+            return None
+        self._check_struct_method_arguments(method, expression.arguments, expression.keyword_arguments, scope, expression)
+        return method.return_type
+
+    def _check_struct_method_arguments(
+        self,
+        method: FunctionSymbol,
+        arguments: list[ast.Expression],
+        keyword_arguments: dict[str, ast.Expression],
+        scope: Scope[VariableSymbol],
+        location: object,
+    ) -> None:
+        if keyword_arguments:
+            raise AetherTypeError(
+                f"Method '{method.name}' does not accept keyword arguments.",
+                line=getattr(location, "line", None),
+                column=getattr(location, "column", None),
+            )
+        if len(arguments) != len(method.parameters):
+            raise AetherTypeError(
+                f"Method '{method.name}' expects {len(method.parameters)} arguments but got {len(arguments)}.",
+                line=getattr(location, "line", None),
+                column=getattr(location, "column", None),
+                kind="arity",
+            )
+        for argument, parameter in zip(arguments, method.parameters):
+            if self._can_use_expected_collection_type(argument, parameter.type_name):
+                continue
+            argument_type = self._expression_type(argument, scope)
+            self._reject_void_value(argument_type, f"argument to {method.name}(...)")
+            if argument_type is not UNKNOWN_TYPE and not can_implicitly_convert(argument_type, parameter.type_name):
+                if isinstance(argument, ast.ListLiteral) and isinstance(parameter.type_name, ArrayType):
+                    if self._can_assign_braced_literal_to_array(argument, parameter.type_name, scope):
+                        continue
+                self._raise_implicit_conversion_error(argument_type, parameter.type_name, location)
 
     def _check_builtin_const_mutation(
         self,
@@ -1546,6 +1748,12 @@ class TypeChecker:
         for field in struct.fields:
             if field.name == field_name:
                 return field.type_name
+        if self._struct_method_symbol(struct, field_name) is not None:
+            raise AetherTypeError(
+                f"{field_name} is a method and must be called.",
+                line=getattr(location, "line", None),
+                column=getattr(location, "column", None),
+            )
         raise AetherTypeError(
             f"Struct '{struct.name}' has no field '{field_name}'.",
             line=getattr(location, "line", None),

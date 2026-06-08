@@ -23,6 +23,11 @@ _AETHER_FUNCTION_RE = re.compile(
     r"(?P<name>[A-Za-z_]\w*)\s*\((?P<params>[^()]*)\)\s*\{?",
     re.IGNORECASE,
 )
+_STRUCT_METHOD_RE = re.compile(
+    rf"(?m)^[ \t]*(?:function\s+)?(?P<return_type>{_TYPE_RE})\s+"
+    r"(?P<name>[A-Za-z_]\w*)\s*\((?P<params>[^()]*)\)\s*\{",
+    re.IGNORECASE,
+)
 _BLOCK_FUNCTION_RE = re.compile(
     r"^function\s+(?:(?:\[(?P<outputs>[A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*)\]|(?P<output>[A-Za-z_]\w*))\s*=\s*)?"
     r"(?P<name>[A-Za-z_]\w*)\s*\((?P<params>[^()]*)\)\s*$",
@@ -81,6 +86,8 @@ def extract_document_symbol_occurrences(document_text: str) -> list[DocumentSymb
         if symbol is None:
             continue
         symbols.append(symbol)
+        if symbol.origin == "struct":
+            symbols.extend(_extract_struct_method_symbols(statement, line_starts))
     return sorted(symbols, key=lambda item: item.statement_index)
 
 
@@ -198,6 +205,37 @@ def _extract_struct_symbol(
         detail=f"struct {name}",
         type_name=name,
     )
+
+
+def _extract_struct_method_symbols(statement_span: _StatementSpan, line_starts: list[int]) -> list[DocumentSymbol]:
+    symbols: list[DocumentSymbol] = []
+    for match in _STRUCT_METHOD_RE.finditer(statement_span.text):
+        prefix = statement_span.text[: match.start()]
+        if "{" not in prefix:
+            continue
+        name = match.group("name")
+        parsed_params = _parse_aether_parameters(match.group("params"))
+        if parsed_params is None:
+            continue
+        param_names, param_details = parsed_params
+        return_type = _normalize_type_name(match.group("return_type"))
+        signature = _build_function_signature(name, param_names)
+        detail = f"{return_type} {_build_function_signature(name, param_details)}"
+        symbols.append(
+            _document_symbol(
+                statement_span,
+                line_starts,
+                name_start=match.start("name"),
+                name_end=match.end("name"),
+                name=name,
+                kind="function",
+                origin="function_definition",
+                signature=signature,
+                detail=detail,
+                type_name=return_type,
+            )
+        )
+    return symbols
 
 
 def _extract_enum_symbol(

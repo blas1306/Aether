@@ -8,6 +8,7 @@ from pathlib import Path
 from .errors import AetherError, AetherRuntimeError, AetherSyntaxError, AetherTypeError
 from .lexer import lex
 from .parser import Parser
+from . import ast
 from .result import AetherRunResult
 from .runner import run_aether
 from .stdlib.registry import builtin_constant_names, builtin_names
@@ -132,6 +133,13 @@ def completion_items(source: str, line: int, column: int) -> list[CompletionItem
             add(member, kind, type_family)
         return items
 
+    struct_context = _struct_member_context(source, line, column)
+    if struct_context is not None:
+        struct_name, members = struct_context
+        for member, kind in members:
+            add(member, kind, struct_name)
+        return items
+
     for keyword in sorted(KEYWORDS):
         add(keyword, "keyword")
     for builtin in builtin_names():
@@ -210,6 +218,40 @@ def _native_member_context(source: str, line: int, column: int) -> tuple[str, tu
     if type_family is None:
         return None
     return type_family, _NATIVE_TYPE_MEMBERS[type_family]
+
+
+def _struct_member_context(source: str, line: int, column: int) -> tuple[str, tuple[tuple[str, str], ...]] | None:
+    prefix = _source_prefix(source, line, column)
+    match = re.search(r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)\.\s*[A-Za-z_][A-Za-z0-9_]*$", prefix)
+    if match is None:
+        match = re.search(r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)\.\s*$", prefix)
+    if match is None:
+        return None
+    variable_name = match.group("name")
+    type_name = _declared_variable_types(prefix).get(variable_name)
+    if type_name is None:
+        return None
+    compact_type = re.sub(r"\s+", "", type_name)
+    members = _struct_members(source).get(compact_type)
+    if members is None:
+        return None
+    return compact_type, members
+
+
+def _struct_members(source: str) -> dict[str, tuple[tuple[str, str], ...]]:
+    try:
+        program, _errors = Parser(lex(source)).parse_with_recovery()
+    except AetherSyntaxError:
+        return {}
+    structs: dict[str, tuple[tuple[str, str], ...]] = {}
+    for statement in program.statements:
+        if not isinstance(statement, ast.StructDeclaration):
+            continue
+        members: list[tuple[str, str]] = []
+        members.extend((field.name, "property") for field in statement.fields)
+        members.extend((method.name, "method") for method in statement.methods)
+        structs[statement.name] = tuple(members)
+    return structs
 
 
 def _declared_variable_types(source: str) -> dict[str, str]:

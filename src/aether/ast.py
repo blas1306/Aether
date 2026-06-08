@@ -68,6 +68,7 @@ class StructDeclaration:
     line: int = 1
     column: int = 1
     visibility: Visibility = None
+    methods: list["FunctionDeclaration"] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
