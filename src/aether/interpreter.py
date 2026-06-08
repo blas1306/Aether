@@ -589,6 +589,8 @@ class Interpreter:
             return self._evaluate_input_call(expression, env, expected_type)
         if isinstance(expected_type, ArrayType) and isinstance(expression, (ast.ArrayLiteral, ast.ListLiteral)):
             return self._evaluate_braced_array_literal(expression, env, expected_type)
+        if isinstance(expected_type, ListType) and isinstance(expression, ast.ListLiteral):
+            return self._evaluate_list_literal(expression, env, expected_type)
         return self._evaluate(expression, env)
 
     def _evaluate_input_call(

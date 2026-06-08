@@ -822,11 +822,15 @@ class TypeChecker:
                 column=statement.column,
             )
         struct_type = self._expression_type(statement.target, scope)
-        value_type = self._expression_type(statement.expression, scope)
-        if struct_type is UNKNOWN_TYPE or value_type is UNKNOWN_TYPE:
+        if struct_type is UNKNOWN_TYPE:
             return
         field_type = self._field_type(struct_type, statement.field_name, statement)
-        if not can_implicitly_convert(value_type, field_type):
+        if self._can_use_expected_collection_type(statement.expression, field_type):
+            return
+        value_type = self._expression_type(statement.expression, scope)
+        if value_type is UNKNOWN_TYPE:
+            return
+        if not self._can_assign(value_type, field_type, initializer=statement.expression, scope=scope):
             self._raise_implicit_conversion_error(value_type, field_type, statement)
 
     def _check_for_in(self, statement: ast.ForInStatement, scope: Scope[VariableSymbol]) -> None:
@@ -931,6 +935,12 @@ class TypeChecker:
                 line=statement.line,
                 column=statement.column,
             )
+        if (
+            isinstance(statement.expression, ast.ListLiteral)
+            and not statement.expression.elements
+            and isinstance(self.current_return_type, (ArrayType, ListType))
+        ):
+            return
         value_type = self._expression_type(statement.expression, scope)
         if value_type is not UNKNOWN_TYPE and not self._can_return(
             value_type,
@@ -1361,6 +1371,8 @@ class TypeChecker:
                 return UNKNOWN_TYPE
             return self._expression_function_return_type(declaration, argument_types)
         for argument, parameter in zip(expression.arguments, function.parameters):
+            if self._can_use_expected_collection_type(argument, parameter.type_name):
+                continue
             argument_type = self._expression_type(argument, scope)
             self._reject_void_value(argument_type, f"argument to {expression.callee}(...)")
             if argument_type is not UNKNOWN_TYPE and not can_implicitly_convert(argument_type, parameter.type_name):
@@ -1369,6 +1381,13 @@ class TypeChecker:
                         continue
                 self._raise_implicit_conversion_error(argument_type, parameter.type_name)
         return function.return_type
+
+    def _can_use_expected_collection_type(self, expression: ast.Expression, target_type: AetherType) -> bool:
+        return (
+            isinstance(expression, ast.ListLiteral)
+            and not expression.elements
+            and isinstance(target_type, (ArrayType, ListType))
+        )
 
     def _dotted_native_method_call_type(
         self,
@@ -1473,6 +1492,8 @@ class TypeChecker:
                 f"but got {len(expression.arguments)}."
             )
         for argument, field in zip(expression.arguments, struct.fields):
+            if self._can_use_expected_collection_type(argument, field.type_name):
+                continue
             argument_type = self._expression_type(argument, scope)
             self._reject_void_value(argument_type, f"argument for field '{field.name}'")
             if argument_type is not UNKNOWN_TYPE and not can_implicitly_convert(argument_type, field.type_name):

@@ -14,6 +14,145 @@ def test_list_literal_declaration_and_zero_based_indexing() -> None:
     assert result.output == "1\n"
 
 
+def test_braced_literal_defaults_to_list_without_expected_type() -> None:
+    result = run_aether("xs = {1, 2, 3}; println(xs);")
+
+    assert result.env["xs"].type_name == ListType("int")
+    assert result.output == "{1, 2, 3}\n"
+
+
+def test_var_declaration_syntax_is_not_supported() -> None:
+    with pytest.raises(AetherSyntaxError):
+        run_aether("var xs = {1, 2, 3};")
+
+
+def test_braced_literal_uses_list_and_array_expected_types() -> None:
+    result = run_aether(
+        """
+List<int> xs = {1, 2, 3};
+Array<int> ys = {4, 5, 6};
+println(xs);
+println(ys);
+"""
+    )
+
+    assert result.env["xs"].type_name == ListType("int")
+    assert result.env["ys"].type_name == ArrayType("int")
+    assert result.output == "{1, 2, 3}\nArray{4, 5, 6}\n"
+
+
+def test_braced_literal_uses_function_parameter_context_for_list_and_array() -> None:
+    result = run_aether(
+        """
+void f(List<int> xs) {
+    println(xs);
+}
+
+void g(Array<int> xs) {
+    println(xs);
+}
+
+f({1, 2, 3});
+g({4, 5, 6});
+"""
+    )
+
+    assert result.output == "{1, 2, 3}\nArray{4, 5, 6}\n"
+
+
+def test_braced_literal_uses_return_context_for_list_and_array() -> None:
+    result = run_aether(
+        """
+List<int> makeList() {
+    return {1, 2, 3};
+}
+
+Array<int> makeArray() {
+    return {4, 5, 6};
+}
+
+println(makeList());
+println(makeArray());
+"""
+    )
+
+    assert result.output == "{1, 2, 3}\nArray{4, 5, 6}\n"
+
+
+def test_empty_braced_literal_uses_expected_type_in_parameters_returns_and_fields() -> None:
+    result = run_aether(
+        """
+struct Lists {
+    List<int> xs;
+    Array<int> ys;
+}
+
+List<int> emptyList() {
+    return {};
+}
+
+Array<int> emptyArray() {
+    return {};
+}
+
+void showList(List<int> xs) {
+    println(length(xs));
+}
+
+void showArray(Array<int> xs) {
+    println(length(xs));
+}
+
+Lists lists = Lists({}, {});
+showList({});
+showArray({});
+println(length(emptyList()));
+println(length(emptyArray()));
+println(lists.xs);
+println(lists.ys);
+"""
+    )
+
+    assert result.output == "0\n0\n0\n0\n{}\nArray{}\n"
+
+
+def test_braced_literal_uses_field_assignment_context_for_list_and_array() -> None:
+    result = run_aether(
+        """
+struct Lists {
+    List<int> xs;
+    Array<int> ys;
+}
+
+Lists lists = Lists({1}, {2});
+lists.xs = {3, 4};
+lists.ys = {5, 6};
+println(lists.xs);
+println(lists.ys);
+lists.xs = {};
+lists.ys = {};
+println(lists.xs);
+println(lists.ys);
+"""
+    )
+
+    assert result.output == "{3, 4}\nArray{5, 6}\n{}\nArray{}\n"
+
+
+def test_push_pop_work_on_inferred_braced_literal_list() -> None:
+    result = run_aether(
+        """
+xs = {1, 2};
+push(xs, 3);
+println(pop(xs));
+println(xs);
+"""
+    )
+
+    assert result.env["xs"].type_name == ListType("int")
+    assert result.output == "3\n{1, 2}\n"
+
+
 def test_list_string_literal_and_formatting() -> None:
     result = run_aether('List<string> names = {"Ana", "Luis"}; println(names);')
 

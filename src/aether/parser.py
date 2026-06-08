@@ -801,6 +801,8 @@ class Parser:
         return token
 
     def _looks_like_var_declaration(self) -> bool:
+        if self._peek().type == TokenType.IDENTIFIER and self._peek().lexeme == "var":
+            return False
         cursor = self._type_annotation_end_cursor(self.current)
         if cursor is None or cursor + 1 >= len(self.tokens):
             return False

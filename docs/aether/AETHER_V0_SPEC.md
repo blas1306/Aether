@@ -795,13 +795,16 @@ Aether separates general programming collections from mathematical vectors and m
 - `List<T>` is the public dynamic collection type.
 - `Array<T>` is the public fixed-size mutable collection type.
 - List literals use braces: `{1, 2, 3}`.
-- `Array<T>` initialization also uses braces when an explicit `Array<T>` target type is present.
+- Without an expected type, a brace literal infers `List<T>`.
+- With an expected `List<T>` target type, a brace literal produces `List<T>`.
+- With an expected `Array<T>` target type, a brace literal produces `Array<T>`.
 - List and array indexing are 0-based: `xs[0]`.
 - `[ ... ]` is reserved for mathematical `Vector<T>` and `Matrix<T>` literals.
 
 Examples:
 
 ```aether
+inferred = {1, 2, 3};     // List<int>
 List<int> xs = {1, 2, 3};
 List<double> ys = {1.0, 2.0, 3.0};
 List<string> names = {"Ana", "Luis"};
@@ -816,7 +819,7 @@ println(a[0]); // 1
 
 List elements must be homogeneous or numerically promotable. Lists use commas only; `{1 2 3}` is a syntax error.
 
-`Array<T>` elements must be compatible with `T`. Numeric widening follows the same implicit-conversion rules as assignments: for example, `Array<double> a = {1, 2.5};` is valid, while `Array<int> a = {1, 2.5};` is not. `Array<T>` is distinct from `List<T>`; neither type is implicitly assignable to the other. `Array<Array<T>>` is valid when nested generic types are otherwise supported. `array(...)`, `int[]`, and other `T[]` spellings are not public Aether v0 syntax.
+The expected target type can come from an explicit variable declaration, assignment to an existing variable, function parameter, return type, or struct field. `Array<T>` elements must be compatible with `T`. Numeric widening follows the same implicit-conversion rules as assignments: for example, `Array<double> a = {1, 2.5};` is valid, while `Array<int> a = {1, 2.5};` is not. `Array<T>` is distinct from `List<T>`; neither type is implicitly assignable to the other. `Array<Array<T>>` is valid when nested generic types are otherwise supported. `array(...)`, `int[]`, and other `T[]` spellings are not public Aether v0 syntax.
 
 Arrays are mutable by index but have fixed length:
 
