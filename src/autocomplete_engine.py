@@ -101,6 +101,7 @@ KEYWORD_SUGGESTIONS: tuple[CommandSuggestion, ...] = (
     _keyword_entry("Exception", "Exception value type.", category="types", priority=105),
     _keyword_entry("void", "No return value for block functions.", category="types", priority=105),
     _keyword_entry("bool", "Boolean type alias.", insert_text="boolean", signature="boolean", category="types", priority=70),
+    _keyword_entry("Array", "Fixed-size mutable collection type.", insert_text="Array<>", category="types", priority=300, cursor_backtrack=1),
     _keyword_entry("Matrix", "Matrix type.", insert_text="Matrix<>", category="types", priority=300, cursor_backtrack=1),
     _keyword_entry("Vector", "Vector type.", insert_text="Vector<>", category="types", priority=300, cursor_backtrack=1),
 )

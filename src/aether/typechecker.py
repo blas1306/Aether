@@ -479,7 +479,7 @@ class TypeChecker:
             )
         ):
             if isinstance(statement.initializer, ast.ListLiteral):
-                if declared_type is None or not is_list_type(declared_type):
+                if declared_type is None or not (is_list_type(declared_type) or is_array_type(declared_type)):
                     raise AetherTypeError("Cannot infer type of empty list literal.")
             elif declared_type is None or not is_array_type(declared_type):
                 raise AetherTypeError("Cannot infer type of empty matrix literal.")
@@ -550,7 +550,7 @@ class TypeChecker:
             if existing is None:
                 raise AetherTypeError("Cannot infer type of empty list literal.")
             if isinstance(statement.expression, ast.ListLiteral):
-                if not is_list_type(existing.type_name):
+                if not (is_list_type(existing.type_name) or is_array_type(existing.type_name)):
                     self._raise_implicit_conversion_error(ListType("int"), existing.type_name, statement)
                 return
             if not is_array_type(existing.type_name):
@@ -685,9 +685,12 @@ class TypeChecker:
             if isinstance(array_type, ArrayType)
             else list_element_type(array_type)
         )
-        if is_array_type(element_type):
+        if is_array_type(element_type) and isinstance(array_type, MatrixType):
             raise AetherTypeError("Assigning a whole matrix row is not supported yet.")
         if not can_implicitly_convert(value_type, element_type):
+            if isinstance(statement.expression, ast.ListLiteral) and isinstance(element_type, ArrayType):
+                if self._can_assign_braced_literal_to_array(statement.expression, element_type, scope):
+                    return
             self._raise_implicit_conversion_error(value_type, element_type, statement)
 
     def _assign_matrix_index(self, statement: ast.MatrixIndexAssignment, scope: Scope[VariableSymbol]) -> None:
@@ -1251,6 +1254,9 @@ class TypeChecker:
             argument_type = self._expression_type(argument, scope)
             self._reject_void_value(argument_type, f"argument to {expression.callee}(...)")
             if argument_type is not UNKNOWN_TYPE and not can_implicitly_convert(argument_type, parameter.type_name):
+                if isinstance(argument, ast.ListLiteral) and isinstance(parameter.type_name, ArrayType):
+                    if self._can_assign_braced_literal_to_array(argument, parameter.type_name, scope):
+                        continue
                 self._raise_implicit_conversion_error(argument_type, parameter.type_name)
         return function.return_type
 
@@ -1294,6 +1300,9 @@ class TypeChecker:
             argument_type = self._expression_type(argument, scope)
             self._reject_void_value(argument_type, f"argument for field '{field.name}'")
             if argument_type is not UNKNOWN_TYPE and not can_implicitly_convert(argument_type, field.type_name):
+                if isinstance(argument, ast.ListLiteral) and isinstance(field.type_name, ArrayType):
+                    if self._can_assign_braced_literal_to_array(argument, field.type_name, scope):
+                        continue
                 raise AetherTypeError(
                     f"Cannot initialize field '{field.name}' of struct '{struct.name}': "
                     f"Cannot implicitly convert '{type_to_string(argument_type)}' to '{type_to_string(field.type_name)}'."
@@ -1450,6 +1459,8 @@ class TypeChecker:
             if not is_array_type(value_type):
                 return False
             return self._can_assign_array_literal(initializer, target_type, scope)
+        if isinstance(initializer, ast.ListLiteral) and is_array_type(target_type):
+            return self._can_assign_braced_literal_to_array(initializer, target_type, scope)
         if isinstance(initializer, ast.ListLiteral) and is_list_type(target_type):
             if not is_list_type(value_type):
                 return False
@@ -1492,6 +1503,8 @@ class TypeChecker:
             )
         if target_type == "float" and isinstance(expression, ast.Literal) and value_type == "double":
             return True
+        if isinstance(expression, ast.ListLiteral) and isinstance(target_type, ArrayType):
+            return self._can_assign_braced_literal_to_array(expression, target_type, scope)
         return can_implicitly_convert(value_type, target_type)
 
     def _raise_implicit_conversion_error(
@@ -1639,6 +1652,14 @@ class TypeChecker:
         target_type: ArrayType,
         scope: Scope[VariableSymbol],
     ) -> bool:
+        return self._can_assign_braced_literal_to_array(initializer, target_type, scope)
+
+    def _can_assign_braced_literal_to_array(
+        self,
+        initializer: ast.ArrayLiteral | ast.ListLiteral,
+        target_type: ArrayType,
+        scope: Scope[VariableSymbol],
+    ) -> bool:
         if not initializer.elements:
             return True
         target_element_type = array_element_type(target_type)
@@ -1647,11 +1668,15 @@ class TypeChecker:
             if element_type is UNKNOWN_TYPE:
                 return True
             if isinstance(target_element_type, ArrayType):
-                if not isinstance(element, ast.ArrayLiteral):
-                    return element_type == target_element_type
+                if not isinstance(element, (ast.ArrayLiteral, ast.ListLiteral)):
+                    return can_implicitly_convert(element_type, target_element_type)
                 if not is_array_type(element_type):
+                    if isinstance(element, ast.ListLiteral):
+                        if not self._can_assign_braced_literal_to_array(element, target_element_type, scope):
+                            return False
+                        continue
                     return False
-                if not self._can_assign_array_literal(element, target_element_type, scope):
+                if not self._can_assign_braced_literal_to_array(element, target_element_type, scope):
                     return False
                 continue
             if can_implicitly_convert(element_type, target_element_type):

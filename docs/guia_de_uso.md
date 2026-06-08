@@ -133,7 +133,15 @@ Las matrices imprimen en formato compacto:
 println([1 2; 3 4]); // [1 2; 3 4]
 ```
 
-`array(...)`, `Array<T>` y `T[]` no son sintaxis publica de Aether v0. Usa `List<T>` para colecciones generales; para dimensiones de matrices usa `rows(A)` y `cols(A)`.
+`Array<T>` es la coleccion mutable de tamaño fijo. Se inicializa con llaves cuando hay tipo esperado:
+
+```aether
+Array<int> xs = {1, 2, 3};
+xs[0] = 9;
+println(length(xs));
+```
+
+`array(...)` y `T[]` no son sintaxis publica de Aether v0. Usa `List<T>` cuando necesites cambiar la longitud con `push`, `pop`, `insert`, `remove_at` o `clear`; para dimensiones de matrices usa `rows(A)` y `cols(A)`.
 
 Operaciones disponibles:
 

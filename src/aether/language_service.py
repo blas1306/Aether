@@ -44,12 +44,12 @@ _LOCATION_RE = re.compile(r"line (?P<line>\d+), column (?P<column>\d+)")
 _ASSIGNMENT_RE = re.compile(r"\b(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*(?:=|\+=)")
 _DECLARATION_RE = re.compile(
     r"\b(?:(?:public|private)\s+)?(?:const\s+)?"
-    r"(?:int|float|double|string|boolean|Matrix\s*<\s*\w+\s*>|Vector\s*<\s*\w+\s*>|[A-Z][A-Za-z0-9_]*)\s+"
+    r"(?:int|float|double|string|boolean|Array\s*<[^>]+>|List\s*<[^>]+>|Matrix\s*<[^>]+>|Vector\s*<[^>]+>|[A-Z][A-Za-z0-9_]*)\s+"
     r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)\b"
 )
 _FUNCTION_RE = re.compile(
     r"\b(?:(?:public|private)\s+)?(?:function\s+)?"
-    r"(?:int|float|double|string|boolean|Matrix|Vector|[A-Z][A-Za-z0-9_]*)?(?:\s*<[^>]+>)?\s*"
+    r"(?:int|float|double|string|boolean|Array|List|Matrix|Vector|[A-Z][A-Za-z0-9_]*)?(?:\s*<[^>]+>)?\s*"
     r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\("
 )
 _STRUCT_RE = re.compile(r"\b(?:(?:public|private)\s+)?struct\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\b")

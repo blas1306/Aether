@@ -68,7 +68,20 @@ class TokenType(str, Enum):
     APOSTROPHE = "'"
 
 
-AETHER_TYPES = {"int", "float", "double", "complex", "string", "boolean", "List", "Matrix", "Vector", "Exception", "void"}
+AETHER_TYPES = {
+    "int",
+    "float",
+    "double",
+    "complex",
+    "string",
+    "boolean",
+    "Array",
+    "List",
+    "Matrix",
+    "Vector",
+    "Exception",
+    "void",
+}
 PRIMITIVE_TYPES = {"int", "float", "double", "complex", "string", "boolean"}
 
 KEYWORDS: dict[str, TokenType] = {

@@ -683,8 +683,10 @@ Not supported in v0:
 Aether separates general programming collections from mathematical vectors and matrices:
 
 - `List<T>` is the public dynamic collection type.
+- `Array<T>` is the public fixed-size mutable collection type.
 - List literals use braces: `{1, 2, 3}`.
-- List indexing is 0-based: `xs[0]`.
+- `Array<T>` initialization also uses braces when an explicit `Array<T>` target type is present.
+- List and array indexing are 0-based: `xs[0]`.
 - `[ ... ]` is reserved for mathematical `Vector<T>` and `Matrix<T>` literals.
 
 Examples:
@@ -693,14 +695,43 @@ Examples:
 List<int> xs = {1, 2, 3};
 List<double> ys = {1.0, 2.0, 3.0};
 List<string> names = {"Ana", "Luis"};
+Array<int> a = {1, 2, 3};
+Array<double> b = {1, 2.5};
+Array<string> s = {"a", "b"};
 
 println(xs[0]); // 1
 println(names); // {"Ana", "Luis"}
+println(a[0]); // 1
 ```
 
 List elements must be homogeneous or numerically promotable. Lists use commas only; `{1 2 3}` is a syntax error.
 
-`array(...)`, `Array<T>`, `int[]`, and other `T[]` spellings are not public Aether v0 syntax. Array values may still exist internally, for example as matrix rows, but user code should use `List<T>` for general collections.
+`Array<T>` elements must be compatible with `T`. Numeric widening follows the same implicit-conversion rules as assignments: for example, `Array<double> a = {1, 2.5};` is valid, while `Array<int> a = {1, 2.5};` is not. `Array<T>` is distinct from `List<T>`; neither type is implicitly assignable to the other. `Array<Array<T>>` is valid when nested generic types are otherwise supported. `array(...)`, `int[]`, and other `T[]` spellings are not public Aether v0 syntax.
+
+Arrays are mutable by index but have fixed length:
+
+```aether
+Array<int> a = {1, 2, 3};
+println(a);         // Array{1, 2, 3}
+println(a[0]);      // 1
+a[0] = 9;
+println(a);         // Array{9, 2, 3}
+println(length(a)); // 3
+
+Array<int> b = copy(a);
+b[0] = 100;
+println(a); // Array{9, 2, 3}
+println(b); // Array{100, 2, 3}
+```
+
+`copy(array)` returns a new `Array<T>` container with the same elements; it is a shallow copy and does not mutate the original. `const Array<T>` blocks index assignment and future mutating array builtins:
+
+```aether
+const Array<int> a = {1, 2, 3};
+a[0] = 9; // error: Cannot mutate constant 'a'.
+```
+
+Arrays do not currently support `push`, `pop`, `insert`, `remove_at`, `clear`, `reverse`, or `sort`; those builtins raise an `AetherTypeError` when given an `Array<T>`. Array slicing (`a[start:end]`) is not implemented yet and is a type error.
 
 Lists support explicit range slices with inclusive, 0-based bounds:
 
@@ -735,7 +766,7 @@ clear(xs);                // {}
 
 All list operations use 0-based indices. `insert(xs, index, value)` accepts `0 <= index <= length(xs)`; `remove_at(xs, index)` accepts `0 <= index < length(xs)`. `copy(xs)` returns a new `List<T>` container with the same elements as `xs`; it is a shallow copy, does not mutate `xs`, and is allowed for `const List<T>`. `push`, `insert`, `pop`, `remove_at`, `clear`, `reverse`, and `sort` mutate the list and reject a first argument whose expression is rooted in a `const` variable. `sort(xs)` sorts ascending and is supported only for `List<int>`, `List<double>`, and `List<string>`. `pop` and `remove_at` return the removed element. `length` returns `int`; `is_empty` and `contains` return `boolean`; `push`, `insert`, `clear`, `reverse`, and `sort` return `void`.
 
-`Vector<T>` and `Matrix<T>` are not lists. They do not accept list mutation builtins such as `push`, `pop`, `insert`, `remove_at`, `clear`, `reverse`, or `sort`.
+`Array<T>`, `Vector<T>`, and `Matrix<T>` are not lists. They do not accept list mutation builtins such as `push`, `pop`, `insert`, `remove_at`, `clear`, `reverse`, or `sort`.
 
 ## Vectors And Matrices
 
@@ -865,7 +896,7 @@ S, D = eig(A);
 sum(u_i * v_i)
 ```
 
-Both arguments must be mathematical vectors represented as `Matrix<T>` or `Vector<T>` values with shape `1xN` or `Nx1`. Row-row, column-column, row-column, and column-row combinations are valid when the effective lengths match. General matrices with both dimensions greater than one are errors. Internal arrays are not vectors for this API.
+Both arguments must be mathematical vectors represented as `Matrix<T>` or `Vector<T>` values with shape `1xN` or `Nx1`. Row-row, column-column, row-column, and column-row combinations are valid when the effective lengths match. General matrices with both dimensions greater than one are errors. `Array<T>` values are not vectors for this API.
 
 Vector elements must be numeric: `int`, `float`, or `double`. `boolean` and `string` vector elements are errors. The result uses the existing numeric promotion rules:
 
@@ -888,7 +919,7 @@ Math.LinearAlgebra.inner([1 2 3], [1 2]);
 sqrt(inner(v, v))
 ```
 
-The argument rules are the same: `v` must be a numeric mathematical row or column vector, not a general matrix and not an internal array. The result is a `double` in the current implementation:
+The argument rules are the same: `v` must be a numeric mathematical row or column vector, not a general matrix and not an `Array<T>`. The result is a `double` in the current implementation:
 
 ```aether
 println(Math.LinearAlgebra.norm([3 4]));     // 5.0
@@ -915,7 +946,7 @@ println(Math.LinearAlgebra.transpose([1; 2; 3]));  // [1 2 3]
 println(Math.LinearAlgebra.transpose([1 2; 3 4])); // [1 3; 2 4]
 ```
 
-The argument must be a mathematical `Matrix<T>` or `Vector<T>` with numeric elements. Internal arrays, scalar values, and matrices with `boolean` or `string` elements are errors for this linear algebra builtin. `transpose` does not mutate the original value. Shape rules are:
+The argument must be a mathematical `Matrix<T>` or `Vector<T>` with numeric elements. `Array<T>` values, scalar values, and matrices with `boolean` or `string` elements are errors for this linear algebra builtin. `transpose` does not mutate the original value. Shape rules are:
 
 - `1xN -> Nx1`
 - `Nx1 -> 1xN`
@@ -927,7 +958,7 @@ The argument must be a mathematical `Matrix<T>` or `Vector<T>` with numeric elem
 if A is m x n and B is n x p, matmul(A, B) is m x p
 ```
 
-Both arguments must be mathematical `Matrix<T>` or `Vector<T>` values with numeric elements. Internal arrays, scalar values, and matrices with `boolean` or `string` elements are errors. The inner dimensions must match. Row and column vectors follow their matrix shapes:
+Both arguments must be mathematical `Matrix<T>` or `Vector<T>` values with numeric elements. `Array<T>` values, scalar values, and matrices with `boolean` or `string` elements are errors. The inner dimensions must match. Row and column vectors follow their matrix shapes:
 
 ```aether
 println(Math.LinearAlgebra.matmul([1 2; 3 4], [5 6; 7 8])); // [19 22; 43 50]
@@ -1016,7 +1047,7 @@ println([1 2 3] + [4 5 6]); // [5 7 9]
 [1 2 3] + [1; 2; 3];        // error, 1x3 vs 3x1
 ```
 
-Internal arrays do not participate in matrix/vector arithmetic or equality.
+`Array<T>` values do not participate in matrix/vector arithmetic, and comparisons between arrays and matrix/vector values are type errors.
 
 Supported scalar operations are:
 
@@ -1265,9 +1296,9 @@ Aether v0 recognizes these builtins:
 
 - `print(...)`
 - `println(...)`
-- `length(list_or_vector)`
+- `length(list_or_array_or_vector)`
 - `is_empty(list)`
-- `copy(list)`
+- `copy(list_or_array)`
 - `push(list, value)`
 - `pop(list)`
 - `insert(list, index, value)`
@@ -1316,9 +1347,9 @@ println(x);
 
 `array(...)` is not a recognized builtin in Aether v0.
 
-`length(...)` accepts `List<T>` and `Vector<T>` values and returns an `int`.
+`length(...)` accepts `List<T>`, `Array<T>`, and `Vector<T>` values and returns an `int`.
 
-`is_empty(...)`, `copy(...)`, `push(...)`, `pop(...)`, `insert(...)`, `remove_at(...)`, `contains(...)`, `clear(...)`, `reverse(...)`, and `sort(...)` accept `List<T>` values. `copy(xs)` returns a shallow copy of the list container and preserves `List<T>`. `push`, `insert`, and `contains` require a value assignable to `T`. `insert` and `remove_at` require an `int` index and use 0-based indexing. `push`, `pop`, `insert`, `remove_at`, `clear`, `reverse`, and `sort` reject mutation through a `const` list variable. `sort` orders ascending and currently supports only `List<int>`, `List<double>`, and `List<string>`.
+`copy(...)` accepts `List<T>` and `Array<T>` values, returns a shallow copy of the container, and preserves the input container type. `is_empty(...)`, `push(...)`, `pop(...)`, `insert(...)`, `remove_at(...)`, `contains(...)`, `clear(...)`, `reverse(...)`, and `sort(...)` accept `List<T>` values. `push`, `insert`, and `contains` require a value assignable to `T`. `insert` and `remove_at` require an `int` index and use 0-based indexing. `push`, `pop`, `insert`, `remove_at`, `clear`, `reverse`, and `sort` reject mutation through a `const` list variable. `sort` orders ascending and currently supports only `List<int>`, `List<double>`, and `List<string>`.
 
 `rows(matrix)` and `cols(matrix)` accept one `Matrix<T>` argument and return `int` dimensions.
 

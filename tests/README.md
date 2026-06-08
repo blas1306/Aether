@@ -29,7 +29,7 @@ Los tests cargan `src/` automaticamente desde `tests/conftest.py`, asi que puede
 ## Contratos importantes
 
 - `.ae` es la superficie activa; `.mtx`, `.mtex`, `.mtn`, notebooks y PDF son rutas heredadas fuera del producto activo.
-- `array(...)` no es builtin publico de Aether v0; los arrays solo quedan como detalle interno/transicional.
+- `array(...)` no es builtin publico de Aether v0; usa `Array<T>` para colecciones mutables de tamaño fijo.
 - Las interpolaciones de strings `$expr$` se parsean, typecheckean y formatean como salida Aether normal.
 - Los fallos de una corrida de `AetherSession` no destruyen variables o funciones ya comprometidas.
 - El LSP no debe caerse por errores del analizador y debe publicar rangos diagnosticos validos dentro del documento.

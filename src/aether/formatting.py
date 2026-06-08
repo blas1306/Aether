@@ -55,7 +55,7 @@ def format_matrix(value: AetherValue) -> str:
 
 
 def format_array(value: AetherValue) -> str:
-    return "[" + ", ".join(format_array_element(element) for element in value.value) + "]"
+    return "Array{" + ", ".join(format_array_element(element) for element in value.value) + "}"
 
 
 def format_list(value: AetherValue) -> str:

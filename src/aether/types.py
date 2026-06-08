@@ -30,7 +30,7 @@ class ArrayType:
             raise AetherTypeError(f"Unknown array element type '{type_to_string(self.element_type)}'.")
 
     def __str__(self) -> str:
-        return f"{type_to_string(self.element_type)}[]"
+        return f"Array<{type_to_string(self.element_type)}>"
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, ArrayType):
@@ -519,6 +519,8 @@ def coerce_implicit(value: AetherValue, target_type: AetherType) -> AetherValue:
         )
     if isinstance(target_type, TupleType):
         return coerce_tuple_value(value, target_type)
+    if isinstance(target_type, ArrayType):
+        return coerce_array_literal_value(value, target_type)
     if isinstance(target_type, ListType):
         return coerce_list_value(value, target_type)
     if isinstance(target_type, VectorType):

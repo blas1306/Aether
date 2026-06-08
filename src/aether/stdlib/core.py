@@ -9,6 +9,7 @@ from ..formatting import format_value
 from ..types import (
     AetherType,
     AetherValue,
+    ArrayType,
     ListType,
     MatrixType,
     NUMERIC_TYPES,
@@ -187,7 +188,7 @@ def length_builtin(args: list[AetherValue]) -> AetherValue:
     if isinstance(value.type_name, MatrixType) and value.type_name.vector:
         return AetherValue("int", _vector_length(value))
     if not is_array_type(value.type_name) and not is_list_type(value.type_name):
-        raise AetherTypeError(f"length(...) expects a List, array, or Vector argument, got '{type_to_string(value.type_name)}'.")
+        raise AetherTypeError(f"length(...) expects a List, Array, or Vector argument, got '{type_to_string(value.type_name)}'.")
     return AetherValue("int", len(value.value))
 
 
@@ -197,7 +198,7 @@ def is_empty_builtin(args: list[AetherValue]) -> AetherValue:
 
 
 def copy_builtin(args: list[AetherValue]) -> AetherValue:
-    xs = _require_list_arg(args, "copy")
+    xs = _require_list_or_array_arg(args, "copy")
     return AetherValue(xs.type_name, list(xs.value))
 
 
@@ -445,6 +446,15 @@ def _require_list_arg(args: list[AetherValue], label: str) -> AetherValue:
     return value
 
 
+def _require_list_or_array_arg(args: list[AetherValue], label: str) -> AetherValue:
+    if not args:
+        raise AetherTypeError(f"{label}(...) expects a List or Array argument.")
+    value = args[0]
+    if not isinstance(value.type_name, (ListType, ArrayType)):
+        raise AetherTypeError(f"{label}(...) expects a List or Array argument, got '{type_to_string(value.type_name)}'.")
+    return value
+
+
 def _require_int_arg(value: AetherValue, label: str) -> int:
     if value.type_name != "int":
         raise AetherTypeError(f"{label} must be int, got '{type_to_string(value.type_name)}'.")
@@ -486,7 +496,7 @@ def _length_type(arg_types: list[AetherType | None]) -> AetherType | None:
     if isinstance(argument_type, (VectorType, TransposeVectorType)):
         return "int"
     if not is_array_type(argument_type) and not is_list_type(argument_type):
-        raise AetherTypeError(f"length(...) expects a List, array, or Vector argument, got '{type_to_string(argument_type)}'.")
+        raise AetherTypeError(f"length(...) expects a List, Array, or Vector argument, got '{type_to_string(argument_type)}'.")
     return "int"
 
 
@@ -541,7 +551,7 @@ def _clear_type(arg_types: list[AetherType | None]) -> AetherType | None:
 
 
 def _copy_type(arg_types: list[AetherType | None]) -> AetherType | None:
-    return _require_list_type_args(arg_types, "copy", 1)
+    return _require_list_or_array_type_args(arg_types, "copy", 1)
 
 
 def _reverse_type(arg_types: list[AetherType | None]) -> AetherType | None:
@@ -597,6 +607,17 @@ def _require_list_type_args(arg_types: list[AetherType | None], label: str, coun
         return None
     if not isinstance(argument_type, ListType):
         raise AetherTypeError(f"{label}(...) expects a List argument, got '{type_to_string(argument_type)}'.")
+    return argument_type
+
+
+def _require_list_or_array_type_args(arg_types: list[AetherType | None], label: str, count: int) -> ListType | ArrayType | None:
+    if len(arg_types) != count:
+        raise AetherTypeError(f"{label}(...) expects exactly {_argument_count_word(count)} arguments.")
+    argument_type = arg_types[0]
+    if argument_type is None:
+        return None
+    if not isinstance(argument_type, (ListType, ArrayType)):
+        raise AetherTypeError(f"{label}(...) expects a List or Array argument, got '{type_to_string(argument_type)}'.")
     return argument_type
 
 

@@ -701,11 +701,13 @@ class Parser:
         token = self._consume_type(message, allow_unknown_identifier=allow_unknown_identifier)
         if token.lexeme == "void":
             raise self._error(token, "'void' is only valid as a function return type.")
-        if token.lexeme == "List":
+        if token.lexeme in {"Array", "List"}:
             element_type = "double"
             if self._match(TokenType.LESS):
                 element_type = self._parse_type_annotation(f"Expected element type inside {token.lexeme}<...>.")
                 self._consume(TokenType.GREATER, f"Expected '>' after {token.lexeme} element type.")
+            if token.lexeme == "Array":
+                return self._nullable_suffix(ArrayType(element_type))
             return self._nullable_suffix(ListType(element_type))
         if token.lexeme in {"Matrix", "Vector"}:
             element_type = "double"
@@ -720,7 +722,7 @@ class Parser:
             return self._nullable_suffix(MatrixType(element_type))
         type_name: AetherType = token.lexeme
         if self._check(TokenType.LEFT_BRACKET):
-            raise self._error(self._peek(), "Array type syntax 'T[]' is not public yet; use List<T>.")
+            raise self._error(self._peek(), "Array type syntax 'T[]' is not public; use Array<T>.")
         return self._nullable_suffix(type_name)
 
     def _nullable_suffix(self, type_name: AetherType) -> AetherType:
@@ -837,7 +839,7 @@ class Parser:
         if self.tokens[start].type not in {TokenType.TYPE, TokenType.IDENTIFIER}:
             return None
         cursor = start + 1
-        if self.tokens[start].lexeme == "List" and cursor < len(self.tokens) and self.tokens[cursor].type == TokenType.LESS:
+        if self.tokens[start].lexeme in {"Array", "List"} and cursor < len(self.tokens) and self.tokens[cursor].type == TokenType.LESS:
             cursor = self._type_annotation_end_cursor(cursor + 1)
             if cursor is None or cursor >= len(self.tokens) or self.tokens[cursor].type != TokenType.GREATER:
                 return None

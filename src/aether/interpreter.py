@@ -224,6 +224,7 @@ class Interpreter:
         self.imported_symbol_origins: dict[str, str] = {}
         self.private_imported_symbols: dict[str, set[str]] = {}
         self._interpret_depth = 0
+        self.current_return_type: AetherType | None = None
 
     def interpret(self, program: ast.Program) -> Environment:
         self._interpret_depth += 1
@@ -290,6 +291,10 @@ class Interpreter:
                 env.define(statement.name, coerced, forbid_shadowing=True, is_const=statement.is_const)
                 return
             if isinstance(statement.initializer, ast.ListLiteral):
+                if declared_type is not None and is_array_type(declared_type):
+                    value = self._evaluate_braced_array_literal(statement.initializer, env, declared_type)
+                    env.define(statement.name, value, forbid_shadowing=True, is_const=statement.is_const)
+                    return
                 value = self._evaluate_list_literal(
                     statement.initializer,
                     env,
@@ -352,8 +357,14 @@ class Interpreter:
                 value = self._evaluate_array_literal(statement.expression, env, current.type_name)
                 env.assign(statement.name, value, array_literal_context=True)
                 return
-            if isinstance(statement.expression, ast.ListLiteral) and current is not None and is_list_type(current.type_name):
-                value = self._evaluate_list_literal(statement.expression, env, current.type_name)
+            if isinstance(statement.expression, ast.ListLiteral) and current is not None and (
+                is_list_type(current.type_name) or is_array_type(current.type_name)
+            ):
+                value = (
+                    self._evaluate_braced_array_literal(statement.expression, env, current.type_name)
+                    if is_array_type(current.type_name)
+                    else self._evaluate_list_literal(statement.expression, env, current.type_name)
+                )
                 env.assign(statement.name, value)
                 return
             if current is not None:
@@ -421,7 +432,10 @@ class Interpreter:
         if isinstance(statement, ast.ReturnStatement):
             value = AetherValue("void", VOID_VALUE)
             if statement.expression is not None:
-                value = self._evaluate(statement.expression, env)
+                if self.current_return_type is not None and self.current_return_type != "void":
+                    value = self._evaluate_with_expected_type(statement.expression, env, self.current_return_type)
+                else:
+                    value = self._evaluate(statement.expression, env)
             raise _ReturnSignal(value)
         if isinstance(statement, ast.BreakStatement):
             raise _BreakSignal()
@@ -548,6 +562,8 @@ class Interpreter:
     ) -> AetherValue:
         if isinstance(expression, ast.InputCall):
             return self._evaluate_input_call(expression, env, expected_type)
+        if isinstance(expected_type, ArrayType) and isinstance(expression, (ast.ArrayLiteral, ast.ListLiteral)):
+            return self._evaluate_braced_array_literal(expression, env, expected_type)
         return self._evaluate(expression, env)
 
     def _evaluate_input_call(
@@ -644,6 +660,21 @@ class Interpreter:
             raise AetherTypeError("Cannot infer type of empty array literal.")
         inferred_type = _array_type_from_values(elements)
         return coerce_array_literal_value(AetherValue(inferred_type, elements), inferred_type)
+
+    def _evaluate_braced_array_literal(
+        self,
+        expression: ast.ArrayLiteral | ast.ListLiteral,
+        env: Environment,
+        target_type: ArrayType,
+    ) -> AetherValue:
+        target_element_type = target_type.element_type
+        elements: list[AetherValue] = []
+        for element in expression.elements:
+            if isinstance(target_element_type, ArrayType) and isinstance(element, (ast.ArrayLiteral, ast.ListLiteral)):
+                elements.append(self._evaluate_braced_array_literal(element, env, target_element_type))
+                continue
+            elements.append(self._evaluate(element, env))
+        return coerce_array_literal_value(AetherValue(target_type, elements), target_type)
 
     def _evaluate_list_literal(
         self,
@@ -867,7 +898,6 @@ class Interpreter:
         array_value = self._evaluate(statement.array, env)
         index_value = self._evaluate(statement.index, env)
         index = self._require_index(array_value, index_value)
-        value = self._evaluate(statement.expression, env)
         if isinstance(array_value.type_name, TransposeVectorType):
             raise AetherTypeError("Cannot assign through a transposed vector view.")
         if isinstance(array_value.type_name, MatrixType) and not array_value.type_name.vector:
@@ -886,8 +916,9 @@ class Interpreter:
             if isinstance(array_value.type_name, ArrayType)
             else list_element_type(array_value.type_name)
         )
-        if is_array_type(element_type):
+        if is_array_type(element_type) and isinstance(array_value.type_name, MatrixType):
             raise AetherTypeError("Assigning a whole matrix row is not supported yet.")
+        value = self._evaluate_with_expected_type(statement.expression, env, element_type)
         if isinstance(array_value.type_name, VectorType):
             array_value.value[index] = coerce_implicit(value, element_type)
             return
@@ -989,9 +1020,31 @@ class Interpreter:
             raise AetherRuntimeError(f"Function '{expression.callee}' does not accept keyword arguments.")
         struct = self._constructor_struct(expression.callee)
         if struct is not None:
-            args = [self._evaluate(arg, env) for arg in expression.arguments]
+            args = [
+                self._evaluate_with_expected_type(arg, env, self._resolve_type_aliases(field.type_name))
+                for arg, field in zip(expression.arguments, struct.fields)
+            ]
+            if len(args) != len(expression.arguments):
+                args = [self._evaluate(arg, env) for arg in expression.arguments]
             return self._construct_struct(struct, args)
-        args = [self._evaluate(arg, env) for arg in expression.arguments]
+        function = env.get_function(expression.callee)
+        if function is not None and isinstance(function.declaration, ast.FunctionDeclaration) and len(
+            expression.arguments
+        ) == len(function.declaration.parameters):
+            try:
+                parameter_types = [
+                    self._resolve_type_aliases(parameter.type_name)
+                    for parameter in function.declaration.parameters
+                ]
+            except AetherTypeError:
+                args = [self._evaluate(arg, env) for arg in expression.arguments]
+            else:
+                args = [
+                    self._evaluate_with_expected_type(arg, env, parameter_type)
+                    for arg, parameter_type in zip(expression.arguments, parameter_types)
+                ]
+        else:
+            args = [self._evaluate(arg, env) for arg in expression.arguments]
         return self._call(expression.callee, args, {}, env)
 
     def _constructor_struct(self, callee: str) -> ast.StructDeclaration | None:
@@ -1089,11 +1142,16 @@ class Interpreter:
             local_env = Environment(parent=function.closure or self.global_env)
             for parameter, arg in zip(declaration.parameters, args):
                 local_env.define(parameter.name, coerce_implicit(arg, self._resolve_type_aliases(parameter.type_name)))
-            try:
-                self._execute_block(declaration.body, local_env)
-            except _ReturnSignal as signal:
-                return coerce_return_value(signal.value, self._resolve_type_aliases(declaration.return_type))
             return_type = self._resolve_type_aliases(declaration.return_type)
+            previous_return_type = self.current_return_type
+            self.current_return_type = return_type
+            try:
+                try:
+                    self._execute_block(declaration.body, local_env)
+                except _ReturnSignal as signal:
+                    return coerce_return_value(signal.value, return_type)
+            finally:
+                self.current_return_type = previous_return_type
             if return_type == "void":
                 return AetherValue("void", VOID_VALUE)
             raise AetherRuntimeError(f"Function '{callee}' ended without returning a value.")

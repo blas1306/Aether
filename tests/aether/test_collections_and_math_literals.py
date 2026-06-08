@@ -4,7 +4,7 @@ import pytest
 
 from aether.errors import AetherRuntimeError, AetherSyntaxError, AetherTypeError
 from aether.runner import run_aether
-from aether.types import ListType, MatrixType, VectorType
+from aether.types import ArrayType, ListType, MatrixType, VectorType
 
 
 def test_list_literal_declaration_and_zero_based_indexing() -> None:
@@ -19,6 +19,142 @@ def test_list_string_literal_and_formatting() -> None:
 
     assert result.env["names"].type_name == ListType("string")
     assert result.output == '{"Ana", "Luis"}\n'
+
+
+def test_array_literal_declaration_read_write_and_length() -> None:
+    result = run_aether(
+        """
+Array<int> a = {1, 2, 3};
+println(a);
+println(a[0]);
+a[0] = 9;
+println(a);
+println(length(a));
+"""
+    )
+
+    assert result.env["a"].type_name == ArrayType("int")
+    assert result.output == "Array{1, 2, 3}\n1\nArray{9, 2, 3}\n3\n"
+
+
+def test_copy_array_creates_new_container() -> None:
+    result = run_aether(
+        """
+Array<int> a = {9, 2, 3};
+Array<int> b = copy(a);
+b[0] = 100;
+println(a);
+println(b);
+"""
+    )
+
+    assert result.env["b"].type_name == ArrayType("int")
+    assert result.output == "Array{9, 2, 3}\nArray{100, 2, 3}\n"
+
+
+def test_const_array_blocks_index_assignment() -> None:
+    with pytest.raises(AetherTypeError, match="Cannot mutate constant 'a'"):
+        run_aether("const Array<int> a = {1, 2, 3}; a[0] = 9;")
+
+
+def test_array_index_bounds_match_list_bounds() -> None:
+    with pytest.raises(AetherRuntimeError, match="Array index 3 out of bounds for length 3"):
+        run_aether("Array<int> a = {1, 2, 3}; println(a[3]);")
+
+    with pytest.raises(AetherRuntimeError, match="Array index 3 out of bounds for length 3"):
+        run_aether("Array<int> a = {1, 2, 3}; a[3] = 9;")
+
+
+def test_array_literal_rejects_wrong_element_type() -> None:
+    with pytest.raises(AetherTypeError, match="Cannot implicitly convert 'List<double>' to 'Array<int>'"):
+        run_aether("Array<int> a = {1, 2.5};")
+
+
+def test_array_index_assignment_rejects_wrong_element_type() -> None:
+    with pytest.raises(AetherTypeError, match="Cannot implicitly convert 'double' to 'int'"):
+        run_aether("Array<int> a = {1, 2, 3}; a[0] = 2.5;")
+
+
+def test_list_and_array_do_not_cross_assign() -> None:
+    with pytest.raises(AetherTypeError, match="Array<int>.*List<int>"):
+        run_aether("Array<int> a = {1, 2, 3}; List<int> xs = a;")
+
+    with pytest.raises(AetherTypeError, match="List<int>.*Array<int>"):
+        run_aether("List<int> xs = {1, 2, 3}; Array<int> a = xs;")
+
+
+@pytest.mark.parametrize("call", ["push(a, 4)", "pop(a)", "insert(a, 0, 9)", "remove_at(a, 0)", "clear(a)", "reverse(a)", "sort(a)"])
+def test_array_rejects_list_mutation_builtins(call: str) -> None:
+    with pytest.raises(AetherTypeError, match="expects a List argument, got 'Array<int>'"):
+        run_aether(f"Array<int> a = {{1, 2, 3}}; {call};")
+
+
+def test_array_double_accepts_int_literals() -> None:
+    result = run_aether("Array<double> a = {1, 2.5}; println(a);")
+
+    assert result.env["a"].type_name == ArrayType("double")
+    assert result.output == "Array{1.0, 2.5}\n"
+
+
+def test_array_string_literal_works() -> None:
+    result = run_aether('Array<string> s = {"a", "b"}; println(s[1]); println(s);')
+
+    assert result.env["s"].type_name == ArrayType("string")
+    assert result.output == "b\nArray{\"a\", \"b\"}\n"
+
+
+def test_nested_array_literal_works() -> None:
+    result = run_aether(
+        """
+Array<Array<int>> xss = {{1, 2}, {3, 4}};
+println(xss);
+println(xss[1][0]);
+xss[0][1] = 9;
+println(xss);
+"""
+    )
+
+    assert result.env["xss"].type_name == ArrayType(ArrayType("int"))
+    assert result.output == "Array{Array{1, 2}, Array{3, 4}}\n3\nArray{Array{1, 9}, Array{3, 4}}\n"
+
+
+def test_array_brace_literal_uses_function_and_return_type_context() -> None:
+    result = run_aether(
+        """
+Array<int> make() {
+    return {1, 2, 3};
+}
+
+void show(Array<int> xs) {
+    println(xs);
+}
+
+show({4, 5});
+println(make());
+"""
+    )
+
+    assert result.output == "Array{4, 5}\nArray{1, 2, 3}\n"
+
+
+def test_array_brace_literal_uses_struct_field_context() -> None:
+    result = run_aether(
+        """
+struct Box {
+    Array<int> items;
+}
+
+Box box = Box({1, 2});
+println(box.items);
+"""
+    )
+
+    assert result.output == "Array{1, 2}\n"
+
+
+def test_array_slicing_is_not_supported_yet() -> None:
+    with pytest.raises(AetherTypeError, match="Cannot slice value of type 'Array<int>'"):
+        run_aether("Array<int> a = {1, 2, 3}; a[0:1];")
 
 
 def test_list_literal_rejects_incompatible_elements() -> None:
