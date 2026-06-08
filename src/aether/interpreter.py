@@ -47,6 +47,8 @@ from .types import (
     coerce_matrix_value,
     coerce_return_value,
     coerce_vector_value,
+    contains_struct_value,
+    copy_value,
     is_array_type,
     is_indexable_type,
     is_list_type,
@@ -101,11 +103,15 @@ class Environment:
         return self.variable_scope.symbols
 
     def define(self, name: str, value: AetherValue, *, forbid_shadowing: bool = False, is_const: bool = False) -> None:
+        if contains_struct_value(value):
+            value = copy_value(value)
         self.variable_scope.define_local(name, value, forbid_shadowing=forbid_shadowing, is_const=is_const)
 
     def assign(self, name: str, value: AetherValue, *, array_literal_context: bool = False) -> None:
         scope = self.variable_scope.resolve_scope(name)
         if scope is None:
+            if contains_struct_value(value):
+                value = copy_value(value)
             self.variable_scope.define_local(name, value)
             return
         if scope.is_const(name):

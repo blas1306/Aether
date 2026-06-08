@@ -536,7 +536,7 @@ def can_implicitly_convert(from_type: AetherType, to_type: AetherType) -> bool:
 
 def coerce_implicit(value: AetherValue, target_type: AetherType) -> AetherValue:
     if value.type_name == target_type:
-        return value
+        return copy_value(value) if contains_struct_value(value) else value
     if not is_known_type(target_type):
         raise AetherTypeError(f"Unknown type '{type_to_string(target_type)}'.")
     if isinstance(target_type, NullableType):
@@ -601,6 +601,48 @@ def coerce_return_value(value: AetherValue, target_type: AetherType) -> AetherVa
     if target_type == "float" and value.type_name == "double":
         return AetherValue("float", float(value.value))
     return coerce_implicit(value, target_type)
+
+
+def contains_struct_value(value: AetherValue) -> bool:
+    if isinstance(value.value, StructInstance):
+        return True
+    if isinstance(value.value, AetherValue):
+        return contains_struct_value(value.value)
+    if isinstance(value.value, (list, tuple)):
+        return any(isinstance(element, AetherValue) and contains_struct_value(element) for element in value.value)
+    if isinstance(value.type_name, NullableType) and value.value is not None:
+        return contains_struct_value(AetherValue(value.type_name.base_type, value.value))
+    return False
+
+
+def copy_value(value: AetherValue) -> AetherValue:
+    if isinstance(value.value, StructInstance):
+        return AetherValue(
+            value.type_name,
+            StructInstance(
+                value.value.type_name,
+                {name: copy_value(field_value) for name, field_value in value.value.fields.items()},
+                value.value.field_order,
+            ),
+        )
+    if isinstance(value.type_name, NullableType):
+        if value.value is None:
+            return value
+        copied = copy_value(AetherValue(value.type_name.base_type, value.value))
+        return AetherValue(value.type_name, copied.value)
+    if isinstance(value.type_name, TupleType):
+        return AetherValue(value.type_name, tuple(copy_value(element) for element in value.value))
+    if isinstance(value.type_name, ListType):
+        return AetherValue(value.type_name, [copy_value(element) for element in value.value])
+    if isinstance(value.type_name, ArrayType):
+        return AetherValue(value.type_name, [copy_value(element) for element in value.value])
+    if isinstance(value.type_name, VectorType):
+        return AetherValue(value.type_name, [copy_value(element) for element in value.value])
+    if isinstance(value.type_name, TransposeVectorType):
+        return AetherValue(value.type_name, copy_value(value.value))
+    if isinstance(value.type_name, MatrixType):
+        return AetherValue(value.type_name, [copy_value(row) for row in value.value])
+    return value
 
 
 def coerce_tuple_value(value: AetherValue, target_type: TupleType) -> AetherValue:

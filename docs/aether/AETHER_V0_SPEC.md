@@ -356,6 +356,38 @@ p = Point(1.0, 2.0);
 println(p.x);
 ```
 
+### Structs are value types
+
+Struct values have value semantics. Assigning a struct to another variable copies the value, passing a struct as a function argument copies the value, and returning a struct returns an independent value. There is no observable aliasing between variables of struct type.
+
+```aether
+Point p = Point(1, 2);
+Point q = p;
+
+q = Point(10, 20);
+println(p); // Point(x=1, y=2)
+println(q); // Point(x=10, y=20)
+```
+
+This also applies when structs contain other structs:
+
+```aether
+struct Segment {
+    Point a;
+    Point b;
+}
+
+Point p = Point(1, 2);
+Segment s1 = Segment(p, p);
+Segment s2 = s1;
+
+s2.a.x = 10;
+println(s1.a.x); // 1
+println(s2.a.x); // 10
+```
+
+In this respect Aether structs behave more like C# `struct` values, Julia immutable-style data values, or simple Rust structs than like Java objects. They are not reference objects, and assignment does not make two struct variables point at the same underlying instance. This value semantics is separate from field assignment: a non-`const` struct variable may update its own fields, but that update does not mutate another struct variable that was copied from it.
+
 Struct aliases are type aliases. An alias can be used both as the annotated type and as the constructor name:
 
 ```aether
