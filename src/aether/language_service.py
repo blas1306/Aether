@@ -53,6 +53,10 @@ _FUNCTION_RE = re.compile(
     r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\("
 )
 _STRUCT_RE = re.compile(r"\b(?:(?:public|private)\s+)?struct\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\b")
+_ENUM_RE = re.compile(
+    r"\b(?:(?:public|private)\s+)?enum\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\{(?P<body>.*?)\}",
+    re.DOTALL,
+)
 
 
 def analyze_source(source: str, *, source_root: str | Path | None = None) -> list[Diagnostic]:
@@ -94,7 +98,6 @@ def run_source(
 
 
 def completion_items(source: str, line: int, column: int) -> list[CompletionItem]:
-    del line, column
     seen: set[str] = set()
     items: list[CompletionItem] = []
 
@@ -103,6 +106,13 @@ def completion_items(source: str, line: int, column: int) -> list[CompletionItem
             return
         seen.add(label)
         items.append(CompletionItem(label=label, kind=kind, detail=detail))
+
+    enum_context = _enum_member_context(source, line, column)
+    if enum_context is not None:
+        enum_name, variants = enum_context
+        for variant in variants:
+            add(variant, "enum", enum_name)
+        return items
 
     for keyword in sorted(KEYWORDS):
         add(keyword, "keyword")
@@ -159,6 +169,7 @@ def _symbol_names(source: str) -> set[str]:
     names.update(match.group("name") for match in _ASSIGNMENT_RE.finditer(source))
     names.update(match.group("name") for match in _DECLARATION_RE.finditer(source))
     names.update(match.group("name") for match in _STRUCT_RE.finditer(source))
+    names.update(match.group("name") for match in _ENUM_RE.finditer(source))
     for match in _FUNCTION_RE.finditer(source):
         name = match.group("name")
         if name not in KEYWORDS:
@@ -175,6 +186,41 @@ def _imported_builtin_aliases(source: str) -> set[str]:
         if is_builtin_namespace(module_name):
             aliases.update(builtin_aliases_for_import(module_name))
     return aliases
+
+
+def _enum_member_context(source: str, line: int, column: int) -> tuple[str, list[str]] | None:
+    prefix = _source_prefix(source, line, column)
+    match = re.search(r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)\.\s*$", prefix)
+    if match is None:
+        return None
+    enum_name = match.group("name")
+    variants = _enum_variants(source).get(enum_name)
+    if variants is None:
+        return None
+    return enum_name, variants
+
+
+def _source_prefix(source: str, line: int, column: int) -> str:
+    lines = source.splitlines(keepends=True)
+    if not lines:
+        return ""
+    line_index = max(0, min(line - 1, len(lines) - 1))
+    offset = sum(len(text) for text in lines[:line_index])
+    offset += max(0, min(column - 1, len(lines[line_index])))
+    return source[:offset]
+
+
+def _enum_variants(source: str) -> dict[str, list[str]]:
+    enums: dict[str, list[str]] = {}
+    for match in _ENUM_RE.finditer(source):
+        body = re.sub(r"//.*|#.*", "", match.group("body"))
+        variants = [
+            variant
+            for variant in re.findall(r"\b[A-Za-z_][A-Za-z0-9_]*\b", body)
+            if variant not in KEYWORDS
+        ]
+        enums[match.group("name")] = variants
+    return enums
 
 
 def _imported_builtin_constant_aliases(source: str) -> set[str]:

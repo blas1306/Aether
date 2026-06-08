@@ -9,13 +9,14 @@ from .lexer import lex
 from .modules import is_public_export, private_top_level_names, resolve_file_module_path
 from .parser import Parser
 from .scope import Scope
-from .symbols import FunctionSymbol, StructSymbol, VariableSymbol
+from .symbols import EnumSymbol, FunctionSymbol, StructSymbol, VariableSymbol
 from .stdlib import infer_builtin_constant_type, infer_builtin_type, is_builtin, is_builtin_namespace, validate_builtin_arity
 from .stdlib.registry import builtin_aliases_for_import, builtin_constant_aliases_for_import
 from .tokens import AETHER_TYPES, PRIMITIVE_TYPES
 from .types import (
     AetherType,
     ArrayType,
+    EnumType,
     ListType,
     MatrixType,
     NUMERIC_TYPES,
@@ -58,6 +59,7 @@ class TypeChecker:
         self.global_scope: Scope[VariableSymbol] = Scope()
         self.functions: dict[str, FunctionSymbol] = {}
         self.structs: dict[str, StructSymbol] = {}
+        self.enums: dict[str, EnumSymbol] = {}
         self.expression_functions: dict[str, ast.ExpressionFunctionDeclaration] = {}
         self.expression_function_call_stack: set[str] = set()
         self.current_return_type: AetherType | None = None
@@ -75,6 +77,7 @@ class TypeChecker:
         self._diagnostic_errors: list[AetherTypeError] | None = None
 
     def check(self, program: ast.Program) -> None:
+        self._declare_enum_headers(program.statements)
         self._declare_struct_headers(program.statements)
         self._declare_type_aliases(program.statements)
         self._define_struct_fields(program.statements, program.package_name)
@@ -86,6 +89,7 @@ class TypeChecker:
         self._diagnostic_errors = []
         try:
             for phase in (
+                lambda: self._declare_enum_headers(program.statements),
                 lambda: self._declare_struct_headers(program.statements),
                 lambda: self._declare_type_aliases(program.statements),
                 lambda: self._define_struct_fields(program.statements, program.package_name),
@@ -100,6 +104,46 @@ class TypeChecker:
         finally:
             self._diagnostic_errors = previous_errors
 
+    def _declare_enum_headers(self, statements: list[ast.Statement]) -> None:
+        for statement in statements:
+            if not isinstance(statement, ast.EnumDeclaration):
+                continue
+            if statement.name in AETHER_TYPES or statement.name in self.type_aliases:
+                raise AetherTypeError(
+                    f"Enum '{statement.name}' conflicts with an existing type.",
+                    line=statement.line,
+                    column=statement.column,
+                )
+            if statement.name in self.enums:
+                raise AetherTypeError(
+                    f"Enum '{statement.name}' is already defined.",
+                    line=statement.line,
+                    column=statement.column,
+                )
+            if statement.name in self.structs:
+                raise AetherTypeError(
+                    f"Name '{statement.name}' is already defined as a struct.",
+                    line=statement.line,
+                    column=statement.column,
+                )
+            if statement.name in self.functions:
+                raise AetherTypeError(
+                    f"Name '{statement.name}' is already defined as a function.",
+                    line=statement.line,
+                    column=statement.column,
+                )
+            if self.global_scope.lookup(statement.name) is not None:
+                raise AetherTypeError(
+                    f"Name '{statement.name}' is already defined as a variable.",
+                    line=statement.line,
+                    column=statement.column,
+                )
+            self.enums[statement.name] = EnumSymbol(
+                statement.name,
+                tuple(variant.name for variant in statement.variants),
+                statement.visibility,
+            )
+
     def _declare_struct_headers(self, statements: list[ast.Statement]) -> None:
         for statement in statements:
             if not isinstance(statement, ast.StructDeclaration):
@@ -113,6 +157,12 @@ class TypeChecker:
             if statement.name in self.structs:
                 raise AetherTypeError(
                     f"Struct '{statement.name}' is already defined.",
+                    line=statement.line,
+                    column=statement.column,
+                )
+            if statement.name in self.enums:
+                raise AetherTypeError(
+                    f"Name '{statement.name}' is already defined as an enum.",
                     line=statement.line,
                     column=statement.column,
                 )
@@ -195,6 +245,8 @@ class TypeChecker:
             self._declare_alias(statement, scope)
             return
         if isinstance(statement, ast.StructDeclaration):
+            return
+        if isinstance(statement, ast.EnumDeclaration):
             return
         if isinstance(statement, ast.Assignment):
             self._assign_variable(statement, scope)
@@ -322,6 +374,10 @@ class TypeChecker:
             self._ensure_import_available(name, module_name)
             self.structs[name] = symbol
             self.imported_symbol_origins[name] = module_name
+        for name, symbol in self._exported_enums(program, module_checker).items():
+            self._ensure_import_available(name, module_name)
+            self.enums[name] = symbol
+            self.imported_symbol_origins[name] = module_name
         for name, target_type in self._exported_aliases(program, module_checker).items():
             self._ensure_import_available(name, module_name)
             self.type_aliases[name] = target_type
@@ -334,7 +390,13 @@ class TypeChecker:
             raise AetherTypeError(
                 f"Import collision for symbol '{name}' exported by both '{existing_origin}' and '{module_name}'."
             )
-        if self.global_scope.lookup(name) is not None or name in self.functions or name in self.type_aliases or name in self.structs:
+        if (
+            self.global_scope.lookup(name) is not None
+            or name in self.functions
+            or name in self.type_aliases
+            or name in self.structs
+            or name in self.enums
+        ):
             raise AetherTypeError(
                 f"Import collision: symbol '{name}' from module '{module_name}' conflicts with an existing symbol."
             )
@@ -400,6 +462,19 @@ class TypeChecker:
                 exports[statement.name] = module_checker.structs[statement.name]
         return exports
 
+    def _exported_enums(
+        self,
+        program: ast.Program,
+        module_checker: "TypeChecker",
+    ) -> dict[str, EnumSymbol]:
+        if program.package_name is None:
+            return dict(module_checker.enums)
+        exports: dict[str, EnumSymbol] = {}
+        for statement in program.statements:
+            if isinstance(statement, ast.EnumDeclaration) and is_public_export(statement.visibility, program.package_name):
+                exports[statement.name] = module_checker.enums[statement.name]
+        return exports
+
     def _exported_expression_functions(
         self,
         program: ast.Program,
@@ -424,7 +499,7 @@ class TypeChecker:
         return f"Symbol '{name}' is private in imported module '{module_list}'."
 
     def _declare_alias(self, statement: ast.AliasDeclaration, scope: Scope[VariableSymbol]) -> None:
-        if statement.name in AETHER_TYPES or statement.name in self.type_aliases or statement.name in self.structs:
+        if statement.name in AETHER_TYPES or statement.name in self.type_aliases or statement.name in self.structs or statement.name in self.enums:
             raise AetherTypeError(
                 f"Type alias '{statement.name}' is already defined.",
                 line=statement.line,
@@ -448,6 +523,12 @@ class TypeChecker:
         if scope is self.global_scope and statement.name in self.structs:
             raise AetherTypeError(
                 f"Name '{statement.name}' is already defined as a struct.",
+                line=statement.line,
+                column=statement.column,
+            )
+        if scope is self.global_scope and statement.name in self.enums:
+            raise AetherTypeError(
+                f"Name '{statement.name}' is already defined as an enum.",
                 line=statement.line,
                 column=statement.column,
             )
@@ -574,6 +655,12 @@ class TypeChecker:
             if scope is self.global_scope and statement.name in self.structs:
                 raise AetherTypeError(
                     f"Name '{statement.name}' is already defined as a struct.",
+                    line=statement.line,
+                    column=statement.column,
+                )
+            if scope is self.global_scope and statement.name in self.enums:
+                raise AetherTypeError(
+                    f"Name '{statement.name}' is already defined as an enum.",
                     line=statement.line,
                     column=statement.column,
                 )
@@ -773,6 +860,8 @@ class TypeChecker:
             raise AetherTypeError(f"Name '{statement.name}' is already defined as a type alias.")
         if statement.name in self.structs:
             raise AetherTypeError(f"Name '{statement.name}' is already defined as a struct.")
+        if statement.name in self.enums:
+            raise AetherTypeError(f"Name '{statement.name}' is already defined as an enum.")
         if self.global_scope.lookup(statement.name) is not None:
             raise AetherTypeError(f"Name '{statement.name}' is already defined as a variable.")
         return_type = self._resolve_type_aliases(statement.return_type, statement)
@@ -807,6 +896,8 @@ class TypeChecker:
             raise AetherTypeError(f"Name '{statement.name}' is already defined as a type alias.")
         if statement.name in self.structs:
             raise AetherTypeError(f"Name '{statement.name}' is already defined as a struct.")
+        if statement.name in self.enums:
+            raise AetherTypeError(f"Name '{statement.name}' is already defined as an enum.")
         if self.global_scope.lookup(statement.name) is not None:
             raise AetherTypeError(f"Name '{statement.name}' is already defined as a variable.")
         parameters = tuple(VariableSymbol(parameter.name, UNKNOWN_TYPE) for parameter in statement.parameters)
@@ -962,6 +1053,10 @@ class TypeChecker:
         if isinstance(expression, ast.FieldAccess):
             constant_name = _field_access_path(expression)
             constant_root = _field_access_root_name(expression)
+            if isinstance(expression.target, ast.Identifier) and scope.lookup(expression.target.name) is None:
+                enum_type = self._enum_variant_type(expression.target.name, expression.field_name, expression)
+                if enum_type is not None:
+                    return enum_type
             if constant_name is not None and constant_root is not None and scope.lookup(constant_root) is None:
                 try:
                     return infer_builtin_constant_type(constant_name)
@@ -1217,6 +1312,12 @@ class TypeChecker:
             return infer_builtin_type(builtin_name, argument_types)
         if expression.keyword_arguments:
             raise AetherTypeError(f"Function '{expression.callee}' does not accept keyword arguments.")
+        if self._constructor_enum(expression.callee) is not None:
+            raise AetherTypeError(
+                f"Cannot instantiate enum '{expression.callee}' as a function.",
+                line=expression.line,
+                column=expression.column,
+            )
         struct = self._constructor_struct(expression.callee)
         if struct is not None:
             self._check_struct_constructor(expression, struct, scope)
@@ -1285,6 +1386,15 @@ class TypeChecker:
             return None
         return self.structs.get(resolved)
 
+    def _constructor_enum(self, callee: str) -> EnumSymbol | None:
+        try:
+            resolved = self._resolve_type_aliases(callee)
+        except AetherTypeError:
+            return None
+        if isinstance(resolved, EnumType):
+            return self.enums.get(resolved.name)
+        return None
+
     def _check_struct_constructor(
         self,
         expression: ast.CallExpression,
@@ -1338,6 +1448,31 @@ class TypeChecker:
             line=getattr(location, "line", None),
             column=getattr(location, "column", None),
         )
+
+    def _enum_variant_type(
+        self,
+        enum_name: str,
+        variant_name: str,
+        location: object | None = None,
+    ) -> AetherType | None:
+        enum = self.enums.get(enum_name)
+        if enum is None:
+            private_message = self._private_import_message(enum_name)
+            if private_message is not None:
+                raise AetherTypeError(
+                    private_message,
+                    line=getattr(location, "line", None),
+                    column=getattr(location, "column", None),
+                    kind="name",
+                )
+            return None
+        if variant_name not in enum.variants:
+            raise AetherTypeError(
+                f"Enum '{enum_name}' has no variant '{variant_name}'.",
+                line=getattr(location, "line", None),
+                column=getattr(location, "column", None),
+            )
+        return EnumType(enum_name)
 
     def _input_call_type(
         self,
@@ -1561,6 +1696,8 @@ class TypeChecker:
                 return self._resolve_type_aliases(self.type_aliases[type_name], location, (*resolving, type_name))
             if type_name in self.structs:
                 return type_name
+            if type_name in self.enums:
+                return EnumType(type_name)
             if type_name not in AETHER_TYPES:
                 private_message = self._private_import_message(type_name)
                 if private_message is not None:
@@ -1613,6 +1750,11 @@ class TypeChecker:
 
     def _private_struct_type_name(self, type_name: AetherType, package_name: str | None) -> str | None:
         if package_name is None:
+            return None
+        if isinstance(type_name, EnumType):
+            symbol = self.enums.get(type_name.name)
+            if symbol is not None and not is_public_export(symbol.visibility, package_name):
+                return type_name.name
             return None
         if isinstance(type_name, str):
             symbol = self.structs.get(type_name)
@@ -1757,7 +1899,7 @@ def _private_type_names(statements: list[ast.Statement], package_name: str | Non
         return set()
     names: set[str] = set()
     for statement in statements:
-        if isinstance(statement, (ast.AliasDeclaration, ast.StructDeclaration)) and not is_public_export(
+        if isinstance(statement, (ast.AliasDeclaration, ast.StructDeclaration, ast.EnumDeclaration)) and not is_public_export(
             statement.visibility,
             package_name,
         ):
@@ -1772,6 +1914,8 @@ def _type_uses_private_name(type_name: AetherType, private_names: set[str]) -> b
 def _first_private_type_name(type_name: AetherType, private_names: set[str]) -> str | None:
     if isinstance(type_name, str):
         return type_name if type_name in private_names else None
+    if isinstance(type_name, EnumType):
+        return type_name.name if type_name.name in private_names else None
     if isinstance(type_name, ArrayType):
         return _first_private_type_name(type_name.element_type, private_names)
     if isinstance(type_name, ListType):

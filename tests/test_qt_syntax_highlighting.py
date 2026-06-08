@@ -48,6 +48,18 @@ def test_exception_keywords_are_highlighted(qapp) -> None:
     editor.close()
 
 
+def test_enum_keyword_is_highlighted(qapp) -> None:
+    editor = CodeEditor()
+    editor.set_autocomplete_document_kind("script")
+    editor.setPlainText("public enum SolverStatus { Converged }\n")
+    qapp.processEvents()
+
+    assert _has_color_at(editor, 0, 0, 6, "#a30101")
+    assert _has_color_at(editor, 0, 7, 4, "#a30101")
+
+    editor.close()
+
+
 def test_aether_types_are_highlighted_like_keywords(qapp) -> None:
     editor = CodeEditor()
     editor.set_autocomplete_document_kind("script")

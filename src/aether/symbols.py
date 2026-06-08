@@ -26,3 +26,10 @@ class StructSymbol:
     name: str
     fields: tuple[VariableSymbol, ...]
     visibility: str | None = None
+
+
+@dataclass(frozen=True)
+class EnumSymbol:
+    name: str
+    variants: tuple[str, ...]
+    visibility: str | None = None

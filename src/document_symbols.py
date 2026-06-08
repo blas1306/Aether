@@ -6,7 +6,7 @@ from typing import Literal
 
 
 DocumentSymbolKind = Literal["variable", "function", "module", "type"]
-DocumentSymbolOrigin = Literal["assignment", "function_definition", "for_loop_variable", "import", "type_alias", "struct"]
+DocumentSymbolOrigin = Literal["assignment", "function_definition", "for_loop_variable", "import", "type_alias", "struct", "enum"]
 
 _IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_]\w*\Z")
 _SIMPLE_ASSIGN_RE = re.compile(r"^(?P<name>[A-Za-z_]\w*)\s*=\s*(?!=)")
@@ -16,6 +16,7 @@ _TYPED_VAR_RE = re.compile(rf"^{_VISIBILITY_RE}(?:const\s+)?(?P<type>{_TYPE_RE})
 _CONST_ASSIGN_RE = re.compile(rf"^{_VISIBILITY_RE}const\s+(?P<name>[A-Za-z_]\w*)\s*=\s*(?!=)")
 _ALIAS_RE = re.compile(rf"^{_VISIBILITY_RE}alias\s+(?P<name>[A-Za-z_]\w*)\s*=\s*(?P<type>{_TYPE_RE})\s*$", re.IGNORECASE)
 _STRUCT_RE = re.compile(rf"^{_VISIBILITY_RE}struct\s+(?P<name>[A-Za-z_]\w*)\s*\{{?", re.IGNORECASE)
+_ENUM_RE = re.compile(rf"^{_VISIBILITY_RE}enum\s+(?P<name>[A-Za-z_]\w*)\s*\{{?", re.IGNORECASE)
 _INLINE_FUNCTION_RE = re.compile(r"^(?P<name>[A-Za-z_]\w*)\s*\((?P<params>[^()]*)\)\s*=\s*(?!=)")
 _AETHER_FUNCTION_RE = re.compile(
     rf"^{_VISIBILITY_RE}(?:function\s+)?(?P<return_type>{_TYPE_RE})\s+"
@@ -138,6 +139,7 @@ def _extract_symbol_from_statement(statement_span: _StatementSpan, line_starts: 
         _extract_import_symbol(statement, statement_span, leading_ws, line_starts)
         or _extract_alias_symbol(statement, statement_span, leading_ws, line_starts)
         or _extract_struct_symbol(statement, statement_span, leading_ws, line_starts)
+        or _extract_enum_symbol(statement, statement_span, leading_ws, line_starts)
         or _extract_aether_function_symbol(statement, statement_span, leading_ws, line_starts)
         or _extract_block_function_symbol(statement, statement_span, leading_ws, line_starts)
         or _extract_inline_function_symbol(statement, statement_span, leading_ws, line_starts)
@@ -194,6 +196,30 @@ def _extract_struct_symbol(
         origin="struct",
         signature=name,
         detail=f"struct {name}",
+        type_name=name,
+    )
+
+
+def _extract_enum_symbol(
+    statement: str,
+    statement_span: _StatementSpan,
+    leading_ws: int,
+    line_starts: list[int],
+) -> DocumentSymbol | None:
+    match = _ENUM_RE.match(statement)
+    if match is None:
+        return None
+    name = match.group("name")
+    return _document_symbol(
+        statement_span,
+        line_starts,
+        name_start=leading_ws + match.start("name"),
+        name_end=leading_ws + match.end("name"),
+        name=name,
+        kind="type",
+        origin="enum",
+        signature=name,
+        detail=f"enum {name}",
         type_name=name,
     )
 

@@ -427,6 +427,116 @@ Current struct limitations:
 - No deep `const`.
 - Struct lowering to IR/JIT is not implemented.
 
+## Enums
+
+Aether v0 supports simple nominal enums with payload-free variants:
+
+```aether
+public enum SolverStatus {
+    Converged,
+    MaxIterations,
+    SingularMatrix
+}
+
+private enum Color {
+    Red,
+    Green,
+    Blue
+}
+```
+
+An enum declaration is top-level only. It may use the same `public`/`private` visibility modifiers as other top-level declarations. In a packaged file, an enum without an explicit visibility modifier follows the package default and is private.
+
+Variants are part of the enum declaration and do not have their own visibility. A public enum exposes all of its variants. Variant names must be unique within the enum.
+
+Enum values are written with qualified variant access:
+
+```aether
+SolverStatus s = SolverStatus.Converged;
+
+if s == SolverStatus.Converged {
+    println("ok");
+}
+```
+
+`SolverStatus.Converged` has type `SolverStatus`. Enums are nominal types: two enums with the same variant names are still distinct types.
+
+```aether
+enum SolverStatus { Converged }
+enum OtherStatus { Converged }
+
+SolverStatus s = SolverStatus.Converged; // valid
+SolverStatus t = OtherStatus.Converged;  // error
+```
+
+`==` and `!=` are supported only between values of the same enum type. Comparing different enum types, or comparing an enum with `int`, `string`, `boolean`, or any other non-matching type, is a type error.
+
+Enum values are not booleans:
+
+```aether
+if SolverStatus.Converged { // error
+    println("ok");
+}
+```
+
+Enums do not have constructors. Calling an enum type as a function is an error:
+
+```aether
+SolverStatus(); // error
+```
+
+Enums can be used in variable declarations, function return types, parameters, and struct fields:
+
+```aether
+SolverStatus solve() {
+    return SolverStatus.Converged;
+}
+
+void report(SolverStatus status) {
+    println(status);
+}
+
+struct Result {
+    SolverStatus status;
+}
+```
+
+`print(...)` and `println(...)` render enum values as `EnumName.VariantName`:
+
+```aether
+println(SolverStatus.Converged); // SolverStatus.Converged
+```
+
+Packaged files export only public enums:
+
+```aether
+package Solver;
+
+public enum SolverStatus {
+    Converged,
+    MaxIterations
+}
+
+private enum InternalStatus {
+    Hidden
+}
+```
+
+```aether
+import Solver;
+
+println(SolverStatus.Converged); // valid
+println(InternalStatus.Hidden);  // error: InternalStatus is private
+```
+
+Current enum limitations:
+
+- No payload variants.
+- No methods inside enums.
+- No custom constructors.
+- No `match` or `switch` yet.
+- No per-variant visibility.
+
 ## Visibility Modifiers
 
 Top-level declarations may be prefixed with `public` or `private`:
@@ -487,7 +597,7 @@ Config             -> Config.ae
 
 Resolution is relative to the active source root. When running a saved file from the editor/runtime, the source root is the file's containing directory. Direct `run_aether(...)` calls can pass an explicit `source_root`; otherwise the current working directory is used to preserve existing script-import behavior.
 
-For packaged files, only `public` top-level variables/constants, aliases, structs, and functions are exported to importers:
+For packaged files, only `public` top-level variables/constants, aliases, structs, enums, and functions are exported to importers:
 
 ```aether
 package Math.Types;

@@ -241,7 +241,37 @@ class NullableType:
         return hash(("Nullable", self.base_type))
 
 
-AetherType = str | ArrayType | ListType | MatrixType | VectorType | TransposeVectorType | RangeType | TupleType | NullType | NullableType
+@dataclass(frozen=True, eq=False)
+class EnumType:
+    name: str
+
+    def __str__(self) -> str:
+        return self.name
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, EnumType):
+            return self.name == other.name
+        if isinstance(other, str):
+            return self.name == other
+        return False
+
+    def __hash__(self) -> int:
+        return hash(("Enum", self.name))
+
+
+AetherType = (
+    str
+    | ArrayType
+    | ListType
+    | MatrixType
+    | VectorType
+    | TransposeVectorType
+    | RangeType
+    | TupleType
+    | NullType
+    | NullableType
+    | EnumType
+)
 NULL_TYPE = NullType()
 
 
@@ -262,6 +292,12 @@ class StructInstance:
     type_name: str
     fields: dict[str, AetherValue]
     field_order: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class EnumValue:
+    enum_name: str
+    variant_name: str
 
 
 @dataclass(frozen=True)
@@ -325,6 +361,8 @@ def is_known_type(type_name: AetherType) -> bool:
         return type_name.element_type in TYPE_NAMES
     if isinstance(type_name, RangeType):
         return type_name.element_type == "int"
+    if isinstance(type_name, EnumType):
+        return True
     return type_name in TYPE_NAMES
 
 
@@ -446,6 +484,8 @@ def can_implicitly_convert(from_type: AetherType, to_type: AetherType) -> bool:
             for source_type, target_type in zip(from_type.element_types, to_type.element_types)
         )
     if isinstance(from_type, RangeType) or isinstance(to_type, RangeType):
+        return from_type == to_type
+    if isinstance(from_type, EnumType) or isinstance(to_type, EnumType):
         return from_type == to_type
     if isinstance(from_type, ListType) or isinstance(to_type, ListType):
         if not isinstance(from_type, ListType) or not isinstance(to_type, ListType):

@@ -10,7 +10,7 @@ from .interpreter import Function, Interpreter
 from .lexer import lex
 from .parser import Parser
 from .result import AetherRunResult
-from .symbols import FunctionSymbol, StructSymbol, VariableSymbol
+from .symbols import EnumSymbol, FunctionSymbol, StructSymbol, VariableSymbol
 from .typechecker import TypeChecker
 from .formatting import format_value
 from .types import AetherType, AetherValue, ArrayType, ListType, MatrixType, TransposeVectorType, TupleType, VectorType, type_to_string
@@ -22,6 +22,7 @@ class _SessionSnapshot:
     checker_constants: set[str]
     checker_functions: dict[str, FunctionSymbol]
     checker_structs: dict[str, StructSymbol]
+    checker_enums: dict[str, EnumSymbol]
     checker_expression_functions: dict[str, ast.ExpressionFunctionDeclaration]
     checker_imported_modules: set[str]
     checker_builtin_aliases: dict[str, str]
@@ -33,6 +34,7 @@ class _SessionSnapshot:
     runtime_constants: set[str]
     runtime_functions: dict[str, Function]
     runtime_structs: dict[str, ast.StructDeclaration]
+    runtime_enums: dict[str, ast.EnumDeclaration]
     imported_modules: set[str]
     runtime_builtin_aliases: dict[str, str]
     runtime_builtin_constant_aliases: dict[str, str]
@@ -101,6 +103,7 @@ class AetherSession:
             checker_constants=deepcopy(self._type_checker.global_scope.constants),
             checker_functions=deepcopy(self._type_checker.functions),
             checker_structs=deepcopy(self._type_checker.structs),
+            checker_enums=deepcopy(self._type_checker.enums),
             checker_expression_functions=deepcopy(self._type_checker.expression_functions),
             checker_imported_modules=deepcopy(self._type_checker.imported_modules),
             checker_builtin_aliases=deepcopy(self._type_checker.builtin_aliases),
@@ -112,6 +115,7 @@ class AetherSession:
             runtime_constants=deepcopy(self._interpreter.global_env.variable_scope.constants),
             runtime_functions=deepcopy(self._interpreter.global_env.functions),
             runtime_structs=deepcopy(self._interpreter.structs),
+            runtime_enums=deepcopy(self._interpreter.enums),
             imported_modules=deepcopy(self._interpreter.imported_modules),
             runtime_builtin_aliases=deepcopy(self._interpreter.builtin_aliases),
             runtime_builtin_constant_aliases=deepcopy(self._interpreter.builtin_constant_aliases),
@@ -125,6 +129,7 @@ class AetherSession:
         self._type_checker.global_scope.constants = deepcopy(snapshot.checker_constants)
         self._type_checker.functions = deepcopy(snapshot.checker_functions)
         self._type_checker.structs = deepcopy(snapshot.checker_structs)
+        self._type_checker.enums = deepcopy(snapshot.checker_enums)
         self._type_checker.expression_functions = deepcopy(snapshot.checker_expression_functions)
         self._type_checker.imported_modules = deepcopy(snapshot.checker_imported_modules)
         self._type_checker.builtin_aliases = deepcopy(snapshot.checker_builtin_aliases)
@@ -137,6 +142,7 @@ class AetherSession:
         self._interpreter.global_env.variable_scope.constants = deepcopy(snapshot.runtime_constants)
         self._interpreter.global_env.functions = deepcopy(snapshot.runtime_functions)
         self._interpreter.structs = deepcopy(snapshot.runtime_structs)
+        self._interpreter.enums = deepcopy(snapshot.runtime_enums)
         self._interpreter.imported_modules = deepcopy(snapshot.imported_modules)
         self._interpreter.builtin_aliases = deepcopy(snapshot.runtime_builtin_aliases)
         self._interpreter.builtin_constant_aliases = deepcopy(snapshot.runtime_builtin_constant_aliases)

@@ -22,6 +22,8 @@ from .tokens import AETHER_TYPES, PRIMITIVE_TYPES
 from .types import (
     AetherType,
     AetherExceptionValue,
+    EnumType,
+    EnumValue,
     AetherRange,
     AetherValue,
     ArrayType,
@@ -70,6 +72,7 @@ class Function:
     imported_modules: set[str] | None = None
     type_aliases: dict[str, AetherType] | None = None
     structs: dict[str, ast.StructDeclaration] | None = None
+    enums: dict[str, ast.EnumDeclaration] | None = None
 
 
 @dataclass(frozen=True)
@@ -154,6 +157,7 @@ class _FunctionContext:
         self.previous_imported_modules: set[str] = set()
         self.previous_type_aliases: dict[str, AetherType] = {}
         self.previous_structs: dict[str, ast.StructDeclaration] = {}
+        self.previous_enums: dict[str, ast.EnumDeclaration] = {}
 
     def __enter__(self) -> None:
         self.previous_builtin_aliases = self.interpreter.builtin_aliases
@@ -161,6 +165,7 @@ class _FunctionContext:
         self.previous_imported_modules = self.interpreter.imported_modules
         self.previous_type_aliases = self.interpreter.type_aliases
         self.previous_structs = self.interpreter.structs
+        self.previous_enums = self.interpreter.enums
         self.interpreter.builtin_aliases = {
             **self.previous_builtin_aliases,
             **(self.function.builtin_aliases or {}),
@@ -181,6 +186,10 @@ class _FunctionContext:
             **self.previous_structs,
             **(self.function.structs or {}),
         }
+        self.interpreter.enums = {
+            **self.previous_enums,
+            **(self.function.enums or {}),
+        }
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
         self.interpreter.builtin_aliases = self.previous_builtin_aliases
@@ -188,6 +197,7 @@ class _FunctionContext:
         self.interpreter.imported_modules = self.previous_imported_modules
         self.interpreter.type_aliases = self.previous_type_aliases
         self.interpreter.structs = self.previous_structs
+        self.interpreter.enums = self.previous_enums
 
 
 class Interpreter:
@@ -219,6 +229,7 @@ class Interpreter:
         self.imported_modules: set[str] = set()
         self.type_aliases: dict[str, AetherType] = {}
         self.structs: dict[str, ast.StructDeclaration] = {}
+        self.enums: dict[str, ast.EnumDeclaration] = {}
         self.source_root = Path(source_root).expanduser().resolve() if source_root is not None else Path.cwd()
         self.import_stack = import_stack
         self.imported_symbol_origins: dict[str, str] = {}
@@ -339,6 +350,9 @@ class Interpreter:
             return
         if isinstance(statement, ast.StructDeclaration):
             self.structs[statement.name] = statement
+            return
+        if isinstance(statement, ast.EnumDeclaration):
+            self.enums[statement.name] = statement
             return
         if isinstance(statement, ast.Assignment):
             current = env.lookup(statement.name)
@@ -470,6 +484,7 @@ class Interpreter:
             set(self.imported_modules),
             dict(self.type_aliases),
             dict(self.structs),
+            dict(self.enums),
         )
 
     def _evaluate(self, expression: ast.Expression, env: Environment) -> AetherValue:
@@ -547,6 +562,10 @@ class Interpreter:
         if isinstance(expression, ast.FieldAccess):
             constant_name = _field_access_path(expression)
             constant_root = _field_access_root_name(expression)
+            if isinstance(expression.target, ast.Identifier) and env.lookup(expression.target.name) is None:
+                enum_value = self._enum_variant_value(expression.target.name, expression.field_name, expression)
+                if enum_value is not None:
+                    return enum_value
             if constant_name is not None and constant_root is not None and env.lookup(constant_root) is None:
                 builtin_constant = get_builtin_constant(constant_name)
                 if builtin_constant is not None:
@@ -1018,6 +1037,12 @@ class Interpreter:
             return self._call(expression.callee, args, named_args, env)
         if named_args:
             raise AetherRuntimeError(f"Function '{expression.callee}' does not accept keyword arguments.")
+        if self._constructor_enum(expression.callee) is not None:
+            raise AetherRuntimeError(
+                f"Cannot instantiate enum '{expression.callee}' as a function.",
+                line=expression.line,
+                column=expression.column,
+            )
         struct = self._constructor_struct(expression.callee)
         if struct is not None:
             args = [
@@ -1056,6 +1081,15 @@ class Interpreter:
             return None
         return self.structs.get(resolved)
 
+    def _constructor_enum(self, callee: str) -> ast.EnumDeclaration | None:
+        try:
+            resolved = self._resolve_type_aliases(callee)
+        except AetherTypeError:
+            return None
+        if isinstance(resolved, EnumType):
+            return self.enums.get(resolved.name)
+        return None
+
     def _construct_struct(self, declaration: ast.StructDeclaration, args: list[AetherValue]) -> AetherValue:
         if len(args) != len(declaration.fields):
             raise AetherRuntimeError(
@@ -1068,6 +1102,31 @@ class Interpreter:
             fields[field.name] = coerce_implicit(arg, field_type)
             field_order.append(field.name)
         return AetherValue(declaration.name, StructInstance(declaration.name, fields, tuple(field_order)))
+
+    def _enum_variant_value(
+        self,
+        enum_name: str,
+        variant_name: str,
+        location: object | None = None,
+    ) -> AetherValue | None:
+        declaration = self.enums.get(enum_name)
+        if declaration is None:
+            private_message = self._private_import_message(enum_name)
+            if private_message is not None:
+                raise AetherRuntimeError(
+                    private_message,
+                    line=getattr(location, "line", None),
+                    column=getattr(location, "column", None),
+                    kind="name",
+                )
+            return None
+        if variant_name not in {variant.name for variant in declaration.variants}:
+            raise AetherTypeError(
+                f"Enum '{enum_name}' has no variant '{variant_name}'.",
+                line=getattr(location, "line", None),
+                column=getattr(location, "column", None),
+            )
+        return AetherValue(EnumType(enum_name), EnumValue(enum_name, variant_name))
 
     def _read_field(self, target: ast.Expression, field_name: str, env: Environment) -> AetherValue:
         struct_value = self._evaluate(target, env)
@@ -1313,6 +1372,10 @@ class Interpreter:
             self._ensure_import_available(name, module_name)
             self.structs[name] = declaration
             self.imported_symbol_origins[name] = module_name
+        for name, declaration in self._exported_enums(program, module_interpreter).items():
+            self._ensure_import_available(name, module_name)
+            self.enums[name] = declaration
+            self.imported_symbol_origins[name] = module_name
         for name, target_type in self._exported_aliases(program, module_interpreter).items():
             self._ensure_import_available(name, module_name)
             self.type_aliases[name] = target_type
@@ -1324,7 +1387,13 @@ class Interpreter:
             raise AetherRuntimeError(
                 f"Import collision for symbol '{name}' exported by both '{existing_origin}' and '{module_name}'."
             )
-        if name in self.global_env.values or name in self.global_env.functions or name in self.type_aliases or name in self.structs:
+        if (
+            name in self.global_env.values
+            or name in self.global_env.functions
+            or name in self.type_aliases
+            or name in self.structs
+            or name in self.enums
+        ):
             raise AetherRuntimeError(
                 f"Import collision: symbol '{name}' from module '{module_name}' conflicts with an existing symbol."
             )
@@ -1369,6 +1438,19 @@ class Interpreter:
         for statement in program.statements:
             if isinstance(statement, ast.StructDeclaration) and is_public_export(statement.visibility, program.package_name):
                 exports[statement.name] = module_interpreter.structs[statement.name]
+        return exports
+
+    def _exported_enums(
+        self,
+        program: ast.Program,
+        module_interpreter: "Interpreter",
+    ) -> dict[str, ast.EnumDeclaration]:
+        if program.package_name is None:
+            return dict(module_interpreter.enums)
+        exports: dict[str, ast.EnumDeclaration] = {}
+        for statement in program.statements:
+            if isinstance(statement, ast.EnumDeclaration) and is_public_export(statement.visibility, program.package_name):
+                exports[statement.name] = module_interpreter.enums[statement.name]
         return exports
 
     def _exported_aliases(
@@ -1432,6 +1514,8 @@ class Interpreter:
                 return self._resolve_type_aliases(self.type_aliases[type_name], (*resolving, type_name))
             if type_name in self.structs:
                 return type_name
+            if type_name in self.enums:
+                return EnumType(type_name)
             if type_name not in AETHER_TYPES:
                 private_message = self._private_import_message(type_name)
                 if private_message is not None:

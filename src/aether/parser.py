@@ -70,6 +70,8 @@ class Parser:
                 return self._alias_declaration(visibility)
             if self._match(TokenType.STRUCT):
                 return self._struct_declaration(visibility)
+            if self._match(TokenType.ENUM):
+                return self._enum_declaration(visibility)
             if self._looks_like_function_declaration():
                 return self._function_declaration(visibility)
             if self._looks_like_expression_function_declaration():
@@ -83,6 +85,10 @@ class Parser:
             if self.block_depth > 0:
                 raise self._error(self._previous(), "Struct declarations are only supported at top level.")
             return self._struct_declaration()
+        if self._match(TokenType.ENUM):
+            if self.block_depth > 0:
+                raise self._error(self._previous(), "Enum declarations are only supported at top level.")
+            return self._enum_declaration()
         if self._match(TokenType.FUNCTION):
             return self._function_declaration()
         if self._looks_like_function_declaration():
@@ -205,6 +211,37 @@ class Parser:
             self._consume(TokenType.SEMICOLON, "Expected ';' after struct field.")
         self._consume(TokenType.RIGHT_BRACE, "Expected '}' after struct declaration.")
         return ast.StructDeclaration(name_token.lexeme, fields, name_token.line, name_token.column, visibility)
+
+    def _enum_declaration(self, visibility: ast.Visibility = None) -> ast.EnumDeclaration:
+        if self.block_depth > 0:
+            raise self._error(self._previous(), "Enum declarations are only supported at top level.")
+        name_token = self._consume(TokenType.IDENTIFIER, "Expected enum name.")
+        self._consume(TokenType.LEFT_BRACE, "Expected '{' before enum variants.")
+        variants: list[ast.EnumVariant] = []
+        variant_names: set[str] = set()
+        if self._check(TokenType.RIGHT_BRACE):
+            raise self._error(self._peek(), f"Enum '{name_token.lexeme}' must declare at least one variant.")
+        while not self._check(TokenType.RIGHT_BRACE) and not self._is_at_end():
+            if self._check(TokenType.PUBLIC) or self._check(TokenType.PRIVATE):
+                raise self._error(self._peek(), "Enum variants do not support visibility modifiers.")
+            if self._check(TokenType.FUNCTION) or self._check(TokenType.STRUCT) or self._check(TokenType.ENUM):
+                raise self._error(self._peek(), "Methods and nested declarations are not supported inside enums.")
+            variant_token = self._consume(TokenType.IDENTIFIER, "Expected enum variant name.")
+            if self._check(TokenType.LEFT_PAREN):
+                raise self._error(variant_token, "Enum variants cannot have payloads.")
+            if variant_token.lexeme in variant_names:
+                raise self._error(
+                    variant_token,
+                    f"Duplicate variant '{variant_token.lexeme}' in enum '{name_token.lexeme}'.",
+                )
+            variant_names.add(variant_token.lexeme)
+            variants.append(ast.EnumVariant(variant_token.lexeme, variant_token.line, variant_token.column))
+            if not self._match(TokenType.COMMA):
+                break
+            if self._check(TokenType.RIGHT_BRACE):
+                break
+        self._consume(TokenType.RIGHT_BRACE, "Expected '}' after enum declaration.")
+        return ast.EnumDeclaration(name_token.lexeme, variants, name_token.line, name_token.column, visibility)
 
     def _package_declaration(self) -> str:
         module_name = self._consume(TokenType.IDENTIFIER, "Expected package name after 'package'.").lexeme
@@ -663,6 +700,7 @@ class Parser:
                 TokenType.CONST,
                 TokenType.ALIAS,
                 TokenType.STRUCT,
+                TokenType.ENUM,
                 TokenType.FUNCTION,
                 TokenType.TYPE,
                 TokenType.IF,

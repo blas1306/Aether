@@ -80,6 +80,7 @@ KEYWORD_SUGGESTIONS: tuple[CommandSuggestion, ...] = (
     _keyword_entry("const", "Declare an immutable variable name.", insert_text="const ", signature="const Type name = value;", category="definitions", priority=110),
     _keyword_entry("alias", "Declare a type alias.", insert_text="alias ", signature="alias Name = Type;", category="definitions", priority=110),
     _keyword_entry("struct", "Declare a nominal data struct.", insert_text="struct ", signature="struct Name { Type field; }", category="definitions", priority=110),
+    _keyword_entry("enum", "Declare a nominal enum type.", insert_text="enum ", signature="enum Name { Variant }", category="definitions", priority=110),
     _keyword_entry("package", "Declare the file package.", insert_text="package ", signature="package Name.Module;", category="definitions", priority=100),
     _keyword_entry("public", "Mark a top-level declaration as public.", insert_text="public ", category="definitions", priority=80),
     _keyword_entry("private", "Mark a top-level declaration as private.", insert_text="private ", category="definitions", priority=80),
@@ -140,6 +141,7 @@ SNIPPET_SUGGESTIONS: tuple[CommandSuggestion, ...] = (
     _snippet_entry("try", "try {\n    \n} catch (e) {\n    \n}", len("try {\n    "), 0, "Try/catch snippet."),
     _snippet_entry("func", "int name() {\n    \n}", len("int "), len("name"), "Block function snippet."),
     _snippet_entry("struct", "struct Name {\n    double field;\n}", len("struct "), len("Name"), "Data struct snippet."),
+    _snippet_entry("enum", "enum Name {\n    Variant\n}", len("enum "), len("Name"), "Enum snippet."),
     _snippet_entry("ife", "if condition {\n    \n} else {\n    \n}", len("if "), len("condition"), "If/else block snippet."),
 )
 
@@ -512,6 +514,41 @@ def _stdlib_member_suggestions(qualifier: str, prefix: str) -> list[CommandSugge
     return suggestions
 
 
+def _enum_member_suggestions(qualifier: str, prefix: str, document_text: str) -> list[CommandSuggestion]:
+    variants = _enum_variants(document_text).get(qualifier)
+    if variants is None:
+        return []
+    return [
+        CommandSuggestion(
+            name=variant,
+            label=variant,
+            insert_text=variant,
+            signature=f"{qualifier}.{variant}",
+            description="Aether enum variant.",
+            category="enums",
+            kind="enum",
+            source="document",
+            priority=470,
+            match_text=variant,
+        )
+        for variant in variants
+        if _match_prefix(variant, prefix)
+    ]
+
+
+def _enum_variants(document_text: str) -> dict[str, list[str]]:
+    enums: dict[str, list[str]] = {}
+    for match in re.finditer(
+        r"\b(?:(?:public|private)\s+)?enum\s+(?P<name>[A-Za-z_]\w*)\s*\{(?P<body>.*?)\}",
+        document_text,
+        re.DOTALL,
+    ):
+        body = re.sub(r"//.*|#.*", "", match.group("body"))
+        variants = re.findall(r"\b[A-Za-z_]\w*\b", body)
+        enums[match.group("name")] = variants
+    return enums
+
+
 def _keyword_suggestions(prefix: str) -> list[CommandSuggestion]:
     return [item for item in KEYWORD_SUGGESTIONS if _match_prefix(item.match_text or item.name, prefix)]
 
@@ -621,7 +658,10 @@ def build_autocomplete_suggestions(
         return _dedupe_suggestions(raw, match, line_text=request.line_text, document_kind=request.document_kind)
 
     if match.kind == "member":
-        raw = _stdlib_member_suggestions(match.qualifier, match.prefix)
+        raw = []
+        if request.document_text:
+            raw.extend(_enum_member_suggestions(match.qualifier, match.prefix, request.document_text))
+        raw.extend(_stdlib_member_suggestions(match.qualifier, match.prefix))
         return _dedupe_suggestions(raw, match, line_text=request.line_text, document_kind=request.document_kind)
 
     should_suggest_identifiers = request.document_kind == "script" or _looks_like_code_line(request.line_text)

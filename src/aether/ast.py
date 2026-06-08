@@ -71,6 +71,22 @@ class StructDeclaration:
 
 
 @dataclass(frozen=True)
+class EnumVariant:
+    name: str
+    line: int = 1
+    column: int = 1
+
+
+@dataclass(frozen=True)
+class EnumDeclaration:
+    name: str
+    variants: list[EnumVariant]
+    line: int = 1
+    column: int = 1
+    visibility: Visibility = None
+
+
+@dataclass(frozen=True)
 class Assignment:
     name: str
     expression: Expression

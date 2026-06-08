@@ -385,6 +385,10 @@ def _symbol_hover_markdown(symbol) -> str:
     }.get(symbol.kind, "Aether symbol.")
     if symbol.origin == "for_loop_variable":
         description = "Loop variable defined in this document."
+    if symbol.origin == "struct":
+        description = "Struct type defined in this document."
+    if symbol.origin == "enum":
+        description = "Enum type defined in this document."
     return f"```aether\n{signature}\n```\n\n{description}"
 
 

@@ -133,3 +133,13 @@ def test_completion_items_include_exception_keywords() -> None:
     labels = {item.label for item in items}
 
     assert {"try", "catch", "throw"} <= labels
+
+
+def test_completion_items_include_enum_keyword_and_variants_after_dot() -> None:
+    source = "enum SolverStatus { Converged, MaxIterations }\nSolverStatus."
+    keyword_labels = {item.label for item in completion_items(source, 1, 1)}
+    variant_items = completion_items(source, 2, len("SolverStatus.") + 1)
+    variant_labels = {item.label for item in variant_items}
+
+    assert "enum" in keyword_labels
+    assert {"Converged", "MaxIterations"} <= variant_labels
