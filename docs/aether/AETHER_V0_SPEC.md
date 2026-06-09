@@ -312,7 +312,7 @@ struct S {
 }
 ```
 
-The explicit receiver name `this` is also available for field reads:
+The explicit receiver name `this` is also available for field reads and writes:
 
 ```aether
 double sum() {
@@ -322,23 +322,51 @@ double sum() {
 
 Methods are looked up on the nominal struct type. Calling an unknown method, calling a method with the wrong arity, reading a method without `(...)`, or calling a field as a method is a type error. Fields and methods cannot share a name, and a struct cannot declare two methods with the same name. Methods may return any supported Aether type, including primitives, structs, enums, `List<T>`, `Array<T>`, `Vector<T>`, and `Matrix<T>`.
 
-Struct methods are non-mutating in this version. Assigning to an implicit field or to `this.field` inside a method is rejected:
+Struct methods may be mutating. A method is mutating when it assigns to a field of its receiver, either through an implicit field name or through `this.field`. A method that calls another mutating method on the same receiver is also mutating:
 
 ```aether
-struct Point {
-    double x;
+struct Counter {
+    int value;
 
-    void setX(double value) {
-        x = value;      // error
-        this.x = value; // error
+    void increment() {
+        value = value + 1;
+    }
+
+    void add(int n) {
+        this.value = this.value + n;
+    }
+}
+
+Counter c = Counter(0);
+c.increment();
+c.add(4);
+println(c.value); // 5
+```
+
+Field assignment inside a method is still typechecked against the declared field type. Local variables and parameters shadow fields; use `this.field` to select the receiver field when a local has the same name:
+
+```aether
+struct Counter {
+    int value;
+
+    void f(int value) {
+        value = value + 1;           // parameter
+        this.value = this.value + 1; // field
     }
 }
 ```
 
-The diagnostic is:
+Mutating methods cannot be called through a `const` receiver:
 
-```text
-Mutating struct fields inside methods is not supported yet.
+```aether
+const Counter c = Counter(0);
+c.increment(); // error: Cannot mutate constant 'c'
+```
+
+Mutating methods also cannot be called on temporary values, because the mutation would have no stable storage target:
+
+```aether
+Counter(0).increment(); // error: Cannot call mutating method on temporary value.
 ```
 
 The automatic constructor is positional and checks the declared field types:
@@ -387,6 +415,16 @@ println(s2.a.x); // 10
 ```
 
 In this respect Aether structs behave more like C# `struct` values, Julia immutable-style data values, or simple Rust structs than like Java objects. They are not reference objects, and assignment does not make two struct variables point at the same underlying instance. This value semantics is separate from field assignment: a non-`const` struct variable may update its own fields, but that update does not mutate another struct variable that was copied from it.
+
+Mutating methods follow the same value semantics:
+
+```aether
+Counter a = Counter(0);
+Counter b = a;
+b.increment();
+println(a.value); // 0
+println(b.value); // 1
+```
 
 Struct aliases are type aliases. An alias can be used both as the annotated type and as the constructor name:
 
@@ -518,7 +556,6 @@ Current struct limitations:
 
 - No custom constructors or overloaded constructors.
 - No field visibility.
-- No mutating struct methods.
 - No static methods or generic methods.
 - No new generic struct parameters.
 - No inheritance, traits, or protocols.
@@ -579,7 +616,7 @@ Shape makeShape() {
 }
 ```
 
-Calling a declared interface method dispatches to the concrete struct method stored in the value. Structs remain value types when assigned or passed through interface-typed variables and parameters.
+Calling a declared interface method dispatches to the concrete struct method stored in the value. Structs remain value types when assigned or passed through interface-typed variables and parameters. If the dispatched method is mutating, the interface-typed receiver must be mutable; calling it through a `const` interface variable is rejected.
 
 Member access uses the static type. A variable whose static type is an interface exposes only the interface methods:
 

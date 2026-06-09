@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from . import ast
@@ -87,6 +87,7 @@ class TypeChecker:
         self._declare_type_aliases(program.statements)
         self._define_interface_methods(program.statements)
         self._define_struct_fields(program.statements, program.package_name)
+        self._infer_struct_method_mutability(program.statements)
         self._check_statements(program.statements, self.global_scope)
         self._validate_type_aliases()
 
@@ -101,6 +102,7 @@ class TypeChecker:
                 lambda: self._declare_type_aliases(program.statements),
                 lambda: self._define_interface_methods(program.statements),
                 lambda: self._define_struct_fields(program.statements, program.package_name),
+                lambda: self._infer_struct_method_mutability(program.statements),
                 lambda: self._check_statements(program.statements, self.global_scope),
                 self._validate_type_aliases,
             ):
@@ -420,6 +422,41 @@ class TypeChecker:
             names.add(method.name)
             symbols.append(FunctionSymbol(method.name, return_type, parameters, method.visibility))
         return tuple(symbols)
+
+    def _infer_struct_method_mutability(self, statements: list[ast.Statement]) -> None:
+        declarations = [statement for statement in statements if isinstance(statement, ast.StructDeclaration)]
+        mutating: set[tuple[str, str]] = set()
+        calls: dict[tuple[str, str], set[tuple[str, str]]] = {}
+        for declaration in declarations:
+            struct = self.structs.get(declaration.name)
+            if struct is None:
+                continue
+            method_names = {method.name for method in declaration.methods}
+            for method in declaration.methods:
+                key = (declaration.name, method.name)
+                analysis = _StructMethodMutationAnalysis(self, struct, method_names)
+                analysis.scan_method(method)
+                if analysis.directly_mutates_receiver:
+                    mutating.add(key)
+                calls[key] = analysis.receiver_method_calls
+        changed = True
+        while changed:
+            changed = False
+            for key, edges in calls.items():
+                if key in mutating:
+                    continue
+                if any(edge in mutating for edge in edges):
+                    mutating.add(key)
+                    changed = True
+        for declaration in declarations:
+            struct = self.structs.get(declaration.name)
+            if struct is None:
+                continue
+            methods = tuple(
+                replace(method, is_mutating=(declaration.name, method.name) in mutating)
+                for method in struct.methods
+            )
+            self.structs[declaration.name] = replace(struct, methods=methods)
 
     def _check_statements(self, statements: list[ast.Statement], scope: Scope[VariableSymbol]) -> None:
         for statement in statements:
@@ -852,12 +889,18 @@ class TypeChecker:
     def _assign_variable(self, statement: ast.Assignment, scope: Scope[VariableSymbol]) -> None:
         if self._is_active_loop_variable_assignment(statement.name, scope):
             raise AetherTypeError(f"Cannot assign to loop variable '{statement.name}' inside its own for-loop.")
-        if self._implicit_method_field(statement.name, scope) is not None:
-            raise AetherTypeError(
-                "Mutating struct fields inside methods is not supported yet.",
-                line=statement.line,
-                column=statement.column,
-            )
+        implicit_field = self._implicit_method_field(statement.name, scope)
+        if implicit_field is not None:
+            value_type = self._expression_type(statement.expression, scope)
+            self._reject_void_value(value_type, "assignment", statement)
+            if value_type is not UNKNOWN_TYPE and not self._can_assign(
+                value_type,
+                implicit_field.type_name,
+                initializer=statement.expression,
+                scope=scope,
+            ):
+                self._raise_implicit_conversion_error(value_type, implicit_field.type_name, statement)
+            return
         existing = scope.lookup(statement.name)
         if existing is not None and existing.is_const:
             raise AetherTypeError(
@@ -993,15 +1036,12 @@ class TypeChecker:
         assigned_name = _assignment_root_name(statement.array)
         if assigned_name is not None and self._is_active_loop_variable_assignment(assigned_name, scope):
             raise AetherTypeError(f"Cannot assign to loop variable '{assigned_name}' inside its own for-loop.")
-        if assigned_name is not None and self._implicit_method_field(assigned_name, scope) is not None:
-            raise AetherTypeError(
-                "Mutating struct fields inside methods is not supported yet.",
-                line=statement.line,
-                column=statement.column,
-            )
         if isinstance(statement.index, (ast.FullSlice, ast.RangeExpression)):
             raise AetherTypeError("Slice assignment is not supported yet.")
-        if assigned_name is not None and scope.is_const(assigned_name):
+        if assigned_name is not None and scope.is_const(assigned_name) and not self._is_method_receiver_mutation_target(
+            statement.array,
+            scope,
+        ):
             raise AetherTypeError(
                 f"Cannot mutate constant '{assigned_name}'.",
                 line=statement.line,
@@ -1043,18 +1083,15 @@ class TypeChecker:
         assigned_name = _assignment_root_name(statement.matrix)
         if assigned_name is not None and self._is_active_loop_variable_assignment(assigned_name, scope):
             raise AetherTypeError(f"Cannot assign to loop variable '{assigned_name}' inside its own for-loop.")
-        if assigned_name is not None and self._implicit_method_field(assigned_name, scope) is not None:
-            raise AetherTypeError(
-                "Mutating struct fields inside methods is not supported yet.",
-                line=statement.line,
-                column=statement.column,
-            )
         if isinstance(statement.row, (ast.FullSlice, ast.RangeExpression)) or isinstance(
             statement.column_index,
             (ast.FullSlice, ast.RangeExpression),
         ):
             raise AetherTypeError("Slice assignment is not supported yet.")
-        if assigned_name is not None and scope.is_const(assigned_name):
+        if assigned_name is not None and scope.is_const(assigned_name) and not self._is_method_receiver_mutation_target(
+            statement.matrix,
+            scope,
+        ):
             raise AetherTypeError(
                 f"Cannot mutate constant '{assigned_name}'.",
                 line=statement.line,
@@ -1079,13 +1116,10 @@ class TypeChecker:
         assigned_name = _assignment_root_name(statement.target)
         if assigned_name is not None and self._is_active_loop_variable_assignment(assigned_name, scope):
             raise AetherTypeError(f"Cannot assign to loop variable '{assigned_name}' inside its own for-loop.")
-        if self._is_method_receiver_field_target(statement.target, scope):
-            raise AetherTypeError(
-                "Mutating struct fields inside methods is not supported yet.",
-                line=statement.line,
-                column=statement.column,
-            )
-        if assigned_name is not None and scope.is_const(assigned_name):
+        if assigned_name is not None and scope.is_const(assigned_name) and not self._is_method_receiver_field_target(
+            statement.target,
+            scope,
+        ):
             raise AetherTypeError(
                 f"Cannot mutate constant '{assigned_name}'.",
                 line=statement.line,
@@ -1144,6 +1178,12 @@ class TypeChecker:
         return self._struct_field_symbol(self.current_method_struct, name)
 
     def _is_method_receiver_field_target(self, expression: ast.Expression, scope: Scope[VariableSymbol]) -> bool:
+        root_name = _assignment_root_name(expression)
+        if root_name == "this" and self.current_method_struct is not None:
+            return True
+        return root_name is not None and self._implicit_method_field(root_name, scope) is not None
+
+    def _is_method_receiver_mutation_target(self, expression: ast.Expression, scope: Scope[VariableSymbol]) -> bool:
         root_name = _assignment_root_name(expression)
         if root_name == "this" and self.current_method_struct is not None:
             return True
@@ -1791,6 +1831,7 @@ class TypeChecker:
                     column=expression.column,
                 )
             self._check_struct_method_arguments(method, expression.arguments, expression.keyword_arguments, scope, expression)
+            self._check_mutating_method_receiver(method, expression.target, scope, expression)
             return method.return_type
         if isinstance(resolved, InterfaceType):
             interface = self.interfaces[resolved.name]
@@ -1802,6 +1843,8 @@ class TypeChecker:
                     column=expression.column,
                 )
             self._check_struct_method_arguments(method, expression.arguments, expression.keyword_arguments, scope, expression)
+            if self._interface_method_is_mutating(interface, expression.method_name):
+                self._check_mutating_method_receiver(replace(method, is_mutating=True), expression.target, scope, expression)
             return method.return_type
         members = native_member_set(resolved)
         if members is None:
@@ -1823,14 +1866,6 @@ class TypeChecker:
                 line=expression.line,
                 column=expression.column,
             )
-        if method.builtin_name in LIST_MUTATING_BUILTINS:
-            root_name = _assignment_root_name(expression.target)
-            if root_name is not None and self._implicit_method_field(root_name, scope) is not None:
-                raise AetherTypeError(
-                    "Mutating struct fields inside methods is not supported yet.",
-                    line=expression.line,
-                    column=expression.column,
-                )
         desugared = ast.CallExpression(
             method.builtin_name,
             [expression.target, *expression.arguments],
@@ -1852,6 +1887,40 @@ class TypeChecker:
             return None
         self._check_struct_method_arguments(method, expression.arguments, expression.keyword_arguments, scope, expression)
         return method.return_type
+
+    def _check_mutating_method_receiver(
+        self,
+        method: FunctionSymbol,
+        target: ast.Expression,
+        scope: Scope[VariableSymbol],
+        location: object,
+    ) -> None:
+        if not method.is_mutating:
+            return
+        root_name = _assignment_root_name(target)
+        if root_name is None:
+            raise AetherTypeError(
+                "Cannot call mutating method on temporary value.",
+                line=getattr(location, "line", None),
+                column=getattr(location, "column", None),
+            )
+        if root_name == "this" and self.current_method_struct is not None:
+            return
+        if scope.is_const(root_name):
+            raise AetherTypeError(
+                f"Cannot mutate constant '{root_name}'.",
+                line=getattr(target, "line", getattr(location, "line", None)),
+                column=getattr(target, "column", getattr(location, "column", None)),
+            )
+
+    def _interface_method_is_mutating(self, interface: InterfaceSymbol, method_name: str) -> bool:
+        for struct in self.structs.values():
+            if interface.name not in struct.implements:
+                continue
+            method = self._struct_method_symbol(struct, method_name)
+            if method is not None and method.is_mutating:
+                return True
+        return False
 
     def _check_struct_method_arguments(
         self,
@@ -1894,7 +1963,10 @@ class TypeChecker:
         if builtin_name not in LIST_MUTATING_BUILTINS or not expression.arguments:
             return
         root_name = _assignment_root_name(expression.arguments[0])
-        if root_name is not None and scope.is_const(root_name):
+        if root_name is not None and scope.is_const(root_name) and not self._is_method_receiver_mutation_target(
+            expression.arguments[0],
+            scope,
+        ):
             raise AetherTypeError(
                 f"Cannot mutate constant '{root_name}'.",
                 line=expression.arguments[0].line,
@@ -2534,6 +2606,183 @@ def _is_vector_like_matrix_type(type_name: MatrixType) -> bool:
 
 def _is_supported_input_target_type(type_name: AetherType) -> bool:
     return type_name in SCALAR_INPUT_TARGET_TYPES or isinstance(type_name, (VectorType, MatrixType))
+
+
+class _StructMethodMutationAnalysis:
+    def __init__(self, checker: TypeChecker, struct: StructSymbol, method_names: set[str]) -> None:
+        self.checker = checker
+        self.struct = struct
+        self.method_names = method_names
+        self.field_names = {field.name for field in struct.fields}
+        self.directly_mutates_receiver = False
+        self.receiver_method_calls: set[tuple[str, str]] = set()
+
+    def scan_method(self, method: ast.FunctionDeclaration) -> None:
+        locals_in_scope = [{parameter.name for parameter in method.parameters} | {"this"}]
+        self._scan_statements(method.body, locals_in_scope)
+
+    def _scan_statements(self, statements: list[ast.Statement], locals_in_scope: list[set[str]]) -> None:
+        for statement in statements:
+            self._scan_statement(statement, locals_in_scope)
+
+    def _scan_statement(self, statement: ast.Statement, locals_in_scope: list[set[str]]) -> None:
+        if isinstance(statement, ast.VarDeclaration):
+            self._scan_expression(statement.initializer, locals_in_scope)
+            locals_in_scope[-1].add(statement.name)
+            return
+        if isinstance(statement, ast.Assignment):
+            if self._is_implicit_field_name(statement.name, locals_in_scope):
+                self.directly_mutates_receiver = True
+            self._scan_expression(statement.expression, locals_in_scope)
+            return
+        if isinstance(statement, ast.FieldAssignment):
+            if self._is_receiver_mutation_target(statement.target, locals_in_scope):
+                self.directly_mutates_receiver = True
+            self._scan_expression(statement.target, locals_in_scope)
+            self._scan_expression(statement.expression, locals_in_scope)
+            return
+        if isinstance(statement, ast.IndexAssignment):
+            if self._is_receiver_mutation_target(statement.array, locals_in_scope):
+                self.directly_mutates_receiver = True
+            self._scan_expression(statement.array, locals_in_scope)
+            self._scan_expression(statement.index, locals_in_scope)
+            self._scan_expression(statement.expression, locals_in_scope)
+            return
+        if isinstance(statement, ast.MatrixIndexAssignment):
+            if self._is_receiver_mutation_target(statement.matrix, locals_in_scope):
+                self.directly_mutates_receiver = True
+            self._scan_expression(statement.matrix, locals_in_scope)
+            self._scan_expression(statement.row, locals_in_scope)
+            self._scan_expression(statement.column_index, locals_in_scope)
+            self._scan_expression(statement.expression, locals_in_scope)
+            return
+        if isinstance(statement, ast.DestructuringAssignment):
+            self._scan_expression(statement.expression, locals_in_scope)
+            locals_in_scope[-1].update(statement.names)
+            return
+        if isinstance(statement, ast.ExpressionStatement):
+            self._scan_expression(statement.expression, locals_in_scope)
+            return
+        if isinstance(statement, ast.ReturnStatement):
+            if statement.expression is not None:
+                self._scan_expression(statement.expression, locals_in_scope)
+            return
+        if isinstance(statement, ast.IfStatement):
+            self._scan_expression(statement.condition, locals_in_scope)
+            self._scan_statements(statement.body, [*locals_in_scope, set()])
+            if statement.else_body is not None:
+                self._scan_statements(statement.else_body, [*locals_in_scope, set()])
+            return
+        if isinstance(statement, ast.WhileStatement):
+            self._scan_expression(statement.condition, locals_in_scope)
+            self._scan_statements(statement.body, [*locals_in_scope, set()])
+            return
+        if isinstance(statement, ast.ForInStatement):
+            self._scan_expression(statement.iterable, locals_in_scope)
+            self._scan_statements(statement.body, [*locals_in_scope, {statement.variable}])
+            return
+        if isinstance(statement, ast.ThrowStatement):
+            self._scan_expression(statement.expression, locals_in_scope)
+            return
+        if isinstance(statement, ast.TryCatchStatement):
+            self._scan_statements(statement.try_body, [*locals_in_scope, set()])
+            self._scan_statements(statement.catch_body, [*locals_in_scope, {statement.catch_name}])
+
+    def _scan_expression(self, expression: ast.Expression, locals_in_scope: list[set[str]]) -> None:
+        if isinstance(expression, (ast.Literal, ast.FullSlice)):
+            return
+        if isinstance(expression, ast.Identifier):
+            return
+        if isinstance(expression, ast.InterpolatedString):
+            for part in expression.parts:
+                if not isinstance(part, str):
+                    self._scan_expression(part, locals_in_scope)
+            return
+        if isinstance(expression, ast.UnaryExpression):
+            self._scan_expression(expression.operand, locals_in_scope)
+            return
+        if isinstance(expression, ast.BinaryExpression):
+            self._scan_expression(expression.left, locals_in_scope)
+            self._scan_expression(expression.right, locals_in_scope)
+            return
+        if isinstance(expression, ast.RangeExpression):
+            self._scan_expression(expression.start, locals_in_scope)
+            self._scan_expression(expression.end, locals_in_scope)
+            if expression.step is not None:
+                self._scan_expression(expression.step, locals_in_scope)
+            return
+        if isinstance(expression, ast.CallExpression):
+            if "." not in expression.callee and expression.callee in self.method_names:
+                self.receiver_method_calls.add((self.struct.name, expression.callee))
+            for argument in expression.arguments:
+                self._scan_expression(argument, locals_in_scope)
+            for argument in expression.keyword_arguments.values():
+                self._scan_expression(argument, locals_in_scope)
+            return
+        if isinstance(expression, ast.MethodCall):
+            target_struct = self._receiver_target_struct_name(expression.target, locals_in_scope)
+            if target_struct is not None:
+                self.receiver_method_calls.add((target_struct, expression.method_name))
+            self._scan_expression(expression.target, locals_in_scope)
+            for argument in expression.arguments:
+                self._scan_expression(argument, locals_in_scope)
+            for argument in expression.keyword_arguments.values():
+                self._scan_expression(argument, locals_in_scope)
+            return
+        if isinstance(expression, ast.FieldAccess):
+            self._scan_expression(expression.target, locals_in_scope)
+            return
+        if isinstance(expression, ast.IndexExpression):
+            self._scan_expression(expression.array, locals_in_scope)
+            self._scan_expression(expression.index, locals_in_scope)
+            return
+        if isinstance(expression, ast.MatrixIndexExpression):
+            self._scan_expression(expression.matrix, locals_in_scope)
+            self._scan_expression(expression.row, locals_in_scope)
+            self._scan_expression(expression.column, locals_in_scope)
+            return
+        if isinstance(expression, (ast.ArrayLiteral, ast.ListLiteral, ast.TupleLiteral)):
+            for element in expression.elements:
+                self._scan_expression(element, locals_in_scope)
+            return
+        if isinstance(expression, ast.MatrixLiteral):
+            for row in expression.rows:
+                for element in row:
+                    self._scan_expression(element, locals_in_scope)
+            return
+        if isinstance(expression, ast.InputCall):
+            for argument in expression.arguments:
+                self._scan_expression(argument, locals_in_scope)
+
+    def _is_implicit_field_name(self, name: str, locals_in_scope: list[set[str]]) -> bool:
+        return name in self.field_names and not any(name in scope for scope in locals_in_scope)
+
+    def _is_receiver_mutation_target(self, expression: ast.Expression, locals_in_scope: list[set[str]]) -> bool:
+        root_name = _assignment_root_name(expression)
+        if root_name == "this":
+            return True
+        return root_name is not None and self._is_implicit_field_name(root_name, locals_in_scope)
+
+    def _receiver_target_struct_name(self, expression: ast.Expression, locals_in_scope: list[set[str]]) -> str | None:
+        if isinstance(expression, ast.Identifier):
+            if expression.name == "this":
+                return self.struct.name
+            if self._is_implicit_field_name(expression.name, locals_in_scope):
+                field = self.checker._struct_field_symbol(self.struct, expression.name)
+                return field.type_name if isinstance(field.type_name, str) and field.type_name in self.checker.structs else None
+            return None
+        if isinstance(expression, ast.FieldAccess):
+            parent_struct_name = self._receiver_target_struct_name(expression.target, locals_in_scope)
+            if parent_struct_name is None:
+                return None
+            parent_struct = self.checker.structs.get(parent_struct_name)
+            if parent_struct is None:
+                return None
+            field = self.checker._struct_field_symbol(parent_struct, expression.field_name)
+            if field is None:
+                return None
+            return field.type_name if isinstance(field.type_name, str) and field.type_name in self.checker.structs else None
+        return None
 
 
 def _assignment_root_name(expression: ast.Expression) -> str | None:

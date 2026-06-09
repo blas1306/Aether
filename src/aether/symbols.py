@@ -19,6 +19,7 @@ class FunctionSymbol:
     return_type: AetherType | None
     parameters: tuple[VariableSymbol, ...]
     visibility: str | None = None
+    is_mutating: bool = False
 
 
 @dataclass(frozen=True)

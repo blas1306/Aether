@@ -209,24 +209,271 @@ struct S {
         )
 
 
-@pytest.mark.parametrize(
-    "body",
-    [
-        "x = 3;",
-        "this.x = 3;",
-    ],
-)
-def test_struct_method_field_assignment_fails_for_now(body: str) -> None:
-    with pytest.raises(AetherTypeError, match="Mutating struct fields inside methods is not supported yet"):
-        run_aether(
-            f"""
-struct S {{
-    int x;
+def test_struct_mutating_method_assigns_implicit_field() -> None:
+    result = run_aether(
+        """
+struct Counter {
+    int value;
 
-    void setX() {{
-        {body}
-    }}
-}}
+    void increment() {
+        value = value + 1;
+    }
+}
+
+Counter c = Counter(0);
+c.increment();
+println(c.value);
+"""
+    )
+
+    assert result.output == "1\n"
+
+
+def test_struct_mutating_method_assigns_this_field() -> None:
+    result = run_aether(
+        """
+struct Counter {
+    int value;
+
+    void add(int n) {
+        this.value = this.value + n;
+    }
+}
+
+Counter c = Counter(1);
+c.add(4);
+println(c.value);
+"""
+    )
+
+    assert result.output == "5\n"
+
+
+def test_struct_mutating_method_field_assignment_checks_type() -> None:
+    with pytest.raises(AetherTypeError, match="Cannot implicitly convert 'string' to 'int'"):
+        run_aether(
+            """
+struct Counter {
+    int value;
+
+    void bad() {
+        value = "hola";
+    }
+}
+"""
+        )
+
+
+def test_struct_method_parameter_shadows_field_assignment() -> None:
+    result = run_aether(
+        """
+struct Counter {
+    int value;
+
+    void f(int value) {
+        value = value + 1;
+    }
+}
+
+Counter c = Counter(3);
+c.f(10);
+println(c.value);
+"""
+    )
+
+    assert result.output == "3\n"
+
+
+def test_struct_method_this_field_overrides_shadowing() -> None:
+    result = run_aether(
+        """
+struct Counter {
+    int value;
+
+    void f(int value) {
+        this.value = this.value + value;
+    }
+}
+
+Counter c = Counter(3);
+c.f(10);
+println(c.value);
+"""
+    )
+
+    assert result.output == "13\n"
+
+
+def test_struct_mutating_method_rejects_const_receiver() -> None:
+    with pytest.raises(AetherTypeError, match="Cannot mutate constant 'c'"):
+        run_aether(
+            """
+struct Counter {
+    int value;
+
+    void increment() {
+        value = value + 1;
+    }
+}
+
+const Counter c = Counter(0);
+c.increment();
+"""
+        )
+
+
+def test_struct_mutating_method_rejects_temporary_receiver() -> None:
+    with pytest.raises(AetherTypeError, match="Cannot call mutating method on temporary value"):
+        run_aether(
+            """
+struct Counter {
+    int value;
+
+    void increment() {
+        value = value + 1;
+    }
+}
+
+Counter(0).increment();
+"""
+        )
+
+
+def test_struct_mutating_method_preserves_value_semantics() -> None:
+    result = run_aether(
+        """
+struct Counter {
+    int value;
+
+    void increment() {
+        value = value + 1;
+    }
+}
+
+Counter a = Counter(0);
+Counter b = a;
+b.increment();
+println(a.value);
+println(b.value);
+"""
+    )
+
+    assert result.output == "0\n1\n"
+
+
+def test_struct_non_mutating_method_accepts_const_receiver() -> None:
+    result = run_aether(
+        """
+struct Counter {
+    int value;
+
+    int get() {
+        return value;
+    }
+}
+
+const Counter c = Counter(7);
+println(c.get());
+"""
+    )
+
+    assert result.output == "7\n"
+
+
+def test_struct_mutating_method_can_call_another_mutating_method() -> None:
+    result = run_aether(
+        """
+struct Counter {
+    int value;
+
+    void increment() {
+        value = value + 1;
+    }
+
+    void addTwo() {
+        increment();
+        this.increment();
+    }
+}
+
+Counter c = Counter(0);
+c.addTwo();
+println(c.value);
+"""
+    )
+
+    assert result.output == "2\n"
+
+
+def test_struct_method_calling_mutating_method_is_mutating() -> None:
+    with pytest.raises(AetherTypeError, match="Cannot mutate constant 'c'"):
+        run_aether(
+            """
+struct Counter {
+    int value;
+
+    void increment() {
+        value = value + 1;
+    }
+
+    void wrapper() {
+        increment();
+    }
+}
+
+const Counter c = Counter(0);
+c.wrapper();
+"""
+        )
+
+
+def test_interface_mutating_method_updates_contained_value() -> None:
+    result = run_aether(
+        """
+interface Inc {
+    void increment();
+    int get();
+}
+
+struct Counter implements Inc {
+    int value;
+
+    void increment() {
+        value = value + 1;
+    }
+
+    int get() {
+        return value;
+    }
+}
+
+Inc c = Counter(0);
+c.increment();
+println(c.get());
+"""
+    )
+
+    assert result.output == "1\n"
+
+
+def test_interface_mutating_method_rejects_const_receiver() -> None:
+    with pytest.raises(AetherTypeError, match="Cannot mutate constant 'c'"):
+        run_aether(
+            """
+interface Inc {
+    void increment();
+}
+
+struct Counter implements Inc {
+    int value;
+
+    void increment() {
+        value = value + 1;
+    }
+}
+
+const Inc c = Counter(0);
+c.increment();
 """
         )
 

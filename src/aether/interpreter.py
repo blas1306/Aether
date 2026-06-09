@@ -389,12 +389,10 @@ class Interpreter:
             self.enums[statement.name] = statement
             return
         if isinstance(statement, ast.Assignment):
-            if self._implicit_method_field(statement.name, env) is not None:
-                raise AetherTypeError(
-                    "Mutating struct fields inside methods is not supported yet.",
-                    line=statement.line,
-                    column=statement.column,
-                )
+            implicit_field = self._implicit_method_field(statement.name, env)
+            if implicit_field is not None:
+                self._assign_implicit_method_field(statement.name, statement.expression, env)
+                return
             current = env.lookup(statement.name)
             if isinstance(statement.expression, ast.MatrixLiteral) and current is not None:
                 if not statement.expression.rows and is_array_type(current.type_name):
@@ -430,32 +428,12 @@ class Interpreter:
             self._assign_destructuring(statement, env)
             return
         if isinstance(statement, ast.IndexAssignment):
-            assigned_name = _assignment_root_name(statement.array)
-            if assigned_name is not None and self._implicit_method_field(assigned_name, env) is not None:
-                raise AetherTypeError(
-                    "Mutating struct fields inside methods is not supported yet.",
-                    line=statement.line,
-                    column=statement.column,
-                )
             self._assign_index(statement, env)
             return
         if isinstance(statement, ast.MatrixIndexAssignment):
-            assigned_name = _assignment_root_name(statement.matrix)
-            if assigned_name is not None and self._implicit_method_field(assigned_name, env) is not None:
-                raise AetherTypeError(
-                    "Mutating struct fields inside methods is not supported yet.",
-                    line=statement.line,
-                    column=statement.column,
-                )
             self._assign_matrix_index(statement, env)
             return
         if isinstance(statement, ast.FieldAssignment):
-            if self._is_method_receiver_field_target(statement.target, env):
-                raise AetherTypeError(
-                    "Mutating struct fields inside methods is not supported yet.",
-                    line=statement.line,
-                    column=statement.column,
-                )
             self._assign_field(statement, env)
             return
         if isinstance(statement, ast.ExpressionStatement):
@@ -555,6 +533,10 @@ class Interpreter:
         if isinstance(expression, ast.InterpolatedString):
             return AetherValue("string", self._interpolate_string(expression, env))
         if isinstance(expression, ast.Identifier):
+            if expression.name == "this":
+                receiver = self._method_receiver_value(env)
+                if receiver is not None:
+                    return receiver
             try:
                 return env.get(expression.name)
             except AetherRuntimeError as exc:
@@ -1053,6 +1035,17 @@ class Interpreter:
         value = self._evaluate_with_expected_type(statement.expression, env, field_type)
         instance.fields[statement.field_name] = coerce_implicit(value, field_type)
 
+    def _assign_implicit_method_field(self, field_name: str, expression: ast.Expression, env: Environment) -> None:
+        receiver = self._method_receiver_value(env)
+        if receiver is None or not isinstance(receiver.value, StructInstance):
+            raise AetherRuntimeError(f"Undefined variable '{field_name}'.")
+        instance = receiver.value
+        if field_name not in instance.fields:
+            raise AetherRuntimeError(f"Undefined variable '{field_name}'.")
+        field_type = instance.fields[field_name].type_name
+        value = self._evaluate_with_expected_type(expression, env, field_type)
+        instance.fields[field_name] = coerce_implicit(value, field_type)
+
     def _require_index(self, array_value: AetherValue, index_value: AetherValue) -> int:
         if not is_indexable_type(array_value.type_name):
             raise AetherTypeError(f"Cannot index non-indexable value of type '{type_to_string(array_value.type_name)}'.")
@@ -1406,8 +1399,13 @@ class Interpreter:
                 self._evaluate_with_expected_type(argument, env, parameter_type)
                 for argument, parameter_type in zip(argument_expressions, parameter_types)
             ]
-            local_env = Environment(parent=function.closure or self.global_env, method_receiver=receiver)
-            local_env.define("this", receiver, is_const=True)
+            method_receiver = (
+                AetherValue(receiver.value.type_name, receiver.value)
+                if isinstance(receiver.value, StructInstance)
+                else receiver
+            )
+            local_env = Environment(parent=function.closure or self.global_env, method_receiver=method_receiver)
+            local_env.define("this", method_receiver, is_const=True)
             for parameter, parameter_type, arg in zip(declaration.parameters, parameter_types, args):
                 local_env.define(parameter.name, coerce_implicit(arg, parameter_type))
             return_type = self._resolve_type_aliases(declaration.return_type)
