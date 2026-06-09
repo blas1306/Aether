@@ -80,6 +80,8 @@ KEYWORD_SUGGESTIONS: tuple[CommandSuggestion, ...] = (
     _keyword_entry("const", "Declare an immutable variable name.", insert_text="const ", signature="const Type name = value;", category="definitions", priority=110),
     _keyword_entry("alias", "Declare a type alias.", insert_text="alias ", signature="alias Name = Type;", category="definitions", priority=110),
     _keyword_entry("struct", "Declare a nominal data struct.", insert_text="struct ", signature="struct Name { Type field; }", category="definitions", priority=110),
+    _keyword_entry("interface", "Declare a nominal interface type.", insert_text="interface ", signature="interface Name { Type method(); }", category="definitions", priority=110),
+    _keyword_entry("implements", "List interfaces implemented by a struct.", insert_text="implements ", category="definitions", priority=90),
     _keyword_entry("enum", "Declare a nominal enum type.", insert_text="enum ", signature="enum Name { Variant }", category="definitions", priority=110),
     _keyword_entry("package", "Declare the file package.", insert_text="package ", signature="package Name.Module;", category="definitions", priority=100),
     _keyword_entry("public", "Mark a top-level declaration as public.", insert_text="public ", category="definitions", priority=80),
@@ -141,6 +143,7 @@ SNIPPET_SUGGESTIONS: tuple[CommandSuggestion, ...] = (
     _snippet_entry("try", "try {\n    \n} catch (e) {\n    \n}", len("try {\n    "), 0, "Try/catch snippet."),
     _snippet_entry("func", "int name() {\n    \n}", len("int "), len("name"), "Block function snippet."),
     _snippet_entry("struct", "struct Name {\n    double field;\n}", len("struct "), len("Name"), "Data struct snippet."),
+    _snippet_entry("interface", "interface Name {\n    double method();\n}", len("interface "), len("Name"), "Interface snippet."),
     _snippet_entry("enum", "enum Name {\n    Variant\n}", len("enum "), len("Name"), "Enum snippet."),
     _snippet_entry("ife", "if condition {\n    \n} else {\n    \n}", len("if "), len("condition"), "If/else block snippet."),
 )
@@ -576,6 +579,38 @@ def _native_member_suggestions(
     return suggestions
 
 
+def _interface_member_suggestions(qualifier: str, prefix: str, document_text: str) -> list[CommandSuggestion]:
+    if "." in qualifier:
+        return []
+    type_name: str | None = None
+    for symbol in reversed(extract_document_symbols(document_text)):
+        if symbol.name == qualifier and symbol.type_name:
+            type_name = symbol.type_name
+            break
+    if type_name is None:
+        return []
+    members = _interface_members(document_text).get(re.sub(r"\s+", "", type_name))
+    if members is None:
+        return []
+    return [
+        CommandSuggestion(
+            name=name,
+            label=name,
+            insert_text=f"{name}()",
+            signature=f"{type_name}.{name}()",
+            description="Aether interface method.",
+            category="members",
+            kind="method",
+            source="document",
+            priority=450,
+            match_text=name,
+            cursor_backtrack=1,
+        )
+        for name in members
+        if _match_prefix(name, prefix)
+    ]
+
+
 def _native_member_type_family(
     qualifier: str,
     document_text: str,
@@ -616,6 +651,19 @@ def _enum_variants(document_text: str) -> dict[str, list[str]]:
         variants = re.findall(r"\b[A-Za-z_]\w*\b", body)
         enums[match.group("name")] = variants
     return enums
+
+
+def _interface_members(document_text: str) -> dict[str, list[str]]:
+    interfaces: dict[str, list[str]] = {}
+    for match in re.finditer(
+        r"\b(?:(?:public|private)\s+)?interface\s+(?P<name>[A-Za-z_]\w*)\s*\{(?P<body>.*?)\}",
+        document_text,
+        re.DOTALL,
+    ):
+        body = re.sub(r"//.*|#.*", "", match.group("body"))
+        methods = re.findall(r"\b[A-Za-z_]\w*\s+(?P<name>[A-Za-z_]\w*)\s*\(", body)
+        interfaces[match.group("name")] = methods
+    return interfaces
 
 
 def _keyword_suggestions(prefix: str) -> list[CommandSuggestion]:
@@ -738,6 +786,8 @@ def build_autocomplete_suggestions(
                 request.workspace_items,
             )
         )
+        if request.document_text:
+            raw.extend(_interface_member_suggestions(match.qualifier, match.prefix, request.document_text))
         raw.extend(_stdlib_member_suggestions(match.qualifier, match.prefix))
         return _dedupe_suggestions(raw, match, line_text=request.line_text, document_kind=request.document_kind)
 

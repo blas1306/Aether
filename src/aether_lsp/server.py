@@ -387,6 +387,8 @@ def _symbol_hover_markdown(symbol) -> str:
         description = "Loop variable defined in this document."
     if symbol.origin == "struct":
         description = "Struct type defined in this document."
+    if symbol.origin == "interface":
+        description = "Interface type defined in this document."
     if symbol.origin == "enum":
         description = "Enum type defined in this document."
     return f"```aether\n{signature}\n```\n\n{description}"

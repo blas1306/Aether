@@ -69,6 +69,25 @@ class StructDeclaration:
     column: int = 1
     visibility: Visibility = None
     methods: list["FunctionDeclaration"] = field(default_factory=list)
+    implements: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class InterfaceMethodSignature:
+    return_type: AetherType
+    name: str
+    parameters: list[Parameter]
+    line: int = 1
+    column: int = 1
+
+
+@dataclass(frozen=True)
+class InterfaceDeclaration:
+    name: str
+    methods: list[InterfaceMethodSignature]
+    line: int = 1
+    column: int = 1
+    visibility: Visibility = None
 
 
 @dataclass(frozen=True)

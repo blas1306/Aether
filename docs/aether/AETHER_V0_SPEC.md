@@ -271,7 +271,7 @@ struct Point {
 }
 ```
 
-Field-level `public`, `private`, and `const` are not supported yet. Nested declarations, custom constructors, constructor overloads, static methods, generic methods, inheritance, and interfaces are also not supported inside structs.
+Field-level `public`, `private`, and `const` are not supported yet. Nested declarations, custom constructors, constructor overloads, static methods, generic methods, and inheritance are also not supported inside structs.
 
 ### Struct Methods
 
@@ -521,12 +521,85 @@ Current struct limitations:
 - No mutating struct methods.
 - No static methods or generic methods.
 - No new generic struct parameters.
-- No inheritance, interfaces, traits, or protocols.
+- No inheritance, traits, or protocols.
 - No destructuring or pattern matching for structs.
 - No operator overloading for structs.
 - No structural equality for structs.
 - No deep `const`.
 - Struct lowering to IR/JIT is not implemented.
+
+## Interfaces
+
+Aether v0 supports minimal nominal interfaces. An interface declares method signatures only:
+
+```aether
+public interface Shape {
+    double area();
+}
+
+private interface Printable {
+    string toString();
+}
+```
+
+Interfaces are top-level declarations. They may be `public` or `private` like other top-level declarations. Interfaces cannot declare fields, method bodies, default methods, generic parameters, or inheritance from other interfaces in this version.
+
+Only structs can implement interfaces:
+
+```aether
+public struct Circle implements Shape, Printable {
+    double r;
+
+    double area() {
+        return r * r;
+    }
+
+    string toString() {
+        return "Circle";
+    }
+}
+```
+
+The typechecker verifies that every implemented interface method is present on the struct. Signatures must match exactly: same name, same parameter count, same parameter types, and same return type. Missing methods and signature mismatches are type errors.
+
+An interface defines a nominal type. A struct value is assignable to an interface type when the struct declares that it implements the interface:
+
+```aether
+Shape s = Circle(2);
+println(s.area());
+
+void printArea(Shape s) {
+    println(s.area());
+}
+
+printArea(Circle(2));
+
+Shape makeShape() {
+    return Circle(3);
+}
+```
+
+Calling a declared interface method dispatches to the concrete struct method stored in the value. Structs remain value types when assigned or passed through interface-typed variables and parameters.
+
+Member access uses the static type. A variable whose static type is an interface exposes only the interface methods:
+
+```aether
+s.area(); // valid
+s.foo();  // error: Shape has no method foo
+s.r;      // error: Shape does not expose Circle.r
+```
+
+Packaged files export only public interfaces. Private interfaces remain visible inside their own module but are not imported by other modules. A public struct in a package cannot implement a private interface, because that would expose the private interface in its public API.
+
+Current interface limitations:
+
+- Method signatures only.
+- No fields.
+- No method bodies or default methods.
+- No inheritance between interfaces.
+- No generic interfaces.
+- Only structs can implement interfaces.
+- No classes yet.
 
 ## Enums
 
@@ -698,7 +771,7 @@ Config             -> Config.ae
 
 Resolution is relative to the active source root. When running a saved file from the editor/runtime, the source root is the file's containing directory. Direct `run_aether(...)` calls can pass an explicit `source_root`; otherwise the current working directory is used to preserve existing script-import behavior.
 
-For packaged files, only `public` top-level variables/constants, aliases, structs, enums, and functions are exported to importers:
+For packaged files, only `public` top-level variables/constants, aliases, structs, interfaces, enums, and functions are exported to importers:
 
 ```aether
 package Math.Types;
@@ -724,7 +797,7 @@ Current package/import limitations:
 - Specific imports, import aliases such as `import X as Y`, and explicit wildcards are not implemented yet.
 - Cyclic imports are rejected.
 - `private` is enforced across imports only; declarations in the same file can still use each other.
-- Classes, interfaces, exceptions, and package-level class visibility are outside this version.
+- Classes, advanced exceptions, and package-level class visibility are outside this version.
 
 ## Implicit Conversions
 

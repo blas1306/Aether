@@ -80,7 +80,7 @@ See [docs/aether/AETHER_V0_SPEC.md](docs/aether/AETHER_V0_SPEC.md) for the curre
 
 Example Aether programs are located in the [examples/](examples/) directory, organized by category:
 
-- **structs/** - Working with structs and field access
+- **structs/** - Working with structs, methods, and interface implementation
 - **linear_algebra/** - Vector and matrix operations
 - **nonlinear_systems/** - Solving non-linear systems of equations
 - **interactive/** - Examples requiring user input (not for automation)

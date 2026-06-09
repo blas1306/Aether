@@ -25,6 +25,7 @@ from .types import (
     AetherExceptionValue,
     EnumType,
     EnumValue,
+    InterfaceType,
     AetherRange,
     AetherValue,
     ArrayType,
@@ -77,6 +78,7 @@ class Function:
     structs: dict[str, ast.StructDeclaration] | None = None
     struct_methods: dict[str, dict[str, "Function"]] | None = None
     enums: dict[str, ast.EnumDeclaration] | None = None
+    interfaces: dict[str, ast.InterfaceDeclaration] | None = None
 
 
 @dataclass(frozen=True)
@@ -168,6 +170,7 @@ class _FunctionContext:
         self.previous_structs: dict[str, ast.StructDeclaration] = {}
         self.previous_struct_methods: dict[str, dict[str, Function]] = {}
         self.previous_enums: dict[str, ast.EnumDeclaration] = {}
+        self.previous_interfaces: dict[str, ast.InterfaceDeclaration] = {}
 
     def __enter__(self) -> None:
         self.previous_builtin_aliases = self.interpreter.builtin_aliases
@@ -177,6 +180,7 @@ class _FunctionContext:
         self.previous_structs = self.interpreter.structs
         self.previous_struct_methods = self.interpreter.struct_methods
         self.previous_enums = self.interpreter.enums
+        self.previous_interfaces = self.interpreter.interfaces
         self.interpreter.builtin_aliases = {
             **self.previous_builtin_aliases,
             **(self.function.builtin_aliases or {}),
@@ -205,6 +209,10 @@ class _FunctionContext:
             **self.previous_enums,
             **(self.function.enums or {}),
         }
+        self.interpreter.interfaces = {
+            **self.previous_interfaces,
+            **(self.function.interfaces or {}),
+        }
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
         self.interpreter.builtin_aliases = self.previous_builtin_aliases
@@ -214,6 +222,7 @@ class _FunctionContext:
         self.interpreter.structs = self.previous_structs
         self.interpreter.struct_methods = self.previous_struct_methods
         self.interpreter.enums = self.previous_enums
+        self.interpreter.interfaces = self.previous_interfaces
 
 
 class Interpreter:
@@ -247,6 +256,7 @@ class Interpreter:
         self.structs: dict[str, ast.StructDeclaration] = {}
         self.struct_methods: dict[str, dict[str, Function]] = {}
         self.enums: dict[str, ast.EnumDeclaration] = {}
+        self.interfaces: dict[str, ast.InterfaceDeclaration] = {}
         self.source_root = Path(source_root).expanduser().resolve() if source_root is not None else Path.cwd()
         self.import_stack = import_stack
         self.imported_symbol_origins: dict[str, str] = {}
@@ -371,6 +381,9 @@ class Interpreter:
                 method.name: self._function(method, env)
                 for method in statement.methods
             }
+            return
+        if isinstance(statement, ast.InterfaceDeclaration):
+            self.interfaces[statement.name] = statement
             return
         if isinstance(statement, ast.EnumDeclaration):
             self.enums[statement.name] = statement
@@ -533,6 +546,7 @@ class Interpreter:
             dict(self.structs),
             {name: dict(methods) for name, methods in self.struct_methods.items()},
             dict(self.enums),
+            dict(self.interfaces),
         )
 
     def _evaluate(self, expression: ast.Expression, env: Environment) -> AetherValue:
@@ -1104,6 +1118,12 @@ class Interpreter:
                 line=expression.line,
                 column=expression.column,
             )
+        if self._constructor_interface(expression.callee) is not None:
+            raise AetherRuntimeError(
+                f"Cannot instantiate interface '{expression.callee}' as a function.",
+                line=expression.line,
+                column=expression.column,
+            )
         struct = self._constructor_struct(expression.callee)
         if struct is not None:
             args = [
@@ -1203,6 +1223,15 @@ class Interpreter:
             return None
         if isinstance(resolved, EnumType):
             return self.enums.get(resolved.name)
+        return None
+
+    def _constructor_interface(self, callee: str) -> ast.InterfaceDeclaration | None:
+        try:
+            resolved = self._resolve_type_aliases(callee)
+        except AetherTypeError:
+            return None
+        if isinstance(resolved, InterfaceType):
+            return self.interfaces.get(resolved.name)
         return None
 
     def _construct_struct(self, declaration: ast.StructDeclaration, args: list[AetherValue]) -> AetherValue:
@@ -1605,6 +1634,10 @@ class Interpreter:
             self._ensure_import_available(name, module_name)
             self.enums[name] = declaration
             self.imported_symbol_origins[name] = module_name
+        for name, declaration in self._exported_interfaces(program, module_interpreter).items():
+            self._ensure_import_available(name, module_name)
+            self.interfaces[name] = declaration
+            self.imported_symbol_origins[name] = module_name
         for name, target_type in self._exported_aliases(program, module_interpreter).items():
             self._ensure_import_available(name, module_name)
             self.type_aliases[name] = target_type
@@ -1622,6 +1655,7 @@ class Interpreter:
             or name in self.type_aliases
             or name in self.structs
             or name in self.enums
+            or name in self.interfaces
         ):
             raise AetherRuntimeError(
                 f"Import collision: symbol '{name}' from module '{module_name}' conflicts with an existing symbol."
@@ -1680,6 +1714,19 @@ class Interpreter:
         for statement in program.statements:
             if isinstance(statement, ast.EnumDeclaration) and is_public_export(statement.visibility, program.package_name):
                 exports[statement.name] = module_interpreter.enums[statement.name]
+        return exports
+
+    def _exported_interfaces(
+        self,
+        program: ast.Program,
+        module_interpreter: "Interpreter",
+    ) -> dict[str, ast.InterfaceDeclaration]:
+        if program.package_name is None:
+            return dict(module_interpreter.interfaces)
+        exports: dict[str, ast.InterfaceDeclaration] = {}
+        for statement in program.statements:
+            if isinstance(statement, ast.InterfaceDeclaration) and is_public_export(statement.visibility, program.package_name):
+                exports[statement.name] = module_interpreter.interfaces[statement.name]
         return exports
 
     def _exported_aliases(
@@ -1745,6 +1792,8 @@ class Interpreter:
                 return type_name
             if type_name in self.enums:
                 return EnumType(type_name)
+            if type_name in self.interfaces:
+                return InterfaceType(type_name)
             if type_name not in AETHER_TYPES:
                 private_message = self._private_import_message(type_name)
                 if private_message is not None:

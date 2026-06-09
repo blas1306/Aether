@@ -27,10 +27,18 @@ class StructSymbol:
     fields: tuple[VariableSymbol, ...]
     visibility: str | None = None
     methods: tuple[FunctionSymbol, ...] = ()
+    implements: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
 class EnumSymbol:
     name: str
     variants: tuple[str, ...]
+    visibility: str | None = None
+
+
+@dataclass(frozen=True)
+class InterfaceSymbol:
+    name: str
+    methods: tuple[FunctionSymbol, ...]
     visibility: str | None = None

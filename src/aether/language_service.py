@@ -59,6 +59,10 @@ _FUNCTION_RE = re.compile(
     r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\("
 )
 _STRUCT_RE = re.compile(r"\b(?:(?:public|private)\s+)?struct\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\b")
+_INTERFACE_RE = re.compile(
+    r"\b(?:(?:public|private)\s+)?interface\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\{(?P<body>.*?)\}",
+    re.DOTALL,
+)
 _ENUM_RE = re.compile(
     r"\b(?:(?:public|private)\s+)?enum\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\{(?P<body>.*?)\}",
     re.DOTALL,
@@ -140,6 +144,13 @@ def completion_items(source: str, line: int, column: int) -> list[CompletionItem
             add(member, kind, struct_name)
         return items
 
+    interface_context = _interface_member_context(source, line, column)
+    if interface_context is not None:
+        interface_name, members = interface_context
+        for member, kind in members:
+            add(member, kind, interface_name)
+        return items
+
     for keyword in sorted(KEYWORDS):
         add(keyword, "keyword")
     for builtin in builtin_names():
@@ -195,6 +206,7 @@ def _symbol_names(source: str) -> set[str]:
     names.update(match.group("name") for match in _ASSIGNMENT_RE.finditer(source))
     names.update(match.group("name") for match in _DECLARATION_RE.finditer(source))
     names.update(match.group("name") for match in _STRUCT_RE.finditer(source))
+    names.update(match.group("name") for match in _INTERFACE_RE.finditer(source))
     names.update(match.group("name") for match in _ENUM_RE.finditer(source))
     for match in _FUNCTION_RE.finditer(source):
         name = match.group("name")
@@ -238,6 +250,24 @@ def _struct_member_context(source: str, line: int, column: int) -> tuple[str, tu
     return compact_type, members
 
 
+def _interface_member_context(source: str, line: int, column: int) -> tuple[str, tuple[tuple[str, str], ...]] | None:
+    prefix = _source_prefix(source, line, column)
+    match = re.search(r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)\.\s*[A-Za-z_][A-Za-z0-9_]*$", prefix)
+    if match is None:
+        match = re.search(r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)\.\s*$", prefix)
+    if match is None:
+        return None
+    variable_name = match.group("name")
+    type_name = _declared_variable_types(prefix).get(variable_name)
+    if type_name is None:
+        return None
+    compact_type = re.sub(r"\s+", "", type_name)
+    members = _interface_members(source).get(compact_type)
+    if members is None:
+        return None
+    return compact_type, members
+
+
 def _struct_members(source: str) -> dict[str, tuple[tuple[str, str], ...]]:
     try:
         program, _errors = Parser(lex(source)).parse_with_recovery()
@@ -252,6 +282,19 @@ def _struct_members(source: str) -> dict[str, tuple[tuple[str, str], ...]]:
         members.extend((method.name, "method") for method in statement.methods)
         structs[statement.name] = tuple(members)
     return structs
+
+
+def _interface_members(source: str) -> dict[str, tuple[tuple[str, str], ...]]:
+    try:
+        program, _errors = Parser(lex(source)).parse_with_recovery()
+    except AetherSyntaxError:
+        return {}
+    interfaces: dict[str, tuple[tuple[str, str], ...]] = {}
+    for statement in program.statements:
+        if not isinstance(statement, ast.InterfaceDeclaration):
+            continue
+        interfaces[statement.name] = tuple((method.name, "method") for method in statement.methods)
+    return interfaces
 
 
 def _declared_variable_types(source: str) -> dict[str, str]:

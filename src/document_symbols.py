@@ -6,7 +6,16 @@ from typing import Literal
 
 
 DocumentSymbolKind = Literal["variable", "function", "module", "type"]
-DocumentSymbolOrigin = Literal["assignment", "function_definition", "for_loop_variable", "import", "type_alias", "struct", "enum"]
+DocumentSymbolOrigin = Literal[
+    "assignment",
+    "function_definition",
+    "for_loop_variable",
+    "import",
+    "type_alias",
+    "struct",
+    "interface",
+    "enum",
+]
 
 _IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_]\w*\Z")
 _SIMPLE_ASSIGN_RE = re.compile(r"^(?P<name>[A-Za-z_]\w*)\s*=\s*(?!=)")
@@ -16,6 +25,7 @@ _TYPED_VAR_RE = re.compile(rf"^{_VISIBILITY_RE}(?:const\s+)?(?P<type>{_TYPE_RE})
 _CONST_ASSIGN_RE = re.compile(rf"^{_VISIBILITY_RE}const\s+(?P<name>[A-Za-z_]\w*)\s*=\s*(?!=)")
 _ALIAS_RE = re.compile(rf"^{_VISIBILITY_RE}alias\s+(?P<name>[A-Za-z_]\w*)\s*=\s*(?P<type>{_TYPE_RE})\s*$", re.IGNORECASE)
 _STRUCT_RE = re.compile(rf"^{_VISIBILITY_RE}struct\s+(?P<name>[A-Za-z_]\w*)\s*\{{?", re.IGNORECASE)
+_INTERFACE_RE = re.compile(rf"^{_VISIBILITY_RE}interface\s+(?P<name>[A-Za-z_]\w*)\s*\{{?", re.IGNORECASE)
 _ENUM_RE = re.compile(rf"^{_VISIBILITY_RE}enum\s+(?P<name>[A-Za-z_]\w*)\s*\{{?", re.IGNORECASE)
 _INLINE_FUNCTION_RE = re.compile(r"^(?P<name>[A-Za-z_]\w*)\s*\((?P<params>[^()]*)\)\s*=\s*(?!=)")
 _AETHER_FUNCTION_RE = re.compile(
@@ -26,6 +36,11 @@ _AETHER_FUNCTION_RE = re.compile(
 _STRUCT_METHOD_RE = re.compile(
     rf"(?m)^[ \t]*(?:function\s+)?(?P<return_type>{_TYPE_RE})\s+"
     r"(?P<name>[A-Za-z_]\w*)\s*\((?P<params>[^()]*)\)\s*\{",
+    re.IGNORECASE,
+)
+_INTERFACE_METHOD_RE = re.compile(
+    rf"(?m)^[ \t]*(?:function\s+)?(?P<return_type>{_TYPE_RE})\s+"
+    r"(?P<name>[A-Za-z_]\w*)\s*\((?P<params>[^()]*)\)\s*;",
     re.IGNORECASE,
 )
 _BLOCK_FUNCTION_RE = re.compile(
@@ -88,6 +103,8 @@ def extract_document_symbol_occurrences(document_text: str) -> list[DocumentSymb
         symbols.append(symbol)
         if symbol.origin == "struct":
             symbols.extend(_extract_struct_method_symbols(statement, line_starts))
+        if symbol.origin == "interface":
+            symbols.extend(_extract_interface_method_symbols(statement, line_starts))
     return sorted(symbols, key=lambda item: item.statement_index)
 
 
@@ -146,6 +163,7 @@ def _extract_symbol_from_statement(statement_span: _StatementSpan, line_starts: 
         _extract_import_symbol(statement, statement_span, leading_ws, line_starts)
         or _extract_alias_symbol(statement, statement_span, leading_ws, line_starts)
         or _extract_struct_symbol(statement, statement_span, leading_ws, line_starts)
+        or _extract_interface_symbol(statement, statement_span, leading_ws, line_starts)
         or _extract_enum_symbol(statement, statement_span, leading_ws, line_starts)
         or _extract_aether_function_symbol(statement, statement_span, leading_ws, line_starts)
         or _extract_block_function_symbol(statement, statement_span, leading_ws, line_starts)
@@ -207,9 +225,64 @@ def _extract_struct_symbol(
     )
 
 
+def _extract_interface_symbol(
+    statement: str,
+    statement_span: _StatementSpan,
+    leading_ws: int,
+    line_starts: list[int],
+) -> DocumentSymbol | None:
+    match = _INTERFACE_RE.match(statement)
+    if match is None:
+        return None
+    name = match.group("name")
+    return _document_symbol(
+        statement_span,
+        line_starts,
+        name_start=leading_ws + match.start("name"),
+        name_end=leading_ws + match.end("name"),
+        name=name,
+        kind="type",
+        origin="interface",
+        signature=name,
+        detail=f"interface {name}",
+        type_name=name,
+    )
+
+
 def _extract_struct_method_symbols(statement_span: _StatementSpan, line_starts: list[int]) -> list[DocumentSymbol]:
     symbols: list[DocumentSymbol] = []
     for match in _STRUCT_METHOD_RE.finditer(statement_span.text):
+        prefix = statement_span.text[: match.start()]
+        if "{" not in prefix:
+            continue
+        name = match.group("name")
+        parsed_params = _parse_aether_parameters(match.group("params"))
+        if parsed_params is None:
+            continue
+        param_names, param_details = parsed_params
+        return_type = _normalize_type_name(match.group("return_type"))
+        signature = _build_function_signature(name, param_names)
+        detail = f"{return_type} {_build_function_signature(name, param_details)}"
+        symbols.append(
+            _document_symbol(
+                statement_span,
+                line_starts,
+                name_start=match.start("name"),
+                name_end=match.end("name"),
+                name=name,
+                kind="function",
+                origin="function_definition",
+                signature=signature,
+                detail=detail,
+                type_name=return_type,
+            )
+        )
+    return symbols
+
+
+def _extract_interface_method_symbols(statement_span: _StatementSpan, line_starts: list[int]) -> list[DocumentSymbol]:
+    symbols: list[DocumentSymbol] = []
+    for match in _INTERFACE_METHOD_RE.finditer(statement_span.text):
         prefix = statement_span.text[: match.start()]
         if "{" not in prefix:
             continue

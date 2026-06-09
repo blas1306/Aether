@@ -259,6 +259,24 @@ class EnumType:
         return hash(("Enum", self.name))
 
 
+@dataclass(frozen=True, eq=False)
+class InterfaceType:
+    name: str
+
+    def __str__(self) -> str:
+        return self.name
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, InterfaceType):
+            return self.name == other.name
+        if isinstance(other, str):
+            return self.name == other
+        return False
+
+    def __hash__(self) -> int:
+        return hash(("Interface", self.name))
+
+
 AetherType = (
     str
     | ArrayType
@@ -271,6 +289,7 @@ AetherType = (
     | NullType
     | NullableType
     | EnumType
+    | InterfaceType
 )
 NULL_TYPE = NullType()
 
@@ -361,7 +380,7 @@ def is_known_type(type_name: AetherType) -> bool:
         return type_name.element_type in TYPE_NAMES
     if isinstance(type_name, RangeType):
         return type_name.element_type == "int"
-    if isinstance(type_name, EnumType):
+    if isinstance(type_name, (EnumType, InterfaceType)):
         return True
     return type_name in TYPE_NAMES
 
@@ -487,6 +506,8 @@ def can_implicitly_convert(from_type: AetherType, to_type: AetherType) -> bool:
         return from_type == to_type
     if isinstance(from_type, EnumType) or isinstance(to_type, EnumType):
         return from_type == to_type
+    if isinstance(from_type, InterfaceType) or isinstance(to_type, InterfaceType):
+        return from_type == to_type
     if isinstance(from_type, ListType) or isinstance(to_type, ListType):
         if not isinstance(from_type, ListType) or not isinstance(to_type, ListType):
             return False
@@ -559,6 +580,12 @@ def coerce_implicit(value: AetherValue, target_type: AetherType) -> AetherValue:
         )
     if isinstance(target_type, TupleType):
         return coerce_tuple_value(value, target_type)
+    if isinstance(target_type, InterfaceType):
+        if isinstance(value.value, StructInstance) or value.type_name == target_type:
+            return AetherValue(target_type, copy_value(value).value)
+        raise AetherTypeError(
+            f"Cannot implicitly convert '{type_to_string(value.type_name)}' to '{type_to_string(target_type)}'."
+        )
     if isinstance(target_type, ArrayType):
         return coerce_array_literal_value(value, target_type)
     if isinstance(target_type, ListType):

@@ -10,7 +10,7 @@ from .modules import is_public_export, private_top_level_names, resolve_file_mod
 from .native_members import native_member_set, native_method, native_property
 from .parser import Parser
 from .scope import Scope
-from .symbols import EnumSymbol, FunctionSymbol, StructSymbol, VariableSymbol
+from .symbols import EnumSymbol, FunctionSymbol, InterfaceSymbol, StructSymbol, VariableSymbol
 from .stdlib import infer_builtin_constant_type, infer_builtin_type, is_builtin, is_builtin_namespace, validate_builtin_arity
 from .stdlib.registry import builtin_aliases_for_import, builtin_constant_aliases_for_import
 from .tokens import AETHER_TYPES, PRIMITIVE_TYPES
@@ -18,6 +18,7 @@ from .types import (
     AetherType,
     ArrayType,
     EnumType,
+    InterfaceType,
     ListType,
     MatrixType,
     NUMERIC_TYPES,
@@ -61,6 +62,7 @@ class TypeChecker:
         self.functions: dict[str, FunctionSymbol] = {}
         self.structs: dict[str, StructSymbol] = {}
         self.enums: dict[str, EnumSymbol] = {}
+        self.interfaces: dict[str, InterfaceSymbol] = {}
         self.expression_functions: dict[str, ast.ExpressionFunctionDeclaration] = {}
         self.expression_function_call_stack: set[str] = set()
         self.current_return_type: AetherType | None = None
@@ -80,8 +82,10 @@ class TypeChecker:
 
     def check(self, program: ast.Program) -> None:
         self._declare_enum_headers(program.statements)
+        self._declare_interface_headers(program.statements)
         self._declare_struct_headers(program.statements)
         self._declare_type_aliases(program.statements)
+        self._define_interface_methods(program.statements)
         self._define_struct_fields(program.statements, program.package_name)
         self._check_statements(program.statements, self.global_scope)
         self._validate_type_aliases()
@@ -92,8 +96,10 @@ class TypeChecker:
         try:
             for phase in (
                 lambda: self._declare_enum_headers(program.statements),
+                lambda: self._declare_interface_headers(program.statements),
                 lambda: self._declare_struct_headers(program.statements),
                 lambda: self._declare_type_aliases(program.statements),
+                lambda: self._define_interface_methods(program.statements),
                 lambda: self._define_struct_fields(program.statements, program.package_name),
                 lambda: self._check_statements(program.statements, self.global_scope),
                 self._validate_type_aliases,
@@ -128,6 +134,12 @@ class TypeChecker:
                     line=statement.line,
                     column=statement.column,
                 )
+            if statement.name in self.interfaces:
+                raise AetherTypeError(
+                    f"Name '{statement.name}' is already defined as an interface.",
+                    line=statement.line,
+                    column=statement.column,
+                )
             if statement.name in self.functions:
                 raise AetherTypeError(
                     f"Name '{statement.name}' is already defined as a function.",
@@ -145,6 +157,48 @@ class TypeChecker:
                 tuple(variant.name for variant in statement.variants),
                 statement.visibility,
             )
+
+    def _declare_interface_headers(self, statements: list[ast.Statement]) -> None:
+        for statement in statements:
+            if not isinstance(statement, ast.InterfaceDeclaration):
+                continue
+            if statement.name in AETHER_TYPES or statement.name in self.type_aliases:
+                raise AetherTypeError(
+                    f"Interface '{statement.name}' conflicts with an existing type.",
+                    line=statement.line,
+                    column=statement.column,
+                )
+            if statement.name in self.interfaces:
+                raise AetherTypeError(
+                    f"Interface '{statement.name}' is already defined.",
+                    line=statement.line,
+                    column=statement.column,
+                )
+            if statement.name in self.structs:
+                raise AetherTypeError(
+                    f"Name '{statement.name}' is already defined as a struct.",
+                    line=statement.line,
+                    column=statement.column,
+                )
+            if statement.name in self.enums:
+                raise AetherTypeError(
+                    f"Name '{statement.name}' is already defined as an enum.",
+                    line=statement.line,
+                    column=statement.column,
+                )
+            if statement.name in self.functions:
+                raise AetherTypeError(
+                    f"Name '{statement.name}' is already defined as a function.",
+                    line=statement.line,
+                    column=statement.column,
+                )
+            if self.global_scope.lookup(statement.name) is not None:
+                raise AetherTypeError(
+                    f"Name '{statement.name}' is already defined as a variable.",
+                    line=statement.line,
+                    column=statement.column,
+                )
+            self.interfaces[statement.name] = InterfaceSymbol(statement.name, (), statement.visibility)
 
     def _declare_struct_headers(self, statements: list[ast.Statement]) -> None:
         for statement in statements:
@@ -168,6 +222,12 @@ class TypeChecker:
                     line=statement.line,
                     column=statement.column,
                 )
+            if statement.name in self.interfaces:
+                raise AetherTypeError(
+                    f"Name '{statement.name}' is already defined as an interface.",
+                    line=statement.line,
+                    column=statement.column,
+                )
             if statement.name in self.functions:
                 raise AetherTypeError(
                     f"Name '{statement.name}' is already defined as a function.",
@@ -187,6 +247,35 @@ class TypeChecker:
             if isinstance(statement, ast.AliasDeclaration):
                 self._declare_alias(statement, self.global_scope)
 
+    def _define_interface_methods(self, statements: list[ast.Statement]) -> None:
+        for statement in statements:
+            if not isinstance(statement, ast.InterfaceDeclaration):
+                continue
+            methods: list[FunctionSymbol] = []
+            names: set[str] = set()
+            for method in statement.methods:
+                if method.name in names:
+                    raise AetherTypeError(
+                        f"Duplicate method '{method.name}' in interface '{statement.name}'.",
+                        line=method.line,
+                        column=method.column,
+                    )
+                return_type = self._resolve_type_aliases(method.return_type, method)
+                parameters = tuple(
+                    VariableSymbol(parameter.name, self._resolve_type_aliases(parameter.type_name, method))
+                    for parameter in method.parameters
+                )
+                for parameter in parameters:
+                    if _contains_void_type(parameter.type_name):
+                        raise AetherTypeError(
+                            f"Parameter '{parameter.name}' cannot have type void.",
+                            line=method.line,
+                            column=method.column,
+                        )
+                names.add(method.name)
+                methods.append(FunctionSymbol(method.name, return_type, parameters))
+            self.interfaces[statement.name] = InterfaceSymbol(statement.name, tuple(methods), statement.visibility)
+
     def _define_struct_fields(self, statements: list[ast.Statement], package_name: str | None) -> None:
         private_names = _private_type_names(statements, package_name)
         for statement in statements:
@@ -197,6 +286,7 @@ class TypeChecker:
                 for field in statement.fields
             )
             methods = self._struct_method_symbols(statement)
+            implements = self._resolve_implements(statement, package_name)
             if is_public_export(statement.visibility, package_name):
                 for field in statement.fields:
                     if _type_uses_private_name(field.type_name, private_names):
@@ -214,7 +304,89 @@ class TypeChecker:
                             line=statement.line,
                             column=statement.column,
                         )
-            self.structs[statement.name] = StructSymbol(statement.name, fields, statement.visibility, methods)
+            struct_symbol = StructSymbol(statement.name, fields, statement.visibility, methods, implements)
+            self.structs[statement.name] = struct_symbol
+            self._validate_struct_implements(statement, struct_symbol)
+
+    def _resolve_implements(self, declaration: ast.StructDeclaration, package_name: str | None) -> tuple[str, ...]:
+        implements: list[str] = []
+        seen: set[str] = set()
+        for interface_name in declaration.implements:
+            if interface_name in seen:
+                raise AetherTypeError(
+                    f"Struct '{declaration.name}' lists interface '{interface_name}' more than once.",
+                    line=declaration.line,
+                    column=declaration.column,
+                )
+            seen.add(interface_name)
+            interface = self.interfaces.get(interface_name)
+            if interface is None:
+                private_message = self._private_import_message(interface_name)
+                if private_message is not None:
+                    raise AetherTypeError(private_message, line=declaration.line, column=declaration.column)
+                if interface_name in self.structs or interface_name in self.enums or interface_name in self.type_aliases or interface_name in AETHER_TYPES:
+                    raise AetherTypeError(
+                        f"Struct '{declaration.name}' cannot implement non-interface type '{interface_name}'.",
+                        line=declaration.line,
+                        column=declaration.column,
+                    )
+                raise AetherTypeError(
+                    f"Unknown interface '{interface_name}' implemented by struct '{declaration.name}'.",
+                    line=declaration.line,
+                    column=declaration.column,
+                )
+            if is_public_export(declaration.visibility, package_name) and not is_public_export(interface.visibility, package_name):
+                raise AetherTypeError(
+                    f"Public struct '{declaration.name}' cannot implement private interface '{interface_name}'.",
+                    line=declaration.line,
+                    column=declaration.column,
+                )
+            implements.append(interface_name)
+        return tuple(implements)
+
+    def _validate_struct_implements(self, declaration: ast.StructDeclaration, struct: StructSymbol) -> None:
+        for interface_name in struct.implements:
+            interface = self.interfaces[interface_name]
+            for required in interface.methods:
+                actual = self._struct_method_symbol(struct, required.name)
+                if actual is None:
+                    raise AetherTypeError(
+                        f"Struct '{struct.name}' is missing method '{required.name}' required by interface '{interface.name}'.",
+                        line=declaration.line,
+                        column=declaration.column,
+                    )
+                self._validate_interface_method_signature(struct, interface, required, actual, declaration)
+
+    def _validate_interface_method_signature(
+        self,
+        struct: StructSymbol,
+        interface: InterfaceSymbol,
+        required: FunctionSymbol,
+        actual: FunctionSymbol,
+        location: object,
+    ) -> None:
+        prefix = f"Method '{struct.name}.{actual.name}' does not match interface '{interface.name}.{required.name}'"
+        if len(actual.parameters) != len(required.parameters):
+            raise AetherTypeError(
+                f"{prefix}: expected {len(required.parameters)} parameters but got {len(actual.parameters)}.",
+                line=getattr(location, "line", None),
+                column=getattr(location, "column", None),
+            )
+        for index, (actual_parameter, required_parameter) in enumerate(zip(actual.parameters, required.parameters), start=1):
+            if actual_parameter.type_name != required_parameter.type_name:
+                raise AetherTypeError(
+                    f"{prefix}: parameter {index} expected '{type_to_string(required_parameter.type_name)}' "
+                    f"but got '{type_to_string(actual_parameter.type_name)}'.",
+                    line=getattr(location, "line", None),
+                    column=getattr(location, "column", None),
+                )
+        if actual.return_type != required.return_type:
+            raise AetherTypeError(
+                f"{prefix}: return type expected '{type_to_string(required.return_type)}' "
+                f"but got '{type_to_string(actual.return_type)}'.",
+                line=getattr(location, "line", None),
+                column=getattr(location, "column", None),
+            )
 
     def _struct_method_symbols(self, declaration: ast.StructDeclaration) -> tuple[FunctionSymbol, ...]:
         symbols: list[FunctionSymbol] = []
@@ -282,6 +454,8 @@ class TypeChecker:
             return
         if isinstance(statement, ast.StructDeclaration):
             self._check_struct_methods(statement)
+            return
+        if isinstance(statement, ast.InterfaceDeclaration):
             return
         if isinstance(statement, ast.EnumDeclaration):
             return
@@ -415,6 +589,10 @@ class TypeChecker:
             self._ensure_import_available(name, module_name)
             self.enums[name] = symbol
             self.imported_symbol_origins[name] = module_name
+        for name, symbol in self._exported_interfaces(program, module_checker).items():
+            self._ensure_import_available(name, module_name)
+            self.interfaces[name] = symbol
+            self.imported_symbol_origins[name] = module_name
         for name, target_type in self._exported_aliases(program, module_checker).items():
             self._ensure_import_available(name, module_name)
             self.type_aliases[name] = target_type
@@ -433,6 +611,7 @@ class TypeChecker:
             or name in self.type_aliases
             or name in self.structs
             or name in self.enums
+            or name in self.interfaces
         ):
             raise AetherTypeError(
                 f"Import collision: symbol '{name}' from module '{module_name}' conflicts with an existing symbol."
@@ -512,6 +691,19 @@ class TypeChecker:
                 exports[statement.name] = module_checker.enums[statement.name]
         return exports
 
+    def _exported_interfaces(
+        self,
+        program: ast.Program,
+        module_checker: "TypeChecker",
+    ) -> dict[str, InterfaceSymbol]:
+        if program.package_name is None:
+            return dict(module_checker.interfaces)
+        exports: dict[str, InterfaceSymbol] = {}
+        for statement in program.statements:
+            if isinstance(statement, ast.InterfaceDeclaration) and is_public_export(statement.visibility, program.package_name):
+                exports[statement.name] = module_checker.interfaces[statement.name]
+        return exports
+
     def _exported_expression_functions(
         self,
         program: ast.Program,
@@ -536,7 +728,13 @@ class TypeChecker:
         return f"Symbol '{name}' is private in imported module '{module_list}'."
 
     def _declare_alias(self, statement: ast.AliasDeclaration, scope: Scope[VariableSymbol]) -> None:
-        if statement.name in AETHER_TYPES or statement.name in self.type_aliases or statement.name in self.structs or statement.name in self.enums:
+        if (
+            statement.name in AETHER_TYPES
+            or statement.name in self.type_aliases
+            or statement.name in self.structs
+            or statement.name in self.enums
+            or statement.name in self.interfaces
+        ):
             raise AetherTypeError(
                 f"Type alias '{statement.name}' is already defined.",
                 line=statement.line,
@@ -566,6 +764,12 @@ class TypeChecker:
         if scope is self.global_scope and statement.name in self.enums:
             raise AetherTypeError(
                 f"Name '{statement.name}' is already defined as an enum.",
+                line=statement.line,
+                column=statement.column,
+            )
+        if scope is self.global_scope and statement.name in self.interfaces:
+            raise AetherTypeError(
+                f"Name '{statement.name}' is already defined as an interface.",
                 line=statement.line,
                 column=statement.column,
             )
@@ -707,6 +911,12 @@ class TypeChecker:
                     line=statement.line,
                     column=statement.column,
                 )
+            if scope is self.global_scope and statement.name in self.interfaces:
+                raise AetherTypeError(
+                    f"Name '{statement.name}' is already defined as an interface.",
+                    line=statement.line,
+                    column=statement.column,
+                )
             if isinstance(value_type, NullType):
                 raise AetherTypeError(
                     "Cannot infer type from null. Use an explicit nullable type.",
@@ -776,7 +986,7 @@ class TypeChecker:
             if existing is None:
                 scope.define_local(name, VariableSymbol(name, element_type))
                 continue
-            if not can_implicitly_convert(element_type, existing.type_name):
+            if not self._can_convert_type(element_type, existing.type_name):
                 self._raise_implicit_conversion_error(element_type, existing.type_name, statement)
 
     def _assign_index(self, statement: ast.IndexAssignment, scope: Scope[VariableSymbol]) -> None:
@@ -823,7 +1033,7 @@ class TypeChecker:
         )
         if is_array_type(element_type) and isinstance(array_type, MatrixType):
             raise AetherTypeError("Assigning a whole matrix row is not supported yet.")
-        if not can_implicitly_convert(value_type, element_type):
+        if not self._can_convert_type(value_type, element_type):
             if isinstance(statement.expression, ast.ListLiteral) and isinstance(element_type, ArrayType):
                 if self._can_assign_braced_literal_to_array(statement.expression, element_type, scope):
                     return
@@ -862,7 +1072,7 @@ class TypeChecker:
             raise AetherTypeError(
                 f"Matrix indices must be int, got '{type_to_string(row_type)}' and '{type_to_string(column_type)}'."
             )
-        if not can_implicitly_convert(value_type, matrix_type.element_type):
+        if not self._can_convert_type(value_type, matrix_type.element_type):
             self._raise_implicit_conversion_error(value_type, matrix_type.element_type, statement)
 
     def _assign_field(self, statement: ast.FieldAssignment, scope: Scope[VariableSymbol]) -> None:
@@ -951,6 +1161,12 @@ class TypeChecker:
                 return method
         return None
 
+    def _interface_method_symbol(self, interface: InterfaceSymbol, method_name: str) -> FunctionSymbol | None:
+        for method in interface.methods:
+            if method.name == method_name:
+                return method
+        return None
+
     def _declare_function(self, statement: ast.FunctionDeclaration) -> None:
         if statement.name in self.functions:
             raise AetherTypeError(f"Function '{statement.name}' is already defined.")
@@ -960,6 +1176,8 @@ class TypeChecker:
             raise AetherTypeError(f"Name '{statement.name}' is already defined as a struct.")
         if statement.name in self.enums:
             raise AetherTypeError(f"Name '{statement.name}' is already defined as an enum.")
+        if statement.name in self.interfaces:
+            raise AetherTypeError(f"Name '{statement.name}' is already defined as an interface.")
         if self.global_scope.lookup(statement.name) is not None:
             raise AetherTypeError(f"Name '{statement.name}' is already defined as a variable.")
         return_type = self._resolve_type_aliases(statement.return_type, statement)
@@ -1025,6 +1243,8 @@ class TypeChecker:
             raise AetherTypeError(f"Name '{statement.name}' is already defined as a struct.")
         if statement.name in self.enums:
             raise AetherTypeError(f"Name '{statement.name}' is already defined as an enum.")
+        if statement.name in self.interfaces:
+            raise AetherTypeError(f"Name '{statement.name}' is already defined as an interface.")
         if self.global_scope.lookup(statement.name) is not None:
             raise AetherTypeError(f"Name '{statement.name}' is already defined as a variable.")
         parameters = tuple(VariableSymbol(parameter.name, UNKNOWN_TYPE) for parameter in statement.parameters)
@@ -1466,6 +1686,12 @@ class TypeChecker:
                 line=expression.line,
                 column=expression.column,
             )
+        if self._constructor_interface(expression.callee) is not None:
+            raise AetherTypeError(
+                f"Cannot instantiate interface '{expression.callee}' as a function.",
+                line=expression.line,
+                column=expression.column,
+            )
         struct = self._constructor_struct(expression.callee)
         if struct is not None:
             self._check_struct_constructor(expression, struct, scope)
@@ -1507,7 +1733,7 @@ class TypeChecker:
                 continue
             argument_type = self._expression_type(argument, scope)
             self._reject_void_value(argument_type, f"argument to {expression.callee}(...)")
-            if argument_type is not UNKNOWN_TYPE and not can_implicitly_convert(argument_type, parameter.type_name):
+            if argument_type is not UNKNOWN_TYPE and not self._can_convert_type(argument_type, parameter.type_name):
                 if isinstance(argument, ast.ListLiteral) and isinstance(parameter.type_name, ArrayType):
                     if self._can_assign_braced_literal_to_array(argument, parameter.type_name, scope):
                         continue
@@ -1561,6 +1787,17 @@ class TypeChecker:
             if method is None:
                 raise AetherTypeError(
                     f"Struct '{struct.name}' has no method '{expression.method_name}'.",
+                    line=expression.line,
+                    column=expression.column,
+                )
+            self._check_struct_method_arguments(method, expression.arguments, expression.keyword_arguments, scope, expression)
+            return method.return_type
+        if isinstance(resolved, InterfaceType):
+            interface = self.interfaces[resolved.name]
+            method = self._interface_method_symbol(interface, expression.method_name)
+            if method is None:
+                raise AetherTypeError(
+                    f"Interface '{interface.name}' has no method '{expression.method_name}'.",
                     line=expression.line,
                     column=expression.column,
                 )
@@ -1642,7 +1879,7 @@ class TypeChecker:
                 continue
             argument_type = self._expression_type(argument, scope)
             self._reject_void_value(argument_type, f"argument to {method.name}(...)")
-            if argument_type is not UNKNOWN_TYPE and not can_implicitly_convert(argument_type, parameter.type_name):
+            if argument_type is not UNKNOWN_TYPE and not self._can_convert_type(argument_type, parameter.type_name):
                 if isinstance(argument, ast.ListLiteral) and isinstance(parameter.type_name, ArrayType):
                     if self._can_assign_braced_literal_to_array(argument, parameter.type_name, scope):
                         continue
@@ -1682,6 +1919,15 @@ class TypeChecker:
             return self.enums.get(resolved.name)
         return None
 
+    def _constructor_interface(self, callee: str) -> InterfaceSymbol | None:
+        try:
+            resolved = self._resolve_type_aliases(callee)
+        except AetherTypeError:
+            return None
+        if isinstance(resolved, InterfaceType):
+            return self.interfaces.get(resolved.name)
+        return None
+
     def _check_struct_constructor(
         self,
         expression: ast.CallExpression,
@@ -1698,7 +1944,7 @@ class TypeChecker:
                 continue
             argument_type = self._expression_type(argument, scope)
             self._reject_void_value(argument_type, f"argument for field '{field.name}'")
-            if argument_type is not UNKNOWN_TYPE and not can_implicitly_convert(argument_type, field.type_name):
+            if argument_type is not UNKNOWN_TYPE and not self._can_convert_type(argument_type, field.type_name):
                 if isinstance(argument, ast.ListLiteral) and isinstance(field.type_name, ArrayType):
                     if self._can_assign_braced_literal_to_array(argument, field.type_name, scope):
                         continue
@@ -1735,6 +1981,19 @@ class TypeChecker:
                 )
             raise AetherTypeError(
                 f"Type '{type_to_string(resolved)}' has no native property '{field_name}'.",
+                line=getattr(location, "line", None),
+                column=getattr(location, "column", None),
+            )
+        if isinstance(resolved, InterfaceType):
+            interface = self.interfaces[resolved.name]
+            if self._interface_method_symbol(interface, field_name) is not None:
+                raise AetherTypeError(
+                    f"{field_name} is a method and must be called.",
+                    line=getattr(location, "line", None),
+                    column=getattr(location, "column", None),
+                )
+            raise AetherTypeError(
+                f"Cannot access field '{field_name}' on interface type '{interface.name}'.",
                 line=getattr(location, "line", None),
                 column=getattr(location, "column", None),
             )
@@ -1914,16 +2173,16 @@ class TypeChecker:
         if isinstance(initializer, ast.MatrixLiteral) and isinstance(target_type, MatrixType):
             if not isinstance(value_type, MatrixType):
                 return False
-            return can_implicitly_convert(value_type, target_type)
+            return self._can_convert_type(value_type, target_type)
         if is_array_type(value_type) or is_array_type(target_type):
             return value_type == target_type
         if is_list_type(value_type) or is_list_type(target_type):
-            return can_implicitly_convert(value_type, target_type)
+            return self._can_convert_type(value_type, target_type)
         if is_matrix_type(value_type) or is_matrix_type(target_type):
-            return can_implicitly_convert(value_type, target_type)
+            return self._can_convert_type(value_type, target_type)
         if target_type == "float" and isinstance(initializer, ast.Literal) and value_type == "double":
             return True
-        return can_implicitly_convert(value_type, target_type)
+        return self._can_convert_type(value_type, target_type)
 
     def _can_return(
         self,
@@ -1938,7 +2197,7 @@ class TypeChecker:
             if len(value_type.element_types) != len(target_type.element_types):
                 return False
             if not isinstance(expression, ast.TupleLiteral):
-                return can_implicitly_convert(value_type, target_type)
+                return self._can_convert_type(value_type, target_type)
             return all(
                 self._can_return(element_value_type, element_target_type, element, scope)
                 for element_value_type, element_target_type, element in zip(
@@ -1951,6 +2210,22 @@ class TypeChecker:
             return True
         if isinstance(expression, ast.ListLiteral) and isinstance(target_type, ArrayType):
             return self._can_assign_braced_literal_to_array(expression, target_type, scope)
+        return self._can_convert_type(value_type, target_type)
+
+    def _can_convert_type(self, value_type: AetherType, target_type: AetherType) -> bool:
+        if isinstance(target_type, NullableType):
+            if isinstance(value_type, NullType):
+                return True
+            if isinstance(value_type, NullableType):
+                return self._can_convert_type(value_type.base_type, target_type.base_type)
+            return self._can_convert_type(value_type, target_type.base_type)
+        if isinstance(target_type, InterfaceType):
+            if isinstance(value_type, InterfaceType):
+                return value_type == target_type
+            if isinstance(value_type, str):
+                struct = self.structs.get(value_type)
+                return struct is not None and target_type.name in struct.implements
+            return False
         return can_implicitly_convert(value_type, target_type)
 
     def _raise_implicit_conversion_error(
@@ -2009,6 +2284,8 @@ class TypeChecker:
                 return type_name
             if type_name in self.enums:
                 return EnumType(type_name)
+            if type_name in self.interfaces:
+                return InterfaceType(type_name)
             if type_name not in AETHER_TYPES:
                 private_message = self._private_import_message(type_name)
                 if private_message is not None:
@@ -2062,8 +2339,9 @@ class TypeChecker:
     def _private_struct_type_name(self, type_name: AetherType, package_name: str | None) -> str | None:
         if package_name is None:
             return None
-        if isinstance(type_name, EnumType):
-            symbol = self.enums.get(type_name.name)
+        if isinstance(type_name, (EnumType, InterfaceType)):
+            symbols = self.enums if isinstance(type_name, EnumType) else self.interfaces
+            symbol = symbols.get(type_name.name)
             if symbol is not None and not is_public_export(symbol.visibility, package_name):
                 return type_name.name
             return None
@@ -2089,6 +2367,8 @@ class TypeChecker:
         resolved = self._resolve_type_aliases(type_name)
         if isinstance(resolved, str):
             return resolved in self.structs
+        if isinstance(resolved, InterfaceType):
+            return True
         if isinstance(resolved, ArrayType):
             return self._type_mentions_struct(resolved.element_type)
         if isinstance(resolved, ListType):
@@ -2210,7 +2490,10 @@ def _private_type_names(statements: list[ast.Statement], package_name: str | Non
         return set()
     names: set[str] = set()
     for statement in statements:
-        if isinstance(statement, (ast.AliasDeclaration, ast.StructDeclaration, ast.EnumDeclaration)) and not is_public_export(
+        if isinstance(
+            statement,
+            (ast.AliasDeclaration, ast.StructDeclaration, ast.InterfaceDeclaration, ast.EnumDeclaration),
+        ) and not is_public_export(
             statement.visibility,
             package_name,
         ):
@@ -2225,7 +2508,7 @@ def _type_uses_private_name(type_name: AetherType, private_names: set[str]) -> b
 def _first_private_type_name(type_name: AetherType, private_names: set[str]) -> str | None:
     if isinstance(type_name, str):
         return type_name if type_name in private_names else None
-    if isinstance(type_name, EnumType):
+    if isinstance(type_name, (EnumType, InterfaceType)):
         return type_name.name if type_name.name in private_names else None
     if isinstance(type_name, ArrayType):
         return _first_private_type_name(type_name.element_type, private_names)

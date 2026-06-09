@@ -70,6 +70,8 @@ class Parser:
                 return self._alias_declaration(visibility)
             if self._match(TokenType.STRUCT):
                 return self._struct_declaration(visibility)
+            if self._match(TokenType.INTERFACE):
+                return self._interface_declaration(visibility)
             if self._match(TokenType.ENUM):
                 return self._enum_declaration(visibility)
             if self._looks_like_function_declaration():
@@ -85,6 +87,10 @@ class Parser:
             if self.block_depth > 0:
                 raise self._error(self._previous(), "Struct declarations are only supported at top level.")
             return self._struct_declaration()
+        if self._match(TokenType.INTERFACE):
+            if self.block_depth > 0:
+                raise self._error(self._previous(), "Interface declarations are only supported at top level.")
+            return self._interface_declaration()
         if self._match(TokenType.ENUM):
             if self.block_depth > 0:
                 raise self._error(self._previous(), "Enum declarations are only supported at top level.")
@@ -198,6 +204,15 @@ class Parser:
         if self.block_depth > 0:
             raise self._error(self._previous(), "Struct declarations are only supported at top level.")
         name_token = self._consume(TokenType.IDENTIFIER, "Expected struct name.")
+        implements: list[str] = []
+        if self._match(TokenType.IMPLEMENTS):
+            while True:
+                interface_token = self._consume(TokenType.IDENTIFIER, "Expected interface name after 'implements'.")
+                if self._check(TokenType.LESS):
+                    raise self._error(self._peek(), "Generic interfaces are not supported yet.")
+                implements.append(interface_token.lexeme)
+                if not self._match(TokenType.COMMA):
+                    break
         self._consume(TokenType.LEFT_BRACE, "Expected '{' before struct body.")
         fields: list[ast.StructField] = []
         methods: list[ast.FunctionDeclaration] = []
@@ -238,6 +253,7 @@ class Parser:
             name_token.column,
             visibility,
             methods,
+            implements,
         )
 
     def _add_struct_method(
@@ -291,6 +307,80 @@ class Parser:
                 break
         self._consume(TokenType.RIGHT_BRACE, "Expected '}' after enum declaration.")
         return ast.EnumDeclaration(name_token.lexeme, variants, name_token.line, name_token.column, visibility)
+
+    def _interface_declaration(self, visibility: ast.Visibility = None) -> ast.InterfaceDeclaration:
+        if self.block_depth > 0:
+            raise self._error(self._previous(), "Interface declarations are only supported at top level.")
+        name_token = self._consume(TokenType.IDENTIFIER, "Expected interface name.")
+        if self._check(TokenType.LESS):
+            raise self._error(self._peek(), "Generic interfaces are not supported yet.")
+        self._consume(TokenType.LEFT_BRACE, "Expected '{' before interface body.")
+        methods: list[ast.InterfaceMethodSignature] = []
+        method_names: set[str] = set()
+        while not self._check(TokenType.RIGHT_BRACE) and not self._is_at_end():
+            if self._check(TokenType.PUBLIC) or self._check(TokenType.PRIVATE):
+                raise self._error(self._peek(), "Interface members do not support visibility modifiers.")
+            if self._check(TokenType.CONST):
+                raise self._error(self._peek(), "Interfaces cannot declare fields.")
+            if self._check(TokenType.STRUCT) or self._check(TokenType.ENUM) or self._check(TokenType.ALIAS) or self._check(TokenType.INTERFACE):
+                raise self._error(self._peek(), "Nested declarations are not supported inside interfaces.")
+            if self._match(TokenType.FUNCTION):
+                signature = self._interface_method_signature(name_token.lexeme)
+            else:
+                return_type = self._parse_return_type_annotation(
+                    "Expected explicit method return type in interface declaration."
+                )
+                method_token = self._consume(TokenType.IDENTIFIER, "Expected interface method name.")
+                if not self._check(TokenType.LEFT_PAREN):
+                    raise self._error(method_token, "Interfaces cannot declare fields.")
+                signature = self._interface_method_signature_tail(return_type, method_token, name_token.lexeme)
+            if signature.name in method_names:
+                raise self._error(
+                    self._previous(),
+                    f"Duplicate method '{signature.name}' in interface '{name_token.lexeme}'.",
+                )
+            method_names.add(signature.name)
+            methods.append(signature)
+        self._consume(TokenType.RIGHT_BRACE, "Expected '}' after interface declaration.")
+        return ast.InterfaceDeclaration(
+            name_token.lexeme,
+            methods,
+            name_token.line,
+            name_token.column,
+            visibility,
+        )
+
+    def _interface_method_signature(self, interface_name: str) -> ast.InterfaceMethodSignature:
+        return_type = self._parse_return_type_annotation("Expected interface method return type.")
+        method_token = self._consume(TokenType.IDENTIFIER, "Expected interface method name.")
+        return self._interface_method_signature_tail(return_type, method_token, interface_name)
+
+    def _interface_method_signature_tail(
+        self,
+        return_type: AetherType,
+        method_token: Token,
+        interface_name: str,
+    ) -> ast.InterfaceMethodSignature:
+        self._consume(TokenType.LEFT_PAREN, "Expected '(' after interface method name.")
+        parameters: list[ast.Parameter] = []
+        if not self._check(TokenType.RIGHT_PAREN):
+            while True:
+                param_type = self._parse_type_annotation("Expected parameter type.")
+                param_name = self._consume(TokenType.IDENTIFIER, "Expected parameter name.").lexeme
+                parameters.append(ast.Parameter(param_type, param_name))
+                if not self._match(TokenType.COMMA):
+                    break
+        self._consume(TokenType.RIGHT_PAREN, "Expected ')' after interface method parameters.")
+        if self._check(TokenType.LEFT_BRACE):
+            raise self._error(method_token, "Interface methods cannot have bodies.")
+        self._consume(TokenType.SEMICOLON, "Expected ';' after interface method signature.")
+        return ast.InterfaceMethodSignature(
+            return_type,
+            method_token.lexeme,
+            parameters,
+            method_token.line,
+            method_token.column,
+        )
 
     def _package_declaration(self) -> str:
         module_name = self._consume(TokenType.IDENTIFIER, "Expected package name after 'package'.").lexeme
@@ -764,6 +854,7 @@ class Parser:
                 TokenType.CONST,
                 TokenType.ALIAS,
                 TokenType.STRUCT,
+                TokenType.INTERFACE,
                 TokenType.ENUM,
                 TokenType.FUNCTION,
                 TokenType.TYPE,
