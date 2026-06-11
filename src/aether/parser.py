@@ -70,6 +70,8 @@ class Parser:
                 return self._alias_declaration(visibility)
             if self._match(TokenType.STRUCT):
                 return self._struct_declaration(visibility)
+            if self._match(TokenType.CLASS):
+                return self._class_declaration(visibility)
             if self._match(TokenType.INTERFACE):
                 return self._interface_declaration(visibility)
             if self._match(TokenType.ENUM):
@@ -87,6 +89,10 @@ class Parser:
             if self.block_depth > 0:
                 raise self._error(self._previous(), "Struct declarations are only supported at top level.")
             return self._struct_declaration()
+        if self._match(TokenType.CLASS):
+            if self.block_depth > 0:
+                raise self._error(self._previous(), "Class declarations are only supported at top level.")
+            return self._class_declaration()
         if self._match(TokenType.INTERFACE):
             if self.block_depth > 0:
                 raise self._error(self._previous(), "Interface declarations are only supported at top level.")
@@ -256,6 +262,69 @@ class Parser:
             implements,
         )
 
+    def _class_declaration(self, visibility: ast.Visibility = None) -> ast.ClassDeclaration:
+        if self.block_depth > 0:
+            raise self._error(self._previous(), "Class declarations are only supported at top level.")
+        name_token = self._consume(TokenType.IDENTIFIER, "Expected class name.")
+        implements: list[str] = []
+        if self._match(TokenType.IMPLEMENTS):
+            while True:
+                interface_token = self._consume(TokenType.IDENTIFIER, "Expected interface name after 'implements'.")
+                if self._check(TokenType.LESS):
+                    raise self._error(self._peek(), "Generic interfaces are not supported yet.")
+                implements.append(interface_token.lexeme)
+                if not self._match(TokenType.COMMA):
+                    break
+        self._consume(TokenType.LEFT_BRACE, "Expected '{' before class body.")
+        fields: list[ast.StructField] = []
+        methods: list[ast.FunctionDeclaration] = []
+        field_names: set[str] = set()
+        method_names: set[str] = set()
+        while not self._check(TokenType.RIGHT_BRACE) and not self._is_at_end():
+            if self._check(TokenType.CONST):
+                raise self._error(self._peek(), "Class fields cannot be const yet.")
+            if self._check(TokenType.STRUCT) or self._check(TokenType.CLASS) or self._check(TokenType.ENUM) or self._check(TokenType.ALIAS):
+                raise self._error(self._peek(), "Nested declarations are not supported inside classes.")
+            member_visibility = self._visibility_modifier()
+            if self._match(TokenType.FUNCTION):
+                method = self._function_declaration(member_visibility)
+                self._add_struct_method(method, methods, method_names, field_names, name_token.lexeme, aggregate_kind="class")
+                continue
+            type_name = self._parse_return_type_annotation("Expected explicit field or method return type in class declaration.")
+            field_token = self._consume(TokenType.IDENTIFIER, "Expected field name.")
+            if self._check(TokenType.LEFT_PAREN):
+                method = self._function_declaration_tail(type_name, field_token, member_visibility)
+                self._add_struct_method(method, methods, method_names, field_names, name_token.lexeme, aggregate_kind="class")
+                continue
+            if field_token.lexeme in field_names:
+                raise self._error(field_token, f"Duplicate field '{field_token.lexeme}' in class '{name_token.lexeme}'.")
+            if field_token.lexeme in method_names:
+                raise self._error(
+                    field_token,
+                    f"Class '{name_token.lexeme}' already has a method named '{field_token.lexeme}'.",
+                )
+            field_names.add(field_token.lexeme)
+            fields.append(
+                ast.StructField(
+                    field_token.lexeme,
+                    type_name,
+                    field_token.line,
+                    field_token.column,
+                    member_visibility,
+                )
+            )
+            self._consume(TokenType.SEMICOLON, "Expected ';' after class field.")
+        self._consume(TokenType.RIGHT_BRACE, "Expected '}' after class declaration.")
+        return ast.ClassDeclaration(
+            name_token.lexeme,
+            fields,
+            name_token.line,
+            name_token.column,
+            visibility,
+            methods,
+            implements,
+        )
+
     def _add_struct_method(
         self,
         method: ast.FunctionDeclaration,
@@ -263,16 +332,18 @@ class Parser:
         method_names: set[str],
         field_names: set[str],
         struct_name: str,
+        *,
+        aggregate_kind: str = "struct",
     ) -> None:
         if method.name in method_names:
             raise self._error(
                 self._previous(),
-                f"Duplicate method '{method.name}' in struct '{struct_name}'.",
+                f"Duplicate method '{method.name}' in {aggregate_kind} '{struct_name}'.",
             )
         if method.name in field_names:
             raise self._error(
                 self._previous(),
-                f"Struct '{struct_name}' already has a field named '{method.name}'.",
+                f"{aggregate_kind.capitalize()} '{struct_name}' already has a field named '{method.name}'.",
             )
         method_names.add(method.name)
         methods.append(method)
@@ -854,6 +925,7 @@ class Parser:
                 TokenType.CONST,
                 TokenType.ALIAS,
                 TokenType.STRUCT,
+                TokenType.CLASS,
                 TokenType.INTERFACE,
                 TokenType.ENUM,
                 TokenType.FUNCTION,

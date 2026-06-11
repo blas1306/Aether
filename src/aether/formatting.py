@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .types import AetherExceptionValue, AetherRange, AetherValue, ArrayType, EnumValue, ListType, MatrixType, NullableType, RangeType, StructInstance, TransposeVectorType, TupleType, VectorType
+from .types import AetherExceptionValue, AetherRange, AetherValue, ArrayType, ClassInstance, EnumValue, ListType, MatrixType, NullableType, RangeType, StructInstance, TransposeVectorType, TupleType, VectorType
 
 
 def format_value(value: AetherValue) -> str:
@@ -24,7 +24,7 @@ def format_value(value: AetherValue) -> str:
         return format_tuple(value)
     if isinstance(value.value, AetherExceptionValue):
         return format_exception(value.value)
-    if isinstance(value.value, StructInstance):
+    if isinstance(value.value, (StructInstance, ClassInstance)):
         return format_struct(value.value)
     if isinstance(value.value, EnumValue):
         return format_enum(value.value)
@@ -77,7 +77,7 @@ def format_range(value: AetherValue) -> str:
     return f"{range_value.start}:{range_value.step}:{range_value.end}"
 
 
-def format_struct(value: StructInstance) -> str:
+def format_struct(value: StructInstance | ClassInstance) -> str:
     fields = ", ".join(
         f"{name}={format_value(value.fields[name])}"
         for name in value.field_order

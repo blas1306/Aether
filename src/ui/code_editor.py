@@ -34,6 +34,7 @@ EDITOR_KEYWORDS = (
     "Vector",
     "alias",
     "struct",
+    "class",
     "interface",
     "implements",
     "enum",

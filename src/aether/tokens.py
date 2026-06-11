@@ -31,6 +31,7 @@ class TokenType(str, Enum):
     CONST = "CONST"
     ALIAS = "ALIAS"
     STRUCT = "STRUCT"
+    CLASS = "CLASS"
     INTERFACE = "INTERFACE"
     IMPLEMENTS = "IMPLEMENTS"
     ENUM = "ENUM"
@@ -105,6 +106,7 @@ KEYWORDS: dict[str, TokenType] = {
     "const": TokenType.CONST,
     "alias": TokenType.ALIAS,
     "struct": TokenType.STRUCT,
+    "class": TokenType.CLASS,
     "interface": TokenType.INTERFACE,
     "implements": TokenType.IMPLEMENTS,
     "enum": TokenType.ENUM,

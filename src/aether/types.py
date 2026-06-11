@@ -277,6 +277,24 @@ class InterfaceType:
         return hash(("Interface", self.name))
 
 
+@dataclass(frozen=True, eq=False)
+class ClassType:
+    name: str
+
+    def __str__(self) -> str:
+        return self.name
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, ClassType):
+            return self.name == other.name
+        if isinstance(other, str):
+            return self.name == other
+        return False
+
+    def __hash__(self) -> int:
+        return hash(("Class", self.name))
+
+
 AetherType = (
     str
     | ArrayType
@@ -290,6 +308,7 @@ AetherType = (
     | NullableType
     | EnumType
     | InterfaceType
+    | ClassType
 )
 NULL_TYPE = NullType()
 
@@ -308,6 +327,13 @@ class AetherExceptionValue:
 
 @dataclass
 class StructInstance:
+    type_name: str
+    fields: dict[str, AetherValue]
+    field_order: tuple[str, ...]
+
+
+@dataclass
+class ClassInstance:
     type_name: str
     fields: dict[str, AetherValue]
     field_order: tuple[str, ...]
@@ -380,7 +406,7 @@ def is_known_type(type_name: AetherType) -> bool:
         return type_name.element_type in TYPE_NAMES
     if isinstance(type_name, RangeType):
         return type_name.element_type == "int"
-    if isinstance(type_name, (EnumType, InterfaceType)):
+    if isinstance(type_name, (EnumType, InterfaceType, ClassType)):
         return True
     return type_name in TYPE_NAMES
 
@@ -506,6 +532,8 @@ def can_implicitly_convert(from_type: AetherType, to_type: AetherType) -> bool:
         return from_type == to_type
     if isinstance(from_type, EnumType) or isinstance(to_type, EnumType):
         return from_type == to_type
+    if isinstance(from_type, ClassType) or isinstance(to_type, ClassType):
+        return from_type == to_type
     if isinstance(from_type, InterfaceType) or isinstance(to_type, InterfaceType):
         return from_type == to_type
     if isinstance(from_type, ListType) or isinstance(to_type, ListType):
@@ -581,6 +609,8 @@ def coerce_implicit(value: AetherValue, target_type: AetherType) -> AetherValue:
     if isinstance(target_type, TupleType):
         return coerce_tuple_value(value, target_type)
     if isinstance(target_type, InterfaceType):
+        if isinstance(value.value, ClassInstance):
+            return AetherValue(target_type, value.value)
         if isinstance(value.value, StructInstance) or value.type_name == target_type:
             return AetherValue(target_type, copy_value(value).value)
         raise AetherTypeError(
@@ -631,6 +661,8 @@ def coerce_return_value(value: AetherValue, target_type: AetherType) -> AetherVa
 
 
 def contains_struct_value(value: AetherValue) -> bool:
+    if isinstance(value.value, ClassInstance):
+        return False
     if isinstance(value.value, StructInstance):
         return True
     if isinstance(value.value, AetherValue):
@@ -643,6 +675,8 @@ def contains_struct_value(value: AetherValue) -> bool:
 
 
 def copy_value(value: AetherValue) -> AetherValue:
+    if isinstance(value.value, ClassInstance):
+        return value
     if isinstance(value.value, StructInstance):
         return AetherValue(
             value.type_name,

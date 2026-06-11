@@ -1,0 +1,371 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from aether.errors import AetherSyntaxError, AetherTypeError
+from aether.language_service import completion_items
+from aether.runner import run_aether
+from document_symbols import extract_document_symbol_occurrences
+
+
+def test_class_public_method_reads_private_field() -> None:
+    result = run_aether(
+        """
+class Counter {
+    int value;
+
+    public int getValue() {
+        return value;
+    }
+}
+
+Counter c = Counter(3);
+println(c.getValue());
+"""
+    )
+
+    assert result.output == "3\n"
+
+
+def test_class_private_field_is_not_accessible_externally() -> None:
+    with pytest.raises(AetherTypeError, match="Field 'Counter.value' is private"):
+        run_aether(
+            """
+class Counter {
+    int value;
+}
+
+Counter c = Counter(3);
+println(c.value);
+"""
+        )
+
+
+def test_class_private_method_is_not_accessible_externally() -> None:
+    with pytest.raises(AetherTypeError, match="Method 'Counter.secret' is private"):
+        run_aether(
+            """
+class Counter {
+    int value;
+
+    int secret() {
+        return value;
+    }
+}
+
+Counter c = Counter(3);
+println(c.secret());
+"""
+        )
+
+
+def test_class_public_method_and_this_field_with_shadowing() -> None:
+    result = run_aether(
+        """
+class Counter {
+    int value;
+
+    public void setValue(int value) {
+        this.value = value;
+    }
+
+    public int getValue() {
+        return value;
+    }
+}
+
+Counter c = Counter(0);
+c.setValue(9);
+println(c.getValue());
+"""
+    )
+
+    assert result.output == "9\n"
+
+
+def test_class_assignment_uses_reference_semantics() -> None:
+    result = run_aether(
+        """
+class Counter {
+    int value;
+
+    public void increment() {
+        value = value + 1;
+    }
+
+    public int getValue() {
+        return value;
+    }
+}
+
+Counter a = Counter(0);
+Counter b = a;
+b.increment();
+println(a.getValue());
+println(b.getValue());
+"""
+    )
+
+    assert result.output == "1\n1\n"
+
+
+def test_class_argument_preserves_reference() -> None:
+    result = run_aether(
+        """
+class Counter {
+    int value;
+    public void increment() { value = value + 1; }
+    public int getValue() { return value; }
+}
+
+void bump(Counter c) {
+    c.increment();
+}
+
+Counter a = Counter(0);
+bump(a);
+println(a.getValue());
+"""
+    )
+
+    assert result.output == "1\n"
+
+
+def test_class_return_preserves_reference() -> None:
+    result = run_aether(
+        """
+class Counter {
+    int value;
+    public void increment() { value = value + 1; }
+    public int getValue() { return value; }
+}
+
+Counter identity(Counter c) {
+    return c;
+}
+
+Counter a = Counter(0);
+Counter b = identity(a);
+b.increment();
+println(a.getValue());
+"""
+    )
+
+    assert result.output == "1\n"
+
+
+def test_const_class_reference_blocks_mutating_method_but_allows_read() -> None:
+    with pytest.raises(AetherTypeError, match="Cannot mutate constant 'c'"):
+        run_aether(
+            """
+class Counter {
+    int value;
+    public void increment() { value = value + 1; }
+    public int getValue() { return value; }
+}
+
+const Counter c = Counter(0);
+c.increment();
+"""
+        )
+
+    result = run_aether(
+        """
+class Counter {
+    int value;
+    public int getValue() { return value; }
+}
+
+const Counter c = Counter(4);
+println(c.getValue());
+"""
+    )
+    assert result.output == "4\n"
+
+
+def test_const_class_reference_does_not_freeze_object() -> None:
+    result = run_aether(
+        """
+class Counter {
+    int value;
+    public void increment() { value = value + 1; }
+    public int getValue() { return value; }
+}
+
+Counter a = Counter(0);
+const Counter b = a;
+a.increment();
+println(b.getValue());
+"""
+    )
+
+    assert result.output == "1\n"
+
+
+def test_class_implements_interface_and_dispatches() -> None:
+    result = run_aether(
+        """
+interface Resettable {
+    void reset();
+    int getValue();
+}
+
+class Counter implements Resettable {
+    int value;
+    public void reset() { value = 0; }
+    public int getValue() { return value; }
+}
+
+Resettable r = Counter(7);
+r.reset();
+println(r.getValue());
+"""
+    )
+
+    assert result.output == "0\n"
+
+
+def test_class_interface_method_must_be_public() -> None:
+    with pytest.raises(AetherTypeError, match="must be public"):
+        run_aether(
+            """
+interface Resettable { void reset(); }
+class Counter implements Resettable {
+    int value;
+    void reset() { value = 0; }
+}
+"""
+        )
+
+
+def test_field_access_on_interface_with_class_fails() -> None:
+    with pytest.raises(AetherTypeError, match="Cannot access field 'value' on interface type 'Readable'"):
+        run_aether(
+            """
+interface Readable { int getValue(); }
+class Counter implements Readable {
+    int value;
+    public int getValue() { return value; }
+}
+
+Readable r = Counter(2);
+println(r.value);
+"""
+        )
+
+
+def test_class_constructor_validates_arity_and_types() -> None:
+    with pytest.raises(AetherTypeError, match="constructor expects 1 arguments but got 0"):
+        run_aether("class Counter { int value; }\nCounter c = Counter();")
+
+    with pytest.raises(AetherTypeError, match="Cannot initialize field 'value'.*string.*int"):
+        run_aether('class Counter { int value; }\nCounter c = Counter("bad");')
+
+
+def test_duplicate_class_members_fail() -> None:
+    with pytest.raises(AetherSyntaxError, match="Duplicate field 'value'"):
+        run_aether("class Counter { int value; int value; }")
+
+    with pytest.raises(AetherSyntaxError, match="Duplicate method 'get'"):
+        run_aether("class Counter { public int get() { return 1; } public int get() { return 2; } }")
+
+
+def test_class_top_level_collision_fails() -> None:
+    with pytest.raises(AetherTypeError, match="already defined"):
+        run_aether("class Counter {}\nstruct Counter {}")
+
+
+def test_public_class_imports_and_private_class_is_hidden(tmp_path: Path) -> None:
+    (tmp_path / "Counters.ae").write_text(
+        """
+package Counters;
+
+public class Counter {
+    int value;
+    public int getValue() { return value; }
+}
+
+private class Hidden {
+    int value;
+}
+""",
+        encoding="utf-8",
+    )
+
+    result = run_aether(
+        "import Counters;\nCounter c = Counter(4);\nprintln(c.getValue());",
+        source_root=tmp_path,
+    )
+    assert result.output == "4\n"
+
+    with pytest.raises(AetherTypeError, match="private"):
+        run_aether("import Counters;\nHidden h = Hidden(1);", source_root=tmp_path)
+
+
+def test_structs_still_have_value_semantics_and_public_fields() -> None:
+    result = run_aether(
+        """
+struct Counter {
+    int value;
+    void increment() { value = value + 1; }
+}
+
+Counter a = Counter(0);
+Counter b = a;
+b.increment();
+println(a.value);
+println(b.value);
+"""
+    )
+
+    assert result.output == "0\n1\n"
+
+
+def test_class_private_method_can_be_called_internally() -> None:
+    result = run_aether(
+        """
+class Counter {
+    int value;
+    void increment() { value = value + 1; }
+    public void bump() { increment(); }
+    public int getValue() { return value; }
+}
+
+Counter c = Counter(0);
+c.bump();
+println(c.getValue());
+"""
+    )
+
+    assert result.output == "1\n"
+
+
+def test_class_mutating_method_on_temporary_fails_but_reader_works() -> None:
+    with pytest.raises(AetherTypeError, match="Cannot call mutating method on temporary value"):
+        run_aether("class Counter { int value; public void inc(){ value=value+1; } }\nCounter(0).inc();")
+
+    result = run_aether("class Counter { int value; public int get(){ return value; } }\nprintln(Counter(5).get());")
+    assert result.output == "5\n"
+
+
+def test_language_service_understands_classes() -> None:
+    source = """
+class Counter {
+    int value;
+    public int getValue() { return value; }
+    int secret() { return value; }
+}
+
+Counter c = Counter(0);
+c.
+"""
+    labels = {item.label for item in completion_items(source, 9, 3)}
+    symbols = extract_document_symbol_occurrences(source)
+
+    assert "class" in {item.label for item in completion_items("", 1, 1)}
+    assert "getValue" in labels
+    assert "secret" not in labels
+    assert any(symbol.name == "Counter" and symbol.origin == "class" for symbol in symbols)
+    assert any(symbol.name == "getValue" for symbol in symbols)

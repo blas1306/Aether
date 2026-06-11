@@ -3,7 +3,9 @@ boolean esPrimo3(int p) {
         return true;
     }
 
-    for i in 2:int(sqrt(p)) {
+    int cota = int(sqrt(p));
+
+    for i in 2:cota {
         if p % i == 0 {
             return false;
         }
@@ -24,5 +26,4 @@ while true {
     } else {
         println("El numero $p$ es primo");
     }
-
 }

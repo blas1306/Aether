@@ -17,6 +17,7 @@ from .tokens import AETHER_TYPES, PRIMITIVE_TYPES
 from .types import (
     AetherType,
     ArrayType,
+    ClassType,
     EnumType,
     InterfaceType,
     ListType,
@@ -204,17 +205,20 @@ class TypeChecker:
 
     def _declare_struct_headers(self, statements: list[ast.Statement]) -> None:
         for statement in statements:
-            if not isinstance(statement, ast.StructDeclaration):
+            if not isinstance(statement, (ast.StructDeclaration, ast.ClassDeclaration)):
                 continue
             if statement.name in AETHER_TYPES or statement.name in self.type_aliases:
+                kind_label = "Class" if isinstance(statement, ast.ClassDeclaration) else "Struct"
                 raise AetherTypeError(
-                    f"Struct '{statement.name}' conflicts with an existing type.",
+                    f"{kind_label} '{statement.name}' conflicts with an existing type.",
                     line=statement.line,
                     column=statement.column,
                 )
             if statement.name in self.structs:
+                existing = self.structs[statement.name].kind
+                kind_label = "Class" if isinstance(statement, ast.ClassDeclaration) else "Struct"
                 raise AetherTypeError(
-                    f"Struct '{statement.name}' is already defined.",
+                    f"{kind_label} '{statement.name}' is already defined as a {existing}.",
                     line=statement.line,
                     column=statement.column,
                 )
@@ -242,7 +246,8 @@ class TypeChecker:
                     line=statement.line,
                     column=statement.column,
                 )
-            self.structs[statement.name] = StructSymbol(statement.name, (), statement.visibility)
+            kind = "class" if isinstance(statement, ast.ClassDeclaration) else "struct"
+            self.structs[statement.name] = StructSymbol(statement.name, (), statement.visibility, kind=kind)
 
     def _declare_type_aliases(self, statements: list[ast.Statement]) -> None:
         for statement in statements:
@@ -281,19 +286,24 @@ class TypeChecker:
     def _define_struct_fields(self, statements: list[ast.Statement], package_name: str | None) -> None:
         private_names = _private_type_names(statements, package_name)
         for statement in statements:
-            if not isinstance(statement, ast.StructDeclaration):
+            if not isinstance(statement, (ast.StructDeclaration, ast.ClassDeclaration)):
                 continue
             fields = tuple(
-                VariableSymbol(field.name, self._resolve_type_aliases(field.type_name, field))
+                VariableSymbol(
+                    field.name,
+                    self._resolve_type_aliases(field.type_name, field),
+                    visibility=field.visibility,
+                )
                 for field in statement.fields
             )
             methods = self._struct_method_symbols(statement)
             implements = self._resolve_implements(statement, package_name)
             if is_public_export(statement.visibility, package_name):
+                kind = "class" if isinstance(statement, ast.ClassDeclaration) else "struct"
                 for field in statement.fields:
                     if _type_uses_private_name(field.type_name, private_names):
                         raise AetherTypeError(
-                            f"Public struct '{statement.name}' cannot expose private field type "
+                            f"Public {kind} '{statement.name}' cannot expose private field type "
                             f"'{_first_private_type_name(field.type_name, private_names)}'.",
                             line=field.line,
                             column=field.column,
@@ -302,21 +312,24 @@ class TypeChecker:
                     private_struct = self._private_struct_type_name(field_symbol.type_name, package_name)
                     if private_struct is not None:
                         raise AetherTypeError(
-                            f"Public struct '{statement.name}' cannot expose private field type '{private_struct}'.",
+                            f"Public {kind} '{statement.name}' cannot expose private field type '{private_struct}'.",
                             line=statement.line,
                             column=statement.column,
                         )
-            struct_symbol = StructSymbol(statement.name, fields, statement.visibility, methods, implements)
+            kind = "class" if isinstance(statement, ast.ClassDeclaration) else "struct"
+            struct_symbol = StructSymbol(statement.name, fields, statement.visibility, methods, implements, kind)
             self.structs[statement.name] = struct_symbol
             self._validate_struct_implements(statement, struct_symbol)
 
-    def _resolve_implements(self, declaration: ast.StructDeclaration, package_name: str | None) -> tuple[str, ...]:
+    def _resolve_implements(self, declaration: ast.StructDeclaration | ast.ClassDeclaration, package_name: str | None) -> tuple[str, ...]:
         implements: list[str] = []
         seen: set[str] = set()
+        kind = "class" if isinstance(declaration, ast.ClassDeclaration) else "struct"
+        kind_title = kind.capitalize()
         for interface_name in declaration.implements:
             if interface_name in seen:
                 raise AetherTypeError(
-                    f"Struct '{declaration.name}' lists interface '{interface_name}' more than once.",
+                    f"{kind_title} '{declaration.name}' lists interface '{interface_name}' more than once.",
                     line=declaration.line,
                     column=declaration.column,
                 )
@@ -328,32 +341,38 @@ class TypeChecker:
                     raise AetherTypeError(private_message, line=declaration.line, column=declaration.column)
                 if interface_name in self.structs or interface_name in self.enums or interface_name in self.type_aliases or interface_name in AETHER_TYPES:
                     raise AetherTypeError(
-                        f"Struct '{declaration.name}' cannot implement non-interface type '{interface_name}'.",
+                        f"{kind_title} '{declaration.name}' cannot implement non-interface type '{interface_name}'.",
                         line=declaration.line,
                         column=declaration.column,
                     )
                 raise AetherTypeError(
-                    f"Unknown interface '{interface_name}' implemented by struct '{declaration.name}'.",
+                    f"Unknown interface '{interface_name}' implemented by {kind} '{declaration.name}'.",
                     line=declaration.line,
                     column=declaration.column,
                 )
             if is_public_export(declaration.visibility, package_name) and not is_public_export(interface.visibility, package_name):
                 raise AetherTypeError(
-                    f"Public struct '{declaration.name}' cannot implement private interface '{interface_name}'.",
+                    f"Public {kind} '{declaration.name}' cannot implement private interface '{interface_name}'.",
                     line=declaration.line,
                     column=declaration.column,
                 )
             implements.append(interface_name)
         return tuple(implements)
 
-    def _validate_struct_implements(self, declaration: ast.StructDeclaration, struct: StructSymbol) -> None:
+    def _validate_struct_implements(self, declaration: ast.StructDeclaration | ast.ClassDeclaration, struct: StructSymbol) -> None:
         for interface_name in struct.implements:
             interface = self.interfaces[interface_name]
             for required in interface.methods:
                 actual = self._struct_method_symbol(struct, required.name)
                 if actual is None:
                     raise AetherTypeError(
-                        f"Struct '{struct.name}' is missing method '{required.name}' required by interface '{interface.name}'.",
+                        f"{struct.kind.capitalize()} '{struct.name}' is missing method '{required.name}' required by interface '{interface.name}'.",
+                        line=declaration.line,
+                        column=declaration.column,
+                    )
+                if struct.kind == "class" and actual.visibility != "public":
+                    raise AetherTypeError(
+                        f"Class '{struct.name}' method '{required.name}' must be public to implement interface '{interface.name}'.",
                         line=declaration.line,
                         column=declaration.column,
                     )
@@ -390,20 +409,22 @@ class TypeChecker:
                 column=getattr(location, "column", None),
             )
 
-    def _struct_method_symbols(self, declaration: ast.StructDeclaration) -> tuple[FunctionSymbol, ...]:
+    def _struct_method_symbols(self, declaration: ast.StructDeclaration | ast.ClassDeclaration) -> tuple[FunctionSymbol, ...]:
         symbols: list[FunctionSymbol] = []
         names: set[str] = set()
         field_names = {field.name for field in declaration.fields}
+        kind = "class" if isinstance(declaration, ast.ClassDeclaration) else "struct"
+        kind_title = kind.capitalize()
         for method in declaration.methods:
             if method.name in names:
                 raise AetherTypeError(
-                    f"Duplicate method '{method.name}' in struct '{declaration.name}'.",
+                    f"Duplicate method '{method.name}' in {kind} '{declaration.name}'.",
                     line=method.line,
                     column=method.column,
                 )
             if method.name in field_names:
                 raise AetherTypeError(
-                    f"Struct '{declaration.name}' cannot have a field and method both named '{method.name}'.",
+                    f"{kind_title} '{declaration.name}' cannot have a field and method both named '{method.name}'.",
                     line=method.line,
                     column=method.column,
                 )
@@ -424,7 +445,7 @@ class TypeChecker:
         return tuple(symbols)
 
     def _infer_struct_method_mutability(self, statements: list[ast.Statement]) -> None:
-        declarations = [statement for statement in statements if isinstance(statement, ast.StructDeclaration)]
+        declarations = [statement for statement in statements if isinstance(statement, (ast.StructDeclaration, ast.ClassDeclaration))]
         mutating: set[tuple[str, str]] = set()
         calls: dict[tuple[str, str], set[tuple[str, str]]] = {}
         for declaration in declarations:
@@ -489,7 +510,7 @@ class TypeChecker:
                 return
             self._declare_alias(statement, scope)
             return
-        if isinstance(statement, ast.StructDeclaration):
+        if isinstance(statement, (ast.StructDeclaration, ast.ClassDeclaration)):
             self._check_struct_methods(statement)
             return
         if isinstance(statement, ast.InterfaceDeclaration):
@@ -711,7 +732,7 @@ class TypeChecker:
             return dict(module_checker.structs)
         exports: dict[str, StructSymbol] = {}
         for statement in program.statements:
-            if isinstance(statement, ast.StructDeclaration) and is_public_export(statement.visibility, program.package_name):
+            if isinstance(statement, (ast.StructDeclaration, ast.ClassDeclaration)) and is_public_export(statement.visibility, program.package_name):
                 exports[statement.name] = module_checker.structs[statement.name]
         return exports
 
@@ -1201,6 +1222,13 @@ class TypeChecker:
                 return method
         return None
 
+    def _can_access_struct_member(self, struct: StructSymbol, visibility: str | None) -> bool:
+        if struct.kind != "class":
+            return True
+        if self.current_method_struct is not None and self.current_method_struct.name == struct.name:
+            return True
+        return visibility == "public"
+
     def _interface_method_symbol(self, interface: InterfaceSymbol, method_name: str) -> FunctionSymbol | None:
         for method in interface.methods:
             if method.name == method_name:
@@ -1245,14 +1273,15 @@ class TypeChecker:
         if return_type != "void" and not self._statements_always_return(statement.body):
             raise AetherTypeError(f"Function '{statement.name}' may not return a value on all paths.")
 
-    def _check_struct_methods(self, declaration: ast.StructDeclaration) -> None:
+    def _check_struct_methods(self, declaration: ast.StructDeclaration | ast.ClassDeclaration) -> None:
         struct = self.structs[declaration.name]
         for method in declaration.methods:
             symbol = self._struct_method_symbol(struct, method.name)
             if symbol is None:
                 continue
             method_scope: Scope[VariableSymbol] = Scope(parent=self.global_scope)
-            method_scope.define_local("this", VariableSymbol("this", struct.name, is_const=True), is_const=True)
+            receiver_type: AetherType = ClassType(struct.name) if struct.kind == "class" else struct.name
+            method_scope.define_local("this", VariableSymbol("this", receiver_type, is_const=True), is_const=True)
             for parameter in symbol.parameters:
                 method_scope.define_local(parameter.name, parameter)
             previous_return_type = self.current_return_type
@@ -1815,8 +1844,9 @@ class TypeChecker:
         if target_type is UNKNOWN_TYPE:
             return UNKNOWN_TYPE
         resolved = self._resolve_type_aliases(target_type, expression)
-        if isinstance(resolved, str) and resolved in self.structs:
-            struct = self.structs[resolved]
+        aggregate_name = resolved.name if isinstance(resolved, ClassType) else resolved if isinstance(resolved, str) else None
+        if aggregate_name is not None and aggregate_name in self.structs:
+            struct = self.structs[aggregate_name]
             if self._struct_field_symbol(struct, expression.method_name) is not None:
                 raise AetherTypeError(
                     f"{expression.method_name} is a field, not a method.",
@@ -1826,7 +1856,13 @@ class TypeChecker:
             method = self._struct_method_symbol(struct, expression.method_name)
             if method is None:
                 raise AetherTypeError(
-                    f"Struct '{struct.name}' has no method '{expression.method_name}'.",
+                    f"{struct.kind.capitalize()} '{struct.name}' has no method '{expression.method_name}'.",
+                    line=expression.line,
+                    column=expression.column,
+                )
+            if not self._can_access_struct_member(struct, method.visibility):
+                raise AetherTypeError(
+                    f"Method '{struct.name}.{expression.method_name}' is private.",
                     line=expression.line,
                     column=expression.column,
                 )
@@ -1978,9 +2014,11 @@ class TypeChecker:
             resolved = self._resolve_type_aliases(callee)
         except AetherTypeError:
             return None
-        if not isinstance(resolved, str):
-            return None
-        return self.structs.get(resolved)
+        if isinstance(resolved, ClassType):
+            return self.structs.get(resolved.name)
+        if isinstance(resolved, str):
+            return self.structs.get(resolved)
+        return None
 
     def _constructor_enum(self, callee: str) -> EnumSymbol | None:
         try:
@@ -2007,8 +2045,9 @@ class TypeChecker:
         scope: Scope[VariableSymbol],
     ) -> None:
         if len(expression.arguments) != len(struct.fields):
+            kind_title = struct.kind.capitalize()
             raise AetherTypeError(
-                f"Struct '{struct.name}' constructor expects {len(struct.fields)} arguments "
+                f"{kind_title} '{struct.name}' constructor expects {len(struct.fields)} arguments "
                 f"but got {len(expression.arguments)}."
             )
         for argument, field in zip(expression.arguments, struct.fields):
@@ -2021,7 +2060,7 @@ class TypeChecker:
                     if self._can_assign_braced_literal_to_array(argument, field.type_name, scope):
                         continue
                 raise AetherTypeError(
-                    f"Cannot initialize field '{field.name}' of struct '{struct.name}': "
+                    f"Cannot initialize field '{field.name}' of {struct.kind} '{struct.name}': "
                     f"Cannot implicitly convert '{type_to_string(argument_type)}' to '{type_to_string(field.type_name)}'."
                 )
 
@@ -2069,15 +2108,22 @@ class TypeChecker:
                 line=getattr(location, "line", None),
                 column=getattr(location, "column", None),
             )
-        if not isinstance(resolved, str) or resolved not in self.structs:
+        aggregate_name = resolved.name if isinstance(resolved, ClassType) else resolved if isinstance(resolved, str) else None
+        if aggregate_name is None or aggregate_name not in self.structs:
             raise AetherTypeError(
                 f"Cannot access field '{field_name}' on non-struct value of type '{type_to_string(resolved)}'.",
                 line=getattr(location, "line", None),
                 column=getattr(location, "column", None),
             )
-        struct = self.structs[resolved]
+        struct = self.structs[aggregate_name]
         for field in struct.fields:
             if field.name == field_name:
+                if not self._can_access_struct_member(struct, field.visibility):
+                    raise AetherTypeError(
+                        f"Field '{struct.name}.{field_name}' is private.",
+                        line=getattr(location, "line", None),
+                        column=getattr(location, "column", None),
+                    )
                 return field.type_name
         if self._struct_method_symbol(struct, field_name) is not None:
             raise AetherTypeError(
@@ -2086,7 +2132,7 @@ class TypeChecker:
                 column=getattr(location, "column", None),
             )
         raise AetherTypeError(
-            f"Struct '{struct.name}' has no field '{field_name}'.",
+            f"{struct.kind.capitalize()} '{struct.name}' has no field '{field_name}'.",
             line=getattr(location, "line", None),
             column=getattr(location, "column", None),
         )
@@ -2294,6 +2340,9 @@ class TypeChecker:
         if isinstance(target_type, InterfaceType):
             if isinstance(value_type, InterfaceType):
                 return value_type == target_type
+            if isinstance(value_type, ClassType):
+                struct = self.structs.get(value_type.name)
+                return struct is not None and target_type.name in struct.implements
             if isinstance(value_type, str):
                 struct = self.structs.get(value_type)
                 return struct is not None and target_type.name in struct.implements
@@ -2353,7 +2402,8 @@ class TypeChecker:
                     )
                 return self._resolve_type_aliases(self.type_aliases[type_name], location, (*resolving, type_name))
             if type_name in self.structs:
-                return type_name
+                struct = self.structs[type_name]
+                return ClassType(type_name) if struct.kind == "class" else type_name
             if type_name in self.enums:
                 return EnumType(type_name)
             if type_name in self.interfaces:
@@ -2411,7 +2461,12 @@ class TypeChecker:
     def _private_struct_type_name(self, type_name: AetherType, package_name: str | None) -> str | None:
         if package_name is None:
             return None
-        if isinstance(type_name, (EnumType, InterfaceType)):
+        if isinstance(type_name, (EnumType, InterfaceType, ClassType)):
+            if isinstance(type_name, ClassType):
+                symbol = self.structs.get(type_name.name)
+                if symbol is not None and not is_public_export(symbol.visibility, package_name):
+                    return type_name.name
+                return None
             symbols = self.enums if isinstance(type_name, EnumType) else self.interfaces
             symbol = symbols.get(type_name.name)
             if symbol is not None and not is_public_export(symbol.visibility, package_name):
@@ -2437,6 +2492,8 @@ class TypeChecker:
 
     def _type_mentions_struct(self, type_name: AetherType) -> bool:
         resolved = self._resolve_type_aliases(type_name)
+        if isinstance(resolved, ClassType):
+            return True
         if isinstance(resolved, str):
             return resolved in self.structs
         if isinstance(resolved, InterfaceType):
@@ -2564,7 +2621,7 @@ def _private_type_names(statements: list[ast.Statement], package_name: str | Non
     for statement in statements:
         if isinstance(
             statement,
-            (ast.AliasDeclaration, ast.StructDeclaration, ast.InterfaceDeclaration, ast.EnumDeclaration),
+            (ast.AliasDeclaration, ast.StructDeclaration, ast.ClassDeclaration, ast.InterfaceDeclaration, ast.EnumDeclaration),
         ) and not is_public_export(
             statement.visibility,
             package_name,
@@ -2580,7 +2637,7 @@ def _type_uses_private_name(type_name: AetherType, private_names: set[str]) -> b
 def _first_private_type_name(type_name: AetherType, private_names: set[str]) -> str | None:
     if isinstance(type_name, str):
         return type_name if type_name in private_names else None
-    if isinstance(type_name, (EnumType, InterfaceType)):
+    if isinstance(type_name, (EnumType, InterfaceType, ClassType)):
         return type_name.name if type_name.name in private_names else None
     if isinstance(type_name, ArrayType):
         return _first_private_type_name(type_name.element_type, private_names)
@@ -2769,6 +2826,8 @@ class _StructMethodMutationAnalysis:
                 return self.struct.name
             if self._is_implicit_field_name(expression.name, locals_in_scope):
                 field = self.checker._struct_field_symbol(self.struct, expression.name)
+                if field is not None and isinstance(field.type_name, ClassType) and field.type_name.name in self.checker.structs:
+                    return field.type_name.name
                 return field.type_name if isinstance(field.type_name, str) and field.type_name in self.checker.structs else None
             return None
         if isinstance(expression, ast.FieldAccess):
@@ -2781,6 +2840,8 @@ class _StructMethodMutationAnalysis:
             field = self.checker._struct_field_symbol(parent_struct, expression.field_name)
             if field is None:
                 return None
+            if isinstance(field.type_name, ClassType) and field.type_name.name in self.checker.structs:
+                return field.type_name.name
             return field.type_name if isinstance(field.type_name, str) and field.type_name in self.checker.structs else None
         return None
 

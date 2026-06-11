@@ -23,6 +23,8 @@ from .tokens import AETHER_TYPES, PRIMITIVE_TYPES
 from .types import (
     AetherType,
     AetherExceptionValue,
+    ClassInstance,
+    ClassType,
     EnumType,
     EnumValue,
     InterfaceType,
@@ -375,7 +377,7 @@ class Interpreter:
         if isinstance(statement, ast.AliasDeclaration):
             self.type_aliases[statement.name] = statement.target_type
             return
-        if isinstance(statement, ast.StructDeclaration):
+        if isinstance(statement, (ast.StructDeclaration, ast.ClassDeclaration)):
             self.structs[statement.name] = statement
             self.struct_methods[statement.name] = {
                 method.name: self._function(method, env)
@@ -1037,7 +1039,7 @@ class Interpreter:
 
     def _assign_implicit_method_field(self, field_name: str, expression: ast.Expression, env: Environment) -> None:
         receiver = self._method_receiver_value(env)
-        if receiver is None or not isinstance(receiver.value, StructInstance):
+        if receiver is None or not isinstance(receiver.value, (StructInstance, ClassInstance)):
             raise AetherRuntimeError(f"Undefined variable '{field_name}'.")
         instance = receiver.value
         if field_name not in instance.fields:
@@ -1176,12 +1178,13 @@ class Interpreter:
 
     def _evaluate_method_call(self, expression: ast.MethodCall, env: Environment) -> AetherValue:
         receiver = self._evaluate(expression.target, env)
-        if isinstance(receiver.value, StructInstance):
+        if isinstance(receiver.value, (StructInstance, ClassInstance)):
             method = self._struct_method_function(receiver.value.type_name, expression.method_name)
             if method is None:
                 if expression.method_name in receiver.value.fields:
                     raise AetherTypeError(f"{expression.method_name} is a field, not a method.")
-                raise AetherTypeError(f"Struct '{receiver.value.type_name}' has no method '{expression.method_name}'.")
+                kind = "Class" if isinstance(receiver.value, ClassInstance) else "Struct"
+                raise AetherTypeError(f"{kind} '{receiver.value.type_name}' has no method '{expression.method_name}'.")
             named_args = {name: self._evaluate(value, env) for name, value in expression.keyword_arguments.items()}
             return self._call_struct_method(receiver, method, expression.arguments, named_args, env, expression)
         members = native_member_set(receiver.type_name)
@@ -1205,9 +1208,11 @@ class Interpreter:
             resolved = self._resolve_type_aliases(callee)
         except AetherTypeError:
             return None
-        if not isinstance(resolved, str):
-            return None
-        return self.structs.get(resolved)
+        if isinstance(resolved, ClassType):
+            return self.structs.get(resolved.name)
+        if isinstance(resolved, str):
+            return self.structs.get(resolved)
+        return None
 
     def _constructor_enum(self, callee: str) -> ast.EnumDeclaration | None:
         try:
@@ -1229,8 +1234,9 @@ class Interpreter:
 
     def _construct_struct(self, declaration: ast.StructDeclaration, args: list[AetherValue]) -> AetherValue:
         if len(args) != len(declaration.fields):
+            kind = "Class" if isinstance(declaration, ast.ClassDeclaration) else "Struct"
             raise AetherRuntimeError(
-                f"Struct '{declaration.name}' constructor expects {len(declaration.fields)} arguments but got {len(args)}."
+                f"{kind} '{declaration.name}' constructor expects {len(declaration.fields)} arguments but got {len(args)}."
             )
         fields: dict[str, AetherValue] = {}
         field_order: list[str] = []
@@ -1238,6 +1244,8 @@ class Interpreter:
             field_type = self._resolve_type_aliases(field.type_name)
             fields[field.name] = coerce_implicit(arg, field_type)
             field_order.append(field.name)
+        if isinstance(declaration, ast.ClassDeclaration):
+            return AetherValue(ClassType(declaration.name), ClassInstance(declaration.name, fields, tuple(field_order)))
         return AetherValue(declaration.name, StructInstance(declaration.name, fields, tuple(field_order)))
 
     def _enum_variant_value(
@@ -1287,11 +1295,12 @@ class Interpreter:
         if field_name not in instance.fields:
             if self._struct_method_function(instance.type_name, field_name) is not None:
                 raise AetherTypeError(f"{field_name} is a method and must be called.")
-            raise AetherTypeError(f"Struct '{instance.type_name}' has no field '{field_name}'.")
+            kind = "Class" if isinstance(instance, ClassInstance) else "Struct"
+            raise AetherTypeError(f"{kind} '{instance.type_name}' has no field '{field_name}'.")
         return instance.fields[field_name]
 
-    def _require_struct_instance(self, value: AetherValue, field_name: str) -> StructInstance:
-        if isinstance(value.value, StructInstance):
+    def _require_struct_instance(self, value: AetherValue, field_name: str) -> StructInstance | ClassInstance:
+        if isinstance(value.value, (StructInstance, ClassInstance)):
             return value.value
         raise AetherTypeError(
             f"Cannot access field '{field_name}' on non-struct value of type '{type_to_string(value.type_name)}'."
@@ -1399,11 +1408,12 @@ class Interpreter:
                 self._evaluate_with_expected_type(argument, env, parameter_type)
                 for argument, parameter_type in zip(argument_expressions, parameter_types)
             ]
-            method_receiver = (
-                AetherValue(receiver.value.type_name, receiver.value)
-                if isinstance(receiver.value, StructInstance)
-                else receiver
-            )
+            if isinstance(receiver.value, ClassInstance):
+                method_receiver = AetherValue(ClassType(receiver.value.type_name), receiver.value)
+            elif isinstance(receiver.value, StructInstance):
+                method_receiver = AetherValue(receiver.value.type_name, receiver.value)
+            else:
+                method_receiver = receiver
             local_env = Environment(parent=function.closure or self.global_env, method_receiver=method_receiver)
             local_env.define("this", method_receiver, is_const=True)
             for parameter, parameter_type, arg in zip(declaration.parameters, parameter_types, args):
@@ -1423,14 +1433,16 @@ class Interpreter:
             raise AetherRuntimeError(f"Method '{declaration.name}' ended without returning a value.")
 
     def _struct_method_function(self, struct_name: AetherType, method_name: str) -> Function | None:
-        if not isinstance(struct_name, str):
-            return None
-        return self.struct_methods.get(struct_name, {}).get(method_name)
+        if isinstance(struct_name, ClassType):
+            return self.struct_methods.get(struct_name.name, {}).get(method_name)
+        if isinstance(struct_name, str):
+            return self.struct_methods.get(struct_name, {}).get(method_name)
+        return None
 
     def _method_receiver_value(self, env: Environment) -> AetherValue | None:
         cursor: Environment | None = env
         while cursor is not None:
-            if cursor.method_receiver is not None and isinstance(cursor.method_receiver.value, StructInstance):
+            if cursor.method_receiver is not None and isinstance(cursor.method_receiver.value, (StructInstance, ClassInstance)):
                 return cursor.method_receiver
             cursor = cursor.parent
         return None
@@ -1438,7 +1450,7 @@ class Interpreter:
     def _method_receiver_env(self, env: Environment) -> Environment | None:
         cursor: Environment | None = env
         while cursor is not None:
-            if cursor.method_receiver is not None and isinstance(cursor.method_receiver.value, StructInstance):
+            if cursor.method_receiver is not None and isinstance(cursor.method_receiver.value, (StructInstance, ClassInstance)):
                 return cursor
             cursor = cursor.parent
         return None
@@ -1458,7 +1470,7 @@ class Interpreter:
 
     def _implicit_method_field(self, name: str, env: Environment) -> AetherValue | None:
         receiver = self._method_receiver_value(env)
-        if receiver is None or not isinstance(receiver.value, StructInstance):
+        if receiver is None or not isinstance(receiver.value, (StructInstance, ClassInstance)):
             return None
         if self._lookup_before_method_receiver(name, env) is not None:
             return None
@@ -1481,7 +1493,7 @@ class Interpreter:
                 raise AetherRuntimeError("Operator '\\' requires import Math.LinearAlgebra.")
             return self.builtins[LINEAR_ALGEBRA_SOLVE]([left, right])
         if operator in {"==", "!="}:
-            if isinstance(left.value, StructInstance) or isinstance(right.value, StructInstance):
+            if isinstance(left.value, (StructInstance, ClassInstance)) or isinstance(right.value, (StructInstance, ClassInstance)):
                 raise AetherTypeError("Struct equality is not supported yet.")
             if not _types_comparable_for_equality(left.type_name, right.type_name):
                 raise AetherTypeError(
@@ -1697,7 +1709,7 @@ class Interpreter:
             return dict(module_interpreter.structs)
         exports: dict[str, ast.StructDeclaration] = {}
         for statement in program.statements:
-            if isinstance(statement, ast.StructDeclaration) and is_public_export(statement.visibility, program.package_name):
+            if isinstance(statement, (ast.StructDeclaration, ast.ClassDeclaration)) and is_public_export(statement.visibility, program.package_name):
                 exports[statement.name] = module_interpreter.structs[statement.name]
         return exports
 
@@ -1787,7 +1799,8 @@ class Interpreter:
                     raise AetherTypeError(f"Cyclic type alias involving '{cycle_name}'.")
                 return self._resolve_type_aliases(self.type_aliases[type_name], (*resolving, type_name))
             if type_name in self.structs:
-                return type_name
+                declaration = self.structs[type_name]
+                return ClassType(type_name) if isinstance(declaration, ast.ClassDeclaration) else type_name
             if type_name in self.enums:
                 return EnumType(type_name)
             if type_name in self.interfaces:

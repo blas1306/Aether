@@ -59,6 +59,7 @@ _FUNCTION_RE = re.compile(
     r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\("
 )
 _STRUCT_RE = re.compile(r"\b(?:(?:public|private)\s+)?struct\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\b")
+_CLASS_RE = re.compile(r"\b(?:(?:public|private)\s+)?class\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\b")
 _INTERFACE_RE = re.compile(
     r"\b(?:(?:public|private)\s+)?interface\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\{(?P<body>.*?)\}",
     re.DOTALL,
@@ -206,6 +207,7 @@ def _symbol_names(source: str) -> set[str]:
     names.update(match.group("name") for match in _ASSIGNMENT_RE.finditer(source))
     names.update(match.group("name") for match in _DECLARATION_RE.finditer(source))
     names.update(match.group("name") for match in _STRUCT_RE.finditer(source))
+    names.update(match.group("name") for match in _CLASS_RE.finditer(source))
     names.update(match.group("name") for match in _INTERFACE_RE.finditer(source))
     names.update(match.group("name") for match in _ENUM_RE.finditer(source))
     for match in _FUNCTION_RE.finditer(source):
@@ -275,11 +277,15 @@ def _struct_members(source: str) -> dict[str, tuple[tuple[str, str], ...]]:
         return {}
     structs: dict[str, tuple[tuple[str, str], ...]] = {}
     for statement in program.statements:
-        if not isinstance(statement, ast.StructDeclaration):
+        if not isinstance(statement, (ast.StructDeclaration, ast.ClassDeclaration)):
             continue
         members: list[tuple[str, str]] = []
-        members.extend((field.name, "property") for field in statement.fields)
-        members.extend((method.name, "method") for method in statement.methods)
+        if isinstance(statement, ast.ClassDeclaration):
+            members.extend((field.name, "property") for field in statement.fields if field.visibility == "public")
+            members.extend((method.name, "method") for method in statement.methods if method.visibility == "public")
+        else:
+            members.extend((field.name, "property") for field in statement.fields)
+            members.extend((method.name, "method") for method in statement.methods)
         structs[statement.name] = tuple(members)
     return structs
 

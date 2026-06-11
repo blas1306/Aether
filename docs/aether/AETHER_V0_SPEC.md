@@ -426,6 +426,100 @@ println(a.value); // 0
 println(b.value); // 1
 ```
 
+## Classes
+
+Aether v0 also supports a minimal nominal `class` form. Classes look similar to structs, but they are reference types and their members are private by default:
+
+```aether
+public class Counter {
+    int value; // private by default
+
+    public void increment() {
+        value = value + 1;
+    }
+
+    public int getValue() {
+        return value;
+    }
+
+    public void setValue(int value) {
+        this.value = value;
+    }
+}
+```
+
+Class declarations are top-level only. They use the same automatic positional constructor as structs:
+
+```aether
+Counter c = Counter(0);
+```
+
+Fields and methods may be marked `public` or `private`. Unmarked class fields and methods are private; unmarked struct fields and methods remain public. Private members are accessible inside the class through either implicit field names or `this.field`, but not through outside references:
+
+```aether
+Counter c = Counter(0);
+c.getValue(); // valid
+c.value;      // error: field is private
+```
+
+Classes have reference semantics. Assigning, passing, or returning a class value copies the reference, not the object:
+
+```aether
+Counter a = Counter(0);
+Counter b = a;
+
+b.increment();
+println(a.getValue()); // 1
+println(b.getValue()); // 1
+```
+
+`const` on a class variable prevents rebinding that variable and prevents mutation through that variable, but it does not freeze the object globally if a mutable alias exists:
+
+```aether
+Counter a = Counter(0);
+const Counter b = a;
+
+a.increment();       // valid
+b.increment();       // error: Cannot mutate constant 'b'
+println(b.getValue()); // 1
+```
+
+Class methods use the same mutability detection as struct methods. Assigning to an implicit field or `this.field` makes the method mutating, and calling a mutating receiver method transitively makes the caller mutating. Mutating methods cannot be called on temporaries:
+
+```aether
+Counter(0).increment(); // error
+Counter(0).getValue();  // valid
+```
+
+Classes may implement interfaces. Methods used to satisfy an interface must be public:
+
+```aether
+interface Resettable {
+    void reset();
+}
+
+class Counter implements Resettable {
+    int value;
+
+    public void reset() {
+        value = 0;
+    }
+}
+
+Resettable r = Counter(1);
+r.reset();
+```
+
+Current class limitations:
+
+- No inheritance or `extends`.
+- No `super`.
+- No custom constructors or overloaded constructors.
+- No static methods.
+- No destructors.
+- No generic classes.
+- No operator overloading or class equality.
+
 Struct aliases are type aliases. An alias can be used both as the annotated type and as the constructor name:
 
 ```aether
@@ -581,7 +675,7 @@ private interface Printable {
 
 Interfaces are top-level declarations. They may be `public` or `private` like other top-level declarations. Interfaces cannot declare fields, method bodies, default methods, generic parameters, or inheritance from other interfaces in this version.
 
-Only structs can implement interfaces:
+Structs and classes can implement interfaces:
 
 ```aether
 public struct Circle implements Shape, Printable {
@@ -597,9 +691,9 @@ public struct Circle implements Shape, Printable {
 }
 ```
 
-The typechecker verifies that every implemented interface method is present on the struct. Signatures must match exactly: same name, same parameter count, same parameter types, and same return type. Missing methods and signature mismatches are type errors.
+The typechecker verifies that every implemented interface method is present on the concrete type. Signatures must match exactly: same name, same parameter count, same parameter types, and same return type. Missing methods and signature mismatches are type errors. Class methods that implement interfaces must be `public`.
 
-An interface defines a nominal type. A struct value is assignable to an interface type when the struct declares that it implements the interface:
+An interface defines a nominal type. A struct or class value is assignable to an interface type when its concrete declaration implements the interface:
 
 ```aether
 Shape s = Circle(2);
@@ -616,7 +710,7 @@ Shape makeShape() {
 }
 ```
 
-Calling a declared interface method dispatches to the concrete struct method stored in the value. Structs remain value types when assigned or passed through interface-typed variables and parameters. If the dispatched method is mutating, the interface-typed receiver must be mutable; calling it through a `const` interface variable is rejected.
+Calling a declared interface method dispatches to the concrete method stored in the value. Structs remain value types when assigned or passed through interface-typed variables and parameters; classes remain reference types. If the dispatched method is mutating, the interface-typed receiver must be mutable; calling it through a `const` interface variable is rejected.
 
 Member access uses the static type. A variable whose static type is an interface exposes only the interface methods:
 
@@ -626,7 +720,7 @@ s.foo();  // error: Shape has no method foo
 s.r;      // error: Shape does not expose Circle.r
 ```
 
-Packaged files export only public interfaces. Private interfaces remain visible inside their own module but are not imported by other modules. A public struct in a package cannot implement a private interface, because that would expose the private interface in its public API.
+Packaged files export only public interfaces. Private interfaces remain visible inside their own module but are not imported by other modules. A public struct or class in a package cannot implement a private interface, because that would expose the private interface in its public API.
 
 Current interface limitations:
 
@@ -635,8 +729,7 @@ Current interface limitations:
 - No method bodies or default methods.
 - No inheritance between interfaces.
 - No generic interfaces.
-- Only structs can implement interfaces.
-- No classes yet.
+- Structs and classes can implement interfaces.
 
 ## Enums
 
@@ -808,7 +901,7 @@ Config             -> Config.ae
 
 Resolution is relative to the active source root. When running a saved file from the editor/runtime, the source root is the file's containing directory. Direct `run_aether(...)` calls can pass an explicit `source_root`; otherwise the current working directory is used to preserve existing script-import behavior.
 
-For packaged files, only `public` top-level variables/constants, aliases, structs, interfaces, enums, and functions are exported to importers:
+For packaged files, only `public` top-level variables/constants, aliases, structs, classes, interfaces, enums, and functions are exported to importers:
 
 ```aether
 package Math.Types;
@@ -834,7 +927,7 @@ Current package/import limitations:
 - Specific imports, import aliases such as `import X as Y`, and explicit wildcards are not implemented yet.
 - Cyclic imports are rejected.
 - `private` is enforced across imports only; declarations in the same file can still use each other.
-- Classes, advanced exceptions, and package-level class visibility are outside this version.
+- Advanced exceptions and multi-file package visibility are outside this version.
 
 ## Implicit Conversions
 

@@ -59,10 +59,22 @@ class StructField:
     type_name: AetherType
     line: int = 1
     column: int = 1
+    visibility: Visibility = None
 
 
 @dataclass(frozen=True)
 class StructDeclaration:
+    name: str
+    fields: list[StructField]
+    line: int = 1
+    column: int = 1
+    visibility: Visibility = None
+    methods: list["FunctionDeclaration"] = field(default_factory=list)
+    implements: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class ClassDeclaration:
     name: str
     fields: list[StructField]
     line: int = 1

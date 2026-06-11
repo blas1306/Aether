@@ -19,6 +19,7 @@ object AetherTokenTypes {
         "boolean",
         "break",
         "catch",
+        "class",
         "const",
         "continue",
         "double",

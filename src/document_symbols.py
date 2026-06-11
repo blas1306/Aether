@@ -13,6 +13,7 @@ DocumentSymbolOrigin = Literal[
     "import",
     "type_alias",
     "struct",
+    "class",
     "interface",
     "enum",
 ]
@@ -25,6 +26,7 @@ _TYPED_VAR_RE = re.compile(rf"^{_VISIBILITY_RE}(?:const\s+)?(?P<type>{_TYPE_RE})
 _CONST_ASSIGN_RE = re.compile(rf"^{_VISIBILITY_RE}const\s+(?P<name>[A-Za-z_]\w*)\s*=\s*(?!=)")
 _ALIAS_RE = re.compile(rf"^{_VISIBILITY_RE}alias\s+(?P<name>[A-Za-z_]\w*)\s*=\s*(?P<type>{_TYPE_RE})\s*$", re.IGNORECASE)
 _STRUCT_RE = re.compile(rf"^{_VISIBILITY_RE}struct\s+(?P<name>[A-Za-z_]\w*)\s*\{{?", re.IGNORECASE)
+_CLASS_RE = re.compile(rf"^{_VISIBILITY_RE}class\s+(?P<name>[A-Za-z_]\w*)\s*\{{?", re.IGNORECASE)
 _INTERFACE_RE = re.compile(rf"^{_VISIBILITY_RE}interface\s+(?P<name>[A-Za-z_]\w*)\s*\{{?", re.IGNORECASE)
 _ENUM_RE = re.compile(rf"^{_VISIBILITY_RE}enum\s+(?P<name>[A-Za-z_]\w*)\s*\{{?", re.IGNORECASE)
 _INLINE_FUNCTION_RE = re.compile(r"^(?P<name>[A-Za-z_]\w*)\s*\((?P<params>[^()]*)\)\s*=\s*(?!=)")
@@ -34,7 +36,7 @@ _AETHER_FUNCTION_RE = re.compile(
     re.IGNORECASE,
 )
 _STRUCT_METHOD_RE = re.compile(
-    rf"(?m)^[ \t]*(?:function\s+)?(?P<return_type>{_TYPE_RE})\s+"
+    rf"(?m)^[ \t]*(?:public\s+|private\s+)?(?:function\s+)?(?P<return_type>{_TYPE_RE})\s+"
     r"(?P<name>[A-Za-z_]\w*)\s*\((?P<params>[^()]*)\)\s*\{",
     re.IGNORECASE,
 )
@@ -101,7 +103,7 @@ def extract_document_symbol_occurrences(document_text: str) -> list[DocumentSymb
         if symbol is None:
             continue
         symbols.append(symbol)
-        if symbol.origin == "struct":
+        if symbol.origin in {"struct", "class"}:
             symbols.extend(_extract_struct_method_symbols(statement, line_starts))
         if symbol.origin == "interface":
             symbols.extend(_extract_interface_method_symbols(statement, line_starts))
@@ -163,6 +165,7 @@ def _extract_symbol_from_statement(statement_span: _StatementSpan, line_starts: 
         _extract_import_symbol(statement, statement_span, leading_ws, line_starts)
         or _extract_alias_symbol(statement, statement_span, leading_ws, line_starts)
         or _extract_struct_symbol(statement, statement_span, leading_ws, line_starts)
+        or _extract_class_symbol(statement, statement_span, leading_ws, line_starts)
         or _extract_interface_symbol(statement, statement_span, leading_ws, line_starts)
         or _extract_enum_symbol(statement, statement_span, leading_ws, line_starts)
         or _extract_aether_function_symbol(statement, statement_span, leading_ws, line_starts)
@@ -221,6 +224,30 @@ def _extract_struct_symbol(
         origin="struct",
         signature=name,
         detail=f"struct {name}",
+        type_name=name,
+    )
+
+
+def _extract_class_symbol(
+    statement: str,
+    statement_span: _StatementSpan,
+    leading_ws: int,
+    line_starts: list[int],
+) -> DocumentSymbol | None:
+    match = _CLASS_RE.match(statement)
+    if match is None:
+        return None
+    name = match.group("name")
+    return _document_symbol(
+        statement_span,
+        line_starts,
+        name_start=leading_ws + match.start("name"),
+        name_end=leading_ws + match.end("name"),
+        name=name,
+        kind="type",
+        origin="class",
+        signature=name,
+        detail=f"class {name}",
         type_name=name,
     )
 
