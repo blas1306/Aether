@@ -69,7 +69,19 @@ _ENUM_RE = re.compile(
     re.DOTALL,
 )
 _NATIVE_TYPE_MEMBERS: dict[str, tuple[tuple[str, str], ...]] = {
-    "List": (("length", "property"), ("copy", "method"), ("reverse", "method"), ("sort", "method")),
+    "List": (
+        ("length", "property"),
+        ("push", "method"),
+        ("pop", "method"),
+        ("insert", "method"),
+        ("removeAt", "method"),
+        ("contains", "method"),
+        ("clear", "method"),
+        ("size", "method"),
+        ("copy", "method"),
+        ("reverse", "method"),
+        ("sort", "method"),
+    ),
     "Array": (("length", "property"), ("copy", "method")),
     "Matrix": (("rows", "property"), ("columns", "property"), ("transpose", "method")),
     "Vector": (("length", "property"), ("norm", "method")),

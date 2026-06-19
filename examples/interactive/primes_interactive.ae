@@ -1,11 +1,18 @@
+import Math
+
 boolean esPrimo3(int p) {
+
     if p == 2 || p == 3 {
         return true;
     }
 
+    if p % 2 == 0 {
+        return false;
+    }
+
     int cota = int(sqrt(p));
 
-    for i in 2:cota {
+    for i in 3:2:cota {
         if p % i == 0 {
             return false;
         }
@@ -14,16 +21,44 @@ boolean esPrimo3(int p) {
     return true;
 }
 
+List<int> factoresPrimos(int n) {
+    List<int> factores = {};
+
+    while n % 2 == 0 {
+        push(factores, 2);
+        n = int(n/2);
+    }
+
+    int divisor = 3;
+
+    while divisor * divisor <= n {
+        while n % divisor == 0 {
+            push(factores, divisor);
+            n = int(n/divisor);
+        }
+
+        divisor += 2;
+    }
+
+    push(factores, n);
+    return factores;
+}
+
 while true {
     int p = input("Ingrese un numero positivo: ");
 
     if p <= 1 {
         println("Numero invalido. Ingrese un numero nuevamente");
+        continue;
     }
 
-    if esPrimo3(p) == false {
-        println("El numero $p$ no es primo");
+    if esPrimo3(p) == true {
+        println("$p$ es primo");
     } else {
-        println("El numero $p$ es primo");
+        println("$p$ no es primo");
+
+        factorizacion = factoresPrimos(p);
+
+        println("Sus factores primos son: ", factorizacion);
     }
 }

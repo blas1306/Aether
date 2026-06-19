@@ -153,7 +153,20 @@ def test_completion_items_include_native_members_after_dot() -> None:
     matrix_labels = {item.label: item.kind for item in completion_items(source + "A.", 5, len("A.") + 1)}
     vector_labels = {item.label: item.kind for item in completion_items(source + "v.", 5, len("v.") + 1)}
 
-    for label, kind in {"length": "property", "copy": "method", "reverse": "method", "sort": "method"}.items():
+    list_members = {
+        "length": "property",
+        "push": "method",
+        "pop": "method",
+        "insert": "method",
+        "removeAt": "method",
+        "contains": "method",
+        "clear": "method",
+        "size": "method",
+        "copy": "method",
+        "reverse": "method",
+        "sort": "method",
+    }
+    for label, kind in list_members.items():
         assert list_labels[label] == kind
     for label, kind in {"length": "property", "copy": "method"}.items():
         assert array_labels[label] == kind

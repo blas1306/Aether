@@ -1210,6 +1210,13 @@ Native methods use call syntax and are desugared to the existing builtins by pas
 
 ```aether
 List<int> ys = xs.copy(); // copy(xs)
+xs.push(4);               // push(xs, 4)
+int last = xs.pop();      // pop(xs)
+xs.insert(1, 9);          // insert(xs, 1, 9)
+int removed = xs.removeAt(0); // remove_at(xs, 0)
+boolean found = xs.contains(9); // contains(xs, 9)
+xs.clear();               // clear(xs)
+int count = xs.size();    // length(xs)
 xs.reverse();             // reverse(xs), mutates xs in place
 xs.sort();                // sort(xs), mutates xs in place
 
@@ -1231,6 +1238,13 @@ Supported native properties:
 
 Supported native methods:
 
+- `List<T>.push(value: T) -> void`, appends `value`
+- `List<T>.pop() -> T`, removes and returns the last element
+- `List<T>.insert(index: int, value: T) -> void`
+- `List<T>.removeAt(index: int) -> T`
+- `List<T>.contains(value: T) -> boolean`
+- `List<T>.clear() -> void`
+- `List<T>.size() -> int`
 - `List<T>.copy() -> List<T>`
 - `List<T>.reverse() -> void`, mutates the list in place
 - `List<T>.sort() -> void`, mutates the list in place
@@ -1238,7 +1252,9 @@ Supported native methods:
 - `Matrix<T>.transpose() -> Matrix<T>`
 - `Vector<T>.norm() -> double`
 
-The functional builtins remain valid and keep the same signatures: `length(xs)`, `copy(xs)`, `reverse(xs)`, `sort(xs)`, `rows(A)`, `columns(A)`, and `Math.LinearAlgebra.transpose(A)`/the imported `transpose(A)` alias still work.
+List method indices are zero-based. `insert(index, value)` accepts `0 <= index <= size()`, while `removeAt(index)` accepts `0 <= index < size()`. `pop()` on an empty list and out-of-range indices raise an `AetherRuntimeError`. Method arguments are checked statically when their types are known: values passed to `push`, `insert`, and `contains` must be assignable to `T`, and indices must be `int`.
+
+The functional builtins remain valid and keep the same signatures: `length(xs)`, `push(xs, value)`, `pop(xs)`, `insert(xs, index, value)`, `remove_at(xs, index)`, `contains(xs, value)`, `clear(xs)`, `copy(xs)`, `reverse(xs)`, `sort(xs)`, `rows(A)`, `columns(A)`, and `Math.LinearAlgebra.transpose(A)`/the imported `transpose(A)` alias still work. The global `size(value)` builtin retains its existing shape-vector semantics; `List<T>.size()` specifically returns the list length as an `int`.
 
 `const` follows the same mutation rules as the functional builtins. Read-only properties and non-mutating copy methods are valid on constants, while mutating methods are rejected when the receiver is rooted in a constant variable:
 
@@ -1246,7 +1262,14 @@ The functional builtins remain valid and keep the same signatures: `length(xs)`,
 const List<int> xs = {1, 2};
 
 println(xs.length); // ok
+println(xs.contains(2)); // ok
+println(xs.size()); // ok
 List<int> ys = xs.copy(); // ok
+xs.push(3);    // error: Cannot mutate constant 'xs'.
+xs.pop();      // error: Cannot mutate constant 'xs'.
+xs.insert(0, 3); // error: Cannot mutate constant 'xs'.
+xs.removeAt(0); // error: Cannot mutate constant 'xs'.
+xs.clear();    // error: Cannot mutate constant 'xs'.
 xs.reverse(); // error: Cannot mutate constant 'xs'.
 xs.sort();    // error: Cannot mutate constant 'xs'.
 ```

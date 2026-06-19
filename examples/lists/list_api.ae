@@ -1,0 +1,55 @@
+// Basic List<T> workflow with integers.
+List<int> numbers = {10, 20};
+
+numbers.push(30);
+numbers.insert(1, 15);
+println("numbers: ", numbers);
+println("contains 20: ", numbers.contains(20));
+println("contains 99: ", numbers.contains(99));
+
+int removed = numbers.removeAt(2);
+int last = numbers.pop();
+println("removed: ", removed);
+println("last: ", last);
+println("numbers after removals: ", numbers);
+println("size: ", numbers.size());
+
+numbers.clear();
+println("size after clear: ", numbers.size());
+numbers.push(99);
+println("numbers reused: ", numbers);
+
+// The same API preserves the element type for strings.
+List<string> names = {"Ana", "Luis"};
+names.push("Marta");
+names.insert(1, "Bruno");
+println("names: ", names);
+println("contains Marta: ", names.contains("Marta"));
+println("removed name: ", names.removeAt(0));
+println("last name: ", names.pop());
+println("remaining names: ", names);
+
+// Read-only methods are allowed on const lists.
+const List<string> colors = {"red", "green", "blue"};
+println("color count: ", colors.size());
+println("contains green: ", colors.contains("green"));
+
+// These examples should fail static typechecking because colors is const:
+// colors.push("white");
+// colors.pop();
+// colors.insert(0, "black");
+// colors.removeAt(0);
+// colors.clear();
+
+// These examples should also fail static typechecking:
+// numbers.push("not an int");
+// numbers.insert("0", 100);
+// numbers.contains("99");
+
+// These examples should fail at runtime with clear bounds errors:
+// List<int> empty = {};
+// empty.pop();
+// numbers.removeAt(-1);
+// numbers.removeAt(numbers.size());
+// numbers.insert(-1, 0);
+// numbers.insert(numbers.size() + 1, 0);

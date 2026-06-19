@@ -23,6 +23,13 @@ LIST_NATIVE_MEMBERS = NativeMemberSet(
         "length": NativeMember("length", "length", "property"),
     },
     methods={
+        "push": NativeMember("push", "push", "method"),
+        "pop": NativeMember("pop", "pop", "method"),
+        "insert": NativeMember("insert", "insert", "method"),
+        "removeAt": NativeMember("removeAt", "remove_at", "method"),
+        "contains": NativeMember("contains", "contains", "method"),
+        "clear": NativeMember("clear", "clear", "method"),
+        "size": NativeMember("size", "length", "method"),
         "copy": NativeMember("copy", "copy", "method"),
         "reverse": NativeMember("reverse", "reverse", "method"),
         "sort": NativeMember("sort", "sort", "method"),
