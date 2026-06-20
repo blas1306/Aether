@@ -731,6 +731,116 @@ Current class limitations:
 - No operator overloading.
 - No class equality.
 
+## Planned Properties (Not Implemented)
+
+> **Status: planned design only. Properties are not implemented in Aether v0.**
+
+Properties v1 are planned only for classes. They are not fields, but they use field-like access syntax and may provide controlled read and write access to internally stored values.
+
+The planned automatic property syntax is:
+
+```aether
+public int age { get; set; }
+public int id { get; }
+public string name { get; private set; }
+```
+
+An automatic property generates a private internal backing field. That storage is created by the compiler, is hidden from source code, and cannot be named or accessed directly by the user. For example:
+
+```aether
+public int age { get; set; }
+```
+
+behaves as if private storage existed internally, while exposing access only through the property's declared getter and setter.
+
+Fields and properties share the same member namespace. A class cannot declare a field and a property with the same name:
+
+```aether
+class Person {
+    private int age;
+    public int age { get; set; } // error: duplicate member name
+}
+```
+
+Property access uses ordinary member syntax. Reading a property invokes its getter, and assigning to it invokes its setter:
+
+```aether
+obj.age;       // calls the getter
+obj.age = 10;  // calls the setter
+```
+
+Assigning to a property without a setter is an error:
+
+```aether
+obj.id = 5; // error: property has no setter
+```
+
+Inside a setter, `value` is an implicit parameter containing the value being assigned.
+
+Custom accessors are reserved for a future design beyond automatic Properties v1. The intended direction is:
+
+```aether
+class Person {
+    private int storedAge;
+
+    public int age {
+        get {
+            return storedAge;
+        }
+
+        set {
+            if value < 0 {
+                throw Exception("age cannot be negative");
+            }
+
+            storedAge = value;
+        }
+    }
+}
+```
+
+Property setters are mutations through their receiver. Therefore, a property may be read through a `const` class reference, but it cannot be assigned through that reference:
+
+```aether
+const Person p = Person("Ana");
+p.name;        // valid
+p.name = "Lu"; // error: the setter mutates through p
+```
+
+A constructor of the declaring class may assign a property when the setter is accessible from that constructor. Whether a get-only property may receive special constructor-only assignment remains open for later design.
+
+Properties v1 will not add properties to interfaces. Interface conformance continues to involve methods only until a later design explicitly extends it.
+
+Example of the planned automatic property model:
+
+```aether
+class Person {
+    public string name { get; set; }
+    public int age { get; private set; }
+
+    public constructor(string name, int age) {
+        this.name = name;
+        this.age = age;
+    }
+
+    public void birthday() {
+        this.age = this.age + 1;
+    }
+}
+```
+
+The following features are explicitly outside Properties v1 and are not implemented:
+
+- Properties in structs.
+- Properties in interfaces.
+- Computed properties with custom accessors instead of an automatic backing field.
+- Init-only properties.
+- Delegated properties.
+- Getter or setter overrides.
+- Static properties.
+- Property overloading.
+- Related operator overloading.
+
 ## Interfaces
 
 Aether v0 supports minimal nominal interfaces. An interface declares method signatures only:
