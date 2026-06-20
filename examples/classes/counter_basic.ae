@@ -1,0 +1,15 @@
+class Counter {
+    int value;
+
+    public void increment() {
+        value = value + 1;
+    }
+
+    public int getValue() {
+        return value;
+    }
+}
+
+Counter counter = Counter(0);
+counter.increment();
+println(counter.getValue());

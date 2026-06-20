@@ -1493,7 +1493,9 @@ class Interpreter:
                 raise AetherRuntimeError("Operator '\\' requires import Math.LinearAlgebra.")
             return self.builtins[LINEAR_ALGEBRA_SOLVE]([left, right])
         if operator in {"==", "!="}:
-            if isinstance(left.value, (StructInstance, ClassInstance)) or isinstance(right.value, (StructInstance, ClassInstance)):
+            if isinstance(left.value, ClassInstance) or isinstance(right.value, ClassInstance):
+                raise AetherTypeError("Class equality is not supported yet.")
+            if isinstance(left.value, StructInstance) or isinstance(right.value, StructInstance):
                 raise AetherTypeError("Struct equality is not supported yet.")
             if not _types_comparable_for_equality(left.type_name, right.type_name):
                 raise AetherTypeError(

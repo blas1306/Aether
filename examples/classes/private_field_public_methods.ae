@@ -1,0 +1,16 @@
+class User {
+    string name;
+
+    public string getName() {
+        return name;
+    }
+
+    public void rename(string newName) {
+        name = newName;
+    }
+}
+
+User user = User("Ada");
+println(user.getName());
+user.rename("Grace");
+println(user.getName());

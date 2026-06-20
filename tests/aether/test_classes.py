@@ -29,6 +29,21 @@ println(c.getValue());
     assert result.output == "3\n"
 
 
+def test_class_public_field_is_accessible_externally() -> None:
+    result = run_aether(
+        """
+class Counter {
+    public int value;
+}
+
+Counter c = Counter(3);
+println(c.value);
+"""
+    )
+
+    assert result.output == "3\n"
+
+
 def test_class_private_field_is_not_accessible_externally() -> None:
     with pytest.raises(AetherTypeError, match="Field 'Counter.value' is private"):
         run_aether(
@@ -264,6 +279,22 @@ def test_class_constructor_validates_arity_and_types() -> None:
         run_aether('class Counter { int value; }\nCounter c = Counter("bad");')
 
 
+def test_class_positional_constructor_initializes_private_field() -> None:
+    result = run_aether(
+        """
+class Counter {
+    int value;
+    public int getValue() { return value; }
+}
+
+Counter c = Counter(8);
+println(c.getValue());
+"""
+    )
+
+    assert result.output == "8\n"
+
+
 def test_duplicate_class_members_fail() -> None:
     with pytest.raises(AetherSyntaxError, match="Duplicate field 'value'"):
         run_aether("class Counter { int value; int value; }")
@@ -350,6 +381,58 @@ def test_class_mutating_method_on_temporary_fails_but_reader_works() -> None:
     assert result.output == "5\n"
 
 
+def test_const_class_reference_blocks_public_field_assignment() -> None:
+    with pytest.raises(AetherTypeError, match="Cannot mutate constant 'frozen'"):
+        run_aether(
+            """
+class Counter {
+    public int value;
+}
+
+const Counter frozen = Counter(0);
+frozen.value = 1;
+"""
+        )
+
+
+def test_interface_dispatch_preserves_class_reference_semantics() -> None:
+    result = run_aether(
+        """
+interface CounterView {
+    void increment();
+    int getValue();
+}
+
+class Counter implements CounterView {
+    int value;
+    public void increment() { value = value + 1; }
+    public int getValue() { return value; }
+}
+
+Counter concrete = Counter(0);
+CounterView view = concrete;
+view.increment();
+println(concrete.getValue());
+println(view.getValue());
+"""
+    )
+
+    assert result.output == "1\n1\n"
+
+
+def test_class_equality_reports_class_specific_error() -> None:
+    with pytest.raises(AetherTypeError, match="Class equality is not supported yet"):
+        run_aether(
+            """
+class Counter {
+    int value;
+}
+
+println(Counter(1) == Counter(1));
+"""
+        )
+
+
 def test_language_service_understands_classes() -> None:
     source = """
 class Counter {
@@ -369,3 +452,22 @@ c.
     assert "secret" not in labels
     assert any(symbol.name == "Counter" and symbol.origin == "class" for symbol in symbols)
     assert any(symbol.name == "getValue" for symbol in symbols)
+
+
+@pytest.mark.parametrize(
+    ("filename", "expected_output"),
+    [
+        ("counter_basic.ae", "1\n"),
+        ("private_field_public_methods.ae", "Ada\nGrace\n"),
+        ("reference_aliasing.ae", "5\n5\n"),
+        ("const_with_mutable_alias.ae", "1\n"),
+        ("implements_interface.ae", "0\n0\n"),
+        ("invalid_cases.ae", "3\n"),
+    ],
+)
+def test_class_examples_run(filename: str, expected_output: str) -> None:
+    example_path = Path(__file__).parents[2] / "examples" / "classes" / filename
+
+    result = run_aether(example_path.read_text(encoding="utf-8"))
+
+    assert result.output == expected_output

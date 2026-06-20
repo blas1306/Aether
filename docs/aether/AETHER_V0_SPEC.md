@@ -426,100 +426,6 @@ println(a.value); // 0
 println(b.value); // 1
 ```
 
-## Classes
-
-Aether v0 also supports a minimal nominal `class` form. Classes look similar to structs, but they are reference types and their members are private by default:
-
-```aether
-public class Counter {
-    int value; // private by default
-
-    public void increment() {
-        value = value + 1;
-    }
-
-    public int getValue() {
-        return value;
-    }
-
-    public void setValue(int value) {
-        this.value = value;
-    }
-}
-```
-
-Class declarations are top-level only. They use the same automatic positional constructor as structs:
-
-```aether
-Counter c = Counter(0);
-```
-
-Fields and methods may be marked `public` or `private`. Unmarked class fields and methods are private; unmarked struct fields and methods remain public. Private members are accessible inside the class through either implicit field names or `this.field`, but not through outside references:
-
-```aether
-Counter c = Counter(0);
-c.getValue(); // valid
-c.value;      // error: field is private
-```
-
-Classes have reference semantics. Assigning, passing, or returning a class value copies the reference, not the object:
-
-```aether
-Counter a = Counter(0);
-Counter b = a;
-
-b.increment();
-println(a.getValue()); // 1
-println(b.getValue()); // 1
-```
-
-`const` on a class variable prevents rebinding that variable and prevents mutation through that variable, but it does not freeze the object globally if a mutable alias exists:
-
-```aether
-Counter a = Counter(0);
-const Counter b = a;
-
-a.increment();       // valid
-b.increment();       // error: Cannot mutate constant 'b'
-println(b.getValue()); // 1
-```
-
-Class methods use the same mutability detection as struct methods. Assigning to an implicit field or `this.field` makes the method mutating, and calling a mutating receiver method transitively makes the caller mutating. Mutating methods cannot be called on temporaries:
-
-```aether
-Counter(0).increment(); // error
-Counter(0).getValue();  // valid
-```
-
-Classes may implement interfaces. Methods used to satisfy an interface must be public:
-
-```aether
-interface Resettable {
-    void reset();
-}
-
-class Counter implements Resettable {
-    int value;
-
-    public void reset() {
-        value = 0;
-    }
-}
-
-Resettable r = Counter(1);
-r.reset();
-```
-
-Current class limitations:
-
-- No inheritance or `extends`.
-- No `super`.
-- No custom constructors or overloaded constructors.
-- No static methods.
-- No destructors.
-- No generic classes.
-- No operator overloading or class equality.
-
 Struct aliases are type aliases. An alias can be used both as the annotated type and as the constructor name:
 
 ```aether
@@ -658,6 +564,116 @@ Current struct limitations:
 - No structural equality for structs.
 - No deep `const`.
 - Struct lowering to IR/JIT is not implemented.
+
+## Classes
+
+Aether v0 supports a minimal nominal `class` form. Classes look similar to structs, but they are reference types and their members are private by default:
+
+```aether
+public class Counter {
+    int value; // private by default
+
+    public void increment() {
+        value = value + 1;
+    }
+
+    public int getValue() {
+        return value;
+    }
+
+    public void setValue(int value) {
+        this.value = value;
+    }
+}
+```
+
+Class declarations are top-level only. They use an automatic positional constructor whose arguments follow field declaration order. Constructor initialization is allowed for every declared field, including private fields; member visibility controls later access, not construction:
+
+```aether
+class Counter {
+    int value; // private
+    public int getValue() { return value; }
+}
+
+Counter c = Counter(4); // valid: initializes the private field
+println(c.getValue());  // 4
+```
+
+Fields and methods may be marked `public` or `private`. Unmarked class fields and methods are private; unmarked struct fields and methods remain public. Private members are accessible inside the declaring class through either implicit field names or `this.field`, but not through outside references:
+
+```aether
+Counter c = Counter(0);
+c.getValue(); // valid
+c.value;      // error: field is private
+```
+
+`public` fields can be read and updated through a mutable external reference. Aether v0 does not synthesize properties, getters, or setters: methods such as `getValue()` and `setValue(...)` must be declared explicitly.
+
+Classes have reference semantics. Assigning, passing, or returning a class value copies the reference, not the object:
+
+```aether
+Counter a = Counter(0);
+Counter b = a;
+
+b.increment();
+println(a.getValue()); // 1
+println(b.getValue()); // 1
+```
+
+`const` on a class variable prevents rebinding that variable and prevents mutation through that variable, but it does not freeze the object globally if a mutable alias exists:
+
+```aether
+Counter a = Counter(0);
+const Counter b = a;
+
+a.increment();         // valid
+b.increment();         // error: Cannot mutate constant 'b'
+println(b.getValue()); // 1
+```
+
+Class methods use the same mutability detection as struct methods. Assigning to an implicit field or `this.field` makes the method mutating, and calling a mutating receiver method transitively makes the caller mutating. Mutating methods cannot be called on temporaries:
+
+```aether
+Counter(0).increment(); // error
+Counter(0).getValue();  // valid
+```
+
+Classes may implement interfaces. Methods used to satisfy an interface must be public. Dispatch through an interface preserves class reference semantics:
+
+```aether
+interface Resettable {
+    void reset();
+}
+
+class Counter implements Resettable {
+    int value;
+
+    public void reset() {
+        value = 0;
+    }
+}
+
+Counter c = Counter(1);
+Resettable r = c;
+r.reset(); // mutates the same object referenced by c
+```
+
+Packaged files export only `public` classes. Private classes remain usable inside their own module and are not visible to importers.
+
+Class equality is not implemented yet. Comparing class values with `==` or `!=` is an error; no identity or structural equality rule is part of v0.
+
+Current class limitations:
+
+- No inheritance or `extends`.
+- No `super`.
+- No custom constructors or constructor overloads.
+- No method overloads.
+- No static methods.
+- No destructors.
+- No generic classes.
+- No automatic properties, getters, or setters.
+- No operator overloading.
+- No class equality.
 
 ## Interfaces
 

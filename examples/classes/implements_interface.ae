@@ -1,0 +1,23 @@
+interface Resettable {
+    void reset();
+    int getValue();
+}
+
+class Counter implements Resettable {
+    int value;
+
+    public void reset() {
+        value = 0;
+    }
+
+    public int getValue() {
+        return value;
+    }
+}
+
+Counter counter = Counter(7);
+Resettable resettable = counter;
+resettable.reset();
+
+println(counter.getValue());
+println(resettable.getValue());

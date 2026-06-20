@@ -19,6 +19,15 @@ python3 src/main.py --cli < /dev/null
 # println(p.x);
 ```
 
+### Classes
+
+- **counter_basic.ae** - Basic private state with public instance methods
+- **private_field_public_methods.ae** - Encapsulation with explicit getter and mutating method
+- **reference_aliasing.ae** - Assignment preserves a shared class reference
+- **const_with_mutable_alias.ae** - A `const` reference cannot mutate, while a mutable alias can
+- **implements_interface.ae** - Interface dispatch over a class preserves reference semantics
+- **invalid_cases.ae** - Invalid class operations kept as commented examples
+
 ### Linear Algebra
 
 - **basic_operations.ae** - Basic matrix/vector operations: creation, transposition, matrix multiplication, and iteration
@@ -46,6 +55,7 @@ Examples that require user input are marked as **interactive** and should not be
 ## Current Status
 
 - `structs/`: ✅ Non-interactive, tested
+- `classes/`: ✅ Non-interactive, tested
 - `linear_algebra/`: ✅ Non-interactive, tested  
 - `nonlinear_systems/`: ⚠️ Experimental (incomplete implementation)
 - `interactive/`: 👤 Interactive examples (not for automation)

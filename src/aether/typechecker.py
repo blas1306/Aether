@@ -1558,6 +1558,8 @@ class TypeChecker:
                 )
             return infer_builtin_type(LINEAR_ALGEBRA_SOLVE, [left_type, right_type])
         if operator in {"==", "!="}:
+            if self._type_mentions_class(left_type) or self._type_mentions_class(right_type):
+                raise AetherTypeError("Class equality is not supported yet.")
             if self._type_mentions_struct(left_type) or self._type_mentions_struct(right_type):
                 raise AetherTypeError("Struct equality is not supported yet.")
             if not _types_comparable_for_equality(left_type, right_type):
@@ -2506,6 +2508,20 @@ class TypeChecker:
             return self._type_mentions_struct(resolved.base_type)
         if isinstance(resolved, TupleType):
             return any(self._type_mentions_struct(element_type) for element_type in resolved.element_types)
+        return False
+
+    def _type_mentions_class(self, type_name: AetherType) -> bool:
+        resolved = self._resolve_type_aliases(type_name)
+        if isinstance(resolved, ClassType):
+            return True
+        if isinstance(resolved, ArrayType):
+            return self._type_mentions_class(resolved.element_type)
+        if isinstance(resolved, ListType):
+            return self._type_mentions_class(resolved.element_type)
+        if isinstance(resolved, NullableType):
+            return self._type_mentions_class(resolved.base_type)
+        if isinstance(resolved, TupleType):
+            return any(self._type_mentions_class(element_type) for element_type in resolved.element_types)
         return False
 
     def _can_assign_array_literal(

@@ -1,0 +1,18 @@
+class Counter {
+    int value;
+
+    public void add(int amount) {
+        value = value + amount;
+    }
+
+    public int getValue() {
+        return value;
+    }
+}
+
+Counter first = Counter(0);
+Counter shared = first;
+shared.add(5);
+
+println(first.getValue());
+println(shared.getValue());

@@ -1,0 +1,19 @@
+class Counter {
+    int value;
+
+    public void increment() {
+        value = value + 1;
+    }
+
+    public int getValue() {
+        return value;
+    }
+}
+
+Counter mutableCounter = Counter(0);
+const Counter readOnlyView = mutableCounter;
+
+mutableCounter.increment();
+println(readOnlyView.getValue());
+
+// readOnlyView.increment(); // invalid: cannot mutate through a const reference

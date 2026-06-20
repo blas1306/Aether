@@ -1,0 +1,26 @@
+class Counter {
+    int value;
+
+    void secretIncrement() {
+        value = value + 1;
+    }
+
+    public void increment() {
+        secretIncrement();
+    }
+
+    public int getValue() {
+        return value;
+    }
+}
+
+Counter counter = Counter(2);
+counter.increment();
+println(counter.getValue());
+
+// println(counter.value);          // invalid: value is private
+// counter.secretIncrement();       // invalid: method is private
+// Counter(0).increment();          // invalid: mutating method on a temporary
+// const Counter frozen = counter;
+// frozen.increment();              // invalid: mutation through const reference
+// println(counter == counter);     // invalid: class equality is not implemented
