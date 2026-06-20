@@ -1,6 +1,11 @@
 # Guia de uso de Aether v0
 
-Esta guia resume la superficie activa de Aether Studio. El producto actual esta centrado en archivos `.ae`, ejecucion de scripts y una REPL persistente. Los flujos heredados de MathTeX, MTeX, `.mtx`, `.mtex`, `.mtn`, proyectos, notebooks y PDF pueden seguir existiendo en el repositorio mientras se limpia el codigo, pero no forman parte de la aplicacion activa.
+Esta guia resume la superficie activa de Aether. El producto actual esta
+centrado en archivos `.ae`, ejecucion de scripts y una REPL persistente. Los
+flujos heredados de MathTeX Studio, MTeX, `.mtx`, `.mtex`, `.mtn`, proyectos,
+notebooks y PDF estan aislados en `legacy/` y no forman parte de la aplicacion
+activa. Consulta [`docs/legacy/README.md`](legacy/README.md) para su inventario
+y politica de mantenimiento.
 
 ## 1. Archivos y ejecucion
 

@@ -1,7 +1,7 @@
 # Legacy MathTeX/MTeX Code
 
 This folder isolates the historical MathTeX Studio/MTeX implementation from
-the active Aether Studio surface.
+the active Aether product.
 
 Contents:
 
@@ -13,3 +13,6 @@ Contents:
 
 The active application and test suite live in `src/`, `tests/`, and
 `docs/aether/`. Aether Studio currently supports `.ae` files only.
+
+See [`docs/legacy/README.md`](../docs/legacy/README.md) for the canonical
+inventory, architecture boundary, and maintenance policy for this directory.
