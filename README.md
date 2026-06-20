@@ -44,15 +44,49 @@ aether> println(x);
 
 Restarting the REPL clears the session state. Failed commands roll back without destroying earlier committed variables.
 
-## CLI
+## Aether CLI
 
-The text-mode CLI is also Aether-only:
+Install the project in editable mode to make the official `aether` command
+available in the active Python environment:
+
+```bash
+python3 -m pip install -e .
+```
+
+Run a program directly:
+
+```bash
+aether examples/hello.ae
+```
+
+The command uses the normal language pipeline:
+
+```text
+Lexer -> Parser -> TypeChecker -> Interpreter
+```
+
+Start a persistent session backed by `AetherSession`:
+
+```bash
+aether --repl
+```
+
+Language-development inspection tools are also available:
+
+```bash
+aether --tokens examples/hello.ae
+aether --ast examples/hello.ae
+```
+
+Use `aether --help` for all current options and `aether --version` for the
+language version. The primary execution form is `aether file.ae`; there is no
+`aether run` command.
+
+The previous Studio entrypoint remains available:
 
 ```bash
 python3 src/main.py --cli
 ```
-
-It starts the same `aether>` workflow without opening the Qt interface.
 
 ## Development
 
@@ -60,6 +94,7 @@ Install dependencies:
 
 ```bash
 python3 -m pip install -r requirements.txt
+python3 -m pip install -e . --no-deps
 ```
 
 Run the GUI:

@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aether-language"
+version = "0"
+description = "The Aether language runtime and command-line interface"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+dependencies = [
+    "numpy==2.4.2",
+    "scipy==1.17.1",
+    "sympy==1.14.0",
+    "matplotlib==3.10.8",
+]
+
+[project.optional-dependencies]
+studio = [
+    "PySide6==6.10.2",
+    "platformdirs==4.4.0",
+]
+
+[project.scripts]
+aether = "aether.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+py-modules = [
+    "app_preferences",
+    "autocomplete_engine",
+    "command_catalog",
+    "document_symbols",
+    "language_runtime",
+    "main",
+    "numeric_format",
+    "plot_backend",
+    "qt_app",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

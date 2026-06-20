@@ -1,5 +1,15 @@
 # Aether Examples
 
+After installing the local CLI with `python3 -m pip install -e .`, run the
+smallest example with:
+
+```bash
+aether examples/hello.ae
+```
+
+The same file can be inspected with `aether --tokens examples/hello.ae` or
+`aether --ast examples/hello.ae`.
+
 This directory contains example Aether programs organized by topic.
 
 ## Non-Interactive Examples

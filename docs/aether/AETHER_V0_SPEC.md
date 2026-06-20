@@ -2076,6 +2076,35 @@ The interpreter should only run after lexical, syntactic, and semantic checks su
 
 The `.ae` editor now selects an `Aether REPL` panel backed by a persistent `AetherSession`. The `Restart REPL` control creates a fresh session. Aether does not auto-print expression statements yet; use `print(...)` or `println(...)` for visible output.
 
+## Command-Line Interface
+
+The official command-line entrypoint treats a source file as the default
+operation:
+
+```bash
+aether hello.ae
+```
+
+This executes the same canonical pipeline used by `AetherSession`. A persistent
+interactive session is available with:
+
+```bash
+aether --repl
+```
+
+The following inspection modes expose intermediate language structures for
+compiler/runtime development without executing the program:
+
+```bash
+aether --tokens hello.ae
+aether --ast hello.ae
+```
+
+`aether --version` reports the current language version and `aether --help`
+lists the active interface. Future commands such as `test`, `fmt`, and
+`package`, and an `--ir` inspection mode, are reserved for later work and are
+not implemented in v0.
+
 ## Editor Integration
 
 `.ae` files are the active Aether script format in the editor and use the persistent Aether REPL for interactive input. Legacy `.mtx`, `.mtex`, and `.mtn` workflows are outside the active Aether Studio surface. A basic Aether LSP server exists for diagnostics and completions; a full IDE protocol feature set is not part of v0.

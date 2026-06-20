@@ -17,6 +17,7 @@ node_modules/
 .gradle/
 .intellijPlatform/
 **/build/
+*.egg-info/
 
 # =========================
 # IDE

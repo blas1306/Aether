@@ -7,8 +7,7 @@ from pathlib import Path
 
 from . import ast
 from .interpreter import Function, Interpreter
-from .lexer import lex
-from .parser import Parser
+from .pipeline import execute_pipeline
 from .result import AetherRunResult
 from .symbols import EnumSymbol, FunctionSymbol, StructSymbol, VariableSymbol
 from .typechecker import TypeChecker
@@ -68,10 +67,11 @@ class AetherSession:
         snapshot = self._snapshot()
         self._interpreter.clear_output()
         try:
-            tokens = lex(source)
-            program = Parser(tokens).parse()
-            self._type_checker.check(program)
-            env = self._interpreter.interpret(program)
+            env = execute_pipeline(
+                source,
+                type_checker=self._type_checker,
+                interpreter=self._interpreter,
+            )
         except Exception:
             self._restore(snapshot)
             raise
