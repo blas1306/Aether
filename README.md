@@ -135,7 +135,13 @@ PYTHONPATH=src .venv/bin/pytest
 git diff --check
 ```
 
-See [docs/aether/AETHER_V0_SPEC.md](docs/aether/AETHER_V0_SPEC.md) for the current language specification.
+Technical language documents:
+
+- [Aether v0 Language Specification](docs/aether/AETHER_V0_SPEC.md) describes
+  the current language behavior.
+- [Aether IR Initial Design](docs/aether/AETHER_IR_DESIGN.md) proposes a future
+  typed intermediate representation; it is a design document, not an
+  implemented feature.
 
 ## Examples
 
