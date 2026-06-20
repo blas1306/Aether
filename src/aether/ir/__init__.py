@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .lowering import IRLowerer, lower_to_ir
 from .model import (
     IRBasicBlock,
     IRBinaryOp,
@@ -53,6 +54,7 @@ __all__ = [
     "IRFunction",
     "IRInstruction",
     "IRJump",
+    "IRLowerer",
     "IRLoad",
     "IRModule",
     "IRParameter",
@@ -70,5 +72,6 @@ __all__ = [
     "StructType",
     "VectorType",
     "VoidType",
+    "lower_to_ir",
     "print_ir",
 ]

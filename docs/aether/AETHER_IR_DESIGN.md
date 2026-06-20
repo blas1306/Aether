@@ -5,10 +5,10 @@
 This document is an initial design proposal for an Aether intermediate
 representation (IR). It is not a final specification.
 
-The purpose of this document is to establish a conservative direction before
-adding lowering, an IR interpreter, optimizations, or backend work. Exact
-instruction names, type spellings, serialization details, and phase boundaries
-may change as the design is validated.
+The purpose of this document is to establish a conservative direction while
+adding lowering, an IR interpreter, optimizations, or backend work
+incrementally. Exact instruction names, type spellings, serialization details,
+and phase boundaries may change as the design is validated.
 
 The current AST interpreter remains the executable semantic reference for
 Aether throughout this work.
@@ -17,8 +17,47 @@ Aether throughout this work.
 
 The `aether.ir` package now contains the initial typed IR data model and a
 deterministic debug printer in Python. This infrastructure is intentionally
-isolated from the current language pipeline: there is no AST-to-IR lowering,
-IR execution, optimization, or CLI integration yet.
+isolated from the current language pipeline: initial AST-to-IR lowering is
+available, but there is no IR execution, optimization, or CLI integration yet.
+
+### Initial lowering implementation
+
+`aether.ir.lowering.IRLowerer` lowers an already typechecked `ast.Program` to
+an `IRModule`. It is an explicit developer API and is not connected to the
+main pipeline or CLI. It does not invoke the typechecker itself.
+
+The currently supported lowering subset is deliberately small:
+
+- Top-level, explicitly typed function declarations.
+- Typed parameters.
+- Explicitly declared local variables with simple initializers.
+- `int`, `boolean`, and `string` literals.
+- Arithmetic `+`, `-`, `*`, `/`, and `%`.
+- Unary minus, currently lowered as a typed zero followed by `sub`.
+- Direct `return`, including bare return in `void` functions.
+- Positional calls to user-defined functions in the same program when no
+  implicit conversion is required.
+
+Each function currently lowers to one `entry` block. Parameters are direct IR
+values. Local variables use named slots represented by `IRValue`, with
+`IRStore` on declaration and `IRLoad` on reads. Expressions produce numbered
+temporaries in deterministic source evaluation order.
+
+Unsupported syntax raises a clear `NotImplementedError` naming the AST node or
+unsupported lowering case. Current limitations include:
+
+- No `if`/`else`, loops, assignments after declaration, or multiple blocks.
+- No structs, classes, interfaces, constructors, methods, or fields.
+- No lists, arrays, nullable values, imports, or packages.
+- No builtin calls, keyword arguments, or expression functions.
+- No implicit conversion instructions.
+- No IR verifier, interpreter, optimizer, or execution path.
+
+The checked AST remains the existing immutable source AST rather than a new
+annotated tree. For this subset, declaration, parameter, literal, and function
+signature types provide the information lowering needs. Features that require
+resolved per-expression metadata should not be added by duplicating the full
+typechecker inside the lowerer.
 
 ## 1. Goals
 
@@ -654,10 +693,10 @@ The unoptimized IR must remain executable.
 
 ### Phase 2: Python IR structures and simple lowering
 
-- Add typed in-memory IR structures in Python.
-- Lower simple literals and expressions.
-- Add functions, blocks, and terminators.
-- Add a deterministic IR pretty-printer.
+- Added typed in-memory IR structures in Python.
+- Added lowering for the initial scalar function subset documented above.
+- Added functions, entry blocks, calls, locals, and return terminators.
+- Added a deterministic IR pretty-printer and lowering tests.
 - Consider a developer-only inspection surface after the format is useful.
 
 ### Phase 3: Small-subset IR interpreter
