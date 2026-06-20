@@ -587,7 +587,7 @@ Current struct limitations:
 - No static methods or generic methods.
 - No new generic struct parameters.
 - No named constructor arguments.
-- No properties or destructors.
+- No user-defined properties or destructors.
 - No inheritance, traits, or protocols.
 - No destructuring or pattern matching for structs.
 - No operator overloading for structs.
@@ -1368,9 +1368,11 @@ All list operations use 0-based indices. `insert(xs, index, value)` accepts `0 <
 
 `Array<T>`, `Vector<T>`, and `Matrix<T>` are not lists. They do not accept list mutation builtins such as `push`, `pop`, `insert`, `remove_at`, `clear`, `reverse`, or `sort`.
 
-## Native Properties And Methods
+## Native Builtin Properties And Methods
 
-Aether v0 supports a small set of native instance properties and methods on existing builtin container and mathematical types. This does not introduce user-defined methods inside `struct` or `class`, and it does not introduce interfaces.
+Aether v0 supports a small set of native instance properties and methods on existing builtin container and mathematical types. These members are compiler-provided on builtin types; user-defined `struct` and `class` methods are documented separately, and this feature does not change interfaces.
+
+These compiler-provided builtin members are distinct from the user-defined class properties described in **Planned Properties (Not Implemented)**. Native builtin properties such as `List<T>.length` are implemented; user-defined properties remain planned only.
 
 Native properties use field syntax and cannot be called:
 

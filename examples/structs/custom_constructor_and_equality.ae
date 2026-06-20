@@ -1,0 +1,18 @@
+struct Square {
+    int width;
+    int height;
+
+    constructor(int size) {
+        width = size;
+        height = size;
+    }
+}
+
+Square first = Square(4);
+Square same = Square(4);
+Square different = Square(5);
+
+println(first.width);
+println(first.height);
+println(first == same);
+println(first != different);

@@ -10,6 +10,7 @@ Examples that run to completion without user input are suitable for automated te
 
 - **Geometry.ae** - Define struct `Point` with fields `x` and `y`
 - **main.ae** - Create and access a `Point` instance using alias `P`
+- **custom_constructor_and_equality.ae** - Use an explicit struct constructor and compare struct values with structural equality
 
 Run both together as a module to demonstrate struct usage:
 ```bash
@@ -22,11 +23,16 @@ python3 src/main.py --cli < /dev/null
 ### Classes
 
 - **counter_basic.ae** - Basic private state with public instance methods
+- **custom_constructor.ae** - Initialize private class state with an explicit constructor
 - **private_field_public_methods.ae** - Encapsulation with explicit getter and mutating method
 - **reference_aliasing.ae** - Assignment preserves a shared class reference
 - **const_with_mutable_alias.ae** - A `const` reference cannot mutate, while a mutable alias can
 - **implements_interface.ae** - Interface dispatch over a class preserves reference semantics
 - **invalid_cases.ae** - Invalid class operations kept as commented examples
+
+### Lists
+
+- **list_api.ae** - Native `List<T>` methods, const behavior, and common invalid operations
 
 ### Linear Algebra
 
@@ -50,12 +56,23 @@ Examples that require user input are marked as **interactive** and should not be
 
 ### Minimos Cuadrados (Least Squares)
 
+- **MinimosCuadrados.ae** - Least-squares polynomial fitting helpers
 - **interactive.ae** - Interactive least-squares polynomial fitting with plot visualization
+
+## Additional Examples
+
+- **Sorts/** - Sorting algorithms and their supporting exception/module example
+- **FormulaNumerosPrimos.ae** - Prime-number formula experiment
+- **Miller-Rabbin.ae** - Miller-Rabin primality experiment
+- **probando.ae**, **probandoNR.ae** - General language experiments
+- **pruebaException.ae** - Exception handling experiment
+- **pruebaListas.ae** - List operations experiment
 
 ## Current Status
 
 - `structs/`: ✅ Non-interactive, tested
 - `classes/`: ✅ Non-interactive, tested
+- `lists/`: ✅ Non-interactive, tested
 - `linear_algebra/`: ✅ Non-interactive, tested  
 - `nonlinear_systems/`: ⚠️ Experimental (incomplete implementation)
 - `interactive/`: 👤 Interactive examples (not for automation)

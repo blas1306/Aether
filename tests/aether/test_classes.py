@@ -679,6 +679,7 @@ c.
     ("filename", "expected_output"),
     [
         ("counter_basic.ae", "1\n"),
+        ("custom_constructor.ae", "6\n"),
         ("private_field_public_methods.ae", "Ada\nGrace\n"),
         ("reference_aliasing.ae", "5\n5\n"),
         ("const_with_mutable_alias.ae", "1\n"),

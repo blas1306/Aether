@@ -12,6 +12,8 @@ import sys
 
 import pytest
 
+from aether.runner import run_aether
+
 
 def get_examples_dir() -> Path:
     """Get the examples directory relative to the project root."""
@@ -98,6 +100,14 @@ println(p.y);
         assert exit_code == 0, f"Expected exit code 0, got {exit_code}.\nstderr: {captured.err}"
         assert "1.0" in captured.out
         assert "2.0" in captured.out
+
+
+def test_struct_constructor_and_equality_example_runs() -> None:
+    example_path = get_examples_dir() / "structs" / "custom_constructor_and_equality.ae"
+
+    result = run_aether(example_path.read_text(encoding="utf-8"))
+
+    assert result.output == "4\n4\ntrue\ntrue\n"
 
 
 class TestLinearAlgebraExamples:

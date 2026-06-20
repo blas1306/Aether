@@ -1,0 +1,19 @@
+class Counter {
+    int value;
+
+    public constructor(int initial) {
+        value = initial;
+    }
+
+    public void increment() {
+        value = value + 1;
+    }
+
+    public int getValue() {
+        return value;
+    }
+}
+
+Counter counter = Counter(5);
+counter.increment();
+println(counter.getValue());
