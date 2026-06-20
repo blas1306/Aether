@@ -1121,9 +1121,14 @@ class Interpreter:
             )
         struct = self._constructor_struct(expression.callee)
         if struct is not None:
+            constructor_parameters = (
+                struct.constructor.parameters
+                if struct.constructor is not None
+                else struct.fields
+            )
             args = [
-                self._evaluate_with_expected_type(arg, env, self._resolve_type_aliases(field.type_name))
-                for arg, field in zip(expression.arguments, struct.fields)
+                self._evaluate_with_expected_type(arg, env, self._resolve_type_aliases(parameter.type_name))
+                for arg, parameter in zip(expression.arguments, constructor_parameters)
             ]
             if len(args) != len(expression.arguments):
                 args = [self._evaluate(arg, env) for arg in expression.arguments]
@@ -1203,7 +1208,7 @@ class Interpreter:
         named_args = {name: self._evaluate(value, env) for name, value in expression.keyword_arguments.items()}
         return self._call(method.builtin_name, args, named_args, env)
 
-    def _constructor_struct(self, callee: str) -> ast.StructDeclaration | None:
+    def _constructor_struct(self, callee: str) -> ast.StructDeclaration | ast.ClassDeclaration | None:
         try:
             resolved = self._resolve_type_aliases(callee)
         except AetherTypeError:
@@ -1232,12 +1237,20 @@ class Interpreter:
             return self.interfaces.get(resolved.name)
         return None
 
-    def _construct_struct(self, declaration: ast.StructDeclaration, args: list[AetherValue]) -> AetherValue:
-        if len(args) != len(declaration.fields):
+    def _construct_struct(
+        self,
+        declaration: ast.StructDeclaration | ast.ClassDeclaration,
+        args: list[AetherValue],
+    ) -> AetherValue:
+        constructor = declaration.constructor
+        parameters = constructor.parameters if constructor is not None else declaration.fields
+        if len(args) != len(parameters):
             kind = "Class" if isinstance(declaration, ast.ClassDeclaration) else "Struct"
             raise AetherRuntimeError(
-                f"{kind} '{declaration.name}' constructor expects {len(declaration.fields)} arguments but got {len(args)}."
+                f"{kind} '{declaration.name}' constructor expects {len(parameters)} arguments but got {len(args)}."
             )
+        if constructor is not None:
+            return self._construct_with_explicit_constructor(declaration, constructor, args)
         fields: dict[str, AetherValue] = {}
         field_order: list[str] = []
         for field, arg in zip(declaration.fields, args):
@@ -1247,6 +1260,54 @@ class Interpreter:
         if isinstance(declaration, ast.ClassDeclaration):
             return AetherValue(ClassType(declaration.name), ClassInstance(declaration.name, fields, tuple(field_order)))
         return AetherValue(declaration.name, StructInstance(declaration.name, fields, tuple(field_order)))
+
+    def _construct_with_explicit_constructor(
+        self,
+        declaration: ast.StructDeclaration | ast.ClassDeclaration,
+        constructor: ast.ConstructorDeclaration,
+        args: list[AetherValue],
+    ) -> AetherValue:
+        fields = {
+            field.name: self._default_field_value(self._resolve_type_aliases(field.type_name))
+            for field in declaration.fields
+        }
+        field_order = tuple(field.name for field in declaration.fields)
+        if isinstance(declaration, ast.ClassDeclaration):
+            instance: StructInstance | ClassInstance = ClassInstance(declaration.name, fields, field_order)
+            receiver = AetherValue(ClassType(declaration.name), instance)
+        else:
+            instance = StructInstance(declaration.name, fields, field_order)
+            receiver = AetherValue(declaration.name, instance)
+        local_env = Environment(parent=self.global_env, method_receiver=receiver)
+        local_env.define("this", receiver, is_const=True)
+        for parameter, arg in zip(constructor.parameters, args):
+            parameter_type = self._resolve_type_aliases(parameter.type_name)
+            local_env.define(parameter.name, coerce_implicit(arg, parameter_type))
+        previous_return_type = self.current_return_type
+        self.current_return_type = "void"
+        try:
+            try:
+                self._execute_block(constructor.body, local_env)
+            except _ReturnSignal as signal:
+                coerce_return_value(signal.value, "void")
+        finally:
+            self.current_return_type = previous_return_type
+        return receiver
+
+    def _default_field_value(self, type_name: AetherType) -> AetherValue:
+        if type_name == "int":
+            return AetherValue(type_name, 0)
+        if type_name in {"float", "double"}:
+            return AetherValue(type_name, 0.0)
+        if type_name == "complex":
+            return AetherValue(type_name, 0j)
+        if type_name == "boolean":
+            return AetherValue(type_name, False)
+        if type_name == "string":
+            return AetherValue(type_name, "")
+        if isinstance(type_name, (ArrayType, ListType, MatrixType, VectorType)):
+            return AetherValue(type_name, [])
+        return AetherValue(type_name, None)
 
     def _enum_variant_value(
         self,
@@ -1496,7 +1557,17 @@ class Interpreter:
             if isinstance(left.value, ClassInstance) or isinstance(right.value, ClassInstance):
                 raise AetherTypeError("Class equality is not supported yet.")
             if isinstance(left.value, StructInstance) or isinstance(right.value, StructInstance):
-                raise AetherTypeError("Struct equality is not supported yet.")
+                if (
+                    not isinstance(left.value, StructInstance)
+                    or not isinstance(right.value, StructInstance)
+                    or left.value.type_name != right.value.type_name
+                ):
+                    raise AetherTypeError(
+                        f"Cannot compare '{type_to_string(left.type_name)}' and '{type_to_string(right.type_name)}' "
+                        f"with '{operator}'."
+                    )
+                result = _values_equal(left, right)
+                return AetherValue("boolean", result if operator == "==" else not result)
             if not _types_comparable_for_equality(left.type_name, right.type_name):
                 raise AetherTypeError(
                     f"Cannot compare '{type_to_string(left.type_name)}' and '{type_to_string(right.type_name)}' "
@@ -2767,6 +2838,27 @@ def _apply_array_element_operator(
 
 
 def _values_equal(left: AetherValue, right: AetherValue) -> bool:
+    if isinstance(left.value, ClassInstance) or isinstance(right.value, ClassInstance):
+        raise AetherTypeError("Class equality is not supported yet.")
+    if isinstance(left.value, StructInstance) or isinstance(right.value, StructInstance):
+        if (
+            not isinstance(left.value, StructInstance)
+            or not isinstance(right.value, StructInstance)
+            or left.value.type_name != right.value.type_name
+        ):
+            return False
+        return all(
+            _values_equal(left.value.fields[field_name], right.value.fields[field_name])
+            for field_name in left.value.field_order
+        )
+    if isinstance(left.type_name, NullableType):
+        if left.value is None:
+            return right.value is None
+        left = AetherValue(left.type_name.base_type, left.value)
+    if isinstance(right.type_name, NullableType):
+        if right.value is None:
+            return left.value is None
+        right = AetherValue(right.type_name.base_type, right.value)
     if isinstance(left.type_name, VectorType) and isinstance(right.type_name, VectorType):
         if len(left.value) != len(right.value):
             return False

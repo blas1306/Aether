@@ -71,6 +71,16 @@ class StructDeclaration:
     visibility: Visibility = None
     methods: list["FunctionDeclaration"] = field(default_factory=list)
     implements: list[str] = field(default_factory=list)
+    constructor: "ConstructorDeclaration | None" = None
+
+
+@dataclass(frozen=True)
+class ConstructorDeclaration:
+    parameters: list[Parameter]
+    body: list["Statement"]
+    visibility: Visibility = None
+    line: int = 1
+    column: int = 1
 
 
 @dataclass(frozen=True)
@@ -82,6 +92,7 @@ class ClassDeclaration:
     visibility: Visibility = None
     methods: list["FunctionDeclaration"] = field(default_factory=list)
     implements: list[str] = field(default_factory=list)
+    constructor: ConstructorDeclaration | None = None
 
 
 @dataclass(frozen=True)

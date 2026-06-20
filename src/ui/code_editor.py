@@ -35,6 +35,8 @@ EDITOR_KEYWORDS = (
     "alias",
     "struct",
     "class",
+    "constructor",
+    "static",
     "interface",
     "implements",
     "enum",

@@ -62,6 +62,8 @@ class Parser:
         if visibility is not None:
             if self.block_depth > 0:
                 raise self._error(self._previous(), "Visibility modifiers are only supported on top-level declarations.")
+            if self._match(TokenType.CONSTRUCTOR):
+                raise self._error(self._previous(), "Constructors can only be declared inside a class or struct.")
             if self._match(TokenType.FUNCTION):
                 return self._function_declaration(visibility)
             if self._match(TokenType.CONST):
@@ -85,6 +87,12 @@ class Parser:
             raise self._error(self._peek(), "Expected declaration after visibility modifier.")
         if self._match(TokenType.ALIAS):
             return self._alias_declaration()
+        if self._match(TokenType.CONSTRUCTOR):
+            raise self._error(self._previous(), "Constructors can only be declared inside a class or struct.")
+        if self._match(TokenType.STATIC):
+            if self._match(TokenType.CONSTRUCTOR):
+                raise self._error(self._previous(), "Constructors cannot be static.")
+            raise self._error(self._previous(), "Static declarations are not supported yet.")
         if self._match(TokenType.STRUCT):
             if self.block_depth > 0:
                 raise self._error(self._previous(), "Struct declarations are only supported at top level.")
@@ -222,20 +230,39 @@ class Parser:
         self._consume(TokenType.LEFT_BRACE, "Expected '{' before struct body.")
         fields: list[ast.StructField] = []
         methods: list[ast.FunctionDeclaration] = []
+        constructor: ast.ConstructorDeclaration | None = None
         field_names: set[str] = set()
         method_names: set[str] = set()
         while not self._check(TokenType.RIGHT_BRACE) and not self._is_at_end():
             if self._check(TokenType.CONST):
                 raise self._error(self._peek(), "Struct fields cannot be const yet.")
-            if self._check(TokenType.PUBLIC) or self._check(TokenType.PRIVATE):
-                raise self._error(self._peek(), "Struct members do not support visibility modifiers yet.")
-            if self._check(TokenType.STRUCT) or self._check(TokenType.ENUM) or self._check(TokenType.ALIAS):
+            if self._check(TokenType.STRUCT) or self._check(TokenType.CLASS) or self._check(TokenType.ENUM) or self._check(TokenType.ALIAS):
                 raise self._error(self._peek(), "Nested declarations are not supported inside structs.")
+            member_visibility = self._visibility_modifier()
+            if self._match(TokenType.STATIC):
+                if self._match(TokenType.CONSTRUCTOR):
+                    raise self._error(self._previous(), "Constructors cannot be static.")
+                raise self._error(self._previous(), "Static struct members are not supported yet.")
+            if self._match(TokenType.CONSTRUCTOR):
+                constructor_token = self._previous()
+                if member_visibility == "private":
+                    raise self._error(constructor_token, "Constructors cannot be private.")
+                if constructor is not None:
+                    raise self._error(
+                        constructor_token,
+                        f"Struct '{name_token.lexeme}' cannot declare more than one constructor.",
+                    )
+                constructor = self._constructor_declaration(constructor_token, member_visibility)
+                continue
+            if member_visibility is not None:
+                raise self._error(self._previous(), "Struct members do not support visibility modifiers yet.")
             if self._match(TokenType.FUNCTION):
                 method = self._function_declaration()
                 self._add_struct_method(method, methods, method_names, field_names, name_token.lexeme)
                 continue
             type_name = self._parse_return_type_annotation("Expected explicit field or method return type in struct declaration.")
+            if self._check(TokenType.CONSTRUCTOR):
+                raise self._error(self._peek(), "Constructors cannot declare a return type.")
             field_token = self._consume(TokenType.IDENTIFIER, "Expected field name.")
             if self._check(TokenType.LEFT_PAREN):
                 method = self._function_declaration_tail(type_name, field_token)
@@ -260,6 +287,7 @@ class Parser:
             visibility,
             methods,
             implements,
+            constructor,
         )
 
     def _class_declaration(self, visibility: ast.Visibility = None) -> ast.ClassDeclaration:
@@ -278,6 +306,7 @@ class Parser:
         self._consume(TokenType.LEFT_BRACE, "Expected '{' before class body.")
         fields: list[ast.StructField] = []
         methods: list[ast.FunctionDeclaration] = []
+        constructor: ast.ConstructorDeclaration | None = None
         field_names: set[str] = set()
         method_names: set[str] = set()
         while not self._check(TokenType.RIGHT_BRACE) and not self._is_at_end():
@@ -286,11 +315,28 @@ class Parser:
             if self._check(TokenType.STRUCT) or self._check(TokenType.CLASS) or self._check(TokenType.ENUM) or self._check(TokenType.ALIAS):
                 raise self._error(self._peek(), "Nested declarations are not supported inside classes.")
             member_visibility = self._visibility_modifier()
+            if self._match(TokenType.STATIC):
+                if self._match(TokenType.CONSTRUCTOR):
+                    raise self._error(self._previous(), "Constructors cannot be static.")
+                raise self._error(self._previous(), "Static class members are not supported yet.")
+            if self._match(TokenType.CONSTRUCTOR):
+                constructor_token = self._previous()
+                if member_visibility == "private":
+                    raise self._error(constructor_token, "Constructors cannot be private.")
+                if constructor is not None:
+                    raise self._error(
+                        constructor_token,
+                        f"Class '{name_token.lexeme}' cannot declare more than one constructor.",
+                    )
+                constructor = self._constructor_declaration(constructor_token, member_visibility)
+                continue
             if self._match(TokenType.FUNCTION):
                 method = self._function_declaration(member_visibility)
                 self._add_struct_method(method, methods, method_names, field_names, name_token.lexeme, aggregate_kind="class")
                 continue
             type_name = self._parse_return_type_annotation("Expected explicit field or method return type in class declaration.")
+            if self._check(TokenType.CONSTRUCTOR):
+                raise self._error(self._peek(), "Constructors cannot declare a return type.")
             field_token = self._consume(TokenType.IDENTIFIER, "Expected field name.")
             if self._check(TokenType.LEFT_PAREN):
                 method = self._function_declaration_tail(type_name, field_token, member_visibility)
@@ -323,6 +369,38 @@ class Parser:
             visibility,
             methods,
             implements,
+            constructor,
+        )
+
+    def _constructor_declaration(
+        self,
+        constructor_token: Token,
+        visibility: ast.Visibility,
+    ) -> ast.ConstructorDeclaration:
+        self._consume(TokenType.LEFT_PAREN, "Expected '(' after 'constructor'.")
+        parameters: list[ast.Parameter] = []
+        parameter_names: set[str] = set()
+        if not self._check(TokenType.RIGHT_PAREN):
+            while True:
+                param_type = self._parse_type_annotation("Expected constructor parameter type.")
+                param_token = self._consume(TokenType.IDENTIFIER, "Expected constructor parameter name.")
+                if param_token.lexeme in parameter_names:
+                    raise self._error(
+                        param_token,
+                        f"Duplicate constructor parameter '{param_token.lexeme}'.",
+                    )
+                parameter_names.add(param_token.lexeme)
+                parameters.append(ast.Parameter(param_type, param_token.lexeme))
+                if not self._match(TokenType.COMMA):
+                    break
+        self._consume(TokenType.RIGHT_PAREN, "Expected ')' after constructor parameters.")
+        body = self._block()
+        return ast.ConstructorDeclaration(
+            parameters,
+            body,
+            visibility,
+            constructor_token.line,
+            constructor_token.column,
         )
 
     def _add_struct_method(
@@ -926,6 +1004,8 @@ class Parser:
                 TokenType.ALIAS,
                 TokenType.STRUCT,
                 TokenType.CLASS,
+                TokenType.CONSTRUCTOR,
+                TokenType.STATIC,
                 TokenType.INTERFACE,
                 TokenType.ENUM,
                 TokenType.FUNCTION,

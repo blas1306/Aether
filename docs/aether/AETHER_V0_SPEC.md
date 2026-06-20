@@ -241,7 +241,7 @@ This limitation will be addressed when full generic type parameters are implemen
 
 ## Structs
 
-Aether v0 supports a nominal `struct` form with an explicit list of typed fields, optional instance methods, an automatic positional constructor, and field/method access with `.`.
+Aether v0 supports a nominal `struct` form with an explicit list of typed fields, optional instance methods, an automatic positional constructor or one explicit constructor, and field/method access with `.`.
 
 ```aether
 public struct Point {
@@ -271,7 +271,7 @@ struct Point {
 }
 ```
 
-Field-level `public`, `private`, and `const` are not supported yet. Nested declarations, custom constructors, constructor overloads, static methods, generic methods, and inheritance are also not supported inside structs.
+Field-level `public`, `private`, and `const` are not supported yet. Nested declarations, constructor overloads, static methods, generic methods, and inheritance are also not supported inside structs.
 
 ### Struct Methods
 
@@ -369,13 +369,35 @@ Mutating methods also cannot be called on temporary values, because the mutation
 Counter(0).increment(); // error: Cannot call mutating method on temporary value.
 ```
 
-The automatic constructor is positional and checks the declared field types:
+If a struct does not declare an explicit constructor, it has an automatic positional constructor. Its parameters follow field declaration order and use the declared field types:
 
 ```aether
 Point p = Point(1.0, 2.0); // valid
 Point q = Point(1.0);      // error: wrong argument count
 Point r = Point("x", 2.0); // error: incompatible field type
 ```
+
+Alternatively, a struct may declare one explicit constructor. It uses `constructor(...) { ... }`, has no return type, and all parameters must be typed:
+
+```aether
+struct Point {
+    double x;
+    double y;
+
+    constructor(double x, double y) {
+        this.x = x;
+        this.y = y;
+    }
+}
+
+Point p = Point(1.0, 2.0);
+```
+
+An explicit constructor completely replaces the automatic field-based signature. Calls must match the explicit parameter count and types; the positional field constructor is not also available.
+
+The runtime creates a struct value with default field values, executes the constructor body on that value, and returns the initialized value. The constructor may read and write fields through implicit field names or `this`, use parameters, run ordinary control flow, and call methods of the same struct. Field assignments and method calls are typechecked using the same rules as struct methods.
+
+Only one explicit constructor is allowed per struct. A constructor cannot be `private` or `static`, cannot declare a return type, and cannot return a value. `return;` without a value may end it early. Constructors cannot be declared outside a class or struct and do not participate in interface conformance.
 
 Local inference works with struct constructor calls:
 
@@ -504,11 +526,16 @@ Point(1.0, 2.0).x = 5.0; // error
 
 This follows the current shallow `const` rule. A `const` binding prevents rebinding the variable name, but it does not deep-freeze the fields of the struct value yet.
 
-Structural equality is not implemented yet. Comparing structs with `==` or `!=` is an error in v0:
+Structs support nominal structural equality with `==` and `!=`. Both operands must have exactly the same nominal struct type; two different structs are not comparable even when they declare identical fields. Values of the same struct type are compared field by field in declaration order, and nested structs are compared recursively:
 
 ```aether
-println(Point(1.0, 2.0) == Point(1.0, 2.0)); // error
+println(Point(1.0, 2.0) == Point(1.0, 2.0)); // true
+println(Point(1.0, 2.0) != Point(1.0, 3.0)); // true
 ```
+
+Every field must support equality. Comparable fields include numeric types, `string`, `boolean`, enums, nullable comparable types, recursively comparable structs, and collection or mathematical container types that already support equality such as `List<T>`, `Array<T>`, `Vector<T>`, and `Matrix<T>` when their element types are comparable.
+
+Classes, interfaces, `void`, and any other type without `==` support are not comparable fields. If any field is not comparable, applying `==` or `!=` to that struct is a type error. `!=` is exactly the negation of `==`.
 
 `print(...)` and `println(...)` render structs with field names:
 
@@ -554,14 +581,17 @@ public struct Wrapper {
 
 Current struct limitations:
 
-- No custom constructors or overloaded constructors.
+- No constructor overloads or constructor chaining.
+- No private or static constructors.
 - No field visibility.
 - No static methods or generic methods.
 - No new generic struct parameters.
+- No named constructor arguments.
+- No properties or destructors.
 - No inheritance, traits, or protocols.
 - No destructuring or pattern matching for structs.
 - No operator overloading for structs.
-- No structural equality for structs.
+- No user-defined or configurable equality for structs.
 - No deep `const`.
 - Struct lowering to IR/JIT is not implemented.
 
@@ -587,7 +617,7 @@ public class Counter {
 }
 ```
 
-Class declarations are top-level only. They use an automatic positional constructor whose arguments follow field declaration order. Constructor initialization is allowed for every declared field, including private fields; member visibility controls later access, not construction:
+Class declarations are top-level only. A class without an explicit constructor uses an automatic positional constructor whose arguments follow field declaration order. Automatic constructor initialization is allowed for every declared field, including private fields; member visibility controls later access, not construction:
 
 ```aether
 class Counter {
@@ -598,6 +628,30 @@ class Counter {
 Counter c = Counter(4); // valid: initializes the private field
 println(c.getValue());  // 4
 ```
+
+Alternatively, a class may declare one explicit constructor using `constructor(...) { ... }` or `public constructor(...) { ... }`. Constructors have no return type:
+
+```aether
+class Counter {
+    int value;
+
+    public constructor(int initial) {
+        this.value = initial;
+    }
+
+    public void increment() {
+        value = value + 1;
+    }
+}
+
+Counter c = Counter(5);
+```
+
+When an explicit constructor is present, it completely replaces the automatic positional constructor. Calls to the class must match the explicit constructor parameter count and types exactly; the old field-based signature is no longer available. Constructor parameters must be typed.
+
+The runtime creates the class instance first, then executes the constructor body with that instance as `this`, and finally returns the initialized instance. A constructor is an instance context: it may read and write fields, access private members of its own class, use its parameters, and call methods of the same class. `return;` may end a constructor early, but `return` with a value is invalid.
+
+Only one explicit constructor is allowed per class. Constructors cannot be declared outside a class or struct, cannot be `private` or `static`, and cannot declare a return type. Constructors do not participate in interface conformance.
 
 Fields and methods may be marked `public` or `private`. Unmarked class fields and methods are private; unmarked struct fields and methods remain public. Private members are accessible inside the declaring class through either implicit field names or `this.field`, but not through outside references:
 
@@ -666,7 +720,9 @@ Current class limitations:
 
 - No inheritance or `extends`.
 - No `super`.
-- No custom constructors or constructor overloads.
+- No constructor overloads.
+- No constructor chaining or calls to `constructor(...)` from a constructor.
+- No private or static constructors.
 - No method overloads.
 - No static methods.
 - No destructors.
@@ -1101,6 +1157,7 @@ Supported:
 - numeric comparisons such as `int < double`
 - `string == string`
 - `boolean == boolean`
+- nominal structural equality between comparable values of the same struct type
 - `!=` for comparable values
 
 Not supported in v0:

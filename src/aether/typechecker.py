@@ -317,9 +317,41 @@ class TypeChecker:
                             column=statement.column,
                         )
             kind = "class" if isinstance(statement, ast.ClassDeclaration) else "struct"
-            struct_symbol = StructSymbol(statement.name, fields, statement.visibility, methods, implements, kind)
+            constructor = self._constructor_symbol(statement)
+            struct_symbol = StructSymbol(
+                statement.name,
+                fields,
+                statement.visibility,
+                methods,
+                implements,
+                kind,
+                constructor,
+            )
             self.structs[statement.name] = struct_symbol
             self._validate_struct_implements(statement, struct_symbol)
+
+    def _constructor_symbol(
+        self,
+        declaration: ast.StructDeclaration | ast.ClassDeclaration,
+    ) -> FunctionSymbol | None:
+        if declaration.constructor is None:
+            return None
+        constructor = declaration.constructor
+        parameters = tuple(
+            VariableSymbol(
+                parameter.name,
+                self._resolve_type_aliases(parameter.type_name, constructor),
+            )
+            for parameter in constructor.parameters
+        )
+        for parameter in parameters:
+            if _contains_void_type(parameter.type_name):
+                raise AetherTypeError(
+                    f"Constructor parameter '{parameter.name}' cannot have type void.",
+                    line=constructor.line,
+                    column=constructor.column,
+                )
+        return FunctionSymbol("constructor", "void", parameters, constructor.visibility)
 
     def _resolve_implements(self, declaration: ast.StructDeclaration | ast.ClassDeclaration, package_name: str | None) -> tuple[str, ...]:
         implements: list[str] = []
@@ -512,6 +544,7 @@ class TypeChecker:
             return
         if isinstance(statement, (ast.StructDeclaration, ast.ClassDeclaration)):
             self._check_struct_methods(statement)
+            self._check_constructor(statement)
             return
         if isinstance(statement, ast.InterfaceDeclaration):
             return
@@ -1303,6 +1336,32 @@ class TypeChecker:
                     column=method.column,
                 )
 
+    def _check_constructor(self, declaration: ast.StructDeclaration | ast.ClassDeclaration) -> None:
+        constructor = declaration.constructor
+        if constructor is None:
+            return
+        struct = self.structs[declaration.name]
+        symbol = struct.constructor
+        if symbol is None:
+            return
+        constructor_scope: Scope[VariableSymbol] = Scope(parent=self.global_scope)
+        receiver_type: AetherType = ClassType(struct.name) if struct.kind == "class" else struct.name
+        constructor_scope.define_local("this", VariableSymbol("this", receiver_type, is_const=True), is_const=True)
+        for parameter in symbol.parameters:
+            constructor_scope.define_local(parameter.name, parameter)
+        previous_return_type = self.current_return_type
+        previous_function_name = self.current_function_name
+        previous_method_struct = self.current_method_struct
+        self.current_return_type = "void"
+        self.current_function_name = f"{struct.name}.constructor"
+        self.current_method_struct = struct
+        try:
+            self._check_statements(constructor.body, constructor_scope)
+        finally:
+            self.current_return_type = previous_return_type
+            self.current_function_name = previous_function_name
+            self.current_method_struct = previous_method_struct
+
     def _declare_expression_function(self, statement: ast.ExpressionFunctionDeclaration) -> None:
         if statement.name in self.functions:
             raise AetherTypeError(f"Function '{statement.name}' is already defined.")
@@ -1560,9 +1619,7 @@ class TypeChecker:
         if operator in {"==", "!="}:
             if self._type_mentions_class(left_type) or self._type_mentions_class(right_type):
                 raise AetherTypeError("Class equality is not supported yet.")
-            if self._type_mentions_struct(left_type) or self._type_mentions_struct(right_type):
-                raise AetherTypeError("Struct equality is not supported yet.")
-            if not _types_comparable_for_equality(left_type, right_type):
+            if not self._types_comparable_for_equality(left_type, right_type):
                 raise AetherTypeError(
                     f"Cannot compare '{type_to_string(left_type)}' and '{type_to_string(right_type)}' "
                     f"with '{operator}'."
@@ -2046,24 +2103,37 @@ class TypeChecker:
         struct: StructSymbol,
         scope: Scope[VariableSymbol],
     ) -> None:
-        if len(expression.arguments) != len(struct.fields):
+        parameters = struct.constructor.parameters if struct.constructor is not None else struct.fields
+        if len(expression.arguments) != len(parameters):
             kind_title = struct.kind.capitalize()
             raise AetherTypeError(
-                f"{kind_title} '{struct.name}' constructor expects {len(struct.fields)} arguments "
+                f"{kind_title} '{struct.name}' constructor expects {len(parameters)} arguments "
                 f"but got {len(expression.arguments)}."
             )
-        for argument, field in zip(expression.arguments, struct.fields):
-            if self._can_use_expected_collection_type(argument, field.type_name):
+        for argument, parameter in zip(expression.arguments, parameters):
+            if self._can_use_expected_collection_type(argument, parameter.type_name):
                 continue
             argument_type = self._expression_type(argument, scope)
-            self._reject_void_value(argument_type, f"argument for field '{field.name}'")
-            if argument_type is not UNKNOWN_TYPE and not self._can_convert_type(argument_type, field.type_name):
-                if isinstance(argument, ast.ListLiteral) and isinstance(field.type_name, ArrayType):
-                    if self._can_assign_braced_literal_to_array(argument, field.type_name, scope):
+            argument_label = (
+                f"constructor parameter '{parameter.name}'"
+                if struct.constructor is not None
+                else f"field '{parameter.name}'"
+            )
+            self._reject_void_value(argument_type, f"argument for {argument_label}")
+            if argument_type is not UNKNOWN_TYPE and not self._can_convert_type(argument_type, parameter.type_name):
+                if isinstance(argument, ast.ListLiteral) and isinstance(parameter.type_name, ArrayType):
+                    if self._can_assign_braced_literal_to_array(argument, parameter.type_name, scope):
                         continue
+                if struct.constructor is not None:
+                    raise AetherTypeError(
+                        f"Cannot pass argument for constructor parameter '{parameter.name}' of {struct.kind} '{struct.name}': "
+                        f"Cannot implicitly convert '{type_to_string(argument_type)}' "
+                        f"to '{type_to_string(parameter.type_name)}'."
+                    )
                 raise AetherTypeError(
-                    f"Cannot initialize field '{field.name}' of {struct.kind} '{struct.name}': "
-                    f"Cannot implicitly convert '{type_to_string(argument_type)}' to '{type_to_string(field.type_name)}'."
+                    f"Cannot initialize field '{parameter.name}' of {struct.kind} '{struct.name}': "
+                    f"Cannot implicitly convert '{type_to_string(argument_type)}' "
+                    f"to '{type_to_string(parameter.type_name)}'."
                 )
 
     def _field_type(
@@ -2523,6 +2593,73 @@ class TypeChecker:
         if isinstance(resolved, TupleType):
             return any(self._type_mentions_class(element_type) for element_type in resolved.element_types)
         return False
+
+    def _types_comparable_for_equality(self, left_type: AetherType, right_type: AetherType) -> bool:
+        left = self._resolve_type_aliases(left_type)
+        right = self._resolve_type_aliases(right_type)
+        if isinstance(left, NullType):
+            if isinstance(right, NullType):
+                return True
+            return isinstance(right, NullableType) and self._type_supports_equality(right.base_type)
+        if isinstance(right, NullType):
+            return isinstance(left, NullableType) and self._type_supports_equality(left.base_type)
+        if isinstance(left, NullableType) and isinstance(right, NullableType):
+            return self._types_comparable_for_equality(left.base_type, right.base_type)
+        if isinstance(left, NullableType):
+            return self._types_comparable_for_equality(left.base_type, right)
+        if isinstance(right, NullableType):
+            return self._types_comparable_for_equality(left, right.base_type)
+        if isinstance(left, VectorType) and isinstance(right, VectorType):
+            return left.length == right.length and self._types_comparable_for_equality(
+                left.element_type,
+                right.element_type,
+            )
+        if isinstance(left, ArrayType) and isinstance(right, ArrayType):
+            return self._types_comparable_for_equality(left.element_type, right.element_type)
+        if isinstance(left, ListType) and isinstance(right, ListType):
+            return self._types_comparable_for_equality(left.element_type, right.element_type)
+        if isinstance(left, MatrixType) and isinstance(right, MatrixType):
+            return left.rows == right.rows and left.cols == right.cols and self._types_comparable_for_equality(
+                left.element_type,
+                right.element_type,
+            )
+        if left == right:
+            return self._type_supports_equality(left)
+        return left in NUMERIC_TYPES and right in NUMERIC_TYPES
+
+    def _type_supports_equality(
+        self,
+        type_name: AetherType,
+        visiting_structs: frozenset[str] = frozenset(),
+    ) -> bool:
+        resolved = self._resolve_type_aliases(type_name)
+        if isinstance(resolved, (ClassType, InterfaceType)):
+            return False
+        if isinstance(resolved, str):
+            struct = self.structs.get(resolved)
+            if struct is None:
+                return resolved != "void"
+            if struct.kind == "class":
+                return False
+            if resolved in visiting_structs:
+                return True
+            nested_visiting = visiting_structs | {resolved}
+            return all(
+                self._type_supports_equality(field.type_name, nested_visiting)
+                for field in struct.fields
+            )
+        if isinstance(resolved, NullableType):
+            return self._type_supports_equality(resolved.base_type, visiting_structs)
+        if isinstance(resolved, (ArrayType, ListType)):
+            return self._type_supports_equality(resolved.element_type, visiting_structs)
+        if isinstance(resolved, (MatrixType, VectorType, TransposeVectorType)):
+            return self._type_supports_equality(resolved.element_type, visiting_structs)
+        if isinstance(resolved, TupleType):
+            return all(
+                self._type_supports_equality(element_type, visiting_structs)
+                for element_type in resolved.element_types
+            )
+        return not isinstance(resolved, RangeType) or resolved.element_type == "int"
 
     def _can_assign_array_literal(
         self,
@@ -3175,45 +3312,6 @@ def _common_list_primitive_type(primitive_types: list[AetherType]) -> str:
         return _common_primitive_type(primitive_types)
     except AetherTypeError as exc:
         raise AetherTypeError("List literals must contain homogeneous compatible element types.") from exc
-
-
-def _types_comparable_for_equality(left_type: AetherType, right_type: AetherType) -> bool:
-    if left_type == right_type:
-        return True
-    if isinstance(left_type, NullType):
-        return isinstance(right_type, NullableType)
-    if isinstance(right_type, NullType):
-        return isinstance(left_type, NullableType)
-    if isinstance(left_type, NullableType) and isinstance(right_type, NullableType):
-        return _types_comparable_for_equality(left_type.base_type, right_type.base_type)
-    if isinstance(left_type, NullableType):
-        return _types_comparable_for_equality(left_type.base_type, right_type)
-    if isinstance(right_type, NullableType):
-        return _types_comparable_for_equality(left_type, right_type.base_type)
-    if isinstance(left_type, VectorType) and isinstance(right_type, VectorType):
-        return left_type.length == right_type.length and _types_comparable_for_equality(
-            left_type.element_type,
-            right_type.element_type,
-        )
-    if isinstance(left_type, ArrayType) and isinstance(right_type, ArrayType):
-        return _types_comparable_for_equality(left_type.element_type, right_type.element_type)
-    if isinstance(left_type, ListType) and isinstance(right_type, ListType):
-        return _types_comparable_for_equality(left_type.element_type, right_type.element_type)
-    if isinstance(left_type, MatrixType) and isinstance(right_type, MatrixType):
-        return left_type.rows == right_type.rows and left_type.cols == right_type.cols and _types_comparable_for_equality(
-            left_type.element_type,
-            right_type.element_type,
-        )
-    if (
-        is_array_type(left_type)
-        or is_array_type(right_type)
-        or is_matrix_type(left_type)
-        or is_matrix_type(right_type)
-        or is_vector_like_type(left_type)
-        or is_vector_like_type(right_type)
-    ):
-        return False
-    return left_type in NUMERIC_TYPES and right_type in NUMERIC_TYPES
 
 
 def _implicit_conversion_message(value_type: AetherType, target_type: AetherType) -> str:

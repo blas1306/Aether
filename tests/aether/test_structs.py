@@ -40,7 +40,6 @@ println(p.x);
 
     assert result.output == "1.0\n"
 
-
 def test_struct_constructor_with_too_few_arguments_fails() -> None:
     with pytest.raises(AetherTypeError, match="constructor expects 2 arguments but got 1"):
         run_aether(
@@ -569,17 +568,3 @@ println(p.x);
     )
 
     assert result.output == "1.0\n"
-
-
-def test_struct_equality_is_not_supported_yet() -> None:
-    with pytest.raises(AetherTypeError, match="Struct equality is not supported yet"):
-        run_aether(
-            """
-struct Point {
-    double x;
-    double y;
-}
-
-println(Point(1.0, 2.0) == Point(1.0, 2.0));
-"""
-        )

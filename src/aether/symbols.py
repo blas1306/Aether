@@ -30,6 +30,7 @@ class StructSymbol:
     methods: tuple[FunctionSymbol, ...] = ()
     implements: tuple[str, ...] = ()
     kind: str = "struct"
+    constructor: FunctionSymbol | None = None
 
 
 @dataclass(frozen=True)

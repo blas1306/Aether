@@ -295,6 +295,227 @@ println(c.getValue());
     assert result.output == "8\n"
 
 
+def test_class_explicit_constructor_initializes_field() -> None:
+    result = run_aether(
+        """
+class Counter {
+    int value;
+
+    public constructor(int initial) {
+        this.value = initial;
+    }
+
+    public int getValue() { return value; }
+}
+
+Counter c = Counter(5);
+println(c.getValue());
+"""
+    )
+
+    assert result.output == "5\n"
+
+
+def test_class_explicit_constructor_accepts_multiple_parameters() -> None:
+    result = run_aether(
+        """
+class Point {
+    public int x;
+    public int y;
+
+    constructor(int initialX, int initialY) {
+        x = initialX;
+        y = initialY;
+    }
+}
+
+Point p = Point(3, 4);
+println(p.x);
+println(p.y);
+"""
+    )
+
+    assert result.output == "3\n4\n"
+
+
+def test_class_explicit_constructor_writes_private_fields() -> None:
+    result = run_aether(
+        """
+class Person {
+    string name;
+
+    constructor(string initialName) {
+        name = initialName;
+    }
+
+    public string getName() { return name; }
+}
+
+Person person = Person("Ada");
+println(person.getName());
+"""
+    )
+
+    assert result.output == "Ada\n"
+
+
+def test_class_explicit_constructor_calls_internal_method() -> None:
+    result = run_aether(
+        """
+class Counter {
+    int value;
+
+    constructor(int initial) {
+        value = initial;
+        increment();
+    }
+
+    void increment() {
+        value = value + 1;
+    }
+
+    public int getValue() { return value; }
+}
+
+Counter c = Counter(9);
+println(c.getValue());
+"""
+    )
+
+    assert result.output == "10\n"
+
+
+def test_class_explicit_constructor_supports_simple_logic() -> None:
+    result = run_aether(
+        """
+class Counter {
+    int value;
+
+    constructor(int initial) {
+        if initial < 0 {
+            value = 0;
+        } else {
+            value = initial;
+        }
+    }
+
+    public int getValue() { return value; }
+}
+
+println(Counter(-2).getValue());
+println(Counter(7).getValue());
+"""
+    )
+
+    assert result.output == "0\n7\n"
+
+
+def test_class_without_explicit_constructor_keeps_automatic_constructor() -> None:
+    result = run_aether(
+        """
+class Pair {
+    public int left;
+    public string right;
+}
+
+Pair pair = Pair(2, "two");
+println(pair.left);
+println(pair.right);
+"""
+    )
+
+    assert result.output == "2\ntwo\n"
+
+
+def test_class_cannot_declare_two_explicit_constructors() -> None:
+    with pytest.raises(AetherSyntaxError, match="cannot declare more than one constructor"):
+        run_aether(
+            """
+class Counter {
+    constructor() {}
+    constructor(int initial) {}
+}
+"""
+        )
+
+
+def test_class_constructor_cannot_return_a_value() -> None:
+    with pytest.raises(AetherTypeError, match="cannot return a value"):
+        run_aether(
+            """
+class Counter {
+    constructor() {
+        return 1;
+    }
+}
+"""
+        )
+
+
+def test_constructor_cannot_be_declared_outside_class() -> None:
+    with pytest.raises(AetherSyntaxError, match="only be declared inside a class"):
+        run_aether("constructor(int initial) {}")
+
+
+def test_class_constructor_cannot_be_private() -> None:
+    with pytest.raises(AetherSyntaxError, match="Constructors cannot be private"):
+        run_aether("class Counter { private constructor() {} }")
+
+
+def test_class_explicit_constructor_validates_arity() -> None:
+    with pytest.raises(AetherTypeError, match="constructor expects 1 arguments but got 0"):
+        run_aether("class Counter { constructor(int initial) {} }\nCounter c = Counter();")
+
+
+def test_class_explicit_constructor_validates_argument_types() -> None:
+    with pytest.raises(AetherTypeError, match="constructor parameter 'initial'.*string.*int"):
+        run_aether(
+            'class Counter { constructor(int initial) {} }\nCounter c = Counter("bad");'
+        )
+
+
+def test_class_explicit_constructor_typechecks_field_assignments() -> None:
+    with pytest.raises(AetherTypeError, match="Cannot implicitly convert 'string' to 'int'"):
+        run_aether(
+            """
+class Counter {
+    int value;
+
+    constructor() {
+        value = "bad";
+    }
+}
+"""
+        )
+
+
+def test_class_explicit_constructor_replaces_automatic_field_signature() -> None:
+    with pytest.raises(AetherTypeError, match="constructor expects 1 arguments but got 2"):
+        run_aether(
+            """
+class Pair {
+    int left;
+    int right;
+
+    constructor(int value) {
+        left = value;
+        right = value;
+    }
+}
+
+Pair pair = Pair(1, 2);
+"""
+        )
+
+
+def test_class_constructor_cannot_declare_return_type_or_be_static() -> None:
+    with pytest.raises(AetherSyntaxError, match="cannot declare a return type"):
+        run_aether("class Counter { void constructor() {} }")
+
+    with pytest.raises(AetherSyntaxError, match="cannot be static"):
+        run_aether("class Counter { static constructor() {} }")
+
+
 def test_duplicate_class_members_fail() -> None:
     with pytest.raises(AetherSyntaxError, match="Duplicate field 'value'"):
         run_aether("class Counter { int value; int value; }")
