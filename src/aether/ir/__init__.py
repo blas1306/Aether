@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .interpreter import IRExecutionError, IRInterpreter
 from .lowering import IRLowerer, lower_to_ir
 from .model import (
     IRBasicBlock,
@@ -51,8 +52,10 @@ __all__ = [
     "IRBranch",
     "IRCall",
     "IRConst",
+    "IRExecutionError",
     "IRFunction",
     "IRInstruction",
+    "IRInterpreter",
     "IRJump",
     "IRLowerer",
     "IRLoad",

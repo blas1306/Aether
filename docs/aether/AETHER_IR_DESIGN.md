@@ -18,7 +18,8 @@ Aether throughout this work.
 The `aether.ir` package now contains the initial typed IR data model and a
 deterministic debug printer in Python. This infrastructure is intentionally
 isolated from the current language pipeline: initial AST-to-IR lowering is
-available, but there is no IR execution, optimization, or CLI integration yet.
+available together with a minimal IR interpreter, but there is no optimization
+or CLI integration yet.
 
 ### Initial lowering implementation
 
@@ -51,13 +52,42 @@ unsupported lowering case. Current limitations include:
 - No lists, arrays, nullable values, imports, or packages.
 - No builtin calls, keyword arguments, or expression functions.
 - No implicit conversion instructions.
-- No IR verifier, interpreter, optimizer, or execution path.
+- No IR verifier, optimizer, or main-pipeline execution path.
 
 The checked AST remains the existing immutable source AST rather than a new
 annotated tree. For this subset, declaration, parameter, literal, and function
 signature types provide the information lowering needs. Features that require
 resolved per-expression metadata should not be added by duplicating the full
 typechecker inside the lowerer.
+
+### Initial IR interpreter implementation
+
+`aether.ir.interpreter.IRInterpreter` executes an `IRModule` through the
+explicit developer API `IRInterpreter(module).call(function_name, arguments)`.
+It remains outside the main pipeline and CLI; the current AST interpreter is
+still Aether's default runtime and semantic reference.
+
+The currently executable subset is:
+
+- Functions selected by name, positional arguments, and a fresh local frame
+  for every call.
+- One `entry` basic block per function.
+- `IRConst`, `IRLoad`, `IRStore`, `IRBinaryOp`, `IRCall`, and `IRReturn`.
+- Raw `int`, `boolean`, and `string` scalar values.
+- `add`, `sub`, `mul`, `div`, and remainder operations. The interpreter
+  accepts `rem`, emitted by the current lowering, and `mod` as an alias.
+- Calls between user-defined IR functions in the same module.
+- Mutable local slots, including errors on loads before initialization.
+- Value returns and bare `void` returns.
+
+Execution reports explicit errors for missing functions, wrong arity,
+uninitialized slots or values, unsupported instructions or binary operations,
+division by zero, missing `entry` blocks, and non-void functions that finish
+without returning a value.
+
+Control-flow instructions, multiple-block execution, builtins, aggregates,
+verification, optimization, and integration with the production execution
+pipeline remain intentionally unsupported.
 
 ## 1. Goals
 
@@ -701,8 +731,11 @@ The unoptimized IR must remain executable.
 
 ### Phase 3: Small-subset IR interpreter
 
-- Interpret scalar values, arithmetic, comparisons, local variables, simple
-  control flow, calls, and returns.
+- Added execution for scalar constants, integer arithmetic, mutable local
+  slots, calls, and returns in a single `entry` block.
+- Added direct tests for hand-built and lowered IR, semantic comparisons
+  against the current AST interpreter, and runtime error cases.
+- Comparisons and control flow remain future work.
 - Keep the current interpreter as the default execution path.
 
 ### Phase 4: Dual-path validation
