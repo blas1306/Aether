@@ -38,6 +38,7 @@ from .types import (
     VectorType,
     VoidType,
 )
+from .verifier import IRVerificationError, IRVerifier
 
 __all__ = [
     "ArrayType",
@@ -66,6 +67,8 @@ __all__ = [
     "IRStore",
     "IRType",
     "IRValue",
+    "IRVerificationError",
+    "IRVerifier",
     "IntType",
     "InterfaceType",
     "ListType",

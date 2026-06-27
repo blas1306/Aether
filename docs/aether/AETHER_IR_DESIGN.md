@@ -15,11 +15,12 @@ Aether throughout this work.
 
 ### Initial Python infrastructure
 
-The `aether.ir` package now contains the initial typed IR data model and a
-deterministic debug printer in Python. This infrastructure is intentionally
-isolated from the current language pipeline: initial AST-to-IR lowering is
-available together with a minimal IR interpreter, but there is no optimization
-or CLI integration yet.
+The `aether.ir` package now contains the initial typed IR data model, a
+deterministic debug printer, an IR verifier, and a minimal IR interpreter in
+Python. This infrastructure is intentionally isolated from the current language
+pipeline: initial AST-to-IR lowering is available together with developer APIs
+for verification and interpretation, but there is no optimization or CLI
+integration yet.
 
 ### Initial lowering implementation
 
@@ -52,7 +53,7 @@ unsupported lowering case. Current limitations include:
 - No lists, arrays, nullable values, imports, or packages.
 - No builtin calls, keyword arguments, or expression functions.
 - No implicit conversion instructions.
-- No IR verifier, optimizer, or main-pipeline execution path.
+- No optimizer or main-pipeline execution path.
 
 The checked AST remains the existing immutable source AST rather than a new
 annotated tree. For this subset, declaration, parameter, literal, and function
@@ -86,8 +87,45 @@ division by zero, missing `entry` blocks, and non-void functions that finish
 without returning a value.
 
 Control-flow instructions, multiple-block execution, builtins, aggregates,
-verification, optimization, and integration with the production execution
-pipeline remain intentionally unsupported.
+optimization, and integration with the production execution pipeline remain
+intentionally unsupported.
+
+### Initial IR verifier implementation
+
+`aether.ir.verifier.IRVerifier` validates an `IRModule` through the explicit
+developer API `IRVerifier(module).verify()`. It returns the module unchanged on
+success and raises `IRVerificationError` with a direct diagnostic on the first
+inconsistency found. Like lowering and the IR interpreter, it is not connected
+to the main pipeline or CLI.
+
+The initial verifier checks the executable subset currently represented by the
+Python IR model:
+
+- Unique function names, at least one block per function, and a required
+  `entry` block.
+- Unique parameter and block names within their owning function.
+- Valid IR types on parameters, return types, instruction results, and slots.
+- Terminator discipline: every block must end in `return`, `jump`, or
+  `branch`, and no instruction may follow a terminator.
+- Jump and branch targets must name existing blocks.
+- Parameters are defined at function entry; instruction results become defined
+  after their instruction; uses must be definitely defined on all reachable
+  paths processed by the verifier.
+- Local slots are inferred from `store` destinations in the current model;
+  loads from unknown slots or loads before a definitely preceding store are
+  rejected.
+- `IRBinaryOp` operand compatibility and declared result types for arithmetic,
+  comparisons, and simple boolean operations.
+- Return values must match the function return type; non-void functions must
+  return on all evident paths from `entry`.
+- Calls must target functions in the same module, use the right arity, pass
+  compatible argument types, and use a result type compatible with the callee's
+  return type.
+
+Builtins remain outside this initial verifier unless they are represented as
+ordinary user functions in the module. Future IR instructions may add explicit
+slot declarations or builtin call nodes; the verifier should then move from
+slot inference to checking those declarations directly.
 
 ## 1. Goals
 

@@ -1,3 +1,7 @@
 import Math
+import Plots
 
-f(x) =
+f(x) = sin(x);
+
+plot(f, 0, 6);
+
