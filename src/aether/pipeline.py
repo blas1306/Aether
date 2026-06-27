@@ -4,14 +4,21 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Protocol
 
 from . import ast
+from .errors import AetherRuntimeError, IRBackendUnsupportedFeatureError
 from .interpreter import Environment, Interpreter
 from .lexer import lex
 from .parser import Parser
 from .tokens import Token
 from .typechecker import TypeChecker
+from .types import AetherType, AetherValue
 
 if TYPE_CHECKING:
+    from .ir.model import IRFunction
     from .ir.model import IRModule
+    from .ir.types import IRType
+
+
+IR_MAIN_RESULT_NAME = "__ir_main_result"
 
 
 @dataclass(frozen=True)
@@ -45,7 +52,7 @@ class ASTBackend:
 
 
 class IRBackend:
-    """Experimental IR backend placeholder, intentionally not public CLI state."""
+    """Experimental executable IR backend for the current scalar function subset."""
 
     name: ClassVar[str] = "ir"
 
@@ -54,10 +61,42 @@ class IRBackend:
 
         return IRLowerer().lower(typed_program.program)
 
+    def verify(self, module: IRModule) -> IRModule:
+        from .ir.verifier import IRVerificationError, IRVerifier
+
+        try:
+            return IRVerifier(module).verify()
+        except IRVerificationError as exc:
+            raise AetherRuntimeError(
+                f"IR verifier rejected module: {exc}",
+                kind="ir",
+            ) from exc
+
+    def lower_verified(self, typed_program: TypedProgram) -> IRModule:
+        return self.verify(self.lower(typed_program))
+
     def run(self, typed_program: TypedProgram) -> Environment:
-        raise NotImplementedError(
-            "The IR backend is experimental and is not connected to the public pipeline."
-        )
+        from .ir.interpreter import IRExecutionError, IRInterpreter
+        from .ir.types import VoidType
+
+        module = self.lower_verified(typed_program)
+        entry = _ir_entry_point(module)
+
+        try:
+            result = IRInterpreter(module).call(entry.name)
+        except IRExecutionError as exc:
+            raise AetherRuntimeError(
+                f"IR interpreter failed: {exc}",
+                kind="ir",
+            ) from exc
+
+        env = Environment()
+        if not isinstance(entry.return_type, VoidType):
+            env.define(
+                IR_MAIN_RESULT_NAME,
+                AetherValue(_aether_type(entry.return_type), result),
+            )
+        return env
 
 
 def tokenize_source(source: str) -> list[Token]:
@@ -97,3 +136,39 @@ def execute_pipeline(
     typed_program = prepare_typed_program(source, type_checker)
     backend: PipelineBackend = ASTBackend(interpreter)
     return backend.run(typed_program)
+
+
+def _ir_entry_point(module: IRModule) -> IRFunction:
+    function = next(
+        (candidate for candidate in module.functions if candidate.name == "main"),
+        None,
+    )
+    if function is None:
+        raise IRBackendUnsupportedFeatureError(
+            "IR backend execution requires a zero-argument main() function."
+        )
+    if function.parameters:
+        raise IRBackendUnsupportedFeatureError(
+            "IR backend entry point main() must not declare parameters yet."
+        )
+    return function
+
+
+def _aether_type(type_: IRType) -> AetherType:
+    from .ir.types import BoolType, ComplexType, DoubleType, FloatType, IntType, StringType
+
+    if isinstance(type_, IntType):
+        return "int"
+    if isinstance(type_, FloatType):
+        return "float"
+    if isinstance(type_, DoubleType):
+        return "double"
+    if isinstance(type_, ComplexType):
+        return "complex"
+    if isinstance(type_, BoolType):
+        return "boolean"
+    if isinstance(type_, StringType):
+        return "string"
+    raise IRBackendUnsupportedFeatureError(
+        f"IR backend cannot publish main() result of type '{type_}' yet."
+    )

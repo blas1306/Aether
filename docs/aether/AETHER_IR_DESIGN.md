@@ -17,20 +17,21 @@ Aether throughout this work.
 
 The `aether.ir` package now contains the initial typed IR data model, a
 deterministic debug printer, an IR verifier, and a minimal IR interpreter in
-Python. The public execution path still uses the AST interpreter, but the
+Python. The default public execution path still uses the AST interpreter, but the
 internal pipeline now has an explicit frontend/backend boundary: source is
 tokenized, parsed, and typechecked into a checked program before a backend runs
-it. The production backend is the AST backend. An IR backend placeholder exists
-only as experimental infrastructure; there is no optimization, public
-`--backend=ir` option, or CLI integration yet.
+it. The production and default backend is the AST backend. An experimental IR
+backend is available for file execution through `aether --backend=ir`, but it
+is intentionally narrow and is not the default. There is no optimization, SSA,
+JIT, Rust backend, or full-language IR execution path yet.
 
 ### Initial lowering implementation
 
 `aether.ir.lowering.IRLowerer` lowers an already typechecked `ast.Program` to
-an `IRModule`. It is an explicit developer API and is not connected to the
-public CLI. The main pipeline can prepare the same checked program boundary,
-but IR lowering remains an experimental backend concern and does not invoke the
-typechecker itself.
+an `IRModule`. It is an explicit developer API and is also used by the
+experimental IR backend and `--emit-ir`. The main pipeline prepares the same
+checked program boundary for both AST and IR backends, but IR lowering remains
+an experimental backend concern and does not invoke the typechecker itself.
 
 The currently supported lowering subset is deliberately small:
 
@@ -61,8 +62,9 @@ produce numbered temporaries in deterministic source evaluation order.
 
 Comparison results are always `bool` in IR and can feed `IRBranch`.
 
-Unsupported syntax raises a clear `NotImplementedError` naming the AST node or
-unsupported lowering case. Current limitations include:
+Unsupported syntax raises a clear `IRBackendUnsupportedFeatureError` naming the
+language feature or unsupported lowering case and includes a short summary of
+the supported subset. Current limitations include:
 
 - No `for`, `do`/`while`, `break`/`continue`, or non-while loop control flow.
 - No structs, classes, interfaces, constructors, methods, or fields.
@@ -70,7 +72,53 @@ unsupported lowering case. Current limitations include:
 - No SSA conversion, phi nodes, or optimizations.
 - No builtin calls, keyword arguments, or expression functions.
 - No implicit conversion instructions.
-- No optimizer or public IR execution path.
+- No optimizer, SSA, JIT, Rust backend, or full public IR execution path.
+
+### Experimental IR backend and CLI
+
+The official CLI accepts:
+
+```bash
+aether program.ae
+aether --backend=ast program.ae
+aether --backend=ir program.ae
+aether --emit-ir program.ae
+aether --backend=ir --emit-ir program.ae
+```
+
+`aether program.ae` and `aether --backend=ast program.ae` both use the
+production AST backend. `--backend=ir` uses the experimental IR pipeline:
+
+```text
+source -> lexer -> parser -> typechecker -> IR lowering -> IR verifier -> IR interpreter
+```
+
+IR execution currently requires a zero-argument `main()` function. If `main()`
+returns a non-void scalar value, `IRBackend.run` stores it in the returned
+runtime environment under `__ir_main_result`; the CLI does not print that value
+automatically. This keeps file-output behavior tied to explicit language
+output constructs, while the IR backend remains too small to support builtins
+such as `println`.
+
+`--emit-ir` lowers and verifies the checked program, prints deterministic
+textual IR, and does not execute it. It is a development tool and is accepted
+with or without `--backend=ir`.
+
+The user-facing supported IR backend subset is:
+
+- functions
+- local variables
+- int/bool/string literals
+- arithmetic
+- comparisons
+- if/else
+- while
+- simple user-defined function calls
+
+The IR backend does not yet support structs, classes, lists, arrays, packages,
+advanced imports, builtins, top-level scripting statements, methods,
+constructors, interfaces, enums, exceptions, `for`, `break`, `continue`,
+optimizations, SSA, JIT, or Rust code generation.
 
 The checked AST remains the existing immutable source AST rather than a new
 annotated tree. For this subset, declaration, parameter, literal, and function
@@ -82,7 +130,8 @@ typechecker inside the lowerer.
 
 `aether.ir.interpreter.IRInterpreter` executes an `IRModule` through the
 explicit developer API `IRInterpreter(module).call(function_name, arguments)`.
-It remains outside public pipeline selection and CLI execution; the current AST
+The experimental `IRBackend` uses this API after verification and currently
+calls zero-argument `main()` for CLI file execution. The current AST
 interpreter is still Aether's default runtime and semantic reference.
 
 The currently executable subset is:

@@ -64,13 +64,33 @@ Run a program directly:
 
 ```bash
 aether examples/hello.ae
+aether --backend=ast examples/hello.ae
 ```
 
-The command uses the normal language pipeline:
+The default command uses the production AST backend:
 
 ```text
-Lexer -> Parser -> TypeChecker -> Interpreter
+Lexer -> Parser -> TypeChecker -> ASTBackend
 ```
+
+`--backend=ast` is equivalent to the default.
+
+An experimental IR backend is available for the current scalar function
+subset:
+
+```bash
+aether --backend=ir program.ae
+```
+
+The IR backend uses:
+
+```text
+Lexer -> Parser -> TypeChecker -> IR lowering -> IR verifier -> IR interpreter
+```
+
+For now, IR file execution requires a zero-argument `main()` function. It is
+not the default backend and does not support structs, classes, lists, advanced
+imports, builtins such as `println`, or the full top-level scripting model yet.
 
 Start a persistent session backed by `AetherSession`:
 
@@ -83,7 +103,12 @@ Language-development inspection tools are also available:
 ```bash
 aether --tokens examples/hello.ae
 aether --ast examples/hello.ae
+aether --emit-ir program.ae
+aether --backend=ir --emit-ir program.ae
 ```
+
+`--emit-ir` lowers and verifies the program, prints textual IR, and does not
+execute it.
 
 Use `aether --help` for all current options and `aether --version` for the
 language version. The primary execution form is `aether file.ae`; there is no
@@ -140,8 +165,8 @@ Technical language documents:
 - [Aether v0 Language Specification](docs/aether/AETHER_V0_SPEC.md) describes
   the current language behavior.
 - [Aether IR Initial Design](docs/aether/AETHER_IR_DESIGN.md) proposes a future
-  typed intermediate representation; it is a design document, not an
-  implemented feature.
+  typed intermediate representation and documents the experimental Python IR
+  backend.
 
 ## Examples
 

@@ -18,6 +18,7 @@ from aether.ir import (
     StringType,
     print_ir,
 )
+from aether.errors import IRBackendUnsupportedFeatureError
 from aether.pipeline import parse_source
 from aether.typechecker import TypeChecker
 
@@ -505,7 +506,7 @@ def test_unsupported_constructs_have_clear_lowering_errors(
     TypeChecker().check(program)
 
     with pytest.raises(
-        NotImplementedError,
-        match=rf"IR lowering not implemented for {node_name}",
+        IRBackendUnsupportedFeatureError,
+        match=rf"IR backend does not support .*{node_name.replace('Declaration', '').lower()}",
     ):
         IRLowerer().lower(program)

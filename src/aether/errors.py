@@ -68,3 +68,37 @@ class AetherRuntimeError(AetherError):
 
 class AetherInputError(AetherRuntimeError):
     """Raised when user input cannot be read or converted."""
+
+
+IR_BACKEND_SUPPORTED_SUBSET = (
+    "Supported IR backend subset:\n"
+    "- functions\n"
+    "- local variables\n"
+    "- int/bool/string literals\n"
+    "- arithmetic\n"
+    "- comparisons\n"
+    "- if/else\n"
+    "- while\n"
+    "- simple user-defined function calls"
+)
+
+
+class IRBackendUnsupportedFeatureError(AetherError):
+    """Raised when the experimental IR backend cannot lower a language feature."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        line: int | None = None,
+        column: int | None = None,
+        hint: str | None = None,
+        kind: str | None = None,
+    ) -> None:
+        super().__init__(
+            message,
+            line=line,
+            column=column,
+            hint=hint or IR_BACKEND_SUPPORTED_SUBSET,
+            kind=kind,
+        )

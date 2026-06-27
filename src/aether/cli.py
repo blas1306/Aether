@@ -9,10 +9,12 @@ import sys
 from typing import TextIO
 
 from .errors import AetherError
-from .pipeline import parse_source, tokenize_source
+from .ir import print_ir
+from .pipeline import IRBackend, parse_source, prepare_typed_program, tokenize_source
 from .runner import run_aether
 from .session import AetherSession
 from .tokens import Token
+from .typechecker import TypeChecker
 from .version import LANGUAGE_VERSION
 
 EXIT_SUCCESS = 0
@@ -42,6 +44,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--ast",
         action="store_true",
         help="Print the parsed AST instead of executing the file.",
+    )
+    modes.add_argument(
+        "--emit-ir",
+        action="store_true",
+        help="Lower the file to experimental IR, verify it, and print it.",
+    )
+    parser.add_argument(
+        "--backend",
+        choices=("ast", "ir"),
+        default="ast",
+        help="Execution backend for files: ast (default) or ir (experimental).",
     )
     parser.add_argument(
         "--version",
@@ -73,6 +86,9 @@ def main(
             return int(exc.code)
 
     if args.repl:
+        if args.backend != "ast":
+            print("aether: error: --repl only supports --backend=ast for now.", file=stderr)
+            return EXIT_USAGE_ERROR
         if args.file is not None:
             print("aether: error: --repl does not accept a file.", file=stderr)
             return EXIT_USAGE_ERROR
@@ -97,8 +113,19 @@ def main(
             lambda: _print_ast(source, stdout=stdout),
             stderr=stderr,
         )
+    if args.emit_ir:
+        return _run_language_action(
+            lambda: _emit_ir(source, path=path, stdout=stdout),
+            stderr=stderr,
+        )
     return _run_language_action(
-        lambda: _execute_file(source, path=path, stdin=stdin, stdout=stdout),
+        lambda: _execute_file(
+            source,
+            path=path,
+            backend=args.backend,
+            stdin=stdin,
+            stdout=stdout,
+        ),
         stderr=stderr,
     )
 
@@ -131,13 +158,31 @@ def run_repl(*, stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:
             print(_format_language_error(exc), file=stderr)
 
 
-def _execute_file(source: str, *, path: Path, stdin: TextIO, stdout: TextIO) -> None:
-    run_aether(
-        source,
-        source_root=path.parent,
-        output_writer=stdout.write,
-        input_reader=stdin.readline,
-    )
+def _execute_file(
+    source: str,
+    *,
+    path: Path,
+    backend: str,
+    stdin: TextIO,
+    stdout: TextIO,
+) -> None:
+    if backend == "ast":
+        run_aether(
+            source,
+            source_root=path.parent,
+            output_writer=stdout.write,
+            input_reader=stdin.readline,
+        )
+        return
+    if backend == "ir":
+        IRBackend().run(
+            prepare_typed_program(
+                source,
+                TypeChecker(source_root=path.parent),
+            )
+        )
+        return
+    raise ValueError(f"Unknown backend '{backend}'")
 
 
 def _print_tokens(source: str, *, stdout: TextIO) -> None:
@@ -153,6 +198,15 @@ def _format_token(token: Token) -> str:
 
 def _print_ast(source: str, *, stdout: TextIO) -> None:
     print(pformat(parse_source(source), width=100, sort_dicts=False), file=stdout)
+
+
+def _emit_ir(source: str, *, path: Path, stdout: TextIO) -> None:
+    typed_program = prepare_typed_program(
+        source,
+        TypeChecker(source_root=path.parent),
+    )
+    module = IRBackend().lower_verified(typed_program)
+    print(print_ir(module), file=stdout)
 
 
 def _read_source(path: Path, *, stderr: TextIO) -> str | None:

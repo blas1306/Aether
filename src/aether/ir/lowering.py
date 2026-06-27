@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import NoReturn
 
 from .. import ast
+from ..errors import IRBackendUnsupportedFeatureError
 from ..types import AetherType
 from .model import (
     IRBasicBlock,
@@ -133,17 +134,16 @@ class IRLowerer:
 
         for statement in declaration.body:
             if self._is_terminated(context.block):
-                raise NotImplementedError(
-                    "IR lowering not implemented for statements after a terminated block"
-                )
+                self._fail("IR backend does not support statements after a terminated block yet.", statement)
             self._lower_statement(statement, context)
 
         if not self._is_terminated(context.block):
             if isinstance(signature.return_type, VoidType):
                 context.block.instructions.append(IRReturn())
             else:
-                raise NotImplementedError(
-                    f"IR lowering requires a direct return in function '{declaration.name}'"
+                self._fail(
+                    f"IR backend requires a direct return in function '{declaration.name}' yet.",
+                    declaration,
                 )
 
         return IRFunction(declaration.name, parameters, signature.return_type, blocks)
@@ -172,8 +172,9 @@ class IRLowerer:
             if slot is None:
                 parameter = context.parameters.get(statement.name)
                 if parameter is None:
-                    raise NotImplementedError(
-                        f"IR lowering not implemented for Assignment to '{statement.name}' outside local scope"
+                    self._fail(
+                        f"IR backend does not support assignment to '{statement.name}' outside local scope yet.",
+                        statement,
                     )
                 slot = IRValue(statement.name, parameter.type)
                 context.locals[statement.name] = slot
@@ -189,7 +190,7 @@ class IRLowerer:
         if isinstance(statement, ast.ReturnStatement):
             if statement.expression is None:
                 if not isinstance(context.return_type, VoidType):
-                    raise NotImplementedError("IR lowering cannot return void from a non-void function")
+                    self._fail("IR backend cannot return void from a non-void function.", statement)
                 context.block.instructions.append(IRReturn())
                 return
             value = self._lower_expression(statement.expression, context)
@@ -297,9 +298,7 @@ class IRLowerer:
     ) -> None:
         for statement in statements:
             if self._is_terminated(context.block):
-                raise NotImplementedError(
-                    "IR lowering not implemented for statements after a terminated block"
-                )
+                self._fail("IR backend does not support statements after a terminated block yet.", statement)
             self._lower_statement(statement, context)
 
     def _lower_expression(
@@ -319,8 +318,9 @@ class IRLowerer:
             parameter = context.parameters.get(expression.name)
             if parameter is not None:
                 return parameter
-            raise NotImplementedError(
-                f"IR lowering not implemented for Identifier '{expression.name}' outside local scope"
+            self._fail(
+                f"IR backend does not support identifier '{expression.name}' outside local scope yet.",
+                expression,
             )
 
         if isinstance(expression, ast.BinaryExpression):
@@ -406,15 +406,14 @@ class IRLowerer:
         if isinstance(left, StringType) and isinstance(right, StringType) and operator == "+":
             return StringType()
         if not isinstance(left, _NUMERIC_IR_TYPES) or not isinstance(right, _NUMERIC_IR_TYPES):
-            raise NotImplementedError(
-                f"IR lowering not implemented for BinaryExpression with operand types '{left}' and '{right}'"
+            self._fail(
+                f"IR backend does not support binary expressions with operand types '{left}' and '{right}' yet."
             )
         if operator == "%" and (
             not isinstance(left, _REAL_IR_TYPES) or not isinstance(right, _REAL_IR_TYPES)
         ):
-            raise NotImplementedError(
-                f"IR lowering not implemented for BinaryExpression operator '%' "
-                f"with operand types '{left}' and '{right}'"
+            self._fail(
+                f"IR backend does not support '%' with operand types '{left}' and '{right}' yet."
             )
         if operator == "/" and isinstance(left, IntType) and isinstance(right, IntType):
             return DoubleType()
@@ -430,25 +429,20 @@ class IRLowerer:
         if operator in {"lt", "le", "gt", "ge"}:
             if isinstance(left, IntType) and isinstance(right, IntType):
                 return BoolType()
-            raise NotImplementedError(
-                f"IR lowering not implemented for ordered comparison with operand types "
-                f"'{left}' and '{right}'"
+            self._fail(
+                f"IR backend does not support ordered comparison with operand types '{left}' and '{right}' yet."
             )
 
         if operator in {"eq", "ne"}:
             if left == right and isinstance(left, _EQUALITY_IR_TYPES):
                 return BoolType()
-            raise NotImplementedError(
-                f"IR lowering not implemented for equality comparison with operand types "
-                f"'{left}' and '{right}'"
+            self._fail(
+                f"IR backend does not support equality comparison with operand types '{left}' and '{right}' yet."
             )
 
-        raise NotImplementedError(
-            f"IR lowering not implemented for comparison operator '{operator}'"
-        )
+        self._fail(f"IR backend does not support comparison operator '{operator}' yet.")
 
-    @staticmethod
-    def _lower_type(type_name: AetherType | None) -> IRType:
+    def _lower_type(self, type_name: AetherType | None) -> IRType:
         if type_name == "int":
             return IntType()
         if type_name == "float":
@@ -463,13 +457,13 @@ class IRLowerer:
             return StringType()
         if type_name == "void":
             return VoidType()
-        raise NotImplementedError(f"IR lowering not implemented for type '{type_name}'")
+        self._fail(f"IR backend does not support type '{type_name}' yet.")
 
-    @staticmethod
-    def _require_same_type(actual: IRType, expected: IRType, operation: str) -> None:
+    def _require_same_type(self, actual: IRType, expected: IRType, operation: str) -> None:
         if actual != expected:
-            raise NotImplementedError(
-                f"IR lowering not implemented when {operation}: '{actual}' to '{expected}'"
+            self._fail(
+                f"IR backend does not support implicit conversion when {operation}: "
+                f"'{actual}' to '{expected}'."
             )
 
     @staticmethod
@@ -494,10 +488,54 @@ class IRLowerer:
 
     @staticmethod
     def _unsupported(node: object, detail: str | None = None) -> NoReturn:
-        suffix = f" ({detail})" if detail is not None else ""
-        raise NotImplementedError(
-            f"IR lowering not implemented for {type(node).__name__}{suffix}"
+        feature = _feature_name(node)
+        detail_text = f" ({detail})" if detail is not None else ""
+        line = getattr(node, "line", None)
+        column = getattr(node, "column", None)
+        raise IRBackendUnsupportedFeatureError(
+            f"IR backend does not support {feature}{detail_text} yet.",
+            line=line if isinstance(line, int) else None,
+            column=column if isinstance(column, int) else None,
         )
+
+    @staticmethod
+    def _fail(message: str, node: object | None = None) -> NoReturn:
+        line = getattr(node, "line", None)
+        column = getattr(node, "column", None)
+        raise IRBackendUnsupportedFeatureError(
+            message,
+            line=line if isinstance(line, int) else None,
+            column=column if isinstance(column, int) else None,
+        )
+
+
+def _feature_name(node: object) -> str:
+    names = {
+        "AliasDeclaration": "alias declarations",
+        "StructDeclaration": "struct declarations",
+        "ClassDeclaration": "class declarations",
+        "InterfaceDeclaration": "interface declarations",
+        "EnumDeclaration": "enum declarations",
+        "ExpressionFunctionDeclaration": "expression functions",
+        "VarDeclaration": "top-level variable declarations",
+        "ImportStatement": "imports",
+        "ExpressionStatement": "expression statements",
+        "DestructuringAssignment": "destructuring assignments",
+        "IndexAssignment": "index assignments",
+        "MatrixIndexAssignment": "matrix index assignments",
+        "FieldAssignment": "field assignments",
+        "ForInStatement": "for-in loops",
+        "BreakStatement": "break statements",
+        "ContinueStatement": "continue statements",
+        "ThrowStatement": "throw statements",
+        "TryCatchStatement": "try/catch statements",
+        "MatrixLiteral": "matrix literals",
+        "ArrayLiteral": "array literals",
+        "ListLiteral": "list literals",
+        "IndexExpression": "index expressions",
+        "FieldAccess": "field access",
+    }
+    return names.get(type(node).__name__, type(node).__name__)
 
 
 def lower_to_ir(program: ast.Program) -> IRModule:

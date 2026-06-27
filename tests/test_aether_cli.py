@@ -29,6 +29,86 @@ def test_executes_valid_file(tmp_path: Path) -> None:
     assert stderr == ""
 
 
+def test_default_backend_is_ast_for_file_execution(tmp_path: Path) -> None:
+    program = tmp_path / "default_ast.ae"
+    program.write_text('println("ast");\n', encoding="utf-8")
+
+    exit_code, stdout, stderr = run_cli([str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert stdout == "ast\n"
+    assert stderr == ""
+
+
+def test_backend_ast_matches_default_file_execution(tmp_path: Path) -> None:
+    program = tmp_path / "backend_ast.ae"
+    program.write_text('println("ast");\n', encoding="utf-8")
+
+    default_exit, default_stdout, default_stderr = run_cli([str(program)])
+    ast_exit, ast_stdout, ast_stderr = run_cli(["--backend=ast", str(program)])
+
+    assert (ast_exit, ast_stdout, ast_stderr) == (
+        default_exit,
+        default_stdout,
+        default_stderr,
+    )
+
+
+def test_backend_ir_executes_supported_subset(tmp_path: Path) -> None:
+    program = tmp_path / "backend_ir.ae"
+    program.write_text(
+        """
+int add(int a, int b) {
+    return a + b;
+}
+
+int main() {
+    return add(2, 3);
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--backend=ir", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert stdout == ""
+    assert stderr == ""
+
+
+def test_invalid_backend_reports_clear_usage_error(tmp_path: Path) -> None:
+    program = tmp_path / "invalid_backend.ae"
+    program.write_text('println("not reached");\n', encoding="utf-8")
+
+    exit_code, stdout, stderr = run_cli(["--backend=wat", str(program)])
+
+    assert exit_code == EXIT_USAGE_ERROR
+    assert stdout == ""
+    assert "invalid choice" in stderr
+    assert "wat" in stderr
+
+
+def test_backend_ir_unsupported_feature_reports_without_traceback(tmp_path: Path) -> None:
+    program = tmp_path / "unsupported_ir.ae"
+    program.write_text("class Counter { int value; }\n", encoding="utf-8")
+
+    exit_code, stdout, stderr = run_cli(["--backend=ir", str(program)])
+
+    assert exit_code == EXIT_LANGUAGE_ERROR
+    assert stdout == ""
+    assert "IR backend does not support class declarations yet." in stderr
+    assert "Supported IR backend subset:" in stderr
+    assert "Traceback" not in stderr
+
+
+def test_repl_rejects_ir_backend_for_now() -> None:
+    exit_code, stdout, stderr = run_cli(["--backend=ir", "--repl"])
+
+    assert exit_code == EXIT_USAGE_ERROR
+    assert stdout == ""
+    assert "--repl only supports --backend=ast" in stderr
+
+
 def test_missing_file_reports_read_error(tmp_path: Path) -> None:
     missing = tmp_path / "missing.ae"
 
@@ -49,6 +129,8 @@ def test_help_describes_direct_execution_and_tools() -> None:
     assert "--repl" in stdout
     assert "--tokens" in stdout
     assert "--ast" in stdout
+    assert "--backend" in stdout
+    assert "--emit-ir" in stdout
     assert stderr == ""
 
 
@@ -84,6 +166,60 @@ def test_ast_prints_parsed_program(tmp_path: Path) -> None:
     assert "VarDeclaration(" in stdout
     assert "name='x'" in stdout
     assert stderr == ""
+
+
+def test_emit_ir_prints_verified_ir(tmp_path: Path) -> None:
+    program = tmp_path / "emit_ir.ae"
+    program.write_text(
+        """
+int add(int a, int b) {
+    return a + b;
+}
+
+int main() {
+    return add(2, 3);
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-ir", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert "func @add" in stdout
+    assert "func @main" in stdout
+    assert "call @add" in stdout
+    assert stderr == ""
+
+
+def test_backend_ir_with_emit_ir_prints_ir_without_execution(tmp_path: Path) -> None:
+    program = tmp_path / "backend_emit_ir.ae"
+    program.write_text(
+        """
+int main() {
+    return 42;
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--backend=ir", "--emit-ir", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert "func @main" in stdout
+    assert stderr == ""
+
+
+def test_emit_ir_unsupported_feature_reports_clear_error(tmp_path: Path) -> None:
+    program = tmp_path / "emit_ir_unsupported.ae"
+    program.write_text("class Counter { int value; }\n", encoding="utf-8")
+
+    exit_code, stdout, stderr = run_cli(["--emit-ir", str(program)])
+
+    assert exit_code == EXIT_LANGUAGE_ERROR
+    assert stdout == ""
+    assert "IR backend does not support class declarations yet." in stderr
+    assert "Traceback" not in stderr
 
 
 def test_repl_uses_persistent_session() -> None:

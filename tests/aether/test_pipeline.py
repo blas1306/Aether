@@ -2,16 +2,19 @@ from __future__ import annotations
 
 import pytest
 
+from aether.errors import IRBackendUnsupportedFeatureError
 from aether.interpreter import Interpreter
 from aether.pipeline import (
     ASTBackend,
     IRBackend,
+    IR_MAIN_RESULT_NAME,
     execute_pipeline,
     parse_source,
     prepare_typed_program,
     run_ast_backend,
     typecheck_program,
 )
+from aether.runner import run_aether
 from aether.typechecker import TypeChecker
 
 
@@ -63,10 +66,10 @@ def test_ast_backend_runs_prepared_typed_program() -> None:
     assert interpreter.output == "21\n"
 
 
-def test_ir_backend_is_lowering_only_and_not_public_execution() -> None:
+def test_ir_backend_runs_prepared_typed_program() -> None:
     typed_program = prepare_typed_program(
         """
-int answer() {
+int main() {
     return 42;
 }
 """,
@@ -74,8 +77,129 @@ int answer() {
     )
     backend = IRBackend()
 
-    module = backend.lower(typed_program)
+    env = backend.run(typed_program)
 
-    assert module.functions[0].name == "answer"
-    with pytest.raises(NotImplementedError, match="experimental"):
-        backend.run(typed_program)
+    assert env.values[IR_MAIN_RESULT_NAME].value == 42
+
+
+def test_ir_backend_verifies_before_interpreting() -> None:
+    typed_program = prepare_typed_program(
+        """
+int main() {
+    return 42;
+}
+""",
+        TypeChecker(),
+    )
+    calls = []
+
+    class RecordingIRBackend(IRBackend):
+        def verify(self, module):
+            calls.append([function.name for function in module.functions])
+            return super().verify(module)
+
+    RecordingIRBackend().run(typed_program)
+
+    assert calls == [["main"]]
+
+
+def test_ir_backend_does_not_change_ast_backend() -> None:
+    typed_program = prepare_typed_program(
+        "value = 8 + 13; println(value);",
+        TypeChecker(),
+    )
+    interpreter = Interpreter()
+
+    env = ASTBackend(interpreter).run(typed_program)
+
+    assert env.values["value"].value == 21
+    assert interpreter.output == "21\n"
+
+
+@pytest.mark.parametrize(
+    ("source", "call"),
+    [
+        (
+            """
+int add(int a, int b) {
+    return a + b;
+}
+int main() {
+    return add(2, 3);
+}
+""",
+            "main()",
+        ),
+        (
+            """
+int main() {
+    int x = 2;
+    int y = 3;
+    return x * y;
+}
+""",
+            "main()",
+        ),
+        (
+            """
+int main() {
+    int x = -4;
+    if x < 0 {
+        return 0 - x;
+    } else {
+        return x;
+    }
+}
+""",
+            "main()",
+        ),
+        (
+            """
+int sumTo(int n) {
+    int i = 0;
+    int sum = 0;
+    while i <= n {
+        sum = sum + i;
+        i = i + 1;
+    }
+    return sum;
+}
+int main() {
+    return sumTo(5);
+}
+""",
+            "main()",
+        ),
+        (
+            """
+int increment(int value) {
+    return value + 1;
+}
+int doubleIncrement(int value) {
+    return increment(increment(value));
+}
+int main() {
+    return doubleIncrement(10);
+}
+""",
+            "main()",
+        ),
+    ],
+)
+def test_ir_backend_matches_ast_for_supported_subset(source: str, call: str) -> None:
+    typed_program = prepare_typed_program(source, TypeChecker())
+    ir_env = IRBackend().run(typed_program)
+
+    ast_result = run_aether(f"{source}\nobserved = {call};")
+
+    assert ir_env.values[IR_MAIN_RESULT_NAME].value == ast_result.env["observed"].value
+
+
+def test_ir_backend_reports_unsupported_features_clearly() -> None:
+    typed_program = prepare_typed_program(
+        "class Counter { int value; }",
+        TypeChecker(),
+    )
+
+    with pytest.raises(IRBackendUnsupportedFeatureError, match="class declarations"):
+        IRBackend().run(typed_program)
