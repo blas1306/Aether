@@ -17,16 +17,20 @@ Aether throughout this work.
 
 The `aether.ir` package now contains the initial typed IR data model, a
 deterministic debug printer, an IR verifier, and a minimal IR interpreter in
-Python. This infrastructure is intentionally isolated from the current language
-pipeline: initial AST-to-IR lowering is available together with developer APIs
-for verification and interpretation, but there is no optimization or CLI
-integration yet.
+Python. The public execution path still uses the AST interpreter, but the
+internal pipeline now has an explicit frontend/backend boundary: source is
+tokenized, parsed, and typechecked into a checked program before a backend runs
+it. The production backend is the AST backend. An IR backend placeholder exists
+only as experimental infrastructure; there is no optimization, public
+`--backend=ir` option, or CLI integration yet.
 
 ### Initial lowering implementation
 
 `aether.ir.lowering.IRLowerer` lowers an already typechecked `ast.Program` to
 an `IRModule`. It is an explicit developer API and is not connected to the
-main pipeline or CLI. It does not invoke the typechecker itself.
+public CLI. The main pipeline can prepare the same checked program boundary,
+but IR lowering remains an experimental backend concern and does not invoke the
+typechecker itself.
 
 The currently supported lowering subset is deliberately small:
 
@@ -66,7 +70,7 @@ unsupported lowering case. Current limitations include:
 - No SSA conversion, phi nodes, or optimizations.
 - No builtin calls, keyword arguments, or expression functions.
 - No implicit conversion instructions.
-- No optimizer or main-pipeline execution path.
+- No optimizer or public IR execution path.
 
 The checked AST remains the existing immutable source AST rather than a new
 annotated tree. For this subset, declaration, parameter, literal, and function
@@ -78,8 +82,8 @@ typechecker inside the lowerer.
 
 `aether.ir.interpreter.IRInterpreter` executes an `IRModule` through the
 explicit developer API `IRInterpreter(module).call(function_name, arguments)`.
-It remains outside the main pipeline and CLI; the current AST interpreter is
-still Aether's default runtime and semantic reference.
+It remains outside public pipeline selection and CLI execution; the current AST
+interpreter is still Aether's default runtime and semantic reference.
 
 The currently executable subset is:
 
@@ -114,7 +118,7 @@ the production execution pipeline remain intentionally unsupported.
 developer API `IRVerifier(module).verify()`. It returns the module unchanged on
 success and raises `IRVerificationError` with a direct diagnostic on the first
 inconsistency found. Like lowering and the IR interpreter, it is not connected
-to the main pipeline or CLI.
+to public pipeline selection or CLI execution.
 
 The initial verifier checks the executable subset currently represented by the
 Python IR model:
