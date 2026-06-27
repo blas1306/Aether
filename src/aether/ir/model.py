@@ -48,6 +48,14 @@ class IRBinaryOp(IRInstruction):
 
 
 @dataclass(frozen=True)
+class IRCompareOp(IRInstruction):
+    result: IRValue
+    operator: str
+    left: IRValue
+    right: IRValue
+
+
+@dataclass(frozen=True)
 class IRCall(IRInstruction):
     function: str
     arguments: tuple[IRValue, ...] = ()

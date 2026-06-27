@@ -13,6 +13,7 @@ from aether.ir import (
     IRBasicBlock,
     IRBinaryOp,
     IRBranch,
+    IRCompareOp,
     IRConst,
     IRFunction,
     IRJump,
@@ -160,7 +161,7 @@ def test_pretty_print_while_with_mutable_slot_and_jump() -> None:
                         "loop.condition",
                         [
                             IRLoad(current, counter),
-                            IRBinaryOp(condition, "lt", current, zero),
+                            IRCompareOp(condition, "lt", current, zero),
                             IRBranch(condition, "loop.body", "loop.exit"),
                         ],
                     ),
@@ -180,7 +181,7 @@ def test_pretty_print_while_with_mutable_slot_and_jump() -> None:
         "\n"
         "loop.condition:\n"
         "    %1: int = load %counter\n"
-        "    %2: bool = lt %1, %0\n"
+        "    %2: bool = cmp_lt %1, %0\n"
         "    branch %2, loop.body, loop.exit\n"
         "\n"
         "loop.body:\n"

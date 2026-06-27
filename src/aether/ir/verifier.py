@@ -8,6 +8,7 @@ from .model import (
     IRBinaryOp,
     IRBranch,
     IRCall,
+    IRCompareOp,
     IRConst,
     IRFunction,
     IRInstruction,
@@ -312,6 +313,17 @@ class IRVerifier:
             )
             return self._define_value(state, instruction.result)
 
+        if isinstance(instruction, IRCompareOp):
+            self._require_defined(instruction.left, state, value_types)
+            self._require_defined(instruction.right, state, value_types)
+            result_type = self._compare_result_type(instruction)
+            self._require_type(
+                instruction.result.type,
+                result_type,
+                f"Compare op '{instruction.operator}' result type mismatch",
+            )
+            return self._define_value(state, instruction.result)
+
         if isinstance(instruction, IRCall):
             self._verify_call(instruction, state, value_types)
             if instruction.result is None:
@@ -544,6 +556,32 @@ class IRVerifier:
 
         self._fail(f"Unsupported binary operator '{operator}'")
 
+    def _compare_result_type(self, instruction: IRCompareOp) -> IRType:
+        left = instruction.left.type
+        right = instruction.right.type
+        operator = instruction.operator
+
+        if operator in {"lt", "le", "gt", "ge"}:
+            if not isinstance(left, IntType) or not isinstance(right, IntType):
+                self._fail(
+                    f"Compare op '{operator}' requires int operands, got {left} and {right}"
+                )
+            return BoolType()
+
+        if operator in {"eq", "ne"}:
+            if left != right:
+                self._fail(
+                    f"Compare op '{operator}' requires compatible operands, "
+                    f"got {left} and {right}"
+                )
+            if not isinstance(left, (IntType, BoolType, StringType)):
+                self._fail(
+                    f"Compare op '{operator}' does not support operands of type {left}"
+                )
+            return BoolType()
+
+        self._fail(f"Unsupported compare operator '{operator}'")
+
     def _require_defined(
         self,
         value: IRValue,
@@ -588,7 +626,7 @@ class IRVerifier:
 
     @staticmethod
     def _instruction_result(instruction: IRInstruction) -> IRValue | None:
-        if isinstance(instruction, (IRConst, IRLoad, IRBinaryOp)):
+        if isinstance(instruction, (IRConst, IRLoad, IRBinaryOp, IRCompareOp)):
             return instruction.result
         if isinstance(instruction, IRCall):
             return instruction.result

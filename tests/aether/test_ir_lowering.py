@@ -6,6 +6,7 @@ from aether.ir import (
     BoolType,
     IRBinaryOp,
     IRCall,
+    IRCompareOp,
     IRConst,
     IRLoad,
     IRLowerer,
@@ -150,6 +151,68 @@ int twiceIncrement(int value) {
     assert module.functions[1].blocks[0].instructions[-1] == IRReturn(calls[1].result)
 
 
+@pytest.mark.parametrize(
+    ("source", "operator", "parameter_types"),
+    [
+        ("boolean compare(int a, int b) { return a < b; }", "lt", [IntType(), IntType()]),
+        ("boolean compare(int a, int b) { return a <= b; }", "le", [IntType(), IntType()]),
+        ("boolean compare(int a, int b) { return a > b; }", "gt", [IntType(), IntType()]),
+        ("boolean compare(int a, int b) { return a >= b; }", "ge", [IntType(), IntType()]),
+        ("boolean compare(int a, int b) { return a == b; }", "eq", [IntType(), IntType()]),
+        ("boolean compare(int a, int b) { return a != b; }", "ne", [IntType(), IntType()]),
+        ("boolean compare(boolean a, boolean b) { return a == b; }", "eq", [BoolType(), BoolType()]),
+        ("boolean compare(boolean a, boolean b) { return a != b; }", "ne", [BoolType(), BoolType()]),
+        ("boolean compare(string a, string b) { return a == b; }", "eq", [StringType(), StringType()]),
+        ("boolean compare(string a, string b) { return a != b; }", "ne", [StringType(), StringType()]),
+    ],
+)
+def test_lower_simple_comparison(
+    source: str,
+    operator: str,
+    parameter_types: list[object],
+) -> None:
+    module = _lower(source)
+
+    function = module.functions[0]
+    comparison, terminator = function.blocks[0].instructions
+
+    assert function.return_type == BoolType()
+    assert [parameter.type for parameter in function.parameters] == parameter_types
+    assert comparison == IRCompareOp(
+        comparison.result,
+        operator,
+        function.parameters[0],
+        function.parameters[1],
+    )
+    assert comparison.result.type == BoolType()
+    assert terminator == IRReturn(comparison.result)
+
+
+def test_lower_comparison_used_as_call_argument() -> None:
+    module = _lower(
+        """
+boolean identity(boolean value) {
+    return value;
+}
+
+boolean less(int a, int b) {
+    return identity(a < b);
+}
+"""
+    )
+
+    comparison, call, terminator = module.functions[1].blocks[0].instructions
+
+    assert comparison == IRCompareOp(
+        comparison.result,
+        "lt",
+        module.functions[1].parameters[0],
+        module.functions[1].parameters[1],
+    )
+    assert call == IRCall("identity", (comparison.result,), call.result)
+    assert terminator == IRReturn(call.result)
+
+
 def test_pretty_print_lowered_ir() -> None:
     module = _lower(
         """
@@ -163,6 +226,24 @@ int add(int a, int b) {
         "func @add(%a: int, %b: int) -> int {\n"
         "entry:\n"
         "    %0: int = add %a, %b\n"
+        "    return %0\n"
+        "}"
+    )
+
+
+def test_pretty_print_lowered_comparison_ir() -> None:
+    module = _lower(
+        """
+boolean less(int a, int b) {
+    return a < b;
+}
+"""
+    )
+
+    assert print_ir(module) == (
+        "func @less(%a: int, %b: int) -> bool {\n"
+        "entry:\n"
+        "    %0: bool = cmp_lt %a, %b\n"
         "    return %0\n"
         "}"
     )

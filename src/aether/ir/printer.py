@@ -8,6 +8,7 @@ from .model import (
     IRBinaryOp,
     IRBranch,
     IRCall,
+    IRCompareOp,
     IRConst,
     IRFunction,
     IRInstruction,
@@ -53,6 +54,11 @@ class IRPrinter:
         if isinstance(instruction, IRBinaryOp):
             return (
                 f"{self._typed_value(instruction.result)} = {instruction.operator} "
+                f"{self._value(instruction.left)}, {self._value(instruction.right)}"
+            )
+        if isinstance(instruction, IRCompareOp):
+            return (
+                f"{self._typed_value(instruction.result)} = cmp_{instruction.operator} "
                 f"{self._value(instruction.left)}, {self._value(instruction.right)}"
             )
         if isinstance(instruction, IRCall):

@@ -7,6 +7,7 @@ from typing import Any, NoReturn, Sequence
 from .model import (
     IRBinaryOp,
     IRCall,
+    IRCompareOp,
     IRConst,
     IRFunction,
     IRInstruction,
@@ -104,6 +105,16 @@ class IRInterpreter:
             )
             return False, None
 
+        if isinstance(instruction, IRCompareOp):
+            left = self._value(instruction.left, frame)
+            right = self._value(instruction.right, frame)
+            frame.values[instruction.result] = self._compare(
+                instruction.operator,
+                left,
+                right,
+            )
+            return False, None
+
         if isinstance(instruction, IRCall):
             arguments = [
                 self._value(argument, frame) for argument in instruction.arguments
@@ -150,5 +161,25 @@ class IRInterpreter:
         IRInterpreter._unsupported_binary(operator)
 
     @staticmethod
+    def _compare(operator: str, left: Any, right: Any) -> bool:
+        if operator == "lt":
+            return left < right
+        if operator == "le":
+            return left <= right
+        if operator == "gt":
+            return left > right
+        if operator == "ge":
+            return left >= right
+        if operator == "eq":
+            return left == right
+        if operator == "ne":
+            return left != right
+        IRInterpreter._unsupported_compare(operator)
+
+    @staticmethod
     def _unsupported_binary(operator: str) -> NoReturn:
         raise IRExecutionError(f"IR binary operation '{operator}' is not supported")
+
+    @staticmethod
+    def _unsupported_compare(operator: str) -> NoReturn:
+        raise IRExecutionError(f"IR compare operation '{operator}' is not supported")

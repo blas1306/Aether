@@ -11,6 +11,7 @@ from aether.ir import (
     IRBinaryOp,
     IRBranch,
     IRCall,
+    IRCompareOp,
     IRConst,
     IRFunction,
     IRJump,
@@ -79,6 +80,27 @@ int twiceIncrement(int value) {
 }
 """
     )
+
+    assert IRVerifier(module).verify() is module
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "boolean compare(int a, int b) { return a < b; }",
+        "boolean compare(int a, int b) { return a <= b; }",
+        "boolean compare(int a, int b) { return a > b; }",
+        "boolean compare(int a, int b) { return a >= b; }",
+        "boolean compare(int a, int b) { return a == b; }",
+        "boolean compare(int a, int b) { return a != b; }",
+        "boolean compare(boolean a, boolean b) { return a == b; }",
+        "boolean compare(boolean a, boolean b) { return a != b; }",
+        "boolean compare(string a, string b) { return a == b; }",
+        "boolean compare(string a, string b) { return a != b; }",
+    ],
+)
+def test_verifies_lowered_comparison_function(source: str) -> None:
+    module = _lower(source)
 
     assert IRVerifier(module).verify() is module
 
@@ -388,6 +410,133 @@ def test_binary_op_incompatible_operand_error() -> None:
         module,
         "Binary op 'add' requires compatible operands, got int and string",
     )
+
+
+def test_compare_op_int_less_than_string_error() -> None:
+    left = IRParameter("left", IntType())
+    right = IRParameter("right", StringType())
+    result = IRValue("0", BoolType())
+    module = IRModule(
+        [
+            IRFunction(
+                "broken",
+                [left, right],
+                BoolType(),
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [IRCompareOp(result, "lt", left, right), IRReturn(result)],
+                    )
+                ],
+            )
+        ]
+    )
+
+    _assert_verification_error(
+        module,
+        "Compare op 'lt' requires int operands, got int and string",
+    )
+
+
+def test_compare_op_bool_less_than_bool_error() -> None:
+    left = IRParameter("left", BoolType())
+    right = IRParameter("right", BoolType())
+    result = IRValue("0", BoolType())
+    module = IRModule(
+        [
+            IRFunction(
+                "broken",
+                [left, right],
+                BoolType(),
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [IRCompareOp(result, "lt", left, right), IRReturn(result)],
+                    )
+                ],
+            )
+        ]
+    )
+
+    _assert_verification_error(
+        module,
+        "Compare op 'lt' requires int operands, got bool and bool",
+    )
+
+
+def test_compare_op_string_less_than_string_error() -> None:
+    left = IRParameter("left", StringType())
+    right = IRParameter("right", StringType())
+    result = IRValue("0", BoolType())
+    module = IRModule(
+        [
+            IRFunction(
+                "broken",
+                [left, right],
+                BoolType(),
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [IRCompareOp(result, "lt", left, right), IRReturn(result)],
+                    )
+                ],
+            )
+        ]
+    )
+
+    _assert_verification_error(
+        module,
+        "Compare op 'lt' requires int operands, got string and string",
+    )
+
+
+def test_compare_op_result_type_must_be_bool_error() -> None:
+    left = IRParameter("left", IntType())
+    right = IRParameter("right", IntType())
+    result = IRValue("0", IntType())
+    module = IRModule(
+        [
+            IRFunction(
+                "broken",
+                [left, right],
+                IntType(),
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [IRCompareOp(result, "lt", left, right), IRReturn(result)],
+                    )
+                ],
+            )
+        ]
+    )
+
+    _assert_verification_error(
+        module,
+        "Compare op 'lt' result type mismatch: expected bool, got int",
+    )
+
+
+def test_compare_op_unknown_operator_error() -> None:
+    left = IRParameter("left", IntType())
+    right = IRParameter("right", IntType())
+    result = IRValue("0", BoolType())
+    module = IRModule(
+        [
+            IRFunction(
+                "broken",
+                [left, right],
+                BoolType(),
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [IRCompareOp(result, "unknown", left, right), IRReturn(result)],
+                    )
+                ],
+            )
+        ]
+    )
+
+    _assert_verification_error(module, "Unsupported compare operator 'unknown'")
 
 
 def test_branch_condition_must_be_bool_error() -> None:

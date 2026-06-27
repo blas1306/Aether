@@ -3,10 +3,12 @@ from __future__ import annotations
 import pytest
 
 from aether.ir import (
+    BoolType,
     DoubleType,
     IRBasicBlock,
     IRBinaryOp,
     IRCall,
+    IRCompareOp,
     IRConst,
     IRExecutionError,
     IRFunction,
@@ -171,6 +173,67 @@ def test_execute_lowered_literals_and_remainder(
 
 
 @pytest.mark.parametrize(
+    ("source", "function_name", "arguments", "expected"),
+    [
+        ("boolean compare(int a, int b) { return a < b; }", "compare", [1, 2], True),
+        ("boolean compare(int a, int b) { return a <= b; }", "compare", [2, 2], True),
+        ("boolean compare(int a, int b) { return a > b; }", "compare", [3, 2], True),
+        ("boolean compare(int a, int b) { return a >= b; }", "compare", [2, 2], True),
+        ("boolean compare(int a, int b) { return a == b; }", "compare", [2, 2], True),
+        ("boolean compare(int a, int b) { return a != b; }", "compare", [2, 3], True),
+        (
+            "boolean compare(boolean a, boolean b) { return a == b; }",
+            "compare",
+            [True, True],
+            True,
+        ),
+        (
+            "boolean compare(boolean a, boolean b) { return a != b; }",
+            "compare",
+            [True, False],
+            True,
+        ),
+        (
+            'boolean compare(string a, string b) { return a == b; }',
+            "compare",
+            ["Aether", "Aether"],
+            True,
+        ),
+        (
+            'boolean compare(string a, string b) { return a != b; }',
+            "compare",
+            ["Aether", "IR"],
+            True,
+        ),
+    ],
+)
+def test_execute_lowered_comparisons(
+    source: str,
+    function_name: str,
+    arguments: list[object],
+    expected: object,
+) -> None:
+    assert IRInterpreter(_lower(source)).call(function_name, arguments) == expected
+
+
+def test_execute_lowered_comparison_used_as_call_argument() -> None:
+    module = _lower(
+        """
+boolean identity(boolean value) {
+    return value;
+}
+
+boolean less(int a, int b) {
+    return identity(a < b);
+}
+"""
+    )
+
+    assert IRInterpreter(module).call("less", [1, 2]) is True
+    assert IRInterpreter(module).call("less", [2, 1]) is False
+
+
+@pytest.mark.parametrize(
     ("source", "function_name", "arguments", "call"),
     [
         (
@@ -282,6 +345,33 @@ def test_unsupported_binary_operation_error() -> None:
     )
 
     with pytest.raises(IRExecutionError, match="binary operation 'lt' is not supported"):
+        IRInterpreter(module).call("compare", [1, 2])
+
+
+def test_unsupported_compare_operation_error() -> None:
+    left = IRParameter("left", IntType())
+    right = IRParameter("right", IntType())
+    result = IRValue("0", BoolType())
+    module = IRModule(
+        [
+            IRFunction(
+                "compare",
+                [left, right],
+                BoolType(),
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [
+                            IRCompareOp(result, "unknown", left, right),
+                            IRReturn(result),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+
+    with pytest.raises(IRExecutionError, match="compare operation 'unknown' is not supported"):
         IRInterpreter(module).call("compare", [1, 2])
 
 

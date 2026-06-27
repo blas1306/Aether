@@ -9,6 +9,7 @@ from .model import (
     IRBasicBlock,
     IRBinaryOp,
     IRCall,
+    IRCompareOp,
     IRConst,
     IRFunction,
     IRLoad,
@@ -37,8 +38,17 @@ _BINARY_OPERATORS = {
     "/": "div",
     "%": "rem",
 }
+_COMPARE_OPERATORS = {
+    "<": "lt",
+    "<=": "le",
+    ">": "gt",
+    ">=": "ge",
+    "==": "eq",
+    "!=": "ne",
+}
 _NUMERIC_IR_TYPES = (IntType, FloatType, DoubleType, ComplexType)
 _REAL_IR_TYPES = (IntType, FloatType, DoubleType)
+_EQUALITY_IR_TYPES = (IntType, BoolType, StringType)
 
 
 @dataclass(frozen=True)
@@ -172,14 +182,26 @@ class IRLowerer:
             )
 
         if isinstance(expression, ast.BinaryExpression):
-            operator = _BINARY_OPERATORS.get(expression.operator)
-            if operator is None:
+            binary_operator = _BINARY_OPERATORS.get(expression.operator)
+            compare_operator = _COMPARE_OPERATORS.get(expression.operator)
+            if binary_operator is None and compare_operator is None:
                 self._unsupported(expression, f"operator '{expression.operator}'")
             left = self._lower_expression(expression.left, context)
             right = self._lower_expression(expression.right, context)
+            if compare_operator is not None:
+                result_type = self._comparison_result_type(
+                    compare_operator,
+                    left.type,
+                    right.type,
+                )
+                result = context.temporary(result_type)
+                context.block.instructions.append(
+                    IRCompareOp(result, compare_operator, left, right)
+                )
+                return result
             result_type = self._binary_result_type(expression.operator, left.type, right.type)
             result = context.temporary(result_type)
-            context.block.instructions.append(IRBinaryOp(result, operator, left, right))
+            context.block.instructions.append(IRBinaryOp(result, binary_operator, left, right))
             return result
 
         if isinstance(expression, ast.UnaryExpression):
@@ -261,6 +283,27 @@ class IRLowerer:
         if isinstance(left, FloatType) or isinstance(right, FloatType):
             return FloatType()
         return IntType()
+
+    def _comparison_result_type(self, operator: str, left: IRType, right: IRType) -> IRType:
+        if operator in {"lt", "le", "gt", "ge"}:
+            if isinstance(left, IntType) and isinstance(right, IntType):
+                return BoolType()
+            raise NotImplementedError(
+                f"IR lowering not implemented for ordered comparison with operand types "
+                f"'{left}' and '{right}'"
+            )
+
+        if operator in {"eq", "ne"}:
+            if left == right and isinstance(left, _EQUALITY_IR_TYPES):
+                return BoolType()
+            raise NotImplementedError(
+                f"IR lowering not implemented for equality comparison with operand types "
+                f"'{left}' and '{right}'"
+            )
+
+        raise NotImplementedError(
+            f"IR lowering not implemented for comparison operator '{operator}'"
+        )
 
     @staticmethod
     def _lower_type(type_name: AetherType | None) -> IRType:

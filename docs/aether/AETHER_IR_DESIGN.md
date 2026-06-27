@@ -35,6 +35,9 @@ The currently supported lowering subset is deliberately small:
 - Explicitly declared local variables with simple initializers.
 - `int`, `boolean`, and `string` literals.
 - Arithmetic `+`, `-`, `*`, `/`, and `%`.
+- Comparisons lowered to `IRCompareOp`: ordered integer comparisons
+  `<`, `<=`, `>`, and `>=`; equality comparisons `==` and `!=` for `int`,
+  `boolean`, and `string`.
 - Unary minus, currently lowered as a typed zero followed by `sub`.
 - Direct `return`, including bare return in `void` functions.
 - Positional calls to user-defined functions in the same program when no
@@ -45,10 +48,14 @@ values. Local variables use named slots represented by `IRValue`, with
 `IRStore` on declaration and `IRLoad` on reads. Expressions produce numbered
 temporaries in deterministic source evaluation order.
 
+Comparison results are always `bool` in IR. The current lowering does not use
+comparisons to lower control flow yet; they are expression values only.
+
 Unsupported syntax raises a clear `NotImplementedError` naming the AST node or
 unsupported lowering case. Current limitations include:
 
-- No `if`/`else`, loops, assignments after declaration, or multiple blocks.
+- No `if`/`else`, `while`, other loops, assignments after declaration, or
+  multiple blocks.
 - No structs, classes, interfaces, constructors, methods, or fields.
 - No lists, arrays, nullable values, imports, or packages.
 - No builtin calls, keyword arguments, or expression functions.
@@ -73,10 +80,13 @@ The currently executable subset is:
 - Functions selected by name, positional arguments, and a fresh local frame
   for every call.
 - One `entry` basic block per function.
-- `IRConst`, `IRLoad`, `IRStore`, `IRBinaryOp`, `IRCall`, and `IRReturn`.
+- `IRConst`, `IRLoad`, `IRStore`, `IRBinaryOp`, `IRCompareOp`, `IRCall`, and
+  `IRReturn`.
 - Raw `int`, `boolean`, and `string` scalar values.
 - `add`, `sub`, `mul`, `div`, and remainder operations. The interpreter
   accepts `rem`, emitted by the current lowering, and `mod` as an alias.
+- `cmp_lt`, `cmp_le`, `cmp_gt`, `cmp_ge`, `cmp_eq`, and `cmp_ne` over the
+  scalar types accepted by the current verifier.
 - Calls between user-defined IR functions in the same module.
 - Mutable local slots, including errors on loads before initialization.
 - Value returns and bare `void` returns.
@@ -114,8 +124,10 @@ Python IR model:
 - Local slots are inferred from `store` destinations in the current model;
   loads from unknown slots or loads before a definitely preceding store are
   rejected.
-- `IRBinaryOp` operand compatibility and declared result types for arithmetic,
-  comparisons, and simple boolean operations.
+- `IRBinaryOp` operand compatibility and declared result types for arithmetic.
+- `IRCompareOp` operand compatibility and declared `bool` result types for
+  ordered integer comparisons and equality over `int`, `boolean`, and
+  `string`.
 - Return values must match the function return type; non-void functions must
   return on all evident paths from `entry`.
 - Calls must target functions in the same module, use the right arity, pass
