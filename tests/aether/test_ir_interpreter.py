@@ -290,6 +290,75 @@ int f(int x) {
     assert interpreter.call("f", [-1]) == 2
 
 
+def test_execute_lowered_sum_to_loop() -> None:
+    module = _lower(
+        """
+int sumTo(int n) {
+    int i = 0;
+    int sum = 0;
+
+    while i < n {
+        sum = sum + i;
+        i = i + 1;
+    }
+
+    return sum;
+}
+"""
+    )
+
+    interpreter = IRInterpreter(module)
+    assert interpreter.call("sumTo", [5]) == 10
+    assert interpreter.call("sumTo", [0]) == 0
+
+
+def test_execute_lowered_countdown_loop() -> None:
+    module = _lower(
+        """
+int countdown(int n) {
+    while n > 0 {
+        n = n - 1;
+    }
+
+    return n;
+}
+"""
+    )
+
+    assert IRInterpreter(module).call("countdown", [10]) == 0
+
+
+def test_execute_lowered_while_without_iterations() -> None:
+    module = _lower(
+        """
+int skip(int n) {
+    while n < 0 {
+        n = n + 1;
+    }
+
+    return n;
+}
+"""
+    )
+
+    assert IRInterpreter(module).call("skip", [7]) == 7
+
+
+def test_execute_lowered_while_with_empty_body() -> None:
+    module = _lower(
+        """
+int emptyLoop(int n) {
+    while n < 0 {
+    }
+
+    return n;
+}
+"""
+    )
+
+    assert IRInterpreter(module).call("emptyLoop", [0]) == 0
+
+
 @pytest.mark.parametrize(
     ("source", "function_name", "arguments", "call"),
     [
@@ -367,6 +436,52 @@ int f(int x) {
             "f",
             [5],
             "f(5)",
+        ),
+        (
+            """
+int sumTo(int n) {
+    int i = 0;
+    int sum = 0;
+
+    while i < n {
+        sum = sum + i;
+        i = i + 1;
+    }
+
+    return sum;
+}
+""",
+            "sumTo",
+            [5],
+            "sumTo(5)",
+        ),
+        (
+            """
+int countdown(int n) {
+    while n > 0 {
+        n = n - 1;
+    }
+
+    return n;
+}
+""",
+            "countdown",
+            [10],
+            "countdown(10)",
+        ),
+        (
+            """
+int skip(int n) {
+    while n < 0 {
+        n = n + 1;
+    }
+
+    return n;
+}
+""",
+            "skip",
+            [7],
+            "skip(7)",
         ),
     ],
 )

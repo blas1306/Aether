@@ -384,20 +384,115 @@ int f(int x) {
     )
 
 
+def test_lower_while_loop() -> None:
+    module = _lower(
+        """
+int sumTo(int n) {
+    int i = 0;
+    int sum = 0;
+
+    while i < n {
+        sum = sum + i;
+        i = i + 1;
+    }
+
+    return sum;
+}
+"""
+    )
+
+    function = module.functions[0]
+    assert [block.name for block in function.blocks] == [
+        "entry",
+        "cond0",
+        "body0",
+        "exit0",
+    ]
+
+    assert function.blocks[0].instructions[-1] == IRJump("cond0")
+    assert isinstance(function.blocks[1].instructions[-1], IRBranch)
+    assert function.blocks[1].instructions[-1].true_target == "body0"
+    assert function.blocks[1].instructions[-1].false_target == "exit0"
+    assert function.blocks[2].instructions[-1] == IRJump("cond0")
+    assert isinstance(function.blocks[3].instructions[-1], IRReturn)
+
+
+def test_lower_while_with_empty_body() -> None:
+    module = _lower(
+        """
+int emptyLoop(int n) {
+    while n < 0 {
+    }
+
+    return n;
+}
+"""
+    )
+
+    function = module.functions[0]
+    assert [block.name for block in function.blocks] == [
+        "entry",
+        "cond0",
+        "body0",
+        "exit0",
+    ]
+    assert function.blocks[0].instructions == [IRJump("cond0")]
+    assert function.blocks[2].instructions == [IRJump("cond0")]
+    assert function.blocks[3].instructions == [IRReturn(function.parameters[0])]
+
+
+def test_pretty_print_lowered_while_loop() -> None:
+    module = _lower(
+        """
+int sumTo(int n) {
+    int i = 0;
+    int sum = 0;
+
+    while i < n {
+        sum = sum + i;
+        i = i + 1;
+    }
+
+    return sum;
+}
+"""
+    )
+
+    assert print_ir(module) == (
+        "func @sumTo(%n: int) -> int {\n"
+        "entry:\n"
+        "    %0: int = const 0\n"
+        "    store %i, %0\n"
+        "    %1: int = const 0\n"
+        "    store %sum, %1\n"
+        "    jump cond0\n"
+        "\n"
+        "cond0:\n"
+        "    %2: int = load %i\n"
+        "    %3: bool = cmp_lt %2, %n\n"
+        "    branch %3, body0, exit0\n"
+        "\n"
+        "body0:\n"
+        "    %4: int = load %sum\n"
+        "    %5: int = load %i\n"
+        "    %6: int = add %4, %5\n"
+        "    store %sum, %6\n"
+        "    %7: int = load %i\n"
+        "    %8: int = const 1\n"
+        "    %9: int = add %7, %8\n"
+        "    store %i, %9\n"
+        "    jump cond0\n"
+        "\n"
+        "exit0:\n"
+        "    %10: int = load %sum\n"
+        "    return %10\n"
+        "}"
+    )
+
+
 @pytest.mark.parametrize(
     ("source", "node_name"),
     [
-        (
-            """
-int wait(boolean flag) {
-    while flag {
-        return 1;
-    }
-    return 0;
-}
-""",
-            "WhileStatement",
-        ),
         ("struct Point { int x; }", "StructDeclaration"),
         ("class Counter { int value; }", "ClassDeclaration"),
     ],

@@ -34,7 +34,7 @@ class _Frame:
 
 
 class IRInterpreter:
-    """Execute the initial acyclic Aether IR subset."""
+    """Execute the initial Aether IR control-flow subset."""
 
     def __init__(self, module: IRModule) -> None:
         self.module = module

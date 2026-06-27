@@ -123,6 +123,26 @@ int f(int x) {
     assert IRVerifier(module).verify() is module
 
 
+def test_verifies_lowered_while_function() -> None:
+    module = _lower(
+        """
+int sumTo(int n) {
+    int i = 0;
+    int sum = 0;
+
+    while i < n {
+        sum = sum + i;
+        i = i + 1;
+    }
+
+    return sum;
+}
+"""
+    )
+
+    assert IRVerifier(module).verify() is module
+
+
 def test_verifies_void_function_with_bare_return() -> None:
     module = IRModule(
         [
@@ -577,6 +597,27 @@ def test_branch_condition_must_be_bool_error() -> None:
     _assert_verification_error(module, "Branch condition must be bool")
 
 
+def test_loop_branch_condition_must_be_bool_error() -> None:
+    condition = IRParameter("condition", IntType())
+    module = IRModule(
+        [
+            IRFunction(
+                "broken",
+                [condition],
+                VoidType(),
+                [
+                    IRBasicBlock("entry", [IRJump("cond0")]),
+                    IRBasicBlock("cond0", [IRBranch(condition, "body0", "exit0")]),
+                    IRBasicBlock("body0", [IRJump("cond0")]),
+                    IRBasicBlock("exit0", [IRReturn()]),
+                ],
+            )
+        ]
+    )
+
+    _assert_verification_error(module, "Branch condition must be bool")
+
+
 def test_jump_target_must_exist_error() -> None:
     module = IRModule(
         [
@@ -617,6 +658,29 @@ def test_branch_target_must_exist_error() -> None:
     )
 
 
+def test_loop_branch_target_must_exist_error() -> None:
+    condition = IRParameter("condition", BoolType())
+    module = IRModule(
+        [
+            IRFunction(
+                "broken",
+                [condition],
+                VoidType(),
+                [
+                    IRBasicBlock("entry", [IRJump("cond0")]),
+                    IRBasicBlock("cond0", [IRBranch(condition, "body0", "missing")]),
+                    IRBasicBlock("body0", [IRJump("cond0")]),
+                ],
+            )
+        ]
+    )
+
+    _assert_verification_error(
+        module,
+        "Unknown branch target 'missing' in function 'broken'",
+    )
+
+
 def test_load_after_merge_requires_store_on_all_incoming_paths() -> None:
     condition = IRParameter("condition", BoolType())
     slot = IRValue("y", IntType())
@@ -641,6 +705,57 @@ def test_load_after_merge_requires_store_on_all_incoming_paths() -> None:
     )
 
     _assert_verification_error(module, "Slot '%y' loaded before store")
+
+
+def test_load_after_loop_requires_store_before_loop() -> None:
+    condition = IRParameter("condition", BoolType())
+    slot = IRValue("x", IntType())
+    one = IRValue("0", IntType())
+    loaded = IRValue("1", IntType())
+    module = IRModule(
+        [
+            IRFunction(
+                "broken",
+                [condition],
+                IntType(),
+                [
+                    IRBasicBlock("entry", [IRJump("cond0")]),
+                    IRBasicBlock("cond0", [IRBranch(condition, "body0", "exit0")]),
+                    IRBasicBlock(
+                        "body0",
+                        [IRConst(one, 1), IRStore(slot, one), IRJump("cond0")],
+                    ),
+                    IRBasicBlock("exit0", [IRLoad(loaded, slot), IRReturn(loaded)]),
+                ],
+            )
+        ]
+    )
+
+    _assert_verification_error(module, "Slot '%x' loaded before store")
+
+
+def test_loop_body_must_have_terminator_error() -> None:
+    condition = IRParameter("condition", BoolType())
+    module = IRModule(
+        [
+            IRFunction(
+                "broken",
+                [condition],
+                VoidType(),
+                [
+                    IRBasicBlock("entry", [IRJump("cond0")]),
+                    IRBasicBlock("cond0", [IRBranch(condition, "body0", "exit0")]),
+                    IRBasicBlock("body0", []),
+                    IRBasicBlock("exit0", [IRReturn()]),
+                ],
+            )
+        ]
+    )
+
+    _assert_verification_error(
+        module,
+        "Block 'body0' in function 'broken' has no terminator",
+    )
 
 
 def test_non_void_function_must_return_on_all_paths_error() -> None:

@@ -435,7 +435,9 @@ class IRVerifier:
         if block_name in memo:
             return memo[block_name]
         if block_name in visiting:
-            return False
+            # Lowered while-loops jump back to condN; the cycle itself is not a
+            # path that exits the function without returning.
+            return block_name.startswith("cond")
 
         visiting.add(block_name)
         terminator = blocks[block_name].instructions[-1]

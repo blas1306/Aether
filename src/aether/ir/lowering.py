@@ -68,6 +68,7 @@ class _FunctionContext:
     locals: dict[str, IRValue] = field(default_factory=dict)
     next_temporary: int = 0
     next_if: int = 0
+    next_loop: int = 0
 
     def temporary(self, type_: IRType) -> IRValue:
         value = IRValue(str(self.next_temporary), type_)
@@ -77,6 +78,11 @@ class _FunctionContext:
     def if_index(self) -> int:
         index = self.next_if
         self.next_if += 1
+        return index
+
+    def loop_index(self) -> int:
+        index = self.next_loop
+        self.next_loop += 1
         return index
 
 
@@ -199,6 +205,10 @@ class IRLowerer:
             self._lower_if(statement, context)
             return
 
+        if isinstance(statement, ast.WhileStatement):
+            self._lower_while(statement, context)
+            return
+
         self._unsupported(statement)
 
     def _lower_if(self, statement: ast.IfStatement, context: _FunctionContext) -> None:
@@ -249,6 +259,36 @@ class IRLowerer:
 
         context.blocks.append(merge_block)
         context.block = merge_block
+
+    def _lower_while(
+        self,
+        statement: ast.WhileStatement,
+        context: _FunctionContext,
+    ) -> None:
+        index = context.loop_index()
+        condition_block = IRBasicBlock(f"cond{index}")
+        body_block = IRBasicBlock(f"body{index}")
+        exit_block = IRBasicBlock(f"exit{index}")
+
+        context.block.instructions.append(IRJump(condition_block.name))
+
+        context.blocks.append(condition_block)
+        context.block = condition_block
+        condition = self._lower_expression(statement.condition, context)
+        self._require_same_type(condition.type, BoolType(), "while condition must be bool")
+        condition_block.instructions.append(
+            IRBranch(condition, body_block.name, exit_block.name)
+        )
+
+        context.blocks.append(body_block)
+        context.block = body_block
+        self._lower_statements(statement.body, context)
+        body_end = context.block
+        if not self._is_terminated(body_end):
+            body_end.instructions.append(IRJump(condition_block.name))
+
+        context.blocks.append(exit_block)
+        context.block = exit_block
 
     def _lower_statements(
         self,
@@ -448,6 +488,8 @@ class IRLowerer:
                 names.update(self._assigned_names(statement.body))
                 if statement.else_body is not None:
                     names.update(self._assigned_names(statement.else_body))
+            elif isinstance(statement, ast.WhileStatement):
+                names.update(self._assigned_names(statement.body))
         return names
 
     @staticmethod

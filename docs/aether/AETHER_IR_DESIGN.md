@@ -43,6 +43,8 @@ The currently supported lowering subset is deliberately small:
   with mutable slots.
 - Basic acyclic `if`/`else` control flow using `IRBranch`, `IRJump`, and
   deterministic block names such as `then0`, `else0`, and `merge0`.
+- Basic `while` loops using cyclic control flow and deterministic block names
+  such as `cond0`, `body0`, and `exit0`.
 - Direct `return`, including bare return in `void` functions.
 - Positional calls to user-defined functions in the same program when no
   implicit conversion is required.
@@ -58,9 +60,10 @@ Comparison results are always `bool` in IR and can feed `IRBranch`.
 Unsupported syntax raises a clear `NotImplementedError` naming the AST node or
 unsupported lowering case. Current limitations include:
 
-- No `while`, `for`, other loops, `break`/`continue`, or loop control flow.
+- No `for`, `do`/`while`, `break`/`continue`, or non-while loop control flow.
 - No structs, classes, interfaces, constructors, methods, or fields.
 - No lists, arrays, nullable values, imports, or packages.
+- No SSA conversion, phi nodes, or optimizations.
 - No builtin calls, keyword arguments, or expression functions.
 - No implicit conversion instructions.
 - No optimizer or main-pipeline execution path.
@@ -85,7 +88,8 @@ The currently executable subset is:
 - One or more basic blocks per function, starting at `entry`.
 - `IRConst`, `IRLoad`, `IRStore`, `IRBinaryOp`, `IRCompareOp`, `IRCall`, and
   `IRReturn`.
-- `IRBranch` and `IRJump` for acyclic conditional control flow.
+- `IRBranch` and `IRJump` for conditional control flow, including basic
+  `while` loops.
 - Raw `int`, `boolean`, and `string` scalar values.
 - `add`, `sub`, `mul`, `div`, and remainder operations. The interpreter
   accepts `rem`, emitted by the current lowering, and `mod` as an alias.
@@ -101,8 +105,8 @@ division by zero, missing `entry` blocks, non-boolean branch conditions,
 missing branch or jump targets, and non-void functions that finish without
 returning a value.
 
-Loops, builtins, aggregates, optimization, and integration with the production
-execution pipeline remain intentionally unsupported.
+`break`, `continue`, builtins, aggregates, optimization, and integration with
+the production execution pipeline remain intentionally unsupported.
 
 ### Initial IR verifier implementation
 
@@ -129,7 +133,9 @@ Python IR model:
 - Local slots are inferred from `store` destinations in the current model;
   loads from unknown slots or loads before a definitely preceding store are
   rejected. At merge points, a slot is considered definitely stored only if it
-  was stored on every incoming path.
+  was stored on every incoming path. At loop exits, the verifier does not try
+  to prove that a loop body executes; values read after a `while` must be
+  definitely stored before entering the loop.
 - `IRBinaryOp` operand compatibility and declared result types for arithmetic.
 - `IRCompareOp` operand compatibility and declared `bool` result types for
   ordered integer comparisons and equality over `int`, `boolean`, and
@@ -273,8 +279,7 @@ The initial executable subset should cover:
 - Comparisons.
 - Boolean operations.
 - `if`/`else`.
-- `while` eventually; loops are not supported by the current lowering or IR
-  interpreter subset.
+- `while`.
 - Simple functions with typed parameters.
 - `return` with and without a value.
 - Calls to simple Aether functions.
