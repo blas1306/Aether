@@ -8,10 +8,12 @@ from ..types import AetherType
 from .model import (
     IRBasicBlock,
     IRBinaryOp,
+    IRBranch,
     IRCall,
     IRCompareOp,
     IRConst,
     IRFunction,
+    IRJump,
     IRLoad,
     IRModule,
     IRParameter,
@@ -60,15 +62,22 @@ class _FunctionSignature:
 @dataclass
 class _FunctionContext:
     block: IRBasicBlock
+    blocks: list[IRBasicBlock]
     return_type: IRType
     parameters: dict[str, IRParameter]
     locals: dict[str, IRValue] = field(default_factory=dict)
     next_temporary: int = 0
+    next_if: int = 0
 
     def temporary(self, type_: IRType) -> IRValue:
         value = IRValue(str(self.next_temporary), type_)
         self.next_temporary += 1
         return value
+
+    def if_index(self) -> int:
+        index = self.next_if
+        self.next_if += 1
+        return index
 
 
 class IRLowerer:
@@ -102,28 +111,36 @@ class IRLowerer:
             for parameter, parameter_type in zip(declaration.parameters, signature.parameters)
         ]
         block = IRBasicBlock("entry")
+        blocks = [block]
         context = _FunctionContext(
             block=block,
+            blocks=blocks,
             return_type=signature.return_type,
             parameters={parameter.name: parameter for parameter in parameters},
         )
+        assigned_names = self._assigned_names(declaration.body)
+        for parameter in parameters:
+            if parameter.name in assigned_names:
+                slot = IRValue(parameter.name, parameter.type)
+                context.locals[parameter.name] = slot
+                context.block.instructions.append(IRStore(slot, parameter))
 
         for statement in declaration.body:
-            if self._is_terminated(block):
+            if self._is_terminated(context.block):
                 raise NotImplementedError(
-                    "IR lowering not implemented for statements after ReturnStatement"
+                    "IR lowering not implemented for statements after a terminated block"
                 )
             self._lower_statement(statement, context)
 
-        if not self._is_terminated(block):
+        if not self._is_terminated(context.block):
             if isinstance(signature.return_type, VoidType):
-                block.instructions.append(IRReturn())
+                context.block.instructions.append(IRReturn())
             else:
                 raise NotImplementedError(
                     f"IR lowering requires a direct return in function '{declaration.name}'"
                 )
 
-        return IRFunction(declaration.name, parameters, signature.return_type, [block])
+        return IRFunction(declaration.name, parameters, signature.return_type, blocks)
 
     def _lower_statement(self, statement: ast.Statement, context: _FunctionContext) -> None:
         if isinstance(statement, ast.VarDeclaration):
@@ -143,6 +160,26 @@ class IRLowerer:
             context.block.instructions.append(IRStore(slot, value))
             return
 
+        if isinstance(statement, ast.Assignment):
+            value = self._lower_expression(statement.expression, context)
+            slot = context.locals.get(statement.name)
+            if slot is None:
+                parameter = context.parameters.get(statement.name)
+                if parameter is None:
+                    raise NotImplementedError(
+                        f"IR lowering not implemented for Assignment to '{statement.name}' outside local scope"
+                    )
+                slot = IRValue(statement.name, parameter.type)
+                context.locals[statement.name] = slot
+                context.blocks[0].instructions.insert(0, IRStore(slot, parameter))
+            self._require_same_type(
+                value.type,
+                slot.type,
+                f"assignment to '{statement.name}' requires an implicit conversion",
+            )
+            context.block.instructions.append(IRStore(slot, value))
+            return
+
         if isinstance(statement, ast.ReturnStatement):
             if statement.expression is None:
                 if not isinstance(context.return_type, VoidType):
@@ -158,7 +195,72 @@ class IRLowerer:
             context.block.instructions.append(IRReturn(value))
             return
 
+        if isinstance(statement, ast.IfStatement):
+            self._lower_if(statement, context)
+            return
+
         self._unsupported(statement)
+
+    def _lower_if(self, statement: ast.IfStatement, context: _FunctionContext) -> None:
+        condition = self._lower_expression(statement.condition, context)
+        self._require_same_type(condition.type, BoolType(), "if condition must be bool")
+
+        index = context.if_index()
+        then_block = IRBasicBlock(f"then{index}")
+        else_block = (
+            IRBasicBlock(f"else{index}") if statement.else_body is not None else None
+        )
+        merge_block = (
+            IRBasicBlock(f"merge{index}")
+            if statement.else_body is None
+            else None
+        )
+
+        false_target = else_block.name if else_block is not None else merge_block.name
+        context.block.instructions.append(
+            IRBranch(condition, then_block.name, false_target)
+        )
+
+        context.blocks.append(then_block)
+        context.block = then_block
+        self._lower_statements(statement.body, context)
+        then_end = context.block
+        then_terminated = self._is_terminated(then_end)
+
+        else_end = else_block
+        else_terminated = False
+        if else_block is not None:
+            context.blocks.append(else_block)
+            context.block = else_block
+            self._lower_statements(statement.else_body or [], context)
+            else_end = context.block
+            else_terminated = self._is_terminated(else_end)
+            if not then_terminated or not else_terminated:
+                merge_block = IRBasicBlock(f"merge{index}")
+
+        if merge_block is None:
+            context.block = else_end if else_end is not None else then_end
+            return
+
+        if not then_terminated:
+            then_end.instructions.append(IRJump(merge_block.name))
+        if else_end is not None and not else_terminated:
+            else_end.instructions.append(IRJump(merge_block.name))
+
+        context.blocks.append(merge_block)
+        context.block = merge_block
+
+    def _lower_statements(
+        self,
+        statements: list[ast.Statement],
+        context: _FunctionContext,
+    ) -> None:
+        for statement in statements:
+            if self._is_terminated(context.block):
+                raise NotImplementedError(
+                    "IR lowering not implemented for statements after a terminated block"
+                )
+            self._lower_statement(statement, context)
 
     def _lower_expression(
         self,
@@ -332,7 +434,21 @@ class IRLowerer:
 
     @staticmethod
     def _is_terminated(block: IRBasicBlock) -> bool:
-        return bool(block.instructions) and isinstance(block.instructions[-1], IRReturn)
+        return bool(block.instructions) and isinstance(
+            block.instructions[-1],
+            (IRReturn, IRJump, IRBranch),
+        )
+
+    def _assigned_names(self, statements: list[ast.Statement]) -> set[str]:
+        names: set[str] = set()
+        for statement in statements:
+            if isinstance(statement, ast.Assignment):
+                names.add(statement.name)
+            elif isinstance(statement, ast.IfStatement):
+                names.update(self._assigned_names(statement.body))
+                if statement.else_body is not None:
+                    names.update(self._assigned_names(statement.else_body))
+        return names
 
     @staticmethod
     def _unsupported(node: object, detail: str | None = None) -> NoReturn:

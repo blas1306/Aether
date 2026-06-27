@@ -7,12 +7,14 @@ from aether.ir import (
     DoubleType,
     IRBasicBlock,
     IRBinaryOp,
+    IRBranch,
     IRCall,
     IRCompareOp,
     IRConst,
     IRExecutionError,
     IRFunction,
     IRInterpreter,
+    IRJump,
     IRLoad,
     IRLowerer,
     IRModule,
@@ -233,6 +235,61 @@ boolean less(int a, int b) {
     assert IRInterpreter(module).call("less", [2, 1]) is False
 
 
+def test_execute_lowered_if_else_returning_from_both_branches() -> None:
+    module = _lower(
+        """
+int sign(int x) {
+    if x > 0 {
+        return 1;
+    } else {
+        return -1;
+    }
+}
+"""
+    )
+
+    interpreter = IRInterpreter(module)
+    assert interpreter.call("sign", [5]) == 1
+    assert interpreter.call("sign", [-3]) == -1
+
+
+def test_execute_lowered_if_without_else_continuation() -> None:
+    module = _lower(
+        """
+int absLike(int x) {
+    if x < 0 {
+        x = 0 - x;
+    }
+    return x;
+}
+"""
+    )
+
+    interpreter = IRInterpreter(module)
+    assert interpreter.call("absLike", [-7]) == 7
+    assert interpreter.call("absLike", [4]) == 4
+
+
+def test_execute_lowered_if_else_assigning_before_return() -> None:
+    module = _lower(
+        """
+int f(int x) {
+    int y = 0;
+    if x > 0 {
+        y = 1;
+    } else {
+        y = 2;
+    }
+    return y;
+}
+"""
+    )
+
+    interpreter = IRInterpreter(module)
+    assert interpreter.call("f", [3]) == 1
+    assert interpreter.call("f", [-1]) == 2
+
+
 @pytest.mark.parametrize(
     ("source", "function_name", "arguments", "call"),
     [
@@ -267,6 +324,49 @@ int twiceIncrement(int value) {
             "twiceIncrement",
             [10],
             "twiceIncrement(10)",
+        ),
+        (
+            """
+int sign(int x) {
+    if x > 0 {
+        return 1;
+    } else {
+        return -1;
+    }
+}
+""",
+            "sign",
+            [-8],
+            "sign(-8)",
+        ),
+        (
+            """
+int absLike(int x) {
+    if x < 0 {
+        x = 0 - x;
+    }
+    return x;
+}
+""",
+            "absLike",
+            [-6],
+            "absLike(-6)",
+        ),
+        (
+            """
+int f(int x) {
+    int y = 0;
+    if x > 0 {
+        y = 1;
+    } else {
+        y = 2;
+    }
+    return y;
+}
+""",
+            "f",
+            [5],
+            "f(5)",
         ),
     ],
 )
@@ -373,6 +473,60 @@ def test_unsupported_compare_operation_error() -> None:
 
     with pytest.raises(IRExecutionError, match="compare operation 'unknown' is not supported"):
         IRInterpreter(module).call("compare", [1, 2])
+
+
+def test_branch_condition_must_be_bool_error() -> None:
+    condition = IRParameter("condition", IntType())
+    module = IRModule(
+        [
+            IRFunction(
+                "choose",
+                [condition],
+                VoidType(),
+                [
+                    IRBasicBlock("entry", [IRBranch(condition, "then", "else")]),
+                    IRBasicBlock("then", [IRReturn()]),
+                    IRBasicBlock("else", [IRReturn()]),
+                ],
+            )
+        ]
+    )
+
+    with pytest.raises(IRExecutionError, match="branch condition must be bool"):
+        IRInterpreter(module).call("choose", [1])
+
+
+def test_branch_target_must_exist_error() -> None:
+    condition = IRParameter("condition", BoolType())
+    module = IRModule(
+        [
+            IRFunction(
+                "choose",
+                [condition],
+                VoidType(),
+                [IRBasicBlock("entry", [IRBranch(condition, "then", "missing")])],
+            )
+        ]
+    )
+
+    with pytest.raises(IRExecutionError, match="target block 'missing' does not exist"):
+        IRInterpreter(module).call("choose", [False])
+
+
+def test_jump_target_must_exist_error() -> None:
+    module = IRModule(
+        [
+            IRFunction(
+                "jump",
+                [],
+                VoidType(),
+                [IRBasicBlock("entry", [IRJump("missing")])],
+            )
+        ]
+    )
+
+    with pytest.raises(IRExecutionError, match="target block 'missing' does not exist"):
+        IRInterpreter(module).call("jump")
 
 
 def test_division_by_zero_error() -> None:

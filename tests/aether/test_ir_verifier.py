@@ -105,6 +105,24 @@ def test_verifies_lowered_comparison_function(source: str) -> None:
     assert IRVerifier(module).verify() is module
 
 
+def test_verifies_lowered_if_else_function() -> None:
+    module = _lower(
+        """
+int f(int x) {
+    int y = 0;
+    if x > 0 {
+        y = 1;
+    } else {
+        y = 2;
+    }
+    return y;
+}
+"""
+    )
+
+    assert IRVerifier(module).verify() is module
+
+
 def test_verifies_void_function_with_bare_return() -> None:
     module = IRModule(
         [
@@ -597,6 +615,32 @@ def test_branch_target_must_exist_error() -> None:
         module,
         "Unknown branch target 'missing' in function 'choose'",
     )
+
+
+def test_load_after_merge_requires_store_on_all_incoming_paths() -> None:
+    condition = IRParameter("condition", BoolType())
+    slot = IRValue("y", IntType())
+    one = IRValue("0", IntType())
+    loaded = IRValue("1", IntType())
+    module = IRModule(
+        [
+            IRFunction(
+                "broken",
+                [condition],
+                IntType(),
+                [
+                    IRBasicBlock("entry", [IRBranch(condition, "then", "merge")]),
+                    IRBasicBlock(
+                        "then",
+                        [IRConst(one, 1), IRStore(slot, one), IRJump("merge")],
+                    ),
+                    IRBasicBlock("merge", [IRLoad(loaded, slot), IRReturn(loaded)]),
+                ],
+            )
+        ]
+    )
+
+    _assert_verification_error(module, "Slot '%y' loaded before store")
 
 
 def test_non_void_function_must_return_on_all_paths_error() -> None:

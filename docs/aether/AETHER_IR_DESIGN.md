@@ -39,23 +39,26 @@ The currently supported lowering subset is deliberately small:
   `<`, `<=`, `>`, and `>=`; equality comparisons `==` and `!=` for `int`,
   `boolean`, and `string`.
 - Unary minus, currently lowered as a typed zero followed by `sub`.
+- Assignment to already declared local variables and parameters, represented
+  with mutable slots.
+- Basic acyclic `if`/`else` control flow using `IRBranch`, `IRJump`, and
+  deterministic block names such as `then0`, `else0`, and `merge0`.
 - Direct `return`, including bare return in `void` functions.
 - Positional calls to user-defined functions in the same program when no
   implicit conversion is required.
 
-Each function currently lowers to one `entry` block. Parameters are direct IR
-values. Local variables use named slots represented by `IRValue`, with
-`IRStore` on declaration and `IRLoad` on reads. Expressions produce numbered
-temporaries in deterministic source evaluation order.
+Functions lower to one or more basic blocks. Parameters are direct IR values
+until assigned; assigned parameters are copied into same-named mutable slots at
+function entry. Local variables use named slots represented by `IRValue`, with
+`IRStore` on declaration or assignment and `IRLoad` on reads. Expressions
+produce numbered temporaries in deterministic source evaluation order.
 
-Comparison results are always `bool` in IR. The current lowering does not use
-comparisons to lower control flow yet; they are expression values only.
+Comparison results are always `bool` in IR and can feed `IRBranch`.
 
 Unsupported syntax raises a clear `NotImplementedError` naming the AST node or
 unsupported lowering case. Current limitations include:
 
-- No `if`/`else`, `while`, other loops, assignments after declaration, or
-  multiple blocks.
+- No `while`, `for`, other loops, `break`/`continue`, or loop control flow.
 - No structs, classes, interfaces, constructors, methods, or fields.
 - No lists, arrays, nullable values, imports, or packages.
 - No builtin calls, keyword arguments, or expression functions.
@@ -79,9 +82,10 @@ The currently executable subset is:
 
 - Functions selected by name, positional arguments, and a fresh local frame
   for every call.
-- One `entry` basic block per function.
+- One or more basic blocks per function, starting at `entry`.
 - `IRConst`, `IRLoad`, `IRStore`, `IRBinaryOp`, `IRCompareOp`, `IRCall`, and
   `IRReturn`.
+- `IRBranch` and `IRJump` for acyclic conditional control flow.
 - Raw `int`, `boolean`, and `string` scalar values.
 - `add`, `sub`, `mul`, `div`, and remainder operations. The interpreter
   accepts `rem`, emitted by the current lowering, and `mod` as an alias.
@@ -93,12 +97,12 @@ The currently executable subset is:
 
 Execution reports explicit errors for missing functions, wrong arity,
 uninitialized slots or values, unsupported instructions or binary operations,
-division by zero, missing `entry` blocks, and non-void functions that finish
-without returning a value.
+division by zero, missing `entry` blocks, non-boolean branch conditions,
+missing branch or jump targets, and non-void functions that finish without
+returning a value.
 
-Control-flow instructions, multiple-block execution, builtins, aggregates,
-optimization, and integration with the production execution pipeline remain
-intentionally unsupported.
+Loops, builtins, aggregates, optimization, and integration with the production
+execution pipeline remain intentionally unsupported.
 
 ### Initial IR verifier implementation
 
@@ -118,12 +122,14 @@ Python IR model:
 - Terminator discipline: every block must end in `return`, `jump`, or
   `branch`, and no instruction may follow a terminator.
 - Jump and branch targets must name existing blocks.
+- Branch conditions must be `bool`.
 - Parameters are defined at function entry; instruction results become defined
   after their instruction; uses must be definitely defined on all reachable
   paths processed by the verifier.
 - Local slots are inferred from `store` destinations in the current model;
   loads from unknown slots or loads before a definitely preceding store are
-  rejected.
+  rejected. At merge points, a slot is considered definitely stored only if it
+  was stored on every incoming path.
 - `IRBinaryOp` operand compatibility and declared result types for arithmetic.
 - `IRCompareOp` operand compatibility and declared `bool` result types for
   ordered integer comparisons and equality over `int`, `boolean`, and
@@ -267,7 +273,8 @@ The initial executable subset should cover:
 - Comparisons.
 - Boolean operations.
 - `if`/`else`.
-- `while`.
+- `while` eventually; loops are not supported by the current lowering or IR
+  interpreter subset.
 - Simple functions with typed parameters.
 - `return` with and without a value.
 - Calls to simple Aether functions.

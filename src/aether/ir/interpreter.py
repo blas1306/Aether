@@ -5,19 +5,22 @@ from math import trunc
 from typing import Any, NoReturn, Sequence
 
 from .model import (
+    IRBasicBlock,
     IRBinaryOp,
+    IRBranch,
     IRCall,
     IRCompareOp,
     IRConst,
     IRFunction,
     IRInstruction,
+    IRJump,
     IRLoad,
     IRModule,
     IRReturn,
     IRStore,
     IRValue,
 )
-from .types import VoidType
+from .types import BoolType, VoidType
 
 
 class IRExecutionError(RuntimeError):
@@ -31,7 +34,7 @@ class _Frame:
 
 
 class IRInterpreter:
-    """Execute the initial single-block Aether IR subset."""
+    """Execute the initial acyclic Aether IR subset."""
 
     def __init__(self, module: IRModule) -> None:
         self.module = module
@@ -55,33 +58,38 @@ class IRInterpreter:
         return self._execute(function, frame)
 
     def _execute(self, function: IRFunction, frame: _Frame) -> Any:
-        entry = next((block for block in function.blocks if block.name == "entry"), None)
-        if entry is None:
+        blocks = {block.name: block for block in function.blocks}
+        current = blocks.get("entry")
+        if current is None:
             raise IRExecutionError(f"IR function '{function.name}' has no entry block")
 
-        for instruction in entry.instructions:
-            returned, value = self._execute_instruction(instruction, frame)
-            if returned:
-                if value is None and not isinstance(function.return_type, VoidType):
-                    raise IRExecutionError(
-                        f"IR function '{function.name}' returned void but is non-void"
-                    )
-                return value
-
-        if isinstance(function.return_type, VoidType):
-            return None
-        raise IRExecutionError(
-            f"IR function '{function.name}' ended without return"
-        )
+        while True:
+            for instruction in current.instructions:
+                returned, value, target = self._execute_instruction(instruction, frame)
+                if returned:
+                    if value is None and not isinstance(function.return_type, VoidType):
+                        raise IRExecutionError(
+                            f"IR function '{function.name}' returned void but is non-void"
+                        )
+                    return value
+                if target is not None:
+                    current = self._target_block(function, blocks, target)
+                    break
+            else:
+                if isinstance(function.return_type, VoidType):
+                    return None
+                raise IRExecutionError(
+                    f"IR function '{function.name}' ended without return"
+                )
 
     def _execute_instruction(
         self,
         instruction: IRInstruction,
         frame: _Frame,
-    ) -> tuple[bool, Any]:
+    ) -> tuple[bool, Any, str | None]:
         if isinstance(instruction, IRConst):
             frame.values[instruction.result] = instruction.value
-            return False, None
+            return False, None, None
 
         if isinstance(instruction, IRLoad):
             if instruction.slot not in frame.slots:
@@ -89,11 +97,11 @@ class IRInterpreter:
                     f"IR slot '%{instruction.slot.name}' is not initialized"
                 )
             frame.values[instruction.result] = frame.slots[instruction.slot]
-            return False, None
+            return False, None, None
 
         if isinstance(instruction, IRStore):
             frame.slots[instruction.slot] = self._value(instruction.value, frame)
-            return False, None
+            return False, None, None
 
         if isinstance(instruction, IRBinaryOp):
             left = self._value(instruction.left, frame)
@@ -103,7 +111,7 @@ class IRInterpreter:
                 left,
                 right,
             )
-            return False, None
+            return False, None, None
 
         if isinstance(instruction, IRCompareOp):
             left = self._value(instruction.left, frame)
@@ -113,7 +121,7 @@ class IRInterpreter:
                 left,
                 right,
             )
-            return False, None
+            return False, None, None
 
         if isinstance(instruction, IRCall):
             arguments = [
@@ -122,7 +130,20 @@ class IRInterpreter:
             result = self.call(instruction.function, arguments)
             if instruction.result is not None:
                 frame.values[instruction.result] = result
-            return False, None
+            return False, None, None
+
+        if isinstance(instruction, IRBranch):
+            condition = self._value(instruction.condition, frame)
+            if (
+                not isinstance(instruction.condition.type, BoolType)
+                or type(condition) is not bool
+            ):
+                raise IRExecutionError("IR branch condition must be bool")
+            target = instruction.true_target if condition else instruction.false_target
+            return False, None, target
+
+        if isinstance(instruction, IRJump):
+            return False, None, instruction.target
 
         if isinstance(instruction, IRReturn):
             value = (
@@ -130,11 +151,24 @@ class IRInterpreter:
                 if instruction.value is None
                 else self._value(instruction.value, frame)
             )
-            return True, value
+            return True, value, None
 
         raise IRExecutionError(
             f"IR instruction '{type(instruction).__name__}' is not supported"
         )
+
+    @staticmethod
+    def _target_block(
+        function: IRFunction,
+        blocks: dict[str, IRBasicBlock],
+        target: str,
+    ) -> IRBasicBlock:
+        block = blocks.get(target)
+        if block is None:
+            raise IRExecutionError(
+                f"IR target block '{target}' does not exist in function '{function.name}'"
+            )
+        return block
 
     @staticmethod
     def _value(value: IRValue, frame: _Frame) -> Any:

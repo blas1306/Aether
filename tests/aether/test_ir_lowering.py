@@ -5,9 +5,11 @@ import pytest
 from aether.ir import (
     BoolType,
     IRBinaryOp,
+    IRBranch,
     IRCall,
     IRCompareOp,
     IRConst,
+    IRJump,
     IRLoad,
     IRLowerer,
     IRReturn,
@@ -249,20 +251,142 @@ boolean less(int a, int b) {
     )
 
 
+def test_lower_if_else_with_return_in_both_branches() -> None:
+    module = _lower(
+        """
+int sign(int x) {
+    if x > 0 {
+        return 1;
+    } else {
+        return -1;
+    }
+}
+"""
+    )
+
+    function = module.functions[0]
+    assert [block.name for block in function.blocks] == ["entry", "then0", "else0"]
+
+    zero, comparison, branch = function.blocks[0].instructions
+    assert zero == IRConst(zero.result, 0)
+    assert comparison == IRCompareOp(
+        comparison.result,
+        "gt",
+        function.parameters[0],
+        zero.result,
+    )
+    assert branch == IRBranch(comparison.result, "then0", "else0")
+    assert isinstance(function.blocks[1].instructions[-1], IRReturn)
+    assert isinstance(function.blocks[2].instructions[-1], IRReturn)
+
+
+def test_lower_if_without_else_continues_after_merge() -> None:
+    module = _lower(
+        """
+int absLike(int x) {
+    if x < 0 {
+        x = 0 - x;
+    }
+    return x;
+}
+"""
+    )
+
+    function = module.functions[0]
+    assert [block.name for block in function.blocks] == ["entry", "then0", "merge0"]
+
+    initial_store, loaded_x, zero, comparison, branch = function.blocks[0].instructions
+    assert initial_store == IRStore(initial_store.slot, function.parameters[0])
+    assert loaded_x == IRLoad(loaded_x.result, initial_store.slot)
+    assert zero == IRConst(zero.result, 0)
+    assert comparison == IRCompareOp(
+        comparison.result,
+        "lt",
+        loaded_x.result,
+        zero.result,
+    )
+    assert branch == IRBranch(comparison.result, "then0", "merge0")
+    assert function.blocks[1].instructions[-1] == IRJump("merge0")
+    assert isinstance(function.blocks[2].instructions[-1], IRReturn)
+
+
+def test_lower_if_else_assigns_local_and_returns_after_merge() -> None:
+    module = _lower(
+        """
+int f(int x) {
+    int y = 0;
+    if x > 0 {
+        y = 1;
+    } else {
+        y = 2;
+    }
+    return y;
+}
+"""
+    )
+
+    function = module.functions[0]
+    assert [block.name for block in function.blocks] == [
+        "entry",
+        "then0",
+        "else0",
+        "merge0",
+    ]
+
+    branch = function.blocks[0].instructions[-1]
+    assert isinstance(branch, IRBranch)
+    assert (branch.true_target, branch.false_target) == ("then0", "else0")
+    assert function.blocks[1].instructions[-1] == IRJump("merge0")
+    assert function.blocks[2].instructions[-1] == IRJump("merge0")
+    load, terminator = function.blocks[3].instructions
+    assert isinstance(load, IRLoad)
+    assert terminator == IRReturn(load.result)
+
+
+def test_pretty_print_lowered_if_else_with_jumps() -> None:
+    module = _lower(
+        """
+int f(int x) {
+    int y = 0;
+    if x > 0 {
+        y = 1;
+    } else {
+        y = 2;
+    }
+    return y;
+}
+"""
+    )
+
+    assert print_ir(module) == (
+        "func @f(%x: int) -> int {\n"
+        "entry:\n"
+        "    %0: int = const 0\n"
+        "    store %y, %0\n"
+        "    %1: int = const 0\n"
+        "    %2: bool = cmp_gt %x, %1\n"
+        "    branch %2, then0, else0\n"
+        "\n"
+        "then0:\n"
+        "    %3: int = const 1\n"
+        "    store %y, %3\n"
+        "    jump merge0\n"
+        "\n"
+        "else0:\n"
+        "    %4: int = const 2\n"
+        "    store %y, %4\n"
+        "    jump merge0\n"
+        "\n"
+        "merge0:\n"
+        "    %5: int = load %y\n"
+        "    return %5\n"
+        "}"
+    )
+
+
 @pytest.mark.parametrize(
     ("source", "node_name"),
     [
-        (
-            """
-int choose(boolean flag) {
-    if flag {
-        return 1;
-    }
-    return 0;
-}
-""",
-            "IfStatement",
-        ),
         (
             """
 int wait(boolean flag) {
