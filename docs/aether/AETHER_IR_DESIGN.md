@@ -71,7 +71,7 @@ the supported subset. Current limitations include:
 - No `for`, `do`/`while`, `break`/`continue`, or non-while loop control flow.
 - No structs, classes, interfaces, constructors, methods, or fields.
 - No lists, arrays, nullable values, imports, or packages.
-- No SSA conversion, phi nodes, or optimizations.
+- No SSA conversion, phi nodes, or execution-time optimizations.
 - No builtin calls, keyword arguments, or expression functions.
 - No implicit conversion instructions.
 - No optimizer integration with the backend, SSA, JIT, Rust backend, or full
@@ -82,7 +82,9 @@ the supported subset. Current limitations include:
 `aether.ir.optimizer.OptimizerPipeline` is the first optimization pipeline
 object. Its default pass list currently contains only
 `aether.ir.optimizer.ConstantFolder`, and it returns an optimized `IRModule`
-without mutating the input module.
+without mutating the input module. The CLI can run this pipeline for inspection
+with `aether --emit-ir --opt program.ae`, but optimization is not connected to
+IR execution yet.
 
 The implemented constant folding pass rewrites arithmetic and comparison
 instructions to `IRConst` when both operands are already known constants:
@@ -139,6 +141,7 @@ aether program.ae
 aether --backend=ast program.ae
 aether --backend=ir program.ae
 aether --emit-ir program.ae
+aether --emit-ir --opt program.ae
 aether --backend=ir --emit-ir program.ae
 ```
 
@@ -160,6 +163,17 @@ such as `println`.
 textual IR, and does not execute it. It is a development tool and is accepted
 with or without `--backend=ir`.
 
+`--emit-ir --opt` runs:
+
+```text
+source -> lexer -> parser -> typechecker -> IR lowering -> IR verifier -> OptimizerPipeline -> IR verifier -> print IR
+```
+
+The second verifier checks the optimizer output before the textual IR is
+printed. `--opt` is currently supported only with `--emit-ir`; using `--opt`
+without `--emit-ir` is a CLI usage error. `aether --backend=ir program.ae`
+continues to execute unoptimized IR for now.
+
 The user-facing supported IR backend subset is:
 
 - functions
@@ -174,7 +188,7 @@ The user-facing supported IR backend subset is:
 The IR backend does not yet support structs, classes, lists, arrays, packages,
 advanced imports, builtins, top-level scripting statements, methods,
 constructors, interfaces, enums, exceptions, `for`, `break`, `continue`,
-optimizer integration, SSA, JIT, or Rust code generation.
+optimizer integration for execution, SSA, JIT, or Rust code generation.
 
 The checked AST remains the existing immutable source AST rather than a new
 annotated tree. For this subset, declaration, parameter, literal, and function

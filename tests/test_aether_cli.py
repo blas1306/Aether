@@ -131,6 +131,7 @@ def test_help_describes_direct_execution_and_tools() -> None:
     assert "--ast" in stdout
     assert "--backend" in stdout
     assert "--emit-ir" in stdout
+    assert "--opt" in stdout
     assert stderr == ""
 
 
@@ -189,6 +190,125 @@ int main() {
     assert "func @add" in stdout
     assert "func @main" in stdout
     assert "call @add" in stdout
+    assert stderr == ""
+
+
+def test_emit_ir_without_opt_preserves_unoptimized_ir(tmp_path: Path) -> None:
+    program = tmp_path / "unoptimized_ir.ae"
+    program.write_text(
+        """
+int main() {
+    return 2 + 3 * 4;
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-ir", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert "%3: int = mul %1, %2" in stdout
+    assert "%4: int = add %0, %3" in stdout
+    assert "%4: int = const 14" not in stdout
+    assert stderr == ""
+
+
+def test_emit_ir_with_opt_shows_constant_folding(tmp_path: Path) -> None:
+    program = tmp_path / "optimized_ir.ae"
+    program.write_text(
+        """
+int main() {
+    return 2 + 3 * 4;
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-ir", "--opt", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert "%3: int = const 12" in stdout
+    assert "%4: int = const 14" in stdout
+    assert " = mul " not in stdout
+    assert " = add " not in stdout
+    assert stderr == ""
+
+
+def test_opt_before_emit_ir_also_shows_constant_folding(tmp_path: Path) -> None:
+    program = tmp_path / "opt_before_emit_ir.ae"
+    program.write_text(
+        """
+int main() {
+    return 2 + 3 * 4;
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--opt", "--emit-ir", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert "%4: int = const 14" in stdout
+    assert " = mul " not in stdout
+    assert " = add " not in stdout
+    assert stderr == ""
+
+
+def test_opt_without_emit_ir_reports_clear_usage_error(tmp_path: Path) -> None:
+    program = tmp_path / "opt_without_emit_ir.ae"
+    program.write_text(
+        """
+int main() {
+    return 14;
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--opt", str(program)])
+
+    assert exit_code == EXIT_USAGE_ERROR
+    assert stdout == ""
+    assert "--opt is currently only supported with --emit-ir." in stderr
+
+
+def test_backend_ir_does_not_run_optimizer_yet(tmp_path: Path, monkeypatch) -> None:
+    program = tmp_path / "backend_ir_unoptimized.ae"
+    program.write_text(
+        """
+int main() {
+    return 2 + 3 * 4;
+}
+""",
+        encoding="utf-8",
+    )
+    calls = []
+
+    def fail_if_called(self, module):
+        calls.append(module)
+        raise AssertionError("optimizer should not run for --backend=ir")
+
+    monkeypatch.setattr(
+        "aether.ir.optimizer.pipeline.OptimizerPipeline.run",
+        fail_if_called,
+    )
+
+    exit_code, stdout, stderr = run_cli(["--backend=ir", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert stdout == ""
+    assert stderr == ""
+    assert calls == []
+
+
+def test_default_ast_backend_still_executes_without_optimizer(tmp_path: Path) -> None:
+    program = tmp_path / "default_ast_after_opt_flag.ae"
+    program.write_text("value = 2 + 3 * 4; println(value);\n", encoding="utf-8")
+
+    exit_code, stdout, stderr = run_cli([str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert stdout == "14\n"
     assert stderr == ""
 
 

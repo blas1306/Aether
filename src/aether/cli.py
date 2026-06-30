@@ -51,6 +51,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Lower the file to experimental IR, verify it, and print it.",
     )
     parser.add_argument(
+        "--opt",
+        action="store_true",
+        help="Optimize emitted IR. Currently only supported with --emit-ir.",
+    )
+    parser.add_argument(
         "--backend",
         choices=("ast", "ir"),
         default="ast",
@@ -85,6 +90,10 @@ def main(
         except SystemExit as exc:
             return int(exc.code)
 
+    if args.opt and not args.emit_ir:
+        print("aether: error: --opt is currently only supported with --emit-ir.", file=stderr)
+        return EXIT_USAGE_ERROR
+
     if args.repl:
         if args.backend != "ast":
             print("aether: error: --repl only supports --backend=ast for now.", file=stderr)
@@ -115,7 +124,7 @@ def main(
         )
     if args.emit_ir:
         return _run_language_action(
-            lambda: _emit_ir(source, path=path, stdout=stdout),
+            lambda: _emit_ir(source, path=path, stdout=stdout, optimize=args.opt),
             stderr=stderr,
         )
     return _run_language_action(
@@ -200,12 +209,15 @@ def _print_ast(source: str, *, stdout: TextIO) -> None:
     print(pformat(parse_source(source), width=100, sort_dicts=False), file=stdout)
 
 
-def _emit_ir(source: str, *, path: Path, stdout: TextIO) -> None:
+def _emit_ir(source: str, *, path: Path, stdout: TextIO, optimize: bool = False) -> None:
     typed_program = prepare_typed_program(
         source,
         TypeChecker(source_root=path.parent),
     )
-    module = IRBackend().lower_verified(typed_program)
+    backend = IRBackend()
+    module = backend.lower_verified(typed_program)
+    if optimize:
+        module = backend.optimize_verified(module)
     print(print_ir(module), file=stdout)
 
 

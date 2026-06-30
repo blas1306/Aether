@@ -104,11 +104,21 @@ Language-development inspection tools are also available:
 aether --tokens examples/hello.ae
 aether --ast examples/hello.ae
 aether --emit-ir program.ae
+aether --emit-ir --opt program.ae
 aether --backend=ir --emit-ir program.ae
 ```
 
 `--emit-ir` lowers and verifies the program, prints textual IR, and does not
-execute it.
+execute it. Add `--opt` to inspect the IR after the current optimization
+pipeline:
+
+```text
+Lexer -> Parser -> TypeChecker -> IR lowering -> IR verifier -> OptimizerPipeline -> IR verifier
+```
+
+Optimization is currently connected only to `--emit-ir`. `--backend=ir` still
+executes the verified, unoptimized IR, and `--opt` without `--emit-ir` is
+rejected.
 
 Use `aether --help` for all current options and `aether --version` for the
 language version. The primary execution form is `aether file.ae`; there is no

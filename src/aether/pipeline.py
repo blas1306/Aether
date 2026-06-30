@@ -39,6 +39,14 @@ class PipelineBackend(Protocol):
         ...
 
 
+class IROptimizer(Protocol):
+    """Internal boundary for IR-to-IR optimization passes or pipelines."""
+
+    def run(self, module: IRModule) -> IRModule:
+        """Return an optimized IR module."""
+        ...
+
+
 @dataclass(frozen=True)
 class ASTBackend:
     """Current production backend backed by the AST interpreter."""
@@ -74,6 +82,16 @@ class IRBackend:
 
     def lower_verified(self, typed_program: TypedProgram) -> IRModule:
         return self.verify(self.lower(typed_program))
+
+    def optimize_verified(
+        self,
+        module: IRModule,
+        optimizer: IROptimizer | None = None,
+    ) -> IRModule:
+        from .ir.optimizer import OptimizerPipeline
+
+        pipeline = optimizer if optimizer is not None else OptimizerPipeline()
+        return self.verify(pipeline.run(module))
 
     def run(self, typed_program: TypedProgram) -> Environment:
         from .ir.interpreter import IRExecutionError, IRInterpreter

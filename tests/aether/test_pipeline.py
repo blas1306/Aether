@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from aether.errors import IRBackendUnsupportedFeatureError
+from aether.errors import AetherRuntimeError, IRBackendUnsupportedFeatureError
 from aether.interpreter import Interpreter
+from aether.ir import IRBasicBlock, IRFunction, IRModule, IRReturn, IRValue, IntType
 from aether.pipeline import (
     ASTBackend,
     IRBackend,
@@ -101,6 +102,37 @@ int main() {
     RecordingIRBackend().run(typed_program)
 
     assert calls == [["main"]]
+
+
+def test_ir_optimizer_flow_verifies_after_optimizing() -> None:
+    typed_program = prepare_typed_program(
+        """
+int main() {
+    return 42;
+}
+""",
+        TypeChecker(),
+    )
+    backend = IRBackend()
+    module = backend.lower_verified(typed_program)
+
+    class InvalidOptimizer:
+        def run(self, module):
+            int_type = IntType()
+            missing = IRValue("missing", int_type)
+            return IRModule(
+                [
+                    IRFunction(
+                        "main",
+                        [],
+                        int_type,
+                        [IRBasicBlock("entry", [IRReturn(missing)])],
+                    )
+                ]
+            )
+
+    with pytest.raises(AetherRuntimeError, match="IR verifier rejected module"):
+        backend.optimize_verified(module, InvalidOptimizer())
 
 
 def test_ir_backend_does_not_change_ast_backend() -> None:
