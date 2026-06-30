@@ -5,6 +5,7 @@ import pytest
 from aether.ir import (
     BoolType,
     DoubleType,
+    FloatType,
     IRBasicBlock,
     IRBinaryOp,
     IRBranch,
@@ -23,7 +24,12 @@ from aether.ir import (
     VoidType,
     print_ir,
 )
-from aether.ir.optimizer import ConstantFolder, DeadCodeEliminator, OptimizerPipeline
+from aether.ir.optimizer import (
+    AlgebraicSimplifier,
+    ConstantFolder,
+    DeadCodeEliminator,
+    OptimizerPipeline,
+)
 
 
 def _optimize(module: IRModule) -> IRModule:
@@ -32,6 +38,10 @@ def _optimize(module: IRModule) -> IRModule:
 
 def _dce(module: IRModule) -> IRModule:
     return DeadCodeEliminator().run(module)
+
+
+def _simplify(module: IRModule) -> IRModule:
+    return AlgebraicSimplifier().run(module)
 
 
 def _single_block_module(instructions: list[object], return_value: IRValue) -> IRModule:
@@ -316,6 +326,304 @@ def test_constant_folding_does_not_fold_load_or_store() -> None:
     )
 
     assert print_ir(_optimize(module)) == print_ir(module)
+
+
+@pytest.mark.parametrize(
+    ("operator", "constant_value", "constant_on_left"),
+    [
+        ("add", 0, False),
+        ("add", 0, True),
+        ("sub", 0, False),
+        ("mul", 1, False),
+        ("mul", 1, True),
+        ("div", 1, False),
+    ],
+)
+def test_algebraic_simplification_integer_identity_rules(
+    operator: str,
+    constant_value: int,
+    constant_on_left: bool,
+) -> None:
+    int_type = IntType()
+    parameter = IRParameter("x", int_type)
+    constant = IRValue("0", int_type)
+    result = IRValue("1", int_type)
+    left = constant if constant_on_left else parameter
+    right = parameter if constant_on_left else constant
+    module = IRModule(
+        [
+            IRFunction(
+                "main",
+                [parameter],
+                int_type,
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [
+                            IRConst(constant, constant_value),
+                            IRBinaryOp(result, operator, left, right),
+                            IRReturn(result),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+
+    assert print_ir(_simplify(module)) == (
+        "func @main(%x: int) -> int {\n"
+        "entry:\n"
+        f"    %0: int = const {constant_value}\n"
+        "    return %x\n"
+        "}"
+    )
+
+
+@pytest.mark.parametrize(
+    ("operator", "constant_value", "constant_on_left"),
+    [
+        ("mul", 0, False),
+        ("mul", 0, True),
+        ("mod", 1, False),
+        ("rem", 1, False),
+    ],
+)
+def test_algebraic_simplification_integer_zero_result_rules(
+    operator: str,
+    constant_value: int,
+    constant_on_left: bool,
+) -> None:
+    int_type = IntType()
+    parameter = IRParameter("x", int_type)
+    constant = IRValue("0", int_type)
+    result = IRValue("1", int_type)
+    left = constant if constant_on_left else parameter
+    right = parameter if constant_on_left else constant
+    module = IRModule(
+        [
+            IRFunction(
+                "main",
+                [parameter],
+                int_type,
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [
+                            IRConst(constant, constant_value),
+                            IRBinaryOp(result, operator, left, right),
+                            IRReturn(result),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+
+    assert print_ir(_simplify(module)) == (
+        "func @main(%x: int) -> int {\n"
+        "entry:\n"
+        f"    %0: int = const {constant_value}\n"
+        "    %1: int = const 0\n"
+        "    return %1\n"
+        "}"
+    )
+
+
+def test_algebraic_simplification_combines_with_dead_code_elimination() -> None:
+    int_type = IntType()
+    parameter = IRParameter("x", int_type)
+    zero = IRValue("0", int_type)
+    result = IRValue("1", int_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "main",
+                [parameter],
+                int_type,
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [
+                            IRConst(zero, 0),
+                            IRBinaryOp(result, "add", parameter, zero),
+                            IRReturn(result),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+
+    assert print_ir(OptimizerPipeline().run(module)) == (
+        "func @main(%x: int) -> int {\n"
+        "entry:\n"
+        "    return %x\n"
+        "}"
+    )
+
+
+@pytest.mark.parametrize("operator", ["sub", "div", "mod", "rem"])
+def test_algebraic_simplification_does_not_fold_same_operand_rules(
+    operator: str,
+) -> None:
+    int_type = IntType()
+    parameter = IRParameter("x", int_type)
+    result = IRValue("0", int_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "main",
+                [parameter],
+                int_type,
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [
+                            IRBinaryOp(result, operator, parameter, parameter),
+                            IRReturn(result),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+
+    assert print_ir(_simplify(module)) == print_ir(module)
+
+
+@pytest.mark.parametrize(
+    ("type_", "constant_value", "operator"),
+    [
+        (FloatType(), 0.0, "add"),
+        (DoubleType(), 1.0, "mul"),
+    ],
+)
+def test_algebraic_simplification_does_not_simplify_float_or_double(
+    type_,
+    constant_value: float,
+    operator: str,
+) -> None:
+    parameter = IRParameter("x", type_)
+    constant = IRValue("0", type_)
+    result = IRValue("1", type_)
+    module = IRModule(
+        [
+            IRFunction(
+                "main",
+                [parameter],
+                type_,
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [
+                            IRConst(constant, constant_value),
+                            IRBinaryOp(result, operator, parameter, constant),
+                            IRReturn(result),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+
+    assert print_ir(_simplify(module)) == print_ir(module)
+
+
+def test_algebraic_simplification_does_not_simplify_non_identity_constant() -> None:
+    int_type = IntType()
+    parameter = IRParameter("x", int_type)
+    two = IRValue("0", int_type)
+    result = IRValue("1", int_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "main",
+                [parameter],
+                int_type,
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [
+                            IRConst(two, 2),
+                            IRBinaryOp(result, "add", parameter, two),
+                            IRReturn(result),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+
+    assert print_ir(_simplify(module)) == print_ir(module)
+
+
+def test_algebraic_simplification_does_not_simplify_valid_int_division_to_double() -> None:
+    int_type = IntType()
+    double_type = DoubleType()
+    parameter = IRParameter("x", int_type)
+    one = IRValue("0", int_type)
+    result = IRValue("1", double_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "main",
+                [parameter],
+                double_type,
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [
+                            IRConst(one, 1),
+                            IRBinaryOp(result, "div", parameter, one),
+                            IRReturn(result),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+
+    assert print_ir(_simplify(module)) == print_ir(module)
+
+
+def test_algebraic_simplification_preserves_effectful_and_control_instructions() -> None:
+    int_type = IntType()
+    bool_type = BoolType()
+    slot = IRValue("slot", int_type)
+    value = IRValue("0", int_type)
+    condition = IRValue("1", bool_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "effect",
+                [IRParameter("value", int_type)],
+                VoidType(),
+                [IRBasicBlock("entry", [IRReturn()])],
+            ),
+            IRFunction(
+                "main",
+                [],
+                VoidType(),
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [
+                            IRConst(value, 7),
+                            IRConst(condition, True),
+                            IRStore(slot, value),
+                            IRCall("effect", (value,)),
+                            IRBranch(condition, "then", "else"),
+                        ],
+                    ),
+                    IRBasicBlock("then", [IRJump("exit")]),
+                    IRBasicBlock("else", [IRJump("exit")]),
+                    IRBasicBlock("exit", [IRReturn()]),
+                ],
+            ),
+        ]
+    )
+
+    assert print_ir(_simplify(module)) == print_ir(module)
 
 
 def test_dead_code_eliminates_unused_constant_after_folding() -> None:

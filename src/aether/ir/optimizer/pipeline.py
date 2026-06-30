@@ -5,6 +5,7 @@ from typing import Protocol
 
 from aether.ir.model import IRModule
 
+from .algebraic_simplification import AlgebraicSimplifier
 from .constant_folding import ConstantFolder
 from .dead_code import DeadCodeEliminator
 
@@ -21,7 +22,7 @@ class OptimizerPipeline:
         self._passes = (
             tuple(passes)
             if passes is not None
-            else (ConstantFolder(), DeadCodeEliminator())
+            else (ConstantFolder(), AlgebraicSimplifier(), DeadCodeEliminator())
         )
 
     def run(self, module: IRModule) -> IRModule:

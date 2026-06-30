@@ -81,7 +81,8 @@ the supported subset. Current limitations include:
 
 `aether.ir.optimizer.OptimizerPipeline` is the first optimization pipeline
 object. Its default pass list currently runs
-`aether.ir.optimizer.ConstantFolder` followed by
+`aether.ir.optimizer.ConstantFolder`, then
+`aether.ir.optimizer.AlgebraicSimplifier`, followed by
 `aether.ir.optimizer.DeadCodeEliminator`, and it returns an optimized
 `IRModule` without mutating the input module. The CLI can run this pipeline for
 inspection with `aether --emit-ir --opt program.ae`, but optimization is not
@@ -131,6 +132,57 @@ The pass deliberately does not perform algebraic simplification, constant
 propagation through loads or stores, call evaluation, or division/modulo by zero
 evaluation.
 
+The implemented algebraic simplification pass rewrites local integer binary
+operations when one operand is a known identity or absorbing constant. The IR
+does not currently have a copy/move instruction, so identity rewrites record a
+temporary value replacement such as `%result -> %x` and then rewrite all uses of
+`%result` in the function. Zero-producing rewrites replace the operation with
+an `IRConst` using the original result value.
+
+The initial integer rules are:
+
+- `x + 0 -> x`
+- `0 + x -> x`
+- `x - 0 -> x`
+- `x * 1 -> x`
+- `1 * x -> x`
+- `x / 1 -> x` only when the result type is the same as `x`
+- `x * 0 -> 0`
+- `0 * x -> 0`
+- `x % 1 -> 0`
+- `x rem 1 -> 0`
+
+For example:
+
+```text
+%0: int = const 0
+%1: int = load %x
+%2: int = add %1, %0
+return %2
+```
+
+becomes:
+
+```text
+%0: int = const 0
+%1: int = load %x
+return %1
+```
+
+and the subsequent dead code elimination pass can remove `%0` if it is no
+longer used:
+
+```text
+%1: int = load %x
+return %1
+```
+
+The pass deliberately does not simplify `x - x`, `x / x`, `x % x`, `x + x`,
+boolean expressions, comparisons, floating-point operations, or integer
+division cases where replacing the result with the left operand would change
+the IR type. It does not perform constant propagation, copy propagation, common
+subexpression elimination, SSA conversion, or interprocedural analysis.
+
 The implemented dead code elimination pass removes pure instructions whose
 result value is not used by any kept instruction in the same function. Its
 initial pure instruction set is:
@@ -173,8 +225,7 @@ The pass deliberately keeps `IRStore`, `IRCall`, `IRBranch`, `IRJump`, and
 `IRReturn`. Calls are preserved even when their result is unused because the IR
 does not model call purity yet, and stores/control-flow instructions are
 observable or structural. Future optimization passes are expected to include
-algebraic simplification, constant propagation, and eventually SSA-oriented
-transformations.
+constant propagation and eventually SSA-oriented transformations.
 
 ### Experimental IR backend and CLI
 

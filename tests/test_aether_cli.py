@@ -256,6 +256,26 @@ int main() {
     assert stderr == ""
 
 
+def test_emit_ir_with_opt_shows_algebraic_simplification(tmp_path: Path) -> None:
+    program = tmp_path / "algebraic_simplification_ir.ae"
+    program.write_text(
+        """
+int identity(int value) {
+    return value + 0;
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-ir", "--opt", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert "return %value" in stdout
+    assert " = add " not in stdout
+    assert "const 0" not in stdout
+    assert stderr == ""
+
+
 def test_opt_without_emit_ir_reports_clear_usage_error(tmp_path: Path) -> None:
     program = tmp_path / "opt_without_emit_ir.ae"
     program.write_text(
