@@ -22,8 +22,10 @@ internal pipeline now has an explicit frontend/backend boundary: source is
 tokenized, parsed, and typechecked into a checked program before a backend runs
 it. The production and default backend is the AST backend. An experimental IR
 backend is available for file execution through `aether --backend=ir`, but it
-is intentionally narrow and is not the default. There is no optimization, SSA,
-JIT, Rust backend, or full-language IR execution path yet.
+is intentionally narrow and is not the default. Initial IR optimization
+infrastructure exists as an explicit developer API, but it is not connected to
+the public IR backend path. There is no SSA, JIT, Rust backend, or full-language
+IR execution path yet.
 
 ### Initial lowering implementation
 
@@ -72,7 +74,61 @@ the supported subset. Current limitations include:
 - No SSA conversion, phi nodes, or optimizations.
 - No builtin calls, keyword arguments, or expression functions.
 - No implicit conversion instructions.
-- No optimizer, SSA, JIT, Rust backend, or full public IR execution path.
+- No optimizer integration with the backend, SSA, JIT, Rust backend, or full
+  public IR execution path.
+
+### Initial optimizer infrastructure
+
+`aether.ir.optimizer.OptimizerPipeline` is the first optimization pipeline
+object. Its default pass list currently contains only
+`aether.ir.optimizer.ConstantFolder`, and it returns an optimized `IRModule`
+without mutating the input module.
+
+The implemented constant folding pass rewrites arithmetic and comparison
+instructions to `IRConst` when both operands are already known constants:
+
+- Arithmetic: `add`, `sub`, `mul`, `div`, `mod`, and the current lowering
+  spelling `rem`.
+- Comparisons: `cmp_lt`, `cmp_le`, `cmp_gt`, `cmp_ge`, `cmp_eq`, and
+  `cmp_ne`.
+
+For example:
+
+```text
+%0: int = const 2
+%1: int = const 3
+%2: int = add %0, %1
+```
+
+becomes:
+
+```text
+%0: int = const 2
+%1: int = const 3
+%2: int = const 5
+```
+
+and:
+
+```text
+%0: int = const 2
+%1: int = const 5
+%2: bool = cmp_lt %0, %1
+```
+
+becomes:
+
+```text
+%0: int = const 2
+%1: int = const 5
+%2: bool = const true
+```
+
+The pass deliberately does not perform algebraic simplification, constant
+propagation through loads or stores, dead code elimination, call evaluation, or
+division/modulo by zero evaluation. Future optimization passes are expected to
+include algebraic simplification, constant propagation, dead code elimination,
+and eventually SSA-oriented transformations.
 
 ### Experimental IR backend and CLI
 
@@ -118,7 +174,7 @@ The user-facing supported IR backend subset is:
 The IR backend does not yet support structs, classes, lists, arrays, packages,
 advanced imports, builtins, top-level scripting statements, methods,
 constructors, interfaces, enums, exceptions, `for`, `break`, `continue`,
-optimizations, SSA, JIT, or Rust code generation.
+optimizer integration, SSA, JIT, or Rust code generation.
 
 The checked AST remains the existing immutable source AST rather than a new
 annotated tree. For this subset, declaration, parameter, literal, and function
@@ -258,8 +314,9 @@ required by lowering. It does not require a new public syntax tree format in
 the first phase. The eventual implementation may annotate the current AST or
 produce a separate typed representation.
 
-The optimizer is an explicit pipeline stage, but it may initially be an
-identity pass. Correct lowering and execution must not depend on optimization.
+The optimizer is an explicit pipeline stage. It now has initial infrastructure
+and a conservative constant folding pass, but correct lowering and execution
+must not depend on optimization.
 
 ## 3. Initial Decisions
 
