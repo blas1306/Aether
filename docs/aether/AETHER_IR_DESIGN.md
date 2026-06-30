@@ -80,11 +80,12 @@ the supported subset. Current limitations include:
 ### Initial optimizer infrastructure
 
 `aether.ir.optimizer.OptimizerPipeline` is the first optimization pipeline
-object. Its default pass list currently contains only
-`aether.ir.optimizer.ConstantFolder`, and it returns an optimized `IRModule`
-without mutating the input module. The CLI can run this pipeline for inspection
-with `aether --emit-ir --opt program.ae`, but optimization is not connected to
-IR execution yet.
+object. Its default pass list currently runs
+`aether.ir.optimizer.ConstantFolder` followed by
+`aether.ir.optimizer.DeadCodeEliminator`, and it returns an optimized
+`IRModule` without mutating the input module. The CLI can run this pipeline for
+inspection with `aether --emit-ir --opt program.ae`, but optimization is not
+connected to IR execution yet.
 
 The implemented constant folding pass rewrites arithmetic and comparison
 instructions to `IRConst` when both operands are already known constants:
@@ -127,10 +128,53 @@ becomes:
 ```
 
 The pass deliberately does not perform algebraic simplification, constant
-propagation through loads or stores, dead code elimination, call evaluation, or
-division/modulo by zero evaluation. Future optimization passes are expected to
-include algebraic simplification, constant propagation, dead code elimination,
-and eventually SSA-oriented transformations.
+propagation through loads or stores, call evaluation, or division/modulo by zero
+evaluation.
+
+The implemented dead code elimination pass removes pure instructions whose
+result value is not used by any kept instruction in the same function. Its
+initial pure instruction set is:
+
+- `IRConst`
+- `IRBinaryOp`
+- `IRCompareOp`
+- `IRLoad`
+
+The pass marks values used by non-removable instructions such as `return`,
+`store`, calls, and branch conditions, then follows those uses backward through
+pure producers. It works per function, preserves basic blocks and control-flow
+targets, and does not perform interprocedural analysis.
+
+For example, after constant folding:
+
+```text
+func @main() -> int {
+entry:
+    %0: int = const 2
+    %1: int = const 3
+    %2: int = const 4
+    %3: int = const 12
+    %4: int = const 14
+    return %4
+}
+```
+
+becomes:
+
+```text
+func @main() -> int {
+entry:
+    %4: int = const 14
+    return %4
+}
+```
+
+The pass deliberately keeps `IRStore`, `IRCall`, `IRBranch`, `IRJump`, and
+`IRReturn`. Calls are preserved even when their result is unused because the IR
+does not model call purity yet, and stores/control-flow instructions are
+observable or structural. Future optimization passes are expected to include
+algebraic simplification, constant propagation, and eventually SSA-oriented
+transformations.
 
 ### Experimental IR backend and CLI
 

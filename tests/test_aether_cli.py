@@ -213,7 +213,9 @@ int main() {
     assert stderr == ""
 
 
-def test_emit_ir_with_opt_shows_constant_folding(tmp_path: Path) -> None:
+def test_emit_ir_with_opt_shows_constant_folding_and_dead_code_elimination(
+    tmp_path: Path,
+) -> None:
     program = tmp_path / "optimized_ir.ae"
     program.write_text(
         """
@@ -227,8 +229,8 @@ int main() {
     exit_code, stdout, stderr = run_cli(["--emit-ir", "--opt", str(program)])
 
     assert exit_code == EXIT_SUCCESS
-    assert "%3: int = const 12" in stdout
     assert "%4: int = const 14" in stdout
+    assert "%3: int = const 12" not in stdout
     assert " = mul " not in stdout
     assert " = add " not in stdout
     assert stderr == ""

@@ -6,6 +6,7 @@ from typing import Protocol
 from aether.ir.model import IRModule
 
 from .constant_folding import ConstantFolder
+from .dead_code import DeadCodeEliminator
 
 
 class OptimizationPass(Protocol):
@@ -17,7 +18,11 @@ class OptimizerPipeline:
     """Run IR optimization passes in a deterministic order."""
 
     def __init__(self, passes: Iterable[OptimizationPass] | None = None) -> None:
-        self._passes = tuple(passes) if passes is not None else (ConstantFolder(),)
+        self._passes = (
+            tuple(passes)
+            if passes is not None
+            else (ConstantFolder(), DeadCodeEliminator())
+        )
 
     def run(self, module: IRModule) -> IRModule:
         optimized = module
