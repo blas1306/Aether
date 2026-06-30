@@ -82,6 +82,8 @@ the supported subset. Current limitations include:
 `aether.ir.optimizer.OptimizerPipeline` is the first optimization pipeline
 object. Its default pass list currently runs
 `aether.ir.optimizer.ConstantFolder`, then
+`aether.ir.optimizer.LocalConstantPropagator`, then another
+`aether.ir.optimizer.ConstantFolder`, then
 `aether.ir.optimizer.AlgebraicSimplifier`, followed by
 `aether.ir.optimizer.DeadCodeEliminator`, and it returns an optimized
 `IRModule` without mutating the input module. The CLI can run this pipeline for
@@ -128,9 +130,41 @@ becomes:
 %2: bool = const true
 ```
 
-The pass deliberately does not perform algebraic simplification, constant
-propagation through loads or stores, call evaluation, or division/modulo by zero
-evaluation.
+The pass deliberately does not perform algebraic simplification, call
+evaluation, or division/modulo by zero evaluation. Constant propagation through
+loads and stores is handled by the separate local pass described below.
+
+The implemented local constant propagation pass rewrites `IRLoad` instructions
+inside a single basic block when the loaded slot is known to contain a constant
+from an earlier same-block `IRStore`. Stores are preserved. If the slot is later
+stored with a non-constant value, the pass forgets the known constant for that
+slot. If it is stored with another constant, the known value is updated.
+
+For example:
+
+```text
+%0: int = const 5
+store %x, %0
+%1: int = load %x
+return %1
+```
+
+becomes:
+
+```text
+%0: int = const 5
+store %x, %0
+%1: int = const 5
+return %1
+```
+
+The pass is deliberately basic-block-local. It does not propagate constants
+across `branch`, `jump`, merge blocks, loops, function boundaries, or any other
+control-flow edge. Results of calls are treated as unknown unless a later pass
+or explicit instruction has already materialized a constant value. It does not
+perform copy propagation, common subexpression elimination, SSA conversion,
+dominance analysis, or global constant propagation. Global constant propagation
+remains future work.
 
 The implemented algebraic simplification pass rewrites local integer binary
 operations when one operand is a known identity or absorbing constant. The IR

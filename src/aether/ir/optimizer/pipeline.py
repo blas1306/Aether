@@ -8,6 +8,7 @@ from aether.ir.model import IRModule
 from .algebraic_simplification import AlgebraicSimplifier
 from .constant_folding import ConstantFolder
 from .dead_code import DeadCodeEliminator
+from .local_constant_propagation import LocalConstantPropagator
 
 
 class OptimizationPass(Protocol):
@@ -22,7 +23,13 @@ class OptimizerPipeline:
         self._passes = (
             tuple(passes)
             if passes is not None
-            else (ConstantFolder(), AlgebraicSimplifier(), DeadCodeEliminator())
+            else (
+                ConstantFolder(),
+                LocalConstantPropagator(),
+                ConstantFolder(),
+                AlgebraicSimplifier(),
+                DeadCodeEliminator(),
+            )
         )
 
     def run(self, module: IRModule) -> IRModule:

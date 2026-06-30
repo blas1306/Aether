@@ -21,6 +21,7 @@ from aether.ir import (
     IRStore,
     IRValue,
     IntType,
+    StringType,
     VoidType,
     print_ir,
 )
@@ -28,6 +29,7 @@ from aether.ir.optimizer import (
     AlgebraicSimplifier,
     ConstantFolder,
     DeadCodeEliminator,
+    LocalConstantPropagator,
     OptimizerPipeline,
 )
 
@@ -42,6 +44,10 @@ def _dce(module: IRModule) -> IRModule:
 
 def _simplify(module: IRModule) -> IRModule:
     return AlgebraicSimplifier().run(module)
+
+
+def _propagate(module: IRModule) -> IRModule:
+    return LocalConstantPropagator().run(module)
 
 
 def _single_block_module(instructions: list[object], return_value: IRValue) -> IRModule:
@@ -326,6 +332,371 @@ def test_constant_folding_does_not_fold_load_or_store() -> None:
     )
 
     assert print_ir(_optimize(module)) == print_ir(module)
+
+
+def test_local_constant_propagation_replaces_same_block_load() -> None:
+    int_type = IntType()
+    slot = IRValue("x", int_type)
+    stored = IRValue("0", int_type)
+    loaded = IRValue("1", int_type)
+    module = _single_block_module(
+        [
+            IRConst(stored, 5),
+            IRStore(slot, stored),
+            IRLoad(loaded, slot),
+        ],
+        loaded,
+    )
+
+    assert print_ir(_propagate(module)) == (
+        "func @main() -> int {\n"
+        "entry:\n"
+        "    %0: int = const 5\n"
+        "    store %x, %0\n"
+        "    %1: int = const 5\n"
+        "    return %1\n"
+        "}"
+    )
+
+
+def test_local_constant_propagation_enables_later_constant_folding() -> None:
+    int_type = IntType()
+    slot = IRValue("x", int_type)
+    five = IRValue("0", int_type)
+    loaded = IRValue("1", int_type)
+    seven = IRValue("2", int_type)
+    result = IRValue("3", int_type)
+    module = _single_block_module(
+        [
+            IRConst(five, 5),
+            IRStore(slot, five),
+            IRLoad(loaded, slot),
+            IRConst(seven, 7),
+            IRBinaryOp(result, "add", loaded, seven),
+        ],
+        result,
+    )
+
+    assert print_ir(OptimizerPipeline().run(module)) == (
+        "func @main() -> int {\n"
+        "entry:\n"
+        "    %0: int = const 5\n"
+        "    store %x, %0\n"
+        "    %3: int = const 12\n"
+        "    return %3\n"
+        "}"
+    )
+
+
+def test_local_constant_propagation_updates_slot_with_new_constant() -> None:
+    int_type = IntType()
+    slot = IRValue("x", int_type)
+    five = IRValue("0", int_type)
+    seven = IRValue("1", int_type)
+    loaded = IRValue("2", int_type)
+    module = _single_block_module(
+        [
+            IRConst(five, 5),
+            IRStore(slot, five),
+            IRConst(seven, 7),
+            IRStore(slot, seven),
+            IRLoad(loaded, slot),
+        ],
+        loaded,
+    )
+
+    assert "%2: int = const 7" in print_ir(_propagate(module))
+
+
+def test_local_constant_propagation_handles_string_slots() -> None:
+    string_type = StringType()
+    slot = IRValue("message", string_type)
+    stored = IRValue("0", string_type)
+    loaded = IRValue("1", string_type)
+    module = _single_block_module(
+        [
+            IRConst(stored, "hello"),
+            IRStore(slot, stored),
+            IRLoad(loaded, slot),
+        ],
+        loaded,
+    )
+
+    assert "%1: string = const \"hello\"" in print_ir(_propagate(module))
+
+
+def test_local_constant_propagation_handles_bool_slots() -> None:
+    bool_type = BoolType()
+    slot = IRValue("flag", bool_type)
+    stored = IRValue("0", bool_type)
+    loaded = IRValue("1", bool_type)
+    module = _single_block_module(
+        [
+            IRConst(stored, True),
+            IRStore(slot, stored),
+            IRLoad(loaded, slot),
+        ],
+        loaded,
+    )
+
+    assert "%1: bool = const true" in print_ir(_propagate(module))
+
+
+def test_local_constant_propagation_tracks_multiple_slots_independently() -> None:
+    int_type = IntType()
+    left_slot = IRValue("left", int_type)
+    right_slot = IRValue("right", int_type)
+    one = IRValue("0", int_type)
+    two = IRValue("1", int_type)
+    left = IRValue("2", int_type)
+    right = IRValue("3", int_type)
+    module = _single_block_module(
+        [
+            IRConst(one, 1),
+            IRConst(two, 2),
+            IRStore(left_slot, one),
+            IRStore(right_slot, two),
+            IRLoad(left, left_slot),
+            IRLoad(right, right_slot),
+        ],
+        right,
+    )
+
+    optimized = print_ir(_propagate(module))
+
+    assert "%2: int = const 1" in optimized
+    assert "%3: int = const 2" in optimized
+
+
+def test_local_constant_propagation_combines_with_dce() -> None:
+    int_type = IntType()
+    slot = IRValue("x", int_type)
+    stored = IRValue("0", int_type)
+    loaded = IRValue("1", int_type)
+    module = _single_block_module(
+        [
+            IRConst(stored, 9),
+            IRStore(slot, stored),
+            IRLoad(loaded, slot),
+        ],
+        loaded,
+    )
+
+    assert print_ir(OptimizerPipeline().run(module)) == (
+        "func @main() -> int {\n"
+        "entry:\n"
+        "    %0: int = const 9\n"
+        "    store %x, %0\n"
+        "    %1: int = const 9\n"
+        "    return %1\n"
+        "}"
+    )
+
+
+def test_local_constant_propagation_forgets_non_constant_store() -> None:
+    int_type = IntType()
+    parameter = IRParameter("value", int_type)
+    slot = IRValue("x", int_type)
+    stored = IRValue("0", int_type)
+    loaded = IRValue("1", int_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "main",
+                [parameter],
+                int_type,
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [
+                            IRConst(stored, 5),
+                            IRStore(slot, stored),
+                            IRStore(slot, parameter),
+                            IRLoad(loaded, slot),
+                            IRReturn(loaded),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+
+    assert print_ir(_propagate(module)) == print_ir(module)
+
+
+def test_local_constant_propagation_does_not_cross_basic_blocks() -> None:
+    int_type = IntType()
+    slot = IRValue("x", int_type)
+    stored = IRValue("0", int_type)
+    loaded = IRValue("1", int_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "main",
+                [],
+                int_type,
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [IRConst(stored, 5), IRStore(slot, stored), IRJump("exit")],
+                    ),
+                    IRBasicBlock("exit", [IRLoad(loaded, slot), IRReturn(loaded)]),
+                ],
+            )
+        ]
+    )
+
+    assert print_ir(_propagate(module)) == print_ir(module)
+
+
+def test_local_constant_propagation_does_not_cross_if_else_merge() -> None:
+    int_type = IntType()
+    bool_type = BoolType()
+    slot = IRValue("x", int_type)
+    condition = IRValue("0", bool_type)
+    one = IRValue("1", int_type)
+    two = IRValue("2", int_type)
+    loaded = IRValue("3", int_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "main",
+                [],
+                int_type,
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [IRConst(condition, True), IRBranch(condition, "then", "else")],
+                    ),
+                    IRBasicBlock(
+                        "then",
+                        [IRConst(one, 1), IRStore(slot, one), IRJump("merge")],
+                    ),
+                    IRBasicBlock(
+                        "else",
+                        [IRConst(two, 2), IRStore(slot, two), IRJump("merge")],
+                    ),
+                    IRBasicBlock("merge", [IRLoad(loaded, slot), IRReturn(loaded)]),
+                ],
+            )
+        ]
+    )
+
+    assert "%3: int = load %x" in print_ir(_propagate(module))
+
+
+def test_local_constant_propagation_does_not_cross_while_blocks() -> None:
+    int_type = IntType()
+    bool_type = BoolType()
+    slot = IRValue("x", int_type)
+    condition = IRValue("0", bool_type)
+    stored = IRValue("1", int_type)
+    loaded = IRValue("2", int_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "main",
+                [],
+                int_type,
+                [
+                    IRBasicBlock("entry", [IRJump("cond")]),
+                    IRBasicBlock(
+                        "cond",
+                        [IRConst(condition, False), IRBranch(condition, "body", "exit")],
+                    ),
+                    IRBasicBlock(
+                        "body",
+                        [IRConst(stored, 5), IRStore(slot, stored), IRJump("cond")],
+                    ),
+                    IRBasicBlock("exit", [IRLoad(loaded, slot), IRReturn(loaded)]),
+                ],
+            )
+        ]
+    )
+
+    assert "%2: int = load %x" in print_ir(_propagate(module))
+
+
+def test_local_constant_propagation_does_not_remove_store() -> None:
+    int_type = IntType()
+    slot = IRValue("x", int_type)
+    stored = IRValue("0", int_type)
+    loaded = IRValue("1", int_type)
+    module = _single_block_module(
+        [
+            IRConst(stored, 5),
+            IRStore(slot, stored),
+            IRLoad(loaded, slot),
+        ],
+        loaded,
+    )
+
+    assert "store %x, %0" in print_ir(_propagate(module))
+
+
+def test_local_constant_propagation_does_not_propagate_call_results() -> None:
+    int_type = IntType()
+    slot = IRValue("x", int_type)
+    call_result = IRValue("0", int_type)
+    loaded = IRValue("1", int_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "identity",
+                [IRParameter("value", int_type)],
+                int_type,
+                [IRBasicBlock("entry", [IRReturn(IRParameter("value", int_type))])],
+            ),
+            IRFunction(
+                "main",
+                [],
+                int_type,
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [
+                            IRCall("identity", (), call_result),
+                            IRStore(slot, call_result),
+                            IRLoad(loaded, slot),
+                            IRReturn(loaded),
+                        ],
+                    )
+                ],
+            ),
+        ]
+    )
+
+    assert print_ir(_propagate(module)) == print_ir(module)
+
+
+def test_local_constant_propagation_does_not_propagate_between_functions() -> None:
+    int_type = IntType()
+    slot = IRValue("x", int_type)
+    stored = IRValue("0", int_type)
+    loaded = IRValue("1", int_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "write",
+                [],
+                VoidType(),
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [IRConst(stored, 5), IRStore(slot, stored), IRReturn()],
+                    )
+                ],
+            ),
+            IRFunction(
+                "read",
+                [],
+                int_type,
+                [IRBasicBlock("entry", [IRLoad(loaded, slot), IRReturn(loaded)])],
+            ),
+        ]
+    )
+
+    assert "%1: int = load %x" in print_ir(_propagate(module))
 
 
 @pytest.mark.parametrize(

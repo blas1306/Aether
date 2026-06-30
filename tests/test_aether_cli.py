@@ -276,6 +276,27 @@ int identity(int value) {
     assert stderr == ""
 
 
+def test_emit_ir_with_opt_shows_local_constant_propagation(tmp_path: Path) -> None:
+    program = tmp_path / "local_constant_propagation_ir.ae"
+    program.write_text(
+        """
+int main() {
+    int x = 5;
+    return x;
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-ir", "--opt", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert "store %x, %0" in stdout
+    assert "%1: int = const 5" in stdout
+    assert "load %x" not in stdout
+    assert stderr == ""
+
+
 def test_opt_without_emit_ir_reports_clear_usage_error(tmp_path: Path) -> None:
     program = tmp_path / "opt_without_emit_ir.ae"
     program.write_text(
