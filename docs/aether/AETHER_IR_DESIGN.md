@@ -80,7 +80,10 @@ the supported subset. Current limitations include:
 ### Initial optimizer infrastructure
 
 `aether.ir.optimizer.OptimizerPipeline` is the first optimization pipeline
-object. Its default pass list currently runs
+object. `aether.ir.optimizer.build_optimizer_pipeline(level)` builds the
+compiler-style optimization profiles used by the CLI: `O0` is a no-op pipeline,
+`O1` is the current iterative pipeline, and `O2` is reserved for future stronger
+optimization but currently aliases `O1`. Its default pass list currently runs
 `aether.ir.optimizer.ConstantFolder`, then
 `aether.ir.optimizer.LocalConstantPropagator`, then another
 `aether.ir.optimizer.ConstantFolder`, then
@@ -101,10 +104,11 @@ that it converged. `OptimizerPipeline.run_with_trace(module)` returns
 `OptimizationTraceStep(label, module, changed, stats)` entries for the lowered
 module, every pass result in order, and the final IR; iterative traces include
 the iteration number in each pass entry. The CLI can run the iterative pipeline
-for inspection with `aether --emit-ir --opt program.ae`, and can show the
-per-pass trace with `aether --emit-ir --opt --show-passes program.ae`, but
-optimization is not connected to IR execution yet. This infrastructure change
-does not add new optimization passes.
+for inspection with `aether --emit-ir -O1 program.ae` or the backward-compatible
+`aether --emit-ir --opt program.ae`, and can show the per-pass trace with
+`aether --emit-ir -O1 --show-passes program.ae`. Optimization is not connected
+to IR execution yet. This infrastructure change does not add new optimization
+passes.
 
 The current pass statistics are:
 
@@ -347,6 +351,9 @@ aether program.ae
 aether --backend=ast program.ae
 aether --backend=ir program.ae
 aether --emit-ir program.ae
+aether --emit-ir -O0 program.ae
+aether --emit-ir -O1 program.ae
+aether --emit-ir -O2 program.ae
 aether --emit-ir --opt program.ae
 aether --backend=ir --emit-ir program.ae
 ```
@@ -367,9 +374,10 @@ such as `println`.
 
 `--emit-ir` lowers and verifies the checked program, prints deterministic
 textual IR, and does not execute it. It is a development tool and is accepted
-with or without `--backend=ir`.
+with or without `--backend=ir`. Plain `--emit-ir` uses `O0`; `--emit-ir -O0` is
+equivalent and prints unoptimized IR.
 
-`--emit-ir --opt` runs:
+`--emit-ir -O1` runs:
 
 ```text
 source -> lexer -> parser -> typechecker -> IR lowering -> IR verifier -> OptimizerPipeline -> IR verifier -> print IR
@@ -379,12 +387,16 @@ The CLI uses `OptimizerPipeline(iterative=True, max_iterations=10)` for this
 path. The optimizer repeats the existing pass list until a full iteration
 reports no changes. If the tenth iteration still changes the IR, optimization
 fails with a clear convergence error. The second verifier checks the optimizer
-output before the textual IR is printed. `--opt` is currently supported only
-with `--emit-ir`; using `--opt` without `--emit-ir` is a CLI usage error.
-`aether --backend=ir program.ae` continues to execute unoptimized IR for now.
+output before the textual IR is printed. `--emit-ir -O2` currently runs the same
+pipeline as `-O1`; it is reserved as the future stronger optimization profile.
+The long form `--opt-level=0`, `--opt-level=1`, or `--opt-level=2` is also
+accepted. `--opt` remains supported as an alias for `-O1`. `--opt` and `-O`
+flags are currently supported only with `--emit-ir`; using them without
+`--emit-ir` is a CLI usage error. `aether --backend=ir program.ae` continues to
+execute unoptimized IR for now.
 
-`--emit-ir --opt --show-passes` runs the same optimizer pipeline and prints
-sectioned textual IR for:
+`--emit-ir -O1 --show-passes` and `--emit-ir --opt --show-passes` run the same
+optimizer pipeline and print sectioned textual IR for:
 
 ```text
 Lowered IR
@@ -403,7 +415,9 @@ Final IR
 The repeated `ConstantFolder` and final `DeadCodeEliminator` are intentional
 because they are part of the default pipeline. A second iteration is printed
 only when an earlier iteration changed the IR and the optimizer needs to confirm
-the fixed point. `--show-passes` is valid only together with `--emit-ir --opt`;
+the fixed point. With `--emit-ir -O0 --show-passes`, the trace contains only
+`Lowered IR` and `Final IR`, with no pass sections. `--show-passes` is valid
+only together with `--emit-ir` plus `--opt` or an explicit `-O`/`--opt-level`;
 it does not affect normal optimized IR output. The bracketed status and stats
 are compiler-development diagnostics, not semantic IR content.
 

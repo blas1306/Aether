@@ -18,7 +18,7 @@ from .typechecker import TypeChecker
 from .version import LANGUAGE_VERSION
 
 if TYPE_CHECKING:
-    from .ir.optimizer import OptimizationTraceStep
+    from .ir.optimizer import OptimizationProfile, OptimizationTraceStep
 
 EXIT_SUCCESS = 0
 EXIT_LANGUAGE_ERROR = 1
@@ -59,9 +59,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optimize emitted IR. Currently only supported with --emit-ir.",
     )
     parser.add_argument(
+        "-O",
+        "--opt-level",
+        choices=("0", "1", "2"),
+        default=None,
+        help=(
+            "Optimization level for --emit-ir: 0 disables optimization, "
+            "1 uses the current pipeline, 2 is reserved and aliases 1."
+        ),
+    )
+    parser.add_argument(
         "--show-passes",
         action="store_true",
-        help="With --emit-ir --opt, print IR after each optimizer pass.",
+        help="With --emit-ir and an optimization level, print optimizer pass IR.",
     )
     parser.add_argument(
         "--backend",
@@ -98,11 +108,23 @@ def main(
         except SystemExit as exc:
             return int(exc.code)
 
+    if args.opt_level is not None and not args.emit_ir:
+        print(
+            "aether: error: -O flags are currently only supported with --emit-ir.",
+            file=stderr,
+        )
+        return EXIT_USAGE_ERROR
     if args.opt and not args.emit_ir:
         print("aether: error: --opt is currently only supported with --emit-ir.", file=stderr)
         return EXIT_USAGE_ERROR
-    if args.show_passes and not (args.emit_ir and args.opt):
-        print("aether: error: --show-passes requires --emit-ir --opt.", file=stderr)
+    if args.show_passes and not (
+        args.emit_ir and (args.opt or args.opt_level is not None)
+    ):
+        print(
+            "aether: error: --show-passes requires --emit-ir --opt. "
+            "Use -O0/-O1/-O2 as an alternative to --opt.",
+            file=stderr,
+        )
         return EXIT_USAGE_ERROR
 
     if args.repl:
@@ -139,7 +161,10 @@ def main(
                 source,
                 path=path,
                 stdout=stdout,
-                optimize=args.opt,
+                optimization_profile=_optimization_profile_from_args(
+                    opt=args.opt,
+                    opt_level=args.opt_level,
+                ),
                 show_passes=args.show_passes,
             ),
             stderr=stderr,
@@ -231,7 +256,7 @@ def _emit_ir(
     *,
     path: Path,
     stdout: TextIO,
-    optimize: bool = False,
+    optimization_profile: "OptimizationProfile" = "O0",
     show_passes: bool = False,
 ) -> None:
     typed_program = prepare_typed_program(
@@ -240,16 +265,37 @@ def _emit_ir(
     )
     backend = IRBackend()
     module = backend.lower_verified(typed_program)
-    if optimize and show_passes:
-        from .ir.optimizer import OptimizerPipeline
+    if show_passes:
+        from .ir.optimizer import build_optimizer_pipeline
 
-        trace = OptimizerPipeline(iterative=True).run_with_trace(module)
+        trace = build_optimizer_pipeline(optimization_profile).run_with_trace(module)
         backend.verify(trace[-1].module)
         _print_ir_trace(trace, stdout=stdout)
         return
-    if optimize:
-        module = backend.optimize_verified(module)
+    if optimization_profile != "O0":
+        from .ir.optimizer import build_optimizer_pipeline
+
+        module = backend.optimize_verified(
+            module,
+            optimizer=build_optimizer_pipeline(optimization_profile),
+        )
     print(print_ir(module), file=stdout)
+
+
+def _optimization_profile_from_args(
+    *,
+    opt: bool,
+    opt_level: str | None,
+) -> "OptimizationProfile":
+    if opt_level == "0":
+        return "O0"
+    if opt_level == "1":
+        return "O1"
+    if opt_level == "2":
+        return "O2"
+    if opt:
+        return "O1"
+    return "O0"
 
 
 def _print_ir_trace(trace: list[OptimizationTraceStep], *, stdout: TextIO) -> None:

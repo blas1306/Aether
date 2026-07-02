@@ -104,24 +104,37 @@ Language-development inspection tools are also available:
 aether --tokens examples/hello.ae
 aether --ast examples/hello.ae
 aether --emit-ir program.ae
+aether --emit-ir -O0 program.ae
+aether --emit-ir -O1 program.ae
+aether --emit-ir -O2 program.ae
 aether --emit-ir --opt program.ae
 aether --emit-ir --opt --show-passes program.ae
 aether --backend=ir --emit-ir program.ae
 ```
 
 `--emit-ir` lowers and verifies the program, prints textual IR, and does not
-execute it. Add `--opt` to inspect the IR after the current optimization
-pipeline. The CLI runs the optimizer to a fixed point, with a default limit of
-10 iterations to catch accidental non-convergence:
+execute it. Optimization profiles are compiler-style `-O` levels for emitted
+IR only:
+
+- `-O0` disables optimization and is equivalent to plain `--emit-ir`.
+- `-O1` runs the current iterative optimizer pipeline.
+- `-O2` is reserved for future stronger optimization and currently aliases
+  `-O1`.
+
+The long form `--opt-level=0`, `--opt-level=1`, or `--opt-level=2` is also
+accepted. Existing `--opt` remains supported and is equivalent to `-O1`. For
+`-O1`, `-O2`, and `--opt`, the CLI runs the optimizer to a fixed point, with a
+default limit of 10 iterations to catch accidental non-convergence:
 
 ```text
 Lexer -> Parser -> TypeChecker -> IR lowering -> IR verifier -> OptimizerPipeline -> IR verifier
 ```
 
-Add `--show-passes` with `--emit-ir --opt` to print the lowered IR, the IR after
-each optimizer pass in each iteration, and the final IR. This is a development
-inspection tool; the default optimized IR output remains unchanged without
-`--show-passes`.
+Add `--show-passes` with `--emit-ir` and an optimization profile to print the
+lowered IR, optimizer pass IR when the selected profile has passes, and the
+final IR. With `-O0`, this prints only `Lowered IR` and `Final IR`. This is a
+development inspection tool; the default optimized IR output remains unchanged
+without `--show-passes`.
 
 Optimizer pass headers include lightweight debug statistics. For example,
 `[changed, folded=2]` means the pass changed the IR and folded two operations,
@@ -141,8 +154,9 @@ escape, interprocedural, SSA, `if`, or `while` analysis; stores that may be
 observed through `jump` or `branch` successors are preserved.
 
 Optimization is currently connected only to `--emit-ir`. `--backend=ir` still
-executes the verified, unoptimized IR, and `--opt` without `--emit-ir` is
-rejected. `--show-passes` also requires `--emit-ir --opt`.
+executes the verified, unoptimized IR, `--opt` without `--emit-ir` is rejected,
+and `-O` flags without `--emit-ir` are rejected. `--show-passes` also requires
+`--emit-ir` plus `--opt` or an explicit `-O`/`--opt-level`.
 
 Use `aether --help` for all current options and `aether --version` for the
 language version. The primary execution form is `aether file.ae`; there is no

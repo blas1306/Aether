@@ -202,6 +202,7 @@ def test_help_describes_direct_execution_and_tools() -> None:
     assert "--backend" in stdout
     assert "--emit-ir" in stdout
     assert "--opt" in stdout
+    assert "--opt-level" in stdout
     assert "--show-passes" in stdout
     assert stderr == ""
 
@@ -284,6 +285,30 @@ int main() {
     assert stderr == ""
 
 
+def test_emit_ir_o0_preserves_unoptimized_ir(tmp_path: Path) -> None:
+    program = tmp_path / "o0_ir.ae"
+    program.write_text(
+        """
+int main() {
+    return 2 + 3 * 4;
+}
+""",
+        encoding="utf-8",
+    )
+
+    default_exit, default_stdout, default_stderr = run_cli(["--emit-ir", str(program)])
+    o0_exit, o0_stdout, o0_stderr = run_cli(["--emit-ir", "-O0", str(program)])
+
+    assert (o0_exit, o0_stdout, o0_stderr) == (
+        default_exit,
+        default_stdout,
+        default_stderr,
+    )
+    assert "%3: int = mul %1, %2" in o0_stdout
+    assert "%4: int = add %0, %3" in o0_stdout
+    assert "%4: int = const 14" not in o0_stdout
+
+
 def test_emit_ir_with_opt_shows_constant_folding_and_dead_code_elimination(
     tmp_path: Path,
 ) -> None:
@@ -305,6 +330,62 @@ int main() {
     assert " = mul " not in stdout
     assert " = add " not in stdout
     assert stderr == ""
+
+
+def test_emit_ir_o1_shows_constant_folding_and_dead_code_elimination(
+    tmp_path: Path,
+) -> None:
+    program = tmp_path / "o1_ir.ae"
+    program.write_text(
+        """
+int main() {
+    return 2 + 3 * 4;
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-ir", "-O1", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert "%4: int = const 14" in stdout
+    assert " = mul " not in stdout
+    assert " = add " not in stdout
+    assert stderr == ""
+
+
+def test_emit_ir_o2_aliases_o1_for_now(tmp_path: Path) -> None:
+    program = tmp_path / "o2_alias_ir.ae"
+    program.write_text(
+        """
+int main() {
+    return 2 + 3 * 4;
+}
+""",
+        encoding="utf-8",
+    )
+
+    o1_exit, o1_stdout, o1_stderr = run_cli(["--emit-ir", "-O1", str(program)])
+    o2_exit, o2_stdout, o2_stderr = run_cli(["--emit-ir", "-O2", str(program)])
+
+    assert (o2_exit, o2_stdout, o2_stderr) == (o1_exit, o1_stdout, o1_stderr)
+
+
+def test_emit_ir_opt_is_equivalent_to_o1(tmp_path: Path) -> None:
+    program = tmp_path / "opt_equals_o1_ir.ae"
+    program.write_text(
+        """
+int main() {
+    return 2 + 3 * 4;
+}
+""",
+        encoding="utf-8",
+    )
+
+    opt_exit, opt_stdout, opt_stderr = run_cli(["--emit-ir", "--opt", str(program)])
+    o1_exit, o1_stdout, o1_stderr = run_cli(["--emit-ir", "-O1", str(program)])
+
+    assert (opt_exit, opt_stdout, opt_stderr) == (o1_exit, o1_stdout, o1_stderr)
 
 
 def test_emit_ir_with_opt_normal_output_does_not_show_pass_trace(tmp_path: Path) -> None:
@@ -353,6 +434,57 @@ int main() {
         "Final IR",
     ]
     assert stdout.count("========================================") == 32
+    assert stderr == ""
+
+
+def test_emit_ir_o0_show_passes_prints_only_lowered_and_final_ir(
+    tmp_path: Path,
+) -> None:
+    program = tmp_path / "o0_ir_trace.ae"
+    program.write_text(
+        """
+int main() {
+    return 2 + 3 * 4;
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(
+        ["--emit-ir", "-O0", "--show-passes", str(program)]
+    )
+
+    assert exit_code == EXIT_SUCCESS
+    assert _trace_titles(stdout) == ["Lowered IR", "Final IR"]
+    assert _trace_section(stdout, "Lowered IR") == _trace_section(stdout, "Final IR")
+    assert "After ConstantFolder" not in stdout
+    assert stderr == ""
+
+
+def test_emit_ir_o1_show_passes_prints_optimizer_stages(
+    tmp_path: Path,
+) -> None:
+    program = tmp_path / "o1_ir_trace.ae"
+    program.write_text(
+        """
+int main() {
+    return 2 + 3 * 4;
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(
+        ["--emit-ir", "-O1", "--show-passes", str(program)]
+    )
+
+    assert exit_code == EXIT_SUCCESS
+    assert _trace_titles(stdout) == [
+        "Lowered IR",
+        *_changed_constant_folding_iteration_titles(),
+        *_iteration_titles(2),
+        "Final IR",
+    ]
     assert stderr == ""
 
 
@@ -537,6 +669,44 @@ int main() {
     assert exit_code == EXIT_USAGE_ERROR
     assert stdout == ""
     assert "--opt is currently only supported with --emit-ir." in stderr
+
+
+def test_o_flag_without_emit_ir_reports_clear_usage_error(tmp_path: Path) -> None:
+    program = tmp_path / "o_without_emit_ir.ae"
+    program.write_text(
+        """
+int main() {
+    return 14;
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["-O1", str(program)])
+
+    assert exit_code == EXIT_USAGE_ERROR
+    assert stdout == ""
+    assert "-O flags are currently only supported with --emit-ir." in stderr
+
+
+def test_opt_level_long_form_is_supported(tmp_path: Path) -> None:
+    program = tmp_path / "opt_level_long_form.ae"
+    program.write_text(
+        """
+int main() {
+    return 2 + 3 * 4;
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-ir", "--opt-level=1", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert "%4: int = const 14" in stdout
+    assert " = mul " not in stdout
+    assert " = add " not in stdout
+    assert stderr == ""
 
 
 def test_show_passes_without_emit_ir_and_opt_reports_clear_usage_error(

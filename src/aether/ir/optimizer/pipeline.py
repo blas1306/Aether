@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Protocol
+from typing import Literal, Protocol
 
 from aether.errors import AetherRuntimeError
 from aether.ir.model import IRModule
@@ -17,6 +17,9 @@ from .result import OptimizationResult, OptimizationTraceStep
 class OptimizationPass(Protocol):
     def run(self, module: IRModule) -> OptimizationResult | IRModule:
         ...
+
+
+OptimizationProfile = Literal["O0", "O1", "O2"]
 
 
 class OptimizationConvergenceError(AetherRuntimeError):
@@ -135,3 +138,24 @@ class OptimizerPipeline:
         if isinstance(result, OptimizationResult):
             return result
         return OptimizationResult(result, changed=result != module, stats={})
+
+
+def build_optimizer_pipeline(level: OptimizationProfile | str) -> OptimizerPipeline:
+    """Build the optimizer pipeline for a compiler-style optimization profile."""
+    normalized = _normalize_optimization_profile(level)
+    if normalized == "O0":
+        return OptimizerPipeline(passes=())
+    if normalized in {"O1", "O2"}:
+        return OptimizerPipeline(iterative=True)
+    raise ValueError(f"Unknown optimization profile '{level}'.")
+
+
+def _normalize_optimization_profile(level: OptimizationProfile | str) -> OptimizationProfile:
+    normalized = level.upper()
+    if normalized in {"0", "O0"}:
+        return "O0"
+    if normalized in {"1", "O1"}:
+        return "O1"
+    if normalized in {"2", "O2"}:
+        return "O2"
+    raise ValueError(f"Unknown optimization profile '{level}'.")
