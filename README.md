@@ -20,8 +20,9 @@ MathTeX Studio is historical code, not an active Aether runtime. Its `.mtx`,
 and architecture boundary.
 
 Compiler implementation notes live under
-[`docs/compiler/`](docs/compiler/), including the initial
-[`SSA design`](docs/compiler/SSA_DESIGN.md) for future IR analysis and
+[`docs/compiler/`](docs/compiler/), including initial
+[`dominator`](docs/compiler/DOMINATORS.md) and
+[`SSA`](docs/compiler/SSA_DESIGN.md) design notes for future IR analysis and
 optimization work. Language-level specifications and design notes live under
 [`docs/aether/`](docs/aether/).
 

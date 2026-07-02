@@ -17,5 +17,7 @@ about compiler machinery.
 
 Current compiler-design documents:
 
+- [DOMINATORS.md](DOMINATORS.md): initial design notes for dominator analysis,
+  dominance frontiers, and their role in future SSA construction.
 - [SSA_DESIGN.md](SSA_DESIGN.md): initial design notes for future SSA support
   in the Aether IR.
