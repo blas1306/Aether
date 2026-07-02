@@ -15,6 +15,9 @@ It is separate from `docs/aether/` on purpose:
 In short, `docs/aether/` is about the language contract. `docs/compiler/` is
 about compiler machinery.
 
+IR analysis helpers live under `aether.analysis`; the current CFG builder and
+DOT printer are exposed by `aether.analysis.cfg`.
+
 Current compiler-design documents:
 
 - [DOMINATORS.md](DOMINATORS.md): initial design notes for dominator analysis,

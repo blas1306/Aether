@@ -352,7 +352,7 @@ def _emit_ir(
 
 
 def _emit_cfg(source: str, *, path: Path, stdout: TextIO) -> None:
-    from .ir import CFGBuilder, DOTPrinter
+    from .analysis.cfg import CFGBuilder, DOTPrinter
 
     typed_program = prepare_typed_program(
         source,

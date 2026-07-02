@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from aether.ir import CFGBuilder, DOTPrinter, IRLowerer
+from aether.analysis.cfg import CFGBuilder, DOTPrinter
+from aether.ir import IRLowerer
 from aether.pipeline import parse_source
 from aether.typechecker import TypeChecker
 
@@ -155,3 +156,9 @@ int second(int x) {
         ("entry", "then0"),
         ("entry", "else0"),
     }
+
+
+def test_ir_cfg_module_reexports_cfg_builder_for_compatibility() -> None:
+    from aether.ir.cfg import CFGBuilder as CompatCFGBuilder
+
+    assert CompatCFGBuilder is CFGBuilder

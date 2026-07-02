@@ -124,7 +124,7 @@ optimized module beyond the transformations the pass already performs.
 
 ### Control Flow Graph
 
-`aether.ir.cfg` contains the first CFG infrastructure for lowered IR:
+`aether.analysis.cfg` contains the first CFG infrastructure for lowered IR:
 `CFG`, `CFGNode`, `CFGEdge`, `CFGBuilder`, and `DOTPrinter`. The graph is
 function-local and block-level. `CFGBuilder.build(function)` creates one node
 per `IRBasicBlock` and derives edges only from the block terminator:

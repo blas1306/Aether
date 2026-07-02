@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .cfg import CFG, CFGBuilder, CFGEdge, CFGNode, DOTPrinter
+from aether.analysis import CFG, CFGBuilder, CFGEdge, CFGNode, DOTPrinter
 from .interpreter import IRExecutionError, IRInterpreter
 from .lowering import IRLowerer, lower_to_ir
 from .model import (
