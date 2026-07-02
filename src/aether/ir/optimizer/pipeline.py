@@ -8,6 +8,7 @@ from aether.ir.model import IRModule
 from .algebraic_simplification import AlgebraicSimplifier
 from .constant_folding import ConstantFolder
 from .dead_code import DeadCodeEliminator
+from .dead_store import DeadStoreEliminator
 from .local_constant_propagation import LocalConstantPropagator
 from .result import OptimizationResult
 
@@ -29,6 +30,8 @@ class OptimizerPipeline:
                 LocalConstantPropagator(),
                 ConstantFolder(),
                 AlgebraicSimplifier(),
+                DeadCodeEliminator(),
+                DeadStoreEliminator(),
                 DeadCodeEliminator(),
             )
         )

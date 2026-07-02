@@ -85,8 +85,10 @@ object. Its default pass list currently runs
 `aether.ir.optimizer.LocalConstantPropagator`, then another
 `aether.ir.optimizer.ConstantFolder`, then
 `aether.ir.optimizer.AlgebraicSimplifier`, followed by
-`aether.ir.optimizer.DeadCodeEliminator`, and it returns an optimized
-`IRModule` without mutating the input module. Individual passes return an
+`aether.ir.optimizer.DeadCodeEliminator`,
+`aether.ir.optimizer.DeadStoreEliminator`, and a final
+`DeadCodeEliminator` cleanup, and it returns an optimized `IRModule` without
+mutating the input module. Individual passes return an
 `OptimizationResult(module, changed)` so development tools can tell whether a
 pass changed the IR. `OptimizerPipeline.run(module)` preserves the simple
 optimized-module API, while `OptimizerPipeline.run_with_trace(module)` returns
@@ -264,8 +266,57 @@ entry:
 The pass deliberately keeps `IRStore`, `IRCall`, `IRBranch`, `IRJump`, and
 `IRReturn`. Calls are preserved even when their result is unused because the IR
 does not model call purity yet, and stores/control-flow instructions are
-observable or structural. Future optimization passes are expected to include
-constant propagation and eventually SSA-oriented transformations.
+observable or structural.
+
+The implemented dead store elimination pass removes `IRStore` instructions
+when the written slot is never loaded again in the same basic block before
+being overwritten or before the block returns. It analyzes each basic block
+independently and never reasons across control-flow edges.
+
+For example:
+
+```text
+%0: int = const 5
+store %x, %0
+%1: int = const 8
+return %1
+```
+
+becomes:
+
+```text
+%0: int = const 5
+%1: int = const 8
+return %1
+```
+
+and:
+
+```text
+store %x, %0
+store %x, %1
+%2: int = load %x
+return %2
+```
+
+becomes:
+
+```text
+store %x, %1
+%2: int = load %x
+return %2
+```
+
+The pass keeps a store if a later same-block `IRLoad` reads that slot before
+another store overwrites it. It also keeps stores before `IRJump` and
+`IRBranch` terminators because a successor block, including `if`, merge, or
+`while` loop blocks, may read the slot. It removes only `IRStore`
+instructions; calls are preserved even if their result is later stored into a
+slot whose store is removed. There is no global dead store elimination,
+cross-block liveness, alias analysis, escape analysis, interprocedural
+optimization, SSA conversion, or dedicated `if`/`while` analysis yet. The final
+dead code cleanup in the default pipeline can remove pure values that become
+unused after DSE deletes a store.
 
 ### Experimental IR backend and CLI
 
@@ -319,12 +370,14 @@ After LocalConstantPropagator
 After ConstantFolder
 After AlgebraicSimplifier
 After DeadCodeEliminator
+After DeadStoreEliminator
+After DeadCodeEliminator
 Final IR
 ```
 
-The repeated `ConstantFolder` is intentional because it is part of the default
-pipeline. `--show-passes` is valid only together with `--emit-ir --opt`; it does
-not affect normal optimized IR output.
+The repeated `ConstantFolder` and final `DeadCodeEliminator` are intentional
+because they are part of the default pipeline. `--show-passes` is valid only
+together with `--emit-ir --opt`; it does not affect normal optimized IR output.
 
 The user-facing supported IR backend subset is:
 

@@ -121,6 +121,14 @@ Add `--show-passes` with `--emit-ir --opt` to print the lowered IR, the IR after
 each optimizer pass, and the final IR. This is a development inspection tool;
 the default optimized IR output remains unchanged without `--show-passes`.
 
+The current optimizer pipeline includes constant folding, block-local constant
+propagation, algebraic simplification, dead code elimination, and block-local
+dead store elimination. Dead Store Elimination only removes `IRStore`
+instructions whose slot is not loaded again before another same-slot store or
+before a returning block ends. It does not perform global liveness, alias,
+escape, interprocedural, SSA, `if`, or `while` analysis; stores that may be
+observed through `jump` or `branch` successors are preserved.
+
 Optimization is currently connected only to `--emit-ir`. `--backend=ir` still
 executes the verified, unoptimized IR, and `--opt` without `--emit-ir` is
 rejected. `--show-passes` also requires `--emit-ir --opt`.

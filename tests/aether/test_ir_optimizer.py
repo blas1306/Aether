@@ -29,6 +29,7 @@ from aether.ir.optimizer import (
     AlgebraicSimplifier,
     ConstantFolder,
     DeadCodeEliminator,
+    DeadStoreEliminator,
     LocalConstantPropagator,
     OptimizerPipeline,
 )
@@ -40,6 +41,10 @@ def _optimize(module: IRModule) -> IRModule:
 
 def _dce(module: IRModule) -> IRModule:
     return DeadCodeEliminator().run(module).module
+
+
+def _dse(module: IRModule) -> IRModule:
+    return DeadStoreEliminator().run(module).module
 
 
 def _simplify(module: IRModule) -> IRModule:
@@ -321,6 +326,8 @@ def test_optimizer_pipeline_trace_includes_every_default_pass_and_final_ir() -> 
         "ConstantFolder",
         "AlgebraicSimplifier",
         "DeadCodeEliminator",
+        "DeadStoreEliminator",
+        "DeadCodeEliminator",
         "Final IR",
     ]
     assert print_ir(trace[0][1]) == print_ir(module)
@@ -471,8 +478,6 @@ def test_local_constant_propagation_enables_later_constant_folding() -> None:
     assert print_ir(OptimizerPipeline().run(module)) == (
         "func @main() -> int {\n"
         "entry:\n"
-        "    %0: int = const 5\n"
-        "    store %x, %0\n"
         "    %3: int = const 12\n"
         "    return %3\n"
         "}"
@@ -576,12 +581,343 @@ def test_local_constant_propagation_combines_with_dce() -> None:
     assert print_ir(OptimizerPipeline().run(module)) == (
         "func @main() -> int {\n"
         "entry:\n"
-        "    %0: int = const 9\n"
-        "    store %x, %0\n"
         "    %1: int = const 9\n"
         "    return %1\n"
         "}"
     )
+
+
+def test_dead_store_eliminates_store_never_read() -> None:
+    int_type = IntType()
+    slot = IRValue("x", int_type)
+    value = IRValue("0", int_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "main",
+                [],
+                VoidType(),
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [IRConst(value, 7), IRStore(slot, value), IRReturn()],
+                    )
+                ],
+            )
+        ]
+    )
+
+    optimization = DeadStoreEliminator().run(module)
+
+    assert optimization.changed is True
+    assert print_ir(optimization.module) == (
+        "func @main() -> void {\n"
+        "entry:\n"
+        "    %0: int = const 7\n"
+        "    return\n"
+        "}"
+    )
+
+
+def test_dead_store_eliminates_only_overwritten_store_before_load() -> None:
+    int_type = IntType()
+    slot = IRValue("x", int_type)
+    first = IRValue("0", int_type)
+    second = IRValue("1", int_type)
+    loaded = IRValue("2", int_type)
+    module = _single_block_module(
+        [
+            IRConst(first, 5),
+            IRStore(slot, first),
+            IRConst(second, 8),
+            IRStore(slot, second),
+            IRLoad(loaded, slot),
+        ],
+        loaded,
+    )
+
+    assert print_ir(_dse(module)) == (
+        "func @main() -> int {\n"
+        "entry:\n"
+        "    %0: int = const 5\n"
+        "    %1: int = const 8\n"
+        "    store %x, %1\n"
+        "    %2: int = load %x\n"
+        "    return %2\n"
+        "}"
+    )
+
+
+def test_dead_store_eliminates_two_consecutive_stores_before_return() -> None:
+    int_type = IntType()
+    slot = IRValue("x", int_type)
+    first = IRValue("0", int_type)
+    second = IRValue("1", int_type)
+    result = IRValue("2", int_type)
+    module = _single_block_module(
+        [
+            IRConst(first, 5),
+            IRStore(slot, first),
+            IRConst(second, 8),
+            IRStore(slot, second),
+            IRConst(result, 13),
+        ],
+        result,
+    )
+
+    assert print_ir(_dse(module)) == (
+        "func @main() -> int {\n"
+        "entry:\n"
+        "    %0: int = const 5\n"
+        "    %1: int = const 8\n"
+        "    %2: int = const 13\n"
+        "    return %2\n"
+        "}"
+    )
+
+
+def test_dead_store_tracks_multiple_slots_independently() -> None:
+    int_type = IntType()
+    left_slot = IRValue("left", int_type)
+    right_slot = IRValue("right", int_type)
+    left_value = IRValue("0", int_type)
+    right_value = IRValue("1", int_type)
+    loaded = IRValue("2", int_type)
+    module = _single_block_module(
+        [
+            IRConst(left_value, 1),
+            IRConst(right_value, 2),
+            IRStore(left_slot, left_value),
+            IRStore(right_slot, right_value),
+            IRLoad(loaded, left_slot),
+        ],
+        loaded,
+    )
+
+    assert print_ir(_dse(module)) == (
+        "func @main() -> int {\n"
+        "entry:\n"
+        "    %0: int = const 1\n"
+        "    %1: int = const 2\n"
+        "    store %left, %0\n"
+        "    %2: int = load %left\n"
+        "    return %2\n"
+        "}"
+    )
+
+
+def test_dead_store_eliminates_store_after_local_constant_propagation() -> None:
+    int_type = IntType()
+    slot = IRValue("x", int_type)
+    stored = IRValue("0", int_type)
+    loaded = IRValue("1", int_type)
+    module = _single_block_module(
+        [
+            IRConst(stored, 5),
+            IRStore(slot, stored),
+            IRLoad(loaded, slot),
+        ],
+        loaded,
+    )
+
+    assert print_ir(OptimizerPipeline().run(module)) == (
+        "func @main() -> int {\n"
+        "entry:\n"
+        "    %1: int = const 5\n"
+        "    return %1\n"
+        "}"
+    )
+
+
+def test_dead_store_keeps_store_followed_by_load() -> None:
+    int_type = IntType()
+    slot = IRValue("x", int_type)
+    stored = IRValue("0", int_type)
+    loaded = IRValue("1", int_type)
+    module = _single_block_module(
+        [IRConst(stored, 5), IRStore(slot, stored), IRLoad(loaded, slot)],
+        loaded,
+    )
+
+    assert print_ir(_dse(module)) == print_ir(module)
+
+
+def test_dead_store_keeps_store_read_before_later_store() -> None:
+    int_type = IntType()
+    slot = IRValue("x", int_type)
+    first = IRValue("0", int_type)
+    loaded = IRValue("1", int_type)
+    second = IRValue("2", int_type)
+    module = _single_block_module(
+        [
+            IRConst(first, 5),
+            IRStore(slot, first),
+            IRLoad(loaded, slot),
+            IRConst(second, 8),
+            IRStore(slot, second),
+        ],
+        loaded,
+    )
+
+    assert print_ir(_dse(module)) == (
+        "func @main() -> int {\n"
+        "entry:\n"
+        "    %0: int = const 5\n"
+        "    store %x, %0\n"
+        "    %1: int = load %x\n"
+        "    %2: int = const 8\n"
+        "    return %1\n"
+        "}"
+    )
+
+
+def test_dead_store_keeps_store_in_other_block_before_load() -> None:
+    int_type = IntType()
+    slot = IRValue("x", int_type)
+    stored = IRValue("0", int_type)
+    loaded = IRValue("1", int_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "main",
+                [],
+                int_type,
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [IRConst(stored, 5), IRStore(slot, stored), IRJump("exit")],
+                    ),
+                    IRBasicBlock("exit", [IRLoad(loaded, slot), IRReturn(loaded)]),
+                ],
+            )
+        ]
+    )
+
+    assert print_ir(_dse(module)) == print_ir(module)
+
+
+def test_dead_store_keeps_store_before_branch() -> None:
+    int_type = IntType()
+    bool_type = BoolType()
+    slot = IRValue("x", int_type)
+    value = IRValue("0", int_type)
+    condition = IRValue("1", bool_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "main",
+                [],
+                VoidType(),
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [
+                            IRConst(value, 5),
+                            IRStore(slot, value),
+                            IRConst(condition, True),
+                            IRBranch(condition, "then", "else"),
+                        ],
+                    ),
+                    IRBasicBlock("then", [IRReturn()]),
+                    IRBasicBlock("else", [IRReturn()]),
+                ],
+            )
+        ]
+    )
+
+    assert print_ir(_dse(module)) == print_ir(module)
+
+
+def test_dead_store_keeps_store_before_while_edge() -> None:
+    int_type = IntType()
+    bool_type = BoolType()
+    slot = IRValue("x", int_type)
+    value = IRValue("0", int_type)
+    condition = IRValue("1", bool_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "main",
+                [],
+                VoidType(),
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [IRConst(value, 5), IRStore(slot, value), IRJump("cond")],
+                    ),
+                    IRBasicBlock(
+                        "cond",
+                        [IRConst(condition, False), IRBranch(condition, "body", "exit")],
+                    ),
+                    IRBasicBlock("body", [IRJump("cond")]),
+                    IRBasicBlock("exit", [IRReturn()]),
+                ],
+            )
+        ]
+    )
+
+    assert print_ir(_dse(module)) == print_ir(module)
+
+
+def test_dead_store_keeps_store_before_jump() -> None:
+    int_type = IntType()
+    slot = IRValue("x", int_type)
+    value = IRValue("0", int_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "main",
+                [],
+                VoidType(),
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [IRConst(value, 5), IRStore(slot, value), IRJump("exit")],
+                    ),
+                    IRBasicBlock("exit", [IRReturn()]),
+                ],
+            )
+        ]
+    )
+
+    assert print_ir(_dse(module)) == print_ir(module)
+
+
+def test_dead_store_preserves_calls() -> None:
+    int_type = IntType()
+    slot = IRValue("x", int_type)
+    call_result = IRValue("0", int_type)
+    answer = IRValue("answer", int_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "value",
+                [],
+                int_type,
+                [IRBasicBlock("entry", [IRConst(answer, 1), IRReturn(answer)])],
+            ),
+            IRFunction(
+                "main",
+                [],
+                VoidType(),
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [
+                            IRCall("value", (), call_result),
+                            IRStore(slot, call_result),
+                            IRReturn(),
+                        ],
+                    )
+                ],
+            ),
+        ]
+    )
+
+    optimized = print_ir(_dse(module))
+
+    assert "call @value()" in optimized
+    assert "store %x, %0" not in optimized
 
 
 def test_local_constant_propagation_forgets_non_constant_store() -> None:

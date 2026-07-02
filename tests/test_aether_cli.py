@@ -300,9 +300,11 @@ int main() {
         "After ConstantFolder",
         "After AlgebraicSimplifier",
         "After DeadCodeEliminator",
+        "After DeadStoreEliminator",
+        "After DeadCodeEliminator",
         "Final IR",
     ]
-    assert stdout.count("========================================") == 14
+    assert stdout.count("========================================") == 18
     assert stderr == ""
 
 
@@ -330,6 +332,8 @@ int addOne(int value) {
         "After LocalConstantPropagator",
         "After ConstantFolder",
         "After AlgebraicSimplifier",
+        "After DeadCodeEliminator",
+        "After DeadStoreEliminator",
         "After DeadCodeEliminator",
         "Final IR",
     ]
@@ -419,9 +423,43 @@ int main() {
     exit_code, stdout, stderr = run_cli(["--emit-ir", "--opt", str(program)])
 
     assert exit_code == EXIT_SUCCESS
-    assert "store %x, %0" in stdout
     assert "%1: int = const 5" in stdout
+    assert "store %x, %0" not in stdout
     assert "load %x" not in stdout
+    assert stderr == ""
+
+
+def test_emit_ir_with_opt_show_passes_shows_dead_store_elimination(
+    tmp_path: Path,
+) -> None:
+    program = tmp_path / "dead_store_elimination_ir.ae"
+    program.write_text(
+        """
+int main() {
+    int x = 5;
+    return x + 3;
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(
+        ["--emit-ir", "--opt", "--show-passes", str(program)]
+    )
+
+    before_dse = _trace_section(stdout, "After DeadCodeEliminator")
+    after_dse = _trace_section(stdout, "After DeadStoreEliminator")
+    final = _trace_section(stdout, "Final IR")
+    assert exit_code == EXIT_SUCCESS
+    assert "store %x, %0" in before_dse
+    assert "store %x, %0" not in after_dse
+    assert final == (
+        "func @main() -> int {\n"
+        "entry:\n"
+        "    %3: int = const 8\n"
+        "    return %3\n"
+        "}"
+    )
     assert stderr == ""
 
 
