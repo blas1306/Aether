@@ -17,15 +17,18 @@ from aether.ir.model import (
     IRValue,
 )
 
+from .result import OptimizationResult
+
 
 class DeadCodeEliminator:
     """Remove pure IR instructions whose result is not used."""
 
     _PURE_INSTRUCTIONS = (IRConst, IRBinaryOp, IRCompareOp, IRLoad)
 
-    def run(self, module: IRModule) -> IRModule:
+    def run(self, module: IRModule) -> OptimizationResult:
         functions = [self._eliminate_function(function) for function in module.functions]
-        return IRModule(functions)
+        optimized = IRModule(functions)
+        return OptimizationResult(optimized, changed=optimized != module)
 
     def _eliminate_function(self, function: IRFunction) -> IRFunction:
         producers = self._collect_pure_producers(function)

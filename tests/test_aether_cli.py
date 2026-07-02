@@ -18,6 +18,24 @@ def run_cli(
     return exit_code, stdout.getvalue(), stderr.getvalue()
 
 
+def _trace_titles(stdout: str) -> list[str]:
+    return [
+        line.removeprefix("=== ").removesuffix(" ===")
+        for line in stdout.splitlines()
+        if line.startswith("=== ") and line.endswith(" ===")
+    ]
+
+
+def _trace_section(stdout: str, title: str) -> str:
+    marker = f"=== {title} ==="
+    title_start = stdout.index(marker)
+    content_start = stdout.index("\n\n", title_start) + 2
+    next_section = stdout.find("\n========================================\n===", content_start)
+    if next_section == -1:
+        return stdout[content_start:].strip()
+    return stdout[content_start:next_section].strip()
+
+
 def test_executes_valid_file(tmp_path: Path) -> None:
     program = tmp_path / "hello.ae"
     program.write_text('println("hello");\n', encoding="utf-8")
@@ -132,6 +150,7 @@ def test_help_describes_direct_execution_and_tools() -> None:
     assert "--backend" in stdout
     assert "--emit-ir" in stdout
     assert "--opt" in stdout
+    assert "--show-passes" in stdout
     assert stderr == ""
 
 
@@ -236,6 +255,115 @@ int main() {
     assert stderr == ""
 
 
+def test_emit_ir_with_opt_normal_output_does_not_show_pass_trace(tmp_path: Path) -> None:
+    program = tmp_path / "optimized_ir_without_trace.ae"
+    program.write_text(
+        """
+int main() {
+    return 2 + 3 * 4;
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-ir", "--opt", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert "=== Lowered IR ===" not in stdout
+    assert "=== After ConstantFolder ===" not in stdout
+    assert "%4: int = const 14" in stdout
+    assert stderr == ""
+
+
+def test_emit_ir_with_opt_show_passes_prints_all_pipeline_stages(
+    tmp_path: Path,
+) -> None:
+    program = tmp_path / "optimized_ir_trace.ae"
+    program.write_text(
+        """
+int main() {
+    return 2 + 3 * 4;
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(
+        ["--emit-ir", "--opt", "--show-passes", str(program)]
+    )
+
+    assert exit_code == EXIT_SUCCESS
+    assert _trace_titles(stdout) == [
+        "Lowered IR",
+        "After ConstantFolder",
+        "After LocalConstantPropagator",
+        "After ConstantFolder",
+        "After AlgebraicSimplifier",
+        "After DeadCodeEliminator",
+        "Final IR",
+    ]
+    assert stdout.count("========================================") == 14
+    assert stderr == ""
+
+
+def test_emit_ir_with_opt_show_passes_shows_unchanged_pipeline_stages(
+    tmp_path: Path,
+) -> None:
+    program = tmp_path / "unchanged_ir_trace.ae"
+    program.write_text(
+        """
+int addOne(int value) {
+    return value + 1;
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(
+        ["--emit-ir", "--opt", "--show-passes", str(program)]
+    )
+
+    assert exit_code == EXIT_SUCCESS
+    assert _trace_titles(stdout) == [
+        "Lowered IR",
+        "After ConstantFolder",
+        "After LocalConstantPropagator",
+        "After ConstantFolder",
+        "After AlgebraicSimplifier",
+        "After DeadCodeEliminator",
+        "Final IR",
+    ]
+    assert _trace_section(stdout, "Lowered IR") == _trace_section(stdout, "Final IR")
+    assert stderr == ""
+
+
+def test_emit_ir_with_opt_show_passes_shows_changed_ir(tmp_path: Path) -> None:
+    program = tmp_path / "changed_ir_trace.ae"
+    program.write_text(
+        """
+int main() {
+    return 2 + 3 * 4;
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(
+        ["--emit-ir", "--opt", "--show-passes", str(program)]
+    )
+
+    lowered = _trace_section(stdout, "Lowered IR")
+    final = _trace_section(stdout, "Final IR")
+    assert exit_code == EXIT_SUCCESS
+    assert lowered != final
+    assert " = mul " in lowered
+    assert " = add " in lowered
+    assert "%4: int = const 14" in final
+    assert " = mul " not in final
+    assert " = add " not in final
+    assert stderr == ""
+
+
 def test_opt_before_emit_ir_also_shows_constant_folding(tmp_path: Path) -> None:
     program = tmp_path / "opt_before_emit_ir.ae"
     program.write_text(
@@ -313,6 +441,46 @@ int main() {
     assert exit_code == EXIT_USAGE_ERROR
     assert stdout == ""
     assert "--opt is currently only supported with --emit-ir." in stderr
+
+
+def test_show_passes_without_emit_ir_and_opt_reports_clear_usage_error(
+    tmp_path: Path,
+) -> None:
+    program = tmp_path / "show_passes_without_flags.ae"
+    program.write_text(
+        """
+int main() {
+    return 14;
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--show-passes", str(program)])
+
+    assert exit_code == EXIT_USAGE_ERROR
+    assert stdout == ""
+    assert "--show-passes requires --emit-ir --opt." in stderr
+
+
+def test_show_passes_with_emit_ir_but_without_opt_reports_clear_usage_error(
+    tmp_path: Path,
+) -> None:
+    program = tmp_path / "show_passes_without_opt.ae"
+    program.write_text(
+        """
+int main() {
+    return 14;
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-ir", "--show-passes", str(program)])
+
+    assert exit_code == EXIT_USAGE_ERROR
+    assert stdout == ""
+    assert "--show-passes requires --emit-ir --opt." in stderr
 
 
 def test_backend_ir_does_not_run_optimizer_yet(tmp_path: Path, monkeypatch) -> None:

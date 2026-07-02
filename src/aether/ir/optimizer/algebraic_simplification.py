@@ -20,13 +20,16 @@ from aether.ir.model import (
 )
 from aether.ir.types import IntType
 
+from .result import OptimizationResult
+
 
 class AlgebraicSimplifier:
     """Apply local integer algebraic identities to IR binary operations."""
 
-    def run(self, module: IRModule) -> IRModule:
+    def run(self, module: IRModule) -> OptimizationResult:
         functions = [self._simplify_function(function) for function in module.functions]
-        return IRModule(functions)
+        optimized = IRModule(functions)
+        return OptimizationResult(optimized, changed=optimized != module)
 
     def _simplify_function(self, function: IRFunction) -> IRFunction:
         constants = self._collect_constants(function)

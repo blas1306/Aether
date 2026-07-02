@@ -105,6 +105,7 @@ aether --tokens examples/hello.ae
 aether --ast examples/hello.ae
 aether --emit-ir program.ae
 aether --emit-ir --opt program.ae
+aether --emit-ir --opt --show-passes program.ae
 aether --backend=ir --emit-ir program.ae
 ```
 
@@ -116,9 +117,13 @@ pipeline:
 Lexer -> Parser -> TypeChecker -> IR lowering -> IR verifier -> OptimizerPipeline -> IR verifier
 ```
 
+Add `--show-passes` with `--emit-ir --opt` to print the lowered IR, the IR after
+each optimizer pass, and the final IR. This is a development inspection tool;
+the default optimized IR output remains unchanged without `--show-passes`.
+
 Optimization is currently connected only to `--emit-ir`. `--backend=ir` still
 executes the verified, unoptimized IR, and `--opt` without `--emit-ir` is
-rejected.
+rejected. `--show-passes` also requires `--emit-ir --opt`.
 
 Use `aether --help` for all current options and `aether --version` for the
 language version. The primary execution form is `aether file.ae`; there is no

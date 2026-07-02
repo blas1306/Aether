@@ -35,19 +35,19 @@ from aether.ir.optimizer import (
 
 
 def _optimize(module: IRModule) -> IRModule:
-    return ConstantFolder().run(module)
+    return ConstantFolder().run(module).module
 
 
 def _dce(module: IRModule) -> IRModule:
-    return DeadCodeEliminator().run(module)
+    return DeadCodeEliminator().run(module).module
 
 
 def _simplify(module: IRModule) -> IRModule:
-    return AlgebraicSimplifier().run(module)
+    return AlgebraicSimplifier().run(module).module
 
 
 def _propagate(module: IRModule) -> IRModule:
-    return LocalConstantPropagator().run(module)
+    return LocalConstantPropagator().run(module).module
 
 
 def _single_block_module(instructions: list[object], return_value: IRValue) -> IRModule:
@@ -234,6 +234,97 @@ def test_optimizer_pipeline_runs_constant_folding_then_dead_code_elimination() -
         "    return %3\n"
         "}"
     )
+
+
+def test_optimization_pass_reports_when_it_changes_ir() -> None:
+    int_type = IntType()
+    left = IRValue("0", int_type)
+    right = IRValue("1", int_type)
+    result = IRValue("2", int_type)
+    module = _single_block_module(
+        [
+            IRConst(left, 2),
+            IRConst(right, 3),
+            IRBinaryOp(result, "add", left, right),
+        ],
+        result,
+    )
+
+    optimization = ConstantFolder().run(module)
+
+    assert optimization.changed is True
+    assert "%2: int = const 5" in print_ir(optimization.module)
+
+
+def test_optimization_pass_reports_when_ir_is_unchanged() -> None:
+    int_type = IntType()
+    parameter = IRParameter("x", int_type)
+    one = IRValue("0", int_type)
+    result = IRValue("1", int_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "addOne",
+                [parameter],
+                int_type,
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [
+                            IRConst(one, 1),
+                            IRBinaryOp(result, "add", parameter, one),
+                            IRReturn(result),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+
+    optimization = ConstantFolder().run(module)
+
+    assert optimization.changed is False
+    assert print_ir(optimization.module) == print_ir(module)
+
+
+def test_optimizer_pipeline_trace_includes_every_default_pass_and_final_ir() -> None:
+    int_type = IntType()
+    parameter = IRParameter("x", int_type)
+    one = IRValue("0", int_type)
+    result = IRValue("1", int_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "main",
+                [parameter],
+                int_type,
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [
+                            IRConst(one, 1),
+                            IRBinaryOp(result, "add", parameter, one),
+                            IRReturn(result),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+
+    trace = OptimizerPipeline().run_with_trace(module)
+
+    assert [name for name, _ in trace] == [
+        "Lowered IR",
+        "ConstantFolder",
+        "LocalConstantPropagator",
+        "ConstantFolder",
+        "AlgebraicSimplifier",
+        "DeadCodeEliminator",
+        "Final IR",
+    ]
+    assert print_ir(trace[0][1]) == print_ir(module)
+    assert print_ir(trace[-1][1]) == print_ir(OptimizerPipeline().run(module))
 
 
 def test_constant_folding_does_not_fold_expression_with_variable() -> None:

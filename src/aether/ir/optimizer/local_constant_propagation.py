@@ -17,13 +17,16 @@ from aether.ir.model import (
     IRValue,
 )
 
+from .result import OptimizationResult
+
 
 class LocalConstantPropagator:
     """Replace same-block loads from known constant slots with constants."""
 
-    def run(self, module: IRModule) -> IRModule:
+    def run(self, module: IRModule) -> OptimizationResult:
         functions = [self._propagate_function(function) for function in module.functions]
-        return IRModule(functions)
+        optimized = IRModule(functions)
+        return OptimizationResult(optimized, changed=optimized != module)
 
     def _propagate_function(self, function: IRFunction) -> IRFunction:
         blocks = [self._propagate_block(block) for block in function.blocks]

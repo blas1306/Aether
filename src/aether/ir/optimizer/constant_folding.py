@@ -15,6 +15,8 @@ from aether.ir.model import (
     IRValue,
 )
 
+from .result import OptimizationResult
+
 
 class ConstantFolder:
     """Fold simple IR operations whose operands are both known constants."""
@@ -22,9 +24,10 @@ class ConstantFolder:
     _BINARY_OPERATORS = {"add", "sub", "mul", "div", "mod", "rem"}
     _COMPARE_OPERATORS = {"lt", "le", "gt", "ge", "eq", "ne"}
 
-    def run(self, module: IRModule) -> IRModule:
+    def run(self, module: IRModule) -> OptimizationResult:
         functions = [self._fold_function(function) for function in module.functions]
-        return IRModule(functions)
+        optimized = IRModule(functions)
+        return OptimizationResult(optimized, changed=optimized != module)
 
     def _fold_function(self, function: IRFunction) -> IRFunction:
         constants: dict[IRValue, Any] = {}

@@ -9,10 +9,11 @@ from .algebraic_simplification import AlgebraicSimplifier
 from .constant_folding import ConstantFolder
 from .dead_code import DeadCodeEliminator
 from .local_constant_propagation import LocalConstantPropagator
+from .result import OptimizationResult
 
 
 class OptimizationPass(Protocol):
-    def run(self, module: IRModule) -> IRModule:
+    def run(self, module: IRModule) -> OptimizationResult | IRModule:
         ...
 
 
@@ -35,5 +36,27 @@ class OptimizerPipeline:
     def run(self, module: IRModule) -> IRModule:
         optimized = module
         for optimization_pass in self._passes:
-            optimized = optimization_pass.run(optimized)
+            optimized = self._run_pass(optimization_pass, optimized).module
         return optimized
+
+    def run_with_trace(self, module: IRModule) -> list[tuple[str, IRModule]]:
+        optimized = module
+        trace = [("Lowered IR", optimized)]
+
+        for optimization_pass in self._passes:
+            result = self._run_pass(optimization_pass, optimized)
+            optimized = result.module
+            trace.append((type(optimization_pass).__name__, optimized))
+
+        trace.append(("Final IR", optimized))
+        return trace
+
+    @staticmethod
+    def _run_pass(
+        optimization_pass: OptimizationPass,
+        module: IRModule,
+    ) -> OptimizationResult:
+        result = optimization_pass.run(module)
+        if isinstance(result, OptimizationResult):
+            return result
+        return OptimizationResult(result, changed=result != module)

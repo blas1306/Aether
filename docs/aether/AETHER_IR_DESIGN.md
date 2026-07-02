@@ -86,8 +86,14 @@ object. Its default pass list currently runs
 `aether.ir.optimizer.ConstantFolder`, then
 `aether.ir.optimizer.AlgebraicSimplifier`, followed by
 `aether.ir.optimizer.DeadCodeEliminator`, and it returns an optimized
-`IRModule` without mutating the input module. The CLI can run this pipeline for
-inspection with `aether --emit-ir --opt program.ae`, but optimization is not
+`IRModule` without mutating the input module. Individual passes return an
+`OptimizationResult(module, changed)` so development tools can tell whether a
+pass changed the IR. `OptimizerPipeline.run(module)` preserves the simple
+optimized-module API, while `OptimizerPipeline.run_with_trace(module)` returns
+the lowered module, every pass result in order, and the final IR. The CLI can
+run this pipeline for inspection with `aether --emit-ir --opt program.ae`, and
+can show the per-pass trace with
+`aether --emit-ir --opt --show-passes program.ae`, but optimization is not
 connected to IR execution yet.
 
 The implemented constant folding pass rewrites arithmetic and comparison
@@ -302,6 +308,23 @@ The second verifier checks the optimizer output before the textual IR is
 printed. `--opt` is currently supported only with `--emit-ir`; using `--opt`
 without `--emit-ir` is a CLI usage error. `aether --backend=ir program.ae`
 continues to execute unoptimized IR for now.
+
+`--emit-ir --opt --show-passes` runs the same optimizer pipeline and prints
+sectioned textual IR for:
+
+```text
+Lowered IR
+After ConstantFolder
+After LocalConstantPropagator
+After ConstantFolder
+After AlgebraicSimplifier
+After DeadCodeEliminator
+Final IR
+```
+
+The repeated `ConstantFolder` is intentional because it is part of the default
+pipeline. `--show-passes` is valid only together with `--emit-ir --opt`; it does
+not affect normal optimized IR output.
 
 The user-facing supported IR backend subset is:
 

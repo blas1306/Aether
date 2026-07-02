@@ -9,7 +9,7 @@ import sys
 from typing import TextIO
 
 from .errors import AetherError
-from .ir import print_ir
+from .ir import IRModule, print_ir
 from .pipeline import IRBackend, parse_source, prepare_typed_program, tokenize_source
 from .runner import run_aether
 from .session import AetherSession
@@ -56,6 +56,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optimize emitted IR. Currently only supported with --emit-ir.",
     )
     parser.add_argument(
+        "--show-passes",
+        action="store_true",
+        help="With --emit-ir --opt, print IR after each optimizer pass.",
+    )
+    parser.add_argument(
         "--backend",
         choices=("ast", "ir"),
         default="ast",
@@ -93,6 +98,9 @@ def main(
     if args.opt and not args.emit_ir:
         print("aether: error: --opt is currently only supported with --emit-ir.", file=stderr)
         return EXIT_USAGE_ERROR
+    if args.show_passes and not (args.emit_ir and args.opt):
+        print("aether: error: --show-passes requires --emit-ir --opt.", file=stderr)
+        return EXIT_USAGE_ERROR
 
     if args.repl:
         if args.backend != "ast":
@@ -124,7 +132,13 @@ def main(
         )
     if args.emit_ir:
         return _run_language_action(
-            lambda: _emit_ir(source, path=path, stdout=stdout, optimize=args.opt),
+            lambda: _emit_ir(
+                source,
+                path=path,
+                stdout=stdout,
+                optimize=args.opt,
+                show_passes=args.show_passes,
+            ),
             stderr=stderr,
         )
     return _run_language_action(
@@ -209,16 +223,43 @@ def _print_ast(source: str, *, stdout: TextIO) -> None:
     print(pformat(parse_source(source), width=100, sort_dicts=False), file=stdout)
 
 
-def _emit_ir(source: str, *, path: Path, stdout: TextIO, optimize: bool = False) -> None:
+def _emit_ir(
+    source: str,
+    *,
+    path: Path,
+    stdout: TextIO,
+    optimize: bool = False,
+    show_passes: bool = False,
+) -> None:
     typed_program = prepare_typed_program(
         source,
         TypeChecker(source_root=path.parent),
     )
     backend = IRBackend()
     module = backend.lower_verified(typed_program)
+    if optimize and show_passes:
+        from .ir.optimizer import OptimizerPipeline
+
+        trace = OptimizerPipeline().run_with_trace(module)
+        backend.verify(trace[-1][1])
+        _print_ir_trace(trace, stdout=stdout)
+        return
     if optimize:
         module = backend.optimize_verified(module)
     print(print_ir(module), file=stdout)
+
+
+def _print_ir_trace(trace: list[tuple[str, IRModule]], *, stdout: TextIO) -> None:
+    separator = "=" * 40
+    for index, (name, module) in enumerate(trace):
+        if index:
+            print(file=stdout)
+        title = name if name in {"Lowered IR", "Final IR"} else f"After {name}"
+        print(separator, file=stdout)
+        print(f"=== {title} ===", file=stdout)
+        print(separator, file=stdout)
+        print(file=stdout)
+        print(print_ir(module), file=stdout)
 
 
 def _read_source(path: Path, *, stderr: TextIO) -> str | None:
