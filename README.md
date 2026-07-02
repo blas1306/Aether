@@ -19,6 +19,12 @@ MathTeX Studio is historical code, not an active Aether runtime. Its `.mtx`,
 [`docs/legacy/README.md`](docs/legacy/README.md) for the retained components
 and architecture boundary.
 
+Compiler implementation notes live under
+[`docs/compiler/`](docs/compiler/), including the initial
+[`SSA design`](docs/compiler/SSA_DESIGN.md) for future IR analysis and
+optimization work. Language-level specifications and design notes live under
+[`docs/aether/`](docs/aether/).
+
 ## Aether Scripts
 
 Create or open `.ae` files from the Aether editor and run them with `Ctrl+Enter` or the Run button.
