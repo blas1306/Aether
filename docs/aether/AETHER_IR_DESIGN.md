@@ -89,19 +89,34 @@ object. Its default pass list currently runs
 `aether.ir.optimizer.DeadStoreEliminator`, and a final
 `DeadCodeEliminator` cleanup, and it returns an optimized `IRModule` without
 mutating the input module. Individual passes return an
-`OptimizationResult(module, changed)` so development tools can tell whether a
-pass changed the IR. `OptimizerPipeline.run(module)` preserves the simple
-optimized-module API. `OptimizerPipeline(iterative=True, max_iterations=10)`
-runs the same pass list repeatedly until a complete iteration reports no
-changes. If the last allowed iteration still changes the IR, the pipeline raises
-`OptimizationConvergenceError` rather than guessing that it converged.
-`OptimizerPipeline.run_with_trace(module)` returns the lowered module, every
-pass result in order, and the final IR; iterative traces include the iteration
-number in each pass entry. The CLI can run the iterative pipeline for inspection
-with `aether --emit-ir --opt program.ae`, and can show the per-pass trace with
-`aether --emit-ir --opt --show-passes program.ae`, but optimization is not
-connected to IR execution yet. This infrastructure change does not add new
-optimization passes.
+`OptimizationResult(module, changed, stats)` so development tools can tell
+whether a pass changed the IR and inspect simple pass-local counters. Existing
+callers may still construct `OptimizationResult(module, changed)`; `stats`
+defaults to an empty dictionary. `OptimizerPipeline.run(module)` preserves the
+simple optimized-module API. `OptimizerPipeline(iterative=True,
+max_iterations=10)` runs the same pass list repeatedly until a complete
+iteration reports no changes. If the last allowed iteration still changes the
+IR, the pipeline raises `OptimizationConvergenceError` rather than guessing
+that it converged. `OptimizerPipeline.run_with_trace(module)` returns
+`OptimizationTraceStep(label, module, changed, stats)` entries for the lowered
+module, every pass result in order, and the final IR; iterative traces include
+the iteration number in each pass entry. The CLI can run the iterative pipeline
+for inspection with `aether --emit-ir --opt program.ae`, and can show the
+per-pass trace with `aether --emit-ir --opt --show-passes program.ae`, but
+optimization is not connected to IR execution yet. This infrastructure change
+does not add new optimization passes.
+
+The current pass statistics are:
+
+- `ConstantFolder`: `folded`
+- `LocalConstantPropagator`: `propagated`
+- `AlgebraicSimplifier`: `simplified`
+- `DeadCodeEliminator`: `removed`
+- `DeadStoreEliminator`: `removed_stores`
+
+These counters are development and debugging metrics only. They are not part of
+the IR semantics, are not observable by Aether programs, and do not affect the
+optimized module beyond the transformations the pass already performs.
 
 The implemented constant folding pass rewrites arithmetic and comparison
 instructions to `IRConst` when both operands are already known constants:
@@ -373,14 +388,14 @@ sectioned textual IR for:
 
 ```text
 Lowered IR
-Iteration 1 / After ConstantFolder
-Iteration 1 / After LocalConstantPropagator
-Iteration 1 / After ConstantFolder
-Iteration 1 / After AlgebraicSimplifier
-Iteration 1 / After DeadCodeEliminator
-Iteration 1 / After DeadStoreEliminator
-Iteration 1 / After DeadCodeEliminator
-Iteration 2 / After ConstantFolder
+Iteration 1 / After ConstantFolder [changed, folded=2]
+Iteration 1 / After LocalConstantPropagator [no changes, propagated=0]
+Iteration 1 / After ConstantFolder [no changes, folded=0]
+Iteration 1 / After AlgebraicSimplifier [no changes, simplified=0]
+Iteration 1 / After DeadCodeEliminator [changed, removed=4]
+Iteration 1 / After DeadStoreEliminator [no changes, removed_stores=0]
+Iteration 1 / After DeadCodeEliminator [no changes, removed=0]
+Iteration 2 / After ConstantFolder [no changes, folded=0]
 ...
 Final IR
 ```
@@ -389,7 +404,8 @@ The repeated `ConstantFolder` and final `DeadCodeEliminator` are intentional
 because they are part of the default pipeline. A second iteration is printed
 only when an earlier iteration changed the IR and the optimizer needs to confirm
 the fixed point. `--show-passes` is valid only together with `--emit-ir --opt`;
-it does not affect normal optimized IR output.
+it does not affect normal optimized IR output. The bracketed status and stats
+are compiler-development diagnostics, not semantic IR content.
 
 The user-facing supported IR backend subset is:
 

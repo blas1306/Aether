@@ -6,7 +6,7 @@ from .dead_code import DeadCodeEliminator
 from .dead_store import DeadStoreEliminator
 from .local_constant_propagation import LocalConstantPropagator
 from .pipeline import OptimizationConvergenceError, OptimizerPipeline
-from .result import OptimizationResult
+from .result import OptimizationResult, OptimizationTraceStep
 
 __all__ = [
     "AlgebraicSimplifier",
@@ -15,6 +15,7 @@ __all__ = [
     "DeadStoreEliminator",
     "LocalConstantPropagator",
     "OptimizationResult",
+    "OptimizationTraceStep",
     "OptimizationConvergenceError",
     "OptimizerPipeline",
 ]

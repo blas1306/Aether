@@ -26,11 +26,20 @@ class DeadCodeEliminator:
     _PURE_INSTRUCTIONS = (IRConst, IRBinaryOp, IRCompareOp, IRLoad)
 
     def run(self, module: IRModule) -> OptimizationResult:
-        functions = [self._eliminate_function(function) for function in module.functions]
+        removed = 0
+        functions: list[IRFunction] = []
+        for function in module.functions:
+            optimized_function, function_removed = self._eliminate_function(function)
+            functions.append(optimized_function)
+            removed += function_removed
         optimized = IRModule(functions)
-        return OptimizationResult(optimized, changed=optimized != module)
+        return OptimizationResult(
+            optimized,
+            changed=optimized != module,
+            stats={"removed": removed},
+        )
 
-    def _eliminate_function(self, function: IRFunction) -> IRFunction:
+    def _eliminate_function(self, function: IRFunction) -> tuple[IRFunction, int]:
         producers = self._collect_pure_producers(function)
         live_values = self._initial_live_values(function)
         worklist = list(live_values)
@@ -46,24 +55,28 @@ class DeadCodeEliminator:
                     live_values.add(operand.name)
                     worklist.append(operand.name)
 
-        blocks = [
-            IRBasicBlock(
-                block.name,
-                [
-                    instruction
-                    for instruction in block.instructions
-                    if not self._is_removable(instruction)
-                    or self._result(instruction).name in live_values
-                ],
-            )
-            for block in function.blocks
-        ]
+        removed = 0
+        blocks: list[IRBasicBlock] = []
+        for block in function.blocks:
+            instructions: list[IRInstruction] = []
+            for instruction in block.instructions:
+                if (
+                    self._is_removable(instruction)
+                    and self._result(instruction).name not in live_values
+                ):
+                    removed += 1
+                    continue
+                instructions.append(instruction)
+            blocks.append(IRBasicBlock(block.name, instructions))
 
-        return IRFunction(
-            function.name,
-            list(function.parameters),
-            function.return_type,
-            blocks,
+        return (
+            IRFunction(
+                function.name,
+                list(function.parameters),
+                function.return_type,
+                blocks,
+            ),
+            removed,
         )
 
     def _collect_pure_producers(

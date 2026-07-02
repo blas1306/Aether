@@ -37,8 +37,18 @@ def _trace_titles(stdout: str) -> list[str]:
     ]
 
 
+def _trace_header(stdout: str, title: str) -> str:
+    for line in stdout.splitlines():
+        if not line.startswith("=== ") or not line.endswith(" ==="):
+            continue
+        trace_title = line.removeprefix("=== ").removesuffix(" ===")
+        if trace_title == title or trace_title.startswith(f"{title} ["):
+            return line
+    raise AssertionError(f"trace section not found: {title}")
+
+
 def _trace_section(stdout: str, title: str) -> str:
-    marker = f"=== {title} ==="
+    marker = _trace_header(stdout, title)
     title_start = stdout.index(marker)
     content_start = stdout.index("\n\n", title_start) + 2
     next_section = stdout.find("\n========================================\n===", content_start)
@@ -48,9 +58,33 @@ def _trace_section(stdout: str, title: str) -> str:
 
 
 def _iteration_titles(iteration: int) -> list[str]:
+    stats_by_pass = [
+        ("folded", 0),
+        ("propagated", 0),
+        ("folded", 0),
+        ("simplified", 0),
+        ("removed", 0),
+        ("removed_stores", 0),
+        ("removed", 0),
+    ]
     return [
-        f"Iteration {iteration} / After {pass_name}"
-        for pass_name in DEFAULT_OPTIMIZER_PASSES
+        f"Iteration {iteration} / After {pass_name} [no changes, {stat}={value}]"
+        for pass_name, (stat, value) in zip(
+            DEFAULT_OPTIMIZER_PASSES,
+            stats_by_pass,
+        )
+    ]
+
+
+def _changed_constant_folding_iteration_titles() -> list[str]:
+    return [
+        "Iteration 1 / After ConstantFolder [changed, folded=2]",
+        "Iteration 1 / After LocalConstantPropagator [no changes, propagated=0]",
+        "Iteration 1 / After ConstantFolder [no changes, folded=0]",
+        "Iteration 1 / After AlgebraicSimplifier [no changes, simplified=0]",
+        "Iteration 1 / After DeadCodeEliminator [changed, removed=4]",
+        "Iteration 1 / After DeadStoreEliminator [no changes, removed_stores=0]",
+        "Iteration 1 / After DeadCodeEliminator [no changes, removed=0]",
     ]
 
 
@@ -289,6 +323,7 @@ int main() {
     assert exit_code == EXIT_SUCCESS
     assert "=== Lowered IR ===" not in stdout
     assert "=== After ConstantFolder ===" not in stdout
+    assert "folded=" not in stdout
     assert "%4: int = const 14" in stdout
     assert stderr == ""
 
@@ -313,7 +348,7 @@ int main() {
     assert exit_code == EXIT_SUCCESS
     assert _trace_titles(stdout) == [
         "Lowered IR",
-        *_iteration_titles(1),
+        *_changed_constant_folding_iteration_titles(),
         *_iteration_titles(2),
         "Final IR",
     ]

@@ -27,24 +27,36 @@ class AlgebraicSimplifier:
     """Apply local integer algebraic identities to IR binary operations."""
 
     def run(self, module: IRModule) -> OptimizationResult:
-        functions = [self._simplify_function(function) for function in module.functions]
+        simplified = 0
+        functions: list[IRFunction] = []
+        for function in module.functions:
+            optimized_function, function_simplified = self._simplify_function(function)
+            functions.append(optimized_function)
+            simplified += function_simplified
         optimized = IRModule(functions)
-        return OptimizationResult(optimized, changed=optimized != module)
+        return OptimizationResult(
+            optimized,
+            changed=optimized != module,
+            stats={"simplified": simplified},
+        )
 
-    def _simplify_function(self, function: IRFunction) -> IRFunction:
+    def _simplify_function(self, function: IRFunction) -> tuple[IRFunction, int]:
         constants = self._collect_constants(function)
         replacements: dict[str, IRValue] = {}
         blocks: list[IRBasicBlock] = []
+        simplified_count = 0
 
         for block in function.blocks:
             instructions: list[IRInstruction] = []
             for instruction in block.instructions:
                 rewritten = self._rewrite_instruction(instruction, replacements)
-                simplified = self._simplify_instruction(
+                simplified, was_simplified = self._simplify_instruction(
                     rewritten,
                     constants,
                     replacements,
                 )
+                if was_simplified:
+                    simplified_count += 1
                 if simplified is None:
                     continue
                 if isinstance(simplified, IRConst):
@@ -63,11 +75,14 @@ class AlgebraicSimplifier:
             for block in blocks
         ]
 
-        return IRFunction(
-            function.name,
-            list(function.parameters),
-            function.return_type,
-            blocks,
+        return (
+            IRFunction(
+                function.name,
+                list(function.parameters),
+                function.return_type,
+                blocks,
+            ),
+            simplified_count,
         )
 
     @staticmethod
@@ -84,11 +99,11 @@ class AlgebraicSimplifier:
         instruction: IRInstruction,
         constants: dict[str, Any],
         replacements: dict[str, IRValue],
-    ) -> IRInstruction | None:
+    ) -> tuple[IRInstruction | None, bool]:
         if not isinstance(instruction, IRBinaryOp):
-            return instruction
+            return instruction, False
         if not self._is_integer_operation(instruction):
-            return instruction
+            return instruction, False
 
         operator = instruction.operator
         left = instruction.left
@@ -97,15 +112,15 @@ class AlgebraicSimplifier:
         if operator == "add":
             if self._is_zero(right, constants, replacements):
                 replacements[instruction.result.name] = left
-                return None
+                return None, True
             if self._is_zero(left, constants, replacements):
                 replacements[instruction.result.name] = right
-                return None
+                return None, True
 
         if operator == "sub":
             if self._is_zero(right, constants, replacements):
                 replacements[instruction.result.name] = left
-                return None
+                return None, True
 
         if operator == "mul":
             if self._is_zero(left, constants, replacements) or self._is_zero(
@@ -113,13 +128,13 @@ class AlgebraicSimplifier:
                 constants,
                 replacements,
             ):
-                return IRConst(instruction.result, 0)
+                return IRConst(instruction.result, 0), True
             if self._is_one(right, constants, replacements):
                 replacements[instruction.result.name] = left
-                return None
+                return None, True
             if self._is_one(left, constants, replacements):
                 replacements[instruction.result.name] = right
-                return None
+                return None, True
 
         if operator == "div":
             if (
@@ -127,13 +142,13 @@ class AlgebraicSimplifier:
                 and self._is_one(right, constants, replacements)
             ):
                 replacements[instruction.result.name] = left
-                return None
+                return None, True
 
         if operator in {"mod", "rem"}:
             if self._is_one(right, constants, replacements):
-                return IRConst(instruction.result, 0)
+                return IRConst(instruction.result, 0), True
 
-        return instruction
+        return instruction, False
 
     @staticmethod
     def _is_integer_operation(instruction: IRBinaryOp) -> bool:

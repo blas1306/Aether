@@ -123,6 +123,12 @@ each optimizer pass in each iteration, and the final IR. This is a development
 inspection tool; the default optimized IR output remains unchanged without
 `--show-passes`.
 
+Optimizer pass headers include lightweight debug statistics. For example,
+`[changed, folded=2]` means the pass changed the IR and folded two operations,
+while `[no changes, removed=0]` means the pass left the IR unchanged. These
+metrics are only for compiler-development inspection; they are not part of the
+IR semantics and do not affect execution behavior.
+
 The current optimizer pipeline includes constant folding, block-local constant
 propagation, algebraic simplification, dead code elimination, and block-local
 dead store elimination. The iterative pipeline does not add new optimizations;

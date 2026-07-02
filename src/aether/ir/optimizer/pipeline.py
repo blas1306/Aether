@@ -11,7 +11,7 @@ from .constant_folding import ConstantFolder
 from .dead_code import DeadCodeEliminator
 from .dead_store import DeadStoreEliminator
 from .local_constant_propagation import LocalConstantPropagator
-from .result import OptimizationResult
+from .result import OptimizationResult, OptimizationTraceStep
 
 
 class OptimizationPass(Protocol):
@@ -65,13 +65,13 @@ class OptimizerPipeline:
         optimized, _changed = self._run_iteration(module)
         return optimized
 
-    def run_with_trace(self, module: IRModule) -> list[tuple[str, IRModule]]:
+    def run_with_trace(self, module: IRModule) -> list[OptimizationTraceStep]:
         if self._iterative:
             return self._run_iterative_with_trace(module)
 
-        trace = [("Lowered IR", module)]
+        trace = [OptimizationTraceStep("Lowered IR", module)]
         optimized, _changed = self._run_iteration(module, trace=trace)
-        trace.append(("Final IR", optimized))
+        trace.append(OptimizationTraceStep("Final IR", optimized))
         return trace
 
     def _run_iterative(self, module: IRModule) -> IRModule:
@@ -82,9 +82,9 @@ class OptimizerPipeline:
                 return optimized
         raise OptimizationConvergenceError(self._max_iterations)
 
-    def _run_iterative_with_trace(self, module: IRModule) -> list[tuple[str, IRModule]]:
+    def _run_iterative_with_trace(self, module: IRModule) -> list[OptimizationTraceStep]:
         optimized = module
-        trace = [("Lowered IR", optimized)]
+        trace = [OptimizationTraceStep("Lowered IR", optimized)]
 
         for iteration in range(1, self._max_iterations + 1):
             optimized, changed = self._run_iteration(
@@ -93,7 +93,7 @@ class OptimizerPipeline:
                 iteration=iteration,
             )
             if not changed:
-                trace.append(("Final IR", optimized))
+                trace.append(OptimizationTraceStep("Final IR", optimized))
                 return trace
 
         raise OptimizationConvergenceError(self._max_iterations)
@@ -102,7 +102,7 @@ class OptimizerPipeline:
         self,
         module: IRModule,
         *,
-        trace: list[tuple[str, IRModule]] | None = None,
+        trace: list[OptimizationTraceStep] | None = None,
         iteration: int | None = None,
     ) -> tuple[IRModule, bool]:
         optimized = module
@@ -115,7 +115,14 @@ class OptimizerPipeline:
                 name = type(optimization_pass).__name__
                 if iteration is not None:
                     name = f"Iteration {iteration} / {name}"
-                trace.append((name, optimized))
+                trace.append(
+                    OptimizationTraceStep(
+                        name,
+                        optimized,
+                        changed=result.changed,
+                        stats=dict(result.stats),
+                    )
+                )
 
         return optimized, changed
 
@@ -127,4 +134,4 @@ class OptimizerPipeline:
         result = optimization_pass.run(module)
         if isinstance(result, OptimizationResult):
             return result
-        return OptimizationResult(result, changed=result != module)
+        return OptimizationResult(result, changed=result != module, stats={})

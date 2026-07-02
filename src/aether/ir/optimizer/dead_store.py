@@ -19,27 +19,49 @@ class DeadStoreEliminator:
     """Remove block-local stores whose written value is never loaded."""
 
     def run(self, module: IRModule) -> OptimizationResult:
-        functions = [self._eliminate_function(function) for function in module.functions]
+        removed_stores = 0
+        functions: list[IRFunction] = []
+        for function in module.functions:
+            optimized_function, function_removed = self._eliminate_function(function)
+            functions.append(optimized_function)
+            removed_stores += function_removed
         optimized = IRModule(functions)
-        return OptimizationResult(optimized, changed=optimized != module)
-
-    def _eliminate_function(self, function: IRFunction) -> IRFunction:
-        blocks = [self._eliminate_block(block) for block in function.blocks]
-        return IRFunction(
-            function.name,
-            list(function.parameters),
-            function.return_type,
-            blocks,
+        return OptimizationResult(
+            optimized,
+            changed=optimized != module,
+            stats={"removed_stores": removed_stores},
         )
 
-    def _eliminate_block(self, block: IRBasicBlock) -> IRBasicBlock:
-        instructions = [
-            instruction
-            for index, instruction in enumerate(block.instructions)
-            if not isinstance(instruction, IRStore)
-            or not self._is_dead_store(block.instructions, index, instruction)
-        ]
-        return IRBasicBlock(block.name, instructions)
+    def _eliminate_function(self, function: IRFunction) -> tuple[IRFunction, int]:
+        removed_stores = 0
+        blocks: list[IRBasicBlock] = []
+        for block in function.blocks:
+            optimized_block, block_removed = self._eliminate_block(block)
+            blocks.append(optimized_block)
+            removed_stores += block_removed
+        return (
+            IRFunction(
+                function.name,
+                list(function.parameters),
+                function.return_type,
+                blocks,
+            ),
+            removed_stores,
+        )
+
+    def _eliminate_block(self, block: IRBasicBlock) -> tuple[IRBasicBlock, int]:
+        instructions: list[IRInstruction] = []
+        removed_stores = 0
+        for index, instruction in enumerate(block.instructions):
+            if isinstance(instruction, IRStore) and self._is_dead_store(
+                block.instructions,
+                index,
+                instruction,
+            ):
+                removed_stores += 1
+                continue
+            instructions.append(instruction)
+        return IRBasicBlock(block.name, instructions), removed_stores
 
     def _is_dead_store(
         self,

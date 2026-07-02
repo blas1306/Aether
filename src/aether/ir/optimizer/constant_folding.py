@@ -25,58 +25,77 @@ class ConstantFolder:
     _COMPARE_OPERATORS = {"lt", "le", "gt", "ge", "eq", "ne"}
 
     def run(self, module: IRModule) -> OptimizationResult:
-        functions = [self._fold_function(function) for function in module.functions]
+        folded = 0
+        functions: list[IRFunction] = []
+        for function in module.functions:
+            optimized_function, function_folded = self._fold_function(function)
+            functions.append(optimized_function)
+            folded += function_folded
         optimized = IRModule(functions)
-        return OptimizationResult(optimized, changed=optimized != module)
+        return OptimizationResult(
+            optimized,
+            changed=optimized != module,
+            stats={"folded": folded},
+        )
 
-    def _fold_function(self, function: IRFunction) -> IRFunction:
+    def _fold_function(self, function: IRFunction) -> tuple[IRFunction, int]:
         constants: dict[IRValue, Any] = {}
-        blocks = [
-            self._fold_block(block, constants)
-            for block in function.blocks
-        ]
-        return IRFunction(
-            function.name,
-            list(function.parameters),
-            function.return_type,
-            blocks,
+        folded = 0
+        blocks: list[IRBasicBlock] = []
+        for block in function.blocks:
+            optimized_block, block_folded = self._fold_block(block, constants)
+            blocks.append(optimized_block)
+            folded += block_folded
+        return (
+            IRFunction(
+                function.name,
+                list(function.parameters),
+                function.return_type,
+                blocks,
+            ),
+            folded,
         )
 
     def _fold_block(
         self,
         block: IRBasicBlock,
         constants: dict[IRValue, Any],
-    ) -> IRBasicBlock:
-        instructions = [
-            self._fold_instruction(instruction, constants)
-            for instruction in block.instructions
-        ]
-        return IRBasicBlock(block.name, instructions)
+    ) -> tuple[IRBasicBlock, int]:
+        folded = 0
+        instructions: list[IRInstruction] = []
+        for instruction in block.instructions:
+            optimized_instruction, instruction_folded = self._fold_instruction(
+                instruction,
+                constants,
+            )
+            instructions.append(optimized_instruction)
+            folded += instruction_folded
+        return IRBasicBlock(block.name, instructions), folded
 
     def _fold_instruction(
         self,
         instruction: IRInstruction,
         constants: dict[IRValue, Any],
-    ) -> IRInstruction:
+    ) -> tuple[IRInstruction, int]:
         if isinstance(instruction, IRConst):
             constants[instruction.result] = instruction.value
-            return replace(instruction)
+            return replace(instruction), 0
 
         if isinstance(instruction, IRBinaryOp):
             folded = self._fold_binary(instruction, constants)
             if folded is not None:
                 constants[instruction.result] = folded.value
-                return folded
-            return instruction
+                return folded, 1
+            return instruction, 0
 
         if isinstance(instruction, IRCompareOp):
             folded = self._fold_compare(instruction, constants)
             if folded is not None:
                 constants[instruction.result] = folded.value
-                return folded
-            return instruction
+                return folded, 1
+            return instruction, 0
 
-        return instruction
+        return instruction, 0
 
     def _fold_binary(
         self,

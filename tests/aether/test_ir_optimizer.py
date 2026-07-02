@@ -345,6 +345,7 @@ def test_optimization_pass_reports_when_it_changes_ir() -> None:
     optimization = ConstantFolder().run(module)
 
     assert optimization.changed is True
+    assert optimization.stats == {"folded": 1}
     assert "%2: int = const 5" in print_ir(optimization.module)
 
 
@@ -376,6 +377,51 @@ def test_optimization_pass_reports_when_ir_is_unchanged() -> None:
     optimization = ConstantFolder().run(module)
 
     assert optimization.changed is False
+    assert optimization.stats == {"folded": 0}
+    assert print_ir(optimization.module) == print_ir(module)
+
+
+def test_optimization_result_keeps_stats_optional() -> None:
+    module = IRModule()
+
+    optimization = OptimizationResult(module, changed=False)
+
+    assert optimization.module is module
+    assert optimization.changed is False
+    assert optimization.stats == {}
+
+
+@pytest.mark.parametrize(
+    ("optimization_pass", "expected_stats"),
+    [
+        (ConstantFolder(), {"folded": 0}),
+        (LocalConstantPropagator(), {"propagated": 0}),
+        (AlgebraicSimplifier(), {"simplified": 0}),
+        (DeadCodeEliminator(), {"removed": 0}),
+        (DeadStoreEliminator(), {"removed_stores": 0}),
+    ],
+)
+def test_optimization_pass_stats_are_zero_when_ir_is_unchanged(
+    optimization_pass,
+    expected_stats: dict[str, int],
+) -> None:
+    int_type = IntType()
+    parameter = IRParameter("x", int_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "identity",
+                [parameter],
+                int_type,
+                [IRBasicBlock("entry", [IRReturn(parameter)])],
+            )
+        ]
+    )
+
+    optimization = optimization_pass.run(module)
+
+    assert optimization.changed is False
+    assert optimization.stats == expected_stats
     assert print_ir(optimization.module) == print_ir(module)
 
 
@@ -406,7 +452,7 @@ def test_optimizer_pipeline_trace_includes_every_default_pass_and_final_ir() -> 
 
     trace = OptimizerPipeline().run_with_trace(module)
 
-    assert [name for name, _ in trace] == [
+    assert [step.label for step in trace] == [
         "Lowered IR",
         "ConstantFolder",
         "LocalConstantPropagator",
@@ -417,8 +463,36 @@ def test_optimizer_pipeline_trace_includes_every_default_pass_and_final_ir() -> 
         "DeadCodeEliminator",
         "Final IR",
     ]
-    assert print_ir(trace[0][1]) == print_ir(module)
-    assert print_ir(trace[-1][1]) == print_ir(OptimizerPipeline().run(module))
+    assert trace[0].stats == {}
+    assert trace[1].changed is False
+    assert trace[1].stats == {"folded": 0}
+    assert print_ir(trace[0].module) == print_ir(module)
+    assert print_ir(trace[-1].module) == print_ir(OptimizerPipeline().run(module))
+
+
+def test_optimizer_pipeline_trace_preserves_pass_stats() -> None:
+    int_type = IntType()
+    left = IRValue("0", int_type)
+    right = IRValue("1", int_type)
+    result = IRValue("2", int_type)
+    module = _single_block_module(
+        [
+            IRConst(left, 2),
+            IRConst(right, 3),
+            IRBinaryOp(result, "add", left, right),
+        ],
+        result,
+    )
+
+    trace = OptimizerPipeline(passes=[ConstantFolder()]).run_with_trace(module)
+
+    assert [step.label for step in trace] == [
+        "Lowered IR",
+        "ConstantFolder",
+        "Final IR",
+    ]
+    assert trace[1].changed is True
+    assert trace[1].stats == {"folded": 1}
 
 
 def test_optimizer_pipeline_iterative_trace_includes_iteration_names() -> None:
@@ -429,14 +503,18 @@ def test_optimizer_pipeline_iterative_trace_includes_iteration_names() -> None:
         iterative=True,
     ).run_with_trace(IRModule())
 
-    assert [name for name, _module in trace] == [
+    assert [step.label for step in trace] == [
         "Lowered IR",
         "Iteration 1 / _AddFunctionUntilPass",
         "Iteration 2 / _AddFunctionUntilPass",
         "Final IR",
     ]
+    assert trace[1].changed is True
+    assert trace[1].stats == {}
+    assert trace[2].changed is False
+    assert trace[2].stats == {}
     assert optimization_pass.calls == 2
-    assert len(trace[-1][1].functions) == 1
+    assert len(trace[-1].module.functions) == 1
 
 
 def test_constant_folding_does_not_fold_expression_with_variable() -> None:
@@ -551,7 +629,11 @@ def test_local_constant_propagation_replaces_same_block_load() -> None:
         loaded,
     )
 
-    assert print_ir(_propagate(module)) == (
+    optimization = LocalConstantPropagator().run(module)
+
+    assert optimization.changed is True
+    assert optimization.stats == {"propagated": 1}
+    assert print_ir(optimization.module) == (
         "func @main() -> int {\n"
         "entry:\n"
         "    %0: int = const 5\n"
@@ -715,6 +797,7 @@ def test_dead_store_eliminates_store_never_read() -> None:
     optimization = DeadStoreEliminator().run(module)
 
     assert optimization.changed is True
+    assert optimization.stats == {"removed_stores": 1}
     assert print_ir(optimization.module) == (
         "func @main() -> void {\n"
         "entry:\n"
@@ -1273,7 +1356,11 @@ def test_algebraic_simplification_integer_identity_rules(
         ]
     )
 
-    assert print_ir(_simplify(module)) == (
+    optimization = AlgebraicSimplifier().run(module)
+
+    assert optimization.changed is True
+    assert optimization.stats == {"simplified": 1}
+    assert print_ir(optimization.module) == (
         "func @main(%x: int) -> int {\n"
         "entry:\n"
         f"    %0: int = const {constant_value}\n"
@@ -1577,7 +1664,11 @@ def test_dead_code_eliminates_unused_arithmetic_operation() -> None:
         ]
     )
 
-    assert print_ir(_dce(module)) == (
+    optimization = DeadCodeEliminator().run(module)
+
+    assert optimization.changed is True
+    assert optimization.stats == {"removed": 1}
+    assert print_ir(optimization.module) == (
         "func @main(%a: int, %b: int) -> int {\n"
         "entry:\n"
         "    return %a\n"

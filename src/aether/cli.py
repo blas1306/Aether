@@ -6,16 +6,19 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from pprint import pformat
 import sys
-from typing import TextIO
+from typing import TYPE_CHECKING, TextIO
 
 from .errors import AetherError
-from .ir import IRModule, print_ir
+from .ir import print_ir
 from .pipeline import IRBackend, parse_source, prepare_typed_program, tokenize_source
 from .runner import run_aether
 from .session import AetherSession
 from .tokens import Token
 from .typechecker import TypeChecker
 from .version import LANGUAGE_VERSION
+
+if TYPE_CHECKING:
+    from .ir.optimizer import OptimizationTraceStep
 
 EXIT_SUCCESS = 0
 EXIT_LANGUAGE_ERROR = 1
@@ -241,7 +244,7 @@ def _emit_ir(
         from .ir.optimizer import OptimizerPipeline
 
         trace = OptimizerPipeline(iterative=True).run_with_trace(module)
-        backend.verify(trace[-1][1])
+        backend.verify(trace[-1].module)
         _print_ir_trace(trace, stdout=stdout)
         return
     if optimize:
@@ -249,26 +252,33 @@ def _emit_ir(
     print(print_ir(module), file=stdout)
 
 
-def _print_ir_trace(trace: list[tuple[str, IRModule]], *, stdout: TextIO) -> None:
+def _print_ir_trace(trace: list[OptimizationTraceStep], *, stdout: TextIO) -> None:
     separator = "=" * 40
-    for index, (name, module) in enumerate(trace):
+    for index, step in enumerate(trace):
         if index:
             print(file=stdout)
-        title = _format_trace_title(name)
+        title = _format_trace_title(step)
         print(separator, file=stdout)
         print(f"=== {title} ===", file=stdout)
         print(separator, file=stdout)
         print(file=stdout)
-        print(print_ir(module), file=stdout)
+        print(print_ir(step.module), file=stdout)
 
 
-def _format_trace_title(name: str) -> str:
+def _format_trace_title(step: OptimizationTraceStep) -> str:
+    name = step.label
     if name in {"Lowered IR", "Final IR"}:
         return name
     if " / " in name:
         iteration, pass_name = name.split(" / ", 1)
-        return f"{iteration} / After {pass_name}"
-    return f"After {name}"
+        title = f"{iteration} / After {pass_name}"
+    else:
+        title = f"After {name}"
+    status = "changed" if step.changed else "no changes"
+    stats = ", ".join(f"{key}={value}" for key, value in step.stats.items())
+    if stats:
+        return f"{title} [{status}, {stats}]"
+    return f"{title} [{status}]"
 
 
 def _read_source(path: Path, *, stderr: TextIO) -> str | None:
