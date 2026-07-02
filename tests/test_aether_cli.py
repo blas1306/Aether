@@ -6,6 +6,17 @@ from pathlib import Path
 from aether.cli import EXIT_LANGUAGE_ERROR, EXIT_SUCCESS, EXIT_USAGE_ERROR, main
 
 
+DEFAULT_OPTIMIZER_PASSES = [
+    "ConstantFolder",
+    "LocalConstantPropagator",
+    "ConstantFolder",
+    "AlgebraicSimplifier",
+    "DeadCodeEliminator",
+    "DeadStoreEliminator",
+    "DeadCodeEliminator",
+]
+
+
 def run_cli(
     argv: list[str],
     *,
@@ -34,6 +45,13 @@ def _trace_section(stdout: str, title: str) -> str:
     if next_section == -1:
         return stdout[content_start:].strip()
     return stdout[content_start:next_section].strip()
+
+
+def _iteration_titles(iteration: int) -> list[str]:
+    return [
+        f"Iteration {iteration} / After {pass_name}"
+        for pass_name in DEFAULT_OPTIMIZER_PASSES
+    ]
 
 
 def test_executes_valid_file(tmp_path: Path) -> None:
@@ -295,16 +313,11 @@ int main() {
     assert exit_code == EXIT_SUCCESS
     assert _trace_titles(stdout) == [
         "Lowered IR",
-        "After ConstantFolder",
-        "After LocalConstantPropagator",
-        "After ConstantFolder",
-        "After AlgebraicSimplifier",
-        "After DeadCodeEliminator",
-        "After DeadStoreEliminator",
-        "After DeadCodeEliminator",
+        *_iteration_titles(1),
+        *_iteration_titles(2),
         "Final IR",
     ]
-    assert stdout.count("========================================") == 18
+    assert stdout.count("========================================") == 32
     assert stderr == ""
 
 
@@ -328,13 +341,7 @@ int addOne(int value) {
     assert exit_code == EXIT_SUCCESS
     assert _trace_titles(stdout) == [
         "Lowered IR",
-        "After ConstantFolder",
-        "After LocalConstantPropagator",
-        "After ConstantFolder",
-        "After AlgebraicSimplifier",
-        "After DeadCodeEliminator",
-        "After DeadStoreEliminator",
-        "After DeadCodeEliminator",
+        *_iteration_titles(1),
         "Final IR",
     ]
     assert _trace_section(stdout, "Lowered IR") == _trace_section(stdout, "Final IR")
@@ -429,6 +436,22 @@ int main() {
     assert stderr == ""
 
 
+def test_emit_ir_with_opt_keeps_local_const_example_output_correct() -> None:
+    exit_code, stdout, stderr = run_cli(
+        ["--emit-ir", "--opt", "examples/ir/local_const.ae"]
+    )
+
+    assert exit_code == EXIT_SUCCESS
+    assert stdout.strip() == (
+        "func @main() -> int {\n"
+        "entry:\n"
+        "    %3: int = const 8\n"
+        "    return %3\n"
+        "}"
+    )
+    assert stderr == ""
+
+
 def test_emit_ir_with_opt_show_passes_shows_dead_store_elimination(
     tmp_path: Path,
 ) -> None:
@@ -447,8 +470,8 @@ int main() {
         ["--emit-ir", "--opt", "--show-passes", str(program)]
     )
 
-    before_dse = _trace_section(stdout, "After DeadCodeEliminator")
-    after_dse = _trace_section(stdout, "After DeadStoreEliminator")
+    before_dse = _trace_section(stdout, "Iteration 1 / After DeadCodeEliminator")
+    after_dse = _trace_section(stdout, "Iteration 1 / After DeadStoreEliminator")
     final = _trace_section(stdout, "Final IR")
     assert exit_code == EXIT_SUCCESS
     assert "store %x, %0" in before_dse

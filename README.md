@@ -111,19 +111,24 @@ aether --backend=ir --emit-ir program.ae
 
 `--emit-ir` lowers and verifies the program, prints textual IR, and does not
 execute it. Add `--opt` to inspect the IR after the current optimization
-pipeline:
+pipeline. The CLI runs the optimizer to a fixed point, with a default limit of
+10 iterations to catch accidental non-convergence:
 
 ```text
 Lexer -> Parser -> TypeChecker -> IR lowering -> IR verifier -> OptimizerPipeline -> IR verifier
 ```
 
 Add `--show-passes` with `--emit-ir --opt` to print the lowered IR, the IR after
-each optimizer pass, and the final IR. This is a development inspection tool;
-the default optimized IR output remains unchanged without `--show-passes`.
+each optimizer pass in each iteration, and the final IR. This is a development
+inspection tool; the default optimized IR output remains unchanged without
+`--show-passes`.
 
 The current optimizer pipeline includes constant folding, block-local constant
 propagation, algebraic simplification, dead code elimination, and block-local
-dead store elimination. Dead Store Elimination only removes `IRStore`
+dead store elimination. The iterative pipeline does not add new optimizations;
+it reruns these existing passes until a full iteration reports no changes or
+the maximum iteration count is reached. Dead Store Elimination only removes
+`IRStore`
 instructions whose slot is not loaded again before another same-slot store or
 before a returning block ends. It does not perform global liveness, alias,
 escape, interprocedural, SSA, `if`, or `while` analysis; stores that may be

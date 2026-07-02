@@ -91,12 +91,17 @@ object. Its default pass list currently runs
 mutating the input module. Individual passes return an
 `OptimizationResult(module, changed)` so development tools can tell whether a
 pass changed the IR. `OptimizerPipeline.run(module)` preserves the simple
-optimized-module API, while `OptimizerPipeline.run_with_trace(module)` returns
-the lowered module, every pass result in order, and the final IR. The CLI can
-run this pipeline for inspection with `aether --emit-ir --opt program.ae`, and
-can show the per-pass trace with
+optimized-module API. `OptimizerPipeline(iterative=True, max_iterations=10)`
+runs the same pass list repeatedly until a complete iteration reports no
+changes. If the last allowed iteration still changes the IR, the pipeline raises
+`OptimizationConvergenceError` rather than guessing that it converged.
+`OptimizerPipeline.run_with_trace(module)` returns the lowered module, every
+pass result in order, and the final IR; iterative traces include the iteration
+number in each pass entry. The CLI can run the iterative pipeline for inspection
+with `aether --emit-ir --opt program.ae`, and can show the per-pass trace with
 `aether --emit-ir --opt --show-passes program.ae`, but optimization is not
-connected to IR execution yet.
+connected to IR execution yet. This infrastructure change does not add new
+optimization passes.
 
 The implemented constant folding pass rewrites arithmetic and comparison
 instructions to `IRConst` when both operands are already known constants:
@@ -355,29 +360,36 @@ with or without `--backend=ir`.
 source -> lexer -> parser -> typechecker -> IR lowering -> IR verifier -> OptimizerPipeline -> IR verifier -> print IR
 ```
 
-The second verifier checks the optimizer output before the textual IR is
-printed. `--opt` is currently supported only with `--emit-ir`; using `--opt`
-without `--emit-ir` is a CLI usage error. `aether --backend=ir program.ae`
-continues to execute unoptimized IR for now.
+The CLI uses `OptimizerPipeline(iterative=True, max_iterations=10)` for this
+path. The optimizer repeats the existing pass list until a full iteration
+reports no changes. If the tenth iteration still changes the IR, optimization
+fails with a clear convergence error. The second verifier checks the optimizer
+output before the textual IR is printed. `--opt` is currently supported only
+with `--emit-ir`; using `--opt` without `--emit-ir` is a CLI usage error.
+`aether --backend=ir program.ae` continues to execute unoptimized IR for now.
 
 `--emit-ir --opt --show-passes` runs the same optimizer pipeline and prints
 sectioned textual IR for:
 
 ```text
 Lowered IR
-After ConstantFolder
-After LocalConstantPropagator
-After ConstantFolder
-After AlgebraicSimplifier
-After DeadCodeEliminator
-After DeadStoreEliminator
-After DeadCodeEliminator
+Iteration 1 / After ConstantFolder
+Iteration 1 / After LocalConstantPropagator
+Iteration 1 / After ConstantFolder
+Iteration 1 / After AlgebraicSimplifier
+Iteration 1 / After DeadCodeEliminator
+Iteration 1 / After DeadStoreEliminator
+Iteration 1 / After DeadCodeEliminator
+Iteration 2 / After ConstantFolder
+...
 Final IR
 ```
 
 The repeated `ConstantFolder` and final `DeadCodeEliminator` are intentional
-because they are part of the default pipeline. `--show-passes` is valid only
-together with `--emit-ir --opt`; it does not affect normal optimized IR output.
+because they are part of the default pipeline. A second iteration is printed
+only when an earlier iteration changed the IR and the optimizer needs to confirm
+the fixed point. `--show-passes` is valid only together with `--emit-ir --opt`;
+it does not affect normal optimized IR output.
 
 The user-facing supported IR backend subset is:
 

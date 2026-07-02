@@ -90,7 +90,11 @@ class IRBackend:
     ) -> IRModule:
         from .ir.optimizer import OptimizerPipeline
 
-        pipeline = optimizer if optimizer is not None else OptimizerPipeline()
+        pipeline = (
+            optimizer
+            if optimizer is not None
+            else OptimizerPipeline(iterative=True)
+        )
         return self.verify(pipeline.run(module))
 
     def run(self, typed_program: TypedProgram) -> Environment:

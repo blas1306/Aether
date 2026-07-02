@@ -5,7 +5,7 @@ from .constant_folding import ConstantFolder
 from .dead_code import DeadCodeEliminator
 from .dead_store import DeadStoreEliminator
 from .local_constant_propagation import LocalConstantPropagator
-from .pipeline import OptimizerPipeline
+from .pipeline import OptimizationConvergenceError, OptimizerPipeline
 from .result import OptimizationResult
 
 __all__ = [
@@ -15,5 +15,6 @@ __all__ = [
     "DeadStoreEliminator",
     "LocalConstantPropagator",
     "OptimizationResult",
+    "OptimizationConvergenceError",
     "OptimizerPipeline",
 ]

@@ -240,7 +240,7 @@ def _emit_ir(
     if optimize and show_passes:
         from .ir.optimizer import OptimizerPipeline
 
-        trace = OptimizerPipeline().run_with_trace(module)
+        trace = OptimizerPipeline(iterative=True).run_with_trace(module)
         backend.verify(trace[-1][1])
         _print_ir_trace(trace, stdout=stdout)
         return
@@ -254,12 +254,21 @@ def _print_ir_trace(trace: list[tuple[str, IRModule]], *, stdout: TextIO) -> Non
     for index, (name, module) in enumerate(trace):
         if index:
             print(file=stdout)
-        title = name if name in {"Lowered IR", "Final IR"} else f"After {name}"
+        title = _format_trace_title(name)
         print(separator, file=stdout)
         print(f"=== {title} ===", file=stdout)
         print(separator, file=stdout)
         print(file=stdout)
         print(print_ir(module), file=stdout)
+
+
+def _format_trace_title(name: str) -> str:
+    if name in {"Lowered IR", "Final IR"}:
+        return name
+    if " / " in name:
+        iteration, pass_name = name.split(" / ", 1)
+        return f"{iteration} / After {pass_name}"
+    return f"After {name}"
 
 
 def _read_source(path: Path, *, stderr: TextIO) -> str | None:

@@ -31,6 +31,8 @@ from aether.ir.optimizer import (
     DeadCodeEliminator,
     DeadStoreEliminator,
     LocalConstantPropagator,
+    OptimizationConvergenceError,
+    OptimizationResult,
     OptimizerPipeline,
 )
 
@@ -66,6 +68,38 @@ def _single_block_module(instructions: list[object], return_value: IRValue) -> I
             )
         ]
     )
+
+
+class _NoOpPass:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def run(self, module: IRModule) -> OptimizationResult:
+        self.calls += 1
+        return OptimizationResult(module, changed=False)
+
+
+class _AddFunctionUntilPass:
+    def __init__(self, target_count: int) -> None:
+        self.target_count = target_count
+        self.calls = 0
+
+    def run(self, module: IRModule) -> OptimizationResult:
+        self.calls += 1
+        if len(module.functions) >= self.target_count:
+            return OptimizationResult(module, changed=False)
+
+        index = len(module.functions)
+        function = IRFunction(
+            f"generated{index}",
+            [],
+            VoidType(),
+            [IRBasicBlock("entry", [IRReturn()])],
+        )
+        return OptimizationResult(
+            IRModule([*module.functions, function]),
+            changed=True,
+        )
 
 
 @pytest.mark.parametrize(
@@ -241,6 +275,59 @@ def test_optimizer_pipeline_runs_constant_folding_then_dead_code_elimination() -
     )
 
 
+def test_optimizer_pipeline_iterative_stops_after_one_unchanged_round() -> None:
+    optimization_pass = _NoOpPass()
+
+    optimized = OptimizerPipeline(
+        passes=[optimization_pass],
+        iterative=True,
+    ).run(IRModule())
+
+    assert optimized == IRModule()
+    assert optimization_pass.calls == 1
+
+
+def test_optimizer_pipeline_iterative_repeats_until_fixed_point() -> None:
+    optimization_pass = _AddFunctionUntilPass(target_count=2)
+
+    optimized = OptimizerPipeline(
+        passes=[optimization_pass],
+        iterative=True,
+    ).run(IRModule())
+
+    assert [function.name for function in optimized.functions] == [
+        "generated0",
+        "generated1",
+    ]
+    assert optimization_pass.calls == 3
+
+
+def test_optimizer_pipeline_iterative_honors_max_iterations() -> None:
+    optimization_pass = _AddFunctionUntilPass(target_count=3)
+    pipeline = OptimizerPipeline(
+        passes=[optimization_pass],
+        iterative=True,
+        max_iterations=2,
+    )
+
+    with pytest.raises(OptimizationConvergenceError, match="fixed point"):
+        pipeline.run(IRModule())
+
+    assert optimization_pass.calls == 2
+
+
+def test_optimizer_pipeline_non_iterative_keeps_single_round_behavior() -> None:
+    optimization_pass = _AddFunctionUntilPass(target_count=3)
+
+    optimized = OptimizerPipeline(
+        passes=[optimization_pass],
+        iterative=False,
+    ).run(IRModule())
+
+    assert [function.name for function in optimized.functions] == ["generated0"]
+    assert optimization_pass.calls == 1
+
+
 def test_optimization_pass_reports_when_it_changes_ir() -> None:
     int_type = IntType()
     left = IRValue("0", int_type)
@@ -332,6 +419,24 @@ def test_optimizer_pipeline_trace_includes_every_default_pass_and_final_ir() -> 
     ]
     assert print_ir(trace[0][1]) == print_ir(module)
     assert print_ir(trace[-1][1]) == print_ir(OptimizerPipeline().run(module))
+
+
+def test_optimizer_pipeline_iterative_trace_includes_iteration_names() -> None:
+    optimization_pass = _AddFunctionUntilPass(target_count=1)
+
+    trace = OptimizerPipeline(
+        passes=[optimization_pass],
+        iterative=True,
+    ).run_with_trace(IRModule())
+
+    assert [name for name, _module in trace] == [
+        "Lowered IR",
+        "Iteration 1 / _AddFunctionUntilPass",
+        "Iteration 2 / _AddFunctionUntilPass",
+        "Final IR",
+    ]
+    assert optimization_pass.calls == 2
+    assert len(trace[-1][1].functions) == 1
 
 
 def test_constant_folding_does_not_fold_expression_with_variable() -> None:
