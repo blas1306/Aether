@@ -109,7 +109,9 @@ aether --emit-ir -O1 program.ae
 aether --emit-ir -O2 program.ae
 aether --emit-ir --opt program.ae
 aether --emit-ir --opt --show-passes program.ae
+aether --emit-cfg program.ae
 aether --backend=ir --emit-ir program.ae
+aether --backend=ir --emit-cfg program.ae
 ```
 
 `--emit-ir` lowers and verifies the program, prints textual IR, and does not
@@ -157,6 +159,34 @@ Optimization is currently connected only to `--emit-ir`. `--backend=ir` still
 executes the verified, unoptimized IR, `--opt` without `--emit-ir` is rejected,
 and `-O` flags without `--emit-ir` are rejected. `--show-passes` also requires
 `--emit-ir` plus `--opt` or an explicit `-O`/`--opt-level`.
+
+### Control Flow Graph
+
+`--emit-cfg` lowers the checked program through the experimental IR path, builds
+a basic-block control-flow graph for each lowered function, and prints Graphviz
+DOT to stdout without executing a backend. Each basic block is a DOT node.
+`IRJump` adds one edge, `IRBranch` adds true and false edges, and `IRReturn`
+adds no edges.
+
+For example:
+
+```dot
+digraph sumTo {
+    entry;
+    cond0;
+    body0;
+    exit0;
+
+    entry -> cond0;
+    cond0 -> body0;
+    cond0 -> exit0;
+    body0 -> cond0;
+}
+```
+
+This is development infrastructure for future SSA conversion, dominator
+analysis, and loop analysis. It does not render PNG/SVG automatically and does
+not add new optimizations.
 
 The CLI also includes a minimal benchmark harness for language and backend
 development:

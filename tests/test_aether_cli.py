@@ -201,6 +201,7 @@ def test_help_describes_direct_execution_and_tools() -> None:
     assert "--ast" in stdout
     assert "--backend" in stdout
     assert "--emit-ir" in stdout
+    assert "--emit-cfg" in stdout
     assert "--opt" in stdout
     assert "--opt-level" in stdout
     assert "--show-passes" in stdout
@@ -264,6 +265,118 @@ int main() {
     assert "func @main" in stdout
     assert "call @add" in stdout
     assert stderr == ""
+
+
+def test_emit_cfg_prints_graphviz_dot(tmp_path: Path) -> None:
+    program = tmp_path / "emit_cfg.ae"
+    program.write_text(
+        """
+int sumTo(int n) {
+    int i = 0;
+    int sum = 0;
+
+    while i < n {
+        sum = sum + i;
+        i = i + 1;
+    }
+
+    return sum;
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-cfg", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert stdout.startswith("digraph sumTo {")
+    assert "    entry;" in stdout
+    assert "    cond0;" in stdout
+    assert "    body0;" in stdout
+    assert "    exit0;" in stdout
+    assert "    entry -> cond0;" in stdout
+    assert "    cond0 -> body0;" in stdout
+    assert "    cond0 -> exit0;" in stdout
+    assert "    body0 -> cond0;" in stdout
+    assert "func @sumTo" not in stdout
+    assert stderr == ""
+
+
+def test_emit_cfg_prints_one_dot_graph_per_function(tmp_path: Path) -> None:
+    program = tmp_path / "emit_cfg_multiple.ae"
+    program.write_text(
+        """
+int first() {
+    return 1;
+}
+
+int second(int x) {
+    if x > 0 {
+        return 1;
+    } else {
+        return 0;
+    }
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-cfg", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert "digraph first {" in stdout
+    assert "digraph second {" in stdout
+    assert "    entry -> then0;" in stdout
+    assert "    entry -> else0;" in stdout
+    assert stderr == ""
+
+
+def test_backend_ir_with_emit_cfg_prints_cfg_without_execution(tmp_path: Path) -> None:
+    program = tmp_path / "backend_emit_cfg.ae"
+    program.write_text(
+        """
+int main() {
+    return 42;
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--backend=ir", "--emit-cfg", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert "digraph main {" in stdout
+    assert "    entry;" in stdout
+    assert stderr == ""
+
+
+def test_emit_cfg_with_show_passes_reports_clear_usage_error(tmp_path: Path) -> None:
+    program = tmp_path / "emit_cfg_show_passes.ae"
+    program.write_text(
+        """
+int main() {
+    return 42;
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-cfg", "--show-passes", str(program)])
+
+    assert exit_code == EXIT_USAGE_ERROR
+    assert stdout == ""
+    assert "--show-passes requires --emit-ir --opt." in stderr
+
+
+def test_emit_cfg_missing_file_reports_read_error(tmp_path: Path) -> None:
+    missing = tmp_path / "missing_cfg.ae"
+
+    exit_code, stdout, stderr = run_cli(["--emit-cfg", str(missing)])
+
+    assert exit_code == EXIT_USAGE_ERROR
+    assert stdout == ""
+    assert "aether: cannot read" in stderr
+    assert str(missing) in stderr
 
 
 def test_emit_ir_without_opt_preserves_unoptimized_ir(tmp_path: Path) -> None:

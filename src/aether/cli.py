@@ -32,7 +32,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Run Aether language programs.",
         epilog=(
             "The default command is file execution: aether program.ae\n"
-            "Development inspection tools: --tokens, --ast, --emit-ir, and bench"
+            "Development inspection tools: --tokens, --ast, --emit-ir, --emit-cfg, and bench"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -53,6 +53,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--emit-ir",
         action="store_true",
         help="Lower the file to experimental IR, verify it, and print it.",
+    )
+    modes.add_argument(
+        "--emit-cfg",
+        action="store_true",
+        help="Lower the file to experimental IR and print Graphviz DOT CFGs.",
     )
     parser.add_argument(
         "--opt",
@@ -193,6 +198,11 @@ def main(
                 ),
                 show_passes=args.show_passes,
             ),
+            stderr=stderr,
+        )
+    if args.emit_cfg:
+        return _run_language_action(
+            lambda: _emit_cfg(source, path=path, stdout=stdout),
             stderr=stderr,
         )
     return _run_language_action(
@@ -339,6 +349,25 @@ def _emit_ir(
             optimizer=build_optimizer_pipeline(optimization_profile),
         )
     print(print_ir(module), file=stdout)
+
+
+def _emit_cfg(source: str, *, path: Path, stdout: TextIO) -> None:
+    from .ir import CFGBuilder, DOTPrinter
+
+    typed_program = prepare_typed_program(
+        source,
+        TypeChecker(source_root=path.parent),
+    )
+    module = IRBackend().lower(typed_program)
+    builder = CFGBuilder()
+    printer = DOTPrinter()
+    print(
+        "\n\n".join(
+            printer.to_dot(builder.build(function))
+            for function in module.functions
+        ),
+        file=stdout,
+    )
 
 
 def _optimization_profile_from_args(

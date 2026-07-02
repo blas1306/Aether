@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .cfg import CFG, CFGBuilder, CFGEdge, CFGNode, DOTPrinter
 from .interpreter import IRExecutionError, IRInterpreter
 from .lowering import IRLowerer, lower_to_ir
 from .model import (
@@ -46,7 +47,12 @@ __all__ = [
     "BoolType",
     "ClassRefType",
     "ComplexType",
+    "CFG",
+    "CFGBuilder",
+    "CFGEdge",
+    "CFGNode",
     "DoubleType",
+    "DOTPrinter",
     "EnumType",
     "FloatType",
     "IRBasicBlock",

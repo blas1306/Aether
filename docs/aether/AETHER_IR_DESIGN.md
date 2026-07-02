@@ -122,6 +122,39 @@ These counters are development and debugging metrics only. They are not part of
 the IR semantics, are not observable by Aether programs, and do not affect the
 optimized module beyond the transformations the pass already performs.
 
+### Control Flow Graph
+
+`aether.ir.cfg` contains the first CFG infrastructure for lowered IR:
+`CFG`, `CFGNode`, `CFGEdge`, `CFGBuilder`, and `DOTPrinter`. The graph is
+function-local and block-level. `CFGBuilder.build(function)` creates one node
+per `IRBasicBlock` and derives edges only from the block terminator:
+
+- `IRJump` produces one edge to its target.
+- `IRBranch` produces one edge to the true target and one edge to the false
+  target.
+- `IRReturn` produces no outgoing edges.
+
+The initial printer emits minimal Graphviz DOT:
+
+```dot
+digraph sumTo {
+    entry;
+    cond0;
+    body0;
+    exit0;
+
+    entry -> cond0;
+    cond0 -> body0;
+    cond0 -> exit0;
+    body0 -> cond0;
+}
+```
+
+This CFG is a development inspection and future-analysis structure for SSA
+conversion, dominator analysis, and loop analysis. It deliberately does not
+implement SSA, phi nodes, dominators, automatic Graphviz rendering, PNG/SVG
+output, or new optimizations.
+
 The implemented constant folding pass rewrites arithmetic and comparison
 instructions to `IRConst` when both operands are already known constants:
 
@@ -356,6 +389,8 @@ aether --emit-ir -O1 program.ae
 aether --emit-ir -O2 program.ae
 aether --emit-ir --opt program.ae
 aether --backend=ir --emit-ir program.ae
+aether --emit-cfg program.ae
+aether --backend=ir --emit-cfg program.ae
 aether bench benchmarks/sum_to.ae
 ```
 
@@ -377,6 +412,12 @@ such as `println`.
 textual IR, and does not execute it. It is a development tool and is accepted
 with or without `--backend=ir`. Plain `--emit-ir` uses `O0`; `--emit-ir -O0` is
 equivalent and prints unoptimized IR.
+
+`--emit-cfg` lowers the checked program, builds a CFG for each function, prints
+Graphviz DOT, and does not execute a backend. It is accepted with any
+`--backend` value because backend selection is ignored by inspection modes.
+`--show-passes` remains specific to `--emit-ir` optimizer inspection and is
+rejected with `--emit-cfg`.
 
 `--emit-ir -O1` runs:
 
