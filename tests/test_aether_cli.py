@@ -204,6 +204,7 @@ def test_help_describes_direct_execution_and_tools() -> None:
     assert "--opt" in stdout
     assert "--opt-level" in stdout
     assert "--show-passes" in stdout
+    assert "bench" in stdout
     assert stderr == ""
 
 
@@ -842,3 +843,129 @@ def test_typechecker_error_is_reported_without_execution(tmp_path: Path) -> None
     assert stdout == ""
     assert "AetherTypeError" in stderr
     assert "not reached" not in stdout
+
+
+def test_bench_sum_to_default_both_backends() -> None:
+    exit_code, stdout, stderr = run_cli(["bench", "benchmarks/sum_to.ae"])
+
+    assert exit_code == EXIT_SUCCESS
+    assert "Benchmark: benchmarks/sum_to.ae" in stdout
+    assert "Iterations: 10" in stdout
+    assert "AST backend:" in stdout
+    assert "IR backend:" in stdout
+    assert "IR O1 optimizer (not executed):" in stdout
+    assert stdout.count("  total: ") == 3
+    assert stdout.count("  avg: ") == 3
+    assert stderr == ""
+
+
+def test_bench_accepts_iteration_count() -> None:
+    exit_code, stdout, stderr = run_cli(
+        ["bench", "benchmarks/sum_to.ae", "--iterations", "2"]
+    )
+
+    assert exit_code == EXIT_SUCCESS
+    assert "Iterations: 2" in stdout
+    assert "AST backend:" in stdout
+    assert "IR backend:" in stdout
+    assert stderr == ""
+
+
+def test_bench_backend_ast_only() -> None:
+    exit_code, stdout, stderr = run_cli(
+        ["bench", "benchmarks/sum_to.ae", "--backend", "ast"]
+    )
+
+    assert exit_code == EXIT_SUCCESS
+    assert "AST backend:" in stdout
+    assert "IR backend:" not in stdout
+    assert "IR O1 optimizer" not in stdout
+    assert stderr == ""
+
+
+def test_bench_backend_ir_only() -> None:
+    exit_code, stdout, stderr = run_cli(
+        ["bench", "benchmarks/sum_to.ae", "--backend", "ir"]
+    )
+
+    assert exit_code == EXIT_SUCCESS
+    assert "AST backend:" not in stdout
+    assert "IR backend:" in stdout
+    assert "IR O1 optimizer (not executed):" in stdout
+    assert stderr == ""
+
+
+def test_bench_backend_both_explicit() -> None:
+    exit_code, stdout, stderr = run_cli(
+        ["bench", "benchmarks/sum_to.ae", "--backend", "both"]
+    )
+
+    assert exit_code == EXIT_SUCCESS
+    assert "AST backend:" in stdout
+    assert "IR backend:" in stdout
+    assert "IR O1 optimizer (not executed):" in stdout
+    assert stderr == ""
+
+
+def test_bench_invalid_backend_reports_usage_error() -> None:
+    exit_code, stdout, stderr = run_cli(
+        ["bench", "benchmarks/sum_to.ae", "--backend", "wat"]
+    )
+
+    assert exit_code == EXIT_USAGE_ERROR
+    assert stdout == ""
+    assert "invalid choice" in stderr
+    assert "wat" in stderr
+
+
+def test_bench_missing_file_reports_read_error(tmp_path: Path) -> None:
+    missing = tmp_path / "missing.ae"
+
+    exit_code, stdout, stderr = run_cli(["bench", str(missing)])
+
+    assert exit_code == EXIT_USAGE_ERROR
+    assert stdout == ""
+    assert "aether: cannot read" in stderr
+    assert str(missing) in stderr
+
+
+def test_bench_both_reports_ir_error_and_keeps_ast(tmp_path: Path) -> None:
+    program = tmp_path / "ast_only.ae"
+    program.write_text('println("ast still runs");\n', encoding="utf-8")
+
+    exit_code, stdout, stderr = run_cli(["bench", str(program), "--backend", "both"])
+
+    assert exit_code == EXIT_SUCCESS
+    assert f"Benchmark: {program}" in stdout
+    assert "AST backend:" in stdout
+    assert "IR backend:" in stdout
+    assert "error:" in stdout
+    assert "IR backend does not support" in stdout
+    assert "Supported IR backend subset:" in stdout
+    assert "Traceback" not in stdout
+    assert stderr == ""
+
+
+def test_bench_ir_only_unsupported_program_fails(tmp_path: Path) -> None:
+    program = tmp_path / "ast_only_ir_fail.ae"
+    program.write_text('println("unsupported");\n', encoding="utf-8")
+
+    exit_code, stdout, stderr = run_cli(["bench", str(program), "--backend", "ir"])
+
+    assert exit_code == EXIT_LANGUAGE_ERROR
+    assert "Benchmark:" in stdout
+    assert "IR backend:" in stdout
+    assert "error:" in stdout
+    assert "IR backend does not support" in stdout
+    assert stderr == ""
+
+
+def test_bench_does_not_break_existing_cli_execution(tmp_path: Path) -> None:
+    program = tmp_path / "normal_cli_after_bench.ae"
+    program.write_text('println("normal");\n', encoding="utf-8")
+
+    exit_code, stdout, stderr = run_cli([str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert stdout == "normal\n"
+    assert stderr == ""

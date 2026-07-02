@@ -1,0 +1,11 @@
+int mix(int a, int b, int c) {
+    int value = a * b;
+    value = value + c;
+    value = value - a;
+    value = value % 97;
+    return value;
+}
+
+int main() {
+    return mix(17, 31, 42);
+}

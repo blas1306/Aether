@@ -9,6 +9,7 @@ import sys
 from typing import TYPE_CHECKING, TextIO
 
 from .errors import AetherError
+from .benchmark import BenchReport, run_benchmark
 from .ir import print_ir
 from .pipeline import IRBackend, parse_source, prepare_typed_program, tokenize_source
 from .runner import run_aether
@@ -31,7 +32,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Run Aether language programs.",
         epilog=(
             "The default command is file execution: aether program.ae\n"
-            "Development inspection tools: --tokens and --ast"
+            "Development inspection tools: --tokens, --ast, --emit-ir, and bench"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -87,6 +88,27 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def build_bench_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="aether bench",
+        description="Measure Aether programs through development backends.",
+    )
+    parser.add_argument("file", help="Aether source file to benchmark.")
+    parser.add_argument(
+        "--iterations",
+        type=_positive_int,
+        default=10,
+        help="Number of benchmark iterations. Defaults to 10.",
+    )
+    parser.add_argument(
+        "--backend",
+        choices=("ast", "ir", "both"),
+        default="both",
+        help="Backend profile to measure. Defaults to both.",
+    )
+    return parser
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
@@ -97,14 +119,18 @@ def main(
     stdin = stdin or sys.stdin
     stdout = stdout or sys.stdout
     stderr = stderr or sys.stderr
+    argv_list = list(sys.argv[1:] if argv is None else argv)
+    if argv_list and argv_list[0] == "bench":
+        return _main_bench(argv_list[1:], stdout=stdout, stderr=stderr)
+
     parser = build_parser()
 
     if stdout is sys.stdout and stderr is sys.stderr:
-        args = parser.parse_args(argv)
+        args = parser.parse_args(argv_list)
     else:
         try:
             with redirect_stdout(stdout), redirect_stderr(stderr):
-                args = parser.parse_args(argv)
+                args = parser.parse_args(argv_list)
         except SystemExit as exc:
             return int(exc.code)
 
@@ -179,6 +205,39 @@ def main(
         ),
         stderr=stderr,
     )
+
+
+def _main_bench(argv: Sequence[str], *, stdout: TextIO, stderr: TextIO) -> int:
+    parser = build_bench_parser()
+    if stdout is sys.stdout and stderr is sys.stderr:
+        args = parser.parse_args(argv)
+    else:
+        try:
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                args = parser.parse_args(argv)
+        except SystemExit as exc:
+            return int(exc.code)
+
+    path = Path(args.file)
+    source = _read_source(path, stderr=stderr)
+    if source is None:
+        return EXIT_USAGE_ERROR
+
+    try:
+        report = run_benchmark(
+            source,
+            path=path,
+            iterations=args.iterations,
+            backend=args.backend,
+        )
+    except AetherError as exc:
+        print(_format_language_error(exc), file=stderr)
+        return EXIT_LANGUAGE_ERROR
+
+    _print_benchmark_report(report, stdout=stdout)
+    if args.backend == "ir" and report.failures:
+        return EXIT_LANGUAGE_ERROR
+    return EXIT_SUCCESS
 
 
 def run_repl(*, stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:
@@ -325,6 +384,33 @@ def _format_trace_title(step: OptimizationTraceStep) -> str:
     if stats:
         return f"{title} [{status}, {stats}]"
     return f"{title} [{status}]"
+
+
+def _print_benchmark_report(report: BenchReport, *, stdout: TextIO) -> None:
+    print(f"Benchmark: {report.path}", file=stdout)
+    print(f"Iterations: {report.iterations}", file=stdout)
+    for timing in report.timings:
+        print(file=stdout)
+        print(f"{timing.name}:", file=stdout)
+        print(f"  total: {_format_seconds(timing.total_seconds)}", file=stdout)
+        print(f"  avg: {_format_seconds(timing.average_seconds)}", file=stdout)
+    for failure in report.failures:
+        print(file=stdout)
+        print(f"{failure.name}:", file=stdout)
+        print("  error:", file=stdout)
+        for line in _format_language_error(failure.error).splitlines():
+            print(f"    {line}", file=stdout)
+
+
+def _format_seconds(value: float) -> str:
+    return f"{value:.6f}s"
+
+
+def _positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be at least 1")
+    return parsed
 
 
 def _read_source(path: Path, *, stderr: TextIO) -> str | None:

@@ -356,6 +356,7 @@ aether --emit-ir -O1 program.ae
 aether --emit-ir -O2 program.ae
 aether --emit-ir --opt program.ae
 aether --backend=ir --emit-ir program.ae
+aether bench benchmarks/sum_to.ae
 ```
 
 `aether program.ae` and `aether --backend=ast program.ae` both use the
@@ -436,6 +437,32 @@ The IR backend does not yet support structs, classes, lists, arrays, packages,
 advanced imports, builtins, top-level scripting statements, methods,
 constructors, interfaces, enums, exceptions, `for`, `break`, `continue`,
 optimizer integration for execution, SSA, JIT, or Rust code generation.
+
+The CLI also has a minimal development benchmark harness:
+
+```bash
+aether bench benchmarks/sum_to.ae
+aether bench benchmarks/sum_to.ae --iterations 20
+aether bench benchmarks/sum_to.ae --backend ast
+aether bench benchmarks/sum_to.ae --backend ir
+aether bench benchmarks/sum_to.ae --backend both
+```
+
+The harness is intentionally small and uses `time.perf_counter()` for
+approximate wall-clock timings. Each iteration measures frontend preparation
+plus the selected backend work. The AST path uses the production AST backend
+and calls zero-argument `main()` when present so small IR-style benchmark files
+can exercise the same workload. The IR path lowers, verifies, and executes the
+unoptimized module with the current IR interpreter. When IR is selected, the
+harness also reports `IR O1 optimizer (not executed)`, which measures lowering,
+verification, the current `O1` optimizer pipeline, and verification of the
+optimized module without executing that optimized IR. This preserves the
+current rule that optimized IR is not the execution backend.
+
+Benchmark output is for local compiler-development comparisons only; it is not
+a stable performance format and there is no JSON output or advanced statistics
+yet. If `--backend both` is selected and IR lowering rejects the program, the
+harness prints the IR error clearly and still reports the AST timing.
 
 The checked AST remains the existing immutable source AST rather than a new
 annotated tree. For this subset, declaration, parameter, literal, and function

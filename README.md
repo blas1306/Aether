@@ -158,6 +158,32 @@ executes the verified, unoptimized IR, `--opt` without `--emit-ir` is rejected,
 and `-O` flags without `--emit-ir` are rejected. `--show-passes` also requires
 `--emit-ir` plus `--opt` or an explicit `-O`/`--opt-level`.
 
+The CLI also includes a minimal benchmark harness for language and backend
+development:
+
+```bash
+aether bench benchmarks/sum_to.ae
+aether bench benchmarks/sum_to.ae --iterations 20
+aether bench benchmarks/sum_to.ae --backend ast
+aether bench benchmarks/sum_to.ae --backend ir
+aether bench benchmarks/sum_to.ae --backend both
+```
+
+`aether bench` measures approximate wall-clock time with `time.perf_counter()`.
+Each iteration includes frontend preparation plus the selected backend work.
+The AST measurement executes the production AST path and calls zero-argument
+`main()` when the benchmark defines one. The IR measurement lowers, verifies,
+and executes with the current experimental IR interpreter. When IR is selected,
+the harness also reports `IR O1 optimizer (not executed)`, which measures
+lowering, verification, the current `-O1` optimizer pipeline, and verification
+of the optimized IR. That optimized IR is still not used as the IR execution
+backend.
+
+This command is a development tool, not a rigorous performance suite. The
+numbers are approximate and intended for local comparisons across backends or
+profiles. If the IR backend cannot lower a benchmark and `--backend both` is
+selected, the harness prints a clear IR error and still reports AST timing.
+
 Use `aether --help` for all current options and `aether --version` for the
 language version. The primary execution form is `aether file.ae`; there is no
 `aether run` command.
@@ -178,6 +204,7 @@ python3 src/main.py
 - `src/`: active desktop application and editor integration modules.
 - `tests/`: active Aether, CLI, LSP, editor, and desktop tests.
 - `examples/`: `.ae` programs for the active language.
+- `benchmarks/`: small `.ae` programs for the development benchmark harness.
 - `docs/aether/`: current language specification.
 - `legacy/`: quarantined MathTeX Studio implementation, tests, examples, and
   historical documentation.
