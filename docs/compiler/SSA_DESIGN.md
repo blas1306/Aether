@@ -7,8 +7,9 @@ Static Single Assignment (SSA) form, how that form relates to the current IR,
 and what compiler analyses are needed first.
 
 It does not implement SSA. Dominator analysis now exists in
-`aether.analysis.dominators`; dominance frontiers, phi insertion, SSA renaming,
-and new optimizer passes remain pending.
+`aether.analysis.dominators`, and dominance frontier computation exists in
+`aether.analysis.dominance_frontier`; phi insertion, SSA renaming, and new
+optimizer passes remain pending.
 
 ## What SSA Is
 
@@ -310,6 +311,10 @@ Phi insertion uses dominance frontiers. If a slot is assigned in block `A`, phi
 nodes for that slot may be needed in blocks in `A`'s dominance frontier. The
 algorithm repeats until all required merge points are covered.
 
+Aether already has this analysis as a prerequisite for SSA construction. The
+current frontier result is a control-flow fact only; it does not insert phi
+nodes or rename variables.
+
 ## Optimizations Enabled By SSA
 
 ### Global Constant Propagation
@@ -399,10 +404,6 @@ form for building one.
 
 This document intentionally does not add:
 
-- dominator computation
-- immediate dominator computation
-- dominator tree construction
-- dominance frontier computation
 - phi placement
 - SSA renaming
 - SSA verification
@@ -417,6 +418,6 @@ This document intentionally does not add:
 - changes to the current IR backend
 - changes to tests or benchmarks
 
-The next practical compiler step is to implement and test dominator analysis
-over the existing CFG infrastructure. SSA conversion should come after that
-foundation is stable.
+The next practical compiler step is to build phi placement on top of the
+existing CFG, dominator, and dominance-frontier analyses. SSA conversion should
+come after that foundation is stable.

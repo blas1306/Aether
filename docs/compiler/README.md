@@ -17,11 +17,12 @@ about compiler machinery.
 
 IR analysis helpers live under `aether.analysis`; the current CFG builder and
 DOT printer are exposed by `aether.analysis.cfg`, and dominator analysis is
-exposed by `aether.analysis.dominators`.
+exposed by `aether.analysis.dominators`. Dominance frontier analysis is exposed
+by `aether.analysis.dominance_frontier`.
 
 Current compiler-design documents:
 
 - [DOMINATORS.md](DOMINATORS.md): implemented iterative dominator analysis,
-  pending dominance frontiers, and their role in future SSA construction.
+  implemented dominance frontiers, and their role in future SSA construction.
 - [SSA_DESIGN.md](SSA_DESIGN.md): initial design notes for future SSA support
   in the Aether IR.

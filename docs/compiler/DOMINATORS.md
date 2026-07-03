@@ -7,14 +7,16 @@ concepts, notation, examples, and first algorithmic direction needed before
 implementing SSA construction.
 
 Aether currently implements the classic iterative dominator analysis in
-`aether.analysis.dominators`. The implementation computes:
+`aether.analysis.dominators` and dominance frontier computation in
+`aether.analysis.dominance_frontier`. The implementation computes:
 
 - dominator sets
 - immediate dominators
 - dominator tree children
+- dominance frontiers
 
-It does not implement dominance frontiers, SSA conversion, phi placement, or
-new optimizations.
+It does not implement SSA conversion, phi placement, variable renaming, or new
+optimizations.
 
 ## What A Dominator Is
 
@@ -229,8 +231,6 @@ result.dominator_tree_children("cond0")
 
 ## Dominance Frontier
 
-Dominance frontier is still pending.
-
 The dominance frontier of a block `A` contains blocks where values defined
 under `A` may meet values defined through other paths.
 
@@ -268,6 +268,38 @@ merge:
 Dominance frontier does not by itself create phi nodes. It tells the SSA
 construction algorithm where phi nodes may be required for variables assigned
 in multiple control-flow regions.
+
+Aether computes dominance frontiers with the standard immediate-dominator walk
+over join blocks:
+
+```text
+for each block B with two or more predecessors:
+    for each predecessor P of B:
+        runner = P
+        while runner != idom(B):
+            DF(runner).add(B)
+            runner = idom(runner)
+```
+
+Implementation notes:
+
+- The analysis runs per function over a `CFG` and an already computed
+  `DominatorResult`.
+- Only reachable join blocks and reachable predecessors participate in the
+  walk.
+- The entry block and unreachable blocks have no immediate dominator, so they
+  do not start a frontier walk as join targets.
+- Unreachable blocks keep an empty frontier in the result.
+- `frontier(block_name)` returns a mutable `set[str]` copy for callers.
+
+API:
+
+```python
+dom_result = DominatorAnalysis(cfg).compute()
+df_result = DominanceFrontierAnalysis(cfg, dom_result).compute()
+
+df_result.frontier("body0")
+```
 
 ## Relationship With SSA
 
