@@ -6,8 +6,9 @@ This document is an initial design note. It describes why Aether should grow a
 Static Single Assignment (SSA) form, how that form relates to the current IR,
 and what compiler analyses are needed first.
 
-It does not implement SSA. It does not implement dominators, dominance
-frontiers, phi insertion, SSA renaming, or new optimizer passes.
+It does not implement SSA. Dominator analysis now exists in
+`aether.analysis.dominators`; dominance frontiers, phi insertion, SSA renaming,
+and new optimizer passes remain pending.
 
 ## What SSA Is
 

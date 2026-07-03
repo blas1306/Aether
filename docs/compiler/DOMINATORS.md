@@ -2,12 +2,19 @@
 
 ## Status
 
-This document is an initial design note for dominator analysis in the Aether
-compiler. It describes the concepts, notation, examples, and first algorithmic
-direction needed before implementing SSA construction.
+This document describes dominator analysis in the Aether compiler: the
+concepts, notation, examples, and first algorithmic direction needed before
+implementing SSA construction.
 
-It does not implement dominators, dominance frontiers, SSA conversion, phi
-placement, or new optimizations.
+Aether currently implements the classic iterative dominator analysis in
+`aether.analysis.dominators`. The implementation computes:
+
+- dominator sets
+- immediate dominators
+- dominator tree children
+
+It does not implement dominance frontiers, SSA conversion, phi placement, or
+new optimizations.
 
 ## What A Dominator Is
 
@@ -175,11 +182,10 @@ SSA renaming commonly walks the dominator tree. That traversal lets the
 compiler maintain the current SSA name for each variable while entering and
 leaving dominated regions.
 
-## Initially Chosen Algorithm
+## Implemented Algorithm
 
-Aether should initially use the classic iterative dominator algorithm. It is
-simple, easy to test, and appropriate for Aether v0's current IR size and
-compiler maturity.
+Aether uses the classic iterative dominator algorithm. It is simple, easy to
+test, and appropriate for Aether v0's current IR size and compiler maturity.
 
 Initialization:
 
@@ -197,20 +203,33 @@ dom(B) = {B} union intersection(dom(P) for each predecessor P of B)
 Repeat the iteration for all non-entry blocks until no `dom(B)` set changes.
 That fixed point is the dominator solution.
 
-Aether should not start with Lengauer-Tarjan. Lengauer-Tarjan is faster on very
+Aether does not start with Lengauer-Tarjan. Lengauer-Tarjan is faster on very
 large graphs, but it is more complex to implement and validate. The iterative
 algorithm is enough for Aether v0 and gives the compiler a clear baseline
 before optimizing the analysis itself.
 
-Important implementation notes for the future:
+Implementation notes:
 
-- Run the analysis per function.
+- The analysis runs per function over a `CFG`.
 - Use the existing CFG as the source of predecessors and blocks.
-- Treat unreachable blocks deliberately; either exclude them from the reachable
-  CFG view or define their behavior explicitly in the analysis.
-- Keep the result deterministic for stable tests and debug output.
+- The first CFG node is treated as the entry block.
+- Blocks unreachable from the entry block are represented as isolated roots:
+  `dom(B) = {B}`, `idom(B) = None`, and they have no dominator-tree parent.
+- The result is deterministic for stable tests and debug output.
+
+API:
+
+```python
+result = DominatorAnalysis(cfg).compute()
+
+result.dominators("entry")
+result.immediate_dominator("body0")
+result.dominator_tree_children("cond0")
+```
 
 ## Dominance Frontier
+
+Dominance frontier is still pending.
 
 The dominance frontier of a block `A` contains blocks where values defined
 under `A` may meet values defined through other paths.

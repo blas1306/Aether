@@ -16,11 +16,12 @@ In short, `docs/aether/` is about the language contract. `docs/compiler/` is
 about compiler machinery.
 
 IR analysis helpers live under `aether.analysis`; the current CFG builder and
-DOT printer are exposed by `aether.analysis.cfg`.
+DOT printer are exposed by `aether.analysis.cfg`, and dominator analysis is
+exposed by `aether.analysis.dominators`.
 
 Current compiler-design documents:
 
-- [DOMINATORS.md](DOMINATORS.md): initial design notes for dominator analysis,
-  dominance frontiers, and their role in future SSA construction.
+- [DOMINATORS.md](DOMINATORS.md): implemented iterative dominator analysis,
+  pending dominance frontiers, and their role in future SSA construction.
 - [SSA_DESIGN.md](SSA_DESIGN.md): initial design notes for future SSA support
   in the Aether IR.

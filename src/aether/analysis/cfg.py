@@ -3,8 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import re
+from typing import TYPE_CHECKING
 
-from aether.ir.model import IRBranch, IRFunction, IRJump, IRReturn
+if TYPE_CHECKING:
+    from aether.ir.model import IRFunction
 
 
 _DOT_SIMPLE_ID = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
@@ -40,12 +42,13 @@ class CFGBuilder:
                 continue
 
             terminator = block.instructions[-1]
-            if isinstance(terminator, IRJump):
+            terminator_name = type(terminator).__name__
+            if terminator_name == "IRJump":
                 edges.append(CFGEdge(block.name, terminator.target))
-            elif isinstance(terminator, IRBranch):
+            elif terminator_name == "IRBranch":
                 edges.append(CFGEdge(block.name, terminator.true_target))
                 edges.append(CFGEdge(block.name, terminator.false_target))
-            elif isinstance(terminator, IRReturn):
+            elif terminator_name == "IRReturn":
                 continue
 
         return CFG(function.name, nodes, tuple(edges))
