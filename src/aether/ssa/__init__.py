@@ -17,6 +17,7 @@ from .model import (
     SSAValue,
 )
 from .printer import SSAPrinter, print_ssa
+from .verifier import SSAVerificationError, SSAVerifier
 
 __all__ = [
     "SSABasicBlock",
@@ -34,5 +35,7 @@ __all__ = [
     "SSAPrinter",
     "SSAReturn",
     "SSAValue",
+    "SSAVerificationError",
+    "SSAVerifier",
     "print_ssa",
 ]

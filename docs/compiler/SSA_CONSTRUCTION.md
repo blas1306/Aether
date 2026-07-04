@@ -10,11 +10,13 @@ Initial SSA infrastructure now exists under `src/aether/ssa/`:
 
 - `model.py` defines the value-based SSA model.
 - `printer.py` defines deterministic textual SSA output.
+- `verifier.py` defines a minimum structural and type verifier for manually
+  built SSA modules.
 - `__init__.py` exposes the public SSA model and printer API.
 
-SSA builder and verifier code do not exist yet. The current compiler still
-lowers to slot IR, verifies slot IR, interprets slot IR, and runs the existing
-local optimizer pipeline over slot IR.
+SSA builder code does not exist yet. The current compiler still lowers to slot
+IR, verifies slot IR, interprets slot IR, and runs the existing local optimizer
+pipeline over slot IR.
 
 ## Current IR State
 
@@ -289,20 +291,34 @@ dominated blocks and are removed when the traversal leaves their valid region.
 
 ## SSA Verification
 
-The SSA verifier should reject malformed SSA before any SSA optimizer runs.
+The initial SSA verifier is implemented as `aether.ssa.SSAVerifier`. It rejects
+malformed hand-built SSA modules before any automatic builder or SSA optimizer
+exists.
 
-It should verify:
+It currently verifies:
 
 - Each `SSAValue` has exactly one definition.
 - Function parameters count as definitions.
+- Function names, parameter names, and block names are unique in their scopes.
+- Each function has at least one block and an `entry` block.
+- Each block ends in `SSABranch`, `SSAJump`, or `SSAReturn`.
+- Branch and jump targets exist.
 - Each phi appears at the start of its block before ordinary instructions.
-- Each phi has exactly one incoming edge value per reachable predecessor.
 - Each phi incoming predecessor names a real predecessor of the phi block.
-- Each incoming phi value is defined along the corresponding predecessor edge.
-- Each non-phi use is dominated by its definition.
+- Phi incoming block names exist and are not duplicated.
+- Each phi has at least one incoming value.
+- Each used value is defined somewhere in the function.
 - Each phi result type matches all incoming value types.
 - Each ordinary instruction result type matches its operands and opcode rules.
 - Terminator operands are defined and have the expected types.
+- Calls target existing SSA functions and match callee arity, argument types,
+  and return type.
+
+Future verifier work should add deeper builder-facing invariants:
+
+- Each phi has exactly one incoming edge value per reachable predecessor.
+- Each incoming phi value is defined along the corresponding predecessor edge.
+- Each non-phi use is dominated by its definition.
 - No `IRLoad` or `IRStore` remains for slots promoted into SSA.
 
 The verifier should report block names, value names, and instruction context in
@@ -317,6 +333,7 @@ src/aether/ssa/
     __init__.py
     model.py
     printer.py
+    verifier.py
 ```
 
 Current responsibilities:
@@ -324,12 +341,13 @@ Current responsibilities:
 - `model.py`: dataclasses or immutable model objects for SSA modules,
   functions, blocks, values, instructions, and phi nodes.
 - `printer.py`: deterministic textual SSA output for tests and debugging.
+- `verifier.py`: minimum structural, use-definition, phi, call, and type checks
+  for manually built SSA.
 
 Future files:
 
 - `builder.py`: conversion from verified slot IR plus CFG, dominators, and
   dominance frontiers into SSA.
-- `verifier.py`: structural, dominance, phi, and type checks for SSA.
 
 The builder should consume existing analysis results instead of recomputing CFG
 or dominators internally. That keeps the construction step testable and makes
@@ -351,15 +369,14 @@ built on top of SSA:
   loop information.
 
 These should not be introduced in early SSA work. After this initial
-model/printer milestone, the next construction milestone is correct automatic
-SSA form plus a verifier.
+model/printer/verifier infrastructure, the next construction milestone is
+correct automatic SSA form from slot IR.
 
 ## Not Implemented Yet
 
 This initial SSA infrastructure milestone does not include:
 
 - automatic SSA builder
-- SSA verifier
 - changes to the current IR lowering semantics
 - changes to the current IR verifier
 - changes to the current IR interpreter

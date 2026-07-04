@@ -1,0 +1,661 @@
+from __future__ import annotations
+
+import re
+
+import pytest
+
+from aether.ir import BoolType, IntType, StringType, VoidType
+from aether.ssa import (
+    SSABasicBlock,
+    SSABinaryOp,
+    SSABranch,
+    SSACall,
+    SSACompareOp,
+    SSAConst,
+    SSAFunction,
+    SSAJump,
+    SSAModule,
+    SSAParameter,
+    SSAPhi,
+    SSAReturn,
+    SSAValue,
+    SSAVerificationError,
+    SSAVerifier,
+)
+
+
+def _assert_verification_error(module: SSAModule, message: str) -> None:
+    with pytest.raises(SSAVerificationError, match=re.escape(message)):
+        SSAVerifier(module).verify()
+
+
+def test_verifies_linear_function() -> None:
+    int_type = IntType()
+    left = SSAParameter("left", int_type)
+    right = SSAParameter("right", int_type)
+    result = SSAValue("0", int_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "add",
+                [left, right],
+                int_type,
+                [SSABasicBlock("entry", [SSABinaryOp(result, "add", left, right), SSAReturn(result)])],
+            )
+        ]
+    )
+
+    assert SSAVerifier(module).verify() is module
+
+
+def test_verifies_if_else_with_phi() -> None:
+    int_type = IntType()
+    bool_type = BoolType()
+    parameter = SSAParameter("x", int_type)
+    zero = SSAValue("0", int_type)
+    condition = SSAValue("1", bool_type)
+    then_value = SSAValue("2", int_type)
+    else_value = SSAValue("3", int_type)
+    merged = SSAValue("4", int_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "choose",
+                [parameter],
+                int_type,
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(zero, 0),
+                            SSACompareOp(condition, "gt", parameter, zero),
+                            SSABranch(condition, "then0", "else0"),
+                        ],
+                    ),
+                    SSABasicBlock("then0", [SSAConst(then_value, 1), SSAJump("merge0")]),
+                    SSABasicBlock("else0", [SSAConst(else_value, 2), SSAJump("merge0")]),
+                    SSABasicBlock(
+                        "merge0",
+                        [
+                            SSAPhi(merged, (("then0", then_value), ("else0", else_value))),
+                            SSAReturn(merged),
+                        ],
+                    ),
+                ],
+            )
+        ]
+    )
+
+    assert SSAVerifier(module).verify() is module
+
+
+def test_verifies_while_with_phi() -> None:
+    int_type = IntType()
+    bool_type = BoolType()
+    initial_i = SSAValue("0", int_type)
+    loop_i = SSAValue("1", int_type)
+    limit = SSAValue("2", int_type)
+    condition = SSAValue("3", bool_type)
+    one = SSAValue("4", int_type)
+    next_i = SSAValue("5", int_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "count",
+                [],
+                int_type,
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(initial_i, 0),
+                            SSAConst(limit, 3),
+                            SSAJump("loop0"),
+                        ],
+                    ),
+                    SSABasicBlock(
+                        "loop0",
+                        [
+                            SSAPhi(loop_i, (("entry", initial_i), ("body0", next_i))),
+                            SSACompareOp(condition, "lt", loop_i, limit),
+                            SSABranch(condition, "body0", "exit0"),
+                        ],
+                    ),
+                    SSABasicBlock(
+                        "body0",
+                        [
+                            SSAConst(one, 1),
+                            SSABinaryOp(next_i, "add", loop_i, one),
+                            SSAJump("loop0"),
+                        ],
+                    ),
+                    SSABasicBlock("exit0", [SSAReturn(loop_i)]),
+                ],
+            )
+        ]
+    )
+
+    assert SSAVerifier(module).verify() is module
+
+
+def test_verifies_call_between_functions() -> None:
+    int_type = IntType()
+    value = SSAParameter("value", int_type)
+    one = SSAValue("0", int_type)
+    incremented = SSAValue("1", int_type)
+    argument = SSAValue("2", int_type)
+    call_result = SSAValue("3", int_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "increment",
+                [value],
+                int_type,
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(one, 1),
+                            SSABinaryOp(incremented, "add", value, one),
+                            SSAReturn(incremented),
+                        ],
+                    )
+                ],
+            ),
+            SSAFunction(
+                "main",
+                [],
+                int_type,
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(argument, 41),
+                            SSACall("increment", (argument,), call_result),
+                            SSAReturn(call_result),
+                        ],
+                    )
+                ],
+            ),
+        ]
+    )
+
+    assert SSAVerifier(module).verify() is module
+
+
+def test_verifies_void_function() -> None:
+    module = SSAModule(
+        [
+            SSAFunction(
+                "nothing",
+                [],
+                VoidType(),
+                [SSABasicBlock("entry", [SSAReturn()])],
+            )
+        ]
+    )
+
+    assert SSAVerifier(module).verify() is module
+
+
+def test_duplicate_function_error() -> None:
+    module = SSAModule(
+        [
+            SSAFunction("main", [], VoidType(), [SSABasicBlock("entry", [SSAReturn()])]),
+            SSAFunction("main", [], VoidType(), [SSABasicBlock("entry", [SSAReturn()])]),
+        ]
+    )
+
+    _assert_verification_error(module, "Duplicate function 'main'")
+
+
+def test_missing_entry_error() -> None:
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [],
+                VoidType(),
+                [SSABasicBlock("body", [SSAReturn()])],
+            )
+        ]
+    )
+
+    _assert_verification_error(module, "Function 'main' has no entry block")
+
+
+def test_duplicate_block_error() -> None:
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [],
+                VoidType(),
+                [
+                    SSABasicBlock("entry", [SSAReturn()]),
+                    SSABasicBlock("entry", [SSAReturn()]),
+                ],
+            )
+        ]
+    )
+
+    _assert_verification_error(module, "Duplicate block 'entry' in function 'main'")
+
+
+def test_duplicate_parameter_error() -> None:
+    int_type = IntType()
+    parameter = SSAParameter("value", int_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "identity",
+                [parameter, SSAParameter("value", int_type)],
+                int_type,
+                [SSABasicBlock("entry", [SSAReturn(parameter)])],
+            )
+        ]
+    )
+
+    _assert_verification_error(
+        module,
+        "Duplicate parameter 'value' in function 'identity'",
+    )
+
+
+def test_unknown_target_error() -> None:
+    condition = SSAValue("0", BoolType())
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [],
+                VoidType(),
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(condition, True),
+                            SSABranch(condition, "then0", "missing"),
+                        ],
+                    ),
+                    SSABasicBlock("then0", [SSAReturn()]),
+                ],
+            )
+        ]
+    )
+
+    _assert_verification_error(module, "Unknown branch target 'missing' in function 'main'")
+
+
+def test_instruction_after_terminator_error() -> None:
+    value = SSAValue("0", IntType())
+    module = SSAModule(
+        [
+            SSAFunction(
+                "broken",
+                [],
+                VoidType(),
+                [SSABasicBlock("entry", [SSAReturn(), SSAConst(value, 1)])],
+            )
+        ]
+    )
+
+    _assert_verification_error(module, "Instruction after terminator in block 'entry'")
+
+
+def test_duplicate_value_error() -> None:
+    value = SSAValue("0", IntType())
+    module = SSAModule(
+        [
+            SSAFunction(
+                "broken",
+                [],
+                IntType(),
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(value, 1),
+                            SSAConst(value, 2),
+                            SSAReturn(value),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+
+    _assert_verification_error(module, "Duplicate value '%0' in function 'broken'")
+
+
+def test_undefined_value_error() -> None:
+    missing = SSAValue("missing", IntType())
+    module = SSAModule(
+        [
+            SSAFunction(
+                "broken",
+                [],
+                IntType(),
+                [SSABasicBlock("entry", [SSAReturn(missing)])],
+            )
+        ]
+    )
+
+    _assert_verification_error(module, "Undefined value '%missing'")
+
+
+def test_return_type_mismatch_error() -> None:
+    value = SSAValue("0", IntType())
+    module = SSAModule(
+        [
+            SSAFunction(
+                "broken",
+                [],
+                BoolType(),
+                [SSABasicBlock("entry", [SSAConst(value, 1), SSAReturn(value)])],
+            )
+        ]
+    )
+
+    _assert_verification_error(module, "Return type mismatch: expected bool, got int")
+
+
+def test_branch_condition_must_be_bool_error() -> None:
+    condition = SSAValue("0", IntType())
+    module = SSAModule(
+        [
+            SSAFunction(
+                "broken",
+                [],
+                VoidType(),
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(condition, 1),
+                            SSABranch(condition, "then0", "else0"),
+                        ],
+                    ),
+                    SSABasicBlock("then0", [SSAReturn()]),
+                    SSABasicBlock("else0", [SSAReturn()]),
+                ],
+            )
+        ]
+    )
+
+    _assert_verification_error(module, "Branch condition must be bool")
+
+
+def test_phi_incoming_block_must_exist_error() -> None:
+    int_type = IntType()
+    value = SSAValue("0", int_type)
+    merged = SSAValue("1", int_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "broken",
+                [],
+                int_type,
+                [
+                    SSABasicBlock("entry", [SSAConst(value, 1), SSAJump("merge0")]),
+                    SSABasicBlock(
+                        "merge0",
+                        [SSAPhi(merged, (("missing", value),)), SSAReturn(merged)],
+                    ),
+                ],
+            )
+        ]
+    )
+
+    _assert_verification_error(
+        module,
+        "Phi incoming block 'missing' does not exist in function block 'merge0'",
+    )
+
+
+def test_phi_incoming_block_must_be_predecessor_error() -> None:
+    int_type = IntType()
+    value = SSAValue("0", int_type)
+    merged = SSAValue("1", int_type)
+    other_value = SSAValue("2", int_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "broken",
+                [],
+                int_type,
+                [
+                    SSABasicBlock("entry", [SSAConst(value, 1), SSAJump("merge0")]),
+                    SSABasicBlock("other0", [SSAConst(other_value, 2), SSAReturn(other_value)]),
+                    SSABasicBlock(
+                        "merge0",
+                        [SSAPhi(merged, (("other0", other_value),)), SSAReturn(merged)],
+                    ),
+                ],
+            )
+        ]
+    )
+
+    _assert_verification_error(
+        module,
+        "Phi incoming block 'other0' is not a predecessor of block 'merge0'",
+    )
+
+
+def test_phi_type_mismatch_error() -> None:
+    int_value = SSAValue("0", IntType())
+    string_value = SSAValue("1", StringType())
+    merged = SSAValue("2", IntType())
+    module = SSAModule(
+        [
+            SSAFunction(
+                "broken",
+                [],
+                IntType(),
+                [
+                    SSABasicBlock("entry", [SSAConst(int_value, 1), SSAJump("left0")]),
+                    SSABasicBlock("left0", [SSAJump("merge0")]),
+                    SSABasicBlock("right0", [SSAConst(string_value, "x"), SSAJump("merge0")]),
+                    SSABasicBlock(
+                        "merge0",
+                        [
+                            SSAPhi(
+                                merged,
+                                (("left0", int_value), ("right0", string_value)),
+                            ),
+                            SSAReturn(merged),
+                        ],
+                    ),
+                ],
+            )
+        ]
+    )
+
+    _assert_verification_error(module, "Phi '%2' type mismatch: expected int, got string")
+
+
+def test_phi_duplicate_incoming_block_error() -> None:
+    int_type = IntType()
+    value = SSAValue("0", int_type)
+    merged = SSAValue("1", int_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "broken",
+                [],
+                int_type,
+                [
+                    SSABasicBlock("entry", [SSAConst(value, 1), SSAJump("merge0")]),
+                    SSABasicBlock(
+                        "merge0",
+                        [
+                            SSAPhi(merged, (("entry", value), ("entry", value))),
+                            SSAReturn(merged),
+                        ],
+                    ),
+                ],
+            )
+        ]
+    )
+
+    _assert_verification_error(
+        module,
+        "Duplicate incoming block 'entry' for phi '%1'",
+    )
+
+
+def test_phi_requires_incoming_values_error() -> None:
+    merged = SSAValue("0", IntType())
+    module = SSAModule(
+        [
+            SSAFunction(
+                "broken",
+                [],
+                IntType(),
+                [SSABasicBlock("entry", [SSAPhi(merged, ()), SSAReturn(merged)])],
+            )
+        ]
+    )
+
+    _assert_verification_error(module, "Phi '%0' has no incoming values")
+
+
+def test_phi_after_non_phi_error() -> None:
+    int_type = IntType()
+    value = SSAValue("0", int_type)
+    merged = SSAValue("1", int_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "broken",
+                [],
+                int_type,
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(value, 1),
+                            SSAPhi(merged, (("entry", value),)),
+                            SSAReturn(merged),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+
+    _assert_verification_error(
+        module,
+        "Phi instruction after non-phi instruction in block 'entry'",
+    )
+
+
+def test_call_to_missing_function_error() -> None:
+    result = SSAValue("0", IntType())
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [],
+                IntType(),
+                [SSABasicBlock("entry", [SSACall("missing", (), result), SSAReturn(result)])],
+            )
+        ]
+    )
+
+    _assert_verification_error(module, "Call to undefined function 'missing'")
+
+
+def test_call_wrong_arity_error() -> None:
+    int_type = IntType()
+    parameter = SSAParameter("value", int_type)
+    result = SSAValue("0", int_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "identity",
+                [parameter],
+                int_type,
+                [SSABasicBlock("entry", [SSAReturn(parameter)])],
+            ),
+            SSAFunction(
+                "main",
+                [],
+                int_type,
+                [SSABasicBlock("entry", [SSACall("identity", (), result), SSAReturn(result)])],
+            ),
+        ]
+    )
+
+    _assert_verification_error(module, "Function 'identity' expects 1 arguments, got 0")
+
+
+def test_call_result_type_mismatch_error() -> None:
+    int_type = IntType()
+    parameter = SSAParameter("value", int_type)
+    argument = SSAValue("0", int_type)
+    result = SSAValue("1", BoolType())
+    module = SSAModule(
+        [
+            SSAFunction(
+                "identity",
+                [parameter],
+                int_type,
+                [SSABasicBlock("entry", [SSAReturn(parameter)])],
+            ),
+            SSAFunction(
+                "main",
+                [],
+                BoolType(),
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(argument, 1),
+                            SSACall("identity", (argument,), result),
+                            SSAReturn(result),
+                        ],
+                    )
+                ],
+            ),
+        ]
+    )
+
+    _assert_verification_error(module, "Call result type mismatch: expected int, got bool")
+
+
+def test_call_argument_type_mismatch_error() -> None:
+    int_type = IntType()
+    parameter = SSAParameter("value", int_type)
+    argument = SSAValue("0", BoolType())
+    result = SSAValue("1", int_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "identity",
+                [parameter],
+                int_type,
+                [SSABasicBlock("entry", [SSAReturn(parameter)])],
+            ),
+            SSAFunction(
+                "main",
+                [],
+                int_type,
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(argument, True),
+                            SSACall("identity", (argument,), result),
+                            SSAReturn(result),
+                        ],
+                    )
+                ],
+            ),
+        ]
+    )
+
+    _assert_verification_error(
+        module,
+        "Argument 1 to function 'identity' type mismatch: expected int, got bool",
+    )
