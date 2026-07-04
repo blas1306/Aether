@@ -73,6 +73,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Lower the file through verified IR and print verified SSA.",
     )
     parser.add_argument(
+        "--ssa-builder",
+        choices=("pattern", "general"),
+        default=None,
+        help=(
+            "SSA builder for --emit-ssa: pattern (default) or general "
+            "(experimental)."
+        ),
+    )
+    parser.add_argument(
         "--opt",
         action="store_true",
         help="Optimize emitted IR. Currently only supported with --emit-ir.",
@@ -161,6 +170,12 @@ def main(
     if args.opt and not args.emit_ir:
         print("aether: error: --opt is currently only supported with --emit-ir.", file=stderr)
         return EXIT_USAGE_ERROR
+    if args.ssa_builder is not None and not args.emit_ssa:
+        print(
+            "aether: error: --ssa-builder is only supported with --emit-ssa.",
+            file=stderr,
+        )
+        return EXIT_USAGE_ERROR
     if args.emit_ssa and args.show_passes:
         print(
             "aether: error: --emit-ssa cannot be combined with --show-passes.",
@@ -226,7 +241,12 @@ def main(
         )
     if args.emit_ssa:
         return _run_language_action(
-            lambda: _emit_ssa(source, path=path, stdout=stdout),
+            lambda: _emit_ssa(
+                source,
+                path=path,
+                stdout=stdout,
+                builder=args.ssa_builder or "pattern",
+            ),
             stderr=stderr,
         )
     return _run_language_action(
@@ -394,18 +414,29 @@ def _emit_cfg(source: str, *, path: Path, stdout: TextIO) -> None:
     )
 
 
-def _emit_ssa(source: str, *, path: Path, stdout: TextIO) -> None:
+def _emit_ssa(
+    source: str,
+    *,
+    path: Path,
+    stdout: TextIO,
+    builder: str = "pattern",
+) -> None:
     from .errors import AetherRuntimeError
-    from .ssa import SSABuildError
+    from .ssa import GeneralSSABuildError, SSABuildError
 
     typed_program = prepare_typed_program(
         source,
         TypeChecker(source_root=path.parent),
     )
     try:
-        module = lower_to_verified_ssa(typed_program)
+        module = lower_to_verified_ssa(typed_program, builder=builder)
     except SSABuildError as exc:
         raise AetherRuntimeError(str(exc), kind="ssa") from exc
+    except GeneralSSABuildError as exc:
+        raise AetherRuntimeError(
+            f"General SSA builder failed: {exc}",
+            kind="ssa",
+        ) from exc
     print(print_ssa(module), file=stdout)
 
 

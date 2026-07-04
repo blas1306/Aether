@@ -26,7 +26,8 @@ Initial SSA infrastructure now exists under `src/aether/ssa/`:
 - `__init__.py` exposes the public SSA model and printer API.
 - `aether.pipeline.lower_to_verified_ssa` and `SSAPipeline` provide an
   internal compiler pipeline from `TypedProgram` or verified `IRModule` to a
-  verified `SSAModule`.
+  verified `SSAModule`, with `builder="pattern"` as the default and
+  `builder="general"` available for experimental inspection.
 
 The current SSA builder is still intentionally pattern-based. It converts
 functions with a single `entry` block and no `branch`, `jump`, `if`, `while`,
@@ -43,9 +44,11 @@ The current compiler still lowers to slot IR, verifies slot IR, interprets slot
 IR, and runs the existing local optimizer pipeline over slot IR. SSA is not used
 by the backend yet. It can be inspected from the CLI with
 `aether --emit-ssa program.ae`, which prints the verified SSA module and exits.
-That inspection path still uses the pattern-based builder; standalone
-`PhiPlacement`, `SSARenamer`, and `GeneralSSABuilder` are tested internally but
-are not wired into the effective builder.
+That inspection path still uses the pattern-based builder by default.
+`aether --emit-ssa --ssa-builder=general program.ae` selects the experimental
+`GeneralSSABuilder` for inspection only. `PhiPlacement`, `SSARenamer`, and
+`GeneralSSABuilder` are still not wired into execution, optimization, backend
+selection, or the effective default builder.
 
 ## Implemented Phase 1
 
@@ -99,7 +102,8 @@ Current limitations of the effective pattern-based builder:
 
 General phi placement and dominator-tree variable renaming now exist as
 experimental infrastructure and are wired together by `GeneralSSABuilder`.
-They are not used by the effective builder or `--emit-ssa`.
+They are not used by the effective pattern-based builder or by default
+`--emit-ssa`; they are used only when `--ssa-builder=general` is selected.
 
 Current supported subset:
 
@@ -110,7 +114,7 @@ Current supported subset:
   `body -> cond`, and `exit` returning
 
 Everything else remains unsupported by the effective builder until the
-experimental general builder is promoted into the SSA pipeline. The general
+experimental general builder is promoted to the default SSA pipeline. The general
 builder already derives phi placement from dominance frontiers and performs
 variable renaming with a dominator-tree DFS instead of matching these local
 shapes directly.
@@ -464,10 +468,14 @@ SSAModule
 This path is available through `aether.pipeline.lower_to_verified_ssa` and
 `aether.pipeline.SSAPipeline`. It accepts either a checked `TypedProgram`, in
 which case it lowers and verifies slot IR first, or an `IRModule`, in which case
-it verifies the IR before building SSA. The CLI inspection mode
-`aether --emit-ssa program.ae` uses this same pipeline and then prints the exact
-output of `aether.ssa.print_ssa`. It does not change IR backend execution, AST
-backend execution, language semantics, or optimizer behavior.
+it verifies the IR before building SSA. The helper defaults to
+`builder="pattern"` and also accepts `builder="general"` for the experimental
+construction path. The CLI inspection mode `aether --emit-ssa program.ae` uses
+the same pipeline with the pattern builder by default. The command
+`aether --emit-ssa --ssa-builder=general program.ae` selects the general
+builder. Both modes then print the exact output of `aether.ssa.print_ssa`. They
+do not change IR backend execution, AST backend execution, language semantics,
+or optimizer behavior.
 
 The full intended future pipeline is:
 
@@ -576,8 +584,10 @@ with the current pattern-based builder for linear, simple `if`/`else`, and
 simple `while` cases.
 
 This renamer is wired into the experimental `GeneralSSABuilder`. It is not
-wired into the effective `SSABuilder`, `SSAPipeline`, `--emit-ssa`, IR
-lowering, optimizers, execution, or the CLI.
+wired into the effective `SSABuilder`, default `SSAPipeline`, default
+`--emit-ssa`, IR lowering, optimizers, or execution. It is reachable from
+`SSAPipeline` and the CLI only through the explicit experimental `general`
+builder selector.
 
 The builder should maintain one stack per promoted slot:
 
@@ -672,8 +682,16 @@ failures in `GeneralSSABuildError` while preserving the original message and
 exception cause.
 
 This is still experimental infrastructure. It does not replace the
-pattern-based `SSABuilder`, does not change `--emit-ssa`, and does not alter IR
-lowering, optimization, execution, or CLI semantics.
+pattern-based `SSABuilder`, does not change default `--emit-ssa` output, and
+does not alter IR lowering, optimization, execution, or backend semantics.
+The CLI selector is available for inspection:
+
+```bash
+aether --emit-ssa --ssa-builder=pattern program.ae
+aether --emit-ssa --ssa-builder=general program.ae
+```
+
+`pattern` remains the default when no selector is provided.
 
 ## SSA Verification
 
@@ -747,9 +765,11 @@ Current responsibilities:
   tree. It consumes `slot -> blocks`, emits an `SSAFunction`, rewrites
   promotable slot loads/stores, and completes phi incoming values.
 - `aether.pipeline.SSAPipeline`: internal `TypedProgram`/`IRModule` to verified
-  `SSAModule` preparation.
+  `SSAModule` preparation. It defaults to `builder="pattern"` and exposes
+  `builder="general"` for experimental inspection.
 - `aether --emit-ssa`: CLI inspection mode that uses the verified SSA pipeline
-  and textual SSA printer.
+  and textual SSA printer. It defaults to the pattern builder; use
+  `--ssa-builder=general` to inspect the experimental general builder.
 
 The future effective full builder may consume existing analysis results instead
 of recomputing CFG or dominators internally. That would keep the construction
@@ -779,7 +799,7 @@ correct automatic SSA form from slot IR.
 This initial SSA construction milestone does not include:
 
 - replacement of the effective pattern-based `SSABuilder`
-- `--emit-ssa` integration for `GeneralSSABuilder`
+- making `GeneralSSABuilder` the default SSA builder
 - changes to the current IR lowering semantics
 - changes to the current IR verifier
 - changes to the current IR interpreter

@@ -195,6 +195,32 @@ int add(int left, int right) {
     )
 
 
+def test_lower_to_verified_ssa_accepts_general_builder() -> None:
+    typed_program = prepare_typed_program(
+        """
+int nested(int x, int y) {
+    int z = 0;
+    if x > 0 {
+        if y > 0 {
+            z = 1;
+        } else {
+            z = 2;
+        }
+    } else {
+        z = 3;
+    }
+    return z;
+}
+""",
+        TypeChecker(),
+    )
+
+    ssa_module = lower_to_verified_ssa(typed_program, builder="general")
+
+    assert [function.name for function in ssa_module.functions] == ["nested"]
+    assert "merge1.z.phi" in print_ssa(ssa_module)
+
+
 def test_ssa_pipeline_builds_if_else_phi() -> None:
     typed_program = prepare_typed_program(
         """

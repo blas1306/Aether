@@ -14,8 +14,9 @@ function-local dominator-tree variable renaming from those placements.
 experimental per-module builder and verifies the resulting SSA module.
 
 These phases are still experimental. The pattern-based `SSABuilder` remains the
-effective builder used by the SSA pipeline and `--emit-ssa`; the general
-builder does not replace it yet.
+default builder used by the SSA pipeline and `--emit-ssa`; the general builder
+is available only through an explicit inspection selector and does not replace
+the default yet.
 
 ## Current State
 
@@ -181,8 +182,10 @@ SSARenamer(function, cfg, dominators, phi_placement).rename()
 
 The result is an `SSARenameResult` containing one `SSAFunction` plus the block
 to slot mapping used for emitted phis. This API operates on one function at a
-time and is now used by the experimental `GeneralSSABuilder`. It is still not
-connected to the effective `SSABuilder`, `SSAPipeline`, or `--emit-ssa`.
+time and is now used by the experimental `GeneralSSABuilder`. It is not
+connected to the effective `SSABuilder`; it is reachable from `SSAPipeline` and
+`--emit-ssa` only when the caller explicitly selects the experimental
+`general` builder.
 
 The builder maintains one stack per promoted slot:
 
@@ -235,9 +238,23 @@ function wrapped as a one-function module.
 Failures from the construction phases are reported as `GeneralSSABuildError`
 with the original diagnostic preserved in the message and exception cause.
 
-This builder is deliberately not wired into the effective SSA pipeline. The
-existing pattern-based `SSABuilder` and the `--emit-ssa` CLI path still produce
-the same kind of output as before.
+The CLI exposes this builder for inspection only:
+
+```bash
+aether --emit-ssa --ssa-builder=general program.ae
+```
+
+The default remains:
+
+```bash
+aether --emit-ssa program.ae
+aether --emit-ssa --ssa-builder=pattern program.ae
+```
+
+The existing pattern-based `SSABuilder` and default `--emit-ssa` CLI path still
+produce the same output as before. Selecting `general` does not execute SSA,
+does not enable SSA optimizations, and does not change IR lowering or backend
+semantics.
 
 ## Pseudocode
 

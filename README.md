@@ -120,6 +120,8 @@ aether --emit-ir --opt program.ae
 aether --emit-ir --opt --show-passes program.ae
 aether --emit-cfg program.ae
 aether --emit-ssa program.ae
+aether --emit-ssa --ssa-builder=pattern program.ae
+aether --emit-ssa --ssa-builder=general program.ae
 aether --backend=ir --emit-ir program.ae
 aether --backend=ir --emit-cfg program.ae
 ```
@@ -201,24 +203,29 @@ not add new optimizations.
 ### Static Single Assignment
 
 `--emit-ssa` lowers the checked program through the experimental IR path,
-verifies IR, builds the currently supported SSA subset, verifies SSA, and
+verifies IR, builds the selected SSA form, verifies SSA, and
 prints the exact textual SSA produced by the SSA printer:
 
 ```text
-Lexer -> Parser -> TypeChecker -> IR lowering -> IR verifier -> SSA builder -> SSA verifier
+Lexer -> Parser -> TypeChecker -> IR lowering -> IR verifier -> selected SSA builder -> SSA verifier
 ```
 
 For example:
 
 ```bash
 aether --emit-ssa program.ae
+aether --emit-ssa --ssa-builder=pattern program.ae
+aether --emit-ssa --ssa-builder=general program.ae
 ```
 
 This is an inspection mode for compiler development. SSA is not executed, is
 not optimized, and does not replace the current slot IR or either execution
-backend. The current SSA builder supports linear functions and simple acyclic
-`if`/`else` plus simple lowered `while` loops. Unsupported general CFG shapes
-report a clear SSA builder error.
+backend. The default `--emit-ssa` path uses the pattern-based builder; explicit
+`--ssa-builder=pattern` is equivalent to that default and preserves the current
+output. `--ssa-builder=general` selects the experimental CFG/dominator/
+dominance-frontier builder for inspection only. The pattern-based builder
+supports linear functions and simple acyclic `if`/`else` plus simple lowered
+`while` loops. Unsupported CFG shapes report a clear SSA builder error.
 
 The CLI also includes a minimal benchmark harness for language and backend
 development:

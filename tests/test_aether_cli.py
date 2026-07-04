@@ -3,6 +3,8 @@ from __future__ import annotations
 from io import StringIO
 from pathlib import Path
 
+import pytest
+
 from aether.cli import EXIT_LANGUAGE_ERROR, EXIT_SUCCESS, EXIT_USAGE_ERROR, main
 
 
@@ -380,6 +382,230 @@ int sumTo(int n) {
         "}\n"
     )
     assert stderr == ""
+
+
+def test_emit_ssa_without_selector_uses_pattern_builder(tmp_path: Path) -> None:
+    program = tmp_path / "emit_ssa_default_pattern.ae"
+    program.write_text(
+        """
+int add(int a, int b) {
+    return a + b;
+}
+""",
+        encoding="utf-8",
+    )
+
+    default_result = run_cli(["--emit-ssa", str(program)])
+    explicit_pattern_result = run_cli(
+        ["--emit-ssa", "--ssa-builder=pattern", str(program)]
+    )
+
+    assert default_result == explicit_pattern_result
+    assert default_result[0] == EXIT_SUCCESS
+
+
+@pytest.mark.parametrize(
+    ("name", "source", "expected"),
+    [
+        (
+            "linear",
+            """
+int add(int a, int b) {
+    return a + b;
+}
+""",
+            "func @add(%a: int, %b: int) -> int",
+        ),
+        (
+            "if_else",
+            """
+int f(int x) {
+    int y = 0;
+    if x > 0 {
+        y = 1;
+    } else {
+        y = 2;
+    }
+    return y;
+}
+""",
+            "phi(then0:",
+        ),
+        (
+            "while",
+            """
+int sumTo(int n) {
+    int i = 0;
+    int sum = 0;
+    while i <= n {
+        sum = sum + i;
+        i = i + 1;
+    }
+    return sum;
+}
+""",
+            "phi(entry:",
+        ),
+        (
+            "nested_if",
+            """
+int nested(int x, int y) {
+    int z = 0;
+    if x > 0 {
+        if y > 0 {
+            z = 1;
+        } else {
+            z = 2;
+        }
+    } else {
+        z = 3;
+    }
+    return z;
+}
+""",
+            "merge1.z.phi",
+        ),
+    ],
+)
+def test_emit_ssa_general_builder_supported_shapes(
+    tmp_path: Path,
+    name: str,
+    source: str,
+    expected: str,
+) -> None:
+    program = tmp_path / f"emit_ssa_general_{name}.ae"
+    program.write_text(source, encoding="utf-8")
+
+    exit_code, stdout, stderr = run_cli(
+        ["--emit-ssa", "--ssa-builder=general", str(program)]
+    )
+
+    assert exit_code == EXIT_SUCCESS
+    assert expected in stdout
+    assert "load" not in stdout
+    assert "store" not in stdout
+    assert stderr == ""
+
+
+def test_emit_ssa_pattern_rejects_nested_if_that_general_supports(
+    tmp_path: Path,
+) -> None:
+    program = tmp_path / "emit_ssa_nested_if.ae"
+    program.write_text(
+        """
+int nested(int x, int y) {
+    int z = 0;
+    if x > 0 {
+        if y > 0 {
+            z = 1;
+        } else {
+            z = 2;
+        }
+    } else {
+        z = 3;
+    }
+    return z;
+}
+""",
+        encoding="utf-8",
+    )
+
+    pattern_exit, pattern_stdout, pattern_stderr = run_cli(
+        ["--emit-ssa", "--ssa-builder=pattern", str(program)]
+    )
+    general_exit, general_stdout, general_stderr = run_cli(
+        ["--emit-ssa", "--ssa-builder=general", str(program)]
+    )
+
+    assert pattern_exit == EXIT_LANGUAGE_ERROR
+    assert pattern_stdout == ""
+    assert "SSA builder phase 3 only supports" in pattern_stderr
+    assert "Traceback" not in pattern_stderr
+    assert general_exit == EXIT_SUCCESS
+    assert "merge1.z.phi" in general_stdout
+    assert general_stderr == ""
+
+
+def test_ssa_builder_without_emit_ssa_reports_usage_error(tmp_path: Path) -> None:
+    program = tmp_path / "ssa_builder_without_emit.ae"
+    program.write_text("int main() { return 42; }\n", encoding="utf-8")
+
+    exit_code, stdout, stderr = run_cli(["--ssa-builder=general", str(program)])
+
+    assert exit_code == EXIT_USAGE_ERROR
+    assert stdout == ""
+    assert "--ssa-builder is only supported with --emit-ssa." in stderr
+
+
+def test_invalid_ssa_builder_reports_usage_error(tmp_path: Path) -> None:
+    program = tmp_path / "invalid_ssa_builder.ae"
+    program.write_text("int main() { return 42; }\n", encoding="utf-8")
+
+    exit_code, stdout, stderr = run_cli(
+        ["--emit-ssa", "--ssa-builder=cytron", str(program)]
+    )
+
+    assert exit_code == EXIT_USAGE_ERROR
+    assert stdout == ""
+    assert "invalid choice" in stderr
+    assert "--ssa-builder" in stderr
+
+
+def test_emit_ssa_general_builder_error_reports_without_traceback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from aether.ssa import GeneralSSABuildError
+
+    def fail_general_build(*args, **kwargs):
+        raise GeneralSSABuildError("original construction detail")
+
+    program = tmp_path / "emit_ssa_general_error.ae"
+    program.write_text("int main() { return 42; }\n", encoding="utf-8")
+    monkeypatch.setattr("aether.cli.lower_to_verified_ssa", fail_general_build)
+
+    exit_code, stdout, stderr = run_cli(
+        ["--emit-ssa", "--ssa-builder=general", str(program)]
+    )
+
+    assert exit_code == EXIT_LANGUAGE_ERROR
+    assert stdout == ""
+    assert "General SSA builder failed: original construction detail" in stderr
+    assert "Traceback" not in stderr
+
+
+def test_non_ssa_modes_remain_unchanged_after_adding_ssa_builder_selector(
+    tmp_path: Path,
+) -> None:
+    program = tmp_path / "non_ssa_modes.ae"
+    program.write_text("int main() { return 42; }\n", encoding="utf-8")
+
+    emit_ir_exit, emit_ir_stdout, emit_ir_stderr = run_cli(
+        ["--emit-ir", str(program)]
+    )
+    emit_cfg_exit, emit_cfg_stdout, emit_cfg_stderr = run_cli(
+        ["--emit-cfg", str(program)]
+    )
+    backend_ir_exit, backend_ir_stdout, backend_ir_stderr = run_cli(
+        ["--backend=ir", str(program)]
+    )
+    bench_exit, bench_stdout, bench_stderr = run_cli(
+        ["bench", "benchmarks/sum_to.ae", "--iterations", "1", "--backend", "ast"]
+    )
+
+    assert emit_ir_exit == EXIT_SUCCESS
+    assert "func @main" in emit_ir_stdout
+    assert emit_ir_stderr == ""
+    assert emit_cfg_exit == EXIT_SUCCESS
+    assert "digraph main {" in emit_cfg_stdout
+    assert emit_cfg_stderr == ""
+    assert backend_ir_exit == EXIT_SUCCESS
+    assert backend_ir_stdout == ""
+    assert backend_ir_stderr == ""
+    assert bench_exit == EXIT_SUCCESS
+    assert "Benchmark: benchmarks/sum_to.ae" in bench_stdout
+    assert "AST backend:" in bench_stdout
+    assert bench_stderr == ""
 
 
 def test_emit_ssa_unsupported_program_reports_builder_error_without_traceback(

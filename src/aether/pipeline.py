@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, ClassVar, Protocol
+from typing import TYPE_CHECKING, ClassVar, Literal, Protocol
 
 from . import ast
 from .errors import AetherRuntimeError, IRBackendUnsupportedFeatureError
@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
 
 IR_MAIN_RESULT_NAME = "__ir_main_result"
+SSABuilderName = Literal["pattern", "general"]
 
 
 @dataclass(frozen=True)
@@ -133,13 +134,20 @@ class IRBackend:
 class SSAPipeline:
     """Internal TypedProgram/IRModule to verified SSA pipeline."""
 
+    def __init__(self, *, builder: SSABuilderName = "pattern") -> None:
+        self.builder = builder
+
     def lower_ir(self, typed_program: TypedProgram) -> IRModule:
         return IRBackend().lower_verified(typed_program)
 
     def build(self, module: IRModule) -> SSAModule:
-        from .ssa import SSABuilder
+        from .ssa import GeneralSSABuilder, SSABuilder
 
-        return SSABuilder().build(module)
+        if self.builder == "pattern":
+            return SSABuilder().build(module)
+        if self.builder == "general":
+            return GeneralSSABuilder().build(module)
+        raise ValueError(f"Unknown SSA builder '{self.builder}'.")
 
     def verify(self, module: SSAModule) -> SSAModule:
         from .ssa import SSAVerificationError, SSAVerifier
@@ -184,9 +192,13 @@ def prepare_typed_program(source: str, checker: TypeChecker) -> TypedProgram:
     return TypedProgram(typecheck_program(program, checker), checker)
 
 
-def lower_to_verified_ssa(program: TypedProgram | IRModule) -> SSAModule:
+def lower_to_verified_ssa(
+    program: TypedProgram | IRModule,
+    *,
+    builder: SSABuilderName = "pattern",
+) -> SSAModule:
     """Prepare verified SSA for internal compiler consumers only."""
-    return SSAPipeline().run(program).ssa_module
+    return SSAPipeline(builder=builder).run(program).ssa_module
 
 
 def run_ast_backend(program: ast.Program, interpreter: Interpreter) -> Environment:
