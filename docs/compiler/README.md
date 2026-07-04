@@ -22,9 +22,11 @@ by `aether.analysis.dominance_frontier`.
 
 Initial SSA model, textual printing, verification infrastructure, the phase-1
 linear-function SSA builder, and the phase-2 simple `if`/`else` builder live
-under `aether.ssa`. The internal `aether.pipeline.SSAPipeline` prepares verified
-SSA modules for compiler tests and future consumers. CLI SSA export, SSA
-execution, full CFG construction, and SSA optimizations are not implemented yet.
+under `aether.ssa`, along with phase-3 support for simple `while` loops. The
+internal `aether.pipeline.SSAPipeline` prepares verified SSA modules for
+compiler tests and future consumers. CLI SSA export exists for inspection; SSA
+execution, general CFG-based SSA construction, and SSA optimizations are not
+implemented yet.
 
 Current compiler-design documents:
 
@@ -35,3 +37,6 @@ Current compiler-design documents:
 - [SSA_CONSTRUCTION.md](SSA_CONSTRUCTION.md): implemented linear, simple
   `if`/`else`, and simple `while` SSA builder, internal verified SSA pipeline,
   planned full construction algorithm, and verification rules.
+- [SSA_BUILDER.md](SSA_BUILDER.md): operational migration plan for replacing
+  the current pattern-based SSA builder with a general dominance-frontier-based
+  builder.

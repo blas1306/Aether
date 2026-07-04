@@ -476,6 +476,67 @@ def test_simple_if_else_uses_previous_value_for_unassigned_branch() -> None:
     )
 
 
+def test_merge_store_completes_partially_defined_slot_before_load() -> None:
+    int_type = IntType()
+    bool_type = BoolType()
+    condition = IRParameter("condition", bool_type)
+    slot = IRValue("x", int_type)
+    branch_value = IRValue("0", int_type)
+    merge_value = IRValue("1", int_type)
+    loaded = IRValue("2", int_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "repair",
+                [condition],
+                int_type,
+                [
+                    IRBasicBlock("entry", [IRBranch(condition, "then0", "else0")]),
+                    IRBasicBlock(
+                        "then0",
+                        [
+                            IRConst(branch_value, 1),
+                            IRStore(slot, branch_value),
+                            IRJump("merge0"),
+                        ],
+                    ),
+                    IRBasicBlock("else0", [IRJump("merge0")]),
+                    IRBasicBlock(
+                        "merge0",
+                        [
+                            IRConst(merge_value, 2),
+                            IRStore(slot, merge_value),
+                            IRLoad(loaded, slot),
+                            IRReturn(loaded),
+                        ],
+                    ),
+                ],
+            )
+        ]
+    )
+
+    ssa_module = _build_and_verify(module)
+
+    assert "phi" not in print_ssa(ssa_module)
+    assert print_ssa(ssa_module) == (
+        "func @repair(%condition: bool) -> int {\n"
+        "entry:\n"
+        "    branch %condition, then0, else0\n"
+        "\n"
+        "then0:\n"
+        "    %0: int = const 1\n"
+        "    jump merge0\n"
+        "\n"
+        "else0:\n"
+        "    jump merge0\n"
+        "\n"
+        "merge0:\n"
+        "    %1: int = const 2\n"
+        "    return %1\n"
+        "}"
+    )
+
+
 def test_builds_if_else_with_return_in_both_branches() -> None:
     int_type = IntType()
     bool_type = BoolType()
@@ -824,6 +885,33 @@ def test_rejects_nested_if_pattern() -> None:
                     IRBasicBlock("inner1", [IRJump("merge0")]),
                     IRBasicBlock("else0", [IRJump("merge0")]),
                     IRBasicBlock("merge0", [IRReturn()]),
+                ],
+            )
+        ]
+    )
+
+    _assert_build_error(module, PHASE_3_MESSAGE)
+
+
+def test_rejects_control_flow_before_terminator_in_supported_shape() -> None:
+    bool_type = BoolType()
+    condition = IRParameter("condition", bool_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "bad_terminator",
+                [condition],
+                VoidType(),
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [
+                            IRBranch(condition, "then0", "else0"),
+                            IRBranch(condition, "then0", "else0"),
+                        ],
+                    ),
+                    IRBasicBlock("then0", [IRReturn()]),
+                    IRBasicBlock("else0", [IRReturn()]),
                 ],
             )
         ]

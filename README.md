@@ -23,7 +23,8 @@ Compiler implementation notes live under
 [`docs/compiler/`](docs/compiler/), including initial
 [`dominator`](docs/compiler/DOMINATORS.md) and
 [`SSA`](docs/compiler/SSA_DESIGN.md) design notes, plus the
-[`SSA construction plan`](docs/compiler/SSA_CONSTRUCTION.md), for future IR
+[`SSA construction plan`](docs/compiler/SSA_CONSTRUCTION.md) and
+[`general SSA builder plan`](docs/compiler/SSA_BUILDER.md), for future IR
 analysis and optimization work. Language-level specifications and design notes
 live under [`docs/aether/`](docs/aether/).
 
@@ -216,8 +217,8 @@ aether --emit-ssa program.ae
 This is an inspection mode for compiler development. SSA is not executed, is
 not optimized, and does not replace the current slot IR or either execution
 backend. The current SSA builder supports linear functions and simple acyclic
-`if`/`else`; unsupported control-flow shapes such as `while` report a clear
-SSA builder error.
+`if`/`else` plus simple lowered `while` loops. Unsupported general CFG shapes
+report a clear SSA builder error.
 
 The CLI also includes a minimal benchmark harness for language and backend
 development:

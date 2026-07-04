@@ -20,16 +20,21 @@ Initial SSA infrastructure now exists under `src/aether/ssa/`:
   internal compiler pipeline from `TypedProgram` or verified `IRModule` to a
   verified `SSAModule`.
 
-The phase-1 SSA builder is intentionally narrow. It converts functions with a
-single `entry` block and no `branch`, `jump`, `if`, `while`, loop, or phi
-requirements. Phase 2 adds one deliberately small control-flow shape: simple
-acyclic `if`/`else` with an optional merge block and phi nodes for promoted
-slots. Phase 3 adds the current lowered simple `while` shape with loop-header
-phi nodes for loop-carried promoted slots. The current compiler still lowers to
-slot IR, verifies slot IR, interprets slot IR, and runs the existing local
-optimizer pipeline over slot IR. SSA is not used by the backend yet. It can be
-inspected from the CLI with `aether --emit-ssa program.ae`, which prints the
-verified SSA module and exits.
+The current SSA builder is still intentionally pattern-based. It converts
+functions with a single `entry` block and no `branch`, `jump`, `if`, `while`,
+loop, or phi requirements. It also accepts two deliberately small
+control-flow shapes: simple acyclic `if`/`else` with an optional merge block and
+simple lowered `while` loops with loop-header phi nodes for loop-carried
+promoted slots. The implementation has been stabilized around explicit helpers
+for slot state, block emission, instruction conversion, pattern detection, and
+phi construction so a future builder can replace the pattern recognizers with
+CFG/dominator/dominance-frontier based SSA construction without changing the
+public SSA model.
+
+The current compiler still lowers to slot IR, verifies slot IR, interprets slot
+IR, and runs the existing local optimizer pipeline over slot IR. SSA is not used
+by the backend yet. It can be inspected from the CLI with
+`aether --emit-ssa program.ae`, which prints the verified SSA module and exits.
 
 ## Implemented Phase 1
 
@@ -83,6 +88,19 @@ Current limitations:
 - no nested branches, nested loops, general CFG, or arbitrary loops
 - no SSA optimizer or backend integration
 
+Current supported subset:
+
+- linear functions with exactly one `entry` block
+- simple acyclic `if`/`else` where both branches return, or both branches jump
+  to one merge block
+- simple lowered `while` with `entry -> cond`, `cond -> body/exit`,
+  `body -> cond`, and `exit` returning
+
+Everything else remains unsupported until the general Cytron-style builder is
+implemented. That future builder should derive phi placement from dominance
+frontiers and perform variable renaming with a dominator-tree DFS instead of
+matching these local shapes directly.
+
 ## Implemented Phase 2
 
 `aether.ssa.SSABuilder` also supports a single acyclic `if`/`else` shape:
@@ -109,7 +127,9 @@ It also accepts the related form where both `then0` and `else0` return directly
 and no merge block exists. This keeps early-return `if`/`else` functions in SSA
 without introducing unnecessary phi nodes.
 
-Phase 2 promotes slots across the two branches with explicit branch-local state:
+Phase 2 promotes slots across the two branches with explicit branch-local state.
+This is a local approximation of the later dominance-frontier behavior, not the
+general algorithm:
 
 - The entry block produces the incoming slot state.
 - The then and else blocks each receive a copy of that state.
@@ -191,7 +211,8 @@ exit0:
 ```
 
 Phase 3 deliberately recognizes this shape directly instead of doing general
-dominance-frontier phi placement. The builder:
+dominance-frontier phi placement. Its loop-header phis are a temporary
+pattern-specific form of loop-carried renaming. The builder:
 
 - builds the entry block first and records the slot values before the loop
 - finds slots stored in the body and read by the condition, by the exit block,
