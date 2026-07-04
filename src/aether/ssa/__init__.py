@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .builder import SSABuildError, SSABuilder
+from .general_builder import GeneralSSABuildError, GeneralSSABuilder
 from .model import (
     SSABasicBlock,
     SSABinaryOp,
@@ -23,6 +24,8 @@ from .renaming import SSARenameError, SSARenameResult, SSARenamer
 from .verifier import SSAVerificationError, SSAVerifier
 
 __all__ = [
+    "GeneralSSABuildError",
+    "GeneralSSABuilder",
     "SSABuildError",
     "SSABuilder",
     "SSABasicBlock",

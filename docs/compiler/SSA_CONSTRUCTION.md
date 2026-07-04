@@ -15,6 +15,10 @@ Initial SSA infrastructure now exists under `src/aether/ssa/`:
 - `builder.py` defines the phase-1 SSA builder for linear functions, the
   phase-2 builder for simple acyclic `if`/`else` functions, and the phase-3
   builder for simple lowered `while` loops.
+- `general_builder.py` defines an experimental Cytron-style builder that wires
+  CFG construction, dominators, dominance frontiers, `PhiPlacement`,
+  `SSARenamer`, and `SSAVerifier` together without replacing the effective
+  builder.
 - `phi_placement.py` defines standalone general phi placement over mutable IR
   slots using CFG, dominators, and dominance frontiers.
 - `renaming.py` defines standalone experimental dominator-tree DFS variable
@@ -40,8 +44,8 @@ IR, and runs the existing local optimizer pipeline over slot IR. SSA is not used
 by the backend yet. It can be inspected from the CLI with
 `aether --emit-ssa program.ae`, which prints the verified SSA module and exits.
 That inspection path still uses the pattern-based builder; standalone
-`PhiPlacement` and `SSARenamer` are tested internally but are not wired into the
-effective builder.
+`PhiPlacement`, `SSARenamer`, and `GeneralSSABuilder` are tested internally but
+are not wired into the effective builder.
 
 ## Implemented Phase 1
 
@@ -86,16 +90,16 @@ entry:
     return %3
 ```
 
-Current limitations:
+Current limitations of the effective pattern-based builder:
 
-- general phi placement exists only as a standalone pre-renaming phase for the
-  experimental renamer
-- dominator-tree variable renaming exists only as standalone experimental
-  infrastructure
 - no dominance-frontier usage in the effective pattern-based builder
 - no general multiple-block functions
 - no nested branches, nested loops, general CFG, or arbitrary loops
 - no SSA optimizer or backend integration
+
+General phi placement and dominator-tree variable renaming now exist as
+experimental infrastructure and are wired together by `GeneralSSABuilder`.
+They are not used by the effective builder or `--emit-ssa`.
 
 Current supported subset:
 
@@ -105,10 +109,11 @@ Current supported subset:
 - simple lowered `while` with `entry -> cond`, `cond -> body/exit`,
   `body -> cond`, and `exit` returning
 
-Everything else remains unsupported until the general Cytron-style builder is
-implemented. That future builder should derive phi placement from dominance
-frontiers and perform variable renaming with a dominator-tree DFS instead of
-matching these local shapes directly.
+Everything else remains unsupported by the effective builder until the
+experimental general builder is promoted into the SSA pipeline. The general
+builder already derives phi placement from dominance frontiers and performs
+variable renaming with a dominator-tree DFS instead of matching these local
+shapes directly.
 
 ## Implemented Phase 2
 
@@ -570,7 +575,8 @@ nested-if placement, and selected negative cases. It also compares its output
 with the current pattern-based builder for linear, simple `if`/`else`, and
 simple `while` cases.
 
-This renamer is not wired into `SSABuilder`, `SSAPipeline`, `--emit-ssa`, IR
+This renamer is wired into the experimental `GeneralSSABuilder`. It is not
+wired into the effective `SSABuilder`, `SSAPipeline`, `--emit-ssa`, IR
 lowering, optimizers, execution, or the CLI.
 
 The builder should maintain one stack per promoted slot:
@@ -631,6 +637,44 @@ The stack discipline ensures every load sees the nearest dominating
 definition. The dominator-tree traversal ensures values are available in all
 dominated blocks and are removed when the traversal leaves their valid region.
 
+## Experimental General Builder
+
+`aether.ssa.GeneralSSABuilder` is available as an isolated construction
+wrapper:
+
+```python
+GeneralSSABuilder().build_function(ir_function)
+GeneralSSABuilder().build_module(ir_module)
+GeneralSSABuilder().build(ir_module)
+```
+
+Its implemented pipeline is:
+
+```text
+IRFunction
+  ->
+CFGBuilder
+  ->
+DominatorAnalysis
+  ->
+DominanceFrontierAnalysis
+  ->
+PhiPlacement
+  ->
+SSARenamer
+  ->
+SSAFunction
+```
+
+`build_module` applies that sequence to each function and verifies the final
+`SSAModule` with `SSAVerifier`. The builder wraps construction and verification
+failures in `GeneralSSABuildError` while preserving the original message and
+exception cause.
+
+This is still experimental infrastructure. It does not replace the
+pattern-based `SSABuilder`, does not change `--emit-ssa`, and does not alter IR
+lowering, optimization, execution, or CLI semantics.
+
 ## SSA Verification
 
 The initial SSA verifier is implemented as `aether.ssa.SSAVerifier`. It rejects
@@ -674,6 +718,7 @@ The SSA implementation lives under a dedicated package:
 src/aether/ssa/
     __init__.py
     builder.py
+    general_builder.py
     model.py
     phi_placement.py
     printer.py
@@ -693,6 +738,9 @@ Current responsibilities:
   nodes in the supported merge block. Phase 3 additionally handles the current
   simple lowered `while` shape and inserts `SSAPhi` nodes in the supported loop
   header.
+- `general_builder.py`: experimental general construction wrapper that uses
+  CFG, dominators, dominance frontiers, `PhiPlacement`, `SSARenamer`, and
+  `SSAVerifier`.
 - `phi_placement.py`: standalone Cytron-style iterated dominance-frontier phi
   placement for mutable IR slots. This computes `slot -> blocks`.
 - `renaming.py`: standalone experimental variable renaming over the dominator
@@ -703,9 +751,9 @@ Current responsibilities:
 - `aether --emit-ssa`: CLI inspection mode that uses the verified SSA pipeline
   and textual SSA printer.
 
-The future full builder should consume existing analysis results instead of
-recomputing CFG or dominators internally. That keeps the construction step
-testable and makes analysis ownership explicit.
+The future effective full builder may consume existing analysis results instead
+of recomputing CFG or dominators internally. That would keep the construction
+step testable and make analysis ownership explicit.
 
 ## Future SSA Optimizations
 
@@ -730,12 +778,8 @@ correct automatic SSA form from slot IR.
 
 This initial SSA construction milestone does not include:
 
-- full multi-block SSA construction
-- general phi placement wired into the effective builder
-- dominator-tree variable renaming
-- dominance-frontier usage in `SSABuilder`
-- general while and loop SSA
-- nested `if` and general CFG SSA
+- replacement of the effective pattern-based `SSABuilder`
+- `--emit-ssa` integration for `GeneralSSABuilder`
 - changes to the current IR lowering semantics
 - changes to the current IR verifier
 - changes to the current IR interpreter

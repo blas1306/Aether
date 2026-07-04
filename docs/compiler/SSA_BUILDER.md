@@ -6,13 +6,16 @@ This document is the operational plan for migrating Aether from the current
 pattern-based SSA builder to a general SSA builder based on the classic SSA
 construction algorithm.
 
-The first two migration steps are implemented as isolated infrastructure:
+The first three migration steps are implemented as isolated infrastructure:
 `aether.ssa.PhiPlacement` computes general iterated dominance-frontier phi
 locations for mutable IR slots, and `aether.ssa.SSARenamer` performs
 function-local dominator-tree variable renaming from those placements.
+`aether.ssa.GeneralSSABuilder` now wires those phases together into an
+experimental per-module builder and verifies the resulting SSA module.
 
-Both phases are still experimental. The pattern-based `SSABuilder` remains the
-effective builder used by the SSA pipeline and `--emit-ssa`.
+These phases are still experimental. The pattern-based `SSABuilder` remains the
+effective builder used by the SSA pipeline and `--emit-ssa`; the general
+builder does not replace it yet.
 
 ## Current State
 
@@ -27,6 +30,7 @@ construction possible:
 - a pattern-based SSA builder
 - standalone general phi placement for mutable slots
 - standalone experimental DFS renaming for mutable slots
+- experimental general SSA builder using phi placement plus renaming
 
 The current `SSABuilder` supports deliberately small CFG shapes:
 
@@ -161,8 +165,9 @@ The result is a dictionary keyed by mutable slot name:
 }
 ```
 
-This phase only computes phi locations. It does not create `SSAPhi` nodes,
-rewrite loads or stores, or affect the current pattern-based builder output.
+This phase only computes phi locations. It does not create `SSAPhi` nodes or
+rewrite loads or stores by itself, and it does not affect the current
+pattern-based builder output.
 
 ## Variable Renaming
 
@@ -176,8 +181,8 @@ SSARenamer(function, cfg, dominators, phi_placement).rename()
 
 The result is an `SSARenameResult` containing one `SSAFunction` plus the block
 to slot mapping used for emitted phis. This API operates on one function at a
-time and is intentionally not connected to `SSABuilder`, `SSAPipeline`, or
-`--emit-ssa` yet.
+time and is now used by the experimental `GeneralSSABuilder`. It is still not
+connected to the effective `SSABuilder`, `SSAPipeline`, or `--emit-ssa`.
 
 The builder maintains one stack per promoted slot:
 
@@ -209,6 +214,30 @@ Within each block:
 If a load observes an empty stack for its slot, the builder should report a
 clear SSA build error. This means the mutable IR uses a slot before a reaching
 definition in the promotable subset.
+
+## Experimental General Builder
+
+`aether.ssa.GeneralSSABuilder` is the first complete experimental wrapper for
+the general construction path:
+
+```python
+GeneralSSABuilder().build_function(ir_function)
+GeneralSSABuilder().build_module(ir_module)
+GeneralSSABuilder().build(ir_module)
+```
+
+For each function it builds a CFG, computes dominators, computes dominance
+frontiers, runs `PhiPlacement`, and runs `SSARenamer`. `build_module` then
+verifies the whole `SSAModule` with `SSAVerifier`, which keeps calls between
+functions valid across module boundaries. `build_function` verifies the single
+function wrapped as a one-function module.
+
+Failures from the construction phases are reported as `GeneralSSABuildError`
+with the original diagnostic preserved in the message and exception cause.
+
+This builder is deliberately not wired into the effective SSA pipeline. The
+existing pattern-based `SSABuilder` and the `--emit-ssa` CLI path still produce
+the same kind of output as before.
 
 ## Pseudocode
 
