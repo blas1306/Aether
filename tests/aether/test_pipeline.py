@@ -9,12 +9,15 @@ from aether.pipeline import (
     ASTBackend,
     IRBackend,
     IR_MAIN_RESULT_NAME,
+    SSAPipeline,
     execute_pipeline,
+    lower_to_verified_ssa,
     parse_source,
     prepare_typed_program,
     run_ast_backend,
     typecheck_program,
 )
+from aether.ssa import SSABuildError, SSAPhi, print_ssa
 from aether.runner import run_aether
 from aether.typechecker import TypeChecker
 
@@ -146,6 +149,166 @@ def test_ir_backend_does_not_change_ast_backend() -> None:
 
     assert env.values["value"].value == 21
     assert interpreter.output == "21\n"
+
+
+def test_typed_ast_lowers_to_verified_ssa() -> None:
+    typed_program = prepare_typed_program(
+        """
+int main() {
+    return 42;
+}
+""",
+        TypeChecker(),
+    )
+
+    ssa_module = lower_to_verified_ssa(typed_program)
+
+    assert [function.name for function in ssa_module.functions] == ["main"]
+    assert print_ssa(ssa_module) == (
+        "func @main() -> int {\n"
+        "entry:\n"
+        "    %0: int = const 42\n"
+        "    return %0\n"
+        "}"
+    )
+
+
+def test_verified_ir_module_lowers_to_verified_linear_ssa() -> None:
+    typed_program = prepare_typed_program(
+        """
+int add(int left, int right) {
+    return left + right;
+}
+""",
+        TypeChecker(),
+    )
+    ir_module = IRBackend().lower_verified(typed_program)
+
+    ssa_module = lower_to_verified_ssa(ir_module)
+
+    assert print_ssa(ssa_module) == (
+        "func @add(%left: int, %right: int) -> int {\n"
+        "entry:\n"
+        "    %0: int = add %left, %right\n"
+        "    return %0\n"
+        "}"
+    )
+
+
+def test_ssa_pipeline_builds_if_else_phi() -> None:
+    typed_program = prepare_typed_program(
+        """
+int choose(int x) {
+    int y = 0;
+    if x > 0 {
+        y = 1;
+    } else {
+        y = 2;
+    }
+    return y;
+}
+""",
+        TypeChecker(),
+    )
+
+    ssa_module = lower_to_verified_ssa(typed_program)
+    phi_nodes = [
+        instruction
+        for function in ssa_module.functions
+        for block in function.blocks
+        for instruction in block.instructions
+        if isinstance(instruction, SSAPhi)
+    ]
+
+    assert len(phi_nodes) == 1
+    assert "phi(then0:" in print_ssa(ssa_module)
+
+
+def test_ssa_pipeline_reports_builder_unsupported_program_clearly() -> None:
+    typed_program = prepare_typed_program(
+        """
+int sumTo(int n) {
+    int i = 0;
+    int sum = 0;
+    while i <= n {
+        sum = sum + i;
+        i = i + 1;
+    }
+    return sum;
+}
+""",
+        TypeChecker(),
+    )
+
+    with pytest.raises(
+        SSABuildError,
+        match="SSA builder phase 2 only supports simple acyclic if/else.",
+    ):
+        lower_to_verified_ssa(typed_program)
+
+
+def test_ssa_pipeline_does_not_change_ast_backend() -> None:
+    ssa_program = prepare_typed_program(
+        """
+int main() {
+    return 42;
+}
+""",
+        TypeChecker(),
+    )
+    lower_to_verified_ssa(ssa_program)
+    ast_program = prepare_typed_program(
+        "value = 8 + 13; println(value);",
+        TypeChecker(),
+    )
+    interpreter = Interpreter()
+
+    env = ASTBackend(interpreter).run(ast_program)
+
+    assert env.values["value"].value == 21
+    assert interpreter.output == "21\n"
+
+
+def test_ssa_pipeline_does_not_change_ir_backend() -> None:
+    typed_program = prepare_typed_program(
+        """
+int main() {
+    return 42;
+}
+""",
+        TypeChecker(),
+    )
+    lower_to_verified_ssa(typed_program)
+
+    env = IRBackend().run(typed_program)
+
+    assert env.values[IR_MAIN_RESULT_NAME].value == 42
+
+
+def test_ssa_verifier_runs_after_builder() -> None:
+    typed_program = prepare_typed_program(
+        """
+int main() {
+    return 42;
+}
+""",
+        TypeChecker(),
+    )
+    calls = []
+
+    class RecordingSSAPipeline(SSAPipeline):
+        def build(self, module):
+            calls.append("build")
+            return super().build(module)
+
+        def verify(self, module):
+            calls.append("verify")
+            return super().verify(module)
+
+    result = RecordingSSAPipeline().run(typed_program)
+
+    assert result.ssa_module.functions[0].name == "main"
+    assert calls == ["build", "verify"]
 
 
 @pytest.mark.parametrize(

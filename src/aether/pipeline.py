@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from .ir.model import IRFunction
     from .ir.model import IRModule
     from .ir.types import IRType
+    from .ssa import SSAModule
 
 
 IR_MAIN_RESULT_NAME = "__ir_main_result"
@@ -45,6 +46,14 @@ class IROptimizer(Protocol):
     def run(self, module: IRModule) -> IRModule:
         """Return an optimized IR module."""
         ...
+
+
+@dataclass(frozen=True)
+class SSACompileResult:
+    """Internal SSA preparation result for compiler-only consumers."""
+
+    ir_module: IRModule
+    ssa_module: SSAModule
 
 
 @dataclass(frozen=True)
@@ -121,6 +130,38 @@ class IRBackend:
         return env
 
 
+class SSAPipeline:
+    """Internal TypedProgram/IRModule to verified SSA pipeline."""
+
+    def lower_ir(self, typed_program: TypedProgram) -> IRModule:
+        return IRBackend().lower_verified(typed_program)
+
+    def build(self, module: IRModule) -> SSAModule:
+        from .ssa import SSABuilder
+
+        return SSABuilder().build(module)
+
+    def verify(self, module: SSAModule) -> SSAModule:
+        from .ssa import SSAVerificationError, SSAVerifier
+
+        try:
+            return SSAVerifier(module).verify()
+        except SSAVerificationError as exc:
+            raise AetherRuntimeError(
+                f"SSA verifier rejected module: {exc}",
+                kind="ssa",
+            ) from exc
+
+    def run(self, program: TypedProgram | IRModule) -> SSACompileResult:
+        if isinstance(program, TypedProgram):
+            ir_module = self.lower_ir(program)
+        else:
+            ir_module = IRBackend().verify(program)
+
+        ssa_module = self.verify(self.build(ir_module))
+        return SSACompileResult(ir_module, ssa_module)
+
+
 def tokenize_source(source: str) -> list[Token]:
     """Run the lexical stage of the Aether pipeline."""
     return lex(source)
@@ -141,6 +182,11 @@ def prepare_typed_program(source: str, checker: TypeChecker) -> TypedProgram:
     """Run the frontend stages and return the checked program boundary."""
     program = parse_source(source)
     return TypedProgram(typecheck_program(program, checker), checker)
+
+
+def lower_to_verified_ssa(program: TypedProgram | IRModule) -> SSAModule:
+    """Prepare verified SSA for internal compiler consumers only."""
+    return SSAPipeline().run(program).ssa_module
 
 
 def run_ast_backend(program: ast.Program, interpreter: Interpreter) -> Environment:

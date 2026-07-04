@@ -15,6 +15,9 @@ Initial SSA infrastructure now exists under `src/aether/ssa/`:
 - `builder.py` defines the phase-1 SSA builder for linear functions and the
   phase-2 builder for simple acyclic `if`/`else` functions.
 - `__init__.py` exposes the public SSA model and printer API.
+- `aether.pipeline.lower_to_verified_ssa` and `SSAPipeline` provide an
+  internal compiler pipeline from `TypedProgram` or verified `IRModule` to a
+  verified `SSAModule`.
 
 The phase-1 SSA builder is intentionally narrow. It converts functions with a
 single `entry` block and no `branch`, `jump`, `if`, `while`, loop, or phi
@@ -22,7 +25,8 @@ requirements. Phase 2 adds one deliberately small control-flow shape: simple
 acyclic `if`/`else` with an optional merge block and phi nodes for promoted
 slots. The current compiler still lowers to slot IR, verifies slot IR,
 interprets slot IR, and runs the existing local optimizer pipeline over slot IR.
-SSA is not used by the backend yet.
+SSA is not used by the backend yet, and there is no CLI flag or export command
+for SSA output yet.
 
 ## Implemented Phase 1
 
@@ -242,8 +246,9 @@ local scalar slots.
 ## Initial SSA IR
 
 The SSA package defines a separate model instead of mutating the existing slot
-IR in place. This first milestone is intentionally only a hand-buildable model
-and printer; automatic construction is still future work.
+IR in place. The current builder constructs this model for the supported linear
+and simple acyclic `if`/`else` subsets. Full CFG-based construction is still
+future work.
 
 ### SSAModule
 
@@ -306,7 +311,31 @@ reachable predecessor of its block.
 
 ## Construction Pipeline
 
-The full intended pipeline is:
+The implemented internal pipeline is intentionally smaller than the full SSA
+construction algorithm:
+
+```text
+Typed AST
+  ->
+IR Lowering
+  ->
+IR Verification
+  ->
+SSA Builder
+  ->
+SSA Verification
+  ->
+SSAModule
+```
+
+This path is available through `aether.pipeline.lower_to_verified_ssa` and
+`aether.pipeline.SSAPipeline`. It is for compiler-internal consumers and tests
+only. It accepts either a checked `TypedProgram`, in which case it lowers and
+verifies slot IR first, or an `IRModule`, in which case it verifies the IR before
+building SSA. It does not change CLI behavior, IR backend execution, AST backend
+execution, language semantics, or optimizer behavior.
+
+The full intended future pipeline is:
 
 ```text
 Typed AST
@@ -339,6 +368,9 @@ Pipeline responsibilities:
 SSA construction should be a compiler-internal conversion step. It should not
 change the CLI or the semantics of the existing slot IR backend when first
 introduced.
+
+There is currently no `aether --emit-ssa`, no SSA export mode, no SSA
+interpreter, and no SSA optimizer pipeline.
 
 ## Phi Placement
 
@@ -498,6 +530,8 @@ Current responsibilities:
 - `builder.py`: phase-1 conversion from verified linear slot IR into SSA.
   Phase 2 additionally handles simple acyclic `if`/`else` and inserts `SSAPhi`
   nodes in the supported merge block.
+- `aether.pipeline.SSAPipeline`: internal `TypedProgram`/`IRModule` to verified
+  `SSAModule` preparation.
 
 The future full builder should consume existing analysis results instead of
 recomputing CFG or dominators internally. That keeps the construction step
@@ -532,11 +566,11 @@ This initial SSA construction milestone does not include:
 - dominance-frontier usage
 - while and loop SSA
 - nested `if` and general CFG SSA
+- CLI SSA export, including `--emit-ssa`
 - changes to the current IR lowering semantics
 - changes to the current IR verifier
 - changes to the current IR interpreter
 - changes to the current optimizer pipeline
-- new CLI flags
 - execution from SSA
 - phi lowering back to slot IR
 - memory SSA
