@@ -12,11 +12,66 @@ Initial SSA infrastructure now exists under `src/aether/ssa/`:
 - `printer.py` defines deterministic textual SSA output.
 - `verifier.py` defines a minimum structural and type verifier for manually
   built SSA modules.
+- `builder.py` defines the phase-1 SSA builder for linear functions.
 - `__init__.py` exposes the public SSA model and printer API.
 
-SSA builder code does not exist yet. The current compiler still lowers to slot
-IR, verifies slot IR, interprets slot IR, and runs the existing local optimizer
-pipeline over slot IR.
+The phase-1 SSA builder is intentionally narrow. It converts only functions
+with a single `entry` block and no `branch`, `jump`, `if`, `while`, loop, or phi
+requirements. The current compiler still lowers to slot IR, verifies slot IR,
+interprets slot IR, and runs the existing local optimizer pipeline over slot IR.
+SSA is not used by the backend yet.
+
+## Implemented Phase 1
+
+`aether.ssa.SSABuilder` converts the linear subset of slot IR into SSA:
+
+- `IRModule` to `SSAModule`
+- `IRFunction` with exactly one `entry` block to `SSAFunction`
+- `IRParameter` to `SSAParameter`
+- `IRConst` to `SSAConst`
+- `IRBinaryOp` to `SSABinaryOp`
+- `IRCompareOp` to `SSACompareOp`
+- `IRCall` to `SSACall`
+- `IRReturn` to `SSAReturn`
+
+It also performs simple block-local slot promotion:
+
+- `IRStore(slot, value)` records the current SSA value for that slot.
+- `IRLoad(result, slot)` aliases `result` to the current SSA value for that
+  slot.
+- No `load` or `store` instruction is emitted in SSA.
+- Loading a slot before any store raises `SSABuildError`.
+
+Example:
+
+```text
+entry:
+    %0: int = const 5
+    store %x, %0
+    %1: int = load %x
+    %2: int = const 3
+    %3: int = add %1, %2
+    return %3
+```
+
+becomes:
+
+```text
+entry:
+    %0: int = const 5
+    %2: int = const 3
+    %3: int = add %0, %2
+    return %3
+```
+
+Current limitations:
+
+- no phi placement
+- no dominator-tree variable renaming
+- no dominance-frontier usage
+- no multiple-block functions
+- no branches, jumps, if/else, while, or loops
+- no SSA optimizer or backend integration
 
 ## Current IR State
 
@@ -331,6 +386,7 @@ The SSA implementation lives under a dedicated package:
 ```text
 src/aether/ssa/
     __init__.py
+    builder.py
     model.py
     printer.py
     verifier.py
@@ -343,15 +399,11 @@ Current responsibilities:
 - `printer.py`: deterministic textual SSA output for tests and debugging.
 - `verifier.py`: minimum structural, use-definition, phi, call, and type checks
   for manually built SSA.
+- `builder.py`: phase-1 conversion from verified linear slot IR into SSA.
 
-Future files:
-
-- `builder.py`: conversion from verified slot IR plus CFG, dominators, and
-  dominance frontiers into SSA.
-
-The builder should consume existing analysis results instead of recomputing CFG
-or dominators internally. That keeps the construction step testable and makes
-analysis ownership explicit.
+The future full builder should consume existing analysis results instead of
+recomputing CFG or dominators internally. That keeps the construction step
+testable and makes analysis ownership explicit.
 
 ## Future SSA Optimizations
 
@@ -374,9 +426,12 @@ correct automatic SSA form from slot IR.
 
 ## Not Implemented Yet
 
-This initial SSA infrastructure milestone does not include:
+This initial SSA construction milestone does not include:
 
-- automatic SSA builder
+- full multi-block SSA construction
+- phi placement
+- dominator-tree variable renaming
+- dominance-frontier usage
 - changes to the current IR lowering semantics
 - changes to the current IR verifier
 - changes to the current IR interpreter
