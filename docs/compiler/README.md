@@ -32,6 +32,6 @@ Current compiler-design documents:
   implemented dominance frontiers, and their role in future SSA construction.
 - [SSA_DESIGN.md](SSA_DESIGN.md): initial design notes for future SSA support
   in the Aether IR.
-- [SSA_CONSTRUCTION.md](SSA_CONSTRUCTION.md): implemented linear and simple
-  `if`/`else` SSA builder, internal verified SSA pipeline, planned full
-  construction algorithm, and verification rules.
+- [SSA_CONSTRUCTION.md](SSA_CONSTRUCTION.md): implemented linear, simple
+  `if`/`else`, and simple `while` SSA builder, internal verified SSA pipeline,
+  planned full construction algorithm, and verification rules.

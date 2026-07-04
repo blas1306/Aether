@@ -12,8 +12,9 @@ Initial SSA infrastructure now exists under `src/aether/ssa/`:
 - `printer.py` defines deterministic textual SSA output.
 - `verifier.py` defines a minimum structural and type verifier for manually
   built SSA modules.
-- `builder.py` defines the phase-1 SSA builder for linear functions and the
-  phase-2 builder for simple acyclic `if`/`else` functions.
+- `builder.py` defines the phase-1 SSA builder for linear functions, the
+  phase-2 builder for simple acyclic `if`/`else` functions, and the phase-3
+  builder for simple lowered `while` loops.
 - `__init__.py` exposes the public SSA model and printer API.
 - `aether.pipeline.lower_to_verified_ssa` and `SSAPipeline` provide an
   internal compiler pipeline from `TypedProgram` or verified `IRModule` to a
@@ -23,10 +24,12 @@ The phase-1 SSA builder is intentionally narrow. It converts functions with a
 single `entry` block and no `branch`, `jump`, `if`, `while`, loop, or phi
 requirements. Phase 2 adds one deliberately small control-flow shape: simple
 acyclic `if`/`else` with an optional merge block and phi nodes for promoted
-slots. The current compiler still lowers to slot IR, verifies slot IR,
-interprets slot IR, and runs the existing local optimizer pipeline over slot IR.
-SSA is not used by the backend yet. It can be inspected from the CLI with
-`aether --emit-ssa program.ae`, which prints the verified SSA module and exits.
+slots. Phase 3 adds the current lowered simple `while` shape with loop-header
+phi nodes for loop-carried promoted slots. The current compiler still lowers to
+slot IR, verifies slot IR, interprets slot IR, and runs the existing local
+optimizer pipeline over slot IR. SSA is not used by the backend yet. It can be
+inspected from the CLI with `aether --emit-ssa program.ae`, which prints the
+verified SSA module and exits.
 
 ## Implemented Phase 1
 
@@ -77,7 +80,7 @@ Current limitations:
 - no dominator-tree variable renaming
 - no dominance-frontier usage
 - no general multiple-block functions
-- no nested branches, general CFG, while, or loops
+- no nested branches, nested loops, general CFG, or arbitrary loops
 - no SSA optimizer or backend integration
 
 ## Implemented Phase 2
@@ -164,14 +167,109 @@ merge0:
     return %4
 ```
 
+## Implemented Phase 3
+
+`aether.ssa.SSABuilder` also supports the simple `while` CFG shape produced by
+the current IR lowering:
+
+```text
+entry:
+    ...
+    jump cond0
+
+cond0:
+    ...
+    branch %cond, body0, exit0
+
+body0:
+    ...
+    jump cond0
+
+exit0:
+    ...
+    return ...
+```
+
+Phase 3 deliberately recognizes this shape directly instead of doing general
+dominance-frontier phi placement. The builder:
+
+- builds the entry block first and records the slot values before the loop
+- finds slots stored in the body and read by the condition, by the exit block,
+  or before their first body store
+- creates one `SSAPhi` per such loop-carried slot at the start of `cond0`
+- uses the pre-loop value for the `entry` incoming edge
+- uses the final body value for the `body0` incoming edge
+- rewrites loads in `cond0`, `body0`, and `exit0` to the correct SSA value
+- rejects a loop-carried slot that has no value before the loop
+
+Example:
+
+```text
+entry:
+    store %n, %n
+    jump cond0
+
+cond0:
+    %0: int = load %n
+    %1: int = const 0
+    %2: bool = cmp_gt %0, %1
+    branch %2, body0, exit0
+
+body0:
+    %3: int = load %n
+    %4: int = const 1
+    %5: int = sub %3, %4
+    store %n, %5
+    jump cond0
+
+exit0:
+    %6: int = load %n
+    return %6
+```
+
+becomes:
+
+```text
+entry:
+    jump cond0
+
+cond0:
+    %0: int = phi(entry: %n, body0: %5)
+    %1: int = const 0
+    %2: bool = cmp_gt %0, %1
+    branch %2, body0, exit0
+
+body0:
+    %4: int = const 1
+    %5: int = sub %0, %4
+    jump cond0
+
+exit0:
+    return %0
+```
+
+The supported loop form is intentionally narrow:
+
+- exactly one simple loop per function
+- no nested loops
+- no `if` inside the loop body
+- no `while` inside an `if`
+- no `break` or `continue`; those are rejected by IR lowering before SSA
+- no loop CFG with extra predecessors, extra exits, or a body edge that does
+  not jump back to the condition block
+- no general phi placement or dominance-frontier-based renaming
+
 Any other CFG shape still raises:
 
 ```text
-SSABuildError("SSA builder phase 2 only supports simple acyclic if/else.")
+SSABuildError(
+    "SSA builder phase 3 only supports linear functions, simple acyclic "
+    "if/else, and simple while loops."
+)
 ```
 
-That includes `while`, back-edges, nested `if`, multiple merge blocks, merge
-blocks with more than two predecessors, and arbitrary branch/jump layouts.
+That includes nested `if`, nested `while`, multiple merge blocks, merge blocks
+with more than two predecessors, and arbitrary branch/jump layouts.
 
 ## Current IR State
 
@@ -530,7 +628,9 @@ Current responsibilities:
   for manually built SSA.
 - `builder.py`: phase-1 conversion from verified linear slot IR into SSA.
   Phase 2 additionally handles simple acyclic `if`/`else` and inserts `SSAPhi`
-  nodes in the supported merge block.
+  nodes in the supported merge block. Phase 3 additionally handles the current
+  simple lowered `while` shape and inserts `SSAPhi` nodes in the supported loop
+  header.
 - `aether.pipeline.SSAPipeline`: internal `TypedProgram`/`IRModule` to verified
   `SSAModule` preparation.
 - `aether --emit-ssa`: CLI inspection mode that uses the verified SSA pipeline
@@ -567,7 +667,7 @@ This initial SSA construction milestone does not include:
 - general phi placement
 - dominator-tree variable renaming
 - dominance-frontier usage
-- while and loop SSA
+- general while and loop SSA
 - nested `if` and general CFG SSA
 - changes to the current IR lowering semantics
 - changes to the current IR verifier

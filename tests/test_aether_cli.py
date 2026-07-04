@@ -336,9 +336,7 @@ int f(int x) {
     assert stderr == ""
 
 
-def test_emit_ssa_unsupported_program_reports_builder_error_without_traceback(
-    tmp_path: Path,
-) -> None:
+def test_emit_ssa_prints_simple_while_with_phi(tmp_path: Path) -> None:
     program = tmp_path / "emit_ssa_while.ae"
     program.write_text(
         """
@@ -357,9 +355,60 @@ int sumTo(int n) {
 
     exit_code, stdout, stderr = run_cli(["--emit-ssa", str(program)])
 
+    assert exit_code == EXIT_SUCCESS
+    assert stdout == (
+        "func @sumTo(%n: int) -> int {\n"
+        "entry:\n"
+        "    %0: int = const 0\n"
+        "    %1: int = const 0\n"
+        "    jump cond0\n"
+        "\n"
+        "cond0:\n"
+        "    %2: int = phi(entry: %0, body0: %9)\n"
+        "    %4: int = phi(entry: %1, body0: %6)\n"
+        "    %3: bool = cmp_le %2, %n\n"
+        "    branch %3, body0, exit0\n"
+        "\n"
+        "body0:\n"
+        "    %6: int = add %4, %2\n"
+        "    %8: int = const 1\n"
+        "    %9: int = add %2, %8\n"
+        "    jump cond0\n"
+        "\n"
+        "exit0:\n"
+        "    return %4\n"
+        "}\n"
+    )
+    assert stderr == ""
+
+
+def test_emit_ssa_unsupported_program_reports_builder_error_without_traceback(
+    tmp_path: Path,
+) -> None:
+    program = tmp_path / "emit_ssa_nested_while.ae"
+    program.write_text(
+        """
+int nested(int n) {
+    while n > 0 {
+        while n > 1 {
+            n = n - 1;
+        }
+        n = n - 1;
+    }
+    return n;
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-ssa", str(program)])
+
     assert exit_code == EXIT_LANGUAGE_ERROR
     assert stdout == ""
-    assert "SSA builder phase 2 only supports simple acyclic if/else." in stderr
+    assert (
+        "SSA builder phase 3 only supports linear functions, simple acyclic "
+        "if/else, and simple while loops."
+    ) in stderr
     assert "Traceback" not in stderr
 
 

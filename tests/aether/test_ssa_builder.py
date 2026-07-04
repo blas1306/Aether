@@ -40,7 +40,10 @@ from aether.ssa import (
 )
 
 
-PHASE_2_MESSAGE = "SSA builder phase 2 only supports simple acyclic if/else."
+PHASE_3_MESSAGE = (
+    "SSA builder phase 3 only supports linear functions, simple acyclic "
+    "if/else, and simple while loops."
+)
 
 
 def _build_and_verify(module: IRModule):
@@ -563,6 +566,128 @@ def test_printer_shows_no_load_or_store_after_promotion() -> None:
     )
 
 
+def test_builds_simple_while_countdown_with_phi() -> None:
+    int_type = IntType()
+    bool_type = BoolType()
+    parameter = IRParameter("n", int_type)
+    slot = IRValue("n", int_type)
+    loop_value = IRValue("0", int_type)
+    zero = IRValue("1", int_type)
+    condition = IRValue("2", bool_type)
+    body_value = IRValue("3", int_type)
+    one = IRValue("4", int_type)
+    next_value = IRValue("5", int_type)
+    result = IRValue("6", int_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "countdown",
+                [parameter],
+                int_type,
+                [
+                    IRBasicBlock("entry", [IRStore(slot, parameter), IRJump("cond0")]),
+                    IRBasicBlock(
+                        "cond0",
+                        [
+                            IRLoad(loop_value, slot),
+                            IRConst(zero, 0),
+                            IRCompareOp(condition, "gt", loop_value, zero),
+                            IRBranch(condition, "body0", "exit0"),
+                        ],
+                    ),
+                    IRBasicBlock(
+                        "body0",
+                        [
+                            IRLoad(body_value, slot),
+                            IRConst(one, 1),
+                            IRBinaryOp(next_value, "sub", body_value, one),
+                            IRStore(slot, next_value),
+                            IRJump("cond0"),
+                        ],
+                    ),
+                    IRBasicBlock("exit0", [IRLoad(result, slot), IRReturn(result)]),
+                ],
+            )
+        ]
+    )
+
+    ssa_module = _build_and_verify(module)
+    condition_instructions = ssa_module.functions[0].blocks[1].instructions
+
+    assert isinstance(condition_instructions[0], SSAPhi)
+    assert print_ssa(ssa_module) == (
+        "func @countdown(%n: int) -> int {\n"
+        "entry:\n"
+        "    jump cond0\n"
+        "\n"
+        "cond0:\n"
+        "    %0: int = phi(entry: %n, body0: %5)\n"
+        "    %1: int = const 0\n"
+        "    %2: bool = cmp_gt %0, %1\n"
+        "    branch %2, body0, exit0\n"
+        "\n"
+        "body0:\n"
+        "    %4: int = const 1\n"
+        "    %5: int = sub %0, %4\n"
+        "    jump cond0\n"
+        "\n"
+        "exit0:\n"
+        "    return %0\n"
+        "}"
+    )
+
+
+def test_builds_simple_while_with_empty_body_without_phi() -> None:
+    int_type = IntType()
+    bool_type = BoolType()
+    parameter = IRParameter("n", int_type)
+    zero = IRValue("0", int_type)
+    condition = IRValue("1", bool_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "empty_loop",
+                [parameter],
+                int_type,
+                [
+                    IRBasicBlock("entry", [IRJump("cond0")]),
+                    IRBasicBlock(
+                        "cond0",
+                        [
+                            IRConst(zero, 0),
+                            IRCompareOp(condition, "lt", parameter, zero),
+                            IRBranch(condition, "body0", "exit0"),
+                        ],
+                    ),
+                    IRBasicBlock("body0", [IRJump("cond0")]),
+                    IRBasicBlock("exit0", [IRReturn(parameter)]),
+                ],
+            )
+        ]
+    )
+
+    printed = print_ssa(_build_and_verify(module))
+
+    assert "phi" not in printed
+    assert printed == (
+        "func @empty_loop(%n: int) -> int {\n"
+        "entry:\n"
+        "    jump cond0\n"
+        "\n"
+        "cond0:\n"
+        "    %0: int = const 0\n"
+        "    %1: bool = cmp_lt %n, %0\n"
+        "    branch %1, body0, exit0\n"
+        "\n"
+        "body0:\n"
+        "    jump cond0\n"
+        "\n"
+        "exit0:\n"
+        "    return %n\n"
+        "}"
+    )
+
+
 def test_rejects_function_with_branch() -> None:
     bool_type = BoolType()
     condition = IRParameter("condition", bool_type)
@@ -579,7 +704,7 @@ def test_rejects_function_with_branch() -> None:
 
     _assert_build_error(
         module,
-        PHASE_2_MESSAGE,
+        PHASE_3_MESSAGE,
     )
 
 
@@ -597,7 +722,7 @@ def test_rejects_function_with_jump() -> None:
 
     _assert_build_error(
         module,
-        PHASE_2_MESSAGE,
+        PHASE_3_MESSAGE,
     )
 
 
@@ -654,11 +779,11 @@ def test_rejects_multiple_blocks() -> None:
 
     _assert_build_error(
         module,
-        PHASE_2_MESSAGE,
+        PHASE_3_MESSAGE,
     )
 
 
-def test_rejects_while_pattern() -> None:
+def test_builds_minimal_simple_while_pattern() -> None:
     bool_type = BoolType()
     condition = IRParameter("condition", bool_type)
     module = IRModule(
@@ -677,7 +802,10 @@ def test_rejects_while_pattern() -> None:
         ]
     )
 
-    _assert_build_error(module, PHASE_2_MESSAGE)
+    ssa_module = _build_and_verify(module)
+
+    assert isinstance(ssa_module.functions[0].blocks[0].instructions[0], SSAJump)
+    assert isinstance(ssa_module.functions[0].blocks[1].instructions[0], SSABranch)
 
 
 def test_rejects_nested_if_pattern() -> None:
@@ -701,7 +829,7 @@ def test_rejects_nested_if_pattern() -> None:
         ]
     )
 
-    _assert_build_error(module, PHASE_2_MESSAGE)
+    _assert_build_error(module, PHASE_3_MESSAGE)
 
 
 def test_rejects_merge_with_more_than_two_predecessors() -> None:
@@ -724,7 +852,7 @@ def test_rejects_merge_with_more_than_two_predecessors() -> None:
         ]
     )
 
-    _assert_build_error(module, PHASE_2_MESSAGE)
+    _assert_build_error(module, PHASE_3_MESSAGE)
 
 
 def test_rejects_merge_load_when_slot_is_not_defined_on_all_paths() -> None:
@@ -819,4 +947,142 @@ def test_rejects_non_matching_cfg_pattern() -> None:
         ]
     )
 
-    _assert_build_error(module, PHASE_2_MESSAGE)
+    _assert_build_error(module, PHASE_3_MESSAGE)
+
+
+def test_rejects_nested_while_pattern() -> None:
+    bool_type = BoolType()
+    condition = IRParameter("condition", bool_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "nested_loop",
+                [condition],
+                VoidType(),
+                [
+                    IRBasicBlock("entry", [IRJump("cond0")]),
+                    IRBasicBlock("cond0", [IRBranch(condition, "body0", "exit0")]),
+                    IRBasicBlock("body0", [IRJump("cond1")]),
+                    IRBasicBlock("cond1", [IRBranch(condition, "body1", "exit1")]),
+                    IRBasicBlock("body1", [IRJump("cond1")]),
+                    IRBasicBlock("exit1", [IRJump("cond0")]),
+                    IRBasicBlock("exit0", [IRReturn()]),
+                ],
+            )
+        ]
+    )
+
+    _assert_build_error(module, PHASE_3_MESSAGE)
+
+
+def test_rejects_if_inside_while_pattern() -> None:
+    bool_type = BoolType()
+    condition = IRParameter("condition", bool_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "if_in_loop",
+                [condition],
+                VoidType(),
+                [
+                    IRBasicBlock("entry", [IRJump("cond0")]),
+                    IRBasicBlock("cond0", [IRBranch(condition, "body0", "exit0")]),
+                    IRBasicBlock("body0", [IRBranch(condition, "then0", "else0")]),
+                    IRBasicBlock("then0", [IRJump("merge0")]),
+                    IRBasicBlock("else0", [IRJump("merge0")]),
+                    IRBasicBlock("merge0", [IRJump("cond0")]),
+                    IRBasicBlock("exit0", [IRReturn()]),
+                ],
+            )
+        ]
+    )
+
+    _assert_build_error(module, PHASE_3_MESSAGE)
+
+
+def test_rejects_while_inside_if_pattern() -> None:
+    bool_type = BoolType()
+    condition = IRParameter("condition", bool_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "loop_in_if",
+                [condition],
+                VoidType(),
+                [
+                    IRBasicBlock("entry", [IRBranch(condition, "then0", "else0")]),
+                    IRBasicBlock("then0", [IRJump("cond0")]),
+                    IRBasicBlock("cond0", [IRBranch(condition, "body0", "exit0")]),
+                    IRBasicBlock("body0", [IRJump("cond0")]),
+                    IRBasicBlock("exit0", [IRJump("merge0")]),
+                    IRBasicBlock("else0", [IRJump("merge0")]),
+                    IRBasicBlock("merge0", [IRReturn()]),
+                ],
+            )
+        ]
+    )
+
+    _assert_build_error(module, PHASE_3_MESSAGE)
+
+
+def test_rejects_loop_carried_slot_without_initial_value() -> None:
+    int_type = IntType()
+    bool_type = BoolType()
+    slot = IRValue("x", int_type)
+    loaded = IRValue("0", int_type)
+    zero = IRValue("1", int_type)
+    condition = IRValue("2", bool_type)
+    one = IRValue("3", int_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "bad_loop",
+                [],
+                VoidType(),
+                [
+                    IRBasicBlock("entry", [IRJump("cond0")]),
+                    IRBasicBlock(
+                        "cond0",
+                        [
+                            IRLoad(loaded, slot),
+                            IRConst(zero, 0),
+                            IRCompareOp(condition, "gt", loaded, zero),
+                            IRBranch(condition, "body0", "exit0"),
+                        ],
+                    ),
+                    IRBasicBlock(
+                        "body0",
+                        [IRConst(one, 1), IRStore(slot, one), IRJump("cond0")],
+                    ),
+                    IRBasicBlock("exit0", [IRReturn()]),
+                ],
+            )
+        ]
+    )
+
+    _assert_build_error(
+        module,
+        "Loop-carried slot '%x' is not initialized before the loop.",
+    )
+
+
+def test_rejects_while_with_distinct_body_edge() -> None:
+    bool_type = BoolType()
+    condition = IRParameter("condition", bool_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "bad_loop_edge",
+                [condition],
+                VoidType(),
+                [
+                    IRBasicBlock("entry", [IRJump("cond0")]),
+                    IRBasicBlock("cond0", [IRBranch(condition, "body0", "exit0")]),
+                    IRBasicBlock("body0", [IRJump("exit0")]),
+                    IRBasicBlock("exit0", [IRReturn()]),
+                ],
+            )
+        ]
+    )
+
+    _assert_build_error(module, PHASE_3_MESSAGE)

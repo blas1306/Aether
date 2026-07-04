@@ -64,12 +64,20 @@ class _SimpleIfElse:
     merge_block: IRBasicBlock | None
 
 
+@dataclass(frozen=True)
+class _SimpleWhile:
+    entry: IRBasicBlock
+    condition_block: IRBasicBlock
+    body_block: IRBasicBlock
+    exit_block: IRBasicBlock
+
+
 class SSABuilder:
     """Convert supported slot IR subsets into value-based SSA."""
 
-    _LINEAR_ONLY_MESSAGE = "SSA builder phase 1 only supports linear functions."
-    _SIMPLE_IF_ELSE_MESSAGE = (
-        "SSA builder phase 2 only supports simple acyclic if/else."
+    _SUPPORTED_CFG_MESSAGE = (
+        "SSA builder phase 3 only supports linear functions, simple acyclic "
+        "if/else, and simple while loops."
     )
 
     def build(self, module: IRModule) -> SSAModule:
@@ -97,15 +105,24 @@ class SSABuilder:
             )
 
         simple_if_else = self._match_simple_if_else(function)
-        if simple_if_else is None:
-            self._fail(self._SIMPLE_IF_ELSE_MESSAGE)
+        if simple_if_else is not None:
+            return SSAFunction(
+                function.name,
+                parameters,
+                function.return_type,
+                self._build_simple_if_else_blocks(simple_if_else, parameters),
+            )
 
-        return SSAFunction(
-            function.name,
-            parameters,
-            function.return_type,
-            self._build_simple_if_else_blocks(simple_if_else, parameters),
-        )
+        simple_while = self._match_simple_while(function)
+        if simple_while is not None:
+            return SSAFunction(
+                function.name,
+                parameters,
+                function.return_type,
+                self._build_simple_while_blocks(simple_while, parameters),
+            )
+
+        self._fail(self._SUPPORTED_CFG_MESSAGE)
 
     def _is_linear_function(self, function: IRFunction) -> bool:
         if len(function.blocks) != 1 or function.blocks[0].name != "entry":
@@ -187,6 +204,63 @@ class SSABuilder:
 
         return _SimpleIfElse(entry, then_block, else_block, merge_block)
 
+    def _match_simple_while(self, function: IRFunction) -> _SimpleWhile | None:
+        if len(function.blocks) != 4:
+            return None
+        if not function.blocks or function.blocks[0].name != "entry":
+            return None
+
+        blocks = {block.name: block for block in function.blocks}
+        if len(blocks) != len(function.blocks):
+            return None
+
+        entry = function.blocks[0]
+        entry_terminator = self._terminator(entry)
+        if not isinstance(entry_terminator, IRJump):
+            return None
+        if self._has_control_flow_before_terminator(entry):
+            return None
+
+        condition_block = blocks.get(entry_terminator.target)
+        if condition_block is None or condition_block is entry:
+            return None
+
+        condition_terminator = self._terminator(condition_block)
+        if not isinstance(condition_terminator, IRBranch):
+            return None
+        if self._has_control_flow_before_terminator(condition_block):
+            return None
+
+        body_block = blocks.get(condition_terminator.true_target)
+        exit_block = blocks.get(condition_terminator.false_target)
+        if body_block is None or exit_block is None:
+            return None
+        if len({entry.name, condition_block.name, body_block.name, exit_block.name}) != 4:
+            return None
+
+        body_terminator = self._terminator(body_block)
+        if not isinstance(body_terminator, IRJump):
+            return None
+        if body_terminator.target != condition_block.name:
+            return None
+        if self._has_control_flow_before_terminator(body_block):
+            return None
+
+        if not isinstance(self._terminator(exit_block), IRReturn):
+            return None
+        if self._has_control_flow_before_terminator(exit_block):
+            return None
+
+        if set(blocks) != {
+            entry.name,
+            condition_block.name,
+            body_block.name,
+            exit_block.name,
+        }:
+            return None
+
+        return _SimpleWhile(entry, condition_block, body_block, exit_block)
+
     def _build_simple_if_else_blocks(
         self,
         simple_if_else: _SimpleIfElse,
@@ -244,6 +318,101 @@ class SSABuilder:
         )
 
         return blocks
+
+    def _build_simple_while_blocks(
+        self,
+        simple_while: _SimpleWhile,
+        parameters: list[SSAParameter],
+    ) -> list[SSABasicBlock]:
+        entry_state = _BuildState(
+            {parameter.name: parameter for parameter in parameters},
+            {},
+        )
+        entry_instructions = self._build_block_instructions(
+            simple_while.entry,
+            entry_state,
+        )
+
+        phi_slots = self._loop_phi_slots(simple_while)
+        phi_names = self._first_loop_load_names(simple_while)
+        phis: dict[str, SSAValue] = {}
+        for slot_name in phi_slots:
+            entry_value = entry_state.slot_values.get(slot_name)
+            if entry_value is None:
+                self._fail(
+                    f"Loop-carried slot '%{slot_name}' is not initialized before "
+                    "the loop."
+                )
+            result_name = phi_names.get(slot_name)
+            if result_name is None:
+                result_name = self._fresh_phi_name(
+                    slot_name,
+                    simple_while.condition_block,
+                )
+            phis[slot_name] = SSAValue(result_name, entry_value.type)
+
+        condition_state = _BuildState(
+            dict(entry_state.value_map),
+            dict(entry_state.slot_values),
+            set(entry_state.incomplete_slots),
+        )
+        for slot_name, phi_value in phis.items():
+            condition_state.slot_values[slot_name] = phi_value
+            condition_state.value_map[phi_value.name] = phi_value
+
+        condition_instructions = self._build_block_instructions(
+            simple_while.condition_block,
+            condition_state,
+        )
+
+        body_state = condition_state.copy()
+        body_instructions = self._build_block_instructions(
+            simple_while.body_block,
+            body_state,
+        )
+
+        phi_instructions: list[SSAInstruction] = []
+        for slot_name in phi_slots:
+            entry_value = entry_state.slot_values[slot_name]
+            body_value = body_state.slot_values.get(slot_name)
+            if body_value is None:
+                self._fail(
+                    f"Loop-carried slot '%{slot_name}' is not defined by the loop body."
+                )
+            if entry_value.type != body_value.type:
+                self._fail(
+                    f"Cannot create phi for slot '%{slot_name}' with incompatible "
+                    f"types {entry_value.type} and {body_value.type}."
+                )
+            phi_instructions.append(
+                SSAPhi(
+                    phis[slot_name],
+                    (
+                        (simple_while.entry.name, entry_value),
+                        (simple_while.body_block.name, body_value),
+                    ),
+                )
+            )
+
+        exit_state = _BuildState(
+            dict(entry_state.value_map),
+            dict(condition_state.slot_values),
+            set(condition_state.incomplete_slots),
+        )
+        exit_instructions = self._build_block_instructions(
+            simple_while.exit_block,
+            exit_state,
+        )
+
+        return [
+            SSABasicBlock(simple_while.entry.name, entry_instructions),
+            SSABasicBlock(
+                simple_while.condition_block.name,
+                phi_instructions + condition_instructions,
+            ),
+            SSABasicBlock(simple_while.body_block.name, body_instructions),
+            SSABasicBlock(simple_while.exit_block.name, exit_instructions),
+        ]
 
     def _build_block_instructions(
         self,
@@ -385,6 +554,57 @@ class SSABuilder:
         for instruction in block.instructions:
             if isinstance(instruction, IRLoad):
                 names.setdefault(instruction.slot.name, instruction.result.name)
+        return names
+
+    def _loop_phi_slots(self, simple_while: _SimpleWhile) -> list[str]:
+        stored_in_body = self._stored_slots(simple_while.body_block)
+        loaded_in_condition = self._loaded_slots(simple_while.condition_block)
+        loaded_in_exit = self._loaded_slots(simple_while.exit_block)
+        loaded_before_store = self._loaded_before_first_store(simple_while.body_block)
+
+        return sorted(
+            stored_in_body
+            & (loaded_in_condition | loaded_in_exit | loaded_before_store)
+        )
+
+    @staticmethod
+    def _stored_slots(block: IRBasicBlock) -> set[str]:
+        return {
+            instruction.slot.name
+            for instruction in block.instructions
+            if isinstance(instruction, IRStore)
+        }
+
+    @staticmethod
+    def _loaded_slots(block: IRBasicBlock) -> set[str]:
+        return {
+            instruction.slot.name
+            for instruction in block.instructions
+            if isinstance(instruction, IRLoad)
+        }
+
+    @staticmethod
+    def _loaded_before_first_store(block: IRBasicBlock) -> set[str]:
+        stored: set[str] = set()
+        loaded_before_store: set[str] = set()
+        for instruction in block.instructions:
+            if isinstance(instruction, IRLoad) and instruction.slot.name not in stored:
+                loaded_before_store.add(instruction.slot.name)
+            elif isinstance(instruction, IRStore):
+                stored.add(instruction.slot.name)
+        return loaded_before_store
+
+    @staticmethod
+    def _first_loop_load_names(simple_while: _SimpleWhile) -> dict[str, str]:
+        names: dict[str, str] = {}
+        for block in (
+            simple_while.condition_block,
+            simple_while.body_block,
+            simple_while.exit_block,
+        ):
+            for instruction in block.instructions:
+                if isinstance(instruction, IRLoad):
+                    names.setdefault(instruction.slot.name, instruction.result.name)
         return names
 
     @staticmethod

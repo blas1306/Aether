@@ -17,7 +17,7 @@ from aether.pipeline import (
     run_ast_backend,
     typecheck_program,
 )
-from aether.ssa import SSABuildError, SSAPhi, print_ssa
+from aether.ssa import SSAPhi, print_ssa
 from aether.runner import run_aether
 from aether.typechecker import TypeChecker
 
@@ -224,7 +224,7 @@ int choose(int x) {
     assert "phi(then0:" in print_ssa(ssa_module)
 
 
-def test_ssa_pipeline_reports_builder_unsupported_program_clearly() -> None:
+def test_ssa_pipeline_builds_simple_while_sum_to_phi() -> None:
     typed_program = prepare_typed_program(
         """
 int sumTo(int n) {
@@ -240,9 +240,55 @@ int sumTo(int n) {
         TypeChecker(),
     )
 
+    ssa_module = lower_to_verified_ssa(typed_program)
+    phi_nodes = [
+        instruction
+        for function in ssa_module.functions
+        for block in function.blocks
+        for instruction in block.instructions
+        if isinstance(instruction, SSAPhi)
+    ]
+
+    assert len(phi_nodes) == 2
+    assert "phi(entry:" in print_ssa(ssa_module)
+
+
+def test_ssa_pipeline_rejects_break_before_ssa_lowering() -> None:
+    typed_program = prepare_typed_program(
+        """
+int first(int n) {
+    while n > 0 {
+        break;
+    }
+    return n;
+}
+""",
+        TypeChecker(),
+    )
+
     with pytest.raises(
-        SSABuildError,
-        match="SSA builder phase 2 only supports simple acyclic if/else.",
+        IRBackendUnsupportedFeatureError,
+        match="IR backend does not support break statements yet.",
+    ):
+        lower_to_verified_ssa(typed_program)
+
+
+def test_ssa_pipeline_rejects_continue_before_ssa_lowering() -> None:
+    typed_program = prepare_typed_program(
+        """
+int skip(int n) {
+    while n > 0 {
+        continue;
+    }
+    return n;
+}
+""",
+        TypeChecker(),
+    )
+
+    with pytest.raises(
+        IRBackendUnsupportedFeatureError,
+        match="IR backend does not support continue statements yet.",
     ):
         lower_to_verified_ssa(typed_program)
 
