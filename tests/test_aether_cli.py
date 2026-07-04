@@ -202,6 +202,7 @@ def test_help_describes_direct_execution_and_tools() -> None:
     assert "--backend" in stdout
     assert "--emit-ir" in stdout
     assert "--emit-cfg" in stdout
+    assert "--emit-ssa" in stdout
     assert "--opt" in stdout
     assert "--opt-level" in stdout
     assert "--show-passes" in stdout
@@ -264,6 +265,156 @@ int main() {
     assert "func @add" in stdout
     assert "func @main" in stdout
     assert "call @add" in stdout
+    assert stderr == ""
+
+
+def test_emit_ssa_prints_linear_function(tmp_path: Path) -> None:
+    program = tmp_path / "emit_ssa_linear.ae"
+    program.write_text(
+        """
+int add(int a, int b) {
+    return a + b;
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-ssa", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert stdout == (
+        "func @add(%a: int, %b: int) -> int {\n"
+        "entry:\n"
+        "    %0: int = add %a, %b\n"
+        "    return %0\n"
+        "}\n"
+    )
+    assert stderr == ""
+
+
+def test_emit_ssa_prints_simple_if_else_with_phi(tmp_path: Path) -> None:
+    program = tmp_path / "emit_ssa_phi.ae"
+    program.write_text(
+        """
+int f(int x) {
+    int y = 0;
+    if x > 0 {
+        y = 1;
+    } else {
+        y = 2;
+    }
+    return y;
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-ssa", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert stdout == (
+        "func @f(%x: int) -> int {\n"
+        "entry:\n"
+        "    %0: int = const 0\n"
+        "    %1: int = const 0\n"
+        "    %2: bool = cmp_gt %x, %1\n"
+        "    branch %2, then0, else0\n"
+        "\n"
+        "then0:\n"
+        "    %3: int = const 1\n"
+        "    jump merge0\n"
+        "\n"
+        "else0:\n"
+        "    %4: int = const 2\n"
+        "    jump merge0\n"
+        "\n"
+        "merge0:\n"
+        "    %5: int = phi(then0: %3, else0: %4)\n"
+        "    return %5\n"
+        "}\n"
+    )
+    assert stderr == ""
+
+
+def test_emit_ssa_unsupported_program_reports_builder_error_without_traceback(
+    tmp_path: Path,
+) -> None:
+    program = tmp_path / "emit_ssa_while.ae"
+    program.write_text(
+        """
+int sumTo(int n) {
+    int i = 0;
+    int sum = 0;
+    while i <= n {
+        sum = sum + i;
+        i = i + 1;
+    }
+    return sum;
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-ssa", str(program)])
+
+    assert exit_code == EXIT_LANGUAGE_ERROR
+    assert stdout == ""
+    assert "SSA builder phase 2 only supports simple acyclic if/else." in stderr
+    assert "Traceback" not in stderr
+
+
+def test_emit_ssa_rejects_emit_ir_combination(tmp_path: Path) -> None:
+    program = tmp_path / "emit_ssa_emit_ir.ae"
+    program.write_text("int main() { return 42; }\n", encoding="utf-8")
+
+    exit_code, stdout, stderr = run_cli(["--emit-ssa", "--emit-ir", str(program)])
+
+    assert exit_code == EXIT_USAGE_ERROR
+    assert stdout == ""
+    assert "not allowed with argument --emit-ssa" in stderr
+
+
+def test_emit_ssa_rejects_emit_cfg_combination(tmp_path: Path) -> None:
+    program = tmp_path / "emit_ssa_emit_cfg.ae"
+    program.write_text("int main() { return 42; }\n", encoding="utf-8")
+
+    exit_code, stdout, stderr = run_cli(["--emit-ssa", "--emit-cfg", str(program)])
+
+    assert exit_code == EXIT_USAGE_ERROR
+    assert stdout == ""
+    assert "not allowed with argument --emit-ssa" in stderr
+
+
+def test_emit_ssa_rejects_show_passes_combination(tmp_path: Path) -> None:
+    program = tmp_path / "emit_ssa_show_passes.ae"
+    program.write_text("int main() { return 42; }\n", encoding="utf-8")
+
+    exit_code, stdout, stderr = run_cli(["--emit-ssa", "--show-passes", str(program)])
+
+    assert exit_code == EXIT_USAGE_ERROR
+    assert stdout == ""
+    assert "--emit-ssa cannot be combined with --show-passes." in stderr
+
+
+def test_emit_ssa_missing_file_reports_read_error(tmp_path: Path) -> None:
+    missing = tmp_path / "missing_ssa.ae"
+
+    exit_code, stdout, stderr = run_cli(["--emit-ssa", str(missing)])
+
+    assert exit_code == EXIT_USAGE_ERROR
+    assert stdout == ""
+    assert "aether: cannot read" in stderr
+    assert str(missing) in stderr
+
+
+def test_normal_cli_execution_is_unchanged_after_emit_ssa(tmp_path: Path) -> None:
+    program = tmp_path / "normal_after_emit_ssa.ae"
+    program.write_text('println("normal");\n', encoding="utf-8")
+
+    exit_code, stdout, stderr = run_cli([str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert stdout == "normal\n"
     assert stderr == ""
 
 

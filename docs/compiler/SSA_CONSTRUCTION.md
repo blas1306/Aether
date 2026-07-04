@@ -25,8 +25,8 @@ requirements. Phase 2 adds one deliberately small control-flow shape: simple
 acyclic `if`/`else` with an optional merge block and phi nodes for promoted
 slots. The current compiler still lowers to slot IR, verifies slot IR,
 interprets slot IR, and runs the existing local optimizer pipeline over slot IR.
-SSA is not used by the backend yet, and there is no CLI flag or export command
-for SSA output yet.
+SSA is not used by the backend yet. It can be inspected from the CLI with
+`aether --emit-ssa program.ae`, which prints the verified SSA module and exits.
 
 ## Implemented Phase 1
 
@@ -329,11 +329,12 @@ SSAModule
 ```
 
 This path is available through `aether.pipeline.lower_to_verified_ssa` and
-`aether.pipeline.SSAPipeline`. It is for compiler-internal consumers and tests
-only. It accepts either a checked `TypedProgram`, in which case it lowers and
-verifies slot IR first, or an `IRModule`, in which case it verifies the IR before
-building SSA. It does not change CLI behavior, IR backend execution, AST backend
-execution, language semantics, or optimizer behavior.
+`aether.pipeline.SSAPipeline`. It accepts either a checked `TypedProgram`, in
+which case it lowers and verifies slot IR first, or an `IRModule`, in which case
+it verifies the IR before building SSA. The CLI inspection mode
+`aether --emit-ssa program.ae` uses this same pipeline and then prints the exact
+output of `aether.ssa.print_ssa`. It does not change IR backend execution, AST
+backend execution, language semantics, or optimizer behavior.
 
 The full intended future pipeline is:
 
@@ -365,12 +366,12 @@ Pipeline responsibilities:
 - `Variable Renaming` rewrites slot loads and stores into SSA values.
 - `SSA Verification` checks the resulting SSA invariants.
 
-SSA construction should be a compiler-internal conversion step. It should not
-change the CLI or the semantics of the existing slot IR backend when first
-introduced.
+SSA construction remains a compiler conversion step. The only public connection
+is inspection through `aether --emit-ssa`; it should not change the semantics of
+the existing slot IR backend.
 
-There is currently no `aether --emit-ssa`, no SSA export mode, no SSA
-interpreter, and no SSA optimizer pipeline.
+There is currently no SSA interpreter, no SSA backend, and no SSA optimizer
+pipeline.
 
 ## Phi Placement
 
@@ -532,6 +533,8 @@ Current responsibilities:
   nodes in the supported merge block.
 - `aether.pipeline.SSAPipeline`: internal `TypedProgram`/`IRModule` to verified
   `SSAModule` preparation.
+- `aether --emit-ssa`: CLI inspection mode that uses the verified SSA pipeline
+  and textual SSA printer.
 
 The future full builder should consume existing analysis results instead of
 recomputing CFG or dominators internally. That keeps the construction step
@@ -566,7 +569,6 @@ This initial SSA construction milestone does not include:
 - dominance-frontier usage
 - while and loop SSA
 - nested `if` and general CFG SSA
-- CLI SSA export, including `--emit-ssa`
 - changes to the current IR lowering semantics
 - changes to the current IR verifier
 - changes to the current IR interpreter

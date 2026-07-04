@@ -11,9 +11,16 @@ from typing import TYPE_CHECKING, TextIO
 from .errors import AetherError
 from .benchmark import BenchReport, run_benchmark
 from .ir import print_ir
-from .pipeline import IRBackend, parse_source, prepare_typed_program, tokenize_source
+from .pipeline import (
+    IRBackend,
+    lower_to_verified_ssa,
+    parse_source,
+    prepare_typed_program,
+    tokenize_source,
+)
 from .runner import run_aether
 from .session import AetherSession
+from .ssa import print_ssa
 from .tokens import Token
 from .typechecker import TypeChecker
 from .version import LANGUAGE_VERSION
@@ -32,7 +39,8 @@ def build_parser() -> argparse.ArgumentParser:
         description="Run Aether language programs.",
         epilog=(
             "The default command is file execution: aether program.ae\n"
-            "Development inspection tools: --tokens, --ast, --emit-ir, --emit-cfg, and bench"
+            "Development inspection tools: --tokens, --ast, --emit-ir, "
+            "--emit-cfg, --emit-ssa, and bench"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -58,6 +66,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--emit-cfg",
         action="store_true",
         help="Lower the file to experimental IR and print Graphviz DOT CFGs.",
+    )
+    modes.add_argument(
+        "--emit-ssa",
+        action="store_true",
+        help="Lower the file through verified IR and print verified SSA.",
     )
     parser.add_argument(
         "--opt",
@@ -148,6 +161,12 @@ def main(
     if args.opt and not args.emit_ir:
         print("aether: error: --opt is currently only supported with --emit-ir.", file=stderr)
         return EXIT_USAGE_ERROR
+    if args.emit_ssa and args.show_passes:
+        print(
+            "aether: error: --emit-ssa cannot be combined with --show-passes.",
+            file=stderr,
+        )
+        return EXIT_USAGE_ERROR
     if args.show_passes and not (
         args.emit_ir and (args.opt or args.opt_level is not None)
     ):
@@ -203,6 +222,11 @@ def main(
     if args.emit_cfg:
         return _run_language_action(
             lambda: _emit_cfg(source, path=path, stdout=stdout),
+            stderr=stderr,
+        )
+    if args.emit_ssa:
+        return _run_language_action(
+            lambda: _emit_ssa(source, path=path, stdout=stdout),
             stderr=stderr,
         )
     return _run_language_action(
@@ -368,6 +392,21 @@ def _emit_cfg(source: str, *, path: Path, stdout: TextIO) -> None:
         ),
         file=stdout,
     )
+
+
+def _emit_ssa(source: str, *, path: Path, stdout: TextIO) -> None:
+    from .errors import AetherRuntimeError
+    from .ssa import SSABuildError
+
+    typed_program = prepare_typed_program(
+        source,
+        TypeChecker(source_root=path.parent),
+    )
+    try:
+        module = lower_to_verified_ssa(typed_program)
+    except SSABuildError as exc:
+        raise AetherRuntimeError(str(exc), kind="ssa") from exc
+    print(print_ssa(module), file=stdout)
 
 
 def _optimization_profile_from_args(

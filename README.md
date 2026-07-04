@@ -118,6 +118,7 @@ aether --emit-ir -O2 program.ae
 aether --emit-ir --opt program.ae
 aether --emit-ir --opt --show-passes program.ae
 aether --emit-cfg program.ae
+aether --emit-ssa program.ae
 aether --backend=ir --emit-ir program.ae
 aether --backend=ir --emit-cfg program.ae
 ```
@@ -195,6 +196,28 @@ digraph sumTo {
 This is development infrastructure for future SSA conversion, dominator
 analysis, and loop analysis. It does not render PNG/SVG automatically and does
 not add new optimizations.
+
+### Static Single Assignment
+
+`--emit-ssa` lowers the checked program through the experimental IR path,
+verifies IR, builds the currently supported SSA subset, verifies SSA, and
+prints the exact textual SSA produced by the SSA printer:
+
+```text
+Lexer -> Parser -> TypeChecker -> IR lowering -> IR verifier -> SSA builder -> SSA verifier
+```
+
+For example:
+
+```bash
+aether --emit-ssa program.ae
+```
+
+This is an inspection mode for compiler development. SSA is not executed, is
+not optimized, and does not replace the current slot IR or either execution
+backend. The current SSA builder supports linear functions and simple acyclic
+`if`/`else`; unsupported control-flow shapes such as `while` report a clear
+SSA builder error.
 
 The CLI also includes a minimal benchmark harness for language and backend
 development:
