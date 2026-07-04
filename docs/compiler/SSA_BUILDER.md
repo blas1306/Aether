@@ -256,6 +256,36 @@ produce the same output as before. Selecting `general` does not execute SSA,
 does not enable SSA optimizations, and does not change IR lowering or backend
 semantics.
 
+## Builder Comparison
+
+The pattern-based builder remains the default for the SSA pipeline and for
+`aether --emit-ssa`. The experimental general builder is validated against that
+default in the CFG shapes both builders are expected to support.
+
+The comparison suite checks structural properties instead of exact printed SSA
+text, because temporary names are not part of the intended contract between the
+two builders. For common cases it verifies that both outputs pass
+`SSAVerifier`, expose the same functions and signatures, keep the same block
+names, remove load/store traffic, produce the same phi counts per function and
+block, use equivalent block terminators, and preserve return types.
+
+The shared comparison cases cover:
+
+- linear functions
+- arithmetic with parameters
+- local store/load promotion
+- simple `if`/`else` with a phi
+- `if`/`else` with returns in both branches
+- simple `while` loops
+- `sumTo`-style loops with two phis
+- modules with multiple functions and calls
+
+The suite also keeps a separate "general wins" case for a nested `if` CFG:
+the pattern builder must reject it, while `GeneralSSABuilder` must construct
+SSA that passes `SSAVerifier`. This documents the current experimental
+coverage expansion without changing the default builder, optimizer, lowering,
+CLI behavior, or execution semantics.
+
 ## Pseudocode
 
 ### `place_phis(function)`
