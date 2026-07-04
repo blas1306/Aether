@@ -12,12 +12,15 @@ Initial SSA infrastructure now exists under `src/aether/ssa/`:
 - `printer.py` defines deterministic textual SSA output.
 - `verifier.py` defines a minimum structural and type verifier for manually
   built SSA modules.
-- `builder.py` defines the phase-1 SSA builder for linear functions.
+- `builder.py` defines the phase-1 SSA builder for linear functions and the
+  phase-2 builder for simple acyclic `if`/`else` functions.
 - `__init__.py` exposes the public SSA model and printer API.
 
-The phase-1 SSA builder is intentionally narrow. It converts only functions
-with a single `entry` block and no `branch`, `jump`, `if`, `while`, loop, or phi
-requirements. The current compiler still lowers to slot IR, verifies slot IR,
+The phase-1 SSA builder is intentionally narrow. It converts functions with a
+single `entry` block and no `branch`, `jump`, `if`, `while`, loop, or phi
+requirements. Phase 2 adds one deliberately small control-flow shape: simple
+acyclic `if`/`else` with an optional merge block and phi nodes for promoted
+slots. The current compiler still lowers to slot IR, verifies slot IR,
 interprets slot IR, and runs the existing local optimizer pipeline over slot IR.
 SSA is not used by the backend yet.
 
@@ -66,12 +69,105 @@ entry:
 
 Current limitations:
 
-- no phi placement
+- no general phi placement
 - no dominator-tree variable renaming
 - no dominance-frontier usage
-- no multiple-block functions
-- no branches, jumps, if/else, while, or loops
+- no general multiple-block functions
+- no nested branches, general CFG, while, or loops
 - no SSA optimizer or backend integration
+
+## Implemented Phase 2
+
+`aether.ssa.SSABuilder` also supports a single acyclic `if`/`else` shape:
+
+```text
+entry:
+    ...
+    branch %cond, then0, else0
+
+then0:
+    ...
+    jump merge0
+
+else0:
+    ...
+    jump merge0
+
+merge0:
+    ...
+    return ...
+```
+
+It also accepts the related form where both `then0` and `else0` return directly
+and no merge block exists. This keeps early-return `if`/`else` functions in SSA
+without introducing unnecessary phi nodes.
+
+Phase 2 promotes slots across the two branches with explicit branch-local state:
+
+- The entry block produces the incoming slot state.
+- The then and else blocks each receive a copy of that state.
+- Stores inside a branch update only that branch's slot state.
+- At the merge, equal incoming SSA values are reused directly.
+- Different incoming SSA values of the same type produce an `SSAPhi` at the
+  top of the merge block.
+- If only one branch assigns a slot, the previous entry value is used for the
+  other branch when it exists.
+- If a slot is missing on some path and later loaded, the builder raises
+  `SSABuildError`.
+
+Example:
+
+```text
+entry:
+    %0: int = const 0
+    store %y, %0
+    %1: bool = cmp_gt %x, %0
+    branch %1, then0, else0
+
+then0:
+    %2: int = const 1
+    store %y, %2
+    jump merge0
+
+else0:
+    %3: int = const 2
+    store %y, %3
+    jump merge0
+
+merge0:
+    %4: int = load %y
+    return %4
+```
+
+becomes:
+
+```text
+entry:
+    %0: int = const 0
+    %1: bool = cmp_gt %x, %0
+    branch %1, then0, else0
+
+then0:
+    %2: int = const 1
+    jump merge0
+
+else0:
+    %3: int = const 2
+    jump merge0
+
+merge0:
+    %4: int = phi(then0: %2, else0: %3)
+    return %4
+```
+
+Any other CFG shape still raises:
+
+```text
+SSABuildError("SSA builder phase 2 only supports simple acyclic if/else.")
+```
+
+That includes `while`, back-edges, nested `if`, multiple merge blocks, merge
+blocks with more than two predecessors, and arbitrary branch/jump layouts.
 
 ## Current IR State
 
@@ -400,6 +496,8 @@ Current responsibilities:
 - `verifier.py`: minimum structural, use-definition, phi, call, and type checks
   for manually built SSA.
 - `builder.py`: phase-1 conversion from verified linear slot IR into SSA.
+  Phase 2 additionally handles simple acyclic `if`/`else` and inserts `SSAPhi`
+  nodes in the supported merge block.
 
 The future full builder should consume existing analysis results instead of
 recomputing CFG or dominators internally. That keeps the construction step
@@ -429,9 +527,11 @@ correct automatic SSA form from slot IR.
 This initial SSA construction milestone does not include:
 
 - full multi-block SSA construction
-- phi placement
+- general phi placement
 - dominator-tree variable renaming
 - dominance-frontier usage
+- while and loop SSA
+- nested `if` and general CFG SSA
 - changes to the current IR lowering semantics
 - changes to the current IR verifier
 - changes to the current IR interpreter

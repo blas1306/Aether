@@ -25,16 +25,22 @@ from aether.ir import (
     VoidType,
 )
 from aether.ssa import (
+    SSABranch,
     SSABinaryOp,
     SSABuildError,
     SSABuilder,
     SSACall,
     SSACompareOp,
     SSAConst,
+    SSAJump,
+    SSAPhi,
     SSAReturn,
     SSAVerifier,
     print_ssa,
 )
+
+
+PHASE_2_MESSAGE = "SSA builder phase 2 only supports simple acyclic if/else."
 
 
 def _build_and_verify(module: IRModule):
@@ -290,6 +296,228 @@ def test_builds_void_function_with_return() -> None:
     assert ssa_module.functions[0].blocks[0].instructions == [SSAReturn()]
 
 
+def test_builds_simple_if_else_with_phi() -> None:
+    int_type = IntType()
+    bool_type = BoolType()
+    x = IRParameter("x", int_type)
+    y = IRValue("y", int_type)
+    zero = IRValue("0", int_type)
+    condition = IRValue("1", bool_type)
+    one = IRValue("2", int_type)
+    two = IRValue("3", int_type)
+    loaded = IRValue("4", int_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "f",
+                [x],
+                int_type,
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [
+                            IRConst(zero, 0),
+                            IRCompareOp(condition, "gt", x, zero),
+                            IRBranch(condition, "then0", "else0"),
+                        ],
+                    ),
+                    IRBasicBlock(
+                        "then0",
+                        [IRConst(one, 1), IRStore(y, one), IRJump("merge0")],
+                    ),
+                    IRBasicBlock(
+                        "else0",
+                        [IRConst(two, 2), IRStore(y, two), IRJump("merge0")],
+                    ),
+                    IRBasicBlock("merge0", [IRLoad(loaded, y), IRReturn(loaded)]),
+                ],
+            )
+        ]
+    )
+
+    ssa_module = _build_and_verify(module)
+    merge_instructions = ssa_module.functions[0].blocks[3].instructions
+
+    assert isinstance(ssa_module.functions[0].blocks[0].instructions[-1], SSABranch)
+    assert isinstance(ssa_module.functions[0].blocks[1].instructions[-1], SSAJump)
+    assert isinstance(ssa_module.functions[0].blocks[2].instructions[-1], SSAJump)
+    assert isinstance(merge_instructions[0], SSAPhi)
+    assert print_ssa(ssa_module) == (
+        "func @f(%x: int) -> int {\n"
+        "entry:\n"
+        "    %0: int = const 0\n"
+        "    %1: bool = cmp_gt %x, %0\n"
+        "    branch %1, then0, else0\n"
+        "\n"
+        "then0:\n"
+        "    %2: int = const 1\n"
+        "    jump merge0\n"
+        "\n"
+        "else0:\n"
+        "    %3: int = const 2\n"
+        "    jump merge0\n"
+        "\n"
+        "merge0:\n"
+        "    %4: int = phi(then0: %2, else0: %3)\n"
+        "    return %4\n"
+        "}"
+    )
+
+
+def test_simple_if_else_reuses_same_value_without_phi() -> None:
+    int_type = IntType()
+    bool_type = BoolType()
+    condition = IRParameter("condition", bool_type)
+    slot = IRValue("x", int_type)
+    value = IRValue("0", int_type)
+    loaded = IRValue("1", int_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "same",
+                [condition],
+                int_type,
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [IRConst(value, 7), IRBranch(condition, "then0", "else0")],
+                    ),
+                    IRBasicBlock(
+                        "then0",
+                        [IRStore(slot, value), IRJump("merge0")],
+                    ),
+                    IRBasicBlock(
+                        "else0",
+                        [IRStore(slot, value), IRJump("merge0")],
+                    ),
+                    IRBasicBlock("merge0", [IRLoad(loaded, slot), IRReturn(loaded)]),
+                ],
+            )
+        ]
+    )
+
+    printed = print_ssa(_build_and_verify(module))
+
+    assert "phi" not in printed
+    assert printed == (
+        "func @same(%condition: bool) -> int {\n"
+        "entry:\n"
+        "    %0: int = const 7\n"
+        "    branch %condition, then0, else0\n"
+        "\n"
+        "then0:\n"
+        "    jump merge0\n"
+        "\n"
+        "else0:\n"
+        "    jump merge0\n"
+        "\n"
+        "merge0:\n"
+        "    return %0\n"
+        "}"
+    )
+
+
+def test_simple_if_else_uses_previous_value_for_unassigned_branch() -> None:
+    int_type = IntType()
+    bool_type = BoolType()
+    condition = IRParameter("condition", bool_type)
+    slot = IRValue("x", int_type)
+    initial = IRValue("0", int_type)
+    updated = IRValue("1", int_type)
+    loaded = IRValue("2", int_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "maybe_update",
+                [condition],
+                int_type,
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [
+                            IRConst(initial, 0),
+                            IRStore(slot, initial),
+                            IRBranch(condition, "then0", "else0"),
+                        ],
+                    ),
+                    IRBasicBlock(
+                        "then0",
+                        [IRConst(updated, 1), IRStore(slot, updated), IRJump("merge0")],
+                    ),
+                    IRBasicBlock("else0", [IRJump("merge0")]),
+                    IRBasicBlock("merge0", [IRLoad(loaded, slot), IRReturn(loaded)]),
+                ],
+            )
+        ]
+    )
+
+    ssa_module = _build_and_verify(module)
+
+    assert print_ssa(ssa_module) == (
+        "func @maybe_update(%condition: bool) -> int {\n"
+        "entry:\n"
+        "    %0: int = const 0\n"
+        "    branch %condition, then0, else0\n"
+        "\n"
+        "then0:\n"
+        "    %1: int = const 1\n"
+        "    jump merge0\n"
+        "\n"
+        "else0:\n"
+        "    jump merge0\n"
+        "\n"
+        "merge0:\n"
+        "    %2: int = phi(then0: %1, else0: %0)\n"
+        "    return %2\n"
+        "}"
+    )
+
+
+def test_builds_if_else_with_return_in_both_branches() -> None:
+    int_type = IntType()
+    bool_type = BoolType()
+    condition = IRParameter("condition", bool_type)
+    one = IRValue("0", int_type)
+    two = IRValue("1", int_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "choose",
+                [condition],
+                int_type,
+                [
+                    IRBasicBlock("entry", [IRBranch(condition, "then0", "else0")]),
+                    IRBasicBlock("then0", [IRConst(one, 1), IRReturn(one)]),
+                    IRBasicBlock("else0", [IRConst(two, 2), IRReturn(two)]),
+                ],
+            )
+        ]
+    )
+
+    ssa_module = _build_and_verify(module)
+
+    assert isinstance(ssa_module.functions[0].blocks[0].instructions[0], SSABranch)
+    assert not any(
+        isinstance(instruction, SSAPhi)
+        for block in ssa_module.functions[0].blocks
+        for instruction in block.instructions
+    )
+    assert print_ssa(ssa_module) == (
+        "func @choose(%condition: bool) -> int {\n"
+        "entry:\n"
+        "    branch %condition, then0, else0\n"
+        "\n"
+        "then0:\n"
+        "    %0: int = const 1\n"
+        "    return %0\n"
+        "\n"
+        "else0:\n"
+        "    %1: int = const 2\n"
+        "    return %1\n"
+        "}"
+    )
+
+
 def test_printer_shows_no_load_or_store_after_promotion() -> None:
     int_type = IntType()
     slot = IRValue("x", int_type)
@@ -351,7 +579,7 @@ def test_rejects_function_with_branch() -> None:
 
     _assert_build_error(
         module,
-        "SSA builder phase 1 only supports linear functions.",
+        PHASE_2_MESSAGE,
     )
 
 
@@ -369,7 +597,7 @@ def test_rejects_function_with_jump() -> None:
 
     _assert_build_error(
         module,
-        "SSA builder phase 1 only supports linear functions.",
+        PHASE_2_MESSAGE,
     )
 
 
@@ -426,5 +654,169 @@ def test_rejects_multiple_blocks() -> None:
 
     _assert_build_error(
         module,
-        "SSA builder phase 1 only supports linear functions.",
+        PHASE_2_MESSAGE,
     )
+
+
+def test_rejects_while_pattern() -> None:
+    bool_type = BoolType()
+    condition = IRParameter("condition", bool_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "loop",
+                [condition],
+                VoidType(),
+                [
+                    IRBasicBlock("entry", [IRJump("cond0")]),
+                    IRBasicBlock("cond0", [IRBranch(condition, "body0", "exit0")]),
+                    IRBasicBlock("body0", [IRJump("cond0")]),
+                    IRBasicBlock("exit0", [IRReturn()]),
+                ],
+            )
+        ]
+    )
+
+    _assert_build_error(module, PHASE_2_MESSAGE)
+
+
+def test_rejects_nested_if_pattern() -> None:
+    bool_type = BoolType()
+    condition = IRParameter("condition", bool_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "nested",
+                [condition],
+                VoidType(),
+                [
+                    IRBasicBlock("entry", [IRBranch(condition, "then0", "else0")]),
+                    IRBasicBlock("then0", [IRBranch(condition, "inner0", "inner1")]),
+                    IRBasicBlock("inner0", [IRJump("merge0")]),
+                    IRBasicBlock("inner1", [IRJump("merge0")]),
+                    IRBasicBlock("else0", [IRJump("merge0")]),
+                    IRBasicBlock("merge0", [IRReturn()]),
+                ],
+            )
+        ]
+    )
+
+    _assert_build_error(module, PHASE_2_MESSAGE)
+
+
+def test_rejects_merge_with_more_than_two_predecessors() -> None:
+    bool_type = BoolType()
+    condition = IRParameter("condition", bool_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "bad_merge",
+                [condition],
+                VoidType(),
+                [
+                    IRBasicBlock("entry", [IRBranch(condition, "then0", "else0")]),
+                    IRBasicBlock("then0", [IRJump("merge0")]),
+                    IRBasicBlock("else0", [IRJump("merge0")]),
+                    IRBasicBlock("extra0", [IRJump("merge0")]),
+                    IRBasicBlock("merge0", [IRReturn()]),
+                ],
+            )
+        ]
+    )
+
+    _assert_build_error(module, PHASE_2_MESSAGE)
+
+
+def test_rejects_merge_load_when_slot_is_not_defined_on_all_paths() -> None:
+    int_type = IntType()
+    bool_type = BoolType()
+    condition = IRParameter("condition", bool_type)
+    slot = IRValue("x", int_type)
+    value = IRValue("0", int_type)
+    loaded = IRValue("1", int_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "partial",
+                [condition],
+                int_type,
+                [
+                    IRBasicBlock("entry", [IRBranch(condition, "then0", "else0")]),
+                    IRBasicBlock(
+                        "then0",
+                        [IRConst(value, 1), IRStore(slot, value), IRJump("merge0")],
+                    ),
+                    IRBasicBlock("else0", [IRJump("merge0")]),
+                    IRBasicBlock("merge0", [IRLoad(loaded, slot), IRReturn(loaded)]),
+                ],
+            )
+        ]
+    )
+
+    _assert_build_error(
+        module,
+        "Load from slot '%x' is not defined on all paths.",
+    )
+
+
+def test_rejects_incompatible_phi_types() -> None:
+    int_type = IntType()
+    bool_type = BoolType()
+    condition = IRParameter("condition", bool_type)
+    slot = IRValue("x", int_type)
+    int_value = IRValue("0", int_type)
+    bool_value = IRValue("1", bool_type)
+    loaded = IRValue("2", int_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "bad_phi",
+                [condition],
+                int_type,
+                [
+                    IRBasicBlock("entry", [IRBranch(condition, "then0", "else0")]),
+                    IRBasicBlock(
+                        "then0",
+                        [IRConst(int_value, 1), IRStore(slot, int_value), IRJump("merge0")],
+                    ),
+                    IRBasicBlock(
+                        "else0",
+                        [
+                            IRConst(bool_value, True),
+                            IRStore(slot, bool_value),
+                            IRJump("merge0"),
+                        ],
+                    ),
+                    IRBasicBlock("merge0", [IRLoad(loaded, slot), IRReturn(loaded)]),
+                ],
+            )
+        ]
+    )
+
+    _assert_build_error(
+        module,
+        "Cannot create phi for slot '%x' with incompatible types int and bool.",
+    )
+
+
+def test_rejects_non_matching_cfg_pattern() -> None:
+    bool_type = BoolType()
+    condition = IRParameter("condition", bool_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "bad_cfg",
+                [condition],
+                VoidType(),
+                [
+                    IRBasicBlock("entry", [IRBranch(condition, "then0", "else0")]),
+                    IRBasicBlock("then0", [IRJump("merge0")]),
+                    IRBasicBlock("else0", [IRJump("other0")]),
+                    IRBasicBlock("merge0", [IRReturn()]),
+                    IRBasicBlock("other0", [IRReturn()]),
+                ],
+            )
+        ]
+    )
+
+    _assert_build_error(module, PHASE_2_MESSAGE)
