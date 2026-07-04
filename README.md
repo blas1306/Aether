@@ -22,9 +22,10 @@ and architecture boundary.
 Compiler implementation notes live under
 [`docs/compiler/`](docs/compiler/), including initial
 [`dominator`](docs/compiler/DOMINATORS.md) and
-[`SSA`](docs/compiler/SSA_DESIGN.md) design notes for future IR analysis and
-optimization work. Language-level specifications and design notes live under
-[`docs/aether/`](docs/aether/).
+[`SSA`](docs/compiler/SSA_DESIGN.md) design notes, plus the
+[`SSA construction plan`](docs/compiler/SSA_CONSTRUCTION.md), for future IR
+analysis and optimization work. Language-level specifications and design notes
+live under [`docs/aether/`](docs/aether/).
 
 ## Aether Scripts
 
