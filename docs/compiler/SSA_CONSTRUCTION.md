@@ -15,6 +15,8 @@ Initial SSA infrastructure now exists under `src/aether/ssa/`:
 - `builder.py` defines the phase-1 SSA builder for linear functions, the
   phase-2 builder for simple acyclic `if`/`else` functions, and the phase-3
   builder for simple lowered `while` loops.
+- `phi_placement.py` defines standalone general phi placement over mutable IR
+  slots using CFG, dominators, and dominance frontiers.
 - `__init__.py` exposes the public SSA model and printer API.
 - `aether.pipeline.lower_to_verified_ssa` and `SSAPipeline` provide an
   internal compiler pipeline from `TypedProgram` or verified `IRModule` to a
@@ -35,6 +37,8 @@ The current compiler still lowers to slot IR, verifies slot IR, interprets slot
 IR, and runs the existing local optimizer pipeline over slot IR. SSA is not used
 by the backend yet. It can be inspected from the CLI with
 `aether --emit-ssa program.ae`, which prints the verified SSA module and exits.
+That inspection path still uses the pattern-based builder; standalone
+`PhiPlacement` is tested internally but is not wired into the effective builder.
 
 ## Implemented Phase 1
 
@@ -81,9 +85,9 @@ entry:
 
 Current limitations:
 
-- no general phi placement
+- general phi placement exists only as a standalone pre-renaming phase
 - no dominator-tree variable renaming
-- no dominance-frontier usage
+- no dominance-frontier usage in the effective pattern-based builder
 - no general multiple-block functions
 - no nested branches, nested loops, general CFG, or arbitrary loops
 - no SSA optimizer or backend integration
@@ -494,7 +498,8 @@ pipeline.
 
 ## Phi Placement
 
-Phi placement should use the already implemented dominance frontier analysis.
+Phi placement is implemented as `aether.ssa.PhiPlacement` and uses the already
+implemented dominance frontier analysis.
 
 For each promotable slot:
 
@@ -529,6 +534,19 @@ merge0:
 Phi placement should ignore unreachable blocks for the first implementation,
 matching the current dominator and dominance-frontier treatment of unreachable
 CFG nodes.
+
+The implemented phase returns placement information only:
+
+```python
+{
+    "x": {"merge0"},
+    "i": {"cond0"},
+    "sum": {"cond0"},
+}
+```
+
+It does not create `SSAPhi` instructions, perform renaming DFS, change
+`SSABuilder`, or affect `--emit-ssa`.
 
 ## Variable Renaming
 
@@ -636,6 +654,7 @@ src/aether/ssa/
     __init__.py
     builder.py
     model.py
+    phi_placement.py
     printer.py
     verifier.py
 ```
@@ -652,6 +671,9 @@ Current responsibilities:
   nodes in the supported merge block. Phase 3 additionally handles the current
   simple lowered `while` shape and inserts `SSAPhi` nodes in the supported loop
   header.
+- `phi_placement.py`: standalone Cytron-style iterated dominance-frontier phi
+  placement for mutable IR slots. This computes `slot -> blocks` and does not
+  emit SSA instructions yet.
 - `aether.pipeline.SSAPipeline`: internal `TypedProgram`/`IRModule` to verified
   `SSAModule` preparation.
 - `aether --emit-ssa`: CLI inspection mode that uses the verified SSA pipeline
@@ -685,9 +707,9 @@ correct automatic SSA form from slot IR.
 This initial SSA construction milestone does not include:
 
 - full multi-block SSA construction
-- general phi placement
+- general phi placement wired into the effective builder
 - dominator-tree variable renaming
-- dominance-frontier usage
+- dominance-frontier usage in `SSABuilder`
 - general while and loop SSA
 - nested `if` and general CFG SSA
 - changes to the current IR lowering semantics

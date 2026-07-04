@@ -17,6 +17,7 @@ from .model import (
     SSAReturn,
     SSAValue,
 )
+from .phi_placement import PhiPlacement
 from .printer import SSAPrinter, print_ssa
 from .verifier import SSAVerificationError, SSAVerifier
 
@@ -35,6 +36,7 @@ __all__ = [
     "SSAModule",
     "SSAParameter",
     "SSAPhi",
+    "PhiPlacement",
     "SSAPrinter",
     "SSAReturn",
     "SSAValue",

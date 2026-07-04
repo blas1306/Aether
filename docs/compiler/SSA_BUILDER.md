@@ -6,9 +6,11 @@ This document is the operational plan for migrating Aether from the current
 pattern-based SSA builder to a general SSA builder based on the classic SSA
 construction algorithm.
 
-It does not describe a code change. It defines the intended behavior,
-algorithmic steps, migration phases, validation strategy, and initial limits for
-the future builder.
+The first migration step is implemented: `aether.ssa.PhiPlacement` computes
+general iterated dominance-frontier phi locations for mutable IR slots. The
+dominator-tree variable renaming phase is not implemented yet, and the
+pattern-based `SSABuilder` remains the effective builder used by the SSA
+pipeline and `--emit-ssa`.
 
 ## Current State
 
@@ -21,6 +23,7 @@ construction possible:
 - dominance-frontier analysis
 - SSA model, printer, and verifier
 - a pattern-based SSA builder
+- standalone general phi placement for mutable slots
 
 The current `SSABuilder` supports deliberately small CFG shapes:
 
@@ -138,6 +141,26 @@ incoming value per predecessor:
 ```text
 %x3: int = phi(then0: %x1, else0: %x2)
 ```
+
+Implemented API:
+
+```python
+PhiPlacement(function, cfg, dominators, dominance_frontier).place()
+```
+
+The result is a dictionary keyed by mutable slot name:
+
+```python
+{
+    "x": {"merge0"},
+    "i": {"cond0"},
+    "sum": {"cond0"},
+}
+```
+
+This phase only computes phi locations. It does not create `SSAPhi` nodes,
+rewrite loads or stores, perform renaming DFS, or affect the current
+pattern-based builder output.
 
 ## Variable Renaming
 
@@ -375,13 +398,13 @@ Phase A:
 
 Phase B:
 
-- implement general phi placement in parallel with the existing builder
-- validate pending phi placement against dominance frontiers before rewriting
-  all values
+- implemented: general phi placement runs in parallel with the existing builder
+- implemented: unit tests validate pending phi placement against dominance
+  frontiers before rewriting all values
 
 Phase C:
 
-- implement dominator-tree DFS variable renaming
+- next: implement dominator-tree DFS variable renaming
 - rewrite promoted slot loads and stores through per-slot stacks
 - complete phi operands for each successor during traversal
 
