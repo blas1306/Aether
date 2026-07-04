@@ -20,6 +20,10 @@ DOT printer are exposed by `aether.analysis.cfg`, and dominator analysis is
 exposed by `aether.analysis.dominators`. Dominance frontier analysis is exposed
 by `aether.analysis.dominance_frontier`.
 
+Initial SSA model and textual printing infrastructure lives under
+`aether.ssa`. Automatic SSA construction, SSA verification, and SSA
+optimizations are not implemented yet.
+
 Current compiler-design documents:
 
 - [DOMINATORS.md](DOMINATORS.md): implemented iterative dominator analysis,

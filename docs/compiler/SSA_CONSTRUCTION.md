@@ -6,9 +6,15 @@ This document specifies how Aether should construct SSA from the current
 slot-based IR. It is an implementation plan, not an introductory SSA design
 note.
 
-No code is implemented by this document. The current compiler still lowers to
-slot IR, verifies slot IR, interprets slot IR, and runs the existing local
-optimizer pipeline over slot IR.
+Initial SSA infrastructure now exists under `src/aether/ssa/`:
+
+- `model.py` defines the value-based SSA model.
+- `printer.py` defines deterministic textual SSA output.
+- `__init__.py` exposes the public SSA model and printer API.
+
+SSA builder and verifier code do not exist yet. The current compiler still
+lowers to slot IR, verifies slot IR, interprets slot IR, and runs the existing
+local optimizer pipeline over slot IR.
 
 ## Current IR State
 
@@ -80,10 +86,11 @@ Non-promotable state can remain in the lower slot IR until Aether has alias
 analysis and a clearer memory model. The first SSA builder should focus on
 local scalar slots.
 
-## Proposed SSA IR
+## Initial SSA IR
 
-The future SSA package should define a separate model instead of mutating the
-existing slot IR in place.
+The SSA package defines a separate model instead of mutating the existing slot
+IR in place. This first milestone is intentionally only a hand-buildable model
+and printer; automatic construction is still future work.
 
 ### SSAModule
 
@@ -129,16 +136,16 @@ The first implementation can use readable names such as `x0`, `x1`, and `x2`
 for promoted locals, plus compiler-generated names for temporary expression
 values.
 
-### IRPhi
+### SSAPhi
 
-`IRPhi` should be the SSA instruction for control-flow merges.
+`SSAPhi` is the SSA instruction for control-flow merges.
 
 Example:
 
 ```text
 merge0:
-    x2: int = phi [then0: x0], [else0: x1]
-    return x2
+    %x2: int = phi(then0: %x0, else0: %x1)
+    return %x2
 ```
 
 Each phi must define one `SSAValue` and contain one incoming value for each
@@ -303,24 +310,26 @@ diagnostics so SSA bugs are easy to localize.
 
 ## Future Architecture
 
-The future SSA implementation should live under a dedicated package:
+The SSA implementation lives under a dedicated package:
 
 ```text
 src/aether/ssa/
+    __init__.py
     model.py
-    builder.py
-    verifier.py
     printer.py
 ```
 
-Suggested responsibilities:
+Current responsibilities:
 
 - `model.py`: dataclasses or immutable model objects for SSA modules,
   functions, blocks, values, instructions, and phi nodes.
+- `printer.py`: deterministic textual SSA output for tests and debugging.
+
+Future files:
+
 - `builder.py`: conversion from verified slot IR plus CFG, dominators, and
   dominance frontiers into SSA.
 - `verifier.py`: structural, dominance, phi, and type checks for SSA.
-- `printer.py`: deterministic textual SSA output for tests and debugging.
 
 The builder should consume existing analysis results instead of recomputing CFG
 or dominators internally. That keeps the construction step testable and makes
@@ -341,13 +350,16 @@ built on top of SSA:
 - LICM: move loop-invariant pure computations out of loops using dominance and
   loop information.
 
-These should not be introduced in the initial SSA construction change. The
-first milestone is correct SSA form plus a verifier.
+These should not be introduced in early SSA work. After this initial
+model/printer milestone, the next construction milestone is correct automatic
+SSA form plus a verifier.
 
 ## Not Implemented Yet
 
-The SSA construction milestone should not include:
+This initial SSA infrastructure milestone does not include:
 
+- automatic SSA builder
+- SSA verifier
 - changes to the current IR lowering semantics
 - changes to the current IR verifier
 - changes to the current IR interpreter
@@ -361,6 +373,6 @@ The SSA construction milestone should not include:
 - global optimizations
 - native code generation
 
-The first implementation should build SSA as an internal representation from
-verified slot IR, verify it, and print or test it independently before any
+A future builder implementation should build SSA as an internal representation
+from verified slot IR, verify it, and print or test it independently before any
 runtime or optimization behavior depends on it.
