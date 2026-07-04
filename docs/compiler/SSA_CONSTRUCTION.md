@@ -17,6 +17,8 @@ Initial SSA infrastructure now exists under `src/aether/ssa/`:
   builder for simple lowered `while` loops.
 - `phi_placement.py` defines standalone general phi placement over mutable IR
   slots using CFG, dominators, and dominance frontiers.
+- `renaming.py` defines standalone experimental dominator-tree DFS variable
+  renaming over the phi-placement result.
 - `__init__.py` exposes the public SSA model and printer API.
 - `aether.pipeline.lower_to_verified_ssa` and `SSAPipeline` provide an
   internal compiler pipeline from `TypedProgram` or verified `IRModule` to a
@@ -38,7 +40,8 @@ IR, and runs the existing local optimizer pipeline over slot IR. SSA is not used
 by the backend yet. It can be inspected from the CLI with
 `aether --emit-ssa program.ae`, which prints the verified SSA module and exits.
 That inspection path still uses the pattern-based builder; standalone
-`PhiPlacement` is tested internally but is not wired into the effective builder.
+`PhiPlacement` and `SSARenamer` are tested internally but are not wired into the
+effective builder.
 
 ## Implemented Phase 1
 
@@ -85,8 +88,10 @@ entry:
 
 Current limitations:
 
-- general phi placement exists only as a standalone pre-renaming phase
-- no dominator-tree variable renaming
+- general phi placement exists only as a standalone pre-renaming phase for the
+  experimental renamer
+- dominator-tree variable renaming exists only as standalone experimental
+  infrastructure
 - no dominance-frontier usage in the effective pattern-based builder
 - no general multiple-block functions
 - no nested branches, nested loops, general CFG, or arbitrary loops
@@ -535,7 +540,7 @@ Phi placement should ignore unreachable blocks for the first implementation,
 matching the current dominator and dominance-frontier treatment of unreachable
 CFG nodes.
 
-The implemented phase returns placement information only:
+The implemented phi-placement phase returns placement information only:
 
 ```python
 {
@@ -545,12 +550,28 @@ The implemented phase returns placement information only:
 }
 ```
 
-It does not create `SSAPhi` instructions, perform renaming DFS, change
-`SSABuilder`, or affect `--emit-ssa`.
+It does not create `SSAPhi` instructions by itself, change `SSABuilder`, or
+affect `--emit-ssa`.
 
 ## Variable Renaming
 
 Variable renaming turns promoted slots into versioned SSA values.
+
+The standalone experimental implementation is `aether.ssa.SSARenamer`:
+
+```python
+SSARenamer(function, cfg, dominators, phi_placement).rename()
+```
+
+It operates per function, consumes the `slot -> blocks` placement dictionary,
+and returns an `SSARenameResult` containing an `SSAFunction`. It is tested with
+linear code, simple `if`/`else`, loop-carried `while` values, `sumTo`,
+nested-if placement, and selected negative cases. It also compares its output
+with the current pattern-based builder for linear, simple `if`/`else`, and
+simple `while` cases.
+
+This renamer is not wired into `SSABuilder`, `SSAPipeline`, `--emit-ssa`, IR
+lowering, optimizers, execution, or the CLI.
 
 The builder should maintain one stack per promoted slot:
 
@@ -656,6 +677,7 @@ src/aether/ssa/
     model.py
     phi_placement.py
     printer.py
+    renaming.py
     verifier.py
 ```
 
@@ -672,8 +694,10 @@ Current responsibilities:
   simple lowered `while` shape and inserts `SSAPhi` nodes in the supported loop
   header.
 - `phi_placement.py`: standalone Cytron-style iterated dominance-frontier phi
-  placement for mutable IR slots. This computes `slot -> blocks` and does not
-  emit SSA instructions yet.
+  placement for mutable IR slots. This computes `slot -> blocks`.
+- `renaming.py`: standalone experimental variable renaming over the dominator
+  tree. It consumes `slot -> blocks`, emits an `SSAFunction`, rewrites
+  promotable slot loads/stores, and completes phi incoming values.
 - `aether.pipeline.SSAPipeline`: internal `TypedProgram`/`IRModule` to verified
   `SSAModule` preparation.
 - `aether --emit-ssa`: CLI inspection mode that uses the verified SSA pipeline

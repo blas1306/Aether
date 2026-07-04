@@ -6,11 +6,13 @@ This document is the operational plan for migrating Aether from the current
 pattern-based SSA builder to a general SSA builder based on the classic SSA
 construction algorithm.
 
-The first migration step is implemented: `aether.ssa.PhiPlacement` computes
-general iterated dominance-frontier phi locations for mutable IR slots. The
-dominator-tree variable renaming phase is not implemented yet, and the
-pattern-based `SSABuilder` remains the effective builder used by the SSA
-pipeline and `--emit-ssa`.
+The first two migration steps are implemented as isolated infrastructure:
+`aether.ssa.PhiPlacement` computes general iterated dominance-frontier phi
+locations for mutable IR slots, and `aether.ssa.SSARenamer` performs
+function-local dominator-tree variable renaming from those placements.
+
+Both phases are still experimental. The pattern-based `SSABuilder` remains the
+effective builder used by the SSA pipeline and `--emit-ssa`.
 
 ## Current State
 
@@ -24,6 +26,7 @@ construction possible:
 - SSA model, printer, and verifier
 - a pattern-based SSA builder
 - standalone general phi placement for mutable slots
+- standalone experimental DFS renaming for mutable slots
 
 The current `SSABuilder` supports deliberately small CFG shapes:
 
@@ -159,12 +162,22 @@ The result is a dictionary keyed by mutable slot name:
 ```
 
 This phase only computes phi locations. It does not create `SSAPhi` nodes,
-rewrite loads or stores, perform renaming DFS, or affect the current
-pattern-based builder output.
+rewrite loads or stores, or affect the current pattern-based builder output.
 
 ## Variable Renaming
 
 Variable renaming rewrites mutable slot traffic into SSA values.
+
+Implemented experimental API:
+
+```python
+SSARenamer(function, cfg, dominators, phi_placement).rename()
+```
+
+The result is an `SSARenameResult` containing one `SSAFunction` plus the block
+to slot mapping used for emitted phis. This API operates on one function at a
+time and is intentionally not connected to `SSABuilder`, `SSAPipeline`, or
+`--emit-ssa` yet.
 
 The builder maintains one stack per promoted slot:
 
@@ -404,14 +417,16 @@ Phase B:
 
 Phase C:
 
-- next: implement dominator-tree DFS variable renaming
-- rewrite promoted slot loads and stores through per-slot stacks
-- complete phi operands for each successor during traversal
+- implemented experimentally: dominator-tree DFS variable renaming
+- implemented experimentally: promoted slot loads and stores are rewritten
+  through per-slot stacks
+- implemented experimentally: phi operands are completed for each successor
+  during traversal
 
 Phase D:
 
-- compare general-builder output with pattern-based output for supported
-  linear, simple `if`/`else`, and simple `while` cases
+- implemented experimentally: compare renamer output with pattern-based output
+  for supported linear, simple `if`/`else`, and simple `while` cases
 - allow harmless naming differences when the SSA verifier and structural checks
   agree
 

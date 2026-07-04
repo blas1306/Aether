@@ -19,6 +19,7 @@ from .model import (
 )
 from .phi_placement import PhiPlacement
 from .printer import SSAPrinter, print_ssa
+from .renaming import SSARenameError, SSARenameResult, SSARenamer
 from .verifier import SSAVerificationError, SSAVerifier
 
 __all__ = [
@@ -38,6 +39,9 @@ __all__ = [
     "SSAPhi",
     "PhiPlacement",
     "SSAPrinter",
+    "SSARenameError",
+    "SSARenameResult",
+    "SSARenamer",
     "SSAReturn",
     "SSAValue",
     "SSAVerificationError",
