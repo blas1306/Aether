@@ -22,11 +22,15 @@ by `aether.analysis.dominance_frontier`.
 
 Initial SSA model, textual printing, verification infrastructure, the legacy
 pattern-based SSA builder, the default `GeneralSSABuilder`, SSA analysis
-infrastructure, and the SSA optimizer pipeline live under `aether.ssa`.
+infrastructure, SCCP analysis, and the SSA optimizer pipeline live under
+`aether.ssa`.
 `aether.ssa.analysis` currently provides reusable lattice states
 (`Unknown`, `Constant(value)`, and `Overdefined`) plus a duplicate-suppressing
-FIFO worklist for future propagation analyses such as SCCP. The optimizer
-pipeline currently defaults to `SSAConstantFolder`,
+FIFO worklist for propagation analyses. `aether.ssa.optimizer.sccp` provides
+analysis-only Sparse Conditional Constant Propagation facts: value lattice
+states, executable blocks, and executable edges. It does not rewrite SSA and is
+not part of the optimizer pipeline yet. The optimizer pipeline currently
+defaults to `SSAConstantFolder`,
 `SSAGlobalConstantPropagator`, `SSAAlgebraicSimplifier`,
 `TrivialPhiEliminator`, `DeadPhiEliminator`, and `SSADeadCodeEliminator`, but
 it is still not connected to CLI SSA export or execution. `SSAConstantFolder`
@@ -40,7 +44,7 @@ rewrites phis whose incoming values are all the same SSA value;
 calls until effect analysis exists. The internal `aether.pipeline.SSAPipeline`
 prepares verified SSA modules for compiler tests and future consumers using
 the general builder by default. CLI SSA export exists for inspection; SSA
-execution, general copy propagation, SCCP, CFG simplification,
+execution, general copy propagation, SCCP transforms, CFG simplification,
 unreachable-block elimination, GVN, LICM, and effect-aware call removal are not
 implemented yet. The pattern builder remains available temporarily through
 `--ssa-builder=pattern` for compatibility and comparison.
@@ -60,7 +64,6 @@ Current compiler-design documents:
 - [SSA_BUILDER.md](SSA_BUILDER.md): operational migration notes for the move
   from the pattern-based SSA builder to the general dominance-frontier-based
   default.
-- [SCCP.md](SCCP.md): design plan for future Sparse Conditional Constant
-  Propagation over SSA, including lattice states, executable-edge tracking,
-  branch handling, phi handling, transformation phases, and initial
-  limitations.
+- [SCCP.md](SCCP.md): implemented phase 1 Sparse Conditional Constant
+  Propagation analysis over SSA, plus the plan for future transformation
+  phases.

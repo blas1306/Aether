@@ -1,10 +1,13 @@
 # Sparse Conditional Constant Propagation
 
-This document describes the planned design for Sparse Conditional Constant
-Propagation (SCCP) over Aether SSA.
+This document describes the design for Sparse Conditional Constant Propagation
+(SCCP) over Aether SSA.
 
-SCCP is not implemented yet. This is a design note for future work and does
-not describe current compiler behavior.
+Phase 1 is implemented as analysis-only infrastructure in
+`aether.ssa.optimizer.sccp`. It computes lattice state per SSA value,
+executable blocks, and executable control-flow edges for one function at a
+time. It does not rewrite SSA yet and is not connected to the SSA optimizer
+pipeline, CLI SSA export, or execution.
 
 ## Overview
 
@@ -22,8 +25,8 @@ main advantage for phi nodes and branch-heavy code: constants can survive
 through a merge when all executable incoming edges agree, even if unreachable
 incoming edges carry different values.
 
-The first Aether implementation should be per function and should use the
-existing SSA analysis infrastructure in `aether.ssa.analysis`.
+The current Aether implementation is per function and uses the existing SSA
+analysis infrastructure in `aether.ssa.analysis`.
 
 ## Value Lattice
 
@@ -35,8 +38,8 @@ SCCP tracks one lattice state for each SSA value:
   constant.
 
 The initial value state for most SSA results is `Unknown`. Function parameters
-should start as `Overdefined` because, without interprocedural information,
-their runtime values are not known.
+start as `Overdefined` because, without interprocedural information, their
+runtime values are not known. `SSAConst` results start as `Constant(value)`.
 
 Merge rules:
 
@@ -97,8 +100,9 @@ never execute user code and should not rewrite the module directly.
 
 ### SSAConst
 
-`SSAConst(result, value)` sets `result` to `Constant(value)` when the containing
-block is executable.
+`SSAConst(result, value)` defines `result` as `Constant(value)`. Phase 1 also
+initializes constant results this way before the worklist reaches their
+containing block.
 
 ### SSABinaryOp
 
@@ -162,7 +166,7 @@ per-function SCCP pass should not infer caller facts from return values.
 `SSACall` should be treated conservatively. If the call has a result and the
 containing block is executable, the result becomes `Overdefined`.
 
-The initial SCCP implementation should not attempt interprocedural constant
+The current SCCP implementation does not attempt interprocedural constant
 propagation, builtin evaluation, effect analysis, or call removal.
 
 ## Branch Handling
@@ -203,7 +207,8 @@ it should also be scheduled.
 
 ## Final Transformation
 
-After the analysis reaches a fixed point, a later transformation pass can
+Phase 1 stops after the analysis reaches a fixed point. A later transformation
+pass can
 rewrite the SSA module using the collected facts:
 
 - SSA values with `Constant(value)` can be materialized as `SSAConst`
@@ -217,13 +222,13 @@ rewrite the SSA module using the collected facts:
 - Existing or future dead-code elimination should clean up unused constants,
   obsolete computations, and dead phis after SCCP rewrites expose them.
 
-The analysis and transformation phases should be separable. Phase separation
-makes it easier to test lattice results and reachable blocks without coupling
-those tests to rewriting details.
+The analysis and transformation phases are intentionally separable. Phase
+separation makes it easier to test lattice results and reachable blocks
+without coupling those tests to rewriting details.
 
 ## Initial Limitations
 
-The first SCCP implementation should be deliberately narrow:
+The current phase 1 implementation is deliberately narrow:
 
 - per-function only
 - no interprocedural propagation
@@ -232,7 +237,8 @@ The first SCCP implementation should be deliberately narrow:
 - no builtin evaluation
 - no complete CFG simplification yet
 - no unreachable-block elimination in the SCCP pass itself
-- no branch pruning beyond replacing constant branches with jumps
+- no constant replacement
+- no branch pruning or replacement of constant branches with jumps
 - no integration with SSA optimization from the CLI yet
 
 These limits keep SCCP independent of execution, backend selection, and the
