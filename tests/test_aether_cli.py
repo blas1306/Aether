@@ -798,6 +798,31 @@ int add(int a, int b) {
     assert stderr == ""
 
 
+def test_emit_llvm_prints_call(tmp_path: Path) -> None:
+    program = tmp_path / "emit_llvm_call.ae"
+    program.write_text(
+        """
+int add(int a, int b) {
+    return a + b;
+}
+
+int main() {
+    return add(2, 3);
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert "define i32 @add(i32 %a, i32 %b)" in stdout
+    assert "define i32 @main()" in stdout
+    assert "  %0 = call i32 @add(i32 2, i32 3)\n" in stdout
+    assert "  ret i32 %0\n" in stdout
+    assert stderr == ""
+
+
 def test_emit_llvm_prints_int_compare(tmp_path: Path) -> None:
     program = tmp_path / "emit_llvm_compare.ae"
     program.write_text(
@@ -973,29 +998,42 @@ def test_build_missing_file_reports_read_error(tmp_path: Path) -> None:
     assert str(missing) in stderr
 
 
-def test_build_unsupported_llvm_feature_reports_without_traceback(
+def test_build_accepts_function_call(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    program = tmp_path / "build_unsupported.ae"
+    program = tmp_path / "build_call.ae"
+    output = tmp_path / "build_call"
+    commands: list[list[str]] = []
     program.write_text(
         """
-int one() {
-    return 1;
+int identity(int x) {
+    return x;
 }
 
 int main() {
-    return one();
+    return identity(5);
 }
 """,
         encoding="utf-8",
     )
+    monkeypatch.setattr(
+        "aether.backend.llvm.build.shutil.which",
+        lambda _name: "/usr/bin/clang",
+    )
 
-    exit_code, stdout, stderr = run_cli(["build", str(program)])
+    def fake_run(command, **_kwargs):
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
 
-    assert exit_code == EXIT_LANGUAGE_ERROR
-    assert stdout == ""
-    assert "LLVM backend does not support call" in stderr
-    assert "Traceback" not in stderr
+    monkeypatch.setattr("aether.backend.llvm.build.subprocess.run", fake_run)
+
+    exit_code, stdout, stderr = run_cli(["build", str(program), "-o", str(output)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert len(commands) == 1
+    assert stdout == f"Built executable: {output.resolve()}\n"
+    assert stderr == ""
 
 
 def test_build_reports_clear_error_when_clang_is_unavailable(
@@ -1141,6 +1179,36 @@ def test_build_smoke_compiles_and_runs_with_clang_if_available(tmp_path: Path) -
     program = tmp_path / "return_5.ae"
     output = tmp_path / "return_5"
     program.write_text("int main() { return 5; }\n", encoding="utf-8")
+
+    exit_code, stdout, stderr = run_cli(["build", str(program), "-o", str(output)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert stdout == f"Built executable: {output.resolve()}\n"
+    assert stderr == ""
+    completed = subprocess.run([str(output)], check=False)
+    assert completed.returncode == 5
+
+
+def test_build_call_smoke_compiles_and_runs_with_clang_if_available(
+    tmp_path: Path,
+) -> None:
+    if shutil.which("clang") is None:
+        pytest.skip("clang is not available")
+
+    program = tmp_path / "identity.ae"
+    output = tmp_path / "identity"
+    program.write_text(
+        """
+int identity(int x) {
+    return x;
+}
+
+int main() {
+    return identity(5);
+}
+""",
+        encoding="utf-8",
+    )
 
     exit_code, stdout, stderr = run_cli(["build", str(program), "-o", str(output)])
 

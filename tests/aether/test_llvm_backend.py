@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 import shutil
 import subprocess
 
@@ -16,7 +15,6 @@ from aether.ssa import (
     SSACompareOp,
     SSAConst,
     SSAFunction,
-    SSAInstruction,
     SSAJump,
     SSAModule,
     SSAParameter,
@@ -462,6 +460,220 @@ def test_prints_bool_phi() -> None:
     assert "  ret i1 %0" in llvm_ir
 
 
+def test_prints_int_call_without_arguments() -> None:
+    int_type = IntType()
+    result = SSAValue("result", int_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [],
+                int_type,
+                [SSABasicBlock("entry", [SSACall("one", (), result), SSAReturn(result)])],
+            )
+        ]
+    )
+
+    assert print_llvm(module) == (
+        "define i32 @main() {\n"
+        "entry:\n"
+        "  %0 = call i32 @one()\n"
+        "  ret i32 %0\n"
+        "}"
+    )
+
+
+def test_prints_int_call_with_arguments() -> None:
+    int_type = IntType()
+    left = SSAParameter("a", int_type)
+    right = SSAParameter("b", int_type)
+    result = SSAValue("result", int_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [left, right],
+                int_type,
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [SSACall("add", (left, right), result), SSAReturn(result)],
+                    )
+                ],
+            )
+        ]
+    )
+
+    assert print_llvm(module) == (
+        "define i32 @main(i32 %a, i32 %b) {\n"
+        "entry:\n"
+        "  %0 = call i32 @add(i32 %a, i32 %b)\n"
+        "  ret i32 %0\n"
+        "}"
+    )
+
+
+def test_prints_bool_call() -> None:
+    bool_type = BoolType()
+    result = SSAValue("result", bool_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [],
+                bool_type,
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [SSACall("ready", (), result), SSAReturn(result)],
+                    )
+                ],
+            )
+        ]
+    )
+
+    assert print_llvm(module) == (
+        "define i1 @main() {\n"
+        "entry:\n"
+        "  %0 = call i1 @ready()\n"
+        "  ret i1 %0\n"
+        "}"
+    )
+
+
+def test_prints_void_call_without_result() -> None:
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [],
+                VoidType(),
+                [SSABasicBlock("entry", [SSACall("tick"), SSAReturn()])],
+            )
+        ]
+    )
+
+    assert print_llvm(module) == (
+        "define void @main() {\n"
+        "entry:\n"
+        "  call void @tick()\n"
+        "  ret void\n"
+        "}"
+    )
+
+
+def test_prints_call_with_multiple_argument_types() -> None:
+    int_type = IntType()
+    bool_type = BoolType()
+    count = SSAParameter("count", int_type)
+    flag = SSAParameter("flag", bool_type)
+    result = SSAValue("result", int_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [count, flag],
+                int_type,
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSACall("choose", (count, flag, count), result),
+                            SSAReturn(result),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+
+    assert (
+        "  %0 = call i32 @choose(i32 %count, i1 %flag, i32 %count)\n"
+        in print_llvm(module)
+    )
+
+
+def test_prints_function_that_calls_another_function() -> None:
+    int_type = IntType()
+    one_value = SSAValue("one", int_type)
+    call_result = SSAValue("result", int_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "one",
+                [],
+                int_type,
+                [SSABasicBlock("entry", [SSAConst(one_value, 1), SSAReturn(one_value)])],
+            ),
+            SSAFunction(
+                "main",
+                [],
+                int_type,
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [SSACall("one", (), call_result), SSAReturn(call_result)],
+                    )
+                ],
+            ),
+        ]
+    )
+
+    assert print_llvm(module) == (
+        "define i32 @one() {\n"
+        "entry:\n"
+        "  ret i32 1\n"
+        "}\n"
+        "\n"
+        "define i32 @main() {\n"
+        "entry:\n"
+        "  %0 = call i32 @one()\n"
+        "  ret i32 %0\n"
+        "}"
+    )
+
+
+def test_call_result_with_unsupported_type_has_clear_error() -> None:
+    result = SSAValue("result", StringType())
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [],
+                IntType(),
+                [SSABasicBlock("entry", [SSACall("text", (), result)])],
+            )
+        ]
+    )
+
+    with pytest.raises(
+        LLVMBackendError,
+        match="LLVM backend does not support type string",
+    ):
+        print_llvm(module)
+
+
+def test_call_argument_with_unsupported_type_has_clear_error() -> None:
+    argument = SSAParameter("text", StringType())
+    result = SSAValue("result", IntType())
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [],
+                IntType(),
+                [SSABasicBlock("entry", [SSACall("length", (argument,), result)])],
+            )
+        ]
+    )
+
+    with pytest.raises(
+        LLVMBackendError,
+        match="LLVM backend does not support type string",
+    ):
+        print_llvm(module)
+
+
 def test_prints_phi_incoming_values_in_original_order() -> None:
     int_type = IntType()
     left = SSAValue("left", int_type)
@@ -613,37 +825,6 @@ def test_string_type_has_clear_error() -> None:
         LLVMBackendError,
         match="LLVM backend does not support type string",
     ):
-        print_llvm(module)
-
-
-@pytest.mark.parametrize(
-    ("instruction", "message"),
-    [
-        (
-            lambda condition, value: SSACall("other", (), value),
-            "LLVM backend does not support call",
-        ),
-    ],
-)
-def test_unsupported_control_and_call_instructions_have_clear_errors(
-    instruction: Callable[[SSAParameter, SSAValue], SSAInstruction],
-    message: str,
-) -> None:
-    int_type = IntType()
-    condition = SSAParameter("condition", BoolType())
-    value = SSAValue("0", int_type)
-    module = SSAModule(
-        [
-            SSAFunction(
-                "main",
-                [condition],
-                int_type,
-                [SSABasicBlock("entry", [instruction(condition, value)])],
-            )
-        ]
-    )
-
-    with pytest.raises(LLVMBackendError, match=message):
         print_llvm(module)
 
 

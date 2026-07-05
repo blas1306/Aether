@@ -53,11 +53,23 @@ Native builds require `clang` on `PATH`.
 - `SSAPhi` over supported scalar types (`int`/`i32` and `bool`/`i1`):
   - `phi(then0: %2, else0: %3)` ->
     `phi i32 [ %2, %then0 ], [ %3, %else0 ]`
+- `SSACall` direct function calls over supported scalar types:
+  - `%4: int = call @foo(%1, %2)` ->
+    `%0 = call i32 @foo(i32 %1, i32 %2)`
+  - `call @foo(...)` with no SSA result ->
+    `call void @foo(...)`
 - `SSAReturn`.
 
 This means an `if`/`else` where both branches return directly can compile to
 LLVM IR, and an `if`/`else` that merges an `int` or `bool` value can also be
 emitted completely through `SSAPhi`.
+
+Direct recursion should work automatically because recursive calls use the same
+ordinary LLVM call emission as any other direct function call. There is no
+special recursion lowering in the backend.
+
+`while` loops whose SSA form uses branches, jumps, phi nodes, and supported
+calls can now be emitted by this backend subset.
 
 Type mapping:
 
@@ -102,6 +114,21 @@ merge0:
 }
 ```
 
+Call example:
+
+```llvm
+define i32 @identity(i32 %x) {
+entry:
+  ret i32 %x
+}
+
+define i32 @main() {
+entry:
+  %0 = call i32 @identity(i32 5)
+  ret i32 %0
+}
+```
+
 ## Limitations
 
 The backend deliberately does not support these yet:
@@ -112,13 +139,12 @@ The backend deliberately does not support these yet:
 - runtime calls
 - heap allocation
 - imports or packages
+- indirect calls, function pointers, or varargs
 - LLVM optimization passes
 - linking beyond invoking `clang` on the generated `.ll`
 - cross-compilation
 - JIT or `llc` build paths
 - automatic execution after build
-- `SSACall`
-- `while` loops are still pending as a complete backend feature
 
 Unsupported input raises `LLVMBackendError` with messages beginning with:
 

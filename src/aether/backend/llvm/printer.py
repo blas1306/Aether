@@ -98,7 +98,7 @@ class LLVMPrinter:
         if isinstance(instruction, SSAJump):
             return self._print_jump(instruction)
         if isinstance(instruction, SSACall):
-            self._unsupported("call")
+            return self._print_call(instruction)
         self._unsupported(type(instruction).__name__)
 
     def _record_const(self, instruction: SSAConst) -> None:
@@ -194,6 +194,23 @@ class LLVMPrinter:
 
     def _print_jump(self, instruction: SSAJump) -> str:
         return f"br {self._label_operand(instruction.target)}"
+
+    def _print_call(self, instruction: SSACall) -> str:
+        arguments = ", ".join(
+            f"{llvm_type(argument.type)} {self._operand(argument)}"
+            for argument in instruction.arguments
+        )
+        callee = self._global_name(instruction.function)
+        if instruction.result is None:
+            return f"call void {callee}({arguments})"
+
+        return_type = llvm_type(instruction.result.type)
+        if isinstance(instruction.result.type, VoidType):
+            raise LLVMBackendError(
+                "LLVM backend does not support assigning void call results"
+            )
+        result = self._new_temp(instruction.result)
+        return f"{result} = call {return_type} {callee}({arguments})"
 
     def _operand(self, value: SSAValue) -> str:
         key = self._key(value)
