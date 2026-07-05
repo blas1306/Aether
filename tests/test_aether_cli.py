@@ -903,10 +903,10 @@ def test_emit_llvm_missing_file_reports_read_error(tmp_path: Path) -> None:
     assert str(missing) in stderr
 
 
-def test_emit_llvm_unsupported_feature_reports_without_traceback(
+def test_emit_llvm_prints_if_else_merge_phi(
     tmp_path: Path,
 ) -> None:
-    program = tmp_path / "emit_llvm_unsupported.ae"
+    program = tmp_path / "emit_llvm_phi.ae"
     program.write_text(
         """
 int choose(int x) {
@@ -924,10 +924,11 @@ int choose(int x) {
 
     exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
 
-    assert exit_code == EXIT_LANGUAGE_ERROR
-    assert stdout == ""
-    assert "LLVM backend does not support phi" in stderr
-    assert "Traceback" not in stderr
+    assert exit_code == EXIT_SUCCESS
+    assert "merge0:\n" in stdout
+    assert "  %1 = phi i32 [ 1, %then0 ], [ 2, %else0 ]\n" in stdout
+    assert "  ret i32 %1\n" in stdout
+    assert stderr == ""
 
 
 @pytest.mark.parametrize(
@@ -978,14 +979,12 @@ def test_build_unsupported_llvm_feature_reports_without_traceback(
     program = tmp_path / "build_unsupported.ae"
     program.write_text(
         """
-int choose(int x) {
-    int y = 0;
-    if x > 0 {
-        y = 1;
-    } else {
-        y = 2;
-    }
-    return y;
+int one() {
+    return 1;
+}
+
+int main() {
+    return one();
 }
 """,
         encoding="utf-8",
@@ -995,7 +994,7 @@ int choose(int x) {
 
     assert exit_code == EXIT_LANGUAGE_ERROR
     assert stdout == ""
-    assert "LLVM backend does not support phi" in stderr
+    assert "LLVM backend does not support call" in stderr
     assert "Traceback" not in stderr
 
 

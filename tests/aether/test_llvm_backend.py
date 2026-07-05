@@ -367,6 +367,187 @@ def test_prints_branch_with_bool_parameter_condition() -> None:
     assert "  br i1 %flag, label %then0, label %else0" in print_llvm(module)
 
 
+def test_prints_int_phi_with_two_incoming_values() -> None:
+    int_type = IntType()
+    flag = SSAParameter("flag", BoolType())
+    then_value = SSAValue("then_value", int_type)
+    else_value = SSAValue("else_value", int_type)
+    phi_value = SSAValue("phi_value", int_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "choose",
+                [flag],
+                int_type,
+                [
+                    SSABasicBlock("entry", [SSABranch(flag, "then0", "else0")]),
+                    SSABasicBlock(
+                        "then0",
+                        [SSAConst(then_value, 1), SSAJump("merge0")],
+                    ),
+                    SSABasicBlock(
+                        "else0",
+                        [SSAConst(else_value, 2), SSAJump("merge0")],
+                    ),
+                    SSABasicBlock(
+                        "merge0",
+                        [
+                            SSAPhi(
+                                phi_value,
+                                (("then0", then_value), ("else0", else_value)),
+                            ),
+                            SSAReturn(phi_value),
+                        ],
+                    ),
+                ],
+            )
+        ]
+    )
+
+    assert print_llvm(module) == (
+        "define i32 @choose(i1 %flag) {\n"
+        "entry:\n"
+        "  br i1 %flag, label %then0, label %else0\n"
+        "then0:\n"
+        "  br label %merge0\n"
+        "else0:\n"
+        "  br label %merge0\n"
+        "merge0:\n"
+        "  %0 = phi i32 [ 1, %then0 ], [ 2, %else0 ]\n"
+        "  ret i32 %0\n"
+        "}"
+    )
+
+
+def test_prints_bool_phi() -> None:
+    bool_type = BoolType()
+    flag = SSAParameter("flag", bool_type)
+    then_value = SSAValue("then_value", bool_type)
+    else_value = SSAValue("else_value", bool_type)
+    phi_value = SSAValue("phi_value", bool_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "choose_flag",
+                [flag],
+                bool_type,
+                [
+                    SSABasicBlock("entry", [SSABranch(flag, "then0", "else0")]),
+                    SSABasicBlock(
+                        "then0",
+                        [SSAConst(then_value, True), SSAJump("merge0")],
+                    ),
+                    SSABasicBlock(
+                        "else0",
+                        [SSAConst(else_value, False), SSAJump("merge0")],
+                    ),
+                    SSABasicBlock(
+                        "merge0",
+                        [
+                            SSAPhi(
+                                phi_value,
+                                (("then0", then_value), ("else0", else_value)),
+                            ),
+                            SSAReturn(phi_value),
+                        ],
+                    ),
+                ],
+            )
+        ]
+    )
+
+    llvm_ir = print_llvm(module)
+
+    assert "  %0 = phi i1 [ 1, %then0 ], [ 0, %else0 ]\n" in llvm_ir
+    assert "  ret i1 %0" in llvm_ir
+
+
+def test_prints_phi_incoming_values_in_original_order() -> None:
+    int_type = IntType()
+    left = SSAValue("left", int_type)
+    middle = SSAValue("middle", int_type)
+    right = SSAValue("right", int_type)
+    phi_value = SSAValue("phi_value", int_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "choose",
+                [],
+                int_type,
+                [
+                    SSABasicBlock("entry", [SSAJump("left0")]),
+                    SSABasicBlock("left0", [SSAConst(left, 10), SSAJump("merge0")]),
+                    SSABasicBlock(
+                        "middle0",
+                        [SSAConst(middle, 20), SSAJump("merge0")],
+                    ),
+                    SSABasicBlock("right0", [SSAConst(right, 30), SSAJump("merge0")]),
+                    SSABasicBlock(
+                        "merge0",
+                        [
+                            SSAPhi(
+                                phi_value,
+                                (
+                                    ("left0", left),
+                                    ("middle0", middle),
+                                    ("right0", right),
+                                ),
+                            ),
+                            SSAReturn(phi_value),
+                        ],
+                    ),
+                ],
+            )
+        ]
+    )
+
+    assert (
+        "  %0 = phi i32 [ 10, %left0 ], [ 20, %middle0 ], [ 30, %right0 ]\n"
+        in print_llvm(module)
+    )
+
+
+def test_empty_phi_incoming_has_clear_error() -> None:
+    int_type = IntType()
+    phi_value = SSAValue("phi_value", int_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [],
+                int_type,
+                [SSABasicBlock("entry", [SSAPhi(phi_value, ())])],
+            )
+        ]
+    )
+
+    with pytest.raises(
+        LLVMBackendError,
+        match="LLVM backend does not support phi with no incoming values",
+    ):
+        print_llvm(module)
+
+
+def test_unsupported_phi_type_has_clear_error() -> None:
+    phi_value = SSAValue("phi_value", StringType())
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [],
+                StringType(),
+                [SSABasicBlock("entry", [SSAPhi(phi_value, (("entry", phi_value),))])],
+            )
+        ]
+    )
+
+    with pytest.raises(
+        LLVMBackendError,
+        match="LLVM backend does not support type string",
+    ):
+        print_llvm(module)
+
+
 def test_branch_condition_must_be_bool() -> None:
     int_type = IntType()
     condition = SSAParameter("condition", int_type)
@@ -438,10 +619,6 @@ def test_string_type_has_clear_error() -> None:
 @pytest.mark.parametrize(
     ("instruction", "message"),
     [
-        (
-            lambda condition, value: SSAPhi(value, (("entry", value),)),
-            "LLVM backend does not support phi",
-        ),
         (
             lambda condition, value: SSACall("other", (), value),
             "LLVM backend does not support call",
@@ -619,6 +796,56 @@ def test_generated_bool_main_compare_can_be_compiled_with_clang_if_available(
     result_process = subprocess.run([str(exe_path)], check=False)
 
     assert result_process.returncode == 1
+
+
+def test_generated_phi_max_function_can_be_compiled_with_clang_if_available(
+    tmp_path,
+) -> None:
+    clang = shutil.which("clang")
+    if clang is None:
+        pytest.skip("clang is not available")
+
+    int_type = IntType()
+    bool_type = BoolType()
+    left = SSAParameter("a", int_type)
+    right = SSAParameter("b", int_type)
+    condition = SSAValue("0", bool_type)
+    result = SSAValue("1", int_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "max",
+                [left, right],
+                int_type,
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSACompareOp(condition, "gt", left, right),
+                            SSABranch(condition, "then0", "else0"),
+                        ],
+                    ),
+                    SSABasicBlock("then0", [SSAJump("merge0")]),
+                    SSABasicBlock("else0", [SSAJump("merge0")]),
+                    SSABasicBlock(
+                        "merge0",
+                        [
+                            SSAPhi(result, (("then0", left), ("else0", right))),
+                            SSAReturn(result),
+                        ],
+                    ),
+                ],
+            )
+        ]
+    )
+    llvm_ir = print_llvm(module)
+    assert "phi i32 [ %a, %then0 ], [ %b, %else0 ]" in llvm_ir
+
+    ir_path = tmp_path / "max.ll"
+    object_path = tmp_path / "max.o"
+    ir_path.write_text(llvm_ir, encoding="utf-8")
+
+    subprocess.run([clang, "-c", str(ir_path), "-o", str(object_path)], check=True)
 
 
 def test_generated_branch_main_can_be_compiled_with_clang_if_available(

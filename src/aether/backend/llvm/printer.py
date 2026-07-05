@@ -92,7 +92,7 @@ class LLVMPrinter:
         if isinstance(instruction, SSAReturn):
             return self._print_return(instruction, function)
         if isinstance(instruction, SSAPhi):
-            self._unsupported("phi")
+            return self._print_phi(instruction)
         if isinstance(instruction, SSABranch):
             return self._print_branch(instruction)
         if isinstance(instruction, SSAJump):
@@ -147,6 +147,18 @@ class LLVMPrinter:
         left = self._operand(instruction.left)
         right = self._operand(instruction.right)
         return f"{result} = icmp {predicate} i32 {left}, {right}"
+
+    def _print_phi(self, instruction: SSAPhi) -> str:
+        if not instruction.incoming:
+            raise LLVMBackendError("LLVM backend does not support phi with no incoming values")
+
+        result_type = llvm_type(instruction.result.type)
+        result = self._new_temp(instruction.result)
+        incoming = ", ".join(
+            f"[ {self._operand(value)}, %{self._label_name(block)} ]"
+            for block, value in instruction.incoming
+        )
+        return f"{result} = phi {result_type} {incoming}"
 
     def _print_return(self, instruction: SSAReturn, function: SSAFunction) -> str:
         if instruction.value is None:
@@ -246,6 +258,15 @@ class LLVMPrinter:
             raise LLVMBackendError("LLVM backend does not support empty block labels")
         if cls._IDENTIFIER_RE.match(raw) or raw.isdigit():
             return f"{raw}:"
+        raise LLVMBackendError(f"LLVM backend does not support block label '{name}'")
+
+    @classmethod
+    def _label_name(cls, name: str) -> str:
+        raw = cls._strip_percent(name)
+        if not raw:
+            raise LLVMBackendError("LLVM backend does not support empty block labels")
+        if cls._IDENTIFIER_RE.match(raw) or raw.isdigit():
+            return raw
         raise LLVMBackendError(f"LLVM backend does not support block label '{name}'")
 
     @staticmethod

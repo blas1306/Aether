@@ -29,10 +29,10 @@ Native builds require `clang` on `PATH`.
 ## Supported Subset
 
 - SSA input: `SSAModule`.
-- Functions with no parameters or integer parameters.
-- Integer return values.
+- Functions with no parameters, integer parameters, or boolean parameters.
+- Integer and boolean return values.
 - Void functions with empty `return`.
-- `SSAConst` integer values, emitted as immediate LLVM operands.
+- `SSAConst` integer and boolean values, emitted as immediate LLVM operands.
 - `SSABinaryOp` integer operations:
   - `add` -> `add`
   - `sub` -> `sub`
@@ -50,10 +50,14 @@ Native builds require `clang` on `PATH`.
   - `branch %cond, then0, else0` -> `br i1 %cond, label %then0, label %else0`
 - `SSAJump`:
   - `jump exit0` -> `br label %exit0`
+- `SSAPhi` over supported scalar types (`int`/`i32` and `bool`/`i1`):
+  - `phi(then0: %2, else0: %3)` ->
+    `phi i32 [ %2, %then0 ], [ %3, %else0 ]`
 - `SSAReturn`.
 
 This means an `if`/`else` where both branches return directly can compile to
-LLVM IR, because it does not require a merge value or `SSAPhi`.
+LLVM IR, and an `if`/`else` that merges an `int` or `bool` value can also be
+emitted completely through `SSAPhi`.
 
 Type mapping:
 
@@ -89,9 +93,12 @@ entry:
   %0 = icmp sgt i32 %x, 0
   br i1 %0, label %then0, label %else0
 then0:
-  ret i32 1
+  br label %merge0
 else0:
-  ret i32 2
+  br label %merge0
+merge0:
+  %1 = phi i32 [ 1, %then0 ], [ 2, %else0 ]
+  ret i32 %1
 }
 ```
 
@@ -110,9 +117,8 @@ The backend deliberately does not support these yet:
 - cross-compilation
 - JIT or `llc` build paths
 - automatic execution after build
-- `SSAPhi` or `SSACall`
-- `while` loops
-- merge values from `if`/`else`, because `SSAPhi` is still pending
+- `SSACall`
+- `while` loops are still pending as a complete backend feature
 
 Unsupported input raises `LLVMBackendError` with messages beginning with:
 
