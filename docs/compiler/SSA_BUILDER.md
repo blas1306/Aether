@@ -280,11 +280,36 @@ The shared comparison cases cover:
 - `sumTo`-style loops with two phis
 - modules with multiple functions and calls
 
-The suite also keeps a separate "general wins" case for a nested `if` CFG:
-the pattern builder must reject it, while `GeneralSSABuilder` must construct
-SSA that passes `SSAVerifier`. This documents the current experimental
-coverage expansion without changing the default builder, optimizer, lowering,
-CLI behavior, or execution semantics.
+The suite also keeps a stress matrix for larger CFG shapes. Those tests classify
+each case as `SUPPORTED`, `PATTERN_ONLY`, `GENERAL_ONLY`, or `UNSUPPORTED`
+according to the actual builders today. Unsupported cases are asserted as
+current limitations instead of being forced to pass. This documents the current
+experimental coverage expansion without changing the default builder, optimizer,
+lowering, CLI behavior, or execution semantics.
+
+## Current GeneralSSABuilder Coverage
+
+Legend:
+
+- `✓`: supported by the current test suite
+- `✗`: not supported
+- `△`: partially supported; see notes
+
+| CFG shape | Pattern | General | Current classification | Notes |
+| --- | --- | --- | --- | --- |
+| Lineal | ✓ | ✓ | `SUPPORTED` | Both builders produce verifier-clean SSA. |
+| If simple | ✓ | ✓ | `SUPPORTED` | Simple acyclic `if`/`else` remains shared coverage. |
+| While simple | ✓ | ✓ | `SUPPORTED` | Includes simple loop-carried slots. |
+| Nested if | ✗ | ✓ | `GENERAL_ONLY` | General places independent inner and outer merge phis. |
+| Nested while | ✗ | △ | `GENERAL_ONLY` / `UNSUPPORTED` | Works when inner-loop slots have visible values on all incoming paths; loop-local slots that trigger dead phis can still fail. |
+| If in while | ✗ | ✓ | `GENERAL_ONLY` | General handles loop-header phis plus the inner merge phi. |
+| While in if | ✗ | △ | `GENERAL_ONLY` / `UNSUPPORTED` | Works when loop-carried slots are initialized before the branch; branch-local loop slots can still fail due non-liveness-pruned phi placement. |
+| Sequential ifs | ✗ | ✓ | `GENERAL_ONLY` | General places separate phis for each merge. |
+| Sequential loops | ✗ | ✓ | `GENERAL_ONLY` | General keeps loop-header phis independent across loops. |
+| Multiple loop-carried slots | ✓ | ✓ | `SUPPORTED` | Current pattern while support and General both verify three loop-carried phis. |
+| Several independent merges | ✗ | ✓ | `GENERAL_ONLY` | General places independent phis for separate merge blocks. |
+| Large function | ✗ | ✓ | `GENERAL_ONLY` | Stress case verifies `SSAVerifier`, no load/store traffic, consistent CFG targets, and multiple phis. |
+| General CFG | ✗ | △ | `GENERAL_ONLY` / `UNSUPPORTED` | Reducible structured stress CFGs pass; liveness-sensitive phi pruning is not complete. |
 
 ## Pseudocode
 
