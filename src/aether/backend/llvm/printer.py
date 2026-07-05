@@ -35,6 +35,14 @@ class LLVMPrinter:
         "mod": "srem",
         "rem": "srem",
     }
+    _COMPARE_OPERATORS = {
+        "lt": "slt",
+        "le": "sle",
+        "gt": "sgt",
+        "ge": "sge",
+        "eq": "eq",
+        "ne": "ne",
+    }
     _IDENTIFIER_RE = re.compile(r"^[A-Za-z_$._][A-Za-z0-9_$._-]*$")
 
     def print_module(self, module: SSAModule) -> str:
@@ -79,6 +87,8 @@ class LLVMPrinter:
             return None
         if isinstance(instruction, SSABinaryOp):
             return self._print_binary_op(instruction)
+        if isinstance(instruction, SSACompareOp):
+            return self._print_compare_op(instruction)
         if isinstance(instruction, SSAReturn):
             return self._print_return(instruction, function)
         if isinstance(instruction, SSAPhi):
@@ -89,8 +99,6 @@ class LLVMPrinter:
             self._unsupported("jump")
         if isinstance(instruction, SSACall):
             self._unsupported("call")
-        if isinstance(instruction, SSACompareOp):
-            self._unsupported("compare")
         self._unsupported(type(instruction).__name__)
 
     def _record_const(self, instruction: SSAConst) -> None:
@@ -119,6 +127,26 @@ class LLVMPrinter:
         left = self._operand(instruction.left)
         right = self._operand(instruction.right)
         return f"{result} = {operator} i32 {left}, {right}"
+
+    def _print_compare_op(self, instruction: SSACompareOp) -> str:
+        predicate = self._COMPARE_OPERATORS.get(instruction.operator)
+        if predicate is None:
+            raise LLVMBackendError(
+                f"LLVM backend does not support compare operator '{instruction.operator}'"
+            )
+        if not (
+            isinstance(instruction.result.type, BoolType)
+            and isinstance(instruction.left.type, IntType)
+            and isinstance(instruction.right.type, IntType)
+        ):
+            raise LLVMBackendError(
+                "LLVM backend only supports i32 integer comparisons producing i1"
+            )
+
+        result = self._new_temp(instruction.result)
+        left = self._operand(instruction.left)
+        right = self._operand(instruction.right)
+        return f"{result} = icmp {predicate} i32 {left}, {right}"
 
     def _print_return(self, instruction: SSAReturn, function: SSAFunction) -> str:
         if instruction.value is None:

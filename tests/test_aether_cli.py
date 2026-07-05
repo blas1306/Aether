@@ -798,6 +798,30 @@ int add(int a, int b) {
     assert stderr == ""
 
 
+def test_emit_llvm_prints_int_compare(tmp_path: Path) -> None:
+    program = tmp_path / "emit_llvm_compare.ae"
+    program.write_text(
+        """
+boolean greater(int a, int b) {
+    return a > b;
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert stdout == (
+        "define i1 @greater(i32 %a, i32 %b) {\n"
+        "entry:\n"
+        "  %0 = icmp sgt i32 %a, %b\n"
+        "  ret i1 %0\n"
+        "}\n"
+    )
+    assert stderr == ""
+
+
 def test_emit_llvm_missing_file_reports_read_error(tmp_path: Path) -> None:
     missing = tmp_path / "missing_llvm.ae"
 
@@ -830,7 +854,7 @@ int choose(int x) {
 
     assert exit_code == EXIT_LANGUAGE_ERROR
     assert stdout == ""
-    assert "LLVM backend does not support compare" in stderr
+    assert "LLVM backend does not support branch" in stderr
     assert "Traceback" not in stderr
 
 
@@ -897,7 +921,7 @@ int choose(int x) {
 
     assert exit_code == EXIT_LANGUAGE_ERROR
     assert stdout == ""
-    assert "LLVM backend does not support compare" in stderr
+    assert "LLVM backend does not support branch" in stderr
     assert "Traceback" not in stderr
 
 
@@ -1052,6 +1076,25 @@ def test_build_smoke_compiles_and_runs_with_clang_if_available(tmp_path: Path) -
     assert stderr == ""
     completed = subprocess.run([str(output)], check=False)
     assert completed.returncode == 5
+
+
+def test_build_bool_compare_smoke_compiles_and_runs_with_clang_if_available(
+    tmp_path: Path,
+) -> None:
+    if shutil.which("clang") is None:
+        pytest.skip("clang is not available")
+
+    program = tmp_path / "return_compare.ae"
+    output = tmp_path / "return_compare"
+    program.write_text("boolean main() { return 3 > 2; }\n", encoding="utf-8")
+
+    exit_code, stdout, stderr = run_cli(["build", str(program), "-o", str(output)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert stdout == f"Built executable: {output.resolve()}\n"
+    assert stderr == ""
+    completed = subprocess.run([str(output)], check=False)
+    assert completed.returncode == 1
 
 
 def test_normal_cli_execution_is_unchanged_after_emit_llvm(tmp_path: Path) -> None:

@@ -13,6 +13,7 @@ from aether.ssa import (
     SSABinaryOp,
     SSABranch,
     SSACall,
+    SSACompareOp,
     SSAConst,
     SSAFunction,
     SSAInstruction,
@@ -180,6 +181,87 @@ def test_prints_void_function() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("operator", "predicate"),
+    [
+        ("lt", "slt"),
+        ("le", "sle"),
+        ("gt", "sgt"),
+        ("ge", "sge"),
+        ("eq", "eq"),
+        ("ne", "ne"),
+    ],
+)
+def test_prints_int_compare_operations(operator: str, predicate: str) -> None:
+    int_type = IntType()
+    bool_type = BoolType()
+    left = SSAParameter("a", int_type)
+    right = SSAParameter("b", int_type)
+    result = SSAValue("0", bool_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "compare",
+                [left, right],
+                bool_type,
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSACompareOp(result, operator, left, right),
+                            SSAReturn(result),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+
+    assert print_llvm(module) == (
+        "define i1 @compare(i32 %a, i32 %b) {\n"
+        "entry:\n"
+        f"  %0 = icmp {predicate} i32 %a, %b\n"
+        "  ret i1 %0\n"
+        "}"
+    )
+
+
+def test_prints_comparison_as_return_value() -> None:
+    int_type = IntType()
+    bool_type = BoolType()
+    left = SSAValue("left", int_type)
+    right = SSAValue("right", int_type)
+    result = SSAValue("result", bool_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [],
+                bool_type,
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(left, 3),
+                            SSAConst(right, 2),
+                            SSACompareOp(result, "gt", left, right),
+                            SSAReturn(result),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+
+    assert print_llvm(module) == (
+        "define i1 @main() {\n"
+        "entry:\n"
+        "  %0 = icmp sgt i32 3, 2\n"
+        "  ret i1 %0\n"
+        "}"
+    )
+
+
 def test_string_type_has_clear_error() -> None:
     value = SSAValue("0", StringType())
     module = SSAModule(
@@ -266,6 +348,53 @@ def test_unknown_binary_operator_has_clear_error() -> None:
         print_llvm(module)
 
 
+def test_unknown_compare_operator_has_clear_error() -> None:
+    int_type = IntType()
+    bool_type = BoolType()
+    left = SSAParameter("a", int_type)
+    right = SSAParameter("b", int_type)
+    result = SSAValue("0", bool_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [left, right],
+                bool_type,
+                [SSABasicBlock("entry", [SSACompareOp(result, "same", left, right)])],
+            )
+        ]
+    )
+
+    with pytest.raises(
+        LLVMBackendError,
+        match="LLVM backend does not support compare operator 'same'",
+    ):
+        print_llvm(module)
+
+
+def test_non_i32_compare_has_clear_error() -> None:
+    bool_type = BoolType()
+    left = SSAParameter("a", bool_type)
+    right = SSAParameter("b", bool_type)
+    result = SSAValue("0", bool_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [left, right],
+                bool_type,
+                [SSABasicBlock("entry", [SSACompareOp(result, "eq", left, right)])],
+            )
+        ]
+    )
+
+    with pytest.raises(
+        LLVMBackendError,
+        match="LLVM backend only supports i32 integer comparisons producing i1",
+    ):
+        print_llvm(module)
+
+
 def test_generated_main_can_be_compiled_with_clang_if_available(tmp_path) -> None:
     clang = shutil.which("clang")
     if clang is None:
@@ -303,3 +432,45 @@ def test_generated_main_can_be_compiled_with_clang_if_available(tmp_path) -> Non
     result_process = subprocess.run([str(exe_path)], check=False)
 
     assert result_process.returncode == 5
+
+
+def test_generated_bool_main_compare_can_be_compiled_with_clang_if_available(
+    tmp_path,
+) -> None:
+    clang = shutil.which("clang")
+    if clang is None:
+        pytest.skip("clang is not available")
+
+    int_type = IntType()
+    bool_type = BoolType()
+    left = SSAValue("0", int_type)
+    right = SSAValue("1", int_type)
+    comparison = SSAValue("2", bool_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [],
+                bool_type,
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(left, 3),
+                            SSAConst(right, 2),
+                            SSACompareOp(comparison, "gt", left, right),
+                            SSAReturn(comparison),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+    ir_path = tmp_path / "bool_main.ll"
+    exe_path = tmp_path / "bool_main"
+    ir_path.write_text(print_llvm(module), encoding="utf-8")
+
+    subprocess.run([clang, str(ir_path), "-o", str(exe_path)], check=True)
+    result_process = subprocess.run([str(exe_path)], check=False)
+
+    assert result_process.returncode == 1

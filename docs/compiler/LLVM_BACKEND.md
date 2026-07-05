@@ -39,6 +39,13 @@ Native builds require `clang` on `PATH`.
   - `mul` -> `mul`
   - `div` -> `sdiv`
   - `mod` and `rem` -> `srem`
+- `SSACompareOp` integer comparisons over `i32`, producing `i1`:
+  - `lt` -> `icmp slt`
+  - `le` -> `icmp sle`
+  - `gt` -> `icmp sgt`
+  - `ge` -> `icmp sge`
+  - `eq` -> `icmp eq`
+  - `ne` -> `icmp ne`
 - `SSAReturn`.
 
 Type mapping:
@@ -57,6 +64,16 @@ entry:
 }
 ```
 
+Comparison example:
+
+```llvm
+define i1 @greater(i32 %a, i32 %b) {
+entry:
+  %0 = icmp sgt i32 %a, %b
+  ret i1 %0
+}
+```
+
 ## Limitations
 
 The backend deliberately does not support these yet:
@@ -72,7 +89,8 @@ The backend deliberately does not support these yet:
 - cross-compilation
 - JIT or `llc` build paths
 - automatic execution after build
-- `SSAPhi`, `SSABranch`, `SSAJump`, `SSACall`, or `SSACompareOp`
+- `SSAPhi`, `SSABranch`, `SSAJump`, or `SSACall`
+- branch/phi lowering for boolean control flow
 
 Unsupported input raises `LLVMBackendError` with messages beginning with:
 
