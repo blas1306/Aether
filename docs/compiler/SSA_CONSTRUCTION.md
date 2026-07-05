@@ -761,7 +761,8 @@ Current responsibilities:
   `SSAVerifier`.
 - `optimizer/`: initial SSA optimizer pipeline infrastructure with
   `SSAOptimizationResult`, `SSAOptimizationTraceStep`, fixed-point iteration,
-  convergence errors, SSA Constant Folding, narrow phi cleanup passes:
+  convergence errors, SSA Constant Folding, SSA Algebraic Simplification,
+  narrow phi cleanup passes:
   `TrivialPhiEliminator` and `DeadPhiEliminator`, plus simple SSA Dead Code
   Elimination. The optimizer is not wired into the CLI or default compilation.
 - `phi_placement.py`: standalone Cytron-style iterated dominance-frontier phi
@@ -789,12 +790,13 @@ narrow SSA optimization passes:
 - `SSAOptimizationTraceStep(label, module, changed, stats)`
 - `SSAOptimizerPipeline(passes=None, iterative=False, max_iterations=10)`
 - `SSAConstantFolder().run(module)`
+- `SSAAlgebraicSimplifier().run(module)`
 - `TrivialPhiEliminator().run(module)`
 - `DeadPhiEliminator().run(module)`
 - `SSADeadCodeEliminator().run(module)`
 
 The default SSA optimizer pipeline currently runs `SSAConstantFolder`,
-`TrivialPhiEliminator`, `DeadPhiEliminator`, and then
+`SSAAlgebraicSimplifier`, `TrivialPhiEliminator`, `DeadPhiEliminator`, and then
 `SSADeadCodeEliminator`. Running it on modules without foldable or removable
 instructions returns the same `SSAModule`; trace output records `Initial SSA`,
 each optimizer step, and `Final SSA` around any custom pass entries. The
@@ -812,6 +814,16 @@ Division, modulo, and remainder by zero are intentionally left unchanged. The
 pass does not fold calls, phi nodes, branch conditions directly, or operations
 with unknown operands. It is local constant folding only; it does not rewrite
 uses, infer constants through phis, or perform global constant propagation.
+
+SSA Algebraic Simplification applies local integer identities on `SSABinaryOp`
+instructions after constant folding. The initial rule set rewrites `x + 0`,
+`0 + x`, `x - 0`, `x * 1`, `1 * x`, and type-preserving `x / 1` to the
+equivalent SSA value, then rewrites supported uses of the original result. It
+replaces `x * 0`, `0 * x`, `x % 1`, and `x rem 1` with `SSAConst(result, 0)`.
+The pass reports `simplified`. It intentionally avoids same-operand shortcuts
+such as `x - x`, `x / x`, `x % x`, and `x rem x`; it also does not simplify
+float, double, or boolean expressions, and it does not implement GVN, SCCP, or
+global value reasoning.
 
 Trivial Phi Elimination removes only `SSAPhi` instructions whose incoming
 values are all exactly the same `SSAValue`, for example
@@ -846,8 +858,8 @@ analysis has not been implemented yet.
 General Copy Propagation is still not implemented. The trivial phi pass handles
 only this phi-specific identity case; broader copy propagation, global constant
 propagation, SCCP, GVN, LICM, and effect-aware dead-code elimination are not
-implemented yet. SSA Constant Folding is implemented, but Global Constant
-Propagation and SCCP remain pending.
+implemented yet. SSA Constant Folding and local SSA Algebraic Simplification
+are implemented, but Global Constant Propagation and SCCP remain pending.
 
 ## Future SSA Optimizations
 

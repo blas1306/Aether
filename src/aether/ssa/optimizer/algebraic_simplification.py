@@ -1,0 +1,272 @@
+from __future__ import annotations
+
+from typing import Any
+
+from aether.ir.types import IntType
+from aether.ssa.model import (
+    SSABasicBlock,
+    SSABinaryOp,
+    SSABranch,
+    SSACall,
+    SSACompareOp,
+    SSAConst,
+    SSAFunction,
+    SSAInstruction,
+    SSAJump,
+    SSAModule,
+    SSAPhi,
+    SSAReturn,
+    SSAValue,
+)
+
+from .result import SSAOptimizationResult
+
+
+class SSAAlgebraicSimplifier:
+    """Apply local integer algebraic identities to SSA binary operations."""
+
+    def run(self, module: SSAModule) -> SSAOptimizationResult:
+        updated_functions: list[SSAFunction] = []
+        simplified = 0
+
+        for function in module.functions:
+            updated_function, function_simplified = self._simplify_function(function)
+            updated_functions.append(updated_function)
+            simplified += function_simplified
+
+        if simplified == 0:
+            return SSAOptimizationResult(
+                module,
+                changed=False,
+                stats={"simplified": 0},
+            )
+
+        return SSAOptimizationResult(
+            SSAModule(updated_functions),
+            changed=True,
+            stats={"simplified": simplified},
+        )
+
+    def _simplify_function(self, function: SSAFunction) -> tuple[SSAFunction, int]:
+        constants = self._collect_constants(function)
+        replacements: dict[SSAValue, SSAValue] = {}
+        blocks: list[SSABasicBlock] = []
+        simplified = 0
+
+        for block in function.blocks:
+            instructions: list[SSAInstruction] = []
+            for instruction in block.instructions:
+                rewritten = self._rewrite_instruction(instruction, replacements)
+                updated, was_simplified = self._simplify_instruction(
+                    rewritten,
+                    constants,
+                    replacements,
+                )
+                if was_simplified:
+                    simplified += 1
+                if updated is None:
+                    continue
+                if isinstance(updated, SSAConst):
+                    constants[updated.result] = updated.value
+                instructions.append(updated)
+            blocks.append(SSABasicBlock(block.name, instructions))
+
+        if simplified == 0:
+            return function, 0
+
+        blocks = [
+            SSABasicBlock(
+                block.name,
+                [
+                    self._rewrite_instruction(instruction, replacements)
+                    for instruction in block.instructions
+                ],
+            )
+            for block in blocks
+        ]
+
+        return (
+            SSAFunction(
+                function.name,
+                list(function.parameters),
+                function.return_type,
+                blocks,
+                function.entry_block,
+            ),
+            simplified,
+        )
+
+    @staticmethod
+    def _collect_constants(function: SSAFunction) -> dict[SSAValue, Any]:
+        constants: dict[SSAValue, Any] = {}
+        for block in function.blocks:
+            for instruction in block.instructions:
+                if isinstance(instruction, SSAConst):
+                    constants[instruction.result] = instruction.value
+        return constants
+
+    def _simplify_instruction(
+        self,
+        instruction: SSAInstruction,
+        constants: dict[SSAValue, Any],
+        replacements: dict[SSAValue, SSAValue],
+    ) -> tuple[SSAInstruction | None, bool]:
+        if not isinstance(instruction, SSABinaryOp):
+            return instruction, False
+        if not self._is_integer_operation(instruction):
+            return instruction, False
+
+        operator = instruction.operator
+        left = instruction.left
+        right = instruction.right
+
+        if operator == "add":
+            if self._is_zero(right, constants, replacements):
+                replacements[instruction.result] = left
+                return None, True
+            if self._is_zero(left, constants, replacements):
+                replacements[instruction.result] = right
+                return None, True
+
+        if operator == "sub":
+            if self._is_zero(right, constants, replacements):
+                replacements[instruction.result] = left
+                return None, True
+
+        if operator == "mul":
+            if self._is_zero(left, constants, replacements) or self._is_zero(
+                right,
+                constants,
+                replacements,
+            ):
+                return SSAConst(instruction.result, 0), True
+            if self._is_one(right, constants, replacements):
+                replacements[instruction.result] = left
+                return None, True
+            if self._is_one(left, constants, replacements):
+                replacements[instruction.result] = right
+                return None, True
+
+        if operator == "div":
+            if (
+                instruction.result.type == left.type
+                and self._is_one(right, constants, replacements)
+            ):
+                replacements[instruction.result] = left
+                return None, True
+
+        if operator in {"mod", "rem"}:
+            if self._is_one(right, constants, replacements):
+                return SSAConst(instruction.result, 0), True
+
+        return instruction, False
+
+    @staticmethod
+    def _is_integer_operation(instruction: SSABinaryOp) -> bool:
+        return (
+            isinstance(instruction.result.type, IntType)
+            and isinstance(instruction.left.type, IntType)
+            and isinstance(instruction.right.type, IntType)
+        )
+
+    def _is_zero(
+        self,
+        value: SSAValue,
+        constants: dict[SSAValue, Any],
+        replacements: dict[SSAValue, SSAValue],
+    ) -> bool:
+        return self._integer_constant(value, constants, replacements) == 0
+
+    def _is_one(
+        self,
+        value: SSAValue,
+        constants: dict[SSAValue, Any],
+        replacements: dict[SSAValue, SSAValue],
+    ) -> bool:
+        return self._integer_constant(value, constants, replacements) == 1
+
+    def _integer_constant(
+        self,
+        value: SSAValue,
+        constants: dict[SSAValue, Any],
+        replacements: dict[SSAValue, SSAValue],
+    ) -> int | None:
+        resolved = self._resolve(value, replacements)
+        if not isinstance(resolved.type, IntType):
+            return None
+        constant = constants.get(resolved)
+        if type(constant) is int:
+            return constant
+        return None
+
+    def _rewrite_instruction(
+        self,
+        instruction: SSAInstruction,
+        replacements: dict[SSAValue, SSAValue],
+    ) -> SSAInstruction:
+        if isinstance(instruction, SSAConst):
+            return instruction
+
+        if isinstance(instruction, SSABinaryOp):
+            return SSABinaryOp(
+                instruction.result,
+                instruction.operator,
+                self._resolve(instruction.left, replacements),
+                self._resolve(instruction.right, replacements),
+            )
+
+        if isinstance(instruction, SSACompareOp):
+            return SSACompareOp(
+                instruction.result,
+                instruction.operator,
+                self._resolve(instruction.left, replacements),
+                self._resolve(instruction.right, replacements),
+            )
+
+        if isinstance(instruction, SSACall):
+            return SSACall(
+                instruction.function,
+                tuple(
+                    self._resolve(argument, replacements)
+                    for argument in instruction.arguments
+                ),
+                instruction.result,
+            )
+
+        if isinstance(instruction, SSAPhi):
+            return SSAPhi(
+                instruction.result,
+                tuple(
+                    (block_name, self._resolve(value, replacements))
+                    for block_name, value in instruction.incoming
+                ),
+            )
+
+        if isinstance(instruction, SSABranch):
+            return SSABranch(
+                self._resolve(instruction.condition, replacements),
+                instruction.true_target,
+                instruction.false_target,
+            )
+
+        if isinstance(instruction, SSAJump):
+            return instruction
+
+        if isinstance(instruction, SSAReturn):
+            if instruction.value is None:
+                return instruction
+            return SSAReturn(self._resolve(instruction.value, replacements))
+
+        return instruction
+
+    def _resolve(
+        self,
+        value: SSAValue,
+        replacements: dict[SSAValue, SSAValue],
+    ) -> SSAValue:
+        resolved = value
+        seen: set[SSAValue] = set()
+        while resolved in replacements and resolved not in seen:
+            seen.add(resolved)
+            resolved = replacements[resolved]
+        return resolved

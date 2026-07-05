@@ -6,6 +6,7 @@ from typing import Protocol
 from aether.errors import AetherRuntimeError
 from aether.ssa.model import SSAModule
 
+from .algebraic_simplification import SSAAlgebraicSimplifier
 from .constant_folding import SSAConstantFolder
 from .dead_code import SSADeadCodeEliminator
 from .dead_phi import DeadPhiEliminator
@@ -47,6 +48,7 @@ class SSAOptimizerPipeline:
             if passes is not None
             else (
                 SSAConstantFolder(),
+                SSAAlgebraicSimplifier(),
                 TrivialPhiEliminator(),
                 DeadPhiEliminator(),
                 SSADeadCodeEliminator(),

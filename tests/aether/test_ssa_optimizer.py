@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from aether.ir import BoolType, DoubleType, IntType, IRType, VoidType
+from aether.ir import BoolType, DoubleType, FloatType, IntType, IRType, VoidType
 from aether.ssa import (
     SSABasicBlock,
     SSABinaryOp,
@@ -22,6 +22,7 @@ from aether.ssa import (
 )
 from aether.ssa.optimizer import (
     DeadPhiEliminator,
+    SSAAlgebraicSimplifier,
     SSAConstantFolder,
     SSADeadCodeEliminator,
     SSAOptimizationConvergenceError,
@@ -695,6 +696,45 @@ def _constant_compare_module(
     return _verify(module)
 
 
+def _integer_identity_module(
+    operator: str,
+    constant_value: int,
+    *,
+    constant_on_left: bool = False,
+    result_type: IRType | None = None,
+    verify: bool = True,
+) -> SSAModule:
+    int_type = IntType()
+    actual_result_type = result_type or int_type
+    parameter = SSAParameter("x", int_type)
+    constant = SSAValue("constant", int_type)
+    result = SSAValue("result", actual_result_type)
+    left = constant if constant_on_left else parameter
+    right = parameter if constant_on_left else constant
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [parameter],
+                actual_result_type,
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(constant, constant_value),
+                            SSABinaryOp(result, operator, left, right),
+                            SSAReturn(result),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+    if not verify:
+        return module
+    return _verify(module)
+
+
 def _folded_result_instruction(module: SSAModule) -> SSAInstruction:
     return module.functions[0].blocks[0].instructions[2]
 
@@ -1032,6 +1072,249 @@ def test_ssa_constant_folder_does_not_change_module_without_fold() -> None:
     _verify(result.module)
 
 
+@pytest.mark.parametrize(
+    ("operator", "constant_value", "constant_on_left"),
+    [
+        ("add", 0, False),
+        ("add", 0, True),
+        ("sub", 0, False),
+        ("mul", 1, False),
+        ("mul", 1, True),
+    ],
+)
+def test_ssa_algebraic_simplifier_integer_identity_rules(
+    operator: str,
+    constant_value: int,
+    constant_on_left: bool,
+) -> None:
+    module = _integer_identity_module(
+        operator,
+        constant_value,
+        constant_on_left=constant_on_left,
+    )
+
+    result = SSAAlgebraicSimplifier().run(module)
+
+    assert result.changed is True
+    assert result.stats == {"simplified": 1}
+    [function] = result.module.functions
+    assert function.blocks[0].instructions == [
+        SSAConst(SSAValue("constant", IntType()), constant_value),
+        SSAReturn(SSAParameter("x", IntType())),
+    ]
+    _verify(result.module)
+
+
+def test_ssa_algebraic_simplifier_type_preserving_division_by_one() -> None:
+    module = _integer_identity_module("div", 1, verify=False)
+
+    result = SSAAlgebraicSimplifier().run(module)
+
+    assert result.changed is True
+    assert result.stats == {"simplified": 1}
+    [function] = result.module.functions
+    assert function.blocks[0].instructions == [
+        SSAConst(SSAValue("constant", IntType()), 1),
+        SSAReturn(SSAParameter("x", IntType())),
+    ]
+    _verify(result.module)
+
+
+@pytest.mark.parametrize(
+    ("operator", "constant_value", "constant_on_left"),
+    [
+        ("mul", 0, False),
+        ("mul", 0, True),
+        ("mod", 1, False),
+        ("rem", 1, False),
+    ],
+)
+def test_ssa_algebraic_simplifier_integer_zero_result_rules(
+    operator: str,
+    constant_value: int,
+    constant_on_left: bool,
+) -> None:
+    module = _integer_identity_module(
+        operator,
+        constant_value,
+        constant_on_left=constant_on_left,
+    )
+
+    result = SSAAlgebraicSimplifier().run(module)
+
+    assert result.changed is True
+    assert result.stats == {"simplified": 1}
+    [function] = result.module.functions
+    assert function.blocks[0].instructions == [
+        SSAConst(SSAValue("constant", IntType()), constant_value),
+        SSAConst(SSAValue("result", IntType()), 0),
+        SSAReturn(SSAValue("result", IntType())),
+    ]
+    _verify(result.module)
+
+
+def test_default_pipeline_algebraic_simplification_then_dce_removes_dead_const() -> None:
+    module = _integer_identity_module("add", 0)
+
+    optimized = SSAOptimizerPipeline().run(module)
+
+    [function] = optimized.functions
+    assert function.blocks[0].instructions == [
+        SSAReturn(SSAParameter("x", IntType())),
+    ]
+    _verify(optimized)
+
+
+@pytest.mark.parametrize("operator", ["sub", "div", "mod", "rem"])
+def test_ssa_algebraic_simplifier_does_not_fold_same_operand_rules(
+    operator: str,
+) -> None:
+    int_type = IntType()
+    result_type: IRType = DoubleType() if operator == "div" else int_type
+    parameter = SSAParameter("x", int_type)
+    result_value = SSAValue("result", result_type)
+    module = _verify(
+        SSAModule(
+            [
+                SSAFunction(
+                    "main",
+                    [parameter],
+                    result_type,
+                    [
+                        SSABasicBlock(
+                            "entry",
+                            [
+                                SSABinaryOp(
+                                    result_value,
+                                    operator,
+                                    parameter,
+                                    parameter,
+                                ),
+                                SSAReturn(result_value),
+                            ],
+                        )
+                    ],
+                )
+            ]
+        )
+    )
+
+    result = SSAAlgebraicSimplifier().run(module)
+
+    assert result.changed is False
+    assert result.module is module
+    assert result.stats == {"simplified": 0}
+    _verify(result.module)
+
+
+def test_ssa_algebraic_simplifier_does_not_simplify_division_if_type_changes() -> None:
+    module = _integer_identity_module("div", 1, result_type=DoubleType())
+
+    result = SSAAlgebraicSimplifier().run(module)
+
+    assert result.changed is False
+    assert result.module is module
+    assert result.stats == {"simplified": 0}
+    _verify(result.module)
+
+
+@pytest.mark.parametrize(
+    ("type_", "constant_value", "operator"),
+    [
+        (FloatType(), 0.0, "add"),
+        (DoubleType(), 0.0, "add"),
+        (DoubleType(), 1.0, "mul"),
+    ],
+)
+def test_ssa_algebraic_simplifier_does_not_simplify_float_or_double(
+    type_: IRType,
+    constant_value: float,
+    operator: str,
+) -> None:
+    parameter = SSAParameter("x", type_)
+    constant = SSAValue("constant", type_)
+    result_value = SSAValue("result", type_)
+    module = _verify(
+        SSAModule(
+            [
+                SSAFunction(
+                    "main",
+                    [parameter],
+                    type_,
+                    [
+                        SSABasicBlock(
+                            "entry",
+                            [
+                                SSAConst(constant, constant_value),
+                                SSABinaryOp(
+                                    result_value,
+                                    operator,
+                                    parameter,
+                                    constant,
+                                ),
+                                SSAReturn(result_value),
+                            ],
+                        )
+                    ],
+                )
+            ]
+        )
+    )
+
+    result = SSAAlgebraicSimplifier().run(module)
+
+    assert result.changed is False
+    assert result.module is module
+    assert result.stats == {"simplified": 0}
+    _verify(result.module)
+
+
+def test_ssa_algebraic_simplifier_does_not_simplify_boolean_compare() -> None:
+    bool_type = BoolType()
+    parameter = SSAParameter("x", bool_type)
+    true_value = SSAValue("true_value", bool_type)
+    result_value = SSAValue("result", bool_type)
+    module = _verify(
+        SSAModule(
+            [
+                SSAFunction(
+                    "main",
+                    [parameter],
+                    bool_type,
+                    [
+                        SSABasicBlock(
+                            "entry",
+                            [
+                                SSAConst(true_value, True),
+                                SSACompareOp(result_value, "eq", parameter, true_value),
+                                SSAReturn(result_value),
+                            ],
+                        )
+                    ],
+                )
+            ]
+        )
+    )
+
+    result = SSAAlgebraicSimplifier().run(module)
+
+    assert result.changed is False
+    assert result.module is module
+    assert result.stats == {"simplified": 0}
+    _verify(result.module)
+
+
+def test_ssa_algebraic_simplifier_does_not_simplify_non_identity_constant() -> None:
+    module = _integer_identity_module("add", 2)
+
+    result = SSAAlgebraicSimplifier().run(module)
+
+    assert result.changed is False
+    assert result.module is module
+    assert result.stats == {"simplified": 0}
+    _verify(result.module)
+
+
 def test_empty_ssa_optimizer_pipeline_returns_same_module() -> None:
     module = _module_with_function()
 
@@ -1048,6 +1331,7 @@ def test_empty_ssa_optimizer_trace_has_initial_and_final_ssa() -> None:
     assert [step.label for step in trace] == [
         "Initial SSA",
         "SSAConstantFolder",
+        "SSAAlgebraicSimplifier",
         "TrivialPhiEliminator",
         "DeadPhiEliminator",
         "SSADeadCodeEliminator",
@@ -1061,16 +1345,19 @@ def test_empty_ssa_optimizer_trace_has_initial_and_final_ssa() -> None:
     assert trace[1].stats == {"folded": 0}
     assert trace[2].module is module
     assert trace[2].changed is False
-    assert trace[2].stats == {"removed_trivial_phis": 0, "rewritten_uses": 0}
+    assert trace[2].stats == {"simplified": 0}
     assert trace[3].module is module
     assert trace[3].changed is False
-    assert trace[3].stats == {"removed_phis": 0}
+    assert trace[3].stats == {"removed_trivial_phis": 0, "rewritten_uses": 0}
     assert trace[4].module is module
     assert trace[4].changed is False
-    assert trace[4].stats == {"removed": 0}
+    assert trace[4].stats == {"removed_phis": 0}
     assert trace[5].module is module
     assert trace[5].changed is False
-    assert trace[5].stats == {}
+    assert trace[5].stats == {"removed": 0}
+    assert trace[6].module is module
+    assert trace[6].changed is False
+    assert trace[6].stats == {}
 
 
 def test_ssa_optimizer_pipeline_runs_fake_changing_pass() -> None:
@@ -1658,6 +1945,7 @@ def test_default_ssa_optimizer_trace_shows_dead_phi_changes() -> None:
     assert [step.label for step in trace] == [
         "Initial SSA",
         "SSAConstantFolder",
+        "SSAAlgebraicSimplifier",
         "TrivialPhiEliminator",
         "DeadPhiEliminator",
         "SSADeadCodeEliminator",
@@ -1666,11 +1954,13 @@ def test_default_ssa_optimizer_trace_shows_dead_phi_changes() -> None:
     assert trace[1].changed is False
     assert trace[1].stats == {"folded": 0}
     assert trace[2].changed is False
-    assert trace[2].stats == {"removed_trivial_phis": 0, "rewritten_uses": 0}
-    assert trace[3].changed is True
-    assert trace[3].stats == {"removed_phis": 1}
+    assert trace[2].stats == {"simplified": 0}
+    assert trace[3].changed is False
+    assert trace[3].stats == {"removed_trivial_phis": 0, "rewritten_uses": 0}
     assert trace[4].changed is True
-    assert trace[4].stats == {"removed": 2}
+    assert trace[4].stats == {"removed_phis": 1}
+    assert trace[5].changed is True
+    assert trace[5].stats == {"removed": 2}
     _verify(trace[-1].module)
 
 

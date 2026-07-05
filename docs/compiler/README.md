@@ -23,10 +23,12 @@ by `aether.analysis.dominance_frontier`.
 Initial SSA model, textual printing, verification infrastructure, the legacy
 pattern-based SSA builder, the default `GeneralSSABuilder`, and the SSA
 optimizer pipeline live under `aether.ssa`. The optimizer pipeline currently
-defaults to `SSAConstantFolder`, `TrivialPhiEliminator`, `DeadPhiEliminator`,
-and `SSADeadCodeEliminator`, but it is still not connected to CLI SSA export or
-execution. `SSAConstantFolder` folds binary and comparison operations whose
-operands are known `SSAConst` values; `TrivialPhiEliminator` rewrites phis whose
+defaults to `SSAConstantFolder`, `SSAAlgebraicSimplifier`,
+`TrivialPhiEliminator`, `DeadPhiEliminator`, and `SSADeadCodeEliminator`, but it
+is still not connected to CLI SSA export or execution. `SSAConstantFolder`
+folds binary and comparison operations whose operands are known `SSAConst`
+values; `SSAAlgebraicSimplifier` applies local integer identities such as
+`x + 0 -> x` and `x * 0 -> 0`; `TrivialPhiEliminator` rewrites phis whose
 incoming values are all the same SSA value; `DeadPhiEliminator` removes phis
 whose results have no uses; `SSADeadCodeEliminator` removes unused pure SSA
 producers while preserving calls until effect analysis exists. The internal
@@ -46,8 +48,8 @@ Current compiler-design documents:
 - [SSA_CONSTRUCTION.md](SSA_CONSTRUCTION.md): implemented pattern and general
   SSA builders, internal verified SSA pipeline, construction algorithm,
   verification rules, SSA optimizer pipeline infrastructure, Trivial Phi
-  Elimination, Dead Phi Elimination, SSA Constant Folding, and SSA Dead Code
-  Elimination.
+  Elimination, Dead Phi Elimination, SSA Constant Folding, SSA Algebraic
+  Simplification, and SSA Dead Code Elimination.
 - [SSA_BUILDER.md](SSA_BUILDER.md): operational migration notes for the move
   from the pattern-based SSA builder to the general dominance-frontier-based
   default.
