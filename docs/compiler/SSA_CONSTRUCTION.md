@@ -761,8 +761,8 @@ Current responsibilities:
   `SSAVerifier`.
 - `optimizer/`: initial SSA optimizer pipeline infrastructure with
   `SSAOptimizationResult`, `SSAOptimizationTraceStep`, fixed-point iteration,
-  convergence errors, and the first real SSA optimization pass:
-  `DeadPhiEliminator`. The optimizer is not wired into the CLI or default
+  convergence errors, and narrow phi cleanup passes: `TrivialPhiEliminator`
+  and `DeadPhiEliminator`. The optimizer is not wired into the CLI or default
   compilation.
 - `phi_placement.py`: standalone Cytron-style iterated dominance-frontier phi
   placement for mutable IR slots. This computes `slot -> blocks`.
@@ -783,19 +783,30 @@ step testable and make analysis ownership explicit.
 ## SSA Optimizer Infrastructure
 
 `aether.ssa.optimizer` now provides SSA optimizer infrastructure plus the first
-real SSA optimization pass:
+narrow SSA optimization passes:
 
 - `SSAOptimizationResult(module, changed, stats)`
 - `SSAOptimizationTraceStep(label, module, changed, stats)`
 - `SSAOptimizerPipeline(passes=None, iterative=False, max_iterations=10)`
+- `TrivialPhiEliminator().run(module)`
 - `DeadPhiEliminator().run(module)`
 
-The default SSA optimizer pipeline currently runs `DeadPhiEliminator`. Running
-it on modules without removable phi nodes returns the same `SSAModule`; trace
-output records `Initial SSA`, the `DeadPhiEliminator` step, and `Final SSA`
-around any custom pass entries. The pipeline supports custom passes and
-iterative fixed-point execution for tests and future development, but it is not
-connected to the CLI, not used by `--emit-ssa`, and not connected to execution.
+The default SSA optimizer pipeline currently runs `TrivialPhiEliminator` and
+then `DeadPhiEliminator`. Running it on modules without removable phi nodes
+returns the same `SSAModule`; trace output records `Initial SSA`, each optimizer
+step, and `Final SSA` around any custom pass entries. The pipeline supports
+custom passes and iterative fixed-point execution for tests and future
+development, but it is not connected to the CLI, not used by `--emit-ssa`, and
+not connected to execution.
+
+Trivial Phi Elimination removes only `SSAPhi` instructions whose incoming
+values are all exactly the same `SSAValue`, for example
+`%3 = phi(then0: %1, else0: %1)`. The pass rewrites supported uses of the phi
+result to the common value, removes the phi, and reports
+`removed_trivial_phis` plus `rewritten_uses`. Supported uses are binary
+operands, compare operands, call arguments, phi incoming values, branch
+conditions, and return values. Self-referential phis such as
+`%3 = phi(then0: %1, else0: %3)` are intentionally left unchanged.
 
 Dead Phi Elimination removes only `SSAPhi` instructions whose result has no
 uses in the containing function. Uses are collected from binary operands,
@@ -804,8 +815,15 @@ return values. The pass reports `removed_phis` in its stats and intentionally
 does not remove constants, arithmetic, comparisons, calls, branches, jumps, or
 returns.
 
-Copy propagation, global constant propagation, SCCP, GVN, LICM, and general SSA
-dead-code elimination are not implemented yet.
+The two phi passes are distinct: Trivial Phi Elimination replaces a still-used
+phi with its common incoming value, while Dead Phi Elimination deletes phis that
+have no remaining uses. Running trivial phi cleanup first can expose dead phis
+for the second pass.
+
+General Copy Propagation is still not implemented. The trivial phi pass handles
+only this phi-specific identity case; broader copy propagation, global constant
+propagation, SCCP, GVN, LICM, and general SSA dead-code elimination are not
+implemented yet.
 
 ## Future SSA Optimizations
 
@@ -823,8 +841,9 @@ built on top of SSA:
   loop information.
 
 These should be introduced one at a time after the SSA model, construction, and
-verification rules stay stable. Dead Phi Elimination is intentionally narrow and
-does not change current lowering, CLI inspection, or execution semantics.
+verification rules stay stable. The current SSA optimizations are intentionally
+narrow and do not change current lowering, CLI inspection, or execution
+semantics.
 
 ## Not Implemented Yet
 

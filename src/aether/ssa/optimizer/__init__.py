@@ -7,6 +7,7 @@ from .pipeline import (
     SSAOptimizerPipeline,
 )
 from .result import SSAOptimizationResult, SSAOptimizationTraceStep
+from .trivial_phi import TrivialPhiEliminator
 
 __all__ = [
     "DeadPhiEliminator",
@@ -15,4 +16,5 @@ __all__ = [
     "SSAOptimizationResult",
     "SSAOptimizationTraceStep",
     "SSAOptimizerPipeline",
+    "TrivialPhiEliminator",
 ]

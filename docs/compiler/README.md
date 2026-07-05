@@ -23,14 +23,16 @@ by `aether.analysis.dominance_frontier`.
 Initial SSA model, textual printing, verification infrastructure, the legacy
 pattern-based SSA builder, the default `GeneralSSABuilder`, and the SSA
 optimizer pipeline live under `aether.ssa`. The optimizer pipeline currently
-defaults to `DeadPhiEliminator`, the first real SSA optimization pass, but it is
-still not connected to CLI SSA export or execution. The internal
+defaults to `TrivialPhiEliminator` followed by `DeadPhiEliminator`, but it is
+still not connected to CLI SSA export or execution. `TrivialPhiEliminator`
+rewrites phis whose incoming values are all the same SSA value;
+`DeadPhiEliminator` removes phis whose results have no uses. The internal
 `aether.pipeline.SSAPipeline` prepares verified SSA modules for compiler tests
-and future consumers using the general builder by default. CLI SSA export exists
-for inspection; SSA execution, copy propagation, global constant propagation,
-SCCP, GVN, and LICM are not implemented yet. The pattern builder remains
-available temporarily through `--ssa-builder=pattern` for compatibility and
-comparison.
+and future consumers using the general builder by default. CLI SSA export
+exists for inspection; SSA execution, general copy propagation, global constant
+propagation, SCCP, GVN, and LICM are not implemented yet. The pattern builder
+remains available temporarily through `--ssa-builder=pattern` for compatibility
+and comparison.
 
 Current compiler-design documents:
 
@@ -40,8 +42,8 @@ Current compiler-design documents:
   in the Aether IR.
 - [SSA_CONSTRUCTION.md](SSA_CONSTRUCTION.md): implemented pattern and general
   SSA builders, internal verified SSA pipeline, construction algorithm,
-  verification rules, SSA optimizer pipeline infrastructure, and Dead Phi
-  Elimination.
+  verification rules, SSA optimizer pipeline infrastructure, Trivial Phi
+  Elimination, and Dead Phi Elimination.
 - [SSA_BUILDER.md](SSA_BUILDER.md): operational migration notes for the move
   from the pattern-based SSA builder to the general dominance-frontier-based
   default.

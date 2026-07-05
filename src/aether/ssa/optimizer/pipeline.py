@@ -8,6 +8,7 @@ from aether.ssa.model import SSAModule
 
 from .dead_phi import DeadPhiEliminator
 from .result import SSAOptimizationResult, SSAOptimizationTraceStep
+from .trivial_phi import TrivialPhiEliminator
 
 
 class SSAOptimizationPass(Protocol):
@@ -39,7 +40,11 @@ class SSAOptimizerPipeline:
     ) -> None:
         if max_iterations < 1:
             raise ValueError("max_iterations must be at least 1.")
-        self._passes = tuple(passes) if passes is not None else (DeadPhiEliminator(),)
+        self._passes = (
+            tuple(passes)
+            if passes is not None
+            else (TrivialPhiEliminator(), DeadPhiEliminator())
+        )
         self._iterative = iterative
         self._max_iterations = max_iterations
 
