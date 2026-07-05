@@ -72,3 +72,6 @@ Current compiler-design documents:
   Propagation over SSA, including analysis, constant transformation, branch
   simplification, unreachable-block cleanup, phi incoming cleanup, and
   integration into the SSA optimizer pipeline.
+- [LLVM_BACKEND.md](LLVM_BACKEND.md): initial textual LLVM IR backend for the
+  smallest SSA subset, its type mapping, current limitations, and the fact
+  that it is not connected to CLI yet.
