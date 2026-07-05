@@ -3,11 +3,11 @@
 This document describes the design for Sparse Conditional Constant Propagation
 (SCCP) over Aether SSA.
 
-Phase 1 is implemented as analysis-only infrastructure in
-`aether.ssa.optimizer.sccp`. It computes lattice state per SSA value,
-executable blocks, and executable control-flow edges for one function at a
-time. It does not rewrite SSA yet and is not connected to the SSA optimizer
-pipeline, CLI SSA export, or execution.
+Phases 1 and 2 are implemented in `aether.ssa.optimizer.sccp`. Phase 1
+computes lattice state per SSA value, executable blocks, and executable
+control-flow edges for one function at a time. Phase 2 consumes those facts
+and rewrites proven constant producers to `SSAConst`. SCCP is still not
+connected to the SSA optimizer pipeline, CLI SSA export, or execution.
 
 ## Overview
 
@@ -205,17 +205,26 @@ When a new predecessor edge becomes executable, every phi in the target block
 should be scheduled again. When an incoming value changes, the phi that uses
 it should also be scheduled.
 
-## Final Transformation
+## Constant Transformation
 
-Phase 1 stops after the analysis reaches a fixed point. A later transformation
-pass can
-rewrite the SSA module using the collected facts:
+After the analysis reaches a fixed point, `SCCPTransformer` can rewrite the
+SSA module using the collected facts. The implemented phase 2 transformation is
+deliberately narrow:
 
-- SSA values with `Constant(value)` can be materialized as `SSAConst`
-  definitions or otherwise have their uses rewritten to known constants,
-  following the existing SSA model constraints.
-- Branches with constant conditions can be simplified to `SSAJump` targeting
-  the known executable successor.
+- `SSABinaryOp`, `SSACompareOp`, and `SSAPhi` producers whose result state is
+  `Constant(value)` are replaced with `SSAConst(result, value)`.
+- The replacement preserves the exact same `SSAValue` result, including its
+  type, so existing uses remain valid and no operand rewriting is needed.
+- Calls, branches, jumps, returns, and existing constants are not rewritten by
+  SCCP phase 2.
+- Phi replacements preserve verifier-friendly phi placement by keeping any
+  remaining `SSAPhi` instructions at the start of the block and placing
+  materialized constants after them.
+- The transformer reports `replaced_constants`.
+
+The CFG is intentionally left intact:
+
+- Branches with constant conditions are not simplified to `SSAJump` yet.
 - Blocks not marked executable should remain structurally present in the
   initial implementation. Full removal belongs to a future unreachable-block
   elimination pass.
@@ -226,9 +235,9 @@ The analysis and transformation phases are intentionally separable. Phase
 separation makes it easier to test lattice results and reachable blocks
 without coupling those tests to rewriting details.
 
-## Initial Limitations
+## Current Limitations
 
-The current phase 1 implementation is deliberately narrow:
+The current SCCP implementation is deliberately narrow:
 
 - per-function only
 - no interprocedural propagation
@@ -237,8 +246,8 @@ The current phase 1 implementation is deliberately narrow:
 - no builtin evaluation
 - no complete CFG simplification yet
 - no unreachable-block elimination in the SCCP pass itself
-- no constant replacement
 - no branch pruning or replacement of constant branches with jumps
+- no operand/use rewriting beyond replacing selected producers with `SSAConst`
 - no integration with SSA optimization from the CLI yet
 
 These limits keep SCCP independent of execution, backend selection, and the
@@ -260,10 +269,11 @@ states, branch reachability, and phi behavior.
 
 ### Phase 2: Constant Transformation
 
-Add a transformation pass that consumes the analysis result and replaces
-proven constant SSA values with `SSAConst` where the SSA model can represent
-the rewrite cleanly. This should preserve verification and avoid changing
-control flow.
+Implemented. `SCCPTransformer` consumes an `SSAModule` and an `SCCPResult`,
+then replaces `SSABinaryOp`, `SSACompareOp`, and `SSAPhi` producers whose
+result state is `Constant(value)` with `SSAConst(result, value)`. It preserves
+the original result value and type, avoids CFG changes, and returns an
+`SSAOptimizationResult` with `replaced_constants`.
 
 ### Phase 3: Branch Simplification
 
@@ -280,6 +290,7 @@ also serve other analyses and simplifications.
 
 ## Non-Goals
 
-This design does not add SCCP today. It also does not change the existing SSA
-optimizer pipeline, the SSA builder, the CLI, execution behavior, the verifier,
-or the current local SSA optimizations.
+SCCP currently does not change the existing SSA optimizer pipeline, the SSA
+builder, the CLI, execution behavior, the verifier, or the current local SSA
+optimizations. Branch simplification, CFG cleanup, and unreachable-block
+elimination remain future work.

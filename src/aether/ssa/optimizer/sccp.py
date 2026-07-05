@@ -21,6 +21,8 @@ from aether.ssa.model import (
     SSAValue,
 )
 
+from .result import SSAOptimizationResult
+
 
 InstructionRef = tuple[str, int]
 Edge = tuple[str, str]
@@ -319,3 +321,100 @@ class SCCPAnalyzer:
         if operator == "ne":
             return left != right
         raise AssertionError(f"Unsupported foldable SSA compare operator: {operator}")
+
+
+class SCCPTransformer:
+    """Rewrite SSA producers whose SCCP lattice state is a known constant."""
+
+    def __init__(self, module: SSAModule, result: SCCPResult) -> None:
+        self.module = module
+        self.result = result
+
+    def run(self) -> SSAOptimizationResult:
+        updated_functions: list[SSAFunction] = []
+        replaced_constants = 0
+
+        for function in self.module.functions:
+            updated_function, function_replaced = self._transform_function(function)
+            updated_functions.append(updated_function)
+            replaced_constants += function_replaced
+
+        if replaced_constants == 0:
+            return SSAOptimizationResult(
+                self.module,
+                changed=False,
+                stats={"replaced_constants": 0},
+            )
+
+        return SSAOptimizationResult(
+            SSAModule(updated_functions),
+            changed=True,
+            stats={"replaced_constants": replaced_constants},
+        )
+
+    def _transform_function(self, function: SSAFunction) -> tuple[SSAFunction, int]:
+        updated_blocks: list[SSABasicBlock] = []
+        replaced_constants = 0
+
+        for block in function.blocks:
+            updated_block, block_replaced = self._transform_block(block)
+            updated_blocks.append(updated_block)
+            replaced_constants += block_replaced
+
+        if replaced_constants == 0:
+            return function, 0
+
+        return (
+            SSAFunction(
+                function.name,
+                list(function.parameters),
+                function.return_type,
+                updated_blocks,
+                function.entry_block,
+            ),
+            replaced_constants,
+        )
+
+    def _transform_block(self, block: SSABasicBlock) -> tuple[SSABasicBlock, int]:
+        remaining_phis: list[SSAInstruction] = []
+        replaced_phis: list[SSAInstruction] = []
+        instructions: list[SSAInstruction] = []
+        replaced_constants = 0
+        index = 0
+
+        while index < len(block.instructions) and isinstance(block.instructions[index], SSAPhi):
+            instruction = block.instructions[index]
+            replacement = self._constant_replacement(instruction)
+            if replacement is None:
+                remaining_phis.append(instruction)
+            else:
+                replaced_phis.append(replacement)
+                replaced_constants += 1
+            index += 1
+
+        instructions.extend(remaining_phis)
+        instructions.extend(replaced_phis)
+
+        for instruction in block.instructions[index:]:
+            replacement = self._constant_replacement(instruction)
+            if replacement is None:
+                instructions.append(instruction)
+                continue
+
+            instructions.append(replacement)
+            replaced_constants += 1
+
+        if replaced_constants == 0:
+            return block, 0
+
+        return SSABasicBlock(block.name, instructions), replaced_constants
+
+    def _constant_replacement(self, instruction: SSAInstruction) -> SSAConst | None:
+        if not isinstance(instruction, (SSABinaryOp, SSACompareOp, SSAPhi)):
+            return None
+
+        state = self.result.state(instruction.result)
+        if not isinstance(state, Constant):
+            return None
+
+        return SSAConst(instruction.result, state.value)

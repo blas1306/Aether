@@ -11,10 +11,14 @@ from .pipeline import (
     SSAOptimizerPipeline,
 )
 from .result import SSAOptimizationResult, SSAOptimizationTraceStep
+from .sccp import SCCPAnalyzer, SCCPResult, SCCPTransformer
 from .trivial_phi import TrivialPhiEliminator
 
 __all__ = [
     "DeadPhiEliminator",
+    "SCCPAnalyzer",
+    "SCCPResult",
+    "SCCPTransformer",
     "SSAAlgebraicSimplifier",
     "SSAConstantFolder",
     "SSADeadCodeEliminator",

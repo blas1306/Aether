@@ -18,7 +18,7 @@ from aether.ssa import (
     SSAVerifier,
 )
 from aether.ssa.analysis import Constant, Overdefined, Unknown
-from aether.ssa.optimizer.sccp import SCCPAnalyzer
+from aether.ssa.optimizer.sccp import SCCPAnalyzer, SCCPResult, SCCPTransformer
 
 
 def _verify(module: SSAModule) -> SSAModule:
@@ -27,6 +27,14 @@ def _verify(module: SSAModule) -> SSAModule:
 
 def _analyze(function: SSAFunction):
     return SCCPAnalyzer(function).analyze()
+
+
+def _transform(module: SSAModule, result: SCCPResult):
+    return SCCPTransformer(module, result).run()
+
+
+def _manual_result(states):
+    return SCCPResult(states, {"entry"}, set())
 
 
 def test_sccp_return_constant_value_state_is_constant() -> None:
@@ -377,6 +385,298 @@ def test_sccp_executable_edges_are_correct() -> None:
     assert result.executable_edges == {("entry", "then0"), ("then0", "merge0")}
 
 
+def test_sccp_transformer_replaces_binary_with_const() -> None:
+    int_type = IntType()
+    left = SSAValue("left", int_type)
+    right = SSAValue("right", int_type)
+    total = SSAValue("total", int_type)
+    module = _verify(
+        SSAModule(
+            [
+                SSAFunction(
+                    "main",
+                    [],
+                    int_type,
+                    [
+                        SSABasicBlock(
+                            "entry",
+                            [
+                                SSAConst(left, 2),
+                                SSAConst(right, 3),
+                                SSABinaryOp(total, "add", left, right),
+                                SSAReturn(total),
+                            ],
+                        )
+                    ],
+                )
+            ]
+        )
+    )
+
+    transform = _transform(module, _analyze(module.functions[0]))
+
+    instruction = transform.module.functions[0].blocks[0].instructions[2]
+    assert transform.changed is True
+    assert transform.stats == {"replaced_constants": 1}
+    assert instruction == SSAConst(total, 5)
+
+
+def test_sccp_transformer_replaces_compare_with_const() -> None:
+    int_type = IntType()
+    left = SSAValue("left", int_type)
+    right = SSAValue("right", int_type)
+    comparison = SSAValue("comparison", BoolType())
+    module = _verify(
+        SSAModule(
+            [
+                SSAFunction(
+                    "main",
+                    [],
+                    BoolType(),
+                    [
+                        SSABasicBlock(
+                            "entry",
+                            [
+                                SSAConst(left, 2),
+                                SSAConst(right, 3),
+                                SSACompareOp(comparison, "lt", left, right),
+                                SSAReturn(comparison),
+                            ],
+                        )
+                    ],
+                )
+            ]
+        )
+    )
+
+    transform = _transform(module, _analyze(module.functions[0]))
+
+    instruction = transform.module.functions[0].blocks[0].instructions[2]
+    assert transform.changed is True
+    assert transform.stats == {"replaced_constants": 1}
+    assert instruction == SSAConst(comparison, True)
+
+
+def test_sccp_transformer_replaces_phi_with_const() -> None:
+    function, phi_value = _phi_diamond_function(True, 1, 2)
+    module = SSAModule([function])
+
+    transform = _transform(module, _analyze(function))
+
+    merge_block = transform.module.functions[0].blocks[3]
+    assert transform.changed is True
+    assert transform.stats == {"replaced_constants": 1}
+    assert merge_block.instructions[0] == SSAConst(phi_value, 1)
+
+
+def test_sccp_analysis_plus_transform_result_passes_verifier() -> None:
+    function, _phi_value = _phi_diamond_function(True, 1, 2)
+    module = SSAModule([function])
+
+    transform = _transform(module, _analyze(function))
+
+    assert _verify(transform.module) is transform.module
+
+
+def test_sccp_transformer_preserves_replaced_producer_result_value() -> None:
+    int_type = IntType()
+    left = SSAValue("left", int_type)
+    right = SSAValue("right", int_type)
+    total = SSAValue("total", int_type)
+    module = _verify(
+        SSAModule(
+            [
+                SSAFunction(
+                    "main",
+                    [],
+                    int_type,
+                    [
+                        SSABasicBlock(
+                            "entry",
+                            [
+                                SSAConst(left, 20),
+                                SSAConst(right, 22),
+                                SSABinaryOp(total, "add", left, right),
+                                SSAReturn(total),
+                            ],
+                        )
+                    ],
+                )
+            ]
+        )
+    )
+
+    transform = _transform(module, _analyze(module.functions[0]))
+
+    instruction = transform.module.functions[0].blocks[0].instructions[2]
+    assert isinstance(instruction, SSAConst)
+    assert instruction.result is total
+    assert instruction.result.type is int_type
+
+
+def test_sccp_transformer_does_not_change_call() -> None:
+    int_type = IntType()
+    source_value = SSAValue("source_value", int_type)
+    call_result = SSAValue("call_result", int_type)
+    module = _verify(
+        SSAModule(
+            [
+                SSAFunction(
+                    "source",
+                    [],
+                    int_type,
+                    [SSABasicBlock("entry", [SSAConst(source_value, 1), SSAReturn(source_value)])],
+                ),
+                SSAFunction(
+                    "main",
+                    [],
+                    int_type,
+                    [
+                        SSABasicBlock(
+                            "entry",
+                            [SSACall("source", (), call_result), SSAReturn(call_result)],
+                        )
+                    ],
+                ),
+            ]
+        )
+    )
+
+    transform = _transform(module, _manual_result({call_result: Constant(7)}))
+
+    assert transform.changed is False
+    assert isinstance(transform.module.functions[1].blocks[0].instructions[0], SSACall)
+
+
+def test_sccp_transformer_does_not_change_branch() -> None:
+    function = _branch_function_with_constant(True)
+    module = SSAModule([function])
+
+    transform = _transform(module, _analyze(function))
+
+    assert transform.changed is False
+    assert isinstance(transform.module.functions[0].blocks[0].instructions[1], SSABranch)
+
+
+def test_sccp_transformer_does_not_change_jump() -> None:
+    module = _jump_module()
+
+    transform = _transform(module, _analyze(module.functions[0]))
+
+    assert transform.changed is False
+    assert isinstance(transform.module.functions[0].blocks[0].instructions[1], SSAJump)
+
+
+def test_sccp_transformer_does_not_change_return() -> None:
+    int_type = IntType()
+    value = SSAValue("value", int_type)
+    module = _verify(
+        SSAModule(
+            [
+                SSAFunction(
+                    "main",
+                    [],
+                    int_type,
+                    [SSABasicBlock("entry", [SSAConst(value, 42), SSAReturn(value)])],
+                )
+            ]
+        )
+    )
+
+    transform = _transform(module, _analyze(module.functions[0]))
+
+    assert transform.changed is False
+    assert isinstance(transform.module.functions[0].blocks[0].instructions[1], SSAReturn)
+
+
+def test_sccp_transformer_does_not_change_overdefined_value() -> None:
+    int_type = IntType()
+    left = SSAValue("left", int_type)
+    right = SSAValue("right", int_type)
+    quotient = SSAValue("quotient", DoubleType())
+    module = _verify(
+        SSAModule(
+            [
+                SSAFunction(
+                    "main",
+                    [],
+                    DoubleType(),
+                    [
+                        SSABasicBlock(
+                            "entry",
+                            [
+                                SSAConst(left, 2),
+                                SSAConst(right, 0),
+                                SSABinaryOp(quotient, "div", left, right),
+                                SSAReturn(quotient),
+                            ],
+                        )
+                    ],
+                )
+            ]
+        )
+    )
+
+    transform = _transform(module, _analyze(module.functions[0]))
+
+    assert transform.changed is False
+    assert isinstance(transform.module.functions[0].blocks[0].instructions[2], SSABinaryOp)
+
+
+def test_sccp_transformer_does_not_change_unknown_value() -> None:
+    int_type = IntType()
+    left = SSAValue("left", int_type)
+    right = SSAValue("right", int_type)
+    total = SSAValue("total", int_type)
+    module = _verify(
+        SSAModule(
+            [
+                SSAFunction(
+                    "main",
+                    [],
+                    int_type,
+                    [
+                        SSABasicBlock(
+                            "entry",
+                            [
+                                SSAConst(left, 2),
+                                SSAConst(right, 3),
+                                SSABinaryOp(total, "add", left, right),
+                                SSAReturn(total),
+                            ],
+                        )
+                    ],
+                )
+            ]
+        )
+    )
+
+    transform = _transform(module, _manual_result({}))
+
+    assert transform.changed is False
+    assert isinstance(transform.module.functions[0].blocks[0].instructions[2], SSABinaryOp)
+
+
+def _jump_module() -> SSAModule:
+    int_type = IntType()
+    value = SSAValue("value", int_type)
+    return _verify(
+        SSAModule(
+            [
+                SSAFunction(
+                    "main",
+                    [],
+                    int_type,
+                    [
+                        SSABasicBlock("entry", [SSAConst(value, 1), SSAJump("exit0")]),
+                        SSABasicBlock("exit0", [SSAReturn(value)]),
+                    ],
+                )
+            ]
+        )
+    )
+
+
 def _branch_function_with_constant(value: bool) -> SSAFunction:
     condition = SSAValue("condition", BoolType())
     return _verify(
@@ -493,4 +793,3 @@ def _overdefined_branch_phi_function(
         )
     ).functions[0]
     return function, phi_value
-
