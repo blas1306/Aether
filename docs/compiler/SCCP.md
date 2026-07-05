@@ -3,14 +3,15 @@
 This document describes the design for Sparse Conditional Constant Propagation
 (SCCP) over Aether SSA.
 
-Phases 1, 2, 3, and 4 are implemented in `aether.ssa.optimizer.sccp`. Phase 1
-computes lattice state per SSA value, executable blocks, and executable
-control-flow edges for one function at a time. Phase 2 consumes those facts
-and rewrites proven constant producers to `SSAConst`. Phase 3 simplifies
-branches with boolean constant conditions to direct `SSAJump` terminators.
-Phase 4 removes blocks not marked executable and cleans phi incoming lists
-that referenced removed blocks. SCCP is still not connected to the SSA
-optimizer pipeline, CLI SSA export, or execution.
+SCCP is completely implemented for the current SSA optimizer scope. Phases 1,
+2, 3, and 4 are implemented in `aether.ssa.optimizer.sccp`, and `SCCPPass`
+connects those phases to the default SSA optimizer pipeline. Phase 1 computes
+lattice state per SSA value, executable blocks, and executable control-flow
+edges for one function at a time. Phase 2 consumes those facts and rewrites
+proven constant producers to `SSAConst`. Phase 3 simplifies branches with
+boolean constant conditions to direct `SSAJump` terminators. Phase 4 removes
+blocks not marked executable and cleans phi incoming lists that referenced
+removed blocks. SCCP is still not connected to CLI SSA export or execution.
 
 ## Overview
 
@@ -248,6 +249,12 @@ The analysis and transformation phases are intentionally separable. Phase
 separation makes it easier to test lattice results and reachable blocks
 without coupling those tests to rewriting details.
 
+`SCCPPass` is the pipeline-facing wrapper. It runs `SCCPAnalyzer` and
+`SCCPTransformer` for each function, combines the transformer statistics, and
+returns a normal `SSAOptimizationResult`. Its reported stats are
+`replaced_constants`, `simplified_branches`, `removed_blocks`, and
+`removed_phi_incomings`.
+
 ## Current Limitations
 
 The current SCCP implementation is deliberately narrow:
@@ -301,9 +308,15 @@ values from deleted predecessors, and checks that remaining terminators do not
 target deleted blocks. It reports `removed_blocks` and
 `removed_phi_incomings`.
 
+### Phase 5: SSA Optimizer Pipeline Integration
+
+Implemented. `SCCPPass` runs the analyzer and transformer as a normal SSA
+optimization pass and is part of the default `SSAOptimizerPipeline` order after
+`SSAAlgebraicSimplifier` and before `TrivialPhiEliminator`.
+
 ## Non-Goals
 
-SCCP currently does not change the existing SSA optimizer pipeline, the SSA
-builder, the CLI, execution behavior, the verifier, or the current local SSA
-optimizations. Broader dead-code cleanup and SCCP integration remain future
-work.
+SCCP does not change the SSA builder, the CLI, execution behavior, the
+verifier, or the current local SSA optimizations. Broader dead-code cleanup
+remains the responsibility of later optimizer passes such as
+`SSADeadCodeEliminator`.

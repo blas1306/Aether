@@ -31,24 +31,24 @@ Sparse Conditional Constant Propagation facts: value lattice states,
 executable blocks, and executable edges. Its transformer can replace
 `SSABinaryOp`, `SSACompareOp`, and `SSAPhi` producers proven constant by SCCP
 with `SSAConst` and can simplify boolean constant `SSABranch` terminators to
-`SSAJump` while leaving unreachable blocks and phi cleanup for later. SCCP is
-not part of the optimizer pipeline yet. The optimizer pipeline currently
-defaults to `SSAConstantFolder`,
-`SSAGlobalConstantPropagator`, `SSAAlgebraicSimplifier`,
+`SSAJump`, remove unreachable blocks, and clean phi incoming lists. `SCCPPass`
+connects the SCCP analyzer and transformer to the default SSA optimizer
+pipeline. The optimizer pipeline currently defaults to `SSAConstantFolder`,
+`SSAGlobalConstantPropagator`, `SSAAlgebraicSimplifier`, `SCCPPass`,
 `TrivialPhiEliminator`, `DeadPhiEliminator`, and `SSADeadCodeEliminator`, but
 it is still not connected to CLI SSA export or execution. `SSAConstantFolder`
 folds binary and comparison operations whose operands are known `SSAConst`
 values; `SSAGlobalConstantPropagator` conservatively replaces globally known
 constant SSA producers; `SSAAlgebraicSimplifier` applies local integer
-identities such as `x + 0 -> x` and `x * 0 -> 0`; `TrivialPhiEliminator`
-rewrites phis whose incoming values are all the same SSA value;
-`DeadPhiEliminator` removes phis whose results have no uses;
-`SSADeadCodeEliminator` removes unused pure SSA producers while preserving
-calls until effect analysis exists. The internal `aether.pipeline.SSAPipeline`
-prepares verified SSA modules for compiler tests and future consumers using
-the general builder by default. CLI SSA export exists for inspection; SSA
-execution, general copy propagation, SCCP integration into the optimizer
-pipeline, CFG simplification, unreachable-block elimination, GVN, LICM, and
+identities such as `x + 0 -> x` and `x * 0 -> 0`; `SCCPPass` performs
+edge-sensitive constant propagation, branch simplification, unreachable-block
+cleanup, and phi incoming cleanup; `TrivialPhiEliminator` rewrites phis whose
+incoming values are all the same SSA value; `DeadPhiEliminator` removes phis
+whose results have no uses; `SSADeadCodeEliminator` removes unused pure SSA
+producers while preserving calls until effect analysis exists. The internal
+`aether.pipeline.SSAPipeline` prepares verified SSA modules for compiler tests
+and future consumers using the general builder by default. CLI SSA export
+exists for inspection; SSA execution, general copy propagation, GVN, LICM, and
 effect-aware call removal are not implemented yet. The pattern builder remains
 available temporarily through `--ssa-builder=pattern` for compatibility and
 comparison.
@@ -68,7 +68,7 @@ Current compiler-design documents:
 - [SSA_BUILDER.md](SSA_BUILDER.md): operational migration notes for the move
   from the pattern-based SSA builder to the general dominance-frontier-based
   default.
-- [SCCP.md](SCCP.md): implemented phase 1 Sparse Conditional Constant
-  Propagation analysis over SSA, implemented phase 2 constant transformation,
-  implemented phase 3 branch simplification, plus the plan for future CFG
-  cleanup phases.
+- [SCCP.md](SCCP.md): completely implemented Sparse Conditional Constant
+  Propagation over SSA, including analysis, constant transformation, branch
+  simplification, unreachable-block cleanup, phi incoming cleanup, and
+  integration into the SSA optimizer pipeline.

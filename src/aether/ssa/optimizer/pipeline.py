@@ -12,6 +12,7 @@ from .dead_code import SSADeadCodeEliminator
 from .dead_phi import DeadPhiEliminator
 from .global_constant_propagation import SSAGlobalConstantPropagator
 from .result import SSAOptimizationResult, SSAOptimizationTraceStep
+from .sccp_pass import SCCPPass
 from .trivial_phi import TrivialPhiEliminator
 
 
@@ -51,6 +52,7 @@ class SSAOptimizerPipeline:
                 SSAConstantFolder(),
                 SSAGlobalConstantPropagator(),
                 SSAAlgebraicSimplifier(),
+                SCCPPass(),
                 TrivialPhiEliminator(),
                 DeadPhiEliminator(),
                 SSADeadCodeEliminator(),

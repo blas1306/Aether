@@ -763,7 +763,8 @@ Current responsibilities:
 - `optimizer/`: initial SSA optimizer pipeline infrastructure with
   `SSAOptimizationResult`, `SSAOptimizationTraceStep`, fixed-point iteration,
   convergence errors, SSA Constant Folding, conservative SSA Global Constant
-  Propagation, SSA Algebraic Simplification, narrow phi cleanup passes:
+  Propagation, SSA Algebraic Simplification, Sparse Conditional Constant
+  Propagation through `SCCPPass`, narrow phi cleanup passes:
   `TrivialPhiEliminator` and `DeadPhiEliminator`, plus simple SSA Dead Code
   Elimination. The optimizer is not wired into the CLI or default compilation.
 - `analysis/`: reusable SSA analysis infrastructure. It currently contains
@@ -796,19 +797,20 @@ narrow SSA optimization passes:
 - `SSAConstantFolder().run(module)`
 - `SSAGlobalConstantPropagator().run(module)`
 - `SSAAlgebraicSimplifier().run(module)`
+- `SCCPPass().run(module)`
 - `TrivialPhiEliminator().run(module)`
 - `DeadPhiEliminator().run(module)`
 - `SSADeadCodeEliminator().run(module)`
 
 The default SSA optimizer pipeline currently runs `SSAConstantFolder`,
 `SSAGlobalConstantPropagator`, `SSAAlgebraicSimplifier`,
-`TrivialPhiEliminator`, `DeadPhiEliminator`, and then
+`SCCPPass`, `TrivialPhiEliminator`, `DeadPhiEliminator`, and then
 `SSADeadCodeEliminator`. Running it on modules without foldable, propagatable,
-or removable instructions returns the same `SSAModule`; trace output records
-`Initial SSA`, each optimizer step, and `Final SSA` around any custom pass
-entries. The pipeline supports custom passes and iterative fixed-point
-execution for tests and future development, but it is not connected to the CLI,
-not used by `--emit-ssa`, and not connected to execution.
+SCCP-simplifiable, or removable instructions returns the same `SSAModule`;
+trace output records `Initial SSA`, each optimizer step, and `Final SSA`
+around any custom pass entries. The pipeline supports custom passes and
+iterative fixed-point execution for tests and future development, but it is not
+connected to the CLI, not used by `--emit-ssa`, and not connected to execution.
 
 SSA Constant Folding tracks constants introduced by `SSAConst` within each
 function as the pass walks the function blocks. It folds `SSABinaryOp`
@@ -839,6 +841,14 @@ The pass reports `simplified`. It intentionally avoids same-operand shortcuts
 such as `x - x`, `x / x`, `x % x`, and `x rem x`; it also does not simplify
 float, double, or boolean expressions, and it does not implement GVN, SCCP, or
 global value reasoning.
+
+Sparse Conditional Constant Propagation is exposed as `SCCPPass` in the normal
+SSA optimizer pipeline. The pass analyzes each function independently with
+`SCCPAnalyzer`, then applies `SCCPTransformer` to replace proven constant
+binary, compare, and phi producers, simplify boolean constant branches to
+direct jumps, remove unreachable blocks, and clean phi incoming lists that
+referenced removed predecessors. It reports `replaced_constants`,
+`simplified_branches`, `removed_blocks`, and `removed_phi_incomings`.
 
 Trivial Phi Elimination removes only `SSAPhi` instructions whose incoming
 values are all exactly the same `SSAValue`, for example
@@ -871,10 +881,8 @@ in its stats. It intentionally preserves `SSACall`, `SSABranch`, `SSAJump`, and
 analysis has not been implemented yet.
 
 General Copy Propagation is still not implemented. The trivial phi pass handles
-only this phi-specific identity case; broader copy propagation, global constant
-propagation, SCCP, GVN, LICM, and effect-aware dead-code elimination are not
-implemented yet. SSA Constant Folding and local SSA Algebraic Simplification
-are implemented, but Global Constant Propagation and SCCP remain pending.
+only this phi-specific identity case; broader copy propagation, GVN, LICM, and
+effect-aware dead-code elimination are not implemented yet.
 
 ## SSA Analysis Infrastructure
 
@@ -896,11 +904,9 @@ The same package also contains a generic FIFO `Worklist` with `push`, `pop`,
 `empty`, and `clear`. It suppresses duplicate queued items while still allowing
 an item to be requeued after it has been popped.
 
-SCCP is expected to use this infrastructure for value-state propagation and
-iterative processing. Other SSA data-flow analyses can reuse the same lattice
-and worklist pieces or extend them with more domain-specific states. SCCP,
-CFG simplification, unreachable-block elimination, and branch pruning are not
-implemented yet.
+SCCP uses this infrastructure for value-state propagation and iterative
+processing. Other SSA data-flow analyses can reuse the same lattice and
+worklist pieces or extend them with more domain-specific states.
 
 ## Future SSA Optimizations
 

@@ -22,6 +22,7 @@ from aether.ssa import (
 )
 from aether.ssa.optimizer import (
     DeadPhiEliminator,
+    SCCPPass,
     SSAAlgebraicSimplifier,
     SSAConstantFolder,
     SSADeadCodeEliminator,
@@ -700,6 +701,46 @@ def _call_argument_const_module() -> SSAModule:
                     )
                 ],
             ),
+        ]
+    )
+    return _verify(module)
+
+
+def _sccp_phi_cleanup_module() -> SSAModule:
+    int_type = IntType()
+    condition = SSAValue("condition", BoolType())
+    parameter = SSAParameter("parameter", int_type)
+    else_value = SSAValue("else_value", int_type)
+    phi_value = SSAValue("phi_value", int_type)
+
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [parameter],
+                int_type,
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(condition, True),
+                            SSABranch(condition, "then0", "else0"),
+                        ],
+                    ),
+                    SSABasicBlock("then0", [SSAJump("merge0")]),
+                    SSABasicBlock("else0", [SSAConst(else_value, 2), SSAJump("merge0")]),
+                    SSABasicBlock(
+                        "merge0",
+                        [
+                            SSAPhi(
+                                phi_value,
+                                (("then0", parameter), ("else0", else_value)),
+                            ),
+                            SSAReturn(phi_value),
+                        ],
+                    ),
+                ],
+            )
         ]
     )
     return _verify(module)
@@ -1535,6 +1576,7 @@ def test_empty_ssa_optimizer_trace_has_initial_and_final_ssa() -> None:
         "SSAConstantFolder",
         "SSAGlobalConstantPropagator",
         "SSAAlgebraicSimplifier",
+        "SCCPPass",
         "TrivialPhiEliminator",
         "DeadPhiEliminator",
         "SSADeadCodeEliminator",
@@ -1554,16 +1596,131 @@ def test_empty_ssa_optimizer_trace_has_initial_and_final_ssa() -> None:
     assert trace[3].stats == {"simplified": 0}
     assert trace[4].module is module
     assert trace[4].changed is False
-    assert trace[4].stats == {"removed_trivial_phis": 0, "rewritten_uses": 0}
+    assert trace[4].stats == {
+        "replaced_constants": 0,
+        "simplified_branches": 0,
+        "removed_blocks": 0,
+        "removed_phi_incomings": 0,
+    }
     assert trace[5].module is module
     assert trace[5].changed is False
-    assert trace[5].stats == {"removed_phis": 0}
+    assert trace[5].stats == {"removed_trivial_phis": 0, "rewritten_uses": 0}
     assert trace[6].module is module
     assert trace[6].changed is False
-    assert trace[6].stats == {"removed": 0}
+    assert trace[6].stats == {"removed_phis": 0}
     assert trace[7].module is module
     assert trace[7].changed is False
-    assert trace[7].stats == {}
+    assert trace[7].stats == {"removed": 0}
+    assert trace[8].module is module
+    assert trace[8].changed is False
+    assert trace[8].stats == {}
+
+
+def test_default_pipeline_executes_sccp() -> None:
+    module = _phi_merge_module(use="return")
+
+    trace = SSAOptimizerPipeline().run_with_trace(module)
+
+    sccp_step = next(step for step in trace if step.label == "SCCPPass")
+    assert sccp_step.changed is True
+    assert sccp_step.stats == {
+        "replaced_constants": 1,
+        "simplified_branches": 1,
+        "removed_blocks": 1,
+        "removed_phi_incomings": 0,
+    }
+    _verify(sccp_step.module)
+
+
+def test_sccp_pass_produces_real_changes() -> None:
+    module = _phi_merge_module(use="return")
+
+    result = SCCPPass().run(module)
+
+    assert result.changed is True
+    assert result.stats == {
+        "replaced_constants": 1,
+        "simplified_branches": 1,
+        "removed_blocks": 1,
+        "removed_phi_incomings": 0,
+    }
+    [function] = result.module.functions
+    assert [block.name for block in function.blocks] == ["entry", "then0", "merge0"]
+    assert function.blocks[0].instructions[-1] == SSAJump("then0")
+    assert "SSAPhi" not in _instruction_names(result.module)
+    _verify(result.module)
+
+
+def test_default_iterative_pipeline_converges_with_sccp() -> None:
+    module = _phi_merge_module(use="return")
+
+    trace = SSAOptimizerPipeline(iterative=True).run_with_trace(module)
+
+    sccp_steps = [step for step in trace if step.label.endswith("SCCPPass")]
+    assert [step.label for step in sccp_steps] == [
+        "Iteration 1 / SCCPPass",
+        "Iteration 2 / SCCPPass",
+    ]
+    assert sccp_steps[0].changed is True
+    assert sccp_steps[1].changed is False
+    assert trace[-1].label == "Final SSA"
+    _verify(trace[-1].module)
+
+
+def test_default_pipeline_sccp_then_dce_cleans_dead_values() -> None:
+    module = _phi_merge_module(use="return")
+
+    optimized = SSAOptimizerPipeline().run(module)
+
+    [function] = optimized.functions
+    assert function.blocks == [
+        SSABasicBlock("entry", [SSAJump("then0")]),
+        SSABasicBlock("then0", [SSAJump("merge0")]),
+        SSABasicBlock(
+            "merge0",
+            [
+                SSAConst(SSAValue("phi_value", IntType()), 1),
+                SSAReturn(SSAValue("phi_value", IntType())),
+            ],
+        ),
+    ]
+    assert "SSABranch" not in _instruction_names(optimized)
+    assert "SSAPhi" not in _instruction_names(optimized)
+    _verify(optimized)
+
+
+def test_sccp_pass_does_not_change_module_without_opportunities() -> None:
+    module = _module_with_function()
+
+    result = SCCPPass().run(module)
+
+    assert result.changed is False
+    assert result.module is module
+    assert result.stats == {
+        "replaced_constants": 0,
+        "simplified_branches": 0,
+        "removed_blocks": 0,
+        "removed_phi_incomings": 0,
+    }
+    _verify(result.module)
+
+
+def test_default_pipeline_sccp_end_to_end_phi_cleanup_and_dce() -> None:
+    module = _sccp_phi_cleanup_module()
+
+    optimized = SSAOptimizerPipeline().run(module)
+
+    [function] = optimized.functions
+    parameter = SSAParameter("parameter", IntType())
+    assert function.blocks == [
+        SSABasicBlock("entry", [SSAJump("then0")]),
+        SSABasicBlock("then0", [SSAJump("merge0")]),
+        SSABasicBlock("merge0", [SSAReturn(parameter)]),
+    ]
+    assert "SSAConst" not in _instruction_names(optimized)
+    assert "SSABranch" not in _instruction_names(optimized)
+    assert "SSAPhi" not in _instruction_names(optimized)
+    _verify(optimized)
 
 
 def test_ssa_optimizer_pipeline_runs_fake_changing_pass() -> None:
@@ -2143,7 +2300,7 @@ def test_dead_phi_eliminator_reports_removed_phi_stats() -> None:
     assert result.stats["removed_phis"] == 1
 
 
-def test_default_ssa_optimizer_trace_shows_dead_phi_changes() -> None:
+def test_default_ssa_optimizer_trace_shows_sccp_changes() -> None:
     module = _phi_merge_module()
 
     trace = SSAOptimizerPipeline().run_with_trace(module)
@@ -2153,6 +2310,7 @@ def test_default_ssa_optimizer_trace_shows_dead_phi_changes() -> None:
         "SSAConstantFolder",
         "SSAGlobalConstantPropagator",
         "SSAAlgebraicSimplifier",
+        "SCCPPass",
         "TrivialPhiEliminator",
         "DeadPhiEliminator",
         "SSADeadCodeEliminator",
@@ -2164,12 +2322,19 @@ def test_default_ssa_optimizer_trace_shows_dead_phi_changes() -> None:
     assert trace[2].stats == {"propagated": 0}
     assert trace[3].changed is False
     assert trace[3].stats == {"simplified": 0}
-    assert trace[4].changed is False
-    assert trace[4].stats == {"removed_trivial_phis": 0, "rewritten_uses": 0}
-    assert trace[5].changed is True
-    assert trace[5].stats == {"removed_phis": 1}
-    assert trace[6].changed is True
-    assert trace[6].stats == {"removed": 2}
+    assert trace[4].changed is True
+    assert trace[4].stats == {
+        "replaced_constants": 1,
+        "simplified_branches": 1,
+        "removed_blocks": 1,
+        "removed_phi_incomings": 0,
+    }
+    assert trace[5].changed is False
+    assert trace[5].stats == {"removed_trivial_phis": 0, "rewritten_uses": 0}
+    assert trace[6].changed is False
+    assert trace[6].stats == {"removed_phis": 0}
+    assert trace[7].changed is True
+    assert trace[7].stats == {"removed": 3}
     _verify(trace[-1].module)
 
 
