@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from aether.ir import BoolType, IntType, VoidType
+from aether.ir import BoolType, DoubleType, IntType, IRType, VoidType
 from aether.ssa import (
     SSABasicBlock,
     SSABinaryOp,
@@ -11,6 +11,7 @@ from aether.ssa import (
     SSACompareOp,
     SSAConst,
     SSAFunction,
+    SSAInstruction,
     SSAJump,
     SSAModule,
     SSAParameter,
@@ -21,6 +22,7 @@ from aether.ssa import (
 )
 from aether.ssa.optimizer import (
     DeadPhiEliminator,
+    SSAConstantFolder,
     SSADeadCodeEliminator,
     SSAOptimizationConvergenceError,
     SSAOptimizationResult,
@@ -624,6 +626,79 @@ def _call_argument_const_module() -> SSAModule:
     return _verify(module)
 
 
+def _constant_binary_module(
+    operator: str,
+    left_value: object,
+    right_value: object,
+    *,
+    result_type: IRType | None = None,
+) -> SSAModule:
+    int_type = IntType()
+    actual_result_type = result_type or int_type
+    left = SSAValue("left", int_type)
+    right = SSAValue("right", int_type)
+    result = SSAValue("result", actual_result_type)
+
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [],
+                actual_result_type,
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(left, left_value),
+                            SSAConst(right, right_value),
+                            SSABinaryOp(result, operator, left, right),
+                            SSAReturn(result),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+    return _verify(module)
+
+
+def _constant_compare_module(
+    operator: str,
+    left_value: object,
+    right_value: object,
+) -> SSAModule:
+    int_type = IntType()
+    left = SSAValue("left", int_type)
+    right = SSAValue("right", int_type)
+    result = SSAValue("result", BoolType())
+
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [],
+                BoolType(),
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(left, left_value),
+                            SSAConst(right, right_value),
+                            SSACompareOp(result, operator, left, right),
+                            SSAReturn(result),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+    return _verify(module)
+
+
+def _folded_result_instruction(module: SSAModule) -> SSAInstruction:
+    return module.functions[0].blocks[0].instructions[2]
+
+
 def _instruction_names(module: SSAModule) -> list[str]:
     return [
         type(instruction).__name__
@@ -699,6 +774,264 @@ class _AddParameterPass:
         return SSAOptimizationResult(SSAModule([updated]), changed=True)
 
 
+@pytest.mark.parametrize(
+    ("operator", "left", "right", "result_type", "expected"),
+    [
+        ("add", 2, 3, IntType(), 5),
+        ("sub", 8, 3, IntType(), 5),
+        ("mul", 4, 3, IntType(), 12),
+        ("div", 5, 2, DoubleType(), 2.5),
+        ("mod", 5, 3, IntType(), 2),
+        ("rem", 5, 3, IntType(), 2),
+    ],
+)
+def test_ssa_constant_folder_folds_binary_ops(
+    operator: str,
+    left: int,
+    right: int,
+    result_type: IRType,
+    expected: int | float,
+) -> None:
+    module = _constant_binary_module(
+        operator,
+        left,
+        right,
+        result_type=result_type,
+    )
+
+    result = SSAConstantFolder().run(module)
+
+    assert result.changed is True
+    assert result.stats == {"folded": 1}
+    folded = _folded_result_instruction(result.module)
+    assert folded == SSAConst(SSAValue("result", result_type), expected)
+    _verify(result.module)
+
+
+@pytest.mark.parametrize(
+    ("operator", "left", "right", "expected"),
+    [
+        ("lt", 2, 3, True),
+        ("le", 3, 3, True),
+        ("gt", 4, 3, True),
+        ("ge", 3, 3, True),
+        ("eq", 3, 3, True),
+        ("ne", 3, 4, True),
+    ],
+)
+def test_ssa_constant_folder_folds_compare_ops(
+    operator: str,
+    left: int,
+    right: int,
+    expected: bool,
+) -> None:
+    module = _constant_compare_module(operator, left, right)
+
+    result = SSAConstantFolder().run(module)
+
+    assert result.changed is True
+    assert result.stats == {"folded": 1}
+    folded = _folded_result_instruction(result.module)
+    assert folded == SSAConst(SSAValue("result", BoolType()), expected)
+    _verify(result.module)
+
+
+def test_ssa_constant_folder_folds_chain_in_single_pass() -> None:
+    int_type = IntType()
+    left = SSAValue("left", int_type)
+    right = SSAValue("right", int_type)
+    first = SSAValue("first", int_type)
+    second = SSAValue("second", int_type)
+    module = _verify(
+        SSAModule(
+            [
+                SSAFunction(
+                    "main",
+                    [],
+                    int_type,
+                    [
+                        SSABasicBlock(
+                            "entry",
+                            [
+                                SSAConst(left, 2),
+                                SSAConst(right, 3),
+                                SSABinaryOp(first, "add", left, right),
+                                SSABinaryOp(second, "mul", first, right),
+                                SSAReturn(second),
+                            ],
+                        )
+                    ],
+                )
+            ]
+        )
+    )
+
+    result = SSAConstantFolder().run(module)
+
+    assert result.changed is True
+    assert result.stats == {"folded": 2}
+    assert module.functions[0].blocks[0].instructions[2] == SSABinaryOp(
+        first,
+        "add",
+        left,
+        right,
+    )
+    assert result.module.functions[0].blocks[0].instructions[2] == SSAConst(first, 5)
+    assert result.module.functions[0].blocks[0].instructions[3] == SSAConst(second, 15)
+    _verify(result.module)
+
+
+def test_default_pipeline_folding_then_dce_removes_dead_constants() -> None:
+    module = _constant_binary_module("add", 2, 3)
+
+    optimized = SSAOptimizerPipeline().run(module)
+
+    [function] = optimized.functions
+    assert function.blocks[0].instructions == [
+        SSAConst(SSAValue("result", IntType()), 5),
+        SSAReturn(SSAValue("result", IntType())),
+    ]
+    _verify(optimized)
+
+
+def test_default_iterative_pipeline_folds_trivial_phi_result_chain() -> None:
+    int_type = IntType()
+    bool_type = BoolType()
+    condition = SSAValue("condition", bool_type)
+    common = SSAValue("common", int_type)
+    one = SSAValue("one", int_type)
+    phi_value = SSAValue("phi_value", int_type)
+    result = SSAValue("result", int_type)
+    module = _verify(
+        SSAModule(
+            [
+                SSAFunction(
+                    "main",
+                    [],
+                    int_type,
+                    [
+                        SSABasicBlock(
+                            "entry",
+                            [
+                                SSAConst(condition, True),
+                                SSAConst(common, 4),
+                                SSAConst(one, 1),
+                                SSABranch(condition, "then0", "else0"),
+                            ],
+                        ),
+                        SSABasicBlock("then0", [SSAJump("merge0")]),
+                        SSABasicBlock("else0", [SSAJump("merge0")]),
+                        SSABasicBlock(
+                            "merge0",
+                            [
+                                SSAPhi(phi_value, (("then0", common), ("else0", common))),
+                                SSABinaryOp(result, "add", phi_value, one),
+                                SSAReturn(result),
+                            ],
+                        ),
+                    ],
+                )
+            ]
+        )
+    )
+
+    optimized = SSAOptimizerPipeline(iterative=True).run(module)
+
+    [function] = optimized.functions
+    assert function.blocks[-1].instructions == [
+        SSAConst(result, 5),
+        SSAReturn(result),
+    ]
+    assert "SSAPhi" not in _instruction_names(optimized)
+    _verify(optimized)
+
+
+@pytest.mark.parametrize("operator", ["div", "mod", "rem"])
+def test_ssa_constant_folder_does_not_fold_division_or_modulo_by_zero(
+    operator: str,
+) -> None:
+    result_type: IRType = DoubleType() if operator == "div" else IntType()
+    module = _constant_binary_module(operator, 5, 0, result_type=result_type)
+
+    result = SSAConstantFolder().run(module)
+
+    assert result.changed is False
+    assert result.module is module
+    assert result.stats == {"folded": 0}
+    assert isinstance(_folded_result_instruction(result.module), SSABinaryOp)
+    _verify(result.module)
+
+
+def test_ssa_constant_folder_does_not_fold_unknown_operand() -> None:
+    int_type = IntType()
+    parameter = SSAParameter("value", int_type)
+    one = SSAValue("one", int_type)
+    result_value = SSAValue("result", int_type)
+    module = _verify(
+        SSAModule(
+            [
+                SSAFunction(
+                    "main",
+                    [parameter],
+                    int_type,
+                    [
+                        SSABasicBlock(
+                            "entry",
+                            [
+                                SSAConst(one, 1),
+                                SSABinaryOp(result_value, "add", parameter, one),
+                                SSAReturn(result_value),
+                            ],
+                        )
+                    ],
+                )
+            ]
+        )
+    )
+
+    result = SSAConstantFolder().run(module)
+
+    assert result.changed is False
+    assert result.module is module
+    assert result.stats == {"folded": 0}
+    _verify(result.module)
+
+
+def test_ssa_constant_folder_does_not_fold_call() -> None:
+    module = _unused_call_result_module()
+
+    result = SSAConstantFolder().run(module)
+
+    assert result.changed is False
+    assert result.module is module
+    assert result.stats == {"folded": 0}
+    assert "SSACall" in _instruction_names(result.module)
+    _verify(result.module)
+
+
+def test_ssa_constant_folder_does_not_fold_phi() -> None:
+    module = _phi_merge_module(use="return")
+
+    result = SSAConstantFolder().run(module)
+
+    assert result.changed is False
+    assert result.module is module
+    assert result.stats == {"folded": 0}
+    assert "SSAPhi" in _instruction_names(result.module)
+    _verify(result.module)
+
+
+def test_ssa_constant_folder_does_not_change_module_without_fold() -> None:
+    module = _module_with_function()
+
+    result = SSAConstantFolder().run(module)
+
+    assert result.changed is False
+    assert result.module is module
+    assert result.stats == {"folded": 0}
+    _verify(result.module)
+
+
 def test_empty_ssa_optimizer_pipeline_returns_same_module() -> None:
     module = _module_with_function()
 
@@ -714,6 +1047,7 @@ def test_empty_ssa_optimizer_trace_has_initial_and_final_ssa() -> None:
 
     assert [step.label for step in trace] == [
         "Initial SSA",
+        "SSAConstantFolder",
         "TrivialPhiEliminator",
         "DeadPhiEliminator",
         "SSADeadCodeEliminator",
@@ -724,16 +1058,19 @@ def test_empty_ssa_optimizer_trace_has_initial_and_final_ssa() -> None:
     assert trace[0].stats == {}
     assert trace[1].module is module
     assert trace[1].changed is False
-    assert trace[1].stats == {"removed_trivial_phis": 0, "rewritten_uses": 0}
+    assert trace[1].stats == {"folded": 0}
     assert trace[2].module is module
     assert trace[2].changed is False
-    assert trace[2].stats == {"removed_phis": 0}
+    assert trace[2].stats == {"removed_trivial_phis": 0, "rewritten_uses": 0}
     assert trace[3].module is module
     assert trace[3].changed is False
-    assert trace[3].stats == {"removed": 0}
+    assert trace[3].stats == {"removed_phis": 0}
     assert trace[4].module is module
     assert trace[4].changed is False
-    assert trace[4].stats == {}
+    assert trace[4].stats == {"removed": 0}
+    assert trace[5].module is module
+    assert trace[5].changed is False
+    assert trace[5].stats == {}
 
 
 def test_ssa_optimizer_pipeline_runs_fake_changing_pass() -> None:
@@ -1320,17 +1657,20 @@ def test_default_ssa_optimizer_trace_shows_dead_phi_changes() -> None:
 
     assert [step.label for step in trace] == [
         "Initial SSA",
+        "SSAConstantFolder",
         "TrivialPhiEliminator",
         "DeadPhiEliminator",
         "SSADeadCodeEliminator",
         "Final SSA",
     ]
     assert trace[1].changed is False
-    assert trace[1].stats == {"removed_trivial_phis": 0, "rewritten_uses": 0}
-    assert trace[2].changed is True
-    assert trace[2].stats == {"removed_phis": 1}
+    assert trace[1].stats == {"folded": 0}
+    assert trace[2].changed is False
+    assert trace[2].stats == {"removed_trivial_phis": 0, "rewritten_uses": 0}
     assert trace[3].changed is True
-    assert trace[3].stats == {"removed": 2}
+    assert trace[3].stats == {"removed_phis": 1}
+    assert trace[4].changed is True
+    assert trace[4].stats == {"removed": 2}
     _verify(trace[-1].module)
 
 

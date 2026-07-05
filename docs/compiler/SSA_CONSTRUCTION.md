@@ -761,9 +761,9 @@ Current responsibilities:
   `SSAVerifier`.
 - `optimizer/`: initial SSA optimizer pipeline infrastructure with
   `SSAOptimizationResult`, `SSAOptimizationTraceStep`, fixed-point iteration,
-  convergence errors, and narrow phi cleanup passes: `TrivialPhiEliminator`
-  and `DeadPhiEliminator`, plus simple SSA Dead Code Elimination. The optimizer
-  is not wired into the CLI or default compilation.
+  convergence errors, SSA Constant Folding, narrow phi cleanup passes:
+  `TrivialPhiEliminator` and `DeadPhiEliminator`, plus simple SSA Dead Code
+  Elimination. The optimizer is not wired into the CLI or default compilation.
 - `phi_placement.py`: standalone Cytron-style iterated dominance-frontier phi
   placement for mutable IR slots. This computes `slot -> blocks`.
 - `renaming.py`: standalone variable renaming over the dominator tree. It
@@ -788,17 +788,30 @@ narrow SSA optimization passes:
 - `SSAOptimizationResult(module, changed, stats)`
 - `SSAOptimizationTraceStep(label, module, changed, stats)`
 - `SSAOptimizerPipeline(passes=None, iterative=False, max_iterations=10)`
+- `SSAConstantFolder().run(module)`
 - `TrivialPhiEliminator().run(module)`
 - `DeadPhiEliminator().run(module)`
 - `SSADeadCodeEliminator().run(module)`
 
-The default SSA optimizer pipeline currently runs `TrivialPhiEliminator` and
-then `DeadPhiEliminator`, followed by `SSADeadCodeEliminator`. Running it on
-modules without removable instructions returns the same `SSAModule`; trace
-output records `Initial SSA`, each optimizer step, and `Final SSA` around any
-custom pass entries. The pipeline supports custom passes and iterative
-fixed-point execution for tests and future development, but it is not connected
-to the CLI, not used by `--emit-ssa`, and not connected to execution.
+The default SSA optimizer pipeline currently runs `SSAConstantFolder`,
+`TrivialPhiEliminator`, `DeadPhiEliminator`, and then
+`SSADeadCodeEliminator`. Running it on modules without foldable or removable
+instructions returns the same `SSAModule`; trace output records `Initial SSA`,
+each optimizer step, and `Final SSA` around any custom pass entries. The
+pipeline supports custom passes and iterative fixed-point execution for tests
+and future development, but it is not connected to the CLI, not used by
+`--emit-ssa`, and not connected to execution.
+
+SSA Constant Folding tracks constants introduced by `SSAConst` within each
+function as the pass walks the function blocks. It folds `SSABinaryOp`
+instructions for `add`, `sub`, `mul`, `div`, `mod`, and `rem`, and folds
+`SSACompareOp` instructions for `lt`, `le`, `gt`, `ge`, `eq`, and `ne`, when
+both operands are known constants. Folded instructions are replaced by
+`SSAConst` using the original result value and the pass reports `folded`.
+Division, modulo, and remainder by zero are intentionally left unchanged. The
+pass does not fold calls, phi nodes, branch conditions directly, or operations
+with unknown operands. It is local constant folding only; it does not rewrite
+uses, infer constants through phis, or perform global constant propagation.
 
 Trivial Phi Elimination removes only `SSAPhi` instructions whose incoming
 values are all exactly the same `SSAValue`, for example
@@ -833,7 +846,8 @@ analysis has not been implemented yet.
 General Copy Propagation is still not implemented. The trivial phi pass handles
 only this phi-specific identity case; broader copy propagation, global constant
 propagation, SCCP, GVN, LICM, and effect-aware dead-code elimination are not
-implemented yet.
+implemented yet. SSA Constant Folding is implemented, but Global Constant
+Propagation and SCCP remain pending.
 
 ## Future SSA Optimizations
 

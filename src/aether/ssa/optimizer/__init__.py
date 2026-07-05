@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .constant_folding import SSAConstantFolder
 from .dead_code import SSADeadCodeEliminator
 from .dead_phi import DeadPhiEliminator
 from .pipeline import (
@@ -12,6 +13,7 @@ from .trivial_phi import TrivialPhiEliminator
 
 __all__ = [
     "DeadPhiEliminator",
+    "SSAConstantFolder",
     "SSADeadCodeEliminator",
     "SSAOptimizationConvergenceError",
     "SSAOptimizationPass",
