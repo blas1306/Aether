@@ -221,6 +221,57 @@ int nested(int x, int y) {
     assert "merge1.z.phi" in print_ssa(ssa_module)
 
 
+def test_lower_to_verified_ssa_defaults_to_general_builder() -> None:
+    typed_program = prepare_typed_program(
+        """
+int nested(int x, int y) {
+    int z = 0;
+    if x > 0 {
+        if y > 0 {
+            z = 1;
+        } else {
+            z = 2;
+        }
+    } else {
+        z = 3;
+    }
+    return z;
+}
+""",
+        TypeChecker(),
+    )
+
+    default_module = lower_to_verified_ssa(typed_program)
+    explicit_general_module = lower_to_verified_ssa(
+        typed_program,
+        builder="general",
+    )
+
+    assert print_ssa(default_module) == print_ssa(explicit_general_module)
+    assert "merge1.z.phi" in print_ssa(default_module)
+
+
+def test_lower_to_verified_ssa_accepts_pattern_builder_fallback() -> None:
+    typed_program = prepare_typed_program(
+        """
+int add(int left, int right) {
+    return left + right;
+}
+""",
+        TypeChecker(),
+    )
+
+    ssa_module = lower_to_verified_ssa(typed_program, builder="pattern")
+
+    assert print_ssa(ssa_module) == (
+        "func @add(%left: int, %right: int) -> int {\n"
+        "entry:\n"
+        "    %0: int = add %left, %right\n"
+        "    return %0\n"
+        "}"
+    )
+
+
 def test_ssa_pipeline_builds_if_else_phi() -> None:
     typed_program = prepare_typed_program(
         """

@@ -14,16 +14,15 @@ from .verifier import SSAVerificationError, SSAVerifier
 
 
 class GeneralSSABuildError(ValueError):
-    """Raised when experimental general SSA construction fails."""
+    """Raised when general SSA construction fails."""
 
 
 class GeneralSSABuilder:
-    """Experimental Cytron-style SSA builder for mutable slot IR.
+    """Cytron-style SSA builder for mutable slot IR.
 
-    This builder is intentionally separate from the effective pattern-based
-    ``SSABuilder``. It wires together CFG construction, dominator analysis,
-    dominance-frontier phi placement, dominator-tree renaming, and SSA
-    verification without changing the existing pipeline or CLI behavior.
+    This builder is the default SSA construction path. The older pattern-based
+    ``SSABuilder`` remains available as an explicit compatibility fallback for
+    comparison and migration diagnostics.
     """
 
     def build(self, module: IRModule) -> SSAModule:

@@ -12,6 +12,7 @@ from .errors import AetherError
 from .benchmark import BenchReport, run_benchmark
 from .ir import print_ir
 from .pipeline import (
+    DEFAULT_SSA_BUILDER,
     IRBackend,
     lower_to_verified_ssa,
     parse_source,
@@ -77,8 +78,8 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("pattern", "general"),
         default=None,
         help=(
-            "SSA builder for --emit-ssa: pattern (default) or general "
-            "(experimental)."
+            "SSA builder for --emit-ssa: general (default) or pattern "
+            "(compatibility fallback)."
         ),
     )
     parser.add_argument(
@@ -245,7 +246,7 @@ def main(
                 source,
                 path=path,
                 stdout=stdout,
-                builder=args.ssa_builder or "pattern",
+                builder=args.ssa_builder or DEFAULT_SSA_BUILDER,
             ),
             stderr=stderr,
         )
@@ -419,7 +420,7 @@ def _emit_ssa(
     *,
     path: Path,
     stdout: TextIO,
-    builder: str = "pattern",
+    builder: str = DEFAULT_SSA_BUILDER,
 ) -> None:
     from .errors import AetherRuntimeError
     from .ssa import GeneralSSABuildError, SSABuildError

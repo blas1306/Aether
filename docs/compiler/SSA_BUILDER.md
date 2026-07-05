@@ -2,21 +2,22 @@
 
 ## Status
 
-This document is the operational plan for migrating Aether from the current
-pattern-based SSA builder to a general SSA builder based on the classic SSA
+This document tracks the controlled migration from Aether's original
+pattern-based SSA builder to the general SSA builder based on the classic SSA
 construction algorithm.
 
 The first three migration steps are implemented as isolated infrastructure:
 `aether.ssa.PhiPlacement` computes general iterated dominance-frontier phi
 locations for mutable IR slots, and `aether.ssa.SSARenamer` performs
 function-local dominator-tree variable renaming from those placements.
-`aether.ssa.GeneralSSABuilder` now wires those phases together into an
-experimental per-module builder and verifies the resulting SSA module.
+`aether.ssa.GeneralSSABuilder` wires those phases together into the default
+per-module builder and verifies the resulting SSA module.
 
-These phases are still experimental. The pattern-based `SSABuilder` remains the
-default builder used by the SSA pipeline and `--emit-ssa`; the general builder
-is available only through an explicit inspection selector and does not replace
-the default yet.
+The pattern-based `SSABuilder` remains available as an explicit temporary
+fallback through `builder="pattern"` and `--ssa-builder=pattern`. It is kept for
+compatibility, comparison, and migration diagnostics while the general builder
+is the effective default used by `SSAPipeline`, `lower_to_verified_ssa`, and
+plain `aether --emit-ssa`.
 
 ## Regression Validation
 
@@ -33,10 +34,10 @@ signatures, block names, terminator shapes, return types, absence of load/store
 traffic, and phi counts per block.
 
 Programs outside the current pattern builder subset are tracked as
-non-comparable for the purpose of this migration. It is acceptable for the
-general builder to accept additional CFG shapes before the default changes, but
-the builder default will only move from `pattern` to `general` once the
-regression suite shows no pattern-supported regressions.
+non-comparable for the purpose of this migration. The default has moved from
+`pattern` to `general` after the regression suite showed no pattern-supported
+regressions. General-only programs remain useful evidence that the default path
+now covers CFG shapes beyond Pattern's deliberately small recognizers.
 
 ## Current State
 
@@ -51,7 +52,7 @@ construction possible:
 - a pattern-based SSA builder
 - standalone general phi placement for mutable slots
 - standalone experimental DFS renaming for mutable slots
-- experimental general SSA builder using phi placement plus renaming
+- general SSA builder using phi placement plus renaming
 
 The current `SSABuilder` supports deliberately small CFG shapes:
 
@@ -194,7 +195,7 @@ pattern-based builder output.
 
 Variable renaming rewrites mutable slot traffic into SSA values.
 
-Implemented experimental API:
+Implemented API:
 
 ```python
 SSARenamer(function, cfg, dominators, phi_placement).rename()
@@ -202,10 +203,8 @@ SSARenamer(function, cfg, dominators, phi_placement).rename()
 
 The result is an `SSARenameResult` containing one `SSAFunction` plus the block
 to slot mapping used for emitted phis. This API operates on one function at a
-time and is now used by the experimental `GeneralSSABuilder`. It is not
-connected to the effective `SSABuilder`; it is reachable from `SSAPipeline` and
-`--emit-ssa` only when the caller explicitly selects the experimental
-`general` builder.
+time and is used by the default `GeneralSSABuilder`. The pattern-based
+`SSABuilder` does not use it.
 
 The builder maintains one stack per promoted slot:
 
@@ -238,10 +237,10 @@ If a load observes an empty stack for its slot, the builder should report a
 clear SSA build error. This means the mutable IR uses a slot before a reaching
 definition in the promotable subset.
 
-## Experimental General Builder
+## General Builder
 
-`aether.ssa.GeneralSSABuilder` is the first complete experimental wrapper for
-the general construction path:
+`aether.ssa.GeneralSSABuilder` is the default wrapper for the general
+construction path:
 
 ```python
 GeneralSSABuilder().build_function(ir_function)
@@ -258,28 +257,28 @@ function wrapped as a one-function module.
 Failures from the construction phases are reported as `GeneralSSABuildError`
 with the original diagnostic preserved in the message and exception cause.
 
-The CLI exposes this builder for inspection only:
-
-```bash
-aether --emit-ssa --ssa-builder=general program.ae
-```
-
-The default remains:
+The CLI uses this builder by default for SSA inspection:
 
 ```bash
 aether --emit-ssa program.ae
+aether --emit-ssa --ssa-builder=general program.ae
+```
+
+The previous pattern-based builder remains available explicitly:
+
+```bash
 aether --emit-ssa --ssa-builder=pattern program.ae
 ```
 
-The existing pattern-based `SSABuilder` and default `--emit-ssa` CLI path still
-produce the same output as before. Selecting `general` does not execute SSA,
-does not enable SSA optimizations, and does not change IR lowering or backend
-semantics.
+Selecting either builder does not execute SSA, does not enable SSA
+optimizations, and does not change IR lowering or backend semantics. Pattern is
+kept temporarily for compatibility and comparison; the intended future is to
+remove it when it no longer adds diagnostic or migration value.
 
 ## Builder Comparison
 
-The pattern-based builder remains the default for the SSA pipeline and for
-`aether --emit-ssa`. The experimental general builder is validated against that
+The general builder is the default for the SSA pipeline and for
+`aether --emit-ssa`. The pattern-based builder is still validated against that
 default in the CFG shapes both builders are expected to support.
 
 The comparison suite checks structural properties instead of exact printed SSA
@@ -303,9 +302,9 @@ The shared comparison cases cover:
 The suite also keeps a stress matrix for larger CFG shapes. Those tests classify
 each case as `SUPPORTED`, `PATTERN_ONLY`, `GENERAL_ONLY`, or `UNSUPPORTED`
 according to the actual builders today. Unsupported cases are asserted as
-current limitations instead of being forced to pass. This documents the current
-experimental coverage expansion without changing the default builder, optimizer,
-lowering, CLI behavior, or execution semantics.
+current limitations instead of being forced to pass. This documents the general
+builder's coverage expansion without changing the optimizer, lowering, backend,
+or execution semantics.
 
 ## Current GeneralSSABuilder Coverage
 
@@ -553,9 +552,9 @@ Phase D:
 
 Phase E:
 
-- replace the pattern-based builder as the default implementation
-- keep only targeted compatibility helpers that still serve diagnostics,
-  testing, or migration clarity
+- implemented: replace the pattern-based builder as the default implementation
+- keep the pattern-based builder temporarily for explicit compatibility,
+  comparison, diagnostics, testing, and migration clarity
 
 ## Validation
 

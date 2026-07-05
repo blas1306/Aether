@@ -220,12 +220,14 @@ aether --emit-ssa --ssa-builder=general program.ae
 
 This is an inspection mode for compiler development. SSA is not executed, is
 not optimized, and does not replace the current slot IR or either execution
-backend. The default `--emit-ssa` path uses the pattern-based builder; explicit
-`--ssa-builder=pattern` is equivalent to that default and preserves the current
-output. `--ssa-builder=general` selects the experimental CFG/dominator/
-dominance-frontier builder for inspection only. The pattern-based builder
-supports linear functions and simple acyclic `if`/`else` plus simple lowered
-`while` loops. Unsupported CFG shapes report a clear SSA builder error.
+backend. The default `--emit-ssa` path now uses `GeneralSSABuilder`, the
+CFG/dominator/dominance-frontier construction path. Explicit
+`--ssa-builder=general` is equivalent to that default.
+`--ssa-builder=pattern` remains available as a temporary compatibility and
+comparison fallback. The pattern-based builder still supports linear functions
+and simple acyclic `if`/`else` plus simple lowered `while` loops. The intended
+future direction is to retire Pattern once comparison coverage stops adding
+migration value. Unsupported CFG shapes report a clear SSA builder error.
 
 The CLI also includes a minimal benchmark harness for language and backend
 development:

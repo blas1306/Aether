@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
 IR_MAIN_RESULT_NAME = "__ir_main_result"
 SSABuilderName = Literal["pattern", "general"]
+DEFAULT_SSA_BUILDER: SSABuilderName = "general"
 
 
 @dataclass(frozen=True)
@@ -134,7 +135,7 @@ class IRBackend:
 class SSAPipeline:
     """Internal TypedProgram/IRModule to verified SSA pipeline."""
 
-    def __init__(self, *, builder: SSABuilderName = "pattern") -> None:
+    def __init__(self, *, builder: SSABuilderName = DEFAULT_SSA_BUILDER) -> None:
         self.builder = builder
 
     def lower_ir(self, typed_program: TypedProgram) -> IRModule:
@@ -195,7 +196,7 @@ def prepare_typed_program(source: str, checker: TypeChecker) -> TypedProgram:
 def lower_to_verified_ssa(
     program: TypedProgram | IRModule,
     *,
-    builder: SSABuilderName = "pattern",
+    builder: SSABuilderName = DEFAULT_SSA_BUILDER,
 ) -> SSAModule:
     """Prepare verified SSA for internal compiler consumers only."""
     return SSAPipeline(builder=builder).run(program).ssa_module

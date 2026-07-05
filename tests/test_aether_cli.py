@@ -205,6 +205,8 @@ def test_help_describes_direct_execution_and_tools() -> None:
     assert "--emit-ir" in stdout
     assert "--emit-cfg" in stdout
     assert "--emit-ssa" in stdout
+    assert "--ssa-builder" in stdout
+    assert "general (default)" in stdout
     assert "--opt" in stdout
     assert "--opt-level" in stdout
     assert "--show-passes" in stdout
@@ -367,25 +369,58 @@ int sumTo(int n) {
         "\n"
         "cond0:\n"
         "    %2: int = phi(entry: %0, body0: %9)\n"
-        "    %4: int = phi(entry: %1, body0: %6)\n"
+        "    %cond0.sum.phi: int = phi(entry: %1, body0: %6)\n"
         "    %3: bool = cmp_le %2, %n\n"
         "    branch %3, body0, exit0\n"
         "\n"
         "body0:\n"
-        "    %6: int = add %4, %2\n"
+        "    %6: int = add %cond0.sum.phi, %2\n"
         "    %8: int = const 1\n"
         "    %9: int = add %2, %8\n"
         "    jump cond0\n"
         "\n"
         "exit0:\n"
-        "    return %4\n"
+        "    return %cond0.sum.phi\n"
         "}\n"
     )
     assert stderr == ""
 
 
-def test_emit_ssa_without_selector_uses_pattern_builder(tmp_path: Path) -> None:
-    program = tmp_path / "emit_ssa_default_pattern.ae"
+def test_emit_ssa_without_selector_uses_general_builder(tmp_path: Path) -> None:
+    program = tmp_path / "emit_ssa_default_general.ae"
+    program.write_text(
+        """
+int nested(int x, int y) {
+    int z = 0;
+    if x > 0 {
+        if y > 0 {
+            z = 1;
+        } else {
+            z = 2;
+        }
+    } else {
+        z = 3;
+    }
+    return z;
+}
+""",
+        encoding="utf-8",
+    )
+
+    default_result = run_cli(["--emit-ssa", str(program)])
+    explicit_general_result = run_cli(
+        ["--emit-ssa", "--ssa-builder=general", str(program)]
+    )
+
+    assert default_result == explicit_general_result
+    assert default_result[0] == EXIT_SUCCESS
+    assert "merge1.z.phi" in default_result[1]
+
+
+def test_emit_ssa_pattern_builder_remains_explicit_fallback(
+    tmp_path: Path,
+) -> None:
+    program = tmp_path / "emit_ssa_explicit_pattern.ae"
     program.write_text(
         """
 int add(int a, int b) {
@@ -395,13 +430,19 @@ int add(int a, int b) {
         encoding="utf-8",
     )
 
-    default_result = run_cli(["--emit-ssa", str(program)])
-    explicit_pattern_result = run_cli(
+    exit_code, stdout, stderr = run_cli(
         ["--emit-ssa", "--ssa-builder=pattern", str(program)]
     )
 
-    assert default_result == explicit_pattern_result
-    assert default_result[0] == EXIT_SUCCESS
+    assert exit_code == EXIT_SUCCESS
+    assert stdout == (
+        "func @add(%a: int, %b: int) -> int {\n"
+        "entry:\n"
+        "    %0: int = add %a, %b\n"
+        "    return %0\n"
+        "}\n"
+    )
+    assert stderr == ""
 
 
 @pytest.mark.parametrize(
@@ -608,7 +649,7 @@ def test_non_ssa_modes_remain_unchanged_after_adding_ssa_builder_selector(
     assert bench_stderr == ""
 
 
-def test_emit_ssa_unsupported_program_reports_builder_error_without_traceback(
+def test_emit_ssa_pattern_unsupported_program_reports_builder_error_without_traceback(
     tmp_path: Path,
 ) -> None:
     program = tmp_path / "emit_ssa_nested_while.ae"
@@ -627,7 +668,9 @@ int nested(int n) {
         encoding="utf-8",
     )
 
-    exit_code, stdout, stderr = run_cli(["--emit-ssa", str(program)])
+    exit_code, stdout, stderr = run_cli(
+        ["--emit-ssa", "--ssa-builder=pattern", str(program)]
+    )
 
     assert exit_code == EXIT_LANGUAGE_ERROR
     assert stdout == ""

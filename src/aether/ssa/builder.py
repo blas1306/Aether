@@ -39,7 +39,7 @@ from .model import (
 
 
 class SSABuildError(ValueError):
-    """Raised when slot IR cannot be converted by the current SSA builder."""
+    """Raised when slot IR cannot be converted by the pattern SSA builder."""
 
 
 @dataclass

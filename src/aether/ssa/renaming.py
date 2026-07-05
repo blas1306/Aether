@@ -64,10 +64,9 @@ class _PhiState:
 class SSARenamer:
     """Convert one slot-based IR function into SSA with dominator-tree DFS.
 
-    This is intentionally standalone and experimental. It consumes phi
-    locations computed elsewhere, rewrites loads and stores with per-slot
-    stacks, and returns an ``SSAFunction`` without wiring itself into the
-    effective pattern-based builder.
+    This is intentionally standalone. It consumes phi locations computed
+    elsewhere, rewrites loads and stores with per-slot stacks, and returns an
+    ``SSAFunction`` for the general builder.
     """
 
     def __init__(
