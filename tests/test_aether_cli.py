@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from io import StringIO
 from pathlib import Path
+import shutil
+import subprocess
 
 import pytest
 
@@ -861,6 +863,195 @@ def test_emit_llvm_rejects_show_passes_combination(tmp_path: Path) -> None:
     assert exit_code == EXIT_USAGE_ERROR
     assert stdout == ""
     assert "--emit-llvm cannot be combined with --show-passes." in stderr
+
+
+def test_build_missing_file_reports_read_error(tmp_path: Path) -> None:
+    missing = tmp_path / "missing_build.ae"
+
+    exit_code, stdout, stderr = run_cli(["build", str(missing)])
+
+    assert exit_code == EXIT_USAGE_ERROR
+    assert stdout == ""
+    assert "aether: cannot read" in stderr
+    assert str(missing) in stderr
+
+
+def test_build_unsupported_llvm_feature_reports_without_traceback(
+    tmp_path: Path,
+) -> None:
+    program = tmp_path / "build_unsupported.ae"
+    program.write_text(
+        """
+int choose(int x) {
+    if x > 0 {
+        return 1;
+    } else {
+        return 2;
+    }
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["build", str(program)])
+
+    assert exit_code == EXIT_LANGUAGE_ERROR
+    assert stdout == ""
+    assert "LLVM backend does not support compare" in stderr
+    assert "Traceback" not in stderr
+
+
+def test_build_reports_clear_error_when_clang_is_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    program = tmp_path / "build_no_clang.ae"
+    program.write_text("int main() { return 5; }\n", encoding="utf-8")
+    monkeypatch.setattr("aether.backend.llvm.build.shutil.which", lambda _name: None)
+
+    exit_code, stdout, stderr = run_cli(["build", str(program)])
+
+    assert exit_code == EXIT_LANGUAGE_ERROR
+    assert stdout == ""
+    assert "clang is required to build native executables." in stderr
+    assert "Traceback" not in stderr
+
+
+def test_build_accepts_output_option(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    program = tmp_path / "build_output.ae"
+    output = tmp_path / "custom_output"
+    commands: list[list[str]] = []
+    program.write_text("int main() { return 5; }\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "aether.backend.llvm.build.shutil.which",
+        lambda _name: "/usr/bin/clang",
+    )
+
+    def fake_run(command, **_kwargs):
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr("aether.backend.llvm.build.subprocess.run", fake_run)
+
+    exit_code, stdout, stderr = run_cli(
+        ["build", str(program), "-o", str(output)]
+    )
+
+    assert exit_code == EXIT_SUCCESS
+    assert len(commands) == 1
+    assert commands[0][0] == "/usr/bin/clang"
+    assert commands[0][1].endswith(".ll")
+    assert commands[0][2:] == ["-o", str(output.resolve())]
+    assert stdout == f"Built executable: {output.resolve()}\n"
+    assert stderr == ""
+
+
+def test_build_reports_clang_stderr_without_traceback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    program = tmp_path / "build_clang_failure.ae"
+    program.write_text("int main() { return 5; }\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "aether.backend.llvm.build.shutil.which",
+        lambda _name: "/usr/bin/clang",
+    )
+    monkeypatch.setattr(
+        "aether.backend.llvm.build.subprocess.run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(
+            command,
+            1,
+            "",
+            "clang failed loudly",
+        ),
+    )
+
+    exit_code, stdout, stderr = run_cli(["build", str(program)])
+
+    assert exit_code == EXIT_LANGUAGE_ERROR
+    assert stdout == ""
+    assert "clang failed loudly" in stderr
+    assert "Traceback" not in stderr
+
+
+def test_build_accepts_keep_llvm_option(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    program = tmp_path / "build_keep_llvm.ae"
+    output = tmp_path / "kept_output"
+    llvm_path = tmp_path / "kept_output.ll"
+    program.write_text("int main() { return 5; }\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "aether.backend.llvm.build.shutil.which",
+        lambda _name: "/usr/bin/clang",
+    )
+    monkeypatch.setattr(
+        "aether.backend.llvm.build.subprocess.run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(command, 0, "", ""),
+    )
+
+    exit_code, stdout, stderr = run_cli(
+        ["build", str(program), "-o", str(output), "--keep-llvm"]
+    )
+
+    assert exit_code == EXIT_SUCCESS
+    assert llvm_path.read_text(encoding="utf-8") == (
+        "define i32 @main() {\n"
+        "entry:\n"
+        "  ret i32 5\n"
+        "}"
+    )
+    assert f"Built executable: {output.resolve()}\n" in stdout
+    assert f"Kept LLVM IR: {llvm_path.resolve()}\n" in stdout
+    assert stderr == ""
+
+
+def test_build_default_output_is_source_without_extension(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    program = tmp_path / "default_output.ae"
+    expected_output = tmp_path / "default_output"
+    commands: list[list[str]] = []
+    program.write_text("int main() { return 5; }\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "aether.backend.llvm.build.shutil.which",
+        lambda _name: "/usr/bin/clang",
+    )
+
+    def fake_run(command, **_kwargs):
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr("aether.backend.llvm.build.subprocess.run", fake_run)
+
+    exit_code, stdout, stderr = run_cli(["build", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert commands[0][-1] == str(expected_output.resolve())
+    assert stdout == f"Built executable: {expected_output.resolve()}\n"
+    assert stderr == ""
+
+
+def test_build_smoke_compiles_and_runs_with_clang_if_available(tmp_path: Path) -> None:
+    if shutil.which("clang") is None:
+        pytest.skip("clang is not available")
+
+    program = tmp_path / "return_5.ae"
+    output = tmp_path / "return_5"
+    program.write_text("int main() { return 5; }\n", encoding="utf-8")
+
+    exit_code, stdout, stderr = run_cli(["build", str(program), "-o", str(output)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert stdout == f"Built executable: {output.resolve()}\n"
+    assert stderr == ""
+    completed = subprocess.run([str(output)], check=False)
+    assert completed.returncode == 5
 
 
 def test_normal_cli_execution_is_unchanged_after_emit_llvm(tmp_path: Path) -> None:

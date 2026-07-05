@@ -41,7 +41,7 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=(
             "The default command is file execution: aether program.ae\n"
             "Development inspection tools: --tokens, --ast, --emit-ir, "
-            "--emit-cfg, --emit-ssa, --emit-llvm, and bench"
+            "--emit-cfg, --emit-ssa, --emit-llvm, build, and bench"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -142,6 +142,28 @@ def build_bench_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def build_native_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="aether build",
+        description="Build an Aether source file to a native executable with clang.",
+    )
+    parser.add_argument("file", help="Aether source file to build.")
+    parser.add_argument(
+        "-o",
+        "--output",
+        help=(
+            "Executable output path. Defaults to the source path without its "
+            "extension."
+        ),
+    )
+    parser.add_argument(
+        "--keep-llvm",
+        action="store_true",
+        help="Keep the generated .ll file next to the executable output.",
+    )
+    return parser
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
@@ -155,6 +177,8 @@ def main(
     argv_list = list(sys.argv[1:] if argv is None else argv)
     if argv_list and argv_list[0] == "bench":
         return _main_bench(argv_list[1:], stdout=stdout, stderr=stderr)
+    if argv_list and argv_list[0] == "build":
+        return _main_build(argv_list[1:], stdout=stdout, stderr=stderr)
 
     parser = build_parser()
 
@@ -308,6 +332,45 @@ def _main_bench(argv: Sequence[str], *, stdout: TextIO, stderr: TextIO) -> int:
     _print_benchmark_report(report, stdout=stdout)
     if args.backend == "ir" and report.failures:
         return EXIT_LANGUAGE_ERROR
+    return EXIT_SUCCESS
+
+
+def _main_build(argv: Sequence[str], *, stdout: TextIO, stderr: TextIO) -> int:
+    from .backend.llvm import LLVMBuildError
+
+    parser = build_native_parser()
+    if stdout is sys.stdout and stderr is sys.stderr:
+        args = parser.parse_args(argv)
+    else:
+        try:
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                args = parser.parse_args(argv)
+        except SystemExit as exc:
+            return int(exc.code)
+
+    path = Path(args.file)
+    source = _read_source(path, stderr=stderr)
+    if source is None:
+        return EXIT_USAGE_ERROR
+
+    output_path = Path(args.output) if args.output is not None else path.with_suffix("")
+    try:
+        result = _build_native(
+            source,
+            path=path,
+            output_path=output_path,
+            keep_llvm=args.keep_llvm,
+        )
+    except LLVMBuildError as exc:
+        print(f"aether build: {exc}", file=stderr)
+        return EXIT_LANGUAGE_ERROR
+    except AetherError as exc:
+        print(_format_language_error(exc), file=stderr)
+        return EXIT_LANGUAGE_ERROR
+
+    print(f"Built executable: {result.output_path}", file=stdout)
+    if result.llvm_path is not None:
+        print(f"Kept LLVM IR: {result.llvm_path}", file=stdout)
     return EXIT_SUCCESS
 
 
@@ -473,6 +536,30 @@ def _emit_llvm(source: str, *, path: Path, stdout: TextIO) -> None:
     except LLVMBackendError as exc:
         raise AetherRuntimeError(str(exc), kind="llvm") from exc
     print(llvm_ir, file=stdout)
+
+
+def _build_native(
+    source: str,
+    *,
+    path: Path,
+    output_path: Path,
+    keep_llvm: bool,
+):
+    from .backend.llvm import LLVMBackendError, LLVMBuilder
+    from .errors import AetherRuntimeError
+
+    typed_program = prepare_typed_program(
+        source,
+        TypeChecker(source_root=path.parent),
+    )
+    try:
+        return LLVMBuilder().build(
+            typed_program,
+            output_path=output_path,
+            keep_llvm=keep_llvm,
+        )
+    except LLVMBackendError as exc:
+        raise AetherRuntimeError(str(exc), kind="llvm") from exc
 
 
 def _optimization_profile_from_args(

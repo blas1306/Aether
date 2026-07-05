@@ -8,9 +8,23 @@ returns a `.ll` string. The CLI inspection entry point is:
 aether --emit-llvm hello.ae
 ```
 
-The CLI currently prints textual LLVM IR to stdout only. It does not invoke
-`clang`, does not write `.ll` files, does not generate executables, and does
-not execute the program.
+The CLI also has a first native build command for the same limited subset:
+
+```bash
+aether build hello.ae
+aether build hello.ae -o hello
+aether build hello.ae --keep-llvm
+```
+
+`--emit-llvm` prints textual LLVM IR to stdout only. `aether build` writes LLVM
+IR to a temporary `.ll` file and invokes `clang` to produce a native
+executable. If `-o`/`--output` is omitted, the executable is written next to the
+source file using the source path without `.ae`; for example
+`examples/llvm/return_5.ae` produces `examples/llvm/return_5`. `--keep-llvm`
+keeps the generated LLVM IR next to the executable output, for example
+`hello.ll`.
+
+Native builds require `clang` on `PATH`.
 
 ## Supported Subset
 
@@ -54,8 +68,10 @@ The backend deliberately does not support these yet:
 - heap allocation
 - imports or packages
 - LLVM optimization passes
-- automatic linking
-- automatic execution
+- linking beyond invoking `clang` on the generated `.ll`
+- cross-compilation
+- JIT or `llc` build paths
+- automatic execution after build
 - `SSAPhi`, `SSABranch`, `SSAJump`, `SSACall`, or `SSACompareOp`
 
 Unsupported input raises `LLVMBackendError` with messages beginning with:

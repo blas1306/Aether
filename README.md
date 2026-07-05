@@ -124,6 +124,9 @@ aether --emit-ssa program.ae
 aether --emit-ssa --ssa-builder=pattern program.ae
 aether --emit-ssa --ssa-builder=general program.ae
 aether --emit-llvm hello.ae
+aether build hello.ae
+aether build hello.ae -o hello
+aether build hello.ae --keep-llvm
 aether --backend=ir --emit-ir program.ae
 aether --backend=ir --emit-cfg program.ae
 ```
@@ -247,8 +250,29 @@ For example:
 aether --emit-llvm hello.ae
 ```
 
-This is currently an inspection mode only. It does not invoke `clang`, does not
-generate `.ll` files or executables, and does not execute the program.
+`--emit-llvm` remains an inspection mode: it prints LLVM IR to stdout and does
+not write files.
+
+For the currently supported LLVM subset, `aether build` can also invoke `clang`
+to produce a native executable:
+
+```bash
+aether build examples/llvm/return_5.ae
+aether build examples/llvm/return_5.ae -o return_5
+aether build examples/llvm/return_5.ae -o return_5 --keep-llvm
+```
+
+When `-o`/`--output` is omitted, the executable is written next to the source
+file using the source name without `.ae`; for example,
+`examples/llvm/return_5.ae` produces `examples/llvm/return_5`. With
+`-o return_5`, the executable is written to `./return_5`. By default the
+generated `.ll` file is temporary and removed after `clang` finishes.
+`--keep-llvm` keeps it next to the executable output, for example
+`return_5.ll`.
+
+Native builds require `clang` on `PATH`. The native build path is intentionally
+small for now: no JIT, `llc`, runtime, string/`println` lowering, advanced
+imports, aggregate LLVM lowering, complex linking, or cross-compilation.
 
 The CLI also includes a minimal benchmark harness for language and backend
 development:
