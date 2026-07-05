@@ -734,6 +734,10 @@ src/aether/ssa/
     builder.py
     general_builder.py
     model.py
+    optimizer/
+        __init__.py
+        pipeline.py
+        result.py
     phi_placement.py
     printer.py
     renaming.py
@@ -755,6 +759,10 @@ Current responsibilities:
 - `general_builder.py`: default general construction wrapper that uses
   CFG, dominators, dominance frontiers, `PhiPlacement`, `SSARenamer`, and
   `SSAVerifier`.
+- `optimizer/`: initial SSA optimizer pipeline infrastructure with
+  `SSAOptimizationResult`, `SSAOptimizationTraceStep`, fixed-point iteration,
+  and convergence errors. The default pipeline has no passes and is not wired
+  into the CLI or default compilation.
 - `phi_placement.py`: standalone Cytron-style iterated dominance-frontier phi
   placement for mutable IR slots. This computes `slot -> blocks`.
 - `renaming.py`: standalone variable renaming over the dominator tree. It
@@ -771,24 +779,42 @@ The future effective full builder may consume existing analysis results instead
 of recomputing CFG or dominators internally. That would keep the construction
 step testable and make analysis ownership explicit.
 
+## SSA Optimizer Infrastructure
+
+`aether.ssa.optimizer` now provides the initial SSA optimizer infrastructure:
+
+- `SSAOptimizationResult(module, changed, stats)`
+- `SSAOptimizationTraceStep(label, module, changed, stats)`
+- `SSAOptimizerPipeline(passes=None, iterative=False, max_iterations=10)`
+
+The default SSA optimizer pipeline intentionally has no passes. Running it
+returns the same `SSAModule`, and trace output records only `Initial SSA` and
+`Final SSA` around any custom pass entries. The pipeline supports custom passes
+and iterative fixed-point execution for tests and future development, but it is
+not connected to the CLI, not used by `--emit-ssa`, and not enabled by default.
+
+No real SSA optimizations are implemented yet.
+
 ## Future SSA Optimizations
 
 Once SSA construction and verification are stable, these optimizations can be
 built on top of SSA:
 
+- Dead Phi Elimination: remove phi nodes whose results are unused or redundant.
 - Global Constant Propagation: propagate constants across basic blocks using
   direct use-definition chains.
 - Copy Propagation: replace uses of trivial copies with their original SSA
   values.
-- CSE: reuse equivalent pure expressions with the same operands.
 - SCCP: combine sparse conditional reachability with constant propagation
   through branches and phi nodes.
+- GVN: reuse equivalent pure computations across dominated regions.
 - LICM: move loop-invariant pure computations out of loops using dominance and
   loop information.
 
 These should not be introduced in early SSA work. After this initial
-model/printer/verifier infrastructure, the next construction milestone is
-correct automatic SSA form from slot IR.
+model/printer/verifier/builder and optimizer-pipeline infrastructure, SSA
+optimization passes can be added one at a time without changing current
+lowering, CLI inspection, or execution semantics.
 
 ## Not Implemented Yet
 
@@ -803,7 +829,7 @@ This initial SSA construction milestone does not include:
 - memory SSA
 - alias analysis
 - aggregate promotion
-- global optimizations
+- real SSA optimization passes
 - native code generation
 
 A future builder implementation should build SSA as an internal representation
