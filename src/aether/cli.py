@@ -41,7 +41,7 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=(
             "The default command is file execution: aether program.ae\n"
             "Development inspection tools: --tokens, --ast, --emit-ir, "
-            "--emit-cfg, --emit-ssa, and bench"
+            "--emit-cfg, --emit-ssa, --emit-llvm, and bench"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -72,6 +72,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--emit-ssa",
         action="store_true",
         help="Lower the file through verified IR and print verified SSA.",
+    )
+    modes.add_argument(
+        "--emit-llvm",
+        action="store_true",
+        help="Lower the file through optimized SSA and print textual LLVM IR.",
     )
     parser.add_argument(
         "--ssa-builder",
@@ -183,6 +188,12 @@ def main(
             file=stderr,
         )
         return EXIT_USAGE_ERROR
+    if args.emit_llvm and args.show_passes:
+        print(
+            "aether: error: --emit-llvm cannot be combined with --show-passes.",
+            file=stderr,
+        )
+        return EXIT_USAGE_ERROR
     if args.show_passes and not (
         args.emit_ir and (args.opt or args.opt_level is not None)
     ):
@@ -248,6 +259,11 @@ def main(
                 stdout=stdout,
                 builder=args.ssa_builder or DEFAULT_SSA_BUILDER,
             ),
+            stderr=stderr,
+        )
+    if args.emit_llvm:
+        return _run_language_action(
+            lambda: _emit_llvm(source, path=path, stdout=stdout),
             stderr=stderr,
         )
     return _run_language_action(
@@ -439,6 +455,24 @@ def _emit_ssa(
             kind="ssa",
         ) from exc
     print(print_ssa(module), file=stdout)
+
+
+def _emit_llvm(source: str, *, path: Path, stdout: TextIO) -> None:
+    from .backend.llvm import LLVMBackend, LLVMBackendError
+    from .errors import AetherRuntimeError
+    from .ssa.optimizer import SSAOptimizerPipeline
+
+    typed_program = prepare_typed_program(
+        source,
+        TypeChecker(source_root=path.parent),
+    )
+    module = lower_to_verified_ssa(typed_program, builder=DEFAULT_SSA_BUILDER)
+    module = SSAOptimizerPipeline().run(module)
+    try:
+        llvm_ir = LLVMBackend().emit(module)
+    except LLVMBackendError as exc:
+        raise AetherRuntimeError(str(exc), kind="llvm") from exc
+    print(llvm_ir, file=stdout)
 
 
 def _optimization_profile_from_args(

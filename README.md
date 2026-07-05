@@ -123,6 +123,7 @@ aether --emit-cfg program.ae
 aether --emit-ssa program.ae
 aether --emit-ssa --ssa-builder=pattern program.ae
 aether --emit-ssa --ssa-builder=general program.ae
+aether --emit-llvm hello.ae
 aether --backend=ir --emit-ir program.ae
 aether --backend=ir --emit-cfg program.ae
 ```
@@ -229,6 +230,25 @@ comparison fallback. The pattern-based builder still supports linear functions
 and simple acyclic `if`/`else` plus simple lowered `while` loops. The intended
 future direction is to retire Pattern once comparison coverage stops adding
 migration value. Unsupported CFG shapes report a clear SSA builder error.
+
+### LLVM IR
+
+`--emit-llvm` lowers the checked program through the General SSA builder,
+verifies SSA, runs the SSA optimizer pipeline, and prints textual LLVM IR to
+stdout:
+
+```text
+Lexer -> Parser -> TypeChecker -> IR lowering -> IR verifier -> GeneralSSABuilder -> SSA verifier -> SSAOptimizerPipeline -> LLVMBackend
+```
+
+For example:
+
+```bash
+aether --emit-llvm hello.ae
+```
+
+This is currently an inspection mode only. It does not invoke `clang`, does not
+generate `.ll` files or executables, and does not execute the program.
 
 The CLI also includes a minimal benchmark harness for language and backend
 development:

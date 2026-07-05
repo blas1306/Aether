@@ -205,6 +205,7 @@ def test_help_describes_direct_execution_and_tools() -> None:
     assert "--emit-ir" in stdout
     assert "--emit-cfg" in stdout
     assert "--emit-ssa" in stdout
+    assert "--emit-llvm" in stdout
     assert "--ssa-builder" in stdout
     assert "general (default)" in stdout
     assert "--opt" in stdout
@@ -723,6 +724,154 @@ def test_emit_ssa_missing_file_reports_read_error(tmp_path: Path) -> None:
     assert stdout == ""
     assert "aether: cannot read" in stderr
     assert str(missing) in stderr
+
+
+def test_emit_llvm_prints_llvm_ir(tmp_path: Path) -> None:
+    program = tmp_path / "emit_llvm.ae"
+    program.write_text("int main() { return 0; }\n", encoding="utf-8")
+
+    exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert stdout.startswith("define i32 @main() {")
+    assert "ret i32 0" in stdout
+    assert "func @main" not in stdout
+    assert stderr == ""
+
+
+def test_emit_llvm_prints_constant_function(tmp_path: Path) -> None:
+    program = tmp_path / "emit_llvm_constant.ae"
+    program.write_text("int main() { return 42; }\n", encoding="utf-8")
+
+    exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert stdout == (
+        "define i32 @main() {\n"
+        "entry:\n"
+        "  ret i32 42\n"
+        "}\n"
+    )
+    assert stderr == ""
+
+
+def test_emit_llvm_prints_sum(tmp_path: Path) -> None:
+    program = tmp_path / "emit_llvm_sum.ae"
+    program.write_text("int inc(int x) { return x + 1; }\n", encoding="utf-8")
+
+    exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert stdout == (
+        "define i32 @inc(i32 %x) {\n"
+        "entry:\n"
+        "  %0 = add i32 %x, 1\n"
+        "  ret i32 %0\n"
+        "}\n"
+    )
+    assert stderr == ""
+
+
+def test_emit_llvm_prints_add_int_int(tmp_path: Path) -> None:
+    program = tmp_path / "emit_llvm_add.ae"
+    program.write_text(
+        """
+int add(int a, int b) {
+    return a + b;
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert stdout == (
+        "define i32 @add(i32 %a, i32 %b) {\n"
+        "entry:\n"
+        "  %0 = add i32 %a, %b\n"
+        "  ret i32 %0\n"
+        "}\n"
+    )
+    assert stderr == ""
+
+
+def test_emit_llvm_missing_file_reports_read_error(tmp_path: Path) -> None:
+    missing = tmp_path / "missing_llvm.ae"
+
+    exit_code, stdout, stderr = run_cli(["--emit-llvm", str(missing)])
+
+    assert exit_code == EXIT_USAGE_ERROR
+    assert stdout == ""
+    assert "aether: cannot read" in stderr
+    assert str(missing) in stderr
+
+
+def test_emit_llvm_unsupported_feature_reports_without_traceback(
+    tmp_path: Path,
+) -> None:
+    program = tmp_path / "emit_llvm_unsupported.ae"
+    program.write_text(
+        """
+int choose(int x) {
+    if x > 0 {
+        return 1;
+    } else {
+        return 2;
+    }
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
+
+    assert exit_code == EXIT_LANGUAGE_ERROR
+    assert stdout == ""
+    assert "LLVM backend does not support compare" in stderr
+    assert "Traceback" not in stderr
+
+
+@pytest.mark.parametrize(
+    "other_flag",
+    ["--emit-ir", "--emit-ssa", "--emit-cfg"],
+)
+def test_emit_llvm_rejects_other_emit_modes(
+    tmp_path: Path,
+    other_flag: str,
+) -> None:
+    program = tmp_path / "emit_llvm_incompatible.ae"
+    program.write_text("int main() { return 42; }\n", encoding="utf-8")
+
+    exit_code, stdout, stderr = run_cli(["--emit-llvm", other_flag, str(program)])
+
+    assert exit_code == EXIT_USAGE_ERROR
+    assert stdout == ""
+    assert "not allowed with argument --emit-llvm" in stderr
+
+
+def test_emit_llvm_rejects_show_passes_combination(tmp_path: Path) -> None:
+    program = tmp_path / "emit_llvm_show_passes.ae"
+    program.write_text("int main() { return 42; }\n", encoding="utf-8")
+
+    exit_code, stdout, stderr = run_cli(
+        ["--emit-llvm", "--show-passes", str(program)]
+    )
+
+    assert exit_code == EXIT_USAGE_ERROR
+    assert stdout == ""
+    assert "--emit-llvm cannot be combined with --show-passes." in stderr
+
+
+def test_normal_cli_execution_is_unchanged_after_emit_llvm(tmp_path: Path) -> None:
+    program = tmp_path / "normal_after_emit_llvm.ae"
+    program.write_text('println("normal");\n', encoding="utf-8")
+
+    exit_code, stdout, stderr = run_cli([str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert stdout == "normal\n"
+    assert stderr == ""
 
 
 def test_normal_cli_execution_is_unchanged_after_emit_ssa(tmp_path: Path) -> None:

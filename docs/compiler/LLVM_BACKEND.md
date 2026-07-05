@@ -2,7 +2,15 @@
 
 Aether now has a minimal textual LLVM IR backend under
 `aether.backend.llvm`. It consumes verified-looking SSA modules directly and
-returns a `.ll` string. It is intentionally not connected to the CLI yet.
+returns a `.ll` string. The CLI inspection entry point is:
+
+```bash
+aether --emit-llvm hello.ae
+```
+
+The CLI currently prints textual LLVM IR to stdout only. It does not invoke
+`clang`, does not write `.ll` files, does not generate executables, and does
+not execute the program.
 
 ## Supported Subset
 
@@ -48,7 +56,6 @@ The backend deliberately does not support these yet:
 - LLVM optimization passes
 - automatic linking
 - automatic execution
-- CLI flags such as `--emit-llvm`
 - `SSAPhi`, `SSABranch`, `SSAJump`, `SSACall`, or `SSACompareOp`
 
 Unsupported input raises `LLVMBackendError` with messages beginning with:
