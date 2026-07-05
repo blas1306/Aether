@@ -60,3 +60,7 @@ Current compiler-design documents:
 - [SSA_BUILDER.md](SSA_BUILDER.md): operational migration notes for the move
   from the pattern-based SSA builder to the general dominance-frontier-based
   default.
+- [SCCP.md](SCCP.md): design plan for future Sparse Conditional Constant
+  Propagation over SSA, including lattice states, executable-edge tracking,
+  branch handling, phi handling, transformation phases, and initial
+  limitations.

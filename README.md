@@ -24,9 +24,10 @@ Compiler implementation notes live under
 [`dominator`](docs/compiler/DOMINATORS.md) and
 [`SSA`](docs/compiler/SSA_DESIGN.md) design notes, plus the
 [`SSA construction plan`](docs/compiler/SSA_CONSTRUCTION.md) and
-[`general SSA builder plan`](docs/compiler/SSA_BUILDER.md), for future IR
-analysis and optimization work. Language-level specifications and design notes
-live under [`docs/aether/`](docs/aether/).
+[`general SSA builder plan`](docs/compiler/SSA_BUILDER.md), and the
+[`SCCP design plan`](docs/compiler/SCCP.md), for future IR analysis and
+optimization work. Language-level specifications and design notes live under
+[`docs/aether/`](docs/aether/).
 
 ## Aether Scripts
 
