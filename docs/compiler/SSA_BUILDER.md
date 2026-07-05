@@ -18,6 +18,26 @@ default builder used by the SSA pipeline and `--emit-ssa`; the general builder
 is available only through an explicit inspection selector and does not replace
 the default yet.
 
+## Regression Validation
+
+The general builder is continuously validated against the pattern-based builder
+through a repository regression suite over the checked-in Aether example
+programs. The suite discovers `.ae` programs under the example and benchmark
+trees, lowers the currently supported subset to verified IR, and then attempts
+SSA construction with both builders.
+
+When the pattern builder accepts a program, the general builder must also
+accept it, the resulting SSA must pass `SSAVerifier`, and the two modules must
+match on structural properties rather than exact text: function sets,
+signatures, block names, terminator shapes, return types, absence of load/store
+traffic, and phi counts per block.
+
+Programs outside the current pattern builder subset are tracked as
+non-comparable for the purpose of this migration. It is acceptable for the
+general builder to accept additional CFG shapes before the default changes, but
+the builder default will only move from `pattern` to `general` once the
+regression suite shows no pattern-supported regressions.
+
 ## Current State
 
 Aether already has the compiler infrastructure needed to make general SSA
