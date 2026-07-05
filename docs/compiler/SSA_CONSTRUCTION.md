@@ -766,6 +766,9 @@ Current responsibilities:
   Propagation, SSA Algebraic Simplification, narrow phi cleanup passes:
   `TrivialPhiEliminator` and `DeadPhiEliminator`, plus simple SSA Dead Code
   Elimination. The optimizer is not wired into the CLI or default compilation.
+- `analysis/`: reusable SSA analysis infrastructure. It currently contains
+  lattice states for value information and a duplicate-suppressing FIFO
+  worklist for future iterative analyses.
 - `phi_placement.py`: standalone Cytron-style iterated dominance-frontier phi
   placement for mutable IR slots. This computes `slot -> blocks`.
 - `renaming.py`: standalone variable renaming over the dominator tree. It
@@ -872,6 +875,32 @@ only this phi-specific identity case; broader copy propagation, global constant
 propagation, SCCP, GVN, LICM, and effect-aware dead-code elimination are not
 implemented yet. SSA Constant Folding and local SSA Algebraic Simplification
 are implemented, but Global Constant Propagation and SCCP remain pending.
+
+## SSA Analysis Infrastructure
+
+`aether.ssa.analysis` provides reusable building blocks for future SSA
+analyses without changing the current optimizer pipeline. The initial lattice
+represents information known about an SSA value:
+
+- `Unknown`: no useful information has been discovered yet.
+- `Constant(value)`: the value is known to be one concrete constant.
+- `Overdefined`: conflicting information means the value cannot be represented
+  as one constant.
+
+Lattice merges follow the usual upward flow for constant propagation:
+`Unknown` yields to the other state, equal constants remain constant, different
+constants become `Overdefined`, and any merge with `Overdefined` stays
+`Overdefined`.
+
+The same package also contains a generic FIFO `Worklist` with `push`, `pop`,
+`empty`, and `clear`. It suppresses duplicate queued items while still allowing
+an item to be requeued after it has been popped.
+
+SCCP is expected to use this infrastructure for value-state propagation and
+iterative processing. Other SSA data-flow analyses can reuse the same lattice
+and worklist pieces or extend them with more domain-specific states. SCCP,
+CFG simplification, unreachable-block elimination, and branch pruning are not
+implemented yet.
 
 ## Future SSA Optimizations
 

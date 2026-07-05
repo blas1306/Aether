@@ -21,24 +21,28 @@ exposed by `aether.analysis.dominators`. Dominance frontier analysis is exposed
 by `aether.analysis.dominance_frontier`.
 
 Initial SSA model, textual printing, verification infrastructure, the legacy
-pattern-based SSA builder, the default `GeneralSSABuilder`, and the SSA
-optimizer pipeline live under `aether.ssa`. The optimizer pipeline currently
-defaults to `SSAConstantFolder`, `SSAGlobalConstantPropagator`,
-`SSAAlgebraicSimplifier`, `TrivialPhiEliminator`, `DeadPhiEliminator`, and
-`SSADeadCodeEliminator`, but it is still not connected to CLI SSA export or
-execution. `SSAConstantFolder` folds binary and comparison operations whose
-operands are known `SSAConst` values; `SSAGlobalConstantPropagator`
-conservatively replaces globally known constant SSA producers;
-`SSAAlgebraicSimplifier` applies local integer identities such as `x + 0 -> x`
-and `x * 0 -> 0`; `TrivialPhiEliminator` rewrites phis whose incoming values
-are all the same SSA value; `DeadPhiEliminator` removes phis whose results have
-no uses; `SSADeadCodeEliminator` removes unused pure SSA producers while
-preserving calls until effect analysis exists. The internal
-`aether.pipeline.SSAPipeline` prepares verified SSA modules for compiler tests
-and future consumers using the general builder by default. CLI SSA export
-exists for inspection; SSA execution, general copy propagation, global constant
-propagation, SCCP, GVN, LICM, and effect-aware call removal are not implemented
-yet. The pattern builder remains available temporarily through
+pattern-based SSA builder, the default `GeneralSSABuilder`, SSA analysis
+infrastructure, and the SSA optimizer pipeline live under `aether.ssa`.
+`aether.ssa.analysis` currently provides reusable lattice states
+(`Unknown`, `Constant(value)`, and `Overdefined`) plus a duplicate-suppressing
+FIFO worklist for future propagation analyses such as SCCP. The optimizer
+pipeline currently defaults to `SSAConstantFolder`,
+`SSAGlobalConstantPropagator`, `SSAAlgebraicSimplifier`,
+`TrivialPhiEliminator`, `DeadPhiEliminator`, and `SSADeadCodeEliminator`, but
+it is still not connected to CLI SSA export or execution. `SSAConstantFolder`
+folds binary and comparison operations whose operands are known `SSAConst`
+values; `SSAGlobalConstantPropagator` conservatively replaces globally known
+constant SSA producers; `SSAAlgebraicSimplifier` applies local integer
+identities such as `x + 0 -> x` and `x * 0 -> 0`; `TrivialPhiEliminator`
+rewrites phis whose incoming values are all the same SSA value;
+`DeadPhiEliminator` removes phis whose results have no uses;
+`SSADeadCodeEliminator` removes unused pure SSA producers while preserving
+calls until effect analysis exists. The internal `aether.pipeline.SSAPipeline`
+prepares verified SSA modules for compiler tests and future consumers using
+the general builder by default. CLI SSA export exists for inspection; SSA
+execution, general copy propagation, SCCP, CFG simplification,
+unreachable-block elimination, GVN, LICM, and effect-aware call removal are not
+implemented yet. The pattern builder remains available temporarily through
 `--ssa-builder=pattern` for compatibility and comparison.
 
 Current compiler-design documents:
@@ -51,7 +55,8 @@ Current compiler-design documents:
   SSA builders, internal verified SSA pipeline, construction algorithm,
   verification rules, SSA optimizer pipeline infrastructure, Trivial Phi
   Elimination, Dead Phi Elimination, SSA Constant Folding, SSA Algebraic
-  Simplification, and SSA Dead Code Elimination.
+  Simplification, SSA Dead Code Elimination, and reusable SSA analysis
+  infrastructure for future propagation analyses.
 - [SSA_BUILDER.md](SSA_BUILDER.md): operational migration notes for the move
   from the pattern-based SSA builder to the general dominance-frontier-based
   default.
