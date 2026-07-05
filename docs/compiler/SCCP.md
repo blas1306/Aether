@@ -3,11 +3,13 @@
 This document describes the design for Sparse Conditional Constant Propagation
 (SCCP) over Aether SSA.
 
-Phases 1 and 2 are implemented in `aether.ssa.optimizer.sccp`. Phase 1
+Phases 1, 2, and 3 are implemented in `aether.ssa.optimizer.sccp`. Phase 1
 computes lattice state per SSA value, executable blocks, and executable
 control-flow edges for one function at a time. Phase 2 consumes those facts
-and rewrites proven constant producers to `SSAConst`. SCCP is still not
-connected to the SSA optimizer pipeline, CLI SSA export, or execution.
+and rewrites proven constant producers to `SSAConst`. Phase 3 simplifies
+branches with boolean constant conditions to direct `SSAJump` terminators.
+SCCP is still not connected to the SSA optimizer pipeline, CLI SSA export, or
+execution.
 
 ## Overview
 
@@ -208,26 +210,31 @@ it should also be scheduled.
 ## Constant Transformation
 
 After the analysis reaches a fixed point, `SCCPTransformer` can rewrite the
-SSA module using the collected facts. The implemented phase 2 transformation is
-deliberately narrow:
+SSA module using the collected facts. The implemented phase 2 and phase 3
+transformation is deliberately narrow:
 
 - `SSABinaryOp`, `SSACompareOp`, and `SSAPhi` producers whose result state is
   `Constant(value)` are replaced with `SSAConst(result, value)`.
 - The replacement preserves the exact same `SSAValue` result, including its
   type, so existing uses remain valid and no operand rewriting is needed.
-- Calls, branches, jumps, returns, and existing constants are not rewritten by
-  SCCP phase 2.
+- `SSABranch(condition, true_target, false_target)` is replaced with
+  `SSAJump(true_target)` when the condition state is `Constant(True)`, or
+  `SSAJump(false_target)` when it is `Constant(False)`.
+- Branches with `Unknown`, `Overdefined`, or non-boolean `Constant` conditions
+  are preserved.
+- Calls, jumps, returns, and existing constants are not rewritten by SCCP.
 - Phi replacements preserve verifier-friendly phi placement by keeping any
   remaining `SSAPhi` instructions at the start of the block and placing
   materialized constants after them.
-- The transformer reports `replaced_constants`.
+- The transformer reports `replaced_constants` and `simplified_branches`.
 
-The CFG is intentionally left intact:
+CFG cleanup is intentionally left for a later phase:
 
-- Branches with constant conditions are not simplified to `SSAJump` yet.
-- Blocks not marked executable should remain structurally present in the
-  initial implementation. Full removal belongs to a future unreachable-block
-  elimination pass.
+- Blocks not marked executable remain structurally present. Full removal
+  belongs to a future unreachable-block elimination pass.
+- Phi incoming lists are not updated when a branch is simplified. If a future
+  case produces verifier-sensitive phi/predecessor mismatch, that cleanup
+  belongs to phase 4 rather than this branch-only transformation.
 - Existing or future dead-code elimination should clean up unused constants,
   obsolete computations, and dead phis after SCCP rewrites expose them.
 
@@ -246,7 +253,7 @@ The current SCCP implementation is deliberately narrow:
 - no builtin evaluation
 - no complete CFG simplification yet
 - no unreachable-block elimination in the SCCP pass itself
-- no branch pruning or replacement of constant branches with jumps
+- no phi cleanup after branch simplification
 - no operand/use rewriting beyond replacing selected producers with `SSAConst`
 - no integration with SSA optimization from the CLI yet
 
@@ -277,9 +284,10 @@ the original result value and type, avoids CFG changes, and returns an
 
 ### Phase 3: Branch Simplification
 
-Extend the transformation pass to replace branches with constant conditions by
-`SSAJump` to the known successor. Non-executable successor blocks may still
-remain in the function until a later CFG cleanup pass exists.
+Implemented. `SCCPTransformer` replaces branches with boolean constant
+conditions by `SSAJump` to the known successor and reports
+`simplified_branches`. Non-executable successor blocks remain in the function,
+and phi incoming lists are not rewritten until a later CFG cleanup pass exists.
 
 ### Phase 4: Future Unreachable Elimination
 
@@ -292,5 +300,5 @@ also serve other analyses and simplifications.
 
 SCCP currently does not change the existing SSA optimizer pipeline, the SSA
 builder, the CLI, execution behavior, the verifier, or the current local SSA
-optimizations. Branch simplification, CFG cleanup, and unreachable-block
-elimination remain future work.
+optimizations. CFG cleanup, phi cleanup, and unreachable-block elimination
+remain future work.

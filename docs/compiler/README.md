@@ -30,8 +30,10 @@ FIFO worklist for propagation analyses. `aether.ssa.optimizer.sccp` provides
 Sparse Conditional Constant Propagation facts: value lattice states,
 executable blocks, and executable edges. Its transformer can replace
 `SSABinaryOp`, `SSACompareOp`, and `SSAPhi` producers proven constant by SCCP
-with `SSAConst` while leaving the CFG intact. SCCP is not part of the optimizer
-pipeline yet. The optimizer pipeline currently defaults to `SSAConstantFolder`,
+with `SSAConst` and can simplify boolean constant `SSABranch` terminators to
+`SSAJump` while leaving unreachable blocks and phi cleanup for later. SCCP is
+not part of the optimizer pipeline yet. The optimizer pipeline currently
+defaults to `SSAConstantFolder`,
 `SSAGlobalConstantPropagator`, `SSAAlgebraicSimplifier`,
 `TrivialPhiEliminator`, `DeadPhiEliminator`, and `SSADeadCodeEliminator`, but
 it is still not connected to CLI SSA export or execution. `SSAConstantFolder`
@@ -45,10 +47,11 @@ rewrites phis whose incoming values are all the same SSA value;
 calls until effect analysis exists. The internal `aether.pipeline.SSAPipeline`
 prepares verified SSA modules for compiler tests and future consumers using
 the general builder by default. CLI SSA export exists for inspection; SSA
-execution, general copy propagation, SCCP branch simplification, CFG
-simplification, unreachable-block elimination, GVN, LICM, and effect-aware call
-removal are not implemented yet. The pattern builder remains available
-temporarily through `--ssa-builder=pattern` for compatibility and comparison.
+execution, general copy propagation, SCCP integration into the optimizer
+pipeline, CFG simplification, unreachable-block elimination, GVN, LICM, and
+effect-aware call removal are not implemented yet. The pattern builder remains
+available temporarily through `--ssa-builder=pattern` for compatibility and
+comparison.
 
 Current compiler-design documents:
 
@@ -67,4 +70,5 @@ Current compiler-design documents:
   default.
 - [SCCP.md](SCCP.md): implemented phase 1 Sparse Conditional Constant
   Propagation analysis over SSA, implemented phase 2 constant transformation,
-  plus the plan for future CFG transformation phases.
+  implemented phase 3 branch simplification, plus the plan for future CFG
+  cleanup phases.

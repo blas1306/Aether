@@ -324,7 +324,7 @@ class SCCPAnalyzer:
 
 
 class SCCPTransformer:
-    """Rewrite SSA producers whose SCCP lattice state is a known constant."""
+    """Rewrite SSA using known constant facts from SCCP."""
 
     def __init__(self, module: SSAModule, result: SCCPResult) -> None:
         self.module = module
@@ -333,36 +333,47 @@ class SCCPTransformer:
     def run(self) -> SSAOptimizationResult:
         updated_functions: list[SSAFunction] = []
         replaced_constants = 0
+        simplified_branches = 0
 
         for function in self.module.functions:
-            updated_function, function_replaced = self._transform_function(function)
+            updated_function, function_replaced, function_simplified = (
+                self._transform_function(function)
+            )
             updated_functions.append(updated_function)
             replaced_constants += function_replaced
+            simplified_branches += function_simplified
 
-        if replaced_constants == 0:
+        stats = {
+            "replaced_constants": replaced_constants,
+            "simplified_branches": simplified_branches,
+        }
+
+        if replaced_constants == 0 and simplified_branches == 0:
             return SSAOptimizationResult(
                 self.module,
                 changed=False,
-                stats={"replaced_constants": 0},
+                stats=stats,
             )
 
         return SSAOptimizationResult(
             SSAModule(updated_functions),
             changed=True,
-            stats={"replaced_constants": replaced_constants},
+            stats=stats,
         )
 
-    def _transform_function(self, function: SSAFunction) -> tuple[SSAFunction, int]:
+    def _transform_function(self, function: SSAFunction) -> tuple[SSAFunction, int, int]:
         updated_blocks: list[SSABasicBlock] = []
         replaced_constants = 0
+        simplified_branches = 0
 
         for block in function.blocks:
-            updated_block, block_replaced = self._transform_block(block)
+            updated_block, block_replaced, block_simplified = self._transform_block(block)
             updated_blocks.append(updated_block)
             replaced_constants += block_replaced
+            simplified_branches += block_simplified
 
-        if replaced_constants == 0:
-            return function, 0
+        if replaced_constants == 0 and simplified_branches == 0:
+            return function, 0, 0
 
         return (
             SSAFunction(
@@ -373,13 +384,15 @@ class SCCPTransformer:
                 function.entry_block,
             ),
             replaced_constants,
+            simplified_branches,
         )
 
-    def _transform_block(self, block: SSABasicBlock) -> tuple[SSABasicBlock, int]:
+    def _transform_block(self, block: SSABasicBlock) -> tuple[SSABasicBlock, int, int]:
         remaining_phis: list[SSAInstruction] = []
         replaced_phis: list[SSAInstruction] = []
         instructions: list[SSAInstruction] = []
         replaced_constants = 0
+        simplified_branches = 0
         index = 0
 
         while index < len(block.instructions) and isinstance(block.instructions[index], SSAPhi):
@@ -396,6 +409,12 @@ class SCCPTransformer:
         instructions.extend(replaced_phis)
 
         for instruction in block.instructions[index:]:
+            branch_replacement = self._branch_replacement(instruction)
+            if branch_replacement is not None:
+                instructions.append(branch_replacement)
+                simplified_branches += 1
+                continue
+
             replacement = self._constant_replacement(instruction)
             if replacement is None:
                 instructions.append(instruction)
@@ -404,10 +423,10 @@ class SCCPTransformer:
             instructions.append(replacement)
             replaced_constants += 1
 
-        if replaced_constants == 0:
-            return block, 0
+        if replaced_constants == 0 and simplified_branches == 0:
+            return block, 0, 0
 
-        return SSABasicBlock(block.name, instructions), replaced_constants
+        return SSABasicBlock(block.name, instructions), replaced_constants, simplified_branches
 
     def _constant_replacement(self, instruction: SSAInstruction) -> SSAConst | None:
         if not isinstance(instruction, (SSABinaryOp, SSACompareOp, SSAPhi)):
@@ -418,3 +437,15 @@ class SCCPTransformer:
             return None
 
         return SSAConst(instruction.result, state.value)
+
+    def _branch_replacement(self, instruction: SSAInstruction) -> SSAJump | None:
+        if not isinstance(instruction, SSABranch):
+            return None
+
+        state = self.result.state(instruction.condition)
+        if not isinstance(state, Constant) or not isinstance(state.value, bool):
+            return None
+
+        if state.value:
+            return SSAJump(instruction.true_target)
+        return SSAJump(instruction.false_target)
