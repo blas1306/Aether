@@ -21,6 +21,7 @@ from aether.ssa import (
 )
 from aether.ssa.optimizer import (
     DeadPhiEliminator,
+    SSADeadCodeEliminator,
     SSAOptimizationConvergenceError,
     SSAOptimizationResult,
     SSAOptimizerPipeline,
@@ -464,6 +465,165 @@ def _self_referential_phi_module() -> SSAModule:
     return _verify(module)
 
 
+def _dead_binary_chain_module() -> SSAModule:
+    int_type = IntType()
+    seed = SSAValue("seed", int_type)
+    first = SSAValue("first", int_type)
+    second = SSAValue("second", int_type)
+
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [],
+                VoidType(),
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(seed, 1),
+                            SSABinaryOp(first, "add", seed, seed),
+                            SSABinaryOp(second, "add", first, first),
+                            SSAReturn(),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+    return _verify(module)
+
+
+def _used_indirectly_module() -> SSAModule:
+    int_type = IntType()
+    left = SSAValue("left", int_type)
+    right = SSAValue("right", int_type)
+    total = SSAValue("total", int_type)
+
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [],
+                int_type,
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(left, 1),
+                            SSAConst(right, 2),
+                            SSABinaryOp(total, "add", left, right),
+                            SSAReturn(total),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+    return _verify(module)
+
+
+def _unused_call_result_module() -> SSAModule:
+    int_type = IntType()
+    value = SSAValue("value", int_type)
+    call_result = SSAValue("call_result", int_type)
+
+    module = SSAModule(
+        [
+            SSAFunction(
+                "source",
+                [],
+                int_type,
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(value, 1),
+                            SSAReturn(value),
+                        ],
+                    )
+                ],
+            ),
+            SSAFunction(
+                "main",
+                [],
+                VoidType(),
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSACall("source", (), call_result),
+                            SSAReturn(),
+                        ],
+                    )
+                ],
+            ),
+        ]
+    )
+    return _verify(module)
+
+
+def _branch_jump_return_module() -> SSAModule:
+    bool_type = BoolType()
+    condition = SSAValue("condition", bool_type)
+
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [],
+                VoidType(),
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(condition, True),
+                            SSABranch(condition, "then0", "else0"),
+                        ],
+                    ),
+                    SSABasicBlock("then0", [SSAJump("exit0")]),
+                    SSABasicBlock("else0", [SSAJump("exit0")]),
+                    SSABasicBlock("exit0", [SSAReturn()]),
+                ],
+            )
+        ]
+    )
+    return _verify(module)
+
+
+def _call_argument_const_module() -> SSAModule:
+    int_type = IntType()
+    argument = SSAValue("argument", int_type)
+    parameter = SSAParameter("value", int_type)
+
+    module = SSAModule(
+        [
+            SSAFunction(
+                "sink",
+                [parameter],
+                VoidType(),
+                [SSABasicBlock("entry", [SSAReturn()])],
+            ),
+            SSAFunction(
+                "main",
+                [],
+                VoidType(),
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(argument, 1),
+                            SSACall("sink", (argument,)),
+                            SSAReturn(),
+                        ],
+                    )
+                ],
+            ),
+        ]
+    )
+    return _verify(module)
+
+
 def _instruction_names(module: SSAModule) -> list[str]:
     return [
         type(instruction).__name__
@@ -556,6 +716,7 @@ def test_empty_ssa_optimizer_trace_has_initial_and_final_ssa() -> None:
         "Initial SSA",
         "TrivialPhiEliminator",
         "DeadPhiEliminator",
+        "SSADeadCodeEliminator",
         "Final SSA",
     ]
     assert trace[0].module is module
@@ -569,7 +730,10 @@ def test_empty_ssa_optimizer_trace_has_initial_and_final_ssa() -> None:
     assert trace[2].stats == {"removed_phis": 0}
     assert trace[3].module is module
     assert trace[3].changed is False
-    assert trace[3].stats == {}
+    assert trace[3].stats == {"removed": 0}
+    assert trace[4].module is module
+    assert trace[4].changed is False
+    assert trace[4].stats == {}
 
 
 def test_ssa_optimizer_pipeline_runs_fake_changing_pass() -> None:
@@ -848,6 +1012,234 @@ def test_trivial_phi_eliminator_does_not_touch_non_phi_instructions() -> None:
     _verify(result.module)
 
 
+def test_ssa_dead_code_eliminator_removes_unused_const() -> None:
+    int_type = IntType()
+    unused = SSAValue("unused", int_type)
+    module = _verify(
+        SSAModule(
+            [
+                SSAFunction(
+                    "main",
+                    [],
+                    VoidType(),
+                    [
+                        SSABasicBlock(
+                            "entry",
+                            [
+                                SSAConst(unused, 1),
+                                SSAReturn(),
+                            ],
+                        )
+                    ],
+                )
+            ]
+        )
+    )
+
+    result = SSADeadCodeEliminator().run(module)
+
+    assert result.changed is True
+    assert result.stats == {"removed": 1}
+    assert _instruction_names(result.module) == ["SSAReturn"]
+    _verify(result.module)
+
+
+def test_ssa_dead_code_eliminator_removes_unused_binary_op() -> None:
+    int_type = IntType()
+    left = SSAValue("left", int_type)
+    right = SSAValue("right", int_type)
+    unused_binary = SSAValue("unused_binary", int_type)
+    module = _verify(
+        SSAModule(
+            [
+                SSAFunction(
+                    "main",
+                    [],
+                    VoidType(),
+                    [
+                        SSABasicBlock(
+                            "entry",
+                            [
+                                SSAConst(left, 1),
+                                SSAConst(right, 2),
+                                SSABinaryOp(unused_binary, "add", left, right),
+                                SSAReturn(),
+                            ],
+                        )
+                    ],
+                )
+            ]
+        )
+    )
+
+    result = SSADeadCodeEliminator().run(module)
+
+    assert result.changed is True
+    assert result.stats == {"removed": 1}
+    assert "SSABinaryOp" not in _instruction_names(result.module)
+    _verify(result.module)
+
+
+def test_ssa_dead_code_eliminator_removes_unused_compare_op() -> None:
+    int_type = IntType()
+    left = SSAValue("left", int_type)
+    right = SSAValue("right", int_type)
+    unused_compare = SSAValue("unused_compare", BoolType())
+    module = _verify(
+        SSAModule(
+            [
+                SSAFunction(
+                    "main",
+                    [],
+                    VoidType(),
+                    [
+                        SSABasicBlock(
+                            "entry",
+                            [
+                                SSAConst(left, 1),
+                                SSAConst(right, 2),
+                                SSACompareOp(unused_compare, "lt", left, right),
+                                SSAReturn(),
+                            ],
+                        )
+                    ],
+                )
+            ]
+        )
+    )
+
+    result = SSADeadCodeEliminator().run(module)
+
+    assert result.changed is True
+    assert result.stats == {"removed": 1}
+    assert "SSACompareOp" not in _instruction_names(result.module)
+    _verify(result.module)
+
+
+def test_ssa_dead_code_eliminator_removes_unused_phi() -> None:
+    module = _phi_merge_module()
+
+    result = SSADeadCodeEliminator().run(module)
+
+    assert result.changed is True
+    assert result.stats == {"removed": 1}
+    assert "SSAPhi" not in _instruction_names(result.module)
+    _verify(result.module)
+
+
+def test_default_iterative_pipeline_removes_dead_instruction_chain() -> None:
+    module = _dead_binary_chain_module()
+
+    optimized = SSAOptimizerPipeline(iterative=True).run(module)
+
+    assert _instruction_names(optimized) == ["SSAReturn"]
+    _verify(optimized)
+
+
+def test_ssa_dead_code_eliminator_keeps_returned_value() -> None:
+    int_type = IntType()
+    returned = SSAValue("returned", int_type)
+    module = _verify(
+        SSAModule(
+            [
+                SSAFunction(
+                    "main",
+                    [],
+                    int_type,
+                    [
+                        SSABasicBlock(
+                            "entry",
+                            [
+                                SSAConst(returned, 1),
+                                SSAReturn(returned),
+                            ],
+                        )
+                    ],
+                )
+            ]
+        )
+    )
+
+    result = SSADeadCodeEliminator().run(module)
+
+    assert result.changed is False
+    assert result.module is module
+    assert result.stats == {"removed": 0}
+    _verify(result.module)
+
+
+def test_ssa_dead_code_eliminator_keeps_branch_condition() -> None:
+    module = _branch_jump_return_module()
+
+    result = SSADeadCodeEliminator().run(module)
+
+    assert result.changed is False
+    assert result.module is module
+    assert result.stats == {"removed": 0}
+    assert "SSAConst" in _instruction_names(result.module)
+    _verify(result.module)
+
+
+def test_ssa_dead_code_eliminator_keeps_call_argument() -> None:
+    module = _call_argument_const_module()
+
+    result = SSADeadCodeEliminator().run(module)
+
+    assert result.changed is False
+    assert result.module is module
+    assert result.stats == {"removed": 0}
+    assert "SSAConst" in _instruction_names(result.module)
+    _verify(result.module)
+
+
+def test_ssa_dead_code_eliminator_does_not_remove_unused_call() -> None:
+    module = _unused_call_result_module()
+
+    result = SSADeadCodeEliminator().run(module)
+
+    assert result.changed is False
+    assert result.module is module
+    assert result.stats == {"removed": 0}
+    assert "SSACall" in _instruction_names(result.module)
+    _verify(result.module)
+
+
+def test_ssa_dead_code_eliminator_does_not_remove_branch_jump_return() -> None:
+    module = _branch_jump_return_module()
+
+    result = SSADeadCodeEliminator().run(module)
+
+    assert result.changed is False
+    assert result.module is module
+    assert "SSABranch" in _instruction_names(result.module)
+    assert "SSAJump" in _instruction_names(result.module)
+    assert "SSAReturn" in _instruction_names(result.module)
+    _verify(result.module)
+
+
+def test_ssa_dead_code_eliminator_does_not_change_module_without_dead_code() -> None:
+    module = _used_indirectly_module()
+
+    result = SSADeadCodeEliminator().run(module)
+
+    assert result.changed is False
+    assert result.module is module
+    assert result.stats == {"removed": 0}
+    _verify(result.module)
+
+
+def test_ssa_dead_code_eliminator_keeps_indirectly_used_instructions() -> None:
+    module = _used_indirectly_module()
+
+    result = SSADeadCodeEliminator().run(module)
+
+    assert result.changed is False
+    assert result.module is module
+    assert "SSAConst" in _instruction_names(result.module)
+    assert "SSABinaryOp" in _instruction_names(result.module)
+    _verify(result.module)
+
+
 def test_dead_phi_eliminator_removes_unused_phi() -> None:
     module = _phi_merge_module()
 
@@ -930,12 +1322,15 @@ def test_default_ssa_optimizer_trace_shows_dead_phi_changes() -> None:
         "Initial SSA",
         "TrivialPhiEliminator",
         "DeadPhiEliminator",
+        "SSADeadCodeEliminator",
         "Final SSA",
     ]
     assert trace[1].changed is False
     assert trace[1].stats == {"removed_trivial_phis": 0, "rewritten_uses": 0}
     assert trace[2].changed is True
     assert trace[2].stats == {"removed_phis": 1}
+    assert trace[3].changed is True
+    assert trace[3].stats == {"removed": 2}
     _verify(trace[-1].module)
 
 

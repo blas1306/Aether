@@ -762,8 +762,8 @@ Current responsibilities:
 - `optimizer/`: initial SSA optimizer pipeline infrastructure with
   `SSAOptimizationResult`, `SSAOptimizationTraceStep`, fixed-point iteration,
   convergence errors, and narrow phi cleanup passes: `TrivialPhiEliminator`
-  and `DeadPhiEliminator`. The optimizer is not wired into the CLI or default
-  compilation.
+  and `DeadPhiEliminator`, plus simple SSA Dead Code Elimination. The optimizer
+  is not wired into the CLI or default compilation.
 - `phi_placement.py`: standalone Cytron-style iterated dominance-frontier phi
   placement for mutable IR slots. This computes `slot -> blocks`.
 - `renaming.py`: standalone variable renaming over the dominator tree. It
@@ -790,14 +790,15 @@ narrow SSA optimization passes:
 - `SSAOptimizerPipeline(passes=None, iterative=False, max_iterations=10)`
 - `TrivialPhiEliminator().run(module)`
 - `DeadPhiEliminator().run(module)`
+- `SSADeadCodeEliminator().run(module)`
 
 The default SSA optimizer pipeline currently runs `TrivialPhiEliminator` and
-then `DeadPhiEliminator`. Running it on modules without removable phi nodes
-returns the same `SSAModule`; trace output records `Initial SSA`, each optimizer
-step, and `Final SSA` around any custom pass entries. The pipeline supports
-custom passes and iterative fixed-point execution for tests and future
-development, but it is not connected to the CLI, not used by `--emit-ssa`, and
-not connected to execution.
+then `DeadPhiEliminator`, followed by `SSADeadCodeEliminator`. Running it on
+modules without removable instructions returns the same `SSAModule`; trace
+output records `Initial SSA`, each optimizer step, and `Final SSA` around any
+custom pass entries. The pipeline supports custom passes and iterative
+fixed-point execution for tests and future development, but it is not connected
+to the CLI, not used by `--emit-ssa`, and not connected to execution.
 
 Trivial Phi Elimination removes only `SSAPhi` instructions whose incoming
 values are all exactly the same `SSAValue`, for example
@@ -820,9 +821,18 @@ phi with its common incoming value, while Dead Phi Elimination deletes phis that
 have no remaining uses. Running trivial phi cleanup first can expose dead phis
 for the second pass.
 
+SSA Dead Code Elimination removes pure value-producing instructions whose
+result has no uses in the containing function. Uses are collected from binary
+operands, compare operands, call arguments, phi incoming values, branch
+conditions, and return values. The pass currently removes unused `SSAConst`,
+`SSABinaryOp`, `SSACompareOp`, and `SSAPhi` instructions, and reports `removed`
+in its stats. It intentionally preserves `SSACall`, `SSABranch`, `SSAJump`, and
+`SSAReturn`. Calls are kept even when their result is unused because effect
+analysis has not been implemented yet.
+
 General Copy Propagation is still not implemented. The trivial phi pass handles
 only this phi-specific identity case; broader copy propagation, global constant
-propagation, SCCP, GVN, LICM, and general SSA dead-code elimination are not
+propagation, SCCP, GVN, LICM, and effect-aware dead-code elimination are not
 implemented yet.
 
 ## Future SSA Optimizations
@@ -834,6 +844,8 @@ built on top of SSA:
   direct use-definition chains.
 - Copy Propagation: replace uses of trivial copies with their original SSA
   values.
+- Effect Analysis: classify calls and future memory operations so DCE can
+  safely remove effect-free computations beyond the current pure SSA subset.
 - SCCP: combine sparse conditional reachability with constant propagation
   through branches and phi nodes.
 - GVN: reuse equivalent pure computations across dominated regions.
@@ -859,6 +871,7 @@ This initial SSA construction milestone does not include:
 - alias analysis
 - aggregate promotion
 - SSA copy propagation, global constant propagation, SCCP, GVN, and LICM
+- effect analysis for calls and memory operations
 - native code generation
 
 A future builder implementation should build SSA as an internal representation

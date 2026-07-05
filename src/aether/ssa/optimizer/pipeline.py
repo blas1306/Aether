@@ -6,6 +6,7 @@ from typing import Protocol
 from aether.errors import AetherRuntimeError
 from aether.ssa.model import SSAModule
 
+from .dead_code import SSADeadCodeEliminator
 from .dead_phi import DeadPhiEliminator
 from .result import SSAOptimizationResult, SSAOptimizationTraceStep
 from .trivial_phi import TrivialPhiEliminator
@@ -43,7 +44,11 @@ class SSAOptimizerPipeline:
         self._passes = (
             tuple(passes)
             if passes is not None
-            else (TrivialPhiEliminator(), DeadPhiEliminator())
+            else (
+                TrivialPhiEliminator(),
+                DeadPhiEliminator(),
+                SSADeadCodeEliminator(),
+            )
         )
         self._iterative = iterative
         self._max_iterations = max_iterations

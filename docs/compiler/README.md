@@ -23,16 +23,18 @@ by `aether.analysis.dominance_frontier`.
 Initial SSA model, textual printing, verification infrastructure, the legacy
 pattern-based SSA builder, the default `GeneralSSABuilder`, and the SSA
 optimizer pipeline live under `aether.ssa`. The optimizer pipeline currently
-defaults to `TrivialPhiEliminator` followed by `DeadPhiEliminator`, but it is
-still not connected to CLI SSA export or execution. `TrivialPhiEliminator`
-rewrites phis whose incoming values are all the same SSA value;
-`DeadPhiEliminator` removes phis whose results have no uses. The internal
-`aether.pipeline.SSAPipeline` prepares verified SSA modules for compiler tests
-and future consumers using the general builder by default. CLI SSA export
-exists for inspection; SSA execution, general copy propagation, global constant
-propagation, SCCP, GVN, and LICM are not implemented yet. The pattern builder
-remains available temporarily through `--ssa-builder=pattern` for compatibility
-and comparison.
+defaults to `TrivialPhiEliminator`, `DeadPhiEliminator`, and
+`SSADeadCodeEliminator`, but it is still not connected to CLI SSA export or
+execution. `TrivialPhiEliminator` rewrites phis whose incoming values are all
+the same SSA value; `DeadPhiEliminator` removes phis whose results have no uses;
+`SSADeadCodeEliminator` removes unused pure SSA producers while preserving calls
+until effect analysis exists. The internal `aether.pipeline.SSAPipeline`
+prepares verified SSA modules for compiler tests and future consumers using the
+general builder by default. CLI SSA export exists for inspection; SSA execution,
+general copy propagation, global constant propagation, SCCP, GVN, LICM, and
+effect-aware call removal are not implemented yet. The pattern builder remains
+available temporarily through `--ssa-builder=pattern` for compatibility and
+comparison.
 
 Current compiler-design documents:
 
@@ -43,7 +45,7 @@ Current compiler-design documents:
 - [SSA_CONSTRUCTION.md](SSA_CONSTRUCTION.md): implemented pattern and general
   SSA builders, internal verified SSA pipeline, construction algorithm,
   verification rules, SSA optimizer pipeline infrastructure, Trivial Phi
-  Elimination, and Dead Phi Elimination.
+  Elimination, Dead Phi Elimination, and SSA Dead Code Elimination.
 - [SSA_BUILDER.md](SSA_BUILDER.md): operational migration notes for the move
   from the pattern-based SSA builder to the general dominance-frontier-based
   default.
