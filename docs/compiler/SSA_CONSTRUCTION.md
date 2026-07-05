@@ -761,8 +761,9 @@ Current responsibilities:
   `SSAVerifier`.
 - `optimizer/`: initial SSA optimizer pipeline infrastructure with
   `SSAOptimizationResult`, `SSAOptimizationTraceStep`, fixed-point iteration,
-  and convergence errors. The default pipeline has no passes and is not wired
-  into the CLI or default compilation.
+  convergence errors, and the first real SSA optimization pass:
+  `DeadPhiEliminator`. The optimizer is not wired into the CLI or default
+  compilation.
 - `phi_placement.py`: standalone Cytron-style iterated dominance-frontier phi
   placement for mutable IR slots. This computes `slot -> blocks`.
 - `renaming.py`: standalone variable renaming over the dominator tree. It
@@ -781,26 +782,36 @@ step testable and make analysis ownership explicit.
 
 ## SSA Optimizer Infrastructure
 
-`aether.ssa.optimizer` now provides the initial SSA optimizer infrastructure:
+`aether.ssa.optimizer` now provides SSA optimizer infrastructure plus the first
+real SSA optimization pass:
 
 - `SSAOptimizationResult(module, changed, stats)`
 - `SSAOptimizationTraceStep(label, module, changed, stats)`
 - `SSAOptimizerPipeline(passes=None, iterative=False, max_iterations=10)`
+- `DeadPhiEliminator().run(module)`
 
-The default SSA optimizer pipeline intentionally has no passes. Running it
-returns the same `SSAModule`, and trace output records only `Initial SSA` and
-`Final SSA` around any custom pass entries. The pipeline supports custom passes
-and iterative fixed-point execution for tests and future development, but it is
-not connected to the CLI, not used by `--emit-ssa`, and not enabled by default.
+The default SSA optimizer pipeline currently runs `DeadPhiEliminator`. Running
+it on modules without removable phi nodes returns the same `SSAModule`; trace
+output records `Initial SSA`, the `DeadPhiEliminator` step, and `Final SSA`
+around any custom pass entries. The pipeline supports custom passes and
+iterative fixed-point execution for tests and future development, but it is not
+connected to the CLI, not used by `--emit-ssa`, and not connected to execution.
 
-No real SSA optimizations are implemented yet.
+Dead Phi Elimination removes only `SSAPhi` instructions whose result has no
+uses in the containing function. Uses are collected from binary operands,
+compare operands, call arguments, phi incoming values, branch conditions, and
+return values. The pass reports `removed_phis` in its stats and intentionally
+does not remove constants, arithmetic, comparisons, calls, branches, jumps, or
+returns.
+
+Copy propagation, global constant propagation, SCCP, GVN, LICM, and general SSA
+dead-code elimination are not implemented yet.
 
 ## Future SSA Optimizations
 
 Once SSA construction and verification are stable, these optimizations can be
 built on top of SSA:
 
-- Dead Phi Elimination: remove phi nodes whose results are unused or redundant.
 - Global Constant Propagation: propagate constants across basic blocks using
   direct use-definition chains.
 - Copy Propagation: replace uses of trivial copies with their original SSA
@@ -811,10 +822,9 @@ built on top of SSA:
 - LICM: move loop-invariant pure computations out of loops using dominance and
   loop information.
 
-These should not be introduced in early SSA work. After this initial
-model/printer/verifier/builder and optimizer-pipeline infrastructure, SSA
-optimization passes can be added one at a time without changing current
-lowering, CLI inspection, or execution semantics.
+These should be introduced one at a time after the SSA model, construction, and
+verification rules stay stable. Dead Phi Elimination is intentionally narrow and
+does not change current lowering, CLI inspection, or execution semantics.
 
 ## Not Implemented Yet
 
@@ -829,7 +839,7 @@ This initial SSA construction milestone does not include:
 - memory SSA
 - alias analysis
 - aggregate promotion
-- real SSA optimization passes
+- SSA copy propagation, global constant propagation, SCCP, GVN, and LICM
 - native code generation
 
 A future builder implementation should build SSA as an internal representation

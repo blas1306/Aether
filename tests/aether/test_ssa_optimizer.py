@@ -2,15 +2,24 @@ from __future__ import annotations
 
 import pytest
 
-from aether.ir import IntType, VoidType
+from aether.ir import BoolType, IntType, VoidType
 from aether.ssa import (
     SSABasicBlock,
+    SSABinaryOp,
+    SSABranch,
+    SSACall,
+    SSAConst,
     SSAFunction,
+    SSAJump,
     SSAModule,
     SSAParameter,
+    SSAPhi,
     SSAReturn,
+    SSAValue,
+    SSAVerifier,
 )
 from aether.ssa.optimizer import (
+    DeadPhiEliminator,
     SSAOptimizationConvergenceError,
     SSAOptimizationResult,
     SSAOptimizerPipeline,
@@ -32,6 +41,205 @@ def _function(name: str) -> SSAFunction:
 
 def _module_with_function(name: str = "main") -> SSAModule:
     return SSAModule([_function(name)])
+
+
+def _verify(module: SSAModule) -> SSAModule:
+    return SSAVerifier(module).verify()
+
+
+def _phi_merge_module(*, use: str = "unused") -> SSAModule:
+    int_type = IntType()
+    bool_type = BoolType()
+    condition = SSAValue("condition", bool_type)
+    then_value = SSAValue("then_value", int_type)
+    else_value = SSAValue("else_value", int_type)
+    phi_value = SSAValue("phi_value", int_type)
+    fallback = SSAValue("fallback", int_type)
+    one = SSAValue("one", int_type)
+    binary_result = SSAValue("binary_result", int_type)
+
+    merge_instructions = [
+        SSAPhi(phi_value, (("then0", then_value), ("else0", else_value))),
+    ]
+    return_type = int_type
+
+    if use == "return":
+        merge_instructions.append(SSAReturn(phi_value))
+    elif use == "binary":
+        merge_instructions.extend(
+            [
+                SSAConst(one, 1),
+                SSABinaryOp(binary_result, "add", phi_value, one),
+                SSAReturn(binary_result),
+            ]
+        )
+    else:
+        merge_instructions.extend([SSAConst(fallback, 0), SSAReturn(fallback)])
+
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [],
+                return_type,
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(condition, True),
+                            SSABranch(condition, "then0", "else0"),
+                        ],
+                    ),
+                    SSABasicBlock("then0", [SSAConst(then_value, 1), SSAJump("merge0")]),
+                    SSABasicBlock("else0", [SSAConst(else_value, 2), SSAJump("merge0")]),
+                    SSABasicBlock("merge0", merge_instructions),
+                ],
+            )
+        ]
+    )
+    return _verify(module)
+
+
+def _branch_condition_phi_module() -> SSAModule:
+    bool_type = BoolType()
+    entry_condition = SSAValue("entry_condition", bool_type)
+    then_value = SSAValue("then_value", bool_type)
+    else_value = SSAValue("else_value", bool_type)
+    phi_value = SSAValue("phi_value", bool_type)
+
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [],
+                VoidType(),
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(entry_condition, True),
+                            SSABranch(entry_condition, "then0", "else0"),
+                        ],
+                    ),
+                    SSABasicBlock("then0", [SSAConst(then_value, True), SSAJump("merge0")]),
+                    SSABasicBlock("else0", [SSAConst(else_value, False), SSAJump("merge0")]),
+                    SSABasicBlock(
+                        "merge0",
+                        [
+                            SSAPhi(phi_value, (("then0", then_value), ("else0", else_value))),
+                            SSABranch(phi_value, "true0", "false0"),
+                        ],
+                    ),
+                    SSABasicBlock("true0", [SSAReturn()]),
+                    SSABasicBlock("false0", [SSAReturn()]),
+                ],
+            )
+        ]
+    )
+    return _verify(module)
+
+
+def _phi_chain_module() -> SSAModule:
+    int_type = IntType()
+    bool_type = BoolType()
+    condition = SSAValue("condition", bool_type)
+    then_value = SSAValue("then_value", int_type)
+    else_value = SSAValue("else_value", int_type)
+    first_phi = SSAValue("first_phi", int_type)
+    second_phi = SSAValue("second_phi", int_type)
+    fallback = SSAValue("fallback", int_type)
+
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [],
+                int_type,
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(condition, True),
+                            SSABranch(condition, "then0", "else0"),
+                        ],
+                    ),
+                    SSABasicBlock("then0", [SSAConst(then_value, 1), SSAJump("merge0")]),
+                    SSABasicBlock("else0", [SSAConst(else_value, 2), SSAJump("merge0")]),
+                    SSABasicBlock(
+                        "merge0",
+                        [
+                            SSAPhi(first_phi, (("then0", then_value), ("else0", else_value))),
+                            SSAJump("exit0"),
+                        ],
+                    ),
+                    SSABasicBlock(
+                        "exit0",
+                        [
+                            SSAPhi(second_phi, (("merge0", first_phi),)),
+                            SSAConst(fallback, 0),
+                            SSAReturn(fallback),
+                        ],
+                    ),
+                ],
+            )
+        ]
+    )
+    return _verify(module)
+
+
+def _call_argument_phi_module() -> SSAModule:
+    int_type = IntType()
+    bool_type = BoolType()
+    condition = SSAValue("condition", bool_type)
+    then_value = SSAValue("then_value", int_type)
+    else_value = SSAValue("else_value", int_type)
+    phi_value = SSAValue("phi_value", int_type)
+    parameter = SSAParameter("value", int_type)
+
+    module = SSAModule(
+        [
+            SSAFunction(
+                "sink",
+                [parameter],
+                VoidType(),
+                [SSABasicBlock("entry", [SSAReturn()])],
+            ),
+            SSAFunction(
+                "main",
+                [],
+                VoidType(),
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(condition, True),
+                            SSABranch(condition, "then0", "else0"),
+                        ],
+                    ),
+                    SSABasicBlock("then0", [SSAConst(then_value, 1), SSAJump("merge0")]),
+                    SSABasicBlock("else0", [SSAConst(else_value, 2), SSAJump("merge0")]),
+                    SSABasicBlock(
+                        "merge0",
+                        [
+                            SSAPhi(phi_value, (("then0", then_value), ("else0", else_value))),
+                            SSACall("sink", (phi_value,)),
+                            SSAReturn(),
+                        ],
+                    ),
+                ],
+            ),
+        ]
+    )
+    return _verify(module)
+
+
+def _instruction_names(module: SSAModule) -> list[str]:
+    return [
+        type(instruction).__name__
+        for function in module.functions
+        for block in function.blocks
+        for instruction in block.instructions
+    ]
 
 
 class _NoOpPass:
@@ -113,13 +321,20 @@ def test_empty_ssa_optimizer_trace_has_initial_and_final_ssa() -> None:
 
     trace = SSAOptimizerPipeline().run_with_trace(module)
 
-    assert [step.label for step in trace] == ["Initial SSA", "Final SSA"]
+    assert [step.label for step in trace] == [
+        "Initial SSA",
+        "DeadPhiEliminator",
+        "Final SSA",
+    ]
     assert trace[0].module is module
     assert trace[0].changed is False
     assert trace[0].stats == {}
     assert trace[1].module is module
     assert trace[1].changed is False
-    assert trace[1].stats == {}
+    assert trace[1].stats == {"removed_phis": 0}
+    assert trace[2].module is module
+    assert trace[2].changed is False
+    assert trace[2].stats == {}
 
 
 def test_ssa_optimizer_pipeline_runs_fake_changing_pass() -> None:
@@ -198,3 +413,150 @@ def test_ssa_optimizer_pipeline_respects_pass_order() -> None:
     [function] = optimized.functions
     assert function.name == "second"
     assert [parameter.name for parameter in function.parameters] == ["value"]
+
+
+def test_dead_phi_eliminator_removes_unused_phi() -> None:
+    module = _phi_merge_module()
+
+    result = DeadPhiEliminator().run(module)
+
+    assert result.changed is True
+    assert result.stats == {"removed_phis": 1}
+    assert "SSAPhi" not in _instruction_names(result.module)
+    _verify(result.module)
+
+
+def test_dead_phi_eliminator_keeps_phi_used_by_return() -> None:
+    module = _phi_merge_module(use="return")
+
+    result = DeadPhiEliminator().run(module)
+
+    assert result.changed is False
+    assert result.module is module
+    assert result.stats == {"removed_phis": 0}
+    assert "SSAPhi" in _instruction_names(result.module)
+    _verify(result.module)
+
+
+def test_dead_phi_eliminator_keeps_phi_used_by_binary_op() -> None:
+    module = _phi_merge_module(use="binary")
+
+    result = DeadPhiEliminator().run(module)
+
+    assert result.changed is False
+    assert result.module is module
+    assert result.stats == {"removed_phis": 0}
+    assert "SSAPhi" in _instruction_names(result.module)
+    _verify(result.module)
+
+
+def test_dead_phi_eliminator_keeps_phi_used_by_branch_condition() -> None:
+    module = _branch_condition_phi_module()
+
+    result = DeadPhiEliminator().run(module)
+
+    assert result.changed is False
+    assert result.module is module
+    assert result.stats == {"removed_phis": 0}
+    assert "SSAPhi" in _instruction_names(result.module)
+    _verify(result.module)
+
+
+def test_dead_phi_eliminator_keeps_phi_used_by_another_phi() -> None:
+    module = _phi_chain_module()
+
+    result = DeadPhiEliminator().run(module)
+
+    assert result.changed is True
+    assert result.stats == {"removed_phis": 1}
+    assert _instruction_names(result.module).count("SSAPhi") == 1
+    _verify(result.module)
+
+
+def test_default_iterative_pipeline_removes_dead_phi_chain() -> None:
+    module = _phi_chain_module()
+
+    optimized = SSAOptimizerPipeline(iterative=True).run(module)
+
+    assert "SSAPhi" not in _instruction_names(optimized)
+    _verify(optimized)
+
+
+def test_dead_phi_eliminator_reports_removed_phi_stats() -> None:
+    result = DeadPhiEliminator().run(_phi_merge_module())
+
+    assert result.stats["removed_phis"] == 1
+
+
+def test_default_ssa_optimizer_trace_shows_dead_phi_changes() -> None:
+    module = _phi_merge_module()
+
+    trace = SSAOptimizerPipeline().run_with_trace(module)
+
+    assert [step.label for step in trace] == [
+        "Initial SSA",
+        "DeadPhiEliminator",
+        "Final SSA",
+    ]
+    assert trace[1].changed is True
+    assert trace[1].stats == {"removed_phis": 1}
+    _verify(trace[-1].module)
+
+
+def test_dead_phi_eliminator_does_not_remove_non_phi_instructions() -> None:
+    int_type = IntType()
+    left = SSAValue("left", int_type)
+    right = SSAValue("right", int_type)
+    unused_binary = SSAValue("unused_binary", int_type)
+    module = _verify(
+        SSAModule(
+            [
+                SSAFunction(
+                    "main",
+                    [],
+                    int_type,
+                    [
+                        SSABasicBlock(
+                            "entry",
+                            [
+                                SSAConst(left, 1),
+                                SSAConst(right, 2),
+                                SSABinaryOp(unused_binary, "add", left, right),
+                                SSAReturn(left),
+                            ],
+                        )
+                    ],
+                )
+            ]
+        )
+    )
+
+    result = DeadPhiEliminator().run(module)
+
+    assert result.changed is False
+    assert result.module is module
+    assert "SSABinaryOp" in _instruction_names(result.module)
+    _verify(result.module)
+
+
+def test_dead_phi_eliminator_does_not_change_module_without_phis() -> None:
+    module = _module_with_function()
+
+    result = DeadPhiEliminator().run(module)
+
+    assert result.changed is False
+    assert result.module is module
+    assert result.stats == {"removed_phis": 0}
+    _verify(result.module)
+
+
+def test_dead_phi_eliminator_keeps_phi_used_by_call_argument() -> None:
+    module = _call_argument_phi_module()
+
+    result = DeadPhiEliminator().run(module)
+
+    assert result.changed is False
+    assert result.module is module
+    assert result.stats == {"removed_phis": 0}
+    assert "SSAPhi" in _instruction_names(result.module)
+    _verify(result.module)

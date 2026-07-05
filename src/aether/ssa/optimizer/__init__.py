@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .dead_phi import DeadPhiEliminator
 from .pipeline import (
     SSAOptimizationConvergenceError,
     SSAOptimizationPass,
@@ -8,6 +9,7 @@ from .pipeline import (
 from .result import SSAOptimizationResult, SSAOptimizationTraceStep
 
 __all__ = [
+    "DeadPhiEliminator",
     "SSAOptimizationConvergenceError",
     "SSAOptimizationPass",
     "SSAOptimizationResult",

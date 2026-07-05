@@ -21,13 +21,16 @@ exposed by `aether.analysis.dominators`. Dominance frontier analysis is exposed
 by `aether.analysis.dominance_frontier`.
 
 Initial SSA model, textual printing, verification infrastructure, the legacy
-pattern-based SSA builder, the default `GeneralSSABuilder`, and the empty SSA
-optimizer pipeline live under `aether.ssa`. The internal
+pattern-based SSA builder, the default `GeneralSSABuilder`, and the SSA
+optimizer pipeline live under `aether.ssa`. The optimizer pipeline currently
+defaults to `DeadPhiEliminator`, the first real SSA optimization pass, but it is
+still not connected to CLI SSA export or execution. The internal
 `aether.pipeline.SSAPipeline` prepares verified SSA modules for compiler tests
 and future consumers using the general builder by default. CLI SSA export exists
-for inspection; SSA execution and real SSA optimization passes are not
-implemented yet. The pattern builder remains available temporarily through
-`--ssa-builder=pattern` for compatibility and comparison.
+for inspection; SSA execution, copy propagation, global constant propagation,
+SCCP, GVN, and LICM are not implemented yet. The pattern builder remains
+available temporarily through `--ssa-builder=pattern` for compatibility and
+comparison.
 
 Current compiler-design documents:
 
@@ -37,7 +40,8 @@ Current compiler-design documents:
   in the Aether IR.
 - [SSA_CONSTRUCTION.md](SSA_CONSTRUCTION.md): implemented pattern and general
   SSA builders, internal verified SSA pipeline, construction algorithm,
-  verification rules, and empty SSA optimizer pipeline infrastructure.
+  verification rules, SSA optimizer pipeline infrastructure, and Dead Phi
+  Elimination.
 - [SSA_BUILDER.md](SSA_BUILDER.md): operational migration notes for the move
   from the pattern-based SSA builder to the general dominance-frontier-based
   default.
