@@ -70,7 +70,7 @@ class LLVMPrinter:
         return "\n".join(lines)
 
     def _print_block(self, block: SSABasicBlock, function: SSAFunction) -> list[str]:
-        lines = [f"{block.name}:"]
+        lines = [self._label_definition(block.name)]
         for instruction in block.instructions:
             emitted = self._print_instruction(instruction, function)
             if emitted is not None:
@@ -94,9 +94,9 @@ class LLVMPrinter:
         if isinstance(instruction, SSAPhi):
             self._unsupported("phi")
         if isinstance(instruction, SSABranch):
-            self._unsupported("branch")
+            return self._print_branch(instruction)
         if isinstance(instruction, SSAJump):
-            self._unsupported("jump")
+            return self._print_jump(instruction)
         if isinstance(instruction, SSACall):
             self._unsupported("call")
         self._unsupported(type(instruction).__name__)
@@ -169,6 +169,20 @@ class LLVMPrinter:
             )
         return f"ret {return_type} {self._operand(instruction.value)}"
 
+    def _print_branch(self, instruction: SSABranch) -> str:
+        if not isinstance(instruction.condition.type, BoolType):
+            raise LLVMBackendError(
+                "LLVM backend only supports bool/i1 branch conditions"
+            )
+
+        condition = self._operand(instruction.condition)
+        true_target = self._label_operand(instruction.true_target)
+        false_target = self._label_operand(instruction.false_target)
+        return f"br i1 {condition}, {true_target}, {false_target}"
+
+    def _print_jump(self, instruction: SSAJump) -> str:
+        return f"br {self._label_operand(instruction.target)}"
+
     def _operand(self, value: SSAValue) -> str:
         key = self._key(value)
         if key in self._constants:
@@ -215,6 +229,24 @@ class LLVMPrinter:
         if cls._IDENTIFIER_RE.match(raw) or raw.isdigit():
             return f"%{raw}"
         raise LLVMBackendError(f"LLVM backend does not support SSA value name '{name}'")
+
+    @classmethod
+    def _label_operand(cls, name: str) -> str:
+        raw = cls._strip_percent(name)
+        if not raw:
+            raise LLVMBackendError("LLVM backend does not support empty block labels")
+        if cls._IDENTIFIER_RE.match(raw) or raw.isdigit():
+            return f"label %{raw}"
+        raise LLVMBackendError(f"LLVM backend does not support block label '{name}'")
+
+    @classmethod
+    def _label_definition(cls, name: str) -> str:
+        raw = cls._strip_percent(name)
+        if not raw:
+            raise LLVMBackendError("LLVM backend does not support empty block labels")
+        if cls._IDENTIFIER_RE.match(raw) or raw.isdigit():
+            return f"{raw}:"
+        raise LLVMBackendError(f"LLVM backend does not support block label '{name}'")
 
     @staticmethod
     def _global_name(name: str) -> str:

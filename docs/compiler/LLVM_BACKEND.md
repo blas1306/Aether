@@ -46,7 +46,14 @@ Native builds require `clang` on `PATH`.
   - `ge` -> `icmp sge`
   - `eq` -> `icmp eq`
   - `ne` -> `icmp ne`
+- `SSABranch` with a `bool`/`i1` condition:
+  - `branch %cond, then0, else0` -> `br i1 %cond, label %then0, label %else0`
+- `SSAJump`:
+  - `jump exit0` -> `br label %exit0`
 - `SSAReturn`.
+
+This means an `if`/`else` where both branches return directly can compile to
+LLVM IR, because it does not require a merge value or `SSAPhi`.
 
 Type mapping:
 
@@ -74,6 +81,20 @@ entry:
 }
 ```
 
+Control-flow example:
+
+```llvm
+define i32 @choose(i32 %x) {
+entry:
+  %0 = icmp sgt i32 %x, 0
+  br i1 %0, label %then0, label %else0
+then0:
+  ret i32 1
+else0:
+  ret i32 2
+}
+```
+
 ## Limitations
 
 The backend deliberately does not support these yet:
@@ -89,8 +110,9 @@ The backend deliberately does not support these yet:
 - cross-compilation
 - JIT or `llc` build paths
 - automatic execution after build
-- `SSAPhi`, `SSABranch`, `SSAJump`, or `SSACall`
-- branch/phi lowering for boolean control flow
+- `SSAPhi` or `SSACall`
+- `while` loops
+- merge values from `if`/`else`, because `SSAPhi` is still pending
 
 Unsupported input raises `LLVMBackendError` with messages beginning with:
 

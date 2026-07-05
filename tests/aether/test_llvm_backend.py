@@ -262,6 +262,159 @@ def test_prints_comparison_as_return_value() -> None:
     )
 
 
+def test_prints_simple_jump() -> None:
+    int_type = IntType()
+    value = SSAValue("0", int_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [],
+                int_type,
+                [
+                    SSABasicBlock("entry", [SSAJump("exit0")]),
+                    SSABasicBlock("exit0", [SSAConst(value, 7), SSAReturn(value)]),
+                ],
+            )
+        ]
+    )
+
+    assert print_llvm(module) == (
+        "define i32 @main() {\n"
+        "entry:\n"
+        "  br label %exit0\n"
+        "exit0:\n"
+        "  ret i32 7\n"
+        "}"
+    )
+
+
+def test_prints_branch_with_comparison_condition() -> None:
+    int_type = IntType()
+    bool_type = BoolType()
+    left = SSAParameter("x", int_type)
+    zero = SSAValue("0", int_type)
+    condition = SSAValue("1", bool_type)
+    then_value = SSAValue("2", int_type)
+    else_value = SSAValue("3", int_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "choose",
+                [left],
+                int_type,
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(zero, 0),
+                            SSACompareOp(condition, "gt", left, zero),
+                            SSABranch(condition, "then0", "else0"),
+                        ],
+                    ),
+                    SSABasicBlock(
+                        "then0",
+                        [SSAConst(then_value, 1), SSAReturn(then_value)],
+                    ),
+                    SSABasicBlock(
+                        "else0",
+                        [SSAConst(else_value, 2), SSAReturn(else_value)],
+                    ),
+                ],
+            )
+        ]
+    )
+
+    assert print_llvm(module) == (
+        "define i32 @choose(i32 %x) {\n"
+        "entry:\n"
+        "  %0 = icmp sgt i32 %x, 0\n"
+        "  br i1 %0, label %then0, label %else0\n"
+        "then0:\n"
+        "  ret i32 1\n"
+        "else0:\n"
+        "  ret i32 2\n"
+        "}"
+    )
+
+
+def test_prints_branch_with_bool_parameter_condition() -> None:
+    int_type = IntType()
+    flag = SSAParameter("flag", BoolType())
+    then_value = SSAValue("0", int_type)
+    else_value = SSAValue("1", int_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "choose",
+                [flag],
+                int_type,
+                [
+                    SSABasicBlock("entry", [SSABranch(flag, "then0", "else0")]),
+                    SSABasicBlock(
+                        "then0",
+                        [SSAConst(then_value, 1), SSAReturn(then_value)],
+                    ),
+                    SSABasicBlock(
+                        "else0",
+                        [SSAConst(else_value, 2), SSAReturn(else_value)],
+                    ),
+                ],
+            )
+        ]
+    )
+
+    assert "  br i1 %flag, label %then0, label %else0" in print_llvm(module)
+
+
+def test_branch_condition_must_be_bool() -> None:
+    int_type = IntType()
+    condition = SSAParameter("condition", int_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [condition],
+                int_type,
+                [SSABasicBlock("entry", [SSABranch(condition, "then0", "else0")])],
+            )
+        ]
+    )
+
+    with pytest.raises(
+        LLVMBackendError,
+        match="LLVM backend only supports bool/i1 branch conditions",
+    ):
+        print_llvm(module)
+
+
+def test_labels_and_label_references_are_printed_consistently() -> None:
+    int_type = IntType()
+    value = SSAValue("0", int_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [],
+                int_type,
+                [
+                    SSABasicBlock("custom.entry", [SSAJump("custom.exit")]),
+                    SSABasicBlock(
+                        "custom.exit",
+                        [SSAConst(value, 9), SSAReturn(value)],
+                    ),
+                ],
+            )
+        ]
+    )
+
+    llvm_ir = print_llvm(module)
+
+    assert "custom.entry:\n" in llvm_ir
+    assert "  br label %custom.exit\n" in llvm_ir
+    assert "custom.exit:\n" in llvm_ir
+
+
 def test_string_type_has_clear_error() -> None:
     value = SSAValue("0", StringType())
     module = SSAModule(
@@ -288,14 +441,6 @@ def test_string_type_has_clear_error() -> None:
         (
             lambda condition, value: SSAPhi(value, (("entry", value),)),
             "LLVM backend does not support phi",
-        ),
-        (
-            lambda condition, value: SSABranch(condition, "then0", "else0"),
-            "LLVM backend does not support branch",
-        ),
-        (
-            lambda condition, value: SSAJump("exit0"),
-            "LLVM backend does not support jump",
         ),
         (
             lambda condition, value: SSACall("other", (), value),
@@ -468,6 +613,54 @@ def test_generated_bool_main_compare_can_be_compiled_with_clang_if_available(
     )
     ir_path = tmp_path / "bool_main.ll"
     exe_path = tmp_path / "bool_main"
+    ir_path.write_text(print_llvm(module), encoding="utf-8")
+
+    subprocess.run([clang, str(ir_path), "-o", str(exe_path)], check=True)
+    result_process = subprocess.run([str(exe_path)], check=False)
+
+    assert result_process.returncode == 1
+
+
+def test_generated_branch_main_can_be_compiled_with_clang_if_available(
+    tmp_path,
+) -> None:
+    clang = shutil.which("clang")
+    if clang is None:
+        pytest.skip("clang is not available")
+
+    int_type = IntType()
+    bool_type = BoolType()
+    condition = SSAValue("0", bool_type)
+    then_value = SSAValue("1", int_type)
+    else_value = SSAValue("2", int_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [],
+                int_type,
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(condition, True),
+                            SSABranch(condition, "then0", "else0"),
+                        ],
+                    ),
+                    SSABasicBlock(
+                        "then0",
+                        [SSAConst(then_value, 1), SSAReturn(then_value)],
+                    ),
+                    SSABasicBlock(
+                        "else0",
+                        [SSAConst(else_value, 2), SSAReturn(else_value)],
+                    ),
+                ],
+            )
+        ]
+    )
+    ir_path = tmp_path / "branch_main.ll"
+    exe_path = tmp_path / "branch_main"
     ir_path.write_text(print_llvm(module), encoding="utf-8")
 
     subprocess.run([clang, str(ir_path), "-o", str(exe_path)], check=True)

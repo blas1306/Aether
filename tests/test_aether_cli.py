@@ -822,6 +822,76 @@ boolean greater(int a, int b) {
     assert stderr == ""
 
 
+def test_emit_llvm_prints_branch_with_comparison(tmp_path: Path) -> None:
+    program = tmp_path / "emit_llvm_branch_compare.ae"
+    program.write_text(
+        """
+int choose(int x) {
+    if x > 0 {
+        return 1;
+    } else {
+        return 2;
+    }
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert "entry:\n" in stdout
+    assert "then0:\n" in stdout
+    assert "else0:\n" in stdout
+    assert "  %0 = icmp sgt i32 %x, 0\n" in stdout
+    assert "  br i1 %0, label %then0, label %else0\n" in stdout
+    assert stderr == ""
+
+
+def test_emit_llvm_prints_branch_with_boolean_parameter(tmp_path: Path) -> None:
+    program = tmp_path / "emit_llvm_branch_bool.ae"
+    program.write_text(
+        """
+int choose(boolean flag) {
+    if flag {
+        return 1;
+    } else {
+        return 2;
+    }
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert "  br i1 %flag, label %then0, label %else0\n" in stdout
+    assert stderr == ""
+
+
+def test_emit_llvm_prints_jump_for_constant_branch(tmp_path: Path) -> None:
+    program = tmp_path / "emit_llvm_jump.ae"
+    program.write_text(
+        """
+int main() {
+    if true {
+        return 1;
+    } else {
+        return 2;
+    }
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert "  br label %then0\n" in stdout
+    assert stderr == ""
+
+
 def test_emit_llvm_missing_file_reports_read_error(tmp_path: Path) -> None:
     missing = tmp_path / "missing_llvm.ae"
 
@@ -840,11 +910,13 @@ def test_emit_llvm_unsupported_feature_reports_without_traceback(
     program.write_text(
         """
 int choose(int x) {
+    int y = 0;
     if x > 0 {
-        return 1;
+        y = 1;
     } else {
-        return 2;
+        y = 2;
     }
+    return y;
 }
 """,
         encoding="utf-8",
@@ -854,7 +926,7 @@ int choose(int x) {
 
     assert exit_code == EXIT_LANGUAGE_ERROR
     assert stdout == ""
-    assert "LLVM backend does not support branch" in stderr
+    assert "LLVM backend does not support phi" in stderr
     assert "Traceback" not in stderr
 
 
@@ -907,11 +979,13 @@ def test_build_unsupported_llvm_feature_reports_without_traceback(
     program.write_text(
         """
 int choose(int x) {
+    int y = 0;
     if x > 0 {
-        return 1;
+        y = 1;
     } else {
-        return 2;
+        y = 2;
     }
+    return y;
 }
 """,
         encoding="utf-8",
@@ -921,7 +995,7 @@ int choose(int x) {
 
     assert exit_code == EXIT_LANGUAGE_ERROR
     assert stdout == ""
-    assert "LLVM backend does not support branch" in stderr
+    assert "LLVM backend does not support phi" in stderr
     assert "Traceback" not in stderr
 
 
