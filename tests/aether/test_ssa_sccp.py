@@ -33,8 +33,30 @@ def _transform(module: SSAModule, result: SCCPResult):
     return SCCPTransformer(module, result).run()
 
 
+def _block(function: SSAFunction, name: str) -> SSABasicBlock:
+    return next(block for block in function.blocks if block.name == name)
+
+
 def _manual_result(states):
     return SCCPResult(states, {"entry"}, set())
+
+
+def _manual_result_for_blocks(states, blocks: set[str]):
+    return SCCPResult(states, blocks, set())
+
+
+def _stats(
+    replaced_constants: int = 0,
+    simplified_branches: int = 0,
+    removed_blocks: int = 0,
+    removed_phi_incomings: int = 0,
+) -> dict[str, int]:
+    return {
+        "replaced_constants": replaced_constants,
+        "simplified_branches": simplified_branches,
+        "removed_blocks": removed_blocks,
+        "removed_phi_incomings": removed_phi_incomings,
+    }
 
 
 def test_sccp_return_constant_value_state_is_constant() -> None:
@@ -417,7 +439,7 @@ def test_sccp_transformer_replaces_binary_with_const() -> None:
 
     instruction = transform.module.functions[0].blocks[0].instructions[2]
     assert transform.changed is True
-    assert transform.stats == {"replaced_constants": 1, "simplified_branches": 0}
+    assert transform.stats == _stats(replaced_constants=1)
     assert instruction == SSAConst(total, 5)
 
 
@@ -453,7 +475,7 @@ def test_sccp_transformer_replaces_compare_with_const() -> None:
 
     instruction = transform.module.functions[0].blocks[0].instructions[2]
     assert transform.changed is True
-    assert transform.stats == {"replaced_constants": 1, "simplified_branches": 0}
+    assert transform.stats == _stats(replaced_constants=1)
     assert instruction == SSAConst(comparison, True)
 
 
@@ -463,9 +485,13 @@ def test_sccp_transformer_replaces_phi_with_const() -> None:
 
     transform = _transform(module, _analyze(function))
 
-    merge_block = transform.module.functions[0].blocks[3]
+    merge_block = _block(transform.module.functions[0], "merge0")
     assert transform.changed is True
-    assert transform.stats == {"replaced_constants": 1, "simplified_branches": 1}
+    assert transform.stats == _stats(
+        replaced_constants=1,
+        simplified_branches=1,
+        removed_blocks=1,
+    )
     assert merge_block.instructions[0] == SSAConst(phi_value, 1)
 
 
@@ -545,7 +571,7 @@ def test_sccp_transformer_does_not_change_call() -> None:
     transform = _transform(module, _manual_result({call_result: Constant(7)}))
 
     assert transform.changed is False
-    assert transform.stats == {"replaced_constants": 0, "simplified_branches": 0}
+    assert transform.stats == _stats()
     assert isinstance(transform.module.functions[1].blocks[0].instructions[0], SSACall)
 
 
@@ -557,7 +583,7 @@ def test_sccp_transformer_simplifies_true_branch_to_jump() -> None:
 
     instruction = transform.module.functions[0].blocks[0].instructions[1]
     assert transform.changed is True
-    assert transform.stats == {"replaced_constants": 0, "simplified_branches": 1}
+    assert transform.stats == _stats(simplified_branches=1, removed_blocks=1)
     assert instruction == SSAJump("then0")
     assert _verify(transform.module) is transform.module
 
@@ -570,7 +596,7 @@ def test_sccp_transformer_simplifies_false_branch_to_jump() -> None:
 
     instruction = transform.module.functions[0].blocks[0].instructions[1]
     assert transform.changed is True
-    assert transform.stats == {"replaced_constants": 0, "simplified_branches": 1}
+    assert transform.stats == _stats(simplified_branches=1, removed_blocks=1)
     assert instruction == SSAJump("else0")
     assert _verify(transform.module) is transform.module
 
@@ -583,7 +609,11 @@ def test_sccp_analysis_plus_transform_simplifies_if_true() -> None:
 
     instruction = transform.module.functions[0].blocks[0].instructions[1]
     assert instruction == SSAJump("then0")
-    assert transform.stats == {"replaced_constants": 1, "simplified_branches": 1}
+    assert transform.stats == _stats(
+        replaced_constants=1,
+        simplified_branches=1,
+        removed_blocks=1,
+    )
     assert _verify(transform.module) is transform.module
 
 
@@ -595,28 +625,165 @@ def test_sccp_analysis_plus_transform_simplifies_if_false() -> None:
 
     instruction = transform.module.functions[0].blocks[0].instructions[1]
     assert instruction == SSAJump("else0")
-    assert transform.stats == {"replaced_constants": 1, "simplified_branches": 1}
+    assert transform.stats == _stats(
+        replaced_constants=1,
+        simplified_branches=1,
+        removed_blocks=1,
+    )
     assert _verify(transform.module) is transform.module
 
 
-def test_sccp_transformer_does_not_remove_unreachable_blocks() -> None:
+def test_sccp_transformer_removes_unreachable_else_block() -> None:
     function = _branch_function_with_constant(True)
     module = SSAModule([function])
 
     transform = _transform(module, _analyze(function))
 
     block_names = [block.name for block in transform.module.functions[0].blocks]
-    assert block_names == ["entry", "then0", "else0"]
+    assert block_names == ["entry", "then0"]
+    assert transform.stats == _stats(simplified_branches=1, removed_blocks=1)
+    assert _verify(transform.module) is transform.module
+
+
+def test_sccp_transformer_removes_unreachable_then_block() -> None:
+    function = _branch_function_with_constant(False)
+    module = SSAModule([function])
+
+    transform = _transform(module, _analyze(function))
+
+    block_names = [block.name for block in transform.module.functions[0].blocks]
+    assert block_names == ["entry", "else0"]
+    assert transform.stats == _stats(simplified_branches=1, removed_blocks=1)
+    assert _verify(transform.module) is transform.module
+
+
+def test_sccp_transformer_removes_phi_incoming_from_unreachable_block() -> None:
+    int_type = IntType()
+    condition = SSAValue("condition", BoolType())
+    parameter = SSAParameter("parameter", int_type)
+    else_value = SSAValue("else_value", int_type)
+    phi_value = SSAValue("phi_value", int_type)
+    function = _verify(
+        SSAModule(
+            [
+                SSAFunction(
+                    "main",
+                    [parameter],
+                    int_type,
+                    [
+                        SSABasicBlock(
+                            "entry",
+                            [
+                                SSAConst(condition, True),
+                                SSABranch(condition, "then0", "else0"),
+                            ],
+                        ),
+                        SSABasicBlock("then0", [SSAJump("merge0")]),
+                        SSABasicBlock(
+                            "else0",
+                            [SSAConst(else_value, 2), SSAJump("merge0")],
+                        ),
+                        SSABasicBlock(
+                            "merge0",
+                            [
+                                SSAPhi(
+                                    phi_value,
+                                    (("then0", parameter), ("else0", else_value)),
+                                ),
+                                SSAReturn(phi_value),
+                            ],
+                        ),
+                    ],
+                )
+            ]
+        )
+    ).functions[0]
+
+    transform = _transform(SSAModule([function]), _analyze(function))
+
+    merge_block = _block(transform.module.functions[0], "merge0")
+    phi = merge_block.instructions[0]
+    assert isinstance(phi, SSAPhi)
+    assert phi.incoming == (("then0", parameter),)
+    assert transform.stats == _stats(
+        simplified_branches=1,
+        removed_blocks=1,
+        removed_phi_incomings=1,
+    )
+    assert _verify(transform.module) is transform.module
+
+
+def test_sccp_transformer_removes_unreachable_block_without_phis() -> None:
+    module = _verify(
+        SSAModule(
+            [
+                SSAFunction(
+                    "main",
+                    [],
+                    VoidType(),
+                    [
+                        SSABasicBlock("entry", [SSAReturn()]),
+                        SSABasicBlock("dead0", [SSAReturn()]),
+                    ],
+                )
+            ]
+        )
+    )
+
+    transform = _transform(module, _analyze(module.functions[0]))
+
+    block_names = [block.name for block in transform.module.functions[0].blocks]
+    assert block_names == ["entry"]
+    assert transform.stats == _stats(removed_blocks=1)
+    assert _verify(transform.module) is transform.module
+
+
+def test_sccp_transformer_does_not_remove_entry_block() -> None:
+    module = _verify(
+        SSAModule(
+            [
+                SSAFunction(
+                    "main",
+                    [],
+                    VoidType(),
+                    [SSABasicBlock("entry", [SSAReturn()])],
+                )
+            ]
+        )
+    )
+
+    transform = _transform(module, SCCPResult({}, set(), set()))
+
+    block_names = [block.name for block in transform.module.functions[0].blocks]
+    assert block_names == ["entry"]
+    assert transform.changed is False
+    assert transform.stats == _stats()
+    assert _verify(transform.module) is transform.module
+
+
+def test_sccp_transformer_leaves_module_without_unreachable_blocks_unchanged() -> None:
+    module = _jump_module()
+
+    transform = _transform(module, _analyze(module.functions[0]))
+
+    block_names = [block.name for block in transform.module.functions[0].blocks]
+    assert block_names == ["entry", "exit0"]
+    assert transform.changed is False
+    assert transform.stats == _stats()
+    assert transform.module is module
 
 
 def test_sccp_transformer_does_not_change_unknown_branch() -> None:
     function = _branch_function_with_constant(True)
     module = SSAModule([function])
 
-    transform = _transform(module, _manual_result({}))
+    transform = _transform(
+        module,
+        _manual_result_for_blocks({}, {"entry", "then0", "else0"}),
+    )
 
     assert transform.changed is False
-    assert transform.stats == {"replaced_constants": 0, "simplified_branches": 0}
+    assert transform.stats == _stats()
     assert isinstance(transform.module.functions[0].blocks[0].instructions[1], SSABranch)
 
 
@@ -642,7 +809,7 @@ def test_sccp_transformer_does_not_change_overdefined_branch() -> None:
     transform = _transform(module, _analyze(module.functions[0]))
 
     assert transform.changed is False
-    assert transform.stats == {"replaced_constants": 0, "simplified_branches": 0}
+    assert transform.stats == _stats()
     assert isinstance(transform.module.functions[0].blocks[0].instructions[0], SSABranch)
 
 
@@ -665,10 +832,13 @@ def test_sccp_transformer_does_not_change_non_bool_constant_branch() -> None:
         )
     )
 
-    transform = _transform(module, _manual_result({condition: Constant(1)}))
+    transform = _transform(
+        module,
+        _manual_result_for_blocks({condition: Constant(1)}, {"entry", "then0", "else0"}),
+    )
 
     assert transform.changed is False
-    assert transform.stats == {"replaced_constants": 0, "simplified_branches": 0}
+    assert transform.stats == _stats()
     assert isinstance(transform.module.functions[0].blocks[0].instructions[0], SSABranch)
 
 
@@ -678,7 +848,7 @@ def test_sccp_transformer_does_not_change_jump() -> None:
     transform = _transform(module, _analyze(module.functions[0]))
 
     assert transform.changed is False
-    assert transform.stats == {"replaced_constants": 0, "simplified_branches": 0}
+    assert transform.stats == _stats()
     assert isinstance(transform.module.functions[0].blocks[0].instructions[1], SSAJump)
 
 
@@ -701,7 +871,7 @@ def test_sccp_transformer_does_not_change_return() -> None:
     transform = _transform(module, _analyze(module.functions[0]))
 
     assert transform.changed is False
-    assert transform.stats == {"replaced_constants": 0, "simplified_branches": 0}
+    assert transform.stats == _stats()
     assert isinstance(transform.module.functions[0].blocks[0].instructions[1], SSAReturn)
 
 

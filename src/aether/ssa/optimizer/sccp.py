@@ -334,21 +334,36 @@ class SCCPTransformer:
         updated_functions: list[SSAFunction] = []
         replaced_constants = 0
         simplified_branches = 0
+        removed_blocks = 0
+        removed_phi_incomings = 0
 
         for function in self.module.functions:
-            updated_function, function_replaced, function_simplified = (
-                self._transform_function(function)
-            )
+            (
+                updated_function,
+                function_replaced,
+                function_simplified,
+                function_removed_blocks,
+                function_removed_phi_incomings,
+            ) = self._transform_function(function)
             updated_functions.append(updated_function)
             replaced_constants += function_replaced
             simplified_branches += function_simplified
+            removed_blocks += function_removed_blocks
+            removed_phi_incomings += function_removed_phi_incomings
 
         stats = {
             "replaced_constants": replaced_constants,
             "simplified_branches": simplified_branches,
+            "removed_blocks": removed_blocks,
+            "removed_phi_incomings": removed_phi_incomings,
         }
 
-        if replaced_constants == 0 and simplified_branches == 0:
+        if (
+            replaced_constants == 0
+            and simplified_branches == 0
+            and removed_blocks == 0
+            and removed_phi_incomings == 0
+        ):
             return SSAOptimizationResult(
                 self.module,
                 changed=False,
@@ -361,19 +376,44 @@ class SCCPTransformer:
             stats=stats,
         )
 
-    def _transform_function(self, function: SSAFunction) -> tuple[SSAFunction, int, int]:
+    def _transform_function(
+        self,
+        function: SSAFunction,
+    ) -> tuple[SSAFunction, int, int, int, int]:
         updated_blocks: list[SSABasicBlock] = []
         replaced_constants = 0
         simplified_branches = 0
+        removed_phi_incomings = 0
+        executable_blocks = set(self.result.executable_blocks)
+        executable_blocks.add(function.entry_block)
+        removed_block_names = {
+            block.name for block in function.blocks if block.name not in executable_blocks
+        }
 
         for block in function.blocks:
+            if block.name in removed_block_names:
+                continue
             updated_block, block_replaced, block_simplified = self._transform_block(block)
+            updated_block, block_removed_phi_incomings = self._cleanup_phi_incomings(
+                function,
+                updated_block,
+                removed_block_names,
+            )
+            self._verify_live_targets(function, updated_block, removed_block_names)
             updated_blocks.append(updated_block)
             replaced_constants += block_replaced
             simplified_branches += block_simplified
+            removed_phi_incomings += block_removed_phi_incomings
 
-        if replaced_constants == 0 and simplified_branches == 0:
-            return function, 0, 0
+        removed_blocks = len(removed_block_names)
+
+        if (
+            replaced_constants == 0
+            and simplified_branches == 0
+            and removed_blocks == 0
+            and removed_phi_incomings == 0
+        ):
+            return function, 0, 0, 0, 0
 
         return (
             SSAFunction(
@@ -385,6 +425,8 @@ class SCCPTransformer:
             ),
             replaced_constants,
             simplified_branches,
+            removed_blocks,
+            removed_phi_incomings,
         )
 
     def _transform_block(self, block: SSABasicBlock) -> tuple[SSABasicBlock, int, int]:
@@ -449,3 +491,71 @@ class SCCPTransformer:
         if state.value:
             return SSAJump(instruction.true_target)
         return SSAJump(instruction.false_target)
+
+    def _cleanup_phi_incomings(
+        self,
+        function: SSAFunction,
+        block: SSABasicBlock,
+        removed_block_names: set[str],
+    ) -> tuple[SSABasicBlock, int]:
+        if not removed_block_names:
+            return block, 0
+
+        instructions: list[SSAInstruction] = []
+        removed_phi_incomings = 0
+        changed = False
+
+        for instruction in block.instructions:
+            if not isinstance(instruction, SSAPhi):
+                instructions.append(instruction)
+                continue
+
+            incoming = tuple(
+                (incoming_block, incoming_value)
+                for incoming_block, incoming_value in instruction.incoming
+                if incoming_block not in removed_block_names
+            )
+            removed_count = len(instruction.incoming) - len(incoming)
+            removed_phi_incomings += removed_count
+
+            if removed_count == 0:
+                instructions.append(instruction)
+                continue
+
+            changed = True
+            if not incoming:
+                raise ValueError(
+                    "SCCP cleanup removed all incoming values from phi "
+                    f"'{instruction.result.name}' in block '{block.name}' "
+                    f"of function '{function.name}'"
+                )
+            instructions.append(SSAPhi(instruction.result, incoming))
+
+        if not changed:
+            return block, removed_phi_incomings
+        return SSABasicBlock(block.name, instructions), removed_phi_incomings
+
+    def _verify_live_targets(
+        self,
+        function: SSAFunction,
+        block: SSABasicBlock,
+        removed_block_names: set[str],
+    ) -> None:
+        if not removed_block_names or not block.instructions:
+            return
+
+        terminator = block.instructions[-1]
+        if isinstance(terminator, SSAJump):
+            targets = (terminator.target,)
+        elif isinstance(terminator, SSABranch):
+            targets = (terminator.true_target, terminator.false_target)
+        else:
+            return
+
+        removed_targets = sorted(target for target in targets if target in removed_block_names)
+        if removed_targets:
+            raise ValueError(
+                "SCCP cleanup would leave terminator in block "
+                f"'{block.name}' of function '{function.name}' targeting removed "
+                f"block(s): {', '.join(removed_targets)}"
+            )
