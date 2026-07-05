@@ -25,6 +25,7 @@ from aether.ssa.optimizer import (
     SSAAlgebraicSimplifier,
     SSAConstantFolder,
     SSADeadCodeEliminator,
+    SSAGlobalConstantPropagator,
     SSAOptimizationConvergenceError,
     SSAOptimizationResult,
     SSAOptimizerPipeline,
@@ -104,6 +105,83 @@ def _phi_merge_module(*, use: str = "unused") -> SSAModule:
         ]
     )
     return _verify(module)
+
+
+def _constant_phi_module(
+    then_constant: int,
+    else_constant: int | None,
+    *,
+    use: str = "return",
+) -> SSAModule:
+    int_type = IntType()
+    parameter = SSAParameter("parameter", int_type)
+    condition = SSAValue("condition", BoolType())
+    then_value = SSAValue("then_value", int_type)
+    else_value = SSAValue("else_value", int_type)
+    phi_value = SSAValue("phi_value", int_type)
+    one = SSAValue("one", int_type)
+    result = SSAValue("result", int_type)
+
+    else_instructions: list[SSAInstruction] = []
+    else_incoming = parameter
+    if else_constant is not None:
+        else_instructions.append(SSAConst(else_value, else_constant))
+        else_incoming = else_value
+    else_instructions.append(SSAJump("merge0"))
+
+    merge_instructions: list[SSAInstruction] = [
+        SSAPhi(phi_value, (("then0", then_value), ("else0", else_incoming))),
+    ]
+    if use == "binary":
+        merge_instructions.extend(
+            [
+                SSAConst(one, 1),
+                SSABinaryOp(result, "add", phi_value, one),
+                SSAReturn(result),
+            ]
+        )
+    elif use == "call":
+        merge_instructions.extend(
+            [
+                SSACall("sink", (phi_value,)),
+                SSAReturn(),
+            ]
+        )
+    else:
+        merge_instructions.append(SSAReturn(phi_value))
+
+    functions = [
+        SSAFunction(
+            "main",
+            [parameter],
+            VoidType() if use == "call" else int_type,
+            [
+                SSABasicBlock(
+                    "entry",
+                    [
+                        SSAConst(condition, True),
+                        SSABranch(condition, "then0", "else0"),
+                    ],
+                ),
+                SSABasicBlock("then0", [SSAConst(then_value, then_constant), SSAJump("merge0")]),
+                SSABasicBlock("else0", else_instructions),
+                SSABasicBlock("merge0", merge_instructions),
+            ],
+        )
+    ]
+    if use == "call":
+        sink_parameter = SSAParameter("value", int_type)
+        functions.insert(
+            0,
+            SSAFunction(
+                "sink",
+                [sink_parameter],
+                VoidType(),
+                [SSABasicBlock("entry", [SSAReturn()])],
+            ),
+        )
+
+    return _verify(SSAModule(functions))
 
 
 def _branch_condition_phi_module() -> SSAModule:
@@ -1072,6 +1150,130 @@ def test_ssa_constant_folder_does_not_change_module_without_fold() -> None:
     _verify(result.module)
 
 
+def test_ssa_global_constant_propagator_replaces_phi_with_same_constants() -> None:
+    module = _constant_phi_module(7, 7)
+
+    result = SSAGlobalConstantPropagator().run(module)
+
+    assert result.changed is True
+    assert result.stats == {"propagated": 1}
+    [function] = result.module.functions
+    assert function.blocks[-1].instructions == [
+        SSAConst(SSAValue("phi_value", IntType()), 7),
+        SSAReturn(SSAValue("phi_value", IntType())),
+    ]
+    _verify(result.module)
+
+
+def test_ssa_global_constant_propagator_keeps_phi_with_different_constants() -> None:
+    module = _constant_phi_module(7, 8)
+
+    result = SSAGlobalConstantPropagator().run(module)
+
+    assert result.changed is False
+    assert result.module is module
+    assert result.stats == {"propagated": 0}
+    assert "SSAPhi" in _instruction_names(result.module)
+    _verify(result.module)
+
+
+def test_ssa_global_constant_propagator_keeps_phi_with_unknown_incoming() -> None:
+    module = _constant_phi_module(7, None)
+
+    result = SSAGlobalConstantPropagator().run(module)
+
+    assert result.changed is False
+    assert result.module is module
+    assert result.stats == {"propagated": 0}
+    assert "SSAPhi" in _instruction_names(result.module)
+    _verify(result.module)
+
+
+def test_ssa_global_constant_propagator_folds_after_phi_constant() -> None:
+    module = _constant_phi_module(7, 7, use="binary")
+
+    result = SSAGlobalConstantPropagator().run(module)
+
+    assert result.changed is True
+    assert result.stats == {"propagated": 2}
+    [function] = result.module.functions
+    assert function.blocks[-1].instructions == [
+        SSAConst(SSAValue("phi_value", IntType()), 7),
+        SSAConst(SSAValue("one", IntType()), 1),
+        SSAConst(SSAValue("result", IntType()), 8),
+        SSAReturn(SSAValue("result", IntType())),
+    ]
+    _verify(result.module)
+
+
+def test_default_pipeline_global_constant_propagation_then_dce() -> None:
+    module = _constant_phi_module(7, 7, use="binary")
+
+    optimized = SSAOptimizerPipeline().run(module)
+
+    [function] = optimized.functions
+    assert function.blocks[-1].instructions == [
+        SSAConst(SSAValue("result", IntType()), 8),
+        SSAReturn(SSAValue("result", IntType())),
+    ]
+    assert "SSAPhi" not in _instruction_names(optimized)
+    assert "SSABinaryOp" not in _instruction_names(optimized)
+    _verify(optimized)
+
+
+def test_ssa_global_constant_propagator_does_not_propagate_calls() -> None:
+    int_type = IntType()
+    call_result = SSAValue("call_result", int_type)
+    one = SSAValue("one", int_type)
+    result_value = SSAValue("result", int_type)
+    source_value = SSAValue("source_value", int_type)
+    module = _verify(
+        SSAModule(
+            [
+                SSAFunction(
+                    "source",
+                    [],
+                    int_type,
+                    [
+                        SSABasicBlock(
+                            "entry",
+                            [
+                                SSAConst(source_value, 7),
+                                SSAReturn(source_value),
+                            ],
+                        )
+                    ],
+                ),
+                SSAFunction(
+                    "main",
+                    [],
+                    int_type,
+                    [
+                        SSABasicBlock(
+                            "entry",
+                            [
+                                SSACall("source", (), call_result),
+                                SSAConst(one, 1),
+                                SSABinaryOp(result_value, "add", call_result, one),
+                                SSAReturn(result_value),
+                            ],
+                        )
+                    ],
+                ),
+            ]
+        )
+    )
+
+    propagation = SSAGlobalConstantPropagator().run(module)
+
+    assert propagation.changed is False
+    assert propagation.module is module
+    assert propagation.stats == {"propagated": 0}
+    assert "SSACall" in _instruction_names(propagation.module)
+    assert "SSABinaryOp" in _instruction_names(propagation.module)
+    _verify(propagation.module)
+
+
 @pytest.mark.parametrize(
     ("operator", "constant_value", "constant_on_left"),
     [
@@ -1331,6 +1533,7 @@ def test_empty_ssa_optimizer_trace_has_initial_and_final_ssa() -> None:
     assert [step.label for step in trace] == [
         "Initial SSA",
         "SSAConstantFolder",
+        "SSAGlobalConstantPropagator",
         "SSAAlgebraicSimplifier",
         "TrivialPhiEliminator",
         "DeadPhiEliminator",
@@ -1345,19 +1548,22 @@ def test_empty_ssa_optimizer_trace_has_initial_and_final_ssa() -> None:
     assert trace[1].stats == {"folded": 0}
     assert trace[2].module is module
     assert trace[2].changed is False
-    assert trace[2].stats == {"simplified": 0}
+    assert trace[2].stats == {"propagated": 0}
     assert trace[3].module is module
     assert trace[3].changed is False
-    assert trace[3].stats == {"removed_trivial_phis": 0, "rewritten_uses": 0}
+    assert trace[3].stats == {"simplified": 0}
     assert trace[4].module is module
     assert trace[4].changed is False
-    assert trace[4].stats == {"removed_phis": 0}
+    assert trace[4].stats == {"removed_trivial_phis": 0, "rewritten_uses": 0}
     assert trace[5].module is module
     assert trace[5].changed is False
-    assert trace[5].stats == {"removed": 0}
+    assert trace[5].stats == {"removed_phis": 0}
     assert trace[6].module is module
     assert trace[6].changed is False
-    assert trace[6].stats == {}
+    assert trace[6].stats == {"removed": 0}
+    assert trace[7].module is module
+    assert trace[7].changed is False
+    assert trace[7].stats == {}
 
 
 def test_ssa_optimizer_pipeline_runs_fake_changing_pass() -> None:
@@ -1945,6 +2151,7 @@ def test_default_ssa_optimizer_trace_shows_dead_phi_changes() -> None:
     assert [step.label for step in trace] == [
         "Initial SSA",
         "SSAConstantFolder",
+        "SSAGlobalConstantPropagator",
         "SSAAlgebraicSimplifier",
         "TrivialPhiEliminator",
         "DeadPhiEliminator",
@@ -1954,13 +2161,15 @@ def test_default_ssa_optimizer_trace_shows_dead_phi_changes() -> None:
     assert trace[1].changed is False
     assert trace[1].stats == {"folded": 0}
     assert trace[2].changed is False
-    assert trace[2].stats == {"simplified": 0}
+    assert trace[2].stats == {"propagated": 0}
     assert trace[3].changed is False
-    assert trace[3].stats == {"removed_trivial_phis": 0, "rewritten_uses": 0}
-    assert trace[4].changed is True
-    assert trace[4].stats == {"removed_phis": 1}
+    assert trace[3].stats == {"simplified": 0}
+    assert trace[4].changed is False
+    assert trace[4].stats == {"removed_trivial_phis": 0, "rewritten_uses": 0}
     assert trace[5].changed is True
-    assert trace[5].stats == {"removed": 2}
+    assert trace[5].stats == {"removed_phis": 1}
+    assert trace[6].changed is True
+    assert trace[6].stats == {"removed": 2}
     _verify(trace[-1].module)
 
 

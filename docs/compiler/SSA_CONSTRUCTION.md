@@ -736,6 +736,7 @@ src/aether/ssa/
     model.py
     optimizer/
         __init__.py
+        global_constant_propagation.py
         pipeline.py
         result.py
     phi_placement.py
@@ -761,8 +762,8 @@ Current responsibilities:
   `SSAVerifier`.
 - `optimizer/`: initial SSA optimizer pipeline infrastructure with
   `SSAOptimizationResult`, `SSAOptimizationTraceStep`, fixed-point iteration,
-  convergence errors, SSA Constant Folding, SSA Algebraic Simplification,
-  narrow phi cleanup passes:
+  convergence errors, SSA Constant Folding, conservative SSA Global Constant
+  Propagation, SSA Algebraic Simplification, narrow phi cleanup passes:
   `TrivialPhiEliminator` and `DeadPhiEliminator`, plus simple SSA Dead Code
   Elimination. The optimizer is not wired into the CLI or default compilation.
 - `phi_placement.py`: standalone Cytron-style iterated dominance-frontier phi
@@ -790,19 +791,21 @@ narrow SSA optimization passes:
 - `SSAOptimizationTraceStep(label, module, changed, stats)`
 - `SSAOptimizerPipeline(passes=None, iterative=False, max_iterations=10)`
 - `SSAConstantFolder().run(module)`
+- `SSAGlobalConstantPropagator().run(module)`
 - `SSAAlgebraicSimplifier().run(module)`
 - `TrivialPhiEliminator().run(module)`
 - `DeadPhiEliminator().run(module)`
 - `SSADeadCodeEliminator().run(module)`
 
 The default SSA optimizer pipeline currently runs `SSAConstantFolder`,
-`SSAAlgebraicSimplifier`, `TrivialPhiEliminator`, `DeadPhiEliminator`, and then
-`SSADeadCodeEliminator`. Running it on modules without foldable or removable
-instructions returns the same `SSAModule`; trace output records `Initial SSA`,
-each optimizer step, and `Final SSA` around any custom pass entries. The
-pipeline supports custom passes and iterative fixed-point execution for tests
-and future development, but it is not connected to the CLI, not used by
-`--emit-ssa`, and not connected to execution.
+`SSAGlobalConstantPropagator`, `SSAAlgebraicSimplifier`,
+`TrivialPhiEliminator`, `DeadPhiEliminator`, and then
+`SSADeadCodeEliminator`. Running it on modules without foldable, propagatable,
+or removable instructions returns the same `SSAModule`; trace output records
+`Initial SSA`, each optimizer step, and `Final SSA` around any custom pass
+entries. The pipeline supports custom passes and iterative fixed-point
+execution for tests and future development, but it is not connected to the CLI,
+not used by `--emit-ssa`, and not connected to execution.
 
 SSA Constant Folding tracks constants introduced by `SSAConst` within each
 function as the pass walks the function blocks. It folds `SSABinaryOp`
@@ -814,6 +817,15 @@ Division, modulo, and remainder by zero are intentionally left unchanged. The
 pass does not fold calls, phi nodes, branch conditions directly, or operations
 with unknown operands. It is local constant folding only; it does not rewrite
 uses, infer constants through phis, or perform global constant propagation.
+
+SSA Global Constant Propagation is deliberately conservative. It computes known
+constants per function, treats `SSAConst` as a constant definition, replaces a
+`SSAPhi` only when every incoming value is a known constant with the same value,
+and can turn binary or compare results into `SSAConst` when all operands become
+known through that global information. It preserves the original result value
+when replacing an instruction, reports `propagated`, does not propagate through
+calls, does not simplify branches, does not infer unreachable blocks, and does
+not remove blocks.
 
 SSA Algebraic Simplification applies local integer identities on `SSABinaryOp`
 instructions after constant folding. The initial rule set rewrites `x + 0`,

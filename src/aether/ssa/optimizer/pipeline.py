@@ -10,6 +10,7 @@ from .algebraic_simplification import SSAAlgebraicSimplifier
 from .constant_folding import SSAConstantFolder
 from .dead_code import SSADeadCodeEliminator
 from .dead_phi import DeadPhiEliminator
+from .global_constant_propagation import SSAGlobalConstantPropagator
 from .result import SSAOptimizationResult, SSAOptimizationTraceStep
 from .trivial_phi import TrivialPhiEliminator
 
@@ -48,6 +49,7 @@ class SSAOptimizerPipeline:
             if passes is not None
             else (
                 SSAConstantFolder(),
+                SSAGlobalConstantPropagator(),
                 SSAAlgebraicSimplifier(),
                 TrivialPhiEliminator(),
                 DeadPhiEliminator(),

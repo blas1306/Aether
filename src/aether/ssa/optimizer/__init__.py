@@ -4,6 +4,7 @@ from .algebraic_simplification import SSAAlgebraicSimplifier
 from .constant_folding import SSAConstantFolder
 from .dead_code import SSADeadCodeEliminator
 from .dead_phi import DeadPhiEliminator
+from .global_constant_propagation import SSAGlobalConstantPropagator
 from .pipeline import (
     SSAOptimizationConvergenceError,
     SSAOptimizationPass,
@@ -17,6 +18,7 @@ __all__ = [
     "SSAAlgebraicSimplifier",
     "SSAConstantFolder",
     "SSADeadCodeEliminator",
+    "SSAGlobalConstantPropagator",
     "SSAOptimizationConvergenceError",
     "SSAOptimizationPass",
     "SSAOptimizationResult",
