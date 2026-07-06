@@ -152,8 +152,7 @@ def build_native_parser() -> argparse.ArgumentParser:
         "-o",
         "--output",
         help=(
-            "Executable output path. Defaults to the source path without its "
-            "extension."
+            "Executable output path. Defaults to build/<source-name>."
         ),
     )
     parser.add_argument(
@@ -353,7 +352,11 @@ def _main_build(argv: Sequence[str], *, stdout: TextIO, stderr: TextIO) -> int:
     if source is None:
         return EXIT_USAGE_ERROR
 
-    output_path = Path(args.output) if args.output is not None else path.with_suffix("")
+    output_path = (
+        Path(args.output)
+        if args.output is not None
+        else _default_native_output_path(path)
+    )
     try:
         result = _build_native(
             source,
@@ -372,6 +375,10 @@ def _main_build(argv: Sequence[str], *, stdout: TextIO, stderr: TextIO) -> int:
     if result.llvm_path is not None:
         print(f"Kept LLVM IR: {result.llvm_path}", file=stdout)
     return EXIT_SUCCESS
+
+
+def _default_native_output_path(source_path: Path) -> Path:
+    return Path("build") / source_path.stem
 
 
 def run_repl(*, stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:

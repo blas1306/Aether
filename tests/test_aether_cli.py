@@ -1177,14 +1177,47 @@ def test_build_accepts_keep_llvm_option(
     assert stderr == ""
 
 
-def test_build_default_output_is_source_without_extension(
+def test_build_keep_llvm_default_output_uses_build_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    program = tmp_path / "default_keep_llvm.ae"
+    expected_output = tmp_path / "build" / "default_keep_llvm"
+    llvm_path = tmp_path / "build" / "default_keep_llvm.ll"
+    program.write_text("int main() { return 5; }\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "aether.backend.llvm.build.shutil.which",
+        lambda _name: "/usr/bin/clang",
+    )
+    monkeypatch.setattr(
+        "aether.backend.llvm.build.subprocess.run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(command, 0, "", ""),
+    )
+
+    exit_code, stdout, stderr = run_cli(["build", str(program), "--keep-llvm"])
+
+    assert exit_code == EXIT_SUCCESS
+    assert llvm_path.read_text(encoding="utf-8") == (
+        "define i32 @main() {\n"
+        "entry:\n"
+        "  ret i32 5\n"
+        "}"
+    )
+    assert f"Built executable: {expected_output.resolve()}\n" in stdout
+    assert f"Kept LLVM IR: {llvm_path.resolve()}\n" in stdout
+    assert stderr == ""
+
+
+def test_build_default_output_uses_build_directory(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     program = tmp_path / "default_output.ae"
-    expected_output = tmp_path / "default_output"
+    expected_output = tmp_path / "build" / "default_output"
     commands: list[list[str]] = []
     program.write_text("int main() { return 5; }\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
         "aether.backend.llvm.build.shutil.which",
         lambda _name: "/usr/bin/clang",
@@ -1201,6 +1234,30 @@ def test_build_default_output_is_source_without_extension(
     assert exit_code == EXIT_SUCCESS
     assert commands[0][-1] == str(expected_output.resolve())
     assert stdout == f"Built executable: {expected_output.resolve()}\n"
+    assert stderr == ""
+
+
+def test_build_creates_nested_output_directories(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    program = tmp_path / "nested_output.ae"
+    output = tmp_path / "out" / "linux" / "release" / "nested_output"
+    program.write_text("int main() { return 5; }\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "aether.backend.llvm.build.shutil.which",
+        lambda _name: "/usr/bin/clang",
+    )
+    monkeypatch.setattr(
+        "aether.backend.llvm.build.subprocess.run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(command, 0, "", ""),
+    )
+
+    exit_code, stdout, stderr = run_cli(["build", str(program), "-o", str(output)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert output.parent.is_dir()
+    assert stdout == f"Built executable: {output.resolve()}\n"
     assert stderr == ""
 
 

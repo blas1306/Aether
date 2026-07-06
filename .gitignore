@@ -64,3 +64,6 @@ tmp_*.pdf
 # Sistema
 # =========================
 CON
+
+# LLVM build artifacts
+*.ll

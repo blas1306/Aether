@@ -18,11 +18,12 @@ aether build hello.ae --keep-llvm
 
 `--emit-llvm` prints textual LLVM IR to stdout only. `aether build` writes LLVM
 IR to a temporary `.ll` file and invokes `clang` to produce a native
-executable. If `-o`/`--output` is omitted, the executable is written next to the
-source file using the source path without `.ae`; for example
-`examples/llvm/return_5.ae` produces `examples/llvm/return_5`. `--keep-llvm`
-keeps the generated LLVM IR next to the executable output, for example
-`hello.ll`.
+executable. If `-o`/`--output` is omitted, the executable is written under
+`build/` using the source name without `.ae`; for example
+`examples/llvm/return_5.ae` produces `build/return_5`. `aether build` creates
+any needed output directories automatically. `--keep-llvm` keeps the generated
+LLVM IR next to the executable output, for example `build/hello.ll` for the
+default output path or `hello.ll` when using `-o hello`.
 
 Native builds require `clang` on `PATH`.
 

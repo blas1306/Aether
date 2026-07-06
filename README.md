@@ -262,13 +262,14 @@ aether build examples/llvm/return_5.ae -o return_5
 aether build examples/llvm/return_5.ae -o return_5 --keep-llvm
 ```
 
-When `-o`/`--output` is omitted, the executable is written next to the source
-file using the source name without `.ae`; for example,
-`examples/llvm/return_5.ae` produces `examples/llvm/return_5`. With
-`-o return_5`, the executable is written to `./return_5`. By default the
-generated `.ll` file is temporary and removed after `clang` finishes.
-`--keep-llvm` keeps it next to the executable output, for example
-`return_5.ll`.
+When `-o`/`--output` is omitted, the executable is written under `build/`
+using the source name without `.ae`; for example,
+`examples/llvm/return_5.ae` produces `build/return_5`. With `-o return_5`,
+the executable is written to `./return_5`. `aether build` creates any needed
+output directories automatically. By default the generated `.ll` file is
+temporary and removed after `clang` finishes. `--keep-llvm` keeps it next to the
+executable output, for example `build/return_5.ll` for the default output path
+or `return_5.ll` when using `-o return_5`.
 
 Native builds require `clang` on `PATH`. The native build path is intentionally
 small for now: no JIT, `llc`, runtime, string/`println` lowering, advanced
