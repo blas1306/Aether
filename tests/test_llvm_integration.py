@@ -17,6 +17,8 @@ LLVM_EXAMPLES = sorted(LLVM_EXAMPLES_DIR.glob("*.ae"))
 EXPECTED_EXIT_CODES = {
     "arithmetic.ae": 23,
     "countdown.ae": 0,
+    "double_add.ae": 17,
+    "double_compare.ae": 19,
     "gcd_iterative.ae": 6,
     "identity_call.ae": 23,
     "max.ae": 12,
