@@ -275,6 +275,31 @@ Native builds require `clang` on `PATH`. The native build path is intentionally
 small for now: no JIT, `llc`, runtime, string/`println` lowering, advanced
 imports, aggregate LLVM lowering, complex linking, or cross-compilation.
 
+Small LLVM-native examples live under `examples/llvm/`:
+
+- `return_5.ae` exits with `5`.
+- `arithmetic.ae` exits with `23`.
+- `max.ae` exits with `12`.
+- `countdown.ae` exits with `0`.
+- `sum_to_n.ae` exits with `15`.
+- `gcd_iterative.ae` exits with `6`.
+- `identity_call.ae` exits with `23`.
+
+Build and run one example with:
+
+```bash
+aether build examples/llvm/sum_to_n.ae -o build/sum_to_n
+./build/sum_to_n
+echo $?
+```
+
+The LLVM integration tests compile and execute these examples when `clang` is
+available. If `clang` is missing, those native integration cases are skipped:
+
+```bash
+PYTHONPATH=src .venv/bin/pytest tests/test_llvm_integration.py
+```
+
 The CLI also includes a minimal benchmark harness for language and backend
 development:
 

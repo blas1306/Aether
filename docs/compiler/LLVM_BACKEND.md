@@ -27,6 +27,35 @@ default output path or `hello.ll` when using `-o hello`.
 
 Native builds require `clang` on `PATH`.
 
+## Example Programs
+
+The repository keeps small native-build examples in `examples/llvm/`. Each one
+uses only the currently supported LLVM subset and returns a predictable process
+exit code from `main`:
+
+| Example | Expected exit code |
+| --- | ---: |
+| `return_5.ae` | 5 |
+| `arithmetic.ae` | 23 |
+| `max.ae` | 12 |
+| `countdown.ae` | 0 |
+| `sum_to_n.ae` | 15 |
+| `gcd_iterative.ae` | 6 |
+| `identity_call.ae` | 23 |
+
+To build and run an example:
+
+```bash
+aether build examples/llvm/gcd_iterative.ae -o build/gcd_iterative
+./build/gcd_iterative
+echo $?
+```
+
+The integration test suite walks `examples/llvm/*.ae`, builds each example with
+`aether build`, runs the resulting executable, and checks the expected exit
+code. These tests require `clang`; when `clang` is not available on `PATH`, the
+native execution cases are skipped.
+
 ## Supported Subset
 
 - SSA input: `SSAModule`.
