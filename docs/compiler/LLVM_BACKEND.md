@@ -55,6 +55,8 @@ exit code from `main`:
 | `sum_to_n.ae` | 15 |
 | `gcd_iterative.ae` | 6 |
 | `identity_call.ae` | 23 |
+| `string_identity.ae` | 0 |
+| `string_choose.ae` | 0 |
 | `double_add.ae` | 17 |
 | `double_compare.ae` | 19 |
 | `int_to_double.ae` | 12 |
@@ -92,6 +94,8 @@ are skipped.
   - LLVM string initializers escape quotes, backslashes, control bytes, and
     non-ASCII bytes with `\XX` byte escapes.
   - Identical literal values are deduplicated within one emitted module.
+  - The resulting `ptr` values can flow through SSA variables, assignments,
+    returns, direct calls, and phi nodes.
 - `SSABinaryOp` integer operations:
   - `add` -> `add`
   - `sub` -> `sub`
@@ -136,8 +140,12 @@ are skipped.
 - `SSAReturn`.
 
 This means an `if`/`else` where both branches return directly can compile to
-LLVM IR, and an `if`/`else` that merges an `int` or `bool` value can also be
-emitted completely through `SSAPhi`.
+LLVM IR, and an `if`/`else` that merges a supported scalar value can also be
+emitted completely through `SSAPhi`, including string values as `ptr`.
+
+String is now a full SSA value type in this subset. The backend keeps the
+representation as LLVM `ptr`: it does not copy, allocate, concatenate, inspect,
+or compare string contents.
 
 Direct recursion should work automatically because recursive calls use the same
 ordinary LLVM call emission as any other direct function call. There is no
@@ -224,6 +232,22 @@ String literal example:
 define ptr @hello() {
 entry:
   ret ptr @.str.0
+}
+```
+
+String phi example:
+
+```llvm
+define ptr @choose(i1 %flag) {
+entry:
+  br i1 %flag, label %then0, label %else0
+then0:
+  br label %merge0
+else0:
+  br label %merge0
+merge0:
+  %0 = phi ptr [ @.str.1, %then0 ], [ @.str.0, %else0 ]
+  ret ptr %0
 }
 ```
 

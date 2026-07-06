@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from aether.ir import BoolType, DoubleType, FloatType, IntType, IRType, VoidType
+from aether.ir import BoolType, DoubleType, FloatType, IntType, IRType, StringType, VoidType
 from aether.ssa import (
     SSABasicBlock,
     SSABinaryOp,
@@ -993,6 +993,76 @@ def test_ssa_constant_folder_folds_compare_ops(
     folded = _folded_result_instruction(result.module)
     assert folded == SSAConst(SSAValue("result", BoolType()), expected)
     _verify(result.module)
+
+
+def test_ssa_constant_folder_does_not_fold_string_binary_ops() -> None:
+    string_type = StringType()
+    left = SSAValue("left", string_type)
+    right = SSAValue("right", string_type)
+    result_value = SSAValue("result", string_type)
+    module = _verify(
+        SSAModule(
+            [
+                SSAFunction(
+                    "main",
+                    [],
+                    string_type,
+                    [
+                        SSABasicBlock(
+                            "entry",
+                            [
+                                SSAConst(left, "a"),
+                                SSAConst(right, "b"),
+                                SSABinaryOp(result_value, "add", left, right),
+                                SSAReturn(result_value),
+                            ],
+                        )
+                    ],
+                )
+            ]
+        )
+    )
+
+    result = SSAConstantFolder().run(module)
+
+    assert result.changed is False
+    assert result.module is module
+    assert result.stats == {"folded": 0}
+
+
+def test_ssa_constant_folder_does_not_fold_string_compare_ops() -> None:
+    string_type = StringType()
+    left = SSAValue("left", string_type)
+    right = SSAValue("right", string_type)
+    result_value = SSAValue("result", BoolType())
+    module = _verify(
+        SSAModule(
+            [
+                SSAFunction(
+                    "main",
+                    [],
+                    BoolType(),
+                    [
+                        SSABasicBlock(
+                            "entry",
+                            [
+                                SSAConst(left, "a"),
+                                SSAConst(right, "a"),
+                                SSACompareOp(result_value, "eq", left, right),
+                                SSAReturn(result_value),
+                            ],
+                        )
+                    ],
+                )
+            ]
+        )
+    )
+
+    result = SSAConstantFolder().run(module)
+
+    assert result.changed is False
+    assert result.module is module
+    assert result.stats == {"folded": 0}
 
 
 def test_ssa_constant_folder_folds_chain_in_single_pass() -> None:

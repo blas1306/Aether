@@ -925,6 +925,103 @@ string caller() {
     assert stderr == ""
 
 
+def test_emit_llvm_prints_string_variable_return(tmp_path: Path) -> None:
+    program = tmp_path / "emit_llvm_string_variable.ae"
+    program.write_text(
+        """
+string hello() {
+    string text = "hello";
+    return text;
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert '@.str.0 = private unnamed_addr constant [6 x i8] c"hello\\00"\n' in stdout
+    assert "define ptr @hello()" in stdout
+    assert "  ret ptr @.str.0\n" in stdout
+    assert stderr == ""
+
+
+def test_emit_llvm_prints_string_assignment_return(tmp_path: Path) -> None:
+    program = tmp_path / "emit_llvm_string_assignment.ae"
+    program.write_text(
+        """
+string copy() {
+    string source = "hello";
+    string target = source;
+    return target;
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert '@.str.0 = private unnamed_addr constant [6 x i8] c"hello\\00"\n' in stdout
+    assert "define ptr @copy()" in stdout
+    assert "  ret ptr @.str.0\n" in stdout
+    assert stderr == ""
+
+
+def test_emit_llvm_prints_string_call_with_variable_argument(tmp_path: Path) -> None:
+    program = tmp_path / "emit_llvm_string_variable_call.ae"
+    program.write_text(
+        """
+string identity(string value) {
+    return value;
+}
+
+string caller() {
+    string text = "hello";
+    return identity(text);
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert "define ptr @identity(ptr %value)" in stdout
+    assert "  ret ptr %value\n" in stdout
+    assert "  %0 = call ptr @identity(ptr @.str.0)\n" in stdout
+    assert "  ret ptr %0\n" in stdout
+    assert stderr == ""
+
+
+def test_emit_llvm_prints_string_phi_for_if_else(tmp_path: Path) -> None:
+    program = tmp_path / "emit_llvm_string_phi.ae"
+    program.write_text(
+        """
+string choose(boolean flag) {
+    string result = "hello";
+    if flag {
+        result = "world";
+    } else {
+        result = "hello";
+    }
+    return result;
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert '@.str.0 = private unnamed_addr constant [6 x i8] c"world\\00"\n' in stdout
+    assert '@.str.1 = private unnamed_addr constant [6 x i8] c"hello\\00"\n' in stdout
+    assert "merge0:\n" in stdout
+    assert "  %0 = phi ptr [ @.str.0, %then0 ], [ @.str.1, %else0 ]\n" in stdout
+    assert "  ret ptr %0\n" in stdout
+    assert stderr == ""
+
+
 def test_emit_llvm_rejects_string_arithmetic_with_clear_error(tmp_path: Path) -> None:
     program = tmp_path / "emit_llvm_string_add.ae"
     program.write_text(
@@ -941,6 +1038,46 @@ string bad(string x) {
     assert exit_code == EXIT_LANGUAGE_ERROR
     assert stdout == ""
     assert "LLVM backend does not support string binary operations yet" in stderr
+
+
+def test_emit_llvm_rejects_constant_string_arithmetic_without_folding(
+    tmp_path: Path,
+) -> None:
+    program = tmp_path / "emit_llvm_constant_string_add.ae"
+    program.write_text(
+        """
+string bad() {
+    return "a" + "b";
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
+
+    assert exit_code == EXIT_LANGUAGE_ERROR
+    assert stdout == ""
+    assert "LLVM backend does not support string binary operations yet" in stderr
+
+
+def test_emit_llvm_rejects_constant_string_comparison_without_folding(
+    tmp_path: Path,
+) -> None:
+    program = tmp_path / "emit_llvm_constant_string_eq.ae"
+    program.write_text(
+        """
+boolean bad() {
+    return "a" == "a";
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
+
+    assert exit_code == EXIT_LANGUAGE_ERROR
+    assert stdout == ""
+    assert "LLVM backend does not support string comparisons yet" in stderr
 
 
 def test_emit_llvm_prints_sum(tmp_path: Path) -> None:
@@ -1593,6 +1730,47 @@ int main() {
     assert stderr == ""
     completed = subprocess.run([str(output)], check=False)
     assert completed.returncode == 5
+
+
+def test_build_string_flow_smoke_compiles_and_runs_with_clang_if_available(
+    tmp_path: Path,
+) -> None:
+    if shutil.which("clang") is None:
+        pytest.skip("clang is not available")
+
+    program = tmp_path / "string_flow.ae"
+    output = tmp_path / "string_flow"
+    program.write_text(
+        """
+string identity(string value) {
+    return value;
+}
+
+string choose(boolean flag) {
+    string result = "hello";
+    if flag {
+        result = identity("world");
+    } else {
+        result = identity("hello");
+    }
+    return result;
+}
+
+int main() {
+    string selected = choose(true);
+    return 0;
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["build", str(program), "-o", str(output)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert stdout == f"Built executable: {output.resolve()}\n"
+    assert stderr == ""
+    completed = subprocess.run([str(output)], check=False)
+    assert completed.returncode == 0
 
 
 def test_build_countdown_smoke_compiles_and_runs_with_clang_if_available(

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from math import trunc
 from typing import Any
 
-from aether.ir.types import DoubleType, IntType
+from aether.ir.types import DoubleType, IntType, StringType
 from aether.ssa.analysis import Constant, LatticeState, Overdefined, Unknown, Worklist
 from aether.ssa.model import (
     SSABasicBlock,
@@ -216,6 +216,11 @@ class SCCPAnalyzer:
         operator = instruction.operator
         if operator not in self._BINARY_OPERATORS:
             return Overdefined()
+        if isinstance(instruction.left.type, StringType) or isinstance(
+            instruction.right.type,
+            StringType,
+        ):
+            return Overdefined()
         if operator in {"div", "mod", "rem"} and right.value == 0:
             return Overdefined()
 
@@ -237,6 +242,11 @@ class SCCPAnalyzer:
 
         operator = instruction.operator
         if operator not in self._COMPARE_OPERATORS:
+            return Overdefined()
+        if isinstance(instruction.left.type, StringType) or isinstance(
+            instruction.right.type,
+            StringType,
+        ):
             return Overdefined()
 
         try:

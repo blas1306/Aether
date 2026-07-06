@@ -297,11 +297,12 @@ intentionally small for now: no JIT, `llc`, runtime, `println` lowering,
 advanced imports, aggregate LLVM lowering, complex linking, or
 cross-compilation.
 
-The LLVM backend supports string literals as private global constants in
-inspection/build IR. Aether `string` currently maps to LLVM `ptr`, and repeated
-literal values are deduplicated within one emitted module. This is literal-only
-support: there is still no string runtime, concatenation, comparison, printing,
-length, indexing, mutation, or heap ownership model.
+The LLVM backend supports `string` as a complete SSA value type represented as
+LLVM `ptr`. String literals are emitted as private global constants and repeated
+literal values are deduplicated within one emitted module. String values can
+flow through variables, assignments, returns, direct calls, and phi nodes. There
+is still no string runtime, concatenation, comparison, printing, length,
+indexing, mutation, substring support, UTF utilities, or heap ownership model.
 
 Small LLVM-native examples live under `examples/llvm/`:
 
@@ -312,6 +313,8 @@ Small LLVM-native examples live under `examples/llvm/`:
 - `sum_to_n.ae` exits with `15`.
 - `gcd_iterative.ae` exits with `6`.
 - `identity_call.ae` exits with `23`.
+- `string_identity.ae` exits with `0`.
+- `string_choose.ae` exits with `0`.
 - `double_add.ae` exits with `17`.
 - `double_compare.ae` exits with `19`.
 - `int_to_double.ae` exits with `12`.

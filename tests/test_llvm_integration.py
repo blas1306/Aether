@@ -25,6 +25,8 @@ EXPECTED_EXIT_CODES = {
     "int_to_double.ae": 12,
     "max.ae": 12,
     "return_5.ae": 5,
+    "string_choose.ae": 0,
+    "string_identity.ae": 0,
     "sum_to_n.ae": 15,
 }
 

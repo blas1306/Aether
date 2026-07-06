@@ -3,7 +3,7 @@ from __future__ import annotations
 from math import trunc
 from typing import Any
 
-from aether.ir.types import DoubleType, IntType
+from aether.ir.types import DoubleType, IntType, StringType
 from aether.ssa.model import (
     SSABasicBlock,
     SSABinaryOp,
@@ -182,6 +182,11 @@ class SSAGlobalConstantPropagator:
         operator = instruction.operator
         if operator not in self._BINARY_OPERATORS:
             return UNKNOWN
+        if isinstance(instruction.left.type, StringType) or isinstance(
+            instruction.right.type,
+            StringType,
+        ):
+            return UNKNOWN
         if instruction.left not in constants or instruction.right not in constants:
             return UNKNOWN
 
@@ -202,6 +207,11 @@ class SSAGlobalConstantPropagator:
     ) -> Any | _Unknown:
         operator = instruction.operator
         if operator not in self._COMPARE_OPERATORS:
+            return UNKNOWN
+        if isinstance(instruction.left.type, StringType) or isinstance(
+            instruction.right.type,
+            StringType,
+        ):
             return UNKNOWN
         if instruction.left not in constants or instruction.right not in constants:
             return UNKNOWN

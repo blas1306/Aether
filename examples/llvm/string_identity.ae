@@ -1,0 +1,13 @@
+string identity(string value) {
+    return value;
+}
+
+string hello() {
+    string text = "hello";
+    return identity(text);
+}
+
+int main() {
+    string value = hello();
+    return 0;
+}

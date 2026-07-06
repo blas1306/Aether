@@ -1,0 +1,14 @@
+string choose(boolean flag) {
+    string result = "hello";
+    if flag {
+        result = "world";
+    } else {
+        result = "hello";
+    }
+    return result;
+}
+
+int main() {
+    string value = choose(true);
+    return 0;
+}
