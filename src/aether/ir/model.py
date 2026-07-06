@@ -56,6 +56,12 @@ class IRCompareOp(IRInstruction):
 
 
 @dataclass(frozen=True)
+class IRCast(IRInstruction):
+    result: IRValue
+    value: IRValue
+
+
+@dataclass(frozen=True)
 class IRCall(IRInstruction):
     function: str
     arguments: tuple[IRValue, ...] = ()

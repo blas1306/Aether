@@ -284,6 +284,10 @@ Small LLVM-native examples live under `examples/llvm/`:
 - `sum_to_n.ae` exits with `15`.
 - `gcd_iterative.ae` exits with `6`.
 - `identity_call.ae` exits with `23`.
+- `double_add.ae` exits with `17`.
+- `double_compare.ae` exits with `19`.
+- `int_to_double.ae` exits with `12`.
+- `double_to_int.ae` exits with `14`.
 
 Build and run one example with:
 

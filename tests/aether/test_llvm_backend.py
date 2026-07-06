@@ -11,6 +11,7 @@ from aether.ssa import (
     SSABasicBlock,
     SSABinaryOp,
     SSABranch,
+    SSACast,
     SSACall,
     SSACompareOp,
     SSAConst,
@@ -311,6 +312,79 @@ def test_prints_double_compare_operations(operator: str, predicate: str) -> None
         "  ret i1 %0\n"
         "}"
     )
+
+
+def test_prints_int_to_double_cast() -> None:
+    int_type = IntType()
+    double_type = DoubleType()
+    parameter = SSAParameter("x", int_type)
+    result = SSAValue("0", double_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "widen",
+                [parameter],
+                double_type,
+                [SSABasicBlock("entry", [SSACast(result, parameter), SSAReturn(result)])],
+            )
+        ]
+    )
+
+    assert print_llvm(module) == (
+        "define double @widen(i32 %x) {\n"
+        "entry:\n"
+        "  %0 = sitofp i32 %x to double\n"
+        "  ret double %0\n"
+        "}"
+    )
+
+
+def test_prints_double_to_int_cast() -> None:
+    double_type = DoubleType()
+    int_type = IntType()
+    parameter = SSAParameter("x", double_type)
+    result = SSAValue("0", int_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "narrow",
+                [parameter],
+                int_type,
+                [SSABasicBlock("entry", [SSACast(result, parameter), SSAReturn(result)])],
+            )
+        ]
+    )
+
+    assert print_llvm(module) == (
+        "define i32 @narrow(double %x) {\n"
+        "entry:\n"
+        "  %0 = fptosi double %x to i32\n"
+        "  ret i32 %0\n"
+        "}"
+    )
+
+
+def test_rejects_unsupported_cast() -> None:
+    bool_type = BoolType()
+    int_type = IntType()
+    parameter = SSAParameter("flag", bool_type)
+    result = SSAValue("0", int_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "bad",
+                [parameter],
+                int_type,
+                [SSABasicBlock("entry", [SSACast(result, parameter), SSAReturn(result)])],
+            )
+        ]
+    )
+
+    with pytest.raises(
+        LLVMBackendError,
+        match="LLVM backend only supports casts from i32 to double or double to i32",
+    ):
+        print_llvm(module)
 
 
 def test_prints_comparison_as_return_value() -> None:

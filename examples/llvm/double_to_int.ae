@@ -1,0 +1,7 @@
+int truncate(double value) {
+    return int(value);
+}
+
+int main() {
+    return truncate(14.9);
+}

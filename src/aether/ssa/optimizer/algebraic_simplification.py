@@ -7,6 +7,7 @@ from aether.ssa.model import (
     SSABasicBlock,
     SSABinaryOp,
     SSABranch,
+    SSACast,
     SSACall,
     SSACompareOp,
     SSAConst,
@@ -221,6 +222,12 @@ class SSAAlgebraicSimplifier:
                 instruction.operator,
                 self._resolve(instruction.left, replacements),
                 self._resolve(instruction.right, replacements),
+            )
+
+        if isinstance(instruction, SSACast):
+            return SSACast(
+                instruction.result,
+                self._resolve(instruction.value, replacements),
             )
 
         if isinstance(instruction, SSACall):

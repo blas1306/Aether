@@ -10,6 +10,7 @@ from .model import (
     IRBasicBlock,
     IRBinaryOp,
     IRBranch,
+    IRCast,
     IRCall,
     IRCompareOp,
     IRConst,
@@ -52,6 +53,7 @@ _COMPARE_OPERATORS = {
 _NUMERIC_IR_TYPES = (IntType, FloatType, DoubleType, ComplexType)
 _REAL_IR_TYPES = (IntType, FloatType, DoubleType)
 _EQUALITY_IR_TYPES = (IntType, DoubleType, BoolType, StringType)
+_CAST_BUILTINS = {"int", "float", "double", "string", "boolean"}
 
 
 @dataclass(frozen=True)
@@ -374,6 +376,8 @@ class IRLowerer:
     def _lower_call(self, call: ast.CallExpression, context: _FunctionContext) -> IRValue:
         if call.keyword_arguments:
             self._unsupported(call, "keyword arguments")
+        if call.callee in _CAST_BUILTINS:
+            return self._lower_cast(call, context)
         signature = self._signatures.get(call.callee)
         if signature is None:
             self._unsupported(call, f"callee '{call.callee}'")
@@ -400,6 +404,24 @@ class IRLowerer:
 
         result = context.temporary(signature.return_type)
         context.block.instructions.append(IRCall(call.callee, arguments, result))
+        return result
+
+    def _lower_cast(self, call: ast.CallExpression, context: _FunctionContext) -> IRValue:
+        if len(call.arguments) != 1:
+            raise ValueError(
+                f"Checked cast '{call.callee}' has {len(call.arguments)} arguments; expected 1"
+            )
+
+        value = self._lower_expression(call.arguments[0], context)
+        target_type = self._lower_type(call.callee)
+        if not self._is_supported_numeric_cast(value.type, target_type):
+            self._fail(
+                f"IR backend does not support cast from '{value.type}' to '{target_type}' yet.",
+                call,
+            )
+
+        result = context.temporary(target_type)
+        context.block.instructions.append(IRCast(result, value))
         return result
 
     def _binary_result_type(self, operator: str, left: IRType, right: IRType) -> IRType:
@@ -470,6 +492,15 @@ class IRLowerer:
                 f"IR backend does not support implicit conversion when {operation}: "
                 f"'{actual}' to '{expected}'."
             )
+
+    @staticmethod
+    def _is_supported_numeric_cast(source: IRType, target: IRType) -> bool:
+        return (
+            isinstance(source, IntType)
+            and isinstance(target, DoubleType)
+            or isinstance(source, DoubleType)
+            and isinstance(target, IntType)
+        )
 
     @staticmethod
     def _is_terminated(block: IRBasicBlock) -> bool:

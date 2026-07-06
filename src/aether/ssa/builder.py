@@ -7,6 +7,7 @@ from aether.ir.model import (
     IRBasicBlock,
     IRBinaryOp,
     IRBranch,
+    IRCast,
     IRCall,
     IRCompareOp,
     IRConst,
@@ -24,6 +25,7 @@ from .model import (
     SSABasicBlock,
     SSABinaryOp,
     SSABranch,
+    SSACast,
     SSACall,
     SSACompareOp,
     SSAConst,
@@ -462,6 +464,11 @@ class SSABuilder:
             left = self._resolve_value(instruction.left, state.value_map)
             right = self._resolve_value(instruction.right, state.value_map)
             return SSACompareOp(result, instruction.operator, left, right)
+
+        if isinstance(instruction, IRCast):
+            result = self._define_value(instruction.result, state.value_map)
+            value = self._resolve_value(instruction.value, state.value_map)
+            return SSACast(result, value)
 
         if isinstance(instruction, IRCall):
             arguments = tuple(

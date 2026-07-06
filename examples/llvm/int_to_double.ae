@@ -1,0 +1,7 @@
+double widen(int value) {
+    return double(value) + 4.5;
+}
+
+int main() {
+    return int(widen(8));
+}

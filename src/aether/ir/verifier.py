@@ -7,6 +7,7 @@ from .model import (
     IRBasicBlock,
     IRBinaryOp,
     IRBranch,
+    IRCast,
     IRCall,
     IRCompareOp,
     IRConst,
@@ -324,6 +325,11 @@ class IRVerifier:
             )
             return self._define_value(state, instruction.result)
 
+        if isinstance(instruction, IRCast):
+            self._require_defined(instruction.value, state, value_types)
+            self._verify_cast(instruction)
+            return self._define_value(state, instruction.result)
+
         if isinstance(instruction, IRCall):
             self._verify_call(instruction, state, value_types)
             if instruction.result is None:
@@ -589,6 +595,18 @@ class IRVerifier:
 
         self._fail(f"Unsupported compare operator '{operator}'")
 
+    def _verify_cast(self, instruction: IRCast) -> None:
+        source = instruction.value.type
+        target = instruction.result.type
+        if (
+            isinstance(source, IntType)
+            and isinstance(target, DoubleType)
+            or isinstance(source, DoubleType)
+            and isinstance(target, IntType)
+        ):
+            return
+        self._fail(f"Cast requires int/double operands, got {source} to {target}")
+
     def _require_defined(
         self,
         value: IRValue,
@@ -633,7 +651,7 @@ class IRVerifier:
 
     @staticmethod
     def _instruction_result(instruction: IRInstruction) -> IRValue | None:
-        if isinstance(instruction, (IRConst, IRLoad, IRBinaryOp, IRCompareOp)):
+        if isinstance(instruction, (IRConst, IRLoad, IRBinaryOp, IRCompareOp, IRCast)):
             return instruction.result
         if isinstance(instruction, IRCall):
             return instruction.result

@@ -4,8 +4,10 @@ import pytest
 
 from aether.ir import (
     BoolType,
+    DoubleType,
     IRBinaryOp,
     IRBranch,
+    IRCast,
     IRCall,
     IRCompareOp,
     IRConst,
@@ -152,6 +154,38 @@ int twiceIncrement(int value) {
     assert [call.function for call in calls] == ["increment", "increment"]
     assert calls[1].arguments == (calls[0].result,)
     assert module.functions[1].blocks[0].instructions[-1] == IRReturn(calls[1].result)
+
+
+@pytest.mark.parametrize(
+    ("source", "source_type", "target_type"),
+    [
+        ("double widen(int value) { return double(value); }", IntType(), DoubleType()),
+        ("int narrow(double value) { return int(value); }", DoubleType(), IntType()),
+    ],
+)
+def test_lower_numeric_cast(
+    source: str,
+    source_type: object,
+    target_type: object,
+) -> None:
+    module = _lower(source)
+
+    function = module.functions[0]
+    cast, terminator = function.blocks[0].instructions
+
+    assert isinstance(cast, IRCast)
+    assert cast.value == function.parameters[0]
+    assert cast.value.type == source_type
+    assert cast.result.type == target_type
+    assert terminator == IRReturn(cast.result)
+
+
+def test_lower_rejects_unsupported_cast() -> None:
+    with pytest.raises(
+        IRBackendUnsupportedFeatureError,
+        match=r"IR backend does not support cast from 'bool' to 'int' yet",
+    ):
+        _lower("int bad(boolean value) { return int(value); }")
 
 
 @pytest.mark.parametrize(

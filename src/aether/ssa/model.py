@@ -44,6 +44,12 @@ class SSACompareOp(SSAInstruction):
 
 
 @dataclass(frozen=True)
+class SSACast(SSAInstruction):
+    result: SSAValue
+    value: SSAValue
+
+
+@dataclass(frozen=True)
 class SSACall(SSAInstruction):
     function: str
     arguments: tuple[SSAValue, ...] = ()

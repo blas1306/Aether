@@ -4,6 +4,7 @@ from aether.ir.model import (
     IRBasicBlock,
     IRBinaryOp,
     IRBranch,
+    IRCast,
     IRCall,
     IRCompareOp,
     IRConst,
@@ -23,7 +24,7 @@ from .result import OptimizationResult
 class DeadCodeEliminator:
     """Remove pure IR instructions whose result is not used."""
 
-    _PURE_INSTRUCTIONS = (IRConst, IRBinaryOp, IRCompareOp, IRLoad)
+    _PURE_INSTRUCTIONS = (IRConst, IRBinaryOp, IRCompareOp, IRCast, IRLoad)
 
     def run(self, module: IRModule) -> OptimizationResult:
         removed = 0
@@ -107,7 +108,7 @@ class DeadCodeEliminator:
 
     @staticmethod
     def _result(instruction: IRInstruction) -> IRValue:
-        if isinstance(instruction, (IRConst, IRLoad, IRBinaryOp, IRCompareOp)):
+        if isinstance(instruction, (IRConst, IRLoad, IRBinaryOp, IRCompareOp, IRCast)):
             return instruction.result
         raise TypeError(
             f"Instruction has no removable result: {type(instruction).__name__}"
@@ -123,6 +124,8 @@ class DeadCodeEliminator:
             return (instruction.value,)
         if isinstance(instruction, (IRBinaryOp, IRCompareOp)):
             return (instruction.left, instruction.right)
+        if isinstance(instruction, IRCast):
+            return (instruction.value,)
         if isinstance(instruction, IRCall):
             return instruction.arguments
         if isinstance(instruction, IRBranch):

@@ -8,6 +8,7 @@ from .model import (
     IRBasicBlock,
     IRBinaryOp,
     IRBranch,
+    IRCast,
     IRCall,
     IRCompareOp,
     IRConst,
@@ -20,7 +21,7 @@ from .model import (
     IRStore,
     IRValue,
 )
-from .types import BoolType, VoidType
+from .types import BoolType, DoubleType, IntType, VoidType
 
 
 class IRExecutionError(RuntimeError):
@@ -123,6 +124,13 @@ class IRInterpreter:
             )
             return False, None, None
 
+        if isinstance(instruction, IRCast):
+            frame.values[instruction.result] = self._cast(
+                self._value(instruction.value, frame),
+                instruction.result.type,
+            )
+            return False, None, None
+
         if isinstance(instruction, IRCall):
             arguments = [
                 self._value(argument, frame) for argument in instruction.arguments
@@ -209,6 +217,14 @@ class IRInterpreter:
         if operator == "ne":
             return left != right
         IRInterpreter._unsupported_compare(operator)
+
+    @staticmethod
+    def _cast(value: Any, target_type: object) -> Any:
+        if isinstance(target_type, DoubleType):
+            return float(value)
+        if isinstance(target_type, IntType):
+            return trunc(value)
+        raise IRExecutionError(f"IR cast to '{target_type}' is not supported")
 
     @staticmethod
     def _unsupported_binary(operator: str) -> NoReturn:

@@ -6,10 +6,12 @@ import pytest
 
 from aether.ir import (
     BoolType,
+    DoubleType,
     IntType,
     IRBasicBlock,
     IRBinaryOp,
     IRBranch,
+    IRCast,
     IRCall,
     IRCompareOp,
     IRConst,
@@ -28,6 +30,7 @@ from aether.ssa import (
     GeneralSSABuilder,
     SSABuilder,
     SSAModule,
+    SSACast,
     SSAPhi,
     SSAVerifier,
     print_ssa,
@@ -190,6 +193,27 @@ def test_builds_linear_function() -> None:
         "}"
     )
     _assert_no_slot_traffic(ssa_module)
+
+
+def test_builds_numeric_cast() -> None:
+    parameter = IRParameter("value", IntType())
+    result = IRValue("0", DoubleType())
+    module = IRModule(
+        [
+            IRFunction(
+                "widen",
+                [parameter],
+                DoubleType(),
+                [IRBasicBlock("entry", [IRCast(result, parameter), IRReturn(result)])],
+            )
+        ]
+    )
+
+    ssa_module = _build_and_verify(module)
+
+    instruction = ssa_module.functions[0].blocks[0].instructions[0]
+    assert instruction == SSACast(instruction.result, ssa_module.functions[0].parameters[0])
+    assert instruction.result.type == DoubleType()
 
 
 def test_builds_simple_if_else_with_phi() -> None:

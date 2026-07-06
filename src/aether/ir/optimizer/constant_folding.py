@@ -4,9 +4,11 @@ from dataclasses import replace
 from math import trunc
 from typing import Any
 
+from aether.ir.types import DoubleType, IntType
 from aether.ir.model import (
     IRBasicBlock,
     IRBinaryOp,
+    IRCast,
     IRCompareOp,
     IRConst,
     IRFunction,
@@ -95,6 +97,13 @@ class ConstantFolder:
                 return folded, 1
             return instruction, 0
 
+        if isinstance(instruction, IRCast):
+            folded = self._fold_cast(instruction, constants)
+            if folded is not None:
+                constants[instruction.result] = folded.value
+                return folded, 1
+            return instruction, 0
+
         return instruction, 0
 
     def _fold_binary(
@@ -132,6 +141,18 @@ class ConstantFolder:
         value = self._evaluate_compare(operator, left, right)
         return IRConst(instruction.result, value)
 
+    def _fold_cast(
+        self,
+        instruction: IRCast,
+        constants: dict[IRValue, Any],
+    ) -> IRConst | None:
+        if instruction.value not in constants:
+            return None
+        return IRConst(
+            instruction.result,
+            self._evaluate_cast(constants[instruction.value], instruction.result.type),
+        )
+
     @staticmethod
     def _evaluate_binary(operator: str, left: Any, right: Any) -> Any:
         if operator == "add":
@@ -161,3 +182,11 @@ class ConstantFolder:
         if operator == "ne":
             return left != right
         raise AssertionError(f"Unsupported foldable compare operator: {operator}")
+
+    @staticmethod
+    def _evaluate_cast(value: Any, target_type: object) -> Any:
+        if isinstance(target_type, DoubleType):
+            return float(value)
+        if isinstance(target_type, IntType):
+            return trunc(value)
+        raise AssertionError(f"Unsupported foldable cast target: {target_type}")

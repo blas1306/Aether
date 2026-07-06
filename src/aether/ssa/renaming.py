@@ -9,6 +9,7 @@ from aether.ir.model import (
     IRBasicBlock,
     IRBinaryOp,
     IRBranch,
+    IRCast,
     IRCall,
     IRCompareOp,
     IRConst,
@@ -26,6 +27,7 @@ from .model import (
     SSABasicBlock,
     SSABinaryOp,
     SSABranch,
+    SSACast,
     SSACall,
     SSACompareOp,
     SSAConst,
@@ -188,6 +190,12 @@ class SSARenamer:
             right = self._resolve_value(instruction.right)
             self._bind_value(result.name, result, bound_values)
             return SSACompareOp(result, instruction.operator, left, right)
+
+        if isinstance(instruction, IRCast):
+            result = self._define_value(instruction.result)
+            value = self._resolve_value(instruction.value)
+            self._bind_value(result.name, result, bound_values)
+            return SSACast(result, value)
 
         if isinstance(instruction, IRCall):
             arguments = tuple(

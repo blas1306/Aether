@@ -8,6 +8,7 @@ from aether.ssa.model import (
     SSABasicBlock,
     SSABinaryOp,
     SSABranch,
+    SSACast,
     SSACall,
     SSACompareOp,
     SSAConst,
@@ -115,6 +116,8 @@ class LLVMPrinter:
             return self._print_binary_op(instruction)
         if isinstance(instruction, SSACompareOp):
             return self._print_compare_op(instruction)
+        if isinstance(instruction, SSACast):
+            return self._print_cast(instruction)
         if isinstance(instruction, SSAReturn):
             return self._print_return(instruction, function)
         if isinstance(instruction, SSAPhi):
@@ -136,7 +139,7 @@ class LLVMPrinter:
 
     @staticmethod
     def _instruction_result(instruction: SSAInstruction) -> SSAValue | None:
-        if isinstance(instruction, SSABinaryOp | SSACompareOp | SSAPhi):
+        if isinstance(instruction, SSABinaryOp | SSACompareOp | SSACast | SSAPhi):
             return instruction.result
         if isinstance(instruction, SSACall):
             return instruction.result
@@ -203,6 +206,29 @@ class LLVMPrinter:
         left = self._operand(instruction.left)
         right = self._operand(instruction.right)
         return f"{result} = {operation} {predicate} {operand_type} {left}, {right}"
+
+    def _print_cast(self, instruction: SSACast) -> str:
+        if isinstance(instruction.value.type, IntType) and isinstance(
+            instruction.result.type,
+            DoubleType,
+        ):
+            operator = "sitofp"
+        elif isinstance(instruction.value.type, DoubleType) and isinstance(
+            instruction.result.type,
+            IntType,
+        ):
+            operator = "fptosi"
+        else:
+            raise LLVMBackendError(
+                "LLVM backend only supports casts from i32 to double "
+                "or double to i32"
+            )
+
+        result = self._new_temp(instruction.result)
+        source_type = llvm_type(instruction.value.type)
+        target_type = llvm_type(instruction.result.type)
+        value = self._operand(instruction.value)
+        return f"{result} = {operator} {source_type} {value} to {target_type}"
 
     def _print_phi(self, instruction: SSAPhi) -> str:
         if not instruction.incoming:

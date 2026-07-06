@@ -4,11 +4,13 @@ from dataclasses import dataclass
 from math import trunc
 from typing import Any
 
+from aether.ir.types import DoubleType, IntType
 from aether.ssa.analysis import Constant, LatticeState, Overdefined, Unknown, Worklist
 from aether.ssa.model import (
     SSABasicBlock,
     SSABinaryOp,
     SSABranch,
+    SSACast,
     SSACall,
     SSACompareOp,
     SSAConst,
@@ -168,6 +170,10 @@ class SCCPAnalyzer:
             self._set_state(instruction.result, self._evaluate_compare(instruction))
             return
 
+        if isinstance(instruction, SSACast):
+            self._set_state(instruction.result, self._evaluate_cast(instruction))
+            return
+
         if isinstance(instruction, SSAPhi):
             self._set_state(instruction.result, self._evaluate_phi(block_name, instruction))
             return
@@ -238,6 +244,25 @@ class SCCPAnalyzer:
         except (ArithmeticError, TypeError, ValueError):
             return Overdefined()
 
+    def _evaluate_cast(self, instruction: SSACast) -> LatticeState:
+        value = self._state(instruction.value)
+
+        if isinstance(value, Overdefined):
+            return Overdefined()
+        if isinstance(value, Unknown):
+            return Unknown()
+        if not isinstance(value, Constant):
+            return Overdefined()
+
+        try:
+            if isinstance(instruction.result.type, DoubleType):
+                return Constant(float(value.value))
+            if isinstance(instruction.result.type, IntType):
+                return Constant(trunc(value.value))
+        except (ArithmeticError, TypeError, ValueError):
+            return Overdefined()
+        return Overdefined()
+
     def _evaluate_phi(self, block_name: str, instruction: SSAPhi) -> LatticeState:
         state: LatticeState = Unknown()
         seen_executable_incoming = False
@@ -270,7 +295,7 @@ class SCCPAnalyzer:
 
     @staticmethod
     def _instruction_result(instruction: SSAInstruction) -> SSAValue | None:
-        if isinstance(instruction, (SSAConst, SSABinaryOp, SSACompareOp, SSAPhi)):
+        if isinstance(instruction, (SSAConst, SSABinaryOp, SSACompareOp, SSACast, SSAPhi)):
             return instruction.result
         if isinstance(instruction, SSACall):
             return instruction.result
@@ -282,6 +307,8 @@ class SCCPAnalyzer:
             return (instruction.left, instruction.right)
         if isinstance(instruction, SSACompareOp):
             return (instruction.left, instruction.right)
+        if isinstance(instruction, SSACast):
+            return (instruction.value,)
         if isinstance(instruction, SSAPhi):
             return tuple(value for _block_name, value in instruction.incoming)
         if isinstance(instruction, SSABranch):
@@ -471,7 +498,7 @@ class SCCPTransformer:
         return SSABasicBlock(block.name, instructions), replaced_constants, simplified_branches
 
     def _constant_replacement(self, instruction: SSAInstruction) -> SSAConst | None:
-        if not isinstance(instruction, (SSABinaryOp, SSACompareOp, SSAPhi)):
+        if not isinstance(instruction, (SSABinaryOp, SSACompareOp, SSACast, SSAPhi)):
             return None
 
         state = self.result.state(instruction.result)

@@ -26,6 +26,7 @@ from .model import (
     SSABasicBlock,
     SSABinaryOp,
     SSABranch,
+    SSACast,
     SSACall,
     SSACompareOp,
     SSAConst,
@@ -230,6 +231,11 @@ class SSAVerifier:
                 self._require_defined(instruction.left, value_types)
                 self._require_defined(instruction.right, value_types)
                 self._verify_compare(instruction)
+                continue
+
+            if isinstance(instruction, SSACast):
+                self._require_defined(instruction.value, value_types)
+                self._verify_cast(instruction)
                 continue
 
             if isinstance(instruction, SSACall):
@@ -497,6 +503,18 @@ class SSAVerifier:
 
         self._fail(f"Unsupported compare operator '{operator}'")
 
+    def _verify_cast(self, instruction: SSACast) -> None:
+        source = instruction.value.type
+        target = instruction.result.type
+        if (
+            isinstance(source, IntType)
+            and isinstance(target, DoubleType)
+            or isinstance(source, DoubleType)
+            and isinstance(target, IntType)
+        ):
+            return
+        self._fail(f"Cast requires int/double operands, got {source} to {target}")
+
     def _require_defined(
         self,
         value: SSAValue,
@@ -517,7 +535,7 @@ class SSAVerifier:
 
     @staticmethod
     def _instruction_result(instruction: SSAInstruction) -> SSAValue | None:
-        if isinstance(instruction, (SSAConst, SSABinaryOp, SSACompareOp, SSAPhi)):
+        if isinstance(instruction, (SSAConst, SSABinaryOp, SSACompareOp, SSACast, SSAPhi)):
             return instruction.result
         if isinstance(instruction, SSACall):
             return instruction.result

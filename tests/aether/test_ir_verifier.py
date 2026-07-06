@@ -10,6 +10,7 @@ from aether.ir import (
     IRBasicBlock,
     IRBinaryOp,
     IRBranch,
+    IRCast,
     IRCall,
     IRCompareOp,
     IRConst,
@@ -181,6 +182,40 @@ def test_verifies_module_with_multiple_functions() -> None:
     )
 
     assert IRVerifier(module).verify() is module
+
+
+def test_verifies_int_to_double_cast() -> None:
+    parameter = IRParameter("value", IntType())
+    result = IRValue("0", DoubleType())
+    module = IRModule(
+        [
+            IRFunction(
+                "widen",
+                [parameter],
+                DoubleType(),
+                [IRBasicBlock("entry", [IRCast(result, parameter), IRReturn(result)])],
+            )
+        ]
+    )
+
+    assert IRVerifier(module).verify() is module
+
+
+def test_unsupported_cast_error() -> None:
+    parameter = IRParameter("value", BoolType())
+    result = IRValue("0", IntType())
+    module = IRModule(
+        [
+            IRFunction(
+                "bad",
+                [parameter],
+                IntType(),
+                [IRBasicBlock("entry", [IRCast(result, parameter), IRReturn(result)])],
+            )
+        ]
+    )
+
+    _assert_verification_error(module, "Cast requires int/double operands, got bool to int")
 
 
 def test_duplicate_function_error() -> None:

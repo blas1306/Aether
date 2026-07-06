@@ -7,6 +7,7 @@ from .model import (
     IRBasicBlock,
     IRBinaryOp,
     IRBranch,
+    IRCast,
     IRCall,
     IRCompareOp,
     IRConst,
@@ -60,6 +61,11 @@ class IRPrinter:
             return (
                 f"{self._typed_value(instruction.result)} = cmp_{instruction.operator} "
                 f"{self._value(instruction.left)}, {self._value(instruction.right)}"
+            )
+        if isinstance(instruction, IRCast):
+            return (
+                f"{self._typed_value(instruction.result)} = cast "
+                f"{self._value(instruction.value)}"
             )
         if isinstance(instruction, IRCall):
             arguments = ", ".join(self._value(argument) for argument in instruction.arguments)

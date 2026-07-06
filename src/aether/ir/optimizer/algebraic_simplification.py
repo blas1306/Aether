@@ -7,6 +7,7 @@ from aether.ir.model import (
     IRBasicBlock,
     IRBinaryOp,
     IRBranch,
+    IRCast,
     IRCall,
     IRCompareOp,
     IRConst,
@@ -208,6 +209,11 @@ class AlgebraicSimplifier:
                 instruction,
                 left=self._resolve(instruction.left, replacements),
                 right=self._resolve(instruction.right, replacements),
+            )
+        if isinstance(instruction, IRCast):
+            return replace(
+                instruction,
+                value=self._resolve(instruction.value, replacements),
             )
         if isinstance(instruction, IRCall):
             return replace(

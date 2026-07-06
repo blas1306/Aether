@@ -4,6 +4,7 @@ from aether.ssa.model import (
     SSABasicBlock,
     SSABinaryOp,
     SSABranch,
+    SSACast,
     SSACall,
     SSACompareOp,
     SSAConst,
@@ -173,6 +174,12 @@ class TrivialPhiEliminator:
                 SSACompareOp(instruction.result, instruction.operator, left, right),
                 int(left_rewritten) + int(right_rewritten),
             )
+
+        if isinstance(instruction, SSACast):
+            value, rewritten = self._rewrite_value(instruction.value, replacements)
+            if not rewritten:
+                return instruction, 0
+            return SSACast(instruction.result, value), 1
 
         if isinstance(instruction, SSACall):
             arguments = []

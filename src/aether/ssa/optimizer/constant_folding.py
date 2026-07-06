@@ -3,9 +3,11 @@ from __future__ import annotations
 from math import trunc
 from typing import Any
 
+from aether.ir.types import DoubleType, IntType
 from aether.ssa.model import (
     SSABasicBlock,
     SSABinaryOp,
+    SSACast,
     SSACompareOp,
     SSAConst,
     SSAFunction,
@@ -113,6 +115,13 @@ class SSAConstantFolder:
             constants[folded.result] = folded.value
             return folded, 1
 
+        if isinstance(instruction, SSACast):
+            folded = self._fold_cast(instruction, constants)
+            if folded is None:
+                return instruction, 0
+            constants[folded.result] = folded.value
+            return folded, 1
+
         return instruction, 0
 
     def _fold_binary(
@@ -156,6 +165,18 @@ class SSAConstantFolder:
             ),
         )
 
+    def _fold_cast(
+        self,
+        instruction: SSACast,
+        constants: dict[SSAValue, Any],
+    ) -> SSAConst | None:
+        if instruction.value not in constants:
+            return None
+        return SSAConst(
+            instruction.result,
+            self._evaluate_cast(constants[instruction.value], instruction.result.type),
+        )
+
     @staticmethod
     def _evaluate_binary(operator: str, left: Any, right: Any) -> Any:
         if operator == "add":
@@ -185,3 +206,11 @@ class SSAConstantFolder:
         if operator == "ne":
             return left != right
         raise AssertionError(f"Unsupported foldable SSA compare operator: {operator}")
+
+    @staticmethod
+    def _evaluate_cast(value: Any, target_type: object) -> Any:
+        if isinstance(target_type, DoubleType):
+            return float(value)
+        if isinstance(target_type, IntType):
+            return trunc(value)
+        raise AssertionError(f"Unsupported foldable SSA cast target: {target_type}")

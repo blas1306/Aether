@@ -6,6 +6,7 @@ from typing import Any
 from aether.ir.model import (
     IRBasicBlock,
     IRBinaryOp,
+    IRCast,
     IRCall,
     IRCompareOp,
     IRConst,
@@ -115,7 +116,7 @@ _UNKNOWN = object()
 
 
 def _instruction_result(instruction: IRInstruction) -> IRValue | None:
-    if isinstance(instruction, (IRBinaryOp, IRCompareOp)):
+    if isinstance(instruction, (IRBinaryOp, IRCompareOp, IRCast)):
         return instruction.result
     if isinstance(instruction, IRCall):
         return instruction.result

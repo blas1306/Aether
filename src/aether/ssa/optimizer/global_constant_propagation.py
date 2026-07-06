@@ -3,9 +3,11 @@ from __future__ import annotations
 from math import trunc
 from typing import Any
 
+from aether.ir.types import DoubleType, IntType
 from aether.ssa.model import (
     SSABasicBlock,
     SSABinaryOp,
+    SSACast,
     SSACompareOp,
     SSAConst,
     SSAFunction,
@@ -123,7 +125,7 @@ class SSAGlobalConstantPropagator:
         if result is None or result not in constants:
             return None
 
-        if isinstance(instruction, (SSAPhi, SSABinaryOp, SSACompareOp)):
+        if isinstance(instruction, (SSAPhi, SSABinaryOp, SSACompareOp, SSACast)):
             return SSAConst(result, constants[result])
 
         return None
@@ -144,6 +146,9 @@ class SSAGlobalConstantPropagator:
 
         if isinstance(instruction, SSACompareOp):
             return self._compare_constant(instruction, constants)
+
+        if isinstance(instruction, SSACast):
+            return self._cast_constant(instruction, constants)
 
         return UNKNOWN
 
@@ -210,6 +215,23 @@ class SSAGlobalConstantPropagator:
         except (ArithmeticError, TypeError, ValueError):
             return UNKNOWN
 
+    def _cast_constant(
+        self,
+        instruction: SSACast,
+        constants: dict[SSAValue, Any],
+    ) -> Any | _Unknown:
+        if instruction.value not in constants:
+            return UNKNOWN
+
+        try:
+            if isinstance(instruction.result.type, DoubleType):
+                return float(constants[instruction.value])
+            if isinstance(instruction.result.type, IntType):
+                return trunc(constants[instruction.value])
+        except (ArithmeticError, TypeError, ValueError):
+            return UNKNOWN
+        return UNKNOWN
+
     @staticmethod
     def _result_value(instruction: SSAInstruction) -> SSAValue | None:
         if isinstance(instruction, SSAConst):
@@ -219,6 +241,8 @@ class SSAGlobalConstantPropagator:
         if isinstance(instruction, SSABinaryOp):
             return instruction.result
         if isinstance(instruction, SSACompareOp):
+            return instruction.result
+        if isinstance(instruction, SSACast):
             return instruction.result
         return None
 

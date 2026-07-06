@@ -4,6 +4,7 @@ from aether.ssa.model import (
     SSABasicBlock,
     SSABinaryOp,
     SSABranch,
+    SSACast,
     SSACall,
     SSACompareOp,
     SSAConst,
@@ -102,6 +103,10 @@ class DeadPhiEliminator:
         if isinstance(instruction, SSACompareOp):
             used_values.add(instruction.left)
             used_values.add(instruction.right)
+            return
+
+        if isinstance(instruction, SSACast):
+            used_values.add(instruction.value)
             return
 
         if isinstance(instruction, SSACall):

@@ -7,6 +7,7 @@ from .model import (
     SSABasicBlock,
     SSABinaryOp,
     SSABranch,
+    SSACast,
     SSACall,
     SSACompareOp,
     SSAConst,
@@ -56,6 +57,11 @@ class SSAPrinter:
             return (
                 f"{self._typed_value(instruction.result)} = cmp_{instruction.operator} "
                 f"{self._value(instruction.left)}, {self._value(instruction.right)}"
+            )
+        if isinstance(instruction, SSACast):
+            return (
+                f"{self._typed_value(instruction.result)} = cast "
+                f"{self._value(instruction.value)}"
             )
         if isinstance(instruction, SSACall):
             arguments = ", ".join(self._value(argument) for argument in instruction.arguments)

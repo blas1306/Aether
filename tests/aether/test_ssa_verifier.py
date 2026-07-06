@@ -4,11 +4,12 @@ import re
 
 import pytest
 
-from aether.ir import BoolType, IntType, StringType, VoidType
+from aether.ir import BoolType, DoubleType, IntType, StringType, VoidType
 from aether.ssa import (
     SSABasicBlock,
     SSABinaryOp,
     SSABranch,
+    SSACast,
     SSACall,
     SSACompareOp,
     SSAConst,
@@ -181,6 +182,40 @@ def test_verifies_call_between_functions() -> None:
     )
 
     assert SSAVerifier(module).verify() is module
+
+
+def test_verifies_double_to_int_cast() -> None:
+    parameter = SSAParameter("value", DoubleType())
+    result = SSAValue("0", IntType())
+    module = SSAModule(
+        [
+            SSAFunction(
+                "narrow",
+                [parameter],
+                IntType(),
+                [SSABasicBlock("entry", [SSACast(result, parameter), SSAReturn(result)])],
+            )
+        ]
+    )
+
+    assert SSAVerifier(module).verify() is module
+
+
+def test_unsupported_cast_error() -> None:
+    parameter = SSAParameter("value", BoolType())
+    result = SSAValue("0", IntType())
+    module = SSAModule(
+        [
+            SSAFunction(
+                "bad",
+                [parameter],
+                IntType(),
+                [SSABasicBlock("entry", [SSACast(result, parameter), SSAReturn(result)])],
+            )
+        ]
+    )
+
+    _assert_verification_error(module, "Cast requires int/double operands, got bool to int")
 
 
 def test_verifies_void_function() -> None:

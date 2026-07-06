@@ -42,6 +42,10 @@ exit code from `main`:
 | `sum_to_n.ae` | 15 |
 | `gcd_iterative.ae` | 6 |
 | `identity_call.ae` | 23 |
+| `double_add.ae` | 17 |
+| `double_compare.ae` | 19 |
+| `int_to_double.ae` | 12 |
+| `double_to_int.ae` | 14 |
 
 To build and run an example:
 
@@ -59,10 +63,11 @@ native execution cases are skipped.
 ## Supported Subset
 
 - SSA input: `SSAModule`.
-- Functions with no parameters, integer parameters, or boolean parameters.
-- Integer and boolean return values.
+- Functions with no parameters, integer, boolean, or double parameters.
+- Integer, boolean, and double return values.
 - Void functions with empty `return`.
-- `SSAConst` integer and boolean values, emitted as immediate LLVM operands.
+- `SSAConst` integer, boolean, and double values, emitted as immediate LLVM
+  operands.
 - `SSABinaryOp` integer operations:
   - `add` -> `add`
   - `sub` -> `sub`
@@ -76,11 +81,27 @@ native execution cases are skipped.
   - `ge` -> `icmp sge`
   - `eq` -> `icmp eq`
   - `ne` -> `icmp ne`
+- `SSABinaryOp` double operations:
+  - `add` -> `fadd`
+  - `sub` -> `fsub`
+  - `mul` -> `fmul`
+  - `div` -> `fdiv`
+- `SSACompareOp` ordered/equality comparisons over `double`, producing `i1`:
+  - `lt` -> `fcmp olt`
+  - `le` -> `fcmp ole`
+  - `gt` -> `fcmp ogt`
+  - `ge` -> `fcmp oge`
+  - `eq` -> `fcmp oeq`
+  - `ne` -> `fcmp one`
+- `SSACast` explicit numeric casts:
+  - `int -> double` -> `sitofp i32 %x to double`
+  - `double -> int` -> `fptosi double %x to i32`
 - `SSABranch` with a `bool`/`i1` condition:
   - `branch %cond, then0, else0` -> `br i1 %cond, label %then0, label %else0`
 - `SSAJump`:
   - `jump exit0` -> `br label %exit0`
-- `SSAPhi` over supported scalar types (`int`/`i32` and `bool`/`i1`):
+- `SSAPhi` over supported scalar types (`int`/`i32`, `bool`/`i1`, and
+  `double`):
   - `phi(then0: %2, else0: %3)` ->
     `phi i32 [ %2, %then0 ], [ %3, %else0 ]`
 - `SSACall` direct function calls over supported scalar types:
@@ -106,6 +127,7 @@ Type mapping:
 - `int` -> `i32`
 - `void` -> `void`
 - `bool` -> `i1`
+- `double` -> `double`
 
 Example:
 
@@ -159,11 +181,23 @@ entry:
 }
 ```
 
+Cast example:
+
+```llvm
+define double @widen(i32 %x) {
+entry:
+  %0 = sitofp i32 %x to double
+  ret double %0
+}
+```
+
 ## Limitations
 
 The backend deliberately does not support these yet:
 
-- structs, classes, lists, arrays, strings, complex numbers, or doubles
+- implicit casts
+- bool casts or string casts
+- structs, classes, lists, arrays, strings, or complex numbers
 - complex boolean lowering
 - `println`
 - runtime calls

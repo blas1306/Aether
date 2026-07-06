@@ -872,6 +872,82 @@ boolean greater_sum(double a, double b, double limit) {
     assert stderr == ""
 
 
+def test_emit_llvm_prints_int_to_double_cast(tmp_path: Path) -> None:
+    program = tmp_path / "emit_llvm_int_to_double.ae"
+    program.write_text(
+        """
+double widen(int x) {
+    return double(x);
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert "  %0 = sitofp i32 %x to double\n" in stdout
+    assert "  ret double %0\n" in stdout
+    assert stderr == ""
+
+
+def test_emit_llvm_prints_double_to_int_cast(tmp_path: Path) -> None:
+    program = tmp_path / "emit_llvm_double_to_int.ae"
+    program.write_text(
+        """
+int narrow(double x) {
+    return int(x);
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert "  %0 = fptosi double %x to i32\n" in stdout
+    assert "  ret i32 %0\n" in stdout
+    assert stderr == ""
+
+
+def test_emit_llvm_prints_cast_used_in_arithmetic(tmp_path: Path) -> None:
+    program = tmp_path / "emit_llvm_cast_arithmetic.ae"
+    program.write_text(
+        """
+double add_cast(int x, double y) {
+    return double(x) + y;
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert "  %0 = sitofp i32 %x to double\n" in stdout
+    assert "  %1 = fadd double %0, %y\n" in stdout
+    assert "  ret double %1\n" in stdout
+    assert stderr == ""
+
+
+def test_emit_llvm_rejects_unsupported_cast(tmp_path: Path) -> None:
+    program = tmp_path / "emit_llvm_bad_cast.ae"
+    program.write_text(
+        """
+int bad(boolean flag) {
+    return int(flag);
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
+
+    assert exit_code == EXIT_LANGUAGE_ERROR
+    assert stdout == ""
+    assert "IR backend does not support cast from 'bool' to 'int' yet" in stderr
+
+
 def test_emit_llvm_prints_branch_with_comparison(tmp_path: Path) -> None:
     program = tmp_path / "emit_llvm_branch_compare.ae"
     program.write_text(
