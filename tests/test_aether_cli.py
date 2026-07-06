@@ -757,6 +757,96 @@ def test_emit_llvm_prints_constant_function(tmp_path: Path) -> None:
     assert stderr == ""
 
 
+def test_emit_llvm_prints_string_literal_global(tmp_path: Path) -> None:
+    program = tmp_path / "emit_llvm_string.ae"
+    program.write_text(
+        """
+string hello() {
+    return "hello";
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert stdout == (
+        '@.str.0 = private unnamed_addr constant [6 x i8] c"hello\\00"\n'
+        "\n"
+        "define ptr @hello() {\n"
+        "entry:\n"
+        "  ret ptr @.str.0\n"
+        "}\n"
+    )
+    assert stderr == ""
+
+
+def test_emit_llvm_deduplicates_repeated_string_literals(tmp_path: Path) -> None:
+    program = tmp_path / "emit_llvm_string_dedup.ae"
+    program.write_text(
+        """
+string first() {
+    return "same";
+}
+
+string second() {
+    return "same";
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert stdout.count("private unnamed_addr constant") == 1
+    assert stdout.count("ret ptr @.str.0") == 2
+    assert stderr == ""
+
+
+def test_emit_llvm_prints_string_literal_call_argument(tmp_path: Path) -> None:
+    program = tmp_path / "emit_llvm_string_call.ae"
+    program.write_text(
+        """
+string echo(string text) {
+    return text;
+}
+
+string caller() {
+    return echo("hi");
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert '@.str.0 = private unnamed_addr constant [3 x i8] c"hi\\00"\n' in stdout
+    assert "define ptr @echo(ptr %text)" in stdout
+    assert "  %0 = call ptr @echo(ptr @.str.0)\n" in stdout
+    assert stderr == ""
+
+
+def test_emit_llvm_rejects_string_arithmetic_with_clear_error(tmp_path: Path) -> None:
+    program = tmp_path / "emit_llvm_string_add.ae"
+    program.write_text(
+        """
+string bad(string x) {
+    return x + "b";
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
+
+    assert exit_code == EXIT_LANGUAGE_ERROR
+    assert stdout == ""
+    assert "LLVM backend does not support string binary operations yet" in stderr
+
+
 def test_emit_llvm_prints_sum(tmp_path: Path) -> None:
     program = tmp_path / "emit_llvm_sum.ae"
     program.write_text("int inc(int x) { return x + 1; }\n", encoding="utf-8")

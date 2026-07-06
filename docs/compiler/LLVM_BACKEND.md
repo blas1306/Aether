@@ -63,11 +63,18 @@ native execution cases are skipped.
 ## Supported Subset
 
 - SSA input: `SSAModule`.
-- Functions with no parameters, integer, boolean, or double parameters.
-- Integer, boolean, and double return values.
+- Functions with no parameters, integer, boolean, double, or string parameters.
+- Integer, boolean, double, and string return values.
 - Void functions with empty `return`.
 - `SSAConst` integer, boolean, and double values, emitted as immediate LLVM
   operands.
+- `SSAConst` string values, emitted as private global constants and used as
+  `ptr` operands:
+  - Aether `string` currently maps to LLVM `ptr`.
+  - Literal bytes are UTF-8 encoded with a trailing `\00`.
+  - LLVM string initializers escape quotes, backslashes, control bytes, and
+    non-ASCII bytes with `\XX` byte escapes.
+  - Identical literal values are deduplicated within one emitted module.
 - `SSABinaryOp` integer operations:
   - `add` -> `add`
   - `sub` -> `sub`
@@ -100,8 +107,8 @@ native execution cases are skipped.
   - `branch %cond, then0, else0` -> `br i1 %cond, label %then0, label %else0`
 - `SSAJump`:
   - `jump exit0` -> `br label %exit0`
-- `SSAPhi` over supported scalar types (`int`/`i32`, `bool`/`i1`, and
-  `double`):
+- `SSAPhi` over supported scalar types (`int`/`i32`, `bool`/`i1`, `double`,
+  and string `ptr`):
   - `phi(then0: %2, else0: %3)` ->
     `phi i32 [ %2, %then0 ], [ %3, %else0 ]`
 - `SSACall` direct function calls over supported scalar types:
@@ -128,6 +135,7 @@ Type mapping:
 - `void` -> `void`
 - `bool` -> `i1`
 - `double` -> `double`
+- `string` -> `ptr`
 
 Example:
 
@@ -191,13 +199,26 @@ entry:
 }
 ```
 
+String literal example:
+
+```llvm
+@.str.0 = private unnamed_addr constant [6 x i8] c"hello\00"
+
+define ptr @hello() {
+entry:
+  ret ptr @.str.0
+}
+```
+
 ## Limitations
 
 The backend deliberately does not support these yet:
 
 - implicit casts
 - bool casts or string casts
-- structs, classes, lists, arrays, strings, or complex numbers
+- structs, classes, lists, arrays, or complex numbers
+- string concatenation, comparison, printing, length, indexing, mutation,
+  heap allocation, or runtime ownership
 - complex boolean lowering
 - `println`
 - runtime calls

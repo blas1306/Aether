@@ -272,8 +272,14 @@ executable output, for example `build/return_5.ll` for the default output path
 or `return_5.ll` when using `-o return_5`.
 
 Native builds require `clang` on `PATH`. The native build path is intentionally
-small for now: no JIT, `llc`, runtime, string/`println` lowering, advanced
-imports, aggregate LLVM lowering, complex linking, or cross-compilation.
+small for now: no JIT, `llc`, runtime, `println` lowering, advanced imports,
+aggregate LLVM lowering, complex linking, or cross-compilation.
+
+The LLVM backend supports string literals as private global constants in
+inspection/build IR. Aether `string` currently maps to LLVM `ptr`, and repeated
+literal values are deduplicated within one emitted module. This is literal-only
+support: there is still no string runtime, concatenation, comparison, printing,
+length, indexing, mutation, or heap ownership model.
 
 Small LLVM-native examples live under `examples/llvm/`:
 

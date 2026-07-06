@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import re
 from typing import Any
 
-from aether.ir.types import BoolType, DoubleType, IntType, VoidType
+from aether.ir.types import BoolType, DoubleType, IntType, StringType, VoidType
 from aether.ssa.model import (
     SSABasicBlock,
     SSABinaryOp,
@@ -23,6 +24,13 @@ from aether.ssa.model import (
 )
 
 from .types import LLVMBackendError, llvm_type
+
+
+@dataclass(frozen=True)
+class _StringGlobal:
+    name: str
+    size: int
+    initializer: str
 
 
 class LLVMPrinter:
@@ -61,7 +69,16 @@ class LLVMPrinter:
     _IDENTIFIER_RE = re.compile(r"^[A-Za-z_$._][A-Za-z0-9_$._-]*$")
 
     def print_module(self, module: SSAModule) -> str:
-        return "\n\n".join(self._print_function(function) for function in module.functions)
+        self._string_globals_by_value: dict[str, _StringGlobal] = {}
+        self._next_string_global = 0
+
+        functions = [self._print_function(function) for function in module.functions]
+        globals_ = [
+            self._print_string_global(global_)
+            for global_ in self._string_globals_by_value.values()
+        ]
+        sections = globals_ + functions
+        return "\n\n".join(sections)
 
     def _print_function(self, function: SSAFunction) -> str:
         self._constants: dict[str, str] = {}
@@ -147,6 +164,16 @@ class LLVMPrinter:
 
     def _print_binary_op(self, instruction: SSABinaryOp) -> str:
         if (
+            isinstance(instruction.result.type, StringType)
+            or isinstance(instruction.left.type, StringType)
+            or isinstance(instruction.right.type, StringType)
+        ):
+            raise LLVMBackendError(
+                "LLVM backend does not support string binary operations yet; "
+                "only string literals as ptr values are supported"
+            )
+
+        if (
             isinstance(instruction.result.type, IntType)
             and isinstance(instruction.left.type, IntType)
             and isinstance(instruction.right.type, IntType)
@@ -176,6 +203,15 @@ class LLVMPrinter:
         return f"{result} = {operator} {result_type} {left}, {right}"
 
     def _print_compare_op(self, instruction: SSACompareOp) -> str:
+        if (
+            isinstance(instruction.left.type, StringType)
+            or isinstance(instruction.right.type, StringType)
+        ):
+            raise LLVMBackendError(
+                "LLVM backend does not support string comparisons yet; "
+                "only string literals as ptr values are supported"
+            )
+
         if (
             isinstance(instruction.result.type, BoolType)
             and isinstance(instruction.left.type, IntType)
@@ -337,9 +373,47 @@ class LLVMPrinter:
                     "LLVM backend does not support non-double SSAConst values"
                 )
             return self._double_literal(float(value))
+        if isinstance(result.type, StringType):
+            if not isinstance(value, str):
+                raise LLVMBackendError(
+                    "LLVM backend does not support non-string SSAConst values"
+                )
+            return self._string_global(value).name
         raise LLVMBackendError(
             f"LLVM backend does not support SSAConst of type {result.type}"
         )
+
+    def _string_global(self, value: str) -> _StringGlobal:
+        existing = self._string_globals_by_value.get(value)
+        if existing is not None:
+            return existing
+
+        encoded = value.encode("utf-8") + b"\x00"
+        global_ = _StringGlobal(
+            name=f"@.str.{self._next_string_global}",
+            size=len(encoded),
+            initializer=self._escape_string_initializer(encoded),
+        )
+        self._next_string_global += 1
+        self._string_globals_by_value[value] = global_
+        return global_
+
+    @staticmethod
+    def _print_string_global(global_: _StringGlobal) -> str:
+        return (
+            f"{global_.name} = private unnamed_addr constant "
+            f"[{global_.size} x i8] c\"{global_.initializer}\""
+        )
+
+    @staticmethod
+    def _escape_string_initializer(value: bytes) -> str:
+        chunks: list[str] = []
+        for byte in value:
+            if byte in {0x22, 0x5C} or byte < 0x20 or byte > 0x7E:
+                chunks.append(f"\\{byte:02X}")
+            else:
+                chunks.append(chr(byte))
+        return "".join(chunks)
 
     @staticmethod
     def _double_literal(value: float) -> str:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from aether.ir.types import BoolType, DoubleType, IntType, IRType, VoidType
+from aether.ir.types import BoolType, DoubleType, IntType, IRType, StringType, VoidType
 
 
 class LLVMBackendError(Exception):
@@ -16,4 +16,6 @@ def llvm_type(type_: IRType) -> str:
         return "void"
     if isinstance(type_, BoolType):
         return "i1"
+    if isinstance(type_, StringType):
+        return "ptr"
     raise LLVMBackendError(f"LLVM backend does not support type {type_}")

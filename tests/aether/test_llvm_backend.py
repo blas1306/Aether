@@ -732,6 +732,158 @@ def test_prints_double_call() -> None:
     )
 
 
+def test_prints_function_returning_string_literal_global() -> None:
+    string_type = StringType()
+    value = SSAValue("0", string_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "hello",
+                [],
+                string_type,
+                [SSABasicBlock("entry", [SSAConst(value, "hello"), SSAReturn(value)])],
+            )
+        ]
+    )
+
+    assert print_llvm(module) == (
+        '@.str.0 = private unnamed_addr constant [6 x i8] c"hello\\00"\n'
+        "\n"
+        "define ptr @hello() {\n"
+        "entry:\n"
+        "  ret ptr @.str.0\n"
+        "}"
+    )
+
+
+def test_prints_two_distinct_string_literals_as_two_globals() -> None:
+    string_type = StringType()
+    alpha = SSAValue("alpha", string_type)
+    beta = SSAValue("beta", string_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "alpha",
+                [],
+                string_type,
+                [SSABasicBlock("entry", [SSAConst(alpha, "alpha"), SSAReturn(alpha)])],
+            ),
+            SSAFunction(
+                "beta",
+                [],
+                string_type,
+                [SSABasicBlock("entry", [SSAConst(beta, "beta"), SSAReturn(beta)])],
+            ),
+        ]
+    )
+
+    llvm_ir = print_llvm(module)
+
+    assert '@.str.0 = private unnamed_addr constant [6 x i8] c"alpha\\00"' in llvm_ir
+    assert '@.str.1 = private unnamed_addr constant [5 x i8] c"beta\\00"' in llvm_ir
+    assert "  ret ptr @.str.0\n" in llvm_ir
+    assert "  ret ptr @.str.1\n" in llvm_ir
+
+
+def test_deduplicates_repeated_string_literals_by_value() -> None:
+    string_type = StringType()
+    first = SSAValue("first", string_type)
+    second = SSAValue("second", string_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "first",
+                [],
+                string_type,
+                [SSABasicBlock("entry", [SSAConst(first, "same"), SSAReturn(first)])],
+            ),
+            SSAFunction(
+                "second",
+                [],
+                string_type,
+                [SSABasicBlock("entry", [SSAConst(second, "same"), SSAReturn(second)])],
+            ),
+        ]
+    )
+
+    llvm_ir = print_llvm(module)
+
+    assert llvm_ir.count("private unnamed_addr constant") == 1
+    assert llvm_ir.count("ret ptr @.str.0") == 2
+
+
+def test_escapes_string_literal_bytes_for_llvm_c_string() -> None:
+    string_type = StringType()
+    value = SSAValue("value", string_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "escaped",
+                [],
+                string_type,
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [SSAConst(value, 'a\n\t"\\\x01é'), SSAReturn(value)],
+                    )
+                ],
+            )
+        ]
+    )
+
+    assert (
+        '@.str.0 = private unnamed_addr constant [9 x i8] '
+        'c"a\\0A\\09\\22\\5C\\01\\C3\\A9\\00"'
+    ) in print_llvm(module)
+
+
+def test_prints_string_literal_as_call_argument() -> None:
+    string_type = StringType()
+    text = SSAParameter("text", string_type)
+    literal = SSAValue("literal", string_type)
+    result = SSAValue("result", string_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "echo",
+                [text],
+                string_type,
+                [SSABasicBlock("entry", [SSAReturn(text)])],
+            ),
+            SSAFunction(
+                "main",
+                [],
+                string_type,
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(literal, "hello"),
+                            SSACall("echo", (literal,), result),
+                            SSAReturn(result),
+                        ],
+                    )
+                ],
+            ),
+        ]
+    )
+
+    assert print_llvm(module) == (
+        '@.str.0 = private unnamed_addr constant [6 x i8] c"hello\\00"\n'
+        "\n"
+        "define ptr @echo(ptr %text) {\n"
+        "entry:\n"
+        "  ret ptr %text\n"
+        "}\n"
+        "\n"
+        "define ptr @main() {\n"
+        "entry:\n"
+        "  %0 = call ptr @echo(ptr @.str.0)\n"
+        "  ret ptr %0\n"
+        "}"
+    )
+
+
 def test_prints_void_call_without_result() -> None:
     module = SSAModule(
         [
@@ -824,27 +976,23 @@ def test_prints_function_that_calls_another_function() -> None:
     )
 
 
-def test_call_result_with_unsupported_type_has_clear_error() -> None:
+def test_prints_string_call_result() -> None:
     result = SSAValue("result", StringType())
     module = SSAModule(
         [
             SSAFunction(
                 "main",
                 [],
-                IntType(),
-                [SSABasicBlock("entry", [SSACall("text", (), result)])],
+                StringType(),
+                [SSABasicBlock("entry", [SSACall("text", (), result), SSAReturn(result)])],
             )
         ]
     )
 
-    with pytest.raises(
-        LLVMBackendError,
-        match="LLVM backend does not support type string",
-    ):
-        print_llvm(module)
+    assert "  %0 = call ptr @text()\n" in print_llvm(module)
 
 
-def test_call_argument_with_unsupported_type_has_clear_error() -> None:
+def test_prints_string_call_argument() -> None:
     argument = SSAParameter("text", StringType())
     result = SSAValue("result", IntType())
     module = SSAModule(
@@ -858,11 +1006,7 @@ def test_call_argument_with_unsupported_type_has_clear_error() -> None:
         ]
     )
 
-    with pytest.raises(
-        LLVMBackendError,
-        match="LLVM backend does not support type string",
-    ):
-        print_llvm(module)
+    assert "  %0 = call i32 @length(ptr %text)\n" in print_llvm(module)
 
 
 def test_prints_phi_incoming_values_in_original_order() -> None:
@@ -982,24 +1126,47 @@ def test_empty_phi_incoming_has_clear_error() -> None:
         print_llvm(module)
 
 
-def test_unsupported_phi_type_has_clear_error() -> None:
-    phi_value = SSAValue("phi_value", StringType())
+def test_prints_string_phi_as_ptr() -> None:
+    string_type = StringType()
+    flag = SSAParameter("flag", BoolType())
+    then_value = SSAValue("then_value", string_type)
+    else_value = SSAValue("else_value", string_type)
+    phi_value = SSAValue("phi_value", string_type)
     module = SSAModule(
         [
             SSAFunction(
-                "main",
-                [],
-                StringType(),
-                [SSABasicBlock("entry", [SSAPhi(phi_value, (("entry", phi_value),))])],
+                "choose",
+                [flag],
+                string_type,
+                [
+                    SSABasicBlock("entry", [SSABranch(flag, "then0", "else0")]),
+                    SSABasicBlock(
+                        "then0",
+                        [SSAConst(then_value, "yes"), SSAJump("merge0")],
+                    ),
+                    SSABasicBlock(
+                        "else0",
+                        [SSAConst(else_value, "no"), SSAJump("merge0")],
+                    ),
+                    SSABasicBlock(
+                        "merge0",
+                        [
+                            SSAPhi(
+                                phi_value,
+                                (("then0", then_value), ("else0", else_value)),
+                            ),
+                            SSAReturn(phi_value),
+                        ],
+                    ),
+                ],
             )
         ]
     )
 
-    with pytest.raises(
-        LLVMBackendError,
-        match="LLVM backend does not support type string",
-    ):
-        print_llvm(module)
+    llvm_ir = print_llvm(module)
+
+    assert "  %0 = phi ptr [ @.str.0, %then0 ], [ @.str.1, %else0 ]\n" in llvm_ir
+    assert "  ret ptr %0" in llvm_ir
 
 
 def test_branch_condition_must_be_bool() -> None:
@@ -1050,7 +1217,7 @@ def test_labels_and_label_references_are_printed_consistently() -> None:
     assert "custom.exit:\n" in llvm_ir
 
 
-def test_string_type_has_clear_error() -> None:
+def test_string_type_maps_to_ptr() -> None:
     value = SSAValue("0", StringType())
     module = SSAModule(
         [
@@ -1063,9 +1230,72 @@ def test_string_type_has_clear_error() -> None:
         ]
     )
 
+    assert "define ptr @main()" in print_llvm(module)
+
+
+def test_string_binary_operation_has_clear_error() -> None:
+    string_type = StringType()
+    left = SSAValue("left", string_type)
+    right = SSAValue("right", string_type)
+    result = SSAValue("result", string_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [],
+                string_type,
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(left, "a"),
+                            SSAConst(right, "b"),
+                            SSABinaryOp(result, "add", left, right),
+                            SSAReturn(result),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+
     with pytest.raises(
         LLVMBackendError,
-        match="LLVM backend does not support type string",
+        match="LLVM backend does not support string binary operations yet",
+    ):
+        print_llvm(module)
+
+
+def test_string_comparison_has_clear_error() -> None:
+    string_type = StringType()
+    bool_type = BoolType()
+    left = SSAValue("left", string_type)
+    right = SSAValue("right", string_type)
+    result = SSAValue("result", bool_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [],
+                bool_type,
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(left, "a"),
+                            SSAConst(right, "b"),
+                            SSACompareOp(result, "eq", left, right),
+                            SSAReturn(result),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+
+    with pytest.raises(
+        LLVMBackendError,
+        match="LLVM backend does not support string comparisons yet",
     ):
         print_llvm(module)
 
@@ -1219,6 +1449,32 @@ def test_generated_bool_main_compare_can_be_compiled_with_clang_if_available(
     result_process = subprocess.run([str(exe_path)], check=False)
 
     assert result_process.returncode == 1
+
+
+def test_generated_string_literal_function_can_be_compiled_with_clang_if_available(
+    tmp_path,
+) -> None:
+    clang = shutil.which("clang")
+    if clang is None:
+        pytest.skip("clang is not available")
+
+    string_type = StringType()
+    value = SSAValue("0", string_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "hello",
+                [],
+                string_type,
+                [SSABasicBlock("entry", [SSAConst(value, "hello"), SSAReturn(value)])],
+            )
+        ]
+    )
+    ir_path = tmp_path / "hello_string.ll"
+    object_path = tmp_path / "hello_string.o"
+    ir_path.write_text(print_llvm(module), encoding="utf-8")
+
+    subprocess.run([clang, "-c", str(ir_path), "-o", str(object_path)], check=True)
 
 
 def test_generated_phi_max_function_can_be_compiled_with_clang_if_available(
