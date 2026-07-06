@@ -3,6 +3,7 @@ from __future__ import annotations
 from .backend import LLVMBackend
 from .build import LLVMBuildError, LLVMBuilder, LLVMBuildResult
 from .printer import LLVMPrinter, print_llvm
+from .run import LLVMRunError, LLVMRunner
 from .types import LLVMBackendError, llvm_type
 
 __all__ = [
@@ -11,6 +12,8 @@ __all__ = [
     "LLVMBuildError",
     "LLVMBuilder",
     "LLVMBuildResult",
+    "LLVMRunError",
+    "LLVMRunner",
     "LLVMPrinter",
     "llvm_type",
     "print_llvm",

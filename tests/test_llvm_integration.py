@@ -41,6 +41,22 @@ def test_llvm_example_exit_code_table_matches_files() -> None:
 
 
 @pytest.mark.parametrize("example_path", LLVM_EXAMPLES, ids=lambda path: path.name)
+def test_llvm_example_runs_directly_with_expected_exit_code(
+    example_path: Path,
+) -> None:
+    if shutil.which("clang") is None:
+        pytest.skip("clang is not available")
+
+    expected_exit_code = EXPECTED_EXIT_CODES[example_path.name]
+
+    exit_code, stdout, stderr = run_cli([str(example_path)])
+
+    assert exit_code == expected_exit_code
+    assert stdout == ""
+    assert stderr == ""
+
+
+@pytest.mark.parametrize("example_path", LLVM_EXAMPLES, ids=lambda path: path.name)
 def test_llvm_example_builds_and_runs_with_expected_exit_code(
     example_path: Path,
     tmp_path: Path,

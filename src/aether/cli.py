@@ -39,7 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="aether",
         description="Run Aether language programs.",
         epilog=(
-            "The default command is file execution: aether program.ae\n"
+            "The default command compiles and runs with LLVM: aether program.ae\n"
             "Development inspection tools: --tokens, --ast, --emit-ir, "
             "--emit-cfg, --emit-ssa, --emit-llvm, build, and bench"
         ),
@@ -109,9 +109,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--backend",
-        choices=("ast", "ir"),
-        default="ast",
-        help="Execution backend for files: ast (default) or ir (experimental).",
+        choices=("llvm", "ast", "ir"),
+        default=None,
+        help=(
+            "Execution backend for files: llvm (default), ast, or ir "
+            "(experimental)."
+        ),
     )
     parser.add_argument(
         "--version",
@@ -228,7 +231,7 @@ def main(
         return EXIT_USAGE_ERROR
 
     if args.repl:
-        if args.backend != "ast":
+        if args.backend not in (None, "ast"):
             print("aether: error: --repl only supports --backend=ast for now.", file=stderr)
             return EXIT_USAGE_ERROR
         if args.file is not None:
@@ -289,13 +292,14 @@ def main(
             lambda: _emit_llvm(source, path=path, stdout=stdout),
             stderr=stderr,
         )
-    return _run_language_action(
+    return _run_execution_action(
         lambda: _execute_file(
             source,
             path=path,
-            backend=args.backend,
+            backend=args.backend or "llvm",
             stdin=stdin,
             stdout=stdout,
+            stderr=stderr,
         ),
         stderr=stderr,
     )
@@ -416,7 +420,15 @@ def _execute_file(
     backend: str,
     stdin: TextIO,
     stdout: TextIO,
-) -> None:
+    stderr: TextIO,
+) -> int:
+    if backend == "llvm":
+        return _run_native(
+            source,
+            path=path,
+            stdout=stdout,
+            stderr=stderr,
+        )
     if backend == "ast":
         run_aether(
             source,
@@ -424,7 +436,7 @@ def _execute_file(
             output_writer=stdout.write,
             input_reader=stdin.readline,
         )
-        return
+        return EXIT_SUCCESS
     if backend == "ir":
         IRBackend().run(
             prepare_typed_program(
@@ -432,7 +444,7 @@ def _execute_file(
                 TypeChecker(source_root=path.parent),
             )
         )
-        return
+        return EXIT_SUCCESS
     raise ValueError(f"Unknown backend '{backend}'")
 
 
@@ -569,6 +581,28 @@ def _build_native(
         raise AetherRuntimeError(str(exc), kind="llvm") from exc
 
 
+def _run_native(
+    source: str,
+    *,
+    path: Path,
+    stdout: TextIO,
+    stderr: TextIO,
+) -> int:
+    from .backend.llvm import LLVMBackendError, LLVMRunError, LLVMRunner
+    from .errors import AetherRuntimeError
+
+    typed_program = prepare_typed_program(
+        source,
+        TypeChecker(source_root=path.parent),
+    )
+    try:
+        return LLVMRunner().run(typed_program, stdout=stdout, stderr=stderr)
+    except LLVMRunError as exc:
+        raise AetherRuntimeError(str(exc), kind="llvm") from exc
+    except LLVMBackendError as exc:
+        raise AetherRuntimeError(str(exc), kind="llvm") from exc
+
+
 def _optimization_profile_from_args(
     *,
     opt: bool,
@@ -656,6 +690,14 @@ def _run_language_action(action: Callable[[], None], *, stderr: TextIO) -> int:
         print(_format_language_error(exc), file=stderr)
         return EXIT_LANGUAGE_ERROR
     return EXIT_SUCCESS
+
+
+def _run_execution_action(action: Callable[[], int], *, stderr: TextIO) -> int:
+    try:
+        return action()
+    except AetherError as exc:
+        print(_format_language_error(exc), file=stderr)
+        return EXIT_LANGUAGE_ERROR
 
 
 def _format_language_error(exc: AetherError) -> str:

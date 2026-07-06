@@ -73,17 +73,31 @@ python3 -m pip install -e .
 Run a program directly:
 
 ```bash
-aether examples/hello.ae
+aether examples/llvm/return_5.ae
 aether --backend=ast examples/hello.ae
 ```
 
-The default command uses the production AST backend:
+The default command compiles through LLVM, invokes `clang` on temporary files,
+runs the temporary executable, forwards the program's stdout/stderr, propagates
+its exit code, and removes the temporary `.ll` and executable:
 
 ```text
-Lexer -> Parser -> TypeChecker -> ASTBackend
+Lexer -> Parser -> TypeChecker -> IR lowering -> IR verifier -> GeneralSSABuilder -> SSA verifier -> SSAOptimizerPipeline -> LLVMBackend -> clang -> temporary executable
 ```
 
-`--backend=ast` is equivalent to the default.
+Use `aether build` when you want a permanent executable instead:
+
+```bash
+aether build examples/llvm/return_5.ae
+aether build examples/llvm/return_5.ae -o return_5
+```
+
+The AST interpreter remains available explicitly for the broader scripting
+surface while the LLVM backend grows:
+
+```bash
+aether --backend=ast examples/hello.ae
+```
 
 An experimental IR backend is available for the current scalar function
 subset:
@@ -123,10 +137,10 @@ aether --emit-cfg program.ae
 aether --emit-ssa program.ae
 aether --emit-ssa --ssa-builder=pattern program.ae
 aether --emit-ssa --ssa-builder=general program.ae
-aether --emit-llvm hello.ae
-aether build hello.ae
-aether build hello.ae -o hello
-aether build hello.ae --keep-llvm
+aether --emit-llvm examples/llvm/return_5.ae
+aether build examples/llvm/return_5.ae
+aether build examples/llvm/return_5.ae -o return_5
+aether build examples/llvm/return_5.ae --keep-llvm
 aether --backend=ir --emit-ir program.ae
 aether --backend=ir --emit-cfg program.ae
 ```
@@ -247,14 +261,21 @@ Lexer -> Parser -> TypeChecker -> IR lowering -> IR verifier -> GeneralSSABuilde
 For example:
 
 ```bash
-aether --emit-llvm hello.ae
+aether --emit-llvm examples/llvm/return_5.ae
 ```
 
 `--emit-llvm` remains an inspection mode: it prints LLVM IR to stdout and does
 not write files.
 
-For the currently supported LLVM subset, `aether build` can also invoke `clang`
-to produce a native executable:
+For the currently supported LLVM subset, plain `aether` invokes `clang` and
+runs a temporary native executable:
+
+```bash
+aether examples/llvm/return_5.ae
+echo $?
+```
+
+Use `aether build` to produce a permanent native executable:
 
 ```bash
 aether build examples/llvm/return_5.ae
@@ -271,9 +292,10 @@ temporary and removed after `clang` finishes. `--keep-llvm` keeps it next to the
 executable output, for example `build/return_5.ll` for the default output path
 or `return_5.ll` when using `-o return_5`.
 
-Native builds require `clang` on `PATH`. The native build path is intentionally
-small for now: no JIT, `llc`, runtime, `println` lowering, advanced imports,
-aggregate LLVM lowering, complex linking, or cross-compilation.
+Native execution and builds require `clang` on `PATH`. The native path is
+intentionally small for now: no JIT, `llc`, runtime, `println` lowering,
+advanced imports, aggregate LLVM lowering, complex linking, or
+cross-compilation.
 
 The LLVM backend supports string literals as private global constants in
 inspection/build IR. Aether `string` currently maps to LLVM `ptr`, and repeated
@@ -298,6 +320,9 @@ Small LLVM-native examples live under `examples/llvm/`:
 Build and run one example with:
 
 ```bash
+aether examples/llvm/sum_to_n.ae
+echo $?
+
 aether build examples/llvm/sum_to_n.ae -o build/sum_to_n
 ./build/sum_to_n
 echo $?

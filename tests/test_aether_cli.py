@@ -33,6 +33,40 @@ def run_cli(
     return exit_code, stdout.getvalue(), stderr.getvalue()
 
 
+def fake_native_toolchain(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    returncode: int = 0,
+    stdout_bytes: bytes = b"",
+    stderr_bytes: bytes = b"",
+) -> tuple[list[list[str]], list[list[str]]]:
+    clang_commands: list[list[str]] = []
+    program_commands: list[list[str]] = []
+
+    monkeypatch.setattr(
+        "aether.backend.llvm.build.shutil.which",
+        lambda _name: "/usr/bin/clang",
+    )
+
+    def fake_subprocess_run(command, **_kwargs):
+        if command[0] != "/usr/bin/clang":
+            program_commands.append(command)
+            return subprocess.CompletedProcess(
+                command,
+                returncode,
+                stdout_bytes,
+                stderr_bytes,
+            )
+        clang_commands.append(command)
+        return subprocess.CompletedProcess(command, 0, b"", b"")
+
+    monkeypatch.setattr(
+        "aether.backend.llvm.build.subprocess.run",
+        fake_subprocess_run,
+    )
+    return clang_commands, program_commands
+
+
 def _trace_titles(stdout: str) -> list[str]:
     return [
         line.removeprefix("=== ").removesuffix(" ===")
@@ -92,40 +126,101 @@ def _changed_constant_folding_iteration_titles() -> list[str]:
     ]
 
 
-def test_executes_valid_file(tmp_path: Path) -> None:
-    program = tmp_path / "hello.ae"
-    program.write_text('println("hello");\n', encoding="utf-8")
+def test_executes_valid_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    program = tmp_path / "return_0.ae"
+    program.write_text("int main() { return 0; }\n", encoding="utf-8")
+    fake_native_toolchain(monkeypatch, returncode=0)
 
     exit_code, stdout, stderr = run_cli([str(program)])
 
     assert exit_code == EXIT_SUCCESS
-    assert stdout == "hello\n"
+    assert stdout == ""
     assert stderr == ""
 
 
-def test_default_backend_is_ast_for_file_execution(tmp_path: Path) -> None:
-    program = tmp_path / "default_ast.ae"
-    program.write_text('println("ast");\n', encoding="utf-8")
+def test_default_backend_runs_with_llvm_and_propagates_exit_code(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    program = tmp_path / "return_5.ae"
+    program.write_text("int main() { return 5; }\n", encoding="utf-8")
+    fake_native_toolchain(monkeypatch, returncode=5)
 
     exit_code, stdout, stderr = run_cli([str(program)])
 
-    assert exit_code == EXIT_SUCCESS
-    assert stdout == "ast\n"
+    assert exit_code == 5
+    assert stdout == ""
     assert stderr == ""
 
 
-def test_backend_ast_matches_default_file_execution(tmp_path: Path) -> None:
+def test_backend_ast_remains_explicit_file_execution(tmp_path: Path) -> None:
     program = tmp_path / "backend_ast.ae"
     program.write_text('println("ast");\n', encoding="utf-8")
 
-    default_exit, default_stdout, default_stderr = run_cli([str(program)])
     ast_exit, ast_stdout, ast_stderr = run_cli(["--backend=ast", str(program)])
 
-    assert (ast_exit, ast_stdout, ast_stderr) == (
-        default_exit,
-        default_stdout,
-        default_stderr,
+    assert ast_exit == EXIT_SUCCESS
+    assert ast_stdout == "ast\n"
+    assert ast_stderr == ""
+
+
+def test_default_llvm_execution_preserves_program_stdout_and_stderr(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    program = tmp_path / "stdio.ae"
+    program.write_text("int main() { return 0; }\n", encoding="utf-8")
+    fake_native_toolchain(
+        monkeypatch,
+        returncode=0,
+        stdout_bytes=b"program stdout\n",
+        stderr_bytes=b"program stderr\n",
     )
+
+    exit_code, stdout, stderr = run_cli([str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert stdout == "program stdout\n"
+    assert stderr == "program stderr\n"
+
+
+def test_default_llvm_execution_reports_missing_clang_without_traceback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    program = tmp_path / "no_clang.ae"
+    program.write_text("int main() { return 0; }\n", encoding="utf-8")
+    monkeypatch.setattr("aether.backend.llvm.build.shutil.which", lambda _name: None)
+
+    exit_code, stdout, stderr = run_cli([str(program)])
+
+    assert exit_code == EXIT_LANGUAGE_ERROR
+    assert stdout == ""
+    assert "clang is required to build native executables." in stderr
+    assert "Traceback" not in stderr
+
+
+def test_default_llvm_execution_removes_temporaries(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    program = tmp_path / "temporaries.ae"
+    program.write_text("int main() { return 5; }\n", encoding="utf-8")
+    clang_commands, program_commands = fake_native_toolchain(
+        monkeypatch,
+        returncode=5,
+    )
+
+    exit_code, stdout, stderr = run_cli([str(program)])
+
+    llvm_path = Path(clang_commands[0][1])
+    executable_path = Path(program_commands[0][0])
+    assert exit_code == 5
+    assert stdout == ""
+    assert stderr == ""
+    assert not llvm_path.exists()
+    assert not executable_path.exists()
+    assert not executable_path.parent.exists()
 
 
 def test_backend_ir_executes_supported_subset(tmp_path: Path) -> None:
@@ -204,6 +299,7 @@ def test_help_describes_direct_execution_and_tools() -> None:
     assert "--tokens" in stdout
     assert "--ast" in stdout
     assert "--backend" in stdout
+    assert "llvm (default)" in stdout
     assert "--emit-ir" in stdout
     assert "--emit-cfg" in stdout
     assert "--emit-ssa" in stdout
@@ -1555,7 +1651,7 @@ def test_normal_cli_execution_is_unchanged_after_emit_llvm(tmp_path: Path) -> No
     program = tmp_path / "normal_after_emit_llvm.ae"
     program.write_text('println("normal");\n', encoding="utf-8")
 
-    exit_code, stdout, stderr = run_cli([str(program)])
+    exit_code, stdout, stderr = run_cli(["--backend=ast", str(program)])
 
     assert exit_code == EXIT_SUCCESS
     assert stdout == "normal\n"
@@ -1566,7 +1662,7 @@ def test_normal_cli_execution_is_unchanged_after_emit_ssa(tmp_path: Path) -> Non
     program = tmp_path / "normal_after_emit_ssa.ae"
     program.write_text('println("normal");\n', encoding="utf-8")
 
-    exit_code, stdout, stderr = run_cli([str(program)])
+    exit_code, stdout, stderr = run_cli(["--backend=ast", str(program)])
 
     assert exit_code == EXIT_SUCCESS
     assert stdout == "normal\n"
@@ -2202,7 +2298,7 @@ def test_default_ast_backend_still_executes_without_optimizer(tmp_path: Path) ->
     program = tmp_path / "default_ast_after_opt_flag.ae"
     program.write_text("value = 2 + 3 * 4; println(value);\n", encoding="utf-8")
 
-    exit_code, stdout, stderr = run_cli([str(program)])
+    exit_code, stdout, stderr = run_cli(["--backend=ast", str(program)])
 
     assert exit_code == EXIT_SUCCESS
     assert stdout == "14\n"
@@ -2383,7 +2479,7 @@ def test_bench_does_not_break_existing_cli_execution(tmp_path: Path) -> None:
     program = tmp_path / "normal_cli_after_bench.ae"
     program.write_text('println("normal");\n', encoding="utf-8")
 
-    exit_code, stdout, stderr = run_cli([str(program)])
+    exit_code, stdout, stderr = run_cli(["--backend=ast", str(program)])
 
     assert exit_code == EXIT_SUCCESS
     assert stdout == "normal\n"

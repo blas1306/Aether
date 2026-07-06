@@ -1,31 +1,44 @@
 # Initial LLVM Backend
 
 Aether now has a minimal textual LLVM IR backend under
-`aether.backend.llvm`. It consumes verified-looking SSA modules directly and
-returns a `.ll` string. The CLI inspection entry point is:
+`aether.backend.llvm`. It consumes verified SSA modules and returns a `.ll`
+string. The recommended CLI execution entry point is:
 
 ```bash
-aether --emit-llvm hello.ae
+aether examples/llvm/return_5.ae
+echo $?
 ```
 
-The CLI also has a first native build command for the same limited subset:
+Plain `aether program.ae` lowers through the General SSA builder, runs the SSA
+optimizer, emits LLVM IR, invokes `clang` using temporary files, executes the
+temporary native program, forwards stdout/stderr, propagates the program exit
+code, and removes the temporary `.ll` and executable.
+
+The LLVM IR inspection entry point is:
 
 ```bash
-aether build hello.ae
-aether build hello.ae -o hello
-aether build hello.ae --keep-llvm
+aether --emit-llvm examples/llvm/return_5.ae
 ```
 
-`--emit-llvm` prints textual LLVM IR to stdout only. `aether build` writes LLVM
-IR to a temporary `.ll` file and invokes `clang` to produce a native
-executable. If `-o`/`--output` is omitted, the executable is written under
-`build/` using the source name without `.ae`; for example
+Use `aether build` for a permanent native executable from the same limited
+subset:
+
+```bash
+aether build examples/llvm/return_5.ae
+aether build examples/llvm/return_5.ae -o return_5
+aether build examples/llvm/return_5.ae --keep-llvm
+```
+
+`--emit-llvm` prints textual LLVM IR to stdout only and does not run `clang`.
+`aether build` writes LLVM IR to a temporary `.ll` file and invokes `clang` to
+produce a native executable. If `-o`/`--output` is omitted, the executable is
+written under `build/` using the source name without `.ae`; for example
 `examples/llvm/return_5.ae` produces `build/return_5`. `aether build` creates
 any needed output directories automatically. `--keep-llvm` keeps the generated
 LLVM IR next to the executable output, for example `build/hello.ll` for the
 default output path or `hello.ll` when using `-o hello`.
 
-Native builds require `clang` on `PATH`.
+Native execution and builds require `clang` on `PATH`.
 
 ## Example Programs
 
@@ -50,15 +63,19 @@ exit code from `main`:
 To build and run an example:
 
 ```bash
+aether examples/llvm/gcd_iterative.ae
+echo $?
+
 aether build examples/llvm/gcd_iterative.ae -o build/gcd_iterative
 ./build/gcd_iterative
 echo $?
 ```
 
-The integration test suite walks `examples/llvm/*.ae`, builds each example with
-`aether build`, runs the resulting executable, and checks the expected exit
-code. These tests require `clang`; when `clang` is not available on `PATH`, the
-native execution cases are skipped.
+The integration test suite walks `examples/llvm/*.ae`, runs each example
+directly with `aether`, builds each example with `aether build`, runs the
+resulting executable, and checks the expected exit code. These tests require
+`clang`; when `clang` is not available on `PATH`, the native execution cases
+are skipped.
 
 ## Supported Subset
 
@@ -229,7 +246,6 @@ The backend deliberately does not support these yet:
 - linking beyond invoking `clang` on the generated `.ll`
 - cross-compilation
 - JIT or `llc` build paths
-- automatic execution after build
 
 Unsupported input raises `LLVMBackendError` with messages beginning with:
 
