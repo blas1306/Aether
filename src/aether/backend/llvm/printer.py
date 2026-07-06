@@ -55,6 +55,7 @@ class LLVMPrinter:
             for parameter in function.parameters
         }
         self._next_temp = 0
+        self._collect_function_values(function)
 
         return_type = llvm_type(function.return_type)
         parameters = ", ".join(
@@ -68,6 +69,17 @@ class LLVMPrinter:
 
         lines.append("}")
         return "\n".join(lines)
+
+    def _collect_function_values(self, function: SSAFunction) -> None:
+        for block in function.blocks:
+            for instruction in block.instructions:
+                if isinstance(instruction, SSAConst):
+                    self._record_const(instruction)
+                    continue
+
+                result = self._instruction_result(instruction)
+                if result is not None:
+                    self._reserve_temp(result)
 
     def _print_block(self, block: SSABasicBlock, function: SSAFunction) -> list[str]:
         lines = [self._label_definition(block.name)]
@@ -107,6 +119,14 @@ class LLVMPrinter:
             instruction.value,
             instruction.result,
         )
+
+    @staticmethod
+    def _instruction_result(instruction: SSAInstruction) -> SSAValue | None:
+        if isinstance(instruction, SSABinaryOp | SSACompareOp | SSAPhi):
+            return instruction.result
+        if isinstance(instruction, SSACall):
+            return instruction.result
+        return None
 
     def _print_binary_op(self, instruction: SSABinaryOp) -> str:
         operator = self._BINARY_OPERATORS.get(instruction.operator)
@@ -221,9 +241,19 @@ class LLVMPrinter:
         return self._local_name(value.name)
 
     def _new_temp(self, value: SSAValue) -> str:
+        existing = self._values.get(self._key(value))
+        if existing is not None:
+            return existing
+        return self._reserve_temp(value)
+
+    def _reserve_temp(self, value: SSAValue) -> str:
+        key = self._key(value)
+        existing = self._values.get(key)
+        if existing is not None:
+            return existing
         name = f"%{self._next_temp}"
         self._next_temp += 1
-        self._values[self._key(value)] = name
+        self._values[key] = name
         return name
 
     def _literal(self, value: Any, result: SSAValue) -> str:

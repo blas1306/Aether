@@ -719,6 +719,57 @@ def test_prints_phi_incoming_values_in_original_order() -> None:
     )
 
 
+def test_loop_carried_phi_uses_same_name_as_later_definition() -> None:
+    int_type = IntType()
+    bool_type = BoolType()
+    n = SSAParameter("n", int_type)
+    zero = SSAValue("zero", int_type)
+    one = SSAValue("one", int_type)
+    current = SSAValue("current", int_type)
+    condition = SSAValue("condition", bool_type)
+    next_value = SSAValue("next", int_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "countdown",
+                [n],
+                int_type,
+                [
+                    SSABasicBlock("entry", [SSAJump("cond0")]),
+                    SSABasicBlock(
+                        "cond0",
+                        [
+                            SSAPhi(current, (("entry", n), ("body0", next_value))),
+                            SSAConst(zero, 0),
+                            SSACompareOp(condition, "gt", current, zero),
+                            SSABranch(condition, "body0", "exit0"),
+                        ],
+                    ),
+                    SSABasicBlock(
+                        "body0",
+                        [
+                            SSAConst(one, 1),
+                            SSABinaryOp(next_value, "sub", current, one),
+                            SSAJump("cond0"),
+                        ],
+                    ),
+                    SSABasicBlock("exit0", [SSAReturn(current)]),
+                ],
+            )
+        ]
+    )
+
+    llvm_ir = print_llvm(module)
+    sub_result = next(
+        line.strip().split(" = ", 1)[0]
+        for line in llvm_ir.splitlines()
+        if " = sub i32 " in line
+    )
+
+    assert f"[ {sub_result}, %body0 ]" in llvm_ir
+    assert f"{sub_result} = sub i32 " in llvm_ir
+
+
 def test_empty_phi_incoming_has_clear_error() -> None:
     int_type = IntType()
     phi_value = SSAValue("phi_value", int_type)

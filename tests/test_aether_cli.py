@@ -956,6 +956,38 @@ int choose(int x) {
     assert stderr == ""
 
 
+def test_emit_llvm_prints_loop_carried_phi_with_defined_incoming(
+    tmp_path: Path,
+) -> None:
+    program = tmp_path / "emit_llvm_countdown.ae"
+    program.write_text(
+        """
+int countdown(int n) {
+    while n > 0 {
+        n = n - 1;
+    }
+    return n;
+}
+
+int main() {
+    return countdown(5);
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert "cond0:\n" in stdout
+    assert "body0:\n" in stdout
+    assert "  %0 = phi i32 [ %n, %entry ], [ %2, %body0 ]\n" in stdout
+    assert "  %2 = sub i32 %0, 1\n" in stdout
+    assert "  %0 = call i32 @countdown(i32 5)\n" in stdout
+    assert "%5" not in stdout
+    assert stderr == ""
+
+
 @pytest.mark.parametrize(
     "other_flag",
     ["--emit-ir", "--emit-ssa", "--emit-cfg"],
@@ -1217,6 +1249,39 @@ int main() {
     assert stderr == ""
     completed = subprocess.run([str(output)], check=False)
     assert completed.returncode == 5
+
+
+def test_build_countdown_smoke_compiles_and_runs_with_clang_if_available(
+    tmp_path: Path,
+) -> None:
+    if shutil.which("clang") is None:
+        pytest.skip("clang is not available")
+
+    program = tmp_path / "countdown.ae"
+    output = tmp_path / "countdown"
+    program.write_text(
+        """
+int countdown(int n) {
+    while n > 0 {
+        n = n - 1;
+    }
+    return n;
+}
+
+int main() {
+    return countdown(5);
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["build", str(program), "-o", str(output)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert stdout == f"Built executable: {output.resolve()}\n"
+    assert stderr == ""
+    completed = subprocess.run([str(output)], check=False)
+    assert completed.returncode == 0
 
 
 def test_build_bool_compare_smoke_compiles_and_runs_with_clang_if_available(
