@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from aether.ir.types import BoolType, DoubleType, IntType, VoidType
+from aether.ir.types import BoolType, IntType, VoidType
 from aether.ssa.model import (
     SSABasicBlock,
     SSABinaryOp,
@@ -27,7 +27,7 @@ from .types import LLVMBackendError, llvm_type
 class LLVMPrinter:
     """Emit textual LLVM IR for the first minimal SSA subset."""
 
-    _INT_BINARY_OPERATORS = {
+    _BINARY_OPERATORS = {
         "add": "add",
         "sub": "sub",
         "mul": "mul",
@@ -35,27 +35,13 @@ class LLVMPrinter:
         "mod": "srem",
         "rem": "srem",
     }
-    _DOUBLE_BINARY_OPERATORS = {
-        "add": "fadd",
-        "sub": "fsub",
-        "mul": "fmul",
-        "div": "fdiv",
-    }
-    _INT_COMPARE_OPERATORS = {
+    _COMPARE_OPERATORS = {
         "lt": "slt",
         "le": "sle",
         "gt": "sgt",
         "ge": "sge",
         "eq": "eq",
         "ne": "ne",
-    }
-    _DOUBLE_COMPARE_OPERATORS = {
-        "lt": "olt",
-        "le": "ole",
-        "gt": "ogt",
-        "ge": "oge",
-        "eq": "oeq",
-        "ne": "one",
     }
     _IDENTIFIER_RE = re.compile(r"^[A-Za-z_$._][A-Za-z0-9_$._-]*$")
 
@@ -143,66 +129,44 @@ class LLVMPrinter:
         return None
 
     def _print_binary_op(self, instruction: SSABinaryOp) -> str:
-        if (
-            isinstance(instruction.result.type, IntType)
-            and isinstance(instruction.left.type, IntType)
-            and isinstance(instruction.right.type, IntType)
-        ):
-            operator = self._INT_BINARY_OPERATORS.get(instruction.operator)
-            result_type = "i32"
-        elif (
-            isinstance(instruction.result.type, DoubleType)
-            and isinstance(instruction.left.type, DoubleType)
-            and isinstance(instruction.right.type, DoubleType)
-        ):
-            operator = self._DOUBLE_BINARY_OPERATORS.get(instruction.operator)
-            result_type = "double"
-        else:
-            raise LLVMBackendError(
-                "LLVM backend only supports homogeneous i32 or double binary operations"
-            )
-
+        operator = self._BINARY_OPERATORS.get(instruction.operator)
         if operator is None:
             raise LLVMBackendError(
                 f"LLVM backend does not support binary operator '{instruction.operator}'"
             )
+        if not (
+            isinstance(instruction.result.type, IntType)
+            and isinstance(instruction.left.type, IntType)
+            and isinstance(instruction.right.type, IntType)
+        ):
+            raise LLVMBackendError(
+                "LLVM backend does not support non-int binary operations"
+            )
 
         result = self._new_temp(instruction.result)
         left = self._operand(instruction.left)
         right = self._operand(instruction.right)
-        return f"{result} = {operator} {result_type} {left}, {right}"
+        return f"{result} = {operator} i32 {left}, {right}"
 
     def _print_compare_op(self, instruction: SSACompareOp) -> str:
-        if (
-            isinstance(instruction.result.type, BoolType)
-            and isinstance(instruction.left.type, IntType)
-            and isinstance(instruction.right.type, IntType)
-        ):
-            operation = "icmp"
-            predicate = self._INT_COMPARE_OPERATORS.get(instruction.operator)
-            operand_type = "i32"
-        elif (
-            isinstance(instruction.result.type, BoolType)
-            and isinstance(instruction.left.type, DoubleType)
-            and isinstance(instruction.right.type, DoubleType)
-        ):
-            operation = "fcmp"
-            predicate = self._DOUBLE_COMPARE_OPERATORS.get(instruction.operator)
-            operand_type = "double"
-        else:
-            raise LLVMBackendError(
-                "LLVM backend only supports i32 or double comparisons producing i1"
-            )
-
+        predicate = self._COMPARE_OPERATORS.get(instruction.operator)
         if predicate is None:
             raise LLVMBackendError(
                 f"LLVM backend does not support compare operator '{instruction.operator}'"
             )
+        if not (
+            isinstance(instruction.result.type, BoolType)
+            and isinstance(instruction.left.type, IntType)
+            and isinstance(instruction.right.type, IntType)
+        ):
+            raise LLVMBackendError(
+                "LLVM backend only supports i32 integer comparisons producing i1"
+            )
 
         result = self._new_temp(instruction.result)
         left = self._operand(instruction.left)
         right = self._operand(instruction.right)
-        return f"{result} = {operation} {predicate} {operand_type} {left}, {right}"
+        return f"{result} = icmp {predicate} i32 {left}, {right}"
 
     def _print_phi(self, instruction: SSAPhi) -> str:
         if not instruction.incoming:
@@ -305,24 +269,9 @@ class LLVMPrinter:
                     "LLVM backend does not support non-bool SSAConst values"
                 )
             return "1" if value else "0"
-        if isinstance(result.type, DoubleType):
-            if isinstance(value, bool) or not isinstance(value, (int, float)):
-                raise LLVMBackendError(
-                    "LLVM backend does not support non-double SSAConst values"
-                )
-            return self._double_literal(float(value))
         raise LLVMBackendError(
             f"LLVM backend does not support SSAConst of type {result.type}"
         )
-
-    @staticmethod
-    def _double_literal(value: float) -> str:
-        literal = repr(value)
-        if "e" in literal or "E" in literal:
-            return format(value, ".17e")
-        if "." not in literal:
-            return f"{literal}.0"
-        return literal
 
     @classmethod
     def _parameter_name(cls, parameter: SSAParameter) -> str:

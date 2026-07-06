@@ -472,14 +472,9 @@ class SSAVerifier:
         operator = instruction.operator
 
         if operator in {"lt", "le", "gt", "ge"}:
-            if not (
-                isinstance(left, IntType)
-                and isinstance(right, IntType)
-                or isinstance(left, DoubleType)
-                and isinstance(right, DoubleType)
-            ):
+            if not isinstance(left, IntType) or not isinstance(right, IntType):
                 self._fail(
-                    f"Compare op '{operator}' requires int or double operands, got {left} and {right}"
+                    f"Compare op '{operator}' requires int operands, got {left} and {right}"
                 )
             return BoolType()
 
@@ -489,7 +484,7 @@ class SSAVerifier:
                     f"Compare op '{operator}' requires compatible operands, "
                     f"got {left} and {right}"
                 )
-            if not isinstance(left, (IntType, DoubleType, BoolType, StringType)):
+            if not isinstance(left, (IntType, BoolType, StringType)):
                 self._fail(
                     f"Compare op '{operator}' does not support operands of type {left}"
                 )

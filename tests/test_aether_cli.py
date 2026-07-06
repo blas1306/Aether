@@ -847,31 +847,6 @@ boolean greater(int a, int b) {
     assert stderr == ""
 
 
-def test_emit_llvm_prints_double_arithmetic_and_compare(tmp_path: Path) -> None:
-    program = tmp_path / "emit_llvm_double.ae"
-    program.write_text(
-        """
-boolean greater_sum(double a, double b, double limit) {
-    return a + b > limit;
-}
-""",
-        encoding="utf-8",
-    )
-
-    exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
-
-    assert exit_code == EXIT_SUCCESS
-    assert stdout == (
-        "define i1 @greater_sum(double %a, double %b, double %limit) {\n"
-        "entry:\n"
-        "  %0 = fadd double %a, %b\n"
-        "  %1 = fcmp ogt double %0, %limit\n"
-        "  ret i1 %1\n"
-        "}\n"
-    )
-    assert stderr == ""
-
-
 def test_emit_llvm_prints_branch_with_comparison(tmp_path: Path) -> None:
     program = tmp_path / "emit_llvm_branch_compare.ae"
     program.write_text(

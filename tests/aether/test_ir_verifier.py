@@ -472,7 +472,7 @@ def test_compare_op_int_less_than_string_error() -> None:
 
     _assert_verification_error(
         module,
-        "Compare op 'lt' requires int or double operands, got int and string",
+        "Compare op 'lt' requires int operands, got int and string",
     )
 
 
@@ -498,7 +498,7 @@ def test_compare_op_bool_less_than_bool_error() -> None:
 
     _assert_verification_error(
         module,
-        "Compare op 'lt' requires int or double operands, got bool and bool",
+        "Compare op 'lt' requires int operands, got bool and bool",
     )
 
 
@@ -524,7 +524,7 @@ def test_compare_op_string_less_than_string_error() -> None:
 
     _assert_verification_error(
         module,
-        "Compare op 'lt' requires int or double operands, got string and string",
+        "Compare op 'lt' requires int operands, got string and string",
     )
 
 

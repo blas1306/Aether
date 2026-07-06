@@ -51,7 +51,7 @@ _COMPARE_OPERATORS = {
 }
 _NUMERIC_IR_TYPES = (IntType, FloatType, DoubleType, ComplexType)
 _REAL_IR_TYPES = (IntType, FloatType, DoubleType)
-_EQUALITY_IR_TYPES = (IntType, DoubleType, BoolType, StringType)
+_EQUALITY_IR_TYPES = (IntType, BoolType, StringType)
 
 
 @dataclass(frozen=True)
@@ -365,7 +365,7 @@ class IRLowerer:
 
     def _lower_literal(self, literal: ast.Literal, context: _FunctionContext) -> IRValue:
         type_ = self._lower_type(literal.type_name)
-        if not isinstance(type_, (IntType, DoubleType, BoolType, StringType)):
+        if not isinstance(type_, (IntType, BoolType, StringType)):
             self._unsupported(literal, f"literal type '{type_}'")
         result = context.temporary(type_)
         context.block.instructions.append(IRConst(result, literal.value))
@@ -427,12 +427,7 @@ class IRLowerer:
 
     def _comparison_result_type(self, operator: str, left: IRType, right: IRType) -> IRType:
         if operator in {"lt", "le", "gt", "ge"}:
-            if (
-                isinstance(left, IntType)
-                and isinstance(right, IntType)
-                or isinstance(left, DoubleType)
-                and isinstance(right, DoubleType)
-            ):
+            if isinstance(left, IntType) and isinstance(right, IntType):
                 return BoolType()
             self._fail(
                 f"IR backend does not support ordered comparison with operand types '{left}' and '{right}' yet."

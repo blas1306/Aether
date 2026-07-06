@@ -6,7 +6,7 @@ import subprocess
 import pytest
 
 from aether.backend.llvm import LLVMBackendError, print_llvm
-from aether.ir import BoolType, DoubleType, IntType, StringType, VoidType
+from aether.ir import BoolType, IntType, StringType, VoidType
 from aether.ssa import (
     SSABasicBlock,
     SSABinaryOp,
@@ -159,50 +159,6 @@ def test_prints_int_binary_operations(operator: str, llvm_operator: str) -> None
     )
 
 
-@pytest.mark.parametrize(
-    ("operator", "llvm_operator"),
-    [
-        ("add", "fadd"),
-        ("sub", "fsub"),
-        ("mul", "fmul"),
-        ("div", "fdiv"),
-    ],
-)
-def test_prints_double_binary_operations(operator: str, llvm_operator: str) -> None:
-    double_type = DoubleType()
-    left = SSAValue("left", double_type)
-    right = SSAValue("right", double_type)
-    result = SSAValue("result", double_type)
-    module = SSAModule(
-        [
-            SSAFunction(
-                "main",
-                [],
-                double_type,
-                [
-                    SSABasicBlock(
-                        "entry",
-                        [
-                            SSAConst(left, 8.5),
-                            SSAConst(right, 2.0),
-                            SSABinaryOp(result, operator, left, right),
-                            SSAReturn(result),
-                        ],
-                    )
-                ],
-            )
-        ]
-    )
-
-    assert print_llvm(module) == (
-        "define double @main() {\n"
-        "entry:\n"
-        f"  %0 = {llvm_operator} double 8.5, 2.0\n"
-        "  ret double %0\n"
-        "}"
-    )
-
-
 def test_prints_void_function() -> None:
     module = SSAModule(
         [
@@ -263,51 +219,6 @@ def test_prints_int_compare_operations(operator: str, predicate: str) -> None:
         "define i1 @compare(i32 %a, i32 %b) {\n"
         "entry:\n"
         f"  %0 = icmp {predicate} i32 %a, %b\n"
-        "  ret i1 %0\n"
-        "}"
-    )
-
-
-@pytest.mark.parametrize(
-    ("operator", "predicate"),
-    [
-        ("lt", "olt"),
-        ("le", "ole"),
-        ("gt", "ogt"),
-        ("ge", "oge"),
-        ("eq", "oeq"),
-        ("ne", "one"),
-    ],
-)
-def test_prints_double_compare_operations(operator: str, predicate: str) -> None:
-    double_type = DoubleType()
-    bool_type = BoolType()
-    left = SSAParameter("a", double_type)
-    right = SSAParameter("b", double_type)
-    result = SSAValue("0", bool_type)
-    module = SSAModule(
-        [
-            SSAFunction(
-                "compare",
-                [left, right],
-                bool_type,
-                [
-                    SSABasicBlock(
-                        "entry",
-                        [
-                            SSACompareOp(result, operator, left, right),
-                            SSAReturn(result),
-                        ],
-                    )
-                ],
-            )
-        ]
-    )
-
-    assert print_llvm(module) == (
-        "define i1 @compare(double %a, double %b) {\n"
-        "entry:\n"
-        f"  %0 = fcmp {predicate} double %a, %b\n"
         "  ret i1 %0\n"
         "}"
     )
@@ -626,34 +537,6 @@ def test_prints_bool_call() -> None:
         "entry:\n"
         "  %0 = call i1 @ready()\n"
         "  ret i1 %0\n"
-        "}"
-    )
-
-
-def test_prints_double_call() -> None:
-    double_type = DoubleType()
-    result = SSAValue("result", double_type)
-    module = SSAModule(
-        [
-            SSAFunction(
-                "main",
-                [],
-                double_type,
-                [
-                    SSABasicBlock(
-                        "entry",
-                        [SSACall("value", (), result), SSAReturn(result)],
-                    )
-                ],
-            )
-        ]
-    )
-
-    assert print_llvm(module) == (
-        "define double @main() {\n"
-        "entry:\n"
-        "  %0 = call double @value()\n"
-        "  ret double %0\n"
         "}"
     )
 
@@ -1061,7 +944,7 @@ def test_non_i32_compare_has_clear_error() -> None:
 
     with pytest.raises(
         LLVMBackendError,
-        match="LLVM backend only supports i32 or double comparisons producing i1",
+        match="LLVM backend only supports i32 integer comparisons producing i1",
     ):
         print_llvm(module)
 
