@@ -27,7 +27,8 @@ Compiler implementation notes live under
 [`general SSA builder plan`](docs/compiler/SSA_BUILDER.md), and the
 [`SCCP design plan`](docs/compiler/SCCP.md), for future IR analysis and
 optimization work. Language-level specifications and design notes live under
-[`docs/aether/`](docs/aether/).
+[`docs/aether/`](docs/aether/), including the
+[`List<T>`/future `Array<T>` collection design](docs/aether/AETHER_COLLECTIONS_DESIGN.md).
 
 ## Aether Scripts
 

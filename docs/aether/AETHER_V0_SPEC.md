@@ -320,7 +320,7 @@ double sum() {
 }
 ```
 
-Methods are looked up on the nominal struct type. Calling an unknown method, calling a method with the wrong arity, reading a method without `(...)`, or calling a field as a method is a type error. Fields and methods cannot share a name, and a struct cannot declare two methods with the same name. Methods may return any supported Aether type, including primitives, structs, enums, `List<T>`, `Array<T>`, `Vector<T>`, and `Matrix<T>`.
+Methods are looked up on the nominal struct type. Calling an unknown method, calling a method with the wrong arity, reading a method without `(...)`, or calling a field as a method is a type error. Fields and methods cannot share a name, and a struct cannot declare two methods with the same name. Methods may return any supported Aether type, including primitives, structs, enums, `List<T>`, `Vector<T>`, and `Matrix<T>`.
 
 Struct methods may be mutating. A method is mutating when it assigns to a field of its receiver, either through an implicit field name or through `this.field`. A method that calls another mutating method on the same receiver is also mutating:
 
@@ -533,7 +533,7 @@ println(Point(1.0, 2.0) == Point(1.0, 2.0)); // true
 println(Point(1.0, 2.0) != Point(1.0, 3.0)); // true
 ```
 
-Every field must support equality. Comparable fields include numeric types, `string`, `boolean`, enums, nullable comparable types, recursively comparable structs, and collection or mathematical container types that already support equality such as `List<T>`, `Array<T>`, `Vector<T>`, and `Matrix<T>` when their element types are comparable.
+Every field must support equality. Comparable fields include numeric types, `string`, `boolean`, enums, nullable comparable types, recursively comparable structs, and collection or mathematical container types that already support equality such as `List<T>`, `Vector<T>`, and `Matrix<T>` when their element types are comparable.
 
 Classes, interfaces, `void`, and any other type without `==` support are not comparable fields. If any field is not comparable, applying `==` or `!=` to that struct is a type error. `!=` is exactly the negation of `==`.
 
@@ -1280,13 +1280,16 @@ Not supported in v0:
 Aether separates general programming collections from mathematical vectors and matrices:
 
 - `List<T>` is the public dynamic collection type.
-- `Array<T>` is the public fixed-size mutable collection type.
 - List literals use braces: `{1, 2, 3}`.
 - Without an expected type, a brace literal infers `List<T>`.
 - With an expected `List<T>` target type, a brace literal produces `List<T>`.
-- With an expected `Array<T>` target type, a brace literal produces `Array<T>`.
-- List and array indexing are 0-based: `xs[0]`.
+- List indexing is 0-based: `xs[0]`.
 - `[ ... ]` is reserved for mathematical `Vector<T>` and `Matrix<T>` literals.
+
+`Array<T>` is reserved for a future fixed-size collection type. Its planned
+relationship to `List<T>` and brace literals is documented in
+[`AETHER_COLLECTIONS_DESIGN.md`](AETHER_COLLECTIONS_DESIGN.md); it is not part
+of the implemented v0 collection surface.
 
 Examples:
 
@@ -1295,43 +1298,13 @@ inferred = {1, 2, 3};     // List<int>
 List<int> xs = {1, 2, 3};
 List<double> ys = {1.0, 2.0, 3.0};
 List<string> names = {"Ana", "Luis"};
-Array<int> a = {1, 2, 3};
-Array<double> b = {1, 2.5};
-Array<string> s = {"a", "b"};
 
 println(xs[0]); // 1
 println(names); // {"Ana", "Luis"}
-println(a[0]); // 1
 ```
 
 List elements must be homogeneous or numerically promotable. Lists use commas only; `{1 2 3}` is a syntax error.
-
-The expected target type can come from an explicit variable declaration, assignment to an existing variable, function parameter, return type, or struct field. `Array<T>` elements must be compatible with `T`. Numeric widening follows the same implicit-conversion rules as assignments: for example, `Array<double> a = {1, 2.5};` is valid, while `Array<int> a = {1, 2.5};` is not. `Array<T>` is distinct from `List<T>`; neither type is implicitly assignable to the other. `Array<Array<T>>` is valid when nested generic types are otherwise supported. `array(...)`, `int[]`, and other `T[]` spellings are not public Aether v0 syntax.
-
-Arrays are mutable by index but have fixed length:
-
-```aether
-Array<int> a = {1, 2, 3};
-println(a);         // Array{1, 2, 3}
-println(a[0]);      // 1
-a[0] = 9;
-println(a);         // Array{9, 2, 3}
-println(length(a)); // 3
-
-Array<int> b = copy(a);
-b[0] = 100;
-println(a); // Array{9, 2, 3}
-println(b); // Array{100, 2, 3}
-```
-
-`copy(array)` returns a new `Array<T>` container with the same elements; it is a shallow copy and does not mutate the original. `const Array<T>` blocks index assignment and future mutating array builtins:
-
-```aether
-const Array<int> a = {1, 2, 3};
-a[0] = 9; // error: Cannot mutate constant 'a'.
-```
-
-Arrays do not currently support `push`, `pop`, `insert`, `remove_at`, `clear`, `reverse`, or `sort`; those builtins raise an `AetherTypeError` when given an `Array<T>`. Array slicing (`a[start:end]`) is not implemented yet and is a type error.
+The expected target type can come from an explicit variable declaration, assignment to an existing variable, function parameter, return type, or struct field. Numeric widening follows the same implicit-conversion rules as assignments: for example, `List<double> xs = {1, 2.5};` is valid, while `List<int> xs = {1, 2.5};` is not. `array(...)`, `int[]`, and other `T[]` spellings are not public Aether v0 syntax.
 
 Lists support explicit range slices with inclusive, 0-based bounds:
 
@@ -1366,7 +1339,7 @@ clear(xs);                // {}
 
 All list operations use 0-based indices. `insert(xs, index, value)` accepts `0 <= index <= length(xs)`; `remove_at(xs, index)` accepts `0 <= index < length(xs)`. `copy(xs)` returns a new `List<T>` container with the same elements as `xs`; it is a shallow copy, does not mutate `xs`, and is allowed for `const List<T>`. `push`, `insert`, `pop`, `remove_at`, `clear`, `reverse`, and `sort` mutate the list and reject a first argument whose expression is rooted in a `const` variable. `sort(xs)` sorts ascending and is supported only for `List<int>`, `List<double>`, and `List<string>`. `pop` and `remove_at` return the removed element. `length` returns `int`; `is_empty` and `contains` return `boolean`; `push`, `insert`, `clear`, `reverse`, and `sort` return `void`.
 
-`Array<T>`, `Vector<T>`, and `Matrix<T>` are not lists. They do not accept list mutation builtins such as `push`, `pop`, `insert`, `remove_at`, `clear`, `reverse`, or `sort`.
+`Vector<T>` and `Matrix<T>` are not lists. They do not accept list mutation builtins such as `push`, `pop`, `insert`, `remove_at`, `clear`, `reverse`, or `sort`.
 
 ## Native Builtin Properties And Methods
 
@@ -1378,12 +1351,10 @@ Native properties use field syntax and cannot be called:
 
 ```aether
 List<int> xs = {1, 2, 3};
-Array<int> a = {1, 2, 3};
 Vector<double> v = [3 4];
 Matrix<double> A = [1 2; 3 4];
 
 println(xs.length); // 3
-println(a.length);  // 3
 println(v.length);  // 2
 println(A.rows);    // 2
 println(A.columns); // 2
@@ -1405,7 +1376,6 @@ int count = xs.size();    // length(xs)
 xs.reverse();             // reverse(xs), mutates xs in place
 xs.sort();                // sort(xs), mutates xs in place
 
-Array<int> b = a.copy();       // copy(a)
 Matrix<double> B = A.transpose(); // Math.LinearAlgebra.transpose(A)
 double n = v.norm();           // Math.LinearAlgebra.norm(v)
 
@@ -1416,7 +1386,6 @@ xs.copy;     // error: copy is a method and must be called.
 Supported native properties:
 
 - `List<T>.length -> int`
-- `Array<T>.length -> int`
 - `Vector<T>.length -> int`
 - `Matrix<T>.rows -> int`
 - `Matrix<T>.columns -> int`
@@ -1433,7 +1402,6 @@ Supported native methods:
 - `List<T>.copy() -> List<T>`
 - `List<T>.reverse() -> void`, mutates the list in place
 - `List<T>.sort() -> void`, mutates the list in place
-- `Array<T>.copy() -> Array<T>`
 - `Matrix<T>.transpose() -> Matrix<T>`
 - `Vector<T>.norm() -> double`
 
@@ -1587,7 +1555,7 @@ S, D = eig(A);
 sum(u_i * v_i)
 ```
 
-Both arguments must be mathematical vectors represented as `Matrix<T>` or `Vector<T>` values with shape `1xN` or `Nx1`. Row-row, column-column, row-column, and column-row combinations are valid when the effective lengths match. General matrices with both dimensions greater than one are errors. `Array<T>` values are not vectors for this API.
+Both arguments must be mathematical vectors represented as `Matrix<T>` or `Vector<T>` values with shape `1xN` or `Nx1`. Row-row, column-column, row-column, and column-row combinations are valid when the effective lengths match. General matrices with both dimensions greater than one are errors.
 
 Vector elements must be numeric: `int`, `float`, or `double`. `boolean` and `string` vector elements are errors. The result uses the existing numeric promotion rules:
 
@@ -1610,7 +1578,7 @@ Math.LinearAlgebra.inner([1 2 3], [1 2]);
 sqrt(inner(v, v))
 ```
 
-The argument rules are the same: `v` must be a numeric mathematical row or column vector, not a general matrix and not an `Array<T>`. The result is a `double` in the current implementation:
+The argument rules are the same: `v` must be a numeric mathematical row or column vector, not a general matrix. The result is a `double` in the current implementation:
 
 ```aether
 println(Math.LinearAlgebra.norm([3 4]));     // 5.0
@@ -1637,7 +1605,7 @@ println(Math.LinearAlgebra.transpose([1; 2; 3]));  // [1 2 3]
 println(Math.LinearAlgebra.transpose([1 2; 3 4])); // [1 3; 2 4]
 ```
 
-The argument must be a mathematical `Matrix<T>` or `Vector<T>` with numeric elements. `Array<T>` values, scalar values, and matrices with `boolean` or `string` elements are errors for this linear algebra builtin. `transpose` does not mutate the original value. Shape rules are:
+The argument must be a mathematical `Matrix<T>` or `Vector<T>` with numeric elements. Scalar values and matrices with `boolean` or `string` elements are errors for this linear algebra builtin. `transpose` does not mutate the original value. Shape rules are:
 
 - `1xN -> Nx1`
 - `Nx1 -> 1xN`
@@ -1649,7 +1617,7 @@ The argument must be a mathematical `Matrix<T>` or `Vector<T>` with numeric elem
 if A is m x n and B is n x p, matmul(A, B) is m x p
 ```
 
-Both arguments must be mathematical `Matrix<T>` or `Vector<T>` values with numeric elements. `Array<T>` values, scalar values, and matrices with `boolean` or `string` elements are errors. The inner dimensions must match. Row and column vectors follow their matrix shapes:
+Both arguments must be mathematical `Matrix<T>` or `Vector<T>` values with numeric elements. Scalar values and matrices with `boolean` or `string` elements are errors. The inner dimensions must match. Row and column vectors follow their matrix shapes:
 
 ```aether
 println(Math.LinearAlgebra.matmul([1 2; 3 4], [5 6; 7 8])); // [19 22; 43 50]
@@ -1738,7 +1706,7 @@ println([1 2 3] + [4 5 6]); // [5 7 9]
 [1 2 3] + [1; 2; 3];        // error, 1x3 vs 3x1
 ```
 
-`Array<T>` values do not participate in matrix/vector arithmetic, and comparisons between arrays and matrix/vector values are type errors.
+General-purpose collections do not participate in matrix/vector arithmetic, and comparisons between lists and matrix/vector values are type errors.
 
 Supported scalar operations are:
 
@@ -1902,7 +1870,7 @@ Rules:
 - The old `function <return_type> ...` form is legacy/deprecated and kept only for temporary compatibility.
 - Non-`void` functions require a return value on all evident paths.
 - `void` functions may end without a `return` and may use `return;` for early exit.
-- `void` is only valid as a block function return type. It is not a variable, parameter, tuple, array, matrix, or vector element type.
+- `void` is only valid as a block function return type. It is not a variable, parameter, tuple, collection, matrix, or vector element type.
 - Calls to `void` functions are valid only as statements; they cannot be assigned, passed as arguments, returned from non-`void` functions, or used inside expressions.
 - Return values must match the declared return type, allowing safe widening.
 - Function call arity is checked.
@@ -1987,9 +1955,9 @@ Aether v0 recognizes these builtins:
 
 - `print(...)`
 - `println(...)`
-- `length(list_or_array_or_vector)`
+- `length(list_or_vector)`
 - `is_empty(list)`
-- `copy(list_or_array)`
+- `copy(list)`
 - `push(list, value)`
 - `pop(list)`
 - `insert(list, index, value)`
@@ -2038,9 +2006,9 @@ println(x);
 
 `array(...)` is not a recognized builtin in Aether v0.
 
-`length(...)` accepts `List<T>`, `Array<T>`, and `Vector<T>` values and returns an `int`.
+`length(...)` accepts `List<T>` and `Vector<T>` values and returns an `int`.
 
-`copy(...)` accepts `List<T>` and `Array<T>` values, returns a shallow copy of the container, and preserves the input container type. `is_empty(...)`, `push(...)`, `pop(...)`, `insert(...)`, `remove_at(...)`, `contains(...)`, `clear(...)`, `reverse(...)`, and `sort(...)` accept `List<T>` values. `push`, `insert`, and `contains` require a value assignable to `T`. `insert` and `remove_at` require an `int` index and use 0-based indexing. `push`, `pop`, `insert`, `remove_at`, `clear`, `reverse`, and `sort` reject mutation through a `const` list variable. `sort` orders ascending and currently supports only `List<int>`, `List<double>`, and `List<string>`.
+`copy(...)`, `is_empty(...)`, `push(...)`, `pop(...)`, `insert(...)`, `remove_at(...)`, `contains(...)`, `clear(...)`, `reverse(...)`, and `sort(...)` accept `List<T>` values. `copy(...)` returns a shallow copy of the list container. `push`, `insert`, and `contains` require a value assignable to `T`. `insert` and `remove_at` require an `int` index and use 0-based indexing. `push`, `pop`, `insert`, `remove_at`, `clear`, `reverse`, and `sort` reject mutation through a `const` list variable. `sort` orders ascending and currently supports only `List<int>`, `List<double>`, and `List<string>`.
 
 `rows(matrix)` and `cols(matrix)` accept one `Matrix<T>` argument and return `int` dimensions.
 
@@ -2113,7 +2081,7 @@ not implemented in v0.
 
 The following are intentionally not implemented in Aether v0:
 
-### Arrays and Matrices
+### Tensors and Matrices
 
 - Full ND tensors (only 1D vectors and 2D matrices are supported)
 - Multidimensional slicing (only 1D vector slicing with `:` is supported; matrix slicing is not available)
