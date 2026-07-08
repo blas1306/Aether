@@ -1062,10 +1062,13 @@ class Parser:
                 if element_token.lexeme not in PRIMITIVE_TYPES:
                     raise self._error(element_token, f"Expected primitive element type inside {token.lexeme}<...>.")
                 if token.lexeme == "Vector" and self._match(TokenType.COMMA):
-                    orientation_token = self._consume(TokenType.IDENTIFIER, "Expected Row after Vector<T, ...>.")
-                    if orientation_token.lexeme != "Row":
-                        raise self._error(orientation_token, "Only Vector<T, Row> is supported in this phase.")
-                    orientation = "row"
+                    orientation_token = self._consume(TokenType.IDENTIFIER, "Expected Row or Column after Vector<T, ...>.")
+                    if orientation_token.lexeme == "Row":
+                        orientation = "row"
+                    elif orientation_token.lexeme == "Column":
+                        orientation = "column"
+                    else:
+                        raise self._error(orientation_token, "Expected Row or Column after Vector<T, ...>.")
                 self._consume(TokenType.GREATER, f"Expected '>' after {token.lexeme} element type.")
                 element_type = element_token.lexeme
             if token.lexeme == "Vector":

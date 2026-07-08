@@ -639,6 +639,8 @@ class Interpreter:
             return self._evaluate_braced_array_literal(expression, env, expected_type)
         if isinstance(expected_type, ListType) and isinstance(expression, ast.ListLiteral):
             return self._evaluate_list_literal(expression, env, expected_type)
+        if isinstance(expected_type, (MatrixType, VectorType)) and isinstance(expression, ast.MatrixLiteral):
+            return self._evaluate_matrix_literal(expression, env, expected_type)
         return self._evaluate(expression, env)
 
     def _evaluate_input_call(
@@ -806,7 +808,15 @@ class Interpreter:
             rows.append(coerced_row)
         if expression.vector:
             vector_elements = [element for row in rows for element in row.value]
-            value = AetherValue(VectorType(element_type, len(vector_elements), expression.orientation), vector_elements)
+            orientation = expression.orientation
+            if (
+                isinstance(target_type, VectorType)
+                and target_type.orientation == "column"
+                and len(expression.rows) == 1
+                and expression.uses_commas
+            ):
+                orientation = "column"
+            value = AetherValue(VectorType(element_type, len(vector_elements), orientation), vector_elements)
             if isinstance(target_type, VectorType):
                 return coerce_vector_value(value, target_type)
             if isinstance(target_type, MatrixType):

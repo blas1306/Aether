@@ -97,6 +97,35 @@ int main() {
     assert any(isinstance(instruction, SSAVectorNew) for instruction in ssa.functions[0].blocks[0].instructions)
 
 
+def test_lower_and_ssa_preserve_column_vector_literal_from_expected_type() -> None:
+    typed_program = prepare_typed_program(
+        """
+int main() {
+    Vector<int, Column> v = [1, 2, 3];
+    return 0;
+}
+""",
+        TypeChecker(),
+    )
+
+    ir = IRLowerer().lower(typed_program.program)
+    ssa = lower_to_verified_ssa(typed_program)
+
+    ir_vector_new = next(
+        instruction
+        for instruction in ir.functions[0].blocks[0].instructions
+        if isinstance(instruction, IRVectorNew)
+    )
+    ssa_vector_new = next(
+        instruction
+        for instruction in ssa.functions[0].blocks[0].instructions
+        if isinstance(instruction, SSAVectorNew)
+    )
+
+    assert ir_vector_new.result.type.orientation == "column"
+    assert ssa_vector_new.result.type.orientation == "column"
+
+
 @pytest.mark.skipif(shutil.which("clang") is None, reason="clang is not available")
 @pytest.mark.parametrize(
     ("source", "expected"),
@@ -156,6 +185,21 @@ def test_llvm_runner_builds_row_vector_literal() -> None:
         """
 int main() {
     Vector<int, Row> v = [1, 2, 3];
+    return 0;
+}
+""",
+        TypeChecker(),
+    )
+
+    assert LLVMRunner().run(typed_program) == 0
+
+
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang is not available")
+def test_llvm_runner_builds_column_vector_literal_from_expected_type() -> None:
+    typed_program = prepare_typed_program(
+        """
+int main() {
+    Vector<int, Column> v = [1, 2, 3];
     return 0;
 }
 """,

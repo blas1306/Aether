@@ -323,9 +323,16 @@ def test_parser_accepts_row_vector_type_annotation_and_literal_ast() -> None:
     assert declaration.initializer.uses_commas is True
 
 
-def test_parser_rejects_column_vector_type_annotation_for_now() -> None:
-    with pytest.raises(AetherSyntaxError, match="Only Vector<T, Row> is supported"):
-        parse_source("Vector<int, Column> v = [1, 2, 3];")
+def test_parser_accepts_column_vector_type_annotation_with_comma_literal_ast() -> None:
+    program = parse_source("Vector<int, Column> v = [1, 2, 3];")
+    declaration = program.statements[0]
+
+    assert isinstance(declaration, ast.VarDeclaration)
+    assert declaration.type_name == VectorType("int", orientation="column")
+    assert isinstance(declaration.initializer, ast.MatrixLiteral)
+    assert declaration.initializer.rows == [[ast.Literal(1, "int"), ast.Literal(2, "int"), ast.Literal(3, "int")]]
+    assert declaration.initializer.orientation == "row"
+    assert declaration.initializer.uses_commas is True
 
 
 def test_row_vector_literal_infers_vector_type_without_expected_type() -> None:
@@ -338,6 +345,25 @@ def test_row_vector_literal_uses_row_vector_expected_type() -> None:
     result = run_aether("Vector<int, Row> v = [1, 2, 3];")
 
     assert result.env["v"].type_name == VectorType("int", 3, "row")
+
+
+def test_comma_vector_literal_uses_column_vector_expected_type() -> None:
+    result = run_aether("Vector<int, Column> v = [1, 2, 3];")
+
+    assert result.env["v"].type_name == VectorType("int", 3, "column")
+
+
+def test_comma_vector_literal_uses_column_vector_parameter_type() -> None:
+    result = run_aether(
+        """
+int first(Vector<int, Column> values) {
+    return values[1];
+}
+answer = first([1, 2, 3]);
+"""
+    )
+
+    assert result.env["answer"].value == 1
 
 
 def test_row_vector_literal_rejects_incompatible_expected_type() -> None:

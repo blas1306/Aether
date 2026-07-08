@@ -133,6 +133,25 @@ int main() {
     assert "vector<int, row>" in print_ir(module)
 
 
+def test_lower_column_vector_literal_from_expected_type() -> None:
+    module = _lower(
+        """
+int main() {
+    Vector<int, Column> v = [1, 2, 3];
+    return 0;
+}
+"""
+    )
+
+    instructions = module.functions[0].blocks[0].instructions
+    vector_new = next(instruction for instruction in instructions if isinstance(instruction, IRVectorNew))
+
+    assert vector_new.result.type == VectorType(IntType(), "column")
+    assert [element.type for element in vector_new.elements] == [IntType(), IntType(), IntType()]
+    assert "vector_new" in print_ir(module)
+    assert "vector<int, column>" in print_ir(module)
+
+
 def test_lower_simple_local_variable() -> None:
     module = _lower(
         """

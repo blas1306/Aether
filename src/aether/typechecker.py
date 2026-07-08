@@ -1865,6 +1865,9 @@ class TypeChecker:
                 if isinstance(argument, ast.ListLiteral) and isinstance(parameter.type_name, ArrayType):
                     if self._can_assign_braced_literal_to_array(argument, parameter.type_name, scope):
                         continue
+                if isinstance(argument, ast.MatrixLiteral) and isinstance(parameter.type_name, VectorType):
+                    if self._can_assign_matrix_literal_to_vector(argument, parameter.type_name, scope):
+                        continue
                 self._raise_implicit_conversion_error(argument_type, parameter.type_name)
         return function.return_type
 
@@ -2046,6 +2049,9 @@ class TypeChecker:
             if argument_type is not UNKNOWN_TYPE and not self._can_convert_type(argument_type, parameter.type_name):
                 if isinstance(argument, ast.ListLiteral) and isinstance(parameter.type_name, ArrayType):
                     if self._can_assign_braced_literal_to_array(argument, parameter.type_name, scope):
+                        continue
+                if isinstance(argument, ast.MatrixLiteral) and isinstance(parameter.type_name, VectorType):
+                    if self._can_assign_matrix_literal_to_vector(argument, parameter.type_name, scope):
                         continue
                 self._raise_implicit_conversion_error(argument_type, parameter.type_name, location)
 
@@ -2360,6 +2366,8 @@ class TypeChecker:
             if not is_list_type(value_type):
                 return False
             return self._can_assign_list_literal(initializer, target_type, scope)
+        if isinstance(initializer, ast.MatrixLiteral) and isinstance(target_type, VectorType):
+            return self._can_assign_matrix_literal_to_vector(initializer, target_type, scope)
         if isinstance(initializer, ast.MatrixLiteral) and isinstance(target_type, MatrixType):
             if not isinstance(value_type, MatrixType):
                 return False
@@ -2400,6 +2408,8 @@ class TypeChecker:
             return True
         if isinstance(expression, ast.ListLiteral) and isinstance(target_type, ArrayType):
             return self._can_assign_braced_literal_to_array(expression, target_type, scope)
+        if isinstance(expression, ast.MatrixLiteral) and isinstance(target_type, VectorType):
+            return self._can_assign_matrix_literal_to_vector(expression, target_type, scope)
         return self._can_convert_type(value_type, target_type)
 
     def _can_convert_type(self, value_type: AetherType, target_type: AetherType) -> bool:
@@ -2717,6 +2727,42 @@ class TypeChecker:
             if can_implicitly_convert(element_type, target_element_type):
                 continue
             if target_element_type == "float" and element_type == "double" and isinstance(element, ast.Literal):
+                continue
+            return False
+        return True
+
+    def _can_assign_matrix_literal_to_vector(
+        self,
+        initializer: ast.MatrixLiteral,
+        target_type: VectorType,
+        scope: Scope[VariableSymbol],
+    ) -> bool:
+        if not initializer.rows:
+            return False
+        if target_type.orientation == "column":
+            if len(initializer.rows) != 1 or not initializer.uses_commas:
+                return False
+            elements = initializer.rows[0]
+        elif target_type.orientation == "row":
+            if len(initializer.rows) != 1:
+                return False
+            elements = initializer.rows[0]
+        else:
+            if len(initializer.rows) == 1:
+                elements = initializer.rows[0]
+            elif all(len(row) == 1 for row in initializer.rows):
+                elements = [row[0] for row in initializer.rows]
+            else:
+                return False
+        if target_type.length is not None and target_type.length != len(elements):
+            return False
+        for element in elements:
+            element_type = self._expression_type(element, scope)
+            if element_type is UNKNOWN_TYPE:
+                return True
+            if can_implicitly_convert(element_type, target_type.element_type):
+                continue
+            if target_type.element_type == "float" and element_type == "double" and isinstance(element, ast.Literal):
                 continue
             return False
         return True

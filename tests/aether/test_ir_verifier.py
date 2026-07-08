@@ -177,6 +177,37 @@ def test_verifies_row_vector_new() -> None:
     assert IRVerifier(module).verify() is module
 
 
+def test_verifies_column_vector_new() -> None:
+    int_type = IntType()
+    vector_type = VectorType(int_type, "column")
+    first = IRValue("0", int_type)
+    second = IRValue("1", int_type)
+    vector = IRValue("2", vector_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "main",
+                [],
+                IntType(),
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [
+                            IRConst(first, 1),
+                            IRConst(second, 2),
+                            IRVectorNew(vector, (first, second)),
+                            IRConst(IRValue("3", int_type), 0),
+                            IRReturn(IRValue("3", int_type)),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+
+    assert IRVerifier(module).verify() is module
+
+
 def test_verifies_void_function_with_bare_return() -> None:
     module = IRModule(
         [

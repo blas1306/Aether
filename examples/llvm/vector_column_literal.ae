@@ -1,0 +1,4 @@
+int main() {
+    Vector<int, Column> v = [1, 2, 3];
+    return 0;
+}

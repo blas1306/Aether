@@ -364,8 +364,8 @@ class LLVMPrinter:
     def _print_vector_new(self, instruction: SSAVectorNew) -> str:
         if not isinstance(instruction.result.type, VectorType):
             raise LLVMBackendError("LLVM vector_new result must be VectorType")
-        if instruction.result.type.orientation != "row":
-            raise LLVMBackendError("LLVM vector_new only supports row vectors")
+        if instruction.result.type.orientation not in {"row", "column"}:
+            raise LLVMBackendError("LLVM vector_new requires row or column orientation")
         return self._print_contiguous_new(
             instruction.result,
             instruction.result.type.element,

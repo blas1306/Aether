@@ -531,8 +531,6 @@ class IRLowerer:
                 )
             vector_type = VectorType(element_type, "row")
 
-        if vector_type.orientation != "row":
-            self._unsupported(expression, "non-row Vector target type")
         for element in elements:
             self._require_same_type(
                 element.type,

@@ -367,8 +367,8 @@ class SSAVerifier:
     ) -> None:
         if not isinstance(instruction.result.type, VectorType):
             self._fail(f"Vector new result must be vector type, got {instruction.result.type}")
-        if instruction.result.type.orientation != "row":
-            self._fail(f"Vector new only supports row vectors, got {instruction.result.type}")
+        if instruction.result.type.orientation not in {"row", "column"}:
+            self._fail(f"Vector new requires row or column orientation, got {instruction.result.type}")
         for element in instruction.elements:
             self._require_defined(element, value_types)
             if element.type != instruction.result.type.element:

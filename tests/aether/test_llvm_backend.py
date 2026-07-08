@@ -6,7 +6,7 @@ import subprocess
 import pytest
 
 from aether.backend.llvm import LLVMBackendError, print_llvm
-from aether.ir import BoolType, DoubleType, IntType, StringType, VoidType
+from aether.ir import BoolType, DoubleType, IntType, StringType, VectorType, VoidType
 from aether.ssa import (
     SSABasicBlock,
     SSABinaryOp,
@@ -22,6 +22,7 @@ from aether.ssa import (
     SSAPhi,
     SSAReturn,
     SSAValue,
+    SSAVectorNew,
 )
 
 
@@ -80,6 +81,44 @@ def test_prints_main_returning_sum() -> None:
         "  ret i32 %0\n"
         "}"
     )
+
+
+def test_prints_column_vector_literal_as_contiguous_array() -> None:
+    int_type = IntType()
+    first = SSAValue("0", int_type)
+    second = SSAValue("1", int_type)
+    third = SSAValue("2", int_type)
+    vector = SSAValue("3", VectorType(int_type, "column"))
+    return_value = SSAValue("4", int_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [],
+                int_type,
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(first, 1),
+                            SSAConst(second, 2),
+                            SSAConst(third, 3),
+                            SSAVectorNew(vector, (first, second, third)),
+                            SSAConst(return_value, 0),
+                            SSAReturn(return_value),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+
+    llvm = print_llvm(module)
+
+    assert "@aether_array_new(i64 4, i64 3)" in llvm
+    assert "store i32 1" in llvm
+    assert "store i32 2" in llvm
+    assert "store i32 3" in llvm
 
 
 def test_prints_add_function_with_int_parameters() -> None:
