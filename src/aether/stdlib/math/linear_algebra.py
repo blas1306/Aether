@@ -161,28 +161,21 @@ def matmul_builtin(args: list[AetherValue]) -> AetherValue:
         raise AetherTypeError(f"{MATMUL_NAME}(...) expects exactly two arguments.")
     left = args[0]
     right = args[1]
-    if isinstance(left.type_name, MatrixType) and isinstance(right.type_name, VectorType):
-        return _matrix_vector_multiply(left, right, MATMUL_NAME)
-    left_type = _require_numeric_matrix_type(left.type_name, MATMUL_NAME)
-    right_type = _require_numeric_matrix_type(right.type_name, MATMUL_NAME)
-    left_rows, left_cols = _runtime_shape(left)
-    right_rows, right_cols = _runtime_shape(right)
-    if left_cols != right_rows:
-        raise AetherTypeError(
-            f"{MATMUL_NAME}(...) requires compatible shapes, got {left_rows}x{left_cols} and {right_rows}x{right_cols}."
-        )
-    result_element_type = _promote_numeric_types(left_type.element_type, right_type.element_type)
-    result_row_type = ArrayType(result_element_type)
-    result_rows: list[AetherValue] = []
-    for row_index in range(left_rows):
-        result_elements: list[AetherValue] = []
-        for col_index in range(right_cols):
-            total = 0
-            for inner_index in range(left_cols):
-                total += left.value[row_index].value[inner_index].value * right.value[inner_index].value[col_index].value
-            result_elements.append(_coerced_numeric_result(total, result_element_type))
-        result_rows.append(AetherValue(result_row_type, result_elements))
-    return AetherValue(MatrixType(result_element_type, left_rows, right_cols), result_rows)
+    left_kind = _matmul_operand_kind(left.type_name, MATMUL_NAME)
+    right_kind = _matmul_operand_kind(right.type_name, MATMUL_NAME)
+
+    if left_kind == "row_vector" and right_kind == "column_vector":
+        return _row_column_multiply(left, right, MATMUL_NAME)
+    if left_kind == "column_vector" and right_kind == "row_vector":
+        return _column_row_multiply(left, right, MATMUL_NAME)
+    if left_kind == "matrix" and right_kind == "matrix":
+        return _matrix_matrix_multiply(left, right, MATMUL_NAME)
+    if left_kind == "matrix" and right_kind == "column_vector":
+        return _matrix_column_multiply(left, right, MATMUL_NAME)
+    if left_kind == "row_vector" and right_kind == "matrix":
+        return _row_matrix_multiply(left, right, MATMUL_NAME)
+
+    _raise_invalid_matmul_operands(left.type_name, right.type_name)
 
 
 def solve_builtin(args: list[AetherValue]) -> AetherValue:
@@ -436,30 +429,61 @@ def _matmul_type(arg_types: list[AetherType | None]) -> AetherType | None:
     left_type, right_type = arg_types
     if left_type is None or right_type is None:
         return None
-    left_matrix_type = _require_numeric_matrix_type(left_type, MATMUL_NAME)
-    if isinstance(right_type, VectorType):
-        if (
-            left_matrix_type.cols is not None
-            and right_type.length is not None
-            and left_matrix_type.cols != right_type.length
-        ):
-            raise AetherTypeError(
-                f"{MATMUL_NAME}(...) requires compatible shapes, got "
-                f"{left_matrix_type.rows}x{left_matrix_type.cols} and {right_type.length}."
-            )
-        return VectorType(_promote_numeric_types(left_matrix_type.element_type, right_type.element_type), left_matrix_type.rows)
-    right_matrix_type = _require_numeric_matrix_type(right_type, MATMUL_NAME)
-    if (
-        left_matrix_type.cols is not None
-        and right_matrix_type.rows is not None
-        and left_matrix_type.cols != right_matrix_type.rows
-    ):
-        raise AetherTypeError(
-            f"{MATMUL_NAME}(...) requires compatible shapes, got "
-            f"{left_matrix_type.rows}x{left_matrix_type.cols} and {right_matrix_type.rows}x{right_matrix_type.cols}."
+    left_kind = _matmul_operand_kind(left_type, MATMUL_NAME)
+    right_kind = _matmul_operand_kind(right_type, MATMUL_NAME)
+    result_element_type = _promote_numeric_types(
+        _matmul_element_type(left_type),
+        _matmul_element_type(right_type),
+    )
+
+    if left_kind == "row_vector" and right_kind == "column_vector":
+        _check_known_dimensions_match(
+            _vector_length_for_matmul(left_type),
+            _vector_length_for_matmul(right_type),
+            type_to_string(left_type),
+            type_to_string(right_type),
+            MATMUL_NAME,
         )
-    result_element_type = _promote_numeric_types(left_matrix_type.element_type, right_matrix_type.element_type)
-    return MatrixType(result_element_type, left_matrix_type.rows, right_matrix_type.cols)
+        return result_element_type
+    if left_kind == "column_vector" and right_kind == "row_vector":
+        return MatrixType(
+            result_element_type,
+            _vector_length_for_matmul(left_type),
+            _vector_length_for_matmul(right_type),
+        )
+    if left_kind == "matrix" and right_kind == "matrix":
+        left_matrix_type = _require_numeric_matrix_type(left_type, MATMUL_NAME)
+        right_matrix_type = _require_numeric_matrix_type(right_type, MATMUL_NAME)
+        _check_known_dimensions_match(
+            left_matrix_type.cols,
+            right_matrix_type.rows,
+            f"{left_matrix_type.rows}x{left_matrix_type.cols}",
+            f"{right_matrix_type.rows}x{right_matrix_type.cols}",
+            MATMUL_NAME,
+        )
+        return MatrixType(result_element_type, left_matrix_type.rows, right_matrix_type.cols)
+    if left_kind == "matrix" and right_kind == "column_vector":
+        left_matrix_type = _require_numeric_matrix_type(left_type, MATMUL_NAME)
+        _check_known_dimensions_match(
+            left_matrix_type.cols,
+            _vector_length_for_matmul(right_type),
+            f"{left_matrix_type.rows}x{left_matrix_type.cols}",
+            type_to_string(right_type),
+            MATMUL_NAME,
+        )
+        return VectorType(result_element_type, left_matrix_type.rows, "column")
+    if left_kind == "row_vector" and right_kind == "matrix":
+        right_matrix_type = _require_numeric_matrix_type(right_type, MATMUL_NAME)
+        _check_known_dimensions_match(
+            _vector_length_for_matmul(left_type),
+            right_matrix_type.rows,
+            type_to_string(left_type),
+            f"{right_matrix_type.rows}x{right_matrix_type.cols}",
+            MATMUL_NAME,
+        )
+        return VectorType(result_element_type, right_matrix_type.cols, "row")
+
+    _raise_invalid_matmul_operands(left_type, right_type)
 
 
 def _solve_type(arg_types: list[AetherType | None]) -> AetherType | None:
@@ -635,23 +659,164 @@ def _filled_double_matrix(rows: int, cols: int, fill: float) -> AetherValue:
     return AetherValue(MatrixType("double", rows, cols), matrix_rows)
 
 
-def _matrix_vector_multiply(matrix: AetherValue, vector: AetherValue, label: str) -> AetherValue:
+def _matmul_operand_kind(type_name: AetherType, label: str) -> str:
+    if isinstance(type_name, TransposeVectorType):
+        raise AetherTypeError(
+            f"{label}(...) no longer accepts legacy TransposeVector values; "
+            "use oriented Vector values instead."
+        )
+    if isinstance(type_name, VectorType):
+        if type_name.element_type not in NUMERIC_TYPES:
+            raise AetherTypeError(f"{label}(...) expects vectors with numeric elements.")
+        if type_name.orientation == "row":
+            return "row_vector"
+        if type_name.orientation == "column":
+            return "column_vector"
+        raise AetherTypeError(
+            f"{label}(...) expects Vector operands to declare Row or Column orientation."
+        )
+    _require_numeric_matrix_type(type_name, label)
+    return "matrix"
+
+
+def _matmul_element_type(type_name: AetherType) -> str:
+    if isinstance(type_name, (VectorType, TransposeVectorType)):
+        return type_name.element_type
+    if isinstance(type_name, MatrixType):
+        return type_name.element_type
+    raise AetherTypeError(f"{MATMUL_NAME}(...) expects Vector or Matrix operands.")
+
+
+def _vector_length_for_matmul(type_name: AetherType) -> int | None:
+    if not isinstance(type_name, VectorType):
+        raise AetherTypeError(f"{MATMUL_NAME}(...) expected an oriented Vector type.")
+    return type_name.length
+
+
+def _check_known_dimensions_match(
+    left_dimension: int | None,
+    right_dimension: int | None,
+    left_shape: str,
+    right_shape: str,
+    label: str,
+) -> None:
+    if left_dimension is not None and right_dimension is not None and left_dimension != right_dimension:
+        raise AetherTypeError(
+            f"{label}(...) requires compatible shapes, got {left_shape} and {right_shape}."
+        )
+
+
+def _raise_invalid_matmul_operands(left_type: AetherType, right_type: AetherType) -> None:
+    raise AetherTypeError(
+        f"{MATMUL_NAME}(...) has no multiplication rule for "
+        f"'{type_to_string(left_type)}' and '{type_to_string(right_type)}'. "
+        "Supported rules are Row * Column -> scalar, Column * Row -> Matrix, "
+        "Matrix * Matrix -> Matrix, Matrix * Column -> Column, and Row * Matrix -> Row."
+    )
+
+
+def _row_column_multiply(left: AetherValue, right: AetherValue, label: str) -> AetherValue:
+    left_type = _require_oriented_vector_type(left, "row", label)
+    right_type = _require_oriented_vector_type(right, "column", label)
+    if len(left.value) != len(right.value):
+        raise AetherTypeError(
+            f"{label}(...) requires compatible shapes, got {len(left.value)} and {len(right.value)}."
+        )
+    result_element_type = _promote_numeric_types(left_type.element_type, right_type.element_type)
+    total = 0
+    for index in range(len(left.value)):
+        total += left.value[index].value * right.value[index].value
+    return _coerced_numeric_result(total, result_element_type)
+
+
+def _column_row_multiply(left: AetherValue, right: AetherValue, label: str) -> AetherValue:
+    left_type = _require_oriented_vector_type(left, "column", label)
+    right_type = _require_oriented_vector_type(right, "row", label)
+    result_element_type = _promote_numeric_types(left_type.element_type, right_type.element_type)
+    result_row_type = ArrayType(result_element_type)
+    result_rows = [
+        AetherValue(
+            result_row_type,
+            [
+                _coerced_numeric_result(left_element.value * right_element.value, result_element_type)
+                for right_element in right.value
+            ],
+        )
+        for left_element in left.value
+    ]
+    return AetherValue(MatrixType(result_element_type, len(left.value), len(right.value)), result_rows)
+
+
+def _matrix_matrix_multiply(left: AetherValue, right: AetherValue, label: str) -> AetherValue:
+    left_type = _require_numeric_matrix_type(left.type_name, label)
+    right_type = _require_numeric_matrix_type(right.type_name, label)
+    left_rows, left_cols = _runtime_shape(left)
+    right_rows, right_cols = _runtime_shape(right)
+    if left_cols != right_rows:
+        raise AetherTypeError(
+            f"{label}(...) requires compatible shapes, got {left_rows}x{left_cols} and {right_rows}x{right_cols}."
+        )
+    result_element_type = _promote_numeric_types(left_type.element_type, right_type.element_type)
+    result_row_type = ArrayType(result_element_type)
+    result_rows: list[AetherValue] = []
+    for row_index in range(left_rows):
+        result_elements: list[AetherValue] = []
+        for col_index in range(right_cols):
+            total = 0
+            for inner_index in range(left_cols):
+                total += left.value[row_index].value[inner_index].value * right.value[inner_index].value[col_index].value
+            result_elements.append(_coerced_numeric_result(total, result_element_type))
+        result_rows.append(AetherValue(result_row_type, result_elements))
+    return AetherValue(MatrixType(result_element_type, left_rows, right_cols), result_rows)
+
+
+def _matrix_column_multiply(matrix: AetherValue, vector: AetherValue, label: str) -> AetherValue:
     matrix_type = _require_numeric_matrix_type(matrix.type_name, label)
-    if not isinstance(vector.type_name, VectorType):
-        raise AetherTypeError(f"{label}(...) expects a Vector right operand.")
-    if vector.type_name.element_type not in NUMERIC_TYPES:
-        raise AetherTypeError(f"{label}(...) expects vectors with numeric elements.")
+    vector_type = _require_oriented_vector_type(vector, "column", label)
     rows, cols = _runtime_shape(matrix)
     if cols != len(vector.value):
         raise AetherTypeError(f"{label}(...) requires compatible shapes, got {rows}x{cols} and {len(vector.value)}.")
-    result_element_type = _promote_numeric_types(matrix_type.element_type, vector.type_name.element_type)
+    result_element_type = _promote_numeric_types(matrix_type.element_type, vector_type.element_type)
     result: list[AetherValue] = []
     for row_index in range(rows):
         total = 0
         for col_index in range(cols):
             total += matrix.value[row_index].value[col_index].value * vector.value[col_index].value
         result.append(_coerced_numeric_result(total, result_element_type))
-    return AetherValue(VectorType(result_element_type, len(result)), result)
+    return AetherValue(VectorType(result_element_type, len(result), "column"), result)
+
+
+def _row_matrix_multiply(vector: AetherValue, matrix: AetherValue, label: str) -> AetherValue:
+    vector_type = _require_oriented_vector_type(vector, "row", label)
+    matrix_type = _require_numeric_matrix_type(matrix.type_name, label)
+    rows, cols = _runtime_shape(matrix)
+    if len(vector.value) != rows:
+        raise AetherTypeError(f"{label}(...) requires compatible shapes, got {len(vector.value)} and {rows}x{cols}.")
+    result_element_type = _promote_numeric_types(vector_type.element_type, matrix_type.element_type)
+    result: list[AetherValue] = []
+    for col_index in range(cols):
+        total = 0
+        for row_index in range(rows):
+            total += vector.value[row_index].value * matrix.value[row_index].value[col_index].value
+        result.append(_coerced_numeric_result(total, result_element_type))
+    return AetherValue(VectorType(result_element_type, len(result), "row"), result)
+
+
+def _require_oriented_vector_type(value: AetherValue, orientation: str, label: str) -> VectorType:
+    if isinstance(value.type_name, TransposeVectorType):
+        raise AetherTypeError(
+            f"{label}(...) no longer accepts legacy TransposeVector values; "
+            "use oriented Vector values instead."
+        )
+    if not isinstance(value.type_name, VectorType):
+        raise AetherTypeError(f"{label}(...) expects an oriented Vector operand.")
+    if value.type_name.element_type not in NUMERIC_TYPES:
+        raise AetherTypeError(f"{label}(...) expects vectors with numeric elements.")
+    if value.type_name.orientation != orientation:
+        raise AetherTypeError(
+            f"{label}(...) expected a {orientation} vector, got '{type_to_string(value.type_name)}'."
+        )
+    return value.type_name
 
 
 def _vector_to_column_matrix(value: AetherValue) -> AetherValue:

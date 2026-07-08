@@ -1003,19 +1003,22 @@ println(C);
 def test_print_matmul_pretty():
     result = run_aether("println(Math.LinearAlgebra.matmul([1 2; 3 4], [5; 6]));")
 
-    assert result.output == "[17 39]\n"
+    assert result.output == "[17; 39]\n"
 
 
-def test_matmul_rejects_vector_matrix_without_orientation():
-    with pytest.raises(AetherTypeError):
-        run_aether(
+def test_matmul_column_row_vector_returns_matrix():
+    result = run_aether(
         """
 u = [1; 2; 3];
 v = [4 5 6];
 C = Math.LinearAlgebra.matmul(u, v);
 println(C);
 """
-        )
+    )
+
+    assert result.env["C"].type_name == MatrixType("int", 3, 3)
+    assert matrix_values(result.env["C"]) == [[4, 5, 6], [8, 10, 12], [12, 15, 18]]
+    assert result.output == "[4 5 6; 8 10 12; 12 15 18]\n"
 
 
 def test_matmul_matrix_column_vector():
@@ -1027,9 +1030,10 @@ C = Math.LinearAlgebra.matmul(A, v);
 println(C);
 """
     )
-    assert result.env["C"].type_name == VectorType("int", 2)
+    assert result.env["C"].type_name == VectorType("int", 2, "column")
+    assert result.env["C"].type_name.orientation == "column"
     assert vector_values(result.env["C"]) == [17, 39]
-    assert result.output == "[17 39]\n"
+    assert result.output == "[17; 39]\n"
 
 
 def test_matmul_row_vector_matrix_waits_for_oriented_vectors():

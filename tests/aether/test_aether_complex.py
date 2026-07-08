@@ -145,13 +145,14 @@ println(norm_value);
     )
 
     assert result.env["A"].type_name == MatrixType("complex", 2, 2)
-    assert result.env["m"].type_name == VectorType("complex", 2)
+    assert result.env["m"].type_name == VectorType("complex", 2, "column")
+    assert result.env["m"].type_name.orientation == "column"
     assert result.env["inner_value"].type_name == "complex"
     assert result.env["inner_value"].value == pytest.approx(complex(6, 0))
     assert result.env["norm_value"].value == pytest.approx(6**0.5)
     assert result.output.splitlines()[:4] == [
         "[1.0 2.0; im 3.0 - im]",
         "[1.0 2.0; -im 3.0 + im]",
-        "[0.0 3.0 + 3.0im]",
+        "[0.0; 3.0 + 3.0im]",
         "6.0",
     ]

@@ -55,7 +55,7 @@ Important observations:
 | `conjtranspose` | Same shape behavior as `transpose`, with conjugation for complex values. | `TransposeVectorType`, `VectorType`, or `MatrixType`. | Must follow the same orientation migration as `transpose`; matrix behavior can mostly stay. |
 | `inner` | Accepts `VectorType`, `TransposeVectorType`, or a `MatrixType` that is runtime row/column vector-like. Ignores orientation except unwrapping `TransposeVectorType`. Uses conjugation only when the left scalar value is complex. | Numeric scalar with promoted type. | Semantics should be clarified as orientation-insensitive vector inner product, or replaced/limited by `Row * Column`. Current acceptance of matrices as vectors is legacy. |
 | `norm` | Accepts the same vector inputs as `inner`; computes Euclidean norm. | `double`. | Can mostly stay if defined for any oriented vector. Legacy matrix-as-vector acceptance should be reconsidered. |
-| `matmul` | Supports `MatrixType * VectorType` specially, otherwise requires both operands to be `MatrixType`. It does not accept `VectorType * VectorType`, `TransposeVectorType * VectorType`, or `VectorType * TransposeVectorType` directly through this builtin. | `VectorType` for matrix-vector, `MatrixType` for matrix-matrix. | Must be redesigned around oriented vector operands. Current builtin only covers part of the target multiplication matrix. |
+| `matmul` | Uses the first-class orientation table for `Vector<T, Row>`, `Vector<T, Column>`, and `Matrix<T>`. Rejects `TransposeVectorType`, unoriented vectors, and undocumented orientation combinations. | Scalar for `Row * Column`, `MatrixType` for `Column * Row` and `Matrix * Matrix`, oriented `VectorType` for `Matrix * Column` and `Row * Matrix`. | Implemented in Phase 3. |
 | `solve` | Requires matrix left operand. Right operand may be `VectorType` or `MatrixType`; vectors are normalized to column matrices. It also treats `1xN` and `Nx1` matrices as vector-like RHS values. | `VectorType` for vector-like RHS with one solution column, else `MatrixType`. | Keep numeric algorithm, but RHS/result orientation must become explicit. Column RHS should return `Vector<T, Column>`; row-vector RHS should probably be rejected or explicitly transposed. |
 | `eig` | Requires square numeric `MatrixType`; returns eigenvector matrix `S` and diagonal matrix `D`. | `TupleType(MatrixType, MatrixType)`. | Can mostly stay; depends on matrix semantics and matrix multiplication contracts for reconstruction examples. |
 | `SVD` | Requires numeric `MatrixType`; returns full `U`, `S`, `V`. | `TupleType(MatrixType, MatrixType, MatrixType)`. | Can mostly stay; reconstruction depends on `transpose`/`conjtranspose` and matrix multiplication semantics. |
@@ -255,6 +255,8 @@ Status: Implemented.
 
 ### Phase 3: `matmul`
 
+Status: Implemented.
+
 - Implement the full orientation-aware multiplication table.
 - Preserve result orientation:
   - `Matrix * Column -> Column`
@@ -263,6 +265,8 @@ Status: Implemented.
 - Return matrix for `Column * Row`.
 - Reject `Row * Row`, `Column * Column`, `Column * Matrix`, and
   `Matrix * Row` unless explicitly designed later.
+- Reject legacy `TransposeVectorType` and `VectorType(..., orientation=None)`
+  operands instead of treating them as row/column vectors implicitly.
 
 ### Phase 4: `solve`, `eig`, `SVD`, `LU`, `LDU`
 
