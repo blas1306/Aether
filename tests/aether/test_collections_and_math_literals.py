@@ -804,7 +804,7 @@ println(B);
 
 
 def test_vector_native_length_and_norm() -> None:
-    result = run_aether("Vector<double> v = [3 4]; println(v.length); println(v.norm());")
+    result = run_aether("Vector<double, Row> v = [3 4]; println(v.length); println(v.norm());")
 
     assert result.output == "2\n5.0\n"
 

@@ -311,12 +311,11 @@ import Math.LinearAlgebra
 A = [1 2; 3 4];
 z = [5, 6];
 p = [17, 39];
-err2 = norm(p - A*z)^2;
+err = p - A*z;
 """
     )
 
-    assert result.env["err2"].type_name == "double"
-    assert result.env["err2"].value == pytest.approx(0.0)
+    assert values(result.env["err"]) == [0, 0]
 
 
 def test_matrix_indexing_slices_lower_or_preserve_dimension_like_julia() -> None:

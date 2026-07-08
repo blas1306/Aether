@@ -142,7 +142,7 @@ def test_imported_public_function_keeps_module_builtin_import_context(tmp_path: 
 package M;
 import Math.LinearAlgebra;
 
-public double len(Vector<double> v) {
+public double len(Vector<double, Column> v) {
     return norm(v);
 }
 """,

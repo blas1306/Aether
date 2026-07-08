@@ -88,14 +88,21 @@ def _exactly_two(label: str):
 def inner_builtin(args: list[AetherValue]) -> AetherValue:
     if len(args) != 2:
         raise AetherTypeError(f"{INNER_NAME}(...) expects exactly two arguments.")
-    left_elements, left_type = _vector_elements(args[0], INNER_NAME)
-    right_elements, right_type = _vector_elements(args[1], INNER_NAME)
+    left_type = _require_oriented_vector_operand(args[0].type_name, INNER_NAME)
+    right_type = _require_oriented_vector_operand(args[1].type_name, INNER_NAME)
+    if left_type.orientation != right_type.orientation:
+        raise AetherTypeError(
+            f"{INNER_NAME}(...) expects vectors with the same orientation, "
+            f"got {left_type.orientation} and {right_type.orientation}."
+        )
+    left_elements = list(args[0].value)
+    right_elements = list(args[1].value)
     if len(left_elements) != len(right_elements):
         raise AetherTypeError(
             f"{INNER_NAME}(...) expects vectors with the same length, "
             f"got {len(left_elements)} and {len(right_elements)}."
         )
-    result_type = _promote_numeric_types(left_type, right_type)
+    result_type = _promote_numeric_types(left_type.element_type, right_type.element_type)
     total = sum(left.value.conjugate() * right.value if isinstance(left.value, complex) else left.value * right.value for left, right in zip(left_elements, right_elements))
     return _coerced_numeric_result(total, result_type)
 
@@ -103,7 +110,8 @@ def inner_builtin(args: list[AetherValue]) -> AetherValue:
 def norm_builtin(args: list[AetherValue]) -> AetherValue:
     if len(args) != 1:
         raise AetherTypeError(f"{NORM_NAME}(...) expects exactly one argument.")
-    elements, _element_type = _vector_elements(args[0], NORM_NAME)
+    _require_oriented_vector_operand(args[0].type_name, NORM_NAME)
+    elements = list(args[0].value)
     norm_squared = sum(abs(element.value) ** 2 for element in elements)
     return AetherValue("double", sqrt(norm_squared))
 
@@ -363,13 +371,21 @@ def _inner_type(arg_types: list[AetherType | None]) -> AetherType | None:
     left_type, right_type = arg_types
     if left_type is None or right_type is None:
         return None
-    left_length = _require_numeric_vector_type(left_type, INNER_NAME)
-    right_length = _require_numeric_vector_type(right_type, INNER_NAME)
-    if left_length is not None and right_length is not None and left_length != right_length:
+    left_vector_type = _require_oriented_vector_operand(left_type, INNER_NAME)
+    right_vector_type = _require_oriented_vector_operand(right_type, INNER_NAME)
+    if left_vector_type.orientation != right_vector_type.orientation:
         raise AetherTypeError(
-            f"{INNER_NAME}(...) expects vectors with the same length, got {left_length} and {right_length}."
+            f"{INNER_NAME}(...) expects vectors with the same orientation, "
+            f"got {left_vector_type.orientation} and {right_vector_type.orientation}."
         )
-    return _promote_numeric_types(left_type.element_type, right_type.element_type)
+    _check_known_dimensions_match(
+        left_vector_type.length,
+        right_vector_type.length,
+        type_to_string(left_type),
+        type_to_string(right_type),
+        INNER_NAME,
+    )
+    return _promote_numeric_types(left_vector_type.element_type, right_vector_type.element_type)
 
 
 def _norm_type(arg_types: list[AetherType | None]) -> AetherType | None:
@@ -378,7 +394,7 @@ def _norm_type(arg_types: list[AetherType | None]) -> AetherType | None:
     argument_type = arg_types[0]
     if argument_type is None:
         return None
-    _require_numeric_vector_type(argument_type, NORM_NAME)
+    _require_oriented_vector_operand(argument_type, NORM_NAME)
     return "double"
 
 
@@ -834,27 +850,19 @@ def _conjugate_scalar(value: AetherValue) -> AetherValue:
     return AetherValue(value.type_name, conjugated)
 
 
-def _vector_elements(value: AetherValue, label: str) -> tuple[list[AetherValue], str]:
-    if isinstance(value.type_name, VectorType):
-        if value.type_name.element_type not in NUMERIC_TYPES:
-            raise AetherTypeError(f"{label}(...) expects vectors with numeric elements.")
-        return list(value.value), value.type_name.element_type
-    if isinstance(value.type_name, TransposeVectorType):
-        if value.type_name.element_type not in NUMERIC_TYPES:
-            raise AetherTypeError(f"{label}(...) expects vectors with numeric elements.")
-        return list(value.value.value), value.type_name.element_type
-    if not isinstance(value.type_name, MatrixType):
-        raise AetherTypeError(f"{label}(...) expects mathematical vector arguments, got '{type_to_string(value.type_name)}'.")
-    element_type = value.type_name.element_type
-    if element_type not in NUMERIC_TYPES:
-        raise AetherTypeError(f"{label}(...) expects vectors with numeric elements.")
-    rows = len(value.value)
-    cols = len(value.value[0].value) if value.value else 0
-    if rows == 0 or cols == 0 or (rows > 1 and cols > 1):
-        raise AetherTypeError(f"{label}(...) expects a row or column vector, got {rows}x{cols}.")
-    if rows == 1:
-        return list(value.value[0].value), element_type
-    return [row.value[0] for row in value.value], element_type
+def _require_oriented_vector_operand(type_name: AetherType, label: str) -> VectorType:
+    if isinstance(type_name, MatrixType):
+        _require_numeric_matrix_type(type_name, label)
+        raise AetherTypeError(
+            f"{label}(...) does not accept Matrix operands; matrix norm semantics are not specified yet."
+        )
+    kind = _matmul_operand_kind(type_name, label)
+    if kind not in {"row_vector", "column_vector"} or not isinstance(type_name, VectorType):
+        raise AetherTypeError(
+            f"{label}(...) expects Vector<Row> or Vector<Column> operands, "
+            f"got '{type_to_string(type_name)}'."
+        )
+    return type_name
 
 
 def _runtime_shape(value: AetherValue) -> tuple[int, int]:
@@ -993,22 +1001,6 @@ def _require_numeric_matrix_type(type_name: AetherType, label: str) -> MatrixTyp
     if type_name.element_type not in NUMERIC_TYPES:
         raise AetherTypeError(f"{label}(...) expects a matrix with numeric elements.")
     return type_name
-
-
-def _require_numeric_vector_type(type_name: AetherType, label: str) -> int | None:
-    if isinstance(type_name, (VectorType, TransposeVectorType)):
-        if type_name.element_type not in NUMERIC_TYPES:
-            raise AetherTypeError(f"{label}(...) expects vectors with numeric elements.")
-        return type_name.length
-    if not isinstance(type_name, MatrixType):
-        raise AetherTypeError(f"{label}(...) expects mathematical vector arguments, got '{type_to_string(type_name)}'.")
-    if type_name.element_type not in NUMERIC_TYPES:
-        raise AetherTypeError(f"{label}(...) expects vectors with numeric elements.")
-    if type_name.rows is None or type_name.cols is None:
-        return None
-    if type_name.rows <= 0 or type_name.cols <= 0 or (type_name.rows > 1 and type_name.cols > 1):
-        raise AetherTypeError(f"{label}(...) expects a row or column vector, got {type_name.rows}x{type_name.cols}.")
-    return type_name.cols if type_name.rows == 1 else type_name.rows
 
 
 def _normalized_rhs_type_shape(

@@ -847,10 +847,9 @@ def test_inner_column_vectors():
     assert result.env["x"].value == 32
 
 
-def test_inner_row_column_vectors():
-    result = run_aether("x = Math.LinearAlgebra.inner([1 2 3], [4; 5; 6]);")
-    assert result.env["x"].type_name == "int"
-    assert result.env["x"].value == 32
+def test_inner_rejects_mixed_row_column_vectors():
+    with pytest.raises(AetherTypeError, match="same orientation"):
+        run_aether("Math.LinearAlgebra.inner([1 2 3], [4; 5; 6]);")
 
 
 def test_inner_promotes_to_double():

@@ -53,8 +53,8 @@ Important observations:
 | --- | --- | --- | --- |
 | `transpose` | Delegates to `_transpose_value`. `VectorType` becomes `TransposeVectorType`; `TransposeVectorType` unwraps to `VectorType`; `MatrixType` swaps rows/cols. | `TransposeVectorType`, `VectorType`, or `MatrixType`. | Must migrate first. It should flip `VectorType.orientation` instead of producing `TransposeVectorType`. |
 | `conjtranspose` | Same shape behavior as `transpose`, with conjugation for complex values. | `TransposeVectorType`, `VectorType`, or `MatrixType`. | Must follow the same orientation migration as `transpose`; matrix behavior can mostly stay. |
-| `inner` | Accepts `VectorType`, `TransposeVectorType`, or a `MatrixType` that is runtime row/column vector-like. Ignores orientation except unwrapping `TransposeVectorType`. Uses conjugation only when the left scalar value is complex. | Numeric scalar with promoted type. | Semantics should be clarified as orientation-insensitive vector inner product, or replaced/limited by `Row * Column`. Current acceptance of matrices as vectors is legacy. |
-| `norm` | Accepts the same vector inputs as `inner`; computes Euclidean norm. | `double`. | Can mostly stay if defined for any oriented vector. Legacy matrix-as-vector acceptance should be reconsidered. |
+| `inner` | Accepts only `Vector<T, Row>` with `Vector<T, Row>` or `Vector<T, Column>` with `Vector<T, Column>`. Rejects mixed orientation, `MatrixType`, `TransposeVectorType`, and unoriented vectors. Uses conjugation only when the left scalar value is complex. | Numeric scalar with promoted type. | Implemented in Phase 2. |
+| `norm` | Accepts only `Vector<T, Row>` or `Vector<T, Column>` and computes Euclidean vector norm. Rejects `MatrixType`, `TransposeVectorType`, and unoriented vectors. | `double`. | Implemented in Phase 2; matrix norm semantics remain pending. |
 | `matmul` | Uses the first-class orientation table for `Vector<T, Row>`, `Vector<T, Column>`, and `Matrix<T>`. Rejects `TransposeVectorType`, unoriented vectors, and undocumented orientation combinations. | Scalar for `Row * Column`, `MatrixType` for `Column * Row` and `Matrix * Matrix`, oriented `VectorType` for `Matrix * Column` and `Row * Matrix`. | Implemented in Phase 3. |
 | `solve` | Requires matrix left operand. Right operand may be `VectorType` or `MatrixType`; vectors are normalized to column matrices. It also treats `1xN` and `Nx1` matrices as vector-like RHS values. | `VectorType` for vector-like RHS with one solution column, else `MatrixType`. | Keep numeric algorithm, but RHS/result orientation must become explicit. Column RHS should return `Vector<T, Column>`; row-vector RHS should probably be rejected or explicitly transposed. |
 | `eig` | Requires square numeric `MatrixType`; returns eigenvector matrix `S` and diagonal matrix `D`. | `TupleType(MatrixType, MatrixType)`. | Can mostly stay; depends on matrix semantics and matrix multiplication contracts for reconstruction examples. |
@@ -74,10 +74,8 @@ Helpers that encode old semantics:
 - `_transpose_value` creates and unwraps `TransposeVectorType`.
 - `_transpose_like_type` returns `TransposeVectorType` for `VectorType` and
   `VectorType` for `TransposeVectorType`.
-- `_vector_elements` accepts `VectorType`, `TransposeVectorType`, and
-  `MatrixType` values with `1xN` / `Nx1` runtime shape.
-- `_require_numeric_vector_type` accepts both `VectorType` and
-  `TransposeVectorType`, then falls back to vector-like `MatrixType`.
+- `_require_oriented_vector_operand` rejects `TransposeVectorType`,
+  `VectorType(..., orientation=None)`, and `MatrixType` for `inner`/`norm`.
 - `_matrix_vector_multiply` returns a `VectorType` without setting an
   orientation.
 - `_vector_to_column_matrix` treats every `VectorType` as a column RHS.
@@ -98,40 +96,34 @@ Helpers that can mostly survive with updated type construction:
 - `_coerced_numeric_result`.
 - `_require_numeric_matrix_type`.
 
-## Dependencies On Old `VectorType`
+## Remaining Unoriented `VectorType` Exposure
 
-The current module depends on `VectorType` as an unoriented or weakly oriented
-vector in these ways:
+The current module still exposes `VectorType` as an unoriented or weakly
+oriented vector in these ways:
 
-- `inner` and `norm` treat any `VectorType` as a plain sequence of numeric
-  elements.
-- `matmul(MatrixType, VectorType)` assumes the vector is a compatible column
-  vector, regardless of `VectorType.orientation`.
+- `inner` and `norm` now require `VectorType` to carry `row` or `column`
+  orientation explicitly.
+- `matmul` now requires vector operands to carry explicit orientation.
 - `solve(MatrixType, VectorType)` normalizes any vector into an `Nx1` column
   matrix.
 - Matrix-vector conversion helpers create `VectorType` without specifying
   `"row"` or `"column"`.
-- Type inference returns `VectorType(..., rows)` or `VectorType(..., cols)`
-  without orientation for `matmul` and `solve`.
+- Type inference still returns `VectorType(..., rows)` or
+  `VectorType(..., cols)` without orientation for `solve`.
 
-Under the target model, each of these should explicitly preserve or require
-orientation.
+Under the target model, remaining vector-producing paths should explicitly
+preserve or require orientation.
 
-## Dependencies On Old `TransposeVectorType`
+## Legacy `TransposeVectorType` Status
 
-`TransposeVectorType` is still a semantic participant, not just a compatibility
-alias:
+`TransposeVectorType` still exists in the type model, but the migrated public
+stdlib functions no longer use it as a semantic participant:
 
-- `transpose(VectorType)` returns `TransposeVectorType`.
-- `transpose(TransposeVectorType)` returns the wrapped `VectorType`.
-- `conjtranspose` mirrors this behavior.
-- `inner` and `norm` accept it by unwrapping `value.value`.
-- Type inference accepts it in `_require_numeric_vector_type`.
+- `inner`, `norm`, `transpose`, `conjtranspose`, and `matmul` reject it at
+  public stdlib boundaries.
 
-This conflicts with the target model because row/column state should live in
-`VectorType.orientation`, not in a separate transposed wrapper type. The wrapper
-also makes `transpose` depend on value nesting instead of a static orientation
-flip.
+The target model keeps row/column state in `VectorType.orientation`, not in a
+separate transposed wrapper type.
 
 ## What Must Migrate
 
@@ -140,10 +132,9 @@ The following should move to `Vector<T, Row>` / `Vector<T, Column>` semantics:
 - `transpose` and `conjtranspose` return types and runtime values.
 - Every `VectorType(...)` construction in this module should set or preserve
   orientation when the result is a vector.
-- `inner` should decide whether it is a general vector operation or a
-  compatibility alias for `Row * Column`.
-- `norm` should operate on oriented vectors directly and avoid using matrix
-  shape as vector identity unless compatibility is intentionally retained.
+- `inner` is implemented for matching vector orientations only:
+  `Row, Row` and `Column, Column`.
+- `norm` operates on oriented vectors directly. Matrix norm remains pending.
 - `matmul` should support the target combinations:
   - row vector times column vector returns scalar.
   - column vector times row vector returns matrix.
@@ -189,8 +180,8 @@ Observed compatibility points:
   `N(A)`, and `R(A)`. The solve RHS is naturally a column vector.
 - `primes_advanced.ae` uses column vectors `n` and `p`, a matrix from
   `ones(12, 2)`, least-squares solve `z = A \ p`, matrix-vector expression
-  `A*z`, and `norm(p - A*z)^2`. This should continue to typecheck if `p`,
-  `z`, and `A*z` are all column vectors.
+  `A*z`, and `norm(p - A*z)^2`. That pattern depends on a later operator/
+  solve phase preserving column orientation through `z` and `A*z`.
 
 The examples are conceptually aligned with the new model, but they rely on the
 implementation to infer and preserve vector orientation consistently.
@@ -246,12 +237,16 @@ Status: Implemented.
 
 ### Phase 2: `inner` and `norm`
 
+Status: Implemented.
+
 - Make `norm` accept `VectorType` with `row` or `column` orientation and return
   `double`.
-- Decide whether `inner(u, v)` remains orientation-insensitive or becomes an
-  explicit `Row, Column` operation.
-- Remove or quarantine implicit matrix-as-vector acceptance from public type
-  inference.
+- Define `inner(u, v)` for matching orientations only:
+  `Row, Row` and `Column, Column`.
+- Reject mixed orientations, `MatrixType`, `TransposeVectorType`, and
+  `VectorType(..., orientation=None)`.
+- Matrix norm remains pending until Aether specifies which matrix norm, if any,
+  should be exposed.
 
 ### Phase 3: `matmul`
 
