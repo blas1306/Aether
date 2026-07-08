@@ -101,7 +101,7 @@ def test_lower_and_ssa_preserve_column_vector_literal_from_expected_type() -> No
     typed_program = prepare_typed_program(
         """
 int main() {
-    Vector<int, Column> v = [1, 2, 3];
+    Vector<int> v = [1; 2; 3];
     return 0;
 }
 """,
@@ -123,7 +123,9 @@ int main() {
     )
 
     assert ir_vector_new.result.type.orientation == "column"
+    assert ir_vector_new.orientation == "column"
     assert ssa_vector_new.result.type.orientation == "column"
+    assert ssa_vector_new.orientation == "column"
 
 
 @pytest.mark.skipif(shutil.which("clang") is None, reason="clang is not available")
@@ -200,6 +202,21 @@ def test_llvm_runner_builds_column_vector_literal_from_expected_type() -> None:
         """
 int main() {
     Vector<int, Column> v = [1, 2, 3];
+    return 0;
+}
+""",
+        TypeChecker(),
+    )
+
+    assert LLVMRunner().run(typed_program) == 0
+
+
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang is not available")
+def test_llvm_runner_builds_column_vector_literal_from_semicolon_syntax() -> None:
+    typed_program = prepare_typed_program(
+        """
+int main() {
+    Vector<int> v = [1; 2; 3];
     return 0;
 }
 """,

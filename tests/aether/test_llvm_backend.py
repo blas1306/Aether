@@ -103,7 +103,7 @@ def test_prints_column_vector_literal_as_contiguous_array() -> None:
                             SSAConst(first, 1),
                             SSAConst(second, 2),
                             SSAConst(third, 3),
-                            SSAVectorNew(vector, (first, second, third)),
+                            SSAVectorNew(vector, (first, second, third), "column"),
                             SSAConst(return_value, 0),
                             SSAReturn(return_value),
                         ],
@@ -119,6 +119,34 @@ def test_prints_column_vector_literal_as_contiguous_array() -> None:
     assert "store i32 1" in llvm
     assert "store i32 2" in llvm
     assert "store i32 3" in llvm
+
+
+def test_rejects_vector_new_orientation_mismatch() -> None:
+    int_type = IntType()
+    value = SSAValue("0", int_type)
+    vector = SSAValue("1", VectorType(int_type, "column"))
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [],
+                int_type,
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(value, 1),
+                            SSAVectorNew(vector, (value,), "row"),
+                            SSAReturn(value),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+
+    with pytest.raises(LLVMBackendError, match="instruction orientation must match"):
+        print_llvm(module)
 
 
 def test_prints_add_function_with_int_parameters() -> None:

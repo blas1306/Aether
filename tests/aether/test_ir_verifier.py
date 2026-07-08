@@ -208,6 +208,33 @@ def test_verifies_column_vector_new() -> None:
     assert IRVerifier(module).verify() is module
 
 
+def test_rejects_vector_new_orientation_mismatch() -> None:
+    int_type = IntType()
+    first = IRValue("0", int_type)
+    vector = IRValue("1", VectorType(int_type, "column"))
+    module = IRModule(
+        [
+            IRFunction(
+                "main",
+                [],
+                IntType(),
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [
+                            IRConst(first, 1),
+                            IRVectorNew(vector, (first,), "row"),
+                            IRReturn(first),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+
+    _assert_verification_error(module, "Vector new orientation mismatch")
+
+
 def test_verifies_void_function_with_bare_return() -> None:
     module = IRModule(
         [

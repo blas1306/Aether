@@ -83,7 +83,8 @@ class IRPrinter:
             return f"{self._typed_value(instruction.result)} = array_new [{elements}]"
         if isinstance(instruction, IRVectorNew):
             elements = ", ".join(self._value(element) for element in instruction.elements)
-            return f"{self._typed_value(instruction.result)} = vector_new [{elements}]"
+            orientation = f" {instruction.orientation}" if instruction.orientation is not None else ""
+            return f"{self._typed_value(instruction.result)} = vector_new{orientation} [{elements}]"
         if isinstance(instruction, IRArrayGet):
             return (
                 f"{self._typed_value(instruction.result)} = array_get "

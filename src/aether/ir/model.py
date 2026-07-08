@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from .types import IRType
+from .types import IRType, VectorType
 
 
 @dataclass(frozen=True)
@@ -78,6 +78,11 @@ class IRArrayNew(IRInstruction):
 class IRVectorNew(IRInstruction):
     result: IRValue
     elements: tuple[IRValue, ...] = ()
+    orientation: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.orientation is None and isinstance(self.result.type, VectorType):
+            object.__setattr__(self, "orientation", self.result.type.orientation)
 
 
 @dataclass(frozen=True)

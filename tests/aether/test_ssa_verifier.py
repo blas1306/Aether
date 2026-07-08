@@ -4,7 +4,7 @@ import re
 
 import pytest
 
-from aether.ir import BoolType, DoubleType, IntType, StringType, VoidType
+from aether.ir import BoolType, DoubleType, IntType, StringType, VectorType, VoidType
 from aether.ssa import (
     SSABasicBlock,
     SSABinaryOp,
@@ -20,6 +20,7 @@ from aether.ssa import (
     SSAPhi,
     SSAReturn,
     SSAValue,
+    SSAVectorNew,
     SSAVerificationError,
     SSAVerifier,
 )
@@ -182,6 +183,62 @@ def test_verifies_call_between_functions() -> None:
     )
 
     assert SSAVerifier(module).verify() is module
+
+
+def test_verifies_column_vector_new() -> None:
+    int_type = IntType()
+    first = SSAValue("0", int_type)
+    second = SSAValue("1", int_type)
+    vector = SSAValue("2", VectorType(int_type, "column"))
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [],
+                int_type,
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(first, 1),
+                            SSAConst(second, 2),
+                            SSAVectorNew(vector, (first, second), "column"),
+                            SSAReturn(first),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+
+    assert SSAVerifier(module).verify() is module
+
+
+def test_rejects_vector_new_orientation_mismatch() -> None:
+    int_type = IntType()
+    first = SSAValue("0", int_type)
+    vector = SSAValue("1", VectorType(int_type, "column"))
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [],
+                int_type,
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(first, 1),
+                            SSAVectorNew(vector, (first,), "row"),
+                            SSAReturn(first),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+
+    _assert_verification_error(module, "Vector new orientation mismatch")
 
 
 def test_verifies_double_to_int_cast() -> None:

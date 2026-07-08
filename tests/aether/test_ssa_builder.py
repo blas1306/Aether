@@ -22,6 +22,8 @@ from aether.ir import (
     IRReturn,
     IRStore,
     IRValue,
+    IRVectorNew,
+    VectorType,
     VoidType,
 )
 from aether.ssa import (
@@ -35,6 +37,7 @@ from aether.ssa import (
     SSAJump,
     SSAPhi,
     SSAReturn,
+    SSAVectorNew,
     SSAVerifier,
     print_ssa,
 )
@@ -116,6 +119,45 @@ def test_builds_add_with_parameters() -> None:
         "    return %0\n"
         "}"
     )
+
+
+def test_builds_column_vector_new_with_orientation() -> None:
+    int_type = IntType()
+    vector_type = VectorType(int_type, "column")
+    first = IRValue("0", int_type)
+    second = IRValue("1", int_type)
+    vector = IRValue("2", vector_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "main",
+                [],
+                int_type,
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [
+                            IRConst(first, 1),
+                            IRConst(second, 2),
+                            IRVectorNew(vector, (first, second), "column"),
+                            IRReturn(first),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+
+    ssa_module = _build_and_verify(module)
+    vector_new = next(
+        instruction
+        for instruction in ssa_module.functions[0].blocks[0].instructions
+        if isinstance(instruction, SSAVectorNew)
+    )
+
+    assert vector_new.result.type == vector_type
+    assert vector_new.orientation == "column"
+    assert "vector_new column" in print_ssa(ssa_module)
 
 
 def test_promotes_simple_local_store_and_load() -> None:

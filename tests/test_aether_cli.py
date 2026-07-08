@@ -889,6 +889,24 @@ def test_emit_llvm_prints_column_vector_literal_from_expected_type(tmp_path: Pat
     assert stderr == ""
 
 
+def test_emit_llvm_prints_column_vector_literal_from_semicolon_syntax(tmp_path: Path) -> None:
+    program = tmp_path / "emit_llvm_vector_column_inferred.ae"
+    program.write_text(
+        "int main() { Vector<int> v = [1; 2; 3]; return 0; }\n",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert "@aether_array_new(i64 4, i64 3)" in stdout
+    assert "store i32 1" in stdout
+    assert "store i32 2" in stdout
+    assert "store i32 3" in stdout
+    assert "ret i32 0" in stdout
+    assert stderr == ""
+
+
 def test_emit_llvm_prints_string_literal_global(tmp_path: Path) -> None:
     program = tmp_path / "emit_llvm_string.ae"
     program.write_text(

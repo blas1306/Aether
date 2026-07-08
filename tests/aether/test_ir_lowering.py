@@ -128,8 +128,9 @@ int main() {
     vector_new = next(instruction for instruction in instructions if isinstance(instruction, IRVectorNew))
 
     assert vector_new.result.type == VectorType(IntType(), "row")
+    assert vector_new.orientation == "row"
     assert [element.type for element in vector_new.elements] == [IntType(), IntType(), IntType()]
-    assert "vector_new" in print_ir(module)
+    assert "vector_new row" in print_ir(module)
     assert "vector<int, row>" in print_ir(module)
 
 
@@ -147,8 +148,29 @@ int main() {
     vector_new = next(instruction for instruction in instructions if isinstance(instruction, IRVectorNew))
 
     assert vector_new.result.type == VectorType(IntType(), "column")
+    assert vector_new.orientation == "column"
     assert [element.type for element in vector_new.elements] == [IntType(), IntType(), IntType()]
-    assert "vector_new" in print_ir(module)
+    assert "vector_new column" in print_ir(module)
+    assert "vector<int, column>" in print_ir(module)
+
+
+def test_lower_column_vector_literal_from_semicolon_syntax() -> None:
+    module = _lower(
+        """
+int main() {
+    Vector<int> v = [1; 2; 3];
+    return 0;
+}
+"""
+    )
+
+    instructions = module.functions[0].blocks[0].instructions
+    vector_new = next(instruction for instruction in instructions if isinstance(instruction, IRVectorNew))
+
+    assert vector_new.result.type == VectorType(IntType(), "column")
+    assert vector_new.orientation == "column"
+    assert [element.type for element in vector_new.elements] == [IntType(), IntType(), IntType()]
+    assert "vector_new column" in print_ir(module)
     assert "vector<int, column>" in print_ir(module)
 
 

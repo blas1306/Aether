@@ -170,6 +170,12 @@ class IRLowerer:
                 context,
                 target_type=slot_type,
             )
+            if (
+                isinstance(slot_type, VectorType)
+                and slot_type.orientation is None
+                and isinstance(value.type, VectorType)
+            ):
+                slot_type = value.type
             slot_type = slot_type if slot_type is not None else value.type
             self._require_same_type(
                 value.type,
@@ -508,20 +514,25 @@ class IRLowerer:
         context: _FunctionContext,
         target_type: IRType | None,
     ) -> IRValue:
-        if len(expression.rows) != 1 or not expression.uses_commas:
-            self._unsupported(expression, "non-row vector literal")
-        row = expression.rows[0]
-        if not row:
+        elements_source: list[ast.Expression]
+        if expression.orientation == "column" and all(len(row) == 1 for row in expression.rows):
+            elements_source = [row[0] for row in expression.rows]
+        elif len(expression.rows) == 1:
+            elements_source = expression.rows[0]
+        else:
+            self._unsupported(expression, "non-vector literal")
+        if not elements_source:
             self._unsupported(expression, "empty vector literal")
 
         element_target_type = target_type.element if isinstance(target_type, VectorType) else None
         elements = tuple(
             self._lower_expression(element, context, target_type=element_target_type)
-            for element in row
+            for element in elements_source
         )
 
         if isinstance(target_type, VectorType):
-            vector_type = target_type
+            orientation = target_type.orientation or expression.orientation
+            vector_type = VectorType(target_type.element, orientation)
         else:
             element_type = elements[0].type
             if any(element.type != element_type for element in elements):
@@ -529,7 +540,7 @@ class IRLowerer:
                     "IR backend does not support implicit conversion inside vector literals yet.",
                     expression,
                 )
-            vector_type = VectorType(element_type, "row")
+            vector_type = VectorType(element_type, expression.orientation or "row")
 
         for element in elements:
             self._require_same_type(
@@ -538,7 +549,7 @@ class IRLowerer:
                 "vector literal element requires an implicit conversion",
             )
         result = context.temporary(vector_type)
-        context.block.instructions.append(IRVectorNew(result, elements))
+        context.block.instructions.append(IRVectorNew(result, elements, vector_type.orientation))
         return result
 
     def _lower_cast(self, call: ast.CallExpression, context: _FunctionContext) -> IRValue:

@@ -366,6 +366,8 @@ class LLVMPrinter:
             raise LLVMBackendError("LLVM vector_new result must be VectorType")
         if instruction.result.type.orientation not in {"row", "column"}:
             raise LLVMBackendError("LLVM vector_new requires row or column orientation")
+        if instruction.orientation != instruction.result.type.orientation:
+            raise LLVMBackendError("LLVM vector_new instruction orientation must match result type")
         return self._print_contiguous_new(
             instruction.result,
             instruction.result.type.element,

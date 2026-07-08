@@ -1691,10 +1691,14 @@ class TypeChecker:
             if any(length != row_lengths[0] for length in row_lengths):
                 raise AetherTypeError("Matrix literals must be rectangular; ragged rows are not supported.")
             common_type = _common_primitive_type(element_types)
-            if len(expression.rows) == 1:
+            if expression.vector and expression.orientation == "column":
+                return VectorType(common_type, len(expression.rows), "column")
+            if expression.vector and expression.orientation == "row":
                 return VectorType(common_type, sum(row_lengths), "row")
             if all(length == 1 for length in row_lengths):
                 return VectorType(common_type, len(expression.rows), "column")
+            if len(expression.rows) == 1:
+                return VectorType(common_type, sum(row_lengths), "row")
             return MatrixType(common_type, len(expression.rows), row_lengths[0])
         return _concat_matrix_literal_type(expression, element_types)
 
@@ -2740,9 +2744,12 @@ class TypeChecker:
         if not initializer.rows:
             return False
         if target_type.orientation == "column":
-            if len(initializer.rows) != 1 or not initializer.uses_commas:
+            if len(initializer.rows) == 1 and initializer.uses_commas:
+                elements = initializer.rows[0]
+            elif all(len(row) == 1 for row in initializer.rows):
+                elements = [row[0] for row in initializer.rows]
+            else:
                 return False
-            elements = initializer.rows[0]
         elif target_type.orientation == "row":
             if len(initializer.rows) != 1:
                 return False

@@ -504,7 +504,7 @@ class SSABuilder:
                 self._resolve_value(element, state.value_map)
                 for element in instruction.elements
             )
-            return SSAVectorNew(result, elements)
+            return SSAVectorNew(result, elements, instruction.orientation)
 
         if isinstance(instruction, IRArrayGet):
             result = self._define_value(instruction.result, state.value_map)

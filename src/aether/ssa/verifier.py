@@ -369,6 +369,13 @@ class SSAVerifier:
             self._fail(f"Vector new result must be vector type, got {instruction.result.type}")
         if instruction.result.type.orientation not in {"row", "column"}:
             self._fail(f"Vector new requires row or column orientation, got {instruction.result.type}")
+        if instruction.orientation not in {"row", "column"}:
+            self._fail(f"Vector new requires row or column instruction orientation, got {instruction.orientation}")
+        if instruction.orientation != instruction.result.type.orientation:
+            self._fail(
+                f"Vector new orientation mismatch: result type is {instruction.result.type.orientation}, "
+                f"instruction is {instruction.orientation}"
+            )
         for element in instruction.elements:
             self._require_defined(element, value_types)
             if element.type != instruction.result.type.element:

@@ -231,7 +231,7 @@ class SSARenamer:
                 self._resolve_value(element) for element in instruction.elements
             )
             self._bind_value(result.name, result, bound_values)
-            return SSAVectorNew(result, elements)
+            return SSAVectorNew(result, elements, instruction.orientation)
 
         if isinstance(instruction, IRArrayGet):
             result = self._define_value(instruction.result)

@@ -335,10 +335,33 @@ def test_parser_accepts_column_vector_type_annotation_with_comma_literal_ast() -
     assert declaration.initializer.uses_commas is True
 
 
+def test_parser_accepts_column_vector_literal_ast() -> None:
+    program = parse_source("c = [1; 2; 3];")
+    assignment = program.statements[0]
+
+    assert isinstance(assignment, ast.Assignment)
+    assert isinstance(assignment.expression, ast.MatrixLiteral)
+    assert assignment.expression.rows == [[ast.Literal(1, "int")], [ast.Literal(2, "int")], [ast.Literal(3, "int")]]
+    assert assignment.expression.vector is True
+    assert assignment.expression.orientation == "column"
+    assert assignment.expression.uses_commas is False
+
+
+def test_parser_rejects_mixed_comma_and_semicolon_vector_literal() -> None:
+    with pytest.raises(AetherSyntaxError, match="Mixed ',' and ';' vector literals"):
+        parse_source("x = [1, 2; 3, 4];")
+
+
 def test_row_vector_literal_infers_vector_type_without_expected_type() -> None:
     result = run_aether("v = [1, 2, 3];")
 
     assert result.env["v"].type_name == VectorType("int", 3, "row")
+
+
+def test_column_vector_literal_infers_vector_type_without_expected_type() -> None:
+    result = run_aether("c = [1; 2; 3];")
+
+    assert result.env["c"].type_name == VectorType("int", 3, "column")
 
 
 def test_row_vector_literal_uses_row_vector_expected_type() -> None:
@@ -386,6 +409,12 @@ def test_column_vector_literal_uses_semicolons() -> None:
 
     assert result.env["v"].type_name == VectorType("int", 3, "column")
     assert result.output == "[1; 2; 3]\n1\n"
+
+
+def test_column_vector_literal_uses_column_vector_expected_type() -> None:
+    result = run_aether("Vector<int, Column> v = [1; 2; 3];")
+
+    assert result.env["v"].type_name == VectorType("int", 3, "column")
 
 
 def test_matrix_literal_and_one_based_indexing() -> None:

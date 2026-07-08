@@ -1268,6 +1268,11 @@ class Parser:
                 if self._check(TokenType.RIGHT_BRACKET):
                     raise self._error(self._previous(), "Trailing ';' in matrix literal is not supported.")
             self._consume(TokenType.RIGHT_BRACKET, "Expected ']' after matrix literal.")
+            if uses_commas and len(rows) > 1:
+                raise self._error(
+                    self._previous(),
+                    "Mixed ',' and ';' vector literals are not supported.",
+                )
             orientation = None
             if len(rows) == 1:
                 orientation = "row"

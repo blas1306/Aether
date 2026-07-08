@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from aether.ir.types import IRType
+from aether.ir.types import IRType, VectorType
 
 
 @dataclass(frozen=True)
@@ -66,6 +66,11 @@ class SSAArrayNew(SSAInstruction):
 class SSAVectorNew(SSAInstruction):
     result: SSAValue
     elements: tuple[SSAValue, ...] = ()
+    orientation: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.orientation is None and isinstance(self.result.type, VectorType):
+            object.__setattr__(self, "orientation", self.result.type.orientation)
 
 
 @dataclass(frozen=True)
