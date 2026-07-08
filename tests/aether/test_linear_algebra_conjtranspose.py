@@ -7,7 +7,8 @@ from aether.ast import Assignment, UnaryExpression
 from aether.errors import AetherTypeError
 from aether.lexer import lex
 from aether.parser import Parser
-from aether.types import MatrixType, TransposeVectorType
+from aether.stdlib.math.linear_algebra import conjtranspose_builtin, transpose_builtin
+from aether.types import AetherValue, MatrixType, TransposeVectorType, VectorType
 
 
 def _matrix_values(result, name: str) -> list[list[float]]:
@@ -82,8 +83,50 @@ println(t);
 """
     )
 
-    assert result.env["t"].type_name == TransposeVectorType("int", 3)
-    assert result.output == "[1 2 3]\n"
+    assert result.env["t"].type_name == VectorType("int", 3, "column")
+    assert result.env["t"].type_name.orientation == "column"
+    assert result.output == "[1; 2; 3]\n"
+
+
+def test_conjtranspose_builtin_flips_row_vector_to_column() -> None:
+    result = run_aether(
+        """
+import Math.LinearAlgebra
+v = [1, 2, 3];
+t = conjtranspose(v);
+"""
+    )
+
+    assert result.env["t"].type_name == VectorType("int", 3, "column")
+    assert result.env["t"].type_name.orientation == "column"
+    assert [element.value for element in result.env["t"].value] == [1, 2, 3]
+
+
+def test_conjtranspose_builtin_flips_column_vector_to_row() -> None:
+    result = run_aether(
+        """
+import Math.LinearAlgebra
+v = [1; 2; 3];
+t = conjtranspose(v);
+"""
+    )
+
+    assert result.env["t"].type_name == VectorType("int", 3, "row")
+    assert result.env["t"].type_name.orientation == "row"
+    assert [element.value for element in result.env["t"].value] == [1, 2, 3]
+
+
+def test_transpose_and_conjtranspose_reject_legacy_transpose_vector_values() -> None:
+    vector = AetherValue(
+        VectorType("int", 3, "row"),
+        [AetherValue("int", 1), AetherValue("int", 2), AetherValue("int", 3)],
+    )
+    legacy = AetherValue(TransposeVectorType("int", 3), vector)
+
+    with pytest.raises(AetherTypeError, match="legacy TransposeVector"):
+        transpose_builtin([legacy])
+    with pytest.raises(AetherTypeError, match="legacy TransposeVector"):
+        conjtranspose_builtin([legacy])
 
 
 def test_apostrophe_operator_requires_linear_algebra_import() -> None:

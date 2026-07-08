@@ -122,18 +122,21 @@ def conjtranspose_builtin(args: list[AetherValue]) -> AetherValue:
 
 def _transpose_value(value: AetherValue, label: str, *, conjugate: bool) -> AetherValue:
     if isinstance(value.type_name, TransposeVectorType):
-        if not conjugate:
-            return value.value
-        elements = [_conjugate_scalar(element) for element in value.value.value]
-        return AetherValue(VectorType(value.type_name.element_type, len(elements)), elements)
+        raise AetherTypeError(
+            f"{label}(...) no longer accepts legacy TransposeVector values; "
+            "use oriented Vector values instead."
+        )
     if isinstance(value.type_name, VectorType):
         if value.type_name.element_type not in NUMERIC_TYPES:
             raise AetherTypeError(f"{label}(...) expects a vector with numeric elements.")
-        vector = value
+        result_orientation = _flipped_vector_orientation(value.type_name.orientation, label)
+        elements = list(value.value)
         if conjugate:
-            elements = [_conjugate_scalar(element) for element in value.value]
-            vector = AetherValue(VectorType(value.type_name.element_type, len(elements)), elements)
-        return AetherValue(TransposeVectorType(value.type_name.element_type, len(value.value)), vector)
+            elements = [_conjugate_scalar(element) for element in elements]
+        return AetherValue(
+            VectorType(value.type_name.element_type, len(elements), result_orientation),
+            elements,
+        )
     matrix_type = _require_numeric_matrix_type(value.type_name, label)
     rows = len(value.value)
     cols = len(value.value[0].value) if value.value else 0
@@ -401,15 +404,30 @@ def _transpose_like_type(arg_types: list[AetherType | None], label: str) -> Aeth
     if argument_type is None:
         return None
     if isinstance(argument_type, TransposeVectorType):
-        return VectorType(argument_type.element_type, argument_type.length)
+        raise AetherTypeError(
+            f"{label}(...) no longer accepts legacy TransposeVector values; "
+            "use oriented Vector values instead."
+        )
     if isinstance(argument_type, VectorType):
         if argument_type.element_type not in NUMERIC_TYPES:
             raise AetherTypeError(f"{label}(...) expects a vector with numeric elements.")
-        return TransposeVectorType(argument_type.element_type, argument_type.length)
+        return VectorType(
+            argument_type.element_type,
+            argument_type.length,
+            _flipped_vector_orientation(argument_type.orientation, label),
+        )
     matrix_type = _require_numeric_matrix_type(argument_type, label)
     rows = matrix_type.rows
     cols = matrix_type.cols
     return MatrixType(matrix_type.element_type, cols, rows)
+
+
+def _flipped_vector_orientation(orientation: str | None, label: str) -> str:
+    if orientation == "row":
+        return "column"
+    if orientation == "column":
+        return "row"
+    raise AetherTypeError(f"{label}(...) expects a vector with row or column orientation.")
 
 
 def _matmul_type(arg_types: list[AetherType | None]) -> AetherType | None:

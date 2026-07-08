@@ -4,7 +4,7 @@ import pytest
 
 from aether.errors import AetherRuntimeError, AetherTypeError
 from aether.runner import run_aether
-from aether.types import MatrixType, TransposeVectorType, VectorType
+from aether.types import MatrixType, VectorType
 
 
 def values(vector):
@@ -74,7 +74,7 @@ println(ok);
     assert result.output == "[3 4]\n3\n4\n3\n4\n4\ntrue\n"
 
 
-def test_size_preserves_transpose_vector_row_orientation() -> None:
+def test_size_preserves_transposed_vector_identity() -> None:
     result = run_aether(
         """
 import Math.LinearAlgebra
@@ -83,17 +83,14 @@ t = transpose(v);
 s = size(t);
 println(s);
 println(s[1]);
-println(s[2]);
-println(rows(t));
-println(cols(t));
-println(columns(t));
 """
     )
 
-    assert result.env["t"].type_name == TransposeVectorType("int", 3)
-    assert result.env["s"].type_name == VectorType("int", 2)
-    assert values(result.env["s"]) == [1, 3]
-    assert result.output == "[1 3]\n1\n3\n1\n3\n3\n"
+    assert result.env["t"].type_name == VectorType("int", 3, "column")
+    assert result.env["t"].type_name.orientation == "column"
+    assert result.env["s"].type_name == VectorType("int", 1)
+    assert values(result.env["s"]) == [3]
+    assert result.output == "[3]\n3\n"
 
 
 def test_size_scalar_shape_has_no_dimension_index() -> None:
@@ -215,7 +212,7 @@ def test_vectors_are_1d_values_and_simple_indexing_returns_scalar() -> None:
     assert result.output == "1\n"
 
 
-def test_transpose_vector_is_a_view_orientation_and_double_transpose_returns_vector() -> None:
+def test_transpose_vector_flips_orientation_and_double_transpose_returns_vector() -> None:
     result = run_aether(
         """
 import Math.LinearAlgebra
@@ -227,31 +224,32 @@ println(a);
 """
     )
 
-    assert result.env["t"].type_name == TransposeVectorType("int", 3)
-    assert result.env["w"].type_name == VectorType("int", 3)
+    assert result.env["t"].type_name == VectorType("int", 3, "column")
+    assert result.env["t"].type_name.orientation == "column"
+    assert result.env["w"].type_name == VectorType("int", 3, "row")
+    assert result.env["w"].type_name.orientation == "row"
     assert result.env["a"].type_name == "int"
     assert result.output == "1\n"
 
 
-def test_star_dispatches_vector_dot_outer_and_matrix_vector_products() -> None:
+def test_star_dispatches_matrix_vector_products() -> None:
     result = run_aether(
         """
 import Math.LinearAlgebra
-v = [1, 2, 3];
-w = [4, 5, 6];
 A = [1 2; 3 4];
-x = transpose(v) * w;
-O = v * transpose(w);
 y = A * [5, 6];
 """
     )
 
-    assert result.env["x"].type_name == "int"
-    assert result.env["x"].value == 32
-    assert result.env["O"].type_name == MatrixType("int", 3, 3)
-    assert matrix_values(result.env["O"]) == [[4, 5, 6], [8, 10, 12], [12, 15, 18]]
     assert result.env["y"].type_name == VectorType("int", 2)
     assert values(result.env["y"]) == [17, 39]
+
+
+def test_star_rejects_oriented_vector_products_until_matmul_migration() -> None:
+    with pytest.raises(AetherTypeError, match="ambiguous"):
+        run_aether("import Math.LinearAlgebra\nv = [1, 2, 3]; w = [4, 5, 6]; x = transpose(v) * w;")
+    with pytest.raises(AetherTypeError, match="ambiguous"):
+        run_aether("import Math.LinearAlgebra\nv = [1, 2, 3]; w = [4, 5, 6]; O = v * transpose(w);")
 
 
 def test_vector_star_vector_is_ambiguous() -> None:

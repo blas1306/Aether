@@ -4,7 +4,7 @@ import pytest
 
 from aether.errors import AetherRuntimeError, AetherSyntaxError, AetherTypeError
 from aether.runner import run_aether
-from aether.types import ListType, MatrixType, TransposeVectorType, VectorType
+from aether.types import ListType, MatrixType, VectorType
 
 
 def test_inferred_assignment():
@@ -608,9 +608,9 @@ def test_print_matrix_pretty():
     assert result.output == "[1 2; 3 4]\n"
 
 
-def test_print_one_by_one_matrix_as_scalar():
-    result = run_aether("println(Math.LinearAlgebra.transpose([1; 2]) * [3; 4]);")
-    assert result.output == "11\n"
+def test_transposed_vector_product_waits_for_oriented_matmul():
+    with pytest.raises(AetherTypeError, match="ambiguous"):
+        run_aether("println(Math.LinearAlgebra.transpose([1; 2]) * [3; 4]);")
 
 
 def test_print_double_matrix_pretty():
@@ -915,9 +915,10 @@ def test_norm_rejects_non_numeric():
 
 def test_transpose_row_vector():
     result = run_aether("x = Math.LinearAlgebra.transpose([1 2 3]); println(x);")
-    assert result.env["x"].type_name == TransposeVectorType("int", 3)
-    assert vector_values(result.env["x"].value) == [1, 2, 3]
-    assert result.output == "[1 2 3]\n"
+    assert result.env["x"].type_name == VectorType("int", 3, "column")
+    assert result.env["x"].type_name.orientation == "column"
+    assert vector_values(result.env["x"]) == [1, 2, 3]
+    assert result.output == "[1; 2; 3]\n"
 
 
 def test_print_transpose_pretty():
@@ -928,8 +929,9 @@ def test_print_transpose_pretty():
 
 def test_transpose_column_vector():
     result = run_aether("x = Math.LinearAlgebra.transpose([1; 2; 3]); println(x);")
-    assert result.env["x"].type_name == TransposeVectorType("int", 3)
-    assert vector_values(result.env["x"].value) == [1, 2, 3]
+    assert result.env["x"].type_name == VectorType("int", 3, "row")
+    assert result.env["x"].type_name.orientation == "row"
+    assert vector_values(result.env["x"]) == [1, 2, 3]
     assert result.output == "[1 2 3]\n"
 
 
@@ -986,18 +988,16 @@ println(C);
     assert result.output == "[19 22; 43 50]\n"
 
 
-def test_matmul_row_column():
-    result = run_aether(
+def test_matmul_row_column_waits_for_oriented_vectors():
+    with pytest.raises(AetherTypeError, match="ambiguous"):
+        run_aether(
         """
 u = [1 2 3];
 v = [4; 5; 6];
 C = Math.LinearAlgebra.transpose(v) * u;
 println(C);
 """
-    )
-    assert result.env["C"].type_name == "int"
-    assert result.env["C"].value == 32
-    assert result.output == "32\n"
+        )
 
 
 def test_print_matmul_pretty():
@@ -1032,24 +1032,21 @@ println(C);
     assert result.output == "[17 39]\n"
 
 
-def test_matmul_row_vector_matrix():
-    result = run_aether(
+def test_matmul_row_vector_matrix_waits_for_oriented_vectors():
+    with pytest.raises(AetherTypeError, match="numeric operands"):
+        run_aether(
         """
 u = [1; 2];
 A = [3 4; 5 6];
 C = Math.LinearAlgebra.transpose(u) * A;
 println(C);
 """
-    )
-    assert result.env["C"].type_name == TransposeVectorType("int", 2)
-    assert vector_values(result.env["C"].value) == [13, 16]
-    assert result.output == "[13 16]\n"
+        )
 
 
-def test_matmul_promotes_to_double():
-    result = run_aether("C = Math.LinearAlgebra.transpose([1; 2.0]) * [3; 4];")
-    assert result.env["C"].type_name == "double"
-    assert result.env["C"].value == pytest.approx(11.0)
+def test_matmul_transposed_vector_promotion_waits_for_oriented_vectors():
+    with pytest.raises(AetherTypeError, match="ambiguous"):
+        run_aether("C = Math.LinearAlgebra.transpose([1; 2.0]) * [3; 4];")
 
 
 def test_matmul_does_not_mutate_operands():

@@ -234,12 +234,15 @@ should be true:
 
 ### Phase 1: Transpose Orientation
 
+Status: Implemented.
+
 - Change `transpose` and `conjtranspose` type inference to return
   `VectorType(element, length, flipped_orientation)` for vector inputs.
 - Change runtime transpose to return an oriented `VectorType`, not a
   `TransposeVectorType`.
 - Decide the compatibility story for existing `TransposeVectorType` values:
-  reject, normalize, or keep only as a temporary internal shim.
+  reject, normalize, or keep only as a temporary internal shim. Implemented as
+  rejection for `transpose` and `conjtranspose`.
 
 ### Phase 2: `inner` and `norm`
 
@@ -276,4 +279,3 @@ should be true:
 - Ensure runtime calls receive orientation and shape metadata where needed.
 - Align LLVM ABI with the final first-class vector/matrix representation.
 - Add backend tests only after the interpreter/typechecker semantics are stable.
-
