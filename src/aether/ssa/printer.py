@@ -20,6 +20,7 @@ from .model import (
     SSAJump,
     SSAMatrixGet,
     SSAMatrixNew,
+    SSAMatrixSet,
     SSAModule,
     SSAParameter,
     SSAPhi,
@@ -27,6 +28,7 @@ from .model import (
     SSAValue,
     SSAVectorGet,
     SSAVectorNew,
+    SSAVectorSet,
 )
 
 
@@ -110,6 +112,17 @@ class SSAPrinter:
             return (
                 f"array_set {self._value(instruction.array)}, "
                 f"{self._value(instruction.index)}, {self._value(instruction.value)}"
+            )
+        if isinstance(instruction, SSAVectorSet):
+            return (
+                f"vector_set {self._value(instruction.vector)}, "
+                f"{self._value(instruction.index)}, {self._value(instruction.value)}"
+            )
+        if isinstance(instruction, SSAMatrixSet):
+            return (
+                f"matrix_set {self._value(instruction.matrix)}, {self._value(instruction.row)}, "
+                f"{self._value(instruction.column)}, {self._value(instruction.value)} "
+                f"cols {instruction.cols}"
             )
         if isinstance(instruction, SSAArrayLength):
             return f"{self._typed_value(instruction.result)} = array_length {self._value(instruction.array)}"

@@ -19,6 +19,7 @@ from .model import (
     SSAJump,
     SSAMatrixGet,
     SSAMatrixNew,
+    SSAMatrixSet,
     SSAModule,
     SSAParameter,
     SSAPhi,
@@ -26,6 +27,7 @@ from .model import (
     SSAValue,
     SSAVectorGet,
     SSAVectorNew,
+    SSAVectorSet,
 )
 from .phi_placement import PhiPlacement
 from .printer import SSAPrinter, print_ssa
@@ -53,6 +55,7 @@ __all__ = [
     "SSAJump",
     "SSAMatrixGet",
     "SSAMatrixNew",
+    "SSAMatrixSet",
     "SSAModule",
     "SSAParameter",
     "SSAPhi",
@@ -65,6 +68,7 @@ __all__ = [
     "SSAValue",
     "SSAVectorGet",
     "SSAVectorNew",
+    "SSAVectorSet",
     "SSAVerificationError",
     "SSAVerifier",
     "print_ssa",

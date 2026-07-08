@@ -21,12 +21,14 @@ from .model import (
     IRLoad,
     IRMatrixGet,
     IRMatrixNew,
+    IRMatrixSet,
     IRModule,
     IRReturn,
     IRStore,
     IRValue,
     IRVectorGet,
     IRVectorNew,
+    IRVectorSet,
 )
 from .types import (
     ArrayType,
@@ -372,6 +374,14 @@ class IRVerifier:
             self._verify_array_set(instruction, state, value_types)
             return state
 
+        if isinstance(instruction, IRVectorSet):
+            self._verify_vector_set(instruction, state, value_types)
+            return state
+
+        if isinstance(instruction, IRMatrixSet):
+            self._verify_matrix_set(instruction, state, value_types)
+            return state
+
         if isinstance(instruction, IRArrayLength):
             self._verify_array_length(instruction, state, value_types)
             return self._define_value(state, instruction.result)
@@ -578,6 +588,49 @@ class IRVerifier:
             self._fail(
                 f"Array set value type mismatch: expected "
                 f"{instruction.array.type.element}, got {instruction.value.type}"
+            )
+
+    def _verify_vector_set(
+        self,
+        instruction: IRVectorSet,
+        state: _State,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.vector, state, value_types)
+        self._require_defined(instruction.index, state, value_types)
+        self._require_defined(instruction.value, state, value_types)
+        if not isinstance(instruction.vector.type, VectorType):
+            self._fail(f"Vector set expects vector value, got {instruction.vector.type}")
+        if not isinstance(instruction.index.type, IntType):
+            self._fail(f"Vector set index must be int, got {instruction.index.type}")
+        if instruction.value.type != instruction.vector.type.element:
+            self._fail(
+                f"Vector set value type mismatch: expected "
+                f"{instruction.vector.type.element}, got {instruction.value.type}"
+            )
+
+    def _verify_matrix_set(
+        self,
+        instruction: IRMatrixSet,
+        state: _State,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.matrix, state, value_types)
+        self._require_defined(instruction.row, state, value_types)
+        self._require_defined(instruction.column, state, value_types)
+        self._require_defined(instruction.value, state, value_types)
+        if not isinstance(instruction.matrix.type, MatrixType):
+            self._fail(f"Matrix set expects matrix value, got {instruction.matrix.type}")
+        if not isinstance(instruction.row.type, IntType):
+            self._fail(f"Matrix set row index must be int, got {instruction.row.type}")
+        if not isinstance(instruction.column.type, IntType):
+            self._fail(f"Matrix set column index must be int, got {instruction.column.type}")
+        if instruction.cols <= 0:
+            self._fail(f"Matrix set column count must be positive, got {instruction.cols}")
+        if instruction.value.type != instruction.matrix.type.element:
+            self._fail(
+                f"Matrix set value type mismatch: expected "
+                f"{instruction.matrix.type.element}, got {instruction.value.type}"
             )
 
     def _verify_array_length(

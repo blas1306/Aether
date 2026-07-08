@@ -39,12 +39,14 @@ from .model import (
     SSAJump,
     SSAMatrixGet,
     SSAMatrixNew,
+    SSAMatrixSet,
     SSAModule,
     SSAPhi,
     SSAReturn,
     SSAValue,
     SSAVectorGet,
     SSAVectorNew,
+    SSAVectorSet,
 )
 
 
@@ -278,6 +280,14 @@ class SSAVerifier:
                 self._verify_array_set(instruction, value_types)
                 continue
 
+            if isinstance(instruction, SSAVectorSet):
+                self._verify_vector_set(instruction, value_types)
+                continue
+
+            if isinstance(instruction, SSAMatrixSet):
+                self._verify_matrix_set(instruction, value_types)
+                continue
+
             if isinstance(instruction, SSAArrayLength):
                 self._verify_array_length(instruction, value_types)
                 continue
@@ -493,6 +503,47 @@ class SSAVerifier:
             self._fail(
                 f"Array set value type mismatch: expected "
                 f"{instruction.array.type.element}, got {instruction.value.type}"
+            )
+
+    def _verify_vector_set(
+        self,
+        instruction: SSAVectorSet,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.vector, value_types)
+        self._require_defined(instruction.index, value_types)
+        self._require_defined(instruction.value, value_types)
+        if not isinstance(instruction.vector.type, VectorType):
+            self._fail(f"Vector set expects vector value, got {instruction.vector.type}")
+        if not isinstance(instruction.index.type, IntType):
+            self._fail(f"Vector set index must be int, got {instruction.index.type}")
+        if instruction.value.type != instruction.vector.type.element:
+            self._fail(
+                f"Vector set value type mismatch: expected "
+                f"{instruction.vector.type.element}, got {instruction.value.type}"
+            )
+
+    def _verify_matrix_set(
+        self,
+        instruction: SSAMatrixSet,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.matrix, value_types)
+        self._require_defined(instruction.row, value_types)
+        self._require_defined(instruction.column, value_types)
+        self._require_defined(instruction.value, value_types)
+        if not isinstance(instruction.matrix.type, MatrixType):
+            self._fail(f"Matrix set expects matrix value, got {instruction.matrix.type}")
+        if not isinstance(instruction.row.type, IntType):
+            self._fail(f"Matrix set row index must be int, got {instruction.row.type}")
+        if not isinstance(instruction.column.type, IntType):
+            self._fail(f"Matrix set column index must be int, got {instruction.column.type}")
+        if instruction.cols <= 0:
+            self._fail(f"Matrix set column count must be positive, got {instruction.cols}")
+        if instruction.value.type != instruction.matrix.type.element:
+            self._fail(
+                f"Matrix set value type mismatch: expected "
+                f"{instruction.matrix.type.element}, got {instruction.value.type}"
             )
 
     def _verify_array_length(

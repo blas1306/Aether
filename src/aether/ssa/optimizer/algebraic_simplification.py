@@ -20,12 +20,14 @@ from aether.ssa.model import (
     SSAJump,
     SSAMatrixGet,
     SSAMatrixNew,
+    SSAMatrixSet,
     SSAModule,
     SSAPhi,
     SSAReturn,
     SSAValue,
     SSAVectorGet,
     SSAVectorNew,
+    SSAVectorSet,
 )
 
 from .result import SSAOptimizationResult
@@ -303,6 +305,22 @@ class SSAAlgebraicSimplifier:
                 self._resolve(instruction.array, replacements),
                 self._resolve(instruction.index, replacements),
                 self._resolve(instruction.value, replacements),
+            )
+
+        if isinstance(instruction, SSAVectorSet):
+            return SSAVectorSet(
+                self._resolve(instruction.vector, replacements),
+                self._resolve(instruction.index, replacements),
+                self._resolve(instruction.value, replacements),
+            )
+
+        if isinstance(instruction, SSAMatrixSet):
+            return SSAMatrixSet(
+                self._resolve(instruction.matrix, replacements),
+                self._resolve(instruction.row, replacements),
+                self._resolve(instruction.column, replacements),
+                self._resolve(instruction.value, replacements),
+                instruction.cols,
             )
 
         if isinstance(instruction, SSAArrayLength):

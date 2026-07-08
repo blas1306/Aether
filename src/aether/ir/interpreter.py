@@ -22,12 +22,14 @@ from .model import (
     IRLoad,
     IRMatrixGet,
     IRMatrixNew,
+    IRMatrixSet,
     IRModule,
     IRReturn,
     IRStore,
     IRValue,
     IRVectorGet,
     IRVectorNew,
+    IRVectorSet,
 )
 from .types import BoolType, DoubleType, IntType, VoidType
 
@@ -198,6 +200,26 @@ class IRInterpreter:
             index = self._value(instruction.index, frame)
             self._check_array_index(array, index)
             array[index] = self._value(instruction.value, frame)
+            return False, None, None
+
+        if isinstance(instruction, IRVectorSet):
+            vector = self._value(instruction.vector, frame)
+            index = self._value(instruction.index, frame)
+            self._check_array_index(vector, index)
+            vector[index] = self._value(instruction.value, frame)
+            return False, None, None
+
+        if isinstance(instruction, IRMatrixSet):
+            matrix = self._value(instruction.matrix, frame)
+            row = self._value(instruction.row, frame)
+            column = self._value(instruction.column, frame)
+            if not isinstance(matrix, list):
+                raise IRExecutionError("IR matrix set requires a matrix value")
+            if type(row) is not int or type(column) is not int:
+                raise IRExecutionError("IR matrix indices must be int")
+            offset = row * instruction.cols + column
+            self._check_array_index(matrix, offset)
+            matrix[offset] = self._value(instruction.value, frame)
             return False, None, None
 
         if isinstance(instruction, IRArrayLength):

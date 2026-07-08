@@ -18,12 +18,14 @@ from aether.ir.model import (
     IRLoad,
     IRMatrixGet,
     IRMatrixNew,
+    IRMatrixSet,
     IRModule,
     IRReturn,
     IRStore,
     IRValue,
     IRVectorGet,
     IRVectorNew,
+    IRVectorSet,
 )
 
 from .result import OptimizationResult
@@ -163,6 +165,10 @@ class DeadCodeEliminator:
             return (instruction.matrix, instruction.row, instruction.column)
         if isinstance(instruction, IRArraySet):
             return (instruction.array, instruction.index, instruction.value)
+        if isinstance(instruction, IRVectorSet):
+            return (instruction.vector, instruction.index, instruction.value)
+        if isinstance(instruction, IRMatrixSet):
+            return (instruction.matrix, instruction.row, instruction.column, instruction.value)
         if isinstance(instruction, IRArrayLength):
             return (instruction.array,)
         if isinstance(instruction, IRBranch):

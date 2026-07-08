@@ -20,12 +20,14 @@ from aether.ir.model import (
     IRLoad,
     IRMatrixGet,
     IRMatrixNew,
+    IRMatrixSet,
     IRModule,
     IRReturn,
     IRStore,
     IRValue,
     IRVectorGet,
     IRVectorNew,
+    IRVectorSet,
 )
 from aether.ir.types import IntType
 
@@ -279,6 +281,21 @@ class AlgebraicSimplifier:
                 instruction,
                 array=self._resolve(instruction.array, replacements),
                 index=self._resolve(instruction.index, replacements),
+                value=self._resolve(instruction.value, replacements),
+            )
+        if isinstance(instruction, IRVectorSet):
+            return replace(
+                instruction,
+                vector=self._resolve(instruction.vector, replacements),
+                index=self._resolve(instruction.index, replacements),
+                value=self._resolve(instruction.value, replacements),
+            )
+        if isinstance(instruction, IRMatrixSet):
+            return replace(
+                instruction,
+                matrix=self._resolve(instruction.matrix, replacements),
+                row=self._resolve(instruction.row, replacements),
+                column=self._resolve(instruction.column, replacements),
                 value=self._resolve(instruction.value, replacements),
             )
         if isinstance(instruction, IRArrayLength):

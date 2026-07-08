@@ -22,6 +22,7 @@ from aether.ssa.model import (
     SSAJump,
     SSAMatrixGet,
     SSAMatrixNew,
+    SSAMatrixSet,
     SSAModule,
     SSAParameter,
     SSAPhi,
@@ -29,6 +30,7 @@ from aether.ssa.model import (
     SSAValue,
     SSAVectorGet,
     SSAVectorNew,
+    SSAVectorSet,
 )
 
 from .types import LLVMBackendError, llvm_type
@@ -172,6 +174,10 @@ class LLVMPrinter:
             return "\n  ".join(self._print_matrix_get(instruction))
         if isinstance(instruction, SSAArraySet):
             return "\n  ".join(self._print_array_set(instruction))
+        if isinstance(instruction, SSAVectorSet):
+            return "\n  ".join(self._print_vector_set(instruction))
+        if isinstance(instruction, SSAMatrixSet):
+            return "\n  ".join(self._print_matrix_set(instruction))
         if isinstance(instruction, SSAArrayLength):
             return "\n  ".join(self._print_array_length(instruction))
         self._unsupported(type(instruction).__name__)
@@ -467,23 +473,17 @@ class LLVMPrinter:
         self._uses_array_type = True
 
         result = self._new_temp(instruction.result)
-        data = self._synthetic_temp("matrix.data")
-        row64 = self._synthetic_temp("matrix.row64")
-        column64 = self._synthetic_temp("matrix.column64")
-        row_offset = self._synthetic_temp("matrix.row.offset")
-        linear_index = self._synthetic_temp("matrix.index")
-        element_ptr = self._synthetic_temp("matrix.elem")
         element_type = llvm_type(instruction.result.type)
-        lines = self._array_data_pointer(data, self._operand(instruction.matrix))
-        lines.append(f"{row64} = sext i32 {self._operand(instruction.row)} to i64")
-        lines.append(f"{column64} = sext i32 {self._operand(instruction.column)} to i64")
-        lines.append(f"{row_offset} = mul i64 {row64}, {instruction.cols}")
-        lines.append(f"{linear_index} = add i64 {row_offset}, {column64}")
-        lines.append(
-            f"{element_ptr} = getelementptr {element_type}, ptr {data}, i64 {linear_index}"
+        element_ptr = self._matrix_element_pointer(
+            self._operand(instruction.matrix),
+            instruction.row,
+            instruction.column,
+            instruction.cols,
+            instruction.result.type,
         )
-        lines.append(f"{result} = load {element_type}, ptr {element_ptr}")
-        return lines
+        return element_ptr.lines + [
+            f"{result} = load {element_type}, ptr {element_ptr.value}"
+        ]
 
     def _print_array_set(self, instruction: SSAArraySet) -> list[str]:
         if not isinstance(instruction.array.type, ArrayType):
@@ -494,6 +494,44 @@ class LLVMPrinter:
         element_ptr = self._array_element_pointer(
             self._operand(instruction.array),
             instruction.index,
+            instruction.value.type,
+        )
+        return element_ptr.lines + [
+            f"store {element_type} {self._operand(instruction.value)}, ptr {element_ptr.value}"
+        ]
+
+    def _print_vector_set(self, instruction: SSAVectorSet) -> list[str]:
+        if not isinstance(instruction.vector.type, VectorType):
+            raise LLVMBackendError("LLVM vector_set expects a VectorType source")
+        if instruction.value.type != instruction.vector.type.element:
+            raise LLVMBackendError("LLVM vector_set value type must match vector element type")
+        self._uses_array_type = True
+
+        element_type = llvm_type(instruction.value.type)
+        element_ptr = self._array_element_pointer(
+            self._operand(instruction.vector),
+            instruction.index,
+            instruction.value.type,
+        )
+        return element_ptr.lines + [
+            f"store {element_type} {self._operand(instruction.value)}, ptr {element_ptr.value}"
+        ]
+
+    def _print_matrix_set(self, instruction: SSAMatrixSet) -> list[str]:
+        if not isinstance(instruction.matrix.type, MatrixType):
+            raise LLVMBackendError("LLVM matrix_set expects a MatrixType source")
+        if instruction.cols <= 0:
+            raise LLVMBackendError("LLVM matrix_set requires a positive column count")
+        if instruction.value.type != instruction.matrix.type.element:
+            raise LLVMBackendError("LLVM matrix_set value type must match matrix element type")
+        self._uses_array_type = True
+
+        element_type = llvm_type(instruction.value.type)
+        element_ptr = self._matrix_element_pointer(
+            self._operand(instruction.matrix),
+            instruction.row,
+            instruction.column,
+            instruction.cols,
             instruction.value.type,
         )
         return element_ptr.lines + [
@@ -527,6 +565,31 @@ class LLVMPrinter:
         lines.append(f"{index64} = sext i32 {self._operand(index)} to i64")
         lines.append(
             f"{element_ptr} = getelementptr {llvm_element_type}, ptr {data}, i64 {index64}"
+        )
+        return self._ArrayPointer(element_ptr, lines)
+
+    def _matrix_element_pointer(
+        self,
+        matrix: str,
+        row: SSAValue,
+        column: SSAValue,
+        cols: int,
+        element_type: object,
+    ) -> _ArrayPointer:
+        data = self._synthetic_temp("matrix.data")
+        row64 = self._synthetic_temp("matrix.row64")
+        column64 = self._synthetic_temp("matrix.column64")
+        row_offset = self._synthetic_temp("matrix.row.offset")
+        linear_index = self._synthetic_temp("matrix.index")
+        element_ptr = self._synthetic_temp("matrix.elem")
+        llvm_element_type = llvm_type(element_type)
+        lines = self._array_data_pointer(data, matrix)
+        lines.append(f"{row64} = sext i32 {self._operand(row)} to i64")
+        lines.append(f"{column64} = sext i32 {self._operand(column)} to i64")
+        lines.append(f"{row_offset} = mul i64 {row64}, {cols}")
+        lines.append(f"{linear_index} = add i64 {row_offset}, {column64}")
+        lines.append(
+            f"{element_ptr} = getelementptr {llvm_element_type}, ptr {data}, i64 {linear_index}"
         )
         return self._ArrayPointer(element_ptr, lines)
 

@@ -131,7 +131,7 @@ class EnumDeclaration:
 
 @dataclass(frozen=True)
 class Assignment:
-    name: str
+    name: str | Expression
     expression: Expression
     line: int = 1
     column: int = 1

@@ -949,6 +949,31 @@ int main() {
     assert stderr == ""
 
 
+def test_emit_llvm_prints_vector_and_matrix_index_writes(tmp_path: Path) -> None:
+    program = tmp_path / "emit_llvm_index_writes.ae"
+    program.write_text(
+        """
+int main() {
+    Vector<int, Row> v = [4, 5, 6];
+    Matrix<int> A = [1, 2; 3, 4];
+    v[1] = 9;
+    A[1, 0] = v[1];
+    return A[1, 0];
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert "store i32 9" in stdout
+    assert "ptr %matrix.elem" in stdout
+    assert "mul i64 %matrix.row64" in stdout
+    assert "ret i32" in stdout
+    assert stderr == ""
+
+
 def test_emit_llvm_prints_string_literal_global(tmp_path: Path) -> None:
     program = tmp_path / "emit_llvm_string.ae"
     program.write_text(
@@ -1634,6 +1659,34 @@ int main() {
     assert stderr == ""
 
 
+def test_build_accepts_vector_and_matrix_index_writes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    program = tmp_path / "build_index_writes.ae"
+    output = tmp_path / "build_index_writes"
+    program.write_text(
+        """
+int main() {
+    Vector<int, Row> v = [4, 5, 6];
+    Matrix<int> A = [1, 2; 3, 4];
+    v[1] = 9;
+    A[1, 0] = v[1];
+    return A[1, 0];
+}
+""",
+        encoding="utf-8",
+    )
+    clang_commands, _program_commands = fake_native_toolchain(monkeypatch)
+
+    exit_code, stdout, stderr = run_cli(["build", str(program), "-o", str(output)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert len(clang_commands) == 1
+    assert stdout == f"Built executable: {output.resolve()}\n"
+    assert stderr == ""
+
+
 def test_build_reports_clear_error_when_clang_is_unavailable(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1888,6 +1941,34 @@ int main() {
     assert stderr == ""
     completed = subprocess.run([str(output)], check=False)
     assert completed.returncode == 8
+
+
+def test_build_index_writes_smoke_compiles_and_runs_with_clang_if_available(tmp_path: Path) -> None:
+    if shutil.which("clang") is None:
+        pytest.skip("clang is not available")
+
+    program = tmp_path / "index_writes.ae"
+    output = tmp_path / "index_writes"
+    program.write_text(
+        """
+int main() {
+    Vector<int, Row> v = [4, 5, 6];
+    Matrix<int> A = [1, 2; 3, 4];
+    v[1] = 9;
+    A[1, 0] = v[1];
+    return A[1, 0];
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["build", str(program), "-o", str(output)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert stdout == f"Built executable: {output.resolve()}\n"
+    assert stderr == ""
+    completed = subprocess.run([str(output)], check=False)
+    assert completed.returncode == 9
 
 
 def test_build_call_smoke_compiles_and_runs_with_clang_if_available(

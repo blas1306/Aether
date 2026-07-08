@@ -124,6 +124,22 @@ class IRArraySet(IRInstruction):
 
 
 @dataclass(frozen=True)
+class IRVectorSet(IRInstruction):
+    vector: IRValue
+    index: IRValue
+    value: IRValue
+
+
+@dataclass(frozen=True)
+class IRMatrixSet(IRInstruction):
+    matrix: IRValue
+    row: IRValue
+    column: IRValue
+    value: IRValue
+    cols: int
+
+
+@dataclass(frozen=True)
 class IRArrayLength(IRInstruction):
     result: IRValue
     array: IRValue

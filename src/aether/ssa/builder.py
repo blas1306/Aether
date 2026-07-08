@@ -21,12 +21,14 @@ from aether.ir.model import (
     IRLoad,
     IRMatrixGet,
     IRMatrixNew,
+    IRMatrixSet,
     IRModule,
     IRReturn,
     IRStore,
     IRValue,
     IRVectorGet,
     IRVectorNew,
+    IRVectorSet,
 )
 
 from .model import (
@@ -46,6 +48,7 @@ from .model import (
     SSAJump,
     SSAMatrixGet,
     SSAMatrixNew,
+    SSAMatrixSet,
     SSAModule,
     SSAParameter,
     SSAPhi,
@@ -53,6 +56,7 @@ from .model import (
     SSAValue,
     SSAVectorGet,
     SSAVectorNew,
+    SSAVectorSet,
 )
 
 
@@ -544,6 +548,19 @@ class SSABuilder:
             index = self._resolve_value(instruction.index, state.value_map)
             value = self._resolve_value(instruction.value, state.value_map)
             return SSAArraySet(array, index, value)
+
+        if isinstance(instruction, IRVectorSet):
+            vector = self._resolve_value(instruction.vector, state.value_map)
+            index = self._resolve_value(instruction.index, state.value_map)
+            value = self._resolve_value(instruction.value, state.value_map)
+            return SSAVectorSet(vector, index, value)
+
+        if isinstance(instruction, IRMatrixSet):
+            matrix = self._resolve_value(instruction.matrix, state.value_map)
+            row = self._resolve_value(instruction.row, state.value_map)
+            column = self._resolve_value(instruction.column, state.value_map)
+            value = self._resolve_value(instruction.value, state.value_map)
+            return SSAMatrixSet(matrix, row, column, value, instruction.cols)
 
         if isinstance(instruction, IRArrayLength):
             result = self._define_value(instruction.result, state.value_map)

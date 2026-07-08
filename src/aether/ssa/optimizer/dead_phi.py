@@ -15,12 +15,16 @@ from aether.ssa.model import (
     SSAFunction,
     SSAInstruction,
     SSAJump,
+    SSAMatrixGet,
     SSAMatrixNew,
+    SSAMatrixSet,
     SSAModule,
     SSAPhi,
     SSAReturn,
     SSAValue,
+    SSAVectorGet,
     SSAVectorNew,
+    SSAVectorSet,
 )
 
 from .result import SSAOptimizationResult
@@ -136,9 +140,33 @@ class DeadPhiEliminator:
             used_values.add(instruction.index)
             return
 
+        if isinstance(instruction, SSAVectorGet):
+            used_values.add(instruction.vector)
+            used_values.add(instruction.index)
+            return
+
+        if isinstance(instruction, SSAMatrixGet):
+            used_values.add(instruction.matrix)
+            used_values.add(instruction.row)
+            used_values.add(instruction.column)
+            return
+
         if isinstance(instruction, SSAArraySet):
             used_values.add(instruction.array)
             used_values.add(instruction.index)
+            used_values.add(instruction.value)
+            return
+
+        if isinstance(instruction, SSAVectorSet):
+            used_values.add(instruction.vector)
+            used_values.add(instruction.index)
+            used_values.add(instruction.value)
+            return
+
+        if isinstance(instruction, SSAMatrixSet):
+            used_values.add(instruction.matrix)
+            used_values.add(instruction.row)
+            used_values.add(instruction.column)
             used_values.add(instruction.value)
             return
 

@@ -604,16 +604,9 @@ class Parser:
             if isinstance(expression, ast.Identifier):
                 return ast.Assignment(expression.name, value, equals.line, equals.column)
             if isinstance(expression, ast.MatrixIndexExpression):
-                return ast.MatrixIndexAssignment(
-                    expression.matrix,
-                    expression.row,
-                    expression.column,
-                    value,
-                    equals.line,
-                    equals.column,
-                )
+                return ast.Assignment(expression, value, equals.line, equals.column)
             if isinstance(expression, ast.IndexExpression):
-                return ast.IndexAssignment(expression.array, expression.index, value, equals.line, equals.column)
+                return ast.Assignment(expression, value, equals.line, equals.column)
             if isinstance(expression, ast.FieldAccess):
                 if not self._is_field_assignment_lvalue(expression):
                     raise self._error(

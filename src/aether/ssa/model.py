@@ -112,6 +112,22 @@ class SSAArraySet(SSAInstruction):
 
 
 @dataclass(frozen=True)
+class SSAVectorSet(SSAInstruction):
+    vector: SSAValue
+    index: SSAValue
+    value: SSAValue
+
+
+@dataclass(frozen=True)
+class SSAMatrixSet(SSAInstruction):
+    matrix: SSAValue
+    row: SSAValue
+    column: SSAValue
+    value: SSAValue
+    cols: int
+
+
+@dataclass(frozen=True)
 class SSAArrayLength(SSAInstruction):
     result: SSAValue
     array: SSAValue

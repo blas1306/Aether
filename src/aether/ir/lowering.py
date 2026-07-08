@@ -29,6 +29,7 @@ from .model import (
     IRLoad,
     IRMatrixGet,
     IRMatrixNew,
+    IRMatrixSet,
     IRModule,
     IRParameter,
     IRReturn,
@@ -36,6 +37,7 @@ from .model import (
     IRValue,
     IRVectorGet,
     IRVectorNew,
+    IRVectorSet,
 )
 from .types import (
     ArrayType,
@@ -200,6 +202,14 @@ class IRLowerer:
             return
 
         if isinstance(statement, ast.Assignment):
+            if isinstance(statement.name, ast.MatrixIndexExpression):
+                self._lower_matrix_index_assignment(statement.name, statement.expression, statement, context)
+                return
+            if isinstance(statement.name, ast.IndexExpression):
+                self._lower_index_assignment(statement.name, statement.expression, statement, context)
+                return
+            if not isinstance(statement.name, str):
+                self._fail("IR backend requires a variable or aggregate element assignment target.", statement)
             slot = context.locals.get(statement.name)
             if slot is None:
                 parameter = context.parameters.get(statement.name)
@@ -226,25 +236,27 @@ class IRLowerer:
             return
 
         if isinstance(statement, ast.IndexAssignment):
-            array = self._lower_expression(statement.array, context)
-            if not isinstance(array.type, ArrayType):
-                self._fail(
-                    f"IR backend only supports index assignment for arrays, got '{array.type}'.",
-                    statement,
-                )
-            index = self._lower_expression(statement.index, context)
-            self._require_same_type(index.type, IntType(), "array index must be int")
-            value = self._lower_expression(
+            self._lower_index_assignment(
+                ast.IndexExpression(statement.array, statement.index, statement.line, statement.column),
                 statement.expression,
+                statement,
                 context,
-                target_type=array.type.element,
             )
-            self._require_same_type(
-                value.type,
-                array.type.element,
-                "array index assignment requires an implicit conversion",
+            return
+
+        if isinstance(statement, ast.MatrixIndexAssignment):
+            self._lower_matrix_index_assignment(
+                ast.MatrixIndexExpression(
+                    statement.matrix,
+                    statement.row,
+                    statement.column_index,
+                    statement.line,
+                    statement.column,
+                ),
+                statement.expression,
+                statement,
+                context,
             )
-            context.block.instructions.append(IRArraySet(array, index, value))
             return
 
         if isinstance(statement, ast.ReturnStatement):
@@ -275,6 +287,83 @@ class IRLowerer:
             return
 
         self._unsupported(statement)
+
+    def _lower_index_assignment(
+        self,
+        target: ast.IndexExpression,
+        value_expression: ast.Expression,
+        statement: ast.Statement,
+        context: _FunctionContext,
+    ) -> None:
+        indexed = self._lower_expression(target.array, context)
+        if isinstance(indexed.type, VectorType):
+            index = self._lower_expression(target.index, context)
+            self._require_same_type(index.type, IntType(), "vector index must be int")
+            value = self._lower_expression(
+                value_expression,
+                context,
+                target_type=indexed.type.element,
+            )
+            self._require_same_type(
+                value.type,
+                indexed.type.element,
+                "vector index assignment requires an implicit conversion",
+            )
+            context.block.instructions.append(IRVectorSet(indexed, index, value))
+            return
+        if not isinstance(indexed.type, ArrayType):
+            self._fail(
+                f"IR backend only supports index assignment for arrays and vectors, got '{indexed.type}'.",
+                statement,
+            )
+        index = self._lower_expression(target.index, context)
+        self._require_same_type(index.type, IntType(), "array index must be int")
+        value = self._lower_expression(
+            value_expression,
+            context,
+            target_type=indexed.type.element,
+        )
+        self._require_same_type(
+            value.type,
+            indexed.type.element,
+            "array index assignment requires an implicit conversion",
+        )
+        context.block.instructions.append(IRArraySet(indexed, index, value))
+
+    def _lower_matrix_index_assignment(
+        self,
+        target: ast.MatrixIndexExpression,
+        value_expression: ast.Expression,
+        statement: ast.Statement,
+        context: _FunctionContext,
+    ) -> None:
+        matrix = self._lower_expression(target.matrix, context)
+        if not isinstance(matrix.type, MatrixType):
+            self._fail(
+                f"IR backend only supports two-dimensional assignment for matrices, got '{matrix.type}'.",
+                statement,
+            )
+        cols = context.matrix_cols.get(matrix.name)
+        if cols is None:
+            self._fail(
+                "IR backend requires known matrix dimensions for A[i, j].",
+                statement,
+            )
+        row = self._lower_expression(target.row, context)
+        self._require_same_type(row.type, IntType(), "matrix row index must be int")
+        column = self._lower_expression(target.column, context)
+        self._require_same_type(column.type, IntType(), "matrix column index must be int")
+        value = self._lower_expression(
+            value_expression,
+            context,
+            target_type=matrix.type.element,
+        )
+        self._require_same_type(
+            value.type,
+            matrix.type.element,
+            "matrix index assignment requires an implicit conversion",
+        )
+        context.block.instructions.append(IRMatrixSet(matrix, row, column, value, cols))
 
     def _lower_if(self, statement: ast.IfStatement, context: _FunctionContext) -> None:
         condition = self._lower_expression(statement.condition, context)
@@ -756,7 +845,7 @@ class IRLowerer:
     def _assigned_names(self, statements: list[ast.Statement]) -> set[str]:
         names: set[str] = set()
         for statement in statements:
-            if isinstance(statement, ast.Assignment):
+            if isinstance(statement, ast.Assignment) and isinstance(statement.name, str):
                 names.add(statement.name)
             elif isinstance(statement, ast.IfStatement):
                 names.update(self._assigned_names(statement.body))

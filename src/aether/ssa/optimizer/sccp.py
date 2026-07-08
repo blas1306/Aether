@@ -23,12 +23,14 @@ from aether.ssa.model import (
     SSAJump,
     SSAMatrixGet,
     SSAMatrixNew,
+    SSAMatrixSet,
     SSAModule,
     SSAPhi,
     SSAReturn,
     SSAValue,
     SSAVectorGet,
     SSAVectorNew,
+    SSAVectorSet,
 )
 
 from .result import SSAOptimizationResult
@@ -201,6 +203,9 @@ class SCCPAnalyzer:
         if isinstance(instruction, SSAArraySet):
             return
 
+        if isinstance(instruction, (SSAVectorSet, SSAMatrixSet)):
+            return
+
         if isinstance(instruction, SSABranch):
             self._evaluate_branch(block_name, instruction)
             return
@@ -362,6 +367,10 @@ class SCCPAnalyzer:
             return (instruction.matrix, instruction.row, instruction.column)
         if isinstance(instruction, SSAArraySet):
             return (instruction.array, instruction.index, instruction.value)
+        if isinstance(instruction, SSAVectorSet):
+            return (instruction.vector, instruction.index, instruction.value)
+        if isinstance(instruction, SSAMatrixSet):
+            return (instruction.matrix, instruction.row, instruction.column, instruction.value)
         if isinstance(instruction, SSAArrayLength):
             return (instruction.array,)
         if isinstance(instruction, SSAReturn) and instruction.value is not None:

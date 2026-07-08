@@ -26,6 +26,7 @@ EXPECTED_EXIT_CODES = {
     "int_to_double.ae": 12,
     "matrix_literal.ae": 0,
     "matrix_index.ae": 4,
+    "matrix_set.ae": 9,
     "max.ae": 12,
     "return_5.ae": 5,
     "string_choose.ae": 0,
@@ -35,6 +36,7 @@ EXPECTED_EXIT_CODES = {
     "vector_column_literal.ae": 0,
     "vector_index.ae": 5,
     "vector_literal.ae": 0,
+    "vector_set.ae": 9,
 }
 
 

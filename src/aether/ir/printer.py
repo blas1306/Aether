@@ -21,12 +21,14 @@ from .model import (
     IRLoad,
     IRMatrixGet,
     IRMatrixNew,
+    IRMatrixSet,
     IRModule,
     IRReturn,
     IRStore,
     IRValue,
     IRVectorGet,
     IRVectorNew,
+    IRVectorSet,
 )
 
 
@@ -114,6 +116,17 @@ class IRPrinter:
             return (
                 f"array_set {self._value(instruction.array)}, "
                 f"{self._value(instruction.index)}, {self._value(instruction.value)}"
+            )
+        if isinstance(instruction, IRVectorSet):
+            return (
+                f"vector_set {self._value(instruction.vector)}, "
+                f"{self._value(instruction.index)}, {self._value(instruction.value)}"
+            )
+        if isinstance(instruction, IRMatrixSet):
+            return (
+                f"matrix_set {self._value(instruction.matrix)}, {self._value(instruction.row)}, "
+                f"{self._value(instruction.column)}, {self._value(instruction.value)} "
+                f"cols {instruction.cols}"
             )
         if isinstance(instruction, IRArrayLength):
             return f"{self._typed_value(instruction.result)} = array_length {self._value(instruction.array)}"

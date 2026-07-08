@@ -21,6 +21,7 @@ from .model import (
     IRLoad,
     IRMatrixGet,
     IRMatrixNew,
+    IRMatrixSet,
     IRModule,
     IRParameter,
     IRReturn,
@@ -28,6 +29,7 @@ from .model import (
     IRValue,
     IRVectorGet,
     IRVectorNew,
+    IRVectorSet,
 )
 from .printer import IRPrinter, print_ir
 from .types import (
@@ -84,6 +86,7 @@ __all__ = [
     "IRLoad",
     "IRMatrixGet",
     "IRMatrixNew",
+    "IRMatrixSet",
     "IRModule",
     "IRParameter",
     "IRPrinter",
@@ -93,6 +96,7 @@ __all__ = [
     "IRValue",
     "IRVectorGet",
     "IRVectorNew",
+    "IRVectorSet",
     "IRVerificationError",
     "IRVerifier",
     "IntType",

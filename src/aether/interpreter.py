@@ -391,6 +391,31 @@ class Interpreter:
             self.enums[statement.name] = statement
             return
         if isinstance(statement, ast.Assignment):
+            if isinstance(statement.name, ast.MatrixIndexExpression):
+                self._assign_matrix_index(
+                    ast.MatrixIndexAssignment(
+                        statement.name.matrix,
+                        statement.name.row,
+                        statement.name.column,
+                        statement.expression,
+                        statement.line,
+                        statement.column,
+                    ),
+                    env,
+                )
+                return
+            if isinstance(statement.name, ast.IndexExpression):
+                self._assign_index(
+                    ast.IndexAssignment(
+                        statement.name.array,
+                        statement.name.index,
+                        statement.expression,
+                        statement.line,
+                        statement.column,
+                    ),
+                    env,
+                )
+                return
             implicit_field = self._implicit_method_field(statement.name, env)
             if implicit_field is not None:
                 self._assign_implicit_method_field(statement.name, statement.expression, env)

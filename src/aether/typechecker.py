@@ -941,6 +941,37 @@ class TypeChecker:
         )
 
     def _assign_variable(self, statement: ast.Assignment, scope: Scope[VariableSymbol]) -> None:
+        if isinstance(statement.name, ast.MatrixIndexExpression):
+            self._assign_matrix_index(
+                ast.MatrixIndexAssignment(
+                    statement.name.matrix,
+                    statement.name.row,
+                    statement.name.column,
+                    statement.expression,
+                    statement.line,
+                    statement.column,
+                ),
+                scope,
+            )
+            return
+        if isinstance(statement.name, ast.IndexExpression):
+            self._assign_index(
+                ast.IndexAssignment(
+                    statement.name.array,
+                    statement.name.index,
+                    statement.expression,
+                    statement.line,
+                    statement.column,
+                ),
+                scope,
+            )
+            return
+        if not isinstance(statement.name, str):
+            raise AetherTypeError(
+                "Invalid assignment target.",
+                line=statement.line,
+                column=statement.column,
+            )
         if self._is_active_loop_variable_assignment(statement.name, scope):
             raise AetherTypeError(f"Cannot assign to loop variable '{statement.name}' inside its own for-loop.")
         implicit_field = self._implicit_method_field(statement.name, scope)
@@ -2894,8 +2925,19 @@ class _StructMethodMutationAnalysis:
             locals_in_scope[-1].add(statement.name)
             return
         if isinstance(statement, ast.Assignment):
-            if self._is_implicit_field_name(statement.name, locals_in_scope):
+            if isinstance(statement.name, str) and self._is_implicit_field_name(statement.name, locals_in_scope):
                 self.directly_mutates_receiver = True
+            elif isinstance(statement.name, ast.MatrixIndexExpression):
+                if self._is_receiver_mutation_target(statement.name.matrix, locals_in_scope):
+                    self.directly_mutates_receiver = True
+                self._scan_expression(statement.name.matrix, locals_in_scope)
+                self._scan_expression(statement.name.row, locals_in_scope)
+                self._scan_expression(statement.name.column, locals_in_scope)
+            elif isinstance(statement.name, ast.IndexExpression):
+                if self._is_receiver_mutation_target(statement.name.array, locals_in_scope):
+                    self.directly_mutates_receiver = True
+                self._scan_expression(statement.name.array, locals_in_scope)
+                self._scan_expression(statement.name.index, locals_in_scope)
             self._scan_expression(statement.expression, locals_in_scope)
             return
         if isinstance(statement, ast.FieldAssignment):
