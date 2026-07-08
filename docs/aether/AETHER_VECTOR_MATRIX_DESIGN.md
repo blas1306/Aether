@@ -204,3 +204,7 @@ backend.
 This document does not implement that runtime. It only fixes the semantic
 target so future parser, typechecker, IR, LLVM, runtime, and standard-library
 work can line up behind the same model.
+
+## Related Audits
+
+- [Math.LinearAlgebra audit](LINEAR_ALGEBRA_AUDIT.md)
