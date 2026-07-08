@@ -19,6 +19,7 @@ from aether.ir.model import (
     IRModule,
     IRStore,
     IRValue,
+    IRVectorNew,
 )
 
 from .result import OptimizationResult
@@ -119,7 +120,7 @@ _UNKNOWN = object()
 
 
 def _instruction_result(instruction: IRInstruction) -> IRValue | None:
-    if isinstance(instruction, (IRBinaryOp, IRCompareOp, IRCast, IRArrayNew, IRArrayGet, IRArrayLength)):
+    if isinstance(instruction, (IRBinaryOp, IRCompareOp, IRCast, IRArrayNew, IRArrayGet, IRArrayLength, IRVectorNew)):
         return instruction.result
     if isinstance(instruction, IRCall):
         return instruction.result

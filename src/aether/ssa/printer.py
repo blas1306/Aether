@@ -23,6 +23,7 @@ from .model import (
     SSAPhi,
     SSAReturn,
     SSAValue,
+    SSAVectorNew,
 )
 
 
@@ -76,6 +77,9 @@ class SSAPrinter:
         if isinstance(instruction, SSAArrayNew):
             elements = ", ".join(self._value(element) for element in instruction.elements)
             return f"{self._typed_value(instruction.result)} = array_new [{elements}]"
+        if isinstance(instruction, SSAVectorNew):
+            elements = ", ".join(self._value(element) for element in instruction.elements)
+            return f"{self._typed_value(instruction.result)} = vector_new [{elements}]"
         if isinstance(instruction, SSAArrayGet):
             return (
                 f"{self._typed_value(instruction.result)} = array_get "

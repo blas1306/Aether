@@ -12,9 +12,10 @@ from aether.ir import (
     IRArraySet,
     IRInterpreter,
     IRLowerer,
+    IRVectorNew,
 )
 from aether.pipeline import lower_to_verified_ssa, parse_source, prepare_typed_program
-from aether.ssa import SSAArrayGet, SSAArrayLength, SSAArrayNew, SSAArraySet
+from aether.ssa import SSAArrayGet, SSAArrayLength, SSAArrayNew, SSAArraySet, SSAVectorNew
 from aether.typechecker import TypeChecker
 
 
@@ -78,6 +79,24 @@ int main() {
     assert any(isinstance(instruction, SSAArrayGet) for instruction in instructions)
 
 
+def test_lower_and_ssa_preserve_row_vector_literal() -> None:
+    typed_program = prepare_typed_program(
+        """
+int main() {
+    Vector<int, Row> v = [1, 2, 3];
+    return 0;
+}
+""",
+        TypeChecker(),
+    )
+
+    ir = IRLowerer().lower(typed_program.program)
+    ssa = lower_to_verified_ssa(typed_program)
+
+    assert any(isinstance(instruction, IRVectorNew) for instruction in ir.functions[0].blocks[0].instructions)
+    assert any(isinstance(instruction, SSAVectorNew) for instruction in ssa.functions[0].blocks[0].instructions)
+
+
 @pytest.mark.skipif(shutil.which("clang") is None, reason="clang is not available")
 @pytest.mark.parametrize(
     ("source", "expected"),
@@ -129,3 +148,18 @@ def test_llvm_runner_executes_arrays(source: str, expected: int) -> None:
     typed_program = prepare_typed_program(source, TypeChecker())
 
     assert LLVMRunner().run(typed_program) == expected
+
+
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang is not available")
+def test_llvm_runner_builds_row_vector_literal() -> None:
+    typed_program = prepare_typed_program(
+        """
+int main() {
+    Vector<int, Row> v = [1, 2, 3];
+    return 0;
+}
+""",
+        TypeChecker(),
+    )
+
+    assert LLVMRunner().run(typed_program) == 0

@@ -63,6 +63,12 @@ class SSAArrayNew(SSAInstruction):
 
 
 @dataclass(frozen=True)
+class SSAVectorNew(SSAInstruction):
+    result: SSAValue
+    elements: tuple[SSAValue, ...] = ()
+
+
+@dataclass(frozen=True)
 class SSAArrayGet(SSAInstruction):
     result: SSAValue
     array: SSAValue

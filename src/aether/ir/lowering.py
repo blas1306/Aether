@@ -5,7 +5,7 @@ from typing import NoReturn
 
 from .. import ast
 from ..errors import IRBackendUnsupportedFeatureError
-from ..types import AetherType, ArrayType as AetherArrayType, ListType as AetherListType
+from ..types import AetherType, ArrayType as AetherArrayType, ListType as AetherListType, VectorType as AetherVectorType
 from .model import (
     IRArrayGet,
     IRArrayLength,
@@ -26,6 +26,7 @@ from .model import (
     IRReturn,
     IRStore,
     IRValue,
+    IRVectorNew,
 )
 from .types import (
     ArrayType,
@@ -37,6 +38,7 @@ from .types import (
     IRType,
     ListType,
     StringType,
+    VectorType,
     VoidType,
 )
 
@@ -357,6 +359,9 @@ class IRLowerer:
         if isinstance(expression, (ast.ArrayLiteral, ast.ListLiteral)):
             return self._lower_array_literal(expression, context, target_type)
 
+        if isinstance(expression, ast.MatrixLiteral):
+            return self._lower_vector_literal(expression, context, target_type)
+
         if isinstance(expression, ast.Identifier):
             slot = context.locals.get(expression.name)
             if slot is not None:
@@ -497,6 +502,47 @@ class IRLowerer:
         context.block.instructions.append(IRArrayNew(result, elements))
         return result
 
+    def _lower_vector_literal(
+        self,
+        expression: ast.MatrixLiteral,
+        context: _FunctionContext,
+        target_type: IRType | None,
+    ) -> IRValue:
+        if len(expression.rows) != 1 or not expression.uses_commas:
+            self._unsupported(expression, "non-row vector literal")
+        row = expression.rows[0]
+        if not row:
+            self._unsupported(expression, "empty vector literal")
+
+        element_target_type = target_type.element if isinstance(target_type, VectorType) else None
+        elements = tuple(
+            self._lower_expression(element, context, target_type=element_target_type)
+            for element in row
+        )
+
+        if isinstance(target_type, VectorType):
+            vector_type = target_type
+        else:
+            element_type = elements[0].type
+            if any(element.type != element_type for element in elements):
+                self._fail(
+                    "IR backend does not support implicit conversion inside vector literals yet.",
+                    expression,
+                )
+            vector_type = VectorType(element_type, "row")
+
+        if vector_type.orientation != "row":
+            self._unsupported(expression, "non-row Vector target type")
+        for element in elements:
+            self._require_same_type(
+                element.type,
+                vector_type.element,
+                "vector literal element requires an implicit conversion",
+            )
+        result = context.temporary(vector_type)
+        context.block.instructions.append(IRVectorNew(result, elements))
+        return result
+
     def _lower_cast(self, call: ast.CallExpression, context: _FunctionContext) -> IRValue:
         if len(call.arguments) != 1:
             raise ValueError(
@@ -579,6 +625,8 @@ class IRLowerer:
             return ArrayType(self._lower_type(type_name.element_type))
         if isinstance(type_name, AetherListType):
             return ListType(self._lower_type(type_name.element_type))
+        if isinstance(type_name, AetherVectorType):
+            return VectorType(self._lower_type(type_name.element_type), type_name.orientation)
         self._fail(f"IR backend does not support type '{type_name}' yet.")
 
     def _require_same_type(self, actual: IRType, expected: IRType, operation: str) -> None:

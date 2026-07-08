@@ -24,6 +24,7 @@ from .model import (
     IRReturn,
     IRStore,
     IRValue,
+    IRVectorNew,
 )
 from .printer import IRPrinter, print_ir
 from .types import (
@@ -85,6 +86,7 @@ __all__ = [
     "IRStore",
     "IRType",
     "IRValue",
+    "IRVectorNew",
     "IRVerificationError",
     "IRVerifier",
     "IntType",

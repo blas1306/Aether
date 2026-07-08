@@ -75,6 +75,12 @@ class IRArrayNew(IRInstruction):
 
 
 @dataclass(frozen=True)
+class IRVectorNew(IRInstruction):
+    result: IRValue
+    elements: tuple[IRValue, ...] = ()
+
+
+@dataclass(frozen=True)
 class IRArrayGet(IRInstruction):
     result: IRValue
     array: IRValue

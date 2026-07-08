@@ -24,6 +24,7 @@ from .model import (
     IRReturn,
     IRStore,
     IRValue,
+    IRVectorNew,
 )
 from .types import BoolType, DoubleType, IntType, VoidType
 
@@ -145,6 +146,12 @@ class IRInterpreter:
             return False, None, None
 
         if isinstance(instruction, IRArrayNew):
+            frame.values[instruction.result] = [
+                self._value(element, frame) for element in instruction.elements
+            ]
+            return False, None, None
+
+        if isinstance(instruction, IRVectorNew):
             frame.values[instruction.result] = [
                 self._value(element, frame) for element in instruction.elements
             ]

@@ -23,6 +23,7 @@ from .model import (
     IRReturn,
     IRStore,
     IRValue,
+    IRVectorNew,
 )
 
 
@@ -80,6 +81,9 @@ class IRPrinter:
         if isinstance(instruction, IRArrayNew):
             elements = ", ".join(self._value(element) for element in instruction.elements)
             return f"{self._typed_value(instruction.result)} = array_new [{elements}]"
+        if isinstance(instruction, IRVectorNew):
+            elements = ", ".join(self._value(element) for element in instruction.elements)
+            return f"{self._typed_value(instruction.result)} = vector_new [{elements}]"
         if isinstance(instruction, IRArrayGet):
             return (
                 f"{self._typed_value(instruction.result)} = array_get "

@@ -22,6 +22,7 @@ from aether.ir.model import (
     IRReturn,
     IRStore,
     IRValue,
+    IRVectorNew,
 )
 from aether.ir.types import IntType
 
@@ -228,6 +229,14 @@ class AlgebraicSimplifier:
                 ),
             )
         if isinstance(instruction, IRArrayNew):
+            return replace(
+                instruction,
+                elements=tuple(
+                    self._resolve(element, replacements)
+                    for element in instruction.elements
+                ),
+            )
+        if isinstance(instruction, IRVectorNew):
             return replace(
                 instruction,
                 elements=tuple(

@@ -3,6 +3,8 @@ from __future__ import annotations
 import pytest
 
 from aether.errors import AetherRuntimeError, AetherSyntaxError, AetherTypeError
+from aether import ast
+from aether.pipeline import parse_source
 from aether.runner import run_aether
 from aether.types import ArrayType, ListType, MatrixType, VectorType
 
@@ -307,6 +309,40 @@ def test_vector_and_list_literals_do_not_cross_assign() -> None:
 
     with pytest.raises(AetherTypeError, match="Vector<int>.*List<int>"):
         run_aether("List<int> xs = [1, 2, 3];")
+
+
+def test_parser_accepts_row_vector_type_annotation_and_literal_ast() -> None:
+    program = parse_source("Vector<int, Row> v = [1, 2, 3];")
+    declaration = program.statements[0]
+
+    assert isinstance(declaration, ast.VarDeclaration)
+    assert declaration.type_name == VectorType("int", orientation="row")
+    assert isinstance(declaration.initializer, ast.MatrixLiteral)
+    assert declaration.initializer.rows == [[ast.Literal(1, "int"), ast.Literal(2, "int"), ast.Literal(3, "int")]]
+    assert declaration.initializer.orientation == "row"
+    assert declaration.initializer.uses_commas is True
+
+
+def test_parser_rejects_column_vector_type_annotation_for_now() -> None:
+    with pytest.raises(AetherSyntaxError, match="Only Vector<T, Row> is supported"):
+        parse_source("Vector<int, Column> v = [1, 2, 3];")
+
+
+def test_row_vector_literal_infers_vector_type_without_expected_type() -> None:
+    result = run_aether("v = [1, 2, 3];")
+
+    assert result.env["v"].type_name == VectorType("int", 3, "row")
+
+
+def test_row_vector_literal_uses_row_vector_expected_type() -> None:
+    result = run_aether("Vector<int, Row> v = [1, 2, 3];")
+
+    assert result.env["v"].type_name == VectorType("int", 3, "row")
+
+
+def test_row_vector_literal_rejects_incompatible_expected_type() -> None:
+    with pytest.raises(AetherTypeError, match="Cannot implicitly convert 'Vector<int>' to 'Array<int>'"):
+        run_aether("Array<int> xs = [1, 2, 3];")
 
 
 def test_row_vector_literals_use_commas_or_spaces() -> None:

@@ -22,6 +22,7 @@ from aether.ssa.model import (
     SSAPhi,
     SSAReturn,
     SSAValue,
+    SSAVectorNew,
 )
 
 from .result import SSAOptimizationResult
@@ -246,6 +247,14 @@ class SSAAlgebraicSimplifier:
 
         if isinstance(instruction, SSAArrayNew):
             return SSAArrayNew(
+                instruction.result,
+                tuple(
+                    self._resolve(element, replacements)
+                    for element in instruction.elements
+                ),
+            )
+        if isinstance(instruction, SSAVectorNew):
+            return SSAVectorNew(
                 instruction.result,
                 tuple(
                     self._resolve(element, replacements)

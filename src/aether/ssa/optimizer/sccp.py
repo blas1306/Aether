@@ -25,6 +25,7 @@ from aether.ssa.model import (
     SSAPhi,
     SSAReturn,
     SSAValue,
+    SSAVectorNew,
 )
 
 from .result import SSAOptimizationResult
@@ -187,7 +188,7 @@ class SCCPAnalyzer:
                 self._set_state(instruction.result, Overdefined())
             return
 
-        if isinstance(instruction, (SSAArrayNew, SSAArrayGet, SSAArrayLength)):
+        if isinstance(instruction, (SSAArrayNew, SSAArrayGet, SSAArrayLength, SSAVectorNew)):
             self._set_state(instruction.result, Overdefined())
             return
 
@@ -320,7 +321,7 @@ class SCCPAnalyzer:
             return instruction.result
         if isinstance(instruction, SSACall):
             return instruction.result
-        if isinstance(instruction, (SSAArrayNew, SSAArrayGet, SSAArrayLength)):
+        if isinstance(instruction, (SSAArrayNew, SSAArrayGet, SSAArrayLength, SSAVectorNew)):
             return instruction.result
         return None
 
@@ -339,6 +340,8 @@ class SCCPAnalyzer:
         if isinstance(instruction, SSACall):
             return instruction.arguments
         if isinstance(instruction, SSAArrayNew):
+            return instruction.elements
+        if isinstance(instruction, SSAVectorNew):
             return instruction.elements
         if isinstance(instruction, SSAArrayGet):
             return (instruction.array, instruction.index)

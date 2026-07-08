@@ -20,6 +20,7 @@ from aether.ir.model import (
     IRReturn,
     IRStore,
     IRValue,
+    IRVectorNew,
 )
 
 from .result import OptimizationResult
@@ -133,6 +134,8 @@ class DeadCodeEliminator:
         if isinstance(instruction, IRCall):
             return instruction.arguments
         if isinstance(instruction, IRArrayNew):
+            return instruction.elements
+        if isinstance(instruction, IRVectorNew):
             return instruction.elements
         if isinstance(instruction, IRArrayGet):
             return (instruction.array, instruction.index)

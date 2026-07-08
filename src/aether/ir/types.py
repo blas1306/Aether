@@ -79,8 +79,11 @@ class ArrayType(IRType):
 @dataclass(frozen=True)
 class VectorType(IRType):
     element: IRType
+    orientation: str | None = None
 
     def __str__(self) -> str:
+        if self.orientation is not None:
+            return f"vector<{self.element}, {self.orientation}>"
         return f"vector<{self.element}>"
 
 

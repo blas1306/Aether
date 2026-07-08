@@ -29,6 +29,7 @@ EXPECTED_EXIT_CODES = {
     "string_choose.ae": 0,
     "string_identity.ae": 0,
     "sum_to_n.ae": 15,
+    "vector_literal.ae": 0,
 }
 
 

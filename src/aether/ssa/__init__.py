@@ -22,6 +22,7 @@ from .model import (
     SSAPhi,
     SSAReturn,
     SSAValue,
+    SSAVectorNew,
 )
 from .phi_placement import PhiPlacement
 from .printer import SSAPrinter, print_ssa
@@ -57,6 +58,7 @@ __all__ = [
     "SSARenamer",
     "SSAReturn",
     "SSAValue",
+    "SSAVectorNew",
     "SSAVerificationError",
     "SSAVerifier",
     "print_ssa",

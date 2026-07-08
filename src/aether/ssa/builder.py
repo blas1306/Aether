@@ -23,6 +23,7 @@ from aether.ir.model import (
     IRReturn,
     IRStore,
     IRValue,
+    IRVectorNew,
 )
 
 from .model import (
@@ -45,6 +46,7 @@ from .model import (
     SSAPhi,
     SSAReturn,
     SSAValue,
+    SSAVectorNew,
 )
 
 
@@ -495,6 +497,14 @@ class SSABuilder:
                 for element in instruction.elements
             )
             return SSAArrayNew(result, elements)
+
+        if isinstance(instruction, IRVectorNew):
+            result = self._define_value(instruction.result, state.value_map)
+            elements = tuple(
+                self._resolve_value(element, state.value_map)
+                for element in instruction.elements
+            )
+            return SSAVectorNew(result, elements)
 
         if isinstance(instruction, IRArrayGet):
             result = self._define_value(instruction.result, state.value_map)

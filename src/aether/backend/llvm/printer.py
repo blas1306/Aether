@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import re
 from typing import Any
 
-from aether.ir.types import ArrayType, BoolType, DoubleType, IntType, StringType, VoidType
+from aether.ir.types import ArrayType, BoolType, DoubleType, IntType, StringType, VectorType, VoidType
 from aether.ssa.model import (
     SSAArrayGet,
     SSAArrayLength,
@@ -25,6 +25,7 @@ from aether.ssa.model import (
     SSAPhi,
     SSAReturn,
     SSAValue,
+    SSAVectorNew,
 )
 
 from .types import LLVMBackendError, llvm_type
@@ -156,6 +157,8 @@ class LLVMPrinter:
             return self._print_call(instruction)
         if isinstance(instruction, SSAArrayNew):
             return self._print_array_new(instruction)
+        if isinstance(instruction, SSAVectorNew):
+            return self._print_vector_new(instruction)
         if isinstance(instruction, SSAArrayGet):
             return "\n  ".join(self._print_array_get(instruction))
         if isinstance(instruction, SSAArraySet):
@@ -177,7 +180,7 @@ class LLVMPrinter:
             return instruction.result
         if isinstance(instruction, SSACall):
             return instruction.result
-        if isinstance(instruction, (SSAArrayNew, SSAArrayGet, SSAArrayLength)):
+        if isinstance(instruction, (SSAArrayNew, SSAArrayGet, SSAArrayLength, SSAVectorNew)):
             return instruction.result
         return None
 
@@ -352,19 +355,42 @@ class LLVMPrinter:
     def _print_array_new(self, instruction: SSAArrayNew) -> str:
         if not isinstance(instruction.result.type, ArrayType):
             raise LLVMBackendError("LLVM array_new result must be ArrayType")
+        return self._print_contiguous_new(
+            instruction.result,
+            instruction.result.type.element,
+            instruction.elements,
+        )
+
+    def _print_vector_new(self, instruction: SSAVectorNew) -> str:
+        if not isinstance(instruction.result.type, VectorType):
+            raise LLVMBackendError("LLVM vector_new result must be VectorType")
+        if instruction.result.type.orientation != "row":
+            raise LLVMBackendError("LLVM vector_new only supports row vectors")
+        return self._print_contiguous_new(
+            instruction.result,
+            instruction.result.type.element,
+            instruction.elements,
+        )
+
+    def _print_contiguous_new(
+        self,
+        result_value: SSAValue,
+        element_ir_type: object,
+        elements: tuple[SSAValue, ...],
+    ) -> str:
         self._uses_array_type = True
         self._uses_array_allocation = True
 
-        result = self._new_temp(instruction.result)
-        element_type = llvm_type(instruction.result.type.element)
-        element_size = self._sizeof(instruction.result.type.element)
-        length = len(instruction.elements)
+        result = self._new_temp(result_value)
+        element_type = llvm_type(element_ir_type)
+        element_size = self._sizeof(element_ir_type)
+        length = len(elements)
         lines = [
             f"{result} = call ptr @aether_array_new(i64 {element_size}, i64 {length})"
         ]
         data = self._synthetic_temp("array.data")
         lines.extend(self._array_data_pointer(data, result))
-        for index, element in enumerate(instruction.elements):
+        for index, element in enumerate(elements):
             element_ptr = self._synthetic_temp("array.elem")
             lines.append(
                 f"{element_ptr} = getelementptr {element_type}, ptr {data}, i64 {index}"
@@ -490,7 +516,7 @@ class LLVMPrinter:
             return 4 if isinstance(type_, IntType) else 1
         if isinstance(type_, DoubleType):
             return 8
-        if isinstance(type_, (StringType, ArrayType)):
+        if isinstance(type_, (StringType, ArrayType, VectorType)):
             return 8
         raise LLVMBackendError(f"LLVM backend does not know the size of {type_}")
 

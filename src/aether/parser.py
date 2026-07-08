@@ -1056,14 +1056,20 @@ class Parser:
             return self._nullable_suffix(ListType(element_type))
         if token.lexeme in {"Matrix", "Vector"}:
             element_type = "double"
+            orientation: str | None = None
             if self._match(TokenType.LESS):
                 element_token = self._consume(TokenType.TYPE, f"Expected element type inside {token.lexeme}<...>.")
                 if element_token.lexeme not in PRIMITIVE_TYPES:
                     raise self._error(element_token, f"Expected primitive element type inside {token.lexeme}<...>.")
+                if token.lexeme == "Vector" and self._match(TokenType.COMMA):
+                    orientation_token = self._consume(TokenType.IDENTIFIER, "Expected Row after Vector<T, ...>.")
+                    if orientation_token.lexeme != "Row":
+                        raise self._error(orientation_token, "Only Vector<T, Row> is supported in this phase.")
+                    orientation = "row"
                 self._consume(TokenType.GREATER, f"Expected '>' after {token.lexeme} element type.")
                 element_type = element_token.lexeme
             if token.lexeme == "Vector":
-                return self._nullable_suffix(VectorType(element_type))
+                return self._nullable_suffix(VectorType(element_type, orientation=orientation))
             return self._nullable_suffix(MatrixType(element_type))
         type_name: AetherType = token.lexeme
         if self._check(TokenType.LEFT_BRACKET):
@@ -1196,10 +1202,19 @@ class Parser:
                 cursor + 2 >= len(self.tokens)
                 or self.tokens[cursor + 1].type != TokenType.TYPE
                 or self.tokens[cursor + 1].lexeme not in PRIMITIVE_TYPES
-                or self.tokens[cursor + 2].type != TokenType.GREATER
             ):
                 return None
-            cursor += 3
+            if self.tokens[start].lexeme == "Vector" and cursor + 4 < len(self.tokens) and self.tokens[cursor + 2].type == TokenType.COMMA:
+                if (
+                    self.tokens[cursor + 3].type != TokenType.IDENTIFIER
+                    or self.tokens[cursor + 4].type != TokenType.GREATER
+                ):
+                    return None
+                cursor += 5
+            elif self.tokens[cursor + 2].type == TokenType.GREATER:
+                cursor += 3
+            else:
+                return None
         if cursor < len(self.tokens) and self.tokens[cursor].type == TokenType.QUESTION:
             cursor += 1
         return cursor

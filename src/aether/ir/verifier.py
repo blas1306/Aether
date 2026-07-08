@@ -23,6 +23,7 @@ from .model import (
     IRReturn,
     IRStore,
     IRValue,
+    IRVectorNew,
 )
 from .types import (
     ArrayType,
@@ -344,6 +345,10 @@ class IRVerifier:
             self._verify_array_new(instruction, state, value_types)
             return self._define_value(state, instruction.result)
 
+        if isinstance(instruction, IRVectorNew):
+            self._verify_vector_new(instruction, state, value_types)
+            return self._define_value(state, instruction.result)
+
         if isinstance(instruction, IRArrayGet):
             self._verify_array_get(instruction, state, value_types)
             return self._define_value(state, instruction.result)
@@ -431,6 +436,24 @@ class IRVerifier:
             if element.type != instruction.result.type.element:
                 self._fail(
                     f"Array literal element type mismatch: expected "
+                    f"{instruction.result.type.element}, got {element.type}"
+                )
+
+    def _verify_vector_new(
+        self,
+        instruction: IRVectorNew,
+        state: _State,
+        value_types: dict[str, IRType],
+    ) -> None:
+        if not isinstance(instruction.result.type, VectorType):
+            self._fail(f"Vector new result must be vector type, got {instruction.result.type}")
+        if instruction.result.type.orientation != "row":
+            self._fail(f"Vector new only supports row vectors, got {instruction.result.type}")
+        for element in instruction.elements:
+            self._require_defined(element, state, value_types)
+            if element.type != instruction.result.type.element:
+                self._fail(
+                    f"Vector literal element type mismatch: expected "
                     f"{instruction.result.type.element}, got {element.type}"
                 )
 
@@ -740,7 +763,7 @@ class IRVerifier:
             return instruction.result
         if isinstance(instruction, IRCall):
             return instruction.result
-        if isinstance(instruction, (IRArrayNew, IRArrayGet, IRArrayLength)):
+        if isinstance(instruction, (IRArrayNew, IRArrayGet, IRArrayLength, IRVectorNew)):
             return instruction.result
         return None
 

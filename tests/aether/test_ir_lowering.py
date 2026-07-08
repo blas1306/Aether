@@ -16,8 +16,10 @@ from aether.ir import (
     IRLowerer,
     IRReturn,
     IRStore,
+    IRVectorNew,
     IntType,
     StringType,
+    VectorType,
     print_ir,
 )
 from aether.errors import IRBackendUnsupportedFeatureError
@@ -110,6 +112,25 @@ def test_lower_return_literal(source: str, expected_type, expected_value: object
     assert constant == IRConst(constant.result, expected_value)
     assert constant.result.type == expected_type
     assert terminator == IRReturn(constant.result)
+
+
+def test_lower_row_vector_literal() -> None:
+    module = _lower(
+        """
+int main() {
+    Vector<int, Row> v = [1, 2, 3];
+    return 0;
+}
+"""
+    )
+
+    instructions = module.functions[0].blocks[0].instructions
+    vector_new = next(instruction for instruction in instructions if isinstance(instruction, IRVectorNew))
+
+    assert vector_new.result.type == VectorType(IntType(), "row")
+    assert [element.type for element in vector_new.elements] == [IntType(), IntType(), IntType()]
+    assert "vector_new" in print_ir(module)
+    assert "vector<int, row>" in print_ir(module)
 
 
 def test_lower_simple_local_variable() -> None:

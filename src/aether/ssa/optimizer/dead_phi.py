@@ -19,6 +19,7 @@ from aether.ssa.model import (
     SSAPhi,
     SSAReturn,
     SSAValue,
+    SSAVectorNew,
 )
 
 from .result import SSAOptimizationResult
@@ -118,6 +119,10 @@ class DeadPhiEliminator:
             return
 
         if isinstance(instruction, SSAArrayNew):
+            used_values.update(instruction.elements)
+            return
+
+        if isinstance(instruction, SSAVectorNew):
             used_values.update(instruction.elements)
             return
 

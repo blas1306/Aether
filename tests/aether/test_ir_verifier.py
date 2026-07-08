@@ -23,10 +23,12 @@ from aether.ir import (
     IRReturn,
     IRStore,
     IRValue,
+    IRVectorNew,
     IRVerificationError,
     IRVerifier,
     IntType,
     StringType,
+    VectorType,
     VoidType,
 )
 from aether.pipeline import parse_source
@@ -139,6 +141,37 @@ int sumTo(int n) {
     return sum;
 }
 """
+    )
+
+    assert IRVerifier(module).verify() is module
+
+
+def test_verifies_row_vector_new() -> None:
+    int_type = IntType()
+    vector_type = VectorType(int_type, "row")
+    first = IRValue("0", int_type)
+    second = IRValue("1", int_type)
+    vector = IRValue("2", vector_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "main",
+                [],
+                IntType(),
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [
+                            IRConst(first, 1),
+                            IRConst(second, 2),
+                            IRVectorNew(vector, (first, second)),
+                            IRConst(IRValue("3", int_type), 0),
+                            IRReturn(IRValue("3", int_type)),
+                        ],
+                    )
+                ],
+            )
+        ]
     )
 
     assert IRVerifier(module).verify() is module

@@ -24,6 +24,7 @@ from aether.ir.model import (
     IRReturn,
     IRStore,
     IRValue,
+    IRVectorNew,
 )
 from aether.ir.types import IRType
 
@@ -46,6 +47,7 @@ from .model import (
     SSAPhi,
     SSAReturn,
     SSAValue,
+    SSAVectorNew,
 )
 
 
@@ -222,6 +224,14 @@ class SSARenamer:
             )
             self._bind_value(result.name, result, bound_values)
             return SSAArrayNew(result, elements)
+
+        if isinstance(instruction, IRVectorNew):
+            result = self._define_value(instruction.result)
+            elements = tuple(
+                self._resolve_value(element) for element in instruction.elements
+            )
+            self._bind_value(result.name, result, bound_values)
+            return SSAVectorNew(result, elements)
 
         if isinstance(instruction, IRArrayGet):
             result = self._define_value(instruction.result)
