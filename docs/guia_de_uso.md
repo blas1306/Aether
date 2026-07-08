@@ -108,19 +108,36 @@ println(contains(xs, 20));
 clear(xs);
 ```
 
-`insert` acepta indices `0 <= index <= length(xs)` y `remove_at` acepta `0 <= index < length(xs)`. `Vector<T>` y `Matrix<T>` no son listas y no aceptan `push`, `pop`, `insert`, `remove_at` ni `clear`.
+`insert` acepta indices `0 <= index <= length(xs)` y `remove_at` acepta `0 <= index < length(xs)`. Los vectores matematicos y `Matrix<T>` no son listas y no aceptan `push`, `pop`, `insert`, `remove_at` ni `clear`.
 
-Los corchetes crean valores matematicos `Vector<T>` y `Matrix<T>`. Los vectores y matrices son 1-based:
+Los corchetes crean valores matematicos. En la semantica formal futura,
+`Vector` lleva la orientacion en el tipo estatico: `Vector<T, Row>` o
+`Vector<T, Column>`. Los vectores y matrices son 1-based:
 
 ```aether
-row = [1 2 3];
+row = [1, 2, 3];      // Vector<int, Row>
 alsoRow = [1, 2, 3];
-col = [1; 2; 3];
-A = [1 2; 3 4];
+col = [1; 2; 3];      // Vector<int, Column>
+A = [1, 2; 3, 4];     // Matrix<int>
 
 println(row[1]);  // 1
 println(A[1, 1]); // 1
 ```
+
+Si hay un tipo esperado compatible, ese tipo guia la interpretacion del
+literal:
+
+```aether
+Vector<int, Row> r = [1, 2, 3];
+Vector<int, Column> c = [1, 2, 3];
+
+Matrix<int> A = [1, 2, 3]; // Matrix 1x3
+Matrix<int> B = [1; 2; 3]; // Matrix 3x1
+```
+
+Sin tipo esperado, la forma decide: `{...}` produce `List<T>`,
+`[a, b, c]` produce `Vector<T, Row>`, `[a; b; c]` produce
+`Vector<T, Column>` y `[a, b; c, d]` produce `Matrix<T>`.
 
 Tambien podes concatenar bloques con corchetes al estilo Julia:
 
@@ -130,7 +147,7 @@ println([A B]);  // [1 2 5 6; 3 4 7 8]
 println([A; B]); // [1 2; 3 4; 5 6; 7 8]
 ```
 
-En concatenacion, la orientacion de `Vector<T>` se respeta: un vector fila aporta un bloque `1xN`, y un vector columna aporta `Nx1`. Las comas siguen reservadas para vectores escalares como `[1, 2, 3]`; `[A, B]` no concatena matrices en v0.
+En concatenacion, la orientacion del vector se respeta: un vector fila aporta un bloque `1xN`, y un vector columna aporta `Nx1`. Las comas siguen reservadas para vectores escalares como `[1, 2, 3]`; `[A, B]` no concatena matrices en v0.
 
 Las matrices imprimen en formato compacto:
 
@@ -138,7 +155,7 @@ Las matrices imprimen en formato compacto:
 println([1 2; 3 4]); // [1 2; 3 4]
 ```
 
-`Array<T>` es la coleccion mutable de tamaño fijo. Se inicializa con llaves cuando hay tipo esperado:
+`Array<T>` esta reservado para una coleccion futura de tamaño fijo. Cuando se implemente, se inicializara con llaves si hay tipo esperado:
 
 ```aether
 Array<int> xs = {1, 2, 3};
@@ -158,6 +175,9 @@ println(Math.LinearAlgebra.matmul(A, [5; 6]));
 ```
 
 `*` no es multiplicacion matricial en v0; usa `Math.LinearAlgebra.matmul(A, B)`.
+La intencion futura para `*` distingue la orientacion estatica:
+`[1, 2, 3] * [4; 5; 6]` produce un escalar, mientras que
+`[1; 2; 3] * [4, 5, 6]` produce una matriz. No son equivalentes.
 
 ## 6. Builtins utiles
 

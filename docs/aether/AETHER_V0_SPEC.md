@@ -1284,12 +1284,16 @@ Aether separates general programming collections from mathematical vectors and m
 - Without an expected type, a brace literal infers `List<T>`.
 - With an expected `List<T>` target type, a brace literal produces `List<T>`.
 - List indexing is 0-based: `xs[0]`.
-- `[ ... ]` is reserved for mathematical `Vector<T>` and `Matrix<T>` literals.
+- `[ ... ]` is reserved for mathematical `Vector<T, Orientation>` and
+  `Matrix<T>` literals.
 
-`Array<T>` is reserved for a future fixed-size collection type. Its planned
-relationship to `List<T>` and brace literals is documented in
-[`AETHER_COLLECTIONS_DESIGN.md`](AETHER_COLLECTIONS_DESIGN.md); it is not part
-of the implemented v0 collection surface.
+`Array<T>` is the fixed-size collection type. Its relationship to `List<T>` and
+brace literals is documented in
+[`AETHER_COLLECTIONS_DESIGN.md`](AETHER_COLLECTIONS_DESIGN.md).
+
+The first-class mathematical design for oriented vectors and matrices is
+documented separately in
+[`AETHER_VECTOR_MATRIX_DESIGN.md`](AETHER_VECTOR_MATRIX_DESIGN.md).
 
 Examples:
 
@@ -1432,14 +1436,15 @@ xs.sort();    // error: Cannot mutate constant 'xs'.
 Aether supports mathematical vector and matrix literals with MATLAB/Julia-like bracket syntax:
 
 ```aether
-[1 2 3]       // Vector<int>, row orientation, length 3
-[1, 2, 3]     // Vector<int>, row orientation, length 3
-[1; 2; 3]     // Vector<int>, column orientation, length 3
-[1 2; 3 4]    // Matrix<int>, shape 2x2
-[1 2; 3.0 4]  // Matrix<double>, shape 2x2
+[1, 2, 3]      // Vector<int, Row>, length 3
+[1; 2; 3]      // Vector<int, Column>, length 3
+[1, 2; 3, 4]   // Matrix<int>, shape 2x2
+[1, 2; 3.0, 4] // Matrix<double>, shape 2x2
 ```
 
-Spaces or commas separate row-vector elements. Semicolons separate column-vector entries or matrix rows. All matrix rows must have the same number of columns. Elements must be homogeneous or numerically promotable:
+Commas separate row-vector elements or matrix columns. Semicolons separate
+column-vector entries or matrix rows. All matrix rows must have the same number
+of columns. Elements must be homogeneous or numerically promotable:
 
 - `int -> float`
 - `int -> double`
@@ -1449,8 +1454,46 @@ Mixed incompatible elements are type errors:
 
 ```aether
 [1 "x"]; // error
-[1 2; 3]; // error, ragged rows
+[1, 2; 3]; // error, ragged rows
 ```
+
+### Planned Static Orientation
+
+The full design for first-class `Vector<T, Row>`, `Vector<T, Column>`, and
+`Matrix<T>` semantics is maintained in
+[`AETHER_VECTOR_MATRIX_DESIGN.md`](AETHER_VECTOR_MATRIX_DESIGN.md). This
+section records the v0 behavior and the planned static-orientation direction.
+
+The future formal static model makes vector orientation part of the type:
+
+```aether
+Vector<int, Row> r = [1, 2, 3];
+Vector<int, Column> c = [1; 2; 3];
+```
+
+`Vector<T, Row>` and `Vector<T, Column>` are different static types. The
+orientation is not merely runtime metadata.
+
+Bracket literals are target-typed. If a compatible expected type exists, the
+literal is constructed as that type:
+
+```aether
+Vector<int, Row> r = [1, 2, 3];
+Vector<int, Column> c = [1, 2, 3];
+
+Matrix<int> A = [1, 2, 3]; // Matrix 1x3
+Matrix<int> B = [1; 2; 3]; // Matrix 3x1
+```
+
+If there is no expected type, the literal form determines the type:
+
+- `{...}` infers `List<T>`.
+- `[a, b, c]` infers `Vector<T, Row>`.
+- `[a; b; c]` infers `Vector<T, Column>`.
+- `[a, b; c, d]` infers `Matrix<T>`.
+
+Precedence rule: a compatible expected type wins. Without one, the syntactic
+form determines the mathematical container.
 
 Bracket literals also support Julia-style block concatenation for existing scalar, vector, transposed-vector, and matrix values:
 
@@ -1472,16 +1515,21 @@ For block concatenation, vector orientation is respected: row vectors contribute
 Explicit mathematical types are:
 
 ```aether
-Matrix<int> A = [1 2; 3 4];
-Matrix<double> B = [1 2; 3.0 4];
-Vector<int> row = [1 2 3];
-Vector<int> col = [1; 2; 3];
-Vector<double> v = [1 2.5 3];
+Matrix<int> A = [1, 2; 3, 4];
+Matrix<double> B = [1, 2; 3.0, 4];
+Vector<int, Row> row = [1, 2, 3];
+Vector<int, Column> col = [1; 2; 3];
+Vector<double, Row> v = [1, 2.5, 3];
 ```
 
-`Matrix<T>` accepts 2D matrix literals. `Vector<T>` is one public type, but runtime values store row or column orientation internally. `RowVector<T>` and `ColumnVector<T>` are not public types in v0.
+`Matrix<T>` accepts 2D matrix literals. In the planned static model, `Vector`
+accepts an orientation parameter: `Vector<T, Row>` for row vectors and
+`Vector<T, Column>` for column vectors.
 
-`Matrix<int>` and `Vector<int>` reject `double` values because narrowing is not implicit. `Matrix<double>` and `Vector<double>` accept `int` and `double` values. `Matrix<string>` does not accept numeric matrix literals.
+`Matrix<int>` and `Vector<int, Orientation>` reject `double` values because
+narrowing is not implicit. `Matrix<double>` and `Vector<double, Orientation>`
+accept `int` and `double` values. `Matrix<string>` does not accept numeric
+matrix literals.
 
 Vectors and matrices are indexed with 1-based mathematical indexing. Lists are the 0-based collection type.
 
@@ -1517,9 +1565,15 @@ println([true false;
          false true]);   // [true false; false true]
 ```
 
-Runtime types remain distinct: `List<T>` for general collections, `Vector<T>` for oriented mathematical vectors, and `Matrix<T>` for 2D mathematical matrices. There is no implicit conversion between `List<T>` and `Vector<T>`.
+Runtime categories remain distinct: `List<T>` for general collections,
+`Vector<T, Orientation>` for oriented mathematical vectors in the planned
+static model, and `Matrix<T>` for 2D mathematical matrices. There is no
+implicit conversion between `List<T>` and mathematical vectors.
 
-Matrix and vector equality compares compatible mathematical values by shape/length and content. Incompatible element types are type errors. Comparing `Matrix<T>` or `Vector<T>` with a `List<T>` is an `AetherTypeError`.
+Matrix and vector equality compares compatible mathematical values by
+shape/length, orientation where applicable, and content. Incompatible element
+types are type errors. Comparing `Matrix<T>` or a vector with a `List<T>` is an
+`AetherTypeError`.
 
 ## Math.LinearAlgebra
 
@@ -1630,6 +1684,20 @@ println(Math.LinearAlgebra.matmul([1 2], [3 4; 5 6]));      // [13 16]
 `matmul` returns a new matrix and does not mutate either operand. It uses existing numeric promotion rules: `int` with `int` remains `int`, combinations involving `float` or `double` widen as usual, and combinations involving `complex` produce `complex`.
 
 The `*` operator is still not matrix multiplication in Aether v0. Matrix multiplication is available only through the explicit `Math.LinearAlgebra.matmul(A, B)` builtin.
+
+Future `*` semantics for mathematical vectors must preserve static
+orientation:
+
+```aether
+[1, 2, 3] * [4; 5; 6]
+// Vector<T, Row> * Vector<T, Column> -> T
+
+[1; 2; 3] * [4, 5, 6]
+// Vector<T, Column> * Vector<T, Row> -> Matrix<T>
+```
+
+These expressions are not equivalent. Row-by-column multiplication is an inner
+product, while column-by-row multiplication is an outer product.
 
 `Math.LinearAlgebra.solve(A, b)` solves linear systems with Julia-like left-division semantics. The expression `A \ b` is equivalent to `Math.LinearAlgebra.solve(A, b)`.
 

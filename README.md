@@ -28,7 +28,10 @@ Compiler implementation notes live under
 [`SCCP design plan`](docs/compiler/SCCP.md), for future IR analysis and
 optimization work. Language-level specifications and design notes live under
 [`docs/aether/`](docs/aether/), including the
-[`List<T>`/future `Array<T>` collection design](docs/aether/AETHER_COLLECTIONS_DESIGN.md).
+[`List<T>`/`Array<T>` collection and mathematical literal boundary
+design](docs/aether/AETHER_COLLECTIONS_DESIGN.md) and the
+[`Vector<T, Orientation>`/`Matrix<T>` mathematical type
+design](docs/aether/AETHER_VECTOR_MATRIX_DESIGN.md).
 
 ## Aether Scripts
 
