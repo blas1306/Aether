@@ -138,6 +138,12 @@ Scalar reads are implemented for `Vector<T, Orientation>` and `Matrix<T>`:
 `v[i]` returns `T`, and `A[i, j]` returns `T`. Indices must typecheck as
 `int`. Indexed assignment and matrix/vector slices remain separate features.
 
+Future indexed assignment, `v[i] = value` and `A[i, j] = value`, should follow
+the mutable-reference and aliasing rules documented in
+[`MUTABLE_AGGREGATES.md`](../compiler/MUTABLE_AGGREGATES.md): assigning a
+vector or matrix copies the reference, not the elements, and mutating through
+one alias is observable through other aliases to the same object.
+
 `A[i][j]` is not matrix indexing. That form belongs to nested structures such
 as `List<List<T>>`, `Array<Array<T>>`, or similar container compositions.
 `Matrix<T>` uses two-dimensional indexing because it is a rectangular

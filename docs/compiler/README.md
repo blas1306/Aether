@@ -75,3 +75,7 @@ Current compiler-design documents:
 - [LLVM_BACKEND.md](LLVM_BACKEND.md): initial textual LLVM IR backend for the
   smallest SSA subset, its type mapping, current limitations, and the fact
   that it is not connected to CLI yet.
+- [MUTABLE_AGGREGATES.md](MUTABLE_AGGREGATES.md): intended mutable-reference
+  semantics for `List`, `Array`, `Vector`, and `Matrix`, including aliasing,
+  future indexed set operations, optimizer constraints, `const`, explicit
+  copies, and runtime/GC implications.

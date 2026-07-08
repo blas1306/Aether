@@ -91,6 +91,11 @@ column-by-row is an outer product.
 `List<T>` is dynamic: operations such as `push`, `pop`, `insert`, `remove_at`,
 `clear`, `reverse`, and `sort` may change the container length or order.
 
+`List<T>` follows the mutable-reference and aliasing rules documented in
+[`MUTABLE_AGGREGATES.md`](../compiler/MUTABLE_AGGREGATES.md): assigning a list
+copies the reference, not the elements, and mutating through one alias is
+observable through other aliases to the same list object.
+
 When a collection literal has no expected type, Aether infers `List<T>`:
 
 ```aether
@@ -106,6 +111,10 @@ collection literals.
 `Array<T>` is fixed-size: after construction, its length cannot change.
 Index assignment may update existing elements, but operations that add or remove
 elements are not part of the array model.
+
+Like `List<T>`, `Array<T>` is a mutable aggregate reference. Assignment aliases
+the same array object rather than copying elements; future indexed assignment
+must preserve that observable aliasing behavior.
 
 `Array<T>` is not inferred from an unannotated literal. A brace literal
 produces `Array<T>` only when the expected type is explicitly `Array<T>`:
