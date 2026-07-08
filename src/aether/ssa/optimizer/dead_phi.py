@@ -15,6 +15,7 @@ from aether.ssa.model import (
     SSAFunction,
     SSAInstruction,
     SSAJump,
+    SSAMatrixNew,
     SSAModule,
     SSAPhi,
     SSAReturn,
@@ -123,6 +124,10 @@ class DeadPhiEliminator:
             return
 
         if isinstance(instruction, SSAVectorNew):
+            used_values.update(instruction.elements)
+            return
+
+        if isinstance(instruction, SSAMatrixNew):
             used_values.update(instruction.elements)
             return
 

@@ -19,6 +19,7 @@ from aether.ir.model import (
     IRInstruction,
     IRJump,
     IRLoad,
+    IRMatrixNew,
     IRModule,
     IRReturn,
     IRStore,
@@ -41,6 +42,7 @@ from .model import (
     SSAFunction,
     SSAInstruction,
     SSAJump,
+    SSAMatrixNew,
     SSAModule,
     SSAParameter,
     SSAPhi,
@@ -505,6 +507,14 @@ class SSABuilder:
                 for element in instruction.elements
             )
             return SSAVectorNew(result, elements, instruction.orientation)
+
+        if isinstance(instruction, IRMatrixNew):
+            result = self._define_value(instruction.result, state.value_map)
+            elements = tuple(
+                self._resolve_value(element, state.value_map)
+                for element in instruction.elements
+            )
+            return SSAMatrixNew(result, elements, instruction.rows, instruction.cols)
 
         if isinstance(instruction, IRArrayGet):
             result = self._define_value(instruction.result, state.value_map)

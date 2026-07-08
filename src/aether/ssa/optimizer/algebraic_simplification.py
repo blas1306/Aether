@@ -18,6 +18,7 @@ from aether.ssa.model import (
     SSAFunction,
     SSAInstruction,
     SSAJump,
+    SSAMatrixNew,
     SSAModule,
     SSAPhi,
     SSAReturn,
@@ -260,6 +261,16 @@ class SSAAlgebraicSimplifier:
                     self._resolve(element, replacements)
                     for element in instruction.elements
                 ),
+            )
+        if isinstance(instruction, SSAMatrixNew):
+            return SSAMatrixNew(
+                instruction.result,
+                tuple(
+                    self._resolve(element, replacements)
+                    for element in instruction.elements
+                ),
+                instruction.rows,
+                instruction.cols,
             )
 
         if isinstance(instruction, SSAArrayGet):

@@ -86,6 +86,14 @@ class IRVectorNew(IRInstruction):
 
 
 @dataclass(frozen=True)
+class IRMatrixNew(IRInstruction):
+    result: IRValue
+    elements: tuple[IRValue, ...] = ()
+    rows: int = 0
+    cols: int = 0
+
+
+@dataclass(frozen=True)
 class IRArrayGet(IRInstruction):
     result: IRValue
     array: IRValue

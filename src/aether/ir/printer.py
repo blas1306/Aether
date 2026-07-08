@@ -19,6 +19,7 @@ from .model import (
     IRInstruction,
     IRJump,
     IRLoad,
+    IRMatrixNew,
     IRModule,
     IRReturn,
     IRStore,
@@ -85,6 +86,12 @@ class IRPrinter:
             elements = ", ".join(self._value(element) for element in instruction.elements)
             orientation = f" {instruction.orientation}" if instruction.orientation is not None else ""
             return f"{self._typed_value(instruction.result)} = vector_new{orientation} [{elements}]"
+        if isinstance(instruction, IRMatrixNew):
+            elements = ", ".join(self._value(element) for element in instruction.elements)
+            return (
+                f"{self._typed_value(instruction.result)} = matrix_new "
+                f"{instruction.rows}x{instruction.cols} [{elements}]"
+            )
         if isinstance(instruction, IRArrayGet):
             return (
                 f"{self._typed_value(instruction.result)} = array_get "

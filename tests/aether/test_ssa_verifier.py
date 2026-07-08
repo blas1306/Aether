@@ -4,7 +4,7 @@ import re
 
 import pytest
 
-from aether.ir import BoolType, DoubleType, IntType, StringType, VectorType, VoidType
+from aether.ir import BoolType, DoubleType, IntType, MatrixType, StringType, VectorType, VoidType
 from aether.ssa import (
     SSABasicBlock,
     SSABinaryOp,
@@ -15,6 +15,7 @@ from aether.ssa import (
     SSAConst,
     SSAFunction,
     SSAJump,
+    SSAMatrixNew,
     SSAModule,
     SSAParameter,
     SSAPhi,
@@ -203,6 +204,39 @@ def test_verifies_column_vector_new() -> None:
                             SSAConst(first, 1),
                             SSAConst(second, 2),
                             SSAVectorNew(vector, (first, second), "column"),
+                            SSAReturn(first),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+
+    assert SSAVerifier(module).verify() is module
+
+
+def test_verifies_matrix_new() -> None:
+    int_type = IntType()
+    first = SSAValue("0", int_type)
+    second = SSAValue("1", int_type)
+    third = SSAValue("2", int_type)
+    fourth = SSAValue("3", int_type)
+    matrix = SSAValue("4", MatrixType(int_type))
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [],
+                int_type,
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(first, 1),
+                            SSAConst(second, 2),
+                            SSAConst(third, 3),
+                            SSAConst(fourth, 4),
+                            SSAMatrixNew(matrix, (first, second, third, fourth), 2, 2),
                             SSAReturn(first),
                         ],
                     )

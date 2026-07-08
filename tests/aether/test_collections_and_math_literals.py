@@ -347,9 +347,19 @@ def test_parser_accepts_column_vector_literal_ast() -> None:
     assert assignment.expression.uses_commas is False
 
 
-def test_parser_rejects_mixed_comma_and_semicolon_vector_literal() -> None:
-    with pytest.raises(AetherSyntaxError, match="Mixed ',' and ';' vector literals"):
-        parse_source("x = [1, 2; 3, 4];")
+def test_parser_accepts_comma_rows_as_matrix_literal_ast() -> None:
+    program = parse_source("A = [1, 2; 3, 4];")
+    assignment = program.statements[0]
+
+    assert isinstance(assignment, ast.Assignment)
+    assert isinstance(assignment.expression, ast.MatrixLiteral)
+    assert assignment.expression.rows == [
+        [ast.Literal(1, "int"), ast.Literal(2, "int")],
+        [ast.Literal(3, "int"), ast.Literal(4, "int")],
+    ]
+    assert assignment.expression.vector is False
+    assert assignment.expression.orientation is None
+    assert assignment.expression.uses_commas is True
 
 
 def test_row_vector_literal_infers_vector_type_without_expected_type() -> None:
@@ -415,6 +425,28 @@ def test_column_vector_literal_uses_column_vector_expected_type() -> None:
     result = run_aether("Vector<int, Column> v = [1; 2; 3];")
 
     assert result.env["v"].type_name == VectorType("int", 3, "column")
+
+
+def test_comma_matrix_literal_infers_matrix_type_without_expected_type() -> None:
+    result = run_aether("A = [1, 2; 3, 4];")
+
+    assert result.env["A"].type_name == MatrixType("int", 2, 2)
+
+
+def test_comma_matrix_literal_uses_matrix_expected_type() -> None:
+    result = run_aether("Matrix<int> A = [1, 2; 3, 4];")
+
+    assert result.env["A"].type_name == MatrixType("int", 2, 2)
+
+
+def test_comma_matrix_literal_rejects_ragged_rows() -> None:
+    with pytest.raises(AetherTypeError, match="Matrix literals must be rectangular"):
+        run_aether("Matrix<int> A = [1, 2; 3];")
+
+
+def test_comma_matrix_literal_rejects_heterogeneous_elements() -> None:
+    with pytest.raises(AetherTypeError, match="homogeneous compatible"):
+        run_aether('Matrix<int> A = [1, "x"; 3, 4];')
 
 
 def test_matrix_literal_and_one_based_indexing() -> None:

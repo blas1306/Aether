@@ -19,6 +19,7 @@ from .model import (
     IRInstruction,
     IRJump,
     IRLoad,
+    IRMatrixNew,
     IRModule,
     IRReturn,
     IRStore,
@@ -349,6 +350,10 @@ class IRVerifier:
             self._verify_vector_new(instruction, state, value_types)
             return self._define_value(state, instruction.result)
 
+        if isinstance(instruction, IRMatrixNew):
+            self._verify_matrix_new(instruction, state, value_types)
+            return self._define_value(state, instruction.result)
+
         if isinstance(instruction, IRArrayGet):
             self._verify_array_get(instruction, state, value_types)
             return self._define_value(state, instruction.result)
@@ -461,6 +466,29 @@ class IRVerifier:
             if element.type != instruction.result.type.element:
                 self._fail(
                     f"Vector literal element type mismatch: expected "
+                    f"{instruction.result.type.element}, got {element.type}"
+                )
+
+    def _verify_matrix_new(
+        self,
+        instruction: IRMatrixNew,
+        state: _State,
+        value_types: dict[str, IRType],
+    ) -> None:
+        if not isinstance(instruction.result.type, MatrixType):
+            self._fail(f"Matrix new result must be matrix type, got {instruction.result.type}")
+        if instruction.rows <= 0 or instruction.cols <= 0:
+            self._fail(f"Matrix new dimensions must be positive, got {instruction.rows}x{instruction.cols}")
+        if len(instruction.elements) != instruction.rows * instruction.cols:
+            self._fail(
+                f"Matrix new element count mismatch: expected {instruction.rows * instruction.cols}, "
+                f"got {len(instruction.elements)}"
+            )
+        for element in instruction.elements:
+            self._require_defined(element, state, value_types)
+            if element.type != instruction.result.type.element:
+                self._fail(
+                    f"Matrix literal element type mismatch: expected "
                     f"{instruction.result.type.element}, got {element.type}"
                 )
 
@@ -770,7 +798,7 @@ class IRVerifier:
             return instruction.result
         if isinstance(instruction, IRCall):
             return instruction.result
-        if isinstance(instruction, (IRArrayNew, IRArrayGet, IRArrayLength, IRVectorNew)):
+        if isinstance(instruction, (IRArrayNew, IRArrayGet, IRArrayLength, IRVectorNew, IRMatrixNew)):
             return instruction.result
         return None
 

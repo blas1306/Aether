@@ -18,6 +18,7 @@ from aether.ir.model import (
     IRFunction,
     IRInstruction,
     IRLoad,
+    IRMatrixNew,
     IRModule,
     IRReturn,
     IRStore,
@@ -237,6 +238,14 @@ class AlgebraicSimplifier:
                 ),
             )
         if isinstance(instruction, IRVectorNew):
+            return replace(
+                instruction,
+                elements=tuple(
+                    self._resolve(element, replacements)
+                    for element in instruction.elements
+                ),
+            )
+        if isinstance(instruction, IRMatrixNew):
             return replace(
                 instruction,
                 elements=tuple(

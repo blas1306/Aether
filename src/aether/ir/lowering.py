@@ -5,7 +5,13 @@ from typing import NoReturn
 
 from .. import ast
 from ..errors import IRBackendUnsupportedFeatureError
-from ..types import AetherType, ArrayType as AetherArrayType, ListType as AetherListType, VectorType as AetherVectorType
+from ..types import (
+    AetherType,
+    ArrayType as AetherArrayType,
+    ListType as AetherListType,
+    MatrixType as AetherMatrixType,
+    VectorType as AetherVectorType,
+)
 from .model import (
     IRArrayGet,
     IRArrayLength,
@@ -21,6 +27,7 @@ from .model import (
     IRFunction,
     IRJump,
     IRLoad,
+    IRMatrixNew,
     IRModule,
     IRParameter,
     IRReturn,
@@ -37,6 +44,7 @@ from .types import (
     IntType,
     IRType,
     ListType,
+    MatrixType,
     StringType,
     VectorType,
     VoidType,
@@ -366,7 +374,9 @@ class IRLowerer:
             return self._lower_array_literal(expression, context, target_type)
 
         if isinstance(expression, ast.MatrixLiteral):
-            return self._lower_vector_literal(expression, context, target_type)
+            if expression.vector:
+                return self._lower_vector_literal(expression, context, target_type)
+            return self._lower_matrix_literal(expression, context, target_type)
 
         if isinstance(expression, ast.Identifier):
             slot = context.locals.get(expression.name)
@@ -552,6 +562,46 @@ class IRLowerer:
         context.block.instructions.append(IRVectorNew(result, elements, vector_type.orientation))
         return result
 
+    def _lower_matrix_literal(
+        self,
+        expression: ast.MatrixLiteral,
+        context: _FunctionContext,
+        target_type: IRType | None,
+    ) -> IRValue:
+        row_lengths = [len(row) for row in expression.rows]
+        if not row_lengths or any(length == 0 for length in row_lengths):
+            self._unsupported(expression, "empty matrix literal")
+        if any(length != row_lengths[0] for length in row_lengths):
+            self._fail("IR backend cannot lower ragged matrix literals.", expression)
+
+        element_target_type = target_type.element if isinstance(target_type, MatrixType) else None
+        elements_source = [element for row in expression.rows for element in row]
+        elements = tuple(
+            self._lower_expression(element, context, target_type=element_target_type)
+            for element in elements_source
+        )
+
+        if isinstance(target_type, MatrixType):
+            matrix_type = MatrixType(target_type.element)
+        else:
+            element_type = elements[0].type
+            if any(element.type != element_type for element in elements):
+                self._fail(
+                    "IR backend does not support implicit conversion inside matrix literals yet.",
+                    expression,
+                )
+            matrix_type = MatrixType(element_type)
+
+        for element in elements:
+            self._require_same_type(
+                element.type,
+                matrix_type.element,
+                "matrix literal element requires an implicit conversion",
+            )
+        result = context.temporary(matrix_type)
+        context.block.instructions.append(IRMatrixNew(result, elements, len(expression.rows), row_lengths[0]))
+        return result
+
     def _lower_cast(self, call: ast.CallExpression, context: _FunctionContext) -> IRValue:
         if len(call.arguments) != 1:
             raise ValueError(
@@ -636,6 +686,8 @@ class IRLowerer:
             return ListType(self._lower_type(type_name.element_type))
         if isinstance(type_name, AetherVectorType):
             return VectorType(self._lower_type(type_name.element_type), type_name.orientation)
+        if isinstance(type_name, AetherMatrixType):
+            return MatrixType(self._lower_type(type_name.element_type))
         self._fail(f"IR backend does not support type '{type_name}' yet.")
 
     def _require_same_type(self, actual: IRType, expected: IRType, operation: str) -> None:

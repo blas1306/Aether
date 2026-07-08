@@ -21,6 +21,7 @@ from aether.ir.model import (
     IRInstruction,
     IRJump,
     IRLoad,
+    IRMatrixNew,
     IRReturn,
     IRStore,
     IRValue,
@@ -43,6 +44,7 @@ from .model import (
     SSAFunction,
     SSAInstruction,
     SSAJump,
+    SSAMatrixNew,
     SSAParameter,
     SSAPhi,
     SSAReturn,
@@ -232,6 +234,14 @@ class SSARenamer:
             )
             self._bind_value(result.name, result, bound_values)
             return SSAVectorNew(result, elements, instruction.orientation)
+
+        if isinstance(instruction, IRMatrixNew):
+            result = self._define_value(instruction.result)
+            elements = tuple(
+                self._resolve_value(element) for element in instruction.elements
+            )
+            self._bind_value(result.name, result, bound_values)
+            return SSAMatrixNew(result, elements, instruction.rows, instruction.cols)
 
         if isinstance(instruction, IRArrayGet):
             result = self._define_value(instruction.result)

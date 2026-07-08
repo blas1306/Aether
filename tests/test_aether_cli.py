@@ -907,6 +907,25 @@ def test_emit_llvm_prints_column_vector_literal_from_semicolon_syntax(tmp_path: 
     assert stderr == ""
 
 
+def test_emit_llvm_prints_matrix_literal(tmp_path: Path) -> None:
+    program = tmp_path / "emit_llvm_matrix_literal.ae"
+    program.write_text(
+        "int main() { Matrix<int> A = [1, 2; 3, 4]; return 0; }\n",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert "@aether_array_new(i64 4, i64 4)" in stdout
+    assert "store i32 1" in stdout
+    assert "store i32 2" in stdout
+    assert "store i32 3" in stdout
+    assert "store i32 4" in stdout
+    assert "ret i32 0" in stdout
+    assert stderr == ""
+
+
 def test_emit_llvm_prints_string_literal_global(tmp_path: Path) -> None:
     program = tmp_path / "emit_llvm_string.ae"
     program.write_text(
@@ -1546,6 +1565,26 @@ int main() {
     assert stderr == ""
 
 
+def test_build_accepts_matrix_literal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    program = tmp_path / "build_matrix_literal.ae"
+    output = tmp_path / "build_matrix_literal"
+    program.write_text(
+        "int main() { Matrix<int> A = [1, 2; 3, 4]; return 0; }\n",
+        encoding="utf-8",
+    )
+    clang_commands, _program_commands = fake_native_toolchain(monkeypatch)
+
+    exit_code, stdout, stderr = run_cli(["build", str(program), "-o", str(output)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert len(clang_commands) == 1
+    assert stdout == f"Built executable: {output.resolve()}\n"
+    assert stderr == ""
+
+
 def test_build_reports_clear_error_when_clang_is_unavailable(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1754,6 +1793,26 @@ def test_build_smoke_compiles_and_runs_with_clang_if_available(tmp_path: Path) -
     assert stderr == ""
     completed = subprocess.run([str(output)], check=False)
     assert completed.returncode == 5
+
+
+def test_build_matrix_literal_smoke_compiles_and_runs_with_clang_if_available(tmp_path: Path) -> None:
+    if shutil.which("clang") is None:
+        pytest.skip("clang is not available")
+
+    program = tmp_path / "matrix_literal.ae"
+    output = tmp_path / "matrix_literal"
+    program.write_text(
+        "int main() { Matrix<int> A = [1, 2; 3, 4]; return 0; }\n",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["build", str(program), "-o", str(output)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert stdout == f"Built executable: {output.resolve()}\n"
+    assert stderr == ""
+    completed = subprocess.run([str(output)], check=False)
+    assert completed.returncode == 0
 
 
 def test_build_call_smoke_compiles_and_runs_with_clang_if_available(

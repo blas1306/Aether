@@ -18,6 +18,7 @@ from aether.ir import (
     IRJump,
     IRLoad,
     IRLowerer,
+    IRMatrixNew,
     IRModule,
     IRParameter,
     IRReturn,
@@ -27,6 +28,7 @@ from aether.ir import (
     IRVerificationError,
     IRVerifier,
     IntType,
+    MatrixType,
     StringType,
     VectorType,
     VoidType,
@@ -198,6 +200,41 @@ def test_verifies_column_vector_new() -> None:
                             IRVectorNew(vector, (first, second)),
                             IRConst(IRValue("3", int_type), 0),
                             IRReturn(IRValue("3", int_type)),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+
+    assert IRVerifier(module).verify() is module
+
+
+def test_verifies_matrix_new() -> None:
+    int_type = IntType()
+    first = IRValue("0", int_type)
+    second = IRValue("1", int_type)
+    third = IRValue("2", int_type)
+    fourth = IRValue("3", int_type)
+    matrix = IRValue("4", MatrixType(int_type))
+    return_value = IRValue("5", int_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "main",
+                [],
+                int_type,
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [
+                            IRConst(first, 1),
+                            IRConst(second, 2),
+                            IRConst(third, 3),
+                            IRConst(fourth, 4),
+                            IRMatrixNew(matrix, (first, second, third, fourth), 2, 2),
+                            IRConst(return_value, 0),
+                            IRReturn(return_value),
                         ],
                     )
                 ],

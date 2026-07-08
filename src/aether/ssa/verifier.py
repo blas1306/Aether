@@ -37,6 +37,7 @@ from .model import (
     SSAFunction,
     SSAInstruction,
     SSAJump,
+    SSAMatrixNew,
     SSAModule,
     SSAPhi,
     SSAReturn,
@@ -255,6 +256,10 @@ class SSAVerifier:
                 self._verify_vector_new(instruction, value_types)
                 continue
 
+            if isinstance(instruction, SSAMatrixNew):
+                self._verify_matrix_new(instruction, value_types)
+                continue
+
             if isinstance(instruction, SSAArrayGet):
                 self._verify_array_get(instruction, value_types)
                 continue
@@ -381,6 +386,28 @@ class SSAVerifier:
             if element.type != instruction.result.type.element:
                 self._fail(
                     f"Vector literal element type mismatch: expected "
+                    f"{instruction.result.type.element}, got {element.type}"
+                )
+
+    def _verify_matrix_new(
+        self,
+        instruction: SSAMatrixNew,
+        value_types: dict[str, IRType],
+    ) -> None:
+        if not isinstance(instruction.result.type, MatrixType):
+            self._fail(f"Matrix new result must be matrix type, got {instruction.result.type}")
+        if instruction.rows <= 0 or instruction.cols <= 0:
+            self._fail(f"Matrix new dimensions must be positive, got {instruction.rows}x{instruction.cols}")
+        if len(instruction.elements) != instruction.rows * instruction.cols:
+            self._fail(
+                f"Matrix new element count mismatch: expected {instruction.rows * instruction.cols}, "
+                f"got {len(instruction.elements)}"
+            )
+        for element in instruction.elements:
+            self._require_defined(element, value_types)
+            if element.type != instruction.result.type.element:
+                self._fail(
+                    f"Matrix literal element type mismatch: expected "
                     f"{instruction.result.type.element}, got {element.type}"
                 )
 
@@ -649,7 +676,7 @@ class SSAVerifier:
             return instruction.result
         if isinstance(instruction, SSACall):
             return instruction.result
-        if isinstance(instruction, (SSAArrayNew, SSAArrayGet, SSAArrayLength, SSAVectorNew)):
+        if isinstance(instruction, (SSAArrayNew, SSAArrayGet, SSAArrayLength, SSAVectorNew, SSAMatrixNew)):
             return instruction.result
         return None
 

@@ -6,7 +6,7 @@ import subprocess
 import pytest
 
 from aether.backend.llvm import LLVMBackendError, print_llvm
-from aether.ir import BoolType, DoubleType, IntType, StringType, VectorType, VoidType
+from aether.ir import BoolType, DoubleType, IntType, MatrixType, StringType, VectorType, VoidType
 from aether.ssa import (
     SSABasicBlock,
     SSABinaryOp,
@@ -17,6 +17,7 @@ from aether.ssa import (
     SSAConst,
     SSAFunction,
     SSAJump,
+    SSAMatrixNew,
     SSAModule,
     SSAParameter,
     SSAPhi,
@@ -119,6 +120,47 @@ def test_prints_column_vector_literal_as_contiguous_array() -> None:
     assert "store i32 1" in llvm
     assert "store i32 2" in llvm
     assert "store i32 3" in llvm
+
+
+def test_prints_matrix_literal_as_contiguous_array() -> None:
+    int_type = IntType()
+    first = SSAValue("0", int_type)
+    second = SSAValue("1", int_type)
+    third = SSAValue("2", int_type)
+    fourth = SSAValue("3", int_type)
+    matrix = SSAValue("4", MatrixType(int_type))
+    return_value = SSAValue("5", int_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [],
+                int_type,
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(first, 1),
+                            SSAConst(second, 2),
+                            SSAConst(third, 3),
+                            SSAConst(fourth, 4),
+                            SSAMatrixNew(matrix, (first, second, third, fourth), 2, 2),
+                            SSAConst(return_value, 0),
+                            SSAReturn(return_value),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+
+    llvm = print_llvm(module)
+
+    assert "@aether_array_new(i64 4, i64 4)" in llvm
+    assert "store i32 1" in llvm
+    assert "store i32 2" in llvm
+    assert "store i32 3" in llvm
+    assert "store i32 4" in llvm
 
 
 def test_rejects_vector_new_orientation_mismatch() -> None:

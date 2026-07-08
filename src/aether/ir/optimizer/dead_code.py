@@ -16,6 +16,7 @@ from aether.ir.model import (
     IRInstruction,
     IRJump,
     IRLoad,
+    IRMatrixNew,
     IRModule,
     IRReturn,
     IRStore,
@@ -136,6 +137,8 @@ class DeadCodeEliminator:
         if isinstance(instruction, IRArrayNew):
             return instruction.elements
         if isinstance(instruction, IRVectorNew):
+            return instruction.elements
+        if isinstance(instruction, IRMatrixNew):
             return instruction.elements
         if isinstance(instruction, IRArrayGet):
             return (instruction.array, instruction.index)

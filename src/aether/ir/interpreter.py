@@ -20,6 +20,7 @@ from .model import (
     IRInstruction,
     IRJump,
     IRLoad,
+    IRMatrixNew,
     IRModule,
     IRReturn,
     IRStore,
@@ -152,6 +153,12 @@ class IRInterpreter:
             return False, None, None
 
         if isinstance(instruction, IRVectorNew):
+            frame.values[instruction.result] = [
+                self._value(element, frame) for element in instruction.elements
+            ]
+            return False, None, None
+
+        if isinstance(instruction, IRMatrixNew):
             frame.values[instruction.result] = [
                 self._value(element, frame) for element in instruction.elements
             ]

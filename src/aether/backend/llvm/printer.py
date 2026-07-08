@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import re
 from typing import Any
 
-from aether.ir.types import ArrayType, BoolType, DoubleType, IntType, StringType, VectorType, VoidType
+from aether.ir.types import ArrayType, BoolType, DoubleType, IntType, MatrixType, StringType, VectorType, VoidType
 from aether.ssa.model import (
     SSAArrayGet,
     SSAArrayLength,
@@ -20,6 +20,7 @@ from aether.ssa.model import (
     SSAFunction,
     SSAInstruction,
     SSAJump,
+    SSAMatrixNew,
     SSAModule,
     SSAParameter,
     SSAPhi,
@@ -159,6 +160,8 @@ class LLVMPrinter:
             return self._print_array_new(instruction)
         if isinstance(instruction, SSAVectorNew):
             return self._print_vector_new(instruction)
+        if isinstance(instruction, SSAMatrixNew):
+            return self._print_matrix_new(instruction)
         if isinstance(instruction, SSAArrayGet):
             return "\n  ".join(self._print_array_get(instruction))
         if isinstance(instruction, SSAArraySet):
@@ -180,7 +183,7 @@ class LLVMPrinter:
             return instruction.result
         if isinstance(instruction, SSACall):
             return instruction.result
-        if isinstance(instruction, (SSAArrayNew, SSAArrayGet, SSAArrayLength, SSAVectorNew)):
+        if isinstance(instruction, (SSAArrayNew, SSAArrayGet, SSAArrayLength, SSAVectorNew, SSAMatrixNew)):
             return instruction.result
         return None
 
@@ -368,6 +371,19 @@ class LLVMPrinter:
             raise LLVMBackendError("LLVM vector_new requires row or column orientation")
         if instruction.orientation != instruction.result.type.orientation:
             raise LLVMBackendError("LLVM vector_new instruction orientation must match result type")
+        return self._print_contiguous_new(
+            instruction.result,
+            instruction.result.type.element,
+            instruction.elements,
+        )
+
+    def _print_matrix_new(self, instruction: SSAMatrixNew) -> str:
+        if not isinstance(instruction.result.type, MatrixType):
+            raise LLVMBackendError("LLVM matrix_new result must be MatrixType")
+        if instruction.rows <= 0 or instruction.cols <= 0:
+            raise LLVMBackendError("LLVM matrix_new requires positive dimensions")
+        if len(instruction.elements) != instruction.rows * instruction.cols:
+            raise LLVMBackendError("LLVM matrix_new element count must match dimensions")
         return self._print_contiguous_new(
             instruction.result,
             instruction.result.type.element,

@@ -12,10 +12,11 @@ from aether.ir import (
     IRArraySet,
     IRInterpreter,
     IRLowerer,
+    IRMatrixNew,
     IRVectorNew,
 )
 from aether.pipeline import lower_to_verified_ssa, parse_source, prepare_typed_program
-from aether.ssa import SSAArrayGet, SSAArrayLength, SSAArrayNew, SSAArraySet, SSAVectorNew
+from aether.ssa import SSAArrayGet, SSAArrayLength, SSAArrayNew, SSAArraySet, SSAMatrixNew, SSAVectorNew
 from aether.typechecker import TypeChecker
 
 
@@ -128,6 +129,39 @@ int main() {
     assert ssa_vector_new.orientation == "column"
 
 
+def test_lower_and_ssa_preserve_matrix_literal() -> None:
+    typed_program = prepare_typed_program(
+        """
+int main() {
+    Matrix<int> A = [1, 2; 3, 4];
+    return 0;
+}
+""",
+        TypeChecker(),
+    )
+
+    ir = IRLowerer().lower(typed_program.program)
+    ssa = lower_to_verified_ssa(typed_program)
+
+    ir_matrix_new = next(
+        instruction
+        for instruction in ir.functions[0].blocks[0].instructions
+        if isinstance(instruction, IRMatrixNew)
+    )
+    ssa_matrix_new = next(
+        instruction
+        for instruction in ssa.functions[0].blocks[0].instructions
+        if isinstance(instruction, SSAMatrixNew)
+    )
+
+    assert ir_matrix_new.rows == 2
+    assert ir_matrix_new.cols == 2
+    assert len(ir_matrix_new.elements) == 4
+    assert ssa_matrix_new.rows == 2
+    assert ssa_matrix_new.cols == 2
+    assert len(ssa_matrix_new.elements) == 4
+
+
 @pytest.mark.skipif(shutil.which("clang") is None, reason="clang is not available")
 @pytest.mark.parametrize(
     ("source", "expected"),
@@ -217,6 +251,21 @@ def test_llvm_runner_builds_column_vector_literal_from_semicolon_syntax() -> Non
         """
 int main() {
     Vector<int> v = [1; 2; 3];
+    return 0;
+}
+""",
+        TypeChecker(),
+    )
+
+    assert LLVMRunner().run(typed_program) == 0
+
+
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang is not available")
+def test_llvm_runner_builds_matrix_literal() -> None:
+    typed_program = prepare_typed_program(
+        """
+int main() {
+    Matrix<int> A = [1, 2; 3, 4];
     return 0;
 }
 """,

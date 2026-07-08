@@ -15,6 +15,7 @@ from aether.ssa.model import (
     SSAFunction,
     SSAInstruction,
     SSAJump,
+    SSAMatrixNew,
     SSAModule,
     SSAPhi,
     SSAReturn,
@@ -228,6 +229,17 @@ class TrivialPhiEliminator:
             if rewritten_uses == 0:
                 return instruction, 0
             return SSAVectorNew(instruction.result, tuple(elements)), rewritten_uses
+
+        if isinstance(instruction, SSAMatrixNew):
+            elements = []
+            rewritten_uses = 0
+            for element in instruction.elements:
+                rewritten_element, rewritten = self._rewrite_value(element, replacements)
+                elements.append(rewritten_element)
+                rewritten_uses += int(rewritten)
+            if rewritten_uses == 0:
+                return instruction, 0
+            return SSAMatrixNew(instruction.result, tuple(elements), instruction.rows, instruction.cols), rewritten_uses
 
         if isinstance(instruction, SSAArrayGet):
             array, array_rewritten = self._rewrite_value(instruction.array, replacements)

@@ -1268,17 +1268,15 @@ class Parser:
                 if self._check(TokenType.RIGHT_BRACKET):
                     raise self._error(self._previous(), "Trailing ';' in matrix literal is not supported.")
             self._consume(TokenType.RIGHT_BRACKET, "Expected ']' after matrix literal.")
-            if uses_commas and len(rows) > 1:
-                raise self._error(
-                    self._previous(),
-                    "Mixed ',' and ';' vector literals are not supported.",
-                )
             orientation = None
+            is_vector = not has_space_columns
             if len(rows) == 1:
                 orientation = "row"
             elif all(len(row) == 1 for row in rows):
                 orientation = "column"
-            return ast.MatrixLiteral(rows, vector=not has_space_columns, orientation=orientation, uses_commas=uses_commas)
+            elif uses_commas:
+                is_vector = False
+            return ast.MatrixLiteral(rows, vector=is_vector, orientation=orientation, uses_commas=uses_commas)
         finally:
             self.matrix_literal_depth -= 1
 

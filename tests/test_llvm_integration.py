@@ -24,6 +24,7 @@ EXPECTED_EXIT_CODES = {
     "gcd_iterative.ae": 6,
     "identity_call.ae": 23,
     "int_to_double.ae": 12,
+    "matrix_literal.ae": 0,
     "max.ae": 12,
     "return_5.ae": 5,
     "string_choose.ae": 0,

@@ -74,6 +74,14 @@ class SSAVectorNew(SSAInstruction):
 
 
 @dataclass(frozen=True)
+class SSAMatrixNew(SSAInstruction):
+    result: SSAValue
+    elements: tuple[SSAValue, ...] = ()
+    rows: int = 0
+    cols: int = 0
+
+
+@dataclass(frozen=True)
 class SSAArrayGet(SSAInstruction):
     result: SSAValue
     array: SSAValue
