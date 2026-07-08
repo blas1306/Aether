@@ -57,6 +57,32 @@ class SSACall(SSAInstruction):
 
 
 @dataclass(frozen=True)
+class SSAArrayNew(SSAInstruction):
+    result: SSAValue
+    elements: tuple[SSAValue, ...] = ()
+
+
+@dataclass(frozen=True)
+class SSAArrayGet(SSAInstruction):
+    result: SSAValue
+    array: SSAValue
+    index: SSAValue
+
+
+@dataclass(frozen=True)
+class SSAArraySet(SSAInstruction):
+    array: SSAValue
+    index: SSAValue
+    value: SSAValue
+
+
+@dataclass(frozen=True)
+class SSAArrayLength(SSAInstruction):
+    result: SSAValue
+    array: SSAValue
+
+
+@dataclass(frozen=True)
 class SSAPhi(SSAInstruction):
     result: SSAValue
     incoming: tuple[tuple[str, SSAValue], ...]

@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 from aether.ssa.model import (
+    SSAArrayGet,
+    SSAArrayLength,
+    SSAArrayNew,
+    SSAArraySet,
     SSABasicBlock,
     SSABinaryOp,
     SSABranch,
@@ -201,6 +205,44 @@ class TrivialPhiEliminator:
                 ),
                 rewritten_uses,
             )
+
+        if isinstance(instruction, SSAArrayNew):
+            elements = []
+            rewritten_uses = 0
+            for element in instruction.elements:
+                rewritten_element, rewritten = self._rewrite_value(element, replacements)
+                elements.append(rewritten_element)
+                rewritten_uses += int(rewritten)
+            if rewritten_uses == 0:
+                return instruction, 0
+            return SSAArrayNew(instruction.result, tuple(elements)), rewritten_uses
+
+        if isinstance(instruction, SSAArrayGet):
+            array, array_rewritten = self._rewrite_value(instruction.array, replacements)
+            index, index_rewritten = self._rewrite_value(instruction.index, replacements)
+            if not array_rewritten and not index_rewritten:
+                return instruction, 0
+            return (
+                SSAArrayGet(instruction.result, array, index),
+                int(array_rewritten) + int(index_rewritten),
+            )
+
+        if isinstance(instruction, SSAArraySet):
+            array, array_rewritten = self._rewrite_value(instruction.array, replacements)
+            index, index_rewritten = self._rewrite_value(instruction.index, replacements)
+            value, value_rewritten = self._rewrite_value(instruction.value, replacements)
+            if not array_rewritten and not index_rewritten and not value_rewritten:
+                return instruction, 0
+            return (
+                SSAArraySet(array, index, value),
+                int(array_rewritten) + int(index_rewritten) + int(value_rewritten),
+            )
+
+        if isinstance(instruction, SSAArrayLength):
+            array, rewritten = self._rewrite_value(instruction.array, replacements)
+            if not rewritten:
+                return instruction, 0
+            return SSAArrayLength(instruction.result, array), 1
 
         if isinstance(instruction, SSAPhi):
             incoming = []

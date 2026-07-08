@@ -4,6 +4,10 @@ from dataclasses import replace
 from typing import Any
 
 from aether.ir.model import (
+    IRArrayGet,
+    IRArrayLength,
+    IRArrayNew,
+    IRArraySet,
     IRBasicBlock,
     IRBinaryOp,
     IRBranch,
@@ -222,6 +226,32 @@ class AlgebraicSimplifier:
                     self._resolve(argument, replacements)
                     for argument in instruction.arguments
                 ),
+            )
+        if isinstance(instruction, IRArrayNew):
+            return replace(
+                instruction,
+                elements=tuple(
+                    self._resolve(element, replacements)
+                    for element in instruction.elements
+                ),
+            )
+        if isinstance(instruction, IRArrayGet):
+            return replace(
+                instruction,
+                array=self._resolve(instruction.array, replacements),
+                index=self._resolve(instruction.index, replacements),
+            )
+        if isinstance(instruction, IRArraySet):
+            return replace(
+                instruction,
+                array=self._resolve(instruction.array, replacements),
+                index=self._resolve(instruction.index, replacements),
+                value=self._resolve(instruction.value, replacements),
+            )
+        if isinstance(instruction, IRArrayLength):
+            return replace(
+                instruction,
+                array=self._resolve(instruction.array, replacements),
             )
         if isinstance(instruction, IRBranch):
             return replace(

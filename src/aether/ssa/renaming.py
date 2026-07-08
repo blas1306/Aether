@@ -6,6 +6,10 @@ from typing import NoReturn
 from aether.analysis.cfg import CFG
 from aether.analysis.dominators import DominatorResult
 from aether.ir.model import (
+    IRArrayGet,
+    IRArrayLength,
+    IRArrayNew,
+    IRArraySet,
     IRBasicBlock,
     IRBinaryOp,
     IRBranch,
@@ -24,6 +28,10 @@ from aether.ir.model import (
 from aether.ir.types import IRType
 
 from .model import (
+    SSAArrayGet,
+    SSAArrayLength,
+    SSAArrayNew,
+    SSAArraySet,
     SSABasicBlock,
     SSABinaryOp,
     SSABranch,
@@ -206,6 +214,33 @@ class SSARenamer:
                 result = self._define_value(instruction.result)
                 self._bind_value(result.name, result, bound_values)
             return SSACall(instruction.function, arguments, result)
+
+        if isinstance(instruction, IRArrayNew):
+            result = self._define_value(instruction.result)
+            elements = tuple(
+                self._resolve_value(element) for element in instruction.elements
+            )
+            self._bind_value(result.name, result, bound_values)
+            return SSAArrayNew(result, elements)
+
+        if isinstance(instruction, IRArrayGet):
+            result = self._define_value(instruction.result)
+            array = self._resolve_value(instruction.array)
+            index = self._resolve_value(instruction.index)
+            self._bind_value(result.name, result, bound_values)
+            return SSAArrayGet(result, array, index)
+
+        if isinstance(instruction, IRArraySet):
+            array = self._resolve_value(instruction.array)
+            index = self._resolve_value(instruction.index)
+            value = self._resolve_value(instruction.value)
+            return SSAArraySet(array, index, value)
+
+        if isinstance(instruction, IRArrayLength):
+            result = self._define_value(instruction.result)
+            array = self._resolve_value(instruction.array)
+            self._bind_value(result.name, result, bound_values)
+            return SSAArrayLength(result, array)
 
         if isinstance(instruction, IRStore):
             value = self._resolve_value(instruction.value)

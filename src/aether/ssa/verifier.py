@@ -23,6 +23,10 @@ from aether.ir.types import (
 )
 
 from .model import (
+    SSAArrayGet,
+    SSAArrayLength,
+    SSAArrayNew,
+    SSAArraySet,
     SSABasicBlock,
     SSABinaryOp,
     SSABranch,
@@ -242,6 +246,22 @@ class SSAVerifier:
                 self._verify_call(instruction, value_types)
                 continue
 
+            if isinstance(instruction, SSAArrayNew):
+                self._verify_array_new(instruction, value_types)
+                continue
+
+            if isinstance(instruction, SSAArrayGet):
+                self._verify_array_get(instruction, value_types)
+                continue
+
+            if isinstance(instruction, SSAArraySet):
+                self._verify_array_set(instruction, value_types)
+                continue
+
+            if isinstance(instruction, SSAArrayLength):
+                self._verify_array_length(instruction, value_types)
+                continue
+
             if isinstance(instruction, SSAPhi):
                 self._verify_phi(instruction, block, blocks, predecessors, value_types)
                 continue
@@ -319,6 +339,67 @@ class SSAVerifier:
                 f"Call result type mismatch: expected {callee.return_type}, "
                 f"got {instruction.result.type}"
             )
+
+    def _verify_array_new(
+        self,
+        instruction: SSAArrayNew,
+        value_types: dict[str, IRType],
+    ) -> None:
+        if not isinstance(instruction.result.type, ArrayType):
+            self._fail(f"Array new result must be array type, got {instruction.result.type}")
+        for element in instruction.elements:
+            self._require_defined(element, value_types)
+            if element.type != instruction.result.type.element:
+                self._fail(
+                    f"Array literal element type mismatch: expected "
+                    f"{instruction.result.type.element}, got {element.type}"
+                )
+
+    def _verify_array_get(
+        self,
+        instruction: SSAArrayGet,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.array, value_types)
+        self._require_defined(instruction.index, value_types)
+        if not isinstance(instruction.array.type, ArrayType):
+            self._fail(f"Array get expects array value, got {instruction.array.type}")
+        if not isinstance(instruction.index.type, IntType):
+            self._fail(f"Array get index must be int, got {instruction.index.type}")
+        if instruction.result.type != instruction.array.type.element:
+            self._fail(
+                f"Array get result type mismatch: expected "
+                f"{instruction.array.type.element}, got {instruction.result.type}"
+            )
+
+    def _verify_array_set(
+        self,
+        instruction: SSAArraySet,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.array, value_types)
+        self._require_defined(instruction.index, value_types)
+        self._require_defined(instruction.value, value_types)
+        if not isinstance(instruction.array.type, ArrayType):
+            self._fail(f"Array set expects array value, got {instruction.array.type}")
+        if not isinstance(instruction.index.type, IntType):
+            self._fail(f"Array set index must be int, got {instruction.index.type}")
+        if instruction.value.type != instruction.array.type.element:
+            self._fail(
+                f"Array set value type mismatch: expected "
+                f"{instruction.array.type.element}, got {instruction.value.type}"
+            )
+
+    def _verify_array_length(
+        self,
+        instruction: SSAArrayLength,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.array, value_types)
+        if not isinstance(instruction.array.type, ArrayType):
+            self._fail(f"Array length expects array value, got {instruction.array.type}")
+        if not isinstance(instruction.result.type, IntType):
+            self._fail(f"Array length result must be int, got {instruction.result.type}")
 
     def _verify_phi(
         self,
@@ -538,6 +619,8 @@ class SSAVerifier:
         if isinstance(instruction, (SSAConst, SSABinaryOp, SSACompareOp, SSACast, SSAPhi)):
             return instruction.result
         if isinstance(instruction, SSACall):
+            return instruction.result
+        if isinstance(instruction, (SSAArrayNew, SSAArrayGet, SSAArrayLength)):
             return instruction.result
         return None
 

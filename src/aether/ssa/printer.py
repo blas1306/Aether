@@ -4,6 +4,10 @@ import json
 from typing import Any
 
 from .model import (
+    SSAArrayGet,
+    SSAArrayLength,
+    SSAArrayNew,
+    SSAArraySet,
     SSABasicBlock,
     SSABinaryOp,
     SSABranch,
@@ -69,6 +73,21 @@ class SSAPrinter:
             if instruction.result is None:
                 return call
             return f"{self._typed_value(instruction.result)} = {call}"
+        if isinstance(instruction, SSAArrayNew):
+            elements = ", ".join(self._value(element) for element in instruction.elements)
+            return f"{self._typed_value(instruction.result)} = array_new [{elements}]"
+        if isinstance(instruction, SSAArrayGet):
+            return (
+                f"{self._typed_value(instruction.result)} = array_get "
+                f"{self._value(instruction.array)}, {self._value(instruction.index)}"
+            )
+        if isinstance(instruction, SSAArraySet):
+            return (
+                f"array_set {self._value(instruction.array)}, "
+                f"{self._value(instruction.index)}, {self._value(instruction.value)}"
+            )
+        if isinstance(instruction, SSAArrayLength):
+            return f"{self._typed_value(instruction.result)} = array_length {self._value(instruction.array)}"
         if isinstance(instruction, SSAPhi):
             incoming = ", ".join(
                 f"{block_name}: {self._value(value)}"

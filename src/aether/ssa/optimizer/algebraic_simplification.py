@@ -4,6 +4,10 @@ from typing import Any
 
 from aether.ir.types import IntType
 from aether.ssa.model import (
+    SSAArrayGet,
+    SSAArrayLength,
+    SSAArrayNew,
+    SSAArraySet,
     SSABasicBlock,
     SSABinaryOp,
     SSABranch,
@@ -238,6 +242,35 @@ class SSAAlgebraicSimplifier:
                     for argument in instruction.arguments
                 ),
                 instruction.result,
+            )
+
+        if isinstance(instruction, SSAArrayNew):
+            return SSAArrayNew(
+                instruction.result,
+                tuple(
+                    self._resolve(element, replacements)
+                    for element in instruction.elements
+                ),
+            )
+
+        if isinstance(instruction, SSAArrayGet):
+            return SSAArrayGet(
+                instruction.result,
+                self._resolve(instruction.array, replacements),
+                self._resolve(instruction.index, replacements),
+            )
+
+        if isinstance(instruction, SSAArraySet):
+            return SSAArraySet(
+                self._resolve(instruction.array, replacements),
+                self._resolve(instruction.index, replacements),
+                self._resolve(instruction.value, replacements),
+            )
+
+        if isinstance(instruction, SSAArrayLength):
+            return SSAArrayLength(
+                instruction.result,
+                self._resolve(instruction.array, replacements),
             )
 
         if isinstance(instruction, SSAPhi):

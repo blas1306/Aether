@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 from aether.ir.model import (
+    IRArrayGet,
+    IRArrayLength,
+    IRArrayNew,
+    IRArraySet,
     IRBasicBlock,
     IRBinaryOp,
     IRBranch,
@@ -108,7 +112,7 @@ class DeadCodeEliminator:
 
     @staticmethod
     def _result(instruction: IRInstruction) -> IRValue:
-        if isinstance(instruction, (IRConst, IRLoad, IRBinaryOp, IRCompareOp, IRCast)):
+        if isinstance(instruction, (IRConst, IRLoad, IRBinaryOp, IRCompareOp, IRCast, IRArrayGet, IRArrayLength)):
             return instruction.result
         raise TypeError(
             f"Instruction has no removable result: {type(instruction).__name__}"
@@ -128,6 +132,14 @@ class DeadCodeEliminator:
             return (instruction.value,)
         if isinstance(instruction, IRCall):
             return instruction.arguments
+        if isinstance(instruction, IRArrayNew):
+            return instruction.elements
+        if isinstance(instruction, IRArrayGet):
+            return (instruction.array, instruction.index)
+        if isinstance(instruction, IRArraySet):
+            return (instruction.array, instruction.index, instruction.value)
+        if isinstance(instruction, IRArrayLength):
+            return (instruction.array,)
         if isinstance(instruction, IRBranch):
             return (instruction.condition,)
         if isinstance(instruction, IRJump):

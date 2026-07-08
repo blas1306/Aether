@@ -5,8 +5,12 @@ from typing import NoReturn
 
 from .. import ast
 from ..errors import IRBackendUnsupportedFeatureError
-from ..types import AetherType
+from ..types import AetherType, ArrayType as AetherArrayType, ListType as AetherListType
 from .model import (
+    IRArrayGet,
+    IRArrayLength,
+    IRArrayNew,
+    IRArraySet,
     IRBasicBlock,
     IRBinaryOp,
     IRBranch,
@@ -24,12 +28,14 @@ from .model import (
     IRValue,
 )
 from .types import (
+    ArrayType,
     BoolType,
     ComplexType,
     DoubleType,
     FloatType,
     IntType,
     IRType,
+    ListType,
     StringType,
     VoidType,
 )
@@ -152,12 +158,17 @@ class IRLowerer:
 
     def _lower_statement(self, statement: ast.Statement, context: _FunctionContext) -> None:
         if isinstance(statement, ast.VarDeclaration):
-            value = self._lower_expression(statement.initializer, context)
             slot_type = (
                 self._lower_type(statement.type_name)
                 if statement.type_name is not None
-                else value.type
+                else None
             )
+            value = self._lower_expression(
+                statement.initializer,
+                context,
+                target_type=slot_type,
+            )
+            slot_type = slot_type if slot_type is not None else value.type
             self._require_same_type(
                 value.type,
                 slot_type,
@@ -169,7 +180,6 @@ class IRLowerer:
             return
 
         if isinstance(statement, ast.Assignment):
-            value = self._lower_expression(statement.expression, context)
             slot = context.locals.get(statement.name)
             if slot is None:
                 parameter = context.parameters.get(statement.name)
@@ -181,6 +191,11 @@ class IRLowerer:
                 slot = IRValue(statement.name, parameter.type)
                 context.locals[statement.name] = slot
                 context.blocks[0].instructions.insert(0, IRStore(slot, parameter))
+            value = self._lower_expression(
+                statement.expression,
+                context,
+                target_type=slot.type,
+            )
             self._require_same_type(
                 value.type,
                 slot.type,
@@ -189,13 +204,39 @@ class IRLowerer:
             context.block.instructions.append(IRStore(slot, value))
             return
 
+        if isinstance(statement, ast.IndexAssignment):
+            array = self._lower_expression(statement.array, context)
+            if not isinstance(array.type, ArrayType):
+                self._fail(
+                    f"IR backend only supports index assignment for arrays, got '{array.type}'.",
+                    statement,
+                )
+            index = self._lower_expression(statement.index, context)
+            self._require_same_type(index.type, IntType(), "array index must be int")
+            value = self._lower_expression(
+                statement.expression,
+                context,
+                target_type=array.type.element,
+            )
+            self._require_same_type(
+                value.type,
+                array.type.element,
+                "array index assignment requires an implicit conversion",
+            )
+            context.block.instructions.append(IRArraySet(array, index, value))
+            return
+
         if isinstance(statement, ast.ReturnStatement):
             if statement.expression is None:
                 if not isinstance(context.return_type, VoidType):
                     self._fail("IR backend cannot return void from a non-void function.", statement)
                 context.block.instructions.append(IRReturn())
                 return
-            value = self._lower_expression(statement.expression, context)
+            value = self._lower_expression(
+                statement.expression,
+                context,
+                target_type=context.return_type,
+            )
             self._require_same_type(
                 value.type,
                 context.return_type,
@@ -307,9 +348,14 @@ class IRLowerer:
         self,
         expression: ast.Expression,
         context: _FunctionContext,
+        *,
+        target_type: IRType | None = None,
     ) -> IRValue:
         if isinstance(expression, ast.Literal):
             return self._lower_literal(expression, context)
+
+        if isinstance(expression, (ast.ArrayLiteral, ast.ListLiteral)):
+            return self._lower_array_literal(expression, context, target_type)
 
         if isinstance(expression, ast.Identifier):
             slot = context.locals.get(expression.name)
@@ -363,6 +409,27 @@ class IRLowerer:
         if isinstance(expression, ast.CallExpression):
             return self._lower_call(expression, context)
 
+        if isinstance(expression, ast.IndexExpression):
+            array = self._lower_expression(expression.array, context)
+            if not isinstance(array.type, ArrayType):
+                self._fail(
+                    f"IR backend only supports indexing arrays, got '{array.type}'.",
+                    expression,
+                )
+            index = self._lower_expression(expression.index, context)
+            self._require_same_type(index.type, IntType(), "array index must be int")
+            result = context.temporary(array.type.element)
+            context.block.instructions.append(IRArrayGet(result, array, index))
+            return result
+
+        if isinstance(expression, ast.FieldAccess):
+            target = self._lower_expression(expression.target, context)
+            if expression.field_name == "length" and isinstance(target.type, ArrayType):
+                result = context.temporary(IntType())
+                context.block.instructions.append(IRArrayLength(result, target))
+                return result
+            self._unsupported(expression, f"field '{expression.field_name}'")
+
         self._unsupported(expression)
 
     def _lower_literal(self, literal: ast.Literal, context: _FunctionContext) -> IRValue:
@@ -384,14 +451,15 @@ class IRLowerer:
         if isinstance(signature.return_type, VoidType):
             self._unsupported(call, "void return value")
 
-        arguments = tuple(
-            self._lower_expression(argument, context) for argument in call.arguments
-        )
-        if len(arguments) != len(signature.parameters):
+        if len(call.arguments) != len(signature.parameters):
             raise ValueError(
-                f"Checked call to '{call.callee}' has {len(arguments)} arguments; "
+                f"Checked call to '{call.callee}' has {len(call.arguments)} arguments; "
                 f"expected {len(signature.parameters)}"
             )
+        arguments = tuple(
+            self._lower_expression(argument, context, target_type=parameter_type)
+            for argument, parameter_type in zip(call.arguments, signature.parameters)
+        )
         for index, (argument, parameter_type) in enumerate(
             zip(arguments, signature.parameters),
             start=1,
@@ -404,6 +472,29 @@ class IRLowerer:
 
         result = context.temporary(signature.return_type)
         context.block.instructions.append(IRCall(call.callee, arguments, result))
+        return result
+
+    def _lower_array_literal(
+        self,
+        expression: ast.ArrayLiteral | ast.ListLiteral,
+        context: _FunctionContext,
+        target_type: IRType | None,
+    ) -> IRValue:
+        if not isinstance(target_type, ArrayType):
+            self._unsupported(expression, "braced literal without Array<T> target type")
+
+        elements = tuple(
+            self._lower_expression(element, context, target_type=target_type.element)
+            for element in expression.elements
+        )
+        for element in elements:
+            self._require_same_type(
+                element.type,
+                target_type.element,
+                "array literal element requires an implicit conversion",
+            )
+        result = context.temporary(target_type)
+        context.block.instructions.append(IRArrayNew(result, elements))
         return result
 
     def _lower_cast(self, call: ast.CallExpression, context: _FunctionContext) -> IRValue:
@@ -484,6 +575,10 @@ class IRLowerer:
             return StringType()
         if type_name == "void":
             return VoidType()
+        if isinstance(type_name, AetherArrayType):
+            return ArrayType(self._lower_type(type_name.element_type))
+        if isinstance(type_name, AetherListType):
+            return ListType(self._lower_type(type_name.element_type))
         self._fail(f"IR backend does not support type '{type_name}' yet.")
 
     def _require_same_type(self, actual: IRType, expected: IRType, operation: str) -> None:

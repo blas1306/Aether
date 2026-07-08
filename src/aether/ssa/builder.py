@@ -4,6 +4,10 @@ from dataclasses import dataclass, field
 from typing import NoReturn
 
 from aether.ir.model import (
+    IRArrayGet,
+    IRArrayLength,
+    IRArrayNew,
+    IRArraySet,
     IRBasicBlock,
     IRBinaryOp,
     IRBranch,
@@ -22,6 +26,10 @@ from aether.ir.model import (
 )
 
 from .model import (
+    SSAArrayGet,
+    SSAArrayLength,
+    SSAArrayNew,
+    SSAArraySet,
     SSABasicBlock,
     SSABinaryOp,
     SSABranch,
@@ -479,6 +487,31 @@ class SSABuilder:
             if instruction.result is not None:
                 result = self._define_value(instruction.result, state.value_map)
             return SSACall(instruction.function, arguments, result)
+
+        if isinstance(instruction, IRArrayNew):
+            result = self._define_value(instruction.result, state.value_map)
+            elements = tuple(
+                self._resolve_value(element, state.value_map)
+                for element in instruction.elements
+            )
+            return SSAArrayNew(result, elements)
+
+        if isinstance(instruction, IRArrayGet):
+            result = self._define_value(instruction.result, state.value_map)
+            array = self._resolve_value(instruction.array, state.value_map)
+            index = self._resolve_value(instruction.index, state.value_map)
+            return SSAArrayGet(result, array, index)
+
+        if isinstance(instruction, IRArraySet):
+            array = self._resolve_value(instruction.array, state.value_map)
+            index = self._resolve_value(instruction.index, state.value_map)
+            value = self._resolve_value(instruction.value, state.value_map)
+            return SSAArraySet(array, index, value)
+
+        if isinstance(instruction, IRArrayLength):
+            result = self._define_value(instruction.result, state.value_map)
+            array = self._resolve_value(instruction.array, state.value_map)
+            return SSAArrayLength(result, array)
 
         return None
 

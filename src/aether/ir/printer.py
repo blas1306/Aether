@@ -4,6 +4,10 @@ import json
 from typing import Any
 
 from .model import (
+    IRArrayGet,
+    IRArrayLength,
+    IRArrayNew,
+    IRArraySet,
     IRBasicBlock,
     IRBinaryOp,
     IRBranch,
@@ -73,6 +77,21 @@ class IRPrinter:
             if instruction.result is None:
                 return call
             return f"{self._typed_value(instruction.result)} = {call}"
+        if isinstance(instruction, IRArrayNew):
+            elements = ", ".join(self._value(element) for element in instruction.elements)
+            return f"{self._typed_value(instruction.result)} = array_new [{elements}]"
+        if isinstance(instruction, IRArrayGet):
+            return (
+                f"{self._typed_value(instruction.result)} = array_get "
+                f"{self._value(instruction.array)}, {self._value(instruction.index)}"
+            )
+        if isinstance(instruction, IRArraySet):
+            return (
+                f"array_set {self._value(instruction.array)}, "
+                f"{self._value(instruction.index)}, {self._value(instruction.value)}"
+            )
+        if isinstance(instruction, IRArrayLength):
+            return f"{self._typed_value(instruction.result)} = array_length {self._value(instruction.array)}"
         if isinstance(instruction, IRBranch):
             return (
                 f"branch {self._value(instruction.condition)}, "

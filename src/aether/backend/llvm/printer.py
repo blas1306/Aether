@@ -4,8 +4,12 @@ from dataclasses import dataclass
 import re
 from typing import Any
 
-from aether.ir.types import BoolType, DoubleType, IntType, StringType, VoidType
+from aether.ir.types import ArrayType, BoolType, DoubleType, IntType, StringType, VoidType
 from aether.ssa.model import (
+    SSAArrayGet,
+    SSAArrayLength,
+    SSAArrayNew,
+    SSAArraySet,
     SSABasicBlock,
     SSABinaryOp,
     SSABranch,
@@ -67,17 +71,21 @@ class LLVMPrinter:
         "ne": "one",
     }
     _IDENTIFIER_RE = re.compile(r"^[A-Za-z_$._][A-Za-z0-9_$._-]*$")
+    _ARRAY_STRUCT_TYPE = "%AetherArray"
 
     def print_module(self, module: SSAModule) -> str:
         self._string_globals_by_value: dict[str, _StringGlobal] = {}
         self._next_string_global = 0
+        self._uses_array_type = False
+        self._uses_array_allocation = False
 
         functions = [self._print_function(function) for function in module.functions]
         globals_ = [
             self._print_string_global(global_)
             for global_ in self._string_globals_by_value.values()
         ]
-        sections = globals_ + functions
+        runtime = self._runtime_declarations()
+        sections = runtime + globals_ + functions
         return "\n\n".join(sections)
 
     def _print_function(self, function: SSAFunction) -> str:
@@ -87,6 +95,7 @@ class LLVMPrinter:
             for parameter in function.parameters
         }
         self._next_temp = 0
+        self._next_synthetic_temp = 0
         self._collect_function_values(function)
 
         return_type = llvm_type(function.return_type)
@@ -145,6 +154,14 @@ class LLVMPrinter:
             return self._print_jump(instruction)
         if isinstance(instruction, SSACall):
             return self._print_call(instruction)
+        if isinstance(instruction, SSAArrayNew):
+            return self._print_array_new(instruction)
+        if isinstance(instruction, SSAArrayGet):
+            return "\n  ".join(self._print_array_get(instruction))
+        if isinstance(instruction, SSAArraySet):
+            return "\n  ".join(self._print_array_set(instruction))
+        if isinstance(instruction, SSAArrayLength):
+            return "\n  ".join(self._print_array_length(instruction))
         self._unsupported(type(instruction).__name__)
 
     def _record_const(self, instruction: SSAConst) -> None:
@@ -159,6 +176,8 @@ class LLVMPrinter:
         if isinstance(instruction, SSABinaryOp | SSACompareOp | SSACast | SSAPhi):
             return instruction.result
         if isinstance(instruction, SSACall):
+            return instruction.result
+        if isinstance(instruction, (SSAArrayNew, SSAArrayGet, SSAArrayLength)):
             return instruction.result
         return None
 
@@ -330,6 +349,151 @@ class LLVMPrinter:
         result = self._new_temp(instruction.result)
         return f"{result} = call {return_type} {callee}({arguments})"
 
+    def _print_array_new(self, instruction: SSAArrayNew) -> str:
+        if not isinstance(instruction.result.type, ArrayType):
+            raise LLVMBackendError("LLVM array_new result must be ArrayType")
+        self._uses_array_type = True
+        self._uses_array_allocation = True
+
+        result = self._new_temp(instruction.result)
+        element_type = llvm_type(instruction.result.type.element)
+        element_size = self._sizeof(instruction.result.type.element)
+        length = len(instruction.elements)
+        lines = [
+            f"{result} = call ptr @aether_array_new(i64 {element_size}, i64 {length})"
+        ]
+        data = self._synthetic_temp("array.data")
+        lines.extend(self._array_data_pointer(data, result))
+        for index, element in enumerate(instruction.elements):
+            element_ptr = self._synthetic_temp("array.elem")
+            lines.append(
+                f"{element_ptr} = getelementptr {element_type}, ptr {data}, i64 {index}"
+            )
+            lines.append(
+                f"store {element_type} {self._operand(element)}, ptr {element_ptr}"
+            )
+        return "\n  ".join(lines)
+
+    def _print_array_get(self, instruction: SSAArrayGet) -> list[str]:
+        if not isinstance(instruction.array.type, ArrayType):
+            raise LLVMBackendError("LLVM array_get expects an ArrayType source")
+        self._uses_array_type = True
+
+        result = self._new_temp(instruction.result)
+        element_type = llvm_type(instruction.result.type)
+        element_ptr = self._array_element_pointer(
+            self._operand(instruction.array),
+            instruction.index,
+            instruction.result.type,
+        )
+        return element_ptr.lines + [
+            f"{result} = load {element_type}, ptr {element_ptr.value}"
+        ]
+
+    def _print_array_set(self, instruction: SSAArraySet) -> list[str]:
+        if not isinstance(instruction.array.type, ArrayType):
+            raise LLVMBackendError("LLVM array_set expects an ArrayType source")
+        self._uses_array_type = True
+
+        element_type = llvm_type(instruction.value.type)
+        element_ptr = self._array_element_pointer(
+            self._operand(instruction.array),
+            instruction.index,
+            instruction.value.type,
+        )
+        return element_ptr.lines + [
+            f"store {element_type} {self._operand(instruction.value)}, ptr {element_ptr.value}"
+        ]
+
+    def _print_array_length(self, instruction: SSAArrayLength) -> list[str]:
+        self._uses_array_type = True
+        result = self._new_temp(instruction.result)
+        length64 = self._synthetic_temp("array.len64")
+        lines = self._array_length64(length64, self._operand(instruction.array))
+        lines.append(f"{result} = trunc i64 {length64} to i32")
+        return lines
+
+    @dataclass(frozen=True)
+    class _ArrayPointer:
+        value: str
+        lines: list[str]
+
+    def _array_element_pointer(
+        self,
+        array: str,
+        index: SSAValue,
+        element_type: object,
+    ) -> _ArrayPointer:
+        data = self._synthetic_temp("array.data")
+        index64 = self._synthetic_temp("array.index64")
+        element_ptr = self._synthetic_temp("array.elem")
+        llvm_element_type = llvm_type(element_type)
+        lines = self._array_data_pointer(data, array)
+        lines.append(f"{index64} = sext i32 {self._operand(index)} to i64")
+        lines.append(
+            f"{element_ptr} = getelementptr {llvm_element_type}, ptr {data}, i64 {index64}"
+        )
+        return self._ArrayPointer(element_ptr, lines)
+
+    def _array_data_pointer(self, result: str, array: str) -> list[str]:
+        field_ptr = self._synthetic_temp("array.data.field")
+        return [
+            f"{field_ptr} = getelementptr {self._ARRAY_STRUCT_TYPE}, ptr {array}, i32 0, i32 1",
+            f"{result} = load ptr, ptr {field_ptr}",
+        ]
+
+    def _array_length64(self, result: str, array: str) -> list[str]:
+        field_ptr = self._synthetic_temp("array.len.field")
+        return [
+            f"{field_ptr} = getelementptr {self._ARRAY_STRUCT_TYPE}, ptr {array}, i32 0, i32 0",
+            f"{result} = load i64, ptr {field_ptr}",
+        ]
+
+    def _runtime_declarations(self) -> list[str]:
+        sections: list[str] = []
+        if self._uses_array_type:
+            sections.append(f"{self._ARRAY_STRUCT_TYPE} = type {{ i64, ptr }}")
+        if self._uses_array_allocation:
+            sections.append("declare noalias ptr @malloc(i64)")
+            sections.append(
+                "\n".join(
+                    [
+                        "define private ptr @aether_alloc(i64 %size) {",
+                        "entry:",
+                        "  %mem = call noalias ptr @malloc(i64 %size)",
+                        "  ret ptr %mem",
+                        "}",
+                    ]
+                )
+            )
+            sections.append(
+                "\n".join(
+                    [
+                        "define private ptr @aether_array_new(i64 %element_size, i64 %length) {",
+                        "entry:",
+                        "  %array = call ptr @aether_alloc(i64 16)",
+                        f"  %len_field = getelementptr {self._ARRAY_STRUCT_TYPE}, ptr %array, i32 0, i32 0",
+                        "  store i64 %length, ptr %len_field",
+                        "  %data_size = mul i64 %element_size, %length",
+                        "  %data = call ptr @aether_alloc(i64 %data_size)",
+                        f"  %data_field = getelementptr {self._ARRAY_STRUCT_TYPE}, ptr %array, i32 0, i32 1",
+                        "  store ptr %data, ptr %data_field",
+                        "  ret ptr %array",
+                        "}",
+                    ]
+                )
+            )
+        return sections
+
+    def _sizeof(self, type_: object) -> int:
+        if isinstance(type_, (IntType, BoolType)):
+            return 4 if isinstance(type_, IntType) else 1
+        if isinstance(type_, DoubleType):
+            return 8
+        if isinstance(type_, (StringType, ArrayType)):
+            return 8
+        raise LLVMBackendError(f"LLVM backend does not know the size of {type_}")
+
     def _operand(self, value: SSAValue) -> str:
         key = self._key(value)
         if key in self._constants:
@@ -352,6 +516,11 @@ class LLVMPrinter:
         name = f"%{self._next_temp}"
         self._next_temp += 1
         self._values[key] = name
+        return name
+
+    def _synthetic_temp(self, prefix: str) -> str:
+        name = f"%{prefix}.{self._next_synthetic_temp}"
+        self._next_synthetic_temp += 1
         return name
 
     def _literal(self, value: Any, result: SSAValue) -> str:

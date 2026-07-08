@@ -4,6 +4,9 @@ from dataclasses import replace
 from typing import Any
 
 from aether.ir.model import (
+    IRArrayGet,
+    IRArrayLength,
+    IRArrayNew,
     IRBasicBlock,
     IRBinaryOp,
     IRCast,
@@ -116,7 +119,7 @@ _UNKNOWN = object()
 
 
 def _instruction_result(instruction: IRInstruction) -> IRValue | None:
-    if isinstance(instruction, (IRBinaryOp, IRCompareOp, IRCast)):
+    if isinstance(instruction, (IRBinaryOp, IRCompareOp, IRCast, IRArrayNew, IRArrayGet, IRArrayLength)):
         return instruction.result
     if isinstance(instruction, IRCall):
         return instruction.result

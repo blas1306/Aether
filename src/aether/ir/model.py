@@ -69,6 +69,32 @@ class IRCall(IRInstruction):
 
 
 @dataclass(frozen=True)
+class IRArrayNew(IRInstruction):
+    result: IRValue
+    elements: tuple[IRValue, ...] = ()
+
+
+@dataclass(frozen=True)
+class IRArrayGet(IRInstruction):
+    result: IRValue
+    array: IRValue
+    index: IRValue
+
+
+@dataclass(frozen=True)
+class IRArraySet(IRInstruction):
+    array: IRValue
+    index: IRValue
+    value: IRValue
+
+
+@dataclass(frozen=True)
+class IRArrayLength(IRInstruction):
+    result: IRValue
+    array: IRValue
+
+
+@dataclass(frozen=True)
 class IRBranch(IRInstruction):
     condition: IRValue
     true_target: str

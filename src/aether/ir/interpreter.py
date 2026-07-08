@@ -5,6 +5,10 @@ from math import trunc
 from typing import Any, NoReturn, Sequence
 
 from .model import (
+    IRArrayGet,
+    IRArrayLength,
+    IRArrayNew,
+    IRArraySet,
     IRBasicBlock,
     IRBinaryOp,
     IRBranch,
@@ -140,6 +144,33 @@ class IRInterpreter:
                 frame.values[instruction.result] = result
             return False, None, None
 
+        if isinstance(instruction, IRArrayNew):
+            frame.values[instruction.result] = [
+                self._value(element, frame) for element in instruction.elements
+            ]
+            return False, None, None
+
+        if isinstance(instruction, IRArrayGet):
+            array = self._value(instruction.array, frame)
+            index = self._value(instruction.index, frame)
+            self._check_array_index(array, index)
+            frame.values[instruction.result] = array[index]
+            return False, None, None
+
+        if isinstance(instruction, IRArraySet):
+            array = self._value(instruction.array, frame)
+            index = self._value(instruction.index, frame)
+            self._check_array_index(array, index)
+            array[index] = self._value(instruction.value, frame)
+            return False, None, None
+
+        if isinstance(instruction, IRArrayLength):
+            array = self._value(instruction.array, frame)
+            if not isinstance(array, list):
+                raise IRExecutionError("IR array length requires an array value")
+            frame.values[instruction.result] = len(array)
+            return False, None, None
+
         if isinstance(instruction, IRBranch):
             condition = self._value(instruction.condition, frame)
             if (
@@ -225,6 +256,17 @@ class IRInterpreter:
         if isinstance(target_type, IntType):
             return trunc(value)
         raise IRExecutionError(f"IR cast to '{target_type}' is not supported")
+
+    @staticmethod
+    def _check_array_index(array: Any, index: Any) -> None:
+        if not isinstance(array, list):
+            raise IRExecutionError("IR array indexing requires an array value")
+        if type(index) is not int:
+            raise IRExecutionError("IR array index must be int")
+        if index < 0 or index >= len(array):
+            raise IRExecutionError(
+                f"IR array index {index} out of bounds for length {len(array)}"
+            )
 
     @staticmethod
     def _unsupported_binary(operator: str) -> NoReturn:

@@ -4,6 +4,10 @@ from aether.analysis import CFG, CFGBuilder, CFGEdge, CFGNode, DOTPrinter
 from .interpreter import IRExecutionError, IRInterpreter
 from .lowering import IRLowerer, lower_to_ir
 from .model import (
+    IRArrayGet,
+    IRArrayLength,
+    IRArrayNew,
+    IRArraySet,
     IRBasicBlock,
     IRBinaryOp,
     IRBranch,
@@ -57,6 +61,10 @@ __all__ = [
     "EnumType",
     "FloatType",
     "IRBasicBlock",
+    "IRArrayGet",
+    "IRArrayLength",
+    "IRArrayNew",
+    "IRArraySet",
     "IRBinaryOp",
     "IRBranch",
     "IRCast",

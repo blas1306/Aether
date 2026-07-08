@@ -4,6 +4,10 @@ from dataclasses import dataclass
 from typing import NoReturn
 
 from .model import (
+    IRArrayGet,
+    IRArrayLength,
+    IRArrayNew,
+    IRArraySet,
     IRBasicBlock,
     IRBinaryOp,
     IRBranch,
@@ -336,6 +340,22 @@ class IRVerifier:
                 return state
             return self._define_value(state, instruction.result)
 
+        if isinstance(instruction, IRArrayNew):
+            self._verify_array_new(instruction, state, value_types)
+            return self._define_value(state, instruction.result)
+
+        if isinstance(instruction, IRArrayGet):
+            self._verify_array_get(instruction, state, value_types)
+            return self._define_value(state, instruction.result)
+
+        if isinstance(instruction, IRArraySet):
+            self._verify_array_set(instruction, state, value_types)
+            return state
+
+        if isinstance(instruction, IRArrayLength):
+            self._verify_array_length(instruction, state, value_types)
+            return self._define_value(state, instruction.result)
+
         if isinstance(instruction, IRBranch):
             self._require_defined(instruction.condition, state, value_types)
             if not isinstance(instruction.condition.type, BoolType):
@@ -397,6 +417,71 @@ class IRVerifier:
                 f"Call result type mismatch: expected {callee.return_type}, "
                 f"got {instruction.result.type}"
             )
+
+    def _verify_array_new(
+        self,
+        instruction: IRArrayNew,
+        state: _State,
+        value_types: dict[str, IRType],
+    ) -> None:
+        if not isinstance(instruction.result.type, ArrayType):
+            self._fail(f"Array new result must be array type, got {instruction.result.type}")
+        for element in instruction.elements:
+            self._require_defined(element, state, value_types)
+            if element.type != instruction.result.type.element:
+                self._fail(
+                    f"Array literal element type mismatch: expected "
+                    f"{instruction.result.type.element}, got {element.type}"
+                )
+
+    def _verify_array_get(
+        self,
+        instruction: IRArrayGet,
+        state: _State,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.array, state, value_types)
+        self._require_defined(instruction.index, state, value_types)
+        if not isinstance(instruction.array.type, ArrayType):
+            self._fail(f"Array get expects array value, got {instruction.array.type}")
+        if not isinstance(instruction.index.type, IntType):
+            self._fail(f"Array get index must be int, got {instruction.index.type}")
+        if instruction.result.type != instruction.array.type.element:
+            self._fail(
+                f"Array get result type mismatch: expected "
+                f"{instruction.array.type.element}, got {instruction.result.type}"
+            )
+
+    def _verify_array_set(
+        self,
+        instruction: IRArraySet,
+        state: _State,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.array, state, value_types)
+        self._require_defined(instruction.index, state, value_types)
+        self._require_defined(instruction.value, state, value_types)
+        if not isinstance(instruction.array.type, ArrayType):
+            self._fail(f"Array set expects array value, got {instruction.array.type}")
+        if not isinstance(instruction.index.type, IntType):
+            self._fail(f"Array set index must be int, got {instruction.index.type}")
+        if instruction.value.type != instruction.array.type.element:
+            self._fail(
+                f"Array set value type mismatch: expected "
+                f"{instruction.array.type.element}, got {instruction.value.type}"
+            )
+
+    def _verify_array_length(
+        self,
+        instruction: IRArrayLength,
+        state: _State,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.array, state, value_types)
+        if not isinstance(instruction.array.type, ArrayType):
+            self._fail(f"Array length expects array value, got {instruction.array.type}")
+        if not isinstance(instruction.result.type, IntType):
+            self._fail(f"Array length result must be int, got {instruction.result.type}")
 
     def _verify_return(
         self,
@@ -654,6 +739,8 @@ class IRVerifier:
         if isinstance(instruction, (IRConst, IRLoad, IRBinaryOp, IRCompareOp, IRCast)):
             return instruction.result
         if isinstance(instruction, IRCall):
+            return instruction.result
+        if isinstance(instruction, (IRArrayNew, IRArrayGet, IRArrayLength)):
             return instruction.result
         return None
 

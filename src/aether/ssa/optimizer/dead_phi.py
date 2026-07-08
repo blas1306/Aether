@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 from aether.ssa.model import (
+    SSAArrayGet,
+    SSAArrayLength,
+    SSAArrayNew,
+    SSAArraySet,
     SSABasicBlock,
     SSABinaryOp,
     SSABranch,
@@ -111,6 +115,25 @@ class DeadPhiEliminator:
 
         if isinstance(instruction, SSACall):
             used_values.update(instruction.arguments)
+            return
+
+        if isinstance(instruction, SSAArrayNew):
+            used_values.update(instruction.elements)
+            return
+
+        if isinstance(instruction, SSAArrayGet):
+            used_values.add(instruction.array)
+            used_values.add(instruction.index)
+            return
+
+        if isinstance(instruction, SSAArraySet):
+            used_values.add(instruction.array)
+            used_values.add(instruction.index)
+            used_values.add(instruction.value)
+            return
+
+        if isinstance(instruction, SSAArrayLength):
+            used_values.add(instruction.array)
             return
 
         if isinstance(instruction, SSAPhi):

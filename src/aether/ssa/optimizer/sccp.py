@@ -7,6 +7,10 @@ from typing import Any
 from aether.ir.types import DoubleType, IntType, StringType
 from aether.ssa.analysis import Constant, LatticeState, Overdefined, Unknown, Worklist
 from aether.ssa.model import (
+    SSAArrayGet,
+    SSAArrayLength,
+    SSAArrayNew,
+    SSAArraySet,
     SSABasicBlock,
     SSABinaryOp,
     SSABranch,
@@ -183,6 +187,13 @@ class SCCPAnalyzer:
                 self._set_state(instruction.result, Overdefined())
             return
 
+        if isinstance(instruction, (SSAArrayNew, SSAArrayGet, SSAArrayLength)):
+            self._set_state(instruction.result, Overdefined())
+            return
+
+        if isinstance(instruction, SSAArraySet):
+            return
+
         if isinstance(instruction, SSABranch):
             self._evaluate_branch(block_name, instruction)
             return
@@ -309,6 +320,8 @@ class SCCPAnalyzer:
             return instruction.result
         if isinstance(instruction, SSACall):
             return instruction.result
+        if isinstance(instruction, (SSAArrayNew, SSAArrayGet, SSAArrayLength)):
+            return instruction.result
         return None
 
     @staticmethod
@@ -325,6 +338,14 @@ class SCCPAnalyzer:
             return (instruction.condition,)
         if isinstance(instruction, SSACall):
             return instruction.arguments
+        if isinstance(instruction, SSAArrayNew):
+            return instruction.elements
+        if isinstance(instruction, SSAArrayGet):
+            return (instruction.array, instruction.index)
+        if isinstance(instruction, SSAArraySet):
+            return (instruction.array, instruction.index, instruction.value)
+        if isinstance(instruction, SSAArrayLength):
+            return (instruction.array,)
         if isinstance(instruction, SSAReturn) and instruction.value is not None:
             return (instruction.value,)
         return ()
