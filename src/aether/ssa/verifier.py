@@ -37,11 +37,13 @@ from .model import (
     SSAFunction,
     SSAInstruction,
     SSAJump,
+    SSAMatrixGet,
     SSAMatrixNew,
     SSAModule,
     SSAPhi,
     SSAReturn,
     SSAValue,
+    SSAVectorGet,
     SSAVectorNew,
 )
 
@@ -264,6 +266,14 @@ class SSAVerifier:
                 self._verify_array_get(instruction, value_types)
                 continue
 
+            if isinstance(instruction, SSAVectorGet):
+                self._verify_vector_get(instruction, value_types)
+                continue
+
+            if isinstance(instruction, SSAMatrixGet):
+                self._verify_matrix_get(instruction, value_types)
+                continue
+
             if isinstance(instruction, SSAArraySet):
                 self._verify_array_set(instruction, value_types)
                 continue
@@ -426,6 +436,45 @@ class SSAVerifier:
             self._fail(
                 f"Array get result type mismatch: expected "
                 f"{instruction.array.type.element}, got {instruction.result.type}"
+            )
+
+    def _verify_vector_get(
+        self,
+        instruction: SSAVectorGet,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.vector, value_types)
+        self._require_defined(instruction.index, value_types)
+        if not isinstance(instruction.vector.type, VectorType):
+            self._fail(f"Vector get expects vector value, got {instruction.vector.type}")
+        if not isinstance(instruction.index.type, IntType):
+            self._fail(f"Vector get index must be int, got {instruction.index.type}")
+        if instruction.result.type != instruction.vector.type.element:
+            self._fail(
+                f"Vector get result type mismatch: expected "
+                f"{instruction.vector.type.element}, got {instruction.result.type}"
+            )
+
+    def _verify_matrix_get(
+        self,
+        instruction: SSAMatrixGet,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.matrix, value_types)
+        self._require_defined(instruction.row, value_types)
+        self._require_defined(instruction.column, value_types)
+        if not isinstance(instruction.matrix.type, MatrixType):
+            self._fail(f"Matrix get expects matrix value, got {instruction.matrix.type}")
+        if not isinstance(instruction.row.type, IntType):
+            self._fail(f"Matrix get row index must be int, got {instruction.row.type}")
+        if not isinstance(instruction.column.type, IntType):
+            self._fail(f"Matrix get column index must be int, got {instruction.column.type}")
+        if instruction.cols <= 0:
+            self._fail(f"Matrix get column count must be positive, got {instruction.cols}")
+        if instruction.result.type != instruction.matrix.type.element:
+            self._fail(
+                f"Matrix get result type mismatch: expected "
+                f"{instruction.matrix.type.element}, got {instruction.result.type}"
             )
 
     def _verify_array_set(
@@ -676,7 +725,10 @@ class SSAVerifier:
             return instruction.result
         if isinstance(instruction, SSACall):
             return instruction.result
-        if isinstance(instruction, (SSAArrayNew, SSAArrayGet, SSAArrayLength, SSAVectorNew, SSAMatrixNew)):
+        if isinstance(
+            instruction,
+            (SSAArrayNew, SSAArrayGet, SSAVectorGet, SSAMatrixGet, SSAArrayLength, SSAVectorNew, SSAMatrixNew),
+        ):
             return instruction.result
         return None
 

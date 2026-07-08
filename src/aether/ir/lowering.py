@@ -27,12 +27,14 @@ from .model import (
     IRFunction,
     IRJump,
     IRLoad,
+    IRMatrixGet,
     IRMatrixNew,
     IRModule,
     IRParameter,
     IRReturn,
     IRStore,
     IRValue,
+    IRVectorGet,
     IRVectorNew,
 )
 from .types import (
@@ -85,6 +87,7 @@ class _FunctionContext:
     return_type: IRType
     parameters: dict[str, IRParameter]
     locals: dict[str, IRValue] = field(default_factory=dict)
+    matrix_cols: dict[str, int] = field(default_factory=dict)
     next_temporary: int = 0
     next_if: int = 0
     next_loop: int = 0
@@ -192,6 +195,7 @@ class IRLowerer:
             )
             slot = IRValue(statement.name, slot_type)
             context.locals[statement.name] = slot
+            self._copy_matrix_cols(value, slot, context)
             context.block.instructions.append(IRStore(slot, value))
             return
 
@@ -217,6 +221,7 @@ class IRLowerer:
                 slot.type,
                 f"assignment to '{statement.name}' requires an implicit conversion",
             )
+            self._copy_matrix_cols(value, slot, context)
             context.block.instructions.append(IRStore(slot, value))
             return
 
@@ -383,6 +388,7 @@ class IRLowerer:
             if slot is not None:
                 result = context.temporary(slot.type)
                 context.block.instructions.append(IRLoad(result, slot))
+                self._copy_matrix_cols(slot, result, context)
                 return result
             parameter = context.parameters.get(expression.name)
             if parameter is not None:
@@ -431,16 +437,43 @@ class IRLowerer:
             return self._lower_call(expression, context)
 
         if isinstance(expression, ast.IndexExpression):
-            array = self._lower_expression(expression.array, context)
-            if not isinstance(array.type, ArrayType):
+            indexed = self._lower_expression(expression.array, context)
+            if isinstance(indexed.type, VectorType):
+                index = self._lower_expression(expression.index, context)
+                self._require_same_type(index.type, IntType(), "vector index must be int")
+                result = context.temporary(indexed.type.element)
+                context.block.instructions.append(IRVectorGet(result, indexed, index))
+                return result
+            if not isinstance(indexed.type, ArrayType):
                 self._fail(
-                    f"IR backend only supports indexing arrays, got '{array.type}'.",
+                    f"IR backend only supports indexing arrays and vectors, got '{indexed.type}'.",
                     expression,
                 )
             index = self._lower_expression(expression.index, context)
             self._require_same_type(index.type, IntType(), "array index must be int")
-            result = context.temporary(array.type.element)
-            context.block.instructions.append(IRArrayGet(result, array, index))
+            result = context.temporary(indexed.type.element)
+            context.block.instructions.append(IRArrayGet(result, indexed, index))
+            return result
+
+        if isinstance(expression, ast.MatrixIndexExpression):
+            matrix = self._lower_expression(expression.matrix, context)
+            if not isinstance(matrix.type, MatrixType):
+                self._fail(
+                    f"IR backend only supports two-dimensional indexing matrices, got '{matrix.type}'.",
+                    expression,
+                )
+            cols = context.matrix_cols.get(matrix.name)
+            if cols is None:
+                self._fail(
+                    "IR backend requires known matrix dimensions for A[i, j].",
+                    expression,
+                )
+            row = self._lower_expression(expression.row, context)
+            self._require_same_type(row.type, IntType(), "matrix row index must be int")
+            column = self._lower_expression(expression.column, context)
+            self._require_same_type(column.type, IntType(), "matrix column index must be int")
+            result = context.temporary(matrix.type.element)
+            context.block.instructions.append(IRMatrixGet(result, matrix, row, column, cols))
             return result
 
         if isinstance(expression, ast.FieldAccess):
@@ -599,8 +632,15 @@ class IRLowerer:
                 "matrix literal element requires an implicit conversion",
             )
         result = context.temporary(matrix_type)
+        context.matrix_cols[result.name] = row_lengths[0]
         context.block.instructions.append(IRMatrixNew(result, elements, len(expression.rows), row_lengths[0]))
         return result
+
+    @staticmethod
+    def _copy_matrix_cols(source: IRValue, target: IRValue, context: _FunctionContext) -> None:
+        cols = context.matrix_cols.get(source.name)
+        if cols is not None:
+            context.matrix_cols[target.name] = cols
 
     def _lower_cast(self, call: ast.CallExpression, context: _FunctionContext) -> IRValue:
         if len(call.arguments) != 1:

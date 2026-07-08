@@ -101,6 +101,22 @@ class IRArrayGet(IRInstruction):
 
 
 @dataclass(frozen=True)
+class IRVectorGet(IRInstruction):
+    result: IRValue
+    vector: IRValue
+    index: IRValue
+
+
+@dataclass(frozen=True)
+class IRMatrixGet(IRInstruction):
+    result: IRValue
+    matrix: IRValue
+    row: IRValue
+    column: IRValue
+    cols: int
+
+
+@dataclass(frozen=True)
 class IRArraySet(IRInstruction):
     array: IRValue
     index: IRValue

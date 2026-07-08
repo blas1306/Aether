@@ -15,11 +15,13 @@ from aether.ssa.model import (
     SSAFunction,
     SSAInstruction,
     SSAJump,
+    SSAMatrixGet,
     SSAMatrixNew,
     SSAModule,
     SSAPhi,
     SSAReturn,
     SSAValue,
+    SSAVectorGet,
     SSAVectorNew,
 )
 
@@ -29,7 +31,17 @@ from .result import SSAOptimizationResult
 class SSADeadCodeEliminator:
     """Remove unused pure SSA value producers."""
 
-    _PURE_PRODUCERS = (SSAConst, SSABinaryOp, SSACompareOp, SSACast, SSAPhi)
+    _PURE_PRODUCERS = (
+        SSAConst,
+        SSABinaryOp,
+        SSACompareOp,
+        SSACast,
+        SSAPhi,
+        SSAArrayGet,
+        SSAVectorGet,
+        SSAMatrixGet,
+        SSAArrayLength,
+    )
 
     def run(self, module: SSAModule) -> SSAOptimizationResult:
         updated_functions: list[SSAFunction] = []
@@ -134,6 +146,17 @@ class SSADeadCodeEliminator:
         if isinstance(instruction, SSAArrayGet):
             used_values.add(instruction.array)
             used_values.add(instruction.index)
+            return
+
+        if isinstance(instruction, SSAVectorGet):
+            used_values.add(instruction.vector)
+            used_values.add(instruction.index)
+            return
+
+        if isinstance(instruction, SSAMatrixGet):
+            used_values.add(instruction.matrix)
+            used_values.add(instruction.row)
+            used_values.add(instruction.column)
             return
 
         if isinstance(instruction, SSAArraySet):

@@ -89,6 +89,22 @@ class SSAArrayGet(SSAInstruction):
 
 
 @dataclass(frozen=True)
+class SSAVectorGet(SSAInstruction):
+    result: SSAValue
+    vector: SSAValue
+    index: SSAValue
+
+
+@dataclass(frozen=True)
+class SSAMatrixGet(SSAInstruction):
+    result: SSAValue
+    matrix: SSAValue
+    row: SSAValue
+    column: SSAValue
+    cols: int
+
+
+@dataclass(frozen=True)
 class SSAArraySet(SSAInstruction):
     array: SSAValue
     index: SSAValue

@@ -137,6 +137,9 @@ are skipped.
     `%0 = call i32 @foo(i32 %1, i32 %2)`
   - `call @foo(...)` with no SSA result ->
     `call void @foo(...)`
+- `SSAVectorNew` and `SSAMatrixNew` allocate contiguous temporary storage.
+- `SSAVectorGet` and `SSAMatrixGet` load scalar elements from that contiguous
+  storage. Matrix indexing is row-major and uses the lowered column count.
 - `SSAReturn`.
 
 This means an `if`/`else` where both branches return directly can compile to

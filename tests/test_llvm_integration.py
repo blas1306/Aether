@@ -25,6 +25,7 @@ EXPECTED_EXIT_CODES = {
     "identity_call.ae": 23,
     "int_to_double.ae": 12,
     "matrix_literal.ae": 0,
+    "matrix_index.ae": 4,
     "max.ae": 12,
     "return_5.ae": 5,
     "string_choose.ae": 0,
@@ -32,6 +33,7 @@ EXPECTED_EXIT_CODES = {
     "sum_to_n.ae": 15,
     "vector_column_inferred.ae": 0,
     "vector_column_literal.ae": 0,
+    "vector_index.ae": 5,
     "vector_literal.ae": 0,
 }
 

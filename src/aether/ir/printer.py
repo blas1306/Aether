@@ -19,11 +19,13 @@ from .model import (
     IRInstruction,
     IRJump,
     IRLoad,
+    IRMatrixGet,
     IRMatrixNew,
     IRModule,
     IRReturn,
     IRStore,
     IRValue,
+    IRVectorGet,
     IRVectorNew,
 )
 
@@ -96,6 +98,17 @@ class IRPrinter:
             return (
                 f"{self._typed_value(instruction.result)} = array_get "
                 f"{self._value(instruction.array)}, {self._value(instruction.index)}"
+            )
+        if isinstance(instruction, IRVectorGet):
+            return (
+                f"{self._typed_value(instruction.result)} = vector_get "
+                f"{self._value(instruction.vector)}, {self._value(instruction.index)}"
+            )
+        if isinstance(instruction, IRMatrixGet):
+            return (
+                f"{self._typed_value(instruction.result)} = matrix_get "
+                f"{self._value(instruction.matrix)}, {self._value(instruction.row)}, "
+                f"{self._value(instruction.column)} cols {instruction.cols}"
             )
         if isinstance(instruction, IRArraySet):
             return (

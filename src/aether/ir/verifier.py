@@ -19,11 +19,13 @@ from .model import (
     IRInstruction,
     IRJump,
     IRLoad,
+    IRMatrixGet,
     IRMatrixNew,
     IRModule,
     IRReturn,
     IRStore,
     IRValue,
+    IRVectorGet,
     IRVectorNew,
 )
 from .types import (
@@ -358,6 +360,14 @@ class IRVerifier:
             self._verify_array_get(instruction, state, value_types)
             return self._define_value(state, instruction.result)
 
+        if isinstance(instruction, IRVectorGet):
+            self._verify_vector_get(instruction, state, value_types)
+            return self._define_value(state, instruction.result)
+
+        if isinstance(instruction, IRMatrixGet):
+            self._verify_matrix_get(instruction, state, value_types)
+            return self._define_value(state, instruction.result)
+
         if isinstance(instruction, IRArraySet):
             self._verify_array_set(instruction, state, value_types)
             return state
@@ -508,6 +518,47 @@ class IRVerifier:
             self._fail(
                 f"Array get result type mismatch: expected "
                 f"{instruction.array.type.element}, got {instruction.result.type}"
+            )
+
+    def _verify_vector_get(
+        self,
+        instruction: IRVectorGet,
+        state: _State,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.vector, state, value_types)
+        self._require_defined(instruction.index, state, value_types)
+        if not isinstance(instruction.vector.type, VectorType):
+            self._fail(f"Vector get expects vector value, got {instruction.vector.type}")
+        if not isinstance(instruction.index.type, IntType):
+            self._fail(f"Vector get index must be int, got {instruction.index.type}")
+        if instruction.result.type != instruction.vector.type.element:
+            self._fail(
+                f"Vector get result type mismatch: expected "
+                f"{instruction.vector.type.element}, got {instruction.result.type}"
+            )
+
+    def _verify_matrix_get(
+        self,
+        instruction: IRMatrixGet,
+        state: _State,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.matrix, state, value_types)
+        self._require_defined(instruction.row, state, value_types)
+        self._require_defined(instruction.column, state, value_types)
+        if not isinstance(instruction.matrix.type, MatrixType):
+            self._fail(f"Matrix get expects matrix value, got {instruction.matrix.type}")
+        if not isinstance(instruction.row.type, IntType):
+            self._fail(f"Matrix get row index must be int, got {instruction.row.type}")
+        if not isinstance(instruction.column.type, IntType):
+            self._fail(f"Matrix get column index must be int, got {instruction.column.type}")
+        if instruction.cols <= 0:
+            self._fail(f"Matrix get column count must be positive, got {instruction.cols}")
+        if instruction.result.type != instruction.matrix.type.element:
+            self._fail(
+                f"Matrix get result type mismatch: expected "
+                f"{instruction.matrix.type.element}, got {instruction.result.type}"
             )
 
     def _verify_array_set(
@@ -798,7 +849,10 @@ class IRVerifier:
             return instruction.result
         if isinstance(instruction, IRCall):
             return instruction.result
-        if isinstance(instruction, (IRArrayNew, IRArrayGet, IRArrayLength, IRVectorNew, IRMatrixNew)):
+        if isinstance(
+            instruction,
+            (IRArrayNew, IRArrayGet, IRVectorGet, IRMatrixGet, IRArrayLength, IRVectorNew, IRMatrixNew),
+        ):
             return instruction.result
         return None
 

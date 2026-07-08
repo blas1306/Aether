@@ -125,7 +125,7 @@ Ragged matrix literals are errors:
 [1, 2; 3] // error: rows have different lengths
 ```
 
-## Future Indexing
+## Indexing
 
 The intended mathematical indexing forms are:
 
@@ -133,6 +133,10 @@ The intended mathematical indexing forms are:
 v[i]
 A[i, j]
 ```
+
+Scalar reads are implemented for `Vector<T, Orientation>` and `Matrix<T>`:
+`v[i]` returns `T`, and `A[i, j]` returns `T`. Indices must typecheck as
+`int`. Indexed assignment and matrix/vector slices remain separate features.
 
 `A[i][j]` is not matrix indexing. That form belongs to nested structures such
 as `List<List<T>>`, `Array<Array<T>>`, or similar container compositions.

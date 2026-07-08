@@ -1,0 +1,4 @@
+int main() {
+    Matrix<int> A = [1, 2; 3, 4];
+    return A[1, 1];
+}

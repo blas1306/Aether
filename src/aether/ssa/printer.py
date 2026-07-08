@@ -18,12 +18,14 @@ from .model import (
     SSAFunction,
     SSAInstruction,
     SSAJump,
+    SSAMatrixGet,
     SSAMatrixNew,
     SSAModule,
     SSAParameter,
     SSAPhi,
     SSAReturn,
     SSAValue,
+    SSAVectorGet,
     SSAVectorNew,
 )
 
@@ -92,6 +94,17 @@ class SSAPrinter:
             return (
                 f"{self._typed_value(instruction.result)} = array_get "
                 f"{self._value(instruction.array)}, {self._value(instruction.index)}"
+            )
+        if isinstance(instruction, SSAVectorGet):
+            return (
+                f"{self._typed_value(instruction.result)} = vector_get "
+                f"{self._value(instruction.vector)}, {self._value(instruction.index)}"
+            )
+        if isinstance(instruction, SSAMatrixGet):
+            return (
+                f"{self._typed_value(instruction.result)} = matrix_get "
+                f"{self._value(instruction.matrix)}, {self._value(instruction.row)}, "
+                f"{self._value(instruction.column)} cols {instruction.cols}"
             )
         if isinstance(instruction, SSAArraySet):
             return (

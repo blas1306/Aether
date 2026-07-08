@@ -20,12 +20,14 @@ from aether.ssa.model import (
     SSAFunction,
     SSAInstruction,
     SSAJump,
+    SSAMatrixGet,
     SSAMatrixNew,
     SSAModule,
     SSAParameter,
     SSAPhi,
     SSAReturn,
     SSAValue,
+    SSAVectorGet,
     SSAVectorNew,
 )
 
@@ -164,6 +166,10 @@ class LLVMPrinter:
             return self._print_matrix_new(instruction)
         if isinstance(instruction, SSAArrayGet):
             return "\n  ".join(self._print_array_get(instruction))
+        if isinstance(instruction, SSAVectorGet):
+            return "\n  ".join(self._print_vector_get(instruction))
+        if isinstance(instruction, SSAMatrixGet):
+            return "\n  ".join(self._print_matrix_get(instruction))
         if isinstance(instruction, SSAArraySet):
             return "\n  ".join(self._print_array_set(instruction))
         if isinstance(instruction, SSAArrayLength):
@@ -183,7 +189,10 @@ class LLVMPrinter:
             return instruction.result
         if isinstance(instruction, SSACall):
             return instruction.result
-        if isinstance(instruction, (SSAArrayNew, SSAArrayGet, SSAArrayLength, SSAVectorNew, SSAMatrixNew)):
+        if isinstance(
+            instruction,
+            (SSAArrayNew, SSAArrayGet, SSAVectorGet, SSAMatrixGet, SSAArrayLength, SSAVectorNew, SSAMatrixNew),
+        ):
             return instruction.result
         return None
 
@@ -433,6 +442,48 @@ class LLVMPrinter:
         return element_ptr.lines + [
             f"{result} = load {element_type}, ptr {element_ptr.value}"
         ]
+
+    def _print_vector_get(self, instruction: SSAVectorGet) -> list[str]:
+        if not isinstance(instruction.vector.type, VectorType):
+            raise LLVMBackendError("LLVM vector_get expects a VectorType source")
+        self._uses_array_type = True
+
+        result = self._new_temp(instruction.result)
+        element_type = llvm_type(instruction.result.type)
+        element_ptr = self._array_element_pointer(
+            self._operand(instruction.vector),
+            instruction.index,
+            instruction.result.type,
+        )
+        return element_ptr.lines + [
+            f"{result} = load {element_type}, ptr {element_ptr.value}"
+        ]
+
+    def _print_matrix_get(self, instruction: SSAMatrixGet) -> list[str]:
+        if not isinstance(instruction.matrix.type, MatrixType):
+            raise LLVMBackendError("LLVM matrix_get expects a MatrixType source")
+        if instruction.cols <= 0:
+            raise LLVMBackendError("LLVM matrix_get requires a positive column count")
+        self._uses_array_type = True
+
+        result = self._new_temp(instruction.result)
+        data = self._synthetic_temp("matrix.data")
+        row64 = self._synthetic_temp("matrix.row64")
+        column64 = self._synthetic_temp("matrix.column64")
+        row_offset = self._synthetic_temp("matrix.row.offset")
+        linear_index = self._synthetic_temp("matrix.index")
+        element_ptr = self._synthetic_temp("matrix.elem")
+        element_type = llvm_type(instruction.result.type)
+        lines = self._array_data_pointer(data, self._operand(instruction.matrix))
+        lines.append(f"{row64} = sext i32 {self._operand(instruction.row)} to i64")
+        lines.append(f"{column64} = sext i32 {self._operand(instruction.column)} to i64")
+        lines.append(f"{row_offset} = mul i64 {row64}, {instruction.cols}")
+        lines.append(f"{linear_index} = add i64 {row_offset}, {column64}")
+        lines.append(
+            f"{element_ptr} = getelementptr {element_type}, ptr {data}, i64 {linear_index}"
+        )
+        lines.append(f"{result} = load {element_type}, ptr {element_ptr}")
+        return lines
 
     def _print_array_set(self, instruction: SSAArraySet) -> list[str]:
         if not isinstance(instruction.array.type, ArrayType):

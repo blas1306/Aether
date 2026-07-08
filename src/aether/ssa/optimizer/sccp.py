@@ -21,11 +21,13 @@ from aether.ssa.model import (
     SSAFunction,
     SSAInstruction,
     SSAJump,
+    SSAMatrixGet,
     SSAMatrixNew,
     SSAModule,
     SSAPhi,
     SSAReturn,
     SSAValue,
+    SSAVectorGet,
     SSAVectorNew,
 )
 
@@ -189,7 +191,10 @@ class SCCPAnalyzer:
                 self._set_state(instruction.result, Overdefined())
             return
 
-        if isinstance(instruction, (SSAArrayNew, SSAArrayGet, SSAArrayLength, SSAVectorNew, SSAMatrixNew)):
+        if isinstance(
+            instruction,
+            (SSAArrayNew, SSAArrayGet, SSAVectorGet, SSAMatrixGet, SSAArrayLength, SSAVectorNew, SSAMatrixNew),
+        ):
             self._set_state(instruction.result, Overdefined())
             return
 
@@ -322,7 +327,10 @@ class SCCPAnalyzer:
             return instruction.result
         if isinstance(instruction, SSACall):
             return instruction.result
-        if isinstance(instruction, (SSAArrayNew, SSAArrayGet, SSAArrayLength, SSAVectorNew, SSAMatrixNew)):
+        if isinstance(
+            instruction,
+            (SSAArrayNew, SSAArrayGet, SSAVectorGet, SSAMatrixGet, SSAArrayLength, SSAVectorNew, SSAMatrixNew),
+        ):
             return instruction.result
         return None
 
@@ -348,6 +356,10 @@ class SCCPAnalyzer:
             return instruction.elements
         if isinstance(instruction, SSAArrayGet):
             return (instruction.array, instruction.index)
+        if isinstance(instruction, SSAVectorGet):
+            return (instruction.vector, instruction.index)
+        if isinstance(instruction, SSAMatrixGet):
+            return (instruction.matrix, instruction.row, instruction.column)
         if isinstance(instruction, SSAArraySet):
             return (instruction.array, instruction.index, instruction.value)
         if isinstance(instruction, SSAArrayLength):

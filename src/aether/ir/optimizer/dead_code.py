@@ -16,11 +16,13 @@ from aether.ir.model import (
     IRInstruction,
     IRJump,
     IRLoad,
+    IRMatrixGet,
     IRMatrixNew,
     IRModule,
     IRReturn,
     IRStore,
     IRValue,
+    IRVectorGet,
     IRVectorNew,
 )
 
@@ -30,7 +32,17 @@ from .result import OptimizationResult
 class DeadCodeEliminator:
     """Remove pure IR instructions whose result is not used."""
 
-    _PURE_INSTRUCTIONS = (IRConst, IRBinaryOp, IRCompareOp, IRCast, IRLoad)
+    _PURE_INSTRUCTIONS = (
+        IRConst,
+        IRBinaryOp,
+        IRCompareOp,
+        IRCast,
+        IRLoad,
+        IRArrayGet,
+        IRVectorGet,
+        IRMatrixGet,
+        IRArrayLength,
+    )
 
     def run(self, module: IRModule) -> OptimizationResult:
         removed = 0
@@ -114,7 +126,10 @@ class DeadCodeEliminator:
 
     @staticmethod
     def _result(instruction: IRInstruction) -> IRValue:
-        if isinstance(instruction, (IRConst, IRLoad, IRBinaryOp, IRCompareOp, IRCast, IRArrayGet, IRArrayLength)):
+        if isinstance(
+            instruction,
+            (IRConst, IRLoad, IRBinaryOp, IRCompareOp, IRCast, IRArrayGet, IRVectorGet, IRMatrixGet, IRArrayLength),
+        ):
             return instruction.result
         raise TypeError(
             f"Instruction has no removable result: {type(instruction).__name__}"
@@ -142,6 +157,10 @@ class DeadCodeEliminator:
             return instruction.elements
         if isinstance(instruction, IRArrayGet):
             return (instruction.array, instruction.index)
+        if isinstance(instruction, IRVectorGet):
+            return (instruction.vector, instruction.index)
+        if isinstance(instruction, IRMatrixGet):
+            return (instruction.matrix, instruction.row, instruction.column)
         if isinstance(instruction, IRArraySet):
             return (instruction.array, instruction.index, instruction.value)
         if isinstance(instruction, IRArrayLength):
