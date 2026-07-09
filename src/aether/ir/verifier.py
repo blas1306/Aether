@@ -20,6 +20,7 @@ from .model import (
     IRJump,
     IRLoad,
     IRMatrixColumns,
+    IRMatrixAdd,
     IRMatrixGet,
     IRMatrixNew,
     IRMatrixRows,
@@ -29,6 +30,7 @@ from .model import (
     IRStore,
     IRValue,
     IRVectorGet,
+    IRVectorAdd,
     IRVectorLength,
     IRVectorNew,
     IRVectorSet,
@@ -361,6 +363,14 @@ class IRVerifier:
             self._verify_matrix_new(instruction, state, value_types)
             return self._define_value(state, instruction.result)
 
+        if isinstance(instruction, IRVectorAdd):
+            self._verify_vector_add(instruction, state, value_types)
+            return self._define_value(state, instruction.result)
+
+        if isinstance(instruction, IRMatrixAdd):
+            self._verify_matrix_add(instruction, state, value_types)
+            return self._define_value(state, instruction.result)
+
         if isinstance(instruction, IRArrayGet):
             self._verify_array_get(instruction, state, value_types)
             return self._define_value(state, instruction.result)
@@ -526,6 +536,60 @@ class IRVerifier:
                     f"Matrix literal element type mismatch: expected "
                     f"{instruction.result.type.element}, got {element.type}"
                 )
+
+    def _verify_vector_add(
+        self,
+        instruction: IRVectorAdd,
+        state: _State,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.left, state, value_types)
+        self._require_defined(instruction.right, state, value_types)
+        if not isinstance(instruction.result.type, VectorType):
+            self._fail(f"Vector add result must be vector type, got {instruction.result.type}")
+        if not isinstance(instruction.left.type, VectorType) or not isinstance(instruction.right.type, VectorType):
+            self._fail(
+                f"Vector add expects vector operands, got {instruction.left.type} and {instruction.right.type}"
+            )
+        if instruction.length <= 0:
+            self._fail(f"Vector add length must be positive, got {instruction.length}")
+        if instruction.left.type.orientation != instruction.right.type.orientation:
+            self._fail("Vector add operands must have the same orientation")
+        if instruction.orientation != instruction.result.type.orientation:
+            self._fail("Vector add instruction orientation must match result type")
+        if instruction.result.type != instruction.left.type:
+            self._fail(
+                f"Vector add result type mismatch: expected {instruction.left.type}, got {instruction.result.type}"
+            )
+        if instruction.right.type != instruction.left.type:
+            self._fail(
+                f"Vector add operand type mismatch: expected {instruction.left.type}, got {instruction.right.type}"
+            )
+
+    def _verify_matrix_add(
+        self,
+        instruction: IRMatrixAdd,
+        state: _State,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.left, state, value_types)
+        self._require_defined(instruction.right, state, value_types)
+        if not isinstance(instruction.result.type, MatrixType):
+            self._fail(f"Matrix add result must be matrix type, got {instruction.result.type}")
+        if not isinstance(instruction.left.type, MatrixType) or not isinstance(instruction.right.type, MatrixType):
+            self._fail(
+                f"Matrix add expects matrix operands, got {instruction.left.type} and {instruction.right.type}"
+            )
+        if instruction.rows <= 0 or instruction.cols <= 0:
+            self._fail(f"Matrix add dimensions must be positive, got {instruction.rows}x{instruction.cols}")
+        if instruction.result.type != instruction.left.type:
+            self._fail(
+                f"Matrix add result type mismatch: expected {instruction.left.type}, got {instruction.result.type}"
+            )
+        if instruction.right.type != instruction.left.type:
+            self._fail(
+                f"Matrix add operand type mismatch: expected {instruction.left.type}, got {instruction.right.type}"
+            )
 
     def _verify_array_get(
         self,
@@ -970,6 +1034,8 @@ class IRVerifier:
                 IRMatrixColumns,
                 IRVectorNew,
                 IRMatrixNew,
+                IRVectorAdd,
+                IRMatrixAdd,
             ),
         ):
             return instruction.result

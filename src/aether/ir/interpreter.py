@@ -21,6 +21,7 @@ from .model import (
     IRJump,
     IRLoad,
     IRMatrixColumns,
+    IRMatrixAdd,
     IRMatrixGet,
     IRMatrixNew,
     IRMatrixRows,
@@ -30,6 +31,7 @@ from .model import (
     IRStore,
     IRValue,
     IRVectorGet,
+    IRVectorAdd,
     IRVectorLength,
     IRVectorNew,
     IRVectorSet,
@@ -168,6 +170,33 @@ class IRInterpreter:
         if isinstance(instruction, IRMatrixNew):
             frame.values[instruction.result] = [
                 self._value(element, frame) for element in instruction.elements
+            ]
+            return False, None, None
+
+        if isinstance(instruction, IRVectorAdd):
+            left = self._value(instruction.left, frame)
+            right = self._value(instruction.right, frame)
+            if not isinstance(left, list) or not isinstance(right, list):
+                raise IRExecutionError("IR vector add requires vector values")
+            if len(left) != instruction.length or len(right) != instruction.length:
+                raise IRExecutionError("IR vector add operands must match instruction length")
+            frame.values[instruction.result] = [
+                self._binary("add", left_value, right_value)
+                for left_value, right_value in zip(left, right)
+            ]
+            return False, None, None
+
+        if isinstance(instruction, IRMatrixAdd):
+            left = self._value(instruction.left, frame)
+            right = self._value(instruction.right, frame)
+            if not isinstance(left, list) or not isinstance(right, list):
+                raise IRExecutionError("IR matrix add requires matrix values")
+            element_count = instruction.rows * instruction.cols
+            if len(left) != element_count or len(right) != element_count:
+                raise IRExecutionError("IR matrix add operands must match instruction dimensions")
+            frame.values[instruction.result] = [
+                self._binary("add", left_value, right_value)
+                for left_value, right_value in zip(left, right)
             ]
             return False, None, None
 

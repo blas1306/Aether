@@ -16,6 +16,7 @@ from aether.ssa.model import (
     SSAInstruction,
     SSAJump,
     SSAMatrixColumns,
+    SSAMatrixAdd,
     SSAMatrixGet,
     SSAMatrixNew,
     SSAMatrixRows,
@@ -24,6 +25,7 @@ from aether.ssa.model import (
     SSAReturn,
     SSAValue,
     SSAVectorGet,
+    SSAVectorAdd,
     SSAVectorLength,
     SSAVectorNew,
 )
@@ -245,6 +247,38 @@ class TrivialPhiEliminator:
             if rewritten_uses == 0:
                 return instruction, 0
             return SSAMatrixNew(instruction.result, tuple(elements), instruction.rows, instruction.cols), rewritten_uses
+
+        if isinstance(instruction, SSAVectorAdd):
+            left, left_rewritten = self._rewrite_value(instruction.left, replacements)
+            right, right_rewritten = self._rewrite_value(instruction.right, replacements)
+            if not left_rewritten and not right_rewritten:
+                return instruction, 0
+            return (
+                SSAVectorAdd(
+                    instruction.result,
+                    left,
+                    right,
+                    instruction.length,
+                    instruction.orientation,
+                ),
+                int(left_rewritten) + int(right_rewritten),
+            )
+
+        if isinstance(instruction, SSAMatrixAdd):
+            left, left_rewritten = self._rewrite_value(instruction.left, replacements)
+            right, right_rewritten = self._rewrite_value(instruction.right, replacements)
+            if not left_rewritten and not right_rewritten:
+                return instruction, 0
+            return (
+                SSAMatrixAdd(
+                    instruction.result,
+                    left,
+                    right,
+                    instruction.rows,
+                    instruction.cols,
+                ),
+                int(left_rewritten) + int(right_rewritten),
+            )
 
         if isinstance(instruction, SSAArrayGet):
             array, array_rewritten = self._rewrite_value(instruction.array, replacements)

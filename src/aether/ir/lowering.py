@@ -28,6 +28,7 @@ from .model import (
     IRJump,
     IRLoad,
     IRMatrixGet,
+    IRMatrixAdd,
     IRMatrixColumns,
     IRMatrixNew,
     IRMatrixRows,
@@ -38,6 +39,7 @@ from .model import (
     IRStore,
     IRValue,
     IRVectorGet,
+    IRVectorAdd,
     IRVectorLength,
     IRVectorNew,
     IRVectorSet,
@@ -93,6 +95,7 @@ class _FunctionContext:
     parameters: dict[str, IRParameter]
     locals: dict[str, IRValue] = field(default_factory=dict)
     matrix_dimensions: dict[str, tuple[int, int]] = field(default_factory=dict)
+    vector_lengths: dict[str, int] = field(default_factory=dict)
     next_temporary: int = 0
     next_if: int = 0
     next_loop: int = 0
@@ -200,7 +203,7 @@ class IRLowerer:
             )
             slot = IRValue(statement.name, slot_type)
             context.locals[statement.name] = slot
-            self._copy_matrix_dimensions(value, slot, context)
+            self._copy_aggregate_metadata(value, slot, context)
             context.block.instructions.append(IRStore(slot, value))
             return
 
@@ -234,7 +237,7 @@ class IRLowerer:
                 slot.type,
                 f"assignment to '{statement.name}' requires an implicit conversion",
             )
-            self._copy_matrix_dimensions(value, slot, context)
+            self._copy_aggregate_metadata(value, slot, context)
             context.block.instructions.append(IRStore(slot, value))
             return
 
@@ -481,7 +484,7 @@ class IRLowerer:
             if slot is not None:
                 result = context.temporary(slot.type)
                 context.block.instructions.append(IRLoad(result, slot))
-                self._copy_matrix_dimensions(slot, result, context)
+                self._copy_aggregate_metadata(slot, result, context)
                 return result
             parameter = context.parameters.get(expression.name)
             if parameter is not None:
@@ -509,6 +512,15 @@ class IRLowerer:
                     IRCompareOp(result, compare_operator, left, right)
                 )
                 return result
+            if expression.operator == "+":
+                aggregate_add = self._lower_aggregate_add(
+                    expression,
+                    left,
+                    right,
+                    context,
+                )
+                if aggregate_add is not None:
+                    return aggregate_add
             result_type = self._binary_result_type(expression.operator, left.type, right.type)
             result = context.temporary(result_type)
             context.block.instructions.append(IRBinaryOp(result, binary_operator, left, right))
@@ -704,6 +716,7 @@ class IRLowerer:
                 "vector literal element requires an implicit conversion",
             )
         result = context.temporary(vector_type)
+        context.vector_lengths[result.name] = len(elements)
         context.block.instructions.append(IRVectorNew(result, elements, vector_type.orientation))
         return result
 
@@ -749,10 +762,84 @@ class IRLowerer:
         return result
 
     @staticmethod
-    def _copy_matrix_dimensions(source: IRValue, target: IRValue, context: _FunctionContext) -> None:
+    def _copy_aggregate_metadata(source: IRValue, target: IRValue, context: _FunctionContext) -> None:
         dimensions = context.matrix_dimensions.get(source.name)
         if dimensions is not None:
             context.matrix_dimensions[target.name] = dimensions
+        vector_length = context.vector_lengths.get(source.name)
+        if vector_length is not None:
+            context.vector_lengths[target.name] = vector_length
+
+    def _lower_aggregate_add(
+        self,
+        expression: ast.BinaryExpression,
+        left: IRValue,
+        right: IRValue,
+        context: _FunctionContext,
+    ) -> IRValue | None:
+        if isinstance(left.type, VectorType) or isinstance(right.type, VectorType):
+            if not isinstance(left.type, VectorType) or not isinstance(right.type, VectorType):
+                return None
+            if left.type.orientation != right.type.orientation:
+                self._fail(
+                    f"IR backend requires vector operands with the same orientation for '+', "
+                    f"got '{left.type}' and '{right.type}'.",
+                    expression,
+                )
+            self._require_same_type(
+                right.type.element,
+                left.type.element,
+                "vector addition requires matching element types",
+            )
+            left_length = context.vector_lengths.get(left.name)
+            right_length = context.vector_lengths.get(right.name)
+            if left_length is None or right_length is None:
+                self._fail(
+                    "IR backend requires known vector lengths for Vector + Vector.",
+                    expression,
+                )
+            if left_length != right_length:
+                self._fail(
+                    f"IR backend requires equal vector lengths for '+', got {left_length} and {right_length}.",
+                    expression,
+                )
+            result = context.temporary(left.type)
+            context.vector_lengths[result.name] = left_length
+            context.block.instructions.append(
+                IRVectorAdd(result, left, right, left_length, left.type.orientation)
+            )
+            return result
+
+        if isinstance(left.type, MatrixType) or isinstance(right.type, MatrixType):
+            if not isinstance(left.type, MatrixType) or not isinstance(right.type, MatrixType):
+                return None
+            self._require_same_type(
+                right.type.element,
+                left.type.element,
+                "matrix addition requires matching element types",
+            )
+            left_dimensions = context.matrix_dimensions.get(left.name)
+            right_dimensions = context.matrix_dimensions.get(right.name)
+            if left_dimensions is None or right_dimensions is None:
+                self._fail(
+                    "IR backend requires known matrix dimensions for Matrix + Matrix.",
+                    expression,
+                )
+            if left_dimensions != right_dimensions:
+                self._fail(
+                    "IR backend requires equal matrix dimensions for '+', "
+                    f"got {left_dimensions[0]}x{left_dimensions[1]} and "
+                    f"{right_dimensions[0]}x{right_dimensions[1]}.",
+                    expression,
+                )
+            result = context.temporary(left.type)
+            context.matrix_dimensions[result.name] = left_dimensions
+            context.block.instructions.append(
+                IRMatrixAdd(result, left, right, left_dimensions[0], left_dimensions[1])
+            )
+            return result
+
+        return None
 
     def _lower_cast(self, call: ast.CallExpression, context: _FunctionContext) -> IRValue:
         if len(call.arguments) != 1:

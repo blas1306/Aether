@@ -38,6 +38,7 @@ from .model import (
     SSAInstruction,
     SSAJump,
     SSAMatrixColumns,
+    SSAMatrixAdd,
     SSAMatrixGet,
     SSAMatrixNew,
     SSAMatrixRows,
@@ -47,6 +48,7 @@ from .model import (
     SSAReturn,
     SSAValue,
     SSAVectorGet,
+    SSAVectorAdd,
     SSAVectorLength,
     SSAVectorNew,
     SSAVectorSet,
@@ -267,6 +269,14 @@ class SSAVerifier:
                 self._verify_matrix_new(instruction, value_types)
                 continue
 
+            if isinstance(instruction, SSAVectorAdd):
+                self._verify_vector_add(instruction, value_types)
+                continue
+
+            if isinstance(instruction, SSAMatrixAdd):
+                self._verify_matrix_add(instruction, value_types)
+                continue
+
             if isinstance(instruction, SSAArrayGet):
                 self._verify_array_get(instruction, value_types)
                 continue
@@ -445,6 +455,58 @@ class SSAVerifier:
                     f"Matrix literal element type mismatch: expected "
                     f"{instruction.result.type.element}, got {element.type}"
                 )
+
+    def _verify_vector_add(
+        self,
+        instruction: SSAVectorAdd,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.left, value_types)
+        self._require_defined(instruction.right, value_types)
+        if not isinstance(instruction.result.type, VectorType):
+            self._fail(f"Vector add result must be vector type, got {instruction.result.type}")
+        if not isinstance(instruction.left.type, VectorType) or not isinstance(instruction.right.type, VectorType):
+            self._fail(
+                f"Vector add expects vector operands, got {instruction.left.type} and {instruction.right.type}"
+            )
+        if instruction.length <= 0:
+            self._fail(f"Vector add length must be positive, got {instruction.length}")
+        if instruction.left.type.orientation != instruction.right.type.orientation:
+            self._fail("Vector add operands must have the same orientation")
+        if instruction.orientation != instruction.result.type.orientation:
+            self._fail("Vector add instruction orientation must match result type")
+        if instruction.result.type != instruction.left.type:
+            self._fail(
+                f"Vector add result type mismatch: expected {instruction.left.type}, got {instruction.result.type}"
+            )
+        if instruction.right.type != instruction.left.type:
+            self._fail(
+                f"Vector add operand type mismatch: expected {instruction.left.type}, got {instruction.right.type}"
+            )
+
+    def _verify_matrix_add(
+        self,
+        instruction: SSAMatrixAdd,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.left, value_types)
+        self._require_defined(instruction.right, value_types)
+        if not isinstance(instruction.result.type, MatrixType):
+            self._fail(f"Matrix add result must be matrix type, got {instruction.result.type}")
+        if not isinstance(instruction.left.type, MatrixType) or not isinstance(instruction.right.type, MatrixType):
+            self._fail(
+                f"Matrix add expects matrix operands, got {instruction.left.type} and {instruction.right.type}"
+            )
+        if instruction.rows <= 0 or instruction.cols <= 0:
+            self._fail(f"Matrix add dimensions must be positive, got {instruction.rows}x{instruction.cols}")
+        if instruction.result.type != instruction.left.type:
+            self._fail(
+                f"Matrix add result type mismatch: expected {instruction.left.type}, got {instruction.result.type}"
+            )
+        if instruction.right.type != instruction.left.type:
+            self._fail(
+                f"Matrix add operand type mismatch: expected {instruction.left.type}, got {instruction.right.type}"
+            )
 
     def _verify_array_get(
         self,
@@ -841,6 +903,8 @@ class SSAVerifier:
                 SSAMatrixColumns,
                 SSAVectorNew,
                 SSAMatrixNew,
+                SSAVectorAdd,
+                SSAMatrixAdd,
             ),
         ):
             return instruction.result

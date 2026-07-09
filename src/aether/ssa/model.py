@@ -82,6 +82,24 @@ class SSAMatrixNew(SSAInstruction):
 
 
 @dataclass(frozen=True)
+class SSAVectorAdd(SSAInstruction):
+    result: SSAValue
+    left: SSAValue
+    right: SSAValue
+    length: int
+    orientation: str | None = None
+
+
+@dataclass(frozen=True)
+class SSAMatrixAdd(SSAInstruction):
+    result: SSAValue
+    left: SSAValue
+    right: SSAValue
+    rows: int
+    cols: int
+
+
+@dataclass(frozen=True)
 class SSAArrayGet(SSAInstruction):
     result: SSAValue
     array: SSAValue

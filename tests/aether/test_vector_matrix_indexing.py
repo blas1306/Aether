@@ -5,7 +5,7 @@ import shutil
 import pytest
 
 from aether import ast
-from aether.backend.llvm import LLVMRunner, print_llvm
+from aether.backend.llvm import LLVMBuilder, LLVMRunner, print_llvm
 from aether.errors import AetherTypeError
 from aether.ir import (
     IRBasicBlock,
@@ -14,6 +14,7 @@ from aether.ir import (
     IRInterpreter,
     IRLowerer,
     IRMatrixColumns,
+    IRMatrixAdd,
     IRMatrixGet,
     IRMatrixNew,
     IRMatrixRows,
@@ -22,6 +23,7 @@ from aether.ir import (
     IRReturn,
     IRValue,
     IRVectorGet,
+    IRVectorAdd,
     IRVectorLength,
     IRVectorNew,
     IRVectorSet,
@@ -41,6 +43,7 @@ from aether.ssa import (
     SSAConst,
     SSAFunction,
     SSAMatrixColumns,
+    SSAMatrixAdd,
     SSAMatrixGet,
     SSAMatrixNew,
     SSAMatrixRows,
@@ -49,6 +52,7 @@ from aether.ssa import (
     SSAReturn,
     SSAValue,
     SSAVectorGet,
+    SSAVectorAdd,
     SSAVectorLength,
     SSAVectorNew,
     SSAVectorSet,
@@ -85,6 +89,15 @@ def test_parser_builds_matrix_index_expression() -> None:
     assert expression.matrix.name == "A"
     assert isinstance(expression.row, ast.Identifier)
     assert isinstance(expression.column, ast.BinaryExpression)
+
+
+def test_parser_builds_add_binary_expression_for_aggregates() -> None:
+    expression = _parse_expression("left + right")
+
+    assert isinstance(expression, ast.BinaryExpression)
+    assert expression.operator == "+"
+    assert isinstance(expression.left, ast.Identifier)
+    assert isinstance(expression.right, ast.Identifier)
 
 
 @pytest.mark.parametrize(
@@ -159,6 +172,57 @@ int main() {
 }
 """
     )
+
+
+def test_typechecker_accepts_vector_and_matrix_addition() -> None:
+    _typed(
+        """
+int main() {
+    Vector<int, Row> a = [1, 2, 3];
+    Vector<int, Row> b = [4, 5, 6];
+    Vector<int, Row> c = a + b;
+    Matrix<int> A = [1, 2; 3, 4];
+    Matrix<int> B = [5, 6; 7, 8];
+    Matrix<int> C = A + B;
+    return c[0] + C[0, 0];
+}
+"""
+    )
+
+
+def test_lowering_preserves_column_vector_addition_orientation() -> None:
+    typed_program = _typed(
+        """
+int main() {
+    Vector<int, Column> a = [1; 2; 3];
+    Vector<int, Column> b = [4; 5; 6];
+    Vector<int, Column> c = a + b;
+    return c[2];
+}
+"""
+    )
+    module = IRVerifier(IRLowerer().lower(typed_program.program)).verify()
+
+    vector_add = next(
+        instruction
+        for instruction in module.functions[0].blocks[0].instructions
+        if isinstance(instruction, IRVectorAdd)
+    )
+    assert vector_add.orientation == "column"
+
+
+def test_typechecker_rejects_vector_addition_orientation_mismatch() -> None:
+    with pytest.raises(AetherTypeError, match="same orientation"):
+        _typed(
+            """
+int main() {
+    Vector<int, Row> a = [1, 2, 3];
+    Vector<int, Column> b = [4; 5; 6];
+    Vector<int> c = a + b;
+    return c[0];
+}
+"""
+        )
 
 
 @pytest.mark.parametrize(
@@ -393,6 +457,54 @@ int main() {
     assert IRInterpreter(module).call("main") == 9
 
 
+def test_lowering_and_ir_interpreter_execute_vector_addition() -> None:
+    typed_program = _typed(
+        """
+int main() {
+    Vector<int, Row> a = [1, 2, 3];
+    Vector<int, Row> b = [4, 5, 6];
+    Vector<int, Row> c = a + b;
+    return c[0] + c[1] + c[2];
+}
+"""
+    )
+    module = IRVerifier(IRLowerer().lower(typed_program.program)).verify()
+
+    vector_add = next(
+        instruction
+        for instruction in module.functions[0].blocks[0].instructions
+        if isinstance(instruction, IRVectorAdd)
+    )
+    assert vector_add.length == 3
+    assert vector_add.orientation == "row"
+    assert "vector_add row" in print_ir(module)
+    assert IRInterpreter(module).call("main") == 21
+
+
+def test_lowering_and_ir_interpreter_execute_matrix_addition() -> None:
+    typed_program = _typed(
+        """
+int main() {
+    Matrix<int> A = [1, 2; 3, 4];
+    Matrix<int> B = [5, 6; 7, 8];
+    Matrix<int> C = A + B;
+    return C[0, 0] + C[0, 1] + C[1, 0] + C[1, 1];
+}
+"""
+    )
+    module = IRVerifier(IRLowerer().lower(typed_program.program)).verify()
+
+    matrix_add = next(
+        instruction
+        for instruction in module.functions[0].blocks[0].instructions
+        if isinstance(instruction, IRMatrixAdd)
+    )
+    assert matrix_add.rows == 2
+    assert matrix_add.cols == 2
+    assert "matrix_add" in print_ir(module)
+    assert IRInterpreter(module).call("main") == 36
+
+
 def test_ssa_preserves_vector_and_matrix_index_reads() -> None:
     typed_program = _typed(
         """
@@ -455,6 +567,85 @@ int main() {
     assert any(isinstance(instruction, SSAMatrixSet) for instruction in instructions)
     assert "vector_set" in print_ssa(ssa)
     assert "matrix_set" in print_ssa(ssa)
+
+
+def test_ssa_preserves_vector_and_matrix_addition() -> None:
+    typed_program = _typed(
+        """
+int main() {
+    Vector<int, Row> a = [1, 2, 3];
+    Vector<int, Row> b = [4, 5, 6];
+    Vector<int, Row> c = a + b;
+    Matrix<int> A = [1, 2; 3, 4];
+    Matrix<int> B = [5, 6; 7, 8];
+    Matrix<int> C = A + B;
+    return c[1] + C[1, 0];
+}
+"""
+    )
+
+    ssa = lower_to_verified_ssa(typed_program)
+    instructions = ssa.functions[0].blocks[0].instructions
+
+    assert any(isinstance(instruction, SSAVectorAdd) for instruction in instructions)
+    assert any(isinstance(instruction, SSAMatrixAdd) for instruction in instructions)
+    assert "vector_add row" in print_ssa(ssa)
+    assert "matrix_add" in print_ssa(ssa)
+
+
+def test_emit_llvm_includes_vector_and_matrix_addition_storage() -> None:
+    typed_program = _typed(
+        """
+int main() {
+    Vector<int, Row> a = [1, 2, 3];
+    Vector<int, Row> b = [4, 5, 6];
+    Vector<int, Row> c = a + b;
+    Matrix<int> A = [1, 2; 3, 4];
+    Matrix<int> B = [5, 6; 7, 8];
+    Matrix<int> C = A + B;
+    return c[2] + C[1, 1];
+}
+"""
+    )
+
+    llvm = LLVMBuilder().emit_llvm(typed_program)
+
+    assert "@aether_array_new(i64 4, i64 3)" in llvm
+    assert "@aether_array_new(i64 4, i64 4)" in llvm
+    assert " = add i32 " in llvm
+    assert "add.left.data" in llvm
+
+
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang is not available")
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        (
+            """
+int main() {
+    Vector<int, Row> a = [1, 2, 3];
+    Vector<int, Row> b = [4, 5, 6];
+    Vector<int, Row> c = a + b;
+    return c[0] + c[1] + c[2];
+}
+""",
+            21,
+        ),
+        (
+            """
+int main() {
+    Matrix<int> A = [1, 2; 3, 4];
+    Matrix<int> B = [5, 6; 7, 8];
+    Matrix<int> C = A + B;
+    return C[0, 0] + C[0, 1] + C[1, 0] + C[1, 1];
+}
+""",
+            36,
+        ),
+    ],
+)
+def test_llvm_runner_builds_and_executes_vector_and_matrix_addition(source: str, expected: int) -> None:
+    assert LLVMRunner().run(_typed(source)) == expected
 
 
 def test_ir_verifier_rejects_bad_vector_get_index_type() -> None:

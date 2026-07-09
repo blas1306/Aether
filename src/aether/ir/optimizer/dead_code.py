@@ -17,6 +17,7 @@ from aether.ir.model import (
     IRJump,
     IRLoad,
     IRMatrixColumns,
+    IRMatrixAdd,
     IRMatrixGet,
     IRMatrixNew,
     IRMatrixRows,
@@ -26,6 +27,7 @@ from aether.ir.model import (
     IRStore,
     IRValue,
     IRVectorGet,
+    IRVectorAdd,
     IRVectorLength,
     IRVectorNew,
     IRVectorSet,
@@ -50,6 +52,8 @@ class DeadCodeEliminator:
         IRVectorLength,
         IRMatrixRows,
         IRMatrixColumns,
+        IRVectorAdd,
+        IRMatrixAdd,
     )
 
     def run(self, module: IRModule) -> OptimizationResult:
@@ -149,6 +153,8 @@ class DeadCodeEliminator:
                 IRVectorLength,
                 IRMatrixRows,
                 IRMatrixColumns,
+                IRVectorAdd,
+                IRMatrixAdd,
             ),
         ):
             return instruction.result
@@ -176,6 +182,8 @@ class DeadCodeEliminator:
             return instruction.elements
         if isinstance(instruction, IRMatrixNew):
             return instruction.elements
+        if isinstance(instruction, (IRVectorAdd, IRMatrixAdd)):
+            return (instruction.left, instruction.right)
         if isinstance(instruction, IRArrayGet):
             return (instruction.array, instruction.index)
         if isinstance(instruction, IRVectorGet):

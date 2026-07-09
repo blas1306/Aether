@@ -20,6 +20,7 @@ from .model import (
     IRJump,
     IRLoad,
     IRMatrixColumns,
+    IRMatrixAdd,
     IRMatrixGet,
     IRMatrixNew,
     IRMatrixRows,
@@ -29,6 +30,7 @@ from .model import (
     IRStore,
     IRValue,
     IRVectorGet,
+    IRVectorAdd,
     IRVectorLength,
     IRVectorNew,
     IRVectorSet,
@@ -98,6 +100,19 @@ class IRPrinter:
             return (
                 f"{self._typed_value(instruction.result)} = matrix_new "
                 f"{instruction.rows}x{instruction.cols} [{elements}]"
+            )
+        if isinstance(instruction, IRVectorAdd):
+            orientation = f" {instruction.orientation}" if instruction.orientation is not None else ""
+            return (
+                f"{self._typed_value(instruction.result)} = vector_add{orientation} "
+                f"{self._value(instruction.left)}, {self._value(instruction.right)} "
+                f"length {instruction.length}"
+            )
+        if isinstance(instruction, IRMatrixAdd):
+            return (
+                f"{self._typed_value(instruction.result)} = matrix_add "
+                f"{self._value(instruction.left)}, {self._value(instruction.right)} "
+                f"{instruction.rows}x{instruction.cols}"
             )
         if isinstance(instruction, IRArrayGet):
             return (

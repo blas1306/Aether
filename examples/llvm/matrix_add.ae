@@ -1,0 +1,6 @@
+int main() {
+    Matrix<int> A = [1, 2; 3, 4];
+    Matrix<int> B = [5, 6; 7, 8];
+    Matrix<int> C = A + B;
+    return C[0, 0] + C[0, 1] + C[1, 0] + C[1, 1];
+}

@@ -644,8 +644,8 @@ def test_matrix_vector_like_addition_same_shape():
 
 
 def test_vector_row_plus_vector_column_shape_error():
-    result = run_aether("v = [1 2 3] + [1; 2; 3]; println(v);")
-    assert result.output == "[2 4 6]\n"
+    with pytest.raises(AetherTypeError, match="same orientation"):
+        run_aether("v = [1 2 3] + [1; 2; 3]; println(v);")
 
 
 def test_matrix_multiplication_uses_algebraic_product():

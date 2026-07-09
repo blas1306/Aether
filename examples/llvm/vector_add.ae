@@ -1,0 +1,6 @@
+int main() {
+    Vector<int, Row> a = [1, 2, 3];
+    Vector<int, Row> b = [4, 5, 6];
+    Vector<int, Row> c = a + b;
+    return c[0] + c[1] + c[2];
+}

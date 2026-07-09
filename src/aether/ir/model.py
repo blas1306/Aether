@@ -94,6 +94,24 @@ class IRMatrixNew(IRInstruction):
 
 
 @dataclass(frozen=True)
+class IRVectorAdd(IRInstruction):
+    result: IRValue
+    left: IRValue
+    right: IRValue
+    length: int
+    orientation: str | None = None
+
+
+@dataclass(frozen=True)
+class IRMatrixAdd(IRInstruction):
+    result: IRValue
+    left: IRValue
+    right: IRValue
+    rows: int
+    cols: int
+
+
+@dataclass(frozen=True)
 class IRArrayGet(IRInstruction):
     result: IRValue
     array: IRValue

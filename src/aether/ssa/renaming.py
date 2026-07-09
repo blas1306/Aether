@@ -22,6 +22,7 @@ from aether.ir.model import (
     IRJump,
     IRLoad,
     IRMatrixColumns,
+    IRMatrixAdd,
     IRMatrixGet,
     IRMatrixNew,
     IRMatrixRows,
@@ -30,6 +31,7 @@ from aether.ir.model import (
     IRStore,
     IRValue,
     IRVectorGet,
+    IRVectorAdd,
     IRVectorLength,
     IRVectorNew,
     IRVectorSet,
@@ -52,6 +54,7 @@ from .model import (
     SSAInstruction,
     SSAJump,
     SSAMatrixColumns,
+    SSAMatrixAdd,
     SSAMatrixGet,
     SSAMatrixNew,
     SSAMatrixRows,
@@ -61,6 +64,7 @@ from .model import (
     SSAReturn,
     SSAValue,
     SSAVectorGet,
+    SSAVectorAdd,
     SSAVectorLength,
     SSAVectorNew,
     SSAVectorSet,
@@ -256,6 +260,20 @@ class SSARenamer:
             )
             self._bind_value(result.name, result, bound_values)
             return SSAMatrixNew(result, elements, instruction.rows, instruction.cols)
+
+        if isinstance(instruction, IRVectorAdd):
+            result = self._define_value(instruction.result)
+            left = self._resolve_value(instruction.left)
+            right = self._resolve_value(instruction.right)
+            self._bind_value(result.name, result, bound_values)
+            return SSAVectorAdd(result, left, right, instruction.length, instruction.orientation)
+
+        if isinstance(instruction, IRMatrixAdd):
+            result = self._define_value(instruction.result)
+            left = self._resolve_value(instruction.left)
+            right = self._resolve_value(instruction.right)
+            self._bind_value(result.name, result, bound_values)
+            return SSAMatrixAdd(result, left, right, instruction.rows, instruction.cols)
 
         if isinstance(instruction, IRArrayGet):
             result = self._define_value(instruction.result)

@@ -20,6 +20,7 @@ from aether.ir.model import (
     IRJump,
     IRLoad,
     IRMatrixGet,
+    IRMatrixAdd,
     IRMatrixNew,
     IRMatrixSet,
     IRModule,
@@ -27,6 +28,7 @@ from aether.ir.model import (
     IRStore,
     IRValue,
     IRVectorGet,
+    IRVectorAdd,
     IRVectorNew,
     IRVectorSet,
 )
@@ -47,6 +49,7 @@ from .model import (
     SSAInstruction,
     SSAJump,
     SSAMatrixGet,
+    SSAMatrixAdd,
     SSAMatrixNew,
     SSAMatrixSet,
     SSAModule,
@@ -55,6 +58,7 @@ from .model import (
     SSAReturn,
     SSAValue,
     SSAVectorGet,
+    SSAVectorAdd,
     SSAVectorNew,
     SSAVectorSet,
 )
@@ -523,6 +527,18 @@ class SSABuilder:
                 for element in instruction.elements
             )
             return SSAMatrixNew(result, elements, instruction.rows, instruction.cols)
+
+        if isinstance(instruction, IRVectorAdd):
+            result = self._define_value(instruction.result, state.value_map)
+            left = self._resolve_value(instruction.left, state.value_map)
+            right = self._resolve_value(instruction.right, state.value_map)
+            return SSAVectorAdd(result, left, right, instruction.length, instruction.orientation)
+
+        if isinstance(instruction, IRMatrixAdd):
+            result = self._define_value(instruction.result, state.value_map)
+            left = self._resolve_value(instruction.left, state.value_map)
+            right = self._resolve_value(instruction.right, state.value_map)
+            return SSAMatrixAdd(result, left, right, instruction.rows, instruction.cols)
 
         if isinstance(instruction, IRArrayGet):
             result = self._define_value(instruction.result, state.value_map)

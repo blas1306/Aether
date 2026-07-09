@@ -3540,11 +3540,21 @@ def _vector_vector_elementwise_type(
     right_type: VectorType,
     label: str,
 ) -> VectorType:
+    if (
+        left_type.orientation is not None
+        and right_type.orientation is not None
+        and left_type.orientation != right_type.orientation
+    ):
+        raise AetherTypeError(
+            f"Operator '{label}' requires vectors with the same orientation, "
+            f"got {left_type.orientation} and {right_type.orientation}."
+        )
     if left_type.length is not None and right_type.length is not None and left_type.length != right_type.length:
         raise AetherTypeError(f"Operator '{label}' requires vectors with the same length, got {left_type.length} and {right_type.length}.")
     return VectorType(
         promote_numeric(_numeric_vector_scalar_type(left_type), _numeric_vector_scalar_type(right_type), operator),
         left_type.length or right_type.length,
+        left_type.orientation or right_type.orientation,
     )
 
 
