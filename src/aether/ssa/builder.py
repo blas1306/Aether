@@ -21,6 +21,7 @@ from aether.ir.model import (
     IRLoad,
     IRMatrixGet,
     IRMatrixAdd,
+    IRMatrixScale,
     IRMatrixSub,
     IRMatrixNew,
     IRMatrixSet,
@@ -30,6 +31,7 @@ from aether.ir.model import (
     IRValue,
     IRVectorGet,
     IRVectorAdd,
+    IRVectorScale,
     IRVectorSub,
     IRVectorNew,
     IRVectorSet,
@@ -52,6 +54,7 @@ from .model import (
     SSAJump,
     SSAMatrixGet,
     SSAMatrixAdd,
+    SSAMatrixScale,
     SSAMatrixSub,
     SSAMatrixNew,
     SSAMatrixSet,
@@ -62,6 +65,7 @@ from .model import (
     SSAValue,
     SSAVectorGet,
     SSAVectorAdd,
+    SSAVectorScale,
     SSAVectorSub,
     SSAVectorNew,
     SSAVectorSet,
@@ -544,6 +548,12 @@ class SSABuilder:
             right = self._resolve_value(instruction.right, state.value_map)
             return SSAVectorSub(result, left, right, instruction.length, instruction.orientation)
 
+        if isinstance(instruction, IRVectorScale):
+            result = self._define_value(instruction.result, state.value_map)
+            vector = self._resolve_value(instruction.vector, state.value_map)
+            scalar = self._resolve_value(instruction.scalar, state.value_map)
+            return SSAVectorScale(result, vector, scalar, instruction.length, instruction.orientation)
+
         if isinstance(instruction, IRMatrixAdd):
             result = self._define_value(instruction.result, state.value_map)
             left = self._resolve_value(instruction.left, state.value_map)
@@ -555,6 +565,12 @@ class SSABuilder:
             left = self._resolve_value(instruction.left, state.value_map)
             right = self._resolve_value(instruction.right, state.value_map)
             return SSAMatrixSub(result, left, right, instruction.rows, instruction.cols)
+
+        if isinstance(instruction, IRMatrixScale):
+            result = self._define_value(instruction.result, state.value_map)
+            matrix = self._resolve_value(instruction.matrix, state.value_map)
+            scalar = self._resolve_value(instruction.scalar, state.value_map)
+            return SSAMatrixScale(result, matrix, scalar, instruction.rows, instruction.cols)
 
         if isinstance(instruction, IRArrayGet):
             result = self._define_value(instruction.result, state.value_map)

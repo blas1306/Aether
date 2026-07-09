@@ -29,6 +29,7 @@ from .model import (
     IRLoad,
     IRMatrixGet,
     IRMatrixAdd,
+    IRMatrixScale,
     IRMatrixSub,
     IRMatrixColumns,
     IRMatrixNew,
@@ -41,6 +42,7 @@ from .model import (
     IRValue,
     IRVectorGet,
     IRVectorAdd,
+    IRVectorScale,
     IRVectorSub,
     IRVectorLength,
     IRVectorNew,
@@ -514,7 +516,7 @@ class IRLowerer:
                     IRCompareOp(result, compare_operator, left, right)
                 )
                 return result
-            if expression.operator in {"+", "-"}:
+            if expression.operator in {"+", "-", "*"}:
                 aggregate_binary = self._lower_aggregate_binary(
                     expression,
                     left,
@@ -780,8 +782,11 @@ class IRLowerer:
         context: _FunctionContext,
     ) -> IRValue | None:
         operator = expression.operator
-        if operator not in {"+", "-"}:
+        if operator not in {"+", "-", "*"}:
             return None
+
+        if operator == "*":
+            return self._lower_aggregate_scale(expression, left, right, context)
 
         if isinstance(left.type, VectorType) or isinstance(right.type, VectorType):
             if not isinstance(left.type, VectorType) or not isinstance(right.type, VectorType):
@@ -847,7 +852,88 @@ class IRLowerer:
 
     @staticmethod
     def _aggregate_operation_name(operator: str) -> str:
-        return "addition" if operator == "+" else "subtraction"
+        if operator == "+":
+            return "addition"
+        if operator == "-":
+            return "subtraction"
+        return "multiplication"
+
+    def _lower_aggregate_scale(
+        self,
+        expression: ast.BinaryExpression,
+        left: IRValue,
+        right: IRValue,
+        context: _FunctionContext,
+    ) -> IRValue | None:
+        if isinstance(left.type, VectorType) or isinstance(right.type, VectorType):
+            if isinstance(left.type, VectorType) and isinstance(right.type, VectorType):
+                return None
+            vector = left if isinstance(left.type, VectorType) else right
+            scalar = right if vector is left else left
+            if not isinstance(scalar.type, _NUMERIC_IR_TYPES):
+                return None
+            scalar = self._coerce_scalar_for_scale(
+                scalar,
+                vector.type.element,
+                "vector scalar multiplication requires matching scalar and element types",
+                context,
+            )
+            length = context.vector_lengths.get(vector.name)
+            if length is None:
+                self._fail(
+                    "IR backend requires known vector length for scalar * Vector.",
+                    expression,
+                )
+            result = context.temporary(vector.type)
+            context.vector_lengths[result.name] = length
+            context.block.instructions.append(
+                IRVectorScale(result, vector, scalar, length, vector.type.orientation)
+            )
+            return result
+
+        if isinstance(left.type, MatrixType) or isinstance(right.type, MatrixType):
+            if isinstance(left.type, MatrixType) and isinstance(right.type, MatrixType):
+                return None
+            matrix = left if isinstance(left.type, MatrixType) else right
+            scalar = right if matrix is left else left
+            if not isinstance(scalar.type, _NUMERIC_IR_TYPES):
+                return None
+            scalar = self._coerce_scalar_for_scale(
+                scalar,
+                matrix.type.element,
+                "matrix scalar multiplication requires matching scalar and element types",
+                context,
+            )
+            dimensions = context.matrix_dimensions.get(matrix.name)
+            if dimensions is None:
+                self._fail(
+                    "IR backend requires known matrix dimensions for scalar * Matrix.",
+                    expression,
+                )
+            result = context.temporary(matrix.type)
+            context.matrix_dimensions[result.name] = dimensions
+            context.block.instructions.append(
+                IRMatrixScale(result, matrix, scalar, dimensions[0], dimensions[1])
+            )
+            return result
+
+        return None
+
+    def _coerce_scalar_for_scale(
+        self,
+        scalar: IRValue,
+        element_type: IRType,
+        operation: str,
+        context: _FunctionContext,
+    ) -> IRValue:
+        if scalar.type == element_type:
+            return scalar
+        if isinstance(scalar.type, IntType) and isinstance(element_type, DoubleType):
+            result = context.temporary(element_type)
+            context.block.instructions.append(IRCast(result, scalar))
+            return result
+        self._require_same_type(scalar.type, element_type, operation)
+        return scalar
 
     def _lower_cast(self, call: ast.CallExpression, context: _FunctionContext) -> IRValue:
         if len(call.arguments) != 1:

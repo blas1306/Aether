@@ -20,6 +20,7 @@ from aether.ir.model import (
     IRLoad,
     IRMatrixColumns,
     IRMatrixAdd,
+    IRMatrixScale,
     IRMatrixSub,
     IRMatrixGet,
     IRMatrixNew,
@@ -31,6 +32,7 @@ from aether.ir.model import (
     IRValue,
     IRVectorGet,
     IRVectorAdd,
+    IRVectorScale,
     IRVectorSub,
     IRVectorLength,
     IRVectorNew,
@@ -269,6 +271,18 @@ class AlgebraicSimplifier:
                 instruction,
                 left=self._resolve(instruction.left, replacements),
                 right=self._resolve(instruction.right, replacements),
+            )
+        if isinstance(instruction, IRVectorScale):
+            return replace(
+                instruction,
+                vector=self._resolve(instruction.vector, replacements),
+                scalar=self._resolve(instruction.scalar, replacements),
+            )
+        if isinstance(instruction, IRMatrixScale):
+            return replace(
+                instruction,
+                matrix=self._resolve(instruction.matrix, replacements),
+                scalar=self._resolve(instruction.scalar, replacements),
             )
         if isinstance(instruction, IRArrayGet):
             return replace(

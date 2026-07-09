@@ -3439,9 +3439,17 @@ def _algebraic_multiplication_type(left_type: AetherType, right_type: AetherType
     if left_type in NUMERIC_TYPES and right_type in NUMERIC_TYPES:
         return None
     if left_type in NUMERIC_TYPES and isinstance(right_type, VectorType):
-        return VectorType(promote_numeric(left_type, _numeric_vector_scalar_type(right_type), "*"), right_type.length)
+        return VectorType(
+            promote_numeric(left_type, _numeric_vector_scalar_type(right_type), "*"),
+            right_type.length,
+            right_type.orientation,
+        )
     if right_type in NUMERIC_TYPES and isinstance(left_type, VectorType):
-        return VectorType(promote_numeric(_numeric_vector_scalar_type(left_type), right_type, "*"), left_type.length)
+        return VectorType(
+            promote_numeric(_numeric_vector_scalar_type(left_type), right_type, "*"),
+            left_type.length,
+            left_type.orientation,
+        )
     if left_type in NUMERIC_TYPES and isinstance(right_type, TransposeVectorType):
         return TransposeVectorType(promote_numeric(left_type, _numeric_transpose_vector_scalar_type(right_type), "*"), right_type.length)
     if right_type in NUMERIC_TYPES and isinstance(left_type, TransposeVectorType):

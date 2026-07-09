@@ -22,6 +22,7 @@ from aether.ssa.model import (
     SSAJump,
     SSAMatrixColumns,
     SSAMatrixAdd,
+    SSAMatrixScale,
     SSAMatrixSub,
     SSAMatrixGet,
     SSAMatrixNew,
@@ -34,6 +35,7 @@ from aether.ssa.model import (
     SSAValue,
     SSAVectorGet,
     SSAVectorAdd,
+    SSAVectorScale,
     SSAVectorSub,
     SSAVectorLength,
     SSAVectorNew,
@@ -177,10 +179,14 @@ class LLVMPrinter:
             return "\n  ".join(self._print_vector_add(instruction))
         if isinstance(instruction, SSAVectorSub):
             return "\n  ".join(self._print_vector_sub(instruction))
+        if isinstance(instruction, SSAVectorScale):
+            return "\n  ".join(self._print_vector_scale(instruction))
         if isinstance(instruction, SSAMatrixAdd):
             return "\n  ".join(self._print_matrix_add(instruction))
         if isinstance(instruction, SSAMatrixSub):
             return "\n  ".join(self._print_matrix_sub(instruction))
+        if isinstance(instruction, SSAMatrixScale):
+            return "\n  ".join(self._print_matrix_scale(instruction))
         if isinstance(instruction, SSAArrayGet):
             return "\n  ".join(self._print_array_get(instruction))
         if isinstance(instruction, SSAVectorGet):
@@ -230,7 +236,9 @@ class LLVMPrinter:
                 SSAVectorNew,
                 SSAMatrixNew,
                 SSAVectorAdd,
+                SSAVectorScale,
                 SSAMatrixAdd,
+                SSAMatrixScale,
                 SSAVectorSub,
                 SSAMatrixSub,
             ),
@@ -477,6 +485,29 @@ class LLVMPrinter:
         if instruction.orientation != instruction.result.type.orientation:
             raise LLVMBackendError(f"LLVM vector_{operation} instruction orientation must match result type")
 
+    def _print_vector_scale(self, instruction: SSAVectorScale) -> list[str]:
+        self._validate_vector_scale(instruction)
+        return self._print_contiguous_scale(
+            instruction.result,
+            instruction.vector,
+            instruction.scalar,
+            instruction.result.type.element,
+            instruction.length,
+            "vector.scale",
+        )
+
+    def _validate_vector_scale(self, instruction: SSAVectorScale) -> None:
+        if not isinstance(instruction.result.type, VectorType):
+            raise LLVMBackendError("LLVM vector_scale result must be VectorType")
+        if instruction.result.type != instruction.vector.type:
+            raise LLVMBackendError("LLVM vector_scale requires matching vector operand and result types")
+        if instruction.scalar.type != instruction.result.type.element:
+            raise LLVMBackendError("LLVM vector_scale scalar type must match vector element type")
+        if instruction.length <= 0:
+            raise LLVMBackendError("LLVM vector_scale requires a positive length")
+        if instruction.orientation != instruction.result.type.orientation:
+            raise LLVMBackendError("LLVM vector_scale instruction orientation must match result type")
+
     def _print_matrix_add(self, instruction: SSAMatrixAdd) -> list[str]:
         self._validate_matrix_binary(instruction, "add")
         return self._print_contiguous_binary(
@@ -510,6 +541,27 @@ class LLVMPrinter:
             raise LLVMBackendError(f"LLVM matrix_{operation} requires matching matrix operand and result types")
         if instruction.rows <= 0 or instruction.cols <= 0:
             raise LLVMBackendError(f"LLVM matrix_{operation} requires positive dimensions")
+
+    def _print_matrix_scale(self, instruction: SSAMatrixScale) -> list[str]:
+        self._validate_matrix_scale(instruction)
+        return self._print_contiguous_scale(
+            instruction.result,
+            instruction.matrix,
+            instruction.scalar,
+            instruction.result.type.element,
+            instruction.rows * instruction.cols,
+            "matrix.scale",
+        )
+
+    def _validate_matrix_scale(self, instruction: SSAMatrixScale) -> None:
+        if not isinstance(instruction.result.type, MatrixType):
+            raise LLVMBackendError("LLVM matrix_scale result must be MatrixType")
+        if instruction.result.type != instruction.matrix.type:
+            raise LLVMBackendError("LLVM matrix_scale requires matching matrix operand and result types")
+        if instruction.scalar.type != instruction.result.type.element:
+            raise LLVMBackendError("LLVM matrix_scale scalar type must match matrix element type")
+        if instruction.rows <= 0 or instruction.cols <= 0:
+            raise LLVMBackendError("LLVM matrix_scale requires positive dimensions")
 
     def _print_contiguous_new(
         self,
@@ -583,6 +635,51 @@ class LLVMPrinter:
             lines.append(f"{loaded_right} = load {element_type}, ptr {right_ptr}")
             lines.append(
                 f"{result_element} = {operator} {element_type} {loaded_left}, {loaded_right}"
+            )
+            lines.append(
+                f"{result_ptr} = getelementptr {element_type}, ptr {result_data}, i64 {index}"
+            )
+            lines.append(f"store {element_type} {result_element}, ptr {result_ptr}")
+
+        return lines
+
+    def _print_contiguous_scale(
+        self,
+        result_value: SSAValue,
+        aggregate_value: SSAValue,
+        scalar_value: SSAValue,
+        element_ir_type: object,
+        length: int,
+        operation_name: str,
+    ) -> list[str]:
+        self._uses_array_type = True
+        self._uses_array_allocation = True
+
+        result = self._new_temp(result_value)
+        element_type = llvm_type(element_ir_type)
+        element_size = self._sizeof(element_ir_type)
+        operator = self._element_binary_operator(element_ir_type, "mul")
+        scalar = self._operand(scalar_value)
+        lines = [
+            f"{result} = call ptr @aether_array_new(i64 {element_size}, i64 {length})"
+        ]
+
+        aggregate_data = self._synthetic_temp(f"{operation_name}.source.data")
+        result_data = self._synthetic_temp(f"{operation_name}.result.data")
+        lines.extend(self._array_data_pointer(aggregate_data, self._operand(aggregate_value)))
+        lines.extend(self._array_data_pointer(result_data, result))
+
+        for index in range(length):
+            aggregate_ptr = self._synthetic_temp(f"{operation_name}.source.elem")
+            result_ptr = self._synthetic_temp(f"{operation_name}.result.elem")
+            loaded_value = self._synthetic_temp(f"{operation_name}.source")
+            result_element = self._synthetic_temp(f"{operation_name}.value")
+            lines.append(
+                f"{aggregate_ptr} = getelementptr {element_type}, ptr {aggregate_data}, i64 {index}"
+            )
+            lines.append(f"{loaded_value} = load {element_type}, ptr {aggregate_ptr}")
+            lines.append(
+                f"{result_element} = {operator} {element_type} {loaded_value}, {scalar}"
             )
             lines.append(
                 f"{result_ptr} = getelementptr {element_type}, ptr {result_data}, i64 {index}"
@@ -839,11 +936,15 @@ class LLVMPrinter:
                 return "add"
             if operator == "sub":
                 return "sub"
+            if operator == "mul":
+                return "mul"
         if isinstance(type_, DoubleType):
             if operator == "add":
                 return "fadd"
             if operator == "sub":
                 return "fsub"
+            if operator == "mul":
+                return "fmul"
         raise LLVMBackendError(
             f"LLVM backend does not support vector/matrix {operator} for {type_}"
         )

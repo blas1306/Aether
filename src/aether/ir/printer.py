@@ -21,6 +21,7 @@ from .model import (
     IRLoad,
     IRMatrixColumns,
     IRMatrixAdd,
+    IRMatrixScale,
     IRMatrixSub,
     IRMatrixGet,
     IRMatrixNew,
@@ -32,6 +33,7 @@ from .model import (
     IRValue,
     IRVectorGet,
     IRVectorAdd,
+    IRVectorScale,
     IRVectorSub,
     IRVectorLength,
     IRVectorNew,
@@ -117,6 +119,13 @@ class IRPrinter:
                 f"{self._value(instruction.left)}, {self._value(instruction.right)} "
                 f"length {instruction.length}"
             )
+        if isinstance(instruction, IRVectorScale):
+            orientation = f" {instruction.orientation}" if instruction.orientation is not None else ""
+            return (
+                f"{self._typed_value(instruction.result)} = vector_scale{orientation} "
+                f"{self._value(instruction.vector)}, {self._value(instruction.scalar)} "
+                f"length {instruction.length}"
+            )
         if isinstance(instruction, IRMatrixAdd):
             return (
                 f"{self._typed_value(instruction.result)} = matrix_add "
@@ -127,6 +136,12 @@ class IRPrinter:
             return (
                 f"{self._typed_value(instruction.result)} = matrix_sub "
                 f"{self._value(instruction.left)}, {self._value(instruction.right)} "
+                f"{instruction.rows}x{instruction.cols}"
+            )
+        if isinstance(instruction, IRMatrixScale):
+            return (
+                f"{self._typed_value(instruction.result)} = matrix_scale "
+                f"{self._value(instruction.matrix)}, {self._value(instruction.scalar)} "
                 f"{instruction.rows}x{instruction.cols}"
             )
         if isinstance(instruction, IRArrayGet):

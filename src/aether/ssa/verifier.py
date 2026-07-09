@@ -39,6 +39,7 @@ from .model import (
     SSAJump,
     SSAMatrixColumns,
     SSAMatrixAdd,
+    SSAMatrixScale,
     SSAMatrixSub,
     SSAMatrixGet,
     SSAMatrixNew,
@@ -50,6 +51,7 @@ from .model import (
     SSAValue,
     SSAVectorGet,
     SSAVectorAdd,
+    SSAVectorScale,
     SSAVectorSub,
     SSAVectorLength,
     SSAVectorNew,
@@ -279,12 +281,20 @@ class SSAVerifier:
                 self._verify_vector_sub(instruction, value_types)
                 continue
 
+            if isinstance(instruction, SSAVectorScale):
+                self._verify_vector_scale(instruction, value_types)
+                continue
+
             if isinstance(instruction, SSAMatrixAdd):
                 self._verify_matrix_add(instruction, value_types)
                 continue
 
             if isinstance(instruction, SSAMatrixSub):
                 self._verify_matrix_sub(instruction, value_types)
+                continue
+
+            if isinstance(instruction, SSAMatrixScale):
+                self._verify_matrix_scale(instruction, value_types)
                 continue
 
             if isinstance(instruction, SSAArrayGet):
@@ -509,6 +519,30 @@ class SSAVerifier:
                 f"Vector {operation} operand type mismatch: expected {instruction.left.type}, got {instruction.right.type}"
             )
 
+    def _verify_vector_scale(
+        self,
+        instruction: SSAVectorScale,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.vector, value_types)
+        self._require_defined(instruction.scalar, value_types)
+        if not isinstance(instruction.result.type, VectorType):
+            self._fail(f"Vector scale result must be vector type, got {instruction.result.type}")
+        if not isinstance(instruction.vector.type, VectorType):
+            self._fail(f"Vector scale expects vector operand, got {instruction.vector.type}")
+        if instruction.length <= 0:
+            self._fail(f"Vector scale length must be positive, got {instruction.length}")
+        if instruction.orientation != instruction.result.type.orientation:
+            self._fail("Vector scale instruction orientation must match result type")
+        if instruction.result.type != instruction.vector.type:
+            self._fail(
+                f"Vector scale result type mismatch: expected {instruction.vector.type}, got {instruction.result.type}"
+            )
+        if instruction.scalar.type != instruction.vector.type.element:
+            self._fail(
+                f"Vector scale scalar type mismatch: expected {instruction.vector.type.element}, got {instruction.scalar.type}"
+            )
+
     def _verify_matrix_add(
         self,
         instruction: SSAMatrixAdd,
@@ -546,6 +580,28 @@ class SSAVerifier:
         if instruction.right.type != instruction.left.type:
             self._fail(
                 f"Matrix {operation} operand type mismatch: expected {instruction.left.type}, got {instruction.right.type}"
+            )
+
+    def _verify_matrix_scale(
+        self,
+        instruction: SSAMatrixScale,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.matrix, value_types)
+        self._require_defined(instruction.scalar, value_types)
+        if not isinstance(instruction.result.type, MatrixType):
+            self._fail(f"Matrix scale result must be matrix type, got {instruction.result.type}")
+        if not isinstance(instruction.matrix.type, MatrixType):
+            self._fail(f"Matrix scale expects matrix operand, got {instruction.matrix.type}")
+        if instruction.rows <= 0 or instruction.cols <= 0:
+            self._fail(f"Matrix scale dimensions must be positive, got {instruction.rows}x{instruction.cols}")
+        if instruction.result.type != instruction.matrix.type:
+            self._fail(
+                f"Matrix scale result type mismatch: expected {instruction.matrix.type}, got {instruction.result.type}"
+            )
+        if instruction.scalar.type != instruction.matrix.type.element:
+            self._fail(
+                f"Matrix scale scalar type mismatch: expected {instruction.matrix.type.element}, got {instruction.scalar.type}"
             )
 
     def _verify_array_get(
@@ -944,7 +1000,9 @@ class SSAVerifier:
                 SSAVectorNew,
                 SSAMatrixNew,
                 SSAVectorAdd,
+                SSAVectorScale,
                 SSAMatrixAdd,
+                SSAMatrixScale,
                 SSAVectorSub,
                 SSAMatrixSub,
             ),

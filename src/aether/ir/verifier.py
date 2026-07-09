@@ -21,6 +21,7 @@ from .model import (
     IRLoad,
     IRMatrixColumns,
     IRMatrixAdd,
+    IRMatrixScale,
     IRMatrixSub,
     IRMatrixGet,
     IRMatrixNew,
@@ -32,6 +33,7 @@ from .model import (
     IRValue,
     IRVectorGet,
     IRVectorAdd,
+    IRVectorScale,
     IRVectorSub,
     IRVectorLength,
     IRVectorNew,
@@ -373,12 +375,20 @@ class IRVerifier:
             self._verify_vector_sub(instruction, state, value_types)
             return self._define_value(state, instruction.result)
 
+        if isinstance(instruction, IRVectorScale):
+            self._verify_vector_scale(instruction, state, value_types)
+            return self._define_value(state, instruction.result)
+
         if isinstance(instruction, IRMatrixAdd):
             self._verify_matrix_add(instruction, state, value_types)
             return self._define_value(state, instruction.result)
 
         if isinstance(instruction, IRMatrixSub):
             self._verify_matrix_sub(instruction, state, value_types)
+            return self._define_value(state, instruction.result)
+
+        if isinstance(instruction, IRMatrixScale):
+            self._verify_matrix_scale(instruction, state, value_types)
             return self._define_value(state, instruction.result)
 
         if isinstance(instruction, IRArrayGet):
@@ -593,6 +603,31 @@ class IRVerifier:
                 f"Vector {operation} operand type mismatch: expected {instruction.left.type}, got {instruction.right.type}"
             )
 
+    def _verify_vector_scale(
+        self,
+        instruction: IRVectorScale,
+        state: _State,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.vector, state, value_types)
+        self._require_defined(instruction.scalar, state, value_types)
+        if not isinstance(instruction.result.type, VectorType):
+            self._fail(f"Vector scale result must be vector type, got {instruction.result.type}")
+        if not isinstance(instruction.vector.type, VectorType):
+            self._fail(f"Vector scale expects vector operand, got {instruction.vector.type}")
+        if instruction.length <= 0:
+            self._fail(f"Vector scale length must be positive, got {instruction.length}")
+        if instruction.orientation != instruction.result.type.orientation:
+            self._fail("Vector scale instruction orientation must match result type")
+        if instruction.result.type != instruction.vector.type:
+            self._fail(
+                f"Vector scale result type mismatch: expected {instruction.vector.type}, got {instruction.result.type}"
+            )
+        if instruction.scalar.type != instruction.vector.type.element:
+            self._fail(
+                f"Vector scale scalar type mismatch: expected {instruction.vector.type.element}, got {instruction.scalar.type}"
+            )
+
     def _verify_matrix_add(
         self,
         instruction: IRMatrixAdd,
@@ -633,6 +668,29 @@ class IRVerifier:
         if instruction.right.type != instruction.left.type:
             self._fail(
                 f"Matrix {operation} operand type mismatch: expected {instruction.left.type}, got {instruction.right.type}"
+            )
+
+    def _verify_matrix_scale(
+        self,
+        instruction: IRMatrixScale,
+        state: _State,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.matrix, state, value_types)
+        self._require_defined(instruction.scalar, state, value_types)
+        if not isinstance(instruction.result.type, MatrixType):
+            self._fail(f"Matrix scale result must be matrix type, got {instruction.result.type}")
+        if not isinstance(instruction.matrix.type, MatrixType):
+            self._fail(f"Matrix scale expects matrix operand, got {instruction.matrix.type}")
+        if instruction.rows <= 0 or instruction.cols <= 0:
+            self._fail(f"Matrix scale dimensions must be positive, got {instruction.rows}x{instruction.cols}")
+        if instruction.result.type != instruction.matrix.type:
+            self._fail(
+                f"Matrix scale result type mismatch: expected {instruction.matrix.type}, got {instruction.result.type}"
+            )
+        if instruction.scalar.type != instruction.matrix.type.element:
+            self._fail(
+                f"Matrix scale scalar type mismatch: expected {instruction.matrix.type.element}, got {instruction.scalar.type}"
             )
 
     def _verify_array_get(
@@ -1079,7 +1137,9 @@ class IRVerifier:
                 IRVectorNew,
                 IRMatrixNew,
                 IRVectorAdd,
+                IRVectorScale,
                 IRMatrixAdd,
+                IRMatrixScale,
                 IRVectorSub,
                 IRMatrixSub,
             ),

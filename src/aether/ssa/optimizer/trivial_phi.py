@@ -17,6 +17,7 @@ from aether.ssa.model import (
     SSAJump,
     SSAMatrixColumns,
     SSAMatrixAdd,
+    SSAMatrixScale,
     SSAMatrixSub,
     SSAMatrixGet,
     SSAMatrixNew,
@@ -27,6 +28,7 @@ from aether.ssa.model import (
     SSAValue,
     SSAVectorGet,
     SSAVectorAdd,
+    SSAVectorScale,
     SSAVectorSub,
     SSAVectorLength,
     SSAVectorNew,
@@ -282,6 +284,22 @@ class TrivialPhiEliminator:
                 int(left_rewritten) + int(right_rewritten),
             )
 
+        if isinstance(instruction, SSAVectorScale):
+            vector, vector_rewritten = self._rewrite_value(instruction.vector, replacements)
+            scalar, scalar_rewritten = self._rewrite_value(instruction.scalar, replacements)
+            if not vector_rewritten and not scalar_rewritten:
+                return instruction, 0
+            return (
+                SSAVectorScale(
+                    instruction.result,
+                    vector,
+                    scalar,
+                    instruction.length,
+                    instruction.orientation,
+                ),
+                int(vector_rewritten) + int(scalar_rewritten),
+            )
+
         if isinstance(instruction, SSAMatrixAdd):
             left, left_rewritten = self._rewrite_value(instruction.left, replacements)
             right, right_rewritten = self._rewrite_value(instruction.right, replacements)
@@ -312,6 +330,22 @@ class TrivialPhiEliminator:
                     instruction.cols,
                 ),
                 int(left_rewritten) + int(right_rewritten),
+            )
+
+        if isinstance(instruction, SSAMatrixScale):
+            matrix, matrix_rewritten = self._rewrite_value(instruction.matrix, replacements)
+            scalar, scalar_rewritten = self._rewrite_value(instruction.scalar, replacements)
+            if not matrix_rewritten and not scalar_rewritten:
+                return instruction, 0
+            return (
+                SSAMatrixScale(
+                    instruction.result,
+                    matrix,
+                    scalar,
+                    instruction.rows,
+                    instruction.cols,
+                ),
+                int(matrix_rewritten) + int(scalar_rewritten),
             )
 
         if isinstance(instruction, SSAArrayGet):

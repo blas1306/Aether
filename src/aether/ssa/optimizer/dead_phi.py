@@ -17,6 +17,7 @@ from aether.ssa.model import (
     SSAJump,
     SSAMatrixColumns,
     SSAMatrixAdd,
+    SSAMatrixScale,
     SSAMatrixSub,
     SSAMatrixGet,
     SSAMatrixNew,
@@ -28,6 +29,7 @@ from aether.ssa.model import (
     SSAValue,
     SSAVectorGet,
     SSAVectorAdd,
+    SSAVectorScale,
     SSAVectorSub,
     SSAVectorLength,
     SSAVectorNew,
@@ -145,6 +147,16 @@ class DeadPhiEliminator:
         if isinstance(instruction, (SSAVectorAdd, SSAMatrixAdd, SSAVectorSub, SSAMatrixSub)):
             used_values.add(instruction.left)
             used_values.add(instruction.right)
+            return
+
+        if isinstance(instruction, SSAVectorScale):
+            used_values.add(instruction.vector)
+            used_values.add(instruction.scalar)
+            return
+
+        if isinstance(instruction, SSAMatrixScale):
+            used_values.add(instruction.matrix)
+            used_values.add(instruction.scalar)
             return
 
         if isinstance(instruction, SSAArrayGet):

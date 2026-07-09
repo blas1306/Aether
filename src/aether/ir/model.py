@@ -112,6 +112,15 @@ class IRVectorSub(IRInstruction):
 
 
 @dataclass(frozen=True)
+class IRVectorScale(IRInstruction):
+    result: IRValue
+    vector: IRValue
+    scalar: IRValue
+    length: int
+    orientation: str | None = None
+
+
+@dataclass(frozen=True)
 class IRMatrixAdd(IRInstruction):
     result: IRValue
     left: IRValue
@@ -125,6 +134,15 @@ class IRMatrixSub(IRInstruction):
     result: IRValue
     left: IRValue
     right: IRValue
+    rows: int
+    cols: int
+
+
+@dataclass(frozen=True)
+class IRMatrixScale(IRInstruction):
+    result: IRValue
+    matrix: IRValue
+    scalar: IRValue
     rows: int
     cols: int
 

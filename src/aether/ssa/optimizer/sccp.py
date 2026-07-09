@@ -23,6 +23,7 @@ from aether.ssa.model import (
     SSAJump,
     SSAMatrixColumns,
     SSAMatrixAdd,
+    SSAMatrixScale,
     SSAMatrixSub,
     SSAMatrixGet,
     SSAMatrixNew,
@@ -34,6 +35,7 @@ from aether.ssa.model import (
     SSAValue,
     SSAVectorGet,
     SSAVectorAdd,
+    SSAVectorScale,
     SSAVectorSub,
     SSAVectorLength,
     SSAVectorNew,
@@ -214,7 +216,9 @@ class SCCPAnalyzer:
                 SSAVectorNew,
                 SSAMatrixNew,
                 SSAVectorAdd,
+                SSAVectorScale,
                 SSAMatrixAdd,
+                SSAMatrixScale,
                 SSAVectorSub,
                 SSAMatrixSub,
             ),
@@ -368,7 +372,9 @@ class SCCPAnalyzer:
                 SSAVectorNew,
                 SSAMatrixNew,
                 SSAVectorAdd,
+                SSAVectorScale,
                 SSAMatrixAdd,
+                SSAMatrixScale,
                 SSAVectorSub,
                 SSAMatrixSub,
             ),
@@ -398,6 +404,10 @@ class SCCPAnalyzer:
             return instruction.elements
         if isinstance(instruction, (SSAVectorAdd, SSAMatrixAdd, SSAVectorSub, SSAMatrixSub)):
             return (instruction.left, instruction.right)
+        if isinstance(instruction, SSAVectorScale):
+            return (instruction.vector, instruction.scalar)
+        if isinstance(instruction, SSAMatrixScale):
+            return (instruction.matrix, instruction.scalar)
         if isinstance(instruction, SSAArrayGet):
             return (instruction.array, instruction.index)
         if isinstance(instruction, SSAVectorGet):

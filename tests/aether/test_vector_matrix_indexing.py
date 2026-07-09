@@ -15,6 +15,7 @@ from aether.ir import (
     IRLowerer,
     IRMatrixColumns,
     IRMatrixAdd,
+    IRMatrixScale,
     IRMatrixSub,
     IRMatrixGet,
     IRMatrixNew,
@@ -25,6 +26,7 @@ from aether.ir import (
     IRValue,
     IRVectorGet,
     IRVectorAdd,
+    IRVectorScale,
     IRVectorSub,
     IRVectorLength,
     IRVectorNew,
@@ -46,6 +48,7 @@ from aether.ssa import (
     SSAFunction,
     SSAMatrixColumns,
     SSAMatrixAdd,
+    SSAMatrixScale,
     SSAMatrixSub,
     SSAMatrixGet,
     SSAMatrixNew,
@@ -56,6 +59,7 @@ from aether.ssa import (
     SSAValue,
     SSAVectorGet,
     SSAVectorAdd,
+    SSAVectorScale,
     SSAVectorSub,
     SSAVectorLength,
     SSAVectorNew,
@@ -620,6 +624,43 @@ int main() {
     assert IRInterpreter(module).call("main") == 20
 
 
+def test_lowering_and_ir_interpreter_execute_scalar_multiplication() -> None:
+    typed_program = _typed(
+        """
+int main() {
+    Vector<int, Row> v = [1, 2, 3];
+    Vector<int, Row> left = 2 * v;
+    Vector<int, Row> right = v * 3;
+    Matrix<int> A = [1, 2; 3, 4];
+    Matrix<int> matrix_left = 4 * A;
+    Matrix<int> matrix_right = A * 5;
+    return left[2] + right[1] + matrix_left[1, 0] + matrix_right[0, 1];
+}
+"""
+    )
+    module = IRVerifier(IRLowerer().lower(typed_program.program)).verify()
+    instructions = module.functions[0].blocks[0].instructions
+    vector_scales = [
+        instruction
+        for instruction in instructions
+        if isinstance(instruction, IRVectorScale)
+    ]
+    matrix_scales = [
+        instruction
+        for instruction in instructions
+        if isinstance(instruction, IRMatrixScale)
+    ]
+
+    assert len(vector_scales) == 2
+    assert len(matrix_scales) == 2
+    assert all(instruction.length == 3 for instruction in vector_scales)
+    assert all(instruction.orientation == "row" for instruction in vector_scales)
+    assert [(instruction.rows, instruction.cols) for instruction in matrix_scales] == [(2, 2), (2, 2)]
+    assert "vector_scale row" in print_ir(module)
+    assert "matrix_scale" in print_ir(module)
+    assert IRInterpreter(module).call("main") == 34
+
+
 def test_ssa_preserves_vector_and_matrix_index_reads() -> None:
     typed_program = _typed(
         """
@@ -732,6 +773,30 @@ int main() {
     assert "matrix_sub" in print_ssa(ssa)
 
 
+def test_ssa_preserves_vector_and_matrix_scalar_multiplication() -> None:
+    typed_program = _typed(
+        """
+int main() {
+    Vector<int, Row> v = [1, 2, 3];
+    Vector<int, Row> left = 2 * v;
+    Vector<int, Row> right = v * 3;
+    Matrix<int> A = [1, 2; 3, 4];
+    Matrix<int> matrix_left = 4 * A;
+    Matrix<int> matrix_right = A * 5;
+    return left[2] + right[1] + matrix_left[1, 0] + matrix_right[0, 1];
+}
+"""
+    )
+
+    ssa = lower_to_verified_ssa(typed_program)
+    instructions = ssa.functions[0].blocks[0].instructions
+
+    assert sum(isinstance(instruction, SSAVectorScale) for instruction in instructions) == 2
+    assert sum(isinstance(instruction, SSAMatrixScale) for instruction in instructions) == 2
+    assert "vector_scale row" in print_ssa(ssa)
+    assert "matrix_scale" in print_ssa(ssa)
+
+
 def test_emit_llvm_includes_vector_and_matrix_addition_storage() -> None:
     typed_program = _typed(
         """
@@ -777,6 +842,31 @@ int main() {
     assert " = sub i32 " in llvm
     assert " = fsub double " in llvm
     assert "sub.left.data" in llvm
+
+
+def test_emit_llvm_includes_vector_and_matrix_scalar_multiplication_storage() -> None:
+    typed_program = _typed(
+        """
+int main() {
+    Vector<int, Row> v = [1, 2, 3];
+    Vector<int, Row> left = 2 * v;
+    Vector<int, Row> right = v * 3;
+    Matrix<double> A = [1.0, 2.0; 3.0, 4.0];
+    Matrix<double> matrix_left = 4 * A;
+    Matrix<double> matrix_right = A * 5;
+    return left[2] + right[1] + int(matrix_left[1, 0]) + int(matrix_right[0, 1]);
+}
+"""
+    )
+
+    llvm = LLVMBuilder().emit_llvm(typed_program)
+
+    assert "@aether_array_new(i64 4, i64 3)" in llvm
+    assert "@aether_array_new(i64 8, i64 4)" in llvm
+    assert " = mul i32 " in llvm
+    assert " = fmul double " in llvm
+    assert "vector.scale.source.data" in llvm
+    assert "matrix.scale.source.data" in llvm
 
 
 @pytest.mark.skipif(shutil.which("clang") is None, reason="clang is not available")
@@ -826,6 +916,28 @@ int main() {
 }
 """,
             20,
+        ),
+        (
+            """
+int main() {
+    Vector<int, Row> v = [1, 2, 3];
+    Vector<int, Row> left = 2 * v;
+    Vector<int, Row> right = v * 3;
+    return left[0] + left[1] + left[2] + right[0] + right[1] + right[2];
+}
+""",
+            30,
+        ),
+        (
+            """
+int main() {
+    Matrix<int> A = [1, 2; 3, 4];
+    Matrix<int> left = 2 * A;
+    Matrix<int> right = A * 3;
+    return left[0, 0] + left[0, 1] + left[1, 0] + left[1, 1] + right[0, 0] + right[0, 1] + right[1, 0] + right[1, 1];
+}
+""",
+            50,
         ),
     ],
 )

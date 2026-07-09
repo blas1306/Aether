@@ -22,6 +22,7 @@ from .model import (
     IRLoad,
     IRMatrixColumns,
     IRMatrixAdd,
+    IRMatrixScale,
     IRMatrixSub,
     IRMatrixGet,
     IRMatrixNew,
@@ -33,6 +34,7 @@ from .model import (
     IRValue,
     IRVectorGet,
     IRVectorAdd,
+    IRVectorScale,
     IRVectorSub,
     IRVectorLength,
     IRVectorNew,
@@ -183,12 +185,20 @@ class IRInterpreter:
             self._execute_vector_binary(instruction, frame, "sub")
             return False, None, None
 
+        if isinstance(instruction, IRVectorScale):
+            self._execute_vector_scale(instruction, frame)
+            return False, None, None
+
         if isinstance(instruction, IRMatrixAdd):
             self._execute_matrix_binary(instruction, frame, "add")
             return False, None, None
 
         if isinstance(instruction, IRMatrixSub):
             self._execute_matrix_binary(instruction, frame, "sub")
+            return False, None, None
+
+        if isinstance(instruction, IRMatrixScale):
+            self._execute_matrix_scale(instruction, frame)
             return False, None, None
 
         if isinstance(instruction, IRArrayGet):
@@ -293,6 +303,22 @@ class IRInterpreter:
             for left_value, right_value in zip(left, right)
         ]
 
+    def _execute_vector_scale(
+        self,
+        instruction: IRVectorScale,
+        frame: _Frame,
+    ) -> None:
+        vector = self._value(instruction.vector, frame)
+        scalar = self._value(instruction.scalar, frame)
+        if not isinstance(vector, list):
+            raise IRExecutionError("IR vector scale requires a vector value")
+        if len(vector) != instruction.length:
+            raise IRExecutionError("IR vector scale operand must match instruction length")
+        frame.values[instruction.result] = [
+            self._binary("mul", value, scalar)
+            for value in vector
+        ]
+
     def _execute_matrix_binary(
         self,
         instruction: IRMatrixAdd | IRMatrixSub,
@@ -309,6 +335,23 @@ class IRInterpreter:
         frame.values[instruction.result] = [
             self._binary(operator, left_value, right_value)
             for left_value, right_value in zip(left, right)
+        ]
+
+    def _execute_matrix_scale(
+        self,
+        instruction: IRMatrixScale,
+        frame: _Frame,
+    ) -> None:
+        matrix = self._value(instruction.matrix, frame)
+        scalar = self._value(instruction.scalar, frame)
+        if not isinstance(matrix, list):
+            raise IRExecutionError("IR matrix scale requires a matrix value")
+        element_count = instruction.rows * instruction.cols
+        if len(matrix) != element_count:
+            raise IRExecutionError("IR matrix scale operand must match instruction dimensions")
+        frame.values[instruction.result] = [
+            self._binary("mul", value, scalar)
+            for value in matrix
         ]
 
     @staticmethod

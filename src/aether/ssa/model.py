@@ -100,6 +100,15 @@ class SSAVectorSub(SSAInstruction):
 
 
 @dataclass(frozen=True)
+class SSAVectorScale(SSAInstruction):
+    result: SSAValue
+    vector: SSAValue
+    scalar: SSAValue
+    length: int
+    orientation: str | None = None
+
+
+@dataclass(frozen=True)
 class SSAMatrixAdd(SSAInstruction):
     result: SSAValue
     left: SSAValue
@@ -113,6 +122,15 @@ class SSAMatrixSub(SSAInstruction):
     result: SSAValue
     left: SSAValue
     right: SSAValue
+    rows: int
+    cols: int
+
+
+@dataclass(frozen=True)
+class SSAMatrixScale(SSAInstruction):
+    result: SSAValue
+    matrix: SSAValue
+    scalar: SSAValue
     rows: int
     cols: int
 

@@ -2582,7 +2582,7 @@ def _scale_vector(vector: AetherValue, scalar: AetherValue) -> AetherValue:
         raise AetherTypeError("Vector operations require numeric elements.")
     result_element_type = promote_numeric(vector.type_name.element_type, scalar.type_name, "*")
     return AetherValue(
-        VectorType(result_element_type, len(vector.value)),
+        VectorType(result_element_type, len(vector.value), vector.type_name.orientation),
         [
             _apply_array_element_operator(element, "*", scalar, result_element_type)
             for element in vector.value
