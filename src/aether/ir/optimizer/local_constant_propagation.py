@@ -18,6 +18,7 @@ from aether.ir.model import (
     IRLoad,
     IRMatrixColumns,
     IRMatrixAdd,
+    IRMatrixSub,
     IRMatrixGet,
     IRMatrixNew,
     IRMatrixRows,
@@ -26,6 +27,7 @@ from aether.ir.model import (
     IRValue,
     IRVectorGet,
     IRVectorAdd,
+    IRVectorSub,
     IRVectorLength,
     IRVectorNew,
 )
@@ -146,6 +148,8 @@ def _instruction_result(instruction: IRInstruction) -> IRValue | None:
             IRMatrixNew,
             IRVectorAdd,
             IRMatrixAdd,
+            IRVectorSub,
+            IRMatrixSub,
         ),
     ):
         return instruction.result

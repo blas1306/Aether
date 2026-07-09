@@ -15,6 +15,7 @@ from aether.ir import (
     IRLowerer,
     IRMatrixColumns,
     IRMatrixAdd,
+    IRMatrixSub,
     IRMatrixGet,
     IRMatrixNew,
     IRMatrixRows,
@@ -24,6 +25,7 @@ from aether.ir import (
     IRValue,
     IRVectorGet,
     IRVectorAdd,
+    IRVectorSub,
     IRVectorLength,
     IRVectorNew,
     IRVectorSet,
@@ -44,6 +46,7 @@ from aether.ssa import (
     SSAFunction,
     SSAMatrixColumns,
     SSAMatrixAdd,
+    SSAMatrixSub,
     SSAMatrixGet,
     SSAMatrixNew,
     SSAMatrixRows,
@@ -53,6 +56,7 @@ from aether.ssa import (
     SSAValue,
     SSAVectorGet,
     SSAVectorAdd,
+    SSAVectorSub,
     SSAVectorLength,
     SSAVectorNew,
     SSAVectorSet,
@@ -96,6 +100,15 @@ def test_parser_builds_add_binary_expression_for_aggregates() -> None:
 
     assert isinstance(expression, ast.BinaryExpression)
     assert expression.operator == "+"
+    assert isinstance(expression.left, ast.Identifier)
+    assert isinstance(expression.right, ast.Identifier)
+
+
+def test_parser_builds_sub_binary_expression_for_aggregates() -> None:
+    expression = _parse_expression("left - right")
+
+    assert isinstance(expression, ast.BinaryExpression)
+    assert expression.operator == "-"
     assert isinstance(expression.left, ast.Identifier)
     assert isinstance(expression.right, ast.Identifier)
 
@@ -190,6 +203,25 @@ int main() {
     )
 
 
+def test_typechecker_accepts_vector_and_matrix_subtraction() -> None:
+    _typed(
+        """
+int main() {
+    Vector<int, Row> a = [7, 8, 9];
+    Vector<int, Row> b = [1, 2, 3];
+    Vector<int, Row> c = a - b;
+    Vector<int, Column> x = [7; 8; 9];
+    Vector<int, Column> y = [1; 2; 3];
+    Vector<int, Column> z = x - y;
+    Matrix<int> A = [9, 8; 7, 6];
+    Matrix<int> B = [1, 2; 3, 4];
+    Matrix<int> C = A - B;
+    return c[0] + z[1] + C[1, 0];
+}
+"""
+    )
+
+
 def test_lowering_preserves_column_vector_addition_orientation() -> None:
     typed_program = _typed(
         """
@@ -211,6 +243,27 @@ int main() {
     assert vector_add.orientation == "column"
 
 
+def test_lowering_preserves_column_vector_subtraction_orientation() -> None:
+    typed_program = _typed(
+        """
+int main() {
+    Vector<int, Column> a = [7; 8; 9];
+    Vector<int, Column> b = [1; 2; 3];
+    Vector<int, Column> c = a - b;
+    return c[2];
+}
+"""
+    )
+    module = IRVerifier(IRLowerer().lower(typed_program.program)).verify()
+
+    vector_sub = next(
+        instruction
+        for instruction in module.functions[0].blocks[0].instructions
+        if isinstance(instruction, IRVectorSub)
+    )
+    assert vector_sub.orientation == "column"
+
+
 def test_typechecker_rejects_vector_addition_orientation_mismatch() -> None:
     with pytest.raises(AetherTypeError, match="same orientation"):
         _typed(
@@ -219,6 +272,20 @@ int main() {
     Vector<int, Row> a = [1, 2, 3];
     Vector<int, Column> b = [4; 5; 6];
     Vector<int> c = a + b;
+    return c[0];
+}
+"""
+        )
+
+
+def test_typechecker_rejects_vector_subtraction_orientation_mismatch() -> None:
+    with pytest.raises(AetherTypeError, match="same orientation"):
+        _typed(
+            """
+int main() {
+    Vector<int, Row> a = [1, 2, 3];
+    Vector<int, Column> b = [4; 5; 6];
+    Vector<int> c = a - b;
     return c[0];
 }
 """
@@ -481,6 +548,30 @@ int main() {
     assert IRInterpreter(module).call("main") == 21
 
 
+def test_lowering_and_ir_interpreter_execute_vector_subtraction() -> None:
+    typed_program = _typed(
+        """
+int main() {
+    Vector<int, Row> a = [7, 8, 9];
+    Vector<int, Row> b = [1, 2, 3];
+    Vector<int, Row> c = a - b;
+    return c[0] + c[1] + c[2];
+}
+"""
+    )
+    module = IRVerifier(IRLowerer().lower(typed_program.program)).verify()
+
+    vector_sub = next(
+        instruction
+        for instruction in module.functions[0].blocks[0].instructions
+        if isinstance(instruction, IRVectorSub)
+    )
+    assert vector_sub.length == 3
+    assert vector_sub.orientation == "row"
+    assert "vector_sub row" in print_ir(module)
+    assert IRInterpreter(module).call("main") == 18
+
+
 def test_lowering_and_ir_interpreter_execute_matrix_addition() -> None:
     typed_program = _typed(
         """
@@ -503,6 +594,30 @@ int main() {
     assert matrix_add.cols == 2
     assert "matrix_add" in print_ir(module)
     assert IRInterpreter(module).call("main") == 36
+
+
+def test_lowering_and_ir_interpreter_execute_matrix_subtraction() -> None:
+    typed_program = _typed(
+        """
+int main() {
+    Matrix<int> A = [9, 8; 7, 6];
+    Matrix<int> B = [1, 2; 3, 4];
+    Matrix<int> C = A - B;
+    return C[0, 0] + C[0, 1] + C[1, 0] + C[1, 1];
+}
+"""
+    )
+    module = IRVerifier(IRLowerer().lower(typed_program.program)).verify()
+
+    matrix_sub = next(
+        instruction
+        for instruction in module.functions[0].blocks[0].instructions
+        if isinstance(instruction, IRMatrixSub)
+    )
+    assert matrix_sub.rows == 2
+    assert matrix_sub.cols == 2
+    assert "matrix_sub" in print_ir(module)
+    assert IRInterpreter(module).call("main") == 20
 
 
 def test_ssa_preserves_vector_and_matrix_index_reads() -> None:
@@ -593,6 +708,30 @@ int main() {
     assert "matrix_add" in print_ssa(ssa)
 
 
+def test_ssa_preserves_vector_and_matrix_subtraction() -> None:
+    typed_program = _typed(
+        """
+int main() {
+    Vector<int, Row> a = [7, 8, 9];
+    Vector<int, Row> b = [1, 2, 3];
+    Vector<int, Row> c = a - b;
+    Matrix<int> A = [9, 8; 7, 6];
+    Matrix<int> B = [1, 2; 3, 4];
+    Matrix<int> C = A - B;
+    return c[1] + C[1, 0];
+}
+"""
+    )
+
+    ssa = lower_to_verified_ssa(typed_program)
+    instructions = ssa.functions[0].blocks[0].instructions
+
+    assert any(isinstance(instruction, SSAVectorSub) for instruction in instructions)
+    assert any(isinstance(instruction, SSAMatrixSub) for instruction in instructions)
+    assert "vector_sub row" in print_ssa(ssa)
+    assert "matrix_sub" in print_ssa(ssa)
+
+
 def test_emit_llvm_includes_vector_and_matrix_addition_storage() -> None:
     typed_program = _typed(
         """
@@ -614,6 +753,30 @@ int main() {
     assert "@aether_array_new(i64 4, i64 4)" in llvm
     assert " = add i32 " in llvm
     assert "add.left.data" in llvm
+
+
+def test_emit_llvm_includes_vector_and_matrix_subtraction_storage() -> None:
+    typed_program = _typed(
+        """
+int main() {
+    Vector<int, Row> a = [7, 8, 9];
+    Vector<int, Row> b = [1, 2, 3];
+    Vector<int, Row> c = a - b;
+    Matrix<double> A = [9.0, 8.0; 7.0, 6.0];
+    Matrix<double> B = [1.0, 2.0; 3.0, 4.0];
+    Matrix<double> C = A - B;
+    return c[2] + int(C[1, 1]);
+}
+"""
+    )
+
+    llvm = LLVMBuilder().emit_llvm(typed_program)
+
+    assert "@aether_array_new(i64 4, i64 3)" in llvm
+    assert "@aether_array_new(i64 8, i64 4)" in llvm
+    assert " = sub i32 " in llvm
+    assert " = fsub double " in llvm
+    assert "sub.left.data" in llvm
 
 
 @pytest.mark.skipif(shutil.which("clang") is None, reason="clang is not available")
@@ -642,9 +805,31 @@ int main() {
 """,
             36,
         ),
+        (
+            """
+int main() {
+    Vector<int, Row> a = [7, 8, 9];
+    Vector<int, Row> b = [1, 2, 3];
+    Vector<int, Row> c = a - b;
+    return c[0] + c[1] + c[2];
+}
+""",
+            18,
+        ),
+        (
+            """
+int main() {
+    Matrix<int> A = [9, 8; 7, 6];
+    Matrix<int> B = [1, 2; 3, 4];
+    Matrix<int> C = A - B;
+    return C[0, 0] + C[0, 1] + C[1, 0] + C[1, 1];
+}
+""",
+            20,
+        ),
     ],
 )
-def test_llvm_runner_builds_and_executes_vector_and_matrix_addition(source: str, expected: int) -> None:
+def test_llvm_runner_builds_and_executes_vector_and_matrix_addition_and_subtraction(source: str, expected: int) -> None:
     assert LLVMRunner().run(_typed(source)) == expected
 
 

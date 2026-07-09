@@ -20,6 +20,7 @@ from .model import (
     SSAJump,
     SSAMatrixColumns,
     SSAMatrixAdd,
+    SSAMatrixSub,
     SSAMatrixGet,
     SSAMatrixNew,
     SSAMatrixRows,
@@ -31,6 +32,7 @@ from .model import (
     SSAValue,
     SSAVectorGet,
     SSAVectorAdd,
+    SSAVectorSub,
     SSAVectorLength,
     SSAVectorNew,
     SSAVectorSet,
@@ -104,9 +106,22 @@ class SSAPrinter:
                 f"{self._value(instruction.left)}, {self._value(instruction.right)} "
                 f"length {instruction.length}"
             )
+        if isinstance(instruction, SSAVectorSub):
+            orientation = f" {instruction.orientation}" if instruction.orientation is not None else ""
+            return (
+                f"{self._typed_value(instruction.result)} = vector_sub{orientation} "
+                f"{self._value(instruction.left)}, {self._value(instruction.right)} "
+                f"length {instruction.length}"
+            )
         if isinstance(instruction, SSAMatrixAdd):
             return (
                 f"{self._typed_value(instruction.result)} = matrix_add "
+                f"{self._value(instruction.left)}, {self._value(instruction.right)} "
+                f"{instruction.rows}x{instruction.cols}"
+            )
+        if isinstance(instruction, SSAMatrixSub):
+            return (
+                f"{self._typed_value(instruction.result)} = matrix_sub "
                 f"{self._value(instruction.left)}, {self._value(instruction.right)} "
                 f"{instruction.rows}x{instruction.cols}"
             )

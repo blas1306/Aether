@@ -21,6 +21,7 @@ from aether.ir.model import (
     IRLoad,
     IRMatrixGet,
     IRMatrixAdd,
+    IRMatrixSub,
     IRMatrixNew,
     IRMatrixSet,
     IRModule,
@@ -29,6 +30,7 @@ from aether.ir.model import (
     IRValue,
     IRVectorGet,
     IRVectorAdd,
+    IRVectorSub,
     IRVectorNew,
     IRVectorSet,
 )
@@ -50,6 +52,7 @@ from .model import (
     SSAJump,
     SSAMatrixGet,
     SSAMatrixAdd,
+    SSAMatrixSub,
     SSAMatrixNew,
     SSAMatrixSet,
     SSAModule,
@@ -59,6 +62,7 @@ from .model import (
     SSAValue,
     SSAVectorGet,
     SSAVectorAdd,
+    SSAVectorSub,
     SSAVectorNew,
     SSAVectorSet,
 )
@@ -534,11 +538,23 @@ class SSABuilder:
             right = self._resolve_value(instruction.right, state.value_map)
             return SSAVectorAdd(result, left, right, instruction.length, instruction.orientation)
 
+        if isinstance(instruction, IRVectorSub):
+            result = self._define_value(instruction.result, state.value_map)
+            left = self._resolve_value(instruction.left, state.value_map)
+            right = self._resolve_value(instruction.right, state.value_map)
+            return SSAVectorSub(result, left, right, instruction.length, instruction.orientation)
+
         if isinstance(instruction, IRMatrixAdd):
             result = self._define_value(instruction.result, state.value_map)
             left = self._resolve_value(instruction.left, state.value_map)
             right = self._resolve_value(instruction.right, state.value_map)
             return SSAMatrixAdd(result, left, right, instruction.rows, instruction.cols)
+
+        if isinstance(instruction, IRMatrixSub):
+            result = self._define_value(instruction.result, state.value_map)
+            left = self._resolve_value(instruction.left, state.value_map)
+            right = self._resolve_value(instruction.right, state.value_map)
+            return SSAMatrixSub(result, left, right, instruction.rows, instruction.cols)
 
         if isinstance(instruction, IRArrayGet):
             result = self._define_value(instruction.result, state.value_map)

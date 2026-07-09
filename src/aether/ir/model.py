@@ -103,7 +103,25 @@ class IRVectorAdd(IRInstruction):
 
 
 @dataclass(frozen=True)
+class IRVectorSub(IRInstruction):
+    result: IRValue
+    left: IRValue
+    right: IRValue
+    length: int
+    orientation: str | None = None
+
+
+@dataclass(frozen=True)
 class IRMatrixAdd(IRInstruction):
+    result: IRValue
+    left: IRValue
+    right: IRValue
+    rows: int
+    cols: int
+
+
+@dataclass(frozen=True)
+class IRMatrixSub(IRInstruction):
     result: IRValue
     left: IRValue
     right: IRValue

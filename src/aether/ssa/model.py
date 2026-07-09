@@ -91,7 +91,25 @@ class SSAVectorAdd(SSAInstruction):
 
 
 @dataclass(frozen=True)
+class SSAVectorSub(SSAInstruction):
+    result: SSAValue
+    left: SSAValue
+    right: SSAValue
+    length: int
+    orientation: str | None = None
+
+
+@dataclass(frozen=True)
 class SSAMatrixAdd(SSAInstruction):
+    result: SSAValue
+    left: SSAValue
+    right: SSAValue
+    rows: int
+    cols: int
+
+
+@dataclass(frozen=True)
+class SSAMatrixSub(SSAInstruction):
     result: SSAValue
     left: SSAValue
     right: SSAValue

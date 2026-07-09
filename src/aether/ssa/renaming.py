@@ -23,6 +23,7 @@ from aether.ir.model import (
     IRLoad,
     IRMatrixColumns,
     IRMatrixAdd,
+    IRMatrixSub,
     IRMatrixGet,
     IRMatrixNew,
     IRMatrixRows,
@@ -32,6 +33,7 @@ from aether.ir.model import (
     IRValue,
     IRVectorGet,
     IRVectorAdd,
+    IRVectorSub,
     IRVectorLength,
     IRVectorNew,
     IRVectorSet,
@@ -55,6 +57,7 @@ from .model import (
     SSAJump,
     SSAMatrixColumns,
     SSAMatrixAdd,
+    SSAMatrixSub,
     SSAMatrixGet,
     SSAMatrixNew,
     SSAMatrixRows,
@@ -65,6 +68,7 @@ from .model import (
     SSAValue,
     SSAVectorGet,
     SSAVectorAdd,
+    SSAVectorSub,
     SSAVectorLength,
     SSAVectorNew,
     SSAVectorSet,
@@ -268,12 +272,26 @@ class SSARenamer:
             self._bind_value(result.name, result, bound_values)
             return SSAVectorAdd(result, left, right, instruction.length, instruction.orientation)
 
+        if isinstance(instruction, IRVectorSub):
+            result = self._define_value(instruction.result)
+            left = self._resolve_value(instruction.left)
+            right = self._resolve_value(instruction.right)
+            self._bind_value(result.name, result, bound_values)
+            return SSAVectorSub(result, left, right, instruction.length, instruction.orientation)
+
         if isinstance(instruction, IRMatrixAdd):
             result = self._define_value(instruction.result)
             left = self._resolve_value(instruction.left)
             right = self._resolve_value(instruction.right)
             self._bind_value(result.name, result, bound_values)
             return SSAMatrixAdd(result, left, right, instruction.rows, instruction.cols)
+
+        if isinstance(instruction, IRMatrixSub):
+            result = self._define_value(instruction.result)
+            left = self._resolve_value(instruction.left)
+            right = self._resolve_value(instruction.right)
+            self._bind_value(result.name, result, bound_values)
+            return SSAMatrixSub(result, left, right, instruction.rows, instruction.cols)
 
         if isinstance(instruction, IRArrayGet):
             result = self._define_value(instruction.result)

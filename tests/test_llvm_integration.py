@@ -29,6 +29,7 @@ EXPECTED_EXIT_CODES = {
     "matrix_index.ae": 4,
     "matrix_rows_columns.ae": 5,
     "matrix_set.ae": 9,
+    "matrix_sub.ae": 20,
     "max.ae": 12,
     "return_5.ae": 5,
     "string_choose.ae": 0,
@@ -41,6 +42,7 @@ EXPECTED_EXIT_CODES = {
     "vector_length.ae": 3,
     "vector_literal.ae": 0,
     "vector_set.ae": 9,
+    "vector_sub.ae": 18,
 }
 
 

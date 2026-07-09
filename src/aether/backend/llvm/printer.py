@@ -22,6 +22,7 @@ from aether.ssa.model import (
     SSAJump,
     SSAMatrixColumns,
     SSAMatrixAdd,
+    SSAMatrixSub,
     SSAMatrixGet,
     SSAMatrixNew,
     SSAMatrixRows,
@@ -33,6 +34,7 @@ from aether.ssa.model import (
     SSAValue,
     SSAVectorGet,
     SSAVectorAdd,
+    SSAVectorSub,
     SSAVectorLength,
     SSAVectorNew,
     SSAVectorSet,
@@ -173,8 +175,12 @@ class LLVMPrinter:
             return self._print_matrix_new(instruction)
         if isinstance(instruction, SSAVectorAdd):
             return "\n  ".join(self._print_vector_add(instruction))
+        if isinstance(instruction, SSAVectorSub):
+            return "\n  ".join(self._print_vector_sub(instruction))
         if isinstance(instruction, SSAMatrixAdd):
             return "\n  ".join(self._print_matrix_add(instruction))
+        if isinstance(instruction, SSAMatrixSub):
+            return "\n  ".join(self._print_matrix_sub(instruction))
         if isinstance(instruction, SSAArrayGet):
             return "\n  ".join(self._print_array_get(instruction))
         if isinstance(instruction, SSAVectorGet):
@@ -225,6 +231,8 @@ class LLVMPrinter:
                 SSAMatrixNew,
                 SSAVectorAdd,
                 SSAMatrixAdd,
+                SSAVectorSub,
+                SSAMatrixSub,
             ),
         ):
             return instruction.result
@@ -434,36 +442,74 @@ class LLVMPrinter:
         )
 
     def _print_vector_add(self, instruction: SSAVectorAdd) -> list[str]:
-        if not isinstance(instruction.result.type, VectorType):
-            raise LLVMBackendError("LLVM vector_add result must be VectorType")
-        if instruction.result.type != instruction.left.type or instruction.result.type != instruction.right.type:
-            raise LLVMBackendError("LLVM vector_add requires matching vector operand and result types")
-        if instruction.length <= 0:
-            raise LLVMBackendError("LLVM vector_add requires a positive length")
-        if instruction.orientation != instruction.result.type.orientation:
-            raise LLVMBackendError("LLVM vector_add instruction orientation must match result type")
-        return self._print_contiguous_add(
+        self._validate_vector_binary(instruction, "add")
+        return self._print_contiguous_binary(
             instruction.result,
             instruction.left,
             instruction.right,
             instruction.result.type.element,
             instruction.length,
+            "add",
         )
 
-    def _print_matrix_add(self, instruction: SSAMatrixAdd) -> list[str]:
-        if not isinstance(instruction.result.type, MatrixType):
-            raise LLVMBackendError("LLVM matrix_add result must be MatrixType")
+    def _print_vector_sub(self, instruction: SSAVectorSub) -> list[str]:
+        self._validate_vector_binary(instruction, "sub")
+        return self._print_contiguous_binary(
+            instruction.result,
+            instruction.left,
+            instruction.right,
+            instruction.result.type.element,
+            instruction.length,
+            "sub",
+        )
+
+    def _validate_vector_binary(
+        self,
+        instruction: SSAVectorAdd | SSAVectorSub,
+        operation: str,
+    ) -> None:
+        if not isinstance(instruction.result.type, VectorType):
+            raise LLVMBackendError(f"LLVM vector_{operation} result must be VectorType")
         if instruction.result.type != instruction.left.type or instruction.result.type != instruction.right.type:
-            raise LLVMBackendError("LLVM matrix_add requires matching matrix operand and result types")
-        if instruction.rows <= 0 or instruction.cols <= 0:
-            raise LLVMBackendError("LLVM matrix_add requires positive dimensions")
-        return self._print_contiguous_add(
+            raise LLVMBackendError(f"LLVM vector_{operation} requires matching vector operand and result types")
+        if instruction.length <= 0:
+            raise LLVMBackendError(f"LLVM vector_{operation} requires a positive length")
+        if instruction.orientation != instruction.result.type.orientation:
+            raise LLVMBackendError(f"LLVM vector_{operation} instruction orientation must match result type")
+
+    def _print_matrix_add(self, instruction: SSAMatrixAdd) -> list[str]:
+        self._validate_matrix_binary(instruction, "add")
+        return self._print_contiguous_binary(
             instruction.result,
             instruction.left,
             instruction.right,
             instruction.result.type.element,
             instruction.rows * instruction.cols,
+            "add",
         )
+
+    def _print_matrix_sub(self, instruction: SSAMatrixSub) -> list[str]:
+        self._validate_matrix_binary(instruction, "sub")
+        return self._print_contiguous_binary(
+            instruction.result,
+            instruction.left,
+            instruction.right,
+            instruction.result.type.element,
+            instruction.rows * instruction.cols,
+            "sub",
+        )
+
+    def _validate_matrix_binary(
+        self,
+        instruction: SSAMatrixAdd | SSAMatrixSub,
+        operation: str,
+    ) -> None:
+        if not isinstance(instruction.result.type, MatrixType):
+            raise LLVMBackendError(f"LLVM matrix_{operation} result must be MatrixType")
+        if instruction.result.type != instruction.left.type or instruction.result.type != instruction.right.type:
+            raise LLVMBackendError(f"LLVM matrix_{operation} requires matching matrix operand and result types")
+        if instruction.rows <= 0 or instruction.cols <= 0:
+            raise LLVMBackendError(f"LLVM matrix_{operation} requires positive dimensions")
 
     def _print_contiguous_new(
         self,
@@ -493,13 +539,14 @@ class LLVMPrinter:
             )
         return "\n  ".join(lines)
 
-    def _print_contiguous_add(
+    def _print_contiguous_binary(
         self,
         result_value: SSAValue,
         left_value: SSAValue,
         right_value: SSAValue,
         element_ir_type: object,
         length: int,
+        operator_name: str,
     ) -> list[str]:
         self._uses_array_type = True
         self._uses_array_allocation = True
@@ -507,25 +554,25 @@ class LLVMPrinter:
         result = self._new_temp(result_value)
         element_type = llvm_type(element_ir_type)
         element_size = self._sizeof(element_ir_type)
-        operator = self._element_add_operator(element_ir_type)
+        operator = self._element_binary_operator(element_ir_type, operator_name)
         lines = [
             f"{result} = call ptr @aether_array_new(i64 {element_size}, i64 {length})"
         ]
 
-        left_data = self._synthetic_temp("add.left.data")
-        right_data = self._synthetic_temp("add.right.data")
-        result_data = self._synthetic_temp("add.result.data")
+        left_data = self._synthetic_temp(f"{operator_name}.left.data")
+        right_data = self._synthetic_temp(f"{operator_name}.right.data")
+        result_data = self._synthetic_temp(f"{operator_name}.result.data")
         lines.extend(self._array_data_pointer(left_data, self._operand(left_value)))
         lines.extend(self._array_data_pointer(right_data, self._operand(right_value)))
         lines.extend(self._array_data_pointer(result_data, result))
 
         for index in range(length):
-            left_ptr = self._synthetic_temp("add.left.elem")
-            right_ptr = self._synthetic_temp("add.right.elem")
-            result_ptr = self._synthetic_temp("add.result.elem")
-            loaded_left = self._synthetic_temp("add.left")
-            loaded_right = self._synthetic_temp("add.right")
-            added = self._synthetic_temp("add.value")
+            left_ptr = self._synthetic_temp(f"{operator_name}.left.elem")
+            right_ptr = self._synthetic_temp(f"{operator_name}.right.elem")
+            result_ptr = self._synthetic_temp(f"{operator_name}.result.elem")
+            loaded_left = self._synthetic_temp(f"{operator_name}.left")
+            loaded_right = self._synthetic_temp(f"{operator_name}.right")
+            result_element = self._synthetic_temp(f"{operator_name}.value")
             lines.append(
                 f"{left_ptr} = getelementptr {element_type}, ptr {left_data}, i64 {index}"
             )
@@ -535,12 +582,12 @@ class LLVMPrinter:
             )
             lines.append(f"{loaded_right} = load {element_type}, ptr {right_ptr}")
             lines.append(
-                f"{added} = {operator} {element_type} {loaded_left}, {loaded_right}"
+                f"{result_element} = {operator} {element_type} {loaded_left}, {loaded_right}"
             )
             lines.append(
                 f"{result_ptr} = getelementptr {element_type}, ptr {result_data}, i64 {index}"
             )
-            lines.append(f"store {element_type} {added}, ptr {result_ptr}")
+            lines.append(f"store {element_type} {result_element}, ptr {result_ptr}")
 
         return lines
 
@@ -786,13 +833,19 @@ class LLVMPrinter:
         raise LLVMBackendError(f"LLVM backend does not know the size of {type_}")
 
     @staticmethod
-    def _element_add_operator(type_: object) -> str:
+    def _element_binary_operator(type_: object, operator: str) -> str:
         if isinstance(type_, IntType):
-            return "add"
+            if operator == "add":
+                return "add"
+            if operator == "sub":
+                return "sub"
         if isinstance(type_, DoubleType):
-            return "fadd"
+            if operator == "add":
+                return "fadd"
+            if operator == "sub":
+                return "fsub"
         raise LLVMBackendError(
-            f"LLVM backend does not support vector/matrix addition for {type_}"
+            f"LLVM backend does not support vector/matrix {operator} for {type_}"
         )
 
     def _operand(self, value: SSAValue) -> str:

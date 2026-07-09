@@ -17,6 +17,7 @@ from aether.ssa.model import (
     SSAJump,
     SSAMatrixColumns,
     SSAMatrixAdd,
+    SSAMatrixSub,
     SSAMatrixGet,
     SSAMatrixNew,
     SSAMatrixRows,
@@ -27,6 +28,7 @@ from aether.ssa.model import (
     SSAValue,
     SSAVectorGet,
     SSAVectorAdd,
+    SSAVectorSub,
     SSAVectorLength,
     SSAVectorNew,
     SSAVectorSet,
@@ -53,6 +55,8 @@ class SSADeadCodeEliminator:
         SSAMatrixColumns,
         SSAVectorAdd,
         SSAMatrixAdd,
+        SSAVectorSub,
+        SSAMatrixSub,
     )
 
     def run(self, module: SSAModule) -> SSAOptimizationResult:
@@ -155,7 +159,7 @@ class SSADeadCodeEliminator:
             used_values.update(instruction.elements)
             return
 
-        if isinstance(instruction, (SSAVectorAdd, SSAMatrixAdd)):
+        if isinstance(instruction, (SSAVectorAdd, SSAMatrixAdd, SSAVectorSub, SSAMatrixSub)):
             used_values.add(instruction.left)
             used_values.add(instruction.right)
             return

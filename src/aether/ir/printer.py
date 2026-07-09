@@ -21,6 +21,7 @@ from .model import (
     IRLoad,
     IRMatrixColumns,
     IRMatrixAdd,
+    IRMatrixSub,
     IRMatrixGet,
     IRMatrixNew,
     IRMatrixRows,
@@ -31,6 +32,7 @@ from .model import (
     IRValue,
     IRVectorGet,
     IRVectorAdd,
+    IRVectorSub,
     IRVectorLength,
     IRVectorNew,
     IRVectorSet,
@@ -108,9 +110,22 @@ class IRPrinter:
                 f"{self._value(instruction.left)}, {self._value(instruction.right)} "
                 f"length {instruction.length}"
             )
+        if isinstance(instruction, IRVectorSub):
+            orientation = f" {instruction.orientation}" if instruction.orientation is not None else ""
+            return (
+                f"{self._typed_value(instruction.result)} = vector_sub{orientation} "
+                f"{self._value(instruction.left)}, {self._value(instruction.right)} "
+                f"length {instruction.length}"
+            )
         if isinstance(instruction, IRMatrixAdd):
             return (
                 f"{self._typed_value(instruction.result)} = matrix_add "
+                f"{self._value(instruction.left)}, {self._value(instruction.right)} "
+                f"{instruction.rows}x{instruction.cols}"
+            )
+        if isinstance(instruction, IRMatrixSub):
+            return (
+                f"{self._typed_value(instruction.result)} = matrix_sub "
                 f"{self._value(instruction.left)}, {self._value(instruction.right)} "
                 f"{instruction.rows}x{instruction.cols}"
             )

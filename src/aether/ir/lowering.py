@@ -29,6 +29,7 @@ from .model import (
     IRLoad,
     IRMatrixGet,
     IRMatrixAdd,
+    IRMatrixSub,
     IRMatrixColumns,
     IRMatrixNew,
     IRMatrixRows,
@@ -40,6 +41,7 @@ from .model import (
     IRValue,
     IRVectorGet,
     IRVectorAdd,
+    IRVectorSub,
     IRVectorLength,
     IRVectorNew,
     IRVectorSet,
@@ -512,15 +514,15 @@ class IRLowerer:
                     IRCompareOp(result, compare_operator, left, right)
                 )
                 return result
-            if expression.operator == "+":
-                aggregate_add = self._lower_aggregate_add(
+            if expression.operator in {"+", "-"}:
+                aggregate_binary = self._lower_aggregate_binary(
                     expression,
                     left,
                     right,
                     context,
                 )
-                if aggregate_add is not None:
-                    return aggregate_add
+                if aggregate_binary is not None:
+                    return aggregate_binary
             result_type = self._binary_result_type(expression.operator, left.type, right.type)
             result = context.temporary(result_type)
             context.block.instructions.append(IRBinaryOp(result, binary_operator, left, right))
@@ -770,44 +772,47 @@ class IRLowerer:
         if vector_length is not None:
             context.vector_lengths[target.name] = vector_length
 
-    def _lower_aggregate_add(
+    def _lower_aggregate_binary(
         self,
         expression: ast.BinaryExpression,
         left: IRValue,
         right: IRValue,
         context: _FunctionContext,
     ) -> IRValue | None:
+        operator = expression.operator
+        if operator not in {"+", "-"}:
+            return None
+
         if isinstance(left.type, VectorType) or isinstance(right.type, VectorType):
             if not isinstance(left.type, VectorType) or not isinstance(right.type, VectorType):
                 return None
             if left.type.orientation != right.type.orientation:
                 self._fail(
-                    f"IR backend requires vector operands with the same orientation for '+', "
+                    f"IR backend requires vector operands with the same orientation for '{operator}', "
                     f"got '{left.type}' and '{right.type}'.",
                     expression,
                 )
             self._require_same_type(
                 right.type.element,
                 left.type.element,
-                "vector addition requires matching element types",
+                f"vector {self._aggregate_operation_name(operator)} requires matching element types",
             )
             left_length = context.vector_lengths.get(left.name)
             right_length = context.vector_lengths.get(right.name)
             if left_length is None or right_length is None:
                 self._fail(
-                    "IR backend requires known vector lengths for Vector + Vector.",
+                    f"IR backend requires known vector lengths for Vector {operator} Vector.",
                     expression,
                 )
             if left_length != right_length:
                 self._fail(
-                    f"IR backend requires equal vector lengths for '+', got {left_length} and {right_length}.",
+                    f"IR backend requires equal vector lengths for '{operator}', got {left_length} and {right_length}.",
                     expression,
                 )
             result = context.temporary(left.type)
             context.vector_lengths[result.name] = left_length
-            context.block.instructions.append(
-                IRVectorAdd(result, left, right, left_length, left.type.orientation)
-            )
+            instruction_type = IRVectorAdd if operator == "+" else IRVectorSub
+            context.block.instructions.append(instruction_type(result, left, right, left_length, left.type.orientation))
             return result
 
         if isinstance(left.type, MatrixType) or isinstance(right.type, MatrixType):
@@ -816,30 +821,33 @@ class IRLowerer:
             self._require_same_type(
                 right.type.element,
                 left.type.element,
-                "matrix addition requires matching element types",
+                f"matrix {self._aggregate_operation_name(operator)} requires matching element types",
             )
             left_dimensions = context.matrix_dimensions.get(left.name)
             right_dimensions = context.matrix_dimensions.get(right.name)
             if left_dimensions is None or right_dimensions is None:
                 self._fail(
-                    "IR backend requires known matrix dimensions for Matrix + Matrix.",
+                    f"IR backend requires known matrix dimensions for Matrix {operator} Matrix.",
                     expression,
                 )
             if left_dimensions != right_dimensions:
                 self._fail(
-                    "IR backend requires equal matrix dimensions for '+', "
+                    f"IR backend requires equal matrix dimensions for '{operator}', "
                     f"got {left_dimensions[0]}x{left_dimensions[1]} and "
                     f"{right_dimensions[0]}x{right_dimensions[1]}.",
                     expression,
                 )
             result = context.temporary(left.type)
             context.matrix_dimensions[result.name] = left_dimensions
-            context.block.instructions.append(
-                IRMatrixAdd(result, left, right, left_dimensions[0], left_dimensions[1])
-            )
+            instruction_type = IRMatrixAdd if operator == "+" else IRMatrixSub
+            context.block.instructions.append(instruction_type(result, left, right, left_dimensions[0], left_dimensions[1]))
             return result
 
         return None
+
+    @staticmethod
+    def _aggregate_operation_name(operator: str) -> str:
+        return "addition" if operator == "+" else "subtraction"
 
     def _lower_cast(self, call: ast.CallExpression, context: _FunctionContext) -> IRValue:
         if len(call.arguments) != 1:

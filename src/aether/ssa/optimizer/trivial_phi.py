@@ -17,6 +17,7 @@ from aether.ssa.model import (
     SSAJump,
     SSAMatrixColumns,
     SSAMatrixAdd,
+    SSAMatrixSub,
     SSAMatrixGet,
     SSAMatrixNew,
     SSAMatrixRows,
@@ -26,6 +27,7 @@ from aether.ssa.model import (
     SSAValue,
     SSAVectorGet,
     SSAVectorAdd,
+    SSAVectorSub,
     SSAVectorLength,
     SSAVectorNew,
 )
@@ -264,6 +266,22 @@ class TrivialPhiEliminator:
                 int(left_rewritten) + int(right_rewritten),
             )
 
+        if isinstance(instruction, SSAVectorSub):
+            left, left_rewritten = self._rewrite_value(instruction.left, replacements)
+            right, right_rewritten = self._rewrite_value(instruction.right, replacements)
+            if not left_rewritten and not right_rewritten:
+                return instruction, 0
+            return (
+                SSAVectorSub(
+                    instruction.result,
+                    left,
+                    right,
+                    instruction.length,
+                    instruction.orientation,
+                ),
+                int(left_rewritten) + int(right_rewritten),
+            )
+
         if isinstance(instruction, SSAMatrixAdd):
             left, left_rewritten = self._rewrite_value(instruction.left, replacements)
             right, right_rewritten = self._rewrite_value(instruction.right, replacements)
@@ -271,6 +289,22 @@ class TrivialPhiEliminator:
                 return instruction, 0
             return (
                 SSAMatrixAdd(
+                    instruction.result,
+                    left,
+                    right,
+                    instruction.rows,
+                    instruction.cols,
+                ),
+                int(left_rewritten) + int(right_rewritten),
+            )
+
+        if isinstance(instruction, SSAMatrixSub):
+            left, left_rewritten = self._rewrite_value(instruction.left, replacements)
+            right, right_rewritten = self._rewrite_value(instruction.right, replacements)
+            if not left_rewritten and not right_rewritten:
+                return instruction, 0
+            return (
+                SSAMatrixSub(
                     instruction.result,
                     left,
                     right,

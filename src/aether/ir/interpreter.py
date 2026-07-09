@@ -22,6 +22,7 @@ from .model import (
     IRLoad,
     IRMatrixColumns,
     IRMatrixAdd,
+    IRMatrixSub,
     IRMatrixGet,
     IRMatrixNew,
     IRMatrixRows,
@@ -32,11 +33,12 @@ from .model import (
     IRValue,
     IRVectorGet,
     IRVectorAdd,
+    IRVectorSub,
     IRVectorLength,
     IRVectorNew,
     IRVectorSet,
 )
-from .types import BoolType, DoubleType, IntType, VoidType
+from .types import DoubleType, IntType, VoidType
 
 
 class IRExecutionError(RuntimeError):
@@ -174,30 +176,19 @@ class IRInterpreter:
             return False, None, None
 
         if isinstance(instruction, IRVectorAdd):
-            left = self._value(instruction.left, frame)
-            right = self._value(instruction.right, frame)
-            if not isinstance(left, list) or not isinstance(right, list):
-                raise IRExecutionError("IR vector add requires vector values")
-            if len(left) != instruction.length or len(right) != instruction.length:
-                raise IRExecutionError("IR vector add operands must match instruction length")
-            frame.values[instruction.result] = [
-                self._binary("add", left_value, right_value)
-                for left_value, right_value in zip(left, right)
-            ]
+            self._execute_vector_binary(instruction, frame, "add")
+            return False, None, None
+
+        if isinstance(instruction, IRVectorSub):
+            self._execute_vector_binary(instruction, frame, "sub")
             return False, None, None
 
         if isinstance(instruction, IRMatrixAdd):
-            left = self._value(instruction.left, frame)
-            right = self._value(instruction.right, frame)
-            if not isinstance(left, list) or not isinstance(right, list):
-                raise IRExecutionError("IR matrix add requires matrix values")
-            element_count = instruction.rows * instruction.cols
-            if len(left) != element_count or len(right) != element_count:
-                raise IRExecutionError("IR matrix add operands must match instruction dimensions")
-            frame.values[instruction.result] = [
-                self._binary("add", left_value, right_value)
-                for left_value, right_value in zip(left, right)
-            ]
+            self._execute_matrix_binary(instruction, frame, "add")
+            return False, None, None
+
+        if isinstance(instruction, IRMatrixSub):
+            self._execute_matrix_binary(instruction, frame, "sub")
             return False, None, None
 
         if isinstance(instruction, IRArrayGet):
@@ -218,90 +209,107 @@ class IRInterpreter:
             matrix = self._value(instruction.matrix, frame)
             row = self._value(instruction.row, frame)
             column = self._value(instruction.column, frame)
-            if not isinstance(matrix, list):
-                raise IRExecutionError("IR matrix get requires a matrix value")
-            if type(row) is not int or type(column) is not int:
-                raise IRExecutionError("IR matrix indices must be int")
-            offset = row * instruction.cols + column
-            self._check_array_index(matrix, offset)
-            frame.values[instruction.result] = matrix[offset]
+            self._check_matrix_index(matrix, row, column, instruction.cols)
+            frame.values[instruction.result] = matrix[row * instruction.cols + column]
             return False, None, None
 
         if isinstance(instruction, IRVectorLength):
             vector = self._value(instruction.vector, frame)
             if not isinstance(vector, list):
-                raise IRExecutionError("IR vector length requires a vector value")
+                raise IRExecutionError("IR vector_length requires a vector value")
             frame.values[instruction.result] = len(vector)
             return False, None, None
 
         if isinstance(instruction, IRMatrixRows):
-            self._value(instruction.matrix, frame)
             frame.values[instruction.result] = instruction.rows
             return False, None, None
 
         if isinstance(instruction, IRMatrixColumns):
-            self._value(instruction.matrix, frame)
             frame.values[instruction.result] = instruction.columns
             return False, None, None
 
         if isinstance(instruction, IRArraySet):
             array = self._value(instruction.array, frame)
             index = self._value(instruction.index, frame)
+            value = self._value(instruction.value, frame)
             self._check_array_index(array, index)
-            array[index] = self._value(instruction.value, frame)
+            array[index] = value
             return False, None, None
 
         if isinstance(instruction, IRVectorSet):
             vector = self._value(instruction.vector, frame)
             index = self._value(instruction.index, frame)
+            value = self._value(instruction.value, frame)
             self._check_array_index(vector, index)
-            vector[index] = self._value(instruction.value, frame)
+            vector[index] = value
             return False, None, None
 
         if isinstance(instruction, IRMatrixSet):
             matrix = self._value(instruction.matrix, frame)
             row = self._value(instruction.row, frame)
             column = self._value(instruction.column, frame)
-            if not isinstance(matrix, list):
-                raise IRExecutionError("IR matrix set requires a matrix value")
-            if type(row) is not int or type(column) is not int:
-                raise IRExecutionError("IR matrix indices must be int")
-            offset = row * instruction.cols + column
-            self._check_array_index(matrix, offset)
-            matrix[offset] = self._value(instruction.value, frame)
+            value = self._value(instruction.value, frame)
+            self._check_matrix_index(matrix, row, column, instruction.cols)
+            matrix[row * instruction.cols + column] = value
             return False, None, None
 
         if isinstance(instruction, IRArrayLength):
             array = self._value(instruction.array, frame)
             if not isinstance(array, list):
-                raise IRExecutionError("IR array length requires an array value")
+                raise IRExecutionError("IR array_length requires an array value")
             frame.values[instruction.result] = len(array)
             return False, None, None
 
         if isinstance(instruction, IRBranch):
             condition = self._value(instruction.condition, frame)
-            if (
-                not isinstance(instruction.condition.type, BoolType)
-                or type(condition) is not bool
-            ):
+            if not isinstance(condition, bool):
                 raise IRExecutionError("IR branch condition must be bool")
-            target = instruction.true_target if condition else instruction.false_target
-            return False, None, target
+            return False, None, instruction.true_target if condition else instruction.false_target
 
         if isinstance(instruction, IRJump):
             return False, None, instruction.target
 
         if isinstance(instruction, IRReturn):
-            value = (
-                None
-                if instruction.value is None
-                else self._value(instruction.value, frame)
-            )
-            return True, value, None
+            if instruction.value is None:
+                return True, None, None
+            return True, self._value(instruction.value, frame), None
 
-        raise IRExecutionError(
-            f"IR instruction '{type(instruction).__name__}' is not supported"
-        )
+        raise IRExecutionError(f"Unsupported IR instruction {type(instruction).__name__}")
+
+    def _execute_vector_binary(
+        self,
+        instruction: IRVectorAdd | IRVectorSub,
+        frame: _Frame,
+        operator: str,
+    ) -> None:
+        left = self._value(instruction.left, frame)
+        right = self._value(instruction.right, frame)
+        if not isinstance(left, list) or not isinstance(right, list):
+            raise IRExecutionError(f"IR vector {operator} requires vector values")
+        if len(left) != instruction.length or len(right) != instruction.length:
+            raise IRExecutionError(f"IR vector {operator} operands must match instruction length")
+        frame.values[instruction.result] = [
+            self._binary(operator, left_value, right_value)
+            for left_value, right_value in zip(left, right)
+        ]
+
+    def _execute_matrix_binary(
+        self,
+        instruction: IRMatrixAdd | IRMatrixSub,
+        frame: _Frame,
+        operator: str,
+    ) -> None:
+        left = self._value(instruction.left, frame)
+        right = self._value(instruction.right, frame)
+        if not isinstance(left, list) or not isinstance(right, list):
+            raise IRExecutionError(f"IR matrix {operator} requires matrix values")
+        element_count = instruction.rows * instruction.cols
+        if len(left) != element_count or len(right) != element_count:
+            raise IRExecutionError(f"IR matrix {operator} operands must match instruction dimensions")
+        frame.values[instruction.result] = [
+            self._binary(operator, left_value, right_value)
+            for left_value, right_value in zip(left, right)
+        ]
 
     @staticmethod
     def _target_block(
@@ -374,6 +382,15 @@ class IRInterpreter:
             raise IRExecutionError(
                 f"IR array index {index} out of bounds for length {len(array)}"
             )
+
+    @staticmethod
+    def _check_matrix_index(matrix: Any, row: Any, column: Any, cols: int) -> None:
+        if not isinstance(matrix, list):
+            raise IRExecutionError("IR matrix indexing requires a matrix value")
+        if type(row) is not int or type(column) is not int:
+            raise IRExecutionError("IR matrix indices must be int")
+        offset = row * cols + column
+        IRInterpreter._check_array_index(matrix, offset)
 
     @staticmethod
     def _unsupported_binary(operator: str) -> NoReturn:
