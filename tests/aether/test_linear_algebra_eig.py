@@ -20,8 +20,8 @@ def test_eig_returns_real_diagonalization_for_imported_short_name() -> None:
 import Math.LinearAlgebra
 A = [1 1; 0 2];
 S, D = eig(A);
-left = A * S;
-right = S * D;
+left = Math.LinearAlgebra.matmul(A, S);
+right = Math.LinearAlgebra.matmul(S, D);
 """
     )
 
@@ -52,8 +52,8 @@ def test_eig_returns_complex_diagonalization_for_complex_matrix() -> None:
 import Math.LinearAlgebra
 A = [im 0; 0 2];
 S, D = eig(A);
-left = A * S;
-right = S * D;
+left = Math.LinearAlgebra.matmul(A, S);
+right = Math.LinearAlgebra.matmul(S, D);
 """
     )
 
@@ -72,8 +72,8 @@ def test_eig_can_return_complex_diagonalization_for_real_matrix() -> None:
 import Math.LinearAlgebra
 A = [0 -1; 1 0];
 S, D = eig(A);
-left = A * S;
-right = S * D;
+left = Math.LinearAlgebra.matmul(A, S);
+right = Math.LinearAlgebra.matmul(S, D);
 """
     )
 

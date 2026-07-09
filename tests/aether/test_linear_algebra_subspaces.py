@@ -26,7 +26,7 @@ def test_null_space_returns_kernel_basis_columns() -> None:
 import Math.LinearAlgebra
 A = [1 1 1; 0 1 1];
 K = N(A);
-Z = A * K;
+Z = Math.LinearAlgebra.matmul(A, K);
 s = size(K);
 """
     )
@@ -60,7 +60,7 @@ def test_null_space_returns_complex_kernel_basis_for_complex_matrix() -> None:
 import Math.LinearAlgebra
 A = [1 im; 2 2im];
 K = N(A);
-Z = A * K;
+Z = Math.LinearAlgebra.matmul(A, K);
 s = size(K);
 """
     )

@@ -42,6 +42,7 @@ from .model import (
     IRValue,
     IRVectorGet,
     IRVectorAdd,
+    IRVectorDot,
     IRVectorScale,
     IRVectorSub,
     IRVectorLength,
@@ -786,6 +787,9 @@ class IRLowerer:
             return None
 
         if operator == "*":
+            vector_dot = self._lower_vector_dot(expression, left, right, context)
+            if vector_dot is not None:
+                return vector_dot
             return self._lower_aggregate_scale(expression, left, right, context)
 
         if isinstance(left.type, VectorType) or isinstance(right.type, VectorType):
@@ -849,6 +853,37 @@ class IRLowerer:
             return result
 
         return None
+
+    def _lower_vector_dot(
+        self,
+        expression: ast.BinaryExpression,
+        left: IRValue,
+        right: IRValue,
+        context: _FunctionContext,
+    ) -> IRValue | None:
+        if not isinstance(left.type, VectorType) or not isinstance(right.type, VectorType):
+            return None
+        if left.type.orientation != "row" or right.type.orientation != "column":
+            return None
+
+        left_length = context.vector_lengths.get(left.name)
+        right_length = context.vector_lengths.get(right.name)
+        if left_length is None or right_length is None:
+            self._fail(
+                "IR backend requires known vector lengths for Vector<Row> * Vector<Column>.",
+                expression,
+            )
+        if left_length != right_length:
+            self._fail(
+                f"IR backend requires equal vector lengths for Vector<Row> * Vector<Column>, "
+                f"got {left_length} and {right_length}.",
+                expression,
+            )
+
+        result_type = self._binary_result_type("*", left.type.element, right.type.element)
+        result = context.temporary(result_type)
+        context.block.instructions.append(IRVectorDot(result, left, right, left_length))
+        return result
 
     @staticmethod
     def _aggregate_operation_name(operator: str) -> str:

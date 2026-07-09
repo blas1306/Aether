@@ -101,7 +101,7 @@ def test_eig_result_can_be_destructured() -> None:
         """
 import Math.LinearAlgebra
 A = [3 2; 1 0; 0 0];
-Vec, Vap = eig(A' * A);
+Vec, Vap = eig(Math.LinearAlgebra.matmul(A', A));
 println(rows(Vec));
 println(cols(Vec));
 println(rows(Vap));

@@ -28,6 +28,7 @@ from aether.ssa.model import (
     SSAValue,
     SSAVectorGet,
     SSAVectorAdd,
+    SSAVectorDot,
     SSAVectorScale,
     SSAVectorSub,
     SSAVectorLength,
@@ -280,6 +281,21 @@ class TrivialPhiEliminator:
                     right,
                     instruction.length,
                     instruction.orientation,
+                ),
+                int(left_rewritten) + int(right_rewritten),
+            )
+
+        if isinstance(instruction, SSAVectorDot):
+            left, left_rewritten = self._rewrite_value(instruction.left, replacements)
+            right, right_rewritten = self._rewrite_value(instruction.right, replacements)
+            if not left_rewritten and not right_rewritten:
+                return instruction, 0
+            return (
+                SSAVectorDot(
+                    instruction.result,
+                    left,
+                    right,
+                    instruction.length,
                 ),
                 int(left_rewritten) + int(right_rewritten),
             )

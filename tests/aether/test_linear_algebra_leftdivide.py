@@ -118,8 +118,9 @@ def test_leftdivide_solves_complex_square_system() -> None:
 import Math.LinearAlgebra
 Matrix<complex> A = [1 im; 2 3];
 Vector<complex> b = [1 + im; 4];
-x = A \\ b;
-r = A * x;
+Vector<complex, Column> x = A \\ b;
+Vector<complex, Column> xc = [x[1]; x[2]];
+r = Math.LinearAlgebra.matmul(A, xc);
 """
     )
 
@@ -146,9 +147,12 @@ def test_leftdivide_returns_complex_least_squares_solution() -> None:
         """
 import Math.LinearAlgebra
 Matrix<complex> A = [1 im; 1 im; 1 im];
-Vector<complex> b = [1; 2 + im; 2];
-x = A \\ b;
-normal_residual = A' * (A * x - b);
+Vector<complex, Column> b = [1; 2 + im; 2];
+Vector<complex, Column> x = A \\ b;
+Vector<complex, Column> xc = [x[1]; x[2]];
+Ax = Math.LinearAlgebra.matmul(A, xc);
+Vector<complex, Column> residual = [Ax[1] - b[1]; Ax[2] - b[2]; Ax[3] - b[3]];
+normal_residual = Math.LinearAlgebra.matmul(A', residual);
 """
     )
 

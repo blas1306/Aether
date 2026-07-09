@@ -109,6 +109,16 @@ class SSAVectorScale(SSAInstruction):
 
 
 @dataclass(frozen=True)
+class SSAVectorDot(SSAInstruction):
+    """Dot product for Vector<Row> * Vector<Column> only."""
+
+    result: SSAValue
+    left: SSAValue
+    right: SSAValue
+    length: int
+
+
+@dataclass(frozen=True)
 class SSAMatrixAdd(SSAInstruction):
     result: SSAValue
     left: SSAValue

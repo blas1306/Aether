@@ -33,6 +33,7 @@ from .model import (
     SSAValue,
     SSAVectorGet,
     SSAVectorAdd,
+    SSAVectorDot,
     SSAVectorScale,
     SSAVectorSub,
     SSAVectorLength,
@@ -120,6 +121,12 @@ class SSAPrinter:
             return (
                 f"{self._typed_value(instruction.result)} = vector_scale{orientation} "
                 f"{self._value(instruction.vector)}, {self._value(instruction.scalar)} "
+                f"length {instruction.length}"
+            )
+        if isinstance(instruction, SSAVectorDot):
+            return (
+                f"{self._typed_value(instruction.result)} = vector_dot row_column "
+                f"{self._value(instruction.left)}, {self._value(instruction.right)} "
                 f"length {instruction.length}"
             )
         if isinstance(instruction, SSAMatrixAdd):

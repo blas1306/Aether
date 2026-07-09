@@ -2474,11 +2474,14 @@ def _evaluate_algebraic_multiplication(left: AetherValue, right: AetherValue) ->
         vector = _scale_vector(left.value, right)
         return AetherValue(TransposeVectorType(vector.type_name.element_type, len(vector.value)), vector)
     if isinstance(left.type_name, VectorType) and isinstance(right.type_name, VectorType):
-        raise AetherTypeError("Operator '*' between Vector and Vector is ambiguous; use transpose(v) * w for dot product, v * transpose(w) for outer product, or v .* w for elementwise multiplication.")
-    if isinstance(left.type_name, MatrixType) and isinstance(right.type_name, MatrixType):
-        return _matrix_multiply(left, right)
-    if isinstance(left.type_name, MatrixType) and isinstance(right.type_name, VectorType):
-        return _matrix_vector_multiply(left, right)
+        if left.type_name.orientation == "row" and right.type_name.orientation == "column":
+            return _dot_product(left, right)
+        raise AetherTypeError(
+            "Operator '*' between Vector operands is only defined for Vector<Row> * Vector<Column>; "
+            "use Math.LinearAlgebra.matmul(...) for other algebraic products or '.*' for elementwise multiplication."
+        )
+    if isinstance(left.type_name, MatrixType) and isinstance(right.type_name, (MatrixType, VectorType)):
+        raise AetherTypeError("Operator '*' does not implement matrix algebra yet; use Math.LinearAlgebra.matmul(...).")
     if isinstance(left.type_name, TransposeVectorType) and isinstance(right.type_name, VectorType):
         return _dot_product(left.value, right)
     if isinstance(left.type_name, TransposeVectorType) and isinstance(right.type_name, MatrixType):

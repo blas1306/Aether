@@ -232,28 +232,33 @@ println(a);
     assert result.output == "1\n"
 
 
-def test_star_dispatches_matrix_vector_products() -> None:
-    result = run_aether(
-        """
+def test_star_rejects_matrix_vector_products_until_operator_matmul_migration() -> None:
+    with pytest.raises(AetherTypeError, match="matrix algebra"):
+        run_aether(
+            """
 import Math.LinearAlgebra
 A = [1 2; 3 4];
-y = A * [5, 6];
+y = A * [5; 6];
 """
-    )
-
-    assert result.env["y"].type_name == VectorType("int", 2)
-    assert values(result.env["y"]) == [17, 39]
+        )
 
 
-def test_star_rejects_oriented_vector_products_until_matmul_migration() -> None:
-    with pytest.raises(AetherTypeError, match="ambiguous"):
+def test_star_accepts_only_row_column_oriented_vector_product() -> None:
+    with pytest.raises(AetherTypeError, match="Vector<Row> \\* Vector<Column>"):
         run_aether("import Math.LinearAlgebra\nv = [1, 2, 3]; w = [4, 5, 6]; x = transpose(v) * w;")
-    with pytest.raises(AetherTypeError, match="ambiguous"):
-        run_aether("import Math.LinearAlgebra\nv = [1, 2, 3]; w = [4, 5, 6]; O = v * transpose(w);")
+    result = run_aether("import Math.LinearAlgebra\nv = [1, 2, 3]; w = [4, 5, 6]; x = v * transpose(w);")
+
+    assert result.env["x"].type_name == "int"
+    assert result.env["x"].value == 32
 
 
-def test_vector_star_vector_is_ambiguous() -> None:
-    with pytest.raises(AetherTypeError, match="ambiguous"):
+def test_vector_star_vector_accepts_only_row_column_dot_product() -> None:
+    result = run_aether("r = [1, 2, 3]; c = [4; 5; 6]; x = r * c;")
+
+    assert result.env["x"].type_name == "int"
+    assert result.env["x"].value == 32
+
+    with pytest.raises(AetherTypeError, match="Vector<Row> \\* Vector<Column>"):
         run_aether("v = [1, 2, 3]; w = [4, 5, 6]; x = v * w;")
 
 
@@ -304,14 +309,14 @@ B = 10 .- [1 2; 3 4];
     assert matrix_values(result.env["B"]) == [[9, 8], [7, 6]]
 
 
-def test_vector_subtraction_accepts_matrix_vector_product() -> None:
+def test_vector_subtraction_accepts_matmul_matrix_vector_product() -> None:
     result = run_aether(
         """
 import Math.LinearAlgebra
 A = [1 2; 3 4];
-z = [5, 6];
-p = [17, 39];
-err = p - A*z;
+z = [5; 6];
+p = [17; 39];
+err = p - Math.LinearAlgebra.matmul(A, z);
 """
     )
 

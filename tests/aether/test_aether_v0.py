@@ -608,9 +608,10 @@ def test_print_matrix_pretty():
     assert result.output == "[1 2; 3 4]\n"
 
 
-def test_transposed_vector_product_waits_for_oriented_matmul():
-    with pytest.raises(AetherTypeError, match="ambiguous"):
-        run_aether("println(Math.LinearAlgebra.transpose([1; 2]) * [3; 4]);")
+def test_transposed_vector_product_returns_dot_product():
+    result = run_aether("println(Math.LinearAlgebra.transpose([1; 2]) * [3; 4]);")
+
+    assert result.output == "11\n"
 
 
 def test_print_double_matrix_pretty():
@@ -648,8 +649,8 @@ def test_vector_row_plus_vector_column_shape_error():
         run_aether("v = [1 2 3] + [1; 2; 3]; println(v);")
 
 
-def test_matrix_multiplication_uses_algebraic_product():
-    result = run_aether("C = [1 2; 3 4] * [1 2; 3 4]; println(C);")
+def test_matrix_multiplication_uses_explicit_matmul():
+    result = run_aether("C = Math.LinearAlgebra.matmul([1 2; 3 4], [1 2; 3 4]); println(C);")
     assert result.output == "[7 10; 15 22]\n"
     assert result.env["C"].type_name == MatrixType("int", 2, 2)
     assert matrix_values(result.env["C"]) == [[7, 10], [15, 22]]
@@ -987,16 +988,19 @@ println(C);
     assert result.output == "[19 22; 43 50]\n"
 
 
-def test_matmul_row_column_waits_for_oriented_vectors():
-    with pytest.raises(AetherTypeError, match="ambiguous"):
-        run_aether(
+def test_star_row_column_returns_scalar():
+    result = run_aether(
         """
-u = [1 2 3];
+u = [1, 2, 3];
 v = [4; 5; 6];
-C = Math.LinearAlgebra.transpose(v) * u;
+C = u * v;
 println(C);
 """
-        )
+    )
+
+    assert result.env["C"].type_name == "int"
+    assert result.env["C"].value == 32
+    assert result.output == "32\n"
 
 
 def test_print_matmul_pretty():
@@ -1047,9 +1051,11 @@ println(C);
         )
 
 
-def test_matmul_transposed_vector_promotion_waits_for_oriented_vectors():
-    with pytest.raises(AetherTypeError, match="ambiguous"):
-        run_aether("C = Math.LinearAlgebra.transpose([1; 2.0]) * [3; 4];")
+def test_star_row_column_promotes_numeric_elements():
+    result = run_aether("C = Math.LinearAlgebra.transpose([1; 2.0]) * [3; 4];")
+
+    assert result.env["C"].type_name == "double"
+    assert result.env["C"].value == 11.0
 
 
 def test_matmul_does_not_mutate_operands():

@@ -34,6 +34,7 @@ from .model import (
     IRValue,
     IRVectorGet,
     IRVectorAdd,
+    IRVectorDot,
     IRVectorScale,
     IRVectorSub,
     IRVectorLength,
@@ -189,6 +190,10 @@ class IRInterpreter:
             self._execute_vector_scale(instruction, frame)
             return False, None, None
 
+        if isinstance(instruction, IRVectorDot):
+            self._execute_vector_dot(instruction, frame)
+            return False, None, None
+
         if isinstance(instruction, IRMatrixAdd):
             self._execute_matrix_binary(instruction, frame, "add")
             return False, None, None
@@ -318,6 +323,22 @@ class IRInterpreter:
             self._binary("mul", value, scalar)
             for value in vector
         ]
+
+    def _execute_vector_dot(
+        self,
+        instruction: IRVectorDot,
+        frame: _Frame,
+    ) -> None:
+        left = self._value(instruction.left, frame)
+        right = self._value(instruction.right, frame)
+        if not isinstance(left, list) or not isinstance(right, list):
+            raise IRExecutionError("IR vector dot requires vector values")
+        if len(left) != instruction.length or len(right) != instruction.length:
+            raise IRExecutionError("IR vector dot operands must match instruction length")
+        total = 0.0 if isinstance(instruction.result.type, DoubleType) else 0
+        for left_value, right_value in zip(left, right):
+            total = self._binary("add", total, self._binary("mul", left_value, right_value))
+        frame.values[instruction.result] = total
 
     def _execute_matrix_binary(
         self,

@@ -121,6 +121,16 @@ class IRVectorScale(IRInstruction):
 
 
 @dataclass(frozen=True)
+class IRVectorDot(IRInstruction):
+    """Dot product for Vector<Row> * Vector<Column> only."""
+
+    result: IRValue
+    left: IRValue
+    right: IRValue
+    length: int
+
+
+@dataclass(frozen=True)
 class IRMatrixAdd(IRInstruction):
     result: IRValue
     left: IRValue

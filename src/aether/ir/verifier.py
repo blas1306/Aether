@@ -33,6 +33,7 @@ from .model import (
     IRValue,
     IRVectorGet,
     IRVectorAdd,
+    IRVectorDot,
     IRVectorScale,
     IRVectorSub,
     IRVectorLength,
@@ -379,6 +380,10 @@ class IRVerifier:
             self._verify_vector_scale(instruction, state, value_types)
             return self._define_value(state, instruction.result)
 
+        if isinstance(instruction, IRVectorDot):
+            self._verify_vector_dot(instruction, state, value_types)
+            return self._define_value(state, instruction.result)
+
         if isinstance(instruction, IRMatrixAdd):
             self._verify_matrix_add(instruction, state, value_types)
             return self._define_value(state, instruction.result)
@@ -626,6 +631,31 @@ class IRVerifier:
         if instruction.scalar.type != instruction.vector.type.element:
             self._fail(
                 f"Vector scale scalar type mismatch: expected {instruction.vector.type.element}, got {instruction.scalar.type}"
+            )
+
+    def _verify_vector_dot(
+        self,
+        instruction: IRVectorDot,
+        state: _State,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.left, state, value_types)
+        self._require_defined(instruction.right, state, value_types)
+        if not isinstance(instruction.left.type, VectorType) or not isinstance(instruction.right.type, VectorType):
+            self._fail(
+                f"Vector dot expects vector operands, got {instruction.left.type} and {instruction.right.type}"
+            )
+        if instruction.left.type.orientation != "row" or instruction.right.type.orientation != "column":
+            self._fail("Vector dot is only defined for Vector<Row> * Vector<Column>")
+        if instruction.length <= 0:
+            self._fail(f"Vector dot length must be positive, got {instruction.length}")
+        expected = self._numeric_binary_result_type(
+            instruction.left.type.element,
+            instruction.right.type.element,
+        )
+        if instruction.result.type != expected:
+            self._fail(
+                f"Vector dot result type mismatch: expected {expected}, got {instruction.result.type}"
             )
 
     def _verify_matrix_add(
@@ -1137,6 +1167,7 @@ class IRVerifier:
                 IRVectorNew,
                 IRMatrixNew,
                 IRVectorAdd,
+                IRVectorDot,
                 IRVectorScale,
                 IRMatrixAdd,
                 IRMatrixScale,
@@ -1146,6 +1177,17 @@ class IRVerifier:
         ):
             return instruction.result
         return None
+
+    def _numeric_binary_result_type(self, left: IRType, right: IRType) -> IRType:
+        if not isinstance(left, self._NUMERIC_TYPES) or not isinstance(right, self._NUMERIC_TYPES):
+            self._fail(f"Numeric operation requires numeric operands, got {left} and {right}")
+        if isinstance(left, ComplexType) or isinstance(right, ComplexType):
+            return ComplexType()
+        if isinstance(left, DoubleType) or isinstance(right, DoubleType):
+            return DoubleType()
+        if isinstance(left, FloatType) or isinstance(right, FloatType):
+            return FloatType()
+        return IntType()
 
     @staticmethod
     def _successors(block: IRBasicBlock) -> tuple[str, ...]:

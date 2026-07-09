@@ -35,6 +35,7 @@ from aether.ssa.model import (
     SSAValue,
     SSAVectorGet,
     SSAVectorAdd,
+    SSAVectorDot,
     SSAVectorScale,
     SSAVectorSub,
     SSAVectorLength,
@@ -181,6 +182,8 @@ class LLVMPrinter:
             return "\n  ".join(self._print_vector_sub(instruction))
         if isinstance(instruction, SSAVectorScale):
             return "\n  ".join(self._print_vector_scale(instruction))
+        if isinstance(instruction, SSAVectorDot):
+            return "\n".join(self._print_vector_dot(instruction))
         if isinstance(instruction, SSAMatrixAdd):
             return "\n  ".join(self._print_matrix_add(instruction))
         if isinstance(instruction, SSAMatrixSub):
@@ -236,6 +239,7 @@ class LLVMPrinter:
                 SSAVectorNew,
                 SSAMatrixNew,
                 SSAVectorAdd,
+                SSAVectorDot,
                 SSAVectorScale,
                 SSAMatrixAdd,
                 SSAMatrixScale,
@@ -507,6 +511,119 @@ class LLVMPrinter:
             raise LLVMBackendError("LLVM vector_scale requires a positive length")
         if instruction.orientation != instruction.result.type.orientation:
             raise LLVMBackendError("LLVM vector_scale instruction orientation must match result type")
+
+    def _print_vector_dot(self, instruction: SSAVectorDot) -> list[str]:
+        self._validate_vector_dot(instruction)
+        self._uses_array_type = True
+
+        result = self._new_temp(instruction.result)
+        result_type = llvm_type(instruction.result.type)
+        left_element_type = llvm_type(instruction.left.type.element)
+        right_element_type = llvm_type(instruction.right.type.element)
+        multiply_operator = self._element_binary_operator(instruction.result.type, "mul")
+        add_operator = self._element_binary_operator(instruction.result.type, "add")
+        zero = "0.0" if isinstance(instruction.result.type, DoubleType) else "0"
+        label_id = self._next_synthetic_temp
+        self._next_synthetic_temp += 1
+        loop_label = f"vector.dot.loop.{label_id}"
+        body_label = f"vector.dot.body.{label_id}"
+        exit_label = f"vector.dot.exit.{label_id}"
+
+        left_field = self._synthetic_temp("vector.dot.left.data.field")
+        left_data = self._synthetic_temp("vector.dot.left.data")
+        right_data = self._synthetic_temp("vector.dot.right.data")
+        acc_ptr = self._synthetic_temp("vector.dot.acc.ptr")
+        index_ptr = self._synthetic_temp("vector.dot.index.ptr")
+        lines = [
+            f"  {left_field} = getelementptr {self._ARRAY_STRUCT_TYPE}, ptr {self._operand(instruction.left)}, i32 0, i32 1",
+            f"  {left_data} = load ptr, ptr {left_field}",
+        ]
+        right_field = self._synthetic_temp("vector.dot.right.data.field")
+        lines.extend(
+            [
+                f"  {right_field} = getelementptr {self._ARRAY_STRUCT_TYPE}, ptr {self._operand(instruction.right)}, i32 0, i32 1",
+                f"  {right_data} = load ptr, ptr {right_field}",
+                f"  {acc_ptr} = alloca {result_type}",
+                f"  store {result_type} {zero}, ptr {acc_ptr}",
+                f"  {index_ptr} = alloca i64",
+                f"  store i64 0, ptr {index_ptr}",
+                f"  br label %{loop_label}",
+                f"{loop_label}:",
+            ]
+        )
+        index = self._synthetic_temp("vector.dot.index")
+        condition = self._synthetic_temp("vector.dot.cond")
+        lines.extend(
+            [
+                f"  {index} = load i64, ptr {index_ptr}",
+                f"  {condition} = icmp slt i64 {index}, {instruction.length}",
+                f"  br i1 {condition}, label %{body_label}, label %{exit_label}",
+                f"{body_label}:",
+            ]
+        )
+
+        left_ptr = self._synthetic_temp("vector.dot.left.elem")
+        right_ptr = self._synthetic_temp("vector.dot.right.elem")
+        loaded_left = self._synthetic_temp("vector.dot.left")
+        loaded_right = self._synthetic_temp("vector.dot.right")
+        lines.extend(
+            [
+                f"  {left_ptr} = getelementptr {left_element_type}, ptr {left_data}, i64 {index}",
+                f"  {loaded_left} = load {left_element_type}, ptr {left_ptr}",
+                f"  {right_ptr} = getelementptr {right_element_type}, ptr {right_data}, i64 {index}",
+                f"  {loaded_right} = load {right_element_type}, ptr {right_ptr}",
+            ]
+        )
+        left_operand = self._coerce_scalar(lines, loaded_left, instruction.left.type.element, instruction.result.type, "vector.dot.left.cast")
+        right_operand = self._coerce_scalar(lines, loaded_right, instruction.right.type.element, instruction.result.type, "vector.dot.right.cast")
+        product = self._synthetic_temp("vector.dot.product")
+        acc_current = self._synthetic_temp("vector.dot.acc")
+        acc_next = self._synthetic_temp("vector.dot.acc.next")
+        index_next = self._synthetic_temp("vector.dot.index.next")
+        lines.extend(
+            [
+                f"  {product} = {multiply_operator} {result_type} {left_operand}, {right_operand}",
+                f"  {acc_current} = load {result_type}, ptr {acc_ptr}",
+                f"  {acc_next} = {add_operator} {result_type} {acc_current}, {product}",
+                f"  store {result_type} {acc_next}, ptr {acc_ptr}",
+                f"  {index_next} = add i64 {index}, 1",
+                f"  store i64 {index_next}, ptr {index_ptr}",
+                f"  br label %{loop_label}",
+                f"{exit_label}:",
+                f"  {result} = load {result_type}, ptr {acc_ptr}",
+            ]
+        )
+        return lines
+
+    def _validate_vector_dot(self, instruction: SSAVectorDot) -> None:
+        if not isinstance(instruction.left.type, VectorType) or not isinstance(instruction.right.type, VectorType):
+            raise LLVMBackendError("LLVM vector_dot expects vector operands")
+        if instruction.left.type.orientation != "row" or instruction.right.type.orientation != "column":
+            raise LLVMBackendError("LLVM vector_dot is only defined for Vector<Row> * Vector<Column>")
+        if instruction.length <= 0:
+            raise LLVMBackendError("LLVM vector_dot requires a positive length")
+        if not isinstance(instruction.result.type, (IntType, DoubleType)):
+            raise LLVMBackendError("LLVM vector_dot only supports int or double results")
+        if not isinstance(instruction.left.type.element, (IntType, DoubleType)):
+            raise LLVMBackendError("LLVM vector_dot only supports int or double left elements")
+        if not isinstance(instruction.right.type.element, (IntType, DoubleType)):
+            raise LLVMBackendError("LLVM vector_dot only supports int or double right elements")
+
+    def _coerce_scalar(
+        self,
+        lines: list[str],
+        value: str,
+        source_type: object,
+        target_type: object,
+        prefix: str,
+    ) -> str:
+        if source_type == target_type:
+            return value
+        if isinstance(source_type, IntType) and isinstance(target_type, DoubleType):
+            result = self._synthetic_temp(prefix)
+            lines.append(f"  {result} = sitofp i32 {value} to double")
+            return result
+        raise LLVMBackendError(f"LLVM backend cannot coerce {source_type} to {target_type}")
 
     def _print_matrix_add(self, instruction: SSAMatrixAdd) -> list[str]:
         self._validate_matrix_binary(instruction, "add")

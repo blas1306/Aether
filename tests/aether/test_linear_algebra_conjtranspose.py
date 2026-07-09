@@ -59,7 +59,7 @@ import Math.LinearAlgebra
 A = [1 2 3; 4 5 6];
 B = A';
 C = B';
-G = A' * A;
+G = Math.LinearAlgebra.matmul(A', A);
 println(B);
 println(C);
 println(G);

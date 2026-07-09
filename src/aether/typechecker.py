@@ -3455,26 +3455,18 @@ def _algebraic_multiplication_type(left_type: AetherType, right_type: AetherType
     if right_type in NUMERIC_TYPES and isinstance(left_type, TransposeVectorType):
         return TransposeVectorType(promote_numeric(_numeric_transpose_vector_scalar_type(left_type), right_type, "*"), left_type.length)
     if isinstance(left_type, VectorType) and isinstance(right_type, VectorType):
-        raise AetherTypeError("Operator '*' between Vector and Vector is ambiguous; use transpose(v) * w for dot product, v * transpose(w) for outer product, or v .* w for elementwise multiplication.")
-    if isinstance(left_type, MatrixType) and isinstance(right_type, MatrixType):
-        if left_type.cols is not None and right_type.rows is not None and left_type.cols != right_type.rows:
-            raise AetherTypeError(
-                f"Operator '*' requires compatible matrix shapes, got {left_type.rows}x{left_type.cols} and {right_type.rows}x{right_type.cols}."
-            )
-        return MatrixType(
-            promote_numeric(_numeric_matrix_scalar_type(left_type), _numeric_matrix_scalar_type(right_type), "*"),
-            left_type.rows,
-            right_type.cols,
+        if left_type.orientation == "row" and right_type.orientation == "column":
+            if left_type.length is not None and right_type.length is not None and left_type.length != right_type.length:
+                raise AetherTypeError(
+                    f"Operator '*' requires vectors with the same length, got {left_type.length} and {right_type.length}."
+                )
+            return promote_numeric(_numeric_vector_scalar_type(left_type), _numeric_vector_scalar_type(right_type), "*")
+        raise AetherTypeError(
+            "Operator '*' between Vector operands is only defined for Vector<Row> * Vector<Column>; "
+            "use Math.LinearAlgebra.matmul(...) for other algebraic products or '.*' for elementwise multiplication."
         )
-    if isinstance(left_type, MatrixType) and isinstance(right_type, VectorType):
-        if left_type.cols is not None and right_type.length is not None and left_type.cols != right_type.length:
-            raise AetherTypeError(
-                f"Operator '*' requires compatible Matrix and Vector shapes, got {left_type.rows}x{left_type.cols} and {right_type.length}."
-            )
-        return VectorType(
-            promote_numeric(_numeric_matrix_scalar_type(left_type), _numeric_vector_scalar_type(right_type), "*"),
-            left_type.rows,
-        )
+    if isinstance(left_type, MatrixType) and isinstance(right_type, (MatrixType, VectorType)):
+        raise AetherTypeError("Operator '*' does not implement matrix algebra yet; use Math.LinearAlgebra.matmul(...).")
     if isinstance(left_type, TransposeVectorType) and isinstance(right_type, VectorType):
         if left_type.length is not None and right_type.length is not None and left_type.length != right_type.length:
             raise AetherTypeError(f"Operator '*' requires vectors with the same length, got {left_type.length} and {right_type.length}.")

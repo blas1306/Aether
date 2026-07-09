@@ -30,6 +30,7 @@ from aether.ir.model import (
     IRValue,
     IRVectorGet,
     IRVectorAdd,
+    IRVectorDot,
     IRVectorScale,
     IRVectorSub,
     IRVectorLength,
@@ -57,6 +58,7 @@ class DeadCodeEliminator:
         IRMatrixRows,
         IRMatrixColumns,
         IRVectorAdd,
+        IRVectorDot,
         IRVectorScale,
         IRMatrixAdd,
         IRMatrixScale,
@@ -162,6 +164,7 @@ class DeadCodeEliminator:
                 IRMatrixRows,
                 IRMatrixColumns,
                 IRVectorAdd,
+                IRVectorDot,
                 IRVectorScale,
                 IRMatrixAdd,
                 IRMatrixScale,
@@ -194,7 +197,7 @@ class DeadCodeEliminator:
             return instruction.elements
         if isinstance(instruction, IRMatrixNew):
             return instruction.elements
-        if isinstance(instruction, (IRVectorAdd, IRMatrixAdd, IRVectorSub, IRMatrixSub)):
+        if isinstance(instruction, (IRVectorAdd, IRVectorDot, IRMatrixAdd, IRVectorSub, IRMatrixSub)):
             return (instruction.left, instruction.right)
         if isinstance(instruction, IRVectorScale):
             return (instruction.vector, instruction.scalar)

@@ -20,7 +20,7 @@ def test_svd_returns_full_factors_for_imported_short_name() -> None:
 import Math.LinearAlgebra
 A = [3 2; 1 0; 0 0];
 U, S, V = SVD(A);
-R = U * S * V';
+R = Math.LinearAlgebra.matmul(Math.LinearAlgebra.matmul(U, S), V');
 """
     )
 
@@ -37,7 +37,7 @@ def test_svd_returns_full_factors_for_qualified_name_and_wide_matrix() -> None:
         """
 A = [1 2 3; 4 5 6];
 U, S, V = Math.LinearAlgebra.SVD(A);
-R = U * S * Math.LinearAlgebra.transpose(V);
+R = Math.LinearAlgebra.matmul(Math.LinearAlgebra.matmul(U, S), Math.LinearAlgebra.transpose(V));
 """
     )
 
@@ -53,7 +53,7 @@ def test_svd_returns_complex_unitary_factors_for_complex_matrix() -> None:
 import Math.LinearAlgebra
 A = [1 im; 2 0; 0 1 - im];
 U, S, V = SVD(A);
-R = U * S * V';
+R = Math.LinearAlgebra.matmul(Math.LinearAlgebra.matmul(U, S), V');
 """
     )
 

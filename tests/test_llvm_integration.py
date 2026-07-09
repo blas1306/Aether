@@ -39,6 +39,7 @@ EXPECTED_EXIT_CODES = {
     "vector_add.ae": 21,
     "vector_column_inferred.ae": 0,
     "vector_column_literal.ae": 0,
+    "vector_dot.ae": 32,
     "vector_index.ae": 5,
     "vector_length.ae": 3,
     "vector_literal.ae": 0,

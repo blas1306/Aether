@@ -20,8 +20,8 @@ def test_lu_returns_permutation_lower_and_upper_factors_after_import() -> None:
 import Math.LinearAlgebra
 A = [2 1; 4 5];
 P, L, U = LU(A);
-PA = P * A;
-R = L * U;
+PA = Math.LinearAlgebra.matmul(P, A);
+R = Math.LinearAlgebra.matmul(L, U);
 """
     )
 
@@ -40,8 +40,8 @@ def test_ldu_returns_permutation_unit_triangular_factors_and_diagonal_factor() -
 import Math.LinearAlgebra
 A = [4 8; 2 6];
 P, L, D, U = LDU(A);
-PA = P * A;
-R = L * D * U;
+PA = Math.LinearAlgebra.matmul(P, A);
+R = Math.LinearAlgebra.matmul(Math.LinearAlgebra.matmul(L, D), U);
 """
     )
 
@@ -62,10 +62,10 @@ def test_lu_and_ldu_work_with_qualified_names() -> None:
 A = [3 6; 1 5];
 P1, L1, U1 = Math.LinearAlgebra.LU(A);
 P2, L2, D2, U2 = Math.LinearAlgebra.LDU(A);
-PA1 = P1 * A;
-PA2 = P2 * A;
-R1 = L1 * U1;
-R2 = L2 * D2 * U2;
+PA1 = Math.LinearAlgebra.matmul(P1, A);
+PA2 = Math.LinearAlgebra.matmul(P2, A);
+R1 = Math.LinearAlgebra.matmul(L1, U1);
+R2 = Math.LinearAlgebra.matmul(Math.LinearAlgebra.matmul(L2, D2), U2);
 """
     )
 
@@ -80,10 +80,10 @@ import Math.LinearAlgebra
 A = [0 1; 1 0];
 P1, L1, U1 = LU(A);
 P2, L2, D2, U2 = LDU(A);
-PA1 = P1 * A;
-PA2 = P2 * A;
-R1 = L1 * U1;
-R2 = L2 * D2 * U2;
+PA1 = Math.LinearAlgebra.matmul(P1, A);
+PA2 = Math.LinearAlgebra.matmul(P2, A);
+R1 = Math.LinearAlgebra.matmul(L1, U1);
+R2 = Math.LinearAlgebra.matmul(Math.LinearAlgebra.matmul(L2, D2), U2);
 """
     )
 
@@ -99,8 +99,8 @@ def test_lu_returns_complex_factors_for_complex_matrix() -> None:
 import Math.LinearAlgebra
 A = [0 1 + im; 2 3];
 P, L, U = LU(A);
-PA = P * A;
-R = L * U;
+PA = Math.LinearAlgebra.matmul(P, A);
+R = Math.LinearAlgebra.matmul(L, U);
 """
     )
 
@@ -120,8 +120,8 @@ def test_ldu_returns_complex_factors_for_complex_matrix() -> None:
 import Math.LinearAlgebra
 A = [2 1 + im; 4 3];
 P, L, D, U = LDU(A);
-PA = P * A;
-R = L * D * U;
+PA = Math.LinearAlgebra.matmul(P, A);
+R = Math.LinearAlgebra.matmul(Math.LinearAlgebra.matmul(L, D), U);
 """
     )
 

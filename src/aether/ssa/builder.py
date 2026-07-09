@@ -31,6 +31,7 @@ from aether.ir.model import (
     IRValue,
     IRVectorGet,
     IRVectorAdd,
+    IRVectorDot,
     IRVectorScale,
     IRVectorSub,
     IRVectorNew,
@@ -65,6 +66,7 @@ from .model import (
     SSAValue,
     SSAVectorGet,
     SSAVectorAdd,
+    SSAVectorDot,
     SSAVectorScale,
     SSAVectorSub,
     SSAVectorNew,
@@ -553,6 +555,12 @@ class SSABuilder:
             vector = self._resolve_value(instruction.vector, state.value_map)
             scalar = self._resolve_value(instruction.scalar, state.value_map)
             return SSAVectorScale(result, vector, scalar, instruction.length, instruction.orientation)
+
+        if isinstance(instruction, IRVectorDot):
+            result = self._define_value(instruction.result, state.value_map)
+            left = self._resolve_value(instruction.left, state.value_map)
+            right = self._resolve_value(instruction.right, state.value_map)
+            return SSAVectorDot(result, left, right, instruction.length)
 
         if isinstance(instruction, IRMatrixAdd):
             result = self._define_value(instruction.result, state.value_map)

@@ -32,6 +32,7 @@ from aether.ssa.model import (
     SSAValue,
     SSAVectorGet,
     SSAVectorAdd,
+    SSAVectorDot,
     SSAVectorScale,
     SSAVectorSub,
     SSAVectorLength,
@@ -302,6 +303,14 @@ class SSAAlgebraicSimplifier:
                 self._resolve(instruction.right, replacements),
                 instruction.length,
                 instruction.orientation,
+            )
+
+        if isinstance(instruction, SSAVectorDot):
+            return SSAVectorDot(
+                instruction.result,
+                self._resolve(instruction.left, replacements),
+                self._resolve(instruction.right, replacements),
+                instruction.length,
             )
 
         if isinstance(instruction, SSAVectorScale):
