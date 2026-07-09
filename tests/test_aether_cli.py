@@ -974,6 +974,30 @@ int main() {
     assert stderr == ""
 
 
+def test_emit_llvm_prints_vector_and_matrix_dimension_properties(tmp_path: Path) -> None:
+    program = tmp_path / "emit_llvm_dimension_properties.ae"
+    program.write_text(
+        """
+int main() {
+    Vector<int, Row> v = [4, 5, 6];
+    Matrix<int> A = [1, 2; 3, 4; 5, 6];
+    return v.length + A.rows + A.columns;
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert "vector.len64" in stdout
+    assert "trunc i64" in stdout
+    assert "add i32 0, 3" in stdout
+    assert "add i32 0, 2" in stdout
+    assert "ret i32" in stdout
+    assert stderr == ""
+
+
 def test_emit_llvm_prints_string_literal_global(tmp_path: Path) -> None:
     program = tmp_path / "emit_llvm_string.ae"
     program.write_text(
@@ -1687,6 +1711,32 @@ int main() {
     assert stderr == ""
 
 
+def test_build_accepts_vector_and_matrix_dimension_properties(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    program = tmp_path / "build_dimension_properties.ae"
+    output = tmp_path / "build_dimension_properties"
+    program.write_text(
+        """
+int main() {
+    Vector<int, Row> v = [4, 5, 6];
+    Matrix<int> A = [1, 2; 3, 4; 5, 6];
+    return v.length + A.rows + A.columns;
+}
+""",
+        encoding="utf-8",
+    )
+    clang_commands, _program_commands = fake_native_toolchain(monkeypatch)
+
+    exit_code, stdout, stderr = run_cli(["build", str(program), "-o", str(output)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert len(clang_commands) == 1
+    assert stdout == f"Built executable: {output.resolve()}\n"
+    assert stderr == ""
+
+
 def test_build_reports_clear_error_when_clang_is_unavailable(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1969,6 +2019,32 @@ int main() {
     assert stderr == ""
     completed = subprocess.run([str(output)], check=False)
     assert completed.returncode == 9
+
+
+def test_build_dimension_properties_smoke_compiles_and_runs_with_clang_if_available(tmp_path: Path) -> None:
+    if shutil.which("clang") is None:
+        pytest.skip("clang is not available")
+
+    program = tmp_path / "dimension_properties.ae"
+    output = tmp_path / "dimension_properties"
+    program.write_text(
+        """
+int main() {
+    Vector<int, Row> v = [4, 5, 6];
+    Matrix<int> A = [1, 2; 3, 4; 5, 6];
+    return v.length + A.rows + A.columns;
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = run_cli(["build", str(program), "-o", str(output)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert stdout == f"Built executable: {output.resolve()}\n"
+    assert stderr == ""
+    completed = subprocess.run([str(output)], check=False)
+    assert completed.returncode == 8
 
 
 def test_build_call_smoke_compiles_and_runs_with_clang_if_available(

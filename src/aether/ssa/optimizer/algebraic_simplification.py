@@ -18,14 +18,17 @@ from aether.ssa.model import (
     SSAFunction,
     SSAInstruction,
     SSAJump,
+    SSAMatrixColumns,
     SSAMatrixGet,
     SSAMatrixNew,
+    SSAMatrixRows,
     SSAMatrixSet,
     SSAModule,
     SSAPhi,
     SSAReturn,
     SSAValue,
     SSAVectorGet,
+    SSAVectorLength,
     SSAVectorNew,
     SSAVectorSet,
 )
@@ -327,6 +330,26 @@ class SSAAlgebraicSimplifier:
             return SSAArrayLength(
                 instruction.result,
                 self._resolve(instruction.array, replacements),
+            )
+
+        if isinstance(instruction, SSAVectorLength):
+            return SSAVectorLength(
+                instruction.result,
+                self._resolve(instruction.vector, replacements),
+            )
+
+        if isinstance(instruction, SSAMatrixRows):
+            return SSAMatrixRows(
+                instruction.result,
+                self._resolve(instruction.matrix, replacements),
+                instruction.rows,
+            )
+
+        if isinstance(instruction, SSAMatrixColumns):
+            return SSAMatrixColumns(
+                instruction.result,
+                self._resolve(instruction.matrix, replacements),
+                instruction.columns,
             )
 
         if isinstance(instruction, SSAPhi):

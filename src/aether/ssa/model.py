@@ -105,6 +105,26 @@ class SSAMatrixGet(SSAInstruction):
 
 
 @dataclass(frozen=True)
+class SSAVectorLength(SSAInstruction):
+    result: SSAValue
+    vector: SSAValue
+
+
+@dataclass(frozen=True)
+class SSAMatrixRows(SSAInstruction):
+    result: SSAValue
+    matrix: SSAValue
+    rows: int
+
+
+@dataclass(frozen=True)
+class SSAMatrixColumns(SSAInstruction):
+    result: SSAValue
+    matrix: SSAValue
+    columns: int
+
+
+@dataclass(frozen=True)
 class SSAArraySet(SSAInstruction):
     array: SSAValue
     index: SSAValue

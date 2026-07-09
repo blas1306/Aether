@@ -21,13 +21,16 @@ from aether.ir.model import (
     IRInstruction,
     IRJump,
     IRLoad,
+    IRMatrixColumns,
     IRMatrixGet,
     IRMatrixNew,
+    IRMatrixRows,
     IRMatrixSet,
     IRReturn,
     IRStore,
     IRValue,
     IRVectorGet,
+    IRVectorLength,
     IRVectorNew,
     IRVectorSet,
 )
@@ -48,14 +51,17 @@ from .model import (
     SSAFunction,
     SSAInstruction,
     SSAJump,
+    SSAMatrixColumns,
     SSAMatrixGet,
     SSAMatrixNew,
+    SSAMatrixRows,
     SSAMatrixSet,
     SSAParameter,
     SSAPhi,
     SSAReturn,
     SSAValue,
     SSAVectorGet,
+    SSAVectorLength,
     SSAVectorNew,
     SSAVectorSet,
 )
@@ -272,6 +278,24 @@ class SSARenamer:
             column = self._resolve_value(instruction.column)
             self._bind_value(result.name, result, bound_values)
             return SSAMatrixGet(result, matrix, row, column, instruction.cols)
+
+        if isinstance(instruction, IRVectorLength):
+            result = self._define_value(instruction.result)
+            vector = self._resolve_value(instruction.vector)
+            self._bind_value(result.name, result, bound_values)
+            return SSAVectorLength(result, vector)
+
+        if isinstance(instruction, IRMatrixRows):
+            result = self._define_value(instruction.result)
+            matrix = self._resolve_value(instruction.matrix)
+            self._bind_value(result.name, result, bound_values)
+            return SSAMatrixRows(result, matrix, instruction.rows)
+
+        if isinstance(instruction, IRMatrixColumns):
+            result = self._define_value(instruction.result)
+            matrix = self._resolve_value(instruction.matrix)
+            self._bind_value(result.name, result, bound_values)
+            return SSAMatrixColumns(result, matrix, instruction.columns)
 
         if isinstance(instruction, IRArraySet):
             array = self._resolve_value(instruction.array)

@@ -13,13 +13,16 @@ from aether.ir import (
     IRFunction,
     IRInterpreter,
     IRLowerer,
+    IRMatrixColumns,
     IRMatrixGet,
     IRMatrixNew,
+    IRMatrixRows,
     IRMatrixSet,
     IRModule,
     IRReturn,
     IRValue,
     IRVectorGet,
+    IRVectorLength,
     IRVectorNew,
     IRVectorSet,
     IRVerificationError,
@@ -34,15 +37,19 @@ from aether.parser import Parser
 from aether.pipeline import lower_to_verified_ssa, prepare_typed_program
 from aether.ssa import (
     SSABasicBlock,
+    SSABinaryOp,
     SSAConst,
     SSAFunction,
+    SSAMatrixColumns,
     SSAMatrixGet,
     SSAMatrixNew,
+    SSAMatrixRows,
     SSAMatrixSet,
     SSAModule,
     SSAReturn,
     SSAValue,
     SSAVectorGet,
+    SSAVectorLength,
     SSAVectorNew,
     SSAVectorSet,
     SSAVerificationError,
@@ -78,6 +85,18 @@ def test_parser_builds_matrix_index_expression() -> None:
     assert expression.matrix.name == "A"
     assert isinstance(expression.row, ast.Identifier)
     assert isinstance(expression.column, ast.BinaryExpression)
+
+
+@pytest.mark.parametrize(
+    ("source", "property_name"),
+    [("v.length", "length"), ("A.rows", "rows"), ("A.columns", "columns")],
+)
+def test_parser_builds_dimension_property_access(source: str, property_name: str) -> None:
+    expression = _parse_expression(source)
+
+    assert isinstance(expression, ast.FieldAccess)
+    assert isinstance(expression.target, ast.Identifier)
+    assert expression.field_name == property_name
 
 
 def test_parser_builds_assignment_with_vector_index_target() -> None:
@@ -125,6 +144,18 @@ int main() {
     v[1] = 9;
     A[1, 0] = v[1];
     return A[1, 0];
+}
+"""
+    )
+
+
+def test_typechecker_accepts_dimension_properties_as_int() -> None:
+    _typed(
+        """
+int main() {
+    Vector<int, Row> v = [4, 5, 6];
+    Matrix<int> A = [1, 2; 3, 4];
+    return v.length + A.rows + A.columns;
 }
 """
     )
@@ -240,6 +271,43 @@ def test_typechecker_reports_index_errors(source: str, message: str) -> None:
         _typed(source)
 
 
+@pytest.mark.parametrize(
+    ("source", "message"),
+    [
+        (
+            """
+int main() {
+    Vector<int, Row> v = [1, 2, 3];
+    return v.rows;
+}
+""",
+            "has no native property 'rows'",
+        ),
+        (
+            """
+int main() {
+    Matrix<int> A = [1, 2; 3, 4];
+    return A.length;
+}
+""",
+            "has no native property 'length'",
+        ),
+        (
+            """
+int main() {
+    Vector<int, Row> v = [1, 2, 3];
+    return v.length();
+}
+""",
+            "length is a property, not a method",
+        ),
+    ],
+)
+def test_typechecker_reports_dimension_property_errors(source: str, message: str) -> None:
+    with pytest.raises(AetherTypeError, match=message):
+        _typed(source)
+
+
 def test_lowering_and_ir_interpreter_execute_vector_index_read() -> None:
     typed_program = _typed(
         """
@@ -276,6 +344,30 @@ int main() {
     assert matrix_get.cols == 2
     assert "matrix_get" in print_ir(module)
     assert IRInterpreter(module).call("main") == 3
+
+
+def test_lowering_and_ir_interpreter_execute_dimension_properties() -> None:
+    typed_program = _typed(
+        """
+int main() {
+    Vector<int, Row> v = [4, 5, 6];
+    Matrix<int> A = [1, 2; 3, 4; 5, 6];
+    return v.length + A.rows + A.columns;
+}
+"""
+    )
+    module = IRVerifier(IRLowerer().lower(typed_program.program)).verify()
+
+    instructions = module.functions[0].blocks[0].instructions
+    matrix_rows = next(instruction for instruction in instructions if isinstance(instruction, IRMatrixRows))
+    matrix_columns = next(instruction for instruction in instructions if isinstance(instruction, IRMatrixColumns))
+    assert any(isinstance(instruction, IRVectorLength) for instruction in instructions)
+    assert matrix_rows.rows == 3
+    assert matrix_columns.columns == 2
+    assert "vector_length" in print_ir(module)
+    assert "matrix_rows" in print_ir(module)
+    assert "matrix_columns" in print_ir(module)
+    assert IRInterpreter(module).call("main") == 8
 
 
 def test_lowering_and_ir_interpreter_execute_vector_and_matrix_index_writes() -> None:
@@ -319,6 +411,28 @@ int main() {
     assert any(isinstance(instruction, SSAMatrixGet) for instruction in instructions)
     assert "vector_get" in print_ssa(ssa)
     assert "matrix_get" in print_ssa(ssa)
+
+
+def test_ssa_preserves_dimension_properties() -> None:
+    typed_program = _typed(
+        """
+int main() {
+    Vector<int, Row> v = [4, 5, 6];
+    Matrix<int> A = [1, 2; 3, 4; 5, 6];
+    return v.length + A.rows + A.columns;
+}
+"""
+    )
+
+    ssa = lower_to_verified_ssa(typed_program)
+    instructions = ssa.functions[0].blocks[0].instructions
+
+    assert any(isinstance(instruction, SSAVectorLength) for instruction in instructions)
+    assert any(isinstance(instruction, SSAMatrixRows) for instruction in instructions)
+    assert any(isinstance(instruction, SSAMatrixColumns) for instruction in instructions)
+    assert "vector_length" in print_ssa(ssa)
+    assert "matrix_rows" in print_ssa(ssa)
+    assert "matrix_columns" in print_ssa(ssa)
 
 
 def test_ssa_preserves_vector_and_matrix_index_writes() -> None:
@@ -469,6 +583,64 @@ def test_ssa_verifier_rejects_bad_matrix_set_column_type() -> None:
         SSAVerifier(module).verify()
 
 
+def test_ir_verifier_rejects_bad_vector_length_source() -> None:
+    int_type = IntType()
+    not_vector = IRValue("x", int_type)
+    result = IRValue("r", int_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "main",
+                [],
+                int_type,
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [
+                            IRConst(not_vector, 0),
+                            IRVectorLength(result, not_vector),
+                            IRReturn(result),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+
+    with pytest.raises(IRVerificationError, match="Vector length expects vector value"):
+        IRVerifier(module).verify()
+
+
+def test_ssa_verifier_rejects_bad_matrix_rows_result_type() -> None:
+    int_type = IntType()
+    matrix = SSAValue("m", MatrixType(int_type))
+    element = SSAValue("x", int_type)
+    result = SSAValue("r", MatrixType(int_type))
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [],
+                int_type,
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(element, 1),
+                            SSAMatrixNew(matrix, (element,), 1, 1),
+                            SSAMatrixRows(result, matrix, 1),
+                            SSAReturn(element),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+
+    with pytest.raises(SSAVerificationError, match="Matrix rows result must be int"):
+        SSAVerifier(module).verify()
+
+
 def test_ir_optimizer_preserves_vector_and_matrix_sets() -> None:
     typed_program = _typed(
         """
@@ -537,6 +709,49 @@ def test_llvm_emits_vector_and_matrix_get_loads() -> None:
     assert "mul i64 %matrix.row64" in llvm
     assert ", 2" in llvm
     assert "add i64" in llvm
+
+
+def test_llvm_emits_dimension_properties() -> None:
+    int_type = IntType()
+    first = SSAValue("0", int_type)
+    second = SSAValue("1", int_type)
+    vector = SSAValue("2", VectorType(int_type, "row"))
+    vector_length = SSAValue("3", int_type)
+    matrix = SSAValue("4", MatrixType(int_type))
+    matrix_rows = SSAValue("5", int_type)
+    matrix_columns = SSAValue("6", int_type)
+    total = SSAValue("7", int_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [],
+                int_type,
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(first, 10),
+                            SSAConst(second, 20),
+                            SSAVectorNew(vector, (first, second), "row"),
+                            SSAVectorLength(vector_length, vector),
+                            SSAMatrixNew(matrix, (first, second, second, first), 2, 2),
+                            SSAMatrixRows(matrix_rows, matrix, 2),
+                            SSAMatrixColumns(matrix_columns, matrix, 2),
+                            SSABinaryOp(total, "add", vector_length, matrix_rows),
+                            SSAReturn(total),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+
+    llvm = print_llvm(SSAVerifier(module).verify())
+
+    assert "vector.len64" in llvm
+    assert "trunc i64" in llvm
+    assert "add i32 0, 2" in llvm
 
 
 def test_llvm_emits_vector_and_matrix_set_stores() -> None:
@@ -627,6 +842,16 @@ int main() {
 }
 """,
             9,
+        ),
+        (
+            """
+int main() {
+    Vector<int, Row> v = [4, 5, 6];
+    Matrix<int> A = [1, 2; 3, 4; 5, 6];
+    return v.length + A.rows + A.columns;
+}
+""",
+            8,
         ),
     ],
 )

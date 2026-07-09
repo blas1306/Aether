@@ -117,6 +117,26 @@ class IRMatrixGet(IRInstruction):
 
 
 @dataclass(frozen=True)
+class IRVectorLength(IRInstruction):
+    result: IRValue
+    vector: IRValue
+
+
+@dataclass(frozen=True)
+class IRMatrixRows(IRInstruction):
+    result: IRValue
+    matrix: IRValue
+    rows: int
+
+
+@dataclass(frozen=True)
+class IRMatrixColumns(IRInstruction):
+    result: IRValue
+    matrix: IRValue
+    columns: int
+
+
+@dataclass(frozen=True)
 class IRArraySet(IRInstruction):
     array: IRValue
     index: IRValue

@@ -20,8 +20,10 @@ from aether.ssa.model import (
     SSAFunction,
     SSAInstruction,
     SSAJump,
+    SSAMatrixColumns,
     SSAMatrixGet,
     SSAMatrixNew,
+    SSAMatrixRows,
     SSAMatrixSet,
     SSAModule,
     SSAParameter,
@@ -29,6 +31,7 @@ from aether.ssa.model import (
     SSAReturn,
     SSAValue,
     SSAVectorGet,
+    SSAVectorLength,
     SSAVectorNew,
     SSAVectorSet,
 )
@@ -172,6 +175,12 @@ class LLVMPrinter:
             return "\n  ".join(self._print_vector_get(instruction))
         if isinstance(instruction, SSAMatrixGet):
             return "\n  ".join(self._print_matrix_get(instruction))
+        if isinstance(instruction, SSAVectorLength):
+            return "\n  ".join(self._print_vector_length(instruction))
+        if isinstance(instruction, SSAMatrixRows):
+            return self._print_matrix_rows(instruction)
+        if isinstance(instruction, SSAMatrixColumns):
+            return self._print_matrix_columns(instruction)
         if isinstance(instruction, SSAArraySet):
             return "\n  ".join(self._print_array_set(instruction))
         if isinstance(instruction, SSAVectorSet):
@@ -197,7 +206,18 @@ class LLVMPrinter:
             return instruction.result
         if isinstance(
             instruction,
-            (SSAArrayNew, SSAArrayGet, SSAVectorGet, SSAMatrixGet, SSAArrayLength, SSAVectorNew, SSAMatrixNew),
+            (
+                SSAArrayNew,
+                SSAArrayGet,
+                SSAVectorGet,
+                SSAMatrixGet,
+                SSAArrayLength,
+                SSAVectorLength,
+                SSAMatrixRows,
+                SSAMatrixColumns,
+                SSAVectorNew,
+                SSAMatrixNew,
+            ),
         ):
             return instruction.result
         return None
@@ -545,6 +565,28 @@ class LLVMPrinter:
         lines = self._array_length64(length64, self._operand(instruction.array))
         lines.append(f"{result} = trunc i64 {length64} to i32")
         return lines
+
+    def _print_vector_length(self, instruction: SSAVectorLength) -> list[str]:
+        if not isinstance(instruction.vector.type, VectorType):
+            raise LLVMBackendError("LLVM vector_length expects a VectorType source")
+        self._uses_array_type = True
+        result = self._new_temp(instruction.result)
+        length64 = self._synthetic_temp("vector.len64")
+        lines = self._array_length64(length64, self._operand(instruction.vector))
+        lines.append(f"{result} = trunc i64 {length64} to i32")
+        return lines
+
+    def _print_matrix_rows(self, instruction: SSAMatrixRows) -> str:
+        if not isinstance(instruction.matrix.type, MatrixType):
+            raise LLVMBackendError("LLVM matrix_rows expects a MatrixType source")
+        result = self._new_temp(instruction.result)
+        return f"{result} = add i32 0, {instruction.rows}"
+
+    def _print_matrix_columns(self, instruction: SSAMatrixColumns) -> str:
+        if not isinstance(instruction.matrix.type, MatrixType):
+            raise LLVMBackendError("LLVM matrix_columns expects a MatrixType source")
+        result = self._new_temp(instruction.result)
+        return f"{result} = add i32 0, {instruction.columns}"
 
     @dataclass(frozen=True)
     class _ArrayPointer:

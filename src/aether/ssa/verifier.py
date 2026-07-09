@@ -37,14 +37,17 @@ from .model import (
     SSAFunction,
     SSAInstruction,
     SSAJump,
+    SSAMatrixColumns,
     SSAMatrixGet,
     SSAMatrixNew,
+    SSAMatrixRows,
     SSAMatrixSet,
     SSAModule,
     SSAPhi,
     SSAReturn,
     SSAValue,
     SSAVectorGet,
+    SSAVectorLength,
     SSAVectorNew,
     SSAVectorSet,
 )
@@ -274,6 +277,18 @@ class SSAVerifier:
 
             if isinstance(instruction, SSAMatrixGet):
                 self._verify_matrix_get(instruction, value_types)
+                continue
+
+            if isinstance(instruction, SSAVectorLength):
+                self._verify_vector_length(instruction, value_types)
+                continue
+
+            if isinstance(instruction, SSAMatrixRows):
+                self._verify_matrix_rows(instruction, value_types)
+                continue
+
+            if isinstance(instruction, SSAMatrixColumns):
+                self._verify_matrix_columns(instruction, value_types)
                 continue
 
             if isinstance(instruction, SSAArraySet):
@@ -557,6 +572,43 @@ class SSAVerifier:
         if not isinstance(instruction.result.type, IntType):
             self._fail(f"Array length result must be int, got {instruction.result.type}")
 
+    def _verify_vector_length(
+        self,
+        instruction: SSAVectorLength,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.vector, value_types)
+        if not isinstance(instruction.vector.type, VectorType):
+            self._fail(f"Vector length expects vector value, got {instruction.vector.type}")
+        if not isinstance(instruction.result.type, IntType):
+            self._fail(f"Vector length result must be int, got {instruction.result.type}")
+
+    def _verify_matrix_rows(
+        self,
+        instruction: SSAMatrixRows,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.matrix, value_types)
+        if not isinstance(instruction.matrix.type, MatrixType):
+            self._fail(f"Matrix rows expects matrix value, got {instruction.matrix.type}")
+        if instruction.rows <= 0:
+            self._fail(f"Matrix rows count must be positive, got {instruction.rows}")
+        if not isinstance(instruction.result.type, IntType):
+            self._fail(f"Matrix rows result must be int, got {instruction.result.type}")
+
+    def _verify_matrix_columns(
+        self,
+        instruction: SSAMatrixColumns,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.matrix, value_types)
+        if not isinstance(instruction.matrix.type, MatrixType):
+            self._fail(f"Matrix columns expects matrix value, got {instruction.matrix.type}")
+        if instruction.columns <= 0:
+            self._fail(f"Matrix columns count must be positive, got {instruction.columns}")
+        if not isinstance(instruction.result.type, IntType):
+            self._fail(f"Matrix columns result must be int, got {instruction.result.type}")
+
     def _verify_phi(
         self,
         instruction: SSAPhi,
@@ -778,7 +830,18 @@ class SSAVerifier:
             return instruction.result
         if isinstance(
             instruction,
-            (SSAArrayNew, SSAArrayGet, SSAVectorGet, SSAMatrixGet, SSAArrayLength, SSAVectorNew, SSAMatrixNew),
+            (
+                SSAArrayNew,
+                SSAArrayGet,
+                SSAVectorGet,
+                SSAMatrixGet,
+                SSAArrayLength,
+                SSAVectorLength,
+                SSAMatrixRows,
+                SSAMatrixColumns,
+                SSAVectorNew,
+                SSAMatrixNew,
+            ),
         ):
             return instruction.result
         return None

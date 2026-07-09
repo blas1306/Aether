@@ -18,8 +18,10 @@ from .model import (
     SSAFunction,
     SSAInstruction,
     SSAJump,
+    SSAMatrixColumns,
     SSAMatrixGet,
     SSAMatrixNew,
+    SSAMatrixRows,
     SSAMatrixSet,
     SSAModule,
     SSAParameter,
@@ -27,6 +29,7 @@ from .model import (
     SSAReturn,
     SSAValue,
     SSAVectorGet,
+    SSAVectorLength,
     SSAVectorNew,
     SSAVectorSet,
 )
@@ -126,6 +129,18 @@ class SSAPrinter:
             )
         if isinstance(instruction, SSAArrayLength):
             return f"{self._typed_value(instruction.result)} = array_length {self._value(instruction.array)}"
+        if isinstance(instruction, SSAVectorLength):
+            return f"{self._typed_value(instruction.result)} = vector_length {self._value(instruction.vector)}"
+        if isinstance(instruction, SSAMatrixRows):
+            return (
+                f"{self._typed_value(instruction.result)} = matrix_rows "
+                f"{self._value(instruction.matrix)} rows {instruction.rows}"
+            )
+        if isinstance(instruction, SSAMatrixColumns):
+            return (
+                f"{self._typed_value(instruction.result)} = matrix_columns "
+                f"{self._value(instruction.matrix)} columns {instruction.columns}"
+            )
         if isinstance(instruction, SSAPhi):
             incoming = ", ".join(
                 f"{block_name}: {self._value(value)}"

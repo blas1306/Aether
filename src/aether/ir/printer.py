@@ -19,14 +19,17 @@ from .model import (
     IRInstruction,
     IRJump,
     IRLoad,
+    IRMatrixColumns,
     IRMatrixGet,
     IRMatrixNew,
+    IRMatrixRows,
     IRMatrixSet,
     IRModule,
     IRReturn,
     IRStore,
     IRValue,
     IRVectorGet,
+    IRVectorLength,
     IRVectorNew,
     IRVectorSet,
 )
@@ -130,6 +133,18 @@ class IRPrinter:
             )
         if isinstance(instruction, IRArrayLength):
             return f"{self._typed_value(instruction.result)} = array_length {self._value(instruction.array)}"
+        if isinstance(instruction, IRVectorLength):
+            return f"{self._typed_value(instruction.result)} = vector_length {self._value(instruction.vector)}"
+        if isinstance(instruction, IRMatrixRows):
+            return (
+                f"{self._typed_value(instruction.result)} = matrix_rows "
+                f"{self._value(instruction.matrix)} rows {instruction.rows}"
+            )
+        if isinstance(instruction, IRMatrixColumns):
+            return (
+                f"{self._typed_value(instruction.result)} = matrix_columns "
+                f"{self._value(instruction.matrix)} columns {instruction.columns}"
+            )
         if isinstance(instruction, IRBranch):
             return (
                 f"branch {self._value(instruction.condition)}, "

@@ -20,14 +20,17 @@ from .model import (
     IRInstruction,
     IRJump,
     IRLoad,
+    IRMatrixColumns,
     IRMatrixGet,
     IRMatrixNew,
+    IRMatrixRows,
     IRMatrixSet,
     IRModule,
     IRReturn,
     IRStore,
     IRValue,
     IRVectorGet,
+    IRVectorLength,
     IRVectorNew,
     IRVectorSet,
 )
@@ -193,6 +196,23 @@ class IRInterpreter:
             offset = row * instruction.cols + column
             self._check_array_index(matrix, offset)
             frame.values[instruction.result] = matrix[offset]
+            return False, None, None
+
+        if isinstance(instruction, IRVectorLength):
+            vector = self._value(instruction.vector, frame)
+            if not isinstance(vector, list):
+                raise IRExecutionError("IR vector length requires a vector value")
+            frame.values[instruction.result] = len(vector)
+            return False, None, None
+
+        if isinstance(instruction, IRMatrixRows):
+            self._value(instruction.matrix, frame)
+            frame.values[instruction.result] = instruction.rows
+            return False, None, None
+
+        if isinstance(instruction, IRMatrixColumns):
+            self._value(instruction.matrix, frame)
+            frame.values[instruction.result] = instruction.columns
             return False, None, None
 
         if isinstance(instruction, IRArraySet):

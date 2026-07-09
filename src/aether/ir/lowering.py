@@ -28,7 +28,9 @@ from .model import (
     IRJump,
     IRLoad,
     IRMatrixGet,
+    IRMatrixColumns,
     IRMatrixNew,
+    IRMatrixRows,
     IRMatrixSet,
     IRModule,
     IRParameter,
@@ -36,6 +38,7 @@ from .model import (
     IRStore,
     IRValue,
     IRVectorGet,
+    IRVectorLength,
     IRVectorNew,
     IRVectorSet,
 )
@@ -89,7 +92,7 @@ class _FunctionContext:
     return_type: IRType
     parameters: dict[str, IRParameter]
     locals: dict[str, IRValue] = field(default_factory=dict)
-    matrix_cols: dict[str, int] = field(default_factory=dict)
+    matrix_dimensions: dict[str, tuple[int, int]] = field(default_factory=dict)
     next_temporary: int = 0
     next_if: int = 0
     next_loop: int = 0
@@ -197,7 +200,7 @@ class IRLowerer:
             )
             slot = IRValue(statement.name, slot_type)
             context.locals[statement.name] = slot
-            self._copy_matrix_cols(value, slot, context)
+            self._copy_matrix_dimensions(value, slot, context)
             context.block.instructions.append(IRStore(slot, value))
             return
 
@@ -231,7 +234,7 @@ class IRLowerer:
                 slot.type,
                 f"assignment to '{statement.name}' requires an implicit conversion",
             )
-            self._copy_matrix_cols(value, slot, context)
+            self._copy_matrix_dimensions(value, slot, context)
             context.block.instructions.append(IRStore(slot, value))
             return
 
@@ -343,12 +346,13 @@ class IRLowerer:
                 f"IR backend only supports two-dimensional assignment for matrices, got '{matrix.type}'.",
                 statement,
             )
-        cols = context.matrix_cols.get(matrix.name)
-        if cols is None:
+        dimensions = context.matrix_dimensions.get(matrix.name)
+        if dimensions is None:
             self._fail(
                 "IR backend requires known matrix dimensions for A[i, j].",
                 statement,
             )
+        _rows, cols = dimensions
         row = self._lower_expression(target.row, context)
         self._require_same_type(row.type, IntType(), "matrix row index must be int")
         column = self._lower_expression(target.column, context)
@@ -477,7 +481,7 @@ class IRLowerer:
             if slot is not None:
                 result = context.temporary(slot.type)
                 context.block.instructions.append(IRLoad(result, slot))
-                self._copy_matrix_cols(slot, result, context)
+                self._copy_matrix_dimensions(slot, result, context)
                 return result
             parameter = context.parameters.get(expression.name)
             if parameter is not None:
@@ -551,12 +555,13 @@ class IRLowerer:
                     f"IR backend only supports two-dimensional indexing matrices, got '{matrix.type}'.",
                     expression,
                 )
-            cols = context.matrix_cols.get(matrix.name)
-            if cols is None:
+            dimensions = context.matrix_dimensions.get(matrix.name)
+            if dimensions is None:
                 self._fail(
                     "IR backend requires known matrix dimensions for A[i, j].",
                     expression,
                 )
+            _rows, cols = dimensions
             row = self._lower_expression(expression.row, context)
             self._require_same_type(row.type, IntType(), "matrix row index must be int")
             column = self._lower_expression(expression.column, context)
@@ -570,6 +575,24 @@ class IRLowerer:
             if expression.field_name == "length" and isinstance(target.type, ArrayType):
                 result = context.temporary(IntType())
                 context.block.instructions.append(IRArrayLength(result, target))
+                return result
+            if expression.field_name == "length" and isinstance(target.type, VectorType):
+                result = context.temporary(IntType())
+                context.block.instructions.append(IRVectorLength(result, target))
+                return result
+            if expression.field_name in {"rows", "columns"} and isinstance(target.type, MatrixType):
+                dimensions = context.matrix_dimensions.get(target.name)
+                if dimensions is None:
+                    self._fail(
+                        f"IR backend requires known matrix dimensions for .{expression.field_name}.",
+                        expression,
+                    )
+                rows, cols = dimensions
+                result = context.temporary(IntType())
+                if expression.field_name == "rows":
+                    context.block.instructions.append(IRMatrixRows(result, target, rows))
+                else:
+                    context.block.instructions.append(IRMatrixColumns(result, target, cols))
                 return result
             self._unsupported(expression, f"field '{expression.field_name}'")
 
@@ -721,15 +744,15 @@ class IRLowerer:
                 "matrix literal element requires an implicit conversion",
             )
         result = context.temporary(matrix_type)
-        context.matrix_cols[result.name] = row_lengths[0]
+        context.matrix_dimensions[result.name] = (len(expression.rows), row_lengths[0])
         context.block.instructions.append(IRMatrixNew(result, elements, len(expression.rows), row_lengths[0]))
         return result
 
     @staticmethod
-    def _copy_matrix_cols(source: IRValue, target: IRValue, context: _FunctionContext) -> None:
-        cols = context.matrix_cols.get(source.name)
-        if cols is not None:
-            context.matrix_cols[target.name] = cols
+    def _copy_matrix_dimensions(source: IRValue, target: IRValue, context: _FunctionContext) -> None:
+        dimensions = context.matrix_dimensions.get(source.name)
+        if dimensions is not None:
+            context.matrix_dimensions[target.name] = dimensions
 
     def _lower_cast(self, call: ast.CallExpression, context: _FunctionContext) -> IRValue:
         if len(call.arguments) != 1:

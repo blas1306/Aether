@@ -19,14 +19,17 @@ from .model import (
     IRInstruction,
     IRJump,
     IRLoad,
+    IRMatrixColumns,
     IRMatrixGet,
     IRMatrixNew,
+    IRMatrixRows,
     IRMatrixSet,
     IRModule,
     IRReturn,
     IRStore,
     IRValue,
     IRVectorGet,
+    IRVectorLength,
     IRVectorNew,
     IRVectorSet,
 )
@@ -370,6 +373,18 @@ class IRVerifier:
             self._verify_matrix_get(instruction, state, value_types)
             return self._define_value(state, instruction.result)
 
+        if isinstance(instruction, IRVectorLength):
+            self._verify_vector_length(instruction, state, value_types)
+            return self._define_value(state, instruction.result)
+
+        if isinstance(instruction, IRMatrixRows):
+            self._verify_matrix_rows(instruction, state, value_types)
+            return self._define_value(state, instruction.result)
+
+        if isinstance(instruction, IRMatrixColumns):
+            self._verify_matrix_columns(instruction, state, value_types)
+            return self._define_value(state, instruction.result)
+
         if isinstance(instruction, IRArraySet):
             self._verify_array_set(instruction, state, value_types)
             return state
@@ -645,6 +660,46 @@ class IRVerifier:
         if not isinstance(instruction.result.type, IntType):
             self._fail(f"Array length result must be int, got {instruction.result.type}")
 
+    def _verify_vector_length(
+        self,
+        instruction: IRVectorLength,
+        state: _State,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.vector, state, value_types)
+        if not isinstance(instruction.vector.type, VectorType):
+            self._fail(f"Vector length expects vector value, got {instruction.vector.type}")
+        if not isinstance(instruction.result.type, IntType):
+            self._fail(f"Vector length result must be int, got {instruction.result.type}")
+
+    def _verify_matrix_rows(
+        self,
+        instruction: IRMatrixRows,
+        state: _State,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.matrix, state, value_types)
+        if not isinstance(instruction.matrix.type, MatrixType):
+            self._fail(f"Matrix rows expects matrix value, got {instruction.matrix.type}")
+        if instruction.rows <= 0:
+            self._fail(f"Matrix rows count must be positive, got {instruction.rows}")
+        if not isinstance(instruction.result.type, IntType):
+            self._fail(f"Matrix rows result must be int, got {instruction.result.type}")
+
+    def _verify_matrix_columns(
+        self,
+        instruction: IRMatrixColumns,
+        state: _State,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.matrix, state, value_types)
+        if not isinstance(instruction.matrix.type, MatrixType):
+            self._fail(f"Matrix columns expects matrix value, got {instruction.matrix.type}")
+        if instruction.columns <= 0:
+            self._fail(f"Matrix columns count must be positive, got {instruction.columns}")
+        if not isinstance(instruction.result.type, IntType):
+            self._fail(f"Matrix columns result must be int, got {instruction.result.type}")
+
     def _verify_return(
         self,
         function: IRFunction,
@@ -904,7 +959,18 @@ class IRVerifier:
             return instruction.result
         if isinstance(
             instruction,
-            (IRArrayNew, IRArrayGet, IRVectorGet, IRMatrixGet, IRArrayLength, IRVectorNew, IRMatrixNew),
+            (
+                IRArrayNew,
+                IRArrayGet,
+                IRVectorGet,
+                IRMatrixGet,
+                IRArrayLength,
+                IRVectorLength,
+                IRMatrixRows,
+                IRMatrixColumns,
+                IRVectorNew,
+                IRMatrixNew,
+            ),
         ):
             return instruction.result
         return None

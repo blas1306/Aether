@@ -21,14 +21,17 @@ from aether.ssa.model import (
     SSAFunction,
     SSAInstruction,
     SSAJump,
+    SSAMatrixColumns,
     SSAMatrixGet,
     SSAMatrixNew,
+    SSAMatrixRows,
     SSAMatrixSet,
     SSAModule,
     SSAPhi,
     SSAReturn,
     SSAValue,
     SSAVectorGet,
+    SSAVectorLength,
     SSAVectorNew,
     SSAVectorSet,
 )
@@ -195,7 +198,18 @@ class SCCPAnalyzer:
 
         if isinstance(
             instruction,
-            (SSAArrayNew, SSAArrayGet, SSAVectorGet, SSAMatrixGet, SSAArrayLength, SSAVectorNew, SSAMatrixNew),
+            (
+                SSAArrayNew,
+                SSAArrayGet,
+                SSAVectorGet,
+                SSAMatrixGet,
+                SSAArrayLength,
+                SSAVectorLength,
+                SSAMatrixRows,
+                SSAMatrixColumns,
+                SSAVectorNew,
+                SSAMatrixNew,
+            ),
         ):
             self._set_state(instruction.result, Overdefined())
             return
@@ -334,7 +348,18 @@ class SCCPAnalyzer:
             return instruction.result
         if isinstance(
             instruction,
-            (SSAArrayNew, SSAArrayGet, SSAVectorGet, SSAMatrixGet, SSAArrayLength, SSAVectorNew, SSAMatrixNew),
+            (
+                SSAArrayNew,
+                SSAArrayGet,
+                SSAVectorGet,
+                SSAMatrixGet,
+                SSAArrayLength,
+                SSAVectorLength,
+                SSAMatrixRows,
+                SSAMatrixColumns,
+                SSAVectorNew,
+                SSAMatrixNew,
+            ),
         ):
             return instruction.result
         return None
@@ -373,6 +398,10 @@ class SCCPAnalyzer:
             return (instruction.matrix, instruction.row, instruction.column, instruction.value)
         if isinstance(instruction, SSAArrayLength):
             return (instruction.array,)
+        if isinstance(instruction, SSAVectorLength):
+            return (instruction.vector,)
+        if isinstance(instruction, (SSAMatrixRows, SSAMatrixColumns)):
+            return (instruction.matrix,)
         if isinstance(instruction, SSAReturn) and instruction.value is not None:
             return (instruction.value,)
         return ()

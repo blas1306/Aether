@@ -16,14 +16,17 @@ from aether.ir.model import (
     IRInstruction,
     IRJump,
     IRLoad,
+    IRMatrixColumns,
     IRMatrixGet,
     IRMatrixNew,
+    IRMatrixRows,
     IRMatrixSet,
     IRModule,
     IRReturn,
     IRStore,
     IRValue,
     IRVectorGet,
+    IRVectorLength,
     IRVectorNew,
     IRVectorSet,
 )
@@ -44,6 +47,9 @@ class DeadCodeEliminator:
         IRVectorGet,
         IRMatrixGet,
         IRArrayLength,
+        IRVectorLength,
+        IRMatrixRows,
+        IRMatrixColumns,
     )
 
     def run(self, module: IRModule) -> OptimizationResult:
@@ -130,7 +136,20 @@ class DeadCodeEliminator:
     def _result(instruction: IRInstruction) -> IRValue:
         if isinstance(
             instruction,
-            (IRConst, IRLoad, IRBinaryOp, IRCompareOp, IRCast, IRArrayGet, IRVectorGet, IRMatrixGet, IRArrayLength),
+            (
+                IRConst,
+                IRLoad,
+                IRBinaryOp,
+                IRCompareOp,
+                IRCast,
+                IRArrayGet,
+                IRVectorGet,
+                IRMatrixGet,
+                IRArrayLength,
+                IRVectorLength,
+                IRMatrixRows,
+                IRMatrixColumns,
+            ),
         ):
             return instruction.result
         raise TypeError(
@@ -171,6 +190,10 @@ class DeadCodeEliminator:
             return (instruction.matrix, instruction.row, instruction.column, instruction.value)
         if isinstance(instruction, IRArrayLength):
             return (instruction.array,)
+        if isinstance(instruction, IRVectorLength):
+            return (instruction.vector,)
+        if isinstance(instruction, (IRMatrixRows, IRMatrixColumns)):
+            return (instruction.matrix,)
         if isinstance(instruction, IRBranch):
             return (instruction.condition,)
         if isinstance(instruction, IRJump):
