@@ -46,7 +46,6 @@ x = r * c;
     [
         "Vector<int, Row> a = [1, 2]; Vector<int, Row> b = [3, 4]; x = a * b;",
         "Vector<int, Column> a = [1; 2]; Vector<int, Column> b = [3; 4]; x = a * b;",
-        "Vector<int, Column> a = [1; 2]; Vector<int, Row> b = [3, 4]; x = a * b;",
         "Matrix<int> A = [1, 2; 3, 4]; Vector<int, Row> r = [5, 6]; y = A * r;",
         "Vector<int, Column> c = [1; 2]; Matrix<int> A = [3, 4; 5, 6]; y = c * A;",
     ],

@@ -29,6 +29,7 @@ from aether.ssa.model import (
     SSAMatrixRows,
     SSAMatrixSet,
     SSAModule,
+    SSAOuterProduct,
     SSAPhi,
     SSAReturn,
     SSAValue,
@@ -314,6 +315,15 @@ class SSAAlgebraicSimplifier:
                 self._resolve(instruction.left, replacements),
                 self._resolve(instruction.right, replacements),
                 instruction.length,
+            )
+
+        if isinstance(instruction, SSAOuterProduct):
+            return SSAOuterProduct(
+                instruction.result,
+                self._resolve(instruction.column, replacements),
+                self._resolve(instruction.row, replacements),
+                instruction.rows,
+                instruction.cols,
             )
 
         if isinstance(instruction, SSAVectorScale):

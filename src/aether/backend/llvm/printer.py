@@ -31,6 +31,7 @@ from aether.ssa.model import (
     SSAMatrixRows,
     SSAMatrixSet,
     SSAModule,
+    SSAOuterProduct,
     SSAParameter,
     SSAPhi,
     SSAReturn,
@@ -187,6 +188,8 @@ class LLVMPrinter:
             return "\n  ".join(self._print_vector_scale(instruction))
         if isinstance(instruction, SSAVectorDot):
             return "\n".join(self._print_vector_dot(instruction))
+        if isinstance(instruction, SSAOuterProduct):
+            return "\n".join(self._print_outer_product(instruction))
         if isinstance(instruction, SSAMatrixAdd):
             return "\n  ".join(self._print_matrix_add(instruction))
         if isinstance(instruction, SSAMatrixSub):
@@ -249,6 +252,7 @@ class LLVMPrinter:
                 SSAMatrixNew,
                 SSAVectorAdd,
                 SSAVectorDot,
+                SSAOuterProduct,
                 SSAVectorScale,
                 SSAMatrixAdd,
                 SSAMatrixMatMul,
@@ -620,6 +624,142 @@ class LLVMPrinter:
             raise LLVMBackendError("LLVM vector_dot only supports int or double left elements")
         if not isinstance(instruction.right.type.element, (IntType, DoubleType)):
             raise LLVMBackendError("LLVM vector_dot only supports int or double right elements")
+
+    def _print_outer_product(self, instruction: SSAOuterProduct) -> list[str]:
+        self._validate_outer_product(instruction)
+        self._uses_array_type = True
+        self._uses_array_allocation = True
+
+        result = self._new_temp(instruction.result)
+        result_element_type = llvm_type(instruction.result.type.element)
+        result_element_size = self._sizeof(instruction.result.type.element)
+        column_element_type = llvm_type(instruction.column.type.element)
+        row_element_type = llvm_type(instruction.row.type.element)
+        multiply_operator = self._element_binary_operator(instruction.result.type.element, "mul")
+        label_id = self._next_synthetic_temp
+        self._next_synthetic_temp += 1
+        outer_loop_label = f"outer.product.outer.loop.{label_id}"
+        outer_body_label = f"outer.product.outer.body.{label_id}"
+        inner_loop_label = f"outer.product.inner.loop.{label_id}"
+        inner_body_label = f"outer.product.inner.body.{label_id}"
+        inner_exit_label = f"outer.product.inner.exit.{label_id}"
+        exit_label = f"outer.product.exit.{label_id}"
+        length = instruction.rows * instruction.cols
+
+        column_field = self._synthetic_temp("outer.product.column.data.field")
+        column_data = self._synthetic_temp("outer.product.column.data")
+        row_field = self._synthetic_temp("outer.product.row.data.field")
+        row_data = self._synthetic_temp("outer.product.row.data")
+        result_field = self._synthetic_temp("outer.product.result.data.field")
+        result_data = self._synthetic_temp("outer.product.result.data")
+        row_index_ptr = self._synthetic_temp("outer.product.row.index.ptr")
+        col_index_ptr = self._synthetic_temp("outer.product.col.index.ptr")
+        lines = [
+            f"  {result} = call ptr @aether_array_new(i64 {result_element_size}, i64 {length})",
+            f"  {column_field} = getelementptr {self._ARRAY_STRUCT_TYPE}, ptr {self._operand(instruction.column)}, i32 0, i32 1",
+            f"  {column_data} = load ptr, ptr {column_field}",
+            f"  {row_field} = getelementptr {self._ARRAY_STRUCT_TYPE}, ptr {self._operand(instruction.row)}, i32 0, i32 1",
+            f"  {row_data} = load ptr, ptr {row_field}",
+            f"  {result_field} = getelementptr {self._ARRAY_STRUCT_TYPE}, ptr {result}, i32 0, i32 1",
+            f"  {result_data} = load ptr, ptr {result_field}",
+            f"  {row_index_ptr} = alloca i64",
+            f"  store i64 0, ptr {row_index_ptr}",
+            f"  {col_index_ptr} = alloca i64",
+            f"  br label %{outer_loop_label}",
+            f"{outer_loop_label}:",
+        ]
+
+        row_index = self._synthetic_temp("outer.product.row.index")
+        outer_cond = self._synthetic_temp("outer.product.outer.cond")
+        lines.extend(
+            [
+                f"  {row_index} = load i64, ptr {row_index_ptr}",
+                f"  {outer_cond} = icmp slt i64 {row_index}, {instruction.rows}",
+                f"  br i1 {outer_cond}, label %{outer_body_label}, label %{exit_label}",
+                f"{outer_body_label}:",
+                f"  store i64 0, ptr {col_index_ptr}",
+                f"  br label %{inner_loop_label}",
+                f"{inner_loop_label}:",
+            ]
+        )
+
+        col_index = self._synthetic_temp("outer.product.col.index")
+        inner_cond = self._synthetic_temp("outer.product.inner.cond")
+        lines.extend(
+            [
+                f"  {col_index} = load i64, ptr {col_index_ptr}",
+                f"  {inner_cond} = icmp slt i64 {col_index}, {instruction.cols}",
+                f"  br i1 {inner_cond}, label %{inner_body_label}, label %{inner_exit_label}",
+                f"{inner_body_label}:",
+            ]
+        )
+
+        column_ptr = self._synthetic_temp("outer.product.column.elem")
+        row_ptr = self._synthetic_temp("outer.product.row.elem")
+        loaded_column = self._synthetic_temp("outer.product.column")
+        loaded_row = self._synthetic_temp("outer.product.row")
+        row_offset = self._synthetic_temp("outer.product.row.offset")
+        result_index = self._synthetic_temp("outer.product.result.index")
+        result_ptr = self._synthetic_temp("outer.product.result.elem")
+        lines.extend(
+            [
+                f"  {column_ptr} = getelementptr {column_element_type}, ptr {column_data}, i64 {row_index}",
+                f"  {loaded_column} = load {column_element_type}, ptr {column_ptr}",
+                f"  {row_ptr} = getelementptr {row_element_type}, ptr {row_data}, i64 {col_index}",
+                f"  {loaded_row} = load {row_element_type}, ptr {row_ptr}",
+            ]
+        )
+        column_operand = self._coerce_scalar(
+            lines,
+            loaded_column,
+            instruction.column.type.element,
+            instruction.result.type.element,
+            "outer.product.column.cast",
+        )
+        row_operand = self._coerce_scalar(
+            lines,
+            loaded_row,
+            instruction.row.type.element,
+            instruction.result.type.element,
+            "outer.product.row.cast",
+        )
+        product = self._synthetic_temp("outer.product.product")
+        col_next = self._synthetic_temp("outer.product.col.next")
+        row_next = self._synthetic_temp("outer.product.row.next")
+        lines.extend(
+            [
+                f"  {product} = {multiply_operator} {result_element_type} {column_operand}, {row_operand}",
+                f"  {row_offset} = mul i64 {row_index}, {instruction.cols}",
+                f"  {result_index} = add i64 {row_offset}, {col_index}",
+                f"  {result_ptr} = getelementptr {result_element_type}, ptr {result_data}, i64 {result_index}",
+                f"  store {result_element_type} {product}, ptr {result_ptr}",
+                f"  {col_next} = add i64 {col_index}, 1",
+                f"  store i64 {col_next}, ptr {col_index_ptr}",
+                f"  br label %{inner_loop_label}",
+                f"{inner_exit_label}:",
+                f"  {row_next} = add i64 {row_index}, 1",
+                f"  store i64 {row_next}, ptr {row_index_ptr}",
+                f"  br label %{outer_loop_label}",
+                f"{exit_label}:",
+            ]
+        )
+        return lines
+
+    def _validate_outer_product(self, instruction: SSAOuterProduct) -> None:
+        if not isinstance(instruction.result.type, MatrixType):
+            raise LLVMBackendError("LLVM outer_product result must be MatrixType")
+        if not isinstance(instruction.column.type, VectorType) or not isinstance(instruction.row.type, VectorType):
+            raise LLVMBackendError("LLVM outer_product expects vector operands")
+        if instruction.column.type.orientation != "column" or instruction.row.type.orientation != "row":
+            raise LLVMBackendError("LLVM outer_product is only defined for Vector<Column> * Vector<Row>")
+        if instruction.rows <= 0 or instruction.cols <= 0:
+            raise LLVMBackendError("LLVM outer_product requires positive dimensions")
+        if not isinstance(instruction.result.type.element, (IntType, DoubleType)):
+            raise LLVMBackendError("LLVM outer_product only supports int or double results")
+        if not isinstance(instruction.column.type.element, (IntType, DoubleType)):
+            raise LLVMBackendError("LLVM outer_product only supports int or double column elements")
+        if not isinstance(instruction.row.type.element, (IntType, DoubleType)):
+            raise LLVMBackendError("LLVM outer_product only supports int or double row elements")
 
     def _coerce_scalar(
         self,

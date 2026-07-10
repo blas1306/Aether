@@ -29,6 +29,7 @@ from aether.ir.model import (
     IRMatrixRows,
     IRMatrixSet,
     IRModule,
+    IROuterProduct,
     IRReturn,
     IRStore,
     IRValue,
@@ -275,6 +276,12 @@ class AlgebraicSimplifier:
                 instruction,
                 left=self._resolve(instruction.left, replacements),
                 right=self._resolve(instruction.right, replacements),
+            )
+        if isinstance(instruction, IROuterProduct):
+            return replace(
+                instruction,
+                column=self._resolve(instruction.column, replacements),
+                row=self._resolve(instruction.row, replacements),
             )
         if isinstance(instruction, IRMatrixVectorMul):
             return replace(

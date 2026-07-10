@@ -131,6 +131,17 @@ class IRVectorDot(IRInstruction):
 
 
 @dataclass(frozen=True)
+class IROuterProduct(IRInstruction):
+    """Outer product for Vector<Column> * Vector<Row>."""
+
+    result: IRValue
+    column: IRValue
+    row: IRValue
+    rows: int
+    cols: int
+
+
+@dataclass(frozen=True)
 class IRMatrixAdd(IRInstruction):
     result: IRValue
     left: IRValue

@@ -3462,8 +3462,11 @@ def _algebraic_multiplication_type(left_type: AetherType, right_type: AetherType
                     f"Operator '*' requires vectors with the same length, got {left_type.length} and {right_type.length}."
                 )
             return promote_numeric(_numeric_vector_scalar_type(left_type), _numeric_vector_scalar_type(right_type), "*")
+        if left_type.orientation == "column" and right_type.orientation == "row":
+            return infer_builtin_type(LINEAR_ALGEBRA_MATMUL, [left_type, right_type])
         raise AetherTypeError(
-            "Operator '*' between Vector operands is only defined for Vector<Row> * Vector<Column>; "
+            "Operator '*' between Vector operands is only defined for Vector<Row> * Vector<Column> "
+            "or Vector<Column> * Vector<Row>; "
             "use Math.LinearAlgebra.matmul(...) for other algebraic products or '.*' for elementwise multiplication."
         )
     if isinstance(left_type, VectorType) and isinstance(right_type, MatrixType):

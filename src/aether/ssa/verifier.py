@@ -48,6 +48,7 @@ from .model import (
     SSAMatrixRows,
     SSAMatrixSet,
     SSAModule,
+    SSAOuterProduct,
     SSAPhi,
     SSAReturn,
     SSAValue,
@@ -291,6 +292,10 @@ class SSAVerifier:
 
             if isinstance(instruction, SSAVectorDot):
                 self._verify_vector_dot(instruction, value_types)
+                continue
+
+            if isinstance(instruction, SSAOuterProduct):
+                self._verify_outer_product(instruction, value_types)
                 continue
 
             if isinstance(instruction, SSAMatrixAdd):
@@ -585,6 +590,33 @@ class SSAVerifier:
         if instruction.result.type != expected:
             self._fail(
                 f"Vector dot result type mismatch: expected {expected}, got {instruction.result.type}"
+            )
+
+    def _verify_outer_product(
+        self,
+        instruction: SSAOuterProduct,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.column, value_types)
+        self._require_defined(instruction.row, value_types)
+        if not isinstance(instruction.result.type, MatrixType):
+            self._fail(f"Outer product result must be matrix type, got {instruction.result.type}")
+        if not isinstance(instruction.column.type, VectorType) or not isinstance(instruction.row.type, VectorType):
+            self._fail(
+                f"Outer product expects vector operands, got {instruction.column.type} and {instruction.row.type}"
+            )
+        if instruction.column.type.orientation != "column" or instruction.row.type.orientation != "row":
+            self._fail("Outer product is only defined for Vector<Column> * Vector<Row>")
+        if instruction.rows <= 0 or instruction.cols <= 0:
+            self._fail(f"Outer product dimensions must be positive, got {instruction.rows}x{instruction.cols}")
+        expected_element = self._numeric_binary_result_type(
+            instruction.column.type.element,
+            instruction.row.type.element,
+        )
+        if instruction.result.type.element != expected_element:
+            self._fail(
+                f"Outer product result element type mismatch: expected "
+                f"{expected_element}, got {instruction.result.type.element}"
             )
 
     def _verify_matrix_add(
@@ -1139,6 +1171,7 @@ class SSAVerifier:
                 SSAMatrixNew,
                 SSAVectorAdd,
                 SSAVectorDot,
+                SSAOuterProduct,
                 SSAVectorScale,
                 SSAMatrixAdd,
                 SSAMatrixMatMul,

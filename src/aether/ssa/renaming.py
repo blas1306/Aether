@@ -31,6 +31,7 @@ from aether.ir.model import (
     IRMatrixNew,
     IRMatrixRows,
     IRMatrixSet,
+    IROuterProduct,
     IRReturn,
     IRStore,
     IRValue,
@@ -71,6 +72,7 @@ from .model import (
     SSAMatrixNew,
     SSAMatrixRows,
     SSAMatrixSet,
+    SSAOuterProduct,
     SSAParameter,
     SSAPhi,
     SSAReturn,
@@ -304,6 +306,13 @@ class SSARenamer:
             right = self._resolve_value(instruction.right)
             self._bind_value(result.name, result, bound_values)
             return SSAVectorDot(result, left, right, instruction.length)
+
+        if isinstance(instruction, IROuterProduct):
+            result = self._define_value(instruction.result)
+            column = self._resolve_value(instruction.column)
+            row = self._resolve_value(instruction.row)
+            self._bind_value(result.name, result, bound_values)
+            return SSAOuterProduct(result, column, row, instruction.rows, instruction.cols)
 
         if isinstance(instruction, IRMatrixAdd):
             result = self._define_value(instruction.result)

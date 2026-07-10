@@ -247,17 +247,6 @@ int main() {
 """,
             "Column \\* Matrix",
         ),
-        (
-            """
-int main() {
-    Vector<int, Column> c = [1; 2];
-    Vector<int, Row> r = [3, 4];
-    Matrix<int> A = c * r;
-    return A[0, 0];
-}
-""",
-            "Vector operands is only defined",
-        ),
     ],
 )
 def test_typechecker_rejects_deferred_matrix_product_operator_cases(source: str, message: str) -> None:

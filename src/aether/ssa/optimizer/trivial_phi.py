@@ -25,6 +25,7 @@ from aether.ssa.model import (
     SSAMatrixNew,
     SSAMatrixRows,
     SSAModule,
+    SSAOuterProduct,
     SSAPhi,
     SSAReturn,
     SSAValue,
@@ -301,6 +302,22 @@ class TrivialPhiEliminator:
                     instruction.length,
                 ),
                 int(left_rewritten) + int(right_rewritten),
+            )
+
+        if isinstance(instruction, SSAOuterProduct):
+            column, column_rewritten = self._rewrite_value(instruction.column, replacements)
+            row, row_rewritten = self._rewrite_value(instruction.row, replacements)
+            if not column_rewritten and not row_rewritten:
+                return instruction, 0
+            return (
+                SSAOuterProduct(
+                    instruction.result,
+                    column,
+                    row,
+                    instruction.rows,
+                    instruction.cols,
+                ),
+                int(column_rewritten) + int(row_rewritten),
             )
 
         if isinstance(instruction, SSAVectorScale):

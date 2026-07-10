@@ -245,11 +245,12 @@ y = A * [5; 6];
     assert values(result.env["y"]) == [17, 39]
 
 
-def test_star_accepts_only_row_column_oriented_vector_product() -> None:
-    with pytest.raises(AetherTypeError, match="Vector<Row> \\* Vector<Column>"):
-        run_aether("import Math.LinearAlgebra\nv = [1, 2, 3]; w = [4, 5, 6]; x = transpose(v) * w;")
+def test_star_accepts_row_column_and_column_row_oriented_vector_products() -> None:
+    outer = run_aether("import Math.LinearAlgebra\nv = [1, 2, 3]; w = [4, 5, 6]; x = transpose(v) * w;")
     result = run_aether("import Math.LinearAlgebra\nv = [1, 2, 3]; w = [4, 5, 6]; x = v * transpose(w);")
 
+    assert outer.env["x"].type_name == MatrixType("int", 3, 3)
+    assert matrix_values(outer.env["x"]) == [[4, 5, 6], [8, 10, 12], [12, 15, 18]]
     assert result.env["x"].type_name == "int"
     assert result.env["x"].value == 32
 

@@ -119,6 +119,17 @@ class SSAVectorDot(SSAInstruction):
 
 
 @dataclass(frozen=True)
+class SSAOuterProduct(SSAInstruction):
+    """Outer product for Vector<Column> * Vector<Row>."""
+
+    result: SSAValue
+    column: SSAValue
+    row: SSAValue
+    rows: int
+    cols: int
+
+
+@dataclass(frozen=True)
 class SSAMatrixAdd(SSAInstruction):
     result: SSAValue
     left: SSAValue

@@ -38,6 +38,7 @@ from .model import (
     IRMatrixRows,
     IRMatrixSet,
     IRModule,
+    IROuterProduct,
     IRParameter,
     IRReturn,
     IRStore,
@@ -793,6 +794,9 @@ class IRLowerer:
             vector_dot = self._lower_vector_dot(expression, left, right, context)
             if vector_dot is not None:
                 return vector_dot
+            outer_product = self._lower_outer_product(expression, left, right, context)
+            if outer_product is not None:
+                return outer_product
             matrix_matmul = self._lower_matrix_matmul(expression, left, right, context)
             if matrix_matmul is not None:
                 return matrix_matmul
@@ -895,6 +899,32 @@ class IRLowerer:
         result_type = self._binary_result_type("*", left.type.element, right.type.element)
         result = context.temporary(result_type)
         context.block.instructions.append(IRVectorDot(result, left, right, left_length))
+        return result
+
+    def _lower_outer_product(
+        self,
+        expression: ast.BinaryExpression,
+        left: IRValue,
+        right: IRValue,
+        context: _FunctionContext,
+    ) -> IRValue | None:
+        if not isinstance(left.type, VectorType) or not isinstance(right.type, VectorType):
+            return None
+        if left.type.orientation != "column" or right.type.orientation != "row":
+            return None
+
+        left_length = context.vector_lengths.get(left.name)
+        right_length = context.vector_lengths.get(right.name)
+        if left_length is None or right_length is None:
+            self._fail(
+                "IR backend requires known vector lengths for Vector<Column> * Vector<Row>.",
+                expression,
+            )
+
+        result_type = self._binary_result_type("*", left.type.element, right.type.element)
+        result = context.temporary(MatrixType(result_type))
+        context.matrix_dimensions[result.name] = (left_length, right_length)
+        context.block.instructions.append(IROuterProduct(result, left, right, left_length, right_length))
         return result
 
     def _lower_matrix_matmul(

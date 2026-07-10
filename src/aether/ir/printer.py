@@ -29,6 +29,7 @@ from .model import (
     IRMatrixNew,
     IRMatrixRows,
     IRMatrixSet,
+    IROuterProduct,
     IRModule,
     IRReturn,
     IRStore,
@@ -135,6 +136,12 @@ class IRPrinter:
                 f"{self._typed_value(instruction.result)} = vector_dot row_column "
                 f"{self._value(instruction.left)}, {self._value(instruction.right)} "
                 f"length {instruction.length}"
+            )
+        if isinstance(instruction, IROuterProduct):
+            return (
+                f"{self._typed_value(instruction.result)} = outer_product column_row "
+                f"{self._value(instruction.column)}, {self._value(instruction.row)} "
+                f"{instruction.rows}x{instruction.cols}"
             )
         if isinstance(instruction, IRMatrixAdd):
             return (

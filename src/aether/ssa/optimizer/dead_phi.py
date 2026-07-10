@@ -26,6 +26,7 @@ from aether.ssa.model import (
     SSAMatrixRows,
     SSAMatrixSet,
     SSAModule,
+    SSAOuterProduct,
     SSAPhi,
     SSAReturn,
     SSAValue,
@@ -151,6 +152,11 @@ class DeadPhiEliminator:
         if isinstance(instruction, (SSAVectorAdd, SSAVectorDot, SSAMatrixAdd, SSAMatrixMatMul, SSAVectorSub, SSAMatrixSub)):
             used_values.add(instruction.left)
             used_values.add(instruction.right)
+            return
+
+        if isinstance(instruction, SSAOuterProduct):
+            used_values.add(instruction.column)
+            used_values.add(instruction.row)
             return
 
         if isinstance(instruction, SSAMatrixVectorMul):

@@ -34,6 +34,7 @@ EXPECTED_EXIT_CODES = {
     "matrix_set.ae": 9,
     "matrix_sub.ae": 20,
     "max.ae": 12,
+    "outer_product.ae": 54,
     "return_5.ae": 5,
     "string_choose.ae": 0,
     "string_identity.ae": 0,

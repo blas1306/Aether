@@ -2477,8 +2477,11 @@ def _evaluate_algebraic_multiplication(left: AetherValue, right: AetherValue) ->
     if isinstance(left.type_name, VectorType) and isinstance(right.type_name, VectorType):
         if left.type_name.orientation == "row" and right.type_name.orientation == "column":
             return _dot_product(left, right)
+        if left.type_name.orientation == "column" and right.type_name.orientation == "row":
+            return matmul_builtin([left, right])
         raise AetherTypeError(
-            "Operator '*' between Vector operands is only defined for Vector<Row> * Vector<Column>; "
+            "Operator '*' between Vector operands is only defined for Vector<Row> * Vector<Column> "
+            "or Vector<Column> * Vector<Row>; "
             "use Math.LinearAlgebra.matmul(...) for other algebraic products or '.*' for elementwise multiplication."
         )
     if isinstance(left.type_name, VectorType) and isinstance(right.type_name, MatrixType):

@@ -31,6 +31,7 @@ from .model import (
     IRMatrixRows,
     IRMatrixSet,
     IRModule,
+    IROuterProduct,
     IRReturn,
     IRStore,
     IRValue,
@@ -197,6 +198,10 @@ class IRInterpreter:
             self._execute_vector_dot(instruction, frame)
             return False, None, None
 
+        if isinstance(instruction, IROuterProduct):
+            self._execute_outer_product(instruction, frame)
+            return False, None, None
+
         if isinstance(instruction, IRMatrixAdd):
             self._execute_matrix_binary(instruction, frame, "add")
             return False, None, None
@@ -354,6 +359,24 @@ class IRInterpreter:
         for left_value, right_value in zip(left, right):
             total = self._binary("add", total, self._binary("mul", left_value, right_value))
         frame.values[instruction.result] = total
+
+    def _execute_outer_product(
+        self,
+        instruction: IROuterProduct,
+        frame: _Frame,
+    ) -> None:
+        column = self._value(instruction.column, frame)
+        row = self._value(instruction.row, frame)
+        if not isinstance(column, list) or not isinstance(row, list):
+            raise IRExecutionError("IR outer product requires vector values")
+        if len(column) != instruction.rows or len(row) != instruction.cols:
+            raise IRExecutionError("IR outer product operands must match instruction dimensions")
+
+        result: list[Any] = []
+        for row_index in range(instruction.rows):
+            for col_index in range(instruction.cols):
+                result.append(self._binary("mul", column[row_index], row[col_index]))
+        frame.values[instruction.result] = result
 
     def _execute_matrix_binary(
         self,

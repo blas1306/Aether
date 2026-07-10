@@ -28,6 +28,7 @@ from aether.ir.model import (
     IRMatrixNew,
     IRMatrixSet,
     IRModule,
+    IROuterProduct,
     IRReturn,
     IRStore,
     IRValue,
@@ -65,6 +66,7 @@ from .model import (
     SSAMatrixNew,
     SSAMatrixSet,
     SSAModule,
+    SSAOuterProduct,
     SSAParameter,
     SSAPhi,
     SSAReturn,
@@ -567,6 +569,12 @@ class SSABuilder:
             left = self._resolve_value(instruction.left, state.value_map)
             right = self._resolve_value(instruction.right, state.value_map)
             return SSAVectorDot(result, left, right, instruction.length)
+
+        if isinstance(instruction, IROuterProduct):
+            result = self._define_value(instruction.result, state.value_map)
+            column = self._resolve_value(instruction.column, state.value_map)
+            row = self._resolve_value(instruction.row, state.value_map)
+            return SSAOuterProduct(result, column, row, instruction.rows, instruction.cols)
 
         if isinstance(instruction, IRMatrixAdd):
             result = self._define_value(instruction.result, state.value_map)

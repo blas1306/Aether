@@ -32,6 +32,7 @@ from aether.ssa.model import (
     SSAMatrixRows,
     SSAMatrixSet,
     SSAModule,
+    SSAOuterProduct,
     SSAPhi,
     SSAReturn,
     SSAValue,
@@ -221,6 +222,7 @@ class SCCPAnalyzer:
                 SSAMatrixNew,
                 SSAVectorAdd,
                 SSAVectorDot,
+                SSAOuterProduct,
                 SSAVectorScale,
                 SSAMatrixAdd,
                 SSAMatrixMatMul,
@@ -381,6 +383,7 @@ class SCCPAnalyzer:
                 SSAMatrixNew,
                 SSAVectorAdd,
                 SSAVectorDot,
+                SSAOuterProduct,
                 SSAVectorScale,
                 SSAMatrixAdd,
                 SSAMatrixMatMul,
@@ -416,6 +419,8 @@ class SCCPAnalyzer:
             return instruction.elements
         if isinstance(instruction, (SSAVectorAdd, SSAVectorDot, SSAMatrixAdd, SSAMatrixMatMul, SSAVectorSub, SSAMatrixSub)):
             return (instruction.left, instruction.right)
+        if isinstance(instruction, SSAOuterProduct):
+            return (instruction.column, instruction.row)
         if isinstance(instruction, SSAMatrixVectorMul):
             return (instruction.matrix, instruction.vector)
         if isinstance(instruction, SSAVectorMatrixMul):
