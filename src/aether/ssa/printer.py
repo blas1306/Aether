@@ -21,6 +21,7 @@ from .model import (
     SSAMatrixColumns,
     SSAMatrixAdd,
     SSAMatrixMatMul,
+    SSAMatrixVectorMul,
     SSAMatrixScale,
     SSAMatrixSub,
     SSAMatrixGet,
@@ -153,6 +154,12 @@ class SSAPrinter:
                 f"{self._typed_value(instruction.result)} = matrix_matmul "
                 f"{self._value(instruction.left)}, {self._value(instruction.right)} "
                 f"{instruction.rows}x{instruction.inner} * {instruction.inner}x{instruction.cols}"
+            )
+        if isinstance(instruction, SSAMatrixVectorMul):
+            return (
+                f"{self._typed_value(instruction.result)} = matrix_vector_mul column "
+                f"{self._value(instruction.matrix)}, {self._value(instruction.vector)} "
+                f"{instruction.rows}x{instruction.inner} * {instruction.inner}"
             )
         if isinstance(instruction, SSAArrayGet):
             return (

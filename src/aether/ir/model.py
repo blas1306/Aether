@@ -168,6 +168,17 @@ class IRMatrixMatMul(IRInstruction):
 
 
 @dataclass(frozen=True)
+class IRMatrixVectorMul(IRInstruction):
+    """Matrix * Vector product; currently only accepts Vector<Column>."""
+
+    result: IRValue
+    matrix: IRValue
+    vector: IRValue
+    rows: int
+    inner: int
+
+
+@dataclass(frozen=True)
 class IRArrayGet(IRInstruction):
     result: IRValue
     array: IRValue

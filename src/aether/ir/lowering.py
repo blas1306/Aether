@@ -30,6 +30,7 @@ from .model import (
     IRMatrixGet,
     IRMatrixAdd,
     IRMatrixMatMul,
+    IRMatrixVectorMul,
     IRMatrixScale,
     IRMatrixSub,
     IRMatrixColumns,
@@ -794,6 +795,9 @@ class IRLowerer:
             matrix_matmul = self._lower_matrix_matmul(expression, left, right, context)
             if matrix_matmul is not None:
                 return matrix_matmul
+            matrix_vector_mul = self._lower_matrix_vector_mul(expression, left, right, context)
+            if matrix_vector_mul is not None:
+                return matrix_vector_mul
             return self._lower_aggregate_scale(expression, left, right, context)
 
         if isinstance(left.type, VectorType) or isinstance(right.type, VectorType):
@@ -919,6 +923,40 @@ class IRLowerer:
                 left_dimensions[1],
                 right_dimensions[1],
             )
+        )
+        return result
+
+    def _lower_matrix_vector_mul(
+        self,
+        expression: ast.BinaryExpression,
+        left: IRValue,
+        right: IRValue,
+        context: _FunctionContext,
+    ) -> IRValue | None:
+        if not isinstance(left.type, MatrixType) or not isinstance(right.type, VectorType):
+            return None
+        if right.type.orientation != "column":
+            return None
+
+        left_dimensions = context.matrix_dimensions.get(left.name)
+        right_length = context.vector_lengths.get(right.name)
+        if left_dimensions is None or right_length is None:
+            self._fail(
+                "IR backend requires known dimensions for Matrix * Vector<Column>.",
+                expression,
+            )
+        if left_dimensions[1] != right_length:
+            self._fail(
+                f"IR backend requires compatible dimensions for Matrix * Vector<Column>, "
+                f"got {left_dimensions[0]}x{left_dimensions[1]} and length {right_length}.",
+                expression,
+            )
+
+        result_type = self._binary_result_type("*", left.type.element, right.type.element)
+        result = context.temporary(VectorType(result_type, "column"))
+        context.vector_lengths[result.name] = left_dimensions[0]
+        context.block.instructions.append(
+            IRMatrixVectorMul(result, left, right, left_dimensions[0], left_dimensions[1])
         )
         return result
 

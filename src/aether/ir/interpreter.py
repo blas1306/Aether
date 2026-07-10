@@ -23,6 +23,7 @@ from .model import (
     IRMatrixColumns,
     IRMatrixAdd,
     IRMatrixMatMul,
+    IRMatrixVectorMul,
     IRMatrixScale,
     IRMatrixSub,
     IRMatrixGet,
@@ -209,6 +210,10 @@ class IRInterpreter:
 
         if isinstance(instruction, IRMatrixMatMul):
             self._execute_matrix_matmul(instruction, frame)
+            return False, None, None
+
+        if isinstance(instruction, IRMatrixVectorMul):
+            self._execute_matrix_vector_mul(instruction, frame)
             return False, None, None
 
         if isinstance(instruction, IRArrayGet):
@@ -403,6 +408,30 @@ class IRInterpreter:
                     right_value = right[inner * instruction.cols + col]
                     total = self._binary("add", total, self._binary("mul", left_value, right_value))
                 result.append(total)
+        frame.values[instruction.result] = result
+
+    def _execute_matrix_vector_mul(
+        self,
+        instruction: IRMatrixVectorMul,
+        frame: _Frame,
+    ) -> None:
+        matrix = self._value(instruction.matrix, frame)
+        vector = self._value(instruction.vector, frame)
+        if not isinstance(matrix, list) or not isinstance(vector, list):
+            raise IRExecutionError("IR matrix vector mul requires matrix and vector values")
+        if len(matrix) != instruction.rows * instruction.inner:
+            raise IRExecutionError("IR matrix vector mul matrix operand must match instruction dimensions")
+        if len(vector) != instruction.inner:
+            raise IRExecutionError("IR matrix vector mul vector operand must match instruction dimensions")
+
+        result: list[Any] = []
+        for row in range(instruction.rows):
+            total = 0.0 if isinstance(instruction.result.type.element, DoubleType) else 0
+            for inner in range(instruction.inner):
+                matrix_value = matrix[row * instruction.inner + inner]
+                vector_value = vector[inner]
+                total = self._binary("add", total, self._binary("mul", matrix_value, vector_value))
+            result.append(total)
         frame.values[instruction.result] = result
 
     @staticmethod

@@ -228,17 +228,6 @@ int main() {
         (
             """
 int main() {
-    Matrix<int> A = [1, 2; 3, 4];
-    Vector<int, Column> c = [5; 6];
-    Vector<int, Column> y = A * c;
-    return y[0];
-}
-""",
-            "Matrix \\* Column",
-        ),
-        (
-            """
-int main() {
     Vector<int, Row> r = [1, 2];
     Matrix<int> A = [3, 4; 5, 6];
     Vector<int, Row> y = r * A;
@@ -246,6 +235,28 @@ int main() {
 }
 """,
             "Row \\* Matrix",
+        ),
+        (
+            """
+int main() {
+    Matrix<int> A = [3, 4; 5, 6];
+    Vector<int, Row> r = [1, 2];
+    Vector<int, Row> y = A * r;
+    return y[0];
+}
+""",
+            "Matrix \\* Vector<Row>",
+        ),
+        (
+            """
+int main() {
+    Vector<int, Column> c = [1; 2];
+    Matrix<int> A = [3, 4; 5, 6];
+    y = c * A;
+    return 0;
+}
+""",
+            "Column \\* Matrix",
         ),
         (
             """
@@ -1074,6 +1085,17 @@ int main() {
 }
 """,
             154,
+        ),
+        (
+            """
+int main() {
+    Matrix<int> A = [1, 2; 3, 4];
+    Vector<int, Column> c = [5; 6];
+    Vector<int, Column> r = A * c;
+    return r[1];
+}
+""",
+            39,
         ),
     ],
 )

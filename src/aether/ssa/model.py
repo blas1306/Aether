@@ -156,6 +156,17 @@ class SSAMatrixMatMul(SSAInstruction):
 
 
 @dataclass(frozen=True)
+class SSAMatrixVectorMul(SSAInstruction):
+    """Matrix * Vector product; currently only accepts Vector<Column>."""
+
+    result: SSAValue
+    matrix: SSAValue
+    vector: SSAValue
+    rows: int
+    inner: int
+
+
+@dataclass(frozen=True)
 class SSAArrayGet(SSAInstruction):
     result: SSAValue
     array: SSAValue

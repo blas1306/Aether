@@ -2482,11 +2482,15 @@ def _evaluate_algebraic_multiplication(left: AetherValue, right: AetherValue) ->
             "use Math.LinearAlgebra.matmul(...) for other algebraic products or '.*' for elementwise multiplication."
         )
     if isinstance(left.type_name, VectorType) and isinstance(right.type_name, MatrixType):
-        raise AetherTypeError("Operator '*' does not implement Row * Matrix yet; use Math.LinearAlgebra.matmul(...).")
+        if left.type_name.orientation == "row":
+            raise AetherTypeError("Operator '*' does not implement Row * Matrix yet; use Math.LinearAlgebra.matmul(...).")
+        raise AetherTypeError("Operator '*' does not implement Column * Matrix.")
     if isinstance(left.type_name, MatrixType) and isinstance(right.type_name, MatrixType):
         return matmul_builtin([left, right])
     if isinstance(left.type_name, MatrixType) and isinstance(right.type_name, VectorType):
-        raise AetherTypeError("Operator '*' does not implement Matrix * Column yet; use Math.LinearAlgebra.matmul(...).")
+        if right.type_name.orientation != "column":
+            raise AetherTypeError("Operator '*' is only defined for Matrix * Vector<Column>, not Matrix * Vector<Row>.")
+        return matmul_builtin([left, right])
     if isinstance(left.type_name, TransposeVectorType) and isinstance(right.type_name, VectorType):
         return _dot_product(left.value, right)
     if isinstance(left.type_name, TransposeVectorType) and isinstance(right.type_name, MatrixType):

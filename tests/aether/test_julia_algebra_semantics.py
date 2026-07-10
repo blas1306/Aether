@@ -232,15 +232,17 @@ println(a);
     assert result.output == "1\n"
 
 
-def test_star_rejects_matrix_vector_products_until_operator_matmul_migration() -> None:
-    with pytest.raises(AetherTypeError, match="Matrix \\* Column"):
-        run_aether(
-            """
+def test_star_accepts_matrix_column_product() -> None:
+    result = run_aether(
+        """
 import Math.LinearAlgebra
 A = [1 2; 3 4];
 y = A * [5; 6];
 """
-        )
+    )
+
+    assert result.env["y"].type_name == VectorType("int", 2, "column")
+    assert values(result.env["y"]) == [17, 39]
 
 
 def test_star_accepts_only_row_column_oriented_vector_product() -> None:

@@ -22,6 +22,7 @@ from .model import (
     IRMatrixColumns,
     IRMatrixAdd,
     IRMatrixMatMul,
+    IRMatrixVectorMul,
     IRMatrixScale,
     IRMatrixSub,
     IRMatrixGet,
@@ -401,6 +402,10 @@ class IRVerifier:
             self._verify_matrix_matmul(instruction, state, value_types)
             return self._define_value(state, instruction.result)
 
+        if isinstance(instruction, IRMatrixVectorMul):
+            self._verify_matrix_vector_mul(instruction, state, value_types)
+            return self._define_value(state, instruction.result)
+
         if isinstance(instruction, IRArrayGet):
             self._verify_array_get(instruction, state, value_types)
             return self._define_value(state, instruction.result)
@@ -754,6 +759,40 @@ class IRVerifier:
         if instruction.result.type.element != expected_element:
             self._fail(
                 f"Matrix matmul result element type mismatch: expected "
+                f"{expected_element}, got {instruction.result.type.element}"
+            )
+
+    def _verify_matrix_vector_mul(
+        self,
+        instruction: IRMatrixVectorMul,
+        state: _State,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.matrix, state, value_types)
+        self._require_defined(instruction.vector, state, value_types)
+        if not isinstance(instruction.result.type, VectorType):
+            self._fail(f"Matrix vector mul result must be vector type, got {instruction.result.type}")
+        if not isinstance(instruction.matrix.type, MatrixType) or not isinstance(instruction.vector.type, VectorType):
+            self._fail(
+                f"Matrix vector mul expects matrix and vector operands, got "
+                f"{instruction.matrix.type} and {instruction.vector.type}"
+            )
+        if isinstance(instruction.result.type, VectorType) and instruction.result.type.orientation != "column":
+            self._fail("Matrix vector mul result must be Vector<Column>")
+        if isinstance(instruction.vector.type, VectorType) and instruction.vector.type.orientation != "column":
+            self._fail("Matrix vector mul operand must be Vector<Column>")
+        if instruction.rows <= 0 or instruction.inner <= 0:
+            self._fail(
+                f"Matrix vector mul dimensions must be positive, got "
+                f"{instruction.rows}x{instruction.inner} and {instruction.inner}"
+            )
+        expected_element = self._numeric_binary_result_type(
+            instruction.matrix.type.element,
+            instruction.vector.type.element,
+        )
+        if instruction.result.type.element != expected_element:
+            self._fail(
+                f"Matrix vector mul result element type mismatch: expected "
                 f"{expected_element}, got {instruction.result.type.element}"
             )
 
@@ -1205,6 +1244,7 @@ class IRVerifier:
                 IRVectorScale,
                 IRMatrixAdd,
                 IRMatrixMatMul,
+                IRMatrixVectorMul,
                 IRMatrixScale,
                 IRVectorSub,
                 IRMatrixSub,

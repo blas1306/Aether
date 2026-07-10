@@ -18,6 +18,7 @@ from aether.ssa.model import (
     SSAMatrixColumns,
     SSAMatrixAdd,
     SSAMatrixMatMul,
+    SSAMatrixVectorMul,
     SSAMatrixScale,
     SSAMatrixSub,
     SSAMatrixGet,
@@ -62,6 +63,7 @@ class SSADeadCodeEliminator:
         SSAVectorScale,
         SSAMatrixAdd,
         SSAMatrixMatMul,
+        SSAMatrixVectorMul,
         SSAMatrixScale,
         SSAVectorSub,
         SSAMatrixSub,
@@ -170,6 +172,11 @@ class SSADeadCodeEliminator:
         if isinstance(instruction, (SSAVectorAdd, SSAVectorDot, SSAMatrixAdd, SSAMatrixMatMul, SSAVectorSub, SSAMatrixSub)):
             used_values.add(instruction.left)
             used_values.add(instruction.right)
+            return
+
+        if isinstance(instruction, SSAMatrixVectorMul):
+            used_values.add(instruction.matrix)
+            used_values.add(instruction.vector)
             return
 
         if isinstance(instruction, SSAVectorScale):

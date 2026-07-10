@@ -3467,11 +3467,15 @@ def _algebraic_multiplication_type(left_type: AetherType, right_type: AetherType
             "use Math.LinearAlgebra.matmul(...) for other algebraic products or '.*' for elementwise multiplication."
         )
     if isinstance(left_type, VectorType) and isinstance(right_type, MatrixType):
-        raise AetherTypeError("Operator '*' does not implement Row * Matrix yet; use Math.LinearAlgebra.matmul(...).")
+        if left_type.orientation == "row":
+            raise AetherTypeError("Operator '*' does not implement Row * Matrix yet; use Math.LinearAlgebra.matmul(...).")
+        raise AetherTypeError("Operator '*' does not implement Column * Matrix.")
     if isinstance(left_type, MatrixType) and isinstance(right_type, MatrixType):
         return infer_builtin_type(LINEAR_ALGEBRA_MATMUL, [left_type, right_type])
     if isinstance(left_type, MatrixType) and isinstance(right_type, VectorType):
-        raise AetherTypeError("Operator '*' does not implement Matrix * Column yet; use Math.LinearAlgebra.matmul(...).")
+        if right_type.orientation != "column":
+            raise AetherTypeError("Operator '*' is only defined for Matrix * Vector<Column>, not Matrix * Vector<Row>.")
+        return infer_builtin_type(LINEAR_ALGEBRA_MATMUL, [left_type, right_type])
     if isinstance(left_type, TransposeVectorType) and isinstance(right_type, VectorType):
         if left_type.length is not None and right_type.length is not None and left_type.length != right_type.length:
             raise AetherTypeError(f"Operator '*' requires vectors with the same length, got {left_type.length} and {right_type.length}.")

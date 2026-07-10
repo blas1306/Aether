@@ -1,0 +1,6 @@
+int main() {
+    Matrix<int> A = [1, 2; 3, 4];
+    Vector<int, Column> c = [5; 6];
+    Vector<int, Column> r = A * c;
+    return r[0] + r[1];
+}

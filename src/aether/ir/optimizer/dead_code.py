@@ -19,6 +19,7 @@ from aether.ir.model import (
     IRMatrixColumns,
     IRMatrixAdd,
     IRMatrixMatMul,
+    IRMatrixVectorMul,
     IRMatrixScale,
     IRMatrixSub,
     IRMatrixGet,
@@ -63,6 +64,7 @@ class DeadCodeEliminator:
         IRVectorScale,
         IRMatrixAdd,
         IRMatrixMatMul,
+        IRMatrixVectorMul,
         IRMatrixScale,
         IRVectorSub,
         IRMatrixSub,
@@ -170,6 +172,7 @@ class DeadCodeEliminator:
                 IRVectorScale,
                 IRMatrixAdd,
                 IRMatrixMatMul,
+                IRMatrixVectorMul,
                 IRMatrixScale,
                 IRVectorSub,
                 IRMatrixSub,
@@ -202,6 +205,8 @@ class DeadCodeEliminator:
             return instruction.elements
         if isinstance(instruction, (IRVectorAdd, IRVectorDot, IRMatrixAdd, IRMatrixMatMul, IRVectorSub, IRMatrixSub)):
             return (instruction.left, instruction.right)
+        if isinstance(instruction, IRMatrixVectorMul):
+            return (instruction.matrix, instruction.vector)
         if isinstance(instruction, IRVectorScale):
             return (instruction.vector, instruction.scalar)
         if isinstance(instruction, IRMatrixScale):
