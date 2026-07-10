@@ -1,15 +1,15 @@
 import Sortings
 
 public void main() {
-    List<int> lista = {5, 2, 3, 8, 1, 10, 9};
+    Array<int> arr = {5, 2, 3, 8, 1, 10, 9};
 
-    listaBubble = bubbleSort(lista);
-    listaSelection = selectionSort(lista);
-    listaInsertion = insertionSort(lista);
+    arrayBubble = bubbleSort(arr);
+    arraySelection = selectionSort(arr);
+    arrayInsertion = insertionSort(arr);
 
-    println("BubbleSort: ", listaBubble);
-    println("SelectionSort: ", listaSelection);
-    println("InsertionSort: ", listaInsertion);
+    println("BubbleSort: ", arrayBubble);
+    println("SelectionSort: ", arraySelection);
+    println("InsertionSort: ", arrayInsertion);
 }
 
 main();

@@ -1,23 +1,20 @@
 import Math.LinearAlgebra
 
-float p = input("Ingrese el coeficiente p: ");
-float q = input("Ingrese el coeficiente q: ");
-
-Vector<double> F(Vector<double> x) {
-    Vector<double> F = [x[0]*x[1]*((x[0]+x[1])^2 - x[0]*x[1]) + p/5, x[0]^5 + x[1]^5 + q];
+Vector<double, Column> F(Vector<double, Column> x) {
+    Vector<double, Column> F = [x[1]^2 + x[2]^2 - 4, exp(x[1]) + x[2] - 1];
     return F;
 }
 
-Matrix<double> JF(Vector<double> x) {
-    Matrix<double> JF = [x[1]*((x[0]+x[1])^2 + 2*x[0]) x[0]*((x[0]+x[1])^2 + 2*x[1]); 5*x[0]^4 5*x[1]^4];
+Matrix<double> JF(Vector<double, Column> x) {
+    Matrix<double> JF = [2*x[1], 2*x[2]; exp(x[1]), 1];
     return JF;
 }
 
-Vector<double> x0 = [2, 1];
+Vector<double, Column> x0 = [2, 0];
 double tol = 1e-8;
 int maxiter = 100;
 
-Vector<double> xn = x0;
+Vector<double, Column> xn = x0;
 double res = norm(F(xn));
 int iter = 0;
 
@@ -31,8 +28,3 @@ while (res > tol && iter < maxiter) {
 println("xn = ", xn);
 println("res = ", res);
 println("iter = ", iter);
-
-xpol = xn[0] + xn[1];
-
-println("x^5 + $p$x + $q$ = 0");
-println("x = ", xpol);

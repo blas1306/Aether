@@ -11,8 +11,17 @@ matriz en IR, SSA y el printer LLVM:
 - Instrucciones SSA equivalentes.
 - `src/aether/backend/llvm/printer.py`.
 
-Este documento es solo auditoria. No define cambios de implementacion
-aplicados.
+Este documento nacio como auditoria. La fase 1 de refactorizacion interna del
+backend LLVM ya fue aplicada sin cambios de comportamiento.
+
+## Estado de Refactorizacion
+
+- Fase 1 completada: helpers privados del printer LLVM para creacion de
+  agregados, labels/checks de loops, recorrido elemento a elemento, recorrido
+  doble de matrices, load/store de elementos y seleccion de `add/sub/mul`
+  contra `fadd/fsub/fmul`.
+- Sin features nuevas, sin instrucciones nuevas y sin cambios intencionales en
+  el LLVM generado.
 
 ## Resumen Ejecutivo
 

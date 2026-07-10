@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import re
-from typing import Any
+from typing import Any, Callable
 
 from aether.ir.types import ArrayType, BoolType, DoubleType, IntType, MatrixType, StringType, VectorType, VoidType
 from aether.ssa.model import (
@@ -539,11 +539,7 @@ class LLVMPrinter:
         multiply_operator = self._element_binary_operator(instruction.result.type, "mul")
         add_operator = self._element_binary_operator(instruction.result.type, "add")
         zero = "0.0" if isinstance(instruction.result.type, DoubleType) else "0"
-        label_id = self._next_synthetic_temp
-        self._next_synthetic_temp += 1
-        loop_label = f"vector.dot.loop.{label_id}"
-        body_label = f"vector.dot.body.{label_id}"
-        exit_label = f"vector.dot.exit.{label_id}"
+        labels = self._linear_loop_labels("vector.dot")
 
         left_field = self._synthetic_temp("vector.dot.left.data.field")
         left_data = self._synthetic_temp("vector.dot.left.data")
@@ -563,19 +559,21 @@ class LLVMPrinter:
                 f"  store {result_type} {zero}, ptr {acc_ptr}",
                 f"  {index_ptr} = alloca i64",
                 f"  store i64 0, ptr {index_ptr}",
-                f"  br label %{loop_label}",
-                f"{loop_label}:",
+                f"  br label %{labels.loop}",
+                f"{labels.loop}:",
             ]
         )
         index = self._synthetic_temp("vector.dot.index")
         condition = self._synthetic_temp("vector.dot.cond")
         lines.extend(
-            [
-                f"  {index} = load i64, ptr {index_ptr}",
-                f"  {condition} = icmp slt i64 {index}, {instruction.length}",
-                f"  br i1 {condition}, label %{body_label}, label %{exit_label}",
-                f"{body_label}:",
-            ]
+            self._linear_loop_check(
+                index,
+                index_ptr,
+                condition,
+                instruction.length,
+                labels,
+                indent="  ",
+            )
         )
 
         left_ptr = self._synthetic_temp("vector.dot.left.elem")
@@ -584,10 +582,10 @@ class LLVMPrinter:
         loaded_right = self._synthetic_temp("vector.dot.right")
         lines.extend(
             [
-                f"  {left_ptr} = getelementptr {left_element_type}, ptr {left_data}, i64 {index}",
-                f"  {loaded_left} = load {left_element_type}, ptr {left_ptr}",
-                f"  {right_ptr} = getelementptr {right_element_type}, ptr {right_data}, i64 {index}",
-                f"  {loaded_right} = load {right_element_type}, ptr {right_ptr}",
+                self._element_pointer_line(left_ptr, left_element_type, left_data, index, indent="  "),
+                self._load_element_line(loaded_left, left_element_type, left_ptr, indent="  "),
+                self._element_pointer_line(right_ptr, right_element_type, right_data, index, indent="  "),
+                self._load_element_line(loaded_right, right_element_type, right_ptr, indent="  "),
             ]
         )
         left_operand = self._coerce_scalar(lines, loaded_left, instruction.left.type.element, instruction.result.type, "vector.dot.left.cast")
@@ -604,8 +602,8 @@ class LLVMPrinter:
                 f"  store {result_type} {acc_next}, ptr {acc_ptr}",
                 f"  {index_next} = add i64 {index}, 1",
                 f"  store i64 {index_next}, ptr {index_ptr}",
-                f"  br label %{loop_label}",
-                f"{exit_label}:",
+                f"  br label %{labels.loop}",
+                f"{labels.exit}:",
                 f"  {result} = load {result_type}, ptr {acc_ptr}",
             ]
         )
@@ -636,14 +634,7 @@ class LLVMPrinter:
         column_element_type = llvm_type(instruction.column.type.element)
         row_element_type = llvm_type(instruction.row.type.element)
         multiply_operator = self._element_binary_operator(instruction.result.type.element, "mul")
-        label_id = self._next_synthetic_temp
-        self._next_synthetic_temp += 1
-        outer_loop_label = f"outer.product.outer.loop.{label_id}"
-        outer_body_label = f"outer.product.outer.body.{label_id}"
-        inner_loop_label = f"outer.product.inner.loop.{label_id}"
-        inner_body_label = f"outer.product.inner.body.{label_id}"
-        inner_exit_label = f"outer.product.inner.exit.{label_id}"
-        exit_label = f"outer.product.exit.{label_id}"
+        labels = self._double_loop_labels("outer.product")
         length = instruction.rows * instruction.cols
 
         column_field = self._synthetic_temp("outer.product.column.data.field")
@@ -665,33 +656,39 @@ class LLVMPrinter:
             f"  {row_index_ptr} = alloca i64",
             f"  store i64 0, ptr {row_index_ptr}",
             f"  {col_index_ptr} = alloca i64",
-            f"  br label %{outer_loop_label}",
-            f"{outer_loop_label}:",
+            f"  br label %{labels.outer_loop}",
+            f"{labels.outer_loop}:",
         ]
 
         row_index = self._synthetic_temp("outer.product.row.index")
         outer_cond = self._synthetic_temp("outer.product.outer.cond")
         lines.extend(
-            [
-                f"  {row_index} = load i64, ptr {row_index_ptr}",
-                f"  {outer_cond} = icmp slt i64 {row_index}, {instruction.rows}",
-                f"  br i1 {outer_cond}, label %{outer_body_label}, label %{exit_label}",
-                f"{outer_body_label}:",
+            self._double_loop_outer_check(
+                row_index,
+                row_index_ptr,
+                outer_cond,
+                instruction.rows,
+                labels,
+                indent="  ",
+            )
+            + [
                 f"  store i64 0, ptr {col_index_ptr}",
-                f"  br label %{inner_loop_label}",
-                f"{inner_loop_label}:",
+                f"  br label %{labels.inner_loop}",
+                f"{labels.inner_loop}:",
             ]
         )
 
         col_index = self._synthetic_temp("outer.product.col.index")
         inner_cond = self._synthetic_temp("outer.product.inner.cond")
         lines.extend(
-            [
-                f"  {col_index} = load i64, ptr {col_index_ptr}",
-                f"  {inner_cond} = icmp slt i64 {col_index}, {instruction.cols}",
-                f"  br i1 {inner_cond}, label %{inner_body_label}, label %{inner_exit_label}",
-                f"{inner_body_label}:",
-            ]
+            self._double_loop_inner_check(
+                col_index,
+                col_index_ptr,
+                inner_cond,
+                instruction.cols,
+                labels,
+                indent="  ",
+            )
         )
 
         column_ptr = self._synthetic_temp("outer.product.column.elem")
@@ -703,10 +700,10 @@ class LLVMPrinter:
         result_ptr = self._synthetic_temp("outer.product.result.elem")
         lines.extend(
             [
-                f"  {column_ptr} = getelementptr {column_element_type}, ptr {column_data}, i64 {row_index}",
-                f"  {loaded_column} = load {column_element_type}, ptr {column_ptr}",
-                f"  {row_ptr} = getelementptr {row_element_type}, ptr {row_data}, i64 {col_index}",
-                f"  {loaded_row} = load {row_element_type}, ptr {row_ptr}",
+                self._element_pointer_line(column_ptr, column_element_type, column_data, row_index, indent="  "),
+                self._load_element_line(loaded_column, column_element_type, column_ptr, indent="  "),
+                self._element_pointer_line(row_ptr, row_element_type, row_data, col_index, indent="  "),
+                self._load_element_line(loaded_row, row_element_type, row_ptr, indent="  "),
             ]
         )
         column_operand = self._coerce_scalar(
@@ -731,16 +728,16 @@ class LLVMPrinter:
                 f"  {product} = {multiply_operator} {result_element_type} {column_operand}, {row_operand}",
                 f"  {row_offset} = mul i64 {row_index}, {instruction.cols}",
                 f"  {result_index} = add i64 {row_offset}, {col_index}",
-                f"  {result_ptr} = getelementptr {result_element_type}, ptr {result_data}, i64 {result_index}",
-                f"  store {result_element_type} {product}, ptr {result_ptr}",
+                self._element_pointer_line(result_ptr, result_element_type, result_data, result_index, indent="  "),
+                self._store_element_line(result_element_type, product, result_ptr, indent="  "),
                 f"  {col_next} = add i64 {col_index}, 1",
                 f"  store i64 {col_next}, ptr {col_index_ptr}",
-                f"  br label %{inner_loop_label}",
-                f"{inner_exit_label}:",
+                f"  br label %{labels.inner_loop}",
+                f"{labels.inner_exit}:",
                 f"  {row_next} = add i64 {row_index}, 1",
                 f"  store i64 {row_next}, ptr {row_index_ptr}",
-                f"  br label %{outer_loop_label}",
-                f"{exit_label}:",
+                f"  br label %{labels.outer_loop}",
+                f"{labels.exit}:",
             ]
         )
         return lines
@@ -837,16 +834,18 @@ class LLVMPrinter:
         self._uses_array_type = True
         self._uses_array_allocation = True
 
-        result = self._new_temp(instruction.result)
         result_element_type = llvm_type(instruction.result.type.element)
-        result_element_size = self._sizeof(instruction.result.type.element)
+        length = instruction.rows * instruction.cols
+        allocation = self._aggregate_allocation(
+            instruction.result,
+            instruction.result.type.element,
+            length,
+        )
+        result = allocation.result
         multiply_operator = self._element_binary_operator(instruction.result.type.element, "mul")
         add_operator = self._element_binary_operator(instruction.result.type.element, "add")
         zero = "0.0" if isinstance(instruction.result.type.element, DoubleType) else "0"
-        length = instruction.rows * instruction.cols
-        lines = [
-            f"{result} = call ptr @aether_array_new(i64 {result_element_size}, i64 {length})"
-        ]
+        lines = [allocation.line]
 
         left_data = self._synthetic_temp("matrix.matmul.left.data")
         right_data = self._synthetic_temp("matrix.matmul.right.data")
@@ -857,53 +856,55 @@ class LLVMPrinter:
 
         left_element_type = llvm_type(instruction.left.type.element)
         right_element_type = llvm_type(instruction.right.type.element)
-        for row in range(instruction.rows):
-            for col in range(instruction.cols):
-                accumulator = zero
-                for inner in range(instruction.inner):
-                    left_index = row * instruction.inner + inner
-                    right_index = inner * instruction.cols + col
-                    left_ptr = self._synthetic_temp("matrix.matmul.left.elem")
-                    right_ptr = self._synthetic_temp("matrix.matmul.right.elem")
-                    loaded_left = self._synthetic_temp("matrix.matmul.left")
-                    loaded_right = self._synthetic_temp("matrix.matmul.right")
-                    lines.append(
-                        f"{left_ptr} = getelementptr {left_element_type}, ptr {left_data}, i64 {left_index}"
-                    )
-                    lines.append(f"{loaded_left} = load {left_element_type}, ptr {left_ptr}")
-                    lines.append(
-                        f"{right_ptr} = getelementptr {right_element_type}, ptr {right_data}, i64 {right_index}"
-                    )
-                    lines.append(f"{loaded_right} = load {right_element_type}, ptr {right_ptr}")
-                    left_operand = self._coerce_scalar(
-                        lines,
-                        loaded_left,
-                        instruction.left.type.element,
-                        instruction.result.type.element,
-                        "matrix.matmul.left.cast",
-                    )
-                    right_operand = self._coerce_scalar(
-                        lines,
-                        loaded_right,
-                        instruction.right.type.element,
-                        instruction.result.type.element,
-                        "matrix.matmul.right.cast",
-                    )
-                    product = self._synthetic_temp("matrix.matmul.product")
-                    summed = self._synthetic_temp("matrix.matmul.sum")
-                    lines.append(
-                        f"{product} = {multiply_operator} {result_element_type} {left_operand}, {right_operand}"
-                    )
-                    lines.append(
-                        f"{summed} = {add_operator} {result_element_type} {accumulator}, {product}"
-                    )
-                    accumulator = summed
-                result_index = row * instruction.cols + col
-                result_ptr = self._synthetic_temp("matrix.matmul.result.elem")
+
+        def emit_cell(row: int, col: int) -> None:
+            accumulator = zero
+            for inner in range(instruction.inner):
+                left_index = row * instruction.inner + inner
+                right_index = inner * instruction.cols + col
+                left_ptr = self._synthetic_temp("matrix.matmul.left.elem")
+                right_ptr = self._synthetic_temp("matrix.matmul.right.elem")
+                loaded_left = self._synthetic_temp("matrix.matmul.left")
+                loaded_right = self._synthetic_temp("matrix.matmul.right")
                 lines.append(
-                    f"{result_ptr} = getelementptr {result_element_type}, ptr {result_data}, i64 {result_index}"
+                    self._element_pointer_line(left_ptr, left_element_type, left_data, left_index)
                 )
-                lines.append(f"store {result_element_type} {accumulator}, ptr {result_ptr}")
+                lines.append(self._load_element_line(loaded_left, left_element_type, left_ptr))
+                lines.append(
+                    self._element_pointer_line(right_ptr, right_element_type, right_data, right_index)
+                )
+                lines.append(self._load_element_line(loaded_right, right_element_type, right_ptr))
+                left_operand = self._coerce_scalar(
+                    lines,
+                    loaded_left,
+                    instruction.left.type.element,
+                    instruction.result.type.element,
+                    "matrix.matmul.left.cast",
+                )
+                right_operand = self._coerce_scalar(
+                    lines,
+                    loaded_right,
+                    instruction.right.type.element,
+                    instruction.result.type.element,
+                    "matrix.matmul.right.cast",
+                )
+                product = self._synthetic_temp("matrix.matmul.product")
+                summed = self._synthetic_temp("matrix.matmul.sum")
+                lines.append(
+                    f"{product} = {multiply_operator} {result_element_type} {left_operand}, {right_operand}"
+                )
+                lines.append(
+                    f"{summed} = {add_operator} {result_element_type} {accumulator}, {product}"
+                )
+                accumulator = summed
+            result_index = row * instruction.cols + col
+            result_ptr = self._synthetic_temp("matrix.matmul.result.elem")
+            lines.append(
+                self._element_pointer_line(result_ptr, result_element_type, result_data, result_index)
+            )
+            lines.append(self._store_element_line(result_element_type, accumulator, result_ptr))
+
+        self._for_each_matrix_element(instruction.rows, instruction.cols, emit_cell)
 
         return lines
 
@@ -926,22 +927,20 @@ class LLVMPrinter:
         self._uses_array_type = True
         self._uses_array_allocation = True
 
-        result = self._new_temp(instruction.result)
         result_element_type = llvm_type(instruction.result.type.element)
-        result_element_size = self._sizeof(instruction.result.type.element)
+        allocation = self._aggregate_allocation(
+            instruction.result,
+            instruction.result.type.element,
+            instruction.rows,
+            indent="  ",
+        )
+        result = allocation.result
         matrix_element_type = llvm_type(instruction.matrix.type.element)
         vector_element_type = llvm_type(instruction.vector.type.element)
         multiply_operator = self._element_binary_operator(instruction.result.type.element, "mul")
         add_operator = self._element_binary_operator(instruction.result.type.element, "add")
         zero = "0.0" if isinstance(instruction.result.type.element, DoubleType) else "0"
-        label_id = self._next_synthetic_temp
-        self._next_synthetic_temp += 1
-        outer_loop_label = f"matrix.vector.outer.loop.{label_id}"
-        outer_body_label = f"matrix.vector.outer.body.{label_id}"
-        inner_loop_label = f"matrix.vector.inner.loop.{label_id}"
-        inner_body_label = f"matrix.vector.inner.body.{label_id}"
-        inner_exit_label = f"matrix.vector.inner.exit.{label_id}"
-        exit_label = f"matrix.vector.exit.{label_id}"
+        labels = self._double_loop_labels("matrix.vector")
 
         matrix_field = self._synthetic_temp("matrix.vector.matrix.data.field")
         matrix_data = self._synthetic_temp("matrix.vector.matrix.data")
@@ -953,7 +952,7 @@ class LLVMPrinter:
         col_ptr = self._synthetic_temp("matrix.vector.col.ptr")
         acc_ptr = self._synthetic_temp("matrix.vector.acc.ptr")
         lines = [
-            f"  {result} = call ptr @aether_array_new(i64 {result_element_size}, i64 {instruction.rows})",
+            allocation.line,
             f"  {matrix_field} = getelementptr {self._ARRAY_STRUCT_TYPE}, ptr {self._operand(instruction.matrix)}, i32 0, i32 1",
             f"  {matrix_data} = load ptr, ptr {matrix_field}",
             f"  {vector_field} = getelementptr {self._ARRAY_STRUCT_TYPE}, ptr {self._operand(instruction.vector)}, i32 0, i32 1",
@@ -964,34 +963,40 @@ class LLVMPrinter:
             f"  store i64 0, ptr {row_ptr}",
             f"  {col_ptr} = alloca i64",
             f"  {acc_ptr} = alloca {result_element_type}",
-            f"  br label %{outer_loop_label}",
-            f"{outer_loop_label}:",
+            f"  br label %{labels.outer_loop}",
+            f"{labels.outer_loop}:",
         ]
 
         row = self._synthetic_temp("matrix.vector.row")
         outer_cond = self._synthetic_temp("matrix.vector.outer.cond")
         lines.extend(
-            [
-                f"  {row} = load i64, ptr {row_ptr}",
-                f"  {outer_cond} = icmp slt i64 {row}, {instruction.rows}",
-                f"  br i1 {outer_cond}, label %{outer_body_label}, label %{exit_label}",
-                f"{outer_body_label}:",
+            self._double_loop_outer_check(
+                row,
+                row_ptr,
+                outer_cond,
+                instruction.rows,
+                labels,
+                indent="  ",
+            )
+            + [
                 f"  store {result_element_type} {zero}, ptr {acc_ptr}",
                 f"  store i64 0, ptr {col_ptr}",
-                f"  br label %{inner_loop_label}",
-                f"{inner_loop_label}:",
+                f"  br label %{labels.inner_loop}",
+                f"{labels.inner_loop}:",
             ]
         )
 
         col = self._synthetic_temp("matrix.vector.col")
         inner_cond = self._synthetic_temp("matrix.vector.inner.cond")
         lines.extend(
-            [
-                f"  {col} = load i64, ptr {col_ptr}",
-                f"  {inner_cond} = icmp slt i64 {col}, {instruction.inner}",
-                f"  br i1 {inner_cond}, label %{inner_body_label}, label %{inner_exit_label}",
-                f"{inner_body_label}:",
-            ]
+            self._double_loop_inner_check(
+                col,
+                col_ptr,
+                inner_cond,
+                instruction.inner,
+                labels,
+                indent="  ",
+            )
         )
 
         row_offset = self._synthetic_temp("matrix.vector.row.offset")
@@ -1004,10 +1009,10 @@ class LLVMPrinter:
             [
                 f"  {row_offset} = mul i64 {row}, {instruction.inner}",
                 f"  {matrix_index} = add i64 {row_offset}, {col}",
-                f"  {matrix_ptr} = getelementptr {matrix_element_type}, ptr {matrix_data}, i64 {matrix_index}",
-                f"  {loaded_matrix} = load {matrix_element_type}, ptr {matrix_ptr}",
-                f"  {vector_ptr} = getelementptr {vector_element_type}, ptr {vector_data}, i64 {col}",
-                f"  {loaded_vector} = load {vector_element_type}, ptr {vector_ptr}",
+                self._element_pointer_line(matrix_ptr, matrix_element_type, matrix_data, matrix_index, indent="  "),
+                self._load_element_line(loaded_matrix, matrix_element_type, matrix_ptr, indent="  "),
+                self._element_pointer_line(vector_ptr, vector_element_type, vector_data, col, indent="  "),
+                self._load_element_line(loaded_vector, vector_element_type, vector_ptr, indent="  "),
             ]
         )
         matrix_operand = self._coerce_scalar(
@@ -1039,15 +1044,15 @@ class LLVMPrinter:
                 f"  store {result_element_type} {acc_next}, ptr {acc_ptr}",
                 f"  {col_next} = add i64 {col}, 1",
                 f"  store i64 {col_next}, ptr {col_ptr}",
-                f"  br label %{inner_loop_label}",
-                f"{inner_exit_label}:",
+                f"  br label %{labels.inner_loop}",
+                f"{labels.inner_exit}:",
                 f"  {acc_final} = load {result_element_type}, ptr {acc_ptr}",
-                f"  {result_ptr} = getelementptr {result_element_type}, ptr {result_data}, i64 {row}",
-                f"  store {result_element_type} {acc_final}, ptr {result_ptr}",
+                self._element_pointer_line(result_ptr, result_element_type, result_data, row, indent="  "),
+                self._store_element_line(result_element_type, acc_final, result_ptr, indent="  "),
                 f"  {row_next} = add i64 {row}, 1",
                 f"  store i64 {row_next}, ptr {row_ptr}",
-                f"  br label %{outer_loop_label}",
-                f"{exit_label}:",
+                f"  br label %{labels.outer_loop}",
+                f"{labels.exit}:",
             ]
         )
         return lines
@@ -1075,22 +1080,20 @@ class LLVMPrinter:
         self._uses_array_type = True
         self._uses_array_allocation = True
 
-        result = self._new_temp(instruction.result)
         result_element_type = llvm_type(instruction.result.type.element)
-        result_element_size = self._sizeof(instruction.result.type.element)
+        allocation = self._aggregate_allocation(
+            instruction.result,
+            instruction.result.type.element,
+            instruction.cols,
+            indent="  ",
+        )
+        result = allocation.result
         vector_element_type = llvm_type(instruction.vector.type.element)
         matrix_element_type = llvm_type(instruction.matrix.type.element)
         multiply_operator = self._element_binary_operator(instruction.result.type.element, "mul")
         add_operator = self._element_binary_operator(instruction.result.type.element, "add")
         zero = "0.0" if isinstance(instruction.result.type.element, DoubleType) else "0"
-        label_id = self._next_synthetic_temp
-        self._next_synthetic_temp += 1
-        outer_loop_label = f"vector.matrix.outer.loop.{label_id}"
-        outer_body_label = f"vector.matrix.outer.body.{label_id}"
-        inner_loop_label = f"vector.matrix.inner.loop.{label_id}"
-        inner_body_label = f"vector.matrix.inner.body.{label_id}"
-        inner_exit_label = f"vector.matrix.inner.exit.{label_id}"
-        exit_label = f"vector.matrix.exit.{label_id}"
+        labels = self._double_loop_labels("vector.matrix")
 
         vector_field = self._synthetic_temp("vector.matrix.vector.data.field")
         vector_data = self._synthetic_temp("vector.matrix.vector.data")
@@ -1102,7 +1105,7 @@ class LLVMPrinter:
         row_ptr = self._synthetic_temp("vector.matrix.row.ptr")
         acc_ptr = self._synthetic_temp("vector.matrix.acc.ptr")
         lines = [
-            f"  {result} = call ptr @aether_array_new(i64 {result_element_size}, i64 {instruction.cols})",
+            allocation.line,
             f"  {vector_field} = getelementptr {self._ARRAY_STRUCT_TYPE}, ptr {self._operand(instruction.vector)}, i32 0, i32 1",
             f"  {vector_data} = load ptr, ptr {vector_field}",
             f"  {matrix_field} = getelementptr {self._ARRAY_STRUCT_TYPE}, ptr {self._operand(instruction.matrix)}, i32 0, i32 1",
@@ -1113,34 +1116,40 @@ class LLVMPrinter:
             f"  store i64 0, ptr {col_ptr}",
             f"  {row_ptr} = alloca i64",
             f"  {acc_ptr} = alloca {result_element_type}",
-            f"  br label %{outer_loop_label}",
-            f"{outer_loop_label}:",
+            f"  br label %{labels.outer_loop}",
+            f"{labels.outer_loop}:",
         ]
 
         col = self._synthetic_temp("vector.matrix.col")
         outer_cond = self._synthetic_temp("vector.matrix.outer.cond")
         lines.extend(
-            [
-                f"  {col} = load i64, ptr {col_ptr}",
-                f"  {outer_cond} = icmp slt i64 {col}, {instruction.cols}",
-                f"  br i1 {outer_cond}, label %{outer_body_label}, label %{exit_label}",
-                f"{outer_body_label}:",
+            self._double_loop_outer_check(
+                col,
+                col_ptr,
+                outer_cond,
+                instruction.cols,
+                labels,
+                indent="  ",
+            )
+            + [
                 f"  store {result_element_type} {zero}, ptr {acc_ptr}",
                 f"  store i64 0, ptr {row_ptr}",
-                f"  br label %{inner_loop_label}",
-                f"{inner_loop_label}:",
+                f"  br label %{labels.inner_loop}",
+                f"{labels.inner_loop}:",
             ]
         )
 
         row = self._synthetic_temp("vector.matrix.row")
         inner_cond = self._synthetic_temp("vector.matrix.inner.cond")
         lines.extend(
-            [
-                f"  {row} = load i64, ptr {row_ptr}",
-                f"  {inner_cond} = icmp slt i64 {row}, {instruction.rows}",
-                f"  br i1 {inner_cond}, label %{inner_body_label}, label %{inner_exit_label}",
-                f"{inner_body_label}:",
-            ]
+            self._double_loop_inner_check(
+                row,
+                row_ptr,
+                inner_cond,
+                instruction.rows,
+                labels,
+                indent="  ",
+            )
         )
 
         row_offset = self._synthetic_temp("vector.matrix.row.offset")
@@ -1153,10 +1162,10 @@ class LLVMPrinter:
             [
                 f"  {row_offset} = mul i64 {row}, {instruction.cols}",
                 f"  {matrix_index} = add i64 {row_offset}, {col}",
-                f"  {vector_ptr} = getelementptr {vector_element_type}, ptr {vector_data}, i64 {row}",
-                f"  {loaded_vector} = load {vector_element_type}, ptr {vector_ptr}",
-                f"  {matrix_ptr} = getelementptr {matrix_element_type}, ptr {matrix_data}, i64 {matrix_index}",
-                f"  {loaded_matrix} = load {matrix_element_type}, ptr {matrix_ptr}",
+                self._element_pointer_line(vector_ptr, vector_element_type, vector_data, row, indent="  "),
+                self._load_element_line(loaded_vector, vector_element_type, vector_ptr, indent="  "),
+                self._element_pointer_line(matrix_ptr, matrix_element_type, matrix_data, matrix_index, indent="  "),
+                self._load_element_line(loaded_matrix, matrix_element_type, matrix_ptr, indent="  "),
             ]
         )
         vector_operand = self._coerce_scalar(
@@ -1188,15 +1197,15 @@ class LLVMPrinter:
                 f"  store {result_element_type} {acc_next}, ptr {acc_ptr}",
                 f"  {row_next} = add i64 {row}, 1",
                 f"  store i64 {row_next}, ptr {row_ptr}",
-                f"  br label %{inner_loop_label}",
-                f"{inner_exit_label}:",
+                f"  br label %{labels.inner_loop}",
+                f"{labels.inner_exit}:",
                 f"  {acc_final} = load {result_element_type}, ptr {acc_ptr}",
-                f"  {result_ptr} = getelementptr {result_element_type}, ptr {result_data}, i64 {col}",
-                f"  store {result_element_type} {acc_final}, ptr {result_ptr}",
+                self._element_pointer_line(result_ptr, result_element_type, result_data, col, indent="  "),
+                self._store_element_line(result_element_type, acc_final, result_ptr, indent="  "),
                 f"  {col_next} = add i64 {col}, 1",
                 f"  store i64 {col_next}, ptr {col_ptr}",
-                f"  br label %{outer_loop_label}",
-                f"{exit_label}:",
+                f"  br label %{labels.outer_loop}",
+                f"{labels.exit}:",
             ]
         )
         return lines
@@ -1228,23 +1237,23 @@ class LLVMPrinter:
         self._uses_array_type = True
         self._uses_array_allocation = True
 
-        result = self._new_temp(result_value)
         element_type = llvm_type(element_ir_type)
-        element_size = self._sizeof(element_ir_type)
         length = len(elements)
-        lines = [
-            f"{result} = call ptr @aether_array_new(i64 {element_size}, i64 {length})"
-        ]
+        allocation = self._aggregate_allocation(result_value, element_ir_type, length)
+        result = allocation.result
+        lines = [allocation.line]
         data = self._synthetic_temp("array.data")
         lines.extend(self._array_data_pointer(data, result))
-        for index, element in enumerate(elements):
+
+        def emit_element(index: int) -> None:
+            element = elements[index]
             element_ptr = self._synthetic_temp("array.elem")
             lines.append(
-                f"{element_ptr} = getelementptr {element_type}, ptr {data}, i64 {index}"
+                self._element_pointer_line(element_ptr, element_type, data, index)
             )
-            lines.append(
-                f"store {element_type} {self._operand(element)}, ptr {element_ptr}"
-            )
+            lines.append(self._store_element_line(element_type, self._operand(element), element_ptr))
+
+        self._for_each_element(length, emit_element)
         return "\n  ".join(lines)
 
     def _print_contiguous_binary(
@@ -1259,13 +1268,11 @@ class LLVMPrinter:
         self._uses_array_type = True
         self._uses_array_allocation = True
 
-        result = self._new_temp(result_value)
         element_type = llvm_type(element_ir_type)
-        element_size = self._sizeof(element_ir_type)
+        allocation = self._aggregate_allocation(result_value, element_ir_type, length)
+        result = allocation.result
         operator = self._element_binary_operator(element_ir_type, operator_name)
-        lines = [
-            f"{result} = call ptr @aether_array_new(i64 {element_size}, i64 {length})"
-        ]
+        lines = [allocation.line]
 
         left_data = self._synthetic_temp(f"{operator_name}.left.data")
         right_data = self._synthetic_temp(f"{operator_name}.right.data")
@@ -1274,7 +1281,7 @@ class LLVMPrinter:
         lines.extend(self._array_data_pointer(right_data, self._operand(right_value)))
         lines.extend(self._array_data_pointer(result_data, result))
 
-        for index in range(length):
+        def emit_element(index: int) -> None:
             left_ptr = self._synthetic_temp(f"{operator_name}.left.elem")
             right_ptr = self._synthetic_temp(f"{operator_name}.right.elem")
             result_ptr = self._synthetic_temp(f"{operator_name}.result.elem")
@@ -1282,20 +1289,22 @@ class LLVMPrinter:
             loaded_right = self._synthetic_temp(f"{operator_name}.right")
             result_element = self._synthetic_temp(f"{operator_name}.value")
             lines.append(
-                f"{left_ptr} = getelementptr {element_type}, ptr {left_data}, i64 {index}"
+                self._element_pointer_line(left_ptr, element_type, left_data, index)
             )
-            lines.append(f"{loaded_left} = load {element_type}, ptr {left_ptr}")
+            lines.append(self._load_element_line(loaded_left, element_type, left_ptr))
             lines.append(
-                f"{right_ptr} = getelementptr {element_type}, ptr {right_data}, i64 {index}"
+                self._element_pointer_line(right_ptr, element_type, right_data, index)
             )
-            lines.append(f"{loaded_right} = load {element_type}, ptr {right_ptr}")
+            lines.append(self._load_element_line(loaded_right, element_type, right_ptr))
             lines.append(
                 f"{result_element} = {operator} {element_type} {loaded_left}, {loaded_right}"
             )
             lines.append(
-                f"{result_ptr} = getelementptr {element_type}, ptr {result_data}, i64 {index}"
+                self._element_pointer_line(result_ptr, element_type, result_data, index)
             )
-            lines.append(f"store {element_type} {result_element}, ptr {result_ptr}")
+            lines.append(self._store_element_line(element_type, result_element, result_ptr))
+
+        self._for_each_element(length, emit_element)
 
         return lines
 
@@ -1311,36 +1320,36 @@ class LLVMPrinter:
         self._uses_array_type = True
         self._uses_array_allocation = True
 
-        result = self._new_temp(result_value)
         element_type = llvm_type(element_ir_type)
-        element_size = self._sizeof(element_ir_type)
+        allocation = self._aggregate_allocation(result_value, element_ir_type, length)
+        result = allocation.result
         operator = self._element_binary_operator(element_ir_type, "mul")
         scalar = self._operand(scalar_value)
-        lines = [
-            f"{result} = call ptr @aether_array_new(i64 {element_size}, i64 {length})"
-        ]
+        lines = [allocation.line]
 
         aggregate_data = self._synthetic_temp(f"{operation_name}.source.data")
         result_data = self._synthetic_temp(f"{operation_name}.result.data")
         lines.extend(self._array_data_pointer(aggregate_data, self._operand(aggregate_value)))
         lines.extend(self._array_data_pointer(result_data, result))
 
-        for index in range(length):
+        def emit_element(index: int) -> None:
             aggregate_ptr = self._synthetic_temp(f"{operation_name}.source.elem")
             result_ptr = self._synthetic_temp(f"{operation_name}.result.elem")
             loaded_value = self._synthetic_temp(f"{operation_name}.source")
             result_element = self._synthetic_temp(f"{operation_name}.value")
             lines.append(
-                f"{aggregate_ptr} = getelementptr {element_type}, ptr {aggregate_data}, i64 {index}"
+                self._element_pointer_line(aggregate_ptr, element_type, aggregate_data, index)
             )
-            lines.append(f"{loaded_value} = load {element_type}, ptr {aggregate_ptr}")
+            lines.append(self._load_element_line(loaded_value, element_type, aggregate_ptr))
             lines.append(
                 f"{result_element} = {operator} {element_type} {loaded_value}, {scalar}"
             )
             lines.append(
-                f"{result_ptr} = getelementptr {element_type}, ptr {result_data}, i64 {index}"
+                self._element_pointer_line(result_ptr, element_type, result_data, index)
             )
-            lines.append(f"store {element_type} {result_element}, ptr {result_ptr}")
+            lines.append(self._store_element_line(element_type, result_element, result_ptr))
+
+        self._for_each_element(length, emit_element)
 
         return lines
 
@@ -1484,6 +1493,159 @@ class LLVMPrinter:
         value: str
         lines: list[str]
 
+    @dataclass(frozen=True)
+    class _AggregateAllocation:
+        result: str
+        line: str
+
+    @dataclass(frozen=True)
+    class _LoopLabels:
+        loop: str
+        body: str
+        exit: str
+
+    @dataclass(frozen=True)
+    class _DoubleLoopLabels:
+        outer_loop: str
+        outer_body: str
+        inner_loop: str
+        inner_body: str
+        inner_exit: str
+        exit: str
+
+    def _aggregate_allocation(
+        self,
+        result_value: SSAValue,
+        element_ir_type: object,
+        length: int,
+        *,
+        indent: str = "",
+    ) -> _AggregateAllocation:
+        result = self._new_temp(result_value)
+        element_size = self._sizeof(element_ir_type)
+        return self._AggregateAllocation(
+            result,
+            f"{indent}{result} = call ptr @aether_array_new(i64 {element_size}, i64 {length})",
+        )
+
+    def _linear_loop_labels(self, prefix: str) -> _LoopLabels:
+        label_id = self._next_synthetic_temp
+        self._next_synthetic_temp += 1
+        return self._LoopLabels(
+            f"{prefix}.loop.{label_id}",
+            f"{prefix}.body.{label_id}",
+            f"{prefix}.exit.{label_id}",
+        )
+
+    def _double_loop_labels(self, prefix: str) -> _DoubleLoopLabels:
+        label_id = self._next_synthetic_temp
+        self._next_synthetic_temp += 1
+        return self._DoubleLoopLabels(
+            f"{prefix}.outer.loop.{label_id}",
+            f"{prefix}.outer.body.{label_id}",
+            f"{prefix}.inner.loop.{label_id}",
+            f"{prefix}.inner.body.{label_id}",
+            f"{prefix}.inner.exit.{label_id}",
+            f"{prefix}.exit.{label_id}",
+        )
+
+    def _linear_loop_check(
+        self,
+        index: str,
+        index_ptr: str,
+        condition: str,
+        limit: int,
+        labels: _LoopLabels,
+        *,
+        indent: str = "",
+    ) -> list[str]:
+        return [
+            f"{indent}{index} = load i64, ptr {index_ptr}",
+            f"{indent}{condition} = icmp slt i64 {index}, {limit}",
+            f"{indent}br i1 {condition}, label %{labels.body}, label %{labels.exit}",
+            f"{labels.body}:",
+        ]
+
+    def _double_loop_outer_check(
+        self,
+        index: str,
+        index_ptr: str,
+        condition: str,
+        limit: int,
+        labels: _DoubleLoopLabels,
+        *,
+        indent: str = "",
+    ) -> list[str]:
+        return [
+            f"{indent}{index} = load i64, ptr {index_ptr}",
+            f"{indent}{condition} = icmp slt i64 {index}, {limit}",
+            f"{indent}br i1 {condition}, label %{labels.outer_body}, label %{labels.exit}",
+            f"{labels.outer_body}:",
+        ]
+
+    def _double_loop_inner_check(
+        self,
+        index: str,
+        index_ptr: str,
+        condition: str,
+        limit: int,
+        labels: _DoubleLoopLabels,
+        *,
+        indent: str = "",
+    ) -> list[str]:
+        return [
+            f"{indent}{index} = load i64, ptr {index_ptr}",
+            f"{indent}{condition} = icmp slt i64 {index}, {limit}",
+            f"{indent}br i1 {condition}, label %{labels.inner_body}, label %{labels.inner_exit}",
+            f"{labels.inner_body}:",
+        ]
+
+    @staticmethod
+    def _for_each_element(length: int, emit: Callable[[int], None]) -> None:
+        for index in range(length):
+            emit(index)
+
+    @staticmethod
+    def _for_each_matrix_element(
+        rows: int,
+        cols: int,
+        emit: Callable[[int, int], None],
+    ) -> None:
+        for row in range(rows):
+            for col in range(cols):
+                emit(row, col)
+
+    @staticmethod
+    def _element_pointer_line(
+        result: str,
+        element_type: str,
+        data: str,
+        index: int | str,
+        *,
+        indent: str = "",
+    ) -> str:
+        return f"{indent}{result} = getelementptr {element_type}, ptr {data}, i64 {index}"
+
+    @staticmethod
+    def _load_element_line(
+        result: str,
+        element_type: str,
+        pointer: str,
+        *,
+        indent: str = "",
+    ) -> str:
+        return f"{indent}{result} = load {element_type}, ptr {pointer}"
+
+    @staticmethod
+    def _store_element_line(
+        element_type: str,
+        value: str,
+        pointer: str,
+        *,
+        indent: str = "",
+    ) -> str:
+        return f"{indent}store {element_type} {value}, ptr {pointer}"
+
     def _array_element_pointer(
         self,
         array: str,
@@ -1587,20 +1749,22 @@ class LLVMPrinter:
 
     @staticmethod
     def _element_binary_operator(type_: object, operator: str) -> str:
+        operations = {
+            (IntType, "add"): "add",
+            (IntType, "sub"): "sub",
+            (IntType, "mul"): "mul",
+            (DoubleType, "add"): "fadd",
+            (DoubleType, "sub"): "fsub",
+            (DoubleType, "mul"): "fmul",
+        }
         if isinstance(type_, IntType):
-            if operator == "add":
-                return "add"
-            if operator == "sub":
-                return "sub"
-            if operator == "mul":
-                return "mul"
+            selected = operations.get((IntType, operator))
+            if selected is not None:
+                return selected
         if isinstance(type_, DoubleType):
-            if operator == "add":
-                return "fadd"
-            if operator == "sub":
-                return "fsub"
-            if operator == "mul":
-                return "fmul"
+            selected = operations.get((DoubleType, operator))
+            if selected is not None:
+                return selected
         raise LLVMBackendError(
             f"LLVM backend does not support vector/matrix {operator} for {type_}"
         )

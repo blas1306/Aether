@@ -1,5 +1,4 @@
 import Math.LinearAlgebra
-import Plots
 
 f(x) = x^2 + 1;
 println("f(4) = ", f(4));
@@ -29,10 +28,11 @@ println(EsPrimo(2));
 println(EsPrimo(5));
 println(EsPrimo(57));
 
-A = [3 2; 1 0; 0 0];
-b = [5; 3; 0];
+Matrix<int> A = [3 2; 1 0; 0 0];
+Vector<int> b = [5; 3; 0];
 
-m, n = size(A);
+m = A.rows;
+n = A.columns;
 x = A \ b;
 
 println("Filas de A: ", m);
