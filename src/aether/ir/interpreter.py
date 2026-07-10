@@ -37,6 +37,7 @@ from .model import (
     IRVectorGet,
     IRVectorAdd,
     IRVectorDot,
+    IRVectorMatrixMul,
     IRVectorScale,
     IRVectorSub,
     IRVectorLength,
@@ -214,6 +215,10 @@ class IRInterpreter:
 
         if isinstance(instruction, IRMatrixVectorMul):
             self._execute_matrix_vector_mul(instruction, frame)
+            return False, None, None
+
+        if isinstance(instruction, IRVectorMatrixMul):
+            self._execute_vector_matrix_mul(instruction, frame)
             return False, None, None
 
         if isinstance(instruction, IRArrayGet):
@@ -431,6 +436,30 @@ class IRInterpreter:
                 matrix_value = matrix[row * instruction.inner + inner]
                 vector_value = vector[inner]
                 total = self._binary("add", total, self._binary("mul", matrix_value, vector_value))
+            result.append(total)
+        frame.values[instruction.result] = result
+
+    def _execute_vector_matrix_mul(
+        self,
+        instruction: IRVectorMatrixMul,
+        frame: _Frame,
+    ) -> None:
+        vector = self._value(instruction.vector, frame)
+        matrix = self._value(instruction.matrix, frame)
+        if not isinstance(vector, list) or not isinstance(matrix, list):
+            raise IRExecutionError("IR vector matrix mul requires vector and matrix values")
+        if len(vector) != instruction.rows:
+            raise IRExecutionError("IR vector matrix mul vector operand must match instruction dimensions")
+        if len(matrix) != instruction.rows * instruction.cols:
+            raise IRExecutionError("IR vector matrix mul matrix operand must match instruction dimensions")
+
+        result: list[Any] = []
+        for col in range(instruction.cols):
+            total = 0.0 if isinstance(instruction.result.type.element, DoubleType) else 0
+            for row in range(instruction.rows):
+                vector_value = vector[row]
+                matrix_value = matrix[row * instruction.cols + col]
+                total = self._binary("add", total, self._binary("mul", vector_value, matrix_value))
             result.append(total)
         frame.values[instruction.result] = result
 

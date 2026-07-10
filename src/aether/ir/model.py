@@ -179,6 +179,17 @@ class IRMatrixVectorMul(IRInstruction):
 
 
 @dataclass(frozen=True)
+class IRVectorMatrixMul(IRInstruction):
+    """Vector<Row> * Matrix product."""
+
+    result: IRValue
+    vector: IRValue
+    matrix: IRValue
+    rows: int
+    cols: int
+
+
+@dataclass(frozen=True)
 class IRArrayGet(IRInstruction):
     result: IRValue
     array: IRValue

@@ -167,6 +167,17 @@ class SSAMatrixVectorMul(SSAInstruction):
 
 
 @dataclass(frozen=True)
+class SSAVectorMatrixMul(SSAInstruction):
+    """Vector<Row> * Matrix product."""
+
+    result: SSAValue
+    vector: SSAValue
+    matrix: SSAValue
+    rows: int
+    cols: int
+
+
+@dataclass(frozen=True)
 class SSAArrayGet(SSAInstruction):
     result: SSAValue
     array: SSAValue

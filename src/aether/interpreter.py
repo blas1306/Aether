@@ -2483,7 +2483,7 @@ def _evaluate_algebraic_multiplication(left: AetherValue, right: AetherValue) ->
         )
     if isinstance(left.type_name, VectorType) and isinstance(right.type_name, MatrixType):
         if left.type_name.orientation == "row":
-            raise AetherTypeError("Operator '*' does not implement Row * Matrix yet; use Math.LinearAlgebra.matmul(...).")
+            return matmul_builtin([left, right])
         raise AetherTypeError("Operator '*' does not implement Column * Matrix.")
     if isinstance(left.type_name, MatrixType) and isinstance(right.type_name, MatrixType):
         return matmul_builtin([left, right])

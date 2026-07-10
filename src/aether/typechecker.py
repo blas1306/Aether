@@ -3468,7 +3468,7 @@ def _algebraic_multiplication_type(left_type: AetherType, right_type: AetherType
         )
     if isinstance(left_type, VectorType) and isinstance(right_type, MatrixType):
         if left_type.orientation == "row":
-            raise AetherTypeError("Operator '*' does not implement Row * Matrix yet; use Math.LinearAlgebra.matmul(...).")
+            return infer_builtin_type(LINEAR_ALGEBRA_MATMUL, [left_type, right_type])
         raise AetherTypeError("Operator '*' does not implement Column * Matrix.")
     if isinstance(left_type, MatrixType) and isinstance(right_type, MatrixType):
         return infer_builtin_type(LINEAR_ALGEBRA_MATMUL, [left_type, right_type])

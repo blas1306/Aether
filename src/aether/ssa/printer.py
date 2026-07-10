@@ -36,6 +36,7 @@ from .model import (
     SSAVectorGet,
     SSAVectorAdd,
     SSAVectorDot,
+    SSAVectorMatrixMul,
     SSAVectorScale,
     SSAVectorSub,
     SSAVectorLength,
@@ -160,6 +161,12 @@ class SSAPrinter:
                 f"{self._typed_value(instruction.result)} = matrix_vector_mul column "
                 f"{self._value(instruction.matrix)}, {self._value(instruction.vector)} "
                 f"{instruction.rows}x{instruction.inner} * {instruction.inner}"
+            )
+        if isinstance(instruction, SSAVectorMatrixMul):
+            return (
+                f"{self._typed_value(instruction.result)} = vector_matrix_mul row "
+                f"{self._value(instruction.vector)}, {self._value(instruction.matrix)} "
+                f"{instruction.rows} * {instruction.rows}x{instruction.cols}"
             )
         if isinstance(instruction, SSAArrayGet):
             return (

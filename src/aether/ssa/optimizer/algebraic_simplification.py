@@ -35,6 +35,7 @@ from aether.ssa.model import (
     SSAVectorGet,
     SSAVectorAdd,
     SSAVectorDot,
+    SSAVectorMatrixMul,
     SSAVectorScale,
     SSAVectorSub,
     SSAVectorLength,
@@ -359,6 +360,15 @@ class SSAAlgebraicSimplifier:
                 self._resolve(instruction.vector, replacements),
                 instruction.rows,
                 instruction.inner,
+            )
+
+        if isinstance(instruction, SSAVectorMatrixMul):
+            return SSAVectorMatrixMul(
+                instruction.result,
+                self._resolve(instruction.vector, replacements),
+                self._resolve(instruction.matrix, replacements),
+                instruction.rows,
+                instruction.cols,
             )
 
         if isinstance(instruction, SSAMatrixScale):

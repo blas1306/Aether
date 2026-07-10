@@ -1039,16 +1039,17 @@ println(C);
     assert result.output == "[17; 39]\n"
 
 
-def test_matmul_row_vector_matrix_waits_for_oriented_vectors():
-    with pytest.raises(AetherTypeError, match="Row \\* Matrix"):
-        run_aether(
+def test_matmul_row_vector_matrix_operator_returns_row_vector():
+    result = run_aether(
         """
 u = [1; 2];
 A = [3 4; 5 6];
 C = Math.LinearAlgebra.transpose(u) * A;
 println(C);
 """
-        )
+    )
+
+    assert [element.value for element in result.env["C"].value] == [13, 16]
 
 
 def test_star_row_column_promotes_numeric_elements():

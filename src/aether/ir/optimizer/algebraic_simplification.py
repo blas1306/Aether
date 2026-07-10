@@ -35,6 +35,7 @@ from aether.ir.model import (
     IRVectorGet,
     IRVectorAdd,
     IRVectorDot,
+    IRVectorMatrixMul,
     IRVectorScale,
     IRVectorSub,
     IRVectorLength,
@@ -280,6 +281,12 @@ class AlgebraicSimplifier:
                 instruction,
                 matrix=self._resolve(instruction.matrix, replacements),
                 vector=self._resolve(instruction.vector, replacements),
+            )
+        if isinstance(instruction, IRVectorMatrixMul):
+            return replace(
+                instruction,
+                vector=self._resolve(instruction.vector, replacements),
+                matrix=self._resolve(instruction.matrix, replacements),
             )
         if isinstance(instruction, IRVectorScale):
             return replace(

@@ -45,6 +45,7 @@ EXPECTED_EXIT_CODES = {
     "vector_index.ae": 5,
     "vector_length.ae": 3,
     "vector_literal.ae": 0,
+    "vector_matrix_mul.ae": 29,
     "vector_scalar_mul.ae": 30,
     "vector_set.ae": 9,
     "vector_sub.ae": 18,

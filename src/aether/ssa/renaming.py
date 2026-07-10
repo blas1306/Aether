@@ -37,6 +37,7 @@ from aether.ir.model import (
     IRVectorGet,
     IRVectorAdd,
     IRVectorDot,
+    IRVectorMatrixMul,
     IRVectorScale,
     IRVectorSub,
     IRVectorLength,
@@ -77,6 +78,7 @@ from .model import (
     SSAVectorGet,
     SSAVectorAdd,
     SSAVectorDot,
+    SSAVectorMatrixMul,
     SSAVectorScale,
     SSAVectorSub,
     SSAVectorLength,
@@ -344,6 +346,13 @@ class SSARenamer:
             vector = self._resolve_value(instruction.vector)
             self._bind_value(result.name, result, bound_values)
             return SSAMatrixVectorMul(result, matrix, vector, instruction.rows, instruction.inner)
+
+        if isinstance(instruction, IRVectorMatrixMul):
+            result = self._define_value(instruction.result)
+            vector = self._resolve_value(instruction.vector)
+            matrix = self._resolve_value(instruction.matrix)
+            self._bind_value(result.name, result, bound_values)
+            return SSAVectorMatrixMul(result, vector, matrix, instruction.rows, instruction.cols)
 
         if isinstance(instruction, IRArrayGet):
             result = self._define_value(instruction.result)

@@ -228,17 +228,6 @@ int main() {
         (
             """
 int main() {
-    Vector<int, Row> r = [1, 2];
-    Matrix<int> A = [3, 4; 5, 6];
-    Vector<int, Row> y = r * A;
-    return y[0];
-}
-""",
-            "Row \\* Matrix",
-        ),
-        (
-            """
-int main() {
     Matrix<int> A = [3, 4; 5, 6];
     Vector<int, Row> r = [1, 2];
     Vector<int, Row> y = A * r;

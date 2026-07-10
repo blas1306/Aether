@@ -10,10 +10,11 @@ import pytest
 from aether.backend.llvm import print_llvm
 from aether.cli import EXIT_SUCCESS, main
 from aether.errors import AetherTypeError
-from aether.ir import IRInterpreter, IRLowerer, IRMatrixVectorMul, IRVerifier, IntType, VectorType
+from aether import ast
+from aether.ir import IRInterpreter, IRLowerer, IRMatrixVectorMul, IRVectorMatrixMul, IRVerifier, IntType, VectorType
 from aether.pipeline import parse_source
 from aether.runner import run_aether
-from aether.ssa import SSABuilder, SSAMatrixVectorMul, SSAVerifier, print_ssa
+from aether.ssa import SSABuilder, SSAMatrixVectorMul, SSAVectorMatrixMul, SSAVerifier, print_ssa
 from aether.typechecker import TypeChecker
 from aether.types import VectorType as RuntimeVectorType
 
@@ -33,6 +34,15 @@ def _emit_llvm(path: Path) -> tuple[int, str, str]:
     stderr = StringIO()
     exit_code = main(["--emit-llvm", str(path)], stdout=stdout, stderr=stderr)
     return exit_code, stdout.getvalue(), stderr.getvalue()
+
+
+def test_vector_matrix_product_parser_accepts_operator_shape() -> None:
+    program = parse_source("Vector<int, Row> r = [1, 2]; Matrix<int> A = [3, 4; 5, 6]; y = r * A;")
+
+    assignment = program.statements[-1]
+    assert isinstance(assignment, ast.Assignment)
+    assert isinstance(assignment.expression, ast.BinaryExpression)
+    assert assignment.expression.operator == "*"
 
 
 def test_matrix_column_product_typechecks_and_runs() -> None:
@@ -69,10 +79,6 @@ Vector<int, Column> r = A * c;
         (
             "Vector<int, Column> c = [1; 2]; Matrix<int> A = [3, 4; 5, 6]; y = c * A;",
             "Column \\* Matrix",
-        ),
-        (
-            "Vector<int, Row> r = [1, 2]; Matrix<int> A = [3, 4; 5, 6]; y = r * A;",
-            "Row \\* Matrix",
         ),
         (
             "Matrix<int> A = [1, 2, 3; 4, 5, 6]; Vector<int, Column> c = [7; 8]; y = A * c;",
@@ -205,5 +211,161 @@ int main() {
     assert stderr.getvalue() == ""
     completed = subprocess.run([str(output)], check=False, capture_output=True, text=True, timeout=10)
     assert completed.returncode == 56
+    assert completed.stdout == ""
+    assert completed.stderr == ""
+
+
+def test_vector_matrix_product_typechecks_and_runs() -> None:
+    _typecheck(
+        """
+int main() {
+    Vector<int, Row> r = [1, 2];
+    Matrix<int> A = [3, 4; 5, 6];
+    Vector<int, Row> out = r * A;
+    return out[0] + out[1];
+}
+"""
+    )
+
+    result = run_aether(
+        """
+Vector<int, Row> r = [1, 2];
+Matrix<int> A = [3, 4; 5, 6];
+Vector<int, Row> out = r * A;
+"""
+    )
+
+    assert result.env["out"].type_name == RuntimeVectorType("int", 2, "row")
+    assert [element.value for element in result.env["out"].value] == [13, 16]
+
+
+def test_vector_matrix_product_rejects_column_matrix_and_incompatible_shapes() -> None:
+    with pytest.raises(AetherTypeError, match="Column \\* Matrix"):
+        run_aether("Vector<int, Column> c = [1; 2]; Matrix<int> A = [3, 4; 5, 6]; y = c * A;")
+
+    with pytest.raises(AetherTypeError, match="compatible shapes"):
+        run_aether("Vector<int, Row> r = [1, 2, 3]; Matrix<int> A = [3, 4; 5, 6]; y = r * A;")
+
+
+def test_vector_matrix_product_lowers_to_ir_instruction_and_interprets() -> None:
+    module = _lower(
+        """
+int mul() {
+    Vector<int, Row> r = [1, 2];
+    Matrix<int> A = [3, 4; 5, 6];
+    Vector<int, Row> out = r * A;
+    return out[0] + out[1];
+}
+"""
+    )
+
+    assert IRVerifier(module).verify() is module
+    instructions = module.functions[0].blocks[0].instructions
+    mul = next(instruction for instruction in instructions if isinstance(instruction, IRVectorMatrixMul))
+
+    assert mul.result.type == VectorType(IntType(), "row")
+    assert mul.rows == 2
+    assert mul.cols == 2
+    assert IRInterpreter(module).call("mul", []) == 29
+
+
+def test_vector_matrix_product_builds_ssa_and_verifies() -> None:
+    module = _lower(
+        """
+int mul() {
+    Vector<int, Row> r = [1, 2];
+    Matrix<int> A = [3, 4; 5, 6];
+    Vector<int, Row> out = r * A;
+    return out[0] + out[1];
+}
+"""
+    )
+
+    ssa_module = SSABuilder().build(module)
+    assert SSAVerifier(ssa_module).verify() is ssa_module
+    mul = next(
+        instruction
+        for instruction in ssa_module.functions[0].blocks[0].instructions
+        if isinstance(instruction, SSAVectorMatrixMul)
+    )
+
+    assert mul.result.type == VectorType(IntType(), "row")
+    assert mul.rows == 2
+    assert mul.cols == 2
+    assert "vector_matrix_mul row" in print_ssa(ssa_module)
+
+
+def test_vector_matrix_product_llvm_text_uses_loops_over_contiguous_storage() -> None:
+    module = _lower(
+        """
+int main() {
+    Vector<int, Row> r = [1, 2];
+    Matrix<int> A = [3, 4; 5, 6];
+    Vector<int, Row> out = r * A;
+    return out[0] + out[1];
+}
+"""
+    )
+    llvm = print_llvm(SSABuilder().build(module))
+
+    assert "vector.matrix.outer.loop" in llvm
+    assert "vector.matrix.inner.loop" in llvm
+    assert "@aether_array_new(i64 4, i64 2)" in llvm
+    assert "getelementptr i32" in llvm
+    assert "load i32" in llvm
+    assert "mul i32" in llvm
+    assert "add i32" in llvm
+    assert "ret i32" in llvm
+
+
+def test_emit_llvm_prints_vector_matrix_product(tmp_path: Path) -> None:
+    program = tmp_path / "vector_matrix_mul.ae"
+    program.write_text(
+        """
+int main() {
+    Vector<int, Row> r = [1, 2];
+    Matrix<int> A = [3, 4; 5, 6];
+    Vector<int, Row> out = r * A;
+    return out[0] + out[1];
+}
+""",
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = _emit_llvm(program)
+
+    assert exit_code == EXIT_SUCCESS
+    assert "vector.matrix.outer.loop" in stdout
+    assert "vector.matrix.inner.loop" in stdout
+    assert "ret i32" in stdout
+    assert stderr == ""
+
+
+def test_build_run_smoke_for_vector_matrix_product(tmp_path: Path) -> None:
+    if shutil.which("clang") is None:
+        pytest.skip("clang is not available")
+
+    program = tmp_path / "vector_matrix_mul.ae"
+    output = tmp_path / "vector_matrix_mul"
+    program.write_text(
+        """
+int main() {
+    Vector<int, Row> r = [1, 2];
+    Matrix<int> A = [3, 4; 5, 6];
+    Vector<int, Row> out = r * A;
+    return out[0] + out[1];
+}
+""",
+        encoding="utf-8",
+    )
+    stdout = StringIO()
+    stderr = StringIO()
+
+    exit_code = main(["build", str(program), "-o", str(output)], stdout=stdout, stderr=stderr)
+
+    assert exit_code == EXIT_SUCCESS
+    assert stderr.getvalue() == ""
+    completed = subprocess.run([str(output)], check=False, capture_output=True, text=True, timeout=10)
+    assert completed.returncode == 29
     assert completed.stdout == ""
     assert completed.stderr == ""

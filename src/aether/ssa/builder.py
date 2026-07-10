@@ -34,6 +34,7 @@ from aether.ir.model import (
     IRVectorGet,
     IRVectorAdd,
     IRVectorDot,
+    IRVectorMatrixMul,
     IRVectorScale,
     IRVectorSub,
     IRVectorNew,
@@ -71,6 +72,7 @@ from .model import (
     SSAVectorGet,
     SSAVectorAdd,
     SSAVectorDot,
+    SSAVectorMatrixMul,
     SSAVectorScale,
     SSAVectorSub,
     SSAVectorNew,
@@ -602,6 +604,12 @@ class SSABuilder:
             matrix = self._resolve_value(instruction.matrix, state.value_map)
             vector = self._resolve_value(instruction.vector, state.value_map)
             return SSAMatrixVectorMul(result, matrix, vector, instruction.rows, instruction.inner)
+
+        if isinstance(instruction, IRVectorMatrixMul):
+            result = self._define_value(instruction.result, state.value_map)
+            vector = self._resolve_value(instruction.vector, state.value_map)
+            matrix = self._resolve_value(instruction.matrix, state.value_map)
+            return SSAVectorMatrixMul(result, vector, matrix, instruction.rows, instruction.cols)
 
         if isinstance(instruction, IRArrayGet):
             result = self._define_value(instruction.result, state.value_map)

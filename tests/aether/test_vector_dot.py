@@ -49,7 +49,6 @@ x = r * c;
         "Vector<int, Column> a = [1; 2]; Vector<int, Row> b = [3, 4]; x = a * b;",
         "Matrix<int> A = [1, 2; 3, 4]; Vector<int, Row> r = [5, 6]; y = A * r;",
         "Vector<int, Column> c = [1; 2]; Matrix<int> A = [3, 4; 5, 6]; y = c * A;",
-        "Vector<int, Row> r = [1, 2]; Matrix<int> A = [3, 4; 5, 6]; y = r * A;",
     ],
 )
 def test_vector_dot_rejects_invalid_star_combinations(source: str) -> None:

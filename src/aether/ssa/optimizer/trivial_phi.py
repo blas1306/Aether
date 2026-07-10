@@ -31,6 +31,7 @@ from aether.ssa.model import (
     SSAVectorGet,
     SSAVectorAdd,
     SSAVectorDot,
+    SSAVectorMatrixMul,
     SSAVectorScale,
     SSAVectorSub,
     SSAVectorLength,
@@ -381,6 +382,22 @@ class TrivialPhiEliminator:
                     instruction.inner,
                 ),
                 int(matrix_rewritten) + int(vector_rewritten),
+            )
+
+        if isinstance(instruction, SSAVectorMatrixMul):
+            vector, vector_rewritten = self._rewrite_value(instruction.vector, replacements)
+            matrix, matrix_rewritten = self._rewrite_value(instruction.matrix, replacements)
+            if not vector_rewritten and not matrix_rewritten:
+                return instruction, 0
+            return (
+                SSAVectorMatrixMul(
+                    instruction.result,
+                    vector,
+                    matrix,
+                    instruction.rows,
+                    instruction.cols,
+                ),
+                int(vector_rewritten) + int(matrix_rewritten),
             )
 
         if isinstance(instruction, SSAMatrixScale):

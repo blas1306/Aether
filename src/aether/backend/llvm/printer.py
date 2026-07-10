@@ -38,6 +38,7 @@ from aether.ssa.model import (
     SSAVectorGet,
     SSAVectorAdd,
     SSAVectorDot,
+    SSAVectorMatrixMul,
     SSAVectorScale,
     SSAVectorSub,
     SSAVectorLength,
@@ -196,6 +197,8 @@ class LLVMPrinter:
             return "\n  ".join(self._print_matrix_matmul(instruction))
         if isinstance(instruction, SSAMatrixVectorMul):
             return "\n".join(self._print_matrix_vector_mul(instruction))
+        if isinstance(instruction, SSAVectorMatrixMul):
+            return "\n".join(self._print_vector_matrix_mul(instruction))
         if isinstance(instruction, SSAArrayGet):
             return "\n  ".join(self._print_array_get(instruction))
         if isinstance(instruction, SSAVectorGet):
@@ -250,6 +253,7 @@ class LLVMPrinter:
                 SSAMatrixAdd,
                 SSAMatrixMatMul,
                 SSAMatrixVectorMul,
+                SSAVectorMatrixMul,
                 SSAMatrixScale,
                 SSAVectorSub,
                 SSAMatrixSub,
@@ -925,6 +929,155 @@ class LLVMPrinter:
             raise LLVMBackendError("LLVM matrix_vector_mul only supports int or double matrix elements")
         if not isinstance(instruction.vector.type.element, (IntType, DoubleType)):
             raise LLVMBackendError("LLVM matrix_vector_mul only supports int or double vector elements")
+
+    def _print_vector_matrix_mul(self, instruction: SSAVectorMatrixMul) -> list[str]:
+        self._validate_vector_matrix_mul(instruction)
+        self._uses_array_type = True
+        self._uses_array_allocation = True
+
+        result = self._new_temp(instruction.result)
+        result_element_type = llvm_type(instruction.result.type.element)
+        result_element_size = self._sizeof(instruction.result.type.element)
+        vector_element_type = llvm_type(instruction.vector.type.element)
+        matrix_element_type = llvm_type(instruction.matrix.type.element)
+        multiply_operator = self._element_binary_operator(instruction.result.type.element, "mul")
+        add_operator = self._element_binary_operator(instruction.result.type.element, "add")
+        zero = "0.0" if isinstance(instruction.result.type.element, DoubleType) else "0"
+        label_id = self._next_synthetic_temp
+        self._next_synthetic_temp += 1
+        outer_loop_label = f"vector.matrix.outer.loop.{label_id}"
+        outer_body_label = f"vector.matrix.outer.body.{label_id}"
+        inner_loop_label = f"vector.matrix.inner.loop.{label_id}"
+        inner_body_label = f"vector.matrix.inner.body.{label_id}"
+        inner_exit_label = f"vector.matrix.inner.exit.{label_id}"
+        exit_label = f"vector.matrix.exit.{label_id}"
+
+        vector_field = self._synthetic_temp("vector.matrix.vector.data.field")
+        vector_data = self._synthetic_temp("vector.matrix.vector.data")
+        matrix_field = self._synthetic_temp("vector.matrix.matrix.data.field")
+        matrix_data = self._synthetic_temp("vector.matrix.matrix.data")
+        result_field = self._synthetic_temp("vector.matrix.result.data.field")
+        result_data = self._synthetic_temp("vector.matrix.result.data")
+        col_ptr = self._synthetic_temp("vector.matrix.col.ptr")
+        row_ptr = self._synthetic_temp("vector.matrix.row.ptr")
+        acc_ptr = self._synthetic_temp("vector.matrix.acc.ptr")
+        lines = [
+            f"  {result} = call ptr @aether_array_new(i64 {result_element_size}, i64 {instruction.cols})",
+            f"  {vector_field} = getelementptr {self._ARRAY_STRUCT_TYPE}, ptr {self._operand(instruction.vector)}, i32 0, i32 1",
+            f"  {vector_data} = load ptr, ptr {vector_field}",
+            f"  {matrix_field} = getelementptr {self._ARRAY_STRUCT_TYPE}, ptr {self._operand(instruction.matrix)}, i32 0, i32 1",
+            f"  {matrix_data} = load ptr, ptr {matrix_field}",
+            f"  {result_field} = getelementptr {self._ARRAY_STRUCT_TYPE}, ptr {result}, i32 0, i32 1",
+            f"  {result_data} = load ptr, ptr {result_field}",
+            f"  {col_ptr} = alloca i64",
+            f"  store i64 0, ptr {col_ptr}",
+            f"  {row_ptr} = alloca i64",
+            f"  {acc_ptr} = alloca {result_element_type}",
+            f"  br label %{outer_loop_label}",
+            f"{outer_loop_label}:",
+        ]
+
+        col = self._synthetic_temp("vector.matrix.col")
+        outer_cond = self._synthetic_temp("vector.matrix.outer.cond")
+        lines.extend(
+            [
+                f"  {col} = load i64, ptr {col_ptr}",
+                f"  {outer_cond} = icmp slt i64 {col}, {instruction.cols}",
+                f"  br i1 {outer_cond}, label %{outer_body_label}, label %{exit_label}",
+                f"{outer_body_label}:",
+                f"  store {result_element_type} {zero}, ptr {acc_ptr}",
+                f"  store i64 0, ptr {row_ptr}",
+                f"  br label %{inner_loop_label}",
+                f"{inner_loop_label}:",
+            ]
+        )
+
+        row = self._synthetic_temp("vector.matrix.row")
+        inner_cond = self._synthetic_temp("vector.matrix.inner.cond")
+        lines.extend(
+            [
+                f"  {row} = load i64, ptr {row_ptr}",
+                f"  {inner_cond} = icmp slt i64 {row}, {instruction.rows}",
+                f"  br i1 {inner_cond}, label %{inner_body_label}, label %{inner_exit_label}",
+                f"{inner_body_label}:",
+            ]
+        )
+
+        row_offset = self._synthetic_temp("vector.matrix.row.offset")
+        matrix_index = self._synthetic_temp("vector.matrix.matrix.index")
+        vector_ptr = self._synthetic_temp("vector.matrix.vector.elem")
+        matrix_ptr = self._synthetic_temp("vector.matrix.matrix.elem")
+        loaded_vector = self._synthetic_temp("vector.matrix.vector")
+        loaded_matrix = self._synthetic_temp("vector.matrix.matrix")
+        lines.extend(
+            [
+                f"  {row_offset} = mul i64 {row}, {instruction.cols}",
+                f"  {matrix_index} = add i64 {row_offset}, {col}",
+                f"  {vector_ptr} = getelementptr {vector_element_type}, ptr {vector_data}, i64 {row}",
+                f"  {loaded_vector} = load {vector_element_type}, ptr {vector_ptr}",
+                f"  {matrix_ptr} = getelementptr {matrix_element_type}, ptr {matrix_data}, i64 {matrix_index}",
+                f"  {loaded_matrix} = load {matrix_element_type}, ptr {matrix_ptr}",
+            ]
+        )
+        vector_operand = self._coerce_scalar(
+            lines,
+            loaded_vector,
+            instruction.vector.type.element,
+            instruction.result.type.element,
+            "vector.matrix.vector.cast",
+        )
+        matrix_operand = self._coerce_scalar(
+            lines,
+            loaded_matrix,
+            instruction.matrix.type.element,
+            instruction.result.type.element,
+            "vector.matrix.matrix.cast",
+        )
+        product = self._synthetic_temp("vector.matrix.product")
+        acc_current = self._synthetic_temp("vector.matrix.acc")
+        acc_next = self._synthetic_temp("vector.matrix.acc.next")
+        row_next = self._synthetic_temp("vector.matrix.row.next")
+        acc_final = self._synthetic_temp("vector.matrix.acc.final")
+        result_ptr = self._synthetic_temp("vector.matrix.result.elem")
+        col_next = self._synthetic_temp("vector.matrix.col.next")
+        lines.extend(
+            [
+                f"  {product} = {multiply_operator} {result_element_type} {vector_operand}, {matrix_operand}",
+                f"  {acc_current} = load {result_element_type}, ptr {acc_ptr}",
+                f"  {acc_next} = {add_operator} {result_element_type} {acc_current}, {product}",
+                f"  store {result_element_type} {acc_next}, ptr {acc_ptr}",
+                f"  {row_next} = add i64 {row}, 1",
+                f"  store i64 {row_next}, ptr {row_ptr}",
+                f"  br label %{inner_loop_label}",
+                f"{inner_exit_label}:",
+                f"  {acc_final} = load {result_element_type}, ptr {acc_ptr}",
+                f"  {result_ptr} = getelementptr {result_element_type}, ptr {result_data}, i64 {col}",
+                f"  store {result_element_type} {acc_final}, ptr {result_ptr}",
+                f"  {col_next} = add i64 {col}, 1",
+                f"  store i64 {col_next}, ptr {col_ptr}",
+                f"  br label %{outer_loop_label}",
+                f"{exit_label}:",
+            ]
+        )
+        return lines
+
+    def _validate_vector_matrix_mul(self, instruction: SSAVectorMatrixMul) -> None:
+        if not isinstance(instruction.result.type, VectorType):
+            raise LLVMBackendError("LLVM vector_matrix_mul result must be VectorType")
+        if instruction.result.type.orientation != "row":
+            raise LLVMBackendError("LLVM vector_matrix_mul result must be Vector<Row>")
+        if not isinstance(instruction.vector.type, VectorType) or not isinstance(instruction.matrix.type, MatrixType):
+            raise LLVMBackendError("LLVM vector_matrix_mul expects vector and matrix operands")
+        if instruction.vector.type.orientation != "row":
+            raise LLVMBackendError("LLVM vector_matrix_mul only supports Vector<Row> * Matrix")
+        if instruction.rows <= 0 or instruction.cols <= 0:
+            raise LLVMBackendError("LLVM vector_matrix_mul requires positive dimensions")
+        if not isinstance(instruction.result.type.element, (IntType, DoubleType)):
+            raise LLVMBackendError("LLVM vector_matrix_mul only supports int or double results")
+        if not isinstance(instruction.vector.type.element, (IntType, DoubleType)):
+            raise LLVMBackendError("LLVM vector_matrix_mul only supports int or double vector elements")
+        if not isinstance(instruction.matrix.type.element, (IntType, DoubleType)):
+            raise LLVMBackendError("LLVM vector_matrix_mul only supports int or double matrix elements")
 
     def _print_contiguous_new(
         self,
