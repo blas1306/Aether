@@ -96,6 +96,12 @@ class _FunctionSignature:
     return_type: IRType
 
 
+@dataclass(frozen=True)
+class _LoopTargets:
+    break_target: str
+    continue_target: str
+
+
 @dataclass
 class _FunctionContext:
     block: IRBasicBlock
@@ -105,6 +111,7 @@ class _FunctionContext:
     locals: dict[str, IRValue] = field(default_factory=dict)
     matrix_dimensions: dict[str, tuple[int, int]] = field(default_factory=dict)
     vector_lengths: dict[str, int] = field(default_factory=dict)
+    loop_targets: list[_LoopTargets] = field(default_factory=list)
     next_temporary: int = 0
     next_if: int = 0
     next_loop: int = 0
@@ -301,6 +308,22 @@ class IRLowerer:
             self._lower_while(statement, context)
             return
 
+        if isinstance(statement, ast.ForInStatement):
+            self._lower_for_in(statement, context)
+            return
+
+        if isinstance(statement, ast.BreakStatement):
+            if not context.loop_targets:
+                self._fail("IR backend found break outside a loop after typechecking.", statement)
+            context.block.instructions.append(IRJump(context.loop_targets[-1].break_target))
+            return
+
+        if isinstance(statement, ast.ContinueStatement):
+            if not context.loop_targets:
+                self._fail("IR backend found continue outside a loop after typechecking.", statement)
+            context.block.instructions.append(IRJump(context.loop_targets[-1].continue_target))
+            return
+
         self._unsupported(statement)
 
     def _lower_index_assignment(
@@ -452,13 +475,213 @@ class IRLowerer:
 
         context.blocks.append(body_block)
         context.block = body_block
-        self._lower_statements(statement.body, context)
+        context.loop_targets.append(_LoopTargets(exit_block.name, condition_block.name))
+        try:
+            self._lower_statements(statement.body, context)
+        finally:
+            context.loop_targets.pop()
         body_end = context.block
         if not self._is_terminated(body_end):
             body_end.instructions.append(IRJump(condition_block.name))
 
         context.blocks.append(exit_block)
         context.block = exit_block
+
+    def _lower_for_in(
+        self,
+        statement: ast.ForInStatement,
+        context: _FunctionContext,
+    ) -> None:
+        if isinstance(statement.iterable, ast.RangeExpression):
+            self._lower_for_range(statement, statement.iterable, context)
+            return
+
+        self._lower_for_indexable(statement, context)
+
+    def _lower_for_range(
+        self,
+        statement: ast.ForInStatement,
+        expression: ast.RangeExpression,
+        context: _FunctionContext,
+    ) -> None:
+        index = context.loop_index()
+        condition_block = IRBasicBlock(f"for.cond{index}")
+        body_block = IRBasicBlock(f"for.body{index}")
+        increment_block = IRBasicBlock(f"for.inc{index}")
+        exit_block = IRBasicBlock(f"for.exit{index}")
+
+        start = self._lower_expression(expression.start, context)
+        end = self._lower_expression(expression.end, context)
+        if expression.step is None:
+            step = context.temporary(IntType())
+            context.block.instructions.append(IRConst(step, 1))
+            step_value = 1
+        else:
+            step = self._lower_expression(expression.step, context)
+            step_value = self._constant_int(expression.step)
+
+        for label, value in (("start", start), ("end", end), ("step", step)):
+            self._require_same_type(value.type, IntType(), f"for range {label} must be int")
+        if step_value == 0:
+            self._fail("IR backend does not support for ranges with a zero step yet.", statement)
+
+        loop_slot = IRValue(statement.variable, IntType())
+        previous_local = context.locals.get(statement.variable)
+        context.locals[statement.variable] = loop_slot
+        context.block.instructions.append(IRStore(loop_slot, start))
+        context.block.instructions.append(IRJump(condition_block.name))
+
+        context.blocks.append(condition_block)
+        context.block = condition_block
+        if step_value is None:
+            positive_check_block = IRBasicBlock(f"for.pos{index}")
+            negative_check_block = IRBasicBlock(f"for.neg{index}")
+            negative_bound_block = IRBasicBlock(f"for.neg.bound{index}")
+            current = context.temporary(IntType())
+            condition_block.instructions.append(IRLoad(current, loop_slot))
+            zero = context.temporary(IntType())
+            condition_block.instructions.append(IRConst(zero, 0))
+            step_positive = context.temporary(BoolType())
+            condition_block.instructions.append(IRCompareOp(step_positive, "gt", step, zero))
+            condition_block.instructions.append(
+                IRBranch(step_positive, positive_check_block.name, negative_check_block.name)
+            )
+
+            context.blocks.append(positive_check_block)
+            positive_condition = context.temporary(BoolType())
+            positive_check_block.instructions.append(IRCompareOp(positive_condition, "le", current, end))
+            positive_check_block.instructions.append(
+                IRBranch(positive_condition, body_block.name, exit_block.name)
+            )
+
+            context.blocks.append(negative_check_block)
+            step_negative = context.temporary(BoolType())
+            negative_check_block.instructions.append(IRCompareOp(step_negative, "lt", step, zero))
+            negative_check_block.instructions.append(
+                IRBranch(step_negative, negative_bound_block.name, exit_block.name)
+            )
+
+            context.blocks.append(negative_bound_block)
+            negative_condition = context.temporary(BoolType())
+            negative_bound_block.instructions.append(IRCompareOp(negative_condition, "ge", current, end))
+            negative_bound_block.instructions.append(
+                IRBranch(negative_condition, body_block.name, exit_block.name)
+            )
+        else:
+            current = context.temporary(IntType())
+            condition_block.instructions.append(IRLoad(current, loop_slot))
+            condition = context.temporary(BoolType())
+            operator = "le" if step_value > 0 else "ge"
+            condition_block.instructions.append(IRCompareOp(condition, operator, current, end))
+            condition_block.instructions.append(IRBranch(condition, body_block.name, exit_block.name))
+
+        context.blocks.append(body_block)
+        context.block = body_block
+        context.loop_targets.append(_LoopTargets(exit_block.name, increment_block.name))
+        try:
+            self._lower_statements(statement.body, context)
+        finally:
+            context.loop_targets.pop()
+        body_end = context.block
+        if not self._is_terminated(body_end):
+            body_end.instructions.append(IRJump(increment_block.name))
+
+        context.blocks.append(increment_block)
+        context.block = increment_block
+        current_for_increment = context.temporary(IntType())
+        increment_block.instructions.append(IRLoad(current_for_increment, loop_slot))
+        next_value = context.temporary(IntType())
+        increment_block.instructions.append(IRBinaryOp(next_value, "add", current_for_increment, step))
+        increment_block.instructions.append(IRStore(loop_slot, next_value))
+        increment_block.instructions.append(IRJump(condition_block.name))
+
+        context.blocks.append(exit_block)
+        context.block = exit_block
+        if previous_local is None:
+            context.locals.pop(statement.variable, None)
+        else:
+            context.locals[statement.variable] = previous_local
+
+    def _lower_for_indexable(
+        self,
+        statement: ast.ForInStatement,
+        context: _FunctionContext,
+    ) -> None:
+        index = context.loop_index()
+        condition_block = IRBasicBlock(f"for.cond{index}")
+        body_block = IRBasicBlock(f"for.body{index}")
+        increment_block = IRBasicBlock(f"for.inc{index}")
+        exit_block = IRBasicBlock(f"for.exit{index}")
+
+        iterable = self._lower_expression(statement.iterable, context)
+        element_type: IRType
+        if isinstance(iterable.type, ArrayType):
+            element_type = iterable.type.element
+            length = context.temporary(IntType())
+            context.block.instructions.append(IRArrayLength(length, iterable))
+            get_instruction = IRArrayGet
+        elif isinstance(iterable.type, VectorType):
+            element_type = iterable.type.element
+            length = context.temporary(IntType())
+            context.block.instructions.append(IRVectorLength(length, iterable))
+            get_instruction = IRVectorGet
+        else:
+            self._fail(
+                f"IR backend only supports for loops over int ranges, arrays, and vectors, got '{iterable.type}'.",
+                statement,
+            )
+
+        index_slot = IRValue(f"for.{index}.index", IntType())
+        loop_slot = IRValue(statement.variable, element_type)
+        previous_local = context.locals.get(statement.variable)
+        context.locals[statement.variable] = loop_slot
+
+        zero = context.temporary(IntType())
+        context.block.instructions.append(IRConst(zero, 0))
+        one = context.temporary(IntType())
+        context.block.instructions.append(IRConst(one, 1))
+        context.block.instructions.append(IRStore(index_slot, zero))
+        context.block.instructions.append(IRJump(condition_block.name))
+
+        context.blocks.append(condition_block)
+        context.block = condition_block
+        current_index = context.temporary(IntType())
+        condition_block.instructions.append(IRLoad(current_index, index_slot))
+        condition = context.temporary(BoolType())
+        condition_block.instructions.append(IRCompareOp(condition, "lt", current_index, length))
+        condition_block.instructions.append(IRBranch(condition, body_block.name, exit_block.name))
+
+        context.blocks.append(body_block)
+        context.block = body_block
+        body_index = context.temporary(IntType())
+        context.block.instructions.append(IRLoad(body_index, index_slot))
+        element = context.temporary(element_type)
+        context.block.instructions.append(get_instruction(element, iterable, body_index))
+        context.block.instructions.append(IRStore(loop_slot, element))
+        context.loop_targets.append(_LoopTargets(exit_block.name, increment_block.name))
+        try:
+            self._lower_statements(statement.body, context)
+        finally:
+            context.loop_targets.pop()
+        body_end = context.block
+        if not self._is_terminated(body_end):
+            body_end.instructions.append(IRJump(increment_block.name))
+
+        context.blocks.append(increment_block)
+        context.block = increment_block
+        increment_index = context.temporary(IntType())
+        increment_block.instructions.append(IRLoad(increment_index, index_slot))
+        next_index = context.temporary(IntType())
+        increment_block.instructions.append(IRBinaryOp(next_index, "add", increment_index, one))
+        increment_block.instructions.append(IRStore(index_slot, next_index))
+        increment_block.instructions.append(IRJump(condition_block.name))
+
+        context.blocks.append(exit_block)
+        context.block = exit_block
+        if previous_local is None:
+            context.locals.pop(statement.variable, None)
+        else:
+            context.locals[statement.variable] = previous_local
 
     def _lower_statements(
         self,
@@ -1235,7 +1458,17 @@ class IRLowerer:
                     names.update(self._assigned_names(statement.else_body))
             elif isinstance(statement, ast.WhileStatement):
                 names.update(self._assigned_names(statement.body))
+            elif isinstance(statement, ast.ForInStatement):
+                names.update(self._assigned_names(statement.body))
         return names
+
+    def _constant_int(self, expression: ast.Expression) -> int | None:
+        if isinstance(expression, ast.Literal) and expression.type_name == "int":
+            return expression.value if isinstance(expression.value, int) else None
+        if isinstance(expression, ast.UnaryExpression) and expression.operator == "-":
+            operand = self._constant_int(expression.operand)
+            return -operand if operand is not None else None
+        return None
 
     @staticmethod
     def _unsupported(node: object, detail: str | None = None) -> NoReturn:

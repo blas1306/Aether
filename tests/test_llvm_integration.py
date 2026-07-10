@@ -21,6 +21,8 @@ EXPECTED_EXIT_CODES = {
     "double_add.ae": 17,
     "double_compare.ae": 19,
     "double_to_int.ae": 14,
+    "for_break_continue.ae": 9,
+    "for_sum.ae": 15,
     "gcd_iterative.ae": 6,
     "identity_call.ae": 23,
     "int_to_double.ae": 12,

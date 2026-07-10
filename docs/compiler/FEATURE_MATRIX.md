@@ -101,10 +101,18 @@ Notas:
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | if | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Completa |
 | while | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Completa |
-| for | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
-| break | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Pendiente IR |
-| continue | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Pendiente IR |
+| for | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Completa |
+| break | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Completa |
+| continue | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Completa |
 | return | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Completa |
+
+Notas:
+
+- `for` baja a CFG explicito con bloques de condicion, cuerpo, incremento y
+  salida. El backend cubre rangos `int` y colecciones indexables ya soportadas
+  por IR/LLVM, como arrays y vectores.
+- `break` y `continue` no agregan sintaxis ni opcodes especiales: se materializan
+  como saltos IR/SSA a los destinos activos del loop.
 
 ## Funciones
 

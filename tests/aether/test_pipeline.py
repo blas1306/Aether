@@ -330,7 +330,7 @@ int sumTo(int n) {
     assert "phi(entry:" in print_ssa(ssa_module)
 
 
-def test_ssa_pipeline_rejects_break_before_ssa_lowering() -> None:
+def test_ssa_pipeline_lowers_break() -> None:
     typed_program = prepare_typed_program(
         """
 int first(int n) {
@@ -343,18 +343,17 @@ int first(int n) {
         TypeChecker(),
     )
 
-    with pytest.raises(
-        IRBackendUnsupportedFeatureError,
-        match="IR backend does not support break statements yet.",
-    ):
-        lower_to_verified_ssa(typed_program)
+    ssa_module = lower_to_verified_ssa(typed_program)
+
+    assert "jump exit0" in print_ssa(ssa_module)
 
 
-def test_ssa_pipeline_rejects_continue_before_ssa_lowering() -> None:
+def test_ssa_pipeline_lowers_continue() -> None:
     typed_program = prepare_typed_program(
         """
 int skip(int n) {
     while n > 0 {
+        n = n - 1;
         continue;
     }
     return n;
@@ -363,11 +362,9 @@ int skip(int n) {
         TypeChecker(),
     )
 
-    with pytest.raises(
-        IRBackendUnsupportedFeatureError,
-        match="IR backend does not support continue statements yet.",
-    ):
-        lower_to_verified_ssa(typed_program)
+    ssa_module = lower_to_verified_ssa(typed_program)
+
+    assert "jump cond0" in print_ssa(ssa_module)
 
 
 def test_ssa_pipeline_does_not_change_ast_backend() -> None:

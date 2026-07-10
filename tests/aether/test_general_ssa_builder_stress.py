@@ -897,20 +897,14 @@ STRESS_CASES = [
     StressCase(
         "nested while with loop-local inner slot",
         _nested_while_with_loop_local_inner_slot_module,
-        UNSUPPORTED,
-        general_error_contains=(
-            "Phi for slot '%j' in successor 'outer_cond' needs incoming from "
-            "block 'entry', but no value is visible."
-        ),
+        GENERAL_ONLY,
+        {"outer_cond": 2, "inner_cond": 2},
     ),
     StressCase(
         "while inside if with branch-local loop slot",
         _while_in_if_with_branch_local_loop_slot_module,
-        UNSUPPORTED,
-        general_error_contains=(
-            "Phi for slot '%i' in successor 'merge0' needs incoming from "
-            "block 'else0', but no value is visible."
-        ),
+        GENERAL_ONLY,
+        {"cond0": 2, "merge0": 1},
     ),
 ]
 
