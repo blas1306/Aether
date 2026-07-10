@@ -55,6 +55,35 @@ C = Math.LinearAlgebra.matmul(A, B);
     assert matrix_values(result.env["C"]) == [[19, 22], [43, 50]]
 
 
+def test_matrix_multiplication_operator_matches_matmul_matrix_matrix() -> None:
+    result = run_aether(
+        """
+A = [1 2 3; 4 5 6];
+B = [7 8; 9 10; 11 12];
+C = A * B;
+D = Math.LinearAlgebra.matmul(A, B);
+"""
+    )
+
+    assert result.env["C"].type_name == MatrixType("int", 2, 2)
+    assert matrix_values(result.env["C"]) == [[58, 64], [139, 154]]
+    assert result.env["C"].type_name == result.env["D"].type_name
+    assert matrix_values(result.env["C"]) == matrix_values(result.env["D"])
+
+
+def test_matrix_multiplication_operator_uses_matmul_type_promotion() -> None:
+    result = run_aether(
+        """
+Matrix<double> A = [1.0 2.0; 3.0 4.0];
+Matrix<int> B = [5 6; 7 8];
+C = A * B;
+"""
+    )
+
+    assert result.env["C"].type_name == MatrixType("double", 2, 2)
+    assert matrix_values(result.env["C"]) == [[19.0, 22.0], [43.0, 50.0]]
+
+
 def test_matmul_matrix_times_column_returns_column() -> None:
     result = run_aether(
         """
@@ -124,4 +153,3 @@ def test_matmul_rejects_legacy_transpose_vector_values() -> None:
 
     with pytest.raises(AetherTypeError, match="legacy TransposeVector"):
         matmul_builtin([legacy, column])
-

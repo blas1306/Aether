@@ -29,6 +29,7 @@ from .model import (
     IRLoad,
     IRMatrixGet,
     IRMatrixAdd,
+    IRMatrixMatMul,
     IRMatrixScale,
     IRMatrixSub,
     IRMatrixColumns,
@@ -790,6 +791,9 @@ class IRLowerer:
             vector_dot = self._lower_vector_dot(expression, left, right, context)
             if vector_dot is not None:
                 return vector_dot
+            matrix_matmul = self._lower_matrix_matmul(expression, left, right, context)
+            if matrix_matmul is not None:
+                return matrix_matmul
             return self._lower_aggregate_scale(expression, left, right, context)
 
         if isinstance(left.type, VectorType) or isinstance(right.type, VectorType):
@@ -883,6 +887,39 @@ class IRLowerer:
         result_type = self._binary_result_type("*", left.type.element, right.type.element)
         result = context.temporary(result_type)
         context.block.instructions.append(IRVectorDot(result, left, right, left_length))
+        return result
+
+    def _lower_matrix_matmul(
+        self,
+        expression: ast.BinaryExpression,
+        left: IRValue,
+        right: IRValue,
+        context: _FunctionContext,
+    ) -> IRValue | None:
+        if not isinstance(left.type, MatrixType) or not isinstance(right.type, MatrixType):
+            return None
+
+        left_dimensions = context.matrix_dimensions.get(left.name)
+        right_dimensions = context.matrix_dimensions.get(right.name)
+        if left_dimensions is None or right_dimensions is None:
+            self._fail(
+                "IR backend requires known matrix dimensions for Matrix * Matrix.",
+                expression,
+            )
+
+        result_type = self._binary_result_type("*", left.type.element, right.type.element)
+        result = context.temporary(MatrixType(result_type))
+        context.matrix_dimensions[result.name] = (left_dimensions[0], right_dimensions[1])
+        context.block.instructions.append(
+            IRMatrixMatMul(
+                result,
+                left,
+                right,
+                left_dimensions[0],
+                left_dimensions[1],
+                right_dimensions[1],
+            )
+        )
         return result
 
     @staticmethod

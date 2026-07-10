@@ -15,6 +15,7 @@ from aether.ir import (
     IRLowerer,
     IRMatrixColumns,
     IRMatrixAdd,
+    IRMatrixMatMul,
     IRMatrixScale,
     IRMatrixSub,
     IRMatrixGet,
@@ -48,6 +49,7 @@ from aether.ssa import (
     SSAFunction,
     SSAMatrixColumns,
     SSAMatrixAdd,
+    SSAMatrixMatMul,
     SSAMatrixScale,
     SSAMatrixSub,
     SSAMatrixGet,
@@ -205,6 +207,62 @@ int main() {
 }
 """
     )
+
+
+def test_typechecker_accepts_matrix_matrix_multiplication_operator() -> None:
+    _typed(
+        """
+int main() {
+    Matrix<int> A = [1, 2, 3; 4, 5, 6];
+    Matrix<int> B = [7, 8; 9, 10; 11, 12];
+    Matrix<int> C = A * B;
+    return C[0, 0] + C[1, 1];
+}
+"""
+    )
+
+
+@pytest.mark.parametrize(
+    ("source", "message"),
+    [
+        (
+            """
+int main() {
+    Matrix<int> A = [1, 2; 3, 4];
+    Vector<int, Column> c = [5; 6];
+    Vector<int, Column> y = A * c;
+    return y[0];
+}
+""",
+            "Matrix \\* Column",
+        ),
+        (
+            """
+int main() {
+    Vector<int, Row> r = [1, 2];
+    Matrix<int> A = [3, 4; 5, 6];
+    Vector<int, Row> y = r * A;
+    return y[0];
+}
+""",
+            "Row \\* Matrix",
+        ),
+        (
+            """
+int main() {
+    Vector<int, Column> c = [1; 2];
+    Vector<int, Row> r = [3, 4];
+    Matrix<int> A = c * r;
+    return A[0, 0];
+}
+""",
+            "Vector operands is only defined",
+        ),
+    ],
+)
+def test_typechecker_rejects_deferred_matrix_product_operator_cases(source: str, message: str) -> None:
+    with pytest.raises(AetherTypeError, match=message):
+        _typed(source)
 
 
 def test_typechecker_accepts_vector_and_matrix_subtraction() -> None:
@@ -600,6 +658,31 @@ int main() {
     assert IRInterpreter(module).call("main") == 36
 
 
+def test_lowering_and_ir_interpreter_execute_matrix_matmul() -> None:
+    typed_program = _typed(
+        """
+int main() {
+    Matrix<int> A = [1, 2, 3; 4, 5, 6];
+    Matrix<int> B = [7, 8; 9, 10; 11, 12];
+    Matrix<int> C = A * B;
+    return C[0, 0] + C[0, 1] + C[1, 0] + C[1, 1];
+}
+"""
+    )
+    module = IRVerifier(IRLowerer().lower(typed_program.program)).verify()
+
+    matrix_matmul = next(
+        instruction
+        for instruction in module.functions[0].blocks[0].instructions
+        if isinstance(instruction, IRMatrixMatMul)
+    )
+    assert matrix_matmul.rows == 2
+    assert matrix_matmul.inner == 3
+    assert matrix_matmul.cols == 2
+    assert "matrix_matmul" in print_ir(module)
+    assert IRInterpreter(module).call("main") == 415
+
+
 def test_lowering_and_ir_interpreter_execute_matrix_subtraction() -> None:
     typed_program = _typed(
         """
@@ -749,6 +832,25 @@ int main() {
     assert "matrix_add" in print_ssa(ssa)
 
 
+def test_ssa_preserves_matrix_matmul() -> None:
+    typed_program = _typed(
+        """
+int main() {
+    Matrix<int> A = [1, 2, 3; 4, 5, 6];
+    Matrix<int> B = [7, 8; 9, 10; 11, 12];
+    Matrix<int> C = A * B;
+    return C[1, 1];
+}
+"""
+    )
+
+    ssa = lower_to_verified_ssa(typed_program)
+    instructions = ssa.functions[0].blocks[0].instructions
+
+    assert any(isinstance(instruction, SSAMatrixMatMul) for instruction in instructions)
+    assert "matrix_matmul" in print_ssa(ssa)
+
+
 def test_ssa_preserves_vector_and_matrix_subtraction() -> None:
     typed_program = _typed(
         """
@@ -869,6 +971,29 @@ int main() {
     assert "matrix.scale.source.data" in llvm
 
 
+def test_emit_llvm_includes_matrix_matmul_storage() -> None:
+    typed_program = _typed(
+        """
+int main() {
+    Matrix<int> A = [1, 2, 3; 4, 5, 6];
+    Matrix<int> B = [7, 8; 9, 10; 11, 12];
+    Matrix<int> C = A * B;
+    return C[1, 1];
+}
+"""
+    )
+
+    llvm = LLVMBuilder().emit_llvm(typed_program)
+
+    assert "@aether_array_new(i64 4, i64 6)" in llvm
+    assert "@aether_array_new(i64 4, i64 4)" in llvm
+    assert "matrix.matmul.left.data" in llvm
+    assert "matrix.matmul.right.data" in llvm
+    assert "matrix.matmul.result.data" in llvm
+    assert " = mul i32 " in llvm
+    assert " = add i32 " in llvm
+
+
 @pytest.mark.skipif(shutil.which("clang") is None, reason="clang is not available")
 @pytest.mark.parametrize(
     ("source", "expected"),
@@ -938,6 +1063,17 @@ int main() {
 }
 """,
             50,
+        ),
+        (
+            """
+int main() {
+    Matrix<int> A = [1, 2, 3; 4, 5, 6];
+    Matrix<int> B = [7, 8; 9, 10; 11, 12];
+    Matrix<int> C = A * B;
+    return C[1, 1];
+}
+""",
+            154,
         ),
     ],
 )

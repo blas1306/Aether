@@ -20,6 +20,7 @@ from aether.ir.model import (
     IRLoad,
     IRMatrixColumns,
     IRMatrixAdd,
+    IRMatrixMatMul,
     IRMatrixScale,
     IRMatrixSub,
     IRMatrixGet,
@@ -267,7 +268,7 @@ class AlgebraicSimplifier:
                     for element in instruction.elements
                 ),
             )
-        if isinstance(instruction, (IRVectorAdd, IRVectorDot, IRMatrixAdd, IRVectorSub, IRMatrixSub)):
+        if isinstance(instruction, (IRVectorAdd, IRVectorDot, IRMatrixAdd, IRMatrixMatMul, IRVectorSub, IRMatrixSub)):
             return replace(
                 instruction,
                 left=self._resolve(instruction.left, replacements),

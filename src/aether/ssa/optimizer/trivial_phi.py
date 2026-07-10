@@ -17,6 +17,7 @@ from aether.ssa.model import (
     SSAJump,
     SSAMatrixColumns,
     SSAMatrixAdd,
+    SSAMatrixMatMul,
     SSAMatrixScale,
     SSAMatrixSub,
     SSAMatrixGet,
@@ -343,6 +344,23 @@ class TrivialPhiEliminator:
                     left,
                     right,
                     instruction.rows,
+                    instruction.cols,
+                ),
+                int(left_rewritten) + int(right_rewritten),
+            )
+
+        if isinstance(instruction, SSAMatrixMatMul):
+            left, left_rewritten = self._rewrite_value(instruction.left, replacements)
+            right, right_rewritten = self._rewrite_value(instruction.right, replacements)
+            if not left_rewritten and not right_rewritten:
+                return instruction, 0
+            return (
+                SSAMatrixMatMul(
+                    instruction.result,
+                    left,
+                    right,
+                    instruction.rows,
+                    instruction.inner,
                     instruction.cols,
                 ),
                 int(left_rewritten) + int(right_rewritten),

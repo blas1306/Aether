@@ -158,6 +158,16 @@ class IRMatrixScale(IRInstruction):
 
 
 @dataclass(frozen=True)
+class IRMatrixMatMul(IRInstruction):
+    result: IRValue
+    left: IRValue
+    right: IRValue
+    rows: int
+    inner: int
+    cols: int
+
+
+@dataclass(frozen=True)
 class IRArrayGet(IRInstruction):
     result: IRValue
     array: IRValue

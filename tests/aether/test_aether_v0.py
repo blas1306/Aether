@@ -1040,7 +1040,7 @@ println(C);
 
 
 def test_matmul_row_vector_matrix_waits_for_oriented_vectors():
-    with pytest.raises(AetherTypeError, match="numeric operands"):
+    with pytest.raises(AetherTypeError, match="Row \\* Matrix"):
         run_aether(
         """
 u = [1; 2];

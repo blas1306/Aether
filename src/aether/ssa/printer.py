@@ -20,6 +20,7 @@ from .model import (
     SSAJump,
     SSAMatrixColumns,
     SSAMatrixAdd,
+    SSAMatrixMatMul,
     SSAMatrixScale,
     SSAMatrixSub,
     SSAMatrixGet,
@@ -146,6 +147,12 @@ class SSAPrinter:
                 f"{self._typed_value(instruction.result)} = matrix_scale "
                 f"{self._value(instruction.matrix)}, {self._value(instruction.scalar)} "
                 f"{instruction.rows}x{instruction.cols}"
+            )
+        if isinstance(instruction, SSAMatrixMatMul):
+            return (
+                f"{self._typed_value(instruction.result)} = matrix_matmul "
+                f"{self._value(instruction.left)}, {self._value(instruction.right)} "
+                f"{instruction.rows}x{instruction.inner} * {instruction.inner}x{instruction.cols}"
             )
         if isinstance(instruction, SSAArrayGet):
             return (

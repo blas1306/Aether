@@ -146,6 +146,16 @@ class SSAMatrixScale(SSAInstruction):
 
 
 @dataclass(frozen=True)
+class SSAMatrixMatMul(SSAInstruction):
+    result: SSAValue
+    left: SSAValue
+    right: SSAValue
+    rows: int
+    inner: int
+    cols: int
+
+
+@dataclass(frozen=True)
 class SSAArrayGet(SSAInstruction):
     result: SSAValue
     array: SSAValue

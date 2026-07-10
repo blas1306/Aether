@@ -22,6 +22,7 @@ from .model import (
     IRLoad,
     IRMatrixColumns,
     IRMatrixAdd,
+    IRMatrixMatMul,
     IRMatrixScale,
     IRMatrixSub,
     IRMatrixGet,
@@ -206,6 +207,10 @@ class IRInterpreter:
             self._execute_matrix_scale(instruction, frame)
             return False, None, None
 
+        if isinstance(instruction, IRMatrixMatMul):
+            self._execute_matrix_matmul(instruction, frame)
+            return False, None, None
+
         if isinstance(instruction, IRArrayGet):
             array = self._value(instruction.array, frame)
             index = self._value(instruction.index, frame)
@@ -374,6 +379,31 @@ class IRInterpreter:
             self._binary("mul", value, scalar)
             for value in matrix
         ]
+
+    def _execute_matrix_matmul(
+        self,
+        instruction: IRMatrixMatMul,
+        frame: _Frame,
+    ) -> None:
+        left = self._value(instruction.left, frame)
+        right = self._value(instruction.right, frame)
+        if not isinstance(left, list) or not isinstance(right, list):
+            raise IRExecutionError("IR matrix matmul requires matrix values")
+        if len(left) != instruction.rows * instruction.inner:
+            raise IRExecutionError("IR matrix matmul left operand must match instruction dimensions")
+        if len(right) != instruction.inner * instruction.cols:
+            raise IRExecutionError("IR matrix matmul right operand must match instruction dimensions")
+
+        result: list[Any] = []
+        for row in range(instruction.rows):
+            for col in range(instruction.cols):
+                total = 0.0 if isinstance(instruction.result.type, DoubleType) else 0
+                for inner in range(instruction.inner):
+                    left_value = left[row * instruction.inner + inner]
+                    right_value = right[inner * instruction.cols + col]
+                    total = self._binary("add", total, self._binary("mul", left_value, right_value))
+                result.append(total)
+        frame.values[instruction.result] = result
 
     @staticmethod
     def _target_block(

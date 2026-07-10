@@ -21,6 +21,7 @@ from .model import (
     IRLoad,
     IRMatrixColumns,
     IRMatrixAdd,
+    IRMatrixMatMul,
     IRMatrixScale,
     IRMatrixSub,
     IRMatrixGet,
@@ -396,6 +397,10 @@ class IRVerifier:
             self._verify_matrix_scale(instruction, state, value_types)
             return self._define_value(state, instruction.result)
 
+        if isinstance(instruction, IRMatrixMatMul):
+            self._verify_matrix_matmul(instruction, state, value_types)
+            return self._define_value(state, instruction.result)
+
         if isinstance(instruction, IRArrayGet):
             self._verify_array_get(instruction, state, value_types)
             return self._define_value(state, instruction.result)
@@ -721,6 +726,35 @@ class IRVerifier:
         if instruction.scalar.type != instruction.matrix.type.element:
             self._fail(
                 f"Matrix scale scalar type mismatch: expected {instruction.matrix.type.element}, got {instruction.scalar.type}"
+            )
+
+    def _verify_matrix_matmul(
+        self,
+        instruction: IRMatrixMatMul,
+        state: _State,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.left, state, value_types)
+        self._require_defined(instruction.right, state, value_types)
+        if not isinstance(instruction.result.type, MatrixType):
+            self._fail(f"Matrix matmul result must be matrix type, got {instruction.result.type}")
+        if not isinstance(instruction.left.type, MatrixType) or not isinstance(instruction.right.type, MatrixType):
+            self._fail(
+                f"Matrix matmul expects matrix operands, got {instruction.left.type} and {instruction.right.type}"
+            )
+        if instruction.rows <= 0 or instruction.inner <= 0 or instruction.cols <= 0:
+            self._fail(
+                f"Matrix matmul dimensions must be positive, got "
+                f"{instruction.rows}x{instruction.inner} and {instruction.inner}x{instruction.cols}"
+            )
+        expected_element = self._numeric_binary_result_type(
+            instruction.left.type.element,
+            instruction.right.type.element,
+        )
+        if instruction.result.type.element != expected_element:
+            self._fail(
+                f"Matrix matmul result element type mismatch: expected "
+                f"{expected_element}, got {instruction.result.type.element}"
             )
 
     def _verify_array_get(
@@ -1170,6 +1204,7 @@ class IRVerifier:
                 IRVectorDot,
                 IRVectorScale,
                 IRMatrixAdd,
+                IRMatrixMatMul,
                 IRMatrixScale,
                 IRVectorSub,
                 IRMatrixSub,

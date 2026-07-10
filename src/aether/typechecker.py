@@ -46,6 +46,7 @@ from .types import (
 
 UNKNOWN_TYPE: AetherType | None = None
 LINEAR_ALGEBRA_MODULE = "Math.LinearAlgebra"
+LINEAR_ALGEBRA_MATMUL = "Math.LinearAlgebra.matmul"
 LINEAR_ALGEBRA_SOLVE = "Math.LinearAlgebra.solve"
 LINEAR_ALGEBRA_CONJTRANSPOSE = "Math.LinearAlgebra.conjtranspose"
 SCALAR_INPUT_TARGET_TYPES = {"int", "float", "string", "boolean"}
@@ -3465,8 +3466,12 @@ def _algebraic_multiplication_type(left_type: AetherType, right_type: AetherType
             "Operator '*' between Vector operands is only defined for Vector<Row> * Vector<Column>; "
             "use Math.LinearAlgebra.matmul(...) for other algebraic products or '.*' for elementwise multiplication."
         )
-    if isinstance(left_type, MatrixType) and isinstance(right_type, (MatrixType, VectorType)):
-        raise AetherTypeError("Operator '*' does not implement matrix algebra yet; use Math.LinearAlgebra.matmul(...).")
+    if isinstance(left_type, VectorType) and isinstance(right_type, MatrixType):
+        raise AetherTypeError("Operator '*' does not implement Row * Matrix yet; use Math.LinearAlgebra.matmul(...).")
+    if isinstance(left_type, MatrixType) and isinstance(right_type, MatrixType):
+        return infer_builtin_type(LINEAR_ALGEBRA_MATMUL, [left_type, right_type])
+    if isinstance(left_type, MatrixType) and isinstance(right_type, VectorType):
+        raise AetherTypeError("Operator '*' does not implement Matrix * Column yet; use Math.LinearAlgebra.matmul(...).")
     if isinstance(left_type, TransposeVectorType) and isinstance(right_type, VectorType):
         if left_type.length is not None and right_type.length is not None and left_type.length != right_type.length:
             raise AetherTypeError(f"Operator '*' requires vectors with the same length, got {left_type.length} and {right_type.length}.")

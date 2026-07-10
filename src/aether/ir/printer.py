@@ -21,6 +21,7 @@ from .model import (
     IRLoad,
     IRMatrixColumns,
     IRMatrixAdd,
+    IRMatrixMatMul,
     IRMatrixScale,
     IRMatrixSub,
     IRMatrixGet,
@@ -150,6 +151,12 @@ class IRPrinter:
                 f"{self._typed_value(instruction.result)} = matrix_scale "
                 f"{self._value(instruction.matrix)}, {self._value(instruction.scalar)} "
                 f"{instruction.rows}x{instruction.cols}"
+            )
+        if isinstance(instruction, IRMatrixMatMul):
+            return (
+                f"{self._typed_value(instruction.result)} = matrix_matmul "
+                f"{self._value(instruction.left)}, {self._value(instruction.right)} "
+                f"{instruction.rows}x{instruction.inner} * {instruction.inner}x{instruction.cols}"
             )
         if isinstance(instruction, IRArrayGet):
             return (

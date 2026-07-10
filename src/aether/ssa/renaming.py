@@ -23,6 +23,7 @@ from aether.ir.model import (
     IRLoad,
     IRMatrixColumns,
     IRMatrixAdd,
+    IRMatrixMatMul,
     IRMatrixScale,
     IRMatrixSub,
     IRMatrixGet,
@@ -60,6 +61,7 @@ from .model import (
     SSAJump,
     SSAMatrixColumns,
     SSAMatrixAdd,
+    SSAMatrixMatMul,
     SSAMatrixScale,
     SSAMatrixSub,
     SSAMatrixGet,
@@ -319,6 +321,20 @@ class SSARenamer:
             scalar = self._resolve_value(instruction.scalar)
             self._bind_value(result.name, result, bound_values)
             return SSAMatrixScale(result, matrix, scalar, instruction.rows, instruction.cols)
+
+        if isinstance(instruction, IRMatrixMatMul):
+            result = self._define_value(instruction.result)
+            left = self._resolve_value(instruction.left)
+            right = self._resolve_value(instruction.right)
+            self._bind_value(result.name, result, bound_values)
+            return SSAMatrixMatMul(
+                result,
+                left,
+                right,
+                instruction.rows,
+                instruction.inner,
+                instruction.cols,
+            )
 
         if isinstance(instruction, IRArrayGet):
             result = self._define_value(instruction.result)

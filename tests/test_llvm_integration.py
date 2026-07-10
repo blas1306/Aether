@@ -27,6 +27,7 @@ EXPECTED_EXIT_CODES = {
     "matrix_literal.ae": 0,
     "matrix_add.ae": 36,
     "matrix_index.ae": 4,
+    "matrix_matmul.ae": 154,
     "matrix_rows_columns.ae": 5,
     "matrix_scalar_mul.ae": 50,
     "matrix_set.ae": 9,

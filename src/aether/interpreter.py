@@ -18,6 +18,7 @@ from .native_members import native_member_set, native_method, native_property
 from .parser import Parser
 from .scope import Scope
 from .stdlib import BuiltinFunction, is_builtin_namespace, make_builtins
+from .stdlib.math.linear_algebra import matmul_builtin
 from .stdlib.registry import builtin_aliases_for_import, builtin_constant_aliases_for_import, get_builtin_constant
 from .tokens import AETHER_TYPES, PRIMITIVE_TYPES
 from .types import (
@@ -2480,8 +2481,12 @@ def _evaluate_algebraic_multiplication(left: AetherValue, right: AetherValue) ->
             "Operator '*' between Vector operands is only defined for Vector<Row> * Vector<Column>; "
             "use Math.LinearAlgebra.matmul(...) for other algebraic products or '.*' for elementwise multiplication."
         )
-    if isinstance(left.type_name, MatrixType) and isinstance(right.type_name, (MatrixType, VectorType)):
-        raise AetherTypeError("Operator '*' does not implement matrix algebra yet; use Math.LinearAlgebra.matmul(...).")
+    if isinstance(left.type_name, VectorType) and isinstance(right.type_name, MatrixType):
+        raise AetherTypeError("Operator '*' does not implement Row * Matrix yet; use Math.LinearAlgebra.matmul(...).")
+    if isinstance(left.type_name, MatrixType) and isinstance(right.type_name, MatrixType):
+        return matmul_builtin([left, right])
+    if isinstance(left.type_name, MatrixType) and isinstance(right.type_name, VectorType):
+        raise AetherTypeError("Operator '*' does not implement Matrix * Column yet; use Math.LinearAlgebra.matmul(...).")
     if isinstance(left.type_name, TransposeVectorType) and isinstance(right.type_name, VectorType):
         return _dot_product(left.value, right)
     if isinstance(left.type_name, TransposeVectorType) and isinstance(right.type_name, MatrixType):

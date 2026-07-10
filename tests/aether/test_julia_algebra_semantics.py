@@ -233,7 +233,7 @@ println(a);
 
 
 def test_star_rejects_matrix_vector_products_until_operator_matmul_migration() -> None:
-    with pytest.raises(AetherTypeError, match="matrix algebra"):
+    with pytest.raises(AetherTypeError, match="Matrix \\* Column"):
         run_aether(
             """
 import Math.LinearAlgebra

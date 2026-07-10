@@ -22,6 +22,7 @@ from aether.ssa.model import (
     SSAJump,
     SSAMatrixColumns,
     SSAMatrixAdd,
+    SSAMatrixMatMul,
     SSAMatrixScale,
     SSAMatrixSub,
     SSAMatrixGet,
@@ -190,6 +191,8 @@ class LLVMPrinter:
             return "\n  ".join(self._print_matrix_sub(instruction))
         if isinstance(instruction, SSAMatrixScale):
             return "\n  ".join(self._print_matrix_scale(instruction))
+        if isinstance(instruction, SSAMatrixMatMul):
+            return "\n  ".join(self._print_matrix_matmul(instruction))
         if isinstance(instruction, SSAArrayGet):
             return "\n  ".join(self._print_array_get(instruction))
         if isinstance(instruction, SSAVectorGet):
@@ -242,6 +245,7 @@ class LLVMPrinter:
                 SSAVectorDot,
                 SSAVectorScale,
                 SSAMatrixAdd,
+                SSAMatrixMatMul,
                 SSAMatrixScale,
                 SSAVectorSub,
                 SSAMatrixSub,
@@ -679,6 +683,95 @@ class LLVMPrinter:
             raise LLVMBackendError("LLVM matrix_scale scalar type must match matrix element type")
         if instruction.rows <= 0 or instruction.cols <= 0:
             raise LLVMBackendError("LLVM matrix_scale requires positive dimensions")
+
+    def _print_matrix_matmul(self, instruction: SSAMatrixMatMul) -> list[str]:
+        self._validate_matrix_matmul(instruction)
+        self._uses_array_type = True
+        self._uses_array_allocation = True
+
+        result = self._new_temp(instruction.result)
+        result_element_type = llvm_type(instruction.result.type.element)
+        result_element_size = self._sizeof(instruction.result.type.element)
+        multiply_operator = self._element_binary_operator(instruction.result.type.element, "mul")
+        add_operator = self._element_binary_operator(instruction.result.type.element, "add")
+        zero = "0.0" if isinstance(instruction.result.type.element, DoubleType) else "0"
+        length = instruction.rows * instruction.cols
+        lines = [
+            f"{result} = call ptr @aether_array_new(i64 {result_element_size}, i64 {length})"
+        ]
+
+        left_data = self._synthetic_temp("matrix.matmul.left.data")
+        right_data = self._synthetic_temp("matrix.matmul.right.data")
+        result_data = self._synthetic_temp("matrix.matmul.result.data")
+        lines.extend(self._array_data_pointer(left_data, self._operand(instruction.left)))
+        lines.extend(self._array_data_pointer(right_data, self._operand(instruction.right)))
+        lines.extend(self._array_data_pointer(result_data, result))
+
+        left_element_type = llvm_type(instruction.left.type.element)
+        right_element_type = llvm_type(instruction.right.type.element)
+        for row in range(instruction.rows):
+            for col in range(instruction.cols):
+                accumulator = zero
+                for inner in range(instruction.inner):
+                    left_index = row * instruction.inner + inner
+                    right_index = inner * instruction.cols + col
+                    left_ptr = self._synthetic_temp("matrix.matmul.left.elem")
+                    right_ptr = self._synthetic_temp("matrix.matmul.right.elem")
+                    loaded_left = self._synthetic_temp("matrix.matmul.left")
+                    loaded_right = self._synthetic_temp("matrix.matmul.right")
+                    lines.append(
+                        f"{left_ptr} = getelementptr {left_element_type}, ptr {left_data}, i64 {left_index}"
+                    )
+                    lines.append(f"{loaded_left} = load {left_element_type}, ptr {left_ptr}")
+                    lines.append(
+                        f"{right_ptr} = getelementptr {right_element_type}, ptr {right_data}, i64 {right_index}"
+                    )
+                    lines.append(f"{loaded_right} = load {right_element_type}, ptr {right_ptr}")
+                    left_operand = self._coerce_scalar(
+                        lines,
+                        loaded_left,
+                        instruction.left.type.element,
+                        instruction.result.type.element,
+                        "matrix.matmul.left.cast",
+                    )
+                    right_operand = self._coerce_scalar(
+                        lines,
+                        loaded_right,
+                        instruction.right.type.element,
+                        instruction.result.type.element,
+                        "matrix.matmul.right.cast",
+                    )
+                    product = self._synthetic_temp("matrix.matmul.product")
+                    summed = self._synthetic_temp("matrix.matmul.sum")
+                    lines.append(
+                        f"{product} = {multiply_operator} {result_element_type} {left_operand}, {right_operand}"
+                    )
+                    lines.append(
+                        f"{summed} = {add_operator} {result_element_type} {accumulator}, {product}"
+                    )
+                    accumulator = summed
+                result_index = row * instruction.cols + col
+                result_ptr = self._synthetic_temp("matrix.matmul.result.elem")
+                lines.append(
+                    f"{result_ptr} = getelementptr {result_element_type}, ptr {result_data}, i64 {result_index}"
+                )
+                lines.append(f"store {result_element_type} {accumulator}, ptr {result_ptr}")
+
+        return lines
+
+    def _validate_matrix_matmul(self, instruction: SSAMatrixMatMul) -> None:
+        if not isinstance(instruction.result.type, MatrixType):
+            raise LLVMBackendError("LLVM matrix_matmul result must be MatrixType")
+        if not isinstance(instruction.left.type, MatrixType) or not isinstance(instruction.right.type, MatrixType):
+            raise LLVMBackendError("LLVM matrix_matmul expects matrix operands")
+        if instruction.rows <= 0 or instruction.inner <= 0 or instruction.cols <= 0:
+            raise LLVMBackendError("LLVM matrix_matmul requires positive dimensions")
+        if not isinstance(instruction.result.type.element, (IntType, DoubleType)):
+            raise LLVMBackendError("LLVM matrix_matmul only supports int or double results")
+        if not isinstance(instruction.left.type.element, (IntType, DoubleType)):
+            raise LLVMBackendError("LLVM matrix_matmul only supports int or double left elements")
+        if not isinstance(instruction.right.type.element, (IntType, DoubleType)):
+            raise LLVMBackendError("LLVM matrix_matmul only supports int or double right elements")
 
     def _print_contiguous_new(
         self,
