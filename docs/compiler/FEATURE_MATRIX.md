@@ -59,6 +59,9 @@ Notas:
   operaciones string (`+`, comparaciones, impresion, length, indexing, runtime).
 - `List<T>` existe como tipo fuente y como tipo IR/SSA nominal, pero no tiene
   lowering real de literales/metodos/operaciones de lista.
+- En el frontend/interprete, los agregados mutables (`List`, `Array`,
+  `Vector`, `Matrix`) aliasan por asignacion, parametros y return cuando no hay
+  conversion de elementos; `copy()` crea el contenedor independiente explicito.
 - `Array<T>` tiene backend para literales con tipo esperado, indexing,
   assignment y length; no tiene API completa de colecciones.
 

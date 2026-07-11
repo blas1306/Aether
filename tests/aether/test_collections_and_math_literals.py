@@ -162,6 +162,113 @@ def test_list_string_literal_and_formatting() -> None:
     assert result.output == '{"Ana", "Luis"}\n'
 
 
+def test_list_assignment_aliases_mutable_reference() -> None:
+    result = run_aether(
+        """
+List<int> a = {1, 2, 3};
+List<int> b = a;
+b[0] = 9;
+println(a);
+println(b);
+"""
+    )
+
+    assert result.output == "{9, 2, 3}\n{9, 2, 3}\n"
+
+
+def test_list_parameter_aliases_mutable_reference() -> None:
+    result = run_aether(
+        """
+void setFirst(List<int> xs) {
+    xs[0] = 9;
+}
+
+List<int> a = {1, 2, 3};
+setFirst(a);
+println(a);
+"""
+    )
+
+    assert result.output == "{9, 2, 3}\n"
+
+
+def test_list_return_aliases_mutable_reference() -> None:
+    result = run_aether(
+        """
+List<int> same(List<int> xs) {
+    return xs;
+}
+
+List<int> a = {1, 2, 3};
+List<int> b = same(a);
+b[0] = 9;
+println(a);
+println(b);
+"""
+    )
+
+    assert result.output == "{9, 2, 3}\n{9, 2, 3}\n"
+
+
+def test_list_copy_is_shallow_for_nested_reference_elements() -> None:
+    result = run_aether(
+        """
+List<List<int>> xs = {{1}, {2}};
+List<List<int>> ys = copy(xs);
+ys[0][0] = 9;
+println(xs);
+println(ys);
+ys[0] = {7};
+println(xs);
+println(ys);
+"""
+    )
+
+    assert result.output == "{{9}, {2}}\n{{9}, {2}}\n{{9}, {2}}\n{{7}, {2}}\n"
+
+
+def test_const_list_alias_blocks_that_reference_only() -> None:
+    with pytest.raises(AetherTypeError, match="Cannot mutate constant 'c'"):
+        run_aether(
+            """
+List<int> a = {1, 2, 3};
+const List<int> c = a;
+c[0] = 9;
+"""
+        )
+
+    result = run_aether(
+        """
+List<int> a = {1, 2, 3};
+const List<int> c = a;
+a[0] = 9;
+println(c);
+"""
+    )
+
+    assert result.output == "{9, 2, 3}\n"
+
+
+def test_struct_value_copy_preserves_list_reference_field() -> None:
+    result = run_aether(
+        """
+struct Box {
+    List<int> items;
+}
+
+List<int> xs = {1, 2};
+Box a = Box(xs);
+Box b = a;
+b.items[0] = 9;
+println(xs);
+println(a.items);
+println(b.items);
+"""
+    )
+
+    assert result.output == "{9, 2}\n{9, 2}\n{9, 2}\n"
+
+
 def test_array_literal_declaration_read_write_and_length() -> None:
     result = run_aether(
         """
@@ -176,6 +283,29 @@ println(length(a));
 
     assert result.env["a"].type_name == ArrayType("int")
     assert result.output == "Array{1, 2, 3}\n1\nArray{9, 2, 3}\n3\n"
+
+
+def test_other_mutable_aggregates_alias_by_assignment() -> None:
+    result = run_aether(
+        """
+Array<int> a = {1, 2};
+Array<int> b = a;
+b[0] = 9;
+println(a);
+
+Vector<int> v = [1, 2];
+Vector<int> w = v;
+w[1] = 9;
+println(v);
+
+Matrix<int> A = [1 2; 3 4];
+Matrix<int> B = A;
+B[1, 1] = 9;
+println(A);
+"""
+    )
+
+    assert result.output == "Array{9, 2}\n[9 2]\n[9 2; 3 4]\n"
 
 
 def test_copy_array_creates_new_container() -> None:

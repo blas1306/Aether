@@ -445,6 +445,10 @@ def is_indexable_type(type_name: AetherType) -> bool:
     return isinstance(type_name, (ArrayType, ListType, MatrixType, VectorType, TransposeVectorType))
 
 
+def is_mutable_reference_type(type_name: AetherType) -> bool:
+    return isinstance(type_name, (ArrayType, ListType, MatrixType, VectorType, TransposeVectorType))
+
+
 def shape_dimensions(value: AetherValue) -> list[int]:
     type_name = value.type_name
     if isinstance(type_name, NullableType):
@@ -677,6 +681,8 @@ def contains_struct_value(value: AetherValue) -> bool:
 def copy_value(value: AetherValue) -> AetherValue:
     if isinstance(value.value, ClassInstance):
         return value
+    if is_mutable_reference_type(value.type_name):
+        return value
     if isinstance(value.value, StructInstance):
         return AetherValue(
             value.type_name,
@@ -693,16 +699,6 @@ def copy_value(value: AetherValue) -> AetherValue:
         return AetherValue(value.type_name, copied.value)
     if isinstance(value.type_name, TupleType):
         return AetherValue(value.type_name, tuple(copy_value(element) for element in value.value))
-    if isinstance(value.type_name, ListType):
-        return AetherValue(value.type_name, [copy_value(element) for element in value.value])
-    if isinstance(value.type_name, ArrayType):
-        return AetherValue(value.type_name, [copy_value(element) for element in value.value])
-    if isinstance(value.type_name, VectorType):
-        return AetherValue(value.type_name, [copy_value(element) for element in value.value])
-    if isinstance(value.type_name, TransposeVectorType):
-        return AetherValue(value.type_name, copy_value(value.value))
-    if isinstance(value.type_name, MatrixType):
-        return AetherValue(value.type_name, [copy_value(row) for row in value.value])
     return value
 
 
@@ -722,10 +718,47 @@ def coerce_tuple_value(value: AetherValue, target_type: TupleType) -> AetherValu
     )
 
 
+def _runtime_value_matches_type(value: AetherValue, target_type: AetherType) -> bool:
+    if isinstance(target_type, ArrayType):
+        return isinstance(value.type_name, ArrayType) and all(
+            _runtime_value_matches_type(element, target_type.element_type)
+            for element in value.value
+        )
+    if isinstance(target_type, ListType):
+        return isinstance(value.type_name, ListType) and all(
+            _runtime_value_matches_type(element, target_type.element_type)
+            for element in value.value
+        )
+    if isinstance(target_type, VectorType):
+        return isinstance(value.type_name, VectorType) and all(
+            _runtime_value_matches_type(element, target_type.element_type)
+            for element in value.value
+        )
+    if isinstance(target_type, TransposeVectorType):
+        return isinstance(value.type_name, TransposeVectorType) and _runtime_value_matches_type(
+            value.value,
+            VectorType(target_type.element_type, target_type.length),
+        )
+    if isinstance(target_type, MatrixType):
+        row_type = ArrayType(target_type.element_type)
+        return isinstance(value.type_name, MatrixType) and all(
+            _runtime_value_matches_type(row, row_type)
+            for row in value.value
+        )
+    return value.type_name == target_type
+
+
 def coerce_list_value(value: AetherValue, target_type: ListType) -> AetherValue:
     if not isinstance(value.type_name, ListType):
         raise AetherTypeError(
             f"Cannot implicitly convert '{type_to_string(value.type_name)}' to '{type_to_string(target_type)}'."
+        )
+    if value.type_name == target_type and _runtime_value_matches_type(value, target_type):
+        return value
+    if not can_implicitly_convert(value.type_name, target_type):
+        raise AetherTypeError(
+            f"Cannot implicitly convert '{type_to_string(value.type_name)}' to '{type_to_string(target_type)}'. "
+            f"Use {type_to_string(target_type)}(...) for explicit conversion."
         )
     return AetherValue(
         target_type,
@@ -741,6 +774,8 @@ def coerce_vector_value(value: AetherValue, target_type: VectorType) -> AetherVa
                 f"Cannot implicitly convert '{type_to_string(value.type_name)}' to '{type_to_string(target_type)}'. "
                 f"Use {type_to_string(target_type)}(...) for explicit conversion."
             )
+        if source_type.element_type == target_type.element_type and _runtime_value_matches_type(value, source_type):
+            return value
         return AetherValue(
             VectorType(target_type.element_type, len(value.value), value.type_name.orientation),
             [coerce_implicit(element, target_type.element_type) for element in value.value],
@@ -786,6 +821,8 @@ def coerce_matrix_value(value: AetherValue, target_type: MatrixType) -> AetherVa
             f"Cannot implicitly convert '{type_to_string(value.type_name)}' to '{type_to_string(target_type)}'. "
             f"Use {type_to_string(target_type)}(...) for explicit conversion."
         )
+    if source_type.element_type == target_type.element_type and _runtime_value_matches_type(value, source_type):
+        return value
     row_type = ArrayType(target_type.element_type)
     if target_type.vector:
         vector_elements = _matrix_vector_elements(value)
@@ -809,6 +846,8 @@ def coerce_array_literal_value(value: AetherValue, target_type: AetherType) -> A
         raise AetherTypeError(
             f"Cannot implicitly convert '{type_to_string(value.type_name)}' to '{type_to_string(target_type)}'."
         )
+    if value.type_name == target_type and _runtime_value_matches_type(value, target_type):
+        return value
     coerced_elements: list[AetherValue] = []
     for element in value.value:
         target_element_type = target_type.element_type

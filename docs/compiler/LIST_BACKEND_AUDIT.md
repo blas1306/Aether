@@ -3,7 +3,7 @@
 ## Alcance
 
 Auditoria de la implementacion actual de `List<T>` antes de empezar su
-migracion al backend. No propone cambios de codigo ni implementa lowering.
+migracion al backend. No implementa lowering.
 
 Areas revisadas:
 
@@ -35,12 +35,12 @@ struct List<T> {
 }
 ```
 
-El mayor riesgo no es el literal ni `length`; es decidir y preservar la
-semantica de copia/aliasing. La documentacion de diseno dice que los agregados
-mutables deberian aliasar por asignacion, pero el interprete actual copia el
-contenedor al asignar/coaccionar listas. El backend debe elegir una semantica
-compatible con la especificacion vigente o ajustar la especificacion antes de
-exponer mutacion compilada.
+El mayor riesgo no es el literal ni `length`; es preservar la semantica de
+copia/aliasing. La contradiccion detectada entre la documentacion de diseno y
+el interprete AST quedo resuelta en el frontend/runtime: `List<T>` aliasa por
+asignacion, por paso de parametros y por return cuando no hay conversion de
+elementos. El backend debe preservar esa semantica antes de exponer mutacion
+compilada.
 
 ## Implementacion Actual
 
@@ -128,15 +128,22 @@ Operaciones permitidas con `const`:
 
 Estado actual de copia/aliasing:
 
-- `coerce_list_value` construye una lista Python nueva y coacciona cada
-  elemento.
-- `copy_value` hace copia recursiva para listas.
+- `coerce_list_value` devuelve la misma instancia runtime cuando el tipo fuente
+  ya coincide con `List<T>` destino y sus elementos ya estan materializados con
+  el tipo esperado.
+- Las conversiones que cambian el tipo de elemento, por ejemplo
+  `List<int>` -> `List<double>`, crean un nuevo contenedor con elementos
+  coaccionados; no pueden compartir storage tipado sin romper invariantes.
+- La asignacion local, el binding de parametros y el return de `List<T>` copian
+  la referencia, no el contenedor.
+- `copy_value` preserva referencias de agregados mutables. Los structs siguen
+  copiandose por valor, pero un campo `List<T>` dentro de un struct copia la
+  referencia a la lista.
 - `copy(xs)` hace copia superficial del contenedor con `list(xs.value)`.
-- En la practica observable por tests, `copy(xs)` y slices producen
-  contenedores independientes para mutaciones de elementos escalares.
-- La documentacion de diseno en `MUTABLE_AGGREGATES.md` afirma una intencion
-  futura distinta: asignar agregados deberia copiar referencias y observar
-  aliases. Esta diferencia debe resolverse antes de mutacion LLVM completa.
+- `copy(xs)`, `xs.copy()` y los slices producen un contenedor externo
+  independiente, pero sus elementos reference-type siguen compartidos.
+- `const` bloquea mutacion a traves de esa referencia; no congela el objeto si
+  existe otro alias no-const.
 
 ### Interaccion con `for`
 
@@ -457,11 +464,12 @@ No reutilizar sin cambios:
 
 - `IRArrayNew` para literales de lista: array es fijo y list necesita capacidad.
 - Optimizadores de array si asumen ausencia de cambios de longitud.
-- Semantica actual de `copy`/assignment sin resolver aliasing.
+- Cualquier lowering que copie contenedores en asignacion, parametros o return.
 
 ## Riesgos
 
-- Semantica de aliasing contradictoria entre diseno y comportamiento actual.
+- El backend todavia debe implementar la semantica de referencia mutable ya
+  observable en el frontend/interprete.
 - Falta de ownership/free/GC en LLVM.
 - `const` es por referencia de acceso, no congelamiento profundo; el backend
   debe preservar esa regla si hay aliases.
