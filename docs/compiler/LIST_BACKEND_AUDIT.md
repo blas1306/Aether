@@ -321,6 +321,11 @@ Sort:
   `aether_list_sort_i32`, `aether_list_sort_f64`, `aether_list_sort_string`.
 - Un helper generico con comparator function pointer es mas flexible, pero
   sube la complejidad de llamadas indirectas y ABI.
+- La semantica comun futura de `List<T>` y `Array<T>`, incluida estabilidad,
+  strings y NaN, esta definida en
+  [`AETHER_SEQUENCE_SORT_DESIGN.md`](../aether/AETHER_SEQUENCE_SORT_DESIGN.md).
+  Ese diseno recomienda helpers orientados a storage compartidos por ambas
+  representaciones; los nombres anteriores son ilustrativos, no un ABI fijado.
 
 Errores:
 

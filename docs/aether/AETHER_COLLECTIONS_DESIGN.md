@@ -18,6 +18,10 @@ The detailed first-class mathematical design for vectors and matrices lives in
 [`AETHER_VECTOR_MATRIX_DESIGN.md`](AETHER_VECTOR_MATRIX_DESIGN.md). This
 document only records the collection side of that boundary.
 
+The future common sorting semantics for lists and arrays are defined once in
+[`AETHER_SEQUENCE_SORT_DESIGN.md`](AETHER_SEQUENCE_SORT_DESIGN.md). That
+document is design-only and does not make array sorting available today.
+
 ## Collection Roles
 
 Aether separates general-purpose collections from mathematical vectors and
@@ -89,7 +93,9 @@ column-by-row is an outer product.
 ## List<T>
 
 `List<T>` is dynamic: operations such as `push`, `pop`, `insert`, `remove_at`,
-`clear`, `reverse`, and `sort` may change the container length or order.
+and `clear` may change the container length, while `reverse` and `sort` change
+only element order. In particular, the future shared `sort()` contract
+preserves both length and capacity.
 
 `List<T>` follows the mutable-reference and aliasing rules documented in
 [`MUTABLE_AGGREGATES.md`](../compiler/MUTABLE_AGGREGATES.md): assigning a list

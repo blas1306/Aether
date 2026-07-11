@@ -173,7 +173,13 @@ Notas:
 | Array.indexOf | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ no documentada | No implementado |
 | Array.swap | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ no documentada | No implementado |
 | Array.reverse | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ no documentada | No implementado |
-| Array.sort | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ no documentada | No implementado |
+| Array.sort | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ⚠️ diseño futuro | No implementado |
+
+Nota de diseno: la semantica futura unica de `List.sort` y `Array.sort` esta en
+[`AETHER_SEQUENCE_SORT_DESIGN.md`](../aether/AETHER_SEQUENCE_SORT_DESIGN.md).
+La existencia de ese contrato no cambia las marcas de implementacion de esta
+matriz: `List.sort` sigue siendo solo frontend y `Array.sort` sigue sin
+implementar.
 
 ## Algebra lineal
 

@@ -1291,6 +1291,12 @@ Aether separates general programming collections from mathematical vectors and m
 brace literals is documented in
 [`AETHER_COLLECTIONS_DESIGN.md`](AETHER_COLLECTIONS_DESIGN.md).
 
+The detailed future contract shared by `List<T>.sort()` and
+`Array<T>.sort()` is documented in
+[`AETHER_SEQUENCE_SORT_DESIGN.md`](AETHER_SEQUENCE_SORT_DESIGN.md). It defines
+stable ordering, strings, NaN, mutation, and rejected element types. The array
+API and compiler/backend work described there are design-only.
+
 The first-class mathematical design for oriented vectors and matrices is
 documented separately in
 [`AETHER_VECTOR_MATRIX_DESIGN.md`](AETHER_VECTOR_MATRIX_DESIGN.md).
@@ -1341,7 +1347,7 @@ sort(xs);                 // {1, 2}
 clear(xs);                // {}
 ```
 
-All list operations use 0-based indices. `insert(xs, index, value)` accepts `0 <= index <= length(xs)`; `remove_at(xs, index)` accepts `0 <= index < length(xs)`. `copy(xs)` returns a new `List<T>` container with the same elements as `xs`; it is a shallow copy, does not mutate `xs`, and is allowed for `const List<T>`. `push`, `insert`, `pop`, `remove_at`, `clear`, `reverse`, and `sort` mutate the list and reject a first argument whose expression is rooted in a `const` variable. `sort(xs)` sorts ascending and is supported only for `List<int>`, `List<double>`, and `List<string>`. `pop` and `remove_at` return the removed element. `length` returns `int`; `is_empty` and `contains` return `boolean`; `push`, `insert`, `clear`, `reverse`, and `sort` return `void`.
+All list operations use 0-based indices. `insert(xs, index, value)` accepts `0 <= index <= length(xs)`; `remove_at(xs, index)` accepts `0 <= index < length(xs)`. `copy(xs)` returns a new `List<T>` container with the same elements as `xs`; it is a shallow copy, does not mutate `xs`, and is allowed for `const List<T>`. `push`, `insert`, `pop`, `remove_at`, `clear`, `reverse`, and `sort` mutate the list and reject a first argument whose expression is rooted in a `const` variable. `sort(xs)` sorts ascending and is supported only for `List<int>`, `List<double>`, and `List<string>`. Its detailed future cross-container ordering contract, including stability and NaN handling, is defined in [`AETHER_SEQUENCE_SORT_DESIGN.md`](AETHER_SEQUENCE_SORT_DESIGN.md); this reference does not imply backend or array implementation. `pop` and `remove_at` return the removed element. `length` returns `int`; `is_empty` and `contains` return `boolean`; `push`, `insert`, `clear`, `reverse`, and `sort` return `void`.
 
 `Vector<T>` and `Matrix<T>` are not lists. They do not accept list mutation builtins such as `push`, `pop`, `insert`, `remove_at`, `clear`, `reverse`, or `sort`.
 
