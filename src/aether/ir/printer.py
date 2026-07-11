@@ -19,10 +19,13 @@ from .model import (
     IRInstruction,
     IRJump,
     IRListGet,
+    IRListCopy,
+    IRListContains,
     IRListIsEmpty,
     IRListLength,
     IRListNew,
     IRListSet,
+    IRListReverse,
     IRLoad,
     IRMatrixColumns,
     IRMatrixAdd,
@@ -108,6 +111,15 @@ class IRPrinter:
         if isinstance(instruction, IRListNew):
             elements = ", ".join(self._value(element) for element in instruction.elements)
             return f"{self._typed_value(instruction.result)} = list_new [{elements}]"
+        if isinstance(instruction, IRListCopy):
+            return f"{self._typed_value(instruction.result)} = list_copy {self._value(instruction.list_value)}"
+        if isinstance(instruction, IRListContains):
+            return (
+                f"{self._typed_value(instruction.result)} = list_contains "
+                f"{self._value(instruction.list_value)}, {self._value(instruction.value)}"
+            )
+        if isinstance(instruction, IRListReverse):
+            return f"list_reverse {self._value(instruction.list_value)}"
         if isinstance(instruction, IRVectorNew):
             elements = ", ".join(self._value(element) for element in instruction.elements)
             orientation = f" {instruction.orientation}" if instruction.orientation is not None else ""

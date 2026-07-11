@@ -18,10 +18,13 @@ from aether.ir.model import (
     IRFunction,
     IRInstruction,
     IRListGet,
+    IRListCopy,
+    IRListContains,
     IRListIsEmpty,
     IRListLength,
     IRListNew,
     IRListSet,
+    IRListReverse,
     IRLoad,
     IRMatrixColumns,
     IRMatrixAdd,
@@ -359,6 +362,16 @@ class AlgebraicSimplifier:
                 index=self._resolve(instruction.index, replacements),
                 value=self._resolve(instruction.value, replacements),
             )
+        if isinstance(instruction, IRListCopy):
+            return replace(instruction, list_value=self._resolve(instruction.list_value, replacements))
+        if isinstance(instruction, IRListContains):
+            return replace(
+                instruction,
+                list_value=self._resolve(instruction.list_value, replacements),
+                value=self._resolve(instruction.value, replacements),
+            )
+        if isinstance(instruction, IRListReverse):
+            return replace(instruction, list_value=self._resolve(instruction.list_value, replacements))
         if isinstance(instruction, IRVectorSet):
             return replace(
                 instruction,

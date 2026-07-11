@@ -65,6 +65,9 @@ exit code from `main`:
 | `list_for_sum.ae` | 6 |
 | `list_index.ae` | 2 |
 | `list_set_alias.ae` | 9 |
+| `list_copy.ae` | 19 |
+| `list_contains.ae` | 1 |
+| `list_reverse.ae` | 41 |
 
 To build and run an example:
 
@@ -160,6 +163,14 @@ are skipped.
   lowered `for x in xs` loops and explicit `xs[i]` reads.
 - `SSAListSet` loads the same `data` pointer and stores the element for
   `xs[i] = value`. It has no SSA result and is preserved as a side effect.
+- `SSAListCopy` calls `aether_list_copy`, which allocates a distinct header and
+  data buffer, then copies element representations with `llvm.memcpy`. The copy
+  is shallow: pointer-valued elements keep the same pointer.
+- `SSAListContains` calls a generated linear-search helper specialized for
+  `int`, `double`, `boolean`, `string`, or reference values. Strings use
+  `strcmp`; reference values use pointer equality.
+- `SSAListReverse` calls an in-place byte-swap loop. It allocates no new list or
+  data buffer and is preserved as a side effect.
 - List references are passed and returned as the same header pointer, so an
   indexed store through an assignment, parameter, or returned alias is visible
   through every alias.
@@ -170,8 +181,8 @@ LLVM IR, and an `if`/`else` that merges a supported scalar value can also be
 emitted completely through `SSAPhi`, including string values as `ptr`.
 
 String is now a full SSA value type in this subset. The backend keeps the
-representation as LLVM `ptr`: it does not copy, allocate, concatenate, inspect,
-or compare string contents.
+representation as LLVM `ptr`: general string operations remain unsupported,
+but `List<string>.contains` compares contents with `strcmp`.
 
 Direct recursion should work automatically because recursive calls use the same
 ordinary LLVM call emission as any other direct function call. There is no

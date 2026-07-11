@@ -29,10 +29,13 @@ from .model import (
     IRFunction,
     IRJump,
     IRListGet,
+    IRListCopy,
+    IRListContains,
     IRListIsEmpty,
     IRListLength,
     IRListNew,
     IRListSet,
+    IRListReverse,
     IRLoad,
     IRMatrixGet,
     IRMatrixAdd,
@@ -352,6 +355,24 @@ class IRLowerer:
         if isinstance(statement, ast.ContinueStatement):
             self._emit_continue(statement, context)
             return
+
+        if isinstance(statement, ast.ExpressionStatement):
+            expression = statement.expression
+            if isinstance(expression, ast.CallExpression) and (
+                expression.callee == "reverse" or expression.callee.endswith(".reverse")
+            ):
+                arguments = expression.arguments
+                if expression.callee.endswith(".reverse"):
+                    receiver = expression.callee.rsplit(".", 1)[0]
+                    arguments = [ast.Identifier(receiver, expression.line, expression.column), *arguments]
+                if expression.keyword_arguments or len(arguments) != 1:
+                    self._unsupported(expression, "invalid reverse call")
+                list_value = self._lower_expression(arguments[0], context)
+                if not isinstance(list_value.type, ListType):
+                    self._unsupported(expression, "reverse on non-list")
+                context.block.instructions.append(IRListReverse(list_value))
+                return
+            self._unsupported(statement)
 
         self._unsupported(statement)
 
@@ -1140,6 +1161,31 @@ class IRLowerer:
     def _lower_call(self, call: ast.CallExpression, context: _FunctionContext) -> IRValue:
         if call.keyword_arguments:
             self._unsupported(call, "keyword arguments")
+        method_name = call.callee.rsplit(".", 1)[-1]
+        arguments = call.arguments
+        if "." in call.callee and method_name in {"copy", "contains"}:
+            receiver = call.callee.rsplit(".", 1)[0]
+            arguments = [ast.Identifier(receiver, call.line, call.column), *arguments]
+        if method_name == "copy" and len(arguments) == 1:
+            list_value = self._lower_expression(arguments[0], context)
+            if isinstance(list_value.type, ListType):
+                result = context.temporary(list_value.type)
+                context.block.instructions.append(IRListCopy(result, list_value))
+                return result
+        if method_name == "contains" and len(arguments) == 2:
+            list_value = self._lower_expression(arguments[0], context)
+            if isinstance(list_value.type, ListType):
+                value = self._lower_expression(
+                    arguments[1], context, target_type=list_value.type.element
+                )
+                self._require_same_type(
+                    value.type,
+                    list_value.type.element,
+                    "contains value requires an implicit conversion",
+                )
+                result = context.temporary(BoolType())
+                context.block.instructions.append(IRListContains(result, list_value, value))
+                return result
         if call.callee in _CAST_BUILTINS:
             return self._lower_cast(call, context)
         signature = self._signatures.get(call.callee)

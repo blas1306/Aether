@@ -19,10 +19,13 @@ from aether.ir.model import (
     IRInstruction,
     IRJump,
     IRListGet,
+    IRListCopy,
+    IRListContains,
     IRListIsEmpty,
     IRListLength,
     IRListNew,
     IRListSet,
+    IRListReverse,
     IRLoad,
     IRMatrixGet,
     IRMatrixAdd,
@@ -63,10 +66,13 @@ from .model import (
     SSAInstruction,
     SSAJump,
     SSAListGet,
+    SSAListCopy,
+    SSAListContains,
     SSAListIsEmpty,
     SSAListLength,
     SSAListNew,
     SSAListSet,
+    SSAListReverse,
     SSAMatrixGet,
     SSAMatrixAdd,
     SSAMatrixMatMul,
@@ -547,6 +553,21 @@ class SSABuilder:
                 for element in instruction.elements
             )
             return SSAListNew(result, elements)
+
+        if isinstance(instruction, IRListCopy):
+            result = self._define_value(instruction.result, state.value_map)
+            list_value = self._resolve_value(instruction.list_value, state.value_map)
+            return SSAListCopy(result, list_value)
+
+        if isinstance(instruction, IRListContains):
+            result = self._define_value(instruction.result, state.value_map)
+            list_value = self._resolve_value(instruction.list_value, state.value_map)
+            value = self._resolve_value(instruction.value, state.value_map)
+            return SSAListContains(result, list_value, value)
+
+        if isinstance(instruction, IRListReverse):
+            list_value = self._resolve_value(instruction.list_value, state.value_map)
+            return SSAListReverse(list_value)
 
         if isinstance(instruction, IRVectorNew):
             result = self._define_value(instruction.result, state.value_map)

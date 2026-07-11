@@ -19,10 +19,13 @@ from .model import (
     SSAInstruction,
     SSAJump,
     SSAListGet,
+    SSAListCopy,
+    SSAListContains,
     SSAListIsEmpty,
     SSAListLength,
     SSAListNew,
     SSAListSet,
+    SSAListReverse,
     SSAMatrixColumns,
     SSAMatrixAdd,
     SSAMatrixMatMul,
@@ -104,6 +107,15 @@ class SSAPrinter:
         if isinstance(instruction, SSAListNew):
             elements = ", ".join(self._value(element) for element in instruction.elements)
             return f"{self._typed_value(instruction.result)} = list_new [{elements}]"
+        if isinstance(instruction, SSAListCopy):
+            return f"{self._typed_value(instruction.result)} = list_copy {self._value(instruction.list_value)}"
+        if isinstance(instruction, SSAListContains):
+            return (
+                f"{self._typed_value(instruction.result)} = list_contains "
+                f"{self._value(instruction.list_value)}, {self._value(instruction.value)}"
+            )
+        if isinstance(instruction, SSAListReverse):
+            return f"list_reverse {self._value(instruction.list_value)}"
         if isinstance(instruction, SSAVectorNew):
             elements = ", ".join(self._value(element) for element in instruction.elements)
             orientation = f" {instruction.orientation}" if instruction.orientation is not None else ""

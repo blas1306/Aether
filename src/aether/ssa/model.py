@@ -69,6 +69,24 @@ class SSAListNew(SSAInstruction):
 
 
 @dataclass(frozen=True)
+class SSAListCopy(SSAInstruction):
+    result: SSAValue
+    list_value: SSAValue
+
+
+@dataclass(frozen=True)
+class SSAListContains(SSAInstruction):
+    result: SSAValue
+    list_value: SSAValue
+    value: SSAValue
+
+
+@dataclass(frozen=True)
+class SSAListReverse(SSAInstruction):
+    list_value: SSAValue
+
+
+@dataclass(frozen=True)
 class SSAVectorNew(SSAInstruction):
     result: SSAValue
     elements: tuple[SSAValue, ...] = ()

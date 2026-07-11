@@ -38,10 +38,13 @@ from .model import (
     SSAInstruction,
     SSAJump,
     SSAListGet,
+    SSAListCopy,
+    SSAListContains,
     SSAListIsEmpty,
     SSAListLength,
     SSAListNew,
     SSAListSet,
+    SSAListReverse,
     SSAMatrixColumns,
     SSAMatrixAdd,
     SSAMatrixMatMul,
@@ -277,6 +280,18 @@ class SSAVerifier:
 
             if isinstance(instruction, SSAListNew):
                 self._verify_list_new(instruction, value_types)
+                continue
+
+            if isinstance(instruction, SSAListCopy):
+                self._verify_list_copy(instruction, value_types)
+                continue
+
+            if isinstance(instruction, SSAListContains):
+                self._verify_list_contains(instruction, value_types)
+                continue
+
+            if isinstance(instruction, SSAListReverse):
+                self._verify_list_reverse(instruction, value_types)
                 continue
 
             if isinstance(instruction, SSAVectorNew):
@@ -986,6 +1001,26 @@ class SSAVerifier:
         if not isinstance(instruction.result.type, IntType):
             self._fail(f"List length result must be int, got {instruction.result.type}")
 
+    def _verify_list_copy(self, instruction: SSAListCopy, value_types: dict[str, IRType]) -> None:
+        self._require_defined(instruction.list_value, value_types)
+        if not isinstance(instruction.list_value.type, ListType):
+            self._fail(f"List copy expects list value, got {instruction.list_value.type}")
+        self._require_type(instruction.result.type, instruction.list_value.type, "List copy result type mismatch")
+
+    def _verify_list_contains(self, instruction: SSAListContains, value_types: dict[str, IRType]) -> None:
+        self._require_defined(instruction.list_value, value_types)
+        self._require_defined(instruction.value, value_types)
+        if not isinstance(instruction.list_value.type, ListType):
+            self._fail(f"List contains expects list value, got {instruction.list_value.type}")
+        self._require_type(instruction.value.type, instruction.list_value.type.element, "List contains value type mismatch")
+        if not isinstance(instruction.result.type, BoolType):
+            self._fail(f"List contains result must be bool, got {instruction.result.type}")
+
+    def _verify_list_reverse(self, instruction: SSAListReverse, value_types: dict[str, IRType]) -> None:
+        self._require_defined(instruction.list_value, value_types)
+        if not isinstance(instruction.list_value.type, ListType):
+            self._fail(f"List reverse expects list value, got {instruction.list_value.type}")
+
     def _verify_list_is_empty(
         self,
         instruction: SSAListIsEmpty,
@@ -1260,6 +1295,8 @@ class SSAVerifier:
                 SSAArrayGet,
                 SSAListNew,
                 SSAListGet,
+                SSAListCopy,
+                SSAListContains,
                 SSAVectorGet,
                 SSAMatrixGet,
                 SSAArrayLength,

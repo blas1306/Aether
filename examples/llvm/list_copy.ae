@@ -1,0 +1,6 @@
+int main() {
+    List<int> original = {1, 2, 3};
+    List<int> copied = original.copy();
+    copied[0] = 9;
+    return original[0] * 10 + copied[0];
+}

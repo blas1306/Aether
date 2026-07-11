@@ -10,11 +10,14 @@ from aether.cli import EXIT_SUCCESS, main
 from aether.errors import AetherTypeError
 from aether.ir import (
     IRInterpreter,
+    IRListContains,
+    IRListCopy,
     IRListGet,
     IRListIsEmpty,
     IRListLength,
     IRListNew,
     IRListSet,
+    IRListReverse,
     IRLowerer,
     IRVerifier,
     print_ir,
@@ -23,10 +26,13 @@ from aether.ir.optimizer import OptimizerPipeline
 from aether.pipeline import lower_to_verified_ssa, parse_source, prepare_typed_program
 from aether.ssa import (
     SSAListGet,
+    SSAListContains,
+    SSAListCopy,
     SSAListIsEmpty,
     SSAListLength,
     SSAListNew,
     SSAListSet,
+    SSAListReverse,
     SSAVerifier,
     print_ssa,
 )
@@ -341,4 +347,125 @@ def test_emit_llvm_prints_explicit_list_index_and_set(tmp_path) -> None:
     assert exit_code == EXIT_SUCCESS
     assert "store i32" in stdout.getvalue()
     assert "load i32" in stdout.getvalue()
+    assert stderr.getvalue() == ""
+
+
+def test_phase_3a_lowers_prints_and_verifies_explicit_ir_and_ssa() -> None:
+    source = """
+int main() {
+    List<int> a = {1, 2, 3};
+    List<int> b = a.copy();
+    b.reverse();
+    if (b.contains(2)) { return b[0]; }
+    return 0;
+}
+"""
+    ir = _lower(source)
+    ssa = SSAVerifier(_ssa(source)).verify()
+
+    assert any(isinstance(item, IRListCopy) for item in _instructions(ir))
+    assert any(isinstance(item, IRListContains) for item in _instructions(ir))
+    assert any(isinstance(item, IRListReverse) for item in _instructions(ir))
+    assert any(isinstance(item, SSAListCopy) for item in _instructions(ssa))
+    assert any(isinstance(item, SSAListContains) for item in _instructions(ssa))
+    assert any(isinstance(item, SSAListReverse) for item in _instructions(ssa))
+    assert "list_copy" in print_ir(ir) and "list_copy" in print_ssa(ssa)
+    assert "list_contains" in print_ir(ir) and "list_contains" in print_ssa(ssa)
+    assert "list_reverse" in print_ir(ir) and "list_reverse" in print_ssa(ssa)
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("int main(){ List<int> a={}; List<int> b=a.copy(); return b.length; }", 0),
+        ("int main(){ List<int> a={1,2}; List<int> b=a.copy(); b[0]=9; return a[0]*10+b[0]; }", 19),
+        ("int main(){ List<double> a={1.5,2.5}; List<double> b=a.copy(); b[0]=9.0; if(a[0]==1.5){return 4;} return 0; }", 4),
+        ("int main(){ List<List<int>> a={{1},{2}}; List<List<int>> b=a.copy(); b[0][0]=5; return a[0][0]; }", 5),
+        ("int main(){ List<int> a={1,2,3}; List<int> b=a.copy(); b.reverse(); return a[0]*10+b[0]; }", 13),
+    ],
+)
+def test_list_copy_is_shallow_with_independent_outer_buffer(source: str, expected: int) -> None:
+    typed = _typed(source)
+    assert IRInterpreter(_lower(source)).call("main") == expected
+    if shutil.which("clang") is not None:
+        assert LLVMRunner().run(typed) == expected
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("int main(){ List<int> xs={1,2,3}; if(xs.contains(2)){return 1;} return 0; }", 1),
+        ("int main(){ List<int> xs={1,2,3}; if(xs.contains(9)){return 1;} return 0; }", 0),
+        ("int main(){ List<int> xs={}; if(xs.contains(1)){return 1;} return 0; }", 0),
+        ("int main(){ List<double> xs={1.5,2.5}; if(xs.contains(2.5)){return 2;} return 0; }", 2),
+        ("int main(){ List<boolean> xs={true,false}; if(xs.contains(false)){return 3;} return 0; }", 3),
+        ('int main(){ List<string> xs={"a","bb"}; if(xs.contains("bb")){return 4;} return 0; }', 4),
+        ("int main(){ List<List<int>> xs={{1}}; List<int> same=xs[0]; if(xs.contains(same)){return 5;} return 0; }", 5),
+        ("int main(){ List<List<int>> xs={{1}}; List<int> other={1}; if(xs.contains(other)){return 5;} return 0; }", 0),
+    ],
+)
+def test_list_contains_uses_language_equality(source: str, expected: int) -> None:
+    typed = _typed(source)
+    assert IRInterpreter(_lower(source)).call("main") == expected
+    if shutil.which("clang") is not None:
+        assert LLVMRunner().run(typed) == expected
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("int main(){ List<int> xs={}; xs.reverse(); return xs.length; }", 0),
+        ("int main(){ List<int> xs={7}; xs.reverse(); return xs[0]; }", 7),
+        ("int main(){ List<int> xs={1,2,3,4}; xs.reverse(); return xs[0]*10+xs[3]; }", 41),
+        ("int main(){ List<int> xs={1,2,3,4,5}; xs.reverse(); return xs[0]*10+xs[4]; }", 51),
+        ("int main(){ List<int> xs={1,2,3}; xs.reverse(); xs.reverse(); return xs[0]*10+xs[2]; }", 13),
+    ],
+)
+def test_list_reverse_swaps_in_place(source: str, expected: int) -> None:
+    typed = _typed(source)
+    assert IRInterpreter(_lower(source)).call("main") == expected
+    if shutil.which("clang") is not None:
+        assert LLVMRunner().run(typed) == expected
+
+
+def test_phase_3a_optimizers_preserve_allocations_reads_and_mutations() -> None:
+    source = """
+int main() {
+    List<int> a = {1, 2, 3};
+    List<int> b = a.copy();
+    boolean before = b.contains(1);
+    b.reverse();
+    boolean after = b.contains(1);
+    if (before == after) { return b[0]; }
+    return 0;
+}
+"""
+    optimized_ir = OptimizerPipeline().run(_lower(source))
+    optimized_ssa = SSAOptimizerPipeline().run(_ssa(source))
+
+    assert any(isinstance(item, IRListCopy) for item in _instructions(optimized_ir))
+    assert any(isinstance(item, IRListReverse) for item in _instructions(optimized_ir))
+    assert sum(isinstance(item, IRListContains) for item in _instructions(optimized_ir)) == 2
+    assert any(isinstance(item, SSAListCopy) for item in _instructions(optimized_ssa))
+    assert any(isinstance(item, SSAListReverse) for item in _instructions(optimized_ssa))
+    assert sum(isinstance(item, SSAListContains) for item in _instructions(optimized_ssa)) == 2
+
+
+def test_phase_3a_llvm_text_and_emit_llvm(tmp_path) -> None:
+    source = "int main(){ List<int> a={1,2,3}; List<int> b=a.copy(); b.reverse(); if(b.contains(2)){return b[0];} return 0; }"
+    llvm = print_llvm(_ssa(source))
+
+    assert "define private ptr @aether_list_copy" in llvm
+    assert "@llvm.memcpy.p0.p0.i64" in llvm
+    assert "define private i1 @aether_list_contains_int" in llvm
+    assert "define private void @aether_list_reverse" in llvm
+
+    program = tmp_path / "list_phase_3a.ae"
+    program.write_text(source + "\n", encoding="utf-8")
+    stdout = StringIO()
+    stderr = StringIO()
+    assert main(["--emit-llvm", str(program)], stdout=stdout, stderr=stderr) == EXIT_SUCCESS
+    assert "@aether_list_copy" in stdout.getvalue()
+    assert "@aether_list_contains_int" in stdout.getvalue()
+    assert "@aether_list_reverse" in stdout.getvalue()
     assert stderr.getvalue() == ""

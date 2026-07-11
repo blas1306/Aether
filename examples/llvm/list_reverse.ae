@@ -1,0 +1,5 @@
+int main() {
+    List<int> values = {1, 2, 3, 4};
+    values.reverse();
+    return values[0] * 10 + values[3];
+}

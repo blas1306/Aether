@@ -16,10 +16,13 @@ from aether.ssa.model import (
     SSAInstruction,
     SSAJump,
     SSAListGet,
+    SSAListCopy,
+    SSAListContains,
     SSAListIsEmpty,
     SSAListLength,
     SSAListNew,
     SSAListSet,
+    SSAListReverse,
     SSAMatrixColumns,
     SSAMatrixAdd,
     SSAMatrixMatMul,
@@ -60,6 +63,7 @@ class SSADeadCodeEliminator:
         SSAPhi,
         SSAArrayGet,
         SSAListGet,
+        SSAListContains,
         SSAVectorGet,
         SSAMatrixGet,
         SSAArrayLength,
@@ -175,6 +179,19 @@ class SSADeadCodeEliminator:
 
         if isinstance(instruction, SSAListNew):
             used_values.update(instruction.elements)
+            return
+
+        if isinstance(instruction, SSAListCopy):
+            used_values.add(instruction.list_value)
+            return
+
+        if isinstance(instruction, SSAListContains):
+            used_values.add(instruction.list_value)
+            used_values.add(instruction.value)
+            return
+
+        if isinstance(instruction, SSAListReverse):
+            used_values.add(instruction.list_value)
             return
 
         if isinstance(instruction, SSAVectorNew):

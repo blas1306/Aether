@@ -19,10 +19,13 @@ from aether.ssa.model import (
     SSAInstruction,
     SSAJump,
     SSAListGet,
+    SSAListCopy,
+    SSAListContains,
     SSAListIsEmpty,
     SSAListLength,
     SSAListNew,
     SSAListSet,
+    SSAListReverse,
     SSAMatrixColumns,
     SSAMatrixAdd,
     SSAMatrixMatMul,
@@ -446,6 +449,19 @@ class SSAAlgebraicSimplifier:
                 self._resolve(instruction.index, replacements),
                 self._resolve(instruction.value, replacements),
             )
+
+        if isinstance(instruction, SSAListCopy):
+            return SSAListCopy(instruction.result, self._resolve(instruction.list_value, replacements))
+
+        if isinstance(instruction, SSAListContains):
+            return SSAListContains(
+                instruction.result,
+                self._resolve(instruction.list_value, replacements),
+                self._resolve(instruction.value, replacements),
+            )
+
+        if isinstance(instruction, SSAListReverse):
+            return SSAListReverse(self._resolve(instruction.list_value, replacements))
 
         if isinstance(instruction, SSAVectorSet):
             return SSAVectorSet(

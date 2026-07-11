@@ -18,9 +18,10 @@ Areas revisadas:
 ## Resumen Ejecutivo
 
 `List<T>` es una feature completa en el frontend/interprete. En IR/SSA/LLVM ya
-tiene soporte de fases 1 y 2 para literales con tipo esperado, `.length`,
+tiene soporte de fases 1, 2 y 3a para literales con tipo esperado, `.length`,
 `.is_empty`, `for x in xs` / `for T x in xs`, lectura `xs[i]` y escritura
-`xs[i] = value`. El resto de la API de listas sigue pendiente de backend.
+`xs[i] = value`, `copy`, `contains` y `reverse`. El resto de la API de listas
+sigue pendiente de backend.
 
 La migracion no deberia reutilizar directamente las instrucciones de `Array<T>`.
 `Array<T>` hoy baja como agregado contiguo fijo con header `{ length, data* }`.
@@ -213,10 +214,10 @@ solo soporte operacional, no la existencia nominal del tipo.
 | `xs[i] = value` | Si | Si | Si | Si | Implementado fase 2 |
 | Slice `xs[start:end]` | Si | No | No | No | Alta |
 | Slice assignment | No | No | No | No | Nueva feature |
-| `copy(xs)` / `xs.copy()` | Si | No | No | No | Media |
-| `contains(xs, value)` / `xs.contains(value)` | Si | No | No | No | Media |
+| `copy(xs)` / `xs.copy()` | Si | Si | Si | Si | Implementado fase 3a |
+| `contains(xs, value)` / `xs.contains(value)` | Si | Si | Si | Si | Implementado fase 3a |
 | `indexOf` | No | No | No | No | Nueva feature |
-| `reverse(xs)` / `xs.reverse()` | Si | No | No | No | Media |
+| `reverse(xs)` / `xs.reverse()` | Si | Si | Si | Si | Implementado fase 3a |
 | `sort(xs)` / `xs.sort()` | Si | No | No | No | Alta |
 | `push(xs, value)` / `xs.push(value)` | Si | No | No | No | Alta |
 | `pop(xs)` / `xs.pop()` | Si | No | No | No | Alta |
@@ -399,6 +400,20 @@ Recomiendo partirla internamente:
 - Fase 3a: `copy`, `contains`, `reverse`.
 - Fase 3b: `indexOf` y `sort`.
 
+Fase 3a implementada:
+
+- `IRListCopy` / `SSAListCopy` son allocations observables y se conservan. LLVM
+  crea header y buffer independientes y copia las representaciones de elemento;
+  los elementos reference-type mantienen sus punteros, por lo que la copia es
+  superficial.
+- `IRListContains` / `SSAListContains` son lecturas lineales. LLVM especializa
+  igualdad para `int`, `double`, `boolean`, `string` y referencias; no se
+  introduce `Comparable`.
+- `IRListReverse` / `SSAListReverse` mutan el buffer mediante swaps in-place,
+  no producen resultado y nunca se eliminan.
+- No se implementaron `indexOf`, `sort`, operaciones que cambian longitud,
+  crecimiento, capacidad, `realloc`, GC ni ownership.
+
 Justificacion:
 
 - `copy` es esencial para estabilizar semantica de aliasing.
@@ -454,10 +469,9 @@ Recomendacion:
 
 Impacto:
 
-- Puede eliminar `ListLength`, `ListIsEmpty`, `ListGet`, `ListContains` y
-  `ListCopy` solo si su resultado no se usa y si `ListCopy` no tiene efectos
-  observables. Con runtime sin `free`, allocation no observable puede ser
-  eliminable, pero conviene ser conservador al inicio.
+- Puede eliminar `ListLength`, `ListIsEmpty`, `ListGet` y `ListContains` si su
+  resultado no se usa. `ListCopy` se trata conservadoramente como allocation y
+  no se elimina.
 - No puede eliminar `ListSet`, `Push`, `Pop`, `Insert`, `RemoveAt`, `Clear`,
   `Reverse` ni `Sort`.
 - `Pop` y `RemoveAt` tienen side effect aunque el resultado no se use.

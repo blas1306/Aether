@@ -19,10 +19,13 @@ from .model import (
     IRInstruction,
     IRJump,
     IRListGet,
+    IRListCopy,
+    IRListContains,
     IRListIsEmpty,
     IRListLength,
     IRListNew,
     IRListSet,
+    IRListReverse,
     IRLoad,
     IRMatrixColumns,
     IRMatrixAdd,
@@ -378,6 +381,18 @@ class IRVerifier:
         if isinstance(instruction, IRListNew):
             self._verify_list_new(instruction, state, value_types)
             return self._define_value(state, instruction.result)
+
+        if isinstance(instruction, IRListCopy):
+            self._verify_list_copy(instruction, state, value_types)
+            return self._define_value(state, instruction.result)
+
+        if isinstance(instruction, IRListContains):
+            self._verify_list_contains(instruction, state, value_types)
+            return self._define_value(state, instruction.result)
+
+        if isinstance(instruction, IRListReverse):
+            self._verify_list_reverse(instruction, state, value_types)
+            return state
 
         if isinstance(instruction, IRVectorNew):
             self._verify_vector_new(instruction, state, value_types)
@@ -1097,6 +1112,26 @@ class IRVerifier:
         if not isinstance(instruction.result.type, IntType):
             self._fail(f"List length result must be int, got {instruction.result.type}")
 
+    def _verify_list_copy(self, instruction: IRListCopy, state: _State, value_types: dict[str, IRType]) -> None:
+        self._require_defined(instruction.list_value, state, value_types)
+        if not isinstance(instruction.list_value.type, ListType):
+            self._fail(f"List copy expects list value, got {instruction.list_value.type}")
+        self._require_type(instruction.result.type, instruction.list_value.type, "List copy result type mismatch")
+
+    def _verify_list_contains(self, instruction: IRListContains, state: _State, value_types: dict[str, IRType]) -> None:
+        self._require_defined(instruction.list_value, state, value_types)
+        self._require_defined(instruction.value, state, value_types)
+        if not isinstance(instruction.list_value.type, ListType):
+            self._fail(f"List contains expects list value, got {instruction.list_value.type}")
+        self._require_type(instruction.value.type, instruction.list_value.type.element, "List contains value type mismatch")
+        if not isinstance(instruction.result.type, BoolType):
+            self._fail(f"List contains result must be bool, got {instruction.result.type}")
+
+    def _verify_list_reverse(self, instruction: IRListReverse, state: _State, value_types: dict[str, IRType]) -> None:
+        self._require_defined(instruction.list_value, state, value_types)
+        if not isinstance(instruction.list_value.type, ListType):
+            self._fail(f"List reverse expects list value, got {instruction.list_value.type}")
+
     def _verify_list_is_empty(
         self,
         instruction: IRListIsEmpty,
@@ -1413,6 +1448,8 @@ class IRVerifier:
                 IRArrayGet,
                 IRListNew,
                 IRListGet,
+                IRListCopy,
+                IRListContains,
                 IRVectorGet,
                 IRMatrixGet,
                 IRArrayLength,

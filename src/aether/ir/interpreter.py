@@ -20,10 +20,13 @@ from .model import (
     IRInstruction,
     IRJump,
     IRListGet,
+    IRListCopy,
+    IRListContains,
     IRListIsEmpty,
     IRListLength,
     IRListNew,
     IRListSet,
+    IRListReverse,
     IRLoad,
     IRMatrixColumns,
     IRMatrixAdd,
@@ -50,7 +53,17 @@ from .model import (
     IRVectorNew,
     IRVectorSet,
 )
-from .types import DoubleType, IntType, VoidType
+from .types import (
+    ArrayType,
+    ClassRefType,
+    DoubleType,
+    IntType,
+    InterfaceType,
+    ListType,
+    MatrixType,
+    VectorType,
+    VoidType,
+)
 
 
 class IRExecutionError(RuntimeError):
@@ -179,6 +192,40 @@ class IRInterpreter:
             frame.values[instruction.result] = [
                 self._value(element, frame) for element in instruction.elements
             ]
+            return False, None, None
+
+        if isinstance(instruction, IRListCopy):
+            list_value = self._value(instruction.list_value, frame)
+            if not isinstance(list_value, list):
+                raise IRExecutionError("IR list_copy requires a list value")
+            frame.values[instruction.result] = list(list_value)
+            return False, None, None
+
+        if isinstance(instruction, IRListContains):
+            list_value = self._value(instruction.list_value, frame)
+            if not isinstance(list_value, list):
+                raise IRExecutionError("IR list_contains requires a list value")
+            value = self._value(instruction.value, frame)
+            reference_type = isinstance(
+                instruction.value.type,
+                (ArrayType, ClassRefType, InterfaceType, ListType, MatrixType, VectorType),
+            )
+            frame.values[instruction.result] = any(
+                element is value if reference_type else element == value
+                for element in list_value
+            )
+            return False, None, None
+
+        if isinstance(instruction, IRListReverse):
+            list_value = self._value(instruction.list_value, frame)
+            if not isinstance(list_value, list):
+                raise IRExecutionError("IR list_reverse requires a list value")
+            left = 0
+            right = len(list_value) - 1
+            while left < right:
+                list_value[left], list_value[right] = list_value[right], list_value[left]
+                left += 1
+                right -= 1
             return False, None, None
 
         if isinstance(instruction, IRVectorNew):

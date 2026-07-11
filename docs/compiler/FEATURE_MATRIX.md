@@ -42,7 +42,7 @@ Leyenda de `Spec`:
 | double | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Completa |
 | bool/boolean | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Completa |
 | string | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ✅ | ✅ documentada | Parcial backend |
-| List | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ✅ | ✅ documentada | Parcial backend fase 2 |
+| List | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ✅ | ✅ documentada | Parcial backend fase 3a |
 | Array | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ parcialmente documentada | Parcial backend |
 | Vector<Row> | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Completa con optimizer parcial |
 | Vector<Column> | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Completa con optimizer parcial |
@@ -57,10 +57,11 @@ Notas:
 
 - `string` baja como valor/literal/call/return/phi, pero LLVM no soporta
   operaciones string (`+`, comparaciones, impresion, length, indexing, runtime).
-- `List<T>` tiene backend fases 1 y 2 para literal con tipo esperado,
+- `List<T>` tiene backend fases 1, 2 y 3a para literal con tipo esperado,
   `.length`, `.is_empty`, `for x in xs` / `for T x in xs`, lectura indexada y
-  asignacion indexada. No incluye `copy()`, crecimiento, `realloc`, ownership
-  ni runtime dinamico completo. El backend no agrega bounds checks en fase 2.
+  asignacion indexada, `copy()`, `contains()` y `reverse()`. No incluye cambios
+  de longitud/capacidad, crecimiento, `realloc`, ownership ni runtime dinamico
+  completo. El backend no agrega bounds checks.
 - En el frontend/interprete, los agregados mutables (`List`, `Array`,
   `Vector`, `Matrix`) aliasan por asignacion, parametros y return cuando no hay
   conversion de elementos; `copy()` crea el contenedor independiente explicito.
@@ -150,15 +151,15 @@ Notas:
 | for sobre List | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Parcial backend fase 1 |
 | List index read (`xs[i]`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 2 |
 | List index assignment (`xs[i] = value`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 2 |
-| List.copy | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
-| List.contains | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
+| List.copy | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 3a |
+| List.contains | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 3a |
 | List.indexOf | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ no documentada | No implementado |
 | List.push | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
 | List.pop | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
 | List.insert | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
 | List.removeAt / remove_at | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
 | List.clear | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
-| List.reverse | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
+| List.reverse | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 3a |
 | List.sort | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
 
 ### Array
@@ -235,8 +236,8 @@ Notas:
    compilable.
 3. Completar strings en backend: concatenacion, comparaciones, impresion,
    length/indexing y runtime/ownership.
-4. Completar `List<T>` en backend mas alla de la fase 2: `copy`, consultas,
-   mutaciones que cambian longitud, crecimiento, `realloc` y ownership.
+4. Completar `List<T>` mas alla de la fase 3a: `indexOf`, `sort`, mutaciones
+   que cambian longitud, crecimiento, `realloc` y ownership.
 5. Agregar `NullableType`/`null` al IR, SSA, optimizadores y LLVM, incluyendo
    comparaciones con `null`.
 6. Migrar structs, classes, interfaces y enums al backend o definir

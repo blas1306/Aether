@@ -21,10 +21,13 @@ from aether.ssa.model import (
     SSAInstruction,
     SSAJump,
     SSAListGet,
+    SSAListCopy,
+    SSAListContains,
     SSAListIsEmpty,
     SSAListLength,
     SSAListNew,
     SSAListSet,
+    SSAListReverse,
     SSAMatrixColumns,
     SSAMatrixAdd,
     SSAMatrixMatMul,
@@ -106,6 +109,9 @@ class LLVMPrinter:
         self._uses_array_allocation = False
         self._uses_list_type = False
         self._uses_list_allocation = False
+        self._uses_list_copy = False
+        self._uses_list_reverse = False
+        self._list_contains_types: set[object] = set()
 
         functions = [self._print_function(function) for function in module.functions]
         globals_ = [
@@ -186,6 +192,12 @@ class LLVMPrinter:
             return self._print_array_new(instruction)
         if isinstance(instruction, SSAListNew):
             return self._print_list_new(instruction)
+        if isinstance(instruction, SSAListCopy):
+            return self._print_list_copy(instruction)
+        if isinstance(instruction, SSAListContains):
+            return self._print_list_contains(instruction)
+        if isinstance(instruction, SSAListReverse):
+            return self._print_list_reverse(instruction)
         if isinstance(instruction, SSAVectorNew):
             return self._print_vector_new(instruction)
         if isinstance(instruction, SSAMatrixNew):
@@ -262,6 +274,8 @@ class LLVMPrinter:
                 SSAArrayGet,
                 SSAListNew,
                 SSAListGet,
+                SSAListCopy,
+                SSAListContains,
                 SSAVectorGet,
                 SSAMatrixGet,
                 SSAArrayLength,
@@ -493,6 +507,41 @@ class LLVMPrinter:
 
         self._for_each_element(length, emit_element)
         return "\n  ".join(lines)
+
+    def _print_list_copy(self, instruction: SSAListCopy) -> str:
+        if not isinstance(instruction.list_value.type, ListType):
+            raise LLVMBackendError("LLVM list_copy expects a ListType source")
+        if instruction.result.type != instruction.list_value.type:
+            raise LLVMBackendError("LLVM list_copy result type must match source type")
+        self._uses_list_type = True
+        self._uses_list_allocation = True
+        self._uses_list_copy = True
+        result = self._new_temp(instruction.result)
+        size = self._sizeof(instruction.list_value.type.element)
+        return f"{result} = call ptr @aether_list_copy(ptr {self._operand(instruction.list_value)}, i64 {size})"
+
+    def _print_list_contains(self, instruction: SSAListContains) -> str:
+        if not isinstance(instruction.list_value.type, ListType):
+            raise LLVMBackendError("LLVM list_contains expects a ListType source")
+        if instruction.value.type != instruction.list_value.type.element:
+            raise LLVMBackendError("LLVM list_contains value type must match list element type")
+        self._uses_list_type = True
+        self._list_contains_types.add(instruction.value.type)
+        result = self._new_temp(instruction.result)
+        helper = self._list_contains_helper_name(instruction.value.type)
+        value_type = llvm_type(instruction.value.type)
+        return (
+            f"{result} = call i1 @{helper}(ptr {self._operand(instruction.list_value)}, "
+            f"{value_type} {self._operand(instruction.value)})"
+        )
+
+    def _print_list_reverse(self, instruction: SSAListReverse) -> str:
+        if not isinstance(instruction.list_value.type, ListType):
+            raise LLVMBackendError("LLVM list_reverse expects a ListType source")
+        self._uses_list_type = True
+        self._uses_list_reverse = True
+        size = self._sizeof(instruction.list_value.type.element)
+        return f"call void @aether_list_reverse(ptr {self._operand(instruction.list_value)}, i64 {size})"
 
     def _print_vector_new(self, instruction: SSAVectorNew) -> str:
         if not isinstance(instruction.result.type, VectorType):
@@ -1894,14 +1943,147 @@ class LLVMPrinter:
                     ]
                 )
             )
+        if self._uses_list_copy:
+            sections.append("declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1 immarg)")
+            sections.append(
+                "\n".join(
+                    [
+                        "define private ptr @aether_list_copy(ptr %source, i64 %element_size) {",
+                        "entry:",
+                        f"  %source_len_field = getelementptr {self._LIST_STRUCT_TYPE}, ptr %source, i32 0, i32 0",
+                        "  %length = load i64, ptr %source_len_field",
+                        "  %copy = call ptr @aether_list_new(i64 %element_size, i64 %length)",
+                        f"  %source_data_field = getelementptr {self._LIST_STRUCT_TYPE}, ptr %source, i32 0, i32 2",
+                        "  %source_data = load ptr, ptr %source_data_field",
+                        f"  %copy_data_field = getelementptr {self._LIST_STRUCT_TYPE}, ptr %copy, i32 0, i32 2",
+                        "  %copy_data = load ptr, ptr %copy_data_field",
+                        "  %bytes = mul i64 %element_size, %length",
+                        "  call void @llvm.memcpy.p0.p0.i64(ptr %copy_data, ptr %source_data, i64 %bytes, i1 false)",
+                        "  ret ptr %copy",
+                        "}",
+                    ]
+                )
+            )
+        if self._uses_list_reverse:
+            sections.append(
+                "\n".join(
+                    [
+                        "define private void @aether_list_reverse(ptr %list, i64 %element_size) {",
+                        "entry:",
+                        f"  %len_field = getelementptr {self._LIST_STRUCT_TYPE}, ptr %list, i32 0, i32 0",
+                        "  %length = load i64, ptr %len_field",
+                        f"  %data_field = getelementptr {self._LIST_STRUCT_TYPE}, ptr %list, i32 0, i32 2",
+                        "  %data = load ptr, ptr %data_field",
+                        "  %has_pair = icmp ugt i64 %length, 1",
+                        "  br i1 %has_pair, label %start, label %exit",
+                        "start:",
+                        "  %right_start = sub i64 %length, 1",
+                        "  br label %outer",
+                        "outer:",
+                        "  %left = phi i64 [ 0, %start ], [ %left_next, %outer_continue ]",
+                        "  %right = phi i64 [ %right_start, %start ], [ %right_next, %outer_continue ]",
+                        "  %swap_more = icmp ult i64 %left, %right",
+                        "  br i1 %swap_more, label %inner_entry, label %exit",
+                        "inner_entry:",
+                        "  %left_offset = mul i64 %left, %element_size",
+                        "  %right_offset = mul i64 %right, %element_size",
+                        "  br label %inner",
+                        "inner:",
+                        "  %byte = phi i64 [ 0, %inner_entry ], [ %byte_next, %inner_body ]",
+                        "  %byte_more = icmp ult i64 %byte, %element_size",
+                        "  br i1 %byte_more, label %inner_body, label %outer_continue",
+                        "inner_body:",
+                        "  %left_byte_offset = add i64 %left_offset, %byte",
+                        "  %right_byte_offset = add i64 %right_offset, %byte",
+                        "  %left_ptr = getelementptr i8, ptr %data, i64 %left_byte_offset",
+                        "  %right_ptr = getelementptr i8, ptr %data, i64 %right_byte_offset",
+                        "  %left_value = load i8, ptr %left_ptr",
+                        "  %right_value = load i8, ptr %right_ptr",
+                        "  store i8 %right_value, ptr %left_ptr",
+                        "  store i8 %left_value, ptr %right_ptr",
+                        "  %byte_next = add i64 %byte, 1",
+                        "  br label %inner",
+                        "outer_continue:",
+                        "  %left_next = add i64 %left, 1",
+                        "  %right_next = sub i64 %right, 1",
+                        "  br label %outer",
+                        "exit:",
+                        "  ret void",
+                        "}",
+                    ]
+                )
+            )
+        if any(isinstance(type_, StringType) for type_ in self._list_contains_types):
+            sections.append("declare i32 @strcmp(ptr, ptr)")
+        contains_helpers: dict[str, object] = {}
+        for element_type in self._list_contains_types:
+            contains_helpers.setdefault(self._list_contains_helper_name(element_type), element_type)
+        for helper_name in sorted(contains_helpers):
+            element_type = contains_helpers[helper_name]
+            sections.append(self._list_contains_helper(element_type))
         return sections
+
+    def _list_contains_helper(self, element_type: object) -> str:
+        helper = self._list_contains_helper_name(element_type)
+        llvm_element_type = llvm_type(element_type)
+        if isinstance(element_type, DoubleType):
+            compare = "  %equal = fcmp oeq double %element, %needle"
+        elif isinstance(element_type, StringType):
+            compare = "\n".join([
+                "  %strcmp_result = call i32 @strcmp(ptr %element, ptr %needle)",
+                "  %equal = icmp eq i32 %strcmp_result, 0",
+            ])
+        else:
+            compare = f"  %equal = icmp eq {llvm_element_type} %element, %needle"
+        return "\n".join(
+            [
+                f"define private i1 @{helper}(ptr %list, {llvm_element_type} %needle) {{",
+                "entry:",
+                f"  %len_field = getelementptr {self._LIST_STRUCT_TYPE}, ptr %list, i32 0, i32 0",
+                "  %length = load i64, ptr %len_field",
+                f"  %data_field = getelementptr {self._LIST_STRUCT_TYPE}, ptr %list, i32 0, i32 2",
+                "  %data = load ptr, ptr %data_field",
+                "  br label %loop",
+                "loop:",
+                "  %index = phi i64 [ 0, %entry ], [ %next, %continue ]",
+                "  %more = icmp ult i64 %index, %length",
+                "  br i1 %more, label %body, label %not_found",
+                "body:",
+                f"  %element_ptr = getelementptr {llvm_element_type}, ptr %data, i64 %index",
+                f"  %element = load {llvm_element_type}, ptr %element_ptr",
+                compare,
+                "  br i1 %equal, label %found, label %continue",
+                "continue:",
+                "  %next = add i64 %index, 1",
+                "  br label %loop",
+                "found:",
+                "  ret i1 true",
+                "not_found:",
+                "  ret i1 false",
+                "}",
+            ]
+        )
+
+    @staticmethod
+    def _list_contains_helper_name(type_: object) -> str:
+        if isinstance(type_, IntType):
+            return "aether_list_contains_int"
+        if isinstance(type_, DoubleType):
+            return "aether_list_contains_double"
+        if isinstance(type_, BoolType):
+            return "aether_list_contains_bool"
+        if isinstance(type_, StringType):
+            return "aether_list_contains_string"
+        if isinstance(type_, (ListType, ArrayType, VectorType, MatrixType)):
+            return "aether_list_contains_ref"
+        raise LLVMBackendError(f"LLVM list_contains does not support element type {type_}")
 
     def _sizeof(self, type_: object) -> int:
         if isinstance(type_, (IntType, BoolType)):
             return 4 if isinstance(type_, IntType) else 1
         if isinstance(type_, DoubleType):
             return 8
-        if isinstance(type_, (StringType, ArrayType, VectorType)):
+        if isinstance(type_, (StringType, ArrayType, ListType, VectorType, MatrixType)):
             return 8
         raise LLVMBackendError(f"LLVM backend does not know the size of {type_}")
 

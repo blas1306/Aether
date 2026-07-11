@@ -22,10 +22,13 @@ from aether.ssa.model import (
     SSAInstruction,
     SSAJump,
     SSAListGet,
+    SSAListCopy,
+    SSAListContains,
     SSAListIsEmpty,
     SSAListLength,
     SSAListNew,
     SSAListSet,
+    SSAListReverse,
     SSAMatrixColumns,
     SSAMatrixAdd,
     SSAMatrixMatMul,
@@ -219,6 +222,8 @@ class SCCPAnalyzer:
                 SSAArrayGet,
                 SSAListNew,
                 SSAListGet,
+                SSAListCopy,
+                SSAListContains,
                 SSAVectorGet,
                 SSAMatrixGet,
                 SSAArrayLength,
@@ -245,7 +250,7 @@ class SCCPAnalyzer:
             self._set_state(instruction.result, Overdefined())
             return
 
-        if isinstance(instruction, (SSAArraySet, SSAListSet)):
+        if isinstance(instruction, (SSAArraySet, SSAListSet, SSAListReverse)):
             return
 
         if isinstance(instruction, (SSAVectorSet, SSAMatrixSet)):
@@ -384,6 +389,8 @@ class SCCPAnalyzer:
                 SSAArrayGet,
                 SSAListNew,
                 SSAListGet,
+                SSAListCopy,
+                SSAListContains,
                 SSAVectorGet,
                 SSAMatrixGet,
                 SSAArrayLength,
@@ -428,6 +435,12 @@ class SCCPAnalyzer:
             return instruction.elements
         if isinstance(instruction, SSAListNew):
             return instruction.elements
+        if isinstance(instruction, SSAListCopy):
+            return (instruction.list_value,)
+        if isinstance(instruction, SSAListContains):
+            return (instruction.list_value, instruction.value)
+        if isinstance(instruction, SSAListReverse):
+            return (instruction.list_value,)
         if isinstance(instruction, SSAVectorNew):
             return instruction.elements
         if isinstance(instruction, SSAMatrixNew):
