@@ -202,8 +202,9 @@ Invariantes parcialmente protegidos:
   IR no verificado, puede omitir edges de terminadores mal ubicados o bloques
   vacios.
 - `IRVerifier` hace dataflow sobre bloques alcanzables e inspecciona bloques
-  inalcanzables con estado de entrada minimo para detectar errores locales.
-  No elimina unreachable.
+  inalcanzables con un estado permisivo para detectar errores locales de tipo,
+  nombres, llamadas y targets sin exigir stores visibles por caminos que no
+  existen. No elimina unreachable.
 - `DominatorAnalysis` deja bloques inalcanzables dominados solo por si mismos
   y con `idom = None`.
 - `DominanceFrontierAnalysis` ignora bloques inalcanzables al calcular
@@ -388,31 +389,30 @@ Riesgos:
 - `for` backend: range simple, nested ranges, dynamic step, break/continue
   dentro de if, while con break/continue, SSA con nested loop phis, optimizers,
   LLVM textual, CLI emit/build/run.
+- Regresiones criticas de control de flujo en
+  `tests/aether/test_control_flow_regression.py`: `for` vacio, `continue` como
+  ultimo statement, `break` incondicional, `return` temprano en `for`/`while`,
+  nested loops con `break`/`continue` internos, variables loop-carried
+  modificadas desde loops internos, variables locales de loop con scope correcto,
+  phis para variables inicializadas antes/modificadas dentro/usadas despues,
+  SCCP con `while false`, `while true` con salida por `break`, `for` sobre
+  `Array`/`Vector` con `break`/`continue` y rango con step dinamico negativo
+  mas `continue`.
 
 ### Huecos recomendados
 
-Los siguientes casos deberian agregarse como regresiones antes o durante la
-refactorizacion:
+La parte critica de Fase 5 ya esta implementada. Quedan huecos utiles, pero no
+bloqueantes para iniciar la refactorizacion:
 
-- `for` vacio en backend IR/SSA/LLVM.
-- `for` con body que termina siempre, por ejemplo body con `return` o `break`
-  incondicional.
-- `continue` en ultimo statement del body, verificando que no se duplica jump.
-- `break` en nested loop via backend compilado, no solo frontend AST.
-- `continue` en nested loop via backend compilado, no solo frontend AST.
-- `return` dentro de `while` y `for`, con salida LLVM/clang si aplica.
-- Variable declarada dentro del loop y usada solo dentro del loop.
-- Variable declarada dentro del loop y usada despues del loop como error
-  frontend/backend documentado.
-- Variable asignada dentro del loop y usada despues del loop cuando tambien
-  esta inicializada antes del loop.
-- Loop con condicion constante `false` y `true` a traves de SSA optimizer/SCCP.
-- Loop con bloques unreachable producidos por branch constante.
-- `break` en inner loop y uso posterior de variable outer loop-carried.
-- `continue` en inner loop y phis de variable outer/inner loop-carried.
-- `for` sobre array/vector indexable con `break`/`continue`.
-- `for` con step dinamico negativo y `continue`.
-- Nested loops emitidos a LLVM y ejecutados con clang.
+- Mas combinaciones LLVM/clang de nested loops profundos, especialmente mezclas
+  de `break`, `continue` y mutacion de varias variables loop-carried.
+- Regresiones negativas explicitas para statements fuente despues de
+  terminadores dentro del mismo body, documentando si la politica queda como
+  error de lowering o si se agregara pruning de unreachable.
+- Casos de optimizer con branches constantes dentro de loops anidados, no solo
+  condiciones constantes del loop principal.
+- Tests especificos de verificador SSA para incoming exacto por predecessor
+  alcanzable y dominancia de usos, que pertenecen a Fase 3.
 
 ## Hallazgos principales
 
@@ -494,7 +494,10 @@ Objetivo: estabilizar emision y nombres.
 
 Objetivo: cubrir la matriz de casos borde antes de `List<T>`.
 
-- Agregar tests backend para todos los huecos listados arriba.
+- Estado: parte critica implementada en
+  `tests/aether/test_control_flow_regression.py`.
+- Agregar tests backend restantes para los huecos no bloqueantes listados
+  arriba.
 - Separar tests por capa cuando convenga:
   - lowering/IR exacto;
   - verifier/CFG;
@@ -502,8 +505,8 @@ Objetivo: cubrir la matriz de casos borde antes de `List<T>`.
   - optimizer/SCCP;
   - LLVM textual;
   - clang smoke solo para casos de alto valor.
-- Agregar al menos un test end-to-end para nested loops con `break` y otro con
-  `continue`.
+- Ya hay regresiones para nested loops con `break` y con `continue`; ampliar a
+  mas combinaciones solo si la refactorizacion toca esos targets.
 
 ## Recomendacion antes de `List<T>`
 

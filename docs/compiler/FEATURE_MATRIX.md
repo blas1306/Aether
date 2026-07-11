@@ -230,15 +230,14 @@ Notas:
    no mutantes.
 5. Agregar `NullableType`/`null` al IR, SSA, optimizadores y LLVM, incluyendo
    comparaciones con `null`.
-6. Implementar `for`, `break` y `continue` en IR/SSA/LLVM.
-7. Migrar structs, classes, interfaces y enums al backend o definir
+6. Migrar structs, classes, interfaces y enums al backend o definir
    explicitamente que son solo del interprete AST.
-8. Alinear la spec con el estado real de operadores de algebra lineal,
+7. Alinear la spec con el estado real de operadores de algebra lineal,
    especialmente `*`, outer product y matrix multiplication.
-9. Bajar `transpose`/`conjtranspose` y demas builtins de algebra lineal que hoy
+8. Bajar `transpose`/`conjtranspose` y demas builtins de algebra lineal que hoy
    dependen del interprete AST.
-10. Agregar tests dedicados de recursividad en IR/SSA/LLVM.
-11. Completar o descartar formalmente APIs faltantes de colecciones:
+9. Agregar tests dedicados de recursividad en IR/SSA/LLVM.
+10. Completar o descartar formalmente APIs faltantes de colecciones:
     `indexOf`, `Array.isEmpty`, `Array.contains`, `Array.swap`,
     `Array.reverse` y `Array.sort`.
 

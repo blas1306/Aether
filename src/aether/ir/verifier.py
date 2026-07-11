@@ -266,12 +266,18 @@ class IRVerifier:
                     inputs[successor] = updated
                     worklist.append(successor)
 
+        unreachable_state = _State(
+            values=frozenset(value_types),
+            slots=frozenset(slot_types),
+        )
         for block_name, block in blocks.items():
             if block_name not in inputs:
+                # Unreachable blocks still get local instruction/type checks, but
+                # they have no executable incoming path that can prove slot stores.
                 self._transfer_block(
                     function,
                     block,
-                    entry,
+                    unreachable_state,
                     value_types,
                     slot_types,
                 )
