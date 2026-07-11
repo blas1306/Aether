@@ -21,6 +21,7 @@ from aether.ir.model import (
     IRListIsEmpty,
     IRListLength,
     IRListNew,
+    IRListSet,
     IRLoad,
     IRMatrixColumns,
     IRMatrixAdd,
@@ -348,6 +349,13 @@ class AlgebraicSimplifier:
             return replace(
                 instruction,
                 array=self._resolve(instruction.array, replacements),
+                index=self._resolve(instruction.index, replacements),
+                value=self._resolve(instruction.value, replacements),
+            )
+        if isinstance(instruction, IRListSet):
+            return replace(
+                instruction,
+                list_value=self._resolve(instruction.list_value, replacements),
                 index=self._resolve(instruction.index, replacements),
                 value=self._resolve(instruction.value, replacements),
             )

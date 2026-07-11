@@ -19,6 +19,7 @@ from aether.ssa.model import (
     SSAListIsEmpty,
     SSAListLength,
     SSAListNew,
+    SSAListSet,
     SSAMatrixColumns,
     SSAMatrixAdd,
     SSAMatrixMatMul,
@@ -498,6 +499,17 @@ class TrivialPhiEliminator:
             return (
                 SSAArraySet(array, index, value),
                 int(array_rewritten) + int(index_rewritten) + int(value_rewritten),
+            )
+
+        if isinstance(instruction, SSAListSet):
+            list_value, list_rewritten = self._rewrite_value(instruction.list_value, replacements)
+            index, index_rewritten = self._rewrite_value(instruction.index, replacements)
+            value, value_rewritten = self._rewrite_value(instruction.value, replacements)
+            if not list_rewritten and not index_rewritten and not value_rewritten:
+                return instruction, 0
+            return (
+                SSAListSet(list_value, index, value),
+                int(list_rewritten) + int(index_rewritten) + int(value_rewritten),
             )
 
         if isinstance(instruction, SSAArrayLength):

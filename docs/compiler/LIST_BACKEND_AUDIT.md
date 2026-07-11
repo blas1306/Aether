@@ -18,9 +18,9 @@ Areas revisadas:
 ## Resumen Ejecutivo
 
 `List<T>` es una feature completa en el frontend/interprete. En IR/SSA/LLVM ya
-tiene soporte fase 1 para literales con tipo esperado, `.length`, `.is_empty` y
-`for x in xs` / `for T x in xs`. El resto de la API de listas sigue pendiente
-de backend.
+tiene soporte de fases 1 y 2 para literales con tipo esperado, `.length`,
+`.is_empty`, `for x in xs` / `for T x in xs`, lectura `xs[i]` y escritura
+`xs[i] = value`. El resto de la API de listas sigue pendiente de backend.
 
 La migracion no deberia reutilizar directamente las instrucciones de `Array<T>`.
 `Array<T>` hoy baja como agregado contiguo fijo con header `{ length, data* }`.
@@ -39,8 +39,8 @@ El mayor riesgo no es el literal ni `length`; es preservar la semantica de
 copia/aliasing. La contradiccion detectada entre la documentacion de diseno y
 el interprete AST quedo resuelta en el frontend/runtime: `List<T>` aliasa por
 asignacion, por paso de parametros y por return cuando no hay conversion de
-elementos. El backend debe preservar esa semantica antes de exponer mutacion
-compilada.
+elementos. El backend preserva esa semantica para `ListSet`: todos esos caminos
+conservan el mismo header y buffer de datos.
 
 ## Implementacion Actual
 
@@ -209,8 +209,8 @@ solo soporte operacional, no la existencia nominal del tipo.
 | `is_empty(xs)` | Si | No | No | No | Baja |
 | `xs.isEmpty()` | No | No | No | No | Nueva feature |
 | `xs.size()` | Si | No | No | No | Baja |
-| `xs[i]` | Si | No; solo `IRListGet` interno para `for` | No; solo `SSAListGet` interno para `for` | No como feature explicita | Media |
-| `xs[i] = value` | Si | No | No | No | Media/Alta |
+| `xs[i]` | Si | Si | Si | Si | Implementado fase 2 |
+| `xs[i] = value` | Si | Si | Si | Si | Implementado fase 2 |
 | Slice `xs[start:end]` | Si | No | No | No | Alta |
 | Slice assignment | No | No | No | No | Nueva feature |
 | `copy(xs)` / `xs.copy()` | Si | No | No | No | Media |
@@ -374,13 +374,23 @@ Justificacion:
 
 ### Fase 2: index, assignment
 
-Mantener.
+Implementada.
 
 Justificacion:
 
-- `xs[i]` y `xs[i] = value` prueban data pointer, bounds, stores y mutabilidad.
+- `xs[i]` y `xs[i] = value` prueban data pointer, stores y mutabilidad.
 - Tambien fuerza a decidir si los indices se quedan en `i32` fuente con
   extension a `i64` runtime o si el IR normaliza indices a `i64`.
+
+La implementacion conserva `IRListSet` / `SSAListSet` como instrucciones con
+efectos y reescribe sus tres operandos sin eliminarlas. `ListGet` sigue siendo
+una lectura de memoria y no se pliega ni se reutiliza a traves de un `ListSet`.
+LLVM carga `header.data`, extiende el indice fuente a `i64`, calcula
+`data[index]` y emite `load` o `store` segun corresponda.
+
+Fase 2 no agrega bounds checks: conserva la politica actual del backend para
+indexing de agregados. Un indice fuera de rango en codigo compilado tiene
+comportamiento no definido. El interprete IR conserva su chequeo existente.
 
 ### Fase 3: copy, contains, indexOf, reverse, sort
 

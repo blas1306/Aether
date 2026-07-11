@@ -264,6 +264,13 @@ class IRArraySet(IRInstruction):
 
 
 @dataclass(frozen=True)
+class IRListSet(IRInstruction):
+    list_value: IRValue
+    index: IRValue
+    value: IRValue
+
+
+@dataclass(frozen=True)
 class IRVectorSet(IRInstruction):
     vector: IRValue
     index: IRValue

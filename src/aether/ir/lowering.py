@@ -32,6 +32,7 @@ from .model import (
     IRListIsEmpty,
     IRListLength,
     IRListNew,
+    IRListSet,
     IRLoad,
     IRMatrixGet,
     IRMatrixAdd,
@@ -506,6 +507,21 @@ class IRLowerer:
         context: _FunctionContext,
     ) -> None:
         indexed = self._lower_expression(target.array, context)
+        if isinstance(indexed.type, ListType):
+            index = self._lower_expression(target.index, context)
+            self._require_same_type(index.type, IntType(), "list index must be int")
+            value = self._lower_expression(
+                value_expression,
+                context,
+                target_type=indexed.type.element,
+            )
+            self._require_same_type(
+                value.type,
+                indexed.type.element,
+                "list index assignment requires an implicit conversion",
+            )
+            context.block.instructions.append(IRListSet(indexed, index, value))
+            return
         if isinstance(indexed.type, VectorType):
             index = self._lower_expression(target.index, context)
             self._require_same_type(index.type, IntType(), "vector index must be int")
@@ -1032,6 +1048,12 @@ class IRLowerer:
 
         if isinstance(expression, ast.IndexExpression):
             indexed = self._lower_expression(expression.array, context)
+            if isinstance(indexed.type, ListType):
+                index = self._lower_expression(expression.index, context)
+                self._require_same_type(index.type, IntType(), "list index must be int")
+                result = context.temporary(indexed.type.element)
+                context.block.instructions.append(IRListGet(result, indexed, index))
+                return result
             if isinstance(indexed.type, VectorType):
                 index = self._lower_expression(expression.index, context)
                 self._require_same_type(index.type, IntType(), "vector index must be int")

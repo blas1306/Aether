@@ -252,6 +252,13 @@ class SSAArraySet(SSAInstruction):
 
 
 @dataclass(frozen=True)
+class SSAListSet(SSAInstruction):
+    list_value: SSAValue
+    index: SSAValue
+    value: SSAValue
+
+
+@dataclass(frozen=True)
 class SSAVectorSet(SSAInstruction):
     vector: SSAValue
     index: SSAValue

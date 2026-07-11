@@ -17,6 +17,8 @@ from aether.ir import (
     IRFunction,
     IRJump,
     IRLoad,
+    IRListNew,
+    IRListSet,
     IRLowerer,
     IRMatrixNew,
     IRModule,
@@ -28,6 +30,7 @@ from aether.ir import (
     IRVerificationError,
     IRVerifier,
     IntType,
+    ListType,
     MatrixType,
     StringType,
     VectorType,
@@ -71,6 +74,39 @@ int identity(int value) {
     )
 
     assert IRVerifier(module).verify() is module
+
+
+def test_rejects_list_set_with_incompatible_value_type() -> None:
+    int_type = IntType()
+    double_type = DoubleType()
+    element = IRValue("0", int_type)
+    list_value = IRValue("1", ListType(int_type))
+    index = IRValue("2", int_type)
+    value = IRValue("3", double_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "main",
+                [],
+                int_type,
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [
+                            IRConst(element, 1),
+                            IRListNew(list_value, (element,)),
+                            IRConst(index, 0),
+                            IRConst(value, 2.0),
+                            IRListSet(list_value, index, value),
+                            IRReturn(element),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+
+    _assert_verification_error(module, "List set value type mismatch: expected int, got double")
 
 
 def test_verifies_function_calling_another_function() -> None:

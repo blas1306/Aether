@@ -63,6 +63,8 @@ exit code from `main`:
 | `double_to_int.ae` | 14 |
 | `list_literal.ae` | 3 |
 | `list_for_sum.ae` | 6 |
+| `list_index.ae` | 2 |
+| `list_set_alias.ae` | 9 |
 
 To build and run an example:
 
@@ -154,9 +156,13 @@ are skipped.
   growth or `realloc`.
 - `SSAListLength` loads the `length` field and truncates it to Aether `int`.
 - `SSAListIsEmpty` compares the `length` field with zero.
-- `SSAListGet` loads an element from the contiguous `data` buffer. It is emitted
-  for lowered `for x in xs` loops; explicit source indexing for List is still
-  outside the phase 1 compiled subset.
+- `SSAListGet` loads an element from the contiguous `data` buffer for both
+  lowered `for x in xs` loops and explicit `xs[i]` reads.
+- `SSAListSet` loads the same `data` pointer and stores the element for
+  `xs[i] = value`. It has no SSA result and is preserved as a side effect.
+- List references are passed and returned as the same header pointer, so an
+  indexed store through an assignment, parameter, or returned alias is visible
+  through every alias.
 - `SSAReturn`.
 
 This means an `if`/`else` where both branches return directly can compile to
@@ -276,11 +282,14 @@ merge0:
 
 The backend deliberately does not support these yet:
 
-- Full `List<T>` backend API. Phase 1 only supports list literals with an
-  expected `List<T>` type, `.length`, `.is_empty`, List parameters/returns, and
-  `for x in xs` / `for T x in xs`.
-- List mutation, explicit source indexing, `copy`, `contains`, `indexOf`,
-  `reverse`, `sort`, capacity growth, `realloc`, ownership, `free`, or GC.
+- Full `List<T>` backend API. Phases 1 and 2 support list literals with an
+  expected `List<T>` type, `.length`, `.is_empty`, List parameters/returns,
+  `for x in xs` / `for T x in xs`, explicit indexed reads and indexed stores.
+- List `copy`, `contains`, `indexOf`, `reverse`, `sort`, length-changing
+  mutation, capacity growth, `realloc`, ownership, `free`, or GC.
+- List indexing does not add bounds checks in phase 2; compiled out-of-range
+  access has undefined behavior, matching the existing aggregate backend
+  policy.
 
 - implicit casts
 - bool casts or string casts

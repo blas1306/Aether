@@ -1,0 +1,4 @@
+int main() {
+    List<int> xs = {1, 2, 3};
+    return xs[1];
+}

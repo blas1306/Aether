@@ -22,6 +22,7 @@ from aether.ssa.model import (
     SSAListIsEmpty,
     SSAListLength,
     SSAListNew,
+    SSAListSet,
     SSAMatrixColumns,
     SSAMatrixAdd,
     SSAMatrixMatMul,
@@ -435,6 +436,13 @@ class SSAAlgebraicSimplifier:
         if isinstance(instruction, SSAArraySet):
             return SSAArraySet(
                 self._resolve(instruction.array, replacements),
+                self._resolve(instruction.index, replacements),
+                self._resolve(instruction.value, replacements),
+            )
+
+        if isinstance(instruction, SSAListSet):
+            return SSAListSet(
+                self._resolve(instruction.list_value, replacements),
                 self._resolve(instruction.index, replacements),
                 self._resolve(instruction.value, replacements),
             )

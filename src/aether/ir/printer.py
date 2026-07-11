@@ -22,6 +22,7 @@ from .model import (
     IRListIsEmpty,
     IRListLength,
     IRListNew,
+    IRListSet,
     IRLoad,
     IRMatrixColumns,
     IRMatrixAdd,
@@ -210,6 +211,11 @@ class IRPrinter:
         if isinstance(instruction, IRArraySet):
             return (
                 f"array_set {self._value(instruction.array)}, "
+                f"{self._value(instruction.index)}, {self._value(instruction.value)}"
+            )
+        if isinstance(instruction, IRListSet):
+            return (
+                f"list_set {self._value(instruction.list_value)}, "
                 f"{self._value(instruction.index)}, {self._value(instruction.value)}"
             )
         if isinstance(instruction, IRVectorSet):

@@ -4,7 +4,7 @@ import re
 
 import pytest
 
-from aether.ir import BoolType, DoubleType, IntType, MatrixType, StringType, VectorType, VoidType
+from aether.ir import BoolType, DoubleType, IntType, ListType, MatrixType, StringType, VectorType, VoidType
 from aether.ssa import (
     SSABasicBlock,
     SSABinaryOp,
@@ -15,6 +15,8 @@ from aether.ssa import (
     SSAConst,
     SSAFunction,
     SSAJump,
+    SSAListNew,
+    SSAListSet,
     SSAMatrixNew,
     SSAModule,
     SSAParameter,
@@ -49,6 +51,39 @@ def test_verifies_linear_function() -> None:
     )
 
     assert SSAVerifier(module).verify() is module
+
+
+def test_rejects_list_set_with_incompatible_value_type() -> None:
+    int_type = IntType()
+    double_type = DoubleType()
+    element = SSAValue("0", int_type)
+    list_value = SSAValue("1", ListType(int_type))
+    index = SSAValue("2", int_type)
+    value = SSAValue("3", double_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "main",
+                [],
+                int_type,
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [
+                            SSAConst(element, 1),
+                            SSAListNew(list_value, (element,)),
+                            SSAConst(index, 0),
+                            SSAConst(value, 2.0),
+                            SSAListSet(list_value, index, value),
+                            SSAReturn(element),
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+
+    _assert_verification_error(module, "List set value type mismatch: expected int, got double")
 
 
 def test_verifies_if_else_with_phi() -> None:

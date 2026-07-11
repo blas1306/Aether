@@ -22,6 +22,7 @@ from .model import (
     SSAListIsEmpty,
     SSAListLength,
     SSAListNew,
+    SSAListSet,
     SSAMatrixColumns,
     SSAMatrixAdd,
     SSAMatrixMatMul,
@@ -206,6 +207,11 @@ class SSAPrinter:
         if isinstance(instruction, SSAArraySet):
             return (
                 f"array_set {self._value(instruction.array)}, "
+                f"{self._value(instruction.index)}, {self._value(instruction.value)}"
+            )
+        if isinstance(instruction, SSAListSet):
+            return (
+                f"list_set {self._value(instruction.list_value)}, "
                 f"{self._value(instruction.index)}, {self._value(instruction.value)}"
             )
         if isinstance(instruction, SSAVectorSet):

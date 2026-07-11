@@ -1,0 +1,6 @@
+int main() {
+    List<int> a = {1, 2, 3};
+    List<int> b = a;
+    b[0] = 9;
+    return a[0];
+}

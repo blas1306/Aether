@@ -41,6 +41,7 @@ from .model import (
     SSAListIsEmpty,
     SSAListLength,
     SSAListNew,
+    SSAListSet,
     SSAMatrixColumns,
     SSAMatrixAdd,
     SSAMatrixMatMul,
@@ -360,6 +361,10 @@ class SSAVerifier:
 
             if isinstance(instruction, SSAArraySet):
                 self._verify_array_set(instruction, value_types)
+                continue
+
+            if isinstance(instruction, SSAListSet):
+                self._verify_list_set(instruction, value_types)
                 continue
 
             if isinstance(instruction, SSAVectorSet):
@@ -916,6 +921,24 @@ class SSAVerifier:
             self._fail(
                 f"Vector set value type mismatch: expected "
                 f"{instruction.vector.type.element}, got {instruction.value.type}"
+            )
+
+    def _verify_list_set(
+        self,
+        instruction: SSAListSet,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.list_value, value_types)
+        self._require_defined(instruction.index, value_types)
+        self._require_defined(instruction.value, value_types)
+        if not isinstance(instruction.list_value.type, ListType):
+            self._fail(f"List set expects list value, got {instruction.list_value.type}")
+        if not isinstance(instruction.index.type, IntType):
+            self._fail(f"List set index must be int, got {instruction.index.type}")
+        if instruction.value.type != instruction.list_value.type.element:
+            self._fail(
+                f"List set value type mismatch: expected "
+                f"{instruction.list_value.type.element}, got {instruction.value.type}"
             )
 
     def _verify_matrix_set(

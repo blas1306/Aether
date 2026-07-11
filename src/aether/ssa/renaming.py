@@ -24,6 +24,7 @@ from aether.ir.model import (
     IRListIsEmpty,
     IRListLength,
     IRListNew,
+    IRListSet,
     IRLoad,
     IRMatrixColumns,
     IRMatrixAdd,
@@ -70,6 +71,7 @@ from .model import (
     SSAListIsEmpty,
     SSAListLength,
     SSAListNew,
+    SSAListSet,
     SSAMatrixColumns,
     SSAMatrixAdd,
     SSAMatrixMatMul,
@@ -431,6 +433,12 @@ class SSARenamer:
             index = self._resolve_value(instruction.index)
             value = self._resolve_value(instruction.value)
             return SSAArraySet(array, index, value)
+
+        if isinstance(instruction, IRListSet):
+            list_value = self._resolve_value(instruction.list_value)
+            index = self._resolve_value(instruction.index)
+            value = self._resolve_value(instruction.value)
+            return SSAListSet(list_value, index, value)
 
         if isinstance(instruction, IRVectorSet):
             vector = self._resolve_value(instruction.vector)

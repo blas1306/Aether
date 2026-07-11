@@ -24,6 +24,7 @@ from aether.ssa.model import (
     SSAListIsEmpty,
     SSAListLength,
     SSAListNew,
+    SSAListSet,
     SSAMatrixColumns,
     SSAMatrixAdd,
     SSAMatrixMatMul,
@@ -227,6 +228,8 @@ class LLVMPrinter:
             return self._print_matrix_columns(instruction)
         if isinstance(instruction, SSAArraySet):
             return "\n  ".join(self._print_array_set(instruction))
+        if isinstance(instruction, SSAListSet):
+            return "\n  ".join(self._print_list_set(instruction))
         if isinstance(instruction, SSAVectorSet):
             return "\n  ".join(self._print_vector_set(instruction))
         if isinstance(instruction, SSAMatrixSet):
@@ -1494,6 +1497,23 @@ class LLVMPrinter:
         element_type = llvm_type(instruction.value.type)
         element_ptr = self._array_element_pointer(
             self._operand(instruction.vector),
+            instruction.index,
+            instruction.value.type,
+        )
+        return element_ptr.lines + [
+            f"store {element_type} {self._operand(instruction.value)}, ptr {element_ptr.value}"
+        ]
+
+    def _print_list_set(self, instruction: SSAListSet) -> list[str]:
+        if not isinstance(instruction.list_value.type, ListType):
+            raise LLVMBackendError("LLVM list_set expects a ListType source")
+        if instruction.value.type != instruction.list_value.type.element:
+            raise LLVMBackendError("LLVM list_set value type must match list element type")
+        self._uses_list_type = True
+
+        element_type = llvm_type(instruction.value.type)
+        element_ptr = self._list_element_pointer(
+            self._operand(instruction.list_value),
             instruction.index,
             instruction.value.type,
         )

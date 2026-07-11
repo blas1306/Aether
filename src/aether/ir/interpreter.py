@@ -23,6 +23,7 @@ from .model import (
     IRListIsEmpty,
     IRListLength,
     IRListNew,
+    IRListSet,
     IRLoad,
     IRMatrixColumns,
     IRMatrixAdd,
@@ -248,6 +249,13 @@ class IRInterpreter:
             index = self._value(instruction.index, frame)
             self._check_array_index(list_value, index)
             frame.values[instruction.result] = list_value[index]
+            return False, None, None
+
+        if isinstance(instruction, IRListSet):
+            list_value = self._value(instruction.list_value, frame)
+            index = self._value(instruction.index, frame)
+            self._check_array_index(list_value, index)
+            list_value[index] = self._value(instruction.value, frame)
             return False, None, None
 
         if isinstance(instruction, IRVectorGet):

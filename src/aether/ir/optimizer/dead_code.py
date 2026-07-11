@@ -19,6 +19,7 @@ from aether.ir.model import (
     IRListIsEmpty,
     IRListLength,
     IRListNew,
+    IRListSet,
     IRLoad,
     IRMatrixColumns,
     IRMatrixAdd,
@@ -243,6 +244,8 @@ class DeadCodeEliminator:
             return (instruction.matrix, instruction.row, instruction.column)
         if isinstance(instruction, IRArraySet):
             return (instruction.array, instruction.index, instruction.value)
+        if isinstance(instruction, IRListSet):
+            return (instruction.list_value, instruction.index, instruction.value)
         if isinstance(instruction, IRVectorSet):
             return (instruction.vector, instruction.index, instruction.value)
         if isinstance(instruction, IRMatrixSet):

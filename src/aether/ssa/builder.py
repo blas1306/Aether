@@ -22,6 +22,7 @@ from aether.ir.model import (
     IRListIsEmpty,
     IRListLength,
     IRListNew,
+    IRListSet,
     IRLoad,
     IRMatrixGet,
     IRMatrixAdd,
@@ -65,6 +66,7 @@ from .model import (
     SSAListIsEmpty,
     SSAListLength,
     SSAListNew,
+    SSAListSet,
     SSAMatrixGet,
     SSAMatrixAdd,
     SSAMatrixMatMul,
@@ -665,6 +667,12 @@ class SSABuilder:
             index = self._resolve_value(instruction.index, state.value_map)
             value = self._resolve_value(instruction.value, state.value_map)
             return SSAArraySet(array, index, value)
+
+        if isinstance(instruction, IRListSet):
+            list_value = self._resolve_value(instruction.list_value, state.value_map)
+            index = self._resolve_value(instruction.index, state.value_map)
+            value = self._resolve_value(instruction.value, state.value_map)
+            return SSAListSet(list_value, index, value)
 
         if isinstance(instruction, IRVectorSet):
             vector = self._resolve_value(instruction.vector, state.value_map)
