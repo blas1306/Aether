@@ -402,6 +402,17 @@ the main pytest configuration only collects `tests/`. Neither
 
 ## Development
 
+Run the complete local CI pipeline before committing or handing off changes:
+
+```bash
+python scripts/ci.py
+```
+
+It combines whitespace validation, the complete pytest suite, quick
+benchmarks, LLVM smoke checks, and native clang builds. See the
+[`local CI documentation`](docs/compiler/CI.md) for its stages, skip options,
+and behavior when clang is unavailable.
+
 Install dependencies:
 
 ```bash
