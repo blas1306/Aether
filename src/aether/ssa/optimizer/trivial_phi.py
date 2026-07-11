@@ -18,6 +18,7 @@ from aether.ssa.model import (
     SSAListGet,
     SSAListCopy,
     SSAListContains,
+    SSAListIndexOf,
     SSAListIsEmpty,
     SSAListLength,
     SSAListNew,
@@ -524,6 +525,12 @@ class TrivialPhiEliminator:
             value, value_rewritten = self._rewrite_value(instruction.value, replacements)
             count = int(list_rewritten) + int(value_rewritten)
             return (SSAListContains(instruction.result, list_value, value), count) if count else (instruction, 0)
+
+        if isinstance(instruction, SSAListIndexOf):
+            list_value, list_rewritten = self._rewrite_value(instruction.list_value, replacements)
+            value, value_rewritten = self._rewrite_value(instruction.value, replacements)
+            count = int(list_rewritten) + int(value_rewritten)
+            return (SSAListIndexOf(instruction.result, list_value, value), count) if count else (instruction, 0)
 
         if isinstance(instruction, SSAListReverse):
             list_value, rewritten = self._rewrite_value(instruction.list_value, replacements)

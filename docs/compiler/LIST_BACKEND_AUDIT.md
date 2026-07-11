@@ -20,7 +20,7 @@ Areas revisadas:
 `List<T>` es una feature completa en el frontend/interprete. En IR/SSA/LLVM ya
 tiene soporte de fases 1, 2 y 3a para literales con tipo esperado, `.length`,
 `.is_empty`, `for x in xs` / `for T x in xs`, lectura `xs[i]` y escritura
-`xs[i] = value`, `copy`, `contains` y `reverse`. El resto de la API de listas
+`xs[i] = value`, `copy`, `contains`, `indexOf` y `reverse`. El resto de la API de listas
 sigue pendiente de backend.
 
 La migracion no deberia reutilizar directamente las instrucciones de `Array<T>`.
@@ -125,6 +125,7 @@ Operaciones permitidas con `const`:
 - `length(xs)`, `xs.length`
 - `is_empty(xs)`, `xs.is_empty`
 - `contains(xs, value)`
+- `xs.indexOf(value)`
 - `copy(xs)`, `xs.copy()`
 - `xs.size()`
 
@@ -216,7 +217,7 @@ solo soporte operacional, no la existencia nominal del tipo.
 | Slice assignment | No | No | No | No | Nueva feature |
 | `copy(xs)` / `xs.copy()` | Si | Si | Si | Si | Implementado fase 3a |
 | `contains(xs, value)` / `xs.contains(value)` | Si | Si | Si | Si | Implementado fase 3a |
-| `indexOf` | No | No | No | No | Nueva feature |
+| `xs.indexOf(value)` | Si | Si | Si | Si | Implementado fase 3b |
 | `reverse(xs)` / `xs.reverse()` | Si | Si | Si | Si | Implementado fase 3a |
 | `sort(xs)` / `xs.sort()` | Si | No | No | No | Alta |
 | `push(xs, value)` / `xs.push(value)` | Si | No | No | No | Alta |
@@ -311,8 +312,8 @@ Copia y busqueda:
 
 - `aether_list_copy(list: ptr, element_size: i64) -> ptr`
 - `aether_list_contains_*` especializado por elemento, o loop generado en LLVM.
-- `aether_list_index_of_*` si se agrega `indexOf`, especializado por elemento,
-  o loop generado en LLVM.
+- `aether_list_index_of_*` especializado por elemento y compartido por
+  `indexOf`/`contains` para la busqueda lineal.
 
 Sort:
 
@@ -339,6 +340,7 @@ Instrucciones minimas recomendadas:
 - `IRListSet(list, index, value)`
 - `IRListCopy(result, list)`
 - `IRListContains(result, list, value)`
+- `IRListIndexOf(result, list, value)`
 - `IRListReverse(list)`
 - `IRListSort(list)`
 - `IRListPush(list, value)`
@@ -347,11 +349,8 @@ Instrucciones minimas recomendadas:
 - `IRListRemoveAt(result, list, index)`
 - `IRListClear(list)`
 
-Si se agrega `indexOf`:
-
-- `IRListIndexOf(result, list, value)` retornando `int`, con convencion a
-  definir para "no encontrado". Recomendada: `-1`, por familiaridad y porque no
-  requiere nullable.
+`IRListIndexOf(result, list, value)` retorna `int`: el primer indice desde cero
+o `-1` cuando no encuentra el valor.
 
 Las instrucciones mutantes deben ser side-effecting aunque no produzcan valor.
 `IRListSet`, `Push`, `Insert`, `Clear`, `Reverse` y `Sort` no pueden eliminarse
@@ -400,7 +399,7 @@ Recomiendo partirla internamente:
 - Fase 3a: `copy`, `contains`, `reverse`.
 - Fase 3b: `indexOf` y `sort`.
 
-Fase 3a implementada:
+Fase 3a e `indexOf` de fase 3b implementados:
 
 - `IRListCopy` / `SSAListCopy` son allocations observables y se conservan. LLVM
   crea header y buffer independientes y copia las representaciones de elemento;
@@ -409,9 +408,11 @@ Fase 3a implementada:
 - `IRListContains` / `SSAListContains` son lecturas lineales. LLVM especializa
   igualdad para `int`, `double`, `boolean`, `string` y referencias; no se
   introduce `Comparable`.
+- `IRListIndexOf` / `SSAListIndexOf` reutilizan la misma busqueda e igualdad,
+  producen el primer indice o `-1` y son lecturas de memoria sin side effects.
 - `IRListReverse` / `SSAListReverse` mutan el buffer mediante swaps in-place,
   no producen resultado y nunca se eliminan.
-- No se implementaron `indexOf`, `sort`, operaciones que cambian longitud,
+- No se implementaron `sort`, `lastIndexOf`, operaciones que cambian longitud,
   crecimiento, capacidad, `realloc`, GC ni ownership.
 
 Justificacion:
@@ -419,8 +420,7 @@ Justificacion:
 - `copy` es esencial para estabilizar semantica de aliasing.
 - `contains` se puede emitir como loop simple con igualdad.
 - `reverse` es mutante pero local y no cambia capacidad.
-- `indexOf` no existe en frontend; requiere spec, parser/member/builtin/tests
-  antes de backend.
+- `indexOf` ya existe en frontend, IR/SSA, interpretes, optimizadores y LLVM.
 - `sort` requiere comparacion por tipo y politica para strings; es mas riesgosa
   que `reverse`.
 
@@ -469,7 +469,8 @@ Recomendacion:
 
 Impacto:
 
-- Puede eliminar `ListLength`, `ListIsEmpty`, `ListGet` y `ListContains` si su
+- Puede eliminar `ListLength`, `ListIsEmpty`, `ListGet`, `ListContains` y
+  `ListIndexOf` si su
   resultado no se usa. `ListCopy` se trata conservadoramente como allocation y
   no se elimina.
 - No puede eliminar `ListSet`, `Push`, `Pop`, `Insert`, `RemoveAt`, `Clear`,
@@ -525,14 +526,15 @@ No reutilizar sin cambios:
 
 ## Riesgos
 
-- El backend todavia debe implementar la semantica de referencia mutable ya
-  observable en el frontend/interprete.
+- El backend preserva referencia mutable para el subconjunto de listas que
+  soporta; ownership y tipos de objeto completos siguen pendientes.
 - Falta de ownership/free/GC en LLVM.
 - `const` es por referencia de acceso, no congelamiento profundo; el backend
   debe preservar esa regla si hay aliases.
 - `sort` para strings depende de representacion/runtime de strings, que sigue
   parcial en LLVM.
-- `indexOf` no existe aun en frontend ni spec como operacion implementada.
+- `indexOf` usa igualdad escalar/string por valor e igualdad de referencia para
+  agregados, sin comparacion profunda.
 - Nested lists y listas de structs/classes deben posponerse o fallar claramente
   mientras esos tipos no tengan backend completo.
 - Builtins globales vs metodos nativos deben converger en el mismo lowering.
@@ -542,13 +544,12 @@ No reutilizar sin cambios:
 
 ## Documentacion y Matriz
 
-`docs/compiler/FEATURE_MATRIX.md` ya refleja correctamente el estado actual:
+`docs/compiler/FEATURE_MATRIX.md` refleja el estado actual:
 
 - `List<T>` existe como tipo frontend y tipo IR/SSA nominal.
-- Las operaciones de lista son frontend-only.
-- `indexOf` aparece como no implementado.
+- Las operaciones que cambian longitud y `sort` siguen sin backend.
+- `indexOf` aparece implementado en todo el pipeline.
 - `isEmpty / is_empty` esta marcado parcial en parser porque solo existe
   `is_empty` como builtin global; no hay metodo `isEmpty`.
 
-No se actualizo `FEATURE_MATRIX.md` porque no se encontro una inconsistencia
-real en esa matriz.
+La matriz se actualiza junto con cada fase del backend.

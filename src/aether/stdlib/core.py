@@ -10,6 +10,8 @@ from ..types import (
     AetherType,
     AetherValue,
     ArrayType,
+    ClassType,
+    InterfaceType,
     ListType,
     MatrixType,
     NUMERIC_TYPES,
@@ -46,6 +48,7 @@ def builtin_definitions() -> list[BuiltinDefinition]:
         BuiltinDefinition("insert", _constant_runtime(insert_builtin), _insert_type, _exactly_three("insert")),
         BuiltinDefinition("remove_at", _constant_runtime(remove_at_builtin), _remove_at_type, _exactly_two("remove_at")),
         BuiltinDefinition("contains", _constant_runtime(contains_builtin), _contains_type, _exactly_two("contains")),
+        BuiltinDefinition("index_of", _constant_runtime(index_of_builtin), _index_of_type, _exactly_two("index_of")),
         BuiltinDefinition("clear", _constant_runtime(clear_builtin), _clear_type, _exactly_one("clear")),
         BuiltinDefinition("reverse", _constant_runtime(reverse_builtin), _reverse_type, _exactly_one("reverse")),
         BuiltinDefinition("sort", _constant_runtime(sort_builtin), _sort_type, _exactly_one("sort")),
@@ -241,7 +244,25 @@ def remove_at_builtin(args: list[AetherValue]) -> AetherValue:
 def contains_builtin(args: list[AetherValue]) -> AetherValue:
     xs = _require_list_arg(args, "contains")
     value = _coerce_list_element_arg(xs, args[1], "contains")
-    return AetherValue("boolean", any(element.value == value.value for element in xs.value))
+    return AetherValue("boolean", _list_index_of(xs, value) >= 0)
+
+
+def index_of_builtin(args: list[AetherValue]) -> AetherValue:
+    xs = _require_list_arg(args, "index_of")
+    value = _coerce_list_element_arg(xs, args[1], "index_of")
+    return AetherValue("int", _list_index_of(xs, value))
+
+
+def _list_index_of(xs: AetherValue, value: AetherValue) -> int:
+    reference_type = isinstance(
+        value.type_name,
+        (ArrayType, ClassType, InterfaceType, ListType, MatrixType, VectorType),
+    )
+    for index, element in enumerate(xs.value):
+        equal = element.value is value.value if reference_type else element.value == value.value
+        if equal:
+            return index
+    return -1
 
 
 def clear_builtin(args: list[AetherValue]) -> AetherValue:
@@ -543,6 +564,14 @@ def _contains_type(arg_types: list[AetherType | None]) -> AetherType | None:
         return None
     _require_assignable_to_list_element(arg_types[1], list_type, "contains")
     return "boolean"
+
+
+def _index_of_type(arg_types: list[AetherType | None]) -> AetherType | None:
+    list_type = _require_list_type_args(arg_types, "index_of", 2)
+    if list_type is None:
+        return None
+    _require_assignable_to_list_element(arg_types[1], list_type, "index_of")
+    return "int"
 
 
 def _clear_type(arg_types: list[AetherType | None]) -> AetherType | None:

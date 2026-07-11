@@ -29,6 +29,7 @@ LIST_NATIVE_MEMBERS = NativeMemberSet(
         "insert": NativeMember("insert", "insert", "method"),
         "removeAt": NativeMember("removeAt", "remove_at", "method"),
         "contains": NativeMember("contains", "contains", "method"),
+        "indexOf": NativeMember("indexOf", "index_of", "method"),
         "clear": NativeMember("clear", "clear", "method"),
         "size": NativeMember("size", "length", "method"),
         "copy": NativeMember("copy", "copy", "method"),

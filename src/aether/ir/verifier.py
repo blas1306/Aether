@@ -21,6 +21,7 @@ from .model import (
     IRListGet,
     IRListCopy,
     IRListContains,
+    IRListIndexOf,
     IRListIsEmpty,
     IRListLength,
     IRListNew,
@@ -388,6 +389,10 @@ class IRVerifier:
 
         if isinstance(instruction, IRListContains):
             self._verify_list_contains(instruction, state, value_types)
+            return self._define_value(state, instruction.result)
+
+        if isinstance(instruction, IRListIndexOf):
+            self._verify_list_index_of(instruction, state, value_types)
             return self._define_value(state, instruction.result)
 
         if isinstance(instruction, IRListReverse):
@@ -1127,6 +1132,15 @@ class IRVerifier:
         if not isinstance(instruction.result.type, BoolType):
             self._fail(f"List contains result must be bool, got {instruction.result.type}")
 
+    def _verify_list_index_of(self, instruction: IRListIndexOf, state: _State, value_types: dict[str, IRType]) -> None:
+        self._require_defined(instruction.list_value, state, value_types)
+        self._require_defined(instruction.value, state, value_types)
+        if not isinstance(instruction.list_value.type, ListType):
+            self._fail(f"List index_of expects list value, got {instruction.list_value.type}")
+        self._require_type(instruction.value.type, instruction.list_value.type.element, "List index_of value type mismatch")
+        if not isinstance(instruction.result.type, IntType):
+            self._fail(f"List index_of result must be int, got {instruction.result.type}")
+
     def _verify_list_reverse(self, instruction: IRListReverse, state: _State, value_types: dict[str, IRType]) -> None:
         self._require_defined(instruction.list_value, state, value_types)
         if not isinstance(instruction.list_value.type, ListType):
@@ -1450,6 +1464,7 @@ class IRVerifier:
                 IRListGet,
                 IRListCopy,
                 IRListContains,
+                IRListIndexOf,
                 IRVectorGet,
                 IRMatrixGet,
                 IRArrayLength,

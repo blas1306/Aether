@@ -30,6 +30,7 @@ EXPECTED_EXIT_CODES = {
     "list_contains.ae": 1,
     "list_copy.ae": 19,
     "list_index.ae": 2,
+    "list_index_of.ae": 12,
     "list_literal.ae": 3,
     "list_reverse.ae": 41,
     "list_set_alias.ae": 9,

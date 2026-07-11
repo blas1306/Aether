@@ -64,6 +64,7 @@ exit code from `main`:
 | `list_literal.ae` | 3 |
 | `list_for_sum.ae` | 6 |
 | `list_index.ae` | 2 |
+| `list_index_of.ae` | 12 |
 | `list_set_alias.ae` | 9 |
 | `list_copy.ae` | 19 |
 | `list_contains.ae` | 1 |
@@ -169,6 +170,9 @@ are skipped.
 - `SSAListContains` calls a generated linear-search helper specialized for
   `int`, `double`, `boolean`, `string`, or reference values. Strings use
   `strcmp`; reference values use pointer equality.
+- `SSAListIndexOf` calls the same specialized linear-search implementation and
+  returns the first zero-based index as `i32`, or `-1` when absent. It is a
+  memory read with no side effect.
 - `SSAListReverse` calls an in-place byte-swap loop. It allocates no new list or
   data buffer and is preserved as a side effect.
 - List references are passed and returned as the same header pointer, so an
@@ -182,7 +186,8 @@ emitted completely through `SSAPhi`, including string values as `ptr`.
 
 String is now a full SSA value type in this subset. The backend keeps the
 representation as LLVM `ptr`: general string operations remain unsupported,
-but `List<string>.contains` compares contents with `strcmp`.
+but `List<string>.contains` and `List<string>.indexOf` compare contents with
+`strcmp`.
 
 Direct recursion should work automatically because recursive calls use the same
 ordinary LLVM call emission as any other direct function call. There is no
@@ -293,11 +298,11 @@ merge0:
 
 The backend deliberately does not support these yet:
 
-- Full `List<T>` backend API. Phases 1 and 2 support list literals with an
+- Full `List<T>` backend API. Phases 1, 2, 3a, and `indexOf` from phase 3b support list literals with an
   expected `List<T>` type, `.length`, `.is_empty`, List parameters/returns,
   `for x in xs` / `for T x in xs`, explicit indexed reads and indexed stores.
-- List `copy`, `contains`, `indexOf`, `reverse`, `sort`, length-changing
-  mutation, capacity growth, `realloc`, ownership, `free`, or GC.
+- List `sort`, length-changing mutation, capacity growth, `realloc`, ownership,
+  `free`, or GC. `copy`, `contains`, `indexOf`, and `reverse` are supported.
 - List indexing does not add bounds checks in phase 2; compiled out-of-range
   access has undefined behavior, matching the existing aggregate backend
   policy.

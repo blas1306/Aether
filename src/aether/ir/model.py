@@ -94,6 +94,13 @@ class IRListContains(IRInstruction):
 
 
 @dataclass(frozen=True)
+class IRListIndexOf(IRInstruction):
+    result: IRValue
+    list_value: IRValue
+    value: IRValue
+
+
+@dataclass(frozen=True)
 class IRListReverse(IRInstruction):
     list_value: IRValue
 

@@ -73,6 +73,42 @@ println(xs.contains(9));
     assert result.output == "true\nfalse\n"
 
 
+def test_list_index_of_returns_first_index_or_minus_one() -> None:
+    result = run_aether(
+        """
+List<int> xs = {10, 20, 20, 30};
+println(xs.indexOf(10));
+println(xs.indexOf(20));
+println(xs.indexOf(30));
+println(xs.indexOf(99));
+List<int> empty = {};
+println(empty.indexOf(1));
+"""
+    )
+
+    assert result.output == "0\n1\n3\n-1\n-1\n"
+
+
+def test_list_index_of_ast_interpreter_uses_scalar_and_reference_equality() -> None:
+    result = run_aether(
+        """
+List<double> doubles = {1.5, 2.5};
+List<boolean> booleans = {true, false};
+List<string> strings = {"a", "bb"};
+List<List<int>> refs = {{1}};
+List<int> same = refs[0];
+List<int> other = {1};
+println(doubles.indexOf(2.5));
+println(booleans.indexOf(false));
+println(strings.indexOf("bb"));
+println(refs.indexOf(same));
+println(refs.indexOf(other));
+"""
+    )
+
+    assert result.output == "1\n1\n1\n0\n-1\n"
+
+
 def test_list_clear_method_empties_list() -> None:
     result = run_aether(
         """
@@ -114,6 +150,14 @@ def test_list_contains_method_rejects_wrong_value_type() -> None:
         match="contains\\(\\.\\.\\.\\) value of type 'string' is not assignable to 'int'",
     ):
         run_aether('List<int> xs = {1}; xs.contains("bad");')
+
+
+def test_list_index_of_method_rejects_wrong_value_type() -> None:
+    with pytest.raises(
+        AetherTypeError,
+        match="index_of\\(\\.\\.\\.\\) value of type 'string' is not assignable to 'int'",
+    ):
+        run_aether('List<int> xs = {1}; xs.indexOf("bad");')
 
 
 def test_list_pop_method_rejects_empty_list_at_runtime() -> None:

@@ -11,6 +11,7 @@ from aether.errors import AetherTypeError
 from aether.ir import (
     IRInterpreter,
     IRListContains,
+    IRListIndexOf,
     IRListCopy,
     IRListGet,
     IRListIsEmpty,
@@ -27,6 +28,7 @@ from aether.pipeline import lower_to_verified_ssa, parse_source, prepare_typed_p
 from aether.ssa import (
     SSAListGet,
     SSAListContains,
+    SSAListIndexOf,
     SSAListCopy,
     SSAListIsEmpty,
     SSAListLength,
@@ -414,6 +416,40 @@ def test_list_contains_uses_language_equality(source: str, expected: int) -> Non
 @pytest.mark.parametrize(
     ("source", "expected"),
     [
+        ("int main(){ List<int> xs={10,20,30}; return xs.indexOf(10); }", 0),
+        ("int main(){ List<int> xs={10,20,30}; return xs.indexOf(20); }", 1),
+        ("int main(){ List<int> xs={10,20,30}; return xs.indexOf(30); }", 2),
+        ("int main(){ List<int> xs={10,20,20,30}; return xs.indexOf(20); }", 1),
+        ("int main(){ List<int> xs={10,20,30}; return xs.indexOf(99)+1; }", 0),
+        ("int main(){ List<int> xs={}; return xs.indexOf(1)+1; }", 0),
+        ("int main(){ List<double> xs={1.5,2.5}; return xs.indexOf(2.5); }", 1),
+        ("int main(){ List<boolean> xs={true,false}; return xs.indexOf(false); }", 1),
+        ('int main(){ List<string> xs={"a","bb"}; return xs.indexOf("bb"); }', 1),
+        ("int main(){ List<List<int>> xs={{1}}; List<int> same=xs[0]; return xs.indexOf(same); }", 0),
+        ("int main(){ List<List<int>> xs={{1}}; List<int> other={1}; return xs.indexOf(other)+1; }", 0),
+    ],
+)
+def test_list_index_of_uses_language_equality(source: str, expected: int) -> None:
+    typed = _typed(source)
+    assert IRInterpreter(_lower(source)).call("main") == expected
+    if shutil.which("clang") is not None:
+        assert LLVMRunner().run(typed) == expected
+
+
+def test_list_index_of_lowers_prints_and_verifies_ir_and_ssa() -> None:
+    source = "int main(){ List<int> xs={1,2,3}; return xs.indexOf(2); }"
+    ir = _lower(source)
+    ssa = SSAVerifier(_ssa(source)).verify()
+
+    assert any(isinstance(item, IRListIndexOf) for item in _instructions(ir))
+    assert any(isinstance(item, SSAListIndexOf) for item in _instructions(ssa))
+    assert "list_index_of" in print_ir(ir)
+    assert "list_index_of" in print_ssa(ssa)
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
         ("int main(){ List<int> xs={}; xs.reverse(); return xs.length; }", 0),
         ("int main(){ List<int> xs={7}; xs.reverse(); return xs[0]; }", 7),
         ("int main(){ List<int> xs={1,2,3,4}; xs.reverse(); return xs[0]*10+xs[3]; }", 41),
@@ -449,6 +485,47 @@ int main() {
     assert any(isinstance(item, SSAListCopy) for item in _instructions(optimized_ssa))
     assert any(isinstance(item, SSAListReverse) for item in _instructions(optimized_ssa))
     assert sum(isinstance(item, SSAListContains) for item in _instructions(optimized_ssa)) == 2
+
+
+def test_list_index_of_reads_are_preserved_around_set_and_reverse() -> None:
+    source = """
+int main() {
+    List<int> xs = {1, 2, 3};
+    int before_set = xs.indexOf(1);
+    xs[0] = 2;
+    int after_set = xs.indexOf(1);
+    int before_reverse = xs.indexOf(3);
+    xs.reverse();
+    int after_reverse = xs.indexOf(3);
+    return (before_set + 1) * 1000 + (after_set + 1) * 100 + (before_reverse + 1) * 10 + after_reverse;
+}
+"""
+    optimized_ir = OptimizerPipeline().run(_lower(source))
+    optimized_ssa = SSAOptimizerPipeline().run(_ssa(source))
+
+    assert sum(isinstance(item, IRListIndexOf) for item in _instructions(optimized_ir)) == 4
+    assert sum(isinstance(item, SSAListIndexOf) for item in _instructions(optimized_ssa)) == 4
+    assert IRInterpreter(optimized_ir).call("main") == 1030
+
+
+def test_list_index_of_llvm_text_emit_and_clang(tmp_path) -> None:
+    source = "int main(){ List<int> xs={9,8,7}; return xs.indexOf(8); }"
+    typed = _typed(source)
+    llvm = print_llvm(_ssa(source))
+
+    assert "define private i32 @aether_list_index_of_int" in llvm
+    assert "call i32 @aether_list_index_of_int" in llvm
+    assert "ret i32 -1" in llvm
+
+    program = tmp_path / "list_index_of.ae"
+    program.write_text(source + "\n", encoding="utf-8")
+    stdout = StringIO()
+    stderr = StringIO()
+    assert main(["--emit-llvm", str(program)], stdout=stdout, stderr=stderr) == EXIT_SUCCESS
+    assert "@aether_list_index_of_int" in stdout.getvalue()
+    assert stderr.getvalue() == ""
+    if shutil.which("clang") is not None:
+        assert LLVMRunner().run(typed) == 1
 
 
 def test_phase_3a_llvm_text_and_emit_llvm(tmp_path) -> None:

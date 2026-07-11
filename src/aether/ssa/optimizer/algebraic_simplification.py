@@ -21,6 +21,7 @@ from aether.ssa.model import (
     SSAListGet,
     SSAListCopy,
     SSAListContains,
+    SSAListIndexOf,
     SSAListIsEmpty,
     SSAListLength,
     SSAListNew,
@@ -455,6 +456,13 @@ class SSAAlgebraicSimplifier:
 
         if isinstance(instruction, SSAListContains):
             return SSAListContains(
+                instruction.result,
+                self._resolve(instruction.list_value, replacements),
+                self._resolve(instruction.value, replacements),
+            )
+
+        if isinstance(instruction, SSAListIndexOf):
+            return SSAListIndexOf(
                 instruction.result,
                 self._resolve(instruction.list_value, replacements),
                 self._resolve(instruction.value, replacements),

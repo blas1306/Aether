@@ -23,6 +23,7 @@ from aether.ssa.model import (
     SSAListGet,
     SSAListCopy,
     SSAListContains,
+    SSAListIndexOf,
     SSAListIsEmpty,
     SSAListLength,
     SSAListNew,
@@ -112,6 +113,7 @@ class LLVMPrinter:
         self._uses_list_copy = False
         self._uses_list_reverse = False
         self._list_contains_types: set[object] = set()
+        self._list_index_of_types: set[object] = set()
 
         functions = [self._print_function(function) for function in module.functions]
         globals_ = [
@@ -196,6 +198,8 @@ class LLVMPrinter:
             return self._print_list_copy(instruction)
         if isinstance(instruction, SSAListContains):
             return self._print_list_contains(instruction)
+        if isinstance(instruction, SSAListIndexOf):
+            return self._print_list_index_of(instruction)
         if isinstance(instruction, SSAListReverse):
             return self._print_list_reverse(instruction)
         if isinstance(instruction, SSAVectorNew):
@@ -276,6 +280,7 @@ class LLVMPrinter:
                 SSAListGet,
                 SSAListCopy,
                 SSAListContains,
+                SSAListIndexOf,
                 SSAVectorGet,
                 SSAMatrixGet,
                 SSAArrayLength,
@@ -532,6 +537,21 @@ class LLVMPrinter:
         value_type = llvm_type(instruction.value.type)
         return (
             f"{result} = call i1 @{helper}(ptr {self._operand(instruction.list_value)}, "
+            f"{value_type} {self._operand(instruction.value)})"
+        )
+
+    def _print_list_index_of(self, instruction: SSAListIndexOf) -> str:
+        if not isinstance(instruction.list_value.type, ListType):
+            raise LLVMBackendError("LLVM list_index_of expects a ListType source")
+        if instruction.value.type != instruction.list_value.type.element:
+            raise LLVMBackendError("LLVM list_index_of value type must match list element type")
+        self._uses_list_type = True
+        self._list_index_of_types.add(instruction.value.type)
+        result = self._new_temp(instruction.result)
+        helper = self._list_index_of_helper_name(instruction.value.type)
+        value_type = llvm_type(instruction.value.type)
+        return (
+            f"{result} = call i32 @{helper}(ptr {self._operand(instruction.list_value)}, "
             f"{value_type} {self._operand(instruction.value)})"
         )
 
@@ -2013,31 +2033,43 @@ class LLVMPrinter:
                     ]
                 )
             )
-        if any(isinstance(type_, StringType) for type_ in self._list_contains_types):
+        search_types = self._list_contains_types | self._list_index_of_types
+        if any(isinstance(type_, StringType) for type_ in search_types):
             sections.append("declare i32 @strcmp(ptr, ptr)")
+        search_helpers: dict[str, object] = {}
+        for element_type in search_types:
+            search_helpers.setdefault(self._list_index_of_helper_name(element_type), element_type)
+        for helper_name in sorted(search_helpers):
+            sections.append(self._list_index_of_helper(search_helpers[helper_name]))
         contains_helpers: dict[str, object] = {}
         for element_type in self._list_contains_types:
             contains_helpers.setdefault(self._list_contains_helper_name(element_type), element_type)
         for helper_name in sorted(contains_helpers):
-            element_type = contains_helpers[helper_name]
-            sections.append(self._list_contains_helper(element_type))
+            sections.append(self._list_contains_helper(contains_helpers[helper_name]))
         return sections
 
     def _list_contains_helper(self, element_type: object) -> str:
         helper = self._list_contains_helper_name(element_type)
+        search_helper = self._list_index_of_helper_name(element_type)
         llvm_element_type = llvm_type(element_type)
-        if isinstance(element_type, DoubleType):
-            compare = "  %equal = fcmp oeq double %element, %needle"
-        elif isinstance(element_type, StringType):
-            compare = "\n".join([
-                "  %strcmp_result = call i32 @strcmp(ptr %element, ptr %needle)",
-                "  %equal = icmp eq i32 %strcmp_result, 0",
-            ])
-        else:
-            compare = f"  %equal = icmp eq {llvm_element_type} %element, %needle"
         return "\n".join(
             [
                 f"define private i1 @{helper}(ptr %list, {llvm_element_type} %needle) {{",
+                "entry:",
+                f"  %index = call i32 @{search_helper}(ptr %list, {llvm_element_type} %needle)",
+                "  %found = icmp sge i32 %index, 0",
+                "  ret i1 %found",
+                "}",
+            ]
+        )
+
+    def _list_index_of_helper(self, element_type: object) -> str:
+        helper = self._list_index_of_helper_name(element_type)
+        llvm_element_type = llvm_type(element_type)
+        compare = self._list_element_compare(element_type, llvm_element_type)
+        return "\n".join(
+            [
+                f"define private i32 @{helper}(ptr %list, {llvm_element_type} %needle) {{",
                 "entry:",
                 f"  %len_field = getelementptr {self._LIST_STRUCT_TYPE}, ptr %list, i32 0, i32 0",
                 "  %length = load i64, ptr %len_field",
@@ -2057,12 +2089,24 @@ class LLVMPrinter:
                 "  %next = add i64 %index, 1",
                 "  br label %loop",
                 "found:",
-                "  ret i1 true",
+                "  %result = trunc i64 %index to i32",
+                "  ret i32 %result",
                 "not_found:",
-                "  ret i1 false",
+                "  ret i32 -1",
                 "}",
             ]
         )
+
+    @staticmethod
+    def _list_element_compare(element_type: object, llvm_element_type: str) -> str:
+        if isinstance(element_type, DoubleType):
+            return "  %equal = fcmp oeq double %element, %needle"
+        if isinstance(element_type, StringType):
+            return "\n".join([
+                "  %strcmp_result = call i32 @strcmp(ptr %element, ptr %needle)",
+                "  %equal = icmp eq i32 %strcmp_result, 0",
+            ])
+        return f"  %equal = icmp eq {llvm_element_type} %element, %needle"
 
     @staticmethod
     def _list_contains_helper_name(type_: object) -> str:
@@ -2077,6 +2121,20 @@ class LLVMPrinter:
         if isinstance(type_, (ListType, ArrayType, VectorType, MatrixType)):
             return "aether_list_contains_ref"
         raise LLVMBackendError(f"LLVM list_contains does not support element type {type_}")
+
+    @staticmethod
+    def _list_index_of_helper_name(type_: object) -> str:
+        if isinstance(type_, IntType):
+            return "aether_list_index_of_int"
+        if isinstance(type_, DoubleType):
+            return "aether_list_index_of_double"
+        if isinstance(type_, BoolType):
+            return "aether_list_index_of_bool"
+        if isinstance(type_, StringType):
+            return "aether_list_index_of_string"
+        if isinstance(type_, (ListType, ArrayType, VectorType, MatrixType)):
+            return "aether_list_index_of_ref"
+        raise LLVMBackendError(f"LLVM list_index_of does not support element type {type_}")
 
     def _sizeof(self, type_: object) -> int:
         if isinstance(type_, (IntType, BoolType)):

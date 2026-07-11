@@ -77,6 +77,7 @@ _NATIVE_TYPE_MEMBERS: dict[str, tuple[tuple[str, str], ...]] = {
         ("insert", "method"),
         ("removeAt", "method"),
         ("contains", "method"),
+        ("indexOf", "method"),
         ("clear", "method"),
         ("size", "method"),
         ("copy", "method"),

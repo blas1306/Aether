@@ -31,6 +31,7 @@ from .model import (
     IRListGet,
     IRListCopy,
     IRListContains,
+    IRListIndexOf,
     IRListIsEmpty,
     IRListLength,
     IRListNew,
@@ -1163,7 +1164,7 @@ class IRLowerer:
             self._unsupported(call, "keyword arguments")
         method_name = call.callee.rsplit(".", 1)[-1]
         arguments = call.arguments
-        if "." in call.callee and method_name in {"copy", "contains"}:
+        if "." in call.callee and method_name in {"copy", "contains", "indexOf"}:
             receiver = call.callee.rsplit(".", 1)[0]
             arguments = [ast.Identifier(receiver, call.line, call.column), *arguments]
         if method_name == "copy" and len(arguments) == 1:
@@ -1185,6 +1186,20 @@ class IRLowerer:
                 )
                 result = context.temporary(BoolType())
                 context.block.instructions.append(IRListContains(result, list_value, value))
+                return result
+        if method_name == "indexOf" and len(arguments) == 2:
+            list_value = self._lower_expression(arguments[0], context)
+            if isinstance(list_value.type, ListType):
+                value = self._lower_expression(
+                    arguments[1], context, target_type=list_value.type.element
+                )
+                self._require_same_type(
+                    value.type,
+                    list_value.type.element,
+                    "indexOf value requires an implicit conversion",
+                )
+                result = context.temporary(IntType())
+                context.block.instructions.append(IRListIndexOf(result, list_value, value))
                 return result
         if call.callee in _CAST_BUILTINS:
             return self._lower_cast(call, context)

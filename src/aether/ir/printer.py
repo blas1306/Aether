@@ -21,6 +21,7 @@ from .model import (
     IRListGet,
     IRListCopy,
     IRListContains,
+    IRListIndexOf,
     IRListIsEmpty,
     IRListLength,
     IRListNew,
@@ -117,6 +118,11 @@ class IRPrinter:
             return (
                 f"{self._typed_value(instruction.result)} = list_contains "
                 f"{self._value(instruction.list_value)}, {self._value(instruction.value)}"
+            )
+        if isinstance(instruction, IRListIndexOf):
+            return (
+                f"{self._typed_value(instruction.result)} = list_index_of "
+                f"{self._typed_value(instruction.list_value)}, {self._typed_value(instruction.value)}"
             )
         if isinstance(instruction, IRListReverse):
             return f"list_reverse {self._value(instruction.list_value)}"

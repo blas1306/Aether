@@ -1401,6 +1401,8 @@ Supported native methods:
 - `List<T>.insert(index: int, value: T) -> void`
 - `List<T>.removeAt(index: int) -> T`
 - `List<T>.contains(value: T) -> boolean`
+- `List<T>.indexOf(value: T) -> int`, returns the zero-based index of the first
+  equal element, or `-1` when no element matches
 - `List<T>.clear() -> void`
 - `List<T>.size() -> int`
 - `List<T>.copy() -> List<T>`
@@ -1409,7 +1411,15 @@ Supported native methods:
 - `Matrix<T>.transpose() -> Matrix<T>`
 - `Vector<T>.norm() -> double`
 
-List method indices are zero-based. `insert(index, value)` accepts `0 <= index <= size()`, while `removeAt(index)` accepts `0 <= index < size()`. `pop()` on an empty list and out-of-range indices raise an `AetherRuntimeError`. Method arguments are checked statically when their types are known: values passed to `push`, `insert`, and `contains` must be assignable to `T`, and indices must be `int`.
+List method indices are zero-based. `indexOf(value)` returns the first matching
+index and returns `-1` for an empty list or when the value is absent. It uses
+the same equality as `contains`: scalar and string values use language value
+equality, while reference types use reference identity; it does not perform
+deep comparison. `insert(index, value)` accepts `0 <= index <= size()`, while
+`removeAt(index)` accepts `0 <= index < size()`. `pop()` on an empty list and
+out-of-range indices raise an `AetherRuntimeError`. Method arguments are checked
+statically when their types are known: values passed to `push`, `insert`,
+`contains`, and `indexOf` must be assignable to `T`, and indices must be `int`.
 
 The functional builtins remain valid and keep the same signatures: `length(xs)`, `push(xs, value)`, `pop(xs)`, `insert(xs, index, value)`, `remove_at(xs, index)`, `contains(xs, value)`, `clear(xs)`, `copy(xs)`, `reverse(xs)`, `sort(xs)`, `rows(A)`, `columns(A)`, and `Math.LinearAlgebra.transpose(A)`/the imported `transpose(A)` alias still work. The global `size(value)` builtin retains its existing shape-vector semantics; `List<T>.size()` specifically returns the list length as an `int`.
 

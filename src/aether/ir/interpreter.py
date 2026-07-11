@@ -22,6 +22,7 @@ from .model import (
     IRListGet,
     IRListCopy,
     IRListContains,
+    IRListIndexOf,
     IRListIsEmpty,
     IRListLength,
     IRListNew,
@@ -210,10 +211,19 @@ class IRInterpreter:
                 instruction.value.type,
                 (ArrayType, ClassRefType, InterfaceType, ListType, MatrixType, VectorType),
             )
-            frame.values[instruction.result] = any(
-                element is value if reference_type else element == value
-                for element in list_value
+            frame.values[instruction.result] = self._list_index_of(list_value, value, reference_type) >= 0
+            return False, None, None
+
+        if isinstance(instruction, IRListIndexOf):
+            list_value = self._value(instruction.list_value, frame)
+            if not isinstance(list_value, list):
+                raise IRExecutionError("IR list_index_of requires a list value")
+            value = self._value(instruction.value, frame)
+            reference_type = isinstance(
+                instruction.value.type,
+                (ArrayType, ClassRefType, InterfaceType, ListType, MatrixType, VectorType),
             )
+            frame.values[instruction.result] = self._list_index_of(list_value, value, reference_type)
             return False, None, None
 
         if isinstance(instruction, IRListReverse):
@@ -590,6 +600,13 @@ class IRInterpreter:
         if value not in frame.values:
             raise IRExecutionError(f"IR value '%{value.name}' is not initialized")
         return frame.values[value]
+
+    @staticmethod
+    def _list_index_of(list_value: list[Any], value: Any, reference_type: bool) -> int:
+        for index, element in enumerate(list_value):
+            if (element is value) if reference_type else (element == value):
+                return index
+        return -1
 
     @staticmethod
     def _binary(operator: str, left: Any, right: Any) -> Any:

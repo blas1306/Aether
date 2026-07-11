@@ -1,0 +1,6 @@
+int main() {
+    List<int> xs = {10, 20, 20, 30};
+    int first = xs.indexOf(20);
+    int missing = xs.indexOf(99);
+    return first * 10 + (missing + 1) + 2;
+}

@@ -82,6 +82,13 @@ class SSAListContains(SSAInstruction):
 
 
 @dataclass(frozen=True)
+class SSAListIndexOf(SSAInstruction):
+    result: SSAValue
+    list_value: SSAValue
+    value: SSAValue
+
+
+@dataclass(frozen=True)
 class SSAListReverse(SSAInstruction):
     list_value: SSAValue
 

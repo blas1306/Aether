@@ -42,7 +42,7 @@ Leyenda de `Spec`:
 | double | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Completa |
 | bool/boolean | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Completa |
 | string | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ✅ | ✅ documentada | Parcial backend |
-| List | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ✅ | ✅ documentada | Parcial backend fase 3a |
+| List | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ✅ | ✅ documentada | Parcial backend fase 3b |
 | Array | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ parcialmente documentada | Parcial backend |
 | Vector<Row> | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Completa con optimizer parcial |
 | Vector<Column> | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Completa con optimizer parcial |
@@ -57,9 +57,9 @@ Notas:
 
 - `string` baja como valor/literal/call/return/phi, pero LLVM no soporta
   operaciones string (`+`, comparaciones, impresion, length, indexing, runtime).
-- `List<T>` tiene backend fases 1, 2 y 3a para literal con tipo esperado,
+- `List<T>` tiene backend fases 1, 2, 3a y `indexOf` de fase 3b para literal con tipo esperado,
   `.length`, `.is_empty`, `for x in xs` / `for T x in xs`, lectura indexada y
-  asignacion indexada, `copy()`, `contains()` y `reverse()`. No incluye cambios
+  asignacion indexada, `copy()`, `contains()`, `indexOf()` y `reverse()`. No incluye cambios
   de longitud/capacidad, crecimiento, `realloc`, ownership ni runtime dinamico
   completo. El backend no agrega bounds checks.
 - En el frontend/interprete, los agregados mutables (`List`, `Array`,
@@ -153,7 +153,7 @@ Notas:
 | List index assignment (`xs[i] = value`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 2 |
 | List.copy | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 3a |
 | List.contains | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 3a |
-| List.indexOf | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ no documentada | No implementado |
+| List.indexOf | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 3b |
 | List.push | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
 | List.pop | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
 | List.insert | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
@@ -236,7 +236,7 @@ Notas:
    compilable.
 3. Completar strings en backend: concatenacion, comparaciones, impresion,
    length/indexing y runtime/ownership.
-4. Completar `List<T>` mas alla de la fase 3a: `indexOf`, `sort`, mutaciones
+4. Completar `List<T>` mas alla de `indexOf` en fase 3b: `sort`, mutaciones
    que cambian longitud, crecimiento, `realloc` y ownership.
 5. Agregar `NullableType`/`null` al IR, SSA, optimizadores y LLVM, incluyendo
    comparaciones con `null`.
@@ -248,7 +248,7 @@ Notas:
    dependen del interprete AST.
 9. Agregar tests dedicados de recursividad en IR/SSA/LLVM.
 10. Completar o descartar formalmente APIs faltantes de colecciones:
-    `indexOf`, `Array.isEmpty`, `Array.contains`, `Array.swap`,
+    `Array.isEmpty`, `Array.contains`, `Array.swap`,
     `Array.reverse` y `Array.sort`.
 
 ## Revisar manualmente

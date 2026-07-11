@@ -40,6 +40,7 @@ from .model import (
     SSAListGet,
     SSAListCopy,
     SSAListContains,
+    SSAListIndexOf,
     SSAListIsEmpty,
     SSAListLength,
     SSAListNew,
@@ -288,6 +289,10 @@ class SSAVerifier:
 
             if isinstance(instruction, SSAListContains):
                 self._verify_list_contains(instruction, value_types)
+                continue
+
+            if isinstance(instruction, SSAListIndexOf):
+                self._verify_list_index_of(instruction, value_types)
                 continue
 
             if isinstance(instruction, SSAListReverse):
@@ -1016,6 +1021,15 @@ class SSAVerifier:
         if not isinstance(instruction.result.type, BoolType):
             self._fail(f"List contains result must be bool, got {instruction.result.type}")
 
+    def _verify_list_index_of(self, instruction: SSAListIndexOf, value_types: dict[str, IRType]) -> None:
+        self._require_defined(instruction.list_value, value_types)
+        self._require_defined(instruction.value, value_types)
+        if not isinstance(instruction.list_value.type, ListType):
+            self._fail(f"List index_of expects list value, got {instruction.list_value.type}")
+        self._require_type(instruction.value.type, instruction.list_value.type.element, "List index_of value type mismatch")
+        if not isinstance(instruction.result.type, IntType):
+            self._fail(f"List index_of result must be int, got {instruction.result.type}")
+
     def _verify_list_reverse(self, instruction: SSAListReverse, value_types: dict[str, IRType]) -> None:
         self._require_defined(instruction.list_value, value_types)
         if not isinstance(instruction.list_value.type, ListType):
@@ -1297,6 +1311,7 @@ class SSAVerifier:
                 SSAListGet,
                 SSAListCopy,
                 SSAListContains,
+                SSAListIndexOf,
                 SSAVectorGet,
                 SSAMatrixGet,
                 SSAArrayLength,
