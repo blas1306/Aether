@@ -30,11 +30,38 @@ El control de flujo ya atraviesa el pipeline compilador:
   ejecutables y limpiar incoming de phis.
 - `LLVMPrinter` emite labels, branches, jumps, returns y phis sobre SSA.
 
-El mayor riesgo no es que falte una pieza principal, sino que la superficie de
-control de flujo crecio con bastante duplicacion manual. Eso vuelve fragiles
-los cambios siguientes: cualquier ajuste para loops, scopes de variables,
-targets de `break`/`continue`, pruning de phis o limpieza de CFG deberia tocar
-varias formas parecidas.
+Las Fases 1 y 2 del plan de refactorizacion ya estan implementadas. El mayor
+riesgo original no era que faltara una pieza principal, sino que la superficie
+de control de flujo habia crecido con bastante duplicacion manual. Esa
+duplicacion quedo reducida en el lowering: construccion de bloques,
+terminadores, merges de `if`, targets de loops y restauracion de variables de
+loop pasan ahora por helpers privados de `IRLowerer`.
+
+## Arquitectura actual del lowering de control de flujo
+
+`IRLowerer` mantiene la misma salida IR observable y los mismos nombres de
+bloques principales, pero el protocolo interno quedo centralizado:
+
+- `_new_block`, `_new_while_blocks` y `_new_for_blocks` crean bloques con
+  nombres estables.
+- `_append_block`, `_enter_block` y `_append_and_enter` registran y activan
+  bloques sin duplicar mutaciones de `_FunctionContext`.
+- `_emit_jump_if_open` y `_emit_current_jump_if_open` agregan jumps solo si el
+  bloque no tiene terminador.
+- `_emit_branch` valida condicion bool y emite `IRBranch`.
+- `_finish_if_merge` decide si un `if` necesita merge, agrega jumps desde ramas
+  abiertas y conserva el caso sin `else` donde el merge es target del camino
+  falso.
+- `_loop_context` encapsula targets de `break`/`continue` y, para `for`,
+  binding/restauracion de la variable de loop mediante `finally`.
+- `_lower_for_range_condition` aisla la sub-CFG especial de rangos con step
+  dinamico.
+- Los helpers de `for indexable` separan seleccion del iterable, inicializacion
+  del indice, condicion, carga del elemento e incremento.
+
+La semantica sigue igual: `continue` en `while` salta al bloque de condicion;
+`continue` en `for` salta al bloque de incremento; `break` salta al bloque de
+salida del loop activo; nested loops siguen usando el stack LIFO de targets.
 
 ## Archivos revisados
 
@@ -74,8 +101,10 @@ Observaciones:
 
 Riesgos:
 
-- La logica de merge y terminacion vive directamente en `_lower_if`, no en un
-  helper reusable.
+- La logica de merge y terminacion ya vive en `_finish_if_merge`; el riesgo
+  principal restante es mantener cubiertos los casos de ramas completamente
+  terminadas y `if` sin `else`, donde el merge sigue siendo target del camino
+  falso.
 - El lowerer falla si hay statements despues de un bloque terminado dentro del
   mismo cuerpo logico. Eso es correcto como restriccion actual del backend, pero
   conviene cubrirlo y decidir si sera error semantico, pruning de unreachable o
@@ -103,11 +132,11 @@ Observaciones:
 
 Riesgos:
 
-- La construccion de bloques, jumps y stack de targets esta duplicada con
-  `for`.
+- La construccion de bloques, jumps y stack de targets ya esta compartida con
+  `for` mediante helpers privados de `IRLowerer`.
 - El destino de `continue` para `while` es el bloque de condicion, mientras que
-  para `for` es el bloque de incremento. Esto es correcto, pero hoy depende de
-  llamadas manuales a `_LoopTargets` en cada lowerer.
+  para `for` es el bloque de incremento. Esto sigue siendo correcto y ahora
+  queda expresado en las llamadas a `_loop_context`.
 - `return` dentro del loop termina el bloque actual, pero statements fuente
   posteriores dentro del mismo body provocan fallo de lowering, no creacion de
   unreachable IR.
@@ -134,11 +163,12 @@ Observaciones:
 
 Riesgos:
 
-- `_lower_for_range` y `_lower_for_indexable` duplican estructura casi completa:
-  nombres, cond/body/inc/exit, push/pop de targets, jump final del body,
-  incremento, bloque de salida y restauracion de locals.
-- El step dinamico introduce una sub-CFG manual mas compleja que deberia quedar
-  cubierta por helpers de condicion y targets.
+- `_lower_for_range` y `_lower_for_indexable` ya comparten nombres
+  `cond/body/inc/exit`, targets de loop, jump final del body, bloque de salida
+  y restauracion de locals. Todavia tienen logica propia para inicializacion,
+  lectura de elemento e incremento, que corresponde a cada forma de iteracion.
+- El step dinamico introduce una sub-CFG mas compleja, ahora aislada en
+  `_lower_for_range_condition`.
 - El loop variable se llama igual que la variable fuente; los slots internos de
   indice usan nombres con puntos. LLVM los escapa/estabiliza, pero un helper de
   nombres reduciria riesgo al agregar nuevos tipos de iteracion.
@@ -157,11 +187,12 @@ Observaciones:
 
 Riesgos:
 
-- La semantica de target de loop no esta centralizada. Si se agrega otro loop o
-  forma de lowering, hay que recordar manualmente ambos destinos.
+- La semantica de target de loop esta centralizada en `_loop_context`; si se
+  agrega otro loop o forma de lowering, debe declarar explicitamente
+  `break_target` y `continue_target`.
 - Un `continue` como ultimo statement produce un jump explicito y no debe
   recibir un jump adicional al final del body. La logica actual lo evita con
-  `_is_terminated`, pero falta una regresion dedicada en backend para ese caso.
+  `_emit_jump_if_open` y ya tiene regresion dedicada en backend.
 
 ### return
 
@@ -416,12 +447,12 @@ bloqueantes para iniciar la refactorizacion:
 
 ## Hallazgos principales
 
-1. La implementacion es funcional, pero el lowering de control de flujo esta
-   demasiado manual.
-2. `while`, `for range` y `for indexable` repiten el mismo protocolo:
+1. La implementacion es funcional y el lowering de control de flujo ya tiene
+   helpers privados para las operaciones CFG repetidas.
+2. `while`, `for range` y `for indexable` comparten el protocolo comun:
    crear bloques, saltar a condicion, bajar body, agregar jump final si no esta
    terminado, crear incremento/salida y restaurar contexto.
-3. El stack de loop targets funciona, pero no esta encapsulado como API de
+3. El stack de loop targets funciona y esta encapsulado como API privada de
    lowering de loops.
 4. CFG y verificadores protegen las invariantes basicas; dominancia y
    frontiers ya modelan unreachable de forma conservadora.
@@ -438,9 +469,11 @@ bloqueantes para iniciar la refactorizacion:
 
 ### Fase 1: helpers privados de lowering/CFG
 
+Estado: implementada.
+
 Objetivo: reducir duplicacion sin cambiar IR.
 
-- Agregar helpers internos en `IRLowerer` para:
+- Helpers internos agregados en `IRLowerer` para:
   - crear bloques con nombres estables;
   - emitir jump solo si el bloque actual no esta terminado;
   - emitir branch bool ya validada;
@@ -448,20 +481,24 @@ Objetivo: reducir duplicacion sin cambiar IR.
   - crear merge condicional de `if`;
   - construir la forma `cond/body/exit`.
 - Mantener nombres actuales para no romper tests.
-- Agregar tests de snapshot donde los nombres importen.
+- No se agregaron tests nuevos en esta fase porque las regresiones criticas ya
+  congelan nombres y comportamiento relevante.
 
 ### Fase 2: unificar stacks y destinos de loops
 
+Estado: implementada.
+
 Objetivo: hacer explicita la semantica de `break`/`continue`.
 
-- Crear un helper/context manager privado para entrar a un loop con
+- Se creo `_loop_context`, un context manager privado para entrar a un loop con
   `break_target` y `continue_target`.
-- Unificar el patron de body:
+- Se unifico el patron de body:
   - bajar statements;
   - si body no termina, saltar al target natural;
   - restaurar loop target aunque haya error.
-- Compartir restauracion de loop variable en `for`.
-- Dejar documentado que `continue` de `for` apunta a `inc` y `continue` de
+- La restauracion de loop variable en `for` queda dentro del mismo context
+  manager.
+- Queda documentado que `continue` de `for` apunta a `inc` y `continue` de
   `while` apunta a `cond`.
 
 ### Fase 3: simplificar/pruning de phis
@@ -510,11 +547,10 @@ Objetivo: cubrir la matriz de casos borde antes de `List<T>`.
 
 ## Recomendacion antes de `List<T>`
 
-Antes de bajar `List<T>` conviene ejecutar al menos Fase 1, Fase 2 y la parte
-critica de Fase 5. `List<T>` probablemente agregue iteracion sobre colecciones,
-mutacion, aliases y length dinamico; eso va a presionar exactamente las zonas
-que hoy estan duplicadas: targets de loops, slots visibles, phis loop-carried y
-cleanup de CFG.
+Antes de bajar `List<T>`, Fase 1, Fase 2 y la parte critica de Fase 5 ya
+quedaron ejecutadas. `List<T>` probablemente agregue iteracion sobre
+colecciones, mutacion, aliases y length dinamico; eso va a presionar targets de
+loops, slots visibles, phis loop-carried y cleanup de CFG.
 
 Fase 3 puede hacerse en paralelo o inmediatamente despues, porque no deberia
 cambiar lowering. Fase 4 es menos urgente, pero ayuda a mantener calidad del
