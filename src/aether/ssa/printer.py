@@ -18,6 +18,10 @@ from .model import (
     SSAFunction,
     SSAInstruction,
     SSAJump,
+    SSAListGet,
+    SSAListIsEmpty,
+    SSAListLength,
+    SSAListNew,
     SSAMatrixColumns,
     SSAMatrixAdd,
     SSAMatrixMatMul,
@@ -96,6 +100,9 @@ class SSAPrinter:
         if isinstance(instruction, SSAArrayNew):
             elements = ", ".join(self._value(element) for element in instruction.elements)
             return f"{self._typed_value(instruction.result)} = array_new [{elements}]"
+        if isinstance(instruction, SSAListNew):
+            elements = ", ".join(self._value(element) for element in instruction.elements)
+            return f"{self._typed_value(instruction.result)} = list_new [{elements}]"
         if isinstance(instruction, SSAVectorNew):
             elements = ", ".join(self._value(element) for element in instruction.elements)
             orientation = f" {instruction.orientation}" if instruction.orientation is not None else ""
@@ -180,6 +187,11 @@ class SSAPrinter:
                 f"{self._typed_value(instruction.result)} = array_get "
                 f"{self._value(instruction.array)}, {self._value(instruction.index)}"
             )
+        if isinstance(instruction, SSAListGet):
+            return (
+                f"{self._typed_value(instruction.result)} = list_get "
+                f"{self._value(instruction.list_value)}, {self._value(instruction.index)}"
+            )
         if isinstance(instruction, SSAVectorGet):
             return (
                 f"{self._typed_value(instruction.result)} = vector_get "
@@ -209,6 +221,10 @@ class SSAPrinter:
             )
         if isinstance(instruction, SSAArrayLength):
             return f"{self._typed_value(instruction.result)} = array_length {self._value(instruction.array)}"
+        if isinstance(instruction, SSAListLength):
+            return f"{self._typed_value(instruction.result)} = list_length {self._value(instruction.list_value)}"
+        if isinstance(instruction, SSAListIsEmpty):
+            return f"{self._typed_value(instruction.result)} = list_is_empty {self._value(instruction.list_value)}"
         if isinstance(instruction, SSAVectorLength):
             return f"{self._typed_value(instruction.result)} = vector_length {self._value(instruction.vector)}"
         if isinstance(instruction, SSAMatrixRows):

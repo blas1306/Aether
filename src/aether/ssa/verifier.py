@@ -37,6 +37,10 @@ from .model import (
     SSAFunction,
     SSAInstruction,
     SSAJump,
+    SSAListGet,
+    SSAListIsEmpty,
+    SSAListLength,
+    SSAListNew,
     SSAMatrixColumns,
     SSAMatrixAdd,
     SSAMatrixMatMul,
@@ -270,6 +274,10 @@ class SSAVerifier:
                 self._verify_array_new(instruction, value_types)
                 continue
 
+            if isinstance(instruction, SSAListNew):
+                self._verify_list_new(instruction, value_types)
+                continue
+
             if isinstance(instruction, SSAVectorNew):
                 self._verify_vector_new(instruction, value_types)
                 continue
@@ -326,6 +334,10 @@ class SSAVerifier:
                 self._verify_array_get(instruction, value_types)
                 continue
 
+            if isinstance(instruction, SSAListGet):
+                self._verify_list_get(instruction, value_types)
+                continue
+
             if isinstance(instruction, SSAVectorGet):
                 self._verify_vector_get(instruction, value_types)
                 continue
@@ -360,6 +372,14 @@ class SSAVerifier:
 
             if isinstance(instruction, SSAArrayLength):
                 self._verify_array_length(instruction, value_types)
+                continue
+
+            if isinstance(instruction, SSAListLength):
+                self._verify_list_length(instruction, value_types)
+                continue
+
+            if isinstance(instruction, SSAListIsEmpty):
+                self._verify_list_is_empty(instruction, value_types)
                 continue
 
             if isinstance(instruction, SSAPhi):
@@ -452,6 +472,21 @@ class SSAVerifier:
             if element.type != instruction.result.type.element:
                 self._fail(
                     f"Array literal element type mismatch: expected "
+                    f"{instruction.result.type.element}, got {element.type}"
+                )
+
+    def _verify_list_new(
+        self,
+        instruction: SSAListNew,
+        value_types: dict[str, IRType],
+    ) -> None:
+        if not isinstance(instruction.result.type, ListType):
+            self._fail(f"List new result must be list type, got {instruction.result.type}")
+        for element in instruction.elements:
+            self._require_defined(element, value_types)
+            if element.type != instruction.result.type.element:
+                self._fail(
+                    f"List literal element type mismatch: expected "
                     f"{instruction.result.type.element}, got {element.type}"
                 )
 
@@ -808,6 +843,23 @@ class SSAVerifier:
                 f"{instruction.vector.type.element}, got {instruction.result.type}"
             )
 
+    def _verify_list_get(
+        self,
+        instruction: SSAListGet,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.list_value, value_types)
+        self._require_defined(instruction.index, value_types)
+        if not isinstance(instruction.list_value.type, ListType):
+            self._fail(f"List get expects list value, got {instruction.list_value.type}")
+        if not isinstance(instruction.index.type, IntType):
+            self._fail(f"List get index must be int, got {instruction.index.type}")
+        if instruction.result.type != instruction.list_value.type.element:
+            self._fail(
+                f"List get result type mismatch: expected "
+                f"{instruction.list_value.type.element}, got {instruction.result.type}"
+            )
+
     def _verify_matrix_get(
         self,
         instruction: SSAMatrixGet,
@@ -899,6 +951,28 @@ class SSAVerifier:
             self._fail(f"Array length expects array value, got {instruction.array.type}")
         if not isinstance(instruction.result.type, IntType):
             self._fail(f"Array length result must be int, got {instruction.result.type}")
+
+    def _verify_list_length(
+        self,
+        instruction: SSAListLength,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.list_value, value_types)
+        if not isinstance(instruction.list_value.type, ListType):
+            self._fail(f"List length expects list value, got {instruction.list_value.type}")
+        if not isinstance(instruction.result.type, IntType):
+            self._fail(f"List length result must be int, got {instruction.result.type}")
+
+    def _verify_list_is_empty(
+        self,
+        instruction: SSAListIsEmpty,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.list_value, value_types)
+        if not isinstance(instruction.list_value.type, ListType):
+            self._fail(f"List is_empty expects list value, got {instruction.list_value.type}")
+        if not isinstance(instruction.result.type, BoolType):
+            self._fail(f"List is_empty result must be bool, got {instruction.result.type}")
 
     def _verify_vector_length(
         self,
@@ -1161,9 +1235,13 @@ class SSAVerifier:
             (
                 SSAArrayNew,
                 SSAArrayGet,
+                SSAListNew,
+                SSAListGet,
                 SSAVectorGet,
                 SSAMatrixGet,
                 SSAArrayLength,
+                SSAListLength,
+                SSAListIsEmpty,
                 SSAVectorLength,
                 SSAMatrixRows,
                 SSAMatrixColumns,

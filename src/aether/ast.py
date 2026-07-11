@@ -209,6 +209,7 @@ class ForInStatement:
     body: list[Statement]
     line: int = 1
     column: int = 1
+    variable_type: AetherType | None = None
 
 
 @dataclass(frozen=True)

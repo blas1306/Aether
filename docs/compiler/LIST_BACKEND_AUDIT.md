@@ -2,8 +2,8 @@
 
 ## Alcance
 
-Auditoria de la implementacion actual de `List<T>` antes de empezar su
-migracion al backend. No implementa lowering.
+Auditoria de la implementacion actual de `List<T>` y estado de la migracion al
+backend. La fase 1 ya implementa un subconjunto compilable.
 
 Areas revisadas:
 
@@ -17,10 +17,10 @@ Areas revisadas:
 
 ## Resumen Ejecutivo
 
-`List<T>` es una feature completa en el frontend/interprete, pero aun no tiene
-representacion operativa en IR/SSA/LLVM. El tipo nominal existe en
-`src/aether/types.py` y tambien se puede mapear a `src/aether/ir/types.py`, pero
-el lowering rechaza o no reconoce sus operaciones.
+`List<T>` es una feature completa en el frontend/interprete. En IR/SSA/LLVM ya
+tiene soporte fase 1 para literales con tipo esperado, `.length`, `.is_empty` y
+`for x in xs` / `for T x in xs`. El resto de la API de listas sigue pendiente
+de backend.
 
 La migracion no deberia reutilizar directamente las instrucciones de `Array<T>`.
 `Array<T>` hoy baja como agregado contiguo fijo con header `{ length, data* }`.
@@ -83,7 +83,8 @@ AetherValue(
 Operaciones:
 
 - `length(xs)` y `xs.length` retornan `int`.
-- `is_empty(xs)` retorna `boolean`; no existe metodo nativo `xs.isEmpty()`.
+- `is_empty(xs)` y `xs.is_empty` retornan `boolean`; no existe metodo nativo
+  `xs.isEmpty()`.
 - `copy(xs)` y `xs.copy()` retornan una nueva lista Python con los mismos
   elementos.
 - `push`, `pop`, `insert`, `remove_at`, `contains`, `clear`, `reverse` y
@@ -121,7 +122,7 @@ Mutaciones bloqueadas por `const`:
 Operaciones permitidas con `const`:
 
 - `length(xs)`, `xs.length`
-- `is_empty(xs)`
+- `is_empty(xs)`, `xs.is_empty`
 - `contains(xs, value)`
 - `copy(xs)`, `xs.copy()`
 - `xs.size()`
@@ -156,10 +157,41 @@ Frontend/interprete:
 
 IR/backend:
 
-- El lowering de `for` solo soporta rangos `int`, arrays y vectores.
-- Para arrays/vectores usa `length` y `get` con un indice local.
-- Listas no bajan a `for`; el mensaje indica que solo soporta rangos, arrays y
-  vectores.
+- El lowering de `for` soporta rangos `int`, arrays, vectores y listas.
+- Para listas usa `IRListLength` y `IRListGet` con un indice local.
+- La lectura por indice explicita `xs[i]` fuera del lowering de `for` no forma
+  parte de la fase 1.
+
+## Backend Fase 1 Implementado
+
+La representacion LLVM temporal de `List<T>` es:
+
+```llvm
+%AetherList = type { i64, i64, ptr }
+; fields:
+; 0 length
+; 1 capacity
+; 2 data
+```
+
+Propiedades de esta fase:
+
+- `IRListNew` / `SSAListNew` construyen un contenedor heap y un buffer contiguo.
+- `length == capacity` al construir el literal.
+- Asignacion, parametros y return transportan el `ptr` del contenedor; no copian
+  header ni buffer.
+- `.length` baja a `IRListLength` / `SSAListLength` y lee el campo `length`.
+- `.is_empty` baja a `IRListIsEmpty` / `SSAListIsEmpty` y compara `length == 0`.
+- `for x in xs` y `for T x in xs` bajan con `ListLength` + `ListGet`.
+- No se agregan bounds checks nuevos; se conserva la politica actual del
+  backend de agregados.
+
+Fuera de alcance en fase 1:
+
+- indexing explicito `xs[i]`/`xs[i] = value` como feature de superficie.
+- `copy`, `contains`, `indexOf`, `reverse`, `sort`.
+- `push`, `pop`, `insert`, `removeAt`, `clear`.
+- crecimiento de capacidad, `realloc`, ownership, `free` o GC.
 
 ## Cobertura Por Operacion
 
@@ -168,15 +200,16 @@ solo soporte operacional, no la existencia nominal del tipo.
 
 | Operacion | Frontend | IR | SSA | LLVM | Dificultad estimada |
 | --- | --- | --- | --- | --- | --- |
-| Tipo `List<T>` nominal | Si | Parcial: tipo nominal | Parcial: via tipos IR | No | Baja |
-| Literal `{...}` como `List<T>` | Si | No | No | No | Media |
-| Literal `{}` con tipo esperado | Si | No | No | No | Media |
+| Tipo `List<T>` nominal | Si | Si | Si | Si, como ptr | Baja |
+| Literal `{...}` como `List<T>` | Si | Si | Si | Si | Media |
+| Literal `{}` con tipo esperado | Si | Si | Si | Si | Media |
 | `length(xs)` | Si | No | No | No | Baja |
-| `xs.length` | Si | No | No | No | Baja |
+| `xs.length` | Si | Si | Si | Si | Baja |
+| `xs.is_empty` | Si | Si | Si | Si | Baja |
 | `is_empty(xs)` | Si | No | No | No | Baja |
 | `xs.isEmpty()` | No | No | No | No | Nueva feature |
 | `xs.size()` | Si | No | No | No | Baja |
-| `xs[i]` | Si | No | No | No | Media |
+| `xs[i]` | Si | No; solo `IRListGet` interno para `for` | No; solo `SSAListGet` interno para `for` | No como feature explicita | Media |
 | `xs[i] = value` | Si | No | No | No | Media/Alta |
 | Slice `xs[start:end]` | Si | No | No | No | Alta |
 | Slice assignment | No | No | No | No | Nueva feature |
@@ -191,7 +224,7 @@ solo soporte operacional, no la existencia nominal del tipo.
 | `remove_at(xs, i)` / `xs.removeAt(i)` | Si | No | No | No | Alta |
 | `clear(xs)` / `xs.clear()` | Si | No | No | No | Media |
 | Equality `xs == ys` | Si | No | No | No | Alta |
-| `for x in xs` | Si | No | No | No | Media despues de get/length |
+| `for x in xs` / `for T x in xs` | Si | Si | Si | Si | Implementado fase 1 |
 
 ## Representacion Recomendada Para LLVM
 

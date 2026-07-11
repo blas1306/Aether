@@ -1230,6 +1230,16 @@ class TypeChecker:
         element_type = _iterable_element_type(iterable_type)
         if element_type is None:
             raise AetherTypeError(f"Cannot iterate over value of type '{type_to_string(iterable_type)}'.")
+        if statement.variable_type is not None:
+            variable_type = self._resolve_type_aliases(statement.variable_type, statement)
+            self._reject_void_value(variable_type, "for loop variable", statement)
+            if variable_type != element_type:
+                raise AetherTypeError(
+                    f"For loop variable '{statement.variable}' type mismatch: expected "
+                    f"'{type_to_string(variable_type)}', got '{type_to_string(element_type)}'.",
+                    line=statement.line,
+                    column=statement.column,
+                )
         loop_scope: Scope[VariableSymbol] = Scope(parent=scope)
         loop_scope.define_local(
             statement.variable,

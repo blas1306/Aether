@@ -63,6 +63,12 @@ class SSAArrayNew(SSAInstruction):
 
 
 @dataclass(frozen=True)
+class SSAListNew(SSAInstruction):
+    result: SSAValue
+    elements: tuple[SSAValue, ...] = ()
+
+
+@dataclass(frozen=True)
 class SSAVectorNew(SSAInstruction):
     result: SSAValue
     elements: tuple[SSAValue, ...] = ()
@@ -196,6 +202,13 @@ class SSAArrayGet(SSAInstruction):
 
 
 @dataclass(frozen=True)
+class SSAListGet(SSAInstruction):
+    result: SSAValue
+    list_value: SSAValue
+    index: SSAValue
+
+
+@dataclass(frozen=True)
 class SSAVectorGet(SSAInstruction):
     result: SSAValue
     vector: SSAValue
@@ -258,6 +271,18 @@ class SSAMatrixSet(SSAInstruction):
 class SSAArrayLength(SSAInstruction):
     result: SSAValue
     array: SSAValue
+
+
+@dataclass(frozen=True)
+class SSAListLength(SSAInstruction):
+    result: SSAValue
+    list_value: SSAValue
+
+
+@dataclass(frozen=True)
+class SSAListIsEmpty(SSAInstruction):
+    result: SSAValue
+    list_value: SSAValue
 
 
 @dataclass(frozen=True)

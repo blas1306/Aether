@@ -1,6 +1,6 @@
 # Matriz de cobertura del compilador
 
-Ultima revision: 2026-07-10.
+Ultima revision: 2026-07-11.
 
 Esta matriz es la referencia oficial del estado visible de implementacion del
 compilador de Aether. Resume la cobertura por etapa del pipeline actual:
@@ -42,7 +42,7 @@ Leyenda de `Spec`:
 | double | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Completa |
 | bool/boolean | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Completa |
 | string | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ✅ | ✅ documentada | Parcial backend |
-| List | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
+| List | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ✅ | ✅ documentada | Parcial backend fase 1 |
 | Array | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ parcialmente documentada | Parcial backend |
 | Vector<Row> | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Completa con optimizer parcial |
 | Vector<Column> | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Completa con optimizer parcial |
@@ -57,8 +57,9 @@ Notas:
 
 - `string` baja como valor/literal/call/return/phi, pero LLVM no soporta
   operaciones string (`+`, comparaciones, impresion, length, indexing, runtime).
-- `List<T>` existe como tipo fuente y como tipo IR/SSA nominal, pero no tiene
-  lowering real de literales/metodos/operaciones de lista.
+- `List<T>` tiene backend fase 1 para literal con tipo esperado, `.length`,
+  `.is_empty` y `for x in xs` / `for T x in xs`. No incluye indexing explicito, mutacion,
+  `copy()`, crecimiento, `realloc`, ownership ni runtime dinamico completo.
 - En el frontend/interprete, los agregados mutables (`List`, `Array`,
   `Vector`, `Matrix`) aliasan por asignacion, parametros y return cuando no hay
   conversion de elementos; `copy()` crea el contenedor independiente explicito.
@@ -113,7 +114,7 @@ Notas:
 
 - `for` baja a CFG explicito con bloques de condicion, cuerpo, incremento y
   salida. El backend cubre rangos `int` y colecciones indexables ya soportadas
-  por IR/LLVM, como arrays y vectores.
+  por IR/LLVM: arrays, vectores y listas fase 1.
 - `break` y `continue` no agregan sintaxis ni opcodes especiales: se materializan
   como saltos IR/SSA a los destinos activos del loop.
 - Auditoria tecnica relacionada:
@@ -142,8 +143,10 @@ Notas:
 
 | Feature | Parser | Typechecker | AST Interpreter | IR | SSA | Optimizer | LLVM | Tests | Spec | Estado |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| List.length / length | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
-| List.isEmpty / is_empty | ⚠️ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
+| List literal `{...}` con tipo esperado | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Parcial backend fase 1 |
+| List.length / length | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Parcial backend fase 1 |
+| List.is_empty / is_empty | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Parcial backend fase 1 |
+| for sobre List | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Parcial backend fase 1 |
 | List.copy | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
 | List.contains | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
 | List.indexOf | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ no documentada | No implementado |
@@ -229,8 +232,8 @@ Notas:
    compilable.
 3. Completar strings en backend: concatenacion, comparaciones, impresion,
    length/indexing y runtime/ownership.
-4. Bajar `List<T>` real al backend: literales, propiedades, metodos mutantes y
-   no mutantes.
+4. Completar `List<T>` en backend mas alla de la fase 1: indexing explicito,
+   `copy`, consultas, mutacion, crecimiento, `realloc` y ownership.
 5. Agregar `NullableType`/`null` al IR, SSA, optimizadores y LLVM, incluyendo
    comparaciones con `null`.
 6. Migrar structs, classes, interfaces y enums al backend o definir

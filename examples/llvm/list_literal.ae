@@ -1,0 +1,7 @@
+int main() {
+    List<int> xs = {1, 2, 3};
+    if (xs.is_empty) {
+        return 1;
+    }
+    return xs.length;
+}

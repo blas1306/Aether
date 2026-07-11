@@ -19,6 +19,15 @@ def test_parser_builds_for_in_and_range_nodes() -> None:
     assert statement.iterable.step is not None
 
 
+def test_parser_builds_typed_for_in_variable() -> None:
+    program = Parser(lex("for int i in 1:3 { println(i); }")).parse()
+
+    statement = program.statements[0]
+    assert isinstance(statement, ForInStatement)
+    assert statement.variable == "i"
+    assert statement.variable_type == "int"
+
+
 def test_for_range_inclusive() -> None:
     result = run_aether("for i in 1:5 { println(i); }")
 
@@ -86,6 +95,11 @@ def test_for_loop_variable_does_not_escape() -> None:
 def test_for_loop_variable_cannot_be_reassigned() -> None:
     with pytest.raises(AetherTypeError, match="Cannot assign to loop variable 'i' inside its own for-loop."):
         run_aether("for i in 1:10 { i = 100; }")
+
+
+def test_typed_for_loop_variable_must_match_iterable_element_type() -> None:
+    with pytest.raises(AetherTypeError, match="For loop variable 'x' type mismatch"):
+        run_aether("List<double> xs = {1.0}; for int x in xs { println(x); }")
 
 
 def test_for_loop_variable_cannot_be_reassigned_with_plus_equal() -> None:

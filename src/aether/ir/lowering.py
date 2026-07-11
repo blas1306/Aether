@@ -28,6 +28,10 @@ from .model import (
     IRConst,
     IRFunction,
     IRJump,
+    IRListGet,
+    IRListIsEmpty,
+    IRListLength,
+    IRListNew,
     IRLoad,
     IRMatrixGet,
     IRMatrixAdd,
@@ -124,7 +128,7 @@ class _IndexableIterable:
     value: IRValue
     element_type: IRType
     length: IRValue
-    get_instruction: type[IRArrayGet] | type[IRVectorGet]
+    get_instruction: type[IRArrayGet] | type[IRListGet] | type[IRVectorGet]
 
 
 _MISSING_LOCAL = object()
@@ -849,6 +853,15 @@ class IRLowerer:
                 length,
                 IRArrayGet,
             )
+        if isinstance(iterable.type, ListType):
+            length = context.temporary(IntType())
+            context.block.instructions.append(IRListLength(length, iterable))
+            return _IndexableIterable(
+                iterable,
+                iterable.type.element,
+                length,
+                IRListGet,
+            )
         if isinstance(iterable.type, VectorType):
             length = context.temporary(IntType())
             context.block.instructions.append(IRVectorLength(length, iterable))
@@ -859,7 +872,7 @@ class IRLowerer:
                 IRVectorGet,
             )
         self._fail(
-            f"IR backend only supports for loops over int ranges, arrays, and vectors, got '{iterable.type}'.",
+            f"IR backend only supports for loops over int ranges, arrays, lists, and vectors, got '{iterable.type}'.",
             statement,
         )
 
@@ -948,7 +961,7 @@ class IRLowerer:
             return self._lower_literal(expression, context)
 
         if isinstance(expression, (ast.ArrayLiteral, ast.ListLiteral)):
-            return self._lower_array_literal(expression, context, target_type)
+            return self._lower_braced_literal(expression, context, target_type)
 
         if isinstance(expression, ast.MatrixLiteral):
             if expression.vector:
@@ -1064,6 +1077,14 @@ class IRLowerer:
                 result = context.temporary(IntType())
                 context.block.instructions.append(IRArrayLength(result, target))
                 return result
+            if expression.field_name == "length" and isinstance(target.type, ListType):
+                result = context.temporary(IntType())
+                context.block.instructions.append(IRListLength(result, target))
+                return result
+            if expression.field_name == "is_empty" and isinstance(target.type, ListType):
+                result = context.temporary(BoolType())
+                context.block.instructions.append(IRListIsEmpty(result, target))
+                return result
             if expression.field_name == "length" and isinstance(target.type, VectorType):
                 result = context.temporary(IntType())
                 context.block.instructions.append(IRVectorLength(result, target))
@@ -1128,15 +1149,24 @@ class IRLowerer:
         context.block.instructions.append(IRCall(call.callee, arguments, result))
         return result
 
-    def _lower_array_literal(
+    def _lower_braced_literal(
         self,
         expression: ast.ArrayLiteral | ast.ListLiteral,
         context: _FunctionContext,
         target_type: IRType | None,
     ) -> IRValue:
-        if not isinstance(target_type, ArrayType):
-            self._unsupported(expression, "braced literal without Array<T> target type")
+        if isinstance(target_type, ArrayType):
+            return self._lower_array_literal(expression, context, target_type)
+        if isinstance(target_type, ListType) and isinstance(expression, ast.ListLiteral):
+            return self._lower_list_literal(expression, context, target_type)
+        self._unsupported(expression, "braced literal without Array<T> or List<T> target type")
 
+    def _lower_array_literal(
+        self,
+        expression: ast.ArrayLiteral | ast.ListLiteral,
+        context: _FunctionContext,
+        target_type: ArrayType,
+    ) -> IRValue:
         elements = tuple(
             self._lower_expression(element, context, target_type=target_type.element)
             for element in expression.elements
@@ -1149,6 +1179,26 @@ class IRLowerer:
             )
         result = context.temporary(target_type)
         context.block.instructions.append(IRArrayNew(result, elements))
+        return result
+
+    def _lower_list_literal(
+        self,
+        expression: ast.ListLiteral,
+        context: _FunctionContext,
+        target_type: ListType,
+    ) -> IRValue:
+        elements = tuple(
+            self._lower_expression(element, context, target_type=target_type.element)
+            for element in expression.elements
+        )
+        for element in elements:
+            self._require_same_type(
+                element.type,
+                target_type.element,
+                "list literal element requires an implicit conversion",
+            )
+        result = context.temporary(target_type)
+        context.block.instructions.append(IRListNew(result, elements))
         return result
 
     def _lower_vector_literal(

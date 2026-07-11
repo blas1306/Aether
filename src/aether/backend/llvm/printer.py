@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import re
 from typing import Any, Callable
 
-from aether.ir.types import ArrayType, BoolType, DoubleType, IntType, MatrixType, StringType, VectorType, VoidType
+from aether.ir.types import ArrayType, BoolType, DoubleType, IntType, ListType, MatrixType, StringType, VectorType, VoidType
 from aether.ssa.model import (
     SSAArrayGet,
     SSAArrayLength,
@@ -20,6 +20,10 @@ from aether.ssa.model import (
     SSAFunction,
     SSAInstruction,
     SSAJump,
+    SSAListGet,
+    SSAListIsEmpty,
+    SSAListLength,
+    SSAListNew,
     SSAMatrixColumns,
     SSAMatrixAdd,
     SSAMatrixMatMul,
@@ -92,12 +96,15 @@ class LLVMPrinter:
     }
     _IDENTIFIER_RE = re.compile(r"^[A-Za-z_$._][A-Za-z0-9_$._-]*$")
     _ARRAY_STRUCT_TYPE = "%AetherArray"
+    _LIST_STRUCT_TYPE = "%AetherList"
 
     def print_module(self, module: SSAModule) -> str:
         self._string_globals_by_value: dict[str, _StringGlobal] = {}
         self._next_string_global = 0
         self._uses_array_type = False
         self._uses_array_allocation = False
+        self._uses_list_type = False
+        self._uses_list_allocation = False
 
         functions = [self._print_function(function) for function in module.functions]
         globals_ = [
@@ -176,6 +183,8 @@ class LLVMPrinter:
             return self._print_call(instruction)
         if isinstance(instruction, SSAArrayNew):
             return self._print_array_new(instruction)
+        if isinstance(instruction, SSAListNew):
+            return self._print_list_new(instruction)
         if isinstance(instruction, SSAVectorNew):
             return self._print_vector_new(instruction)
         if isinstance(instruction, SSAMatrixNew):
@@ -204,6 +213,8 @@ class LLVMPrinter:
             return "\n".join(self._print_vector_matrix_mul(instruction))
         if isinstance(instruction, SSAArrayGet):
             return "\n  ".join(self._print_array_get(instruction))
+        if isinstance(instruction, SSAListGet):
+            return "\n  ".join(self._print_list_get(instruction))
         if isinstance(instruction, SSAVectorGet):
             return "\n  ".join(self._print_vector_get(instruction))
         if isinstance(instruction, SSAMatrixGet):
@@ -222,6 +233,10 @@ class LLVMPrinter:
             return "\n  ".join(self._print_matrix_set(instruction))
         if isinstance(instruction, SSAArrayLength):
             return "\n  ".join(self._print_array_length(instruction))
+        if isinstance(instruction, SSAListLength):
+            return "\n  ".join(self._print_list_length(instruction))
+        if isinstance(instruction, SSAListIsEmpty):
+            return "\n  ".join(self._print_list_is_empty(instruction))
         self._unsupported(type(instruction).__name__)
 
     def _record_const(self, instruction: SSAConst) -> None:
@@ -242,9 +257,13 @@ class LLVMPrinter:
             (
                 SSAArrayNew,
                 SSAArrayGet,
+                SSAListNew,
+                SSAListGet,
                 SSAVectorGet,
                 SSAMatrixGet,
                 SSAArrayLength,
+                SSAListLength,
+                SSAListIsEmpty,
                 SSAVectorLength,
                 SSAMatrixRows,
                 SSAMatrixColumns,
@@ -442,6 +461,35 @@ class LLVMPrinter:
             instruction.result.type.element,
             instruction.elements,
         )
+
+    def _print_list_new(self, instruction: SSAListNew) -> str:
+        if not isinstance(instruction.result.type, ListType):
+            raise LLVMBackendError("LLVM list_new result must be ListType")
+        self._uses_list_type = True
+        self._uses_list_allocation = True
+
+        element_type = llvm_type(instruction.result.type.element)
+        element_size = self._sizeof(instruction.result.type.element)
+        length = len(instruction.elements)
+        result = self._new_temp(instruction.result)
+        data = self._synthetic_temp("list.data")
+        data_field = self._synthetic_temp("list.data.field")
+        lines = [
+            f"{result} = call ptr @aether_list_new(i64 {element_size}, i64 {length})",
+            f"{data_field} = getelementptr {self._LIST_STRUCT_TYPE}, ptr {result}, i32 0, i32 2",
+            f"{data} = load ptr, ptr {data_field}",
+        ]
+
+        def emit_element(index: int) -> None:
+            element = instruction.elements[index]
+            element_ptr = self._synthetic_temp("list.elem")
+            lines.append(
+                self._element_pointer_line(element_ptr, element_type, data, index)
+            )
+            lines.append(self._store_element_line(element_type, self._operand(element), element_ptr))
+
+        self._for_each_element(length, emit_element)
+        return "\n  ".join(lines)
 
     def _print_vector_new(self, instruction: SSAVectorNew) -> str:
         if not isinstance(instruction.result.type, VectorType):
@@ -1369,6 +1417,22 @@ class LLVMPrinter:
             f"{result} = load {element_type}, ptr {element_ptr.value}"
         ]
 
+    def _print_list_get(self, instruction: SSAListGet) -> list[str]:
+        if not isinstance(instruction.list_value.type, ListType):
+            raise LLVMBackendError("LLVM list_get expects a ListType source")
+        self._uses_list_type = True
+
+        result = self._new_temp(instruction.result)
+        element_type = llvm_type(instruction.result.type)
+        element_ptr = self._list_element_pointer(
+            self._operand(instruction.list_value),
+            instruction.index,
+            instruction.result.type,
+        )
+        return element_ptr.lines + [
+            f"{result} = load {element_type}, ptr {element_ptr.value}"
+        ]
+
     def _print_vector_get(self, instruction: SSAVectorGet) -> list[str]:
         if not isinstance(instruction.vector.type, VectorType):
             raise LLVMBackendError("LLVM vector_get expects a VectorType source")
@@ -1464,6 +1528,26 @@ class LLVMPrinter:
         length64 = self._synthetic_temp("array.len64")
         lines = self._array_length64(length64, self._operand(instruction.array))
         lines.append(f"{result} = trunc i64 {length64} to i32")
+        return lines
+
+    def _print_list_length(self, instruction: SSAListLength) -> list[str]:
+        if not isinstance(instruction.list_value.type, ListType):
+            raise LLVMBackendError("LLVM list_length expects a ListType source")
+        self._uses_list_type = True
+        result = self._new_temp(instruction.result)
+        length64 = self._synthetic_temp("list.len64")
+        lines = self._list_length64(length64, self._operand(instruction.list_value))
+        lines.append(f"{result} = trunc i64 {length64} to i32")
+        return lines
+
+    def _print_list_is_empty(self, instruction: SSAListIsEmpty) -> list[str]:
+        if not isinstance(instruction.list_value.type, ListType):
+            raise LLVMBackendError("LLVM list_is_empty expects a ListType source")
+        self._uses_list_type = True
+        result = self._new_temp(instruction.result)
+        length64 = self._synthetic_temp("list.empty.len64")
+        lines = self._list_length64(length64, self._operand(instruction.list_value))
+        lines.append(f"{result} = icmp eq i64 {length64}, 0")
         return lines
 
     def _print_vector_length(self, instruction: SSAVectorLength) -> list[str]:
@@ -1663,6 +1747,23 @@ class LLVMPrinter:
         )
         return self._ArrayPointer(element_ptr, lines)
 
+    def _list_element_pointer(
+        self,
+        list_value: str,
+        index: SSAValue,
+        element_type: object,
+    ) -> _ArrayPointer:
+        data = self._synthetic_temp("list.data")
+        index64 = self._synthetic_temp("list.index64")
+        element_ptr = self._synthetic_temp("list.elem")
+        llvm_element_type = llvm_type(element_type)
+        lines = self._list_data_pointer(data, list_value)
+        lines.append(f"{index64} = sext i32 {self._operand(index)} to i64")
+        lines.append(
+            f"{element_ptr} = getelementptr {llvm_element_type}, ptr {data}, i64 {index64}"
+        )
+        return self._ArrayPointer(element_ptr, lines)
+
     def _matrix_element_pointer(
         self,
         matrix: str,
@@ -1695,6 +1796,13 @@ class LLVMPrinter:
             f"{result} = load ptr, ptr {field_ptr}",
         ]
 
+    def _list_data_pointer(self, result: str, list_value: str) -> list[str]:
+        field_ptr = self._synthetic_temp("list.data.field")
+        return [
+            f"{field_ptr} = getelementptr {self._LIST_STRUCT_TYPE}, ptr {list_value}, i32 0, i32 2",
+            f"{result} = load ptr, ptr {field_ptr}",
+        ]
+
     def _array_length64(self, result: str, array: str) -> list[str]:
         field_ptr = self._synthetic_temp("array.len.field")
         return [
@@ -1702,11 +1810,20 @@ class LLVMPrinter:
             f"{result} = load i64, ptr {field_ptr}",
         ]
 
+    def _list_length64(self, result: str, list_value: str) -> list[str]:
+        field_ptr = self._synthetic_temp("list.len.field")
+        return [
+            f"{field_ptr} = getelementptr {self._LIST_STRUCT_TYPE}, ptr {list_value}, i32 0, i32 0",
+            f"{result} = load i64, ptr {field_ptr}",
+        ]
+
     def _runtime_declarations(self) -> list[str]:
         sections: list[str] = []
         if self._uses_array_type:
             sections.append(f"{self._ARRAY_STRUCT_TYPE} = type {{ i64, ptr }}")
-        if self._uses_array_allocation:
+        if self._uses_list_type:
+            sections.append(f"{self._LIST_STRUCT_TYPE} = type {{ i64, i64, ptr }}")
+        if self._uses_array_allocation or self._uses_list_allocation:
             sections.append("declare noalias ptr @malloc(i64)")
             sections.append(
                 "\n".join(
@@ -1719,6 +1836,7 @@ class LLVMPrinter:
                     ]
                 )
             )
+        if self._uses_array_allocation:
             sections.append(
                 "\n".join(
                     [
@@ -1732,6 +1850,26 @@ class LLVMPrinter:
                         f"  %data_field = getelementptr {self._ARRAY_STRUCT_TYPE}, ptr %array, i32 0, i32 1",
                         "  store ptr %data, ptr %data_field",
                         "  ret ptr %array",
+                        "}",
+                    ]
+                )
+            )
+        if self._uses_list_allocation:
+            sections.append(
+                "\n".join(
+                    [
+                        "define private ptr @aether_list_new(i64 %element_size, i64 %length) {",
+                        "entry:",
+                        "  %list = call ptr @aether_alloc(i64 24)",
+                        f"  %len_field = getelementptr {self._LIST_STRUCT_TYPE}, ptr %list, i32 0, i32 0",
+                        "  store i64 %length, ptr %len_field",
+                        f"  %cap_field = getelementptr {self._LIST_STRUCT_TYPE}, ptr %list, i32 0, i32 1",
+                        "  store i64 %length, ptr %cap_field",
+                        "  %data_size = mul i64 %element_size, %length",
+                        "  %data = call ptr @aether_alloc(i64 %data_size)",
+                        f"  %data_field = getelementptr {self._LIST_STRUCT_TYPE}, ptr %list, i32 0, i32 2",
+                        "  store ptr %data, ptr %data_field",
+                        "  ret ptr %list",
                         "}",
                     ]
                 )

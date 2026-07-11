@@ -705,10 +705,12 @@ List<int> empty = {};
 println(length(xs));
 println(is_empty(xs));
 println(is_empty(empty));
+println(xs.is_empty);
+println(empty.is_empty);
 """
     )
 
-    assert result.output == "3\nfalse\ntrue\n"
+    assert result.output == "3\nfalse\ntrue\nfalse\ntrue\n"
 
 
 def test_push_appends_and_preserves_list_type() -> None:

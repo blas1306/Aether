@@ -15,6 +15,10 @@ from aether.ssa.model import (
     SSAFunction,
     SSAInstruction,
     SSAJump,
+    SSAListGet,
+    SSAListIsEmpty,
+    SSAListLength,
+    SSAListNew,
     SSAMatrixColumns,
     SSAMatrixAdd,
     SSAMatrixMatMul,
@@ -235,6 +239,17 @@ class TrivialPhiEliminator:
                 return instruction, 0
             return SSAArrayNew(instruction.result, tuple(elements)), rewritten_uses
 
+        if isinstance(instruction, SSAListNew):
+            elements = []
+            rewritten_uses = 0
+            for element in instruction.elements:
+                rewritten_element, rewritten = self._rewrite_value(element, replacements)
+                elements.append(rewritten_element)
+                rewritten_uses += int(rewritten)
+            if rewritten_uses == 0:
+                return instruction, 0
+            return SSAListNew(instruction.result, tuple(elements)), rewritten_uses
+
         if isinstance(instruction, SSAVectorNew):
             elements = []
             rewritten_uses = 0
@@ -443,6 +458,16 @@ class TrivialPhiEliminator:
                 int(array_rewritten) + int(index_rewritten),
             )
 
+        if isinstance(instruction, SSAListGet):
+            list_value, list_rewritten = self._rewrite_value(instruction.list_value, replacements)
+            index, index_rewritten = self._rewrite_value(instruction.index, replacements)
+            if not list_rewritten and not index_rewritten:
+                return instruction, 0
+            return (
+                SSAListGet(instruction.result, list_value, index),
+                int(list_rewritten) + int(index_rewritten),
+            )
+
         if isinstance(instruction, SSAVectorGet):
             vector, vector_rewritten = self._rewrite_value(instruction.vector, replacements)
             index, index_rewritten = self._rewrite_value(instruction.index, replacements)
@@ -480,6 +505,18 @@ class TrivialPhiEliminator:
             if not rewritten:
                 return instruction, 0
             return SSAArrayLength(instruction.result, array), 1
+
+        if isinstance(instruction, SSAListLength):
+            list_value, rewritten = self._rewrite_value(instruction.list_value, replacements)
+            if not rewritten:
+                return instruction, 0
+            return SSAListLength(instruction.result, list_value), 1
+
+        if isinstance(instruction, SSAListIsEmpty):
+            list_value, rewritten = self._rewrite_value(instruction.list_value, replacements)
+            if not rewritten:
+                return instruction, 0
+            return SSAListIsEmpty(instruction.result, list_value), 1
 
         if isinstance(instruction, SSAVectorLength):
             vector, rewritten = self._rewrite_value(instruction.vector, replacements)

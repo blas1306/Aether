@@ -15,6 +15,10 @@ from aether.ir.model import (
     IRFunction,
     IRInstruction,
     IRJump,
+    IRListGet,
+    IRListIsEmpty,
+    IRListLength,
+    IRListNew,
     IRLoad,
     IRMatrixColumns,
     IRMatrixAdd,
@@ -55,9 +59,12 @@ class DeadCodeEliminator:
         IRCast,
         IRLoad,
         IRArrayGet,
+        IRListGet,
         IRVectorGet,
         IRMatrixGet,
         IRArrayLength,
+        IRListLength,
+        IRListIsEmpty,
         IRVectorLength,
         IRMatrixRows,
         IRMatrixColumns,
@@ -165,9 +172,12 @@ class DeadCodeEliminator:
                 IRCompareOp,
                 IRCast,
                 IRArrayGet,
+                IRListGet,
                 IRVectorGet,
                 IRMatrixGet,
                 IRArrayLength,
+                IRListLength,
+                IRListIsEmpty,
                 IRVectorLength,
                 IRMatrixRows,
                 IRMatrixColumns,
@@ -205,6 +215,8 @@ class DeadCodeEliminator:
             return instruction.arguments
         if isinstance(instruction, IRArrayNew):
             return instruction.elements
+        if isinstance(instruction, IRListNew):
+            return instruction.elements
         if isinstance(instruction, IRVectorNew):
             return instruction.elements
         if isinstance(instruction, IRMatrixNew):
@@ -223,6 +235,8 @@ class DeadCodeEliminator:
             return (instruction.matrix, instruction.scalar)
         if isinstance(instruction, IRArrayGet):
             return (instruction.array, instruction.index)
+        if isinstance(instruction, IRListGet):
+            return (instruction.list_value, instruction.index)
         if isinstance(instruction, IRVectorGet):
             return (instruction.vector, instruction.index)
         if isinstance(instruction, IRMatrixGet):
@@ -235,6 +249,8 @@ class DeadCodeEliminator:
             return (instruction.matrix, instruction.row, instruction.column, instruction.value)
         if isinstance(instruction, IRArrayLength):
             return (instruction.array,)
+        if isinstance(instruction, (IRListLength, IRListIsEmpty)):
+            return (instruction.list_value,)
         if isinstance(instruction, IRVectorLength):
             return (instruction.vector,)
         if isinstance(instruction, (IRMatrixRows, IRMatrixColumns)):

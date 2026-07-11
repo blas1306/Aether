@@ -18,6 +18,10 @@ from .model import (
     IRFunction,
     IRInstruction,
     IRJump,
+    IRListGet,
+    IRListIsEmpty,
+    IRListLength,
+    IRListNew,
     IRLoad,
     IRMatrixColumns,
     IRMatrixAdd,
@@ -100,6 +104,9 @@ class IRPrinter:
         if isinstance(instruction, IRArrayNew):
             elements = ", ".join(self._value(element) for element in instruction.elements)
             return f"{self._typed_value(instruction.result)} = array_new [{elements}]"
+        if isinstance(instruction, IRListNew):
+            elements = ", ".join(self._value(element) for element in instruction.elements)
+            return f"{self._typed_value(instruction.result)} = list_new [{elements}]"
         if isinstance(instruction, IRVectorNew):
             elements = ", ".join(self._value(element) for element in instruction.elements)
             orientation = f" {instruction.orientation}" if instruction.orientation is not None else ""
@@ -184,6 +191,11 @@ class IRPrinter:
                 f"{self._typed_value(instruction.result)} = array_get "
                 f"{self._value(instruction.array)}, {self._value(instruction.index)}"
             )
+        if isinstance(instruction, IRListGet):
+            return (
+                f"{self._typed_value(instruction.result)} = list_get "
+                f"{self._value(instruction.list_value)}, {self._value(instruction.index)}"
+            )
         if isinstance(instruction, IRVectorGet):
             return (
                 f"{self._typed_value(instruction.result)} = vector_get "
@@ -213,6 +225,10 @@ class IRPrinter:
             )
         if isinstance(instruction, IRArrayLength):
             return f"{self._typed_value(instruction.result)} = array_length {self._value(instruction.array)}"
+        if isinstance(instruction, IRListLength):
+            return f"{self._typed_value(instruction.result)} = list_length {self._value(instruction.list_value)}"
+        if isinstance(instruction, IRListIsEmpty):
+            return f"{self._typed_value(instruction.result)} = list_is_empty {self._value(instruction.list_value)}"
         if isinstance(instruction, IRVectorLength):
             return f"{self._typed_value(instruction.result)} = vector_length {self._value(instruction.vector)}"
         if isinstance(instruction, IRMatrixRows):

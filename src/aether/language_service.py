@@ -71,6 +71,7 @@ _ENUM_RE = re.compile(
 _NATIVE_TYPE_MEMBERS: dict[str, tuple[tuple[str, str], ...]] = {
     "List": (
         ("length", "property"),
+        ("is_empty", "property"),
         ("push", "method"),
         ("pop", "method"),
         ("insert", "method"),

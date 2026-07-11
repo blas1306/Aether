@@ -75,6 +75,12 @@ class IRArrayNew(IRInstruction):
 
 
 @dataclass(frozen=True)
+class IRListNew(IRInstruction):
+    result: IRValue
+    elements: tuple[IRValue, ...] = ()
+
+
+@dataclass(frozen=True)
 class IRVectorNew(IRInstruction):
     result: IRValue
     elements: tuple[IRValue, ...] = ()
@@ -208,6 +214,13 @@ class IRArrayGet(IRInstruction):
 
 
 @dataclass(frozen=True)
+class IRListGet(IRInstruction):
+    result: IRValue
+    list_value: IRValue
+    index: IRValue
+
+
+@dataclass(frozen=True)
 class IRVectorGet(IRInstruction):
     result: IRValue
     vector: IRValue
@@ -270,6 +283,18 @@ class IRMatrixSet(IRInstruction):
 class IRArrayLength(IRInstruction):
     result: IRValue
     array: IRValue
+
+
+@dataclass(frozen=True)
+class IRListLength(IRInstruction):
+    result: IRValue
+    list_value: IRValue
+
+
+@dataclass(frozen=True)
+class IRListIsEmpty(IRInstruction):
+    result: IRValue
+    list_value: IRValue
 
 
 @dataclass(frozen=True)

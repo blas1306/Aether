@@ -557,10 +557,29 @@ class Parser:
             return ast.ImportStatement(module_name, import_token.line, import_token.column)
         if self._match(TokenType.FOR):
             for_token = self._previous()
+            variable_type: AetherType | None = None
+            type_end = self._type_annotation_end_cursor(self.current)
+            if (
+                type_end is not None
+                and type_end + 1 < len(self.tokens)
+                and self.tokens[type_end].type == TokenType.IDENTIFIER
+                and self.tokens[type_end + 1].type == TokenType.IN
+            ):
+                variable_type = self._parse_type_annotation(
+                    "Expected loop variable type after 'for'.",
+                    allow_unknown_identifier=True,
+                )
             variable = self._consume(TokenType.IDENTIFIER, "Expected loop variable after 'for'.").lexeme
             self._consume(TokenType.IN, "Expected 'in' after loop variable.")
             iterable = self._expression()
-            return ast.ForInStatement(variable, iterable, self._block(), for_token.line, for_token.column)
+            return ast.ForInStatement(
+                variable,
+                iterable,
+                self._block(),
+                for_token.line,
+                for_token.column,
+                variable_type,
+            )
         if self._match(TokenType.RETURN):
             return_token = self._previous()
             expression = None if self._check(TokenType.SEMICOLON) else self._expression()

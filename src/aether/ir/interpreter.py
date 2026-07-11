@@ -19,6 +19,10 @@ from .model import (
     IRFunction,
     IRInstruction,
     IRJump,
+    IRListGet,
+    IRListIsEmpty,
+    IRListLength,
+    IRListNew,
     IRLoad,
     IRMatrixColumns,
     IRMatrixAdd,
@@ -170,6 +174,12 @@ class IRInterpreter:
             ]
             return False, None, None
 
+        if isinstance(instruction, IRListNew):
+            frame.values[instruction.result] = [
+                self._value(element, frame) for element in instruction.elements
+            ]
+            return False, None, None
+
         if isinstance(instruction, IRVectorNew):
             frame.values[instruction.result] = [
                 self._value(element, frame) for element in instruction.elements
@@ -233,6 +243,13 @@ class IRInterpreter:
             frame.values[instruction.result] = array[index]
             return False, None, None
 
+        if isinstance(instruction, IRListGet):
+            list_value = self._value(instruction.list_value, frame)
+            index = self._value(instruction.index, frame)
+            self._check_array_index(list_value, index)
+            frame.values[instruction.result] = list_value[index]
+            return False, None, None
+
         if isinstance(instruction, IRVectorGet):
             vector = self._value(instruction.vector, frame)
             index = self._value(instruction.index, frame)
@@ -293,6 +310,20 @@ class IRInterpreter:
             if not isinstance(array, list):
                 raise IRExecutionError("IR array_length requires an array value")
             frame.values[instruction.result] = len(array)
+            return False, None, None
+
+        if isinstance(instruction, IRListLength):
+            list_value = self._value(instruction.list_value, frame)
+            if not isinstance(list_value, list):
+                raise IRExecutionError("IR list_length requires a list value")
+            frame.values[instruction.result] = len(list_value)
+            return False, None, None
+
+        if isinstance(instruction, IRListIsEmpty):
+            list_value = self._value(instruction.list_value, frame)
+            if not isinstance(list_value, list):
+                raise IRExecutionError("IR list_is_empty requires a list value")
+            frame.values[instruction.result] = len(list_value) == 0
             return False, None, None
 
         if isinstance(instruction, IRBranch):

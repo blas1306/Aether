@@ -18,6 +18,10 @@ from aether.ir.model import (
     IRFunction,
     IRInstruction,
     IRJump,
+    IRListGet,
+    IRListIsEmpty,
+    IRListLength,
+    IRListNew,
     IRLoad,
     IRMatrixGet,
     IRMatrixAdd,
@@ -57,6 +61,10 @@ from .model import (
     SSAFunction,
     SSAInstruction,
     SSAJump,
+    SSAListGet,
+    SSAListIsEmpty,
+    SSAListLength,
+    SSAListNew,
     SSAMatrixGet,
     SSAMatrixAdd,
     SSAMatrixMatMul,
@@ -530,6 +538,14 @@ class SSABuilder:
             )
             return SSAArrayNew(result, elements)
 
+        if isinstance(instruction, IRListNew):
+            result = self._define_value(instruction.result, state.value_map)
+            elements = tuple(
+                self._resolve_value(element, state.value_map)
+                for element in instruction.elements
+            )
+            return SSAListNew(result, elements)
+
         if isinstance(instruction, IRVectorNew):
             result = self._define_value(instruction.result, state.value_map)
             elements = tuple(
@@ -625,6 +641,12 @@ class SSABuilder:
             index = self._resolve_value(instruction.index, state.value_map)
             return SSAArrayGet(result, array, index)
 
+        if isinstance(instruction, IRListGet):
+            result = self._define_value(instruction.result, state.value_map)
+            list_value = self._resolve_value(instruction.list_value, state.value_map)
+            index = self._resolve_value(instruction.index, state.value_map)
+            return SSAListGet(result, list_value, index)
+
         if isinstance(instruction, IRVectorGet):
             result = self._define_value(instruction.result, state.value_map)
             vector = self._resolve_value(instruction.vector, state.value_map)
@@ -661,6 +683,16 @@ class SSABuilder:
             result = self._define_value(instruction.result, state.value_map)
             array = self._resolve_value(instruction.array, state.value_map)
             return SSAArrayLength(result, array)
+
+        if isinstance(instruction, IRListLength):
+            result = self._define_value(instruction.result, state.value_map)
+            list_value = self._resolve_value(instruction.list_value, state.value_map)
+            return SSAListLength(result, list_value)
+
+        if isinstance(instruction, IRListIsEmpty):
+            result = self._define_value(instruction.result, state.value_map)
+            list_value = self._resolve_value(instruction.list_value, state.value_map)
+            return SSAListIsEmpty(result, list_value)
 
         return None
 

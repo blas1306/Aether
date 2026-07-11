@@ -21,6 +21,7 @@ class NativeMemberSet:
 LIST_NATIVE_MEMBERS = NativeMemberSet(
     properties={
         "length": NativeMember("length", "length", "property"),
+        "is_empty": NativeMember("is_empty", "is_empty", "property"),
     },
     methods={
         "push": NativeMember("push", "push", "method"),

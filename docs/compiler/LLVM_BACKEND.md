@@ -61,6 +61,8 @@ exit code from `main`:
 | `double_compare.ae` | 19 |
 | `int_to_double.ae` | 12 |
 | `double_to_int.ae` | 14 |
+| `list_literal.ae` | 3 |
+| `list_for_sum.ae` | 6 |
 
 To build and run an example:
 
@@ -140,6 +142,21 @@ are skipped.
 - `SSAVectorNew` and `SSAMatrixNew` allocate contiguous temporary storage.
 - `SSAVectorGet` and `SSAMatrixGet` load scalar elements from that contiguous
   storage. Matrix indexing is row-major and uses the lowered column count.
+- `SSAListNew` allocates a temporary heap list header plus contiguous element
+  storage using the phase 1 layout:
+
+  ```llvm
+  %AetherList = type { i64, i64, ptr }
+  ; length, capacity, data
+  ```
+
+  In this phase `length == capacity` at literal construction and there is no
+  growth or `realloc`.
+- `SSAListLength` loads the `length` field and truncates it to Aether `int`.
+- `SSAListIsEmpty` compares the `length` field with zero.
+- `SSAListGet` loads an element from the contiguous `data` buffer. It is emitted
+  for lowered `for x in xs` loops; explicit source indexing for List is still
+  outside the phase 1 compiled subset.
 - `SSAReturn`.
 
 This means an `if`/`else` where both branches return directly can compile to
@@ -164,6 +181,7 @@ Type mapping:
 - `bool` -> `i1`
 - `double` -> `double`
 - `string` -> `ptr`
+- `List<T>` -> `ptr` to `%AetherList`
 
 Example:
 
@@ -258,15 +276,21 @@ merge0:
 
 The backend deliberately does not support these yet:
 
+- Full `List<T>` backend API. Phase 1 only supports list literals with an
+  expected `List<T>` type, `.length`, `.is_empty`, List parameters/returns, and
+  `for x in xs` / `for T x in xs`.
+- List mutation, explicit source indexing, `copy`, `contains`, `indexOf`,
+  `reverse`, `sort`, capacity growth, `realloc`, ownership, `free`, or GC.
+
 - implicit casts
 - bool casts or string casts
-- structs, classes, lists, arrays, or complex numbers
+- structs, classes, full List API, or complex numbers
 - string concatenation, comparison, printing, length, indexing, mutation,
   heap allocation, or runtime ownership
 - complex boolean lowering
 - `println`
-- runtime calls
-- heap allocation
+- general user/runtime calls beyond the backend helpers emitted internally
+- ownership-aware heap allocation, deallocation, or collection
 - imports or packages
 - indirect calls, function pointers, or varargs
 - LLVM optimization passes

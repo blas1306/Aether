@@ -21,6 +21,10 @@ from aether.ssa.model import (
     SSAFunction,
     SSAInstruction,
     SSAJump,
+    SSAListGet,
+    SSAListIsEmpty,
+    SSAListLength,
+    SSAListNew,
     SSAMatrixColumns,
     SSAMatrixAdd,
     SSAMatrixMatMul,
@@ -212,9 +216,13 @@ class SCCPAnalyzer:
             (
                 SSAArrayNew,
                 SSAArrayGet,
+                SSAListNew,
+                SSAListGet,
                 SSAVectorGet,
                 SSAMatrixGet,
                 SSAArrayLength,
+                SSAListLength,
+                SSAListIsEmpty,
                 SSAVectorLength,
                 SSAMatrixRows,
                 SSAMatrixColumns,
@@ -373,9 +381,13 @@ class SCCPAnalyzer:
             (
                 SSAArrayNew,
                 SSAArrayGet,
+                SSAListNew,
+                SSAListGet,
                 SSAVectorGet,
                 SSAMatrixGet,
                 SSAArrayLength,
+                SSAListLength,
+                SSAListIsEmpty,
                 SSAVectorLength,
                 SSAMatrixRows,
                 SSAMatrixColumns,
@@ -413,6 +425,8 @@ class SCCPAnalyzer:
             return instruction.arguments
         if isinstance(instruction, SSAArrayNew):
             return instruction.elements
+        if isinstance(instruction, SSAListNew):
+            return instruction.elements
         if isinstance(instruction, SSAVectorNew):
             return instruction.elements
         if isinstance(instruction, SSAMatrixNew):
@@ -431,6 +445,8 @@ class SCCPAnalyzer:
             return (instruction.matrix, instruction.scalar)
         if isinstance(instruction, SSAArrayGet):
             return (instruction.array, instruction.index)
+        if isinstance(instruction, SSAListGet):
+            return (instruction.list_value, instruction.index)
         if isinstance(instruction, SSAVectorGet):
             return (instruction.vector, instruction.index)
         if isinstance(instruction, SSAMatrixGet):
@@ -443,6 +459,8 @@ class SCCPAnalyzer:
             return (instruction.matrix, instruction.row, instruction.column, instruction.value)
         if isinstance(instruction, SSAArrayLength):
             return (instruction.array,)
+        if isinstance(instruction, (SSAListLength, SSAListIsEmpty)):
+            return (instruction.list_value,)
         if isinstance(instruction, SSAVectorLength):
             return (instruction.vector,)
         if isinstance(instruction, (SSAMatrixRows, SSAMatrixColumns)):
