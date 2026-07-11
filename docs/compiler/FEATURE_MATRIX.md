@@ -113,6 +113,8 @@ Notas:
   por IR/LLVM, como arrays y vectores.
 - `break` y `continue` no agregan sintaxis ni opcodes especiales: se materializan
   como saltos IR/SSA a los destinos activos del loop.
+- Auditoria tecnica relacionada:
+  [CONTROL_FLOW_AUDIT.md](CONTROL_FLOW_AUDIT.md).
 
 ## Funciones
 
