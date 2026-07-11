@@ -351,17 +351,20 @@ aether bench benchmarks/sum_to.ae --iterations 20
 aether bench benchmarks/sum_to.ae --backend ast
 aether bench benchmarks/sum_to.ae --backend ir
 aether bench benchmarks/sum_to.ae --backend both
+aether bench benchmarks/sum_to.ae --backend ssa
+aether bench benchmarks/sum_to.ae --backend llvm
+aether bench benchmarks/sum_to.ae --backend native
+aether bench benchmarks/sum_to.ae --backend all
 ```
 
 `aether bench` measures approximate wall-clock time with `time.perf_counter()`.
-Each iteration includes frontend preparation plus the selected backend work.
-The AST measurement executes the production AST path and calls zero-argument
-`main()` when the benchmark defines one. The IR measurement lowers, verifies,
-and executes with the current experimental IR interpreter. When IR is selected,
-the harness also reports `IR O1 optimizer (not executed)`, which measures
-lowering, verification, the current `-O1` optimizer pipeline, and verification
-of the optimized IR. That optimized IR is still not used as the IR execution
-backend.
+Compilation and execution are reported separately. The AST and IR runtime
+profiles prepare their typed/verified input once outside the timed interval.
+SSA, LLVM, native build, and native runtime profiles are available through the
+new backend modes. Native runtime compiles exactly once before its measured
+iterations; it never presents compilation time as runtime. See
+[`benchmarks/README.md`](benchmarks/README.md) for profile definitions, exit-code
+validation, benchmark contents, and interpretation guidance.
 
 This command is a development tool, not a rigorous performance suite. The
 numbers are approximate and intended for local comparisons across backends or

@@ -7,5 +7,15 @@ int mix(int a, int b, int c) {
 }
 
 int main() {
-    return mix(17, 31, 42);
+    int i = 0;
+    int total = 0;
+    while i < 1000 {
+        total = total + mix(17, 31, 42);
+        i = i + 1;
+    }
+    if total == 67000 {
+        return 0;
+    } else {
+        return 1;
+    }
 }

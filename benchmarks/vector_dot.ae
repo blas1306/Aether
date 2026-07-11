@@ -1,0 +1,19 @@
+int dotProduct() {
+    Vector<int, Row> row = [1, 2, 3];
+    Vector<int, Column> column = [4; 5; 6];
+    return row * column;
+}
+
+int main() {
+    int repeat = 0;
+    int total = 0;
+    while repeat < 500 {
+        total = total + dotProduct();
+        repeat = repeat + 1;
+    }
+    if total == 16000 {
+        return 0;
+    } else {
+        return 1;
+    }
+}

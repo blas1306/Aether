@@ -744,7 +744,7 @@ def test_non_ssa_modes_remain_unchanged_after_adding_ssa_builder_selector(
     assert backend_ir_stderr == ""
     assert bench_exit == EXIT_SUCCESS
     assert "Benchmark: benchmarks/sum_to.ae" in bench_stdout
-    assert "AST backend:" in bench_stdout
+    assert "AST execute:" in bench_stdout
     assert bench_stderr == ""
 
 
@@ -2889,11 +2889,13 @@ def test_bench_sum_to_default_both_backends() -> None:
     assert exit_code == EXIT_SUCCESS
     assert "Benchmark: benchmarks/sum_to.ae" in stdout
     assert "Iterations: 10" in stdout
-    assert "AST backend:" in stdout
-    assert "IR backend:" in stdout
-    assert "IR O1 optimizer (not executed):" in stdout
-    assert stdout.count("  total: ") == 3
-    assert stdout.count("  avg: ") == 3
+    assert "AST parse/typecheck:" in stdout
+    assert "AST execute:" in stdout
+    assert "IR lower/verify:" in stdout
+    assert "IR execute:" in stdout
+    assert "IR O1 optimize:" in stdout
+    assert stdout.count("  total: ") == 5
+    assert stdout.count("  avg: ") == 5
     assert stderr == ""
 
 
@@ -2904,8 +2906,8 @@ def test_bench_accepts_iteration_count() -> None:
 
     assert exit_code == EXIT_SUCCESS
     assert "Iterations: 2" in stdout
-    assert "AST backend:" in stdout
-    assert "IR backend:" in stdout
+    assert "AST execute:" in stdout
+    assert "IR execute:" in stdout
     assert stderr == ""
 
 
@@ -2915,8 +2917,8 @@ def test_bench_backend_ast_only() -> None:
     )
 
     assert exit_code == EXIT_SUCCESS
-    assert "AST backend:" in stdout
-    assert "IR backend:" not in stdout
+    assert "AST execute:" in stdout
+    assert "IR execute:" not in stdout
     assert "IR O1 optimizer" not in stdout
     assert stderr == ""
 
@@ -2927,9 +2929,9 @@ def test_bench_backend_ir_only() -> None:
     )
 
     assert exit_code == EXIT_SUCCESS
-    assert "AST backend:" not in stdout
-    assert "IR backend:" in stdout
-    assert "IR O1 optimizer (not executed):" in stdout
+    assert "AST execute:" not in stdout
+    assert "IR execute:" in stdout
+    assert "IR O1 optimize:" in stdout
     assert stderr == ""
 
 
@@ -2939,9 +2941,69 @@ def test_bench_backend_both_explicit() -> None:
     )
 
     assert exit_code == EXIT_SUCCESS
-    assert "AST backend:" in stdout
-    assert "IR backend:" in stdout
-    assert "IR O1 optimizer (not executed):" in stdout
+    assert "AST execute:" in stdout
+    assert "IR execute:" in stdout
+    assert "IR O1 optimize:" in stdout
+    assert stderr == ""
+
+
+@pytest.mark.parametrize(
+    ("backend", "profiles"),
+    [
+        ("ssa", ("SSA build:", "SSA optimize:")),
+        ("llvm", ("LLVM emit:",)),
+    ],
+)
+def test_bench_accepts_new_compiler_backend_modes(
+    backend: str,
+    profiles: tuple[str, ...],
+) -> None:
+    exit_code, stdout, stderr = run_cli(
+        ["bench", "benchmarks/sum_to.ae", "--iterations", "1", "--backend", backend]
+    )
+
+    assert exit_code == EXIT_SUCCESS
+    assert all(profile in stdout for profile in profiles)
+    assert "  category: " in stdout
+    assert "Failures: 0" in stdout
+    assert stderr == ""
+
+
+def test_bench_all_keeps_non_native_timings_when_clang_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("aether.backend.llvm.build.shutil.which", lambda _name: None)
+
+    exit_code, stdout, stderr = run_cli(
+        ["bench", "benchmarks/sum_to.ae", "--iterations", "1", "--backend", "all"]
+    )
+
+    assert exit_code == EXIT_SUCCESS
+    assert "AST execute:" in stdout
+    assert "SSA optimize:" in stdout
+    assert "LLVM emit:" in stdout
+    assert "Native build:" in stdout
+    assert "Native run:" in stdout
+    assert stdout.count("  unsupported:") == 2
+    assert "clang is required" in stdout
+    assert "Traceback" not in stdout
+    assert stderr == ""
+
+
+def test_bench_native_missing_clang_is_a_clean_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("aether.backend.llvm.build.shutil.which", lambda _name: None)
+
+    exit_code, stdout, stderr = run_cli(
+        ["bench", "benchmarks/sum_to.ae", "--iterations", "1", "--backend", "native"]
+    )
+
+    assert exit_code == EXIT_LANGUAGE_ERROR
+    assert "Native build:" in stdout
+    assert "Native run:" in stdout
+    assert "unsupported:" in stdout
+    assert "Traceback" not in stdout
     assert stderr == ""
 
 
@@ -2975,8 +3037,8 @@ def test_bench_both_reports_ir_error_and_keeps_ast(tmp_path: Path) -> None:
 
     assert exit_code == EXIT_SUCCESS
     assert f"Benchmark: {program}" in stdout
-    assert "AST backend:" in stdout
-    assert "IR backend:" in stdout
+    assert "AST execute:" in stdout
+    assert "IR lower/verify:" in stdout
     assert "error:" in stdout
     assert "IR backend does not support" in stdout
     assert "Supported IR backend subset:" in stdout
@@ -2992,7 +3054,7 @@ def test_bench_ir_only_unsupported_program_fails(tmp_path: Path) -> None:
 
     assert exit_code == EXIT_LANGUAGE_ERROR
     assert "Benchmark:" in stdout
-    assert "IR backend:" in stdout
+    assert "IR lower/verify:" in stdout
     assert "error:" in stdout
     assert "IR backend does not support" in stdout
     assert stderr == ""

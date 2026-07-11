@@ -138,9 +138,21 @@ def build_bench_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--backend",
-        choices=("ast", "ir", "both"),
+        choices=("ast", "ir", "both", "ssa", "llvm", "native", "all"),
         default="both",
-        help="Backend profile to measure. Defaults to both.",
+        help="Backend profile to measure. Defaults to both (AST and IR).",
+    )
+    exit_code = parser.add_mutually_exclusive_group()
+    exit_code.add_argument(
+        "--expected-exit-code",
+        type=int,
+        default=0,
+        help="Expected native executable exit code. Defaults to 0.",
+    )
+    exit_code.add_argument(
+        "--ignore-exit-code",
+        action="store_true",
+        help="Explicitly ignore native executable exit codes.",
     )
     return parser
 
@@ -327,13 +339,14 @@ def _main_bench(argv: Sequence[str], *, stdout: TextIO, stderr: TextIO) -> int:
             path=path,
             iterations=args.iterations,
             backend=args.backend,
+            expected_exit_code=None if args.ignore_exit_code else args.expected_exit_code,
         )
     except AetherError as exc:
         print(_format_language_error(exc), file=stderr)
         return EXIT_LANGUAGE_ERROR
 
     _print_benchmark_report(report, stdout=stdout)
-    if args.backend == "ir" and report.failures:
+    if args.backend in {"ir", "ssa", "llvm", "native"} and report.failures:
         return EXIT_LANGUAGE_ERROR
     return EXIT_SUCCESS
 
@@ -651,15 +664,18 @@ def _format_trace_title(step: OptimizationTraceStep) -> str:
 def _print_benchmark_report(report: BenchReport, *, stdout: TextIO) -> None:
     print(f"Benchmark: {report.path}", file=stdout)
     print(f"Iterations: {report.iterations}", file=stdout)
+    print(f"Failures: {len(report.failures)}", file=stdout)
     for timing in report.timings:
         print(file=stdout)
         print(f"{timing.name}:", file=stdout)
+        print(f"  category: {timing.category}", file=stdout)
         print(f"  total: {_format_seconds(timing.total_seconds)}", file=stdout)
         print(f"  avg: {_format_seconds(timing.average_seconds)}", file=stdout)
     for failure in report.failures:
         print(file=stdout)
         print(f"{failure.name}:", file=stdout)
-        print("  error:", file=stdout)
+        print(f"  category: {failure.category}", file=stdout)
+        print("  unsupported:" if failure.unsupported else "  error:", file=stdout)
         for line in _format_language_error(failure.error).splitlines():
             print(f"    {line}", file=stdout)
 

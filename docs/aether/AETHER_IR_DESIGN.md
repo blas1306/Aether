@@ -487,18 +487,19 @@ aether bench benchmarks/sum_to.ae --iterations 20
 aether bench benchmarks/sum_to.ae --backend ast
 aether bench benchmarks/sum_to.ae --backend ir
 aether bench benchmarks/sum_to.ae --backend both
+aether bench benchmarks/sum_to.ae --backend ssa
+aether bench benchmarks/sum_to.ae --backend llvm
+aether bench benchmarks/sum_to.ae --backend native
+aether bench benchmarks/sum_to.ae --backend all
 ```
 
-The harness is intentionally small and uses `time.perf_counter()` for
-approximate wall-clock timings. Each iteration measures frontend preparation
-plus the selected backend work. The AST path uses the production AST backend
-and calls zero-argument `main()` when present so small IR-style benchmark files
-can exercise the same workload. The IR path lowers, verifies, and executes the
-unoptimized module with the current IR interpreter. When IR is selected, the
-harness also reports `IR O1 optimizer (not executed)`, which measures lowering,
-verification, the current `O1` optimizer pipeline, and verification of the
-optimized module without executing that optimized IR. This preserves the
-current rule that optimized IR is not the execution backend.
+The harness uses `time.perf_counter()` for approximate wall-clock timings and
+reports frontend, middle-end, codegen, and runtime categories. AST and IR
+compilation are separate from execution. SSA construction/verification, SSA
+optimization, LLVM emission, clang compilation, and native execution have
+their own profiles. Native execution performs one untimed setup build and then
+runs the same temporary executable for all measured iterations. See
+`benchmarks/README.md` for the full measurement contract.
 
 Benchmark output is for local compiler-development comparisons only; it is not
 a stable performance format and there is no JSON output or advanced statistics

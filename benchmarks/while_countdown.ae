@@ -11,5 +11,9 @@ int countdown(int start) {
 }
 
 int main() {
-    return countdown(100);
+    if countdown(10000) == 10000 {
+        return 0;
+    } else {
+        return 1;
+    }
 }

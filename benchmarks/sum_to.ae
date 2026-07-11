@@ -11,5 +11,9 @@ int sumTo(int n) {
 }
 
 int main() {
-    return sumTo(100);
+    if sumTo(1000) == 500500 {
+        return 0;
+    } else {
+        return 1;
+    }
 }

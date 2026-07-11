@@ -1,0 +1,17 @@
+int main() {
+    int outer = 0;
+    int count = 0;
+    while outer < 100 {
+        int inner = 0;
+        while inner < 100 {
+            count = count + 1;
+            inner = inner + 1;
+        }
+        outer = outer + 1;
+    }
+    if count == 10000 {
+        return 0;
+    } else {
+        return 1;
+    }
+}

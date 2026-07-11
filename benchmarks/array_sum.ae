@@ -1,0 +1,18 @@
+int main() {
+    Array<int> values = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    int repeat = 0;
+    int total = 0;
+    while repeat < 200 {
+        int index = 0;
+        while index < values.length {
+            total = total + values[index];
+            index = index + 1;
+        }
+        repeat = repeat + 1;
+    }
+    if total == 11000 {
+        return 0;
+    } else {
+        return 1;
+    }
+}

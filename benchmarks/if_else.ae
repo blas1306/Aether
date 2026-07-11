@@ -11,5 +11,15 @@ int clampScore(int value) {
 }
 
 int main() {
-    return clampScore(137);
+    int i = 0;
+    int total = 0;
+    while i < 1000 {
+        total = total + clampScore(137);
+        i = i + 1;
+    }
+    if total == 100000 {
+        return 0;
+    } else {
+        return 1;
+    }
 }
