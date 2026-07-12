@@ -12,6 +12,7 @@ from aether.ir import (
     IRInterpreter,
     IRListContains,
     IRListClear,
+    IRListPush,
     IRListIndexOf,
     IRListCopy,
     IRListGet,
@@ -30,6 +31,7 @@ from aether.ssa import (
     SSAListGet,
     SSAListContains,
     SSAListClear,
+    SSAListPush,
     SSAListIndexOf,
     SSAListCopy,
     SSAListIsEmpty,
@@ -638,3 +640,94 @@ def test_list_clear_emit_llvm_and_clang(tmp_path) -> None:
     assert stderr.getvalue() == ""
     if shutil.which("clang") is not None:
         assert LLVMRunner().run(_typed(source)) == 6
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("int main(){ List<int> xs={}; xs.push(10); return xs[0]; }", 10),
+        ("int main(){ List<int> xs={}; xs.push(1); xs.push(2); return xs[1]; }", 2),
+        ("int main(){ List<int> xs={7}; xs.push(xs[0]); return xs[1]; }", 7),
+        ("int main(){ List<int> xs={}; xs.push(1); xs.push(2); xs.push(3); xs.push(4); xs.push(5); return xs[0]+xs[4]; }", 6),
+        ("int main(){ List<int> xs={1,2,3}; xs.clear(); xs.push(9); return xs.length*10+xs[0]; }", 19),
+        ("int main(){ List<int> xs={3,1,2}; xs.sort(); xs.push(4); xs.reverse(); xs.push(5); return xs[0]*10+xs[4]; }", 45),
+        ("int main(){ List<int> xs={1}; xs.push(2); xs.push(3); int sum=0; for int x in xs { sum=sum+x; } return sum; }", 6),
+        ("int main(){ List<List<int>> refs={}; List<int> inner={}; refs.push(inner); inner.push(7); return refs[0][0]; }", 7),
+    ],
+)
+def test_list_push_runtime_semantics(source: str, expected: int) -> None:
+    typed = _typed(source)
+    assert IRInterpreter(_lower(source)).call("main") == expected
+    if shutil.which("clang") is not None:
+        assert LLVMRunner().run(typed) == expected
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("int main(){ List<int> a={1,2}; List<int> b=a; b.push(3); return a.length*10+a[2]; }", 33),
+        ("int append(List<int> xs){ xs.push(3); return 0; } int main(){ List<int> a={1,2}; int ignored=append(a); return a.length*10+a[2]; }", 33),
+        ("List<int> identity(List<int> xs){ return xs; } int main(){ List<int> a={1,2}; List<int> b=identity(a); b.push(3); return a.length*10+a[2]; }", 33),
+    ],
+)
+def test_list_push_is_observed_through_aliases(source: str, expected: int) -> None:
+    typed = _typed(source)
+    assert IRInterpreter(_lower(source)).call("main") == expected
+    if shutil.which("clang") is not None:
+        assert LLVMRunner().run(typed) == expected
+
+
+def test_list_push_is_void_typed_and_rejects_invalid_uses() -> None:
+    with pytest.raises(AetherTypeError, match="Cannot mutate constant 'xs'"):
+        _typed("int main(){ const List<int> xs={1}; xs.push(2); return 0; }")
+    with pytest.raises(AetherTypeError, match="not assignable to 'int'"):
+        _typed('int main(){ List<int> xs={1}; xs.push("bad"); return 0; }')
+    with pytest.raises(AetherTypeError, match="void"):
+        _typed("int main(){ List<int> xs={1}; int result=xs.push(2); return result; }")
+
+
+def test_list_push_lowers_prints_and_verifies_ir_and_ssa() -> None:
+    source = "int main(){ List<int> xs={}; xs.push(3); return xs[0]; }"
+    ir = IRVerifier(_lower(source)).verify()
+    ssa = SSAVerifier(_ssa(source)).verify()
+
+    assert any(isinstance(item, IRListPush) for item in _instructions(ir))
+    assert any(isinstance(item, SSAListPush) for item in _instructions(ssa))
+    assert "list_push" in print_ir(ir)
+    assert "list_push" in print_ssa(ssa)
+    assert IRInterpreter(ir).call("main") == 3
+
+
+def test_optimizers_preserve_push_and_reads_around_it() -> None:
+    source = "int main(){ List<int> xs={1,2}; int before=xs.length; int old=xs[0]; xs.push(3); int after=xs.length; int now=xs[2]; return before*10+after+old+now; }"
+    optimized_ir = OptimizerPipeline().run(_lower(source))
+    optimized_ssa = SSAOptimizerPipeline().run(_ssa(source))
+
+    assert any(isinstance(item, IRListPush) for item in _instructions(optimized_ir))
+    assert any(isinstance(item, SSAListPush) for item in _instructions(optimized_ssa))
+    assert sum(isinstance(item, IRListLength) for item in _instructions(optimized_ir)) == 2
+    assert sum(isinstance(item, SSAListLength) for item in _instructions(optimized_ssa)) == 2
+    assert sum(isinstance(item, IRListGet) for item in _instructions(optimized_ir)) == 2
+    assert sum(isinstance(item, SSAListGet) for item in _instructions(optimized_ssa)) == 2
+    assert IRInterpreter(optimized_ir).call("main") == 27
+
+
+def test_list_push_llvm_contains_checked_growth_and_reloads_data() -> None:
+    llvm = print_llvm(_ssa("int main(){ List<int> xs={}; xs.push(7); return xs[0]; }"))
+
+    assert "define private void @aether_list_reserve" in llvm
+    assert "@llvm.uadd.with.overflow.i64" in llvm
+    assert llvm.count("@llvm.umul.with.overflow.i64") >= 3
+    assert "select i1 %required_is_larger" in llvm
+    assert "%grown_capacity = phi i64 [ 1, %from_zero ], [ %doubled, %doubled_ok ]" in llvm
+    assert "@llvm.umul.with.overflow.i64(i64 %capacity, i64 2)" in llvm
+    assert "call void @free(ptr %old_data)" in llvm
+    call_index = llvm.index("call i64 @aether_list_prepare_push")
+    reload_index = llvm.index("load ptr, ptr %list.push.data_field", call_index)
+    store_index = llvm.index("store i32 7", reload_index)
+    length_index = llvm.index("store i64 %list.push.new_length", store_index)
+    assert call_index < reload_index < store_index < length_index
+    assert "Aether panic: List capacity overflow" in llvm
+    assert "Aether panic: memory allocation failed" in llvm
+    assert "%failed = icmp eq ptr %mem, null" in llvm
+    assert "br i1 %failed, label %panic, label %ok" in llvm

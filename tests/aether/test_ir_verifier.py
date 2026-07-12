@@ -19,6 +19,7 @@ from aether.ir import (
     IRLoad,
     IRListNew,
     IRListClear,
+    IRListPush,
     IRListSet,
     IRLowerer,
     IRMatrixNew,
@@ -118,6 +119,17 @@ def test_rejects_list_clear_with_non_list_operand() -> None:
     )
 
     _assert_verification_error(module, "List clear expects list value, got int")
+
+
+def test_rejects_list_push_with_incompatible_value_type() -> None:
+    int_type = IntType()
+    double_type = DoubleType()
+    element = IRValue("0", int_type)
+    list_value = IRValue("1", ListType(int_type))
+    value = IRValue("2", double_type)
+    module = IRModule([IRFunction("main", [], int_type, [IRBasicBlock("entry", [IRConst(element, 1), IRListNew(list_value, (element,)), IRConst(value, 2.0), IRListPush(list_value, value), IRReturn(element)])])])
+
+    _assert_verification_error(module, "List push value type mismatch: expected int, got double")
 
 
 def test_verifies_function_calling_another_function() -> None:

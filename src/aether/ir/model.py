@@ -106,6 +106,12 @@ class IRListClear(IRInstruction):
 
 
 @dataclass(frozen=True)
+class IRListPush(IRInstruction):
+    list_value: IRValue
+    value: IRValue
+
+
+@dataclass(frozen=True)
 class IRListReverse(IRInstruction):
     list_value: IRValue
 

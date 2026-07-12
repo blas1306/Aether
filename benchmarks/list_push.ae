@@ -1,0 +1,16 @@
+int main() {
+    List<int> values = {};
+    int i = 0;
+    while (i < 256) {
+        values.push(i);
+        i = i + 1;
+    }
+    if (values.length == 256) {
+        if (values[0] == 0) {
+            if (values[255] == 255) {
+                return 0;
+            }
+        }
+    }
+    return 1;
+}

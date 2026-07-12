@@ -18,9 +18,9 @@ Areas revisadas:
 ## Resumen Ejecutivo
 
 `List<T>` es una feature completa en el frontend/interprete. En IR/SSA/LLVM ya
-tiene soporte de fases 1, 2, 3a, 3b (`indexOf`) y 4a (`clear`) para literales con tipo esperado, `.length`,
+tiene soporte de fases 1, 2, 3a, 3b (`indexOf`), 4a (`clear`) y 4b (`push`/growth) para literales con tipo esperado, `.length`,
 `.is_empty`, `for x in xs` / `for T x in xs`, lectura `xs[i]` y escritura
-`xs[i] = value`, `copy`, `contains`, `indexOf`, `reverse` y `clear`. El resto de la API de listas
+`xs[i] = value`, `copy`, `contains`, `indexOf`, `reverse`, `clear` y `push`. El resto de la API de listas
 sigue pendiente de backend.
 
 La migracion no deberia reutilizar directamente las instrucciones de `Array<T>`.
@@ -221,7 +221,7 @@ solo soporte operacional, no la existencia nominal del tipo.
 | `xs.indexOf(value)` | Si | Si | Si | Si | Implementado fase 3b |
 | `reverse(xs)` / `xs.reverse()` | Si | Si | Si | Si | Implementado fase 3a |
 | `sort(xs)` / `xs.sort()` | Si | Si | Si | Si | Implementado; comparte `IRSequenceSort` y runtime con Array |
-| `push(xs, value)` / `xs.push(value)` | Si | No | No | No | Alta |
+| `push(xs, value)` / `xs.push(value)` | Si | Si | Si | Si | Implementado fase 4b |
 | `pop(xs)` / `xs.pop()` | Si | No | No | No | Alta |
 | `insert(xs, i, value)` / `xs.insert(i, value)` | Si | No | No | No | Alta |
 | `remove_at(xs, i)` / `xs.removeAt(i)` | Si | No | No | No | Alta |
@@ -281,7 +281,7 @@ Refcount/GC en header:
 
 ## Runtime LLVM
 
-Los contratos pendientes para mutaciones que cambian longitud siguen siendo:
+Los helpers de crecimiento implementados y los contratos aun pendientes son:
 
 Helpers base:
 
@@ -291,7 +291,7 @@ Helpers base:
 - `aether_list_length(list: ptr) -> i64`
 - `aether_list_capacity(list: ptr) -> i64`
 - `aether_list_data(list: ptr) -> ptr`
-- `aether_list_reserve(list: ptr, element_size: i64, required: i64) -> void`
+- `aether_list_reserve(list: ptr, required: i64, element_size: i64) -> void` (interno, implementado)
 
 Lectura/escritura:
 
@@ -301,7 +301,8 @@ Lectura/escritura:
 
 Mutacion:
 
-- `aether_list_push(list: ptr, element_size: i64, value_ptr: ptr) -> void`
+- `push` se emite desde `SSAListPush`: prepara/reserva, recarga `data`, almacena
+  el valor tipado y actualiza `length` al final.
 - `aether_list_pop(list: ptr, element_size: i64, out_ptr: ptr) -> void`
 - `aether_list_insert(list: ptr, element_size: i64, index: i64, value_ptr: ptr) -> void`
 - `aether_list_remove_at(list: ptr, element_size: i64, index: i64, out_ptr: ptr) -> void`
@@ -437,22 +438,23 @@ Justificacion:
 El contrato detallado de invariantes, crecimiento, allocation, shifting,
 ownership y optimizacion para esta fase esta en
 [`AETHER_LIST_GROWTH_DESIGN.md`](../aether/AETHER_LIST_GROWTH_DESIGN.md). Es un
-diseno previo para las operaciones pendientes. La Fase 4a (`clear`) ya esta
-implementada; no cambia `capacity` ni `data` y no reserva ni libera memoria.
+contrato implementado para 4a/4b y previo para las operaciones pendientes. La
+Fase 4a (`clear`) no cambia `capacity` ni `data`; la Fase 4b (`push`) usa un
+reserve interno con crecimiento geometrico, checks de overflow y OOM.
 
-`clear` se implemento como el primer incremento de Fase 4.
+`clear` y `push` son los dos primeros incrementos implementados de Fase 4.
 
 Justificacion:
 
 - `clear` solo cambia `length`; no requiere crecimiento ni memmove.
-- `push`, `insert`, `pop` y `removeAt` requieren contratos de capacidad,
+- `insert`, `pop` y `removeAt` requieren contratos adicionales de capacidad,
   shifting y errores runtime.
 - `insert` y `removeAt` son los mas sensibles a off-by-one y memmove.
 
 Orden sugerido dentro de Fase 4:
 
 1. `clear` (implementado, Fase 4a)
-2. `push`
+2. `push` (implementado, Fase 4b)
 3. `pop`
 4. `insert`
 5. `removeAt`

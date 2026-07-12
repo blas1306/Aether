@@ -158,8 +158,8 @@ are skipped.
   ; length, capacity, data
   ```
 
-  In this phase `length == capacity` at literal construction and there is no
-  growth or `realloc`.
+  Literal construction starts with `length == capacity`; later `push` may grow
+  and replace `data` while retaining this header pointer.
 - `SSAListLength` loads the `length` field and truncates it to Aether `int`.
 - `SSAListIsEmpty` compares the `length` field with zero.
 - `SSAListGet` loads an element from the contiguous `data` buffer for both
@@ -178,6 +178,12 @@ are skipped.
 - `SSAListClear` has no result and is side-effecting. It emits only a GEP to
   field 0 of `%AetherList` followed by `store i64 0`; it does not load or store
   capacity/data and does not allocate, free, or call a runtime helper.
+- `SSAListPush` has no result and is side-effecting. It checks `length + 1`,
+  calls internal `aether_list_reserve`, reloads `data`, stores the shallow
+  element representation, and updates `length` only after the store. Reserve
+  grows `0 -> 1` or doubles capacity, validates arithmetic overflow, uses a
+  checked allocation, copies existing bytes, frees the old owned buffer, and
+  updates `data`/`capacity` without replacing the header.
 - `SSAListReverse` calls an in-place byte-swap loop. It allocates no new list or
   data buffer and is preserved as a side effect.
 - `SSASequenceSort` is the common side-effecting instruction for
@@ -313,12 +319,13 @@ merge0:
 
 The backend deliberately does not support these yet:
 
-- Full `List<T>` backend API. Phases 1, 2, 3, and `clear` from phase 4a support list literals with an
+- Full `List<T>` backend API. Phases 1, 2, 3, `clear` from phase 4a, and `push` from phase 4b support list literals with an
   expected `List<T>` type, `.length`, `.is_empty`, List parameters/returns,
   `for x in xs` / `for T x in xs`, explicit indexed reads and indexed stores.
-- Length-changing mutation other than `clear`, capacity growth, `realloc`,
-  ownership, or GC. `clear`, `copy`, `contains`, `indexOf`, `reverse`, and
-  stable `sort` are supported. `clear` preserves capacity and data.
+- Length-changing mutation other than `clear`/`push`, shrinking, public
+  reserve, general ownership, or GC. `clear`, `push`, `copy`, `contains`,
+  `indexOf`, `reverse`, and stable `sort` are supported. `clear` preserves
+  capacity/data; push may replace the owned data buffer but preserves header.
 - List indexing does not add bounds checks in phase 2; compiled out-of-range
   access has undefined behavior, matching the existing aggregate backend
   policy.

@@ -32,6 +32,7 @@ from .model import (
     IRListCopy,
     IRListContains,
     IRListClear,
+    IRListPush,
     IRListIndexOf,
     IRListIsEmpty,
     IRListLength,
@@ -361,6 +362,26 @@ class IRLowerer:
 
         if isinstance(statement, ast.ExpressionStatement):
             expression = statement.expression
+            if isinstance(expression, ast.CallExpression) and (
+                expression.callee == "push" or expression.callee.endswith(".push")
+            ):
+                arguments = expression.arguments
+                if expression.callee.endswith(".push"):
+                    receiver = expression.callee.rsplit(".", 1)[0]
+                    arguments = [ast.Identifier(receiver, expression.line, expression.column), *arguments]
+                if expression.keyword_arguments or len(arguments) != 2:
+                    self._unsupported(expression, "invalid push call")
+                list_value = self._lower_expression(arguments[0], context)
+                if not isinstance(list_value.type, ListType):
+                    self._unsupported(expression, "push on non-list")
+                value = self._lower_expression(arguments[1], context, target_type=list_value.type.element)
+                self._require_same_type(
+                    value.type,
+                    list_value.type.element,
+                    "push value requires an implicit conversion",
+                )
+                context.block.instructions.append(IRListPush(list_value, value))
+                return
             if isinstance(expression, ast.CallExpression) and (
                 expression.callee == "clear" or expression.callee.endswith(".clear")
             ):

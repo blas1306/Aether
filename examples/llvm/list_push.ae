@@ -1,0 +1,9 @@
+int main() {
+    List<int> xs = {};
+    xs.push(10);
+    xs.push(20);
+    xs.push(30);
+    xs.push(40);
+    xs.push(50);
+    return xs[1];
+}

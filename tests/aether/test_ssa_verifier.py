@@ -17,6 +17,7 @@ from aether.ssa import (
     SSAJump,
     SSAListNew,
     SSAListClear,
+    SSAListPush,
     SSAListSet,
     SSAMatrixNew,
     SSAModule,
@@ -95,6 +96,17 @@ def test_rejects_list_clear_with_non_list_operand() -> None:
     )
 
     _assert_verification_error(module, "List clear expects list value, got int")
+
+
+def test_rejects_list_push_with_incompatible_value_type() -> None:
+    int_type = IntType()
+    double_type = DoubleType()
+    element = SSAValue("0", int_type)
+    list_value = SSAValue("1", ListType(int_type))
+    value = SSAValue("2", double_type)
+    module = SSAModule([SSAFunction("main", [], int_type, [SSABasicBlock("entry", [SSAConst(element, 1), SSAListNew(list_value, (element,)), SSAConst(value, 2.0), SSAListPush(list_value, value), SSAReturn(element)])])])
+
+    _assert_verification_error(module, "List push value type mismatch: expected int, got double")
 
 
 def test_verifies_if_else_with_phi() -> None:

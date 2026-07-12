@@ -22,6 +22,7 @@ from .model import (
     SSAListCopy,
     SSAListContains,
     SSAListClear,
+    SSAListPush,
     SSAListIndexOf,
     SSAListIsEmpty,
     SSAListLength,
@@ -124,6 +125,8 @@ class SSAPrinter:
             )
         if isinstance(instruction, SSAListClear):
             return f"list_clear {self._value(instruction.list_value)}"
+        if isinstance(instruction, SSAListPush):
+            return f"list_push {self._value(instruction.list_value)}, {self._value(instruction.value)}"
         if isinstance(instruction, SSAListReverse):
             return f"list_reverse {self._value(instruction.list_value)}"
         if isinstance(instruction, SSASequenceSort):

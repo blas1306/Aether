@@ -24,6 +24,7 @@ from .model import (
     IRListCopy,
     IRListContains,
     IRListClear,
+    IRListPush,
     IRListIndexOf,
     IRListIsEmpty,
     IRListLength,
@@ -235,6 +236,13 @@ class IRInterpreter:
             if not isinstance(list_value, list):
                 raise IRExecutionError("IR list_clear requires a list value")
             list_value.clear()
+            return False, None, None
+
+        if isinstance(instruction, IRListPush):
+            list_value = self._value(instruction.list_value, frame)
+            if not isinstance(list_value, list):
+                raise IRExecutionError("IR list_push requires a list value")
+            list_value.append(self._value(instruction.value, frame))
             return False, None, None
 
         if isinstance(instruction, IRListReverse):

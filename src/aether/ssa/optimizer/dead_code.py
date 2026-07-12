@@ -19,6 +19,7 @@ from aether.ssa.model import (
     SSAListCopy,
     SSAListContains,
     SSAListClear,
+    SSAListPush,
     SSAListIndexOf,
     SSAListIsEmpty,
     SSAListLength,
@@ -201,6 +202,11 @@ class SSADeadCodeEliminator:
 
         if isinstance(instruction, SSAListClear):
             used_values.add(instruction.list_value)
+            return
+
+        if isinstance(instruction, SSAListPush):
+            used_values.add(instruction.list_value)
+            used_values.add(instruction.value)
             return
 
         if isinstance(instruction, SSAListReverse):

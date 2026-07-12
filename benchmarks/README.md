@@ -41,6 +41,7 @@ remember that `Native build` invokes clang once per iteration.
 - `while_countdown.ae`: a longer countdown loop.
 - `array_sum.ae`: indexed `Array<int>` traversal.
 - `list_for_sum.ae`: `for` traversal over `List<int>`.
+- `list_push.ae`: 256 appends with internal result validation and no loop output.
 - `vector_dot.ae`: repeated row/column vector dot products.
 - `matrix_mul.ae`: repeated matrix multiplication and indexing.
 - `nested_loops.ae`: nested loop control flow.

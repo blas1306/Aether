@@ -41,6 +41,7 @@ from .model import (
     SSAListCopy,
     SSAListContains,
     SSAListClear,
+    SSAListPush,
     SSAListIndexOf,
     SSAListIsEmpty,
     SSAListLength,
@@ -299,6 +300,10 @@ class SSAVerifier:
 
             if isinstance(instruction, SSAListClear):
                 self._verify_list_clear(instruction, value_types)
+                continue
+
+            if isinstance(instruction, SSAListPush):
+                self._verify_list_push(instruction, value_types)
                 continue
 
             if isinstance(instruction, SSAListReverse):
@@ -1048,6 +1053,17 @@ class SSAVerifier:
         self._require_defined(instruction.list_value, value_types)
         if not isinstance(instruction.list_value.type, ListType):
             self._fail(f"List clear expects list value, got {instruction.list_value.type}")
+
+    def _verify_list_push(self, instruction: SSAListPush, value_types: dict[str, IRType]) -> None:
+        self._require_defined(instruction.list_value, value_types)
+        self._require_defined(instruction.value, value_types)
+        if not isinstance(instruction.list_value.type, ListType):
+            self._fail(f"List push expects list value, got {instruction.list_value.type}")
+        self._require_type(
+            instruction.value.type,
+            instruction.list_value.type.element,
+            "List push value type mismatch",
+        )
 
     def _verify_sequence_sort(self, instruction: SSASequenceSort, value_types: dict[str, IRType]) -> None:
         self._require_defined(instruction.sequence, value_types)

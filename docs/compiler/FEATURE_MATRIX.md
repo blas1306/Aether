@@ -42,7 +42,7 @@ Leyenda de `Spec`:
 | double | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Completa |
 | bool/boolean | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Completa |
 | string | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ✅ | ✅ documentada | Parcial backend |
-| List | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ✅ | ✅ documentada | Parcial backend fase 3b |
+| List | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ✅ | ✅ documentada | Parcial backend fase 4b |
 | Array | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ parcialmente documentada | Parcial backend |
 | Vector<Row> | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Completa con optimizer parcial |
 | Vector<Column> | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Completa con optimizer parcial |
@@ -57,11 +57,11 @@ Notas:
 
 - `string` baja como valor/literal/call/return/phi, pero LLVM no soporta
   operaciones string (`+`, comparaciones, impresion, length, indexing, runtime).
-- `List<T>` tiene backend fases 1, 2, 3a, `indexOf` de fase 3b y `clear` de fase 4a para literal con tipo esperado,
+- `List<T>` tiene backend fases 1, 2, 3a, `indexOf` de fase 3b, `clear` de fase 4a y `push`/growth de fase 4b para literal con tipo esperado,
   `.length`, `.is_empty`, `for x in xs` / `for T x in xs`, lectura indexada y
   asignacion indexada, `copy()`, `contains()`, `indexOf()`, `reverse()` y
-  `clear()`. Fuera de `clear`, no incluye cambios de longitud/capacidad,
-  crecimiento, `realloc`, ownership ni runtime dinamico completo. El backend
+  `clear()` y `push()`. No incluye `pop`, `insert`, `removeAt`, shrinking,
+  reserva publica, ownership general ni runtime dinamico completo. El backend
   no agrega bounds checks.
 - En el frontend/interprete, los agregados mutables (`List`, `Array`,
   `Vector`, `Matrix`) aliasan por asignacion, parametros y return cuando no hay
@@ -155,7 +155,7 @@ Notas:
 | List.copy | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 3a |
 | List.contains | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 3a |
 | List.indexOf | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 3b |
-| List.push | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
+| List.push | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 4b con growth interno |
 | List.pop | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
 | List.insert | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
 | List.removeAt / remove_at | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
@@ -182,10 +182,10 @@ Ambos contenedores comparten IR, politica de comparacion y helpers LLVM; solo
 difieren al extraer el puntero de datos y la longitud de sus cabeceras.
 
 El crecimiento y las mutaciones de longitud de `List<T>` tienen su
-contrato de implementacion futura en
+contrato de implementacion en
 [`AETHER_LIST_GROWTH_DESIGN.md`](../aether/AETHER_LIST_GROWTH_DESIGN.md). Las
-filas `push`, `pop`, `insert` y `removeAt` permanecen sin backend. `clear` es
-la unica operacion de Fase 4 implementada y conserva capacidad y buffer.
+filas `pop`, `insert` y `removeAt` permanecen sin backend. `clear` conserva
+capacidad y buffer; `push` implementa reserve/growth interno y preserva header.
 
 ## Algebra lineal
 

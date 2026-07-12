@@ -4,9 +4,10 @@
 
 Este documento define el contrato de crecimiento dinamico de `List<T>` y la
 semantica de `push`, `pop`, `insert`, `removeAt`/`remove_at` y `clear`.
-La Fase 4a, unicamente `clear`, esta implementada en frontend, interpretes,
-IR, SSA, optimizadores y LLVM. `push`, `pop`, `insert`, `removeAt`, reserva,
-growth, realloc, shrinking y gestion de memoria permanecen como diseno futuro.
+Las Fases 4a (`clear`) y 4b (`push` y reserve/growth interno) estan
+implementadas en frontend, interpretes, IR, SSA, optimizadores y LLVM. `pop`,
+`insert`, `removeAt`, shrinking, reserva publica y gestion general de memoria
+permanecen como diseno futuro.
 
 El contrato publico de listas ya definido en
 [`AETHER_V0_SPEC.md`](AETHER_V0_SPEC.md), las reglas generales de aliasing de
@@ -235,6 +236,15 @@ mismo contrato. Todos los indices son 0-based.
 
 ### `push(value) -> void`
 
+Estado Fase 4b: implementado mediante `IRListPush` y `SSAListPush`, ambas sin
+resultado y side-effecting. LLVM valida `length + 1`, llama al helper interno
+`aether_list_reserve(list, required_capacity, element_size)`, vuelve a cargar
+`data`, escribe el nuevo elemento y publica `length` al final. El helper usa
+exactamente `0 -> 1` o duplicacion y `max(required, grown)`, valida overflow de
+duplicacion y tamaños en bytes, y termina con panic claro ante overflow u OOM.
+Tras reservar y copiar con exito libera el buffer anterior, actualiza `data` y
+`capacity` en el mismo header y conserva shallow-copy para referencias.
+
 1. Evaluar `value` y materializar una representacion estable asignable a `T`.
 2. Validar `required_length = length + 1`.
 3. Crecer si `required_length > capacity`.
@@ -422,7 +432,7 @@ La Fase 4 se divide asi:
 
 1. **Fase 4a: `clear` (implementada).** Valida una mutacion de `length`, const,
    aliases y efectos IR sin allocation ni movimientos.
-2. **Fase 4b: `reserve`/growth interno y `push`.** Establece overflow,
+2. **Fase 4b: `reserve`/growth interno y `push` (implementada).** Establece overflow,
    allocation, commit del header y crecimiento amortizado con el caso de shift
    mas simple: ninguno.
 3. **Fase 4c: `pop`.** Agrega error de lista vacia y resultado tipado sin

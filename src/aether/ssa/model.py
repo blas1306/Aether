@@ -94,6 +94,12 @@ class SSAListClear(SSAInstruction):
 
 
 @dataclass(frozen=True)
+class SSAListPush(SSAInstruction):
+    list_value: SSAValue
+    value: SSAValue
+
+
+@dataclass(frozen=True)
 class SSAListReverse(SSAInstruction):
     list_value: SSAValue
 
