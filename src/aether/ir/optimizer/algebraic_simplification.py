@@ -24,6 +24,7 @@ from aether.ir.model import (
     IRListPop,
     IRListPush,
     IRListInsert,
+    IRListRemoveAt,
     IRListIndexOf,
     IRListIsEmpty,
     IRListLength,
@@ -399,6 +400,12 @@ class AlgebraicSimplifier:
             )
         if isinstance(instruction, IRListPop):
             return replace(instruction, list_value=self._resolve(instruction.list_value, replacements))
+        if isinstance(instruction, IRListRemoveAt):
+            return replace(
+                instruction,
+                list_value=self._resolve(instruction.list_value, replacements),
+                index=self._resolve(instruction.index, replacements),
+            )
         if isinstance(instruction, IRListReverse):
             return replace(instruction, list_value=self._resolve(instruction.list_value, replacements))
         if isinstance(instruction, IRSequenceSort):

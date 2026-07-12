@@ -44,6 +44,7 @@ from .model import (
     SSAListPop,
     SSAListPush,
     SSAListInsert,
+    SSAListRemoveAt,
     SSAListIndexOf,
     SSAListIsEmpty,
     SSAListLength,
@@ -314,6 +315,10 @@ class SSAVerifier:
 
             if isinstance(instruction, SSAListPop):
                 self._verify_list_pop(instruction, value_types)
+                continue
+
+            if isinstance(instruction, SSAListRemoveAt):
+                self._verify_list_remove_at(instruction, value_types)
                 continue
 
             if isinstance(instruction, SSAListReverse):
@@ -1099,6 +1104,19 @@ class SSAVerifier:
             "List pop result type mismatch",
         )
 
+    def _verify_list_remove_at(self, instruction: SSAListRemoveAt, value_types: dict[str, IRType]) -> None:
+        self._require_defined(instruction.list_value, value_types)
+        self._require_defined(instruction.index, value_types)
+        if not isinstance(instruction.list_value.type, ListType):
+            self._fail(f"List remove_at expects list value, got {instruction.list_value.type}")
+        if not isinstance(instruction.index.type, IntType):
+            self._fail(f"List remove_at index must be int, got {instruction.index.type}")
+        self._require_type(
+            instruction.result.type,
+            instruction.list_value.type.element,
+            "List remove_at result type mismatch",
+        )
+
     def _verify_sequence_sort(self, instruction: SSASequenceSort, value_types: dict[str, IRType]) -> None:
         self._require_defined(instruction.sequence, value_types)
         if not isinstance(instruction.sequence.type, (ArrayType, ListType)):
@@ -1384,6 +1402,7 @@ class SSAVerifier:
                 SSAListContains,
                 SSAListIndexOf,
                 SSAListPop,
+                SSAListRemoveAt,
                 SSAVectorGet,
                 SSAMatrixGet,
                 SSAArrayLength,

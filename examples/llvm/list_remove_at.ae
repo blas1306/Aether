@@ -1,0 +1,5 @@
+int main() {
+    List<int> xs = {10, 20, 30};
+    int removed = xs.removeAt(1);
+    return removed + xs.length * 10 + xs[1];
+}

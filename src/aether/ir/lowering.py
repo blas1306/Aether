@@ -35,6 +35,7 @@ from .model import (
     IRListPop,
     IRListPush,
     IRListInsert,
+    IRListRemoveAt,
     IRListIndexOf,
     IRListIsEmpty,
     IRListLength,
@@ -365,7 +366,9 @@ class IRLowerer:
         if isinstance(statement, ast.ExpressionStatement):
             expression = statement.expression
             if isinstance(expression, ast.CallExpression) and (
-                expression.callee == "pop" or expression.callee.endswith(".pop")
+                expression.callee in {"pop", "remove_at"}
+                or expression.callee.endswith(".pop")
+                or expression.callee.endswith(".removeAt")
             ):
                 self._lower_call(expression, context)
                 return
@@ -1244,7 +1247,7 @@ class IRLowerer:
             self._unsupported(call, "keyword arguments")
         method_name = call.callee.rsplit(".", 1)[-1]
         arguments = call.arguments
-        if "." in call.callee and method_name in {"copy", "contains", "indexOf", "pop"}:
+        if "." in call.callee and method_name in {"copy", "contains", "indexOf", "pop", "removeAt"}:
             receiver = call.callee.rsplit(".", 1)[0]
             arguments = [ast.Identifier(receiver, call.line, call.column), *arguments]
         if method_name == "copy" and len(arguments) == 1:
@@ -1286,6 +1289,14 @@ class IRLowerer:
             if isinstance(list_value.type, ListType):
                 result = context.temporary(list_value.type.element)
                 context.block.instructions.append(IRListPop(result, list_value))
+                return result
+        if method_name in {"removeAt", "remove_at"} and len(arguments) == 2:
+            list_value = self._lower_expression(arguments[0], context)
+            if isinstance(list_value.type, ListType):
+                index = self._lower_expression(arguments[1], context)
+                self._require_same_type(index.type, IntType(), "removeAt index must be int")
+                result = context.temporary(list_value.type.element)
+                context.block.instructions.append(IRListRemoveAt(result, list_value, index))
                 return result
         if call.callee in _CAST_BUILTINS:
             return self._lower_cast(call, context)

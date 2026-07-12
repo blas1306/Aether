@@ -20,6 +20,7 @@ from aether.ssa import (
     SSAListPop,
     SSAListPush,
     SSAListInsert,
+    SSAListRemoveAt,
     SSAListSet,
     SSAMatrixNew,
     SSAModule,
@@ -129,6 +130,17 @@ def test_rejects_list_pop_with_incompatible_result_type() -> None:
     module = SSAModule([SSAFunction("main", [], int_type, [SSABasicBlock("entry", [SSAConst(element, 1), SSAListNew(list_value, (element,)), SSAListPop(result, list_value), SSAReturn(element)])])])
 
     _assert_verification_error(module, "List pop result type mismatch: expected int, got double")
+
+
+def test_rejects_list_remove_at_with_non_int_index() -> None:
+    int_type = IntType()
+    element = SSAValue("0", int_type)
+    list_value = SSAValue("1", ListType(int_type))
+    index = SSAValue("2", DoubleType())
+    result = SSAValue("3", int_type)
+    module = SSAModule([SSAFunction("main", [], int_type, [SSABasicBlock("entry", [SSAConst(element, 1), SSAListNew(list_value, (element,)), SSAConst(index, 0.0), SSAListRemoveAt(result, list_value, index), SSAReturn(result)])])])
+
+    _assert_verification_error(module, "List remove_at index must be int, got double")
 
 
 def test_verifies_if_else_with_phi() -> None:

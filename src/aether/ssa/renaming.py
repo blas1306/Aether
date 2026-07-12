@@ -27,6 +27,7 @@ from aether.ir.model import (
     IRListPop,
     IRListPush,
     IRListInsert,
+    IRListRemoveAt,
     IRListIndexOf,
     IRListIsEmpty,
     IRListLength,
@@ -83,6 +84,7 @@ from .model import (
     SSAListPop,
     SSAListPush,
     SSAListInsert,
+    SSAListRemoveAt,
     SSAListIndexOf,
     SSAListIsEmpty,
     SSAListLength,
@@ -340,6 +342,13 @@ class SSARenamer:
             list_value = self._resolve_value(instruction.list_value)
             self._bind_value(result.name, result, bound_values)
             return SSAListPop(result, list_value)
+
+        if isinstance(instruction, IRListRemoveAt):
+            result = self._define_value(instruction.result)
+            list_value = self._resolve_value(instruction.list_value)
+            index = self._resolve_value(instruction.index)
+            self._bind_value(result.name, result, bound_values)
+            return SSAListRemoveAt(result, list_value, index)
 
         if isinstance(instruction, IRListReverse):
             return SSAListReverse(self._resolve_value(instruction.list_value))

@@ -37,6 +37,7 @@ EXPECTED_EXIT_CODES = {
     "list_literal.ae": 3,
     "list_pop.ae": 51,
     "list_pop_alias.ae": 32,
+    "list_remove_at.ae": 70,
     "list_push.ae": 20,
     "list_push_alias.ae": 3,
     "list_reverse.ae": 41,

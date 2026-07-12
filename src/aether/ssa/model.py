@@ -107,6 +107,13 @@ class SSAListInsert(SSAInstruction):
 
 
 @dataclass(frozen=True)
+class SSAListRemoveAt(SSAInstruction):
+    result: SSAValue
+    list_value: SSAValue
+    index: SSAValue
+
+
+@dataclass(frozen=True)
 class SSAListPop(SSAInstruction):
     result: SSAValue
     list_value: SSAValue

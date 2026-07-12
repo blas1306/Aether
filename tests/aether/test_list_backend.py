@@ -16,6 +16,7 @@ from aether.ir import (
     IRListPop,
     IRListPush,
     IRListInsert,
+    IRListRemoveAt,
     IRListIndexOf,
     IRListCopy,
     IRListGet,
@@ -37,6 +38,7 @@ from aether.ssa import (
     SSAListPop,
     SSAListPush,
     SSAListInsert,
+    SSAListRemoveAt,
     SSAListIndexOf,
     SSAListCopy,
     SSAListIsEmpty,
@@ -858,6 +860,103 @@ def test_list_insert_emit_llvm_and_clang(tmp_path) -> None:
     assert stderr.getvalue() == ""
     if shutil.which("clang") is not None:
         assert LLVMRunner().run(_typed(source)) == 60
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("int main(){ List<int> xs={7}; int r=xs.removeAt(0); return r+xs.length; }", 7),
+        ("int main(){ List<int> xs={10,20,30}; int r=xs.removeAt(0); return r+xs[0]+xs[1]+xs.length; }", 62),
+        ("int main(){ List<int> xs={10,20,30,40}; int r=xs.removeAt(2); return r+xs[2]+xs.length; }", 73),
+        ("int main(){ List<int> xs={10,20,30}; int r=remove_at(xs,2); return r+xs.length; }", 32),
+        ("int main(){ List<double> xs={1.5,2.5}; double r=xs.removeAt(0); return int(r*10.0)+xs.length; }", 16),
+        ("int main(){ List<boolean> xs={false,true}; boolean r=xs.removeAt(1); if(r){return xs.length;} return 0; }", 1),
+        ('int main(){ List<string> xs={"a","b"}; string r=xs.removeAt(0); return xs.length; }', 1),
+        ("int main(){ List<List<int>> xs={}; List<int> inner={1}; xs.push(inner); List<int> r=xs.removeAt(0); r.push(2); return inner.length; }", 2),
+        ("int main(){ List<int> xs={1,3}; xs.insert(1,2); xs.removeAt(1); xs.push(4); xs.pop(); return xs.length*10+xs[1]; }", 23),
+        ("int main(){ List<int> xs={3,1,2}; xs.sort(); xs.reverse(); xs.removeAt(1); return xs[0]*10+xs[1]; }", 31),
+        ("int main(){ List<int> xs={1,2,3}; xs.removeAt(0); xs.removeAt(0); xs.removeAt(0); return xs.length; }", 0),
+    ],
+)
+def test_list_remove_at_runtime_semantics(source: str, expected: int) -> None:
+    typed = _typed(source)
+    assert IRInterpreter(_lower(source)).call("main") == expected
+    if shutil.which("clang") is not None:
+        assert LLVMRunner().run(typed) == expected % 256
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "int main(){ List<int> a={1,2,3}; List<int> b=a; int r=b.removeAt(1); return a.length*10+a[1]; }",
+        "int drop(List<int> xs){return xs.removeAt(1);} int main(){List<int> a={1,2,3}; int r=drop(a); return a.length*10+a[1];}",
+        "List<int> identity(List<int> xs){return xs;} int main(){List<int> a={1,2,3}; List<int> b=identity(a); int r=b.removeAt(1); return a.length*10+a[1];}",
+    ],
+)
+def test_list_remove_at_is_observed_through_aliases(source: str) -> None:
+    typed = _typed(source)
+    assert IRInterpreter(_lower(source)).call("main") == 23
+    if shutil.which("clang") is not None:
+        assert LLVMRunner().run(typed) == 23
+
+
+def test_list_remove_at_typing_arity_and_const() -> None:
+    with pytest.raises(AetherTypeError, match="Cannot mutate constant 'xs'"):
+        _typed("int main(){ const List<int> xs={1}; int r=xs.removeAt(0); return r; }")
+    with pytest.raises(AetherTypeError, match="index must be int"):
+        _typed('int main(){ List<int> xs={1}; int r=xs.removeAt("0"); return r; }')
+    with pytest.raises(AetherTypeError, match="expects exactly two arguments"):
+        _typed("int main(){ List<int> xs={1}; int r=xs.removeAt(); return r; }")
+
+
+def test_list_remove_at_lowers_prints_interprets_and_verifies_ir_and_ssa() -> None:
+    source = "int main(){ List<int> xs={1,2,3}; int r=xs.removeAt(1); return r+xs.length; }"
+    ir = IRVerifier(_lower(source)).verify()
+    ssa = SSAVerifier(_ssa(source)).verify()
+
+    assert any(isinstance(item, IRListRemoveAt) for item in _instructions(ir))
+    assert any(isinstance(item, SSAListRemoveAt) for item in _instructions(ssa))
+    assert "list_remove_at" in print_ir(ir)
+    assert "list_remove_at" in print_ssa(ssa)
+    assert IRInterpreter(ir).call("main") == 4
+
+
+def test_optimizers_preserve_remove_at_when_result_is_unused() -> None:
+    source = "int main(){ List<int> xs={1,2,3}; xs.removeAt(1); return xs.length*10+xs[1]; }"
+    optimized_ir = OptimizerPipeline().run(_lower(source))
+    optimized_ssa = SSAOptimizerPipeline().run(_ssa(source))
+
+    assert any(isinstance(item, IRListRemoveAt) for item in _instructions(optimized_ir))
+    assert any(isinstance(item, SSAListRemoveAt) for item in _instructions(optimized_ssa))
+    assert IRInterpreter(optimized_ir).call("main") == 23
+
+
+@pytest.mark.parametrize("index", [-1, 0, 2, 3])
+def test_list_remove_at_invalid_index_panics(index: int) -> None:
+    values = "" if index == 0 else "1,2"
+    source = f"int main(){{ List<int> xs={{{values}}}; xs.removeAt({index}); return xs.length; }}"
+    with pytest.raises(IRExecutionError, match=r"index .* out of bounds for List of length"):
+        IRInterpreter(_lower(source)).call("main")
+
+    if shutil.which("clang") is not None:
+        stdout = StringIO()
+        assert LLVMRunner().run(_typed(source), stdout=stdout) == 1
+        assert stdout.getvalue() == "Aether panic: removeAt() index is out of bounds\n"
+
+
+def test_list_remove_at_llvm_validates_moves_and_updates_length_last() -> None:
+    llvm = print_llvm(_ssa("int main(){ List<int> xs={1,2,3}; return xs.removeAt(1); }"))
+
+    assert "define private i64 @aether_list_prepare_remove_at" in llvm
+    assert "%within_length = icmp ult i64 %index, %length" in llvm
+    assert "@llvm.umul.with.overflow.i64" in llvm
+    assert "@llvm.memmove.p0.p0.i64" in llvm
+    assert "@aether_list_reserve" not in llvm
+    call_index = llvm.index("call i64 @aether_list_prepare_remove_at")
+    result_index = llvm.index("load i32, ptr %list.remove_at.removed", call_index)
+    move_index = llvm.index("call void @llvm.memmove", result_index)
+    length_index = llvm.index("store i64 %list.remove_at.new_length", move_index)
+    assert call_index < result_index < move_index < length_index
 
 
 @pytest.mark.parametrize(

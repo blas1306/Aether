@@ -4,10 +4,10 @@
 
 Este documento define el contrato de crecimiento dinamico de `List<T>` y la
 semantica de `push`, `pop`, `insert`, `removeAt`/`remove_at` y `clear`.
-Las Fases 4a (`clear`), 4b (`push` y reserve/growth interno) y 4c (`pop`) estan
-implementadas en frontend, interpretes, IR, SSA, optimizadores y LLVM.
-`insert`, `removeAt`, shrinking, reserva publica y gestion general de memoria
-permanecen como diseno futuro.
+Las Fases 4a (`clear`), 4b (`push` y reserve/growth interno), 4c (`pop`), 4d
+(`insert`) y 4e (`removeAt`) estan implementadas en frontend, interpretes, IR,
+SSA, optimizadores y LLVM. Shrinking, reserva publica y gestion general de
+memoria permanecen como diseno futuro.
 
 El contrato publico de listas ya definido en
 [`AETHER_V0_SPEC.md`](AETHER_V0_SPEC.md), las reglas generales de aliasing de
@@ -455,10 +455,10 @@ La Fase 4 se divide asi:
    mas simple: ninguno.
 3. **Fase 4c: `pop` (implementada).** Agrega error de lista vacia y resultado tipado sin
    requerir allocation ni memmove.
-4. **Fase 4d: `insert`.** Reutiliza growth y agrega bounds inclusivos y shift a
-   la derecha solapado.
-5. **Fase 4e: `removeAt`.** Reutiliza el resultado tipado de `pop` y los checks
-   de indice, y agrega shift a la izquierda solapado.
+4. **Fase 4d: `insert` (implementada).** Reutiliza growth y agrega bounds
+   inclusivos y shift a la derecha solapado.
+5. **Fase 4e: `removeAt` (implementada).** Reutiliza el resultado tipado de
+   `pop` y los checks de indice, y agrega shift a la izquierda solapado.
 
 Este orden reduce variables nuevas por fase y deja `removeAt`, la combinacion
 de retorno, bounds y memmove, para cuando esas piezas ya fueron probadas por

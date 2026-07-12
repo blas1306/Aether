@@ -28,6 +28,7 @@ LLVM_EXAMPLES = (
     Path("examples/llvm/list_clear.ae"),
     Path("examples/llvm/list_insert.ae"),
     Path("examples/llvm/list_push.ae"),
+    Path("examples/llvm/list_remove_at.ae"),
     Path("examples/llvm/vector_dot.ae"),
 )
 

@@ -119,6 +119,13 @@ class IRListInsert(IRInstruction):
 
 
 @dataclass(frozen=True)
+class IRListRemoveAt(IRInstruction):
+    result: IRValue
+    list_value: IRValue
+    index: IRValue
+
+
+@dataclass(frozen=True)
 class IRListPop(IRInstruction):
     result: IRValue
     list_value: IRValue

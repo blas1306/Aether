@@ -42,7 +42,7 @@ Leyenda de `Spec`:
 | double | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Completa |
 | bool/boolean | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Completa |
 | string | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ✅ | ✅ documentada | Parcial backend |
-| List | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ✅ | ✅ documentada | Parcial backend fase 4b |
+| List | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ✅ | ✅ documentada | Parcial backend fase 4e |
 | Array | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ parcialmente documentada | Parcial backend |
 | Vector<Row> | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Completa con optimizer parcial |
 | Vector<Column> | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Completa con optimizer parcial |
@@ -57,12 +57,13 @@ Notas:
 
 - `string` baja como valor/literal/call/return/phi, pero LLVM no soporta
   operaciones string (`+`, comparaciones, impresion, length, indexing, runtime).
-- `List<T>` tiene backend fases 1, 2, 3a, `indexOf` de fase 3b, `clear` de fase 4a, `push`/growth de fase 4b, `pop` de fase 4c e `insert` de fase 4d para literal con tipo esperado,
+- `List<T>` tiene backend fases 1, 2, 3a, `indexOf` de fase 3b, `clear` de fase 4a, `push`/growth de fase 4b, `pop` de fase 4c, `insert` de fase 4d y `removeAt` de fase 4e para literal con tipo esperado,
   `.length`, `.is_empty`, `for x in xs` / `for T x in xs`, lectura indexada y
   asignacion indexada, `copy()`, `contains()`, `indexOf()`, `reverse()` y
-  `clear()`, `push()`, `pop()` e `insert()`. No incluye `removeAt`, shrinking,
+  `clear()`, `push()`, `pop()`, `insert()` y `removeAt()`. No incluye shrinking,
   reserva publica, ownership general ni runtime dinamico completo. El backend
-  no agrega bounds checks.
+  no agrega bounds checks generales para lectura/escritura indexada; las
+  mutaciones de longitud validan sus indices antes de modificar la lista.
 - En el frontend/interprete, los agregados mutables (`List`, `Array`,
   `Vector`, `Matrix`) aliasan por asignacion, parametros y return cuando no hay
   conversion de elementos; `copy()` crea el contenedor independiente explicito.
@@ -158,7 +159,7 @@ Notas:
 | List.push | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 4b con growth interno |
 | List.pop | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 4c |
 | List.insert | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 4d |
-| List.removeAt / remove_at | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
+| List.removeAt / remove_at | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 4e sin shrinking |
 | List.clear | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 4a |
 | List.reverse | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 3a |
 | List.sort | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado con `IRSequenceSort` y helper estable compartido |

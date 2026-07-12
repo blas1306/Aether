@@ -27,6 +27,7 @@ from .model import (
     IRListPop,
     IRListPush,
     IRListInsert,
+    IRListRemoveAt,
     IRListIndexOf,
     IRListIsEmpty,
     IRListLength,
@@ -269,6 +270,20 @@ class IRInterpreter:
             if not list_value:
                 raise IRExecutionError("pop() cannot be used on an empty List")
             frame.values[instruction.result] = list_value.pop()
+            return False, None, None
+
+        if isinstance(instruction, IRListRemoveAt):
+            list_value = self._value(instruction.list_value, frame)
+            if not isinstance(list_value, list):
+                raise IRExecutionError("IR list_remove_at requires a list value")
+            index = self._value(instruction.index, frame)
+            if not isinstance(index, int) or isinstance(index, bool):
+                raise IRExecutionError("IR list_remove_at requires an int index")
+            if index < 0 or index >= len(list_value):
+                raise IRExecutionError(
+                    f"index {index} out of bounds for List of length {len(list_value)}"
+                )
+            frame.values[instruction.result] = list_value.pop(index)
             return False, None, None
 
         if isinstance(instruction, IRListReverse):
