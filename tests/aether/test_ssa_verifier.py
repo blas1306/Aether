@@ -17,6 +17,7 @@ from aether.ssa import (
     SSAJump,
     SSAListNew,
     SSAListClear,
+    SSAListPop,
     SSAListPush,
     SSAListSet,
     SSAMatrixNew,
@@ -107,6 +108,16 @@ def test_rejects_list_push_with_incompatible_value_type() -> None:
     module = SSAModule([SSAFunction("main", [], int_type, [SSABasicBlock("entry", [SSAConst(element, 1), SSAListNew(list_value, (element,)), SSAConst(value, 2.0), SSAListPush(list_value, value), SSAReturn(element)])])])
 
     _assert_verification_error(module, "List push value type mismatch: expected int, got double")
+
+
+def test_rejects_list_pop_with_incompatible_result_type() -> None:
+    int_type = IntType()
+    element = SSAValue("0", int_type)
+    list_value = SSAValue("1", ListType(int_type))
+    result = SSAValue("2", DoubleType())
+    module = SSAModule([SSAFunction("main", [], int_type, [SSABasicBlock("entry", [SSAConst(element, 1), SSAListNew(list_value, (element,)), SSAListPop(result, list_value), SSAReturn(element)])])])
+
+    _assert_verification_error(module, "List pop result type mismatch: expected int, got double")
 
 
 def test_verifies_if_else_with_phi() -> None:

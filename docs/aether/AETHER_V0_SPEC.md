@@ -1294,12 +1294,14 @@ brace literals is documented in
 The LLVM capacity, growth, allocation, and shrinking policy for
 length-changing `List<T>` operations is documented in
 [`AETHER_LIST_GROWTH_DESIGN.md`](AETHER_LIST_GROWTH_DESIGN.md). That document
-marks `clear` and `push` as implemented in the backend. `clear` sets the shared
+marks `clear`, `push`, and `pop` as implemented in the backend. `clear` sets the shared
 header's length to zero in O(1), preserves capacity and data, and performs no
 deallocation or recursive destruction. `push` appends in amortized O(1), grows
 capacity geometrically when required, may replace the owned data buffer, and
 preserves the shared header so aliases observe the new length and element.
-`pop`, `insert`, and `removeAt` remain frontend-only.
+`pop` removes and returns the last element in O(1), panics on an empty list,
+and preserves header, capacity, and data; its now-out-of-range slot is logically
+dead and is not cleared. `insert` and `removeAt` remain frontend-only.
 
 The detailed future contract shared by `List<T>.sort()` and
 `Array<T>.sort()` is documented in

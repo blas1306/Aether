@@ -4,8 +4,8 @@
 
 Este documento define el contrato de crecimiento dinamico de `List<T>` y la
 semantica de `push`, `pop`, `insert`, `removeAt`/`remove_at` y `clear`.
-Las Fases 4a (`clear`) y 4b (`push` y reserve/growth interno) estan
-implementadas en frontend, interpretes, IR, SSA, optimizadores y LLVM. `pop`,
+Las Fases 4a (`clear`), 4b (`push` y reserve/growth interno) y 4c (`pop`) estan
+implementadas en frontend, interpretes, IR, SSA, optimizadores y LLVM.
 `insert`, `removeAt`, shrinking, reserva publica y gestion general de memoria
 permanecen como diseno futuro.
 
@@ -256,9 +256,19 @@ Agrega al final, conserva la identidad del header y puede cambiar `data` y
 
 ### `pop() -> T`
 
+Estado Fase 4c: implementado mediante `IRListPop(result, list)` y
+`SSAListPop(result, list)`, ambas side-effecting y con resultado `T`.
 Requiere `length > 0`; una lista vacia produce error runtime. Captura el valor
 de `data[length - 1]`, publica `length - 1` y devuelve el valor capturado. No
 reduce capacidad ni libera el buffer. Su costo es `O(1)`.
+
+El orden seguro es cargar `length`, comprobar cero, calcular `new_length`,
+cargar `data[new_length]`, escribir `length = new_length` y devolver la carga.
+La lectura ocurre antes de reducir la longitud y antes de cualquier posible
+underflow. `capacity`, `data` y la identidad del header no cambian. El slot en
+`data[new_length]` queda logicamente muerto fuera de `[0, length)` y no se
+limpia mientras no exista una politica de GC. Para reference-types se devuelve
+el mismo handle almacenado, sin deep copy ni destruccion recursiva.
 
 La decision normativa es devolver `T`, consistente con el frontend y la spec
 actuales y util para consumir el elemento retirado. Aunque el resultado no se
@@ -360,7 +370,7 @@ Helpers base candidatos:
 ```text
 aether_list_reserve(list, element_size, required_length) -> void
 aether_list_push(list, element_size, value_ptr) -> void
-aether_list_pop(list, element_size, out_ptr) -> void
+aether_list_prepare_pop(list) -> new_length
 aether_list_insert(list, element_size, index, value_ptr) -> void
 aether_list_remove_at(list, element_size, index, out_ptr) -> void
 aether_list_clear(list) -> void
@@ -368,8 +378,10 @@ aether_list_clear(list) -> void
 
 Tambien son compartibles los checks de overflow/bounds y el helper de panic.
 `reserve`, `clear` y los movimientos de bytes no dependen semanticamente de
-`T`; reciben `element_size` donde corresponde. `push` e `insert` pueden usar
-un `value_ptr` estable, y `pop`/`remove_at` un `out_ptr`, lo que permite una
+`T`; reciben `element_size` donde corresponde. La implementacion actual de
+`pop` usa `aether_list_prepare_pop` solo para comprobar vacio y calcular el
+indice; LLVM carga el valor tipado y despues publica la nueva longitud inline.
+`push` e `insert` pueden usar un `value_ptr` estable, y `remove_at` un `out_ptr`, lo que permite una
 implementacion generica con `memcpy` para un elemento y `memmove` para rangos
 solapados.
 
@@ -435,7 +447,7 @@ La Fase 4 se divide asi:
 2. **Fase 4b: `reserve`/growth interno y `push` (implementada).** Establece overflow,
    allocation, commit del header y crecimiento amortizado con el caso de shift
    mas simple: ninguno.
-3. **Fase 4c: `pop`.** Agrega error de lista vacia y resultado tipado sin
+3. **Fase 4c: `pop` (implementada).** Agrega error de lista vacia y resultado tipado sin
    requerir allocation ni memmove.
 4. **Fase 4d: `insert`.** Reutiliza growth y agrega bounds inclusivos y shift a
    la derecha solapado.

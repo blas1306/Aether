@@ -1,0 +1,10 @@
+int pop_last(List<int> xs) {
+    return xs.pop();
+}
+
+int main() {
+    List<int> a = {1, 2, 3};
+    List<int> b = a;
+    int value = pop_last(b);
+    return value * 10 + a.length;
+}

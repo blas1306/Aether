@@ -10,8 +10,10 @@ from aether.cli import EXIT_SUCCESS, main
 from aether.errors import AetherTypeError
 from aether.ir import (
     IRInterpreter,
+    IRExecutionError,
     IRListContains,
     IRListClear,
+    IRListPop,
     IRListPush,
     IRListIndexOf,
     IRListCopy,
@@ -31,6 +33,7 @@ from aether.ssa import (
     SSAListGet,
     SSAListContains,
     SSAListClear,
+    SSAListPop,
     SSAListPush,
     SSAListIndexOf,
     SSAListCopy,
@@ -731,3 +734,121 @@ def test_list_push_llvm_contains_checked_growth_and_reloads_data() -> None:
     assert "Aether panic: memory allocation failed" in llvm
     assert "%failed = icmp eq ptr %mem, null" in llvm
     assert "br i1 %failed, label %panic, label %ok" in llvm
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("int main(){ List<int> xs={7}; int x=xs.pop(); if(xs.is_empty){return x;} return 0; }", 7),
+        ("int main(){ List<int> xs={10,20,30}; int x=xs.pop(); return x+xs.length; }", 32),
+        ("int main(){ List<int> xs={1,2,3}; return xs.pop()*100+xs.pop()*10+xs.pop(); }", 321),
+        ("int main(){ List<int> xs={}; xs.push(8); int x=xs.pop(); return x+xs.length; }", 8),
+        ("int main(){ List<int> xs={3,1,2}; xs.sort(); xs.reverse(); int x=xs.pop(); return x*10+xs.length; }", 12),
+        ("int main(){ List<int> xs={1,2,3}; int ignored=xs.pop(); int sum=0; for int x in xs {sum=sum+x;} return sum; }", 3),
+        ("int main(){ List<double> xs={1.5,2.5}; double x=xs.pop(); return int(x*10.0)+xs.length; }", 26),
+        ("int main(){ List<boolean> xs={false,true}; boolean x=xs.pop(); if(x){return xs.length+5;} return 0; }", 6),
+        ('int main(){ List<string> xs={"a","last"}; string x=xs.pop(); return xs.length; }', 1),
+        ("int main(){ List<List<int>> refs={}; List<int> inner={1}; refs.push(inner); List<int> popped=refs.pop(); popped.push(2); return inner.length; }", 2),
+    ],
+)
+def test_list_pop_runtime_semantics(source: str, expected: int) -> None:
+    typed = _typed(source)
+    assert IRInterpreter(_lower(source)).call("main") == expected
+    if shutil.which("clang") is not None:
+        assert LLVMRunner().run(typed) == expected % 256
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "int main(){ List<int> a={1,2,3}; List<int> b=a; int x=b.pop(); return x*10+a.length; }",
+        "int take(List<int> xs){return xs.pop();} int main(){List<int> a={1,2,3}; int x=take(a); return x*10+a.length;}",
+        "List<int> identity(List<int> xs){return xs;} int main(){List<int> a={1,2,3}; List<int> b=identity(a); int x=b.pop(); return x*10+a.length;}",
+    ],
+)
+def test_list_pop_is_observed_through_aliases(source: str) -> None:
+    typed = _typed(source)
+    assert IRInterpreter(_lower(source)).call("main") == 32
+    if shutil.which("clang") is not None:
+        assert LLVMRunner().run(typed) == 32
+
+
+def test_list_pop_typing_arity_and_const_receiver() -> None:
+    with pytest.raises(AetherTypeError, match="Cannot mutate constant 'xs'"):
+        _typed("int main(){ const List<int> xs={1}; return xs.pop(); }")
+    with pytest.raises(AetherTypeError, match="expects exactly one argument"):
+        _typed("int main(){ List<int> xs={1}; return xs.pop(2); }")
+    assert _typed("int main(){ List<int> xs={1}; return xs.pop(); }")
+
+
+def test_list_pop_lowers_prints_interprets_and_verifies_ir_and_ssa() -> None:
+    source = "int main(){ List<int> xs={1,2,3}; int x=xs.pop(); return x+xs.length; }"
+    ir = IRVerifier(_lower(source)).verify()
+    ssa = SSAVerifier(_ssa(source)).verify()
+
+    assert any(isinstance(item, IRListPop) for item in _instructions(ir))
+    assert any(isinstance(item, SSAListPop) for item in _instructions(ssa))
+    assert "list_pop" in print_ir(ir)
+    assert "list_pop" in print_ssa(ssa)
+    assert IRInterpreter(ir).call("main") == 5
+
+
+def test_list_pop_empty_panics_in_ast_ir_and_llvm() -> None:
+    source = "int main(){ List<int> xs={}; return xs.pop(); }"
+    with pytest.raises(IRExecutionError, match=r"pop\(\) cannot be used on an empty List"):
+        IRInterpreter(_lower(source)).call("main")
+
+    if shutil.which("clang") is not None:
+        stdout = StringIO()
+        assert LLVMRunner().run(_typed(source), stdout=stdout) == 1
+        assert stdout.getvalue() == "Aether panic: pop() cannot be used on an empty List\n"
+
+
+def test_list_pop_after_clear_panics() -> None:
+    source = "int main(){ List<int> xs={1}; xs.clear(); return xs.pop(); }"
+    with pytest.raises(IRExecutionError, match="empty List"):
+        IRInterpreter(_lower(source)).call("main")
+
+
+def test_optimizers_keep_unused_list_pop_and_following_length_read() -> None:
+    source = "int main(){ List<int> xs={1,2,3}; xs.pop(); return xs.length; }"
+    optimized_ir = OptimizerPipeline().run(_lower(source))
+    optimized_ssa = SSAOptimizerPipeline().run(_ssa(source))
+
+    assert any(isinstance(item, IRListPop) for item in _instructions(optimized_ir))
+    assert any(isinstance(item, SSAListPop) for item in _instructions(optimized_ssa))
+    assert any(isinstance(item, IRListLength) for item in _instructions(optimized_ir))
+    assert any(isinstance(item, SSAListLength) for item in _instructions(optimized_ssa))
+    assert IRInterpreter(optimized_ir).call("main") == 2
+
+
+def test_list_pop_llvm_reads_before_length_mutation_and_preserves_storage() -> None:
+    llvm = print_llvm(_ssa("int main(){ List<int> xs={1,2,3}; return xs.pop(); }"))
+
+    assert "define private i64 @aether_list_prepare_pop" in llvm
+    assert "Aether panic: pop() cannot be used on an empty List" in llvm
+    assert "br i1 %empty, label %panic, label %ready" in llvm
+    assert llvm.index("%new_length = sub i64 %length, 1") > llvm.index("%empty = icmp eq i64 %length, 0")
+    pop_start = llvm.index("call i64 @aether_list_prepare_pop")
+    value_load = llvm.index("load i32, ptr %list.pop.element", pop_start)
+    length_store = llvm.index("store i64 %list.pop.new_length", value_load)
+    pop_body = llvm[pop_start:length_store]
+    assert value_load < length_store
+    assert "i32 0, i32 1" not in pop_body
+    assert "store ptr" not in pop_body
+    assert "@aether_list_reserve" not in llvm
+    assert "call void @free" not in llvm
+
+
+def test_list_pop_emit_llvm_and_clang(tmp_path) -> None:
+    source = "int main(){ List<int> xs={10,20,30}; int x=xs.pop(); return x+xs.length; }"
+    program = tmp_path / "list_pop.ae"
+    program.write_text(source + "\n", encoding="utf-8")
+    stdout = StringIO()
+    stderr = StringIO()
+
+    assert main(["--emit-llvm", str(program)], stdout=stdout, stderr=stderr) == EXIT_SUCCESS
+    assert "@aether_list_prepare_pop" in stdout.getvalue()
+    assert stderr.getvalue() == ""
+    if shutil.which("clang") is not None:
+        assert LLVMRunner().run(_typed(source)) == 32

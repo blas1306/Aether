@@ -22,6 +22,7 @@ from .model import (
     IRListCopy,
     IRListContains,
     IRListClear,
+    IRListPop,
     IRListPush,
     IRListIndexOf,
     IRListIsEmpty,
@@ -405,6 +406,10 @@ class IRVerifier:
         if isinstance(instruction, IRListPush):
             self._verify_list_push(instruction, state, value_types)
             return state
+
+        if isinstance(instruction, IRListPop):
+            self._verify_list_pop(instruction, state, value_types)
+            return self._define_value(state, instruction.result)
 
         if isinstance(instruction, IRListReverse):
             self._verify_list_reverse(instruction, state, value_types)
@@ -1174,6 +1179,16 @@ class IRVerifier:
             instruction.value.type,
             instruction.list_value.type.element,
             "List push value type mismatch",
+        )
+
+    def _verify_list_pop(self, instruction: IRListPop, state: _State, value_types: dict[str, IRType]) -> None:
+        self._require_defined(instruction.list_value, state, value_types)
+        if not isinstance(instruction.list_value.type, ListType):
+            self._fail(f"List pop expects list value, got {instruction.list_value.type}")
+        self._require_type(
+            instruction.result.type,
+            instruction.list_value.type.element,
+            "List pop result type mismatch",
         )
 
     def _verify_sequence_sort(self, instruction: IRSequenceSort, state: _State, value_types: dict[str, IRType]) -> None:

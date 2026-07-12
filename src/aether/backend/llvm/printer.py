@@ -24,6 +24,7 @@ from aether.ssa.model import (
     SSAListCopy,
     SSAListContains,
     SSAListClear,
+    SSAListPop,
     SSAListPush,
     SSAListIndexOf,
     SSAListIsEmpty,
@@ -116,6 +117,7 @@ class LLVMPrinter:
         self._uses_list_allocation = False
         self._uses_list_copy = False
         self._uses_list_push = False
+        self._uses_list_pop = False
         self._uses_list_reverse = False
         self._sequence_sort_types: set[object] = set()
         self._list_contains_types: set[object] = set()
@@ -210,6 +212,8 @@ class LLVMPrinter:
             return self._print_list_clear(instruction)
         if isinstance(instruction, SSAListPush):
             return "\n  ".join(self._print_list_push(instruction))
+        if isinstance(instruction, SSAListPop):
+            return "\n  ".join(self._print_list_pop(instruction))
         if isinstance(instruction, SSAListReverse):
             return self._print_list_reverse(instruction)
         if isinstance(instruction, SSASequenceSort):
@@ -293,6 +297,7 @@ class LLVMPrinter:
                 SSAListCopy,
                 SSAListContains,
                 SSAListIndexOf,
+                SSAListPop,
                 SSAVectorGet,
                 SSAMatrixGet,
                 SSAArrayLength,
@@ -611,6 +616,31 @@ class LLVMPrinter:
             f"{element_ptr} = getelementptr {element_type}, ptr {data}, i64 {old_length}",
             f"store {element_type} {self._operand(instruction.value)}, ptr {element_ptr}",
             f"{new_length} = add i64 {old_length}, 1",
+            f"{length_field} = getelementptr {self._LIST_STRUCT_TYPE}, ptr {list_value}, i32 0, i32 0",
+            f"store i64 {new_length}, ptr {length_field}",
+        ]
+
+    def _print_list_pop(self, instruction: SSAListPop) -> list[str]:
+        if not isinstance(instruction.list_value.type, ListType):
+            raise LLVMBackendError("LLVM list_pop expects a ListType source")
+        if instruction.result.type != instruction.list_value.type.element:
+            raise LLVMBackendError("LLVM list_pop result type must match list element type")
+        self._uses_list_type = True
+        self._uses_list_pop = True
+        list_value = self._operand(instruction.list_value)
+        element_type = llvm_type(instruction.result.type)
+        new_length = self._synthetic_temp("list.pop.new_length")
+        data_field = self._synthetic_temp("list.pop.data_field")
+        data = self._synthetic_temp("list.pop.data")
+        element_ptr = self._synthetic_temp("list.pop.element")
+        result = self._new_temp(instruction.result)
+        length_field = self._synthetic_temp("list.pop.length_field")
+        return [
+            f"{new_length} = call i64 @aether_list_prepare_pop(ptr {list_value})",
+            f"{data_field} = getelementptr {self._LIST_STRUCT_TYPE}, ptr {list_value}, i32 0, i32 2",
+            f"{data} = load ptr, ptr {data_field}",
+            f"{element_ptr} = getelementptr {element_type}, ptr {data}, i64 {new_length}",
+            f"{result} = load {element_type}, ptr {element_ptr}",
             f"{length_field} = getelementptr {self._LIST_STRUCT_TYPE}, ptr {list_value}, i32 0, i32 0",
             f"store i64 {new_length}, ptr {length_field}",
         ]
@@ -2014,6 +2044,14 @@ class LLVMPrinter:
                     ]
                 )
             )
+        if self._uses_list_pop and not (
+            self._uses_array_allocation
+            or self._uses_list_allocation
+            or self._uses_list_push
+            or self._sequence_sort_types
+        ):
+            sections.append("declare i32 @puts(ptr)")
+            sections.append("declare void @exit(i32) noreturn")
         if self._sequence_sort_types or self._uses_list_push:
             sections.append("declare void @free(ptr)")
             sections.append("declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1 immarg)")
@@ -2170,6 +2208,40 @@ class LLVMPrinter:
                         "reserve:",
                         "  call void @aether_list_reserve(ptr %list, i64 %required_length, i64 %element_size)",
                         "  ret i64 %length",
+                        "}",
+                    ]
+                )
+            )
+        if self._uses_list_pop:
+            sections.append('@.aether.list.pop.empty = private unnamed_addr constant [52 x i8] c"Aether panic: pop() cannot be used on an empty List\\00"')
+            sections.append(
+                "\n".join(
+                    [
+                        "define private void @aether_list_pop_empty_panic() noreturn {",
+                        "entry:",
+                        "  %message = getelementptr [52 x i8], ptr @.aether.list.pop.empty, i64 0, i64 0",
+                        "  call i32 @puts(ptr %message)",
+                        "  call void @exit(i32 1)",
+                        "  unreachable",
+                        "}",
+                    ]
+                )
+            )
+            sections.append(
+                "\n".join(
+                    [
+                        "define private i64 @aether_list_prepare_pop(ptr %list) {",
+                        "entry:",
+                        f"  %len_field = getelementptr {self._LIST_STRUCT_TYPE}, ptr %list, i32 0, i32 0",
+                        "  %length = load i64, ptr %len_field",
+                        "  %empty = icmp eq i64 %length, 0",
+                        "  br i1 %empty, label %panic, label %ready",
+                        "panic:",
+                        "  call void @aether_list_pop_empty_panic()",
+                        "  unreachable",
+                        "ready:",
+                        "  %new_length = sub i64 %length, 1",
+                        "  ret i64 %new_length",
                         "}",
                     ]
                 )

@@ -33,6 +33,32 @@ println(xs);
     assert result.output == "3\n{1, 2}\n"
 
 
+def test_list_pop_ast_interpreter_supports_scalar_and_reference_elements() -> None:
+    result = run_aether(
+        """
+List<double> doubles = {1.5, 2.5};
+List<boolean> booleans = {false, true};
+List<string> strings = {"first", "last"};
+List<int> inner = {1};
+List<List<int>> refs = {inner};
+println(doubles.pop());
+println(booleans.pop());
+println(strings.pop());
+List<int> popped = refs.pop();
+popped.push(2);
+println(inner);
+println(refs.is_empty);
+"""
+    )
+
+    assert result.output == "2.5\ntrue\nlast\n{1, 2}\ntrue\n"
+
+
+def test_list_pop_method_rejects_arguments() -> None:
+    with pytest.raises(AetherTypeError, match="expects exactly one argument"):
+        run_aether("List<int> xs = {1}; xs.pop(2);")
+
+
 def test_list_insert_method_inserts_at_index() -> None:
     result = run_aether(
         """

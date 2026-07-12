@@ -22,6 +22,7 @@ from aether.ssa.model import (
     SSAListCopy,
     SSAListContains,
     SSAListClear,
+    SSAListPop,
     SSAListPush,
     SSAListIndexOf,
     SSAListIsEmpty,
@@ -478,6 +479,12 @@ class SSAAlgebraicSimplifier:
             return SSAListPush(
                 self._resolve(instruction.list_value, replacements),
                 self._resolve(instruction.value, replacements),
+            )
+
+        if isinstance(instruction, SSAListPop):
+            return SSAListPop(
+                instruction.result,
+                self._resolve(instruction.list_value, replacements),
             )
 
         if isinstance(instruction, SSAListReverse):

@@ -34,6 +34,8 @@ EXPECTED_EXIT_CODES = {
     "list_index.ae": 2,
     "list_index_of.ae": 12,
     "list_literal.ae": 3,
+    "list_pop.ae": 51,
+    "list_pop_alias.ae": 32,
     "list_push.ae": 20,
     "list_push_alias.ae": 3,
     "list_reverse.ae": 41,

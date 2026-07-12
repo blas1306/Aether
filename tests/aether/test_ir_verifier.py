@@ -19,6 +19,7 @@ from aether.ir import (
     IRLoad,
     IRListNew,
     IRListClear,
+    IRListPop,
     IRListPush,
     IRListSet,
     IRLowerer,
@@ -130,6 +131,16 @@ def test_rejects_list_push_with_incompatible_value_type() -> None:
     module = IRModule([IRFunction("main", [], int_type, [IRBasicBlock("entry", [IRConst(element, 1), IRListNew(list_value, (element,)), IRConst(value, 2.0), IRListPush(list_value, value), IRReturn(element)])])])
 
     _assert_verification_error(module, "List push value type mismatch: expected int, got double")
+
+
+def test_rejects_list_pop_with_incompatible_result_type() -> None:
+    int_type = IntType()
+    element = IRValue("0", int_type)
+    list_value = IRValue("1", ListType(int_type))
+    result = IRValue("2", DoubleType())
+    module = IRModule([IRFunction("main", [], int_type, [IRBasicBlock("entry", [IRConst(element, 1), IRListNew(list_value, (element,)), IRListPop(result, list_value), IRReturn(element)])])])
+
+    _assert_verification_error(module, "List pop result type mismatch: expected int, got double")
 
 
 def test_verifies_function_calling_another_function() -> None:

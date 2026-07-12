@@ -57,10 +57,10 @@ Notas:
 
 - `string` baja como valor/literal/call/return/phi, pero LLVM no soporta
   operaciones string (`+`, comparaciones, impresion, length, indexing, runtime).
-- `List<T>` tiene backend fases 1, 2, 3a, `indexOf` de fase 3b, `clear` de fase 4a y `push`/growth de fase 4b para literal con tipo esperado,
+- `List<T>` tiene backend fases 1, 2, 3a, `indexOf` de fase 3b, `clear` de fase 4a, `push`/growth de fase 4b y `pop` de fase 4c para literal con tipo esperado,
   `.length`, `.is_empty`, `for x in xs` / `for T x in xs`, lectura indexada y
   asignacion indexada, `copy()`, `contains()`, `indexOf()`, `reverse()` y
-  `clear()` y `push()`. No incluye `pop`, `insert`, `removeAt`, shrinking,
+  `clear()`, `push()` y `pop()`. No incluye `insert`, `removeAt`, shrinking,
   reserva publica, ownership general ni runtime dinamico completo. El backend
   no agrega bounds checks.
 - En el frontend/interprete, los agregados mutables (`List`, `Array`,
@@ -156,7 +156,7 @@ Notas:
 | List.contains | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 3a |
 | List.indexOf | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 3b |
 | List.push | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 4b con growth interno |
-| List.pop | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
+| List.pop | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 4c |
 | List.insert | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
 | List.removeAt / remove_at | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
 | List.clear | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 4a |
@@ -184,7 +184,7 @@ difieren al extraer el puntero de datos y la longitud de sus cabeceras.
 El crecimiento y las mutaciones de longitud de `List<T>` tienen su
 contrato de implementacion en
 [`AETHER_LIST_GROWTH_DESIGN.md`](../aether/AETHER_LIST_GROWTH_DESIGN.md). Las
-filas `pop`, `insert` y `removeAt` permanecen sin backend. `clear` conserva
+filas `insert` y `removeAt` permanecen sin backend. `clear` y `pop` conservan
 capacidad y buffer; `push` implementa reserve/growth interno y preserva header.
 
 ## Algebra lineal

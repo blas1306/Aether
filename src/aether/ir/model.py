@@ -112,6 +112,12 @@ class IRListPush(IRInstruction):
 
 
 @dataclass(frozen=True)
+class IRListPop(IRInstruction):
+    result: IRValue
+    list_value: IRValue
+
+
+@dataclass(frozen=True)
 class IRListReverse(IRInstruction):
     list_value: IRValue
 

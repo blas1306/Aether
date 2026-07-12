@@ -22,6 +22,7 @@ from .model import (
     IRListCopy,
     IRListContains,
     IRListClear,
+    IRListPop,
     IRListPush,
     IRListIndexOf,
     IRListIsEmpty,
@@ -131,6 +132,8 @@ class IRPrinter:
             return f"list_clear {self._value(instruction.list_value)}"
         if isinstance(instruction, IRListPush):
             return f"list_push {self._value(instruction.list_value)}, {self._value(instruction.value)}"
+        if isinstance(instruction, IRListPop):
+            return f"{self._typed_value(instruction.result)} = list_pop {self._value(instruction.list_value)}"
         if isinstance(instruction, IRListReverse):
             return f"list_reverse {self._value(instruction.list_value)}"
         if isinstance(instruction, IRSequenceSort):

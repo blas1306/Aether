@@ -1,0 +1,10 @@
+boolean esMayor(int x) {
+	if x >= 18 {
+		return true;
+	} else {
+		return false;
+	}
+}
+
+u1 = esMayor(19);
+u2 = esMayor(17);

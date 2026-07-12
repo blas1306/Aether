@@ -24,6 +24,7 @@ from .model import (
     IRListCopy,
     IRListContains,
     IRListClear,
+    IRListPop,
     IRListPush,
     IRListIndexOf,
     IRListIsEmpty,
@@ -243,6 +244,15 @@ class IRInterpreter:
             if not isinstance(list_value, list):
                 raise IRExecutionError("IR list_push requires a list value")
             list_value.append(self._value(instruction.value, frame))
+            return False, None, None
+
+        if isinstance(instruction, IRListPop):
+            list_value = self._value(instruction.list_value, frame)
+            if not isinstance(list_value, list):
+                raise IRExecutionError("IR list_pop requires a list value")
+            if not list_value:
+                raise IRExecutionError("pop() cannot be used on an empty List")
+            frame.values[instruction.result] = list_value.pop()
             return False, None, None
 
         if isinstance(instruction, IRListReverse):

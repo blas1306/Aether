@@ -32,6 +32,7 @@ from .model import (
     IRListCopy,
     IRListContains,
     IRListClear,
+    IRListPop,
     IRListPush,
     IRListIndexOf,
     IRListIsEmpty,
@@ -362,6 +363,11 @@ class IRLowerer:
 
         if isinstance(statement, ast.ExpressionStatement):
             expression = statement.expression
+            if isinstance(expression, ast.CallExpression) and (
+                expression.callee == "pop" or expression.callee.endswith(".pop")
+            ):
+                self._lower_call(expression, context)
+                return
             if isinstance(expression, ast.CallExpression) and (
                 expression.callee == "push" or expression.callee.endswith(".push")
             ):
@@ -1215,7 +1221,7 @@ class IRLowerer:
             self._unsupported(call, "keyword arguments")
         method_name = call.callee.rsplit(".", 1)[-1]
         arguments = call.arguments
-        if "." in call.callee and method_name in {"copy", "contains", "indexOf"}:
+        if "." in call.callee and method_name in {"copy", "contains", "indexOf", "pop"}:
             receiver = call.callee.rsplit(".", 1)[0]
             arguments = [ast.Identifier(receiver, call.line, call.column), *arguments]
         if method_name == "copy" and len(arguments) == 1:
@@ -1251,6 +1257,12 @@ class IRLowerer:
                 )
                 result = context.temporary(IntType())
                 context.block.instructions.append(IRListIndexOf(result, list_value, value))
+                return result
+        if method_name == "pop" and len(arguments) == 1:
+            list_value = self._lower_expression(arguments[0], context)
+            if isinstance(list_value.type, ListType):
+                result = context.temporary(list_value.type.element)
+                context.block.instructions.append(IRListPop(result, list_value))
                 return result
         if call.callee in _CAST_BUILTINS:
             return self._lower_cast(call, context)

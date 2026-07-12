@@ -184,6 +184,11 @@ are skipped.
   grows `0 -> 1` or doubles capacity, validates arithmetic overflow, uses a
   checked allocation, copies existing bytes, frees the old owned buffer, and
   updates `data`/`capacity` without replacing the header.
+- `SSAListPop` is side-effecting and produces the list element type. It checks
+  `length == 0` through the existing panic mechanism before subtracting,
+  loads `data[length - 1]`, then stores the new length. It does not call
+  reserve, allocate, free, shrink, clear the dead slot, or change capacity,
+  data, or the header pointer. Pointer-valued elements are returned shallowly.
 - `SSAListReverse` calls an in-place byte-swap loop. It allocates no new list or
   data buffer and is preserved as a side effect.
 - `SSASequenceSort` is the common side-effecting instruction for
@@ -319,13 +324,14 @@ merge0:
 
 The backend deliberately does not support these yet:
 
-- Full `List<T>` backend API. Phases 1, 2, 3, `clear` from phase 4a, and `push` from phase 4b support list literals with an
+- Full `List<T>` backend API. Phases 1, 2, 3, `clear` from phase 4a, `push` from phase 4b, and `pop` from phase 4c support list literals with an
   expected `List<T>` type, `.length`, `.is_empty`, List parameters/returns,
   `for x in xs` / `for T x in xs`, explicit indexed reads and indexed stores.
-- Length-changing mutation other than `clear`/`push`, shrinking, public
-  reserve, general ownership, or GC. `clear`, `push`, `copy`, `contains`,
+- Length-changing mutation other than `clear`/`push`/`pop`, shrinking, public
+  reserve, general ownership, or GC. `clear`, `push`, `pop`, `copy`, `contains`,
   `indexOf`, `reverse`, and stable `sort` are supported. `clear` preserves
-  capacity/data; push may replace the owned data buffer but preserves header.
+  capacity/data; pop also preserves them, while push may replace the owned data
+  buffer but preserves header.
 - List indexing does not add bounds checks in phase 2; compiled out-of-range
   access has undefined behavior, matching the existing aggregate backend
   policy.
