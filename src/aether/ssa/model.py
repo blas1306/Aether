@@ -100,6 +100,13 @@ class SSAListPush(SSAInstruction):
 
 
 @dataclass(frozen=True)
+class SSAListInsert(SSAInstruction):
+    list_value: SSAValue
+    index: SSAValue
+    value: SSAValue
+
+
+@dataclass(frozen=True)
 class SSAListPop(SSAInstruction):
     result: SSAValue
     list_value: SSAValue

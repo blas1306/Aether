@@ -26,6 +26,7 @@ from .model import (
     IRListClear,
     IRListPop,
     IRListPush,
+    IRListInsert,
     IRListIndexOf,
     IRListIsEmpty,
     IRListLength,
@@ -244,6 +245,21 @@ class IRInterpreter:
             if not isinstance(list_value, list):
                 raise IRExecutionError("IR list_push requires a list value")
             list_value.append(self._value(instruction.value, frame))
+            return False, None, None
+
+        if isinstance(instruction, IRListInsert):
+            list_value = self._value(instruction.list_value, frame)
+            if not isinstance(list_value, list):
+                raise IRExecutionError("IR list_insert requires a list value")
+            index = self._value(instruction.index, frame)
+            if not isinstance(index, int) or isinstance(index, bool):
+                raise IRExecutionError("IR list_insert requires an int index")
+            if index < 0 or index > len(list_value):
+                raise IRExecutionError(
+                    f"insert() index must be between 0 and length(xs); got {index} "
+                    f"for List of length {len(list_value)}"
+                )
+            list_value.insert(index, self._value(instruction.value, frame))
             return False, None, None
 
         if isinstance(instruction, IRListPop):

@@ -276,6 +276,12 @@ use, la mutacion sigue siendo observable.
 
 ### `insert(index, value) -> void`
 
+Estado Fase 4d: implementado mediante `IRListInsert(list, index, value)` y
+`SSAListInsert(list, index, value)`, ambas side-effecting y sin resultado. LLVM
+reutiliza `aether_list_reserve`, recarga `data` tras el posible crecimiento y
+desplaza la region solapada con `llvm.memmove` antes de publicar el nuevo
+`length`.
+
 Acepta exactamente `0 <= index <= length`; fuera de ese rango produce error
 runtime. `index == length` es semanticamente equivalente a `push(value)`.
 

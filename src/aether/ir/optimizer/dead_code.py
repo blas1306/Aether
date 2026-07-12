@@ -21,6 +21,7 @@ from aether.ir.model import (
     IRListClear,
     IRListPop,
     IRListPush,
+    IRListInsert,
     IRListIndexOf,
     IRListIsEmpty,
     IRListLength,
@@ -240,6 +241,8 @@ class DeadCodeEliminator:
             return (instruction.list_value,)
         if isinstance(instruction, IRListPush):
             return (instruction.list_value, instruction.value)
+        if isinstance(instruction, IRListInsert):
+            return (instruction.list_value, instruction.index, instruction.value)
         if isinstance(instruction, IRListPop):
             return (instruction.list_value,)
         if isinstance(instruction, IRListReverse):

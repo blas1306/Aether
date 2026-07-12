@@ -34,6 +34,7 @@ from .model import (
     IRListClear,
     IRListPop,
     IRListPush,
+    IRListInsert,
     IRListIndexOf,
     IRListIsEmpty,
     IRListLength,
@@ -387,6 +388,28 @@ class IRLowerer:
                     "push value requires an implicit conversion",
                 )
                 context.block.instructions.append(IRListPush(list_value, value))
+                return
+            if isinstance(expression, ast.CallExpression) and (
+                expression.callee == "insert" or expression.callee.endswith(".insert")
+            ):
+                arguments = expression.arguments
+                if expression.callee.endswith(".insert"):
+                    receiver = expression.callee.rsplit(".", 1)[0]
+                    arguments = [ast.Identifier(receiver, expression.line, expression.column), *arguments]
+                if expression.keyword_arguments or len(arguments) != 3:
+                    self._unsupported(expression, "invalid insert call")
+                list_value = self._lower_expression(arguments[0], context)
+                if not isinstance(list_value.type, ListType):
+                    self._unsupported(expression, "insert on non-list")
+                index = self._lower_expression(arguments[1], context)
+                self._require_same_type(index.type, IntType(), "insert index must be int")
+                value = self._lower_expression(arguments[2], context, target_type=list_value.type.element)
+                self._require_same_type(
+                    value.type,
+                    list_value.type.element,
+                    "insert value requires an implicit conversion",
+                )
+                context.block.instructions.append(IRListInsert(list_value, index, value))
                 return
             if isinstance(expression, ast.CallExpression) and (
                 expression.callee == "clear" or expression.callee.endswith(".clear")

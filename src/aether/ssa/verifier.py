@@ -43,6 +43,7 @@ from .model import (
     SSAListClear,
     SSAListPop,
     SSAListPush,
+    SSAListInsert,
     SSAListIndexOf,
     SSAListIsEmpty,
     SSAListLength,
@@ -305,6 +306,10 @@ class SSAVerifier:
 
             if isinstance(instruction, SSAListPush):
                 self._verify_list_push(instruction, value_types)
+                continue
+
+            if isinstance(instruction, SSAListInsert):
+                self._verify_list_insert(instruction, value_types)
                 continue
 
             if isinstance(instruction, SSAListPop):
@@ -1068,6 +1073,20 @@ class SSAVerifier:
             instruction.value.type,
             instruction.list_value.type.element,
             "List push value type mismatch",
+        )
+
+    def _verify_list_insert(self, instruction: SSAListInsert, value_types: dict[str, IRType]) -> None:
+        self._require_defined(instruction.list_value, value_types)
+        self._require_defined(instruction.index, value_types)
+        self._require_defined(instruction.value, value_types)
+        if not isinstance(instruction.list_value.type, ListType):
+            self._fail(f"List insert expects list value, got {instruction.list_value.type}")
+        if not isinstance(instruction.index.type, IntType):
+            self._fail(f"List insert index must be int, got {instruction.index.type}")
+        self._require_type(
+            instruction.value.type,
+            instruction.list_value.type.element,
+            "List insert value type mismatch",
         )
 
     def _verify_list_pop(self, instruction: SSAListPop, value_types: dict[str, IRType]) -> None:

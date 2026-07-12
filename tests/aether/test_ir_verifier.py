@@ -21,6 +21,7 @@ from aether.ir import (
     IRListClear,
     IRListPop,
     IRListPush,
+    IRListInsert,
     IRListSet,
     IRLowerer,
     IRMatrixNew,
@@ -131,6 +132,16 @@ def test_rejects_list_push_with_incompatible_value_type() -> None:
     module = IRModule([IRFunction("main", [], int_type, [IRBasicBlock("entry", [IRConst(element, 1), IRListNew(list_value, (element,)), IRConst(value, 2.0), IRListPush(list_value, value), IRReturn(element)])])])
 
     _assert_verification_error(module, "List push value type mismatch: expected int, got double")
+
+
+def test_rejects_list_insert_with_non_int_index() -> None:
+    int_type = IntType()
+    element = IRValue("0", int_type)
+    list_value = IRValue("1", ListType(int_type))
+    index = IRValue("2", DoubleType())
+    module = IRModule([IRFunction("main", [], int_type, [IRBasicBlock("entry", [IRConst(element, 1), IRListNew(list_value, (element,)), IRConst(index, 0.0), IRListInsert(list_value, index, element), IRReturn(element)])])])
+
+    _assert_verification_error(module, "List insert index must be int, got double")
 
 
 def test_rejects_list_pop_with_incompatible_result_type() -> None:

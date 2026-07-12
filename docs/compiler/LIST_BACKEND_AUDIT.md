@@ -18,9 +18,9 @@ Areas revisadas:
 ## Resumen Ejecutivo
 
 `List<T>` es una feature completa en el frontend/interprete. En IR/SSA/LLVM ya
-tiene soporte de fases 1, 2, 3a, 3b (`indexOf`), 4a (`clear`), 4b (`push`/growth) y 4c (`pop`) para literales con tipo esperado, `.length`,
+tiene soporte de fases 1, 2, 3a, 3b (`indexOf`), 4a (`clear`), 4b (`push`/growth), 4c (`pop`) y 4d (`insert`) para literales con tipo esperado, `.length`,
 `.is_empty`, `for x in xs` / `for T x in xs`, lectura `xs[i]` y escritura
-`xs[i] = value`, `copy`, `contains`, `indexOf`, `reverse`, `clear`, `push` y `pop`. El resto de la API de listas
+`xs[i] = value`, `copy`, `contains`, `indexOf`, `reverse`, `clear`, `push`, `pop` e `insert`. El resto de la API de listas
 sigue pendiente de backend.
 
 La migracion no deberia reutilizar directamente las instrucciones de `Array<T>`.
@@ -223,7 +223,7 @@ solo soporte operacional, no la existencia nominal del tipo.
 | `sort(xs)` / `xs.sort()` | Si | Si | Si | Si | Implementado; comparte `IRSequenceSort` y runtime con Array |
 | `push(xs, value)` / `xs.push(value)` | Si | Si | Si | Si | Implementado fase 4b |
 | `pop(xs)` / `xs.pop()` | Si | Si | Si | Si | Implementado fase 4c |
-| `insert(xs, i, value)` / `xs.insert(i, value)` | Si | No | No | No | Alta |
+| `insert(xs, i, value)` / `xs.insert(i, value)` | Si | Si | Si | Si | Implementado fase 4d |
 | `remove_at(xs, i)` / `xs.removeAt(i)` | Si | No | No | No | Alta |
 | `clear(xs)` / `xs.clear()` | Si | Si | Si | Si | Implementado fase 4a |
 | Equality `xs == ys` | Si | No | No | No | Alta |

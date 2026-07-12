@@ -15,6 +15,7 @@ from aether.ir import (
     IRListClear,
     IRListPop,
     IRListPush,
+    IRListInsert,
     IRListIndexOf,
     IRListCopy,
     IRListGet,
@@ -35,6 +36,7 @@ from aether.ssa import (
     SSAListClear,
     SSAListPop,
     SSAListPush,
+    SSAListInsert,
     SSAListIndexOf,
     SSAListCopy,
     SSAListIsEmpty,
@@ -734,6 +736,128 @@ def test_list_push_llvm_contains_checked_growth_and_reloads_data() -> None:
     assert "Aether panic: memory allocation failed" in llvm
     assert "%failed = icmp eq ptr %mem, null" in llvm
     assert "br i1 %failed, label %panic, label %ok" in llvm
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("int main(){ List<int> xs={}; xs.insert(0,7); return xs.length*10+xs[0]; }", 17),
+        ("int main(){ List<int> xs={20,30}; xs.insert(0,10); return xs[0]+xs[1]+xs[2]; }", 60),
+        ("int main(){ List<int> xs={10,30}; insert(xs,1,20); return xs.length*10+xs[1]; }", 50),
+        ("int main(){ List<int> xs={10,20}; xs.insert(xs.length,30); return xs[2]; }", 30),
+        ("int main(){ List<int> xs={}; xs.insert(0,2); xs.insert(0,1); xs.insert(2,4); xs.insert(2,3); int sum=0; for int x in xs {sum=sum*10+x;} return sum; }", 1234),
+        ("int main(){ List<int> xs={1,2}; xs.push(3); xs.pop(); xs.insert(1,9); return xs[0]*100+xs[1]*10+xs[2]; }", 192),
+        ("int main(){ List<int> xs={3,1,2}; xs.sort(); xs.reverse(); xs.insert(1,9); return xs[0]*10+xs[1]; }", 39),
+        ("int main(){ List<int> xs={1,2}; xs.clear(); xs.insert(0,8); return xs.length*10+xs[0]; }", 18),
+        ("int main(){ List<int> xs={1,3}; if(xs.contains(2)){return 99;} int result=xs.length*100+xs.indexOf(3)*10; xs.insert(1,2); result=result+xs.length*100+xs.indexOf(3)*10; if(xs.contains(2)){result=result+1;} return result; }", 531),
+        ("int main(){ List<double> xs={1.5,3.5}; xs.insert(1,2.5); return int(xs[1]*10.0)+xs.length; }", 28),
+        ("int main(){ List<boolean> xs={false}; xs.insert(0,true); if(xs[0]){if(xs[1]){return 0;} return xs.length;} return 0; }", 2),
+        ('int main(){ List<string> xs={"a","c"}; xs.insert(1,"b"); return xs.length; }', 3),
+        ("int main(){ List<List<int>> xs={}; List<int> inner={1}; xs.insert(0,inner); List<int> got=xs[0]; got.push(2); return inner.length; }", 2),
+    ],
+)
+def test_list_insert_runtime_semantics(source: str, expected: int) -> None:
+    typed = _typed(source)
+    assert IRInterpreter(_lower(source)).call("main") == expected
+    if shutil.which("clang") is not None:
+        assert LLVMRunner().run(typed) == expected % 256
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "int main(){ List<int> a={1,3}; List<int> b=a; b.insert(1,2); return a.length*10+a[1]; }",
+        "int add(List<int> xs){xs.insert(1,2); return 0;} int main(){List<int> a={1,3}; int ignored=add(a); return a.length*10+a[1];}",
+        "List<int> identity(List<int> xs){return xs;} int main(){List<int> a={1,3}; List<int> b=identity(a); b.insert(1,2); return a.length*10+a[1];}",
+    ],
+)
+def test_list_insert_is_observed_through_aliases(source: str) -> None:
+    typed = _typed(source)
+    assert IRInterpreter(_lower(source)).call("main") == 32
+    if shutil.which("clang") is not None:
+        assert LLVMRunner().run(typed) == 32
+
+
+def test_list_insert_typing_arity_const_and_void_result() -> None:
+    with pytest.raises(AetherTypeError, match="Cannot mutate constant 'xs'"):
+        _typed("int main(){ const List<int> xs={1}; xs.insert(0,2); return 0; }")
+    with pytest.raises(AetherTypeError, match="index must be int"):
+        _typed('int main(){ List<int> xs={1}; xs.insert("0",2); return 0; }')
+    with pytest.raises(AetherTypeError, match="not assignable to 'int'"):
+        _typed('int main(){ List<int> xs={1}; xs.insert(0,"bad"); return 0; }')
+    with pytest.raises(AetherTypeError, match="expects exactly three arguments"):
+        _typed("int main(){ List<int> xs={1}; xs.insert(0); return 0; }")
+    with pytest.raises(AetherTypeError, match="void"):
+        _typed("int main(){ List<int> xs={1}; int result=xs.insert(0,2); return result; }")
+
+
+def test_list_insert_lowers_prints_interprets_and_verifies_ir_and_ssa() -> None:
+    source = "int main(){ List<int> xs={1,3}; xs.insert(1,2); return xs[1]; }"
+    ir = IRVerifier(_lower(source)).verify()
+    ssa = SSAVerifier(_ssa(source)).verify()
+
+    assert any(isinstance(item, IRListInsert) for item in _instructions(ir))
+    assert any(isinstance(item, SSAListInsert) for item in _instructions(ssa))
+    assert "list_insert" in print_ir(ir)
+    assert "list_insert" in print_ssa(ssa)
+    assert IRInterpreter(ir).call("main") == 2
+
+
+def test_optimizers_preserve_insert_and_reads_around_it() -> None:
+    source = "int main(){ List<int> xs={1,3}; int before=xs.length; int old=xs[1]; xs.insert(1,2); int after=xs.length; int now=xs[1]; return before*10+after+old+now; }"
+    optimized_ir = OptimizerPipeline().run(_lower(source))
+    optimized_ssa = SSAOptimizerPipeline().run(_ssa(source))
+
+    assert any(isinstance(item, IRListInsert) for item in _instructions(optimized_ir))
+    assert any(isinstance(item, SSAListInsert) for item in _instructions(optimized_ssa))
+    assert sum(isinstance(item, IRListLength) for item in _instructions(optimized_ir)) == 2
+    assert sum(isinstance(item, SSAListLength) for item in _instructions(optimized_ssa)) == 2
+    assert sum(isinstance(item, IRListGet) for item in _instructions(optimized_ir)) == 2
+    assert sum(isinstance(item, SSAListGet) for item in _instructions(optimized_ssa)) == 2
+    assert IRInterpreter(optimized_ir).call("main") == 28
+
+
+@pytest.mark.parametrize("index", [-1, 3])
+def test_list_insert_invalid_index_panics_before_mutation(index: int) -> None:
+    source = f"int main(){{ List<int> xs={{1,2}}; xs.insert({index},9); return xs.length; }}"
+    with pytest.raises(IRExecutionError, match=r"insert\(\) index must be between 0 and length"):
+        IRInterpreter(_lower(source)).call("main")
+
+    if shutil.which("clang") is not None:
+        stdout = StringIO()
+        assert LLVMRunner().run(_typed(source), stdout=stdout) == 1
+        assert stdout.getvalue() == "Aether panic: insert() index is out of bounds\n"
+
+
+def test_list_insert_llvm_uses_reserve_memmove_and_updates_length_last() -> None:
+    llvm = print_llvm(_ssa("int main(){ List<int> xs={1,3}; xs.insert(1,2); return xs[1]; }"))
+
+    assert "define private void @aether_list_reserve" in llvm
+    assert "define private i64 @aether_list_prepare_insert" in llvm
+    assert "@llvm.memmove.p0.p0.i64" in llvm
+    assert "%nonnegative = icmp sge i64 %index, 0" in llvm
+    assert "%within_length = icmp ule i64 %index, %length" in llvm
+    call_index = llvm.index("call i64 @aether_list_prepare_insert")
+    reload_index = llvm.index("load ptr, ptr %list.insert.data_field", call_index)
+    move_index = llvm.index("call void @llvm.memmove", reload_index)
+    value_index = llvm.index("store i32 2", move_index)
+    length_index = llvm.index("store i64 %list.insert.new_length", value_index)
+    assert call_index < reload_index < move_index < value_index < length_index
+
+
+def test_list_insert_emit_llvm_and_clang(tmp_path) -> None:
+    source = "int main(){ List<int> xs={10,30}; xs.insert(1,20); return xs[0]+xs[1]+xs[2]; }"
+    program = tmp_path / "list_insert.ae"
+    program.write_text(source + "\n", encoding="utf-8")
+    stdout = StringIO()
+    stderr = StringIO()
+
+    assert main(["--emit-llvm", str(program)], stdout=stdout, stderr=stderr) == EXIT_SUCCESS
+    assert "@aether_list_prepare_insert" in stdout.getvalue()
+    assert "@llvm.memmove.p0.p0.i64" in stdout.getvalue()
+    assert stderr.getvalue() == ""
+    if shutil.which("clang") is not None:
+        assert LLVMRunner().run(_typed(source)) == 60
 
 
 @pytest.mark.parametrize(

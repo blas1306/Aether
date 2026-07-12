@@ -26,6 +26,7 @@ from aether.ssa.model import (
     SSAListClear,
     SSAListPop,
     SSAListPush,
+    SSAListInsert,
     SSAListIndexOf,
     SSAListIsEmpty,
     SSAListLength,
@@ -117,6 +118,7 @@ class LLVMPrinter:
         self._uses_list_allocation = False
         self._uses_list_copy = False
         self._uses_list_push = False
+        self._uses_list_insert = False
         self._uses_list_pop = False
         self._uses_list_reverse = False
         self._sequence_sort_types: set[object] = set()
@@ -212,6 +214,8 @@ class LLVMPrinter:
             return self._print_list_clear(instruction)
         if isinstance(instruction, SSAListPush):
             return "\n  ".join(self._print_list_push(instruction))
+        if isinstance(instruction, SSAListInsert):
+            return "\n  ".join(self._print_list_insert(instruction))
         if isinstance(instruction, SSAListPop):
             return "\n  ".join(self._print_list_pop(instruction))
         if isinstance(instruction, SSAListReverse):
@@ -614,6 +618,47 @@ class LLVMPrinter:
             f"{data_field} = getelementptr {self._LIST_STRUCT_TYPE}, ptr {list_value}, i32 0, i32 2",
             f"{data} = load ptr, ptr {data_field}",
             f"{element_ptr} = getelementptr {element_type}, ptr {data}, i64 {old_length}",
+            f"store {element_type} {self._operand(instruction.value)}, ptr {element_ptr}",
+            f"{new_length} = add i64 {old_length}, 1",
+            f"{length_field} = getelementptr {self._LIST_STRUCT_TYPE}, ptr {list_value}, i32 0, i32 0",
+            f"store i64 {new_length}, ptr {length_field}",
+        ]
+
+    def _print_list_insert(self, instruction: SSAListInsert) -> list[str]:
+        if not isinstance(instruction.list_value.type, ListType):
+            raise LLVMBackendError("LLVM list_insert expects a ListType source")
+        if not isinstance(instruction.index.type, IntType):
+            raise LLVMBackendError("LLVM list_insert index must be int")
+        if instruction.value.type != instruction.list_value.type.element:
+            raise LLVMBackendError("LLVM list_insert value type must match list element type")
+        self._uses_list_type = True
+        self._uses_list_insert = True
+        list_value = self._operand(instruction.list_value)
+        index = self._operand(instruction.index)
+        element_type = llvm_type(instruction.value.type)
+        element_size = self._sizeof(instruction.value.type)
+        index64 = self._synthetic_temp("list.insert.index64")
+        old_length = self._synthetic_temp("list.insert.old_length")
+        data_field = self._synthetic_temp("list.insert.data_field")
+        data = self._synthetic_temp("list.insert.data")
+        source = self._synthetic_temp("list.insert.source")
+        destination = self._synthetic_temp("list.insert.destination")
+        elements_to_move = self._synthetic_temp("list.insert.elements_to_move")
+        bytes_to_move = self._synthetic_temp("list.insert.bytes_to_move")
+        element_ptr = self._synthetic_temp("list.insert.element")
+        new_length = self._synthetic_temp("list.insert.new_length")
+        length_field = self._synthetic_temp("list.insert.length_field")
+        return [
+            f"{index64} = sext i32 {index} to i64",
+            f"{old_length} = call i64 @aether_list_prepare_insert(ptr {list_value}, i64 {index64}, i64 {element_size})",
+            f"{data_field} = getelementptr {self._LIST_STRUCT_TYPE}, ptr {list_value}, i32 0, i32 2",
+            f"{data} = load ptr, ptr {data_field}",
+            f"{source} = getelementptr {element_type}, ptr {data}, i64 {index64}",
+            f"{destination} = getelementptr {element_type}, ptr {source}, i64 1",
+            f"{elements_to_move} = sub i64 {old_length}, {index64}",
+            f"{bytes_to_move} = mul i64 {elements_to_move}, {element_size}",
+            f"call void @llvm.memmove.p0.p0.i64(ptr {destination}, ptr {source}, i64 {bytes_to_move}, i1 false)",
+            f"{element_ptr} = getelementptr {element_type}, ptr {data}, i64 {index64}",
             f"store {element_type} {self._operand(instruction.value)}, ptr {element_ptr}",
             f"{new_length} = add i64 {old_length}, 1",
             f"{length_field} = getelementptr {self._LIST_STRUCT_TYPE}, ptr {list_value}, i32 0, i32 0",
@@ -2011,11 +2056,12 @@ class LLVMPrinter:
 
     def _runtime_declarations(self) -> list[str]:
         sections: list[str] = []
+        uses_list_growth = self._uses_list_push or self._uses_list_insert
         if self._uses_array_type:
             sections.append(f"{self._ARRAY_STRUCT_TYPE} = type {{ i64, ptr }}")
         if self._uses_list_type:
             sections.append(f"{self._LIST_STRUCT_TYPE} = type {{ i64, i64, ptr }}")
-        if self._uses_array_allocation or self._uses_list_allocation or self._uses_list_push or self._sequence_sort_types:
+        if self._uses_array_allocation or self._uses_list_allocation or uses_list_growth or self._sequence_sort_types:
             sections.append("declare noalias ptr @malloc(i64)")
             sections.append("declare i32 @puts(ptr)")
             sections.append("declare void @exit(i32) noreturn")
@@ -2047,14 +2093,16 @@ class LLVMPrinter:
         if self._uses_list_pop and not (
             self._uses_array_allocation
             or self._uses_list_allocation
-            or self._uses_list_push
+            or uses_list_growth
             or self._sequence_sort_types
         ):
             sections.append("declare i32 @puts(ptr)")
             sections.append("declare void @exit(i32) noreturn")
-        if self._sequence_sort_types or self._uses_list_push:
+        if self._sequence_sort_types or uses_list_growth:
             sections.append("declare void @free(ptr)")
             sections.append("declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1 immarg)")
+        if self._uses_list_insert:
+            sections.append("declare void @llvm.memmove.p0.p0.i64(ptr, ptr, i64, i1 immarg)")
         if self._uses_array_allocation:
             sections.append(
                 "\n".join(
@@ -2094,7 +2142,7 @@ class LLVMPrinter:
                 )
             )
         if self._uses_list_copy:
-            if not self._sequence_sort_types and not self._uses_list_push:
+            if not self._sequence_sort_types and not uses_list_growth:
                 sections.append("declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1 immarg)")
             sections.append(
                 "\n".join(
@@ -2115,7 +2163,7 @@ class LLVMPrinter:
                     ]
                 )
             )
-        if self._uses_list_push:
+        if uses_list_growth:
             sections.append("declare { i64, i1 } @llvm.uadd.with.overflow.i64(i64, i64)")
             sections.append("declare { i64, i1 } @llvm.umul.with.overflow.i64(i64, i64)")
             sections.append('@.aether.list.overflow = private unnamed_addr constant [37 x i8] c"Aether panic: List capacity overflow\\00"')
@@ -2132,6 +2180,56 @@ class LLVMPrinter:
                     ]
                 )
             )
+        if self._uses_list_insert:
+            sections.append('@.aether.list.insert.bounds = private unnamed_addr constant [46 x i8] c"Aether panic: insert() index is out of bounds\\00"')
+            sections.append(
+                "\n".join(
+                    [
+                        "define private void @aether_list_insert_bounds_panic() noreturn {",
+                        "entry:",
+                        "  %message = getelementptr [46 x i8], ptr @.aether.list.insert.bounds, i64 0, i64 0",
+                        "  call i32 @puts(ptr %message)",
+                        "  call void @exit(i32 1)",
+                        "  unreachable",
+                        "}",
+                    ]
+                )
+            )
+            sections.append(
+                "\n".join(
+                    [
+                        "define private i64 @aether_list_prepare_insert(ptr %list, i64 %index, i64 %element_size) {",
+                        "entry:",
+                        f"  %len_field = getelementptr {self._LIST_STRUCT_TYPE}, ptr %list, i32 0, i32 0",
+                        "  %length = load i64, ptr %len_field",
+                        "  %nonnegative = icmp sge i64 %index, 0",
+                        "  %within_length = icmp ule i64 %index, %length",
+                        "  %valid = and i1 %nonnegative, %within_length",
+                        "  br i1 %valid, label %required, label %bounds_panic",
+                        "bounds_panic:",
+                        "  call void @aether_list_insert_bounds_panic()",
+                        "  unreachable",
+                        "required:",
+                        "  %elements_to_move = sub i64 %length, %index",
+                        "  %move_pair = call { i64, i1 } @llvm.umul.with.overflow.i64(i64 %elements_to_move, i64 %element_size)",
+                        "  %move_overflow = extractvalue { i64, i1 } %move_pair, 1",
+                        "  br i1 %move_overflow, label %overflow_panic, label %length_required",
+                        "length_required:",
+                        "  %required_pair = call { i64, i1 } @llvm.uadd.with.overflow.i64(i64 %length, i64 1)",
+                        "  %required_length = extractvalue { i64, i1 } %required_pair, 0",
+                        "  %overflow = extractvalue { i64, i1 } %required_pair, 1",
+                        "  br i1 %overflow, label %overflow_panic, label %reserve",
+                        "overflow_panic:",
+                        "  call void @aether_list_overflow_panic()",
+                        "  unreachable",
+                        "reserve:",
+                        "  call void @aether_list_reserve(ptr %list, i64 %required_length, i64 %element_size)",
+                        "  ret i64 %length",
+                        "}",
+                    ]
+                )
+            )
+        if uses_list_growth:
             sections.append(
                 "\n".join(
                     [

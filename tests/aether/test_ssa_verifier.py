@@ -19,6 +19,7 @@ from aether.ssa import (
     SSAListClear,
     SSAListPop,
     SSAListPush,
+    SSAListInsert,
     SSAListSet,
     SSAMatrixNew,
     SSAModule,
@@ -108,6 +109,16 @@ def test_rejects_list_push_with_incompatible_value_type() -> None:
     module = SSAModule([SSAFunction("main", [], int_type, [SSABasicBlock("entry", [SSAConst(element, 1), SSAListNew(list_value, (element,)), SSAConst(value, 2.0), SSAListPush(list_value, value), SSAReturn(element)])])])
 
     _assert_verification_error(module, "List push value type mismatch: expected int, got double")
+
+
+def test_rejects_list_insert_with_non_int_index() -> None:
+    int_type = IntType()
+    element = SSAValue("0", int_type)
+    list_value = SSAValue("1", ListType(int_type))
+    index = SSAValue("2", DoubleType())
+    module = SSAModule([SSAFunction("main", [], int_type, [SSABasicBlock("entry", [SSAConst(element, 1), SSAListNew(list_value, (element,)), SSAConst(index, 0.0), SSAListInsert(list_value, index, element), SSAReturn(element)])])])
+
+    _assert_verification_error(module, "List insert index must be int, got double")
 
 
 def test_rejects_list_pop_with_incompatible_result_type() -> None:

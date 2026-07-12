@@ -21,6 +21,7 @@ from aether.ssa.model import (
     SSAListClear,
     SSAListPop,
     SSAListPush,
+    SSAListInsert,
     SSAListIndexOf,
     SSAListIsEmpty,
     SSAListLength,
@@ -178,6 +179,12 @@ class DeadPhiEliminator:
 
         if isinstance(instruction, SSAListPush):
             used_values.add(instruction.list_value)
+            used_values.add(instruction.value)
+            return
+
+        if isinstance(instruction, SSAListInsert):
+            used_values.add(instruction.list_value)
+            used_values.add(instruction.index)
             used_values.add(instruction.value)
             return
 

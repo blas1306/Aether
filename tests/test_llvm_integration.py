@@ -33,6 +33,7 @@ EXPECTED_EXIT_CODES = {
     "list_copy.ae": 19,
     "list_index.ae": 2,
     "list_index_of.ae": 12,
+    "list_insert.ae": 60,
     "list_literal.ae": 3,
     "list_pop.ae": 51,
     "list_pop_alias.ae": 32,
