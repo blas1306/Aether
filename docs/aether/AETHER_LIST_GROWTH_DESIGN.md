@@ -3,9 +3,10 @@
 ## Estado y alcance
 
 Este documento define el contrato de crecimiento dinamico de `List<T>` y la
-semantica futura de `push`, `pop`, `insert`, `removeAt`/`remove_at` y `clear`.
-Es exclusivamente documentacion de diseno: no implementa cambios en parser,
-typechecker, interpretes, IR, SSA, optimizadores, LLVM, runtime ni tests.
+semantica de `push`, `pop`, `insert`, `removeAt`/`remove_at` y `clear`.
+La Fase 4a, unicamente `clear`, esta implementada en frontend, interpretes,
+IR, SSA, optimizadores y LLVM. `push`, `pop`, `insert`, `removeAt`, reserva,
+growth, realloc, shrinking y gestion de memoria permanecen como diseno futuro.
 
 El contrato publico de listas ya definido en
 [`AETHER_V0_SPEC.md`](AETHER_V0_SPEC.md), las reglas generales de aliasing de
@@ -283,6 +284,11 @@ Todos los aliases observan inmediatamente la lista vacia y una insercion
 posterior puede reutilizar la capacidad. Es `O(1)` bajo el modelo v0 sin
 destructores.
 
+Estado Fase 4a: implementado mediante `IRListClear` y `SSAListClear`, ambas
+instrucciones sin resultado y con side effects. En LLVM baja directamente a
+un acceso al campo 0 del header y `store i64 0`; no usa helper, allocator ni
+`free`, y no accede a los campos `capacity` o `data`.
+
 ## Shrinking
 
 V0 nunca reduce automaticamente capacidad en `pop`, `removeAt` ni `clear`.
@@ -414,8 +420,8 @@ programa secuencial, no atomics ni sincronizacion entre threads.
 
 La Fase 4 se divide asi:
 
-1. **Fase 4a: `clear`.** Valida una mutacion de `length`, const, aliases y
-   efectos IR sin allocation ni movimientos.
+1. **Fase 4a: `clear` (implementada).** Valida una mutacion de `length`, const,
+   aliases y efectos IR sin allocation ni movimientos.
 2. **Fase 4b: `reserve`/growth interno y `push`.** Establece overflow,
    allocation, commit del header y crecimiento amortizado con el caso de shift
    mas simple: ninguno.
@@ -431,7 +437,7 @@ de retorno, bounds y memmove, para cuando esas piezas ya fueron probadas por
 separado. No se mueve `clear` a la Fase 3 historica para no reetiquetar trabajo
 ya cerrado; se lo implementa como primer incremento de Fase 4.
 
-## Plan minimo de tests futuros
+## Plan minimo de regresiones
 
 La implementacion debera cubrir, con paridad entre interprete AST, interprete
 IR y LLVM cuando cada superficie exista:

@@ -89,6 +89,11 @@ class SSAListIndexOf(SSAInstruction):
 
 
 @dataclass(frozen=True)
+class SSAListClear(SSAInstruction):
+    list_value: SSAValue
+
+
+@dataclass(frozen=True)
 class SSAListReverse(SSAInstruction):
     list_value: SSAValue
 

@@ -25,6 +25,7 @@ BENCHMARKS = (
 LLVM_EXAMPLES = (
     Path("examples/llvm/arithmetic.ae"),
     Path("examples/llvm/countdown.ae"),
+    Path("examples/llvm/list_clear.ae"),
     Path("examples/llvm/vector_dot.ae"),
 )
 

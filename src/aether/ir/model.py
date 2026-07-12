@@ -101,6 +101,11 @@ class IRListIndexOf(IRInstruction):
 
 
 @dataclass(frozen=True)
+class IRListClear(IRInstruction):
+    list_value: IRValue
+
+
+@dataclass(frozen=True)
 class IRListReverse(IRInstruction):
     list_value: IRValue
 

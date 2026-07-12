@@ -11,6 +11,7 @@ from aether.errors import AetherTypeError
 from aether.ir import (
     IRInterpreter,
     IRListContains,
+    IRListClear,
     IRListIndexOf,
     IRListCopy,
     IRListGet,
@@ -28,6 +29,7 @@ from aether.pipeline import lower_to_verified_ssa, parse_source, prepare_typed_p
 from aether.ssa import (
     SSAListGet,
     SSAListContains,
+    SSAListClear,
     SSAListIndexOf,
     SSAListCopy,
     SSAListIsEmpty,
@@ -546,3 +548,93 @@ def test_phase_3a_llvm_text_and_emit_llvm(tmp_path) -> None:
     assert "@aether_list_contains_int" in stdout.getvalue()
     assert "@aether_list_reverse" in stdout.getvalue()
     assert stderr.getvalue() == ""
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("int main(){ List<int> xs={}; xs.clear(); return xs.length; }", 0),
+        ("int main(){ List<int> xs={1,2,3}; xs.clear(); return xs.length; }", 0),
+        ("int main(){ List<int> xs={1}; xs.clear(); xs.clear(); if(xs.is_empty){return 7;} return 0; }", 7),
+        ("int main(){ List<int> xs={3,1,2}; xs[0]=9; xs.reverse(); xs.sort(); xs.clear(); return xs.length; }", 0),
+        ("int main(){ List<int> xs={1,2}; xs.clear(); int count=0; for int x in xs { count=count+1; } return count; }", 0),
+    ],
+)
+def test_list_clear_runtime_semantics(source: str, expected: int) -> None:
+    typed = _typed(source)
+    assert IRInterpreter(_lower(source)).call("main") == expected
+    if shutil.which("clang") is not None:
+        assert LLVMRunner().run(typed) == expected
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "int main(){ List<int> a={1,2,3}; List<int> b=a; b.clear(); return a.length+b.length; }",
+        "int wipe(List<int> xs){ xs.clear(); return 0; } int main(){ List<int> a={1,2,3}; int ignored=wipe(a); return a.length; }",
+        "List<int> identity(List<int> xs){ return xs; } int main(){ List<int> a={1,2,3}; List<int> b=identity(a); b.clear(); return a.length; }",
+    ],
+)
+def test_list_clear_is_observed_through_aliases(source: str) -> None:
+    typed = _typed(source)
+    assert IRInterpreter(_lower(source)).call("main") == 0
+    if shutil.which("clang") is not None:
+        assert LLVMRunner().run(typed) == 0
+
+
+def test_list_clear_is_void_and_rejects_const_receiver() -> None:
+    with pytest.raises(AetherTypeError, match="Cannot mutate constant 'xs'"):
+        _typed("int main(){ const List<int> xs={1,2,3}; xs.clear(); return 0; }")
+    with pytest.raises(AetherTypeError, match="void"):
+        _typed("int main(){ List<int> xs={1}; int result=xs.clear(); return result; }")
+
+
+def test_list_clear_lowers_prints_and_verifies_ir_and_ssa() -> None:
+    source = "int main(){ List<int> xs={1,2,3}; xs.clear(); return xs.length; }"
+    ir = IRVerifier(_lower(source)).verify()
+    ssa = SSAVerifier(_ssa(source)).verify()
+
+    assert any(isinstance(item, IRListClear) for item in _instructions(ir))
+    assert any(isinstance(item, SSAListClear) for item in _instructions(ssa))
+    assert "list_clear" in print_ir(ir)
+    assert "list_clear" in print_ssa(ssa)
+    assert IRInterpreter(ir).call("main") == 0
+
+
+def test_optimizers_preserve_clear_and_distinct_reads_around_it() -> None:
+    source = "int main(){ List<int> xs={1,2,3}; int before=xs.length; xs.clear(); int after=xs.length; return before*10+after; }"
+    optimized_ir = OptimizerPipeline().run(_lower(source))
+    optimized_ssa = SSAOptimizerPipeline().run(_ssa(source))
+
+    assert any(isinstance(item, IRListClear) for item in _instructions(optimized_ir))
+    assert any(isinstance(item, SSAListClear) for item in _instructions(optimized_ssa))
+    assert sum(isinstance(item, IRListLength) for item in _instructions(optimized_ir)) == 2
+    assert sum(isinstance(item, SSAListLength) for item in _instructions(optimized_ssa)) == 2
+    assert IRInterpreter(optimized_ir).call("main") == 30
+
+
+def test_list_clear_llvm_only_stores_zero_to_length() -> None:
+    llvm = print_llvm(_ssa("int main(){ List<int> xs={1,2,3}; xs.clear(); return xs.length; }"))
+    clear_lines = [line.strip() for line in llvm.splitlines() if "list.clear." in line]
+
+    assert clear_lines == [
+        "%list.clear.length_field.5 = getelementptr %AetherList, ptr %0, i32 0, i32 0",
+        "store i64 0, ptr %list.clear.length_field.5",
+    ]
+    assert "@aether_list_clear" not in llvm
+
+
+def test_list_clear_emit_llvm_and_clang(tmp_path) -> None:
+    source = "int main(){ List<int> xs={1,2,3}; xs.clear(); if(xs.is_empty){return 6;} return 0; }"
+    program = tmp_path / "list_clear.ae"
+    program.write_text(source + "\n", encoding="utf-8")
+    stdout = StringIO()
+    stderr = StringIO()
+
+    assert main(["--emit-llvm", str(program)], stdout=stdout, stderr=stderr) == EXIT_SUCCESS
+    emitted = stdout.getvalue()
+    assert "store i64 0, ptr %list.clear.length_field." in emitted
+    assert "@aether_list_clear" not in emitted
+    assert stderr.getvalue() == ""
+    if shutil.which("clang") is not None:
+        assert LLVMRunner().run(_typed(source)) == 6

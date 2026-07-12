@@ -40,6 +40,7 @@ from .model import (
     SSAListGet,
     SSAListCopy,
     SSAListContains,
+    SSAListClear,
     SSAListIndexOf,
     SSAListIsEmpty,
     SSAListLength,
@@ -294,6 +295,10 @@ class SSAVerifier:
 
             if isinstance(instruction, SSAListIndexOf):
                 self._verify_list_index_of(instruction, value_types)
+                continue
+
+            if isinstance(instruction, SSAListClear):
+                self._verify_list_clear(instruction, value_types)
                 continue
 
             if isinstance(instruction, SSAListReverse):
@@ -1038,6 +1043,11 @@ class SSAVerifier:
         self._require_defined(instruction.list_value, value_types)
         if not isinstance(instruction.list_value.type, ListType):
             self._fail(f"List reverse expects list value, got {instruction.list_value.type}")
+
+    def _verify_list_clear(self, instruction: SSAListClear, value_types: dict[str, IRType]) -> None:
+        self._require_defined(instruction.list_value, value_types)
+        if not isinstance(instruction.list_value.type, ListType):
+            self._fail(f"List clear expects list value, got {instruction.list_value.type}")
 
     def _verify_sequence_sort(self, instruction: SSASequenceSort, value_types: dict[str, IRType]) -> None:
         self._require_defined(instruction.sequence, value_types)

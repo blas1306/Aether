@@ -57,11 +57,12 @@ Notas:
 
 - `string` baja como valor/literal/call/return/phi, pero LLVM no soporta
   operaciones string (`+`, comparaciones, impresion, length, indexing, runtime).
-- `List<T>` tiene backend fases 1, 2, 3a y `indexOf` de fase 3b para literal con tipo esperado,
+- `List<T>` tiene backend fases 1, 2, 3a, `indexOf` de fase 3b y `clear` de fase 4a para literal con tipo esperado,
   `.length`, `.is_empty`, `for x in xs` / `for T x in xs`, lectura indexada y
-  asignacion indexada, `copy()`, `contains()`, `indexOf()` y `reverse()`. No incluye cambios
-  de longitud/capacidad, crecimiento, `realloc`, ownership ni runtime dinamico
-  completo. El backend no agrega bounds checks.
+  asignacion indexada, `copy()`, `contains()`, `indexOf()`, `reverse()` y
+  `clear()`. Fuera de `clear`, no incluye cambios de longitud/capacidad,
+  crecimiento, `realloc`, ownership ni runtime dinamico completo. El backend
+  no agrega bounds checks.
 - En el frontend/interprete, los agregados mutables (`List`, `Array`,
   `Vector`, `Matrix`) aliasan por asignacion, parametros y return cuando no hay
   conversion de elementos; `copy()` crea el contenedor independiente explicito.
@@ -158,7 +159,7 @@ Notas:
 | List.pop | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
 | List.insert | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
 | List.removeAt / remove_at | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
-| List.clear | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
+| List.clear | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 4a |
 | List.reverse | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 3a |
 | List.sort | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado con `IRSequenceSort` y helper estable compartido |
 
@@ -180,11 +181,11 @@ La semantica unica implementada de `List.sort` y `Array.sort` esta en
 Ambos contenedores comparten IR, politica de comparacion y helpers LLVM; solo
 difieren al extraer el puntero de datos y la longitud de sus cabeceras.
 
-El crecimiento y las mutaciones de longitud pendientes de `List<T>` tienen su
+El crecimiento y las mutaciones de longitud de `List<T>` tienen su
 contrato de implementacion futura en
 [`AETHER_LIST_GROWTH_DESIGN.md`](../aether/AETHER_LIST_GROWTH_DESIGN.md). Las
-filas `push`, `pop`, `insert`, `removeAt` y `clear` permanecen sin backend; el
-enlace no cambia su estado en esta matriz.
+filas `push`, `pop`, `insert` y `removeAt` permanecen sin backend. `clear` es
+la unica operacion de Fase 4 implementada y conserva capacidad y buffer.
 
 ## Algebra lineal
 
@@ -247,8 +248,8 @@ Notas:
    compilable.
 3. Completar strings en backend: concatenacion, comparaciones, impresion,
    length/indexing y runtime/ownership.
-4. Completar `List<T>` con mutaciones que cambian longitud, crecimiento,
-   `realloc` y ownership; `sort` ya esta implementado.
+4. Completar `List<T>` con las mutaciones de longitud restantes, crecimiento,
+   `realloc` y ownership; `clear` y `sort` ya estan implementados.
 5. Agregar `NullableType`/`null` al IR, SSA, optimizadores y LLVM, incluyendo
    comparaciones con `null`.
 6. Migrar structs, classes, interfaces y enums al backend o definir

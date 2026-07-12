@@ -29,6 +29,7 @@ EXPECTED_EXIT_CODES = {
     "int_to_double.ae": 12,
     "list_for_sum.ae": 6,
     "list_contains.ae": 1,
+    "list_clear.ae": 0,
     "list_copy.ae": 19,
     "list_index.ae": 2,
     "list_index_of.ae": 12,

@@ -23,6 +23,7 @@ from .model import (
     IRListGet,
     IRListCopy,
     IRListContains,
+    IRListClear,
     IRListIndexOf,
     IRListIsEmpty,
     IRListLength,
@@ -227,6 +228,13 @@ class IRInterpreter:
                 (ArrayType, ClassRefType, InterfaceType, ListType, MatrixType, VectorType),
             )
             frame.values[instruction.result] = self._list_index_of(list_value, value, reference_type)
+            return False, None, None
+
+        if isinstance(instruction, IRListClear):
+            list_value = self._value(instruction.list_value, frame)
+            if not isinstance(list_value, list):
+                raise IRExecutionError("IR list_clear requires a list value")
+            list_value.clear()
             return False, None, None
 
         if isinstance(instruction, IRListReverse):

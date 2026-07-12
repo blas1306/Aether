@@ -18,6 +18,7 @@ from aether.ir.model import (
     IRListGet,
     IRListCopy,
     IRListContains,
+    IRListClear,
     IRListIndexOf,
     IRListIsEmpty,
     IRListLength,
@@ -233,6 +234,8 @@ class DeadCodeEliminator:
             return (instruction.list_value, instruction.value)
         if isinstance(instruction, IRListIndexOf):
             return (instruction.list_value, instruction.value)
+        if isinstance(instruction, IRListClear):
+            return (instruction.list_value,)
         if isinstance(instruction, IRListReverse):
             return (instruction.list_value,)
         if isinstance(instruction, IRSequenceSort):

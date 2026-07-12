@@ -175,6 +175,9 @@ are skipped.
 - `SSAListIndexOf` calls the same specialized linear-search implementation and
   returns the first zero-based index as `i32`, or `-1` when absent. It is a
   memory read with no side effect.
+- `SSAListClear` has no result and is side-effecting. It emits only a GEP to
+  field 0 of `%AetherList` followed by `store i64 0`; it does not load or store
+  capacity/data and does not allocate, free, or call a runtime helper.
 - `SSAListReverse` calls an in-place byte-swap loop. It allocates no new list or
   data buffer and is preserved as a side effect.
 - `SSASequenceSort` is the common side-effecting instruction for
@@ -310,11 +313,12 @@ merge0:
 
 The backend deliberately does not support these yet:
 
-- Full `List<T>` backend API. Phases 1, 2, and 3 support list literals with an
+- Full `List<T>` backend API. Phases 1, 2, 3, and `clear` from phase 4a support list literals with an
   expected `List<T>` type, `.length`, `.is_empty`, List parameters/returns,
   `for x in xs` / `for T x in xs`, explicit indexed reads and indexed stores.
-- Length-changing mutation, capacity growth, `realloc`, ownership, or GC.
-  `copy`, `contains`, `indexOf`, `reverse`, and stable `sort` are supported.
+- Length-changing mutation other than `clear`, capacity growth, `realloc`,
+  ownership, or GC. `clear`, `copy`, `contains`, `indexOf`, `reverse`, and
+  stable `sort` are supported. `clear` preserves capacity and data.
 - List indexing does not add bounds checks in phase 2; compiled out-of-range
   access has undefined behavior, matching the existing aggregate backend
   policy.

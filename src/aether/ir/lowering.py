@@ -31,6 +31,7 @@ from .model import (
     IRListGet,
     IRListCopy,
     IRListContains,
+    IRListClear,
     IRListIndexOf,
     IRListIsEmpty,
     IRListLength,
@@ -360,6 +361,20 @@ class IRLowerer:
 
         if isinstance(statement, ast.ExpressionStatement):
             expression = statement.expression
+            if isinstance(expression, ast.CallExpression) and (
+                expression.callee == "clear" or expression.callee.endswith(".clear")
+            ):
+                arguments = expression.arguments
+                if expression.callee.endswith(".clear"):
+                    receiver = expression.callee.rsplit(".", 1)[0]
+                    arguments = [ast.Identifier(receiver, expression.line, expression.column), *arguments]
+                if expression.keyword_arguments or len(arguments) != 1:
+                    self._unsupported(expression, "invalid clear call")
+                list_value = self._lower_expression(arguments[0], context)
+                if not isinstance(list_value.type, ListType):
+                    self._unsupported(expression, "clear on non-list")
+                context.block.instructions.append(IRListClear(list_value))
+                return
             if isinstance(expression, ast.CallExpression) and (
                 expression.callee == "sort" or expression.callee.endswith(".sort")
             ):

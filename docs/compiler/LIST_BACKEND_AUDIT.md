@@ -18,9 +18,9 @@ Areas revisadas:
 ## Resumen Ejecutivo
 
 `List<T>` es una feature completa en el frontend/interprete. En IR/SSA/LLVM ya
-tiene soporte de fases 1, 2 y 3a para literales con tipo esperado, `.length`,
+tiene soporte de fases 1, 2, 3a, 3b (`indexOf`) y 4a (`clear`) para literales con tipo esperado, `.length`,
 `.is_empty`, `for x in xs` / `for T x in xs`, lectura `xs[i]` y escritura
-`xs[i] = value`, `copy`, `contains`, `indexOf` y `reverse`. El resto de la API de listas
+`xs[i] = value`, `copy`, `contains`, `indexOf`, `reverse` y `clear`. El resto de la API de listas
 sigue pendiente de backend.
 
 La migracion no deberia reutilizar directamente las instrucciones de `Array<T>`.
@@ -225,7 +225,7 @@ solo soporte operacional, no la existencia nominal del tipo.
 | `pop(xs)` / `xs.pop()` | Si | No | No | No | Alta |
 | `insert(xs, i, value)` / `xs.insert(i, value)` | Si | No | No | No | Alta |
 | `remove_at(xs, i)` / `xs.removeAt(i)` | Si | No | No | No | Alta |
-| `clear(xs)` / `xs.clear()` | Si | No | No | No | Media |
+| `clear(xs)` / `xs.clear()` | Si | Si | Si | Si | Implementado fase 4a |
 | Equality `xs == ys` | Si | No | No | No | Alta |
 | `for x in xs` / `for T x in xs` | Si | Si | Si | Si | Implementado fase 1 |
 
@@ -305,7 +305,8 @@ Mutacion:
 - `aether_list_pop(list: ptr, element_size: i64, out_ptr: ptr) -> void`
 - `aether_list_insert(list: ptr, element_size: i64, index: i64, value_ptr: ptr) -> void`
 - `aether_list_remove_at(list: ptr, element_size: i64, index: i64, out_ptr: ptr) -> void`
-- `aether_list_clear(list: ptr) -> void`
+- `clear` se emite inline como GEP al campo `length` y `store i64 0`; no usa
+  helper runtime.
 - `aether_list_reverse(list: ptr, element_size: i64) -> void`
 
 Copia y busqueda:
@@ -436,10 +437,10 @@ Justificacion:
 El contrato detallado de invariantes, crecimiento, allocation, shifting,
 ownership y optimizacion para esta fase esta en
 [`AETHER_LIST_GROWTH_DESIGN.md`](../aether/AETHER_LIST_GROWTH_DESIGN.md). Es un
-diseno previo a la implementacion y no cambia el estado de backend auditado en
-este documento.
+diseno previo para las operaciones pendientes. La Fase 4a (`clear`) ya esta
+implementada; no cambia `capacity` ni `data` y no reserva ni libera memoria.
 
-Recomiendo mover `clear` antes, a Fase 3a o al inicio de Fase 4.
+`clear` se implemento como el primer incremento de Fase 4.
 
 Justificacion:
 
@@ -450,7 +451,7 @@ Justificacion:
 
 Orden sugerido dentro de Fase 4:
 
-1. `clear`
+1. `clear` (implementado, Fase 4a)
 2. `push`
 3. `pop`
 4. `insert`
@@ -560,8 +561,9 @@ No reutilizar sin cambios:
 `docs/compiler/FEATURE_MATRIX.md` refleja el estado actual:
 
 - `List<T>` existe como tipo frontend y tipo IR/SSA nominal.
-- Las operaciones que cambian longitud siguen sin backend; `sort` esta
-  implementado para List y Array.
+- `clear` es la unica operacion que cambia longitud con backend; `sort` esta
+  implementado para List y Array. Las demas mutaciones de longitud siguen
+  pendientes.
 - `indexOf` aparece implementado en todo el pipeline.
 - `isEmpty / is_empty` esta marcado parcial en parser porque solo existe
   `is_empty` como builtin global; no hay metodo `isEmpty`.

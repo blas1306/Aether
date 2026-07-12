@@ -23,6 +23,7 @@ from aether.ssa.model import (
     SSAListGet,
     SSAListCopy,
     SSAListContains,
+    SSAListClear,
     SSAListIndexOf,
     SSAListIsEmpty,
     SSAListLength,
@@ -203,6 +204,8 @@ class LLVMPrinter:
             return self._print_list_contains(instruction)
         if isinstance(instruction, SSAListIndexOf):
             return self._print_list_index_of(instruction)
+        if isinstance(instruction, SSAListClear):
+            return self._print_list_clear(instruction)
         if isinstance(instruction, SSAListReverse):
             return self._print_list_reverse(instruction)
         if isinstance(instruction, SSASequenceSort):
@@ -567,6 +570,19 @@ class LLVMPrinter:
         self._uses_list_reverse = True
         size = self._sizeof(instruction.list_value.type.element)
         return f"call void @aether_list_reverse(ptr {self._operand(instruction.list_value)}, i64 {size})"
+
+    def _print_list_clear(self, instruction: SSAListClear) -> str:
+        if not isinstance(instruction.list_value.type, ListType):
+            raise LLVMBackendError("LLVM list_clear expects a ListType source")
+        self._uses_list_type = True
+        length_field = self._synthetic_temp("list.clear.length_field")
+        return "\n  ".join(
+            (
+                f"{length_field} = getelementptr {self._LIST_STRUCT_TYPE}, "
+                f"ptr {self._operand(instruction.list_value)}, i32 0, i32 0",
+                f"store i64 0, ptr {length_field}",
+            )
+        )
 
     def _print_sequence_sort(self, instruction: SSASequenceSort) -> str:
         sequence_type = instruction.sequence.type

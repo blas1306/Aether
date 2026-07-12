@@ -54,8 +54,9 @@ def test_pipeline_runs_stages_in_declared_order(monkeypatch: pytest.MonkeyPatch)
     assert commands[0] == ["git", "diff", "--check"]
     assert commands[1] == [str(ci.ROOT / ".venv" / "bin" / "pytest")]
     assert [command[3] for command in commands[2:5]] == ["bench"] * 3
-    assert [command[3] for command in commands[5:8]] == ["--emit-llvm"] * 3
-    assert [command[3] for command in commands[8:11]] == ["build"] * 3
+    llvm_end = 5 + len(ci.LLVM_EXAMPLES)
+    assert [command[3] for command in commands[5:llvm_end]] == ["--emit-llvm"] * len(ci.LLVM_EXAMPLES)
+    assert [command[3] for command in commands[llvm_end:]] == ["build"] * len(ci.LLVM_EXAMPLES)
     assert output.getvalue().index("OK tests") < output.getvalue().index("OK benchmarks")
     assert output.getvalue().index("OK benchmarks") < output.getvalue().index("OK llvm")
     assert output.getvalue().index("OK llvm") < output.getvalue().index("OK native")

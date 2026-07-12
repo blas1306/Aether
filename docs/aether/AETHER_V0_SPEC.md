@@ -1291,11 +1291,13 @@ Aether separates general programming collections from mathematical vectors and m
 brace literals is documented in
 [`AETHER_COLLECTIONS_DESIGN.md`](AETHER_COLLECTIONS_DESIGN.md).
 
-The planned LLVM capacity, growth, allocation, and shrinking policy for
+The LLVM capacity, growth, allocation, and shrinking policy for
 length-changing `List<T>` operations is documented in
 [`AETHER_LIST_GROWTH_DESIGN.md`](AETHER_LIST_GROWTH_DESIGN.md). That document
-does not mark `push`, `pop`, `insert`, `removeAt`, or `clear` as implemented in
-the backend.
+marks only `clear` as implemented in the backend. `clear` sets the shared
+header's length to zero in O(1), preserves capacity and data, and performs no
+deallocation or recursive destruction. `push`, `pop`, `insert`, and
+`removeAt` remain frontend-only.
 
 The detailed future contract shared by `List<T>.sort()` and
 `Array<T>.sort()` is documented in

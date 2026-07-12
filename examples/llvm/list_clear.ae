@@ -1,0 +1,13 @@
+int main() {
+    List<int> xs = {1, 2, 3};
+    List<int> other = xs;
+
+    other.clear();
+
+    if (xs.is_empty) {
+        if (other.length == 0) {
+            return 0;
+        }
+    }
+    return 1;
+}

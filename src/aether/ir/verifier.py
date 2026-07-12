@@ -21,6 +21,7 @@ from .model import (
     IRListGet,
     IRListCopy,
     IRListContains,
+    IRListClear,
     IRListIndexOf,
     IRListIsEmpty,
     IRListLength,
@@ -395,6 +396,10 @@ class IRVerifier:
         if isinstance(instruction, IRListIndexOf):
             self._verify_list_index_of(instruction, state, value_types)
             return self._define_value(state, instruction.result)
+
+        if isinstance(instruction, IRListClear):
+            self._verify_list_clear(instruction, state, value_types)
+            return state
 
         if isinstance(instruction, IRListReverse):
             self._verify_list_reverse(instruction, state, value_types)
@@ -1149,6 +1154,11 @@ class IRVerifier:
         self._require_defined(instruction.list_value, state, value_types)
         if not isinstance(instruction.list_value.type, ListType):
             self._fail(f"List reverse expects list value, got {instruction.list_value.type}")
+
+    def _verify_list_clear(self, instruction: IRListClear, state: _State, value_types: dict[str, IRType]) -> None:
+        self._require_defined(instruction.list_value, state, value_types)
+        if not isinstance(instruction.list_value.type, ListType):
+            self._fail(f"List clear expects list value, got {instruction.list_value.type}")
 
     def _verify_sequence_sort(self, instruction: IRSequenceSort, state: _State, value_types: dict[str, IRType]) -> None:
         self._require_defined(instruction.sequence, state, value_types)
