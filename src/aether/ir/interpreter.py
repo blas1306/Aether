@@ -5,6 +5,8 @@ import math
 from math import trunc
 from typing import Any, NoReturn, Sequence
 
+from aether.list_safety import checked_list_index_to_int, checked_list_length_to_int
+
 from .model import (
     IRArrayGet,
     IRArrayLength,
@@ -231,7 +233,12 @@ class IRInterpreter:
                 instruction.value.type,
                 (ArrayType, ClassRefType, InterfaceType, ListType, MatrixType, VectorType),
             )
-            frame.values[instruction.result] = self._list_index_of(list_value, value, reference_type)
+            try:
+                frame.values[instruction.result] = checked_list_index_to_int(
+                    self._list_index_of(list_value, value, reference_type)
+                )
+            except OverflowError as error:
+                raise IRExecutionError(str(error)) from error
             return False, None, None
 
         if isinstance(instruction, IRListClear):
@@ -379,14 +386,14 @@ class IRInterpreter:
         if isinstance(instruction, IRListGet):
             list_value = self._value(instruction.list_value, frame)
             index = self._value(instruction.index, frame)
-            self._check_array_index(list_value, index)
+            self._check_list_index(list_value, index)
             frame.values[instruction.result] = list_value[index]
             return False, None, None
 
         if isinstance(instruction, IRListSet):
             list_value = self._value(instruction.list_value, frame)
             index = self._value(instruction.index, frame)
-            self._check_array_index(list_value, index)
+            self._check_list_index(list_value, index)
             list_value[index] = self._value(instruction.value, frame)
             return False, None, None
 
@@ -456,7 +463,10 @@ class IRInterpreter:
             list_value = self._value(instruction.list_value, frame)
             if not isinstance(list_value, list):
                 raise IRExecutionError("IR list_length requires a list value")
-            frame.values[instruction.result] = len(list_value)
+            try:
+                frame.values[instruction.result] = checked_list_length_to_int(len(list_value))
+            except OverflowError as error:
+                raise IRExecutionError(str(error)) from error
             return False, None, None
 
         if isinstance(instruction, IRListIsEmpty):
@@ -734,6 +744,17 @@ class IRInterpreter:
         if index < 0 or index >= len(array):
             raise IRExecutionError(
                 f"IR array index {index} out of bounds for length {len(array)}"
+            )
+
+    @staticmethod
+    def _check_list_index(list_value: Any, index: Any) -> None:
+        if not isinstance(list_value, list):
+            raise IRExecutionError("IR list indexing requires a list value")
+        if type(index) is not int:
+            raise IRExecutionError("IR List index must be int")
+        if index < 0 or index >= len(list_value):
+            raise IRExecutionError(
+                f"List index {index} out of bounds for length {len(list_value)}"
             )
 
     @staticmethod

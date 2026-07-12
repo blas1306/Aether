@@ -186,8 +186,8 @@ Propiedades de esta fase:
 - `.length` baja a `IRListLength` / `SSAListLength` y lee el campo `length`.
 - `.is_empty` baja a `IRListIsEmpty` / `SSAListIsEmpty` y compara `length == 0`.
 - `for x in xs` y `for T x in xs` bajan con `ListLength` + `ListGet`.
-- No se agregan bounds checks nuevos; se conserva la politica actual del
-  backend de agregados.
+- `ListGet` valida `0 <= index < length` antes de cargar `data` o calcular el
+  GEP del elemento.
 
 Fuera de alcance en fase 1:
 
@@ -285,6 +285,15 @@ Los helpers de crecimiento implementados y los contratos aun pendientes son:
 
 Helpers base:
 
+- `aether_checked_mul_i64(left, right) -> i64` usa
+  `llvm.umul.with.overflow.i64` y deriva al panic de tamano;
+- `aether_checked_allocation_bytes(length, element_size) -> i64` valida
+  operandos no negativos y reutiliza la multiplicacion checked;
+- `aether_alloc(size) -> ptr` admite cero como buffer nulo, comprueba el
+  resultado de `malloc` para requests no vacios y usa el panic de OOM;
+- `aether_list_length_to_int` y `aether_list_index_to_int` implementan la
+  frontera checked `i64 -> i32` sin cambiar los tipos publicos.
+
 - `aether_list_new(element_size: i64, length: i64, capacity: i64) -> ptr`
 - `aether_list_new_from_values(element_size: i64, length: i64, values: ptr) -> ptr`
   o, alternativamente, emitir `new` + stores desde LLVM sin helper variadico.
@@ -296,7 +305,8 @@ Helpers base:
 Lectura/escritura:
 
 - `aether_list_element_ptr(list: ptr, element_size: i64, index: i64) -> ptr`
-- `aether_list_bounds_check(index: i64, length: i64) -> void`
+- `aether_list_check_index(list: ptr, index: i64) -> void` (implementado para
+  get/set; carga length y deriva a un panic `noreturn`)
 - `aether_list_insert_bounds_check(index: i64, length: i64) -> void`
 
 Mutacion:
@@ -391,14 +401,15 @@ Justificacion:
   extension a `i64` runtime o si el IR normaliza indices a `i64`.
 
 La implementacion conserva `IRListSet` / `SSAListSet` como instrucciones con
-efectos y reescribe sus tres operandos sin eliminarlas. `ListGet` sigue siendo
-una lectura de memoria y no se pliega ni se reutiliza a traves de un `ListSet`.
-LLVM carga `header.data`, extiende el indice fuente a `i64`, calcula
-`data[index]` y emite `load` o `store` segun corresponda.
+efectos y reescribe sus tres operandos sin eliminarlas. `ListGet` es una
+lectura de memoria `may_trap`: DCE IR y SSA la conservan aunque el resultado no
+se use, y no se pliega ni se reutiliza a traves de un `ListSet`.
 
-Fase 2 no agrega bounds checks: conserva la politica actual del backend para
-indexing de agregados. Un indice fuera de rango en codigo compilado tiene
-comportamiento no definido. El interprete IR conserva su chequeo existente.
+LLVM extiende el indice fuente a `i64`, llama a
+`aether_list_check_index(list, index)` y solo despues carga `header.data`,
+calcula `data[index]` y emite `load` o `store`. Un indice negativo, igual a
+length o mayor termina con codigo 1 y el mensaje
+`Aether panic: List index out of bounds`; el store no ocurre si el check falla.
 
 ### Fase 3: copy, contains, indexOf, reverse, sort
 
@@ -410,14 +421,18 @@ Recomiendo partirla internamente:
 Fase 3a y fase 3b implementadas para las operaciones sin cambio de longitud:
 
 - `IRListCopy` / `SSAListCopy` son allocations observables y se conservan. LLVM
-  crea header y buffer independientes y copia las representaciones de elemento;
-  los elementos reference-type mantienen sus punteros, por lo que la copia es
-  superficial.
+  valida `length * element_size`, crea header y buffer independientes y solo
+  entonces copia las representaciones de elemento; los elementos
+  reference-type mantienen sus punteros, por lo que la copia es superficial.
 - `IRListContains` / `SSAListContains` son lecturas lineales. LLVM especializa
   igualdad para `int`, `double`, `boolean`, `string` y referencias; no se
   introduce `Comparable`.
-- `IRListIndexOf` / `SSAListIndexOf` reutilizan la misma busqueda e igualdad,
-  producen el primer indice o `-1` y son lecturas de memoria sin side effects.
+- `IRListIndexOf` / `SSAListIndexOf` reutilizan una busqueda interna `i64`,
+  producen el primer indice o `-1`, y convierten a `i32` con check. Un indice
+  mayor que `INT32_MAX` termina con
+  `Aether panic: List index does not fit in int`.
+- `contains` compara directamente el resultado `i64` de esa busqueda con `-1`;
+  no puede disparar el panic de narrowing solo para producir un booleano.
 - `IRListReverse` / `SSAListReverse` mutan el buffer mediante swaps in-place,
   no producen resultado y nunca se eliminan.
 - `IRSequenceSort` / `SSASequenceSort` son comunes a List y Array, mutan el
@@ -488,10 +503,9 @@ Recomendacion:
 
 Impacto:
 
-- Puede eliminar `ListLength`, `ListIsEmpty`, `ListGet`, `ListContains` y
-  `ListIndexOf` si su
-  resultado no se usa. `ListCopy` se trata conservadoramente como allocation y
-  no se elimina.
+- Puede eliminar `ListIsEmpty` y `ListContains` si su resultado no se usa.
+  Conserva `ListGet`, `ListLength` y `ListIndexOf` porque pueden hacer trap;
+  `ListCopy` se conserva como allocation observable.
 - No puede eliminar `ListSet`, `Push`, `Pop`, `Insert`, `RemoveAt`, `Clear`,
   `Reverse` ni `Sort`.
 - `Pop` y `RemoveAt` tienen side effect aunque el resultado no se use.

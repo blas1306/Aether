@@ -198,6 +198,15 @@ insertion sort for small merge runs. The auxiliary buffer does not alter the
 receiver's identity, length, array size, or list capacity. A later stable
 algorithm may replace it without changing language semantics.
 
+The implemented bottom-up merge sort validates `length * element_size` with
+checked unsigned i64 multiplication before allocating its auxiliary buffer.
+Each memcpy run size is checked as well. Merge endpoints are computed from
+remaining lengths rather than potentially wrapping `left + 2 * width`, and
+the loop branches before doubling width. Allocation failure and size overflow
+therefore terminate before copying or writing, with respectively
+`Aether panic: memory allocation failed` and
+`Aether panic: allocation size overflow`.
+
 ## Compile-Time Errors
 
 Static checking must diagnose `sort()` on:
@@ -227,6 +236,8 @@ is:
 - empty, prefix-related, mixed-case, ASCII, and non-ASCII strings;
 - aliases observing the in-place mutation;
 - unchanged identity, length, array size, and list capacity;
+- checked total/run byte sizes and non-wrapping merge bounds in textual LLVM;
+- allocation failure through an injected allocator rather than real OOM;
 - compile-time rejection of every unsupported type category; and
 - behavioral parity between the AST interpreter and LLVM backend.
 
@@ -246,7 +257,6 @@ The following are explicitly not part of v0 `sort()`:
 Open integration questions, none of which changes the semantic contract above:
 
 - the final runtime helper names and string ABI;
-- how helper allocation failure is reported;
 - whether and when `sort(Array<T>)` is added as a global builtin in addition to
   `Array<T>.sort()`; and
 - whether a future common collection hierarchy is named `Sequence<T>` and

@@ -23,6 +23,11 @@ No se ejecutaron tests ni benchmarks por restriccion del encargo. Las
 afirmaciones sobre cobertura indican que existe codigo de test, no que se haya
 revalidado su resultado durante esta auditoria.
 
+Actualizacion del 12 de julio de 2026: el P0 de bounds de `ListGet`/`ListSet`
+y su modelado `may_trap` en DCE fueron resueltos despues del relevamiento
+original. Las secciones afectadas se actualizaron; los demas riesgos y el
+alcance de la auditoria permanecen sin cambios.
+
 ## Resumen ejecutivo
 
 Clasificacion global: **aceptable**.
@@ -30,18 +35,11 @@ Clasificacion global: **aceptable**.
 El subsistema es funcionalmente amplio y coherente en sus caminos normales:
 los quince opcodes auditados atraviesan AST, IR, SSA y LLVM mediante al menos
 una forma de sintaxis; el aliasing por header estable esta bien conservado; las mutaciones estan
-modeladas como efectos; growth centraliza reserva y comprueba los overflows
-mas importantes; y la cobertura funcional es considerable. No se clasifica
-como solido porque persisten dos riesgos nativos de seguridad/correccion de
-prioridad alta:
-
-1. `ListGet` y `ListSet` comprueban bounds en los interpretes AST e IR, pero
-   LLVM calcula el GEP y carga/almacena sin comprobar el indice. Un acceso
-   invalido en native cae en comportamiento indefinido en lugar de un panic
-   controlado.
-2. `aether_list_new` y `aether_list_copy` calculan el tamano del buffer con
-   `mul i64` sin overflow check. El runtime de growth si usa
-   `llvm.umul.with.overflow.i64`, por lo que la politica no es uniforme.
+modeladas como efectos; growth centraliza reserva; new/copy/sort validan sus
+tamanos; y la cobertura funcional es considerable. Los P0 nativos relevados
+(bounds get/set, overflow de allocation/copy/sort y conversiones List i64 a
+`int`) estan resueltos. La clasificacion se conserva como snapshot hasta cerrar
+las brechas de formas publicas y consolidacion que siguen fuera de este cambio.
 
 Hallazgos adicionales:
 
@@ -52,15 +50,12 @@ Hallazgos adicionales:
   frontend/AST y no tiene lowering IR. La spec presenta esas formas como
   equivalentes, por lo que el backend documentado no es completamente
   intercambiable.
-- DCE considera `ListGet` una lectura pura eliminable. En el interprete IR esa
-  lectura puede fallar por bounds, por lo que eliminar un resultado no usado
-  tambien puede eliminar un error observable. La clasificacion solo seria
-  correcta si el lenguaje declarase los accesos invalidos como UB, cosa que la
-  conducta del AST/IR no sugiere.
-- `length` e `indexOf` son `int` (`i32`) en el lenguaje, mientras el header usa
-  `i64`: LLVM trunca longitud e indices encontrados sin check. Growth puede
-  superar el rango representable por `int` antes de que la API pueda describir
-  correctamente esa longitud.
+- `ListGet` se modela conservadoramente como `may_trap`: DCE IR y SSA lo
+  preservan aunque su resultado no tenga usos. `ListSet` permanece
+  side-effecting.
+- `length` e `indexOf` siguen siendo `int` (`i32`) aunque el header use `i64`.
+  LLVM ahora comprueba `0..INT32_MAX`; `indexOf` conserva `-1`, y ambos hacen
+  panic en vez de truncar si un resultado no es representable.
 - El conocimiento de operandos, resultados y efectos de cada opcode List esta
   duplicado entre builders, renaming, printers, verifiers y optimizadores. Hoy
   las mutaciones se preservan, pero agregar o refactorizar un opcode exige
@@ -213,16 +208,16 @@ del interprete, y "LLVM" a helpers emitidos por el backend.
 
 | Operacion | Frontend / AST | IR | SSA y optimizer | LLVM / runtime | Tests existentes | Observaciones |
 | --- | --- | --- | --- | --- | --- | --- |
-| `ListNew` | `ListLiteral`; inferencia/target type; AST crea lista Python | `IRListNew` y ejecucion/printer/verifier | `SSAListNew`; ambos builders; se conserva como allocation | `aether_list_new`; header+buffer; stores de elementos inline | literal, tipos, empty, for, IR/SSA/LLVM/native | `data_size` sin overflow; GEP/data load se repiten en emitter. |
-| `ListGet` | `IndexExpression`; indice `int`; AST comprueba bounds | `IRListGet`; interprete comprueba bounds | `SSAListGet`; DCE lo considera puro | data GEP + load inline, **sin bounds** | valores/tipos, alias alrededor de set, for, native | Divergencia critica AST/IR/native; DCE puede quitar un fallo observable. |
-| `ListSet` | `IndexAssignment`; tipo/const; AST comprueba bounds y muta alias | `IRListSet`, side-effecting | `SSAListSet`; preservado por todos los pases | data GEP + store inline, **sin bounds** | assignment/param/return aliases, optimizer, LLVM | Efecto correcto; misma divergencia de bounds. |
-| `ListLength` | builtin/property/`size()`; AST usa `len` | `IRListLength` para `.length` y `for`; no baja `length(xs)` ni `xs.size()` | `SSAListLength`; lectura eliminable si muerta | carga `i64`, luego `trunc` a `i32` | literal, empty, for, antes/despues de mutaciones | Brecha de formas publicas y falta politica para `length > INT_MAX`. |
+| `ListNew` | `ListLiteral`; inferencia/target type; AST crea lista Python | `IRListNew` y ejecucion/printer/verifier | `SSAListNew`; ambos builders; se conserva como allocation | checked bytes; header+buffer; stores de elementos inline | literal, tipos, empty, for, helpers/LLVM/native | Valida longitud/producto antes de reservar header o buffer. |
+| `ListGet` | `IndexExpression`; indice `int`; AST comprueba bounds | `IRListGet`; interprete comprueba bounds con mensaje List | `SSAListGet`; DCE lo preserva por `may_trap` | `aether_list_check_index` antes de cargar data, GEP y load | validos; negativo/igual/mayor/empty; AST/IR/native; DCE; orden LLVM | Semantica uniforme `0 <= i < length`; panic native controlado. |
+| `ListSet` | `IndexAssignment`; tipo/const; AST comprueba bounds y muta alias | `IRListSet`, side-effecting; check antes de mutar | `SSAListSet`; preservado por todos los pases | `aether_list_check_index` antes de cargar data, GEP y store | validos; negativo/igual/mayor/empty; estado; native; orden LLVM | Un fallo no escribe el buffer ni publica una mutacion parcial. |
+| `ListLength` | builtin/property/`size()`; AST usa `len` | `IRListLength` para `.length` y `for`; no baja `length(xs)` ni `xs.size()` | `SSAListLength`; DCE la conserva por `may_trap` | carga `i64`; conversion checked a `i32` | limites unitarios, LLVM, DCE y caminos normales | `> INT32_MAX` produce `Aether panic: List length does not fit in int`. |
 | `ListIsEmpty` | builtin y propiedad `is_empty`; AST `len == 0` | `IRListIsEmpty` solo para `.is_empty`; no baja `is_empty(xs)` | `SSAListIsEmpty`; lectura eliminable | carga `length` y `icmp eq 0` | propiedad en backend; builtin en AST | Opcode coherente, superficie global incompleta y docs de miembros incompletas. |
-| `ListCopy` | builtin/metodo; copia superficial del contenedor | `IRListCopy`; nueva lista Python externa | `SSAListCopy`; conservada como allocation | `aether_list_copy` -> new + `memcpy` | shallow copy, referencias, IR/SSA, LLVM/native | `length * element_size` sin overflow; header y buffer independientes. |
-| `ListContains` | builtin/metodo; igualdad valor o identidad segun `T` | `IRListContains`, reutiliza busqueda del interprete | `SSAListContains`; lectura | wrapper tipado llama al helper `indexOf` tipado | escalares/referencias, mutaciones, LLVM/native | Buena reutilizacion LLVM; nombres tipados colapsan todos los refs a ABI `ptr`. |
-| `ListIndexOf` | builtin `index_of` y metodo `indexOf`; primer match/-1 | `IRListIndexOf` solo para `indexOf`; no baja `index_of` | `SSAListIndexOf`; lectura | loop tipado por `T`; `strcmp` para string; identidad para refs | metodo: igualdad, -1, IR/SSA/optimizer/LLVM/native; global: AST | Trunca indice `i64` a `i32`; forma global no alcanza backend. |
+| `ListCopy` | builtin/metodo; copia superficial del contenedor | `IRListCopy`; nueva lista Python externa | `SSAListCopy`; conservada como allocation | valida bytes -> new -> `memcpy` no vacio | shallow copy, helpers, orden LLVM/native | Nunca llama memcpy con un tamano envuelto; header y buffer independientes. |
+| `ListContains` | builtin/metodo; igualdad valor o identidad segun `T` | `IRListContains`, reutiliza busqueda del interprete | `SSAListContains`; lectura | llama a busqueda especializada que retorna `i64` | escalares/referencias, mutaciones, LLVM/native | Compara el `i64` con `-1`; no pasa por la conversion checked de indexOf. |
+| `ListIndexOf` | builtin `index_of` y metodo `indexOf`; primer match/-1 | `IRListIndexOf` solo para `indexOf`; no baja `index_of` | `SSAListIndexOf`; DCE lo conserva por `may_trap` | busqueda `i64` + wrapper checked `i32` | valido/-1/limite helper/DCE/LLVM/native | Encontrado `> INT32_MAX` hace panic; la forma global aun no alcanza backend. |
 | `ListReverse` | builtin/metodo mutante; AST `reverse` | `IRListReverse`/swaps | `SSAListReverse`; efecto preservado | helper generico, swap byte a byte | vacia/pares/impares/tipos/aliases/optimizer/native | Multiplicaciones de offsets sin check; correctas solo si el objeto fue asignado con tamanos validados. |
-| `SequenceSort` | `sort` en List/Array; tipos ordenables | un `IRSequenceSort` comun | un `SSASequenceSort`; efecto preservado | merge sort estable especializado en `runtime.py`, compartido | int/double/string/NaN/alias/List+Array/native | Aritmetica de bytes, width y bounds del merge sin overflow checks. |
+| `SequenceSort` | `sort` en List/Array; tipos ordenables | un `IRSequenceSort` comun | un `SSASequenceSort`; efecto preservado | merge sort estable con bytes checked, compartido | int/double/string/NaN/alias/List+Array/native | Valida temporal antes de malloc; bounds y width evitan add/shift con wrap. |
 | `ListClear` | builtin/metodo mutante; AST `clear` | `IRListClear` | `SSAListClear`; efecto preservado | store inline de cero a `length` | empty/nonempty/reuse/alias/optimizer/native | Correctamente O(1); conserva capacidad/data y slots residuales. |
 | `ListPush` | tipo de valor, aridad y const; AST `append` | `IRListPush` | `SSAListPush`; efecto preservado | `prepare_push` + `reserve`; recarga data; store y length al final | zero/growth/reuse/tipos/refs/aliases/optimizer/native | Checks de `length+1`, doubling y bytes correctos; logica de commit esta repartida entre helper y emitter. |
 | `ListPop` | vacio falla; retorna `T`; AST `pop` | `IRListPop`, efecto+resultado | `SSAListPop`; nunca puro aunque resultado muera | `prepare_pop`; load tipado; store length | tipos/refs/empty/clear/alias/unused/optimizer/native | Correcto sin shrinking; slot muerto no se limpia. |
@@ -232,7 +227,7 @@ del interprete, y "LLVM" a helpers emitidos por el backend.
 No se detecto un opcode de esta lista que falte completamente en una capa,
 pero length/is_empty/indexOf tienen formas publicas que faltan en IR y capas
 posteriores. La duplicacion encontrada es estructural, no duplicacion de opcodes publicos:
-`contains` reutiliza correctamente `indexOf`, sort reutiliza un helper comun, y
+`contains` e `indexOf` reutilizan una busqueda interna `i64`, sort reutiliza un helper comun, y
 push/insert reutilizan reserve.
 
 ## 4. Duplicacion y helpers concretos
@@ -248,9 +243,9 @@ La mayor concentracion esta en `backend/llvm/printer.py`:
   longitud / calcular nueva longitud / publicar longitud.
 - insert y removeAt repiten sext del indice, GEP tipado, conteo de elementos,
   bytes de movimiento y `memmove`.
-- `aether_list_new`, copy, reserve y sort calculan bytes por caminos distintos;
-  solo reserve/prepares usan los intrinsecos de overflow sistematicamente.
-- OOM, overflow, pop-empty, insert-bounds y removeAt-bounds repiten global de
+- `aether_checked_mul_i64` y `aether_checked_allocation_bytes` cubren new, copy
+  y sort; reserve/prepares conservan sus checks de capacidad existentes.
+- OOM, overflow, index-bounds, pop-empty, insert-bounds y removeAt-bounds repiten global de
   mensaje, `puts`, `exit` y `unreachable`.
 - El printer mantiene muchos flags `_uses_list_*` y luego reconstruye
   dependencias de declaraciones manualmente.
@@ -313,8 +308,9 @@ Helpers recomendados:
 
 ### Runtime
 
-Ya existen buenas reutilizaciones: contains delega en indexOf, insert/push
-delegan en reserve y sort es comun a Array/List. Lo repetido es la periferia:
+Ya existen buenas reutilizaciones: contains/indexOf delegan en la busqueda
+interna i64, insert/push delegan en reserve y sort es comun a Array/List. Lo
+repetido es la periferia:
 panics, acceso a campos, multiplicacion de bytes y declaracion condicional de
 intrinsecos/libc. Un modulo generador de runtime con secciones y dependencias
 explicitas reduciria el tamano de `LLVMPrinter` y evitaria combinaciones de
@@ -352,14 +348,14 @@ pase. Detalles que merecen limpieza:
 
 Lecturas y allocations:
 
-- `ListLength`, `ListIsEmpty`, `ListGet`, `ListContains` y `ListIndexOf` son
-  productores puros eliminables por DCE.
+- `ListIsEmpty` y `ListContains` son productores puros eliminables por DCE.
+- `ListLength` y `ListIndexOf` se conservan en DCE IR/SSA porque sus
+  conversiones `i64 -> i32` pueden hacer panic aunque el resultado no se use.
 - `ListNew` y `ListCopy` se conservan conservadoramente aunque el resultado
   muera, porque allocation/OOM se trata como observable.
-- `ListGet` no es realmente `may_trap = false` en el interprete IR. DCE puede
-  borrar un get invalido no usado y cambiar el error observable. Separar
-  `pure` de `may_trap` solucionaria el modelado sin volver toda lectura un
-  efecto de memoria.
+- `ListGet` es una lectura `may_trap`: se excluye de los productores
+  eliminables en DCE IR y SSA. No se introdujo metadata centralizada; la regla
+  conservadora queda explicita en ambos pases.
 
 ## 6. Aliasing
 
@@ -413,21 +409,19 @@ removeAt requieren `0 <= i < length`; insert permite `i == length`; pop exige
 
 | Operacion | AST runtime | IR Interpreter | LLVM native |
 | --- | --- | --- | --- |
-| get | `_require_index`, si | `_check_array_index`, si | **no** |
-| set | `_require_index`, si | `_check_array_index`, si | **no** |
-| `for` | iteracion segura sobre valores | indice generado + get comprobado | indice generado contra length, pero get en si no comprueba |
+| get | `_require_index`, si | `_check_list_index`, si | `aether_list_check_index`, antes de data/GEP/load |
+| set | `_require_index`, si | `_check_list_index`, antes de mutar | `aether_list_check_index`, antes de data/GEP/store |
+| `for` | iteracion segura sobre valores | indice generado + get comprobado | condicion del loop y check propio de cada get |
 | insert | `0 <= i <= length` | mismo check | `prepare_insert`, mismo check antes de reserve/memmove |
 | removeAt | `0 <= i < length` | mismo check | `prepare_remove_at`, mismo check antes de load/memmove |
 | pop | no vacia | no vacia | `prepare_pop` antes del calculo/load |
 
-Los mensajes no son identicos: AST/IR incluyen indice y longitud; LLVM usa
-mensajes estaticos. Esto es secundario frente a la ausencia total en get/set.
-
-Recomendacion tecnica prioritaria: emitir un unico bounds helper para get/set
-antes de obtener el puntero del elemento y reutilizar el nucleo de comparacion
-en removeAt/insert. La comprobacion debe ocurrir antes de cualquier GEP/load/
-store y debe estar marcada como potencialmente terminante para que DCE no la
-borre incorrectamente.
+AST e IR incluyen indice y longitud. LLVM usa el mensaje estatico
+`Aether panic: List index out of bounds`, llama `exit(1)` y termina el bloque
+con `unreachable`. El helper comprueba `index >= 0` e `index < length`; solo al
+retornar se carga `data` y se calcula el GEP del elemento. Es reutilizable por
+otras operaciones, aunque insert/removeAt conservan sus checks existentes en
+esta tarea.
 
 ## 8. Overflow y representabilidad
 
@@ -440,18 +434,19 @@ borre incorrectamente.
 | `length * element_size` al copiar durante growth | `umul.with.overflow` | Cubierto |
 | bytes a mover en insert | `umul.with.overflow` en prepare; `mul` repetido al emitir | Cubierto por precondicion, pero fragil por duplicacion |
 | bytes a mover en removeAt | igual | Cubierto por precondicion, pero fragil por duplicacion |
-| bytes de `ListNew` | `mul i64` | **No cubierto** |
-| bytes de `ListCopy` | `mul i64` | **No cubierto** |
-| bytes/bounds internos de sort | `mul`, `add`, `shl` | **No cubierto** |
+| bytes de `ListNew` | `aether_checked_allocation_bytes` antes del header | Cubierto |
+| bytes de `ListCopy` | checked antes de llamar new y antes de memcpy | Cubierto |
+| bytes/bounds internos de sort | checked total/run; sumas acotadas; width con branches | Cubierto |
 | offsets byte de reverse | `mul`/`add` | No cubierto; depende de invariantes previos |
-| retorno de length/indexOf | `trunc i64 -> i32` | **No cubierto**, posible wrap semantico |
+| retorno de length/indexOf | helpers checked; `-1` admitido solo para indexOf | Cubierto; panic si excede `INT32_MAX` |
 | tamano del header | constante 24 | Valido solo bajo ABI 64-bit asumida |
 
 `aether_alloc` trata size cero como null y comprueba `malloc` null para sizes
 no cero. No comprueba limites distintos de `i64` ni modela `size_t` en targets
 de 32 bits. El contrato documental de growth exige mas: element size valido,
 limite del allocator y ausencia de wrap en todos los caminos. La
-implementacion solo satisface ese contrato en reserve/prepares.
+implementacion satisface el contrato i64 en reserve/prepares y en
+new/copy/sort; modelar un `size_t` de 32 bits sigue fuera del target actual.
 
 ## 9. Runtime LLVM
 
@@ -459,7 +454,8 @@ implementacion solo satisface ese contrato en reserve/prepares.
 
 - `aether_alloc` unifica OOM para allocation List, Array y sort.
 - `aether_list_reserve` es el unico lugar que decide growth y reemplaza buffer.
-- contains delega en indexOf; el helper de busqueda se deduplica por ABI de T.
+- contains e indexOf delegan en una busqueda `i64` deduplicada por ABI de T;
+  solo indexOf llama al wrapper checked a `i32`.
 - sort List/Array comparte exactamente los helpers especializados.
 - `memcpy` se usa para buffers no solapados y `memmove` para shifts solapados.
 - reserve publica `data/capacity` solo despues de allocation/copy y libera el
@@ -486,9 +482,8 @@ de optimizacion, no por un modelo formal de memoria.
 
 Riesgos abiertos:
 
-1. **Eliminar efectos:** las mutaciones estan correctamente fuera de las
-   listas de productores puros. El riesgo inmediato es `ListGet` may-trap, no
-   las mutaciones.
+1. **Eliminar efectos/traps:** las mutaciones estan correctamente fuera de las
+   listas de productores puros y `ListGet` tambien se conserva por `may_trap`.
 2. **Mover/reutilizar lecturas:** cualquier futuro GVN, LICM o load forwarding
    debe tratar llamadas desconocidas y las ocho mutaciones como clobbers de
    longitud/contenido de todos los aliases posibles.
@@ -532,13 +527,14 @@ no alcanza para List.
 
 Prioridad alta:
 
-- get y set fuera de bounds en native; es el hueco que permite la divergencia
-  mas peligrosa;
+- bounds nativos de get/set: **resuelto**, con casos negativo, igual a length,
+  mayor, lista vacia, estado no modificado, orden LLVM y panic clang;
 - paridad backend de las formas globales `length`, `is_empty`, `index_of` y
   del metodo documentado `size()`;
-- overflow inyectado de new/copy/sort y de los limites `i64 -> i32`;
-- fallo de allocation inyectado y comprobacion de que el header no se publica
-  parcialmente.
+- overflow de new/copy/sort y limites `i64 -> i32`: **resuelto** con helpers
+  unitarios y comprobaciones textuales LLVM sin allocations gigantes;
+- fallo de allocation: **resuelto** mediante allocator inyectado; no se provoca
+  OOM real.
 
 Prioridad media:
 
@@ -608,8 +604,8 @@ infraestructura, no una nueva operacion del lenguaje.
 La tabla detallada de colecciones refleja correctamente la existencia de
 opcodes para literal, length, is_empty, for, get, set, copy, contains, indexOf,
 push, pop, insert, removeAt, clear, reverse y sort hasta LLVM. Tambien documenta
-correctamente que get/set native no tienen bounds checks generales. No es
-correcta al agrupar `List.length / length` y `List.is_empty / is_empty` como si
+los bounds checks propios de get/set native. No es correcta al agrupar
+`List.length / length` y `List.is_empty / is_empty` como si
 las formas property y builtin tuvieran la misma cobertura: las globales no
 bajan. La fila `List.indexOf` es correcta solo para el metodo camelCase; no
 registra el builtin global `index_of`, y `List.size()` no tiene fila propia.
@@ -641,10 +637,9 @@ Sin embargo, sus resumenes son historicos o ambiguos:
   habla de mutaciones de longitud pendientes. Secciones posteriores del mismo
   archivo ya describen removeAt, por lo que el documento se contradice a si
   mismo.
-- `AETHER_LIST_GROWTH_DESIGN.md` declara un contrato de overflow mas estricto
-  que el implementado por new/copy/sort y presenta algunos helpers como
-  candidatos con orden de argumentos distinto al helper actual. El layout y
-  aliasing de ese documento si coinciden.
+- `AETHER_LIST_GROWTH_DESIGN.md` ya refleja el orden seguro y los helpers
+  checked de new/copy; conserva como futuras las decisiones generales de
+  ownership y limites del allocator.
 - `MUTABLE_AGGREGATES.md` todavia llama "planned" a indexed mutation y futuras
   instrucciones de Vector/Matrix; su regla general de aliasing coincide, pero
   su estado historico reduce su valor como referencia actual.
@@ -659,14 +654,14 @@ Solo pasos de robustez/refactor, sin nuevas features del lenguaje:
 
 ### P0 - correccion y seguridad nativa
 
-1. Centralizar y emitir bounds checks para `ListGet`/`ListSet`; alinear su
-   semantica con AST/IR y modelar `may_trap` en DCE.
+1. **Completado:** centralizar y emitir bounds checks para `ListGet`/`ListSet`,
+   alinear su semantica con AST/IR y modelar `may_trap` en DCE.
 2. Completar el lowering de las formas publicas ya documentadas (`length`,
    `is_empty`, `index_of`, `size`) mediante los opcodes existentes.
-3. Aplicar checked byte-size a `aether_list_new`, copy y sort; definir el
-   limite `i64`/`size_t` del target.
-4. Resolver la frontera `i64 length` vs `i32 int`: rechazar longitudes no
-   representables o documentar/implementar una invariante maxima uniforme.
+3. **Completado:** aplicar checked byte-size a `aether_list_new`, copy y sort
+   para el target i64 actual.
+4. **Completado:** rechazar `List.length` e indices encontrados por `indexOf`
+   que excedan `INT32_MAX`; `contains` permanece independiente del narrowing.
 
 ### P1 - consolidacion del runtime LLVM
 
@@ -711,9 +706,8 @@ documentadas alcanzan el backend.
 La arquitectura de header estable, copy shallow, reserve central y efectos
 conservadores es una base correcta.
 
-El estado tecnico global es **aceptable**, no solido, porque el backend native
-todavia puede acceder memoria fuera de bounds y aceptar tamanos de allocation
-desbordados en constructores/copias. Esos riesgos son mas importantes que la
-duplicacion o la documentacion desfasada. Cerrados P0 y P1, y con metadata
-central de efectos, el subsistema podria clasificarse objetivamente como
-solido sin agregar ninguna operacion nueva al lenguaje.
+El estado tecnico global del snapshot es **aceptable**: los P0 de bounds,
+tamanos envueltos y narrowing silencioso estan cerrados. Persisten brechas de
+superficie publica, ownership y consolidacion del runtime que quedaron
+explicitamente fuera de esta tarea; no requieren cambiar `int`, el layout ni
+la API de List.

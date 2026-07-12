@@ -158,23 +158,39 @@ are skipped.
   ; length, capacity, data
   ```
 
-  Literal construction starts with `length == capacity`; later `push` may grow
-  and replace `data` while retaining this header pointer.
-- `SSAListLength` loads the `length` field and truncates it to Aether `int`.
+  Literal construction validates nonnegative length and checked
+  `length * element_size` before allocating either header or data, then starts
+  with `length == capacity`; later `push` may grow and replace `data` while
+  retaining this header pointer.
+- `SSAListLength` loads the `length` field and calls
+  `aether_list_length_to_int`. Values in `0..INT32_MAX` convert to Aether
+  `int`; larger or invalid values panic with
+  `Aether panic: List length does not fit in int`.
 - `SSAListIsEmpty` compares the `length` field with zero.
-- `SSAListGet` loads an element from the contiguous `data` buffer for both
-  lowered `for x in xs` loops and explicit `xs[i]` reads.
-- `SSAListSet` loads the same `data` pointer and stores the element for
-  `xs[i] = value`. It has no SSA result and is preserved as a side effect.
+- `SSAListGet` sign-extends the source index, calls the private
+  `aether_list_check_index` helper, and only then loads an element from the
+  contiguous `data` buffer. This applies to lowered `for x in xs` loops and
+  explicit `xs[i]` reads.
+- `SSAListSet` uses the same check before loading `data`, calculating the
+  element GEP, or storing for `xs[i] = value`. It has no SSA result and is
+  preserved as a side effect.
+- `aether_list_check_index` loads `length` and requires
+  `index >= 0 && index < length`. Failure calls a private `noreturn` panic
+  helper, prints `Aether panic: List index out of bounds`, and exits with code
+  1. Thus an invalid set cannot write the list buffer.
 - `SSAListCopy` calls `aether_list_copy`, which allocates a distinct header and
-  data buffer, then copies element representations with `llvm.memcpy`. The copy
-  is shallow: pointer-valued elements keep the same pointer.
-- `SSAListContains` calls a generated linear-search helper specialized for
+  data buffer, then copies element representations with `llvm.memcpy`. It
+  validates bytes before calling `aether_list_new`, skips memcpy for zero
+  bytes, and never copies with a wrapped size. The copy is shallow:
+  pointer-valued elements keep the same pointer.
+- `SSAListContains` calls a generated i64 linear-search helper specialized for
   `int`, `double`, `boolean`, `string`, or reference values. Strings use
-  `strcmp`; reference values use pointer equality.
-- `SSAListIndexOf` calls the same specialized linear-search implementation and
-  returns the first zero-based index as `i32`, or `-1` when absent. It is a
-  memory read with no side effect.
+  `strcmp`; reference values use pointer equality. It compares the i64 result
+  with `-1` directly and does not narrow an index merely to answer boolean.
+- `SSAListIndexOf` calls the same i64 search and then
+  `aether_list_index_to_int`: absence remains `-1`, a found index through
+  `INT32_MAX` converts to i32, and a larger index panics with
+  `Aether panic: List index does not fit in int`.
 - `SSAListClear` has no result and is side-effecting. It emits only a GEP to
   field 0 of `%AetherList` followed by `store i64 0`; it does not load or store
   capacity/data and does not allocate, free, or call a runtime helper.
@@ -201,6 +217,14 @@ are skipped.
   capacity. The `double` helper places NaNs last and treats signed zeroes as
   equivalent; the string helper uses locale-independent unsigned UTF-8 byte
   order through `strcmp`.
+- Sort validates `length * element_size` before allocating its temporary
+  buffer, checks each copied run size, clamps merge bounds using remaining
+  lengths, and branches before doubling width. No temporary allocation,
+  pointer offset, or memcpy size is derived from wrapped arithmetic.
+- `aether_checked_mul_i64` centralizes unsigned i64 multiplication checks;
+  `aether_checked_allocation_bytes` adds nonnegative length/element-size
+  validation. `aether_alloc` checks nonzero `malloc` results and delegates to
+  `aether_allocation_failure_panic`.
 - List references are passed and returned as the same header pointer, so an
   indexed store through an assignment, parameter, or returned alias is visible
   through every alias.
@@ -332,9 +356,9 @@ The backend deliberately does not support these yet:
   `indexOf`, `reverse`, and stable `sort` are supported. `clear` preserves
   capacity/data; pop also preserves them, while push may replace the owned data
   buffer but preserves header.
-- List indexing does not add bounds checks in phase 2; compiled out-of-range
-  access has undefined behavior, matching the existing aggregate backend
-  policy.
+- List get/set indexing has native bounds checks and a controlled panic.
+  General bounds checks for Array, Vector, and Matrix remain outside this
+  backend increment.
 
 - implicit casts
 - bool casts or string casts

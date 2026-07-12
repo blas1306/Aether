@@ -151,6 +151,14 @@ serlo, una implementacion puede usar exactamente `required_length`; aun asi
 debe validar el producto en bytes. Si el request final no es representable, el
 runtime termina con un diagnostico claro de overflow de capacidad.
 
+La construccion y copia nativas aplican el mismo principio sin cambiar el
+layout: `aether_checked_allocation_bytes(length, element_size)` valida los
+operandos y reutiliza `aether_checked_mul_i64`. `ListNew` calcula los bytes
+antes de reservar el header; `ListCopy` los vuelve a validar antes de crear el
+nuevo contenedor y solo llama `memcpy` si son no cero. El orden es siempre
+validar longitud/producto, reservar y comprobar, y recien despues escribir o
+copiar. El wrap termina con `Aether panic: allocation size overflow`.
+
 ## Reserva y realocacion
 
 `reserve(list, required_length, element_size)` es conceptualmente
@@ -201,6 +209,11 @@ No se ignora un `malloc`/`realloc` nulo y no se deja un header parcialmente
 actualizado. Excepciones recuperables de allocation o resultados especiales
 quedan para una fase posterior, cuando exista un modelo general de excepciones
 y unwinding para el backend.
+
+`aether_alloc` devuelve null solo para size cero. Para un request no vacio,
+comprueba el resultado de `malloc` y llama al helper `noreturn` que imprime
+`Aether panic: memory allocation failed`. Los tests de fallo usan un allocator
+inyectado; no intentan provocar OOM real.
 
 ## Ownership sin GC
 

@@ -123,6 +123,8 @@ class LLVMPrinter:
         self._uses_list_pop = False
         self._uses_list_remove_at = False
         self._uses_list_reverse = False
+        self._uses_list_indexing = False
+        self._uses_list_length_conversion = False
         self._sequence_sort_types: set[object] = set()
         self._list_contains_types: set[object] = set()
         self._list_index_of_types: set[object] = set()
@@ -1686,6 +1688,7 @@ class LLVMPrinter:
         if not isinstance(instruction.list_value.type, ListType):
             raise LLVMBackendError("LLVM list_get expects a ListType source")
         self._uses_list_type = True
+        self._uses_list_indexing = True
 
         result = self._new_temp(instruction.result)
         element_type = llvm_type(instruction.result.type)
@@ -1772,6 +1775,7 @@ class LLVMPrinter:
         if instruction.value.type != instruction.list_value.type.element:
             raise LLVMBackendError("LLVM list_set value type must match list element type")
         self._uses_list_type = True
+        self._uses_list_indexing = True
 
         element_type = llvm_type(instruction.value.type)
         element_ptr = self._list_element_pointer(
@@ -1816,10 +1820,11 @@ class LLVMPrinter:
         if not isinstance(instruction.list_value.type, ListType):
             raise LLVMBackendError("LLVM list_length expects a ListType source")
         self._uses_list_type = True
+        self._uses_list_length_conversion = True
         result = self._new_temp(instruction.result)
         length64 = self._synthetic_temp("list.len64")
         lines = self._list_length64(length64, self._operand(instruction.list_value))
-        lines.append(f"{result} = trunc i64 {length64} to i32")
+        lines.append(f"{result} = call i32 @aether_list_length_to_int(i64 {length64})")
         return lines
 
     def _print_list_is_empty(self, instruction: SSAListIsEmpty) -> list[str]:
@@ -2039,8 +2044,9 @@ class LLVMPrinter:
         index64 = self._synthetic_temp("list.index64")
         element_ptr = self._synthetic_temp("list.elem")
         llvm_element_type = llvm_type(element_type)
-        lines = self._list_data_pointer(data, list_value)
-        lines.append(f"{index64} = sext i32 {self._operand(index)} to i64")
+        lines = [f"{index64} = sext i32 {self._operand(index)} to i64"]
+        lines.append(f"call void @aether_list_check_index(ptr {list_value}, i64 {index64})")
+        lines.extend(self._list_data_pointer(data, list_value))
         lines.append(
             f"{element_ptr} = getelementptr {llvm_element_type}, ptr {data}, i64 {index64}"
         )
@@ -2102,15 +2108,37 @@ class LLVMPrinter:
     def _runtime_declarations(self) -> list[str]:
         sections: list[str] = []
         uses_list_growth = self._uses_list_push or self._uses_list_insert
+        uses_allocation = bool(
+            self._uses_array_allocation
+            or self._uses_list_allocation
+            or uses_list_growth
+            or self._sequence_sort_types
+        )
+        uses_checked_allocation_size = bool(self._uses_list_allocation or self._sequence_sort_types)
+        uses_int_conversion = bool(self._uses_list_length_conversion or self._list_index_of_types)
         if self._uses_array_type:
             sections.append(f"{self._ARRAY_STRUCT_TYPE} = type {{ i64, ptr }}")
         if self._uses_list_type:
             sections.append(f"{self._LIST_STRUCT_TYPE} = type {{ i64, i64, ptr }}")
-        if self._uses_array_allocation or self._uses_list_allocation or uses_list_growth or self._sequence_sort_types:
-            sections.append("declare noalias ptr @malloc(i64)")
+        if uses_allocation or self._uses_list_indexing or self._uses_list_pop or self._uses_list_remove_at or uses_int_conversion:
             sections.append("declare i32 @puts(ptr)")
             sections.append("declare void @exit(i32) noreturn")
+        if uses_allocation:
+            sections.append("declare noalias ptr @malloc(i64)")
             sections.append('@.aether.oom = private unnamed_addr constant [39 x i8] c"Aether panic: memory allocation failed\\00"')
+            sections.append(
+                "\n".join(
+                    [
+                        "define private void @aether_allocation_failure_panic() noreturn {",
+                        "entry:",
+                        "  %message = getelementptr [39 x i8], ptr @.aether.oom, i64 0, i64 0",
+                        "  call i32 @puts(ptr %message)",
+                        "  call void @exit(i32 1)",
+                        "  unreachable",
+                        "}",
+                    ]
+                )
+            )
             sections.append(
                 "\n".join(
                     [
@@ -2125,9 +2153,7 @@ class LLVMPrinter:
                         "  %failed = icmp eq ptr %mem, null",
                         "  br i1 %failed, label %panic, label %ok",
                         "panic:",
-                        "  %message = getelementptr [39 x i8], ptr @.aether.oom, i64 0, i64 0",
-                        "  call i32 @puts(ptr %message)",
-                        "  call void @exit(i32 1)",
+                        "  call void @aether_allocation_failure_panic()",
                         "  unreachable",
                         "ok:",
                         "  ret ptr %mem",
@@ -2135,14 +2161,58 @@ class LLVMPrinter:
                     ]
                 )
             )
-        if (self._uses_list_pop or self._uses_list_remove_at) and not (
-            self._uses_array_allocation
-            or self._uses_list_allocation
-            or uses_list_growth
-            or self._sequence_sort_types
-        ):
-            sections.append("declare i32 @puts(ptr)")
-            sections.append("declare void @exit(i32) noreturn")
+        if uses_checked_allocation_size:
+            sections.append('@.aether.allocation.overflow = private unnamed_addr constant [39 x i8] c"Aether panic: allocation size overflow\\00"')
+            sections.append(
+                "\n".join(
+                    [
+                        "define private void @aether_allocation_overflow_panic() noreturn {",
+                        "entry:",
+                        "  %message = getelementptr [39 x i8], ptr @.aether.allocation.overflow, i64 0, i64 0",
+                        "  call i32 @puts(ptr %message)",
+                        "  call void @exit(i32 1)",
+                        "  unreachable",
+                        "}",
+                    ]
+                )
+            )
+            sections.append(
+                "\n".join(
+                    [
+                        "define private i64 @aether_checked_allocation_bytes(i64 %length, i64 %element_size) {",
+                        "entry:",
+                        "  %negative_length = icmp slt i64 %length, 0",
+                        "  %negative_size = icmp slt i64 %element_size, 0",
+                        "  %invalid = or i1 %negative_length, %negative_size",
+                        "  br i1 %invalid, label %panic, label %multiply",
+                        "panic:",
+                        "  call void @aether_allocation_overflow_panic()",
+                        "  unreachable",
+                        "multiply:",
+                        "  %bytes = call i64 @aether_checked_mul_i64(i64 %length, i64 %element_size)",
+                        "  ret i64 %bytes",
+                        "}",
+                    ]
+                )
+            )
+            sections.append(
+                "\n".join(
+                    [
+                        "define private i64 @aether_checked_mul_i64(i64 %left, i64 %right) {",
+                        "entry:",
+                        "  %pair = call { i64, i1 } @llvm.umul.with.overflow.i64(i64 %left, i64 %right)",
+                        "  %result = extractvalue { i64, i1 } %pair, 0",
+                        "  %overflow = extractvalue { i64, i1 } %pair, 1",
+                        "  br i1 %overflow, label %panic, label %ok",
+                        "panic:",
+                        "  call void @aether_allocation_overflow_panic()",
+                        "  unreachable",
+                        "ok:",
+                        "  ret i64 %result",
+                        "}",
+                    ]
+                )
+            )
         if self._sequence_sort_types or uses_list_growth:
             sections.append("declare void @free(ptr)")
             sections.append("declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1 immarg)")
@@ -2172,12 +2242,12 @@ class LLVMPrinter:
                     [
                         "define private ptr @aether_list_new(i64 %element_size, i64 %length) {",
                         "entry:",
+                        "  %data_size = call i64 @aether_checked_allocation_bytes(i64 %length, i64 %element_size)",
                         "  %list = call ptr @aether_alloc(i64 24)",
                         f"  %len_field = getelementptr {self._LIST_STRUCT_TYPE}, ptr %list, i32 0, i32 0",
                         "  store i64 %length, ptr %len_field",
                         f"  %cap_field = getelementptr {self._LIST_STRUCT_TYPE}, ptr %list, i32 0, i32 1",
                         "  store i64 %length, ptr %cap_field",
-                        "  %data_size = mul i64 %element_size, %length",
                         "  %data = call ptr @aether_alloc(i64 %data_size)",
                         f"  %data_field = getelementptr {self._LIST_STRUCT_TYPE}, ptr %list, i32 0, i32 2",
                         "  store ptr %data, ptr %data_field",
@@ -2196,20 +2266,107 @@ class LLVMPrinter:
                         "entry:",
                         f"  %source_len_field = getelementptr {self._LIST_STRUCT_TYPE}, ptr %source, i32 0, i32 0",
                         "  %length = load i64, ptr %source_len_field",
+                        "  %bytes = call i64 @aether_checked_allocation_bytes(i64 %length, i64 %element_size)",
                         "  %copy = call ptr @aether_list_new(i64 %element_size, i64 %length)",
                         f"  %source_data_field = getelementptr {self._LIST_STRUCT_TYPE}, ptr %source, i32 0, i32 2",
                         "  %source_data = load ptr, ptr %source_data_field",
                         f"  %copy_data_field = getelementptr {self._LIST_STRUCT_TYPE}, ptr %copy, i32 0, i32 2",
                         "  %copy_data = load ptr, ptr %copy_data_field",
-                        "  %bytes = mul i64 %element_size, %length",
+                        "  %has_bytes = icmp ne i64 %bytes, 0",
+                        "  br i1 %has_bytes, label %copy_elements, label %done",
+                        "copy_elements:",
                         "  call void @llvm.memcpy.p0.p0.i64(ptr %copy_data, ptr %source_data, i64 %bytes, i1 false)",
+                        "  br label %done",
+                        "done:",
                         "  ret ptr %copy",
                         "}",
                     ]
                 )
             )
-        if uses_list_growth or self._uses_list_remove_at:
+        if self._uses_list_length_conversion:
+            sections.append('@.aether.list.length.int = private unnamed_addr constant [46 x i8] c"Aether panic: List length does not fit in int\\00"')
+            sections.append(
+                "\n".join(
+                    [
+                        "define private i32 @aether_list_length_to_int(i64 %length) {",
+                        "entry:",
+                        "  %nonnegative = icmp sge i64 %length, 0",
+                        "  %fits = icmp sle i64 %length, 2147483647",
+                        "  %valid = and i1 %nonnegative, %fits",
+                        "  br i1 %valid, label %convert, label %panic",
+                        "panic:",
+                        "  %message = getelementptr [46 x i8], ptr @.aether.list.length.int, i64 0, i64 0",
+                        "  call i32 @puts(ptr %message)",
+                        "  call void @exit(i32 1)",
+                        "  unreachable",
+                        "convert:",
+                        "  %result = trunc i64 %length to i32",
+                        "  ret i32 %result",
+                        "}",
+                    ]
+                )
+            )
+        if self._list_index_of_types:
+            sections.append('@.aether.list.index.int = private unnamed_addr constant [45 x i8] c"Aether panic: List index does not fit in int\\00"')
+            sections.append(
+                "\n".join(
+                    [
+                        "define private i32 @aether_list_index_to_int(i64 %index) {",
+                        "entry:",
+                        "  %not_below_sentinel = icmp sge i64 %index, -1",
+                        "  %fits = icmp sle i64 %index, 2147483647",
+                        "  %valid = and i1 %not_below_sentinel, %fits",
+                        "  br i1 %valid, label %convert, label %panic",
+                        "panic:",
+                        "  %message = getelementptr [45 x i8], ptr @.aether.list.index.int, i64 0, i64 0",
+                        "  call i32 @puts(ptr %message)",
+                        "  call void @exit(i32 1)",
+                        "  unreachable",
+                        "convert:",
+                        "  %result = trunc i64 %index to i32",
+                        "  ret i32 %result",
+                        "}",
+                    ]
+                )
+            )
+        if self._uses_list_indexing:
+            sections.append('@.aether.list.index.bounds = private unnamed_addr constant [39 x i8] c"Aether panic: List index out of bounds\\00"')
+            sections.append(
+                "\n".join(
+                    [
+                        "define private void @aether_list_index_bounds_panic() noreturn {",
+                        "entry:",
+                        "  %message = getelementptr [39 x i8], ptr @.aether.list.index.bounds, i64 0, i64 0",
+                        "  call i32 @puts(ptr %message)",
+                        "  call void @exit(i32 1)",
+                        "  unreachable",
+                        "}",
+                    ]
+                )
+            )
+            sections.append(
+                "\n".join(
+                    [
+                        "define private void @aether_list_check_index(ptr %list, i64 %index) {",
+                        "entry:",
+                        f"  %len_field = getelementptr {self._LIST_STRUCT_TYPE}, ptr %list, i32 0, i32 0",
+                        "  %length = load i64, ptr %len_field",
+                        "  %nonnegative = icmp sge i64 %index, 0",
+                        "  %within_length = icmp ult i64 %index, %length",
+                        "  %valid = and i1 %nonnegative, %within_length",
+                        "  br i1 %valid, label %ready, label %bounds_panic",
+                        "bounds_panic:",
+                        "  call void @aether_list_index_bounds_panic()",
+                        "  unreachable",
+                        "ready:",
+                        "  ret void",
+                        "}",
+                    ]
+                )
+            )
+        if uses_checked_allocation_size or uses_list_growth or self._uses_list_remove_at:
             sections.append("declare { i64, i1 } @llvm.umul.with.overflow.i64(i64, i64)")
+        if uses_list_growth or self._uses_list_remove_at:
             sections.append('@.aether.list.overflow = private unnamed_addr constant [37 x i8] c"Aether panic: List capacity overflow\\00"')
             sections.append(
                 "\n".join(
@@ -2494,9 +2651,14 @@ class LLVMPrinter:
             sections.append("declare i32 @strcmp(ptr, ptr)")
         search_helpers: dict[str, object] = {}
         for element_type in search_types:
-            search_helpers.setdefault(self._list_index_of_helper_name(element_type), element_type)
+            search_helpers.setdefault(self._list_search_helper_name(element_type), element_type)
         for helper_name in sorted(search_helpers):
-            sections.append(self._list_index_of_helper(search_helpers[helper_name]))
+            sections.append(self._list_search_helper(search_helpers[helper_name]))
+        index_helpers: dict[str, object] = {}
+        for element_type in self._list_index_of_types:
+            index_helpers.setdefault(self._list_index_of_helper_name(element_type), element_type)
+        for helper_name in sorted(index_helpers):
+            sections.append(self._list_index_of_helper(index_helpers[helper_name]))
         contains_helpers: dict[str, object] = {}
         for element_type in self._list_contains_types:
             contains_helpers.setdefault(self._list_contains_helper_name(element_type), element_type)
@@ -2506,14 +2668,14 @@ class LLVMPrinter:
 
     def _list_contains_helper(self, element_type: object) -> str:
         helper = self._list_contains_helper_name(element_type)
-        search_helper = self._list_index_of_helper_name(element_type)
+        search_helper = self._list_search_helper_name(element_type)
         llvm_element_type = llvm_type(element_type)
         return "\n".join(
             [
                 f"define private i1 @{helper}(ptr %list, {llvm_element_type} %needle) {{",
                 "entry:",
-                f"  %index = call i32 @{search_helper}(ptr %list, {llvm_element_type} %needle)",
-                "  %found = icmp sge i32 %index, 0",
+                f"  %index = call i64 @{search_helper}(ptr %list, {llvm_element_type} %needle)",
+                "  %found = icmp sge i64 %index, 0",
                 "  ret i1 %found",
                 "}",
             ]
@@ -2521,11 +2683,26 @@ class LLVMPrinter:
 
     def _list_index_of_helper(self, element_type: object) -> str:
         helper = self._list_index_of_helper_name(element_type)
+        search_helper = self._list_search_helper_name(element_type)
+        llvm_element_type = llvm_type(element_type)
+        return "\n".join(
+            [
+                f"define private i32 @{helper}(ptr %list, {llvm_element_type} %needle) {{",
+                "entry:",
+                f"  %index = call i64 @{search_helper}(ptr %list, {llvm_element_type} %needle)",
+                "  %result = call i32 @aether_list_index_to_int(i64 %index)",
+                "  ret i32 %result",
+                "}",
+            ]
+        )
+
+    def _list_search_helper(self, element_type: object) -> str:
+        helper = self._list_search_helper_name(element_type)
         llvm_element_type = llvm_type(element_type)
         compare = self._list_element_compare(element_type, llvm_element_type)
         return "\n".join(
             [
-                f"define private i32 @{helper}(ptr %list, {llvm_element_type} %needle) {{",
+                f"define private i64 @{helper}(ptr %list, {llvm_element_type} %needle) {{",
                 "entry:",
                 f"  %len_field = getelementptr {self._LIST_STRUCT_TYPE}, ptr %list, i32 0, i32 0",
                 "  %length = load i64, ptr %len_field",
@@ -2545,10 +2722,9 @@ class LLVMPrinter:
                 "  %next = add i64 %index, 1",
                 "  br label %loop",
                 "found:",
-                "  %result = trunc i64 %index to i32",
-                "  ret i32 %result",
+                "  ret i64 %index",
                 "not_found:",
-                "  ret i32 -1",
+                "  ret i64 -1",
                 "}",
             ]
         )
@@ -2591,6 +2767,20 @@ class LLVMPrinter:
         if isinstance(type_, (ListType, ArrayType, VectorType, MatrixType)):
             return "aether_list_index_of_ref"
         raise LLVMBackendError(f"LLVM list_index_of does not support element type {type_}")
+
+    @staticmethod
+    def _list_search_helper_name(type_: object) -> str:
+        if isinstance(type_, IntType):
+            return "aether_list_search_int"
+        if isinstance(type_, DoubleType):
+            return "aether_list_search_double"
+        if isinstance(type_, BoolType):
+            return "aether_list_search_bool"
+        if isinstance(type_, StringType):
+            return "aether_list_search_string"
+        if isinstance(type_, (ListType, ArrayType, VectorType, MatrixType)):
+            return "aether_list_search_ref"
+        raise LLVMBackendError(f"LLVM list search does not support element type {type_}")
 
     def _sizeof(self, type_: object) -> int:
         if isinstance(type_, (IntType, BoolType)):

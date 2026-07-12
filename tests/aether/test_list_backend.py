@@ -230,6 +230,8 @@ def test_emit_llvm_prints_list_ir(tmp_path) -> None:
     assert exit_code == EXIT_SUCCESS
     assert "%AetherList = type { i64, i64, ptr }" in stdout.getvalue()
     assert "@aether_list_new(i64 4, i64 3)" in stdout.getvalue()
+    assert "@aether_checked_allocation_bytes" in stdout.getvalue()
+    assert "call i32 @aether_list_length_to_int" in stdout.getvalue()
     assert stderr.getvalue() == ""
 
 
@@ -358,6 +360,8 @@ def test_emit_llvm_prints_explicit_list_index_and_set(tmp_path) -> None:
     exit_code = main(["--emit-llvm", str(program)], stdout=stdout, stderr=stderr)
 
     assert exit_code == EXIT_SUCCESS
+    assert "define private void @aether_list_check_index" in stdout.getvalue()
+    assert stdout.getvalue().count("call void @aether_list_check_index") == 2
     assert "store i32" in stdout.getvalue()
     assert "load i32" in stdout.getvalue()
     assert stderr.getvalue() == ""
@@ -526,7 +530,8 @@ def test_list_index_of_llvm_text_emit_and_clang(tmp_path) -> None:
 
     assert "define private i32 @aether_list_index_of_int" in llvm
     assert "call i32 @aether_list_index_of_int" in llvm
-    assert "ret i32 -1" in llvm
+    assert "ret i64 -1" in llvm
+    assert "call i32 @aether_list_index_to_int" in llvm
 
     program = tmp_path / "list_index_of.ae"
     program.write_text(source + "\n", encoding="utf-8")

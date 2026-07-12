@@ -7,6 +7,7 @@ from math import ceil, cos, exp, factorial as math_factorial, floor, log, log10,
 
 from ..errors import AetherRuntimeError, AetherTypeError
 from ..formatting import format_value
+from ..list_safety import checked_list_index_to_int, checked_list_length_to_int
 from ..types import (
     AetherType,
     AetherValue,
@@ -193,7 +194,13 @@ def length_builtin(args: list[AetherValue]) -> AetherValue:
         return AetherValue("int", _vector_length(value))
     if not is_array_type(value.type_name) and not is_list_type(value.type_name):
         raise AetherTypeError(f"length(...) expects a List, Array, or Vector argument, got '{type_to_string(value.type_name)}'.")
-    return AetherValue("int", len(value.value))
+    length = len(value.value)
+    if is_list_type(value.type_name):
+        try:
+            length = checked_list_length_to_int(length)
+        except OverflowError as error:
+            raise AetherRuntimeError(str(error)) from error
+    return AetherValue("int", length)
 
 
 def is_empty_builtin(args: list[AetherValue]) -> AetherValue:
@@ -251,7 +258,11 @@ def contains_builtin(args: list[AetherValue]) -> AetherValue:
 def index_of_builtin(args: list[AetherValue]) -> AetherValue:
     xs = _require_list_arg(args, "index_of")
     value = _coerce_list_element_arg(xs, args[1], "index_of")
-    return AetherValue("int", _list_index_of(xs, value))
+    try:
+        index = checked_list_index_to_int(_list_index_of(xs, value))
+    except OverflowError as error:
+        raise AetherRuntimeError(str(error)) from error
+    return AetherValue("int", index)
 
 
 def _list_index_of(xs: AetherValue, value: AetherValue) -> int:

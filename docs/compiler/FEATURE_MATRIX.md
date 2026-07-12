@@ -62,8 +62,13 @@ Notas:
   asignacion indexada, `copy()`, `contains()`, `indexOf()`, `reverse()` y
   `clear()`, `push()`, `pop()`, `insert()` y `removeAt()`. No incluye shrinking,
   reserva publica, ownership general ni runtime dinamico completo. El backend
-  no agrega bounds checks generales para lectura/escritura indexada; las
-  mutaciones de longitud validan sus indices antes de modificar la lista.
+  agrega bounds checks propios para `ListGet`/`ListSet` antes de acceder a
+  `data`; las mutaciones de longitud validan sus indices antes de modificar la
+  lista.
+- `ListNew`, `ListCopy` y el buffer temporal de `List/Array.sort` validan
+  multiplicaciones i64 antes de reservar o copiar. `List.length` e `indexOf`
+  rechazan resultados fuera de i32; `contains` consume la busqueda i64 sin
+  narrowing.
 - En el frontend/interprete, los agregados mutables (`List`, `Array`,
   `Vector`, `Matrix`) aliasan por asignacion, parametros y return cuando no hay
   conversion de elementos; `copy()` crea el contenedor independiente explicito.
@@ -148,21 +153,21 @@ Notas:
 | Feature | Parser | Typechecker | AST Interpreter | IR | SSA | Optimizer | LLVM | Tests | Spec | Estado |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | List literal `{...}` con tipo esperado | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Parcial backend fase 1 |
-| List.length / length | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Parcial backend fase 1 |
+| List.length / length | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ may-trap | ✅ checked i64→i32 | ✅ | ✅ documentada | `.length` segura; builtin global aun no baja a IR |
 | List.is_empty / is_empty | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Parcial backend fase 1 |
 | for sobre List | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Parcial backend fase 1 |
-| List index read (`xs[i]`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 2 |
-| List index assignment (`xs[i] = value`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 2 |
-| List.copy | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 3a |
-| List.contains | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 3a |
-| List.indexOf | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 3b |
+| List index read (`xs[i]`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ may-trap | ✅ bounds + panic | ✅ | ✅ documentada | Seguro: `0 <= i < length` en AST/IR/native |
+| List index assignment (`xs[i] = value`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ side-effect | ✅ bounds + panic | ✅ | ✅ documentada | Seguro: check antes del store |
+| List.copy | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ checked bytes/OOM | ✅ | ✅ documentada | Orden seguro antes de allocation/memcpy |
+| List.contains | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ búsqueda i64 | ✅ | ✅ documentada | No depende del narrowing de indexOf |
+| List.indexOf | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ may-trap | ✅ checked i64→i32 | ✅ | ✅ documentada | `-1` ausente; panic si índice > INT32_MAX |
 | List.push | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 4b con growth interno |
 | List.pop | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 4c |
 | List.insert | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 4d |
 | List.removeAt / remove_at | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 4e sin shrinking |
 | List.clear | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 4a |
 | List.reverse | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 3a |
-| List.sort | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado con `IRSequenceSort` y helper estable compartido |
+| List.sort | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ checked temp/offsets | ✅ | ✅ documentada | `IRSequenceSort` estable compartido, sin wraparound |
 
 ### Array
 
@@ -175,7 +180,7 @@ Notas:
 | Array.indexOf | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ no documentada | No implementado |
 | Array.swap | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ no documentada | No implementado |
 | Array.reverse | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ no documentada | No implementado |
-| Array.sort | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado con `IRSequenceSort` y helper estable compartido |
+| Array.sort | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ checked temp/offsets | ✅ | ✅ documentada | Mismo helper estable y seguro que List.sort |
 
 La semantica unica implementada de `List.sort` y `Array.sort` esta en
 [`AETHER_SEQUENCE_SORT_DESIGN.md`](../aether/AETHER_SEQUENCE_SORT_DESIGN.md).
