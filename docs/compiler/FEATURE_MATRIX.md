@@ -180,6 +180,12 @@ La semantica unica implementada de `List.sort` y `Array.sort` esta en
 Ambos contenedores comparten IR, politica de comparacion y helpers LLVM; solo
 difieren al extraer el puntero de datos y la longitud de sus cabeceras.
 
+El crecimiento y las mutaciones de longitud pendientes de `List<T>` tienen su
+contrato de implementacion futura en
+[`AETHER_LIST_GROWTH_DESIGN.md`](../aether/AETHER_LIST_GROWTH_DESIGN.md). Las
+filas `push`, `pop`, `insert`, `removeAt` y `clear` permanecen sin backend; el
+enlace no cambia su estado en esta matriz.
+
 ## Algebra lineal
 
 | Feature | Parser | Typechecker | AST Interpreter | IR | SSA | Optimizer | LLVM | Tests | Spec | Estado |

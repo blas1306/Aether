@@ -22,6 +22,11 @@ The future common sorting semantics for lists and arrays are defined once in
 [`AETHER_SEQUENCE_SORT_DESIGN.md`](AETHER_SEQUENCE_SORT_DESIGN.md). That
 document is design-only and does not make array sorting available today.
 
+The future dynamic-capacity contract for `List<T>`, including stable headers,
+growth, `push`, `pop`, `insert`, `removeAt`, and `clear`, is defined in
+[`AETHER_LIST_GROWTH_DESIGN.md`](AETHER_LIST_GROWTH_DESIGN.md). It is
+design-only and does not mark those operations as implemented in the backend.
+
 ## Collection Roles
 
 Aether separates general-purpose collections from mathematical vectors and

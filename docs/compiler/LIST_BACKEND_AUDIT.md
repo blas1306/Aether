@@ -433,6 +433,12 @@ Justificacion:
 
 ### Fase 4: push, pop, insert, removeAt, clear
 
+El contrato detallado de invariantes, crecimiento, allocation, shifting,
+ownership y optimizacion para esta fase esta en
+[`AETHER_LIST_GROWTH_DESIGN.md`](../aether/AETHER_LIST_GROWTH_DESIGN.md). Es un
+diseno previo a la implementacion y no cambia el estado de backend auditado en
+este documento.
+
 Recomiendo mover `clear` antes, a Fase 3a o al inicio de Fase 4.
 
 Justificacion:
