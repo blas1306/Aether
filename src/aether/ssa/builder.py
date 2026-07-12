@@ -27,6 +27,7 @@ from aether.ir.model import (
     IRListNew,
     IRListSet,
     IRListReverse,
+    IRSequenceSort,
     IRLoad,
     IRMatrixGet,
     IRMatrixAdd,
@@ -75,6 +76,7 @@ from .model import (
     SSAListNew,
     SSAListSet,
     SSAListReverse,
+    SSASequenceSort,
     SSAMatrixGet,
     SSAMatrixAdd,
     SSAMatrixMatMul,
@@ -576,6 +578,10 @@ class SSABuilder:
         if isinstance(instruction, IRListReverse):
             list_value = self._resolve_value(instruction.list_value, state.value_map)
             return SSAListReverse(list_value)
+
+        if isinstance(instruction, IRSequenceSort):
+            sequence = self._resolve_value(instruction.sequence, state.value_map)
+            return SSASequenceSort(sequence)
 
         if isinstance(instruction, IRVectorNew):
             result = self._define_value(instruction.result, state.value_map)

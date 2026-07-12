@@ -37,6 +37,7 @@ from .model import (
     IRListNew,
     IRListSet,
     IRListReverse,
+    IRSequenceSort,
     IRLoad,
     IRMatrixGet,
     IRMatrixAdd,
@@ -359,6 +360,20 @@ class IRLowerer:
 
         if isinstance(statement, ast.ExpressionStatement):
             expression = statement.expression
+            if isinstance(expression, ast.CallExpression) and (
+                expression.callee == "sort" or expression.callee.endswith(".sort")
+            ):
+                arguments = expression.arguments
+                if expression.callee.endswith(".sort"):
+                    receiver = expression.callee.rsplit(".", 1)[0]
+                    arguments = [ast.Identifier(receiver, expression.line, expression.column), *arguments]
+                if expression.keyword_arguments or len(arguments) != 1:
+                    self._unsupported(expression, "invalid sort call")
+                sequence = self._lower_expression(arguments[0], context)
+                if not isinstance(sequence.type, (ArrayType, ListType)):
+                    self._unsupported(expression, "sort on non-sequence")
+                context.block.instructions.append(IRSequenceSort(sequence))
+                return
             if isinstance(expression, ast.CallExpression) and (
                 expression.callee == "reverse" or expression.callee.endswith(".reverse")
             ):

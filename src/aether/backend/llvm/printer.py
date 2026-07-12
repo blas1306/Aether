@@ -29,6 +29,7 @@ from aether.ssa.model import (
     SSAListNew,
     SSAListSet,
     SSAListReverse,
+    SSASequenceSort,
     SSAMatrixColumns,
     SSAMatrixAdd,
     SSAMatrixMatMul,
@@ -57,6 +58,7 @@ from aether.ssa.model import (
 )
 
 from .types import LLVMBackendError, llvm_type
+from .runtime import sequence_sort_helper, sequence_sort_helper_name
 
 
 @dataclass(frozen=True)
@@ -112,6 +114,7 @@ class LLVMPrinter:
         self._uses_list_allocation = False
         self._uses_list_copy = False
         self._uses_list_reverse = False
+        self._sequence_sort_types: set[object] = set()
         self._list_contains_types: set[object] = set()
         self._list_index_of_types: set[object] = set()
 
@@ -202,6 +205,8 @@ class LLVMPrinter:
             return self._print_list_index_of(instruction)
         if isinstance(instruction, SSAListReverse):
             return self._print_list_reverse(instruction)
+        if isinstance(instruction, SSASequenceSort):
+            return self._print_sequence_sort(instruction)
         if isinstance(instruction, SSAVectorNew):
             return self._print_vector_new(instruction)
         if isinstance(instruction, SSAMatrixNew):
@@ -562,6 +567,27 @@ class LLVMPrinter:
         self._uses_list_reverse = True
         size = self._sizeof(instruction.list_value.type.element)
         return f"call void @aether_list_reverse(ptr {self._operand(instruction.list_value)}, i64 {size})"
+
+    def _print_sequence_sort(self, instruction: SSASequenceSort) -> str:
+        sequence_type = instruction.sequence.type
+        if not isinstance(sequence_type, (ArrayType, ListType)):
+            raise LLVMBackendError("LLVM sequence_sort expects an ArrayType or ListType source")
+        element_type = sequence_type.element
+        helper = sequence_sort_helper_name(element_type)
+        self._sequence_sort_types.add(element_type)
+        sequence = self._operand(instruction.sequence)
+        data = self._synthetic_temp("sort.data")
+        length = self._synthetic_temp("sort.length")
+        if isinstance(sequence_type, ArrayType):
+            self._uses_array_type = True
+            lines = self._array_data_pointer(data, sequence)
+            lines.extend(self._array_length64(length, sequence))
+        else:
+            self._uses_list_type = True
+            lines = self._list_data_pointer(data, sequence)
+            lines.extend(self._list_length64(length, sequence))
+        lines.append(f"call void @{helper}(ptr {data}, i64 {length})")
+        return "\n  ".join(lines)
 
     def _print_vector_new(self, instruction: SSAVectorNew) -> str:
         if not isinstance(instruction.result.type, VectorType):
@@ -1912,7 +1938,7 @@ class LLVMPrinter:
             sections.append(f"{self._ARRAY_STRUCT_TYPE} = type {{ i64, ptr }}")
         if self._uses_list_type:
             sections.append(f"{self._LIST_STRUCT_TYPE} = type {{ i64, i64, ptr }}")
-        if self._uses_array_allocation or self._uses_list_allocation:
+        if self._uses_array_allocation or self._uses_list_allocation or self._sequence_sort_types:
             sections.append("declare noalias ptr @malloc(i64)")
             sections.append(
                 "\n".join(
@@ -1925,6 +1951,9 @@ class LLVMPrinter:
                     ]
                 )
             )
+        if self._sequence_sort_types:
+            sections.append("declare void @free(ptr)")
+            sections.append("declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1 immarg)")
         if self._uses_array_allocation:
             sections.append(
                 "\n".join(
@@ -1964,7 +1993,8 @@ class LLVMPrinter:
                 )
             )
         if self._uses_list_copy:
-            sections.append("declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1 immarg)")
+            if not self._sequence_sort_types:
+                sections.append("declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1 immarg)")
             sections.append(
                 "\n".join(
                     [
@@ -2033,8 +2063,14 @@ class LLVMPrinter:
                     ]
                 )
             )
+        if any(isinstance(type_, StringType) for type_ in self._sequence_sort_types):
+            sections.append("declare i32 @strcmp(ptr, ptr)")
+        for element_type in sorted(self._sequence_sort_types, key=sequence_sort_helper_name):
+            sections.append(sequence_sort_helper(element_type))
         search_types = self._list_contains_types | self._list_index_of_types
-        if any(isinstance(type_, StringType) for type_ in search_types):
+        if any(isinstance(type_, StringType) for type_ in search_types) and not any(
+            isinstance(type_, StringType) for type_ in self._sequence_sort_types
+        ):
             sections.append("declare i32 @strcmp(ptr, ptr)")
         search_helpers: dict[str, object] = {}
         for element_type in search_types:

@@ -96,7 +96,8 @@ Operaciones:
 - `size()` como metodo de lista baja a `length(xs)`. El builtin global
   `size(value)` sigue teniendo semantica de shape vector, no de longitud de
   lista.
-- `sort` solo acepta `List<int>`, `List<double>` y `List<string>`.
+- `sort` acepta `List` y `Array` con elementos `int`, `double` o `string` y
+  comparte la misma semantica estable para ambos contenedores.
 
 ### Indexing y Slices
 
@@ -219,7 +220,7 @@ solo soporte operacional, no la existencia nominal del tipo.
 | `contains(xs, value)` / `xs.contains(value)` | Si | Si | Si | Si | Implementado fase 3a |
 | `xs.indexOf(value)` | Si | Si | Si | Si | Implementado fase 3b |
 | `reverse(xs)` / `xs.reverse()` | Si | Si | Si | Si | Implementado fase 3a |
-| `sort(xs)` / `xs.sort()` | Si | No | No | No | Alta |
+| `sort(xs)` / `xs.sort()` | Si | Si | Si | Si | Implementado; comparte `IRSequenceSort` y runtime con Array |
 | `push(xs, value)` / `xs.push(value)` | Si | No | No | No | Alta |
 | `pop(xs)` / `xs.pop()` | Si | No | No | No | Alta |
 | `insert(xs, i, value)` / `xs.insert(i, value)` | Si | No | No | No | Alta |
@@ -254,8 +255,7 @@ Costos:
 - Necesita helpers runtime nuevos para crecimiento y copia.
 - El backend actual no tiene ownership, destructores ni `free`; inicialmente
   tendra las mismas fugas toleradas que arrays.
-- Para `sort` y `contains` debe haber comparacion especializada por tipo de
-  elemento o wrappers generados por el compiler.
+- `sort` y `contains` usan comparacion especializada por tipo de elemento.
 
 ### Alternativas Rechazadas
 
@@ -279,9 +279,9 @@ Refcount/GC en header:
 - Puede ser futuro, pero meterlo ahora mezclaria `List<T>` con una decision
   global de ownership que arrays, strings y matrices todavia no resuelven.
 
-## Runtime LLVM Necesario
+## Runtime LLVM
 
-No escribir estos helpers todavia; esta es la lista de contratos necesarios.
+Los contratos pendientes para mutaciones que cambian longitud siguen siendo:
 
 Helpers base:
 
@@ -317,15 +317,14 @@ Copia y busqueda:
 
 Sort:
 
-- Para fase inicial, conviene generar o exponer helpers especializados:
-  `aether_list_sort_i32`, `aether_list_sort_f64`, `aether_list_sort_string`.
-- Un helper generico con comparator function pointer es mas flexible, pero
-  sube la complejidad de llamadas indirectas y ABI.
-- La semantica comun futura de `List<T>` y `Array<T>`, incluida estabilidad,
-  strings y NaN, esta definida en
+- La implementacion expone `aether_sort_i32`, `aether_sort_f64` y
+  `aether_sort_string`, todos con ABI `(data, length)` y reutilizados por List
+  y Array.
+- Los helpers implementan merge sort bottom-up estable, con tiempo
+  `O(n log n)` y buffer temporal `O(n)`.
+- La semantica comun de `List<T>` y `Array<T>`, incluida estabilidad, strings
+  y NaN, esta definida en
   [`AETHER_SEQUENCE_SORT_DESIGN.md`](../aether/AETHER_SEQUENCE_SORT_DESIGN.md).
-  Ese diseno recomienda helpers orientados a storage compartidos por ambas
-  representaciones; los nombres anteriores son ilustrativos, no un ABI fijado.
 
 Errores:
 
@@ -347,7 +346,7 @@ Instrucciones minimas recomendadas:
 - `IRListContains(result, list, value)`
 - `IRListIndexOf(result, list, value)`
 - `IRListReverse(list)`
-- `IRListSort(list)`
+- `IRSequenceSort(sequence)`, compartida con Array
 - `IRListPush(list, value)`
 - `IRListPop(result, list)`
 - `IRListInsert(list, index, value)`
@@ -404,7 +403,7 @@ Recomiendo partirla internamente:
 - Fase 3a: `copy`, `contains`, `reverse`.
 - Fase 3b: `indexOf` y `sort`.
 
-Fase 3a e `indexOf` de fase 3b implementados:
+Fase 3a y fase 3b implementadas para las operaciones sin cambio de longitud:
 
 - `IRListCopy` / `SSAListCopy` son allocations observables y se conservan. LLVM
   crea header y buffer independientes y copia las representaciones de elemento;
@@ -417,7 +416,10 @@ Fase 3a e `indexOf` de fase 3b implementados:
   producen el primer indice o `-1` y son lecturas de memoria sin side effects.
 - `IRListReverse` / `SSAListReverse` mutan el buffer mediante swaps in-place,
   no producen resultado y nunca se eliminan.
-- No se implementaron `sort`, `lastIndexOf`, operaciones que cambian longitud,
+- `IRSequenceSort` / `SSASequenceSort` son comunes a List y Array, mutan el
+  mismo buffer, no producen resultado y nunca se eliminan. LLVM extrae
+  `data`/`length` y llama al mismo helper especializado para ambos headers.
+- No se implementaron `lastIndexOf`, operaciones que cambian longitud,
   crecimiento, capacidad, `realloc`, GC ni ownership.
 
 Justificacion:
@@ -426,8 +428,8 @@ Justificacion:
 - `contains` se puede emitir como loop simple con igualdad.
 - `reverse` es mutante pero local y no cambia capacidad.
 - `indexOf` ya existe en frontend, IR/SSA, interpretes, optimizadores y LLVM.
-- `sort` requiere comparacion por tipo y politica para strings; es mas riesgosa
-  que `reverse`.
+- `sort` centraliza comparacion por tipo, orden UTF-8 y politica de NaN en los
+  helpers compartidos.
 
 ### Fase 4: push, pop, insert, removeAt, clear
 
@@ -536,8 +538,8 @@ No reutilizar sin cambios:
 - Falta de ownership/free/GC en LLVM.
 - `const` es por referencia de acceso, no congelamiento profundo; el backend
   debe preservar esa regla si hay aliases.
-- `sort` para strings depende de representacion/runtime de strings, que sigue
-  parcial en LLVM.
+- `sort` para strings opera sobre la representacion UTF-8 terminada en cero y
+  usa `strcmp`, cuyo orden de bytes unsigned coincide con el contrato.
 - `indexOf` usa igualdad escalar/string por valor e igualdad de referencia para
   agregados, sin comparacion profunda.
 - Nested lists y listas de structs/classes deben posponerse o fallar claramente
@@ -552,7 +554,8 @@ No reutilizar sin cambios:
 `docs/compiler/FEATURE_MATRIX.md` refleja el estado actual:
 
 - `List<T>` existe como tipo frontend y tipo IR/SSA nominal.
-- Las operaciones que cambian longitud y `sort` siguen sin backend.
+- Las operaciones que cambian longitud siguen sin backend; `sort` esta
+  implementado para List y Array.
 - `indexOf` aparece implementado en todo el pipeline.
 - `isEmpty / is_empty` esta marcado parcial en parser porque solo existe
   `is_empty` como builtin global; no hay metodo `isEmpty`.

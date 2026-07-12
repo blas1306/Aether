@@ -84,7 +84,7 @@ _NATIVE_TYPE_MEMBERS: dict[str, tuple[tuple[str, str], ...]] = {
         ("reverse", "method"),
         ("sort", "method"),
     ),
-    "Array": (("length", "property"), ("copy", "method")),
+    "Array": (("length", "property"), ("copy", "method"), ("sort", "method")),
     "Matrix": (("rows", "property"), ("columns", "property"), ("transpose", "method")),
     "Vector": (("length", "property"), ("norm", "method")),
 }

@@ -29,6 +29,7 @@ from aether.ir.model import (
     IRListNew,
     IRListSet,
     IRListReverse,
+    IRSequenceSort,
     IRLoad,
     IRMatrixColumns,
     IRMatrixAdd,
@@ -80,6 +81,7 @@ from .model import (
     SSAListNew,
     SSAListSet,
     SSAListReverse,
+    SSASequenceSort,
     SSAMatrixColumns,
     SSAMatrixAdd,
     SSAMatrixMatMul,
@@ -311,6 +313,9 @@ class SSARenamer:
 
         if isinstance(instruction, IRListReverse):
             return SSAListReverse(self._resolve_value(instruction.list_value))
+
+        if isinstance(instruction, IRSequenceSort):
+            return SSASequenceSort(self._resolve_value(instruction.sequence))
 
         if isinstance(instruction, IRVectorNew):
             result = self._define_value(instruction.result)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
 from math import trunc
 from typing import Any, NoReturn, Sequence
 
@@ -28,6 +29,7 @@ from .model import (
     IRListNew,
     IRListSet,
     IRListReverse,
+    IRSequenceSort,
     IRLoad,
     IRMatrixColumns,
     IRMatrixAdd,
@@ -62,6 +64,7 @@ from .types import (
     InterfaceType,
     ListType,
     MatrixType,
+    StringType,
     VectorType,
     VoidType,
 )
@@ -236,6 +239,21 @@ class IRInterpreter:
                 list_value[left], list_value[right] = list_value[right], list_value[left]
                 left += 1
                 right -= 1
+            return False, None, None
+
+        if isinstance(instruction, IRSequenceSort):
+            sequence = self._value(instruction.sequence, frame)
+            if not isinstance(sequence, list):
+                raise IRExecutionError("IR sequence_sort requires a sequence value")
+            element_type = instruction.sequence.type.element
+            if isinstance(element_type, DoubleType):
+                sequence.sort(key=lambda value: (math.isnan(value), 0.0 if math.isnan(value) else value))
+            elif isinstance(element_type, StringType):
+                sequence.sort(key=lambda value: value.encode("utf-8"))
+            elif isinstance(element_type, IntType):
+                sequence.sort()
+            else:
+                raise IRExecutionError(f"IR sequence_sort does not support {element_type}")
             return False, None, None
 
         if isinstance(instruction, IRVectorNew):

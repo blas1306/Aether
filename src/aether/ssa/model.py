@@ -94,6 +94,11 @@ class SSAListReverse(SSAInstruction):
 
 
 @dataclass(frozen=True)
+class SSASequenceSort(SSAInstruction):
+    sequence: SSAValue
+
+
+@dataclass(frozen=True)
 class SSAVectorNew(SSAInstruction):
     result: SSAValue
     elements: tuple[SSAValue, ...] = ()

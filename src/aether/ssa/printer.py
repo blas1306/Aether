@@ -27,6 +27,7 @@ from .model import (
     SSAListNew,
     SSAListSet,
     SSAListReverse,
+    SSASequenceSort,
     SSAMatrixColumns,
     SSAMatrixAdd,
     SSAMatrixMatMul,
@@ -122,6 +123,8 @@ class SSAPrinter:
             )
         if isinstance(instruction, SSAListReverse):
             return f"list_reverse {self._value(instruction.list_value)}"
+        if isinstance(instruction, SSASequenceSort):
+            return f"sequence_sort {self._value(instruction.sequence)}"
         if isinstance(instruction, SSAVectorNew):
             elements = ", ".join(self._value(element) for element in instruction.elements)
             orientation = f" {instruction.orientation}" if instruction.orientation is not None else ""

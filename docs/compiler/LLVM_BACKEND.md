@@ -69,6 +69,8 @@ exit code from `main`:
 | `list_copy.ae` | 19 |
 | `list_contains.ae` | 1 |
 | `list_reverse.ae` | 41 |
+| `list_sort.ae` | 123 |
+| `array_sort.ae` | 124 |
 
 To build and run an example:
 
@@ -175,6 +177,16 @@ are skipped.
   memory read with no side effect.
 - `SSAListReverse` calls an in-place byte-swap loop. It allocates no new list or
   data buffer and is preserved as a side effect.
+- `SSASequenceSort` is the common side-effecting instruction for
+  `List<T>.sort()` and `Array<T>.sort()`. Lowering extracts the existing data
+  pointer and current length, then calls exactly one type-specialized helper:
+  `aether_sort_i32`, `aether_sort_f64`, or `aether_sort_string`.
+- The sort helpers implement stable bottom-up merge sort with `O(n log n)`
+  time and `O(n)` temporary storage. They never replace the collection header
+  or data buffer and therefore preserve identity, length, array size, and list
+  capacity. The `double` helper places NaNs last and treats signed zeroes as
+  equivalent; the string helper uses locale-independent unsigned UTF-8 byte
+  order through `strcmp`.
 - List references are passed and returned as the same header pointer, so an
   indexed store through an assignment, parameter, or returned alias is visible
   through every alias.
@@ -298,11 +310,11 @@ merge0:
 
 The backend deliberately does not support these yet:
 
-- Full `List<T>` backend API. Phases 1, 2, 3a, and `indexOf` from phase 3b support list literals with an
+- Full `List<T>` backend API. Phases 1, 2, and 3 support list literals with an
   expected `List<T>` type, `.length`, `.is_empty`, List parameters/returns,
   `for x in xs` / `for T x in xs`, explicit indexed reads and indexed stores.
-- List `sort`, length-changing mutation, capacity growth, `realloc`, ownership,
-  `free`, or GC. `copy`, `contains`, `indexOf`, and `reverse` are supported.
+- Length-changing mutation, capacity growth, `realloc`, ownership, or GC.
+  `copy`, `contains`, `indexOf`, `reverse`, and stable `sort` are supported.
 - List indexing does not add bounds checks in phase 2; compiled out-of-range
   access has undefined behavior, matching the existing aggregate backend
   policy.

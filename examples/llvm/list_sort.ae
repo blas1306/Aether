@@ -1,0 +1,6 @@
+int main() {
+    List<int> values = {3, 1, 2};
+    List<int> observed = values;
+    observed.sort();
+    return values[0] * 100 + values[1] * 10 + values[2];
+}

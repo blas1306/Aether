@@ -354,7 +354,7 @@ def test_list_and_array_do_not_cross_assign() -> None:
         run_aether("List<int> xs = {1, 2, 3}; Array<int> a = xs;")
 
 
-@pytest.mark.parametrize("call", ["push(a, 4)", "pop(a)", "insert(a, 0, 9)", "remove_at(a, 0)", "clear(a)", "reverse(a)", "sort(a)"])
+@pytest.mark.parametrize("call", ["push(a, 4)", "pop(a)", "insert(a, 0, 9)", "remove_at(a, 0)", "clear(a)", "reverse(a)"])
 def test_array_rejects_list_mutation_builtins(call: str) -> None:
     with pytest.raises(AetherTypeError, match="expects a List argument, got 'Array<int>'"):
         run_aether(f"Array<int> a = {{1, 2, 3}}; {call};")

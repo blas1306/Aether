@@ -15,6 +15,7 @@ LLVM_EXAMPLES_DIR = ROOT_DIR / "examples" / "llvm"
 LLVM_EXAMPLES = sorted(LLVM_EXAMPLES_DIR.glob("*.ae"))
 
 EXPECTED_EXIT_CODES = {
+    "array_sort.ae": 124,
     "array_sum.ae": 6,
     "arithmetic.ae": 23,
     "countdown.ae": 0,
@@ -34,6 +35,7 @@ EXPECTED_EXIT_CODES = {
     "list_literal.ae": 3,
     "list_reverse.ae": 41,
     "list_set_alias.ae": 9,
+    "list_sort.ae": 123,
     "matrix_literal.ae": 0,
     "matrix_add.ae": 36,
     "matrix_index.ae": 4,

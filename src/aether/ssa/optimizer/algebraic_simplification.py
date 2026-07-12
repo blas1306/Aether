@@ -27,6 +27,7 @@ from aether.ssa.model import (
     SSAListNew,
     SSAListSet,
     SSAListReverse,
+    SSASequenceSort,
     SSAMatrixColumns,
     SSAMatrixAdd,
     SSAMatrixMatMul,
@@ -470,6 +471,9 @@ class SSAAlgebraicSimplifier:
 
         if isinstance(instruction, SSAListReverse):
             return SSAListReverse(self._resolve(instruction.list_value, replacements))
+
+        if isinstance(instruction, SSASequenceSort):
+            return SSASequenceSort(self._resolve(instruction.sequence, replacements))
 
         if isinstance(instruction, SSAVectorSet):
             return SSAVectorSet(

@@ -44,6 +44,7 @@ ARRAY_NATIVE_MEMBERS = NativeMemberSet(
     },
     methods={
         "copy": NativeMember("copy", "copy", "method"),
+        "sort": NativeMember("sort", "sort", "method"),
     },
 )
 

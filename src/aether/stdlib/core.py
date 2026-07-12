@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 import cmath
+import math
 from math import ceil, cos, exp, factorial as math_factorial, floor, log, log10, pi, sin, sqrt, tan
 
 from ..errors import AetherRuntimeError, AetherTypeError
@@ -278,9 +279,23 @@ def reverse_builtin(args: list[AetherValue]) -> AetherValue:
 
 
 def sort_builtin(args: list[AetherValue]) -> AetherValue:
-    xs = _require_list_arg(args, "sort")
-    _require_sortable_list_type(xs.type_name, "sort")
-    xs.value.sort(key=lambda element: element.value)
+    if len(args) != 1:
+        raise AetherTypeError("sort(...) expects exactly one argument.")
+    xs = args[0]
+    _require_sortable_sequence_type(xs.type_name, "sort")
+    if not isinstance(xs.value, list):
+        raise AetherTypeError(
+            f"sort(...) expects a List or Array argument, got '{type_to_string(xs.type_name)}'."
+        )
+    element_type = xs.type_name.element_type
+    if element_type == "double":
+        # Python's sort is stable.  The tuple supplies the specified total order:
+        # non-NaNs numerically first, then all NaNs as one equivalent group.
+        xs.value.sort(key=lambda element: (math.isnan(element.value), 0.0 if math.isnan(element.value) else element.value))
+    elif element_type == "string":
+        xs.value.sort(key=lambda element: element.value.encode("utf-8"))
+    else:
+        xs.value.sort(key=lambda element: element.value)
     return AetherValue("void", VOID_VALUE)
 
 
@@ -589,10 +604,10 @@ def _reverse_type(arg_types: list[AetherType | None]) -> AetherType | None:
 
 
 def _sort_type(arg_types: list[AetherType | None]) -> AetherType | None:
-    list_type = _require_list_type_args(arg_types, "sort", 1)
-    if list_type is None:
+    sequence_type = _require_list_or_array_type_args(arg_types, "sort", 1)
+    if sequence_type is None:
         return None
-    _require_sortable_list_type(list_type, "sort")
+    _require_sortable_sequence_type(sequence_type, "sort")
     return "void"
 
 
@@ -665,12 +680,12 @@ def _require_assignable_to_list_element(type_name: AetherType | None, list_type:
         )
 
 
-def _require_sortable_list_type(type_name: AetherType, label: str) -> None:
-    if not isinstance(type_name, ListType):
-        raise AetherTypeError(f"{label}(...) expects a List argument, got '{type_to_string(type_name)}'.")
+def _require_sortable_sequence_type(type_name: AetherType, label: str) -> None:
+    if not isinstance(type_name, (ListType, ArrayType)):
+        raise AetherTypeError(f"{label}(...) expects a List or Array argument, got '{type_to_string(type_name)}'.")
     if type_name.element_type not in {"int", "double", "string"}:
         raise AetherTypeError(
-            f"{label}(...) only supports List<int>, List<double>, and List<string>, "
+            f"{label}(...) only supports sequences of int, double, or string; "
             f"got '{type_to_string(type_name)}'."
         )
 

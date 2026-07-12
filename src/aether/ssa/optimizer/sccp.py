@@ -30,6 +30,7 @@ from aether.ssa.model import (
     SSAListNew,
     SSAListSet,
     SSAListReverse,
+    SSASequenceSort,
     SSAMatrixColumns,
     SSAMatrixAdd,
     SSAMatrixMatMul,
@@ -252,7 +253,7 @@ class SCCPAnalyzer:
             self._set_state(instruction.result, Overdefined())
             return
 
-        if isinstance(instruction, (SSAArraySet, SSAListSet, SSAListReverse)):
+        if isinstance(instruction, (SSAArraySet, SSAListSet, SSAListReverse, SSASequenceSort)):
             return
 
         if isinstance(instruction, (SSAVectorSet, SSAMatrixSet)):
@@ -446,6 +447,8 @@ class SCCPAnalyzer:
             return (instruction.list_value, instruction.value)
         if isinstance(instruction, SSAListReverse):
             return (instruction.list_value,)
+        if isinstance(instruction, SSASequenceSort):
+            return (instruction.sequence,)
         if isinstance(instruction, SSAVectorNew):
             return instruction.elements
         if isinstance(instruction, SSAMatrixNew):

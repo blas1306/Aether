@@ -24,6 +24,7 @@ from aether.ssa.model import (
     SSAListNew,
     SSAListSet,
     SSAListReverse,
+    SSASequenceSort,
     SSAMatrixColumns,
     SSAMatrixAdd,
     SSAMatrixMatMul,
@@ -170,6 +171,10 @@ class DeadPhiEliminator:
 
         if isinstance(instruction, SSAListReverse):
             used_values.add(instruction.list_value)
+            return
+
+        if isinstance(instruction, SSASequenceSort):
+            used_values.add(instruction.sequence)
             return
 
         if isinstance(instruction, SSAVectorNew):

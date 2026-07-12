@@ -27,6 +27,7 @@ from .model import (
     IRListNew,
     IRListSet,
     IRListReverse,
+    IRSequenceSort,
     IRLoad,
     IRMatrixColumns,
     IRMatrixAdd,
@@ -397,6 +398,9 @@ class IRVerifier:
 
         if isinstance(instruction, IRListReverse):
             self._verify_list_reverse(instruction, state, value_types)
+            return state
+        if isinstance(instruction, IRSequenceSort):
+            self._verify_sequence_sort(instruction, state, value_types)
             return state
 
         if isinstance(instruction, IRVectorNew):
@@ -1145,6 +1149,13 @@ class IRVerifier:
         self._require_defined(instruction.list_value, state, value_types)
         if not isinstance(instruction.list_value.type, ListType):
             self._fail(f"List reverse expects list value, got {instruction.list_value.type}")
+
+    def _verify_sequence_sort(self, instruction: IRSequenceSort, state: _State, value_types: dict[str, IRType]) -> None:
+        self._require_defined(instruction.sequence, state, value_types)
+        if not isinstance(instruction.sequence.type, (ArrayType, ListType)):
+            self._fail(f"Sequence sort expects array or list value, got {instruction.sequence.type}")
+        if not isinstance(instruction.sequence.type.element, (IntType, DoubleType, StringType)):
+            self._fail(f"Sequence sort does not support element type {instruction.sequence.type.element}")
 
     def _verify_list_is_empty(
         self,

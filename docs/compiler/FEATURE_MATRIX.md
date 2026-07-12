@@ -160,7 +160,7 @@ Notas:
 | List.removeAt / remove_at | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
 | List.clear | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
 | List.reverse | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 3a |
-| List.sort | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
+| List.sort | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado con `IRSequenceSort` y helper estable compartido |
 
 ### Array
 
@@ -173,13 +173,12 @@ Notas:
 | Array.indexOf | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ no documentada | No implementado |
 | Array.swap | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ no documentada | No implementado |
 | Array.reverse | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ no documentada | No implementado |
-| Array.sort | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ⚠️ diseño futuro | No implementado |
+| Array.sort | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado con `IRSequenceSort` y helper estable compartido |
 
-Nota de diseno: la semantica futura unica de `List.sort` y `Array.sort` esta en
+La semantica unica implementada de `List.sort` y `Array.sort` esta en
 [`AETHER_SEQUENCE_SORT_DESIGN.md`](../aether/AETHER_SEQUENCE_SORT_DESIGN.md).
-La existencia de ese contrato no cambia las marcas de implementacion de esta
-matriz: `List.sort` sigue siendo solo frontend y `Array.sort` sigue sin
-implementar.
+Ambos contenedores comparten IR, politica de comparacion y helpers LLVM; solo
+difieren al extraer el puntero de datos y la longitud de sus cabeceras.
 
 ## Algebra lineal
 
@@ -242,8 +241,8 @@ Notas:
    compilable.
 3. Completar strings en backend: concatenacion, comparaciones, impresion,
    length/indexing y runtime/ownership.
-4. Completar `List<T>` mas alla de `indexOf` en fase 3b: `sort`, mutaciones
-   que cambian longitud, crecimiento, `realloc` y ownership.
+4. Completar `List<T>` con mutaciones que cambian longitud, crecimiento,
+   `realloc` y ownership; `sort` ya esta implementado.
 5. Agregar `NullableType`/`null` al IR, SSA, optimizadores y LLVM, incluyendo
    comparaciones con `null`.
 6. Migrar structs, classes, interfaces y enums al backend o definir
@@ -254,8 +253,8 @@ Notas:
    dependen del interprete AST.
 9. Agregar tests dedicados de recursividad en IR/SSA/LLVM.
 10. Completar o descartar formalmente APIs faltantes de colecciones:
-    `Array.isEmpty`, `Array.contains`, `Array.swap`,
-    `Array.reverse` y `Array.sort`.
+    `Array.isEmpty`, `Array.contains`, `Array.swap` y `Array.reverse`;
+    `Array.sort` ya esta implementado.
 
 ## Revisar manualmente
 

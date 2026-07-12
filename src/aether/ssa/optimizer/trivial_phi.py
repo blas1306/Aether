@@ -24,6 +24,7 @@ from aether.ssa.model import (
     SSAListNew,
     SSAListSet,
     SSAListReverse,
+    SSASequenceSort,
     SSAMatrixColumns,
     SSAMatrixAdd,
     SSAMatrixMatMul,
@@ -535,6 +536,10 @@ class TrivialPhiEliminator:
         if isinstance(instruction, SSAListReverse):
             list_value, rewritten = self._rewrite_value(instruction.list_value, replacements)
             return (SSAListReverse(list_value), 1) if rewritten else (instruction, 0)
+
+        if isinstance(instruction, SSASequenceSort):
+            sequence, rewritten = self._rewrite_value(instruction.sequence, replacements)
+            return (SSASequenceSort(sequence), 1) if rewritten else (instruction, 0)
 
         if isinstance(instruction, SSAArrayLength):
             array, rewritten = self._rewrite_value(instruction.array, replacements)

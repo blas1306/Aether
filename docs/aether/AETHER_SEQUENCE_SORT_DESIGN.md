@@ -2,10 +2,10 @@
 
 ## Status And Scope
 
-This document defines the future common sorting contract for `List<T>` and
-`Array<T>`. It is design documentation only. It does not make `Array.sort()`
-available and does not add IR, SSA, LLVM, runtime, parser, typechecker, or
-interpreter support.
+This document defines the implemented common sorting contract for `List<T>`
+and `Array<T>`. The frontend, interpreter, common `IRSequenceSort` /
+`SSASequenceSort` instruction, optimizers, and LLVM helpers implement this
+contract.
 
 The contract applies to both method calls:
 
@@ -14,9 +14,8 @@ xs.sort(); // List<T>
 a.sort();  // Array<T>
 ```
 
-The existing `sort(xs)` list builtin remains a compatibility surface. When the
-shared contract is implemented, every spelling that reaches sequence sorting
-must have the semantics in this document.
+The existing `sort(xs)` builtin remains a compatibility surface. Every
+spelling that reaches sequence sorting has the semantics in this document.
 
 ## Normative V0 Contract
 

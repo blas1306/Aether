@@ -46,6 +46,7 @@ from .model import (
     SSAListNew,
     SSAListSet,
     SSAListReverse,
+    SSASequenceSort,
     SSAMatrixColumns,
     SSAMatrixAdd,
     SSAMatrixMatMul,
@@ -297,6 +298,9 @@ class SSAVerifier:
 
             if isinstance(instruction, SSAListReverse):
                 self._verify_list_reverse(instruction, value_types)
+                continue
+            if isinstance(instruction, SSASequenceSort):
+                self._verify_sequence_sort(instruction, value_types)
                 continue
 
             if isinstance(instruction, SSAVectorNew):
@@ -1034,6 +1038,13 @@ class SSAVerifier:
         self._require_defined(instruction.list_value, value_types)
         if not isinstance(instruction.list_value.type, ListType):
             self._fail(f"List reverse expects list value, got {instruction.list_value.type}")
+
+    def _verify_sequence_sort(self, instruction: SSASequenceSort, value_types: dict[str, IRType]) -> None:
+        self._require_defined(instruction.sequence, value_types)
+        if not isinstance(instruction.sequence.type, (ArrayType, ListType)):
+            self._fail(f"Sequence sort expects array or list value, got {instruction.sequence.type}")
+        if not isinstance(instruction.sequence.type.element, (IntType, DoubleType, StringType)):
+            self._fail(f"Sequence sort does not support element type {instruction.sequence.type.element}")
 
     def _verify_list_is_empty(
         self,

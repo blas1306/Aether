@@ -27,6 +27,7 @@ from .model import (
     IRListNew,
     IRListSet,
     IRListReverse,
+    IRSequenceSort,
     IRLoad,
     IRMatrixColumns,
     IRMatrixAdd,
@@ -126,6 +127,8 @@ class IRPrinter:
             )
         if isinstance(instruction, IRListReverse):
             return f"list_reverse {self._value(instruction.list_value)}"
+        if isinstance(instruction, IRSequenceSort):
+            return f"sequence_sort {self._value(instruction.sequence)}"
         if isinstance(instruction, IRVectorNew):
             elements = ", ".join(self._value(element) for element in instruction.elements)
             orientation = f" {instruction.orientation}" if instruction.orientation is not None else ""

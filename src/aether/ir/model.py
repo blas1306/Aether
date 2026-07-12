@@ -106,6 +106,11 @@ class IRListReverse(IRInstruction):
 
 
 @dataclass(frozen=True)
+class IRSequenceSort(IRInstruction):
+    sequence: IRValue
+
+
+@dataclass(frozen=True)
 class IRVectorNew(IRInstruction):
     result: IRValue
     elements: tuple[IRValue, ...] = ()
