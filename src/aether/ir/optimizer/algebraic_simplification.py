@@ -49,6 +49,7 @@ from aether.ir.model import (
     IRPrint,
     IRReturn,
     IRStore,
+    IRUnaryOp,
     IRValue,
     IRVectorGet,
     IRVectorAdd,
@@ -244,6 +245,11 @@ class AlgebraicSimplifier:
                 instruction,
                 left=self._resolve(instruction.left, replacements),
                 right=self._resolve(instruction.right, replacements),
+            )
+        if isinstance(instruction, IRUnaryOp):
+            return replace(
+                instruction,
+                operand=self._resolve(instruction.operand, replacements),
             )
         if isinstance(instruction, IRCompareOp):
             return replace(

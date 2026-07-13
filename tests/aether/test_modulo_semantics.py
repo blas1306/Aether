@@ -71,8 +71,8 @@ def test_integer_modulo_handles_in_range_factorials_exactly() -> None:
     result = run_aether(
         """
 import Math
-wilson = ((12)! + 1) % 13;
-floored = Math.mod((12)! + 1, 13);
+wilson = (factorial(12) + 1) % 13;
+floored = Math.mod(factorial(12) + 1, 13);
 """
     )
 

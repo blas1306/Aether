@@ -83,7 +83,7 @@ Notas:
 | Feature | Parser | Typechecker | AST Interpreter | IR | SSA | Optimizer | LLVM | Tests | Spec | Estado |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | unary `-` | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ✅ | ⚠️ parcialmente documentada | Parcial backend |
-| `!` factorial postfix | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ no documentada | Frontend solamente |
+| `!` negación lógica prefija | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Completa |
 | `+` | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ✅ | ✅ documentada | Parcial backend |
 | `-` | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ✅ | ✅ documentada | Parcial backend |
 | `*` | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ✅ | ⚠️ parcialmente documentada | Parcial backend |
@@ -101,8 +101,8 @@ Notas:
 
 Notas:
 
-- `!` esta implementado como operador postfix de factorial. No se encontro
-  negacion booleana prefija `!expr` en el parser.
+- `!` solo acepta un operando `boolean`, se representa explícitamente en
+  IR/SSA y baja a `xor i1 ..., true`; no existe una forma postfix.
 - `&&` y `||` tienen short-circuit en el interprete AST, pero no bajan a IR.
 - `%` baja como `rem`; los optimizadores IR/SSA conocen `mod`/`rem`. LLVM solo
   tiene `srem` para enteros en el backend actual.

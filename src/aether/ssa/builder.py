@@ -48,6 +48,7 @@ from aether.ir.model import (
     IRPrint,
     IRReturn,
     IRStore,
+    IRUnaryOp,
     IRValue,
     IRVectorGet,
     IRVectorAdd,
@@ -104,6 +105,7 @@ from .model import (
     SSAParameter,
     SSAPhi,
     SSAReturn,
+    SSAUnaryOp,
     SSAValue,
     SSAVectorGet,
     SSAVectorAdd,
@@ -534,6 +536,11 @@ class SSABuilder:
             left = self._resolve_value(instruction.left, state.value_map)
             right = self._resolve_value(instruction.right, state.value_map)
             return SSABinaryOp(result, instruction.operator, left, right)
+
+        if isinstance(instruction, IRUnaryOp):
+            result = self._define_value(instruction.result, state.value_map)
+            operand = self._resolve_value(instruction.operand, state.value_map)
+            return SSAUnaryOp(result, instruction.operator, operand)
 
         if isinstance(instruction, IRCompareOp):
             result = self._define_value(instruction.result, state.value_map)

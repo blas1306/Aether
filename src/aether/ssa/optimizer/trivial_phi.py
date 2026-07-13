@@ -45,6 +45,7 @@ from aether.ssa.model import (
     SSAPrint,
     SSAPhi,
     SSAReturn,
+    SSAUnaryOp,
     SSAValue,
     SSAVectorGet,
     SSAVectorAdd,
@@ -203,6 +204,15 @@ class TrivialPhiEliminator:
                 SSABinaryOp(instruction.result, instruction.operator, left, right),
                 int(left_rewritten) + int(right_rewritten),
             )
+
+        if isinstance(instruction, SSAUnaryOp):
+            operand, rewritten = self._rewrite_value(
+                instruction.operand,
+                replacements,
+            )
+            if not rewritten:
+                return instruction, 0
+            return SSAUnaryOp(instruction.result, instruction.operator, operand), 1
 
         if isinstance(instruction, SSACompareOp):
             left, left_rewritten = self._rewrite_value(instruction.left, replacements)

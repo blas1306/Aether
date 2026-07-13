@@ -1,6 +1,6 @@
 import IllegalArgumentException
 
-private boolean validarArray(Array<int>? arr) {
+public boolean validarArray(Array<int>? arr) {
     if arr == null {
         return false;
     }

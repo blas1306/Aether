@@ -1,7 +1,10 @@
-(double x, double res, int iter) nr(double f, double df, double x0, double tol, int maxiter) {
-    x = x0;
-    res = abs(f(x));
-    iter = 0;
+f(x) = x*exp(x) - 1;
+df(x) = exp(x) + x*exp(x);
+
+double nr(double x0, double tol, int maxiter) {
+    double x = x0;
+    double res = abs(f(x));
+    int iter = 0;
     
     for i in 1:maxiter {
         x = x - f(x)/df(x);
@@ -13,18 +16,11 @@
         }
     }
     
-    return (x, res, iter);
+    return x;
 }
 
-f(x) = x*exp(x) - 1;
-df(x) = exp(x) + x*exp(x);
+solNR = nr(1, 1e-8, 100);
 
-solNR = nr(f(x), df(x), 1, 1e-8, 100);
-
-xn = solNR.x;
-res = solNR.res;
-iter = solNR.iter;
+xn = solNR;
 
 println("x = ", xn);
-println("res = ", res);
-println("iter = ", iter);

@@ -768,7 +768,7 @@ class Parser:
         return expr
 
     def _unary(self) -> ast.Expression:
-        if self._match(TokenType.MINUS):
+        if self._match(TokenType.MINUS, TokenType.BANG):
             operator = self._previous()
             return ast.UnaryExpression(operator.lexeme, self._unary(), operator.line, operator.column)
         return self._postfix()
@@ -791,10 +791,6 @@ class Parser:
                     expr = ast.IndexExpression(expr, index, bracket.line, bracket.column)
                 continue
             if self._match(TokenType.APOSTROPHE):
-                operator = self._previous()
-                expr = ast.UnaryExpression(operator.lexeme, expr, operator.line, operator.column)
-                continue
-            if self._match(TokenType.BANG):
                 operator = self._previous()
                 expr = ast.UnaryExpression(operator.lexeme, expr, operator.line, operator.column)
                 continue

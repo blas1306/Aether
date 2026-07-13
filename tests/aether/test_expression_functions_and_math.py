@@ -44,17 +44,16 @@ def test_math_import_exposes_pi_constant() -> None:
     assert values == pytest.approx([3.141592653589793, 3.141592653589793])
 
 
-def test_math_factorial_function_and_postfix_operator() -> None:
+def test_math_factorial_function() -> None:
     result = run_aether(
         """
 import Math
 println(factorial(5));
 println(Math.factorial(6));
-println((5 - 2)!);
 """
     )
 
-    assert result.output == "120\n720\n6\n"
+    assert result.output == "120\n720\n"
 
 
 def test_math_floor_and_ceil_names() -> None:
@@ -76,7 +75,7 @@ def test_factorial_rejects_non_int_and_negative_values() -> None:
         run_aether("import Math\nprintln(factorial(5.0));")
 
     with pytest.raises(AetherRuntimeError, match="requires a non-negative integer"):
-        run_aether("import Math\nprintln((-1)!);")
+        run_aether("import Math\nprintln(factorial(-1));")
 
 
 def test_expression_function_single_parameter() -> None:

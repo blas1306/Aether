@@ -623,7 +623,11 @@ class Interpreter:
                         raise AetherRuntimeError("Operator \"'\" requires import Math.LinearAlgebra.", kind="import")
                     return self.builtins[LINEAR_ALGEBRA_CONJTRANSPOSE]([operand])
                 if expression.operator == "!":
-                    return self.builtins["Math.factorial"]([operand])
+                    if operand.type_name != "boolean" or not isinstance(operand.value, bool):
+                        raise AetherRuntimeError(
+                            "Unary operator '!' requires a boolean operand."
+                        )
+                    return AetherValue("boolean", not operand.value)
                 raise AetherRuntimeError(f"Unsupported unary operator '{expression.operator}'.")
             except AetherError as exc:
                 raise _with_source_location(exc, expression) from exc

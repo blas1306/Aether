@@ -89,7 +89,8 @@ plugin ejecute ese backend.
 | Comparaciones | Implemented | Implemented | escalares, null, agregados, structs/enums | int/double/bool/string seleccionados | Igual | int/double; string compare falla | Igual | Diagnósticos | escalar E2E | Partial |
 | `&&` / `||` short-circuit | Implemented | boolean | Implemented con short-circuit (`interpreter.py:1642`) | Rechazado | No | No | No | Highlight/completion | AST | AST-only |
 | Unario `-` | Implemented | Implemented | Implemented | int/double; se baja como `0-x` | Implemented | int/double | Implemented | Highlight | E2E parcial | Partial |
-| Factorial postfix `!` | Implemented | Implemented | Builtin Math | Rechazado | No | No | No | Highlight | AST | AST-only |
+| Negación prefija `!boolean` | Implemented | boolean exacto | Implemented | `IRUnaryOp not`, puro | `SSAUnaryOp not`; folding, propagación, SCCP y DCE | `xor i1 ..., true` | Implemented | Highlight | frontend+IR+SSA+LLVM+CLI | Implemented |
+| Factorial `factorial(...)` | Llamada normal | Implemented | Builtin Math | Rechazado como builtin | No | No | No | Completion | AST | AST-only |
 | Cast explícito | Implemented como llamada de tipo | Amplio en frontend | int/float/double/complex/string/boolean con límites | solo int↔double efectivo | solo int↔double verificado | solo i32↔double | Implemented para ese par | Completion | frontend + par nativo | Partial |
 | Conversión implícita | Implemented | widening de frontend | Implemented | muchos casos target-typed se rechazan | No adicional | solo casts ya emitidos | subconjunto | Diagnósticos | frontend; huecos backend | Partial |
 | `if` / `else` | Implemented | bool | Implemented | CFG explícito | phi/CFG | Implemented | Implemented | Highlight/symbols | E2E | Implemented |
@@ -337,7 +338,7 @@ AST-only. Los principales bloqueos son UDT/módulos fuera del lowering, runtime
 string incompleto y builtins de álgebra lineal que siguen fuera del lowering.
 
 Features AST-only más relevantes: inferencia por assignment, aliases,
-`&&`/`||`, factorial, named arguments, float/complex/nullable, input, print de
+`&&`/`||`, la función factorial, named arguments, float/complex/nullable, input, print de
 Array/List/UDT, Array copy/equality, List slicing/equality, builtins avanzados de
 álgebra lineal, tuples, todos los UDT, imports/packages y excepciones.
 

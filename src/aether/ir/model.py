@@ -64,6 +64,14 @@ class IRBinaryOp(CheckedBinaryMixin, IRInstruction):
     left: IRValue
     right: IRValue
 
+
+@dataclass(frozen=True)
+class IRUnaryOp(IRInstruction):
+    result: IRValue
+    operator: str
+    operand: IRValue
+
+
 @dataclass(frozen=True)
 class IRCompareOp(IRInstruction):
     result: IRValue

@@ -51,6 +51,7 @@ from aether.ir.model import (
     IRPrint,
     IRReturn,
     IRStore,
+    IRUnaryOp,
     IRValue,
     IRVectorGet,
     IRVectorAdd,
@@ -110,6 +111,7 @@ from .model import (
     SSAParameter,
     SSAPhi,
     SSAReturn,
+    SSAUnaryOp,
     SSAValue,
     SSAVectorGet,
     SSAVectorAdd,
@@ -265,6 +267,12 @@ class SSARenamer:
             right = self._resolve_value(instruction.right)
             self._bind_value(result.name, result, bound_values)
             return SSABinaryOp(result, instruction.operator, left, right)
+
+        if isinstance(instruction, IRUnaryOp):
+            result = self._define_value(instruction.result)
+            operand = self._resolve_value(instruction.operand)
+            self._bind_value(result.name, result, bound_values)
+            return SSAUnaryOp(result, instruction.operator, operand)
 
         if isinstance(instruction, IRCompareOp):
             result = self._define_value(instruction.result)

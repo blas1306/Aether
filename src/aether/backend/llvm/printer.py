@@ -52,6 +52,7 @@ from aether.ssa.model import (
     SSAPrint,
     SSAPhi,
     SSAReturn,
+    SSAUnaryOp,
     SSAValue,
     SSAVectorGet,
     SSAVectorAdd,
@@ -281,6 +282,8 @@ class LLVMPrinter:
             return None
         if isinstance(instruction, SSABinaryOp):
             return self._print_binary_op(instruction)
+        if isinstance(instruction, SSAUnaryOp):
+            return self._print_unary_op(instruction)
         if isinstance(instruction, SSACompareOp):
             return self._print_compare_op(instruction)
         if isinstance(instruction, SSACast):
@@ -388,7 +391,7 @@ class LLVMPrinter:
 
     @staticmethod
     def _instruction_result(instruction: SSAInstruction) -> SSAValue | None:
-        if isinstance(instruction, SSABinaryOp | SSACompareOp | SSACast | SSAPhi):
+        if isinstance(instruction, SSABinaryOp | SSAUnaryOp | SSACompareOp | SSACast | SSAPhi):
             return instruction.result
         if isinstance(instruction, SSACall):
             return instruction.result
@@ -481,6 +484,19 @@ class LLVMPrinter:
         left = self._operand(instruction.left)
         right = self._operand(instruction.right)
         return f"{result} = {operator} {result_type} {left}, {right}"
+
+    def _print_unary_op(self, instruction: SSAUnaryOp) -> str:
+        if (
+            instruction.operator != "not"
+            or not isinstance(instruction.operand.type, BoolType)
+            or not isinstance(instruction.result.type, BoolType)
+        ):
+            raise LLVMBackendError(
+                "LLVM backend only supports unary not on bool/i1 values"
+            )
+        result = self._new_temp(instruction.result)
+        operand = self._operand(instruction.operand)
+        return f"{result} = xor i1 {operand}, true"
 
     def _print_compare_op(self, instruction: SSACompareOp) -> str:
         if instruction.aggregate_shape is not None:

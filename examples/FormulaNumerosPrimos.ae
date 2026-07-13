@@ -1,13 +1,11 @@
-import Math
-
 int GenPrimos(int n) {
-    suma1 = 0;
+    int suma1 = 0;
 
     for i in 1:int(2^n) {
-        suma2 = 0;
+        int suma2 = 0;
 
         for j in 1:i {
-            if (((j - 1)! + 1) % j) == 0 {
+            if ((Math.factorial(j - 1) + 1) % j) == 0 {
                 suma2 = suma2 + 1;
             }
         }
@@ -15,10 +13,12 @@ int GenPrimos(int n) {
         suma1 = suma1 + int((n/suma2)^(1/n));
     }
 
-    p = 1 + suma1;
+    int p = 1 + suma1;
     return p;
 }
 
-for i in 1:10 {
-    println("p_{$i$} = ", GenPrimos(i));
+int main() {
+    println(GenPrimos(2));
+    println(GenPrimos(5));
+    println(GenPrimos(10));
 }

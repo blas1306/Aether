@@ -15,6 +15,7 @@ from aether.ir.model import (
     IRFunction,
     IRInstruction,
     IRModule,
+    IRUnaryOp,
     IRValue,
 )
 
@@ -91,6 +92,13 @@ class ConstantFolder:
                 return folded, 1
             return instruction, 0
 
+        if isinstance(instruction, IRUnaryOp):
+            folded = self._fold_unary(instruction, constants)
+            if folded is not None:
+                constants[instruction.result] = folded.value
+                return folded, 1
+            return instruction, 0
+
         if isinstance(instruction, IRCompareOp):
             folded = self._fold_compare(instruction, constants)
             if folded is not None:
@@ -130,6 +138,18 @@ class ConstantFolder:
                 return None
             value = self._evaluate_binary(operator, left, right)
         return IRConst(instruction.result, value)
+
+    @staticmethod
+    def _fold_unary(
+        instruction: IRUnaryOp,
+        constants: dict[IRValue, Any],
+    ) -> IRConst | None:
+        if instruction.operator != "not" or instruction.operand not in constants:
+            return None
+        value = constants[instruction.operand]
+        if not isinstance(value, bool):
+            return None
+        return IRConst(instruction.result, not value)
 
     def _fold_compare(
         self,

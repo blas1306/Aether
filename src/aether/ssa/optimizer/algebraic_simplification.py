@@ -49,6 +49,7 @@ from aether.ssa.model import (
     SSAPrint,
     SSAPhi,
     SSAReturn,
+    SSAUnaryOp,
     SSAValue,
     SSAVectorGet,
     SSAVectorAdd,
@@ -255,6 +256,13 @@ class SSAAlgebraicSimplifier:
                 instruction.operator,
                 self._resolve(instruction.left, replacements),
                 self._resolve(instruction.right, replacements),
+            )
+
+        if isinstance(instruction, SSAUnaryOp):
+            return SSAUnaryOp(
+                instruction.result,
+                instruction.operator,
+                self._resolve(instruction.operand, replacements),
             )
 
         if isinstance(instruction, SSACompareOp):

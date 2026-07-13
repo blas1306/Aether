@@ -14,6 +14,7 @@ from aether.ssa.model import (
     SSAFunction,
     SSAInstruction,
     SSAModule,
+    SSAUnaryOp,
     SSAValue,
 )
 
@@ -109,6 +110,13 @@ class SSAConstantFolder:
             constants[folded.result] = folded.value
             return folded, 1
 
+        if isinstance(instruction, SSAUnaryOp):
+            folded = self._fold_unary(instruction, constants)
+            if folded is None:
+                return instruction, 0
+            constants[folded.result] = folded.value
+            return folded, 1
+
         if isinstance(instruction, SSACompareOp):
             folded = self._fold_compare(instruction, constants)
             if folded is None:
@@ -154,6 +162,18 @@ class SSAConstantFolder:
             value = self._evaluate_binary(operator, left, right)
 
         return SSAConst(instruction.result, value)
+
+    @staticmethod
+    def _fold_unary(
+        instruction: SSAUnaryOp,
+        constants: dict[SSAValue, Any],
+    ) -> SSAConst | None:
+        if instruction.operator != "not" or instruction.operand not in constants:
+            return None
+        value = constants[instruction.operand]
+        if not isinstance(value, bool):
+            return None
+        return SSAConst(instruction.result, not value)
 
     def _fold_compare(
         self,

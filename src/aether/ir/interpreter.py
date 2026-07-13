@@ -62,6 +62,7 @@ from .model import (
     IRPrint,
     IRReturn,
     IRStore,
+    IRUnaryOp,
     IRValue,
     IRVectorGet,
     IRVectorAdd,
@@ -226,6 +227,15 @@ class IRInterpreter:
                 right,
                 checked_int=instruction.may_trap,
             )
+            return False, None, None
+
+        if isinstance(instruction, IRUnaryOp):
+            operand = self._value(instruction.operand, frame)
+            if instruction.operator != "not" or not isinstance(operand, bool):
+                raise IRExecutionError(
+                    f"Unsupported IR unary operation '{instruction.operator}'"
+                )
+            frame.values[instruction.result] = not operand
             return False, None, None
 
         if isinstance(instruction, IRCompareOp):

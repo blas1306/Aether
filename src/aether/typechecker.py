@@ -1586,7 +1586,13 @@ class TypeChecker:
                     )
                 return infer_builtin_type(LINEAR_ALGEBRA_CONJTRANSPOSE, [operand_type])
             if expression.operator == "!":
-                return infer_builtin_type("Math.factorial", [operand_type])
+                if operand_type != "boolean":
+                    raise AetherTypeError(
+                        "Unary operator '!' requires a boolean operand.",
+                        line=expression.line,
+                        column=expression.column,
+                    )
+                return "boolean"
             raise AetherRuntimeError(f"Unsupported unary operator '{expression.operator}'.")
         if isinstance(expression, ast.BinaryExpression):
             try:

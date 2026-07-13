@@ -1,0 +1,8 @@
+boolean a = true;
+boolean b = false;
+
+println(!a);
+println(!!a);
+println(!a && b);
+println(!(a && b));
+println(a != b);

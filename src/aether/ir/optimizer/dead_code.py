@@ -47,6 +47,7 @@ from aether.ir.model import (
     IRPrint,
     IRReturn,
     IRStore,
+    IRUnaryOp,
     IRValue,
     IRVectorGet,
     IRVectorAdd,
@@ -164,6 +165,8 @@ class DeadCodeEliminator:
             return (instruction.value,)
         if isinstance(instruction, (IRBinaryOp, IRCompareOp)):
             return (instruction.left, instruction.right)
+        if isinstance(instruction, IRUnaryOp):
+            return (instruction.operand,)
         if isinstance(instruction, IRCast):
             return (instruction.value,)
         if isinstance(instruction, IRCall):

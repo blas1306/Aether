@@ -50,6 +50,14 @@ class SSABinaryOp(CheckedBinaryMixin, SSAInstruction):
     left: SSAValue
     right: SSAValue
 
+
+@dataclass(frozen=True)
+class SSAUnaryOp(SSAInstruction):
+    result: SSAValue
+    operator: str
+    operand: SSAValue
+
+
 @dataclass(frozen=True)
 class SSACompareOp(SSAInstruction):
     result: SSAValue

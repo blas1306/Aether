@@ -68,6 +68,7 @@ from .model import (
     SSAPrint,
     SSAPhi,
     SSAReturn,
+    SSAUnaryOp,
     SSAValue,
     SSAVectorGet,
     SSAVectorAdd,
@@ -266,6 +267,11 @@ class SSAVerifier:
                     result_type,
                     f"Binary op '{instruction.operator}' result type mismatch",
                 )
+                continue
+
+            if isinstance(instruction, SSAUnaryOp):
+                self._require_defined(instruction.operand, value_types)
+                self._verify_unary(instruction)
                 continue
 
             if isinstance(instruction, SSACompareOp):
@@ -1370,6 +1376,19 @@ class SSAVerifier:
 
         self._fail(f"Unsupported binary operator '{operator}'")
 
+    def _verify_unary(self, instruction: SSAUnaryOp) -> None:
+        if instruction.operator != "not":
+            self._fail(f"Unsupported unary operator '{instruction.operator}'")
+        if not isinstance(instruction.operand.type, BoolType):
+            self._fail(
+                f"Unary op 'not' requires bool operand, got {instruction.operand.type}"
+            )
+        self._require_type(
+            instruction.result.type,
+            BoolType(),
+            "Unary op 'not' result type mismatch",
+        )
+
     def _compare_operand_result_type(self, instruction: SSACompareOp) -> IRType:
         left = instruction.left.type
         right = instruction.right.type
@@ -1449,7 +1468,7 @@ class SSAVerifier:
 
     @staticmethod
     def _instruction_result(instruction: SSAInstruction) -> SSAValue | None:
-        if isinstance(instruction, (SSAConst, SSABinaryOp, SSACompareOp, SSACast, SSAPhi)):
+        if isinstance(instruction, (SSAConst, SSABinaryOp, SSAUnaryOp, SSACompareOp, SSACast, SSAPhi)):
             return instruction.result
         if isinstance(instruction, SSACall):
             return instruction.result

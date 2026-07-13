@@ -50,6 +50,7 @@ from .model import (
     IRPrint,
     IRReturn,
     IRStore,
+    IRUnaryOp,
     IRValue,
     IRVectorGet,
     IRVectorAdd,
@@ -359,6 +360,11 @@ class IRVerifier:
                 result_type,
                 f"Binary op '{instruction.operator}' result type mismatch",
             )
+            return self._define_value(state, instruction.result)
+
+        if isinstance(instruction, IRUnaryOp):
+            self._require_defined(instruction.operand, state, value_types)
+            self._verify_unary(instruction)
             return self._define_value(state, instruction.result)
 
         if isinstance(instruction, IRCompareOp):
@@ -1500,6 +1506,19 @@ class IRVerifier:
 
         self._fail(f"Unsupported binary operator '{operator}'")
 
+    def _verify_unary(self, instruction: IRUnaryOp) -> None:
+        if instruction.operator != "not":
+            self._fail(f"Unsupported unary operator '{instruction.operator}'")
+        if not isinstance(instruction.operand.type, BoolType):
+            self._fail(
+                f"Unary op 'not' requires bool operand, got {instruction.operand.type}"
+            )
+        self._require_type(
+            instruction.result.type,
+            BoolType(),
+            "Unary op 'not' result type mismatch",
+        )
+
     def _compare_result_type(self, instruction: IRCompareOp) -> IRType:
         left = instruction.left.type
         right = instruction.right.type
@@ -1603,7 +1622,7 @@ class IRVerifier:
 
     @staticmethod
     def _instruction_result(instruction: IRInstruction) -> IRValue | None:
-        if isinstance(instruction, (IRConst, IRLoad, IRBinaryOp, IRCompareOp, IRCast)):
+        if isinstance(instruction, (IRConst, IRLoad, IRBinaryOp, IRUnaryOp, IRCompareOp, IRCast)):
             return instruction.result
         if isinstance(instruction, IRCall):
             return instruction.result

@@ -50,6 +50,7 @@ from .model import (
     IRPrint,
     IRReturn,
     IRStore,
+    IRUnaryOp,
     IRValue,
     IRVectorGet,
     IRVectorAdd,
@@ -97,6 +98,11 @@ class IRPrinter:
             return (
                 f"{self._typed_value(instruction.result)} = {instruction.operator} "
                 f"{self._value(instruction.left)}, {self._value(instruction.right)}"
+            )
+        if isinstance(instruction, IRUnaryOp):
+            return (
+                f"{self._typed_value(instruction.result)} = {instruction.operator} "
+                f"{self._value(instruction.operand)}"
             )
         if isinstance(instruction, IRCompareOp):
             shape = (

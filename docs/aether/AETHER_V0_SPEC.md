@@ -1254,6 +1254,28 @@ Booleans do not participate in arithmetic:
 true + 1; // error
 ```
 
+Logical negation uses the prefix `!` operator. Its only valid signature is:
+
+```text
+!boolean -> boolean
+```
+
+It binds more tightly than comparisons, equality, `&&`, and `||`, and may be
+repeated:
+
+```aether
+boolean ready = false;
+println(!ready);        // true
+println(!!ready);       // false
+println(!(1 == 2));     // true
+```
+
+Aether does not apply truthy/falsy conversions: `!1`, `!0.0`, `!"text"`, and
+negation of collections are type errors. `!` has no postfix form and does not
+mean factorial. Factorial remains available as `factorial(value)` or
+`Math.factorial(value)`. The two-character `!=` token remains the inequality
+operator.
+
 ## Comparisons
 
 Numeric comparisons return `boolean`:

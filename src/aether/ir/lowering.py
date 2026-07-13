@@ -61,6 +61,7 @@ from .model import (
     IRPrint,
     IRReturn,
     IRStore,
+    IRUnaryOp,
     IRValue,
     IRVectorGet,
     IRVectorAdd,
@@ -1097,6 +1098,16 @@ class IRLowerer:
             return result
 
         if isinstance(expression, ast.UnaryExpression):
+            if expression.operator == "!":
+                operand = self._lower_expression(expression.operand, context)
+                self._require_same_type(
+                    operand.type,
+                    BoolType(),
+                    "applying unary logical not",
+                )
+                result = context.temporary(BoolType())
+                context.block.instructions.append(IRUnaryOp(result, "not", operand))
+                return result
             if expression.operator != "-":
                 self._unsupported(expression, f"operator '{expression.operator}'")
             if (

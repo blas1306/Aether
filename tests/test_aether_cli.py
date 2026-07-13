@@ -153,6 +153,29 @@ def test_default_backend_runs_with_llvm_and_propagates_exit_code(
     assert stderr == ""
 
 
+def test_default_backend_lowers_logical_not_end_to_end(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    program = tmp_path / "logical_not.ae"
+    program.write_text(
+        "int main() { boolean ready = false; println(!ready); return 0; }\n",
+        encoding="utf-8",
+    )
+    clang_commands, _ = fake_native_toolchain(
+        monkeypatch,
+        returncode=0,
+        stdout_bytes=b"true\n",
+    )
+
+    exit_code, stdout, stderr = run_cli([str(program)])
+
+    assert exit_code == EXIT_SUCCESS
+    assert stdout == "true\n"
+    assert stderr == ""
+    assert len(clang_commands) == 1
+
+
 def test_backend_ast_remains_explicit_file_execution(tmp_path: Path) -> None:
     program = tmp_path / "backend_ast.ae"
     program.write_text('println("ast");\n', encoding="utf-8")

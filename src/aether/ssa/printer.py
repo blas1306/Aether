@@ -50,6 +50,7 @@ from .model import (
     SSAPrint,
     SSAPhi,
     SSAReturn,
+    SSAUnaryOp,
     SSAValue,
     SSAVectorGet,
     SSAVectorAdd,
@@ -93,6 +94,11 @@ class SSAPrinter:
             return (
                 f"{self._typed_value(instruction.result)} = {instruction.operator} "
                 f"{self._value(instruction.left)}, {self._value(instruction.right)}"
+            )
+        if isinstance(instruction, SSAUnaryOp):
+            return (
+                f"{self._typed_value(instruction.result)} = {instruction.operator} "
+                f"{self._value(instruction.operand)}"
             )
         if isinstance(instruction, SSACompareOp):
             shape = (

@@ -46,6 +46,7 @@ from aether.ssa.model import (
     SSAPrint,
     SSAPhi,
     SSAReturn,
+    SSAUnaryOp,
     SSAValue,
     SSAVectorGet,
     SSAVectorAdd,
@@ -139,6 +140,10 @@ class DeadPhiEliminator:
         if isinstance(instruction, SSABinaryOp):
             used_values.add(instruction.left)
             used_values.add(instruction.right)
+            return
+
+        if isinstance(instruction, SSAUnaryOp):
+            used_values.add(instruction.operand)
             return
 
         if isinstance(instruction, SSACompareOp):

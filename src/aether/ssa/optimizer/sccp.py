@@ -53,6 +53,7 @@ from aether.ssa.model import (
     SSAPrint,
     SSAPhi,
     SSAReturn,
+    SSAUnaryOp,
     SSAValue,
     SSAVectorGet,
     SSAVectorAdd,
@@ -208,6 +209,10 @@ class SCCPAnalyzer:
             self._set_state(instruction.result, self._evaluate_binary(instruction))
             return
 
+        if isinstance(instruction, SSAUnaryOp):
+            self._set_state(instruction.result, self._evaluate_unary(instruction))
+            return
+
         if isinstance(instruction, SSACompareOp):
             self._set_state(instruction.result, self._evaluate_compare(instruction))
             return
@@ -276,6 +281,20 @@ class SCCPAnalyzer:
             return Constant(self._evaluate_binary_values(operator, left.value, right.value))
         except (ArithmeticError, TypeError, ValueError):
             return Overdefined()
+
+    def _evaluate_unary(self, instruction: SSAUnaryOp) -> LatticeState:
+        operand = self._state(instruction.operand)
+        if isinstance(operand, Overdefined):
+            return Overdefined()
+        if isinstance(operand, Unknown):
+            return Unknown()
+        if (
+            not isinstance(operand, Constant)
+            or instruction.operator != "not"
+            or not isinstance(operand.value, bool)
+        ):
+            return Overdefined()
+        return Constant(not operand.value)
 
     def _evaluate_compare(self, instruction: SSACompareOp) -> LatticeState:
         if instruction.aggregate_shape is not None:
@@ -355,7 +374,7 @@ class SCCPAnalyzer:
 
     @staticmethod
     def _instruction_result(instruction: SSAInstruction) -> SSAValue | None:
-        if isinstance(instruction, (SSAConst, SSABinaryOp, SSACompareOp, SSACast, SSAPhi)):
+        if isinstance(instruction, (SSAConst, SSABinaryOp, SSAUnaryOp, SSACompareOp, SSACast, SSAPhi)):
             return instruction.result
         if isinstance(instruction, SSACall):
             return instruction.result
@@ -402,6 +421,8 @@ class SCCPAnalyzer:
     def _instruction_operands(instruction: SSAInstruction) -> tuple[SSAValue, ...]:
         if isinstance(instruction, SSABinaryOp):
             return (instruction.left, instruction.right)
+        if isinstance(instruction, SSAUnaryOp):
+            return (instruction.operand,)
         if isinstance(instruction, SSACompareOp):
             return (instruction.left, instruction.right)
         if isinstance(instruction, SSACast):
@@ -663,7 +684,7 @@ class SCCPTransformer:
         return SSABasicBlock(block.name, instructions), replaced_constants, simplified_branches
 
     def _constant_replacement(self, instruction: SSAInstruction) -> SSAConst | None:
-        if not isinstance(instruction, (SSABinaryOp, SSACompareOp, SSACast, SSAPhi)):
+        if not isinstance(instruction, (SSABinaryOp, SSAUnaryOp, SSACompareOp, SSACast, SSAPhi)):
             return None
 
         state = self.result.state(instruction.result)

@@ -15,6 +15,7 @@ from aether.ssa.model import (
     SSAInstruction,
     SSAModule,
     SSAPhi,
+    SSAUnaryOp,
     SSAValue,
 )
 
@@ -126,7 +127,7 @@ class SSAGlobalConstantPropagator:
         if result is None or result not in constants:
             return None
 
-        if isinstance(instruction, (SSAPhi, SSABinaryOp, SSACompareOp, SSACast)):
+        if isinstance(instruction, (SSAPhi, SSABinaryOp, SSAUnaryOp, SSACompareOp, SSACast)):
             return SSAConst(result, constants[result])
 
         return None
@@ -144,6 +145,9 @@ class SSAGlobalConstantPropagator:
 
         if isinstance(instruction, SSABinaryOp):
             return self._binary_constant(instruction, constants)
+
+        if isinstance(instruction, SSAUnaryOp):
+            return self._unary_constant(instruction, constants)
 
         if isinstance(instruction, SSACompareOp):
             if instruction.aggregate_shape is not None:
@@ -203,6 +207,16 @@ class SSAGlobalConstantPropagator:
             return self._evaluate_binary(operator, left, right)
         except (ArithmeticError, TypeError, ValueError):
             return UNKNOWN
+
+    @staticmethod
+    def _unary_constant(
+        instruction: SSAUnaryOp,
+        constants: dict[SSAValue, Any],
+    ) -> Any | _Unknown:
+        if instruction.operator != "not" or instruction.operand not in constants:
+            return UNKNOWN
+        value = constants[instruction.operand]
+        return not value if isinstance(value, bool) else UNKNOWN
 
     def _compare_constant(
         self,
