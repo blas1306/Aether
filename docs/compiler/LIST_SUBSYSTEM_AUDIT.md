@@ -28,6 +28,11 @@ y su modelado `may_trap` en DCE fueron resueltos despues del relevamiento
 original. Las secciones afectadas se actualizaron; los demas riesgos y el
 alcance de la auditoria permanecen sin cambios.
 
+Actualizacion P2: el runtime LLVM quedo separado en `list_runtime.py` para el
+layout/capacity/growth List, `array_runtime.py` para Array y
+`runtime_common.py` para allocation checked, declaraciones y sort. La salida
+LLVM representativa se conserva byte a byte.
+
 ## Resumen ejecutivo
 
 Clasificacion global: **aceptable**.
@@ -142,9 +147,10 @@ actual es deliberadamente conservadora respecto de mutaciones.
 
 ### LLVM, runtime LLVM y native
 
-`LLVMPrinter` baja SSA a LLVM textual. El runtime no es una biblioteca `.ll`
-separada: `printer.py` agrega bajo demanda `aether_list_new`, copy, search,
-reverse, reserve, prepare helpers y panics. `runtime.py` genera los helpers de
+`LLVMPrinter` baja SSA a LLVM textual y registra las dependencias requeridas.
+`list_runtime.py` emite `aether_list_new`, copy, search, reverse, reserve,
+prepare helpers y panics List; `array_runtime.py` emite el runtime Array; y
+`runtime_common.py` centraliza allocation, declaraciones y los helpers de
 merge sort compartidos por List y Array. Se enlazan intrinsecos LLVM y libc
 (`malloc`, `free`, `puts`, `exit`, `strcmp`) al compilar con clang.
 
@@ -463,9 +469,9 @@ new/copy/sort; modelar un `size_t` de 32 bits sigue fuera del target actual.
 
 ### Oportunidades de simplificacion
 
-- Extraer la generacion de runtime List fuera del printer de instrucciones.
-- Unificar panic y checks como se describe en la seccion 4.
-- Hacer que new/copy llamen al mismo checked byte-size de reserve.
+- La extraccion del runtime List y la infraestructura comun ya estan
+  completadas; las declaraciones se deduplican por modulo.
+- Los mensajes y checks dependientes del layout permanecen especializados.
 - Mover la totalidad de insert/removeAt a helpers storage-oriented con
   `value_ptr/out_ptr`, o mantener lowering inline pero compartir una primitiva
   de movimiento validado. La primera opcion reduce LLVM emitido; la segunda
@@ -665,9 +671,11 @@ Solo pasos de robustez/refactor, sin nuevas features del lenguaje:
 
 ### P1 - consolidacion del runtime LLVM
 
-5. Extraer runtime List del printer de instrucciones y declarar dependencias
-   entre helpers.
-6. Unificar panic, acceso a campos y calculos de bytes.
+5. **Completado:** extraer runtime List del printer de instrucciones y declarar
+   dependencias entre helpers.
+6. **Completado en el alcance compartible:** unificar infraestructura de panic,
+   declaraciones, allocation, calculos checked y sort; los campos permanecen
+   separados por layout.
 7. Unificar prepare/move/commit de insert/removeAt sin duplicar calculos ya
    validados.
 8. Registrar explicitamente ABI/target y alignment soportados.

@@ -13,7 +13,8 @@ from aether.ir.types import (
     VectorType,
 )
 
-from .runtime import sequence_sort_helper, sequence_sort_helper_name
+from .array_runtime import LLVMArrayRuntime
+from .runtime_common import LLVMRuntimeCommon
 from .types import LLVMBackendError, llvm_type
 
 
@@ -21,10 +22,6 @@ from .types import LLVMBackendError, llvm_type
 class LLVMListRuntime:
     """Generate the LLVM runtime sections required by one emitted module."""
 
-    _uses_array_type: bool
-    _uses_array_allocation: bool
-    _uses_array_indexing: bool
-    _uses_array_length_conversion: bool
     _uses_list_type: bool
     _uses_list_allocation: bool
     _uses_list_copy: bool
@@ -39,7 +36,6 @@ class LLVMListRuntime:
     _list_contains_types: frozenset[object]
     _list_index_of_types: frozenset[object]
 
-    _ARRAY_STRUCT_TYPE = "%AetherArray"
     _LIST_STRUCT_TYPE = "%AetherList"
 
     @classmethod
@@ -66,173 +62,20 @@ class LLVMListRuntime:
     def _list_data_pointer(cls, result: str, list_value: str) -> str:
         return cls._list_field_pointer(result, list_value, 2)
 
-    @staticmethod
-    def _declare(sections: list[str], declaration: str) -> None:
-        if declaration not in sections:
-            sections.append(declaration)
-
-    def declarations(self) -> list[str]:
+    def declarations(
+        self,
+        common: LLVMRuntimeCommon,
+        array: LLVMArrayRuntime,
+    ) -> list[str]:
         sections: list[str] = []
         uses_list_growth = self._uses_list_push or self._uses_list_insert
-        uses_allocation = bool(
-            self._uses_array_allocation
-            or self._uses_list_allocation
-            or uses_list_growth
-            or self._sequence_sort_types
-        )
-        uses_checked_allocation_size = bool(
-            self._uses_array_allocation
-            or self._uses_list_allocation
-            or self._sequence_sort_types
-        )
-        uses_int_conversion = bool(
-            self._uses_array_length_conversion
-            or self._uses_list_length_conversion
-            or self._list_index_of_types
-        )
-        if self._uses_array_type:
-            sections.append(f"{self._ARRAY_STRUCT_TYPE} = type {{ i64, ptr }}")
+        uses_checked_allocation_size = common.uses_checked_allocation_size
+        array.append_type(sections)
         if self._uses_list_type:
             sections.append(f"{self._LIST_STRUCT_TYPE} = type {{ i64, i64, ptr }}")
-        if uses_allocation or self._uses_array_indexing or self._uses_list_indexing or self._uses_list_pop or self._uses_list_remove_at or uses_int_conversion:
-            self._declare(sections, "declare i32 @puts(ptr)")
-            self._declare(sections, "declare void @exit(i32) noreturn")
-        if uses_allocation:
-            self._declare(sections, "declare noalias ptr @malloc(i64)")
-            sections.append('@.aether.oom = private unnamed_addr constant [39 x i8] c"Aether panic: memory allocation failed\\00"')
-            sections.append(
-                "\n".join(
-                    [
-                        "define private void @aether_allocation_failure_panic() noreturn {",
-                        "entry:",
-                        "  %message = getelementptr [39 x i8], ptr @.aether.oom, i64 0, i64 0",
-                        "  call i32 @puts(ptr %message)",
-                        "  call void @exit(i32 1)",
-                        "  unreachable",
-                        "}",
-                    ]
-                )
-            )
-            sections.append(
-                "\n".join(
-                    [
-                        "define private ptr @aether_alloc(i64 %size) {",
-                        "entry:",
-                        "  %zero = icmp eq i64 %size, 0",
-                        "  br i1 %zero, label %empty, label %allocate",
-                        "empty:",
-                        "  ret ptr null",
-                        "allocate:",
-                        "  %mem = call noalias ptr @malloc(i64 %size)",
-                        "  %failed = icmp eq ptr %mem, null",
-                        "  br i1 %failed, label %panic, label %ok",
-                        "panic:",
-                        "  call void @aether_allocation_failure_panic()",
-                        "  unreachable",
-                        "ok:",
-                        "  ret ptr %mem",
-                        "}",
-                    ]
-                )
-            )
-        if uses_checked_allocation_size:
-            sections.append('@.aether.allocation.overflow = private unnamed_addr constant [39 x i8] c"Aether panic: allocation size overflow\\00"')
-            sections.append(
-                "\n".join(
-                    [
-                        "define private void @aether_allocation_overflow_panic() noreturn {",
-                        "entry:",
-                        "  %message = getelementptr [39 x i8], ptr @.aether.allocation.overflow, i64 0, i64 0",
-                        "  call i32 @puts(ptr %message)",
-                        "  call void @exit(i32 1)",
-                        "  unreachable",
-                        "}",
-                    ]
-                )
-            )
-            sections.append(
-                "\n".join(
-                    [
-                        "define private i64 @aether_checked_allocation_bytes(i64 %length, i64 %element_size) {",
-                        "entry:",
-                        "  %negative_length = icmp slt i64 %length, 0",
-                        "  %negative_size = icmp slt i64 %element_size, 0",
-                        "  %invalid = or i1 %negative_length, %negative_size",
-                        "  br i1 %invalid, label %panic, label %multiply",
-                        "panic:",
-                        "  call void @aether_allocation_overflow_panic()",
-                        "  unreachable",
-                        "multiply:",
-                        "  %bytes = call i64 @aether_checked_mul_i64(i64 %length, i64 %element_size)",
-                        "  ret i64 %bytes",
-                        "}",
-                    ]
-                )
-            )
-            sections.append(
-                "\n".join(
-                    [
-                        "define private i64 @aether_checked_mul_i64(i64 %left, i64 %right) {",
-                        "entry:",
-                        "  %pair = call { i64, i1 } @llvm.umul.with.overflow.i64(i64 %left, i64 %right)",
-                        "  %result = extractvalue { i64, i1 } %pair, 0",
-                        "  %overflow = extractvalue { i64, i1 } %pair, 1",
-                        "  br i1 %overflow, label %panic, label %ok",
-                        "panic:",
-                        "  call void @aether_allocation_overflow_panic()",
-                        "  unreachable",
-                        "ok:",
-                        "  ret i64 %result",
-                        "}",
-                    ]
-                )
-            )
-        if self._sequence_sort_types or uses_list_growth:
-            self._declare(sections, "declare void @free(ptr)")
-            self._declare(sections, "declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1 immarg)")
-        if self._uses_list_insert or self._uses_list_remove_at:
-            self._declare(sections, "declare void @llvm.memmove.p0.p0.i64(ptr, ptr, i64, i1 immarg)")
-        if self._uses_array_allocation:
-            sections.append(
-                "\n".join(
-                    [
-                        "define private ptr @aether_array_new(i64 %element_size, i64 %length) {",
-                        "entry:",
-                        "  %data_size = call i64 @aether_checked_allocation_bytes(i64 %length, i64 %element_size)",
-                        "  %array = call ptr @aether_alloc(i64 16)",
-                        f"  %len_field = getelementptr {self._ARRAY_STRUCT_TYPE}, ptr %array, i32 0, i32 0",
-                        "  store i64 %length, ptr %len_field",
-                        "  %data = call ptr @aether_alloc(i64 %data_size)",
-                        f"  %data_field = getelementptr {self._ARRAY_STRUCT_TYPE}, ptr %array, i32 0, i32 1",
-                        "  store ptr %data, ptr %data_field",
-                        "  ret ptr %array",
-                        "}",
-                    ]
-                )
-            )
-        if self._uses_array_length_conversion:
-            sections.append('@.aether.array.length.int = private unnamed_addr constant [47 x i8] c"Aether panic: Array length does not fit in int\\00"')
-            sections.append(
-                "\n".join(
-                    [
-                        "define private i32 @aether_array_length_to_int(i64 %length) {",
-                        "entry:",
-                        "  %nonnegative = icmp sge i64 %length, 0",
-                        "  %fits = icmp sle i64 %length, 2147483647",
-                        "  %valid = and i1 %nonnegative, %fits",
-                        "  br i1 %valid, label %convert, label %panic",
-                        "panic:",
-                        "  %message = getelementptr [47 x i8], ptr @.aether.array.length.int, i64 0, i64 0",
-                        "  call i32 @puts(ptr %message)",
-                        "  call void @exit(i32 1)",
-                        "  unreachable",
-                        "convert:",
-                        "  %result = trunc i64 %length to i32",
-                        "  ret i32 %result",
-                        "}",
-                    ]
-                )
-            )
+        common.append_core(sections)
+        array.append_allocation(sections)
+        array.append_length_conversion(sections)
         if self._uses_list_allocation:
             sections.append(
                 "\n".join(
@@ -255,7 +98,7 @@ class LLVMListRuntime:
             )
         if self._uses_list_copy:
             if not self._sequence_sort_types and not uses_list_growth:
-                self._declare(sections, "declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1 immarg)")
+                common.declare(sections, "declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1 immarg)")
             sections.append(
                 "\n".join(
                     [
@@ -326,56 +169,10 @@ class LLVMListRuntime:
                     ]
                 )
             )
-        if self._uses_array_indexing:
-            sections.append('@.aether.array.index.bounds = private unnamed_addr constant [40 x i8] c"Aether panic: Array index out of bounds\\00"')
-            sections.append(
-                "\n".join(
-                    [
-                        "define private void @aether_array_index_bounds_panic() noreturn {",
-                        "entry:",
-                        "  %message = getelementptr [40 x i8], ptr @.aether.array.index.bounds, i64 0, i64 0",
-                        "  call i32 @puts(ptr %message)",
-                        "  call void @exit(i32 1)",
-                        "  unreachable",
-                        "}",
-                    ]
-                )
-            )
-            sections.append(
-                "\n".join(
-                    [
-                        "define private void @aether_array_check_index(ptr %array, i64 %index) {",
-                        "entry:",
-                        f"  %len_field = getelementptr {self._ARRAY_STRUCT_TYPE}, ptr %array, i32 0, i32 0",
-                        "  %length = load i64, ptr %len_field",
-                        "  %nonnegative = icmp sge i64 %index, 0",
-                        "  %within_length = icmp ult i64 %index, %length",
-                        "  %valid = and i1 %nonnegative, %within_length",
-                        "  br i1 %valid, label %ready, label %bounds_panic",
-                        "bounds_panic:",
-                        "  call void @aether_array_index_bounds_panic()",
-                        "  unreachable",
-                        "ready:",
-                        "  ret void",
-                        "}",
-                    ]
-                )
-            )
+        array.append_indexing(sections)
         if self._uses_list_indexing:
             sections.append('@.aether.list.index.bounds = private unnamed_addr constant [39 x i8] c"Aether panic: List index out of bounds\\00"')
-            sections.append(
-                "\n".join(
-                    [
-                        "define private void @aether_list_index_bounds_panic() noreturn {",
-                        "entry:",
-                        "  %message = getelementptr [39 x i8], ptr @.aether.list.index.bounds, i64 0, i64 0",
-                        "  call i32 @puts(ptr %message)",
-                        "  call void @exit(i32 1)",
-                        "  unreachable",
-                        "}",
-                    ]
-                )
-            )
+            sections.append(common.panic_helper("aether_list_index_bounds_panic", ".aether.list.index.bounds", 39))
             sections.append(
                 "\n".join(
                     [
@@ -397,39 +194,15 @@ class LLVMListRuntime:
                 )
             )
         if uses_checked_allocation_size or uses_list_growth or self._uses_list_remove_at:
-            self._declare(sections, "declare { i64, i1 } @llvm.umul.with.overflow.i64(i64, i64)")
+            common.declare(sections, "declare { i64, i1 } @llvm.umul.with.overflow.i64(i64, i64)")
         if uses_list_growth or self._uses_list_remove_at:
             sections.append('@.aether.list.overflow = private unnamed_addr constant [37 x i8] c"Aether panic: List capacity overflow\\00"')
-            sections.append(
-                "\n".join(
-                    [
-                        "define private void @aether_list_overflow_panic() noreturn {",
-                        "entry:",
-                        "  %message = getelementptr [37 x i8], ptr @.aether.list.overflow, i64 0, i64 0",
-                        "  call i32 @puts(ptr %message)",
-                        "  call void @exit(i32 1)",
-                        "  unreachable",
-                        "}",
-                    ]
-                )
-            )
+            sections.append(common.panic_helper("aether_list_overflow_panic", ".aether.list.overflow", 37))
         if uses_list_growth:
-            self._declare(sections, "declare { i64, i1 } @llvm.uadd.with.overflow.i64(i64, i64)")
+            common.declare(sections, "declare { i64, i1 } @llvm.uadd.with.overflow.i64(i64, i64)")
         if self._uses_list_insert:
             sections.append('@.aether.list.insert.bounds = private unnamed_addr constant [46 x i8] c"Aether panic: insert() index is out of bounds\\00"')
-            sections.append(
-                "\n".join(
-                    [
-                        "define private void @aether_list_insert_bounds_panic() noreturn {",
-                        "entry:",
-                        "  %message = getelementptr [46 x i8], ptr @.aether.list.insert.bounds, i64 0, i64 0",
-                        "  call i32 @puts(ptr %message)",
-                        "  call void @exit(i32 1)",
-                        "  unreachable",
-                        "}",
-                    ]
-                )
-            )
+            sections.append(common.panic_helper("aether_list_insert_bounds_panic", ".aether.list.insert.bounds", 46))
             sections.append(
                 "\n".join(
                     [
@@ -547,19 +320,7 @@ class LLVMListRuntime:
             )
         if self._uses_list_pop:
             sections.append('@.aether.list.pop.empty = private unnamed_addr constant [52 x i8] c"Aether panic: pop() cannot be used on an empty List\\00"')
-            sections.append(
-                "\n".join(
-                    [
-                        "define private void @aether_list_pop_empty_panic() noreturn {",
-                        "entry:",
-                        "  %message = getelementptr [52 x i8], ptr @.aether.list.pop.empty, i64 0, i64 0",
-                        "  call i32 @puts(ptr %message)",
-                        "  call void @exit(i32 1)",
-                        "  unreachable",
-                        "}",
-                    ]
-                )
-            )
+            sections.append(common.panic_helper("aether_list_pop_empty_panic", ".aether.list.pop.empty", 52))
             sections.append(
                 "\n".join(
                     [
@@ -581,19 +342,7 @@ class LLVMListRuntime:
             )
         if self._uses_list_remove_at:
             sections.append('@.aether.list.remove_at.bounds = private unnamed_addr constant [48 x i8] c"Aether panic: removeAt() index is out of bounds\\00"')
-            sections.append(
-                "\n".join(
-                    [
-                        "define private void @aether_list_remove_at_bounds_panic() noreturn {",
-                        "entry:",
-                        "  %message = getelementptr [48 x i8], ptr @.aether.list.remove_at.bounds, i64 0, i64 0",
-                        "  call i32 @puts(ptr %message)",
-                        "  call void @exit(i32 1)",
-                        "  unreachable",
-                        "}",
-                    ]
-                )
-            )
+            sections.append(common.panic_helper("aether_list_remove_at_bounds_panic", ".aether.list.remove_at.bounds", 48))
             sections.append(
                 "\n".join(
                     [
@@ -672,15 +421,12 @@ class LLVMListRuntime:
                     ]
                 )
             )
-        if any(isinstance(type_, StringType) for type_ in self._sequence_sort_types):
-            self._declare(sections, "declare i32 @strcmp(ptr, ptr)")
-        for element_type in sorted(self._sequence_sort_types, key=sequence_sort_helper_name):
-            sections.append(sequence_sort_helper(element_type))
+        common.append_sort(sections)
         search_types = self._list_contains_types | self._list_index_of_types
         if any(isinstance(type_, StringType) for type_ in search_types) and not any(
             isinstance(type_, StringType) for type_ in self._sequence_sort_types
         ):
-            self._declare(sections, "declare i32 @strcmp(ptr, ptr)")
+            common.declare(sections, "declare i32 @strcmp(ptr, ptr)")
         search_helpers: dict[str, object] = {}
         for element_type in search_types:
             search_helpers.setdefault(self.list_search_helper_name(element_type), element_type)

@@ -63,12 +63,14 @@ from aether.ssa.model import (
 )
 
 from .types import LLVMBackendError, llvm_type
+from .array_runtime import LLVMArrayRuntime
 from .list_runtime import (
     LLVMListRuntime,
     list_contains_helper_name,
     list_index_of_helper_name,
 )
 from .runtime import sequence_sort_helper_name
+from .runtime_common import LLVMRuntimeCommon
 
 
 @dataclass(frozen=True)
@@ -112,7 +114,6 @@ class LLVMPrinter:
         "ne": "one",
     }
     _IDENTIFIER_RE = re.compile(r"^[A-Za-z_$._][A-Za-z0-9_$._-]*$")
-    _ARRAY_STRUCT_TYPE = "%AetherArray"
     _LIST_STRUCT_TYPE = "%AetherList"
 
     def print_module(self, module: SSAModule) -> str:
@@ -141,11 +142,13 @@ class LLVMPrinter:
             self._print_string_global(global_)
             for global_ in self._string_globals_by_value.values()
         ]
-        runtime = LLVMListRuntime(
-            _uses_array_type=self._uses_array_type,
-            _uses_array_allocation=self._uses_array_allocation,
-            _uses_array_indexing=self._uses_array_indexing,
-            _uses_array_length_conversion=self._uses_array_length_conversion,
+        array_runtime = LLVMArrayRuntime(
+            uses_type=self._uses_array_type,
+            uses_allocation=self._uses_array_allocation,
+            uses_indexing=self._uses_array_indexing,
+            uses_length_conversion=self._uses_array_length_conversion,
+        )
+        list_runtime = LLVMListRuntime(
             _uses_list_type=self._uses_list_type,
             _uses_list_allocation=self._uses_list_allocation,
             _uses_list_copy=self._uses_list_copy,
@@ -159,7 +162,36 @@ class LLVMPrinter:
             _sequence_sort_types=frozenset(self._sequence_sort_types),
             _list_contains_types=frozenset(self._list_contains_types),
             _list_index_of_types=frozenset(self._list_index_of_types),
-        ).declarations()
+        )
+        uses_list_growth = self._uses_list_push or self._uses_list_insert
+        uses_allocation = bool(
+            self._uses_array_allocation
+            or self._uses_list_allocation
+            or uses_list_growth
+            or self._sequence_sort_types
+        )
+        common_runtime = LLVMRuntimeCommon(
+            uses_allocation=uses_allocation,
+            uses_checked_allocation_size=bool(
+                self._uses_array_allocation
+                or self._uses_list_allocation
+                or self._sequence_sort_types
+            ),
+            uses_panic=bool(
+                uses_allocation
+                or self._uses_array_indexing
+                or self._uses_list_indexing
+                or self._uses_list_pop
+                or self._uses_list_remove_at
+                or self._uses_array_length_conversion
+                or self._uses_list_length_conversion
+                or self._list_index_of_types
+            ),
+            uses_free_and_memcpy=bool(self._sequence_sort_types or uses_list_growth),
+            uses_memmove=self._uses_list_insert or self._uses_list_remove_at,
+            sequence_sort_types=frozenset(self._sequence_sort_types),
+        )
+        runtime = list_runtime.declarations(common_runtime, array_runtime)
         sections = runtime + globals_ + functions
         return "\n\n".join(sections)
 
@@ -876,13 +908,13 @@ class LLVMPrinter:
         acc_ptr = self._synthetic_temp("vector.dot.acc.ptr")
         index_ptr = self._synthetic_temp("vector.dot.index.ptr")
         lines = [
-            f"  {left_field} = getelementptr {self._ARRAY_STRUCT_TYPE}, ptr {self._operand(instruction.left)}, i32 0, i32 1",
+            LLVMArrayRuntime.data_pointer_line(left_field, self._operand(instruction.left), indent="  "),
             f"  {left_data} = load ptr, ptr {left_field}",
         ]
         right_field = self._synthetic_temp("vector.dot.right.data.field")
         lines.extend(
             [
-                f"  {right_field} = getelementptr {self._ARRAY_STRUCT_TYPE}, ptr {self._operand(instruction.right)}, i32 0, i32 1",
+                LLVMArrayRuntime.data_pointer_line(right_field, self._operand(instruction.right), indent="  "),
                 f"  {right_data} = load ptr, ptr {right_field}",
                 f"  {acc_ptr} = alloca {result_type}",
                 f"  store {result_type} {zero}, ptr {acc_ptr}",
@@ -976,11 +1008,11 @@ class LLVMPrinter:
         col_index_ptr = self._synthetic_temp("outer.product.col.index.ptr")
         lines = [
             f"  {result} = call ptr @aether_array_new(i64 {result_element_size}, i64 {length})",
-            f"  {column_field} = getelementptr {self._ARRAY_STRUCT_TYPE}, ptr {self._operand(instruction.column)}, i32 0, i32 1",
+            LLVMArrayRuntime.data_pointer_line(column_field, self._operand(instruction.column), indent="  "),
             f"  {column_data} = load ptr, ptr {column_field}",
-            f"  {row_field} = getelementptr {self._ARRAY_STRUCT_TYPE}, ptr {self._operand(instruction.row)}, i32 0, i32 1",
+            LLVMArrayRuntime.data_pointer_line(row_field, self._operand(instruction.row), indent="  "),
             f"  {row_data} = load ptr, ptr {row_field}",
-            f"  {result_field} = getelementptr {self._ARRAY_STRUCT_TYPE}, ptr {result}, i32 0, i32 1",
+            LLVMArrayRuntime.data_pointer_line(result_field, result, indent="  "),
             f"  {result_data} = load ptr, ptr {result_field}",
             f"  {row_index_ptr} = alloca i64",
             f"  store i64 0, ptr {row_index_ptr}",
@@ -1282,11 +1314,11 @@ class LLVMPrinter:
         acc_ptr = self._synthetic_temp("matrix.vector.acc.ptr")
         lines = [
             allocation.line,
-            f"  {matrix_field} = getelementptr {self._ARRAY_STRUCT_TYPE}, ptr {self._operand(instruction.matrix)}, i32 0, i32 1",
+            LLVMArrayRuntime.data_pointer_line(matrix_field, self._operand(instruction.matrix), indent="  "),
             f"  {matrix_data} = load ptr, ptr {matrix_field}",
-            f"  {vector_field} = getelementptr {self._ARRAY_STRUCT_TYPE}, ptr {self._operand(instruction.vector)}, i32 0, i32 1",
+            LLVMArrayRuntime.data_pointer_line(vector_field, self._operand(instruction.vector), indent="  "),
             f"  {vector_data} = load ptr, ptr {vector_field}",
-            f"  {result_field} = getelementptr {self._ARRAY_STRUCT_TYPE}, ptr {result}, i32 0, i32 1",
+            LLVMArrayRuntime.data_pointer_line(result_field, result, indent="  "),
             f"  {result_data} = load ptr, ptr {result_field}",
             f"  {row_ptr} = alloca i64",
             f"  store i64 0, ptr {row_ptr}",
@@ -1435,11 +1467,11 @@ class LLVMPrinter:
         acc_ptr = self._synthetic_temp("vector.matrix.acc.ptr")
         lines = [
             allocation.line,
-            f"  {vector_field} = getelementptr {self._ARRAY_STRUCT_TYPE}, ptr {self._operand(instruction.vector)}, i32 0, i32 1",
+            LLVMArrayRuntime.data_pointer_line(vector_field, self._operand(instruction.vector), indent="  "),
             f"  {vector_data} = load ptr, ptr {vector_field}",
-            f"  {matrix_field} = getelementptr {self._ARRAY_STRUCT_TYPE}, ptr {self._operand(instruction.matrix)}, i32 0, i32 1",
+            LLVMArrayRuntime.data_pointer_line(matrix_field, self._operand(instruction.matrix), indent="  "),
             f"  {matrix_data} = load ptr, ptr {matrix_field}",
-            f"  {result_field} = getelementptr {self._ARRAY_STRUCT_TYPE}, ptr {result}, i32 0, i32 1",
+            LLVMArrayRuntime.data_pointer_line(result_field, result, indent="  "),
             f"  {result_data} = load ptr, ptr {result_field}",
             f"  {col_ptr} = alloca i64",
             f"  store i64 0, ptr {col_ptr}",
@@ -2048,7 +2080,7 @@ class LLVMPrinter:
         index64 = self._synthetic_temp("array.index64")
         element_ptr = self._synthetic_temp("array.elem")
         llvm_element_type = llvm_type(element_type)
-        lines = [f"{index64} = sext i32 {self._operand(index)} to i64"]
+        lines = [LLVMArrayRuntime.index64_line(index64, self._operand(index))]
         if check_bounds:
             lines.append(f"call void @aether_array_check_index(ptr {array}, i64 {index64})")
         lines.extend(self._array_data_pointer(data, array))
@@ -2103,7 +2135,7 @@ class LLVMPrinter:
     def _array_data_pointer(self, result: str, array: str) -> list[str]:
         field_ptr = self._synthetic_temp("array.data.field")
         return [
-            f"{field_ptr} = getelementptr {self._ARRAY_STRUCT_TYPE}, ptr {array}, i32 0, i32 1",
+            LLVMArrayRuntime.data_pointer_line(field_ptr, array),
             f"{result} = load ptr, ptr {field_ptr}",
         ]
 
@@ -2139,7 +2171,7 @@ class LLVMPrinter:
     def _array_length64(self, result: str, array: str) -> list[str]:
         field_ptr = self._synthetic_temp("array.len.field")
         return [
-            f"{field_ptr} = getelementptr {self._ARRAY_STRUCT_TYPE}, ptr {array}, i32 0, i32 0",
+            LLVMArrayRuntime.length_pointer_line(field_ptr, array),
             f"{result} = load i64, ptr {field_ptr}",
         ]
 

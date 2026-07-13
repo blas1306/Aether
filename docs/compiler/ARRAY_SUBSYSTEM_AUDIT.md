@@ -15,7 +15,7 @@ Se revisaron principalmente:
 - `src/aether/{native_members.py,stdlib/core.py}`;
 - `src/aether/ir/`, incluidos lowering, verifier, interpreter y optimizadores;
 - `src/aether/ssa/`, ambos builders, verifier y todos los optimizadores;
-- `src/aether/backend/llvm/{printer.py,list_runtime.py,runtime.py}`;
+- `src/aether/backend/llvm/{printer.py,array_runtime.py,list_runtime.py,runtime_common.py,runtime.py}`;
 - `tests/aether/test_array_backend.py`,
   `test_collections_and_math_literals.py`, `test_sequence_sort.py`, tests de
   IR/SSA/LLVM y ejemplos Array;
@@ -25,6 +25,12 @@ El interprete AST y el interprete IR son backends alternativos, no etapas del
 ejecutable nativo. El camino nativo efectivo es AST tipado -> IR -> SSA
 optimizado -> LLVM. El optimizador IR se usa en su propio pipeline; LLVM usa el
 pipeline SSA.
+
+Actualizacion del 12 de julio de 2026: P0 y P2 se implementaron despues del
+relevamiento original. Array LLVM ahora comprueba bounds, overflow de bytes y
+conversion `i64 -> int`; `ArrayGet` es `may_trap`; y el runtime se separa en
+`array_runtime.py`, `list_runtime.py` y `runtime_common.py`. Las observaciones
+historicas posteriores deben leerse a la luz de esta actualizacion.
 
 ## Resumen ejecutivo
 
@@ -351,21 +357,20 @@ ni un test "ArrayGet muerto pero fuera de rango". La correccion depende de
 listas manuales repetidas en DCE, SCCP, algebraic simplification, dead/trivial
 phi, builders, printers y verifiers.
 
-## 9. Duplicacion LLVM y runtime
+## 9. Runtime LLVM despues de P2
 
-### Duplicacion encontrada
+### Separacion implementada
 
-- `_array_data_pointer` y `_array_length64` centralizan parte del acceso, pero
-  `list_runtime.py` vuelve a escribir GEPs Array dentro de `aether_array_new`.
-- get y set repiten data load, sext, GEP; no tienen helper comun de bounds.
-- ArrayLength y sort vuelven a extraer length por caminos distintos del
-  runtime textual.
-- `aether_array_new`, tipos `%AetherArray/%AetherList`, allocator, panics,
-  checked multiplication y helpers List viven todos en `list_runtime.py`.
-- `LLVMPrinter` mantiene flags Array/List y arma manualmente las dependencias
-  runtime.
-- el descriptor de operandos/resultados/efectos esta duplicado extensamente en
-  IR y SSA, no solo en LLVM.
+- `array_runtime.py` posee `%AetherArray`, `aether_array_new`, bounds panic,
+  narrowing checked y helpers de acceso a `length`/`data` e indice extendido.
+- `list_runtime.py` conserva `%AetherList`, capacity, growth, mutaciones y
+  busqueda List. No define helpers Array.
+- `runtime_common.py` posee allocation checked, OOM/overflow, declaraciones
+  deduplicadas y emision de los helpers de sort compartidos.
+- `printer.py` conserva loads/stores/GEPs tipados pequenos y delega la
+  definicion del runtime a esos tres componentes.
+- Los layouts siguen separados: data es campo 1 para Array y campo 2 para
+  List. No se introdujo un header generico ni cambio de ABI.
 
 ### Que compartir con List
 
@@ -525,7 +530,7 @@ Otros documentos historicos no se modifican aqui:
 | sort | helper comun estable/checked | mismo helper | ninguna |
 | panic bounds | AST/IR/native | AST/IR solamente | P0 |
 | `may_trap` get | preservado por DCE | removible por DCE | P1 |
-| runtime separado | runtime List extraido | mezclado dentro de `list_runtime.py` y printer | P2 |
+| runtime separado | runtime List extraido | runtime Array/List separados y nucleo comun acotado | resuelto P2 |
 | ownership final | sin GC/free final | sin GC/free final | deuda comun P4 |
 | tests safety | bounds/overflow/OOM/narrowing/native | principalmente caminos felices/AST | brecha alta |
 
@@ -555,12 +560,11 @@ brecha; las diferencias de la tabla son garantias aplicables al tipo fijo.
 
 ### P2 - consolidacion de runtime
 
-8. Adoptar estrategia B: helpers comunes de secuencia/seguridad, runtime Array
-   especifico y runtime List especifico.
-9. Extraer `aether_array_new`, layout y wrappers de checks a
-   `array_runtime.py`; dejar growth/capacity en `list_runtime.py`.
-10. Centralizar allocator, checked arithmetic, panic y sort sin unificar los
-    headers.
+8. **Completado:** estrategia B con runtimes Array/List especificos.
+9. **Completado:** `aether_array_new`, layout y wrappers Array viven en
+   `array_runtime.py`; growth/capacity permanecen en `list_runtime.py`.
+10. **Completado:** allocator, checked arithmetic, declaraciones y sort se
+    consolidaron en `runtime_common.py` sin unificar headers.
 11. Documentar target ABI, alignment y tamaño de header soportados.
 
 ### P3 - API fija no estructural y cobertura

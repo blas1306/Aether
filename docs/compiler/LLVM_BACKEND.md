@@ -40,6 +40,23 @@ default output path or `hello.ll` when using `-o hello`.
 
 Native execution and builds require `clang` on `PATH`.
 
+## Runtime architecture
+
+The textual runtime is assembled on demand from three focused generators:
+
+- `array_runtime.py` owns `%AetherArray = type { i64, ptr }`, Array allocation,
+  checked length conversion, bounds panic/checks, and Array field accessors.
+- `list_runtime.py` owns `%AetherList = type { i64, i64, ptr }`, capacity,
+  growth, and List-only operations.
+- `runtime_common.py` owns checked allocation arithmetic, checked `malloc`,
+  deduplicated libc/intrinsic declarations, and the sort helpers shared by
+  Array and List.
+
+This split does not change either layout or ABI. Array and List still use
+different data field indices and only share semantics independent of their
+headers. Representative Array/List LLVM output remained byte-identical through
+the extraction.
+
 ## Example Programs
 
 The repository keeps small native-build examples in `examples/llvm/`. Each one
@@ -356,9 +373,9 @@ The backend deliberately does not support these yet:
   `indexOf`, `reverse`, and stable `sort` are supported. `clear` preserves
   capacity/data; pop also preserves them, while push may replace the owned data
   buffer but preserves header.
-- List get/set indexing has native bounds checks and a controlled panic.
-  General bounds checks for Array, Vector, and Matrix remain outside this
-  backend increment.
+- List and Array get/set indexing have native bounds checks and controlled,
+  container-specific panics. General Vector and Matrix bounds checks remain
+  outside this backend increment.
 
 - implicit casts
 - bool casts or string casts
