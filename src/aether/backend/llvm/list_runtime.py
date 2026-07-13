@@ -23,6 +23,8 @@ class LLVMListRuntime:
 
     _uses_array_type: bool
     _uses_array_allocation: bool
+    _uses_array_indexing: bool
+    _uses_array_length_conversion: bool
     _uses_list_type: bool
     _uses_list_allocation: bool
     _uses_list_copy: bool
@@ -78,13 +80,21 @@ class LLVMListRuntime:
             or uses_list_growth
             or self._sequence_sort_types
         )
-        uses_checked_allocation_size = bool(self._uses_list_allocation or self._sequence_sort_types)
-        uses_int_conversion = bool(self._uses_list_length_conversion or self._list_index_of_types)
+        uses_checked_allocation_size = bool(
+            self._uses_array_allocation
+            or self._uses_list_allocation
+            or self._sequence_sort_types
+        )
+        uses_int_conversion = bool(
+            self._uses_array_length_conversion
+            or self._uses_list_length_conversion
+            or self._list_index_of_types
+        )
         if self._uses_array_type:
             sections.append(f"{self._ARRAY_STRUCT_TYPE} = type {{ i64, ptr }}")
         if self._uses_list_type:
             sections.append(f"{self._LIST_STRUCT_TYPE} = type {{ i64, i64, ptr }}")
-        if uses_allocation or self._uses_list_indexing or self._uses_list_pop or self._uses_list_remove_at or uses_int_conversion:
+        if uses_allocation or self._uses_array_indexing or self._uses_list_indexing or self._uses_list_pop or self._uses_list_remove_at or uses_int_conversion:
             self._declare(sections, "declare i32 @puts(ptr)")
             self._declare(sections, "declare void @exit(i32) noreturn")
         if uses_allocation:
@@ -188,14 +198,37 @@ class LLVMListRuntime:
                     [
                         "define private ptr @aether_array_new(i64 %element_size, i64 %length) {",
                         "entry:",
+                        "  %data_size = call i64 @aether_checked_allocation_bytes(i64 %length, i64 %element_size)",
                         "  %array = call ptr @aether_alloc(i64 16)",
                         f"  %len_field = getelementptr {self._ARRAY_STRUCT_TYPE}, ptr %array, i32 0, i32 0",
                         "  store i64 %length, ptr %len_field",
-                        "  %data_size = mul i64 %element_size, %length",
                         "  %data = call ptr @aether_alloc(i64 %data_size)",
                         f"  %data_field = getelementptr {self._ARRAY_STRUCT_TYPE}, ptr %array, i32 0, i32 1",
                         "  store ptr %data, ptr %data_field",
                         "  ret ptr %array",
+                        "}",
+                    ]
+                )
+            )
+        if self._uses_array_length_conversion:
+            sections.append('@.aether.array.length.int = private unnamed_addr constant [47 x i8] c"Aether panic: Array length does not fit in int\\00"')
+            sections.append(
+                "\n".join(
+                    [
+                        "define private i32 @aether_array_length_to_int(i64 %length) {",
+                        "entry:",
+                        "  %nonnegative = icmp sge i64 %length, 0",
+                        "  %fits = icmp sle i64 %length, 2147483647",
+                        "  %valid = and i1 %nonnegative, %fits",
+                        "  br i1 %valid, label %convert, label %panic",
+                        "panic:",
+                        "  %message = getelementptr [47 x i8], ptr @.aether.array.length.int, i64 0, i64 0",
+                        "  call i32 @puts(ptr %message)",
+                        "  call void @exit(i32 1)",
+                        "  unreachable",
+                        "convert:",
+                        "  %result = trunc i64 %length to i32",
+                        "  ret i32 %result",
                         "}",
                     ]
                 )
@@ -289,6 +322,41 @@ class LLVMListRuntime:
                         "convert:",
                         "  %result = trunc i64 %index to i32",
                         "  ret i32 %result",
+                        "}",
+                    ]
+                )
+            )
+        if self._uses_array_indexing:
+            sections.append('@.aether.array.index.bounds = private unnamed_addr constant [40 x i8] c"Aether panic: Array index out of bounds\\00"')
+            sections.append(
+                "\n".join(
+                    [
+                        "define private void @aether_array_index_bounds_panic() noreturn {",
+                        "entry:",
+                        "  %message = getelementptr [40 x i8], ptr @.aether.array.index.bounds, i64 0, i64 0",
+                        "  call i32 @puts(ptr %message)",
+                        "  call void @exit(i32 1)",
+                        "  unreachable",
+                        "}",
+                    ]
+                )
+            )
+            sections.append(
+                "\n".join(
+                    [
+                        "define private void @aether_array_check_index(ptr %array, i64 %index) {",
+                        "entry:",
+                        f"  %len_field = getelementptr {self._ARRAY_STRUCT_TYPE}, ptr %array, i32 0, i32 0",
+                        "  %length = load i64, ptr %len_field",
+                        "  %nonnegative = icmp sge i64 %index, 0",
+                        "  %within_length = icmp ult i64 %index, %length",
+                        "  %valid = and i1 %nonnegative, %within_length",
+                        "  br i1 %valid, label %ready, label %bounds_panic",
+                        "bounds_panic:",
+                        "  call void @aether_array_index_bounds_panic()",
+                        "  unreachable",
+                        "ready:",
+                        "  ret void",
                         "}",
                     ]
                 )

@@ -5,6 +5,7 @@ import math
 from math import trunc
 from typing import Any, NoReturn, Sequence
 
+from aether.array_safety import checked_array_length_to_int
 from aether.list_safety import checked_list_index_to_int, checked_list_length_to_int
 
 from .model import (
@@ -456,7 +457,10 @@ class IRInterpreter:
             array = self._value(instruction.array, frame)
             if not isinstance(array, list):
                 raise IRExecutionError("IR array_length requires an array value")
-            frame.values[instruction.result] = len(array)
+            try:
+                frame.values[instruction.result] = checked_array_length_to_int(len(array))
+            except OverflowError as error:
+                raise IRExecutionError(str(error)) from error
             return False, None, None
 
         if isinstance(instruction, IRListLength):

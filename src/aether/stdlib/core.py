@@ -5,6 +5,7 @@ import cmath
 import math
 from math import ceil, cos, exp, factorial as math_factorial, floor, log, log10, pi, sin, sqrt, tan
 
+from ..array_safety import checked_array_length_to_int
 from ..errors import AetherRuntimeError, AetherTypeError
 from ..formatting import format_value
 from ..list_safety import checked_list_index_to_int, checked_list_length_to_int
@@ -195,9 +196,13 @@ def length_builtin(args: list[AetherValue]) -> AetherValue:
     if not is_array_type(value.type_name) and not is_list_type(value.type_name):
         raise AetherTypeError(f"length(...) expects a List, Array, or Vector argument, got '{type_to_string(value.type_name)}'.")
     length = len(value.value)
-    if is_list_type(value.type_name):
+    if is_list_type(value.type_name) or is_array_type(value.type_name):
         try:
-            length = checked_list_length_to_int(length)
+            length = (
+                checked_list_length_to_int(length)
+                if is_list_type(value.type_name)
+                else checked_array_length_to_int(length)
+            )
         except OverflowError as error:
             raise AetherRuntimeError(str(error)) from error
     return AetherValue("int", length)

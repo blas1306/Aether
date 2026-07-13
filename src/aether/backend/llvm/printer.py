@@ -120,6 +120,8 @@ class LLVMPrinter:
         self._next_string_global = 0
         self._uses_array_type = False
         self._uses_array_allocation = False
+        self._uses_array_indexing = False
+        self._uses_array_length_conversion = False
         self._uses_list_type = False
         self._uses_list_allocation = False
         self._uses_list_copy = False
@@ -142,6 +144,8 @@ class LLVMPrinter:
         runtime = LLVMListRuntime(
             _uses_array_type=self._uses_array_type,
             _uses_array_allocation=self._uses_array_allocation,
+            _uses_array_indexing=self._uses_array_indexing,
+            _uses_array_length_conversion=self._uses_array_length_conversion,
             _uses_list_type=self._uses_list_type,
             _uses_list_allocation=self._uses_list_allocation,
             _uses_list_copy=self._uses_list_copy,
@@ -1682,6 +1686,7 @@ class LLVMPrinter:
         if not isinstance(instruction.array.type, ArrayType):
             raise LLVMBackendError("LLVM array_get expects an ArrayType source")
         self._uses_array_type = True
+        self._uses_array_indexing = True
 
         result = self._new_temp(instruction.result)
         element_type = llvm_type(instruction.result.type)
@@ -1689,6 +1694,7 @@ class LLVMPrinter:
             self._operand(instruction.array),
             instruction.index,
             instruction.result.type,
+            check_bounds=True,
         )
         return element_ptr.lines + [
             f"{result} = load {element_type}, ptr {element_ptr.value}"
@@ -1751,12 +1757,14 @@ class LLVMPrinter:
         if not isinstance(instruction.array.type, ArrayType):
             raise LLVMBackendError("LLVM array_set expects an ArrayType source")
         self._uses_array_type = True
+        self._uses_array_indexing = True
 
         element_type = llvm_type(instruction.value.type)
         element_ptr = self._array_element_pointer(
             self._operand(instruction.array),
             instruction.index,
             instruction.value.type,
+            check_bounds=True,
         )
         return element_ptr.lines + [
             f"store {element_type} {self._operand(instruction.value)}, ptr {element_ptr.value}"
@@ -1820,10 +1828,11 @@ class LLVMPrinter:
 
     def _print_array_length(self, instruction: SSAArrayLength) -> list[str]:
         self._uses_array_type = True
+        self._uses_array_length_conversion = True
         result = self._new_temp(instruction.result)
         length64 = self._synthetic_temp("array.len64")
         lines = self._array_length64(length64, self._operand(instruction.array))
-        lines.append(f"{result} = trunc i64 {length64} to i32")
+        lines.append(f"{result} = call i32 @aether_array_length_to_int(i64 {length64})")
         return lines
 
     def _print_list_length(self, instruction: SSAListLength) -> list[str]:
@@ -2032,13 +2041,17 @@ class LLVMPrinter:
         array: str,
         index: SSAValue,
         element_type: object,
+        *,
+        check_bounds: bool = False,
     ) -> _ArrayPointer:
         data = self._synthetic_temp("array.data")
         index64 = self._synthetic_temp("array.index64")
         element_ptr = self._synthetic_temp("array.elem")
         llvm_element_type = llvm_type(element_type)
-        lines = self._array_data_pointer(data, array)
-        lines.append(f"{index64} = sext i32 {self._operand(index)} to i64")
+        lines = [f"{index64} = sext i32 {self._operand(index)} to i64"]
+        if check_bounds:
+            lines.append(f"call void @aether_array_check_index(ptr {array}, i64 {index64})")
+        lines.extend(self._array_data_pointer(data, array))
         lines.append(
             f"{element_ptr} = getelementptr {llvm_element_type}, ptr {data}, i64 {index64}"
         )
