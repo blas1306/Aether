@@ -3,8 +3,21 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from aether.integer_arithmetic import int_operator_may_trap
-from aether.ir.types import IRType, IntType, VectorType
+from aether.instruction_effects import (
+    AllocationMixin,
+    CheckedBinaryMixin,
+    CheckedCastMixin,
+    EffectTrackedInstruction,
+    MemoryReadMayTrapMixin,
+    MemoryReadMixin,
+    MemoryWriteMayTrapMixin,
+    MemoryWriteMixin,
+    MutatingAllocationMixin,
+    ReadingAllocationMixin,
+    SideEffectMixin,
+    UnknownCallMixin,
+)
+from aether.ir.types import IRType, VectorType
 
 
 @dataclass(frozen=True)
@@ -18,7 +31,7 @@ class SSAParameter(SSAValue):
     pass
 
 
-class SSAInstruction:
+class SSAInstruction(EffectTrackedInstruction):
     """Base class for value-based SSA instructions."""
 
 
@@ -29,20 +42,11 @@ class SSAConst(SSAInstruction):
 
 
 @dataclass(frozen=True)
-class SSABinaryOp(SSAInstruction):
+class SSABinaryOp(CheckedBinaryMixin, SSAInstruction):
     result: SSAValue
     operator: str
     left: SSAValue
     right: SSAValue
-
-    @property
-    def may_trap(self) -> bool:
-        return (
-            isinstance(self.left.type, IntType)
-            and isinstance(self.right.type, IntType)
-            and int_operator_may_trap(self.operator)
-        )
-
 
 @dataclass(frozen=True)
 class SSACompareOp(SSAInstruction):
@@ -53,99 +57,99 @@ class SSACompareOp(SSAInstruction):
 
 
 @dataclass(frozen=True)
-class SSACast(SSAInstruction):
+class SSACast(CheckedCastMixin, SSAInstruction):
     result: SSAValue
     value: SSAValue
 
 
 @dataclass(frozen=True)
-class SSACall(SSAInstruction):
+class SSACall(UnknownCallMixin, SSAInstruction):
     function: str
     arguments: tuple[SSAValue, ...] = ()
     result: SSAValue | None = None
 
 
 @dataclass(frozen=True)
-class SSAPrint(SSAInstruction):
+class SSAPrint(SideEffectMixin, SSAInstruction):
     value: SSAValue
     newline: bool = False
 
 
 @dataclass(frozen=True)
-class SSAArrayNew(SSAInstruction):
+class SSAArrayNew(AllocationMixin, SSAInstruction):
     result: SSAValue
     elements: tuple[SSAValue, ...] = ()
 
 
 @dataclass(frozen=True)
-class SSAListNew(SSAInstruction):
+class SSAListNew(AllocationMixin, SSAInstruction):
     result: SSAValue
     elements: tuple[SSAValue, ...] = ()
 
 
 @dataclass(frozen=True)
-class SSAListCopy(SSAInstruction):
+class SSAListCopy(ReadingAllocationMixin, SSAInstruction):
     result: SSAValue
     list_value: SSAValue
 
 
 @dataclass(frozen=True)
-class SSAListContains(SSAInstruction):
-    result: SSAValue
-    list_value: SSAValue
-    value: SSAValue
-
-
-@dataclass(frozen=True)
-class SSAListIndexOf(SSAInstruction):
+class SSAListContains(MemoryReadMixin, SSAInstruction):
     result: SSAValue
     list_value: SSAValue
     value: SSAValue
 
 
 @dataclass(frozen=True)
-class SSAListClear(SSAInstruction):
-    list_value: SSAValue
-
-
-@dataclass(frozen=True)
-class SSAListPush(SSAInstruction):
+class SSAListIndexOf(MemoryReadMayTrapMixin, SSAInstruction):
+    result: SSAValue
     list_value: SSAValue
     value: SSAValue
 
 
 @dataclass(frozen=True)
-class SSAListInsert(SSAInstruction):
+class SSAListClear(MemoryWriteMixin, SSAInstruction):
+    list_value: SSAValue
+
+
+@dataclass(frozen=True)
+class SSAListPush(MutatingAllocationMixin, SSAInstruction):
+    list_value: SSAValue
+    value: SSAValue
+
+
+@dataclass(frozen=True)
+class SSAListInsert(MutatingAllocationMixin, SSAInstruction):
     list_value: SSAValue
     index: SSAValue
     value: SSAValue
 
 
 @dataclass(frozen=True)
-class SSAListRemoveAt(SSAInstruction):
+class SSAListRemoveAt(MemoryWriteMayTrapMixin, SSAInstruction):
     result: SSAValue
     list_value: SSAValue
     index: SSAValue
 
 
 @dataclass(frozen=True)
-class SSAListPop(SSAInstruction):
+class SSAListPop(MemoryWriteMayTrapMixin, SSAInstruction):
     result: SSAValue
     list_value: SSAValue
 
 
 @dataclass(frozen=True)
-class SSAListReverse(SSAInstruction):
+class SSAListReverse(MemoryWriteMixin, SSAInstruction):
     list_value: SSAValue
 
 
 @dataclass(frozen=True)
-class SSASequenceSort(SSAInstruction):
+class SSASequenceSort(MutatingAllocationMixin, SSAInstruction):
     sequence: SSAValue
 
 
 @dataclass(frozen=True)
-class SSAVectorNew(SSAInstruction):
+class SSAVectorNew(AllocationMixin, SSAInstruction):
     result: SSAValue
     elements: tuple[SSAValue, ...] = ()
     orientation: str | None = None
@@ -156,7 +160,7 @@ class SSAVectorNew(SSAInstruction):
 
 
 @dataclass(frozen=True)
-class SSAMatrixNew(SSAInstruction):
+class SSAMatrixNew(AllocationMixin, SSAInstruction):
     result: SSAValue
     elements: tuple[SSAValue, ...] = ()
     rows: int = 0
@@ -164,7 +168,7 @@ class SSAMatrixNew(SSAInstruction):
 
 
 @dataclass(frozen=True)
-class SSAVectorAdd(SSAInstruction):
+class SSAVectorAdd(ReadingAllocationMixin, SSAInstruction):
     result: SSAValue
     left: SSAValue
     right: SSAValue
@@ -173,7 +177,7 @@ class SSAVectorAdd(SSAInstruction):
 
 
 @dataclass(frozen=True)
-class SSAVectorSub(SSAInstruction):
+class SSAVectorSub(ReadingAllocationMixin, SSAInstruction):
     result: SSAValue
     left: SSAValue
     right: SSAValue
@@ -182,7 +186,7 @@ class SSAVectorSub(SSAInstruction):
 
 
 @dataclass(frozen=True)
-class SSAVectorScale(SSAInstruction):
+class SSAVectorScale(ReadingAllocationMixin, SSAInstruction):
     result: SSAValue
     vector: SSAValue
     scalar: SSAValue
@@ -191,7 +195,7 @@ class SSAVectorScale(SSAInstruction):
 
 
 @dataclass(frozen=True)
-class SSAVectorDot(SSAInstruction):
+class SSAVectorDot(MemoryReadMayTrapMixin, SSAInstruction):
     """Dot product for Vector<Row> * Vector<Column> only."""
 
     result: SSAValue
@@ -201,7 +205,7 @@ class SSAVectorDot(SSAInstruction):
 
 
 @dataclass(frozen=True)
-class SSAOuterProduct(SSAInstruction):
+class SSAOuterProduct(ReadingAllocationMixin, SSAInstruction):
     """Outer product for Vector<Column> * Vector<Row>."""
 
     result: SSAValue
@@ -212,7 +216,7 @@ class SSAOuterProduct(SSAInstruction):
 
 
 @dataclass(frozen=True)
-class SSAMatrixAdd(SSAInstruction):
+class SSAMatrixAdd(ReadingAllocationMixin, SSAInstruction):
     result: SSAValue
     left: SSAValue
     right: SSAValue
@@ -221,7 +225,7 @@ class SSAMatrixAdd(SSAInstruction):
 
 
 @dataclass(frozen=True)
-class SSAMatrixSub(SSAInstruction):
+class SSAMatrixSub(ReadingAllocationMixin, SSAInstruction):
     result: SSAValue
     left: SSAValue
     right: SSAValue
@@ -230,7 +234,7 @@ class SSAMatrixSub(SSAInstruction):
 
 
 @dataclass(frozen=True)
-class SSAMatrixScale(SSAInstruction):
+class SSAMatrixScale(ReadingAllocationMixin, SSAInstruction):
     result: SSAValue
     matrix: SSAValue
     scalar: SSAValue
@@ -239,7 +243,7 @@ class SSAMatrixScale(SSAInstruction):
 
 
 @dataclass(frozen=True)
-class SSAMatrixMatMul(SSAInstruction):
+class SSAMatrixMatMul(ReadingAllocationMixin, SSAInstruction):
     result: SSAValue
     left: SSAValue
     right: SSAValue
@@ -249,7 +253,7 @@ class SSAMatrixMatMul(SSAInstruction):
 
 
 @dataclass(frozen=True)
-class SSAMatrixVectorMul(SSAInstruction):
+class SSAMatrixVectorMul(ReadingAllocationMixin, SSAInstruction):
     """Matrix * Vector product; currently only accepts Vector<Column>."""
 
     result: SSAValue
@@ -260,7 +264,7 @@ class SSAMatrixVectorMul(SSAInstruction):
 
 
 @dataclass(frozen=True)
-class SSAVectorMatrixMul(SSAInstruction):
+class SSAVectorMatrixMul(ReadingAllocationMixin, SSAInstruction):
     """Vector<Row> * Matrix product."""
 
     result: SSAValue
@@ -271,40 +275,35 @@ class SSAVectorMatrixMul(SSAInstruction):
 
 
 @dataclass(frozen=True)
-class SSAArrayGet(SSAInstruction):
+class SSAArrayGet(MemoryReadMayTrapMixin, SSAInstruction):
     result: SSAValue
     array: SSAValue
     index: SSAValue
 
 
 @dataclass(frozen=True)
-class SSAArraySlice(SSAInstruction):
+class SSAArraySlice(ReadingAllocationMixin, SSAInstruction):
     result: SSAValue
     array: SSAValue
     start: SSAValue
     end: SSAValue
 
-    allocates = True
-    reads_memory = True
-    may_trap = True
-
-
 @dataclass(frozen=True)
-class SSAListGet(SSAInstruction):
+class SSAListGet(MemoryReadMayTrapMixin, SSAInstruction):
     result: SSAValue
     list_value: SSAValue
     index: SSAValue
 
 
 @dataclass(frozen=True)
-class SSAVectorGet(SSAInstruction):
+class SSAVectorGet(MemoryReadMayTrapMixin, SSAInstruction):
     result: SSAValue
     vector: SSAValue
     index: SSAValue
 
 
 @dataclass(frozen=True)
-class SSAMatrixGet(SSAInstruction):
+class SSAMatrixGet(MemoryReadMayTrapMixin, SSAInstruction):
     result: SSAValue
     matrix: SSAValue
     row: SSAValue
@@ -313,7 +312,7 @@ class SSAMatrixGet(SSAInstruction):
 
 
 @dataclass(frozen=True)
-class SSAVectorLength(SSAInstruction):
+class SSAVectorLength(MemoryReadMixin, SSAInstruction):
     result: SSAValue
     vector: SSAValue
 
@@ -333,28 +332,28 @@ class SSAMatrixColumns(SSAInstruction):
 
 
 @dataclass(frozen=True)
-class SSAArraySet(SSAInstruction):
+class SSAArraySet(MemoryWriteMayTrapMixin, SSAInstruction):
     array: SSAValue
     index: SSAValue
     value: SSAValue
 
 
 @dataclass(frozen=True)
-class SSAListSet(SSAInstruction):
+class SSAListSet(MemoryWriteMayTrapMixin, SSAInstruction):
     list_value: SSAValue
     index: SSAValue
     value: SSAValue
 
 
 @dataclass(frozen=True)
-class SSAVectorSet(SSAInstruction):
+class SSAVectorSet(MemoryWriteMayTrapMixin, SSAInstruction):
     vector: SSAValue
     index: SSAValue
     value: SSAValue
 
 
 @dataclass(frozen=True)
-class SSAMatrixSet(SSAInstruction):
+class SSAMatrixSet(MemoryWriteMayTrapMixin, SSAInstruction):
     matrix: SSAValue
     row: SSAValue
     column: SSAValue
@@ -363,19 +362,19 @@ class SSAMatrixSet(SSAInstruction):
 
 
 @dataclass(frozen=True)
-class SSAArrayLength(SSAInstruction):
+class SSAArrayLength(MemoryReadMayTrapMixin, SSAInstruction):
     result: SSAValue
     array: SSAValue
 
 
 @dataclass(frozen=True)
-class SSAListLength(SSAInstruction):
+class SSAListLength(MemoryReadMayTrapMixin, SSAInstruction):
     result: SSAValue
     list_value: SSAValue
 
 
 @dataclass(frozen=True)
-class SSAListIsEmpty(SSAInstruction):
+class SSAListIsEmpty(MemoryReadMixin, SSAInstruction):
     result: SSAValue
     list_value: SSAValue
 
@@ -387,19 +386,19 @@ class SSAPhi(SSAInstruction):
 
 
 @dataclass(frozen=True)
-class SSABranch(SSAInstruction):
+class SSABranch(SideEffectMixin, SSAInstruction):
     condition: SSAValue
     true_target: str
     false_target: str
 
 
 @dataclass(frozen=True)
-class SSAJump(SSAInstruction):
+class SSAJump(SideEffectMixin, SSAInstruction):
     target: str
 
 
 @dataclass(frozen=True)
-class SSAReturn(SSAInstruction):
+class SSAReturn(SideEffectMixin, SSAInstruction):
     value: SSAValue | None = None
 
 

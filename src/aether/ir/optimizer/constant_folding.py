@@ -154,10 +154,14 @@ class ConstantFolder:
     ) -> IRConst | None:
         if instruction.value not in constants:
             return None
-        return IRConst(
-            instruction.result,
-            self._evaluate_cast(constants[instruction.value], instruction.result.type),
-        )
+        try:
+            value = self._evaluate_cast(
+                constants[instruction.value],
+                instruction.result.type,
+            )
+        except (ArithmeticError, TypeError, ValueError):
+            return None
+        return IRConst(instruction.result, value)
 
     @staticmethod
     def _evaluate_binary(operator: str, left: Any, right: Any) -> Any:

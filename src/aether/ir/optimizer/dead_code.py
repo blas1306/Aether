@@ -65,32 +65,6 @@ from .result import OptimizationResult
 class DeadCodeEliminator:
     """Remove pure IR instructions whose result is not used."""
 
-    _PURE_INSTRUCTIONS = (
-        IRConst,
-        IRBinaryOp,
-        IRCompareOp,
-        IRCast,
-        IRLoad,
-        IRListContains,
-        IRVectorGet,
-        IRMatrixGet,
-        IRListIsEmpty,
-        IRVectorLength,
-        IRMatrixRows,
-        IRMatrixColumns,
-        IRVectorAdd,
-        IRVectorDot,
-        IROuterProduct,
-        IRVectorScale,
-        IRMatrixAdd,
-        IRMatrixMatMul,
-        IRMatrixVectorMul,
-        IRVectorMatrixMul,
-        IRMatrixScale,
-        IRVectorSub,
-        IRMatrixSub,
-    )
-
     def run(self, module: IRModule) -> OptimizationResult:
         removed = 0
         functions: list[IRFunction] = []
@@ -169,48 +143,13 @@ class DeadCodeEliminator:
 
     @classmethod
     def _is_removable(cls, instruction: IRInstruction) -> bool:
-        return isinstance(instruction, cls._PURE_INSTRUCTIONS) and not getattr(
-            instruction,
-            "may_trap",
-            False,
-        )
+        return getattr(instruction, "result", None) is not None and not instruction.must_preserve
 
     @staticmethod
     def _result(instruction: IRInstruction) -> IRValue:
-        if isinstance(
-            instruction,
-            (
-                IRConst,
-                IRLoad,
-                IRBinaryOp,
-                IRCompareOp,
-                IRCast,
-                IRArrayGet,
-                IRListGet,
-                IRListContains,
-                IRListIndexOf,
-                IRVectorGet,
-                IRMatrixGet,
-                IRArrayLength,
-                IRListLength,
-                IRListIsEmpty,
-                IRVectorLength,
-                IRMatrixRows,
-                IRMatrixColumns,
-                IRVectorAdd,
-                IRVectorDot,
-                IROuterProduct,
-                IRVectorScale,
-                IRMatrixAdd,
-                IRMatrixMatMul,
-                IRMatrixVectorMul,
-                IRVectorMatrixMul,
-                IRMatrixScale,
-                IRVectorSub,
-                IRMatrixSub,
-            ),
-        ):
-            return instruction.result
+        result = getattr(instruction, "result", None)
+        if isinstance(result, IRValue):
+            return result
         raise TypeError(
             f"Instruction has no removable result: {type(instruction).__name__}"
         )

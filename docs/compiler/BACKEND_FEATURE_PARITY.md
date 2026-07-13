@@ -154,8 +154,8 @@ plugin ejecute ese backend.
 | List `sort` | método/global | int/double/string | estable in-place | IRSequenceSort | efecto | checked temp/offsets | Implemented | Completion | E2E | Implemented |
 | List `copy` | método/global | Implemented | shallow outer copy | IRListCopy | allocation conservada | checked allocation/memcpy | Implemented | Completion | E2E | Implemented |
 | List igualdad | Implemented | estructural/ref recursiva | Implemented | aggregate compare rechazado | No | No | No | Diagnósticos | AST | AST-only |
-| Vector literal/get/set/length | Implemented | orientación/shape | índices públicos 0-based para `v[i]` | opcodes dedicados | get marcado puro | acceso LLVM sin bounds | fuera de rango inseguro/suprimible | members | happy paths native | Broken |
-| Matrix literal/get/set/rows/columns | Implemented | shape | `A[i,j]` usa selectores 1-based | IR usa 0-based y valida offset plano | get marcado puro | acceso sin bounds | semántica/safety divergente | members | happy paths; sondeo divergente | Broken |
+| Vector literal/get/set/length | Implemented | orientación/shape | índices públicos 0-based para `v[i]` | opcodes dedicados; get `may_trap` | DCE preserva get/set | acceso LLVM sin bounds | fuera de rango aún inseguro en native | members | happy paths + regresión DCE | Broken |
+| Matrix literal/get/set/rows/columns | Implemented | shape | `A[i,j]` usa selectores 1-based | IR usa 0-based, valida offset plano y clasifica get `may_trap` | DCE preserva get/set | acceso sin bounds | semántica/safety divergente | members | happy paths + regresión DCE | Broken |
 | Vector/Matrix aritmética básica | operadores +,-,* | shape/tipo | amplia | dimensiones estáticas/subconjunto int/double | preserva/optimiza usos | loops y allocations | happy paths | Completion | amplia E2E | Partial |
 | Builtins de álgebra lineal | llamadas/namespaces | Amplio | transpose, solve, factorizaciones, eig/SVD, etc. | la mayoría sin lowering | No | No | No | Completion/hover importado | AST exhaustivo | AST-only |
 | Vector/Matrix igualdad | Implemented | estructural | Implemented | aggregate compare rechazado | No | No | No | Diagnósticos | AST | AST-only |
@@ -226,40 +226,39 @@ entry points distintos, el cuerpo es el mismo y solo se adapta el wrapper.
 | List mutations + sort | `1\ntrue\n3\n` | mismo output | mismo output | List core completo |
 | Struct y class mínimos | ejecutan | lowering rechaza | no alcanza | AST-only confirmado |
 | nested function | ejecuta `2\n` | lowering rechaza `FunctionDeclaration` | no alcanza | AST-only y diagnóstico crudo |
-| Vector get muerto fuera de rango | sin lectura top-level observable | IR sin optimizar trapea; DCE lo borra | pipeline SSA también lo borra | bug de efectos |
+| Vector get muerto fuera de rango | sin lectura top-level observable | IR optimizado conserva el get y trapea | SSA conserva el get; native aún carece de bounds check | DCE corregido; safety native pendiente |
 | Matrix `[0,2]` sobre 2x2 | falla por selector 1-based | devuelve elemento plano `3` | acceso sin check | divergencia crítica |
 
-## Auditoría de optimizadores y efectos
+## Modelo central de efectos de instrucciones
 
-Las operaciones observables se preservan en muchos casos por exclusión
-conservadora: `IRPrint`/`SSAPrint`, calls incluso con resultado muerto,
-allocations Array/List, slices, stores, List mutations y operaciones Array que
-pueden trapear no aparecen en las tuplas de productores removibles. Esto está
-cubierto por `test_backend_print.py`, `test_list_bounds.py` y
-`test_array_p0_safety.py`.
+Todas las instrucciones IR y SSA exponen `has_side_effects`, `may_trap`,
+`reads_memory`, `writes_memory`, `allocates` y la propiedad derivada
+`must_preserve`. Los descriptores y mixins viven en
+`src/aether/instruction_effects.py`, por lo que instrucciones equivalentes de
+IR y SSA comparten una sola definición semántica. DCE ya no mantiene tuplas de
+tipos supuestamente puros: cualquier productor con resultado muerto se elimina
+solo cuando `must_preserve` es falso.
 
-El diseño, sin embargo, no tiene traits centrales `has_side_effects` o
-`may_trap`. IR DCE mantiene una tupla manual en
-`src/aether/ir/optimizer/dead_code.py:68`; SSA DCE repite otra en
-`src/aether/ssa/optimizer/dead_code.py:67`; cada propagador vuelve a implementar
-su despacho de operands/results. Riesgos comprobados:
+La clasificación incluye IO y terminadores; calls conservadoras; stores y
+mutaciones; accesos checked de Array/List/Vector/Matrix; conversiones y
+aritmética checked; y todas las instrucciones que reservan almacenamiento.
+Una lectura segura (`ListContains`, por ejemplo) declara `reads_memory` pero
+puede eliminarse si su resultado está muerto. Los folders, propagación global y
+SCCP conservan operaciones constantes inválidas en vez de convertir un panic en
+una constante.
 
-1. `IRVectorGet`/`SSAVectorGet` y `IRMatrixGet`/`SSAMatrixGet` están marcados
-   puros aunque el intérprete IR puede fallar. Un resultado muerto elimina el
-   acceso y su trap. El sondeo Vector lo demuestra.
-2. Los accesos Vector/Matrix LLVM tampoco tienen bounds check
-   (`printer.py:1816-1884`), de modo que incluso sin DCE no conservan safety.
-3. Operaciones de álgebra lineal que producen un agregado están marcadas puras.
-   En LLVM reservan memoria; DCE puede suprimir OOM observable. No hay contrato
-   de efectos que permita decidirlo explícitamente.
-4. `IRBinaryOp`/`SSABinaryOp` es eliminable. Una división muerta por cero puede
-   dejar de fallar en AST/IR; en LLVM `fdiv` ya tiene semántica distinta.
-5. Calls se conservan siempre, decisión segura pero imprecisa hasta tener
-   análisis de efectos interprocedural.
+La regresión de `IRVectorGet`/`SSAVectorGet` y
+`IRMatrixGet`/`SSAMatrixGet` muertos está corregida estructuralmente: ahora son
+lecturas `may_trap` y sobreviven DCE. Esto no completa la seguridad de Vector y
+Matrix:
 
-Los folders y SCCP evitan evaluar división/módulo por cero constante; el fallo
-está en DCE/effect classification, no en ese guard. No se refactorizó ni cambió
-ningún pass en esta auditoría.
+1. Los accesos LLVM siguen sin bounds checks (`printer.py:1816-1884`).
+2. Matrix conserva la divergencia 1-based en AST frente a offsets 0-based en
+   IR/LLVM.
+3. El intérprete IR valida el offset plano de Matrix, no cada coordenada por
+   separado.
+4. Calls se clasifican conservadoramente hasta que exista análisis fiable de
+   pureza/efectos interprocedural.
 
 ## Diferencias semánticas confirmadas
 

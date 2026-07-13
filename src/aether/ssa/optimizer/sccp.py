@@ -225,49 +225,9 @@ class SCCPAnalyzer:
                 self._set_state(instruction.result, Overdefined())
             return
 
-        if isinstance(
-            instruction,
-            (
-                SSAArrayNew,
-                SSAArrayGet,
-                SSAArraySlice,
-                SSAListNew,
-                SSAListGet,
-                SSAListCopy,
-                SSAListContains,
-                SSAListIndexOf,
-                SSAListPop,
-                SSAListRemoveAt,
-                SSAVectorGet,
-                SSAMatrixGet,
-                SSAArrayLength,
-                SSAListLength,
-                SSAListIsEmpty,
-                SSAVectorLength,
-                SSAMatrixRows,
-                SSAMatrixColumns,
-                SSAVectorNew,
-                SSAMatrixNew,
-                SSAVectorAdd,
-                SSAVectorDot,
-                SSAOuterProduct,
-                SSAVectorScale,
-                SSAMatrixAdd,
-                SSAMatrixMatMul,
-                SSAMatrixVectorMul,
-                SSAVectorMatrixMul,
-                SSAMatrixScale,
-                SSAVectorSub,
-                SSAMatrixSub,
-            ),
-        ):
-            self._set_state(instruction.result, Overdefined())
-            return
-
-        if isinstance(instruction, (SSAArraySet, SSAListSet, SSAListClear, SSAListPush, SSAListInsert, SSAListRemoveAt, SSAListReverse, SSASequenceSort)):
-            return
-
-        if isinstance(instruction, (SSAVectorSet, SSAMatrixSet)):
+        result = getattr(instruction, "result", None)
+        if isinstance(result, SSAValue):
+            self._set_state(result, Overdefined())
             return
 
         if isinstance(instruction, SSABranch):

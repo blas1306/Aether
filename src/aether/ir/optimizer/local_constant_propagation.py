@@ -4,49 +4,14 @@ from dataclasses import replace
 from typing import Any
 
 from aether.ir.model import (
-    IRArrayGet,
-    IRArrayLength,
-    IRArrayNew,
-    IRArraySlice,
     IRBasicBlock,
-    IRBinaryOp,
-    IRCast,
-    IRCall,
-    IRCompareOp,
     IRConst,
     IRFunction,
     IRInstruction,
-    IRListGet,
-    IRListCopy,
-    IRListContains,
-    IRListIndexOf,
-    IRListPop,
-    IRListRemoveAt,
-    IRListIsEmpty,
-    IRListLength,
-    IRListNew,
     IRLoad,
-    IRMatrixColumns,
-    IRMatrixAdd,
-    IRMatrixMatMul,
-    IRMatrixVectorMul,
-    IRMatrixScale,
-    IRMatrixSub,
-    IRMatrixGet,
-    IRMatrixNew,
-    IRMatrixRows,
     IRModule,
-    IROuterProduct,
     IRStore,
     IRValue,
-    IRVectorGet,
-    IRVectorAdd,
-    IRVectorDot,
-    IRVectorMatrixMul,
-    IRVectorScale,
-    IRVectorSub,
-    IRVectorLength,
-    IRVectorNew,
 )
 
 from .result import OptimizationResult
@@ -147,46 +112,5 @@ _UNKNOWN = object()
 
 
 def _instruction_result(instruction: IRInstruction) -> IRValue | None:
-    if isinstance(
-        instruction,
-        (
-            IRBinaryOp,
-            IRCompareOp,
-            IRCast,
-            IRArrayNew,
-            IRArrayGet,
-            IRArraySlice,
-            IRListNew,
-            IRListGet,
-            IRListCopy,
-            IRListContains,
-            IRListIndexOf,
-            IRListPop,
-            IRListRemoveAt,
-            IRVectorGet,
-            IRMatrixGet,
-            IRArrayLength,
-            IRListLength,
-            IRListIsEmpty,
-            IRVectorLength,
-            IRMatrixRows,
-            IRMatrixColumns,
-            IRVectorNew,
-            IRMatrixNew,
-            IRVectorAdd,
-            IRVectorDot,
-            IROuterProduct,
-            IRVectorScale,
-            IRMatrixAdd,
-            IRMatrixMatMul,
-            IRMatrixVectorMul,
-            IRVectorMatrixMul,
-            IRMatrixScale,
-            IRVectorSub,
-            IRMatrixSub,
-        ),
-    ):
-        return instruction.result
-    if isinstance(instruction, IRCall):
-        return instruction.result
-    return None
+    result = getattr(instruction, "result", None)
+    return result if isinstance(result, IRValue) else None

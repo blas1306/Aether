@@ -3,9 +3,23 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from aether.integer_arithmetic import int_operator_may_trap
+from aether.instruction_effects import (
+    AllocationMixin,
+    CheckedBinaryMixin,
+    CheckedCastMixin,
+    EffectTrackedInstruction,
+    MemoryReadMayTrapMixin,
+    MemoryReadMixin,
+    MemoryWriteMayTrapMixin,
+    MemoryWriteMixin,
+    MemoryWriteOnlyMixin,
+    MutatingAllocationMixin,
+    ReadingAllocationMixin,
+    SideEffectMixin,
+    UnknownCallMixin,
+)
 
-from .types import IRType, IntType, VectorType
+from .types import IRType, VectorType
 
 
 @dataclass(frozen=True)
@@ -19,7 +33,7 @@ class IRParameter(IRValue):
     pass
 
 
-class IRInstruction:
+class IRInstruction(EffectTrackedInstruction):
     """Base class for instructions in the initial Aether IR."""
 
 
@@ -30,32 +44,23 @@ class IRConst(IRInstruction):
 
 
 @dataclass(frozen=True)
-class IRLoad(IRInstruction):
+class IRLoad(MemoryReadMixin, IRInstruction):
     result: IRValue
     slot: IRValue
 
 
 @dataclass(frozen=True)
-class IRStore(IRInstruction):
+class IRStore(MemoryWriteOnlyMixin, IRInstruction):
     slot: IRValue
     value: IRValue
 
 
 @dataclass(frozen=True)
-class IRBinaryOp(IRInstruction):
+class IRBinaryOp(CheckedBinaryMixin, IRInstruction):
     result: IRValue
     operator: str
     left: IRValue
     right: IRValue
-
-    @property
-    def may_trap(self) -> bool:
-        return (
-            isinstance(self.left.type, IntType)
-            and isinstance(self.right.type, IntType)
-            and int_operator_may_trap(self.operator)
-        )
-
 
 @dataclass(frozen=True)
 class IRCompareOp(IRInstruction):
@@ -66,99 +71,99 @@ class IRCompareOp(IRInstruction):
 
 
 @dataclass(frozen=True)
-class IRCast(IRInstruction):
+class IRCast(CheckedCastMixin, IRInstruction):
     result: IRValue
     value: IRValue
 
 
 @dataclass(frozen=True)
-class IRCall(IRInstruction):
+class IRCall(UnknownCallMixin, IRInstruction):
     function: str
     arguments: tuple[IRValue, ...] = ()
     result: IRValue | None = None
 
 
 @dataclass(frozen=True)
-class IRPrint(IRInstruction):
+class IRPrint(SideEffectMixin, IRInstruction):
     value: IRValue
     newline: bool = False
 
 
 @dataclass(frozen=True)
-class IRArrayNew(IRInstruction):
+class IRArrayNew(AllocationMixin, IRInstruction):
     result: IRValue
     elements: tuple[IRValue, ...] = ()
 
 
 @dataclass(frozen=True)
-class IRListNew(IRInstruction):
+class IRListNew(AllocationMixin, IRInstruction):
     result: IRValue
     elements: tuple[IRValue, ...] = ()
 
 
 @dataclass(frozen=True)
-class IRListCopy(IRInstruction):
+class IRListCopy(ReadingAllocationMixin, IRInstruction):
     result: IRValue
     list_value: IRValue
 
 
 @dataclass(frozen=True)
-class IRListContains(IRInstruction):
-    result: IRValue
-    list_value: IRValue
-    value: IRValue
-
-
-@dataclass(frozen=True)
-class IRListIndexOf(IRInstruction):
+class IRListContains(MemoryReadMixin, IRInstruction):
     result: IRValue
     list_value: IRValue
     value: IRValue
 
 
 @dataclass(frozen=True)
-class IRListClear(IRInstruction):
-    list_value: IRValue
-
-
-@dataclass(frozen=True)
-class IRListPush(IRInstruction):
+class IRListIndexOf(MemoryReadMayTrapMixin, IRInstruction):
+    result: IRValue
     list_value: IRValue
     value: IRValue
 
 
 @dataclass(frozen=True)
-class IRListInsert(IRInstruction):
+class IRListClear(MemoryWriteMixin, IRInstruction):
+    list_value: IRValue
+
+
+@dataclass(frozen=True)
+class IRListPush(MutatingAllocationMixin, IRInstruction):
+    list_value: IRValue
+    value: IRValue
+
+
+@dataclass(frozen=True)
+class IRListInsert(MutatingAllocationMixin, IRInstruction):
     list_value: IRValue
     index: IRValue
     value: IRValue
 
 
 @dataclass(frozen=True)
-class IRListRemoveAt(IRInstruction):
+class IRListRemoveAt(MemoryWriteMayTrapMixin, IRInstruction):
     result: IRValue
     list_value: IRValue
     index: IRValue
 
 
 @dataclass(frozen=True)
-class IRListPop(IRInstruction):
+class IRListPop(MemoryWriteMayTrapMixin, IRInstruction):
     result: IRValue
     list_value: IRValue
 
 
 @dataclass(frozen=True)
-class IRListReverse(IRInstruction):
+class IRListReverse(MemoryWriteMixin, IRInstruction):
     list_value: IRValue
 
 
 @dataclass(frozen=True)
-class IRSequenceSort(IRInstruction):
+class IRSequenceSort(MutatingAllocationMixin, IRInstruction):
     sequence: IRValue
 
 
 @dataclass(frozen=True)
-class IRVectorNew(IRInstruction):
+class IRVectorNew(AllocationMixin, IRInstruction):
     result: IRValue
     elements: tuple[IRValue, ...] = ()
     orientation: str | None = None
@@ -169,7 +174,7 @@ class IRVectorNew(IRInstruction):
 
 
 @dataclass(frozen=True)
-class IRMatrixNew(IRInstruction):
+class IRMatrixNew(AllocationMixin, IRInstruction):
     result: IRValue
     elements: tuple[IRValue, ...] = ()
     rows: int = 0
@@ -177,7 +182,7 @@ class IRMatrixNew(IRInstruction):
 
 
 @dataclass(frozen=True)
-class IRVectorAdd(IRInstruction):
+class IRVectorAdd(ReadingAllocationMixin, IRInstruction):
     result: IRValue
     left: IRValue
     right: IRValue
@@ -186,7 +191,7 @@ class IRVectorAdd(IRInstruction):
 
 
 @dataclass(frozen=True)
-class IRVectorSub(IRInstruction):
+class IRVectorSub(ReadingAllocationMixin, IRInstruction):
     result: IRValue
     left: IRValue
     right: IRValue
@@ -195,7 +200,7 @@ class IRVectorSub(IRInstruction):
 
 
 @dataclass(frozen=True)
-class IRVectorScale(IRInstruction):
+class IRVectorScale(ReadingAllocationMixin, IRInstruction):
     result: IRValue
     vector: IRValue
     scalar: IRValue
@@ -204,7 +209,7 @@ class IRVectorScale(IRInstruction):
 
 
 @dataclass(frozen=True)
-class IRVectorDot(IRInstruction):
+class IRVectorDot(MemoryReadMayTrapMixin, IRInstruction):
     """Dot product for Vector<Row> * Vector<Column> only."""
 
     result: IRValue
@@ -214,7 +219,7 @@ class IRVectorDot(IRInstruction):
 
 
 @dataclass(frozen=True)
-class IROuterProduct(IRInstruction):
+class IROuterProduct(ReadingAllocationMixin, IRInstruction):
     """Outer product for Vector<Column> * Vector<Row>."""
 
     result: IRValue
@@ -225,7 +230,7 @@ class IROuterProduct(IRInstruction):
 
 
 @dataclass(frozen=True)
-class IRMatrixAdd(IRInstruction):
+class IRMatrixAdd(ReadingAllocationMixin, IRInstruction):
     result: IRValue
     left: IRValue
     right: IRValue
@@ -234,7 +239,7 @@ class IRMatrixAdd(IRInstruction):
 
 
 @dataclass(frozen=True)
-class IRMatrixSub(IRInstruction):
+class IRMatrixSub(ReadingAllocationMixin, IRInstruction):
     result: IRValue
     left: IRValue
     right: IRValue
@@ -243,7 +248,7 @@ class IRMatrixSub(IRInstruction):
 
 
 @dataclass(frozen=True)
-class IRMatrixScale(IRInstruction):
+class IRMatrixScale(ReadingAllocationMixin, IRInstruction):
     result: IRValue
     matrix: IRValue
     scalar: IRValue
@@ -252,7 +257,7 @@ class IRMatrixScale(IRInstruction):
 
 
 @dataclass(frozen=True)
-class IRMatrixMatMul(IRInstruction):
+class IRMatrixMatMul(ReadingAllocationMixin, IRInstruction):
     result: IRValue
     left: IRValue
     right: IRValue
@@ -262,7 +267,7 @@ class IRMatrixMatMul(IRInstruction):
 
 
 @dataclass(frozen=True)
-class IRMatrixVectorMul(IRInstruction):
+class IRMatrixVectorMul(ReadingAllocationMixin, IRInstruction):
     """Matrix * Vector product; currently only accepts Vector<Column>."""
 
     result: IRValue
@@ -273,7 +278,7 @@ class IRMatrixVectorMul(IRInstruction):
 
 
 @dataclass(frozen=True)
-class IRVectorMatrixMul(IRInstruction):
+class IRVectorMatrixMul(ReadingAllocationMixin, IRInstruction):
     """Vector<Row> * Matrix product."""
 
     result: IRValue
@@ -284,40 +289,35 @@ class IRVectorMatrixMul(IRInstruction):
 
 
 @dataclass(frozen=True)
-class IRArrayGet(IRInstruction):
+class IRArrayGet(MemoryReadMayTrapMixin, IRInstruction):
     result: IRValue
     array: IRValue
     index: IRValue
 
 
 @dataclass(frozen=True)
-class IRArraySlice(IRInstruction):
+class IRArraySlice(ReadingAllocationMixin, IRInstruction):
     result: IRValue
     array: IRValue
     start: IRValue
     end: IRValue
 
-    allocates = True
-    reads_memory = True
-    may_trap = True
-
-
 @dataclass(frozen=True)
-class IRListGet(IRInstruction):
+class IRListGet(MemoryReadMayTrapMixin, IRInstruction):
     result: IRValue
     list_value: IRValue
     index: IRValue
 
 
 @dataclass(frozen=True)
-class IRVectorGet(IRInstruction):
+class IRVectorGet(MemoryReadMayTrapMixin, IRInstruction):
     result: IRValue
     vector: IRValue
     index: IRValue
 
 
 @dataclass(frozen=True)
-class IRMatrixGet(IRInstruction):
+class IRMatrixGet(MemoryReadMayTrapMixin, IRInstruction):
     result: IRValue
     matrix: IRValue
     row: IRValue
@@ -326,7 +326,7 @@ class IRMatrixGet(IRInstruction):
 
 
 @dataclass(frozen=True)
-class IRVectorLength(IRInstruction):
+class IRVectorLength(MemoryReadMixin, IRInstruction):
     result: IRValue
     vector: IRValue
 
@@ -346,28 +346,28 @@ class IRMatrixColumns(IRInstruction):
 
 
 @dataclass(frozen=True)
-class IRArraySet(IRInstruction):
+class IRArraySet(MemoryWriteMayTrapMixin, IRInstruction):
     array: IRValue
     index: IRValue
     value: IRValue
 
 
 @dataclass(frozen=True)
-class IRListSet(IRInstruction):
+class IRListSet(MemoryWriteMayTrapMixin, IRInstruction):
     list_value: IRValue
     index: IRValue
     value: IRValue
 
 
 @dataclass(frozen=True)
-class IRVectorSet(IRInstruction):
+class IRVectorSet(MemoryWriteMayTrapMixin, IRInstruction):
     vector: IRValue
     index: IRValue
     value: IRValue
 
 
 @dataclass(frozen=True)
-class IRMatrixSet(IRInstruction):
+class IRMatrixSet(MemoryWriteMayTrapMixin, IRInstruction):
     matrix: IRValue
     row: IRValue
     column: IRValue
@@ -376,37 +376,37 @@ class IRMatrixSet(IRInstruction):
 
 
 @dataclass(frozen=True)
-class IRArrayLength(IRInstruction):
+class IRArrayLength(MemoryReadMayTrapMixin, IRInstruction):
     result: IRValue
     array: IRValue
 
 
 @dataclass(frozen=True)
-class IRListLength(IRInstruction):
+class IRListLength(MemoryReadMayTrapMixin, IRInstruction):
     result: IRValue
     list_value: IRValue
 
 
 @dataclass(frozen=True)
-class IRListIsEmpty(IRInstruction):
+class IRListIsEmpty(MemoryReadMixin, IRInstruction):
     result: IRValue
     list_value: IRValue
 
 
 @dataclass(frozen=True)
-class IRBranch(IRInstruction):
+class IRBranch(SideEffectMixin, IRInstruction):
     condition: IRValue
     true_target: str
     false_target: str
 
 
 @dataclass(frozen=True)
-class IRJump(IRInstruction):
+class IRJump(SideEffectMixin, IRInstruction):
     target: str
 
 
 @dataclass(frozen=True)
-class IRReturn(IRInstruction):
+class IRReturn(SideEffectMixin, IRInstruction):
     value: IRValue | None = None
 
 

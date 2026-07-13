@@ -246,17 +246,8 @@ class SSAGlobalConstantPropagator:
 
     @staticmethod
     def _result_value(instruction: SSAInstruction) -> SSAValue | None:
-        if isinstance(instruction, SSAConst):
-            return instruction.result
-        if isinstance(instruction, SSAPhi):
-            return instruction.result
-        if isinstance(instruction, SSABinaryOp):
-            return instruction.result
-        if isinstance(instruction, SSACompareOp):
-            return instruction.result
-        if isinstance(instruction, SSACast):
-            return instruction.result
-        return None
+        result = getattr(instruction, "result", None)
+        return result if isinstance(result, SSAValue) else None
 
     @staticmethod
     def _evaluate_binary(operator: str, left: Any, right: Any) -> Any:

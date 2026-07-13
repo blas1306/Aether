@@ -127,7 +127,7 @@ println(removed);
     _assert_ast_ir_native_output(body, compiled, "1\ntrue\n3\n")
 
 
-def test_backend_parity_characterization_vector_get_trap_is_removed_by_dce() -> None:
+def test_backend_parity_vector_get_trap_is_preserved_by_dce() -> None:
     source = """
 int main() {
     Vector<int, Row> values = [1, 2];
@@ -140,16 +140,17 @@ int main() {
         IRInterpreter(ir).call("main")
 
     optimized_ir = OptimizerPipeline().run(ir)
-    assert not any(
+    assert any(
         isinstance(instruction, IRVectorGet)
         for function in optimized_ir.functions
         for block in function.blocks
         for instruction in block.instructions
     )
-    assert IRInterpreter(optimized_ir).call("main") == 0
+    with pytest.raises(IRExecutionError, match="index 2 out of bounds"):
+        IRInterpreter(optimized_ir).call("main")
 
     optimized_ssa = SSAOptimizerPipeline().run(lower_to_verified_ssa(_typed(source)))
-    assert not any(
+    assert any(
         isinstance(instruction, SSAVectorGet)
         for function in optimized_ssa.functions
         for block in function.blocks

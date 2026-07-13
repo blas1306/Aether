@@ -64,32 +64,6 @@ from .result import SSAOptimizationResult
 class SSADeadCodeEliminator:
     """Remove unused pure SSA value producers."""
 
-    _PURE_PRODUCERS = (
-        SSAConst,
-        SSABinaryOp,
-        SSACompareOp,
-        SSACast,
-        SSAPhi,
-        SSAListContains,
-        SSAVectorGet,
-        SSAMatrixGet,
-        SSAListIsEmpty,
-        SSAVectorLength,
-        SSAMatrixRows,
-        SSAMatrixColumns,
-        SSAVectorAdd,
-        SSAVectorDot,
-        SSAOuterProduct,
-        SSAVectorScale,
-        SSAMatrixAdd,
-        SSAMatrixMatMul,
-        SSAMatrixVectorMul,
-        SSAVectorMatrixMul,
-        SSAMatrixScale,
-        SSAVectorSub,
-        SSAMatrixSub,
-    )
-
     def run(self, module: SSAModule) -> SSAOptimizationResult:
         updated_functions: list[SSAFunction] = []
         removed = 0
@@ -360,10 +334,7 @@ class SSADeadCodeEliminator:
             return
 
     def _pure_result(self, instruction: SSAInstruction) -> SSAValue | None:
-        if not isinstance(instruction, self._PURE_PRODUCERS) or getattr(
-            instruction,
-            "may_trap",
-            False,
-        ):
+        result = getattr(instruction, "result", None)
+        if not isinstance(result, SSAValue) or instruction.must_preserve:
             return None
-        return instruction.result
+        return result
