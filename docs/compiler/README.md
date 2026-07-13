@@ -55,6 +55,9 @@ comparison.
 
 Current compiler-design documents:
 
+- [BACKEND_FEATURE_PARITY.md](BACKEND_FEATURE_PARITY.md): evidence-based
+  parity audit across frontend, AST, IR, SSA, LLVM/native, CLI, REPL and the
+  IntelliJ tool, including characterization probes and optimizer safety gaps.
 - [DOMINATORS.md](DOMINATORS.md): implemented iterative dominator analysis,
   implemented dominance frontiers, and their role in future SSA construction.
 - [SSA_DESIGN.md](SSA_DESIGN.md): initial design notes for future SSA support
