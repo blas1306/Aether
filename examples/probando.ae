@@ -1,7 +1,7 @@
 import Math
-import Plots
+import Plots as pl
 
 f(x) = sin(x);
 
-Plots.grid(true);
-Plots.plot(f, 0, 6);
+pl.grid(true);
+pl.plot(f, 0, 6);

@@ -72,6 +72,10 @@ class TypeChecker:
         self.enums: dict[str, EnumSymbol] = {}
         self.interfaces: dict[str, InterfaceSymbol] = {}
         self.expression_functions: dict[str, ast.ExpressionFunctionDeclaration] = {}
+        self._local_function_declarations: dict[
+            str, ast.FunctionDeclaration | ast.ExpressionFunctionDeclaration
+        ] = {}
+        self._module_function_declaration_ids: set[int] = set()
         self.expression_function_call_stack: set[str] = set()
         self.current_return_type: AetherType | None = None
         self.current_function_name: str | None = None
@@ -105,6 +109,8 @@ class TypeChecker:
         self._declare_type_aliases(program.statements)
         self._define_interface_methods(program.statements)
         self._define_struct_fields(program.statements, program.package_name)
+        self._validate_struct_layouts(program.statements)
+        self._declare_function_signatures(program.statements)
         self._infer_struct_method_mutability(program.statements)
         self._check_statements(program.statements, self.global_scope)
         self._validate_type_aliases()
@@ -122,6 +128,8 @@ class TypeChecker:
                 lambda: self._declare_type_aliases(program.statements),
                 lambda: self._define_interface_methods(program.statements),
                 lambda: self._define_struct_fields(program.statements, program.package_name),
+                lambda: self._validate_struct_layouts(program.statements),
+                lambda: self._declare_function_signatures(program.statements),
                 lambda: self._infer_struct_method_mutability(program.statements),
                 lambda: self._check_statements(program.statements, self.global_scope),
                 self._validate_type_aliases,
@@ -348,6 +356,84 @@ class TypeChecker:
             )
             self.structs[statement.name] = struct_symbol
             self._validate_struct_implements(statement, struct_symbol)
+
+    def _validate_struct_layouts(self, statements: list[ast.Statement]) -> None:
+        """Reject cycles formed by struct fields stored directly by value.
+
+        Classes, interfaces, and collection values do not contribute a direct
+        inline-layout edge. Alias resolution has already happened while fields
+        were defined, so a field whose resolved type is a struct name is the
+        only edge that can make a value layout infinitely recursive today.
+        """
+        declarations = {
+            statement.name: statement
+            for statement in statements
+            if isinstance(statement, ast.StructDeclaration)
+        }
+        edges: dict[str, tuple[str, ...]] = {}
+        for name in declarations:
+            struct = self.structs.get(name)
+            if struct is None or struct.kind != "struct":
+                continue
+            edges[name] = tuple(
+                field.type_name
+                for field in struct.fields
+                if isinstance(field.type_name, str)
+                and field.type_name in declarations
+                and self.structs.get(field.type_name) is not None
+                and self.structs[field.type_name].kind == "struct"
+            )
+
+        visited: set[str] = set()
+        active: list[str] = []
+        active_indices: dict[str, int] = {}
+
+        def visit(name: str) -> None:
+            if name in visited:
+                return
+            cycle_start = active_indices.get(name)
+            if cycle_start is not None:
+                cycle = active[cycle_start:]
+                quoted = " and ".join(f"'{item}'" for item in cycle)
+                declaration = declarations[name]
+                raise AetherTypeError(
+                    f"Recursive value-type layout involving {quoted}.",
+                    line=declaration.line,
+                    column=declaration.column,
+                )
+            active_indices[name] = len(active)
+            active.append(name)
+            try:
+                for target in edges.get(name, ()):
+                    visit(target)
+            finally:
+                active.pop()
+                active_indices.pop(name, None)
+            visited.add(name)
+
+        for name in declarations:
+            visit(name)
+
+    def _declare_function_signatures(self, statements: list[ast.Statement]) -> None:
+        self._module_function_declaration_ids.update(
+            id(statement)
+            for statement in statements
+            if isinstance(statement, (ast.FunctionDeclaration, ast.ExpressionFunctionDeclaration))
+        )
+        prior_module_variables: set[str] = set()
+        for statement in statements:
+            if isinstance(statement, ast.VarDeclaration):
+                prior_module_variables.add(statement.name)
+                continue
+            try:
+                if isinstance(statement, ast.FunctionDeclaration):
+                    self._declare_function_signature(statement, prior_module_variables)
+                elif isinstance(statement, ast.ExpressionFunctionDeclaration):
+                    self._declare_expression_function_signature(statement, prior_module_variables)
+            except AetherTypeError as exc:
+                if self._diagnostic_errors is None:
+                    raise
+                self._record_diagnostic_error(exc, statement)
 
     def _constructor_symbol(
         self,
@@ -614,10 +700,14 @@ class TypeChecker:
             self._check_for_in(statement, scope)
             return
         if isinstance(statement, ast.FunctionDeclaration):
-            self._declare_function(statement)
+            if id(statement) not in self._module_function_declaration_ids:
+                self._declare_function_signature(statement)
+            self._check_function_body(statement)
             return
         if isinstance(statement, ast.ExpressionFunctionDeclaration):
-            self._declare_expression_function(statement)
+            if id(statement) not in self._module_function_declaration_ids:
+                self._declare_expression_function_signature(statement)
+            self._check_expression_function_body(statement)
             return
         if isinstance(statement, ast.ImportStatement):
             return
@@ -1450,7 +1540,11 @@ class TypeChecker:
                 return method
         return None
 
-    def _declare_function(self, statement: ast.FunctionDeclaration) -> None:
+    def _declare_function_signature(
+        self,
+        statement: ast.FunctionDeclaration,
+        prior_module_variables: set[str] | None = None,
+    ) -> None:
         if statement.name in self.functions:
             message = (
                 "Program entry point 'main' is already defined."
@@ -1466,6 +1560,8 @@ class TypeChecker:
             raise AetherTypeError(f"Name '{statement.name}' is already defined as an enum.")
         if statement.name in self.interfaces:
             raise AetherTypeError(f"Name '{statement.name}' is already defined as an interface.")
+        if statement.name in (prior_module_variables or set()):
+            raise AetherTypeError(f"Name '{statement.name}' is already defined as a variable.")
         if self.global_scope.lookup(statement.name) is not None:
             raise AetherTypeError(f"Name '{statement.name}' is already defined as a variable.")
         return_type = self._resolve_type_aliases(statement.return_type, statement)
@@ -1493,12 +1589,18 @@ class TypeChecker:
                 raise AetherTypeError(f"Parameter '{parameter.name}' cannot have type void.")
         parameters = tuple(VariableSymbol(parameter.name, parameter.type_name) for parameter in resolved_parameters)
         self.functions[statement.name] = FunctionSymbol(statement.name, return_type, parameters, statement.visibility)
+        self._local_function_declarations[statement.name] = statement
+
+    def _check_function_body(self, statement: ast.FunctionDeclaration) -> None:
+        if self._local_function_declarations.get(statement.name) is not statement:
+            return
+        symbol = self.functions[statement.name]
         function_scope: Scope[VariableSymbol] = Scope(parent=self.global_scope)
-        for parameter in parameters:
+        for parameter in symbol.parameters:
             function_scope.define_local(parameter.name, parameter)
         previous_return_type = self.current_return_type
         previous_function_name = self.current_function_name
-        self.current_return_type = return_type
+        self.current_return_type = symbol.return_type
         self.current_function_name = statement.name
         try:
             self._check_statements(statement.body, function_scope)
@@ -1506,7 +1608,7 @@ class TypeChecker:
             self.current_return_type = previous_return_type
             self.current_function_name = previous_function_name
         if (
-            return_type != "void"
+            symbol.return_type != "void"
             and statement.name != "main"
             and not self._statements_always_return(statement.body)
         ):
@@ -1568,7 +1670,11 @@ class TypeChecker:
             self.current_function_name = previous_function_name
             self.current_method_struct = previous_method_struct
 
-    def _declare_expression_function(self, statement: ast.ExpressionFunctionDeclaration) -> None:
+    def _declare_expression_function_signature(
+        self,
+        statement: ast.ExpressionFunctionDeclaration,
+        prior_module_variables: set[str] | None = None,
+    ) -> None:
         if statement.name == "main":
             raise AetherTypeError(
                 "main must use the signature int main()",
@@ -1586,11 +1692,19 @@ class TypeChecker:
             raise AetherTypeError(f"Name '{statement.name}' is already defined as an enum.")
         if statement.name in self.interfaces:
             raise AetherTypeError(f"Name '{statement.name}' is already defined as an interface.")
+        if statement.name in (prior_module_variables or set()):
+            raise AetherTypeError(f"Name '{statement.name}' is already defined as a variable.")
         if self.global_scope.lookup(statement.name) is not None:
             raise AetherTypeError(f"Name '{statement.name}' is already defined as a variable.")
         parameters = tuple(VariableSymbol(parameter.name, UNKNOWN_TYPE) for parameter in statement.parameters)
         self.functions[statement.name] = FunctionSymbol(statement.name, UNKNOWN_TYPE, parameters, statement.visibility)
         self.expression_functions[statement.name] = statement
+        self._local_function_declarations[statement.name] = statement
+
+    def _check_expression_function_body(self, statement: ast.ExpressionFunctionDeclaration) -> None:
+        if self._local_function_declarations.get(statement.name) is not statement:
+            return
+        parameters = self.functions[statement.name].parameters
         function_scope: Scope[VariableSymbol] = Scope(parent=self.global_scope)
         for parameter in parameters:
             function_scope.define_local(parameter.name, parameter)
@@ -2121,7 +2235,7 @@ class TypeChecker:
                 f"Undefined function '{expression.callee}'.",
                 line=expression.line,
                 column=expression.column,
-                hint="define the function before calling it, import its module, or check the spelling.",
+                hint="define the function in this module, import its module, or check the spelling.",
                 kind="name",
             )
         if len(expression.arguments) != len(function.parameters):

@@ -53,7 +53,7 @@ Referencias centrales:
 | --- | --- | --- |
 | Lexer | Implemented | Tokens, comentarios, literales, interpolación y recuperación inicial; `lexer.py`, tests de sintaxis. |
 | Parser | Implemented | Superficie AST amplia; algunas formas se reconocen para rechazarlas. `parser.py:47-1395`. |
-| Type checker | Implemented | Tipos, scopes, módulos, UDT y recolección de múltiples diagnósticos. `typechecker.py:85-96`. |
+| Type checker | Implemented | Resolución multifase de tipos/miembros/firmas antes de cuerpos, scopes secuenciales para locales, módulos, UDT y recolección de múltiples diagnósticos. |
 | AST interpreter | Implemented | Backend de superficie más completo; ejecuta el entry point normalizado y conserva sesiones persistentes. |
 | IR lowering | Partial | Solo acepta programas formados por funciones top-level y un subconjunto de expresiones/tipos. |
 | IR verifier | Implemented para el modelo IR | Valida CFG, definiciones y tipos de todos los opcodes actuales; no prueba equivalencia con la semántica AST. |
@@ -106,7 +106,7 @@ plugin ejecute ese backend.
 | Argumentos posicionales | Implemented | Aridad/tipos exactos | Implemented | Implemented sin defaults | Implemented | Implemented | Implemented | Signature hover parcial | E2E | Implemented |
 | Argumentos nombrados | Sintaxis implementada | Solo builtins que los declaran; user funcs rechazan | Plots/builtins seleccionados | Rechazado (`lowering.py:1187`) | No | No | No | Parser/LSP | Plots AST | AST-only |
 | Parámetros por defecto | Sin nodo/campo de default | No | No | No | No | No | No | No | No | Not implemented |
-| Recursión | Implemented | Símbolo declarado antes del body | Implemented | Implemented | Implemented | llamada recursiva | Implemented | Símbolos | sondeo AST+IR+native | Implemented |
+| Recursión directa y mutua | Implemented | Firmas globales recolectadas antes de los bodies | Implemented | Implemented | Implemented | llamadas a símbolos emitidos en cualquier orden | Implemented | completion/hover/definition | `test_declaration_order.py` AST+IR+LLVM | Implemented |
 | Overloads | Sintaxis repetible | Nombre duplicado rechazado (`typechecker.py:1319`) | No | No | No | No | No | No resolución overload | tests negativos UDT | Not implemented |
 | Funciones anidadas | Parser las acepta en bloques | Se registran globalmente | Ejecutan; scope no es closure léxico | `FunctionDeclaration` en body rechazada | No | No | No | Símbolos incompletos | sondeo AST/IR | AST-only |
 

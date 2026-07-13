@@ -6,7 +6,7 @@ from typing import Literal, Sequence
 
 from aether.stdlib.registry import builtin_names
 from command_catalog import COMMAND_CATALOG, CommandSuggestion
-from document_symbols import DocumentSymbol, extract_document_symbols
+from document_symbols import DocumentSymbol, extract_document_symbols, forward_visible_symbols
 
 
 AutocompleteKind = Literal["command", "identifier", "member"]
@@ -29,6 +29,7 @@ class AutocompleteRequest:
     document_kind: DocumentKind = "script"
     document_text: str = ""
     workspace_items: Sequence[dict[str, str]] = ()
+    module_document_text: str = ""
 
 
 def _is_command_char(char: str) -> bool:
@@ -422,6 +423,34 @@ def _document_symbol_suggestions(prefix: str, document_text: str) -> list[Comman
     return suggestions
 
 
+def _forward_document_symbol_suggestions(
+    prefix: str,
+    document_text: str,
+    module_document_text: str,
+) -> list[CommandSuggestion]:
+    suggestions: list[CommandSuggestion] = []
+    for symbol in forward_visible_symbols(module_document_text, len(document_text)):
+        if not _match_prefix(symbol.name, prefix):
+            continue
+        is_function = symbol.kind == "function"
+        suggestions.append(
+            CommandSuggestion(
+                name=symbol.name,
+                label=symbol.name,
+                insert_text=f"{symbol.name}()" if is_function else symbol.name,
+                signature=symbol.signature,
+                description="Module declaration visible regardless of textual order.",
+                category="document",
+                kind="function" if is_function else "variable",
+                source="document",
+                priority=305 + symbol.statement_index,
+                match_text=symbol.name,
+                cursor_backtrack=1 if is_function else None,
+            )
+        )
+    return suggestions
+
+
 def _builtin_suggestions(prefix: str) -> list[CommandSuggestion]:
     suggestions: list[CommandSuggestion] = []
     keyword_names = {item.name for item in KEYWORD_SUGGESTIONS}
@@ -795,6 +824,14 @@ def build_autocomplete_suggestions(
     raw: list[CommandSuggestion] = []
     if should_suggest_identifiers and request.document_text:
         raw.extend(_document_symbol_suggestions(match.prefix, request.document_text))
+    if should_suggest_identifiers and request.module_document_text:
+        raw.extend(
+            _forward_document_symbol_suggestions(
+                match.prefix,
+                request.document_text,
+                request.module_document_text,
+            )
+        )
     raw.extend(_workspace_suggestions(match.prefix, request.workspace_items))
     if should_suggest_identifiers:
         raw.extend(_snippet_suggestions(match.prefix))

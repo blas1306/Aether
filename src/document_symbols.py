@@ -142,6 +142,70 @@ def symbol_before_offset(document_text: str, name: str, offset: int) -> Document
     return max(under_cursor or candidates, key=lambda symbol: symbol.selection_start_offset)
 
 
+def symbol_visible_at_offset(document_text: str, name: str, offset: int) -> DocumentSymbol | None:
+    """Resolve a document symbol using Aether's declaration-order rules.
+
+    Variables retain point-of-declaration visibility. Module declarations and
+    methods in the aggregate currently containing the cursor may be resolved
+    forward.
+    """
+    symbol = symbol_before_offset(document_text, name, offset)
+    if symbol is not None:
+        return symbol
+
+    occurrences = extract_document_symbol_occurrences(document_text)
+    aggregates = [
+        candidate
+        for candidate in occurrences
+        if candidate.origin in {"struct", "class", "interface"}
+    ]
+    candidates: list[DocumentSymbol] = []
+    for candidate in occurrences:
+        if candidate.name != name or candidate.selection_start_offset <= offset:
+            continue
+        if candidate.origin in {"import", "type_alias", "struct", "class", "interface", "enum"}:
+            candidates.append(candidate)
+            continue
+        if candidate.origin != "function_definition":
+            continue
+        parent = next(
+            (
+                aggregate
+                for aggregate in aggregates
+                if aggregate.start_offset == candidate.start_offset
+                and aggregate.end_offset == candidate.end_offset
+            ),
+            None,
+        )
+        if parent is None or parent.start_offset <= offset <= parent.end_offset:
+            candidates.append(candidate)
+    if not candidates:
+        return None
+    return min(candidates, key=lambda candidate: candidate.selection_start_offset)
+
+
+def forward_visible_symbols(document_text: str, offset: int) -> list[DocumentSymbol]:
+    """Return module declarations after offset, excluding local variables."""
+    occurrences = extract_document_symbol_occurrences(document_text)
+    aggregate_spans = {
+        (candidate.start_offset, candidate.end_offset)
+        for candidate in occurrences
+        if candidate.origin in {"struct", "class", "interface"}
+    }
+    result: list[DocumentSymbol] = []
+    for candidate in occurrences:
+        if candidate.selection_start_offset <= offset:
+            continue
+        if candidate.origin in {"import", "type_alias", "struct", "class", "interface", "enum"}:
+            result.append(candidate)
+        elif candidate.origin == "function_definition" and (
+            candidate.start_offset,
+            candidate.end_offset,
+        ) not in aggregate_spans:
+            result.append(candidate)
+    return result
+
+
 def identifier_at_offset(document_text: str, offset: int) -> str | None:
     if not document_text:
         return None

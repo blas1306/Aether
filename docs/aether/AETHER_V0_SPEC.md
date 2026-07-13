@@ -1940,6 +1940,20 @@ if true {
 
 Function parameters and local variables live only inside the function call.
 
+Functions and module-level type declarations are visible throughout their
+module regardless of textual order. The frontend first registers enum,
+interface, struct, class, and alias names; then resolves fields, constructors,
+method signatures, and global function signatures; and only then checks
+function, method, and constructor bodies. This permits forward calls, mutual
+recursion, methods that call later methods, and signatures that mention types
+declared later. Cyclic aliases and recursive by-value `struct` layouts are
+rejected; references between `class` types do not form a value-layout cycle.
+
+Local variables are different: they become visible only after their
+declaration. Aether does not hoist locals, loop variables, or block variables.
+Module-level variable and constant initializers also retain their existing
+sequential evaluation rules; only their already-declared bindings are visible.
+
 ## Control Flow
 
 `if`:
@@ -2046,6 +2060,8 @@ Rules:
 - Return values must match the declared return type, allowing safe widening.
 - Function call arity is checked.
 - Function argument types are checked, allowing safe widening.
+- A module-level function may be called before its textual declaration.
+- Direct and mutual recursion are supported for typed block functions.
 - Duplicate parameter names are not allowed.
 - Duplicate global function names are not allowed in v0.
 

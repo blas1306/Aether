@@ -24,7 +24,7 @@ from document_symbols import (
     extract_document_symbol_occurrences,
     extract_document_symbols,
     identifier_at_offset,
-    symbol_before_offset,
+    symbol_visible_at_offset,
 )
 
 
@@ -105,6 +105,10 @@ class AetherLanguageServer:
             return self._response(message, self._document_symbol_result(message.get("params") or {}))
         if method == "textDocument/hover":
             return self._response(message, self._hover_result(message.get("params") or {}))
+        if method == "textDocument/definition":
+            return self._response(message, self._definition_result(message.get("params") or {}))
+        if method == "textDocument/references":
+            return self._response(message, self._references_result(message.get("params") or {}))
         if "id" in message:
             return self._error_response(message, code=-32601, message=f"Method not found: {method}")
         return None
@@ -123,6 +127,8 @@ class AetherLanguageServer:
                 },
                 "documentSymbolProvider": True,
                 "hoverProvider": True,
+                "definitionProvider": True,
+                "referencesProvider": True,
             }
         }
 
@@ -251,6 +257,7 @@ class AetherLanguageServer:
                     cursor_col=cursor_col,
                     document_kind="script",
                     document_text=source[:source_offset],
+                    module_document_text=source,
                 )
             )
             replace_range = _lsp_completion_range(line, match.token_start_col, match.token_end_col)
@@ -288,7 +295,7 @@ class AetherLanguageServer:
             return None
         name, token_start, token_end = token
 
-        symbol = symbol_before_offset(source, name, offset)
+        symbol = symbol_visible_at_offset(source, name, offset)
         if symbol is not None and symbol.origin != "import":
             return _lsp_hover(
                 _symbol_hover_markdown(symbol),
@@ -315,6 +322,64 @@ class AetherLanguageServer:
             )
 
         return None
+
+    def _definition_result(self, params: JsonObject) -> JsonObject | None:
+        document = params.get("textDocument") or {}
+        position = params.get("position") or {}
+        uri = document.get("uri", "")
+        source = self.documents.get(uri, "")
+        if not source:
+            return None
+        line_starts = _line_start_offsets(source)
+        offset = _position_to_offset(
+            source,
+            line_starts,
+            int(position.get("line", 0)),
+            int(position.get("character", 0)),
+        )
+        name = identifier_at_offset(source, offset)
+        if name is None:
+            return None
+        symbol = symbol_visible_at_offset(source, name, offset)
+        if symbol is None:
+            return None
+        return {"uri": uri, "range": _source_range_to_lsp(symbol.selection_range)}
+
+    def _references_result(self, params: JsonObject) -> list[JsonObject]:
+        document = params.get("textDocument") or {}
+        position = params.get("position") or {}
+        context = params.get("context") or {}
+        uri = document.get("uri", "")
+        source = self.documents.get(uri, "")
+        if not source:
+            return []
+        line_starts = _line_start_offsets(source)
+        offset = _position_to_offset(
+            source,
+            line_starts,
+            int(position.get("line", 0)),
+            int(position.get("character", 0)),
+        )
+        name = identifier_at_offset(source, offset)
+        if name is None or symbol_visible_at_offset(source, name, offset) is None:
+            return []
+        declaration = symbol_visible_at_offset(source, name, offset)
+        include_declaration = bool(context.get("includeDeclaration", False))
+        results: list[JsonObject] = []
+        for match in re.finditer(rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])", source):
+            if (
+                not include_declaration
+                and declaration is not None
+                and match.start() == declaration.selection_start_offset
+            ):
+                continue
+            results.append(
+                {
+                    "uri": uri,
+                    "range": _lsp_range_from_offsets(source, line_starts, match.start(), match.end()),
+                }
+            )
+        return results
 
     def _read_message(self) -> JsonObject | None:
         headers: dict[str, str] = {}

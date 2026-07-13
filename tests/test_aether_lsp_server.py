@@ -65,6 +65,32 @@ def _hover_for(source: str, *, line: int, character: int) -> dict | None:
     )
 
 
+def _definition_for(source: str, *, line: int, character: int) -> dict | None:
+    from aether_lsp.server import AetherLanguageServer
+
+    uri = "file:///tmp/definition.ae"
+    language_server = AetherLanguageServer(reader=BytesIO(), writer=BytesIO())
+    language_server.documents[uri] = source
+    return language_server._definition_result(
+        {"textDocument": {"uri": uri}, "position": {"line": line, "character": character}}
+    )
+
+
+def _references_for(source: str, *, line: int, character: int) -> list[dict]:
+    from aether_lsp.server import AetherLanguageServer
+
+    uri = "file:///tmp/references.ae"
+    language_server = AetherLanguageServer(reader=BytesIO(), writer=BytesIO())
+    language_server.documents[uri] = source
+    return language_server._references_result(
+        {
+            "textDocument": {"uri": uri},
+            "position": {"line": line, "character": character},
+            "context": {"includeDeclaration": True},
+        }
+    )
+
+
 def _item_by_label(items: list[dict], label: str) -> dict:
     for item in items:
         if item["label"] == label:
@@ -269,6 +295,16 @@ def test_lsp_completion_includes_only_document_symbols_before_cursor() -> None:
     assert local_value["detail"] == "localValue"
 
 
+def test_lsp_completion_includes_module_function_declared_after_cursor() -> None:
+    source = "int main() { return la; }\nint later() { return 1; }\n"
+    items = _completion_items_for(source, line=0, character=len("int main() { return la"))
+
+    later = _item_by_label(items, "later")
+
+    assert later["kind"] == 3
+    assert later["detail"] == "later()"
+
+
 def test_lsp_completion_supports_stdlib_member_context() -> None:
     items = _completion_items_for("Math.", line=0, character=len("Math."))
     labels = [item["label"] for item in items]
@@ -346,6 +382,28 @@ def test_lsp_hover_returns_document_symbol_details() -> None:
     }
     assert variable_hover is not None
     assert "Variable defined in this document" in variable_hover["contents"]["value"]
+
+
+def test_lsp_hover_and_definition_resolve_function_declared_later() -> None:
+    source = "int main() { return later(); }\nint later() { return 1; }\n"
+
+    hover = _hover_for(source, line=0, character=len("int main() { return lat"))
+    definition = _definition_for(source, line=0, character=len("int main() { return lat"))
+
+    assert hover is not None
+    assert "int later()" in hover["contents"]["value"]
+    assert definition == {
+        "uri": "file:///tmp/definition.ae",
+        "range": {
+            "start": {"line": 1, "character": len("int ")},
+            "end": {"line": 1, "character": len("int later")},
+        },
+    }
+    references = _references_for(source, line=0, character=len("int main() { return lat"))
+    assert [item["range"]["start"] for item in references] == [
+        {"line": 0, "character": len("int main() { return ")},
+        {"line": 1, "character": len("int ")},
+    ]
 
 
 def test_lsp_hover_returns_builtin_and_imported_alias_details() -> None:
