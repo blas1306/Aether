@@ -240,7 +240,7 @@ int main() {
 
     exit_code, stdout, stderr = run_cli(["--backend=ir", str(program)])
 
-    assert exit_code == EXIT_SUCCESS
+    assert exit_code == 5
     assert stdout == ""
     assert stderr == ""
 
@@ -739,7 +739,7 @@ def test_non_ssa_modes_remain_unchanged_after_adding_ssa_builder_selector(
     assert emit_cfg_exit == EXIT_SUCCESS
     assert "digraph main {" in emit_cfg_stdout
     assert emit_cfg_stderr == ""
-    assert backend_ir_exit == EXIT_SUCCESS
+    assert backend_ir_exit == 42
     assert backend_ir_stdout == ""
     assert backend_ir_stderr == ""
     assert bench_exit == EXIT_SUCCESS
@@ -2153,7 +2153,7 @@ int main() {
     assert completed.returncode == 0
 
 
-def test_build_bool_compare_smoke_compiles_and_runs_with_clang_if_available(
+def test_build_rejects_non_int_main_signature(
     tmp_path: Path,
 ) -> None:
     if shutil.which("clang") is None:
@@ -2165,11 +2165,10 @@ def test_build_bool_compare_smoke_compiles_and_runs_with_clang_if_available(
 
     exit_code, stdout, stderr = run_cli(["build", str(program), "-o", str(output)])
 
-    assert exit_code == EXIT_SUCCESS
-    assert stdout == f"Built executable: {output.resolve()}\n"
-    assert stderr == ""
-    completed = subprocess.run([str(output)], check=False)
-    assert completed.returncode == 1
+    assert exit_code == EXIT_LANGUAGE_ERROR
+    assert stdout == ""
+    assert "main must return int" in stderr
+    assert not output.exists()
 
 
 def test_normal_cli_execution_is_unchanged_after_emit_llvm(tmp_path: Path) -> None:
@@ -2813,7 +2812,7 @@ int main() {
 
     exit_code, stdout, stderr = run_cli(["--backend=ir", str(program)])
 
-    assert exit_code == EXIT_SUCCESS
+    assert exit_code == 14
     assert stdout == ""
     assert stderr == ""
     assert calls == []
@@ -3031,7 +3030,7 @@ def test_bench_missing_file_reports_read_error(tmp_path: Path) -> None:
     assert str(missing) in stderr
 
 
-def test_bench_both_reports_ir_error_and_keeps_ast(tmp_path: Path) -> None:
+def test_bench_both_accepts_script_mode_for_ast_and_ir(tmp_path: Path) -> None:
     program = tmp_path / "ast_only.ae"
     program.write_text('println("ast still runs");\n', encoding="utf-8")
 
@@ -3041,24 +3040,21 @@ def test_bench_both_reports_ir_error_and_keeps_ast(tmp_path: Path) -> None:
     assert f"Benchmark: {program}" in stdout
     assert "AST execute:" in stdout
     assert "IR lower/verify:" in stdout
-    assert "error:" in stdout
-    assert "IR backend does not support" in stdout
-    assert "Supported IR backend subset:" in stdout
+    assert "error:" not in stdout
     assert "Traceback" not in stdout
     assert stderr == ""
 
 
-def test_bench_ir_only_unsupported_program_fails(tmp_path: Path) -> None:
+def test_bench_ir_only_accepts_script_mode(tmp_path: Path) -> None:
     program = tmp_path / "ast_only_ir_fail.ae"
     program.write_text('println("unsupported");\n', encoding="utf-8")
 
     exit_code, stdout, stderr = run_cli(["bench", str(program), "--backend", "ir"])
 
-    assert exit_code == EXIT_LANGUAGE_ERROR
+    assert exit_code == EXIT_SUCCESS
     assert "Benchmark:" in stdout
     assert "IR lower/verify:" in stdout
-    assert "error:" in stdout
-    assert "IR backend does not support" in stdout
+    assert "error:" not in stdout
     assert stderr == ""
 
 

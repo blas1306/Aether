@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Literal, Protocol
 
 from . import ast
 from .errors import AetherRuntimeError, IRBackendUnsupportedFeatureError
+from .entry_point import normalize_entry_point
 from .interpreter import Environment, Interpreter
 from .lexer import lex
 from .parser import Parser
@@ -75,6 +77,10 @@ class IRBackend:
 
     name: ClassVar[str] = "ir"
 
+    def __init__(self, *, output_writer: Callable[[str], None] | None = None) -> None:
+        self.output_writer = output_writer
+        self.output = ""
+
     def lower(self, typed_program: TypedProgram) -> IRModule:
         from .ir.lowering import IRLowerer
 
@@ -114,14 +120,18 @@ class IRBackend:
 
         module = self.lower_verified(typed_program)
         entry = _ir_entry_point(module)
+        self.output = ""
+        interpreter = IRInterpreter(module, write_output=self.output_writer)
 
         try:
-            result = IRInterpreter(module).call(entry.name)
+            result = interpreter.call(entry.name)
         except IRExecutionError as exc:
+            self.output = interpreter.output
             raise AetherRuntimeError(
                 f"IR interpreter failed: {exc}",
                 kind="ir",
             ) from exc
+        self.output = interpreter.output
 
         env = Environment()
         if not isinstance(entry.return_type, VoidType):
@@ -190,7 +200,8 @@ def typecheck_program(program: ast.Program, checker: TypeChecker) -> ast.Program
 def prepare_typed_program(source: str, checker: TypeChecker) -> TypedProgram:
     """Run the frontend stages and return the checked program boundary."""
     program = parse_source(source)
-    return TypedProgram(typecheck_program(program, checker), checker)
+    checked_program = typecheck_program(program, checker)
+    return TypedProgram(normalize_entry_point(checked_program, checker), checker)
 
 
 def lower_to_verified_ssa(
@@ -226,11 +237,11 @@ def _ir_entry_point(module: IRModule) -> IRFunction:
     )
     if function is None:
         raise IRBackendUnsupportedFeatureError(
-            "IR backend execution requires a zero-argument main() function."
+            "IR backend cannot execute a declaration-only module without an entry point."
         )
     if function.parameters:
         raise IRBackendUnsupportedFeatureError(
-            "IR backend entry point main() must not declare parameters yet."
+            "Normalized IR entry point main() must not declare parameters."
         )
     return function
 

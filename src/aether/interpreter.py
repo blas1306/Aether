@@ -273,12 +273,16 @@ class Interpreter:
         self.private_imported_symbols: dict[str, set[str]] = {}
         self._interpret_depth = 0
         self.current_return_type: AetherType | None = None
+        self.last_exit_code = 0
 
     def interpret(self, program: ast.Program) -> Environment:
         self._interpret_depth += 1
+        self.last_exit_code = 0
         try:
             for statement in program.statements:
                 self._execute(statement, self.global_env)
+            if program.entry_point is not None:
+                self.last_exit_code = self._invoke_entry_point(program.entry_point)
             return self.global_env
         except _ThrownExceptionSignal as signal:
             raise self._runtime_error_from_thrown(signal.value) from None
@@ -286,6 +290,33 @@ class Interpreter:
             self._interpret_depth -= 1
             if self._interpret_depth == 0:
                 self.plot_backend.wait_for_interactive_plots()
+
+    def _invoke_entry_point(self, name: str) -> int:
+        function = self.global_env.get_function(name)
+        if function is None or not isinstance(function.declaration, ast.FunctionDeclaration):
+            raise AetherRuntimeError(f"Program entry point '{name}' is not defined.")
+        declaration = function.declaration
+        if declaration.synthetic:
+            result = self._execute_synthetic_entry(declaration)
+        else:
+            result = self._call_user_function(name, [], self.global_env)
+        if result.type_name != "int" or isinstance(result.value, bool):
+            raise AetherRuntimeError("Program entry point 'main' did not return int.")
+        return int(result.value)
+
+    def _execute_synthetic_entry(self, declaration: ast.FunctionDeclaration) -> AetherValue:
+        previous_return_type = self.current_return_type
+        self.current_return_type = "int"
+        try:
+            try:
+                # Script variables intentionally remain in the session/global
+                # environment, preserving the existing REPL and IDE workspace UX.
+                self._execute_block(declaration.body, self.global_env)
+            except _ReturnSignal as signal:
+                return coerce_return_value(signal.value, "int")
+        finally:
+            self.current_return_type = previous_return_type
+        raise AetherRuntimeError("Synthetic program entry point ended without returning a value.")
 
     @property
     def output(self) -> str:

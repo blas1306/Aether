@@ -209,15 +209,7 @@ def _append_measurement(
 
 def _run_ast(typed_program: TypedProgram, path: Path) -> None:
     interpreter = Interpreter(source_root=path.parent, output_writer=lambda _text: None)
-    env = ASTBackend(interpreter).run(typed_program)
-    main = env.get_function("main")
-    if main is not None:
-        if main.declaration.parameters:
-            raise AetherRuntimeError(
-                "Benchmark AST entry point main() must not declare parameters.",
-                kind="bench",
-            )
-        interpreter._call_user_function("main", [], env)
+    ASTBackend(interpreter).run(typed_program)
 
 
 def _build_ir(source: str, path: Path) -> IRModule:
@@ -230,7 +222,7 @@ def _run_ir(module: IRModule) -> None:
     entry = next((function for function in module.functions if function.name == "main"), None)
     if entry is None or entry.parameters:
         raise AetherRuntimeError(
-            "IR benchmark execution requires a zero-argument main() function.",
+            "IR benchmark input has no normalized executable entry point.",
             kind="bench",
         )
     try:

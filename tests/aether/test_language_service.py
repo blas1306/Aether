@@ -80,6 +80,22 @@ def test_run_source_returns_output() -> None:
     assert result.success
     assert result.output == "hola\n"
     assert result.error is None
+    assert result.exit_code == 0
+
+
+def test_run_source_propagates_explicit_main_exit_code() -> None:
+    result = run_source("int main() { return 7; }")
+
+    assert result.success
+    assert result.exit_code == 7
+
+
+def test_diagnostics_reject_mixed_script_and_explicit_main() -> None:
+    diagnostics = analyze_source('println("top");\nint main() {}\n')
+
+    assert len(diagnostics) == 1
+    assert "Cannot combine top-level executable statements" in diagnostics[0].message
+    assert diagnostics[0].line == 1
 
 
 def test_run_source_can_stream_output_while_retaining_result() -> None:

@@ -1327,7 +1327,12 @@ class TypeChecker:
 
     def _declare_function(self, statement: ast.FunctionDeclaration) -> None:
         if statement.name in self.functions:
-            raise AetherTypeError(f"Function '{statement.name}' is already defined.")
+            message = (
+                "Program entry point 'main' is already defined."
+                if statement.name == "main"
+                else f"Function '{statement.name}' is already defined."
+            )
+            raise AetherTypeError(message, line=statement.line, column=statement.column)
         if statement.name in self.type_aliases:
             raise AetherTypeError(f"Name '{statement.name}' is already defined as a type alias.")
         if statement.name in self.structs:
@@ -1339,6 +1344,21 @@ class TypeChecker:
         if self.global_scope.lookup(statement.name) is not None:
             raise AetherTypeError(f"Name '{statement.name}' is already defined as a variable.")
         return_type = self._resolve_type_aliases(statement.return_type, statement)
+        if statement.name == "main":
+            if return_type != "int":
+                raise AetherTypeError(
+                    "main must return int",
+                    line=statement.line,
+                    column=statement.column,
+                    kind="entry-point",
+                )
+            if statement.parameters:
+                raise AetherTypeError(
+                    "main must not declare parameters",
+                    line=statement.line,
+                    column=statement.column,
+                    kind="entry-point",
+                )
         resolved_parameters = [
             ast.Parameter(self._resolve_type_aliases(parameter.type_name), parameter.name)
             for parameter in statement.parameters
@@ -1360,7 +1380,11 @@ class TypeChecker:
         finally:
             self.current_return_type = previous_return_type
             self.current_function_name = previous_function_name
-        if return_type != "void" and not self._statements_always_return(statement.body):
+        if (
+            return_type != "void"
+            and statement.name != "main"
+            and not self._statements_always_return(statement.body)
+        ):
             raise AetherTypeError(f"Function '{statement.name}' may not return a value on all paths.")
 
     def _check_struct_methods(self, declaration: ast.StructDeclaration | ast.ClassDeclaration) -> None:
@@ -1420,6 +1444,13 @@ class TypeChecker:
             self.current_method_struct = previous_method_struct
 
     def _declare_expression_function(self, statement: ast.ExpressionFunctionDeclaration) -> None:
+        if statement.name == "main":
+            raise AetherTypeError(
+                "main must use the signature int main()",
+                line=statement.line,
+                column=statement.column,
+                kind="entry-point",
+            )
         if statement.name in self.functions:
             raise AetherTypeError(f"Function '{statement.name}' is already defined.")
         if statement.name in self.type_aliases:
@@ -2865,6 +2896,10 @@ class TypeChecker:
             if self._statement_always_returns(statement):
                 return True
         return False
+
+    def statements_always_return(self, statements: list[ast.Statement]) -> bool:
+        """Expose the existing return-flow analysis to checked-AST normalization."""
+        return self._statements_always_return(statements)
 
     def _statement_always_returns(self, statement: ast.Statement) -> bool:
         if isinstance(statement, ast.ReturnStatement):

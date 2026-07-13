@@ -45,7 +45,7 @@ def _assert_ast_ir_native_output(
     assert stderr.getvalue() == ""
 
 
-def test_backend_parity_characterization_main_is_not_an_ast_entry_point() -> None:
+def test_backend_parity_characterization_main_is_shared_entry_point() -> None:
     source = """
 int add(int a, int b) {
     return a + b;
@@ -61,9 +61,7 @@ int main() {
 }
 """
 
-    # A source file is a script for the AST backend: declarations are registered,
-    # but main() is not invoked. IR/native use main() as their entry point.
-    assert run_aether(source).output == ""
+    assert run_aether(source).output == "ok\n"
     assert _run_ir(source) == (0, "ok\n")
 
     if shutil.which("clang") is not None:

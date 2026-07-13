@@ -9,3 +9,4 @@ from .types import AetherValue
 class AetherRunResult:
     env: dict[str, AetherValue]
     output: str
+    exit_code: int = 0

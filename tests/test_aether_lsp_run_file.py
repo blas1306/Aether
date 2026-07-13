@@ -33,3 +33,15 @@ public alias P = Point;
     assert exit_code == 0
     assert captured.out == "1.0\n"
     assert captured.err == ""
+
+
+def test_run_file_propagates_explicit_main_exit_code(tmp_path: Path, capsys) -> None:
+    from aether_lsp.run_file import main
+
+    main_file = tmp_path / "main.ae"
+    main_file.write_text("int main() { return 7; }\n", encoding="utf-8")
+
+    assert main([str(main_file)]) == 7
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""

@@ -23,7 +23,7 @@ def main(argv: list[str] | None = None) -> int:
     if not result.success:
         print(result.error or "Aether execution failed.", file=sys.stderr)
         return 1
-    return 0
+    return result.exit_code
 
 
 def _write_stdout(text: str) -> None:

@@ -22,7 +22,7 @@ cuando no hay evidencia suficiente.
 La ruta nativa real es:
 
 ```text
-lexer -> parser -> typechecker -> IR lowering -> IR verifier
+lexer -> parser -> typechecker -> entry-point normalization -> IR lowering -> IR verifier
       -> GeneralSSABuilder -> SSA verifier -> SSA optimizer
       -> LLVM printer/runtime -> clang -> proceso nativo
 ```
@@ -54,7 +54,7 @@ Referencias centrales:
 | Lexer | Implemented | Tokens, comentarios, literales, interpolación y recuperación inicial; `lexer.py`, tests de sintaxis. |
 | Parser | Implemented | Superficie AST amplia; algunas formas se reconocen para rechazarlas. `parser.py:47-1395`. |
 | Type checker | Implemented | Tipos, scopes, módulos, UDT y recolección de múltiples diagnósticos. `typechecker.py:85-96`. |
-| AST interpreter | Implemented | Backend de superficie más completo; ejecuta scripts top-level y sesiones persistentes. |
+| AST interpreter | Implemented | Backend de superficie más completo; ejecuta el entry point normalizado y conserva sesiones persistentes. |
 | IR lowering | Partial | Solo acepta programas formados por funciones top-level y un subconjunto de expresiones/tipos. |
 | IR verifier | Implemented para el modelo IR | Valida CFG, definiciones y tipos de todos los opcodes actuales; no prueba equivalencia con la semántica AST. |
 | IR interpreter | Partial | Ejecuta todos los opcodes IR actuales; Vector/Matrix ya coinciden con AST, pero persisten diferencias generales de representación/overflow numérico. |
@@ -184,8 +184,8 @@ plugin ejecute ese backend.
 | Resolución entre archivos | N/A | `source_root` + `.ae` | Implemented | No linker/lowering módulos | No | No | No | LSP recibe root | tests | AST-only |
 | Visibilidad top-level | public/private | Implemented | Implemented | no módulos | No | No | No | completion parcial | tests | AST-only |
 | Inicialización de módulo | Statements al importar | Typechecked | se ejecutan una vez por sesión | No | No | No | No | N/A | imports | AST-only |
-| Statements top-level | Implemented | Implemented | entry natural del script | IR exige solo funciones | No | No | No | IntelliJ ejecuta AST | tests/sondeo | AST-only |
-| `main` | Función ordinaria | firma no especial en frontend | no se invoca | entry obligatorio, cero args | compilado | `@main` | entry del proceso | CLI LLVM; IntelliJ AST | sondeo | Broken — entry points distintos |
+| Statements top-level del módulo de entrada | Implemented | Implemented | `main` sintético normalizado | función `main` ordinaria tras normalización | Implemented | `@main` | exit del proceso | IntelliJ ejecuta AST | `test_entry_point.py` | Implemented para el módulo de entrada |
+| `main` | `int main()` | retorno int, cero parámetros, único | se invoca; return 0 implícito | entry ordinario normalizado | compilado | `@main` | entry del proceso | CLI LLVM/AST/IR; IntelliJ AST | `test_entry_point.py` | Implemented |
 
 ### Errores, runtime y herramientas
 
@@ -200,7 +200,7 @@ plugin ejecute ese backend.
 | Allocation overflow/OOM Array/List | N/A | N/A | host Python | checks lógicos seleccionados | instrucciones preservadas | helpers checked | panic | N/A | safety | Implemented |
 | `throw` / `try-catch` | Implemented | string/Exception | Implemented | statements rechazados | No | No | No | keywords/diagnostics | AST | AST-only |
 | Null dereference | nullable existe | no smart narrowing | operaciones restringidas | no nullable | No | No | No | diagnostics | frontend | AST-only |
-| Exit codes | N/A | N/A | CLI AST retorna 0 si éxito | CLI IR retorna 0, no `main` value | N/A | proceso retorna `main` | 0-255 POSIX | IntelliJ bridge AST siempre 0/1 | CLI/native | Partial |
+| Exit codes | N/A | N/A | retorna el valor de `main` | retorna el valor de `main` | N/A | proceso retorna `main` | 0-255 POSIX | bridge AST recibe 0 normal/1 panic | AST+IR+CLI+native | Implemented para entry point |
 | CLI backend predeterminado | N/A | N/A | explícito `--backend=ast` | explícito `ir` | export SSA | default `llvm` | default file run | N/A | CLI | Implemented |
 | Selección explícita backend | N/A | N/A | `ast` | `ir` | no ejecución SSA | `llvm` | build/run | IntelliJ sin selector | CLI | Partial |
 | REPL | Parser por línea | checker persistente | session + rollback | no | no | no | no | Studio/CLI | tests | AST-only |
@@ -214,12 +214,13 @@ plugin ejecute ese backend.
 ## Programas de sondeo y resultados
 
 Los programas viven como strings pequeños en
-`tests/aether/test_backend_feature_parity.py`. Cuando AST y compiled necesitan
-entry points distintos, el cuerpo es el mismo y solo se adapta el wrapper.
+`tests/aether/test_backend_feature_parity.py` y
+`tests/aether/test_entry_point.py`. Todos los backends consumen el mismo AST
+normalizado y el mismo `main`, explícito o sintético.
 
 | Sondeo | AST | IR interpreter | LLVM/native | Resultado |
 | --- | --- | --- | --- | --- |
-| Programa base con `main` | registra funciones, no imprime | `ok\n`, return 0 | `ok\n`, exit 0 | confirma divergencia de entry |
+| Programa base con `main` | `ok\n`, return 0 | `ok\n`, return 0 | `ok\n`, exit 0 | paridad de entry |
 | `while` 0..2 | `0\n1\n2\n` como script | mismo output | mismo output | paridad del core al adaptar entry |
 | recursión factorial(5) | `120\n` | `120\n` | `120\n` | cobertura E2E antes ausente |
 | Array set + slice | `9\n1\n` | mismo output | mismo output | Array core completo |
@@ -258,8 +259,11 @@ exista análisis fiable de pureza/efectos interprocedural.
 
 ## Diferencias semánticas confirmadas
 
-- Entry point: AST ejecuta top-level y no llama `main`; IR requiere `main()`
-  sin parámetros (`pipeline.py:222`); native expone el return como exit code.
+- Entry point: cerrado en P3. `EntryPointNormalizer`, ejecutado después del
+  typechecker, envuelve el modo script en un `main` marcado `synthetic` y añade
+  `return 0` solo si el flujo puede alcanzar el final. AST, IR y native propagan
+  el mismo valor de retorno. El soporte nativo sigue limitado al módulo de
+  entrada: imports e inicializadores de módulos continúan AST-only.
 - Vector/Matrix: la especificación, AST, IR, SSA, ejemplos y LLVM usan índices
   públicos 1-based. Los offsets de storage siguen siendo 0-based y no forman
   parte de la API.
@@ -270,8 +274,8 @@ exista análisis fiable de pureza/efectos interprocedural.
   formato double sigue parcial porque native usa `%.17g`.
 - Strings: AST concatena/compara/interpola; LLVM solo transporta punteros de
   literales y puede imprimirlos.
-- Exit: CLI AST/IR reportan éxito 0; native retorna el valor de `main` (limitado
-  por el proceso/OS).
+- Exit: AST, IR y native retornan el valor de `main` (limitado por el proceso/OS
+  para el ejecutable nativo); un panic conserva código 1.
 
 ## Diagnósticos y documentación desactualizados
 
@@ -349,11 +353,9 @@ están cerrados por P2.
 
 ### P1 — paridad del núcleo
 
-4. Resolver el contrato de entry point: documentar/adaptar script top-level y
-   `main` sin cambiarlo silenciosamente.
-5. Bajar `&&`/`||` con short-circuit y completar conversiones implícitas y
+4. Bajar `&&`/`||` con short-circuit y completar conversiones implícitas y
    tipos float/string del core.
-6. Actualizar los diagnósticos de backend y retirar matrices/documentos
+5. Actualizar los diagnósticos de backend y retirar matrices/documentos
    históricos contradictorios.
 
 ### P2 — colecciones y tipos definidos por usuario

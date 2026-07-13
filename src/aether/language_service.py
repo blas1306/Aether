@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .errors import AetherError, AetherRuntimeError, AetherSyntaxError, AetherTypeError
+from .entry_point import normalize_entry_point
 from .lexer import lex
 from .parser import Parser
 from . import ast
@@ -31,6 +32,7 @@ class RunResult:
     success: bool
     output: str = ""
     error: str | None = None
+    exit_code: int = 0
 
 
 @dataclass(frozen=True)
@@ -99,7 +101,13 @@ def analyze_source(source: str, *, source_root: str | Path | None = None) -> lis
     parser = Parser(tokens)
     program, syntax_errors = parser.parse_with_recovery()
     diagnostics.extend(_diagnostic_from_error(exc, source) for exc in syntax_errors)
-    type_errors = TypeChecker(source_root=source_root).check_collecting_errors(program)
+    checker = TypeChecker(source_root=source_root)
+    type_errors = checker.check_collecting_errors(program)
+    if not type_errors:
+        try:
+            normalize_entry_point(program, checker)
+        except AetherTypeError as exc:
+            type_errors.append(exc)
     diagnostics.extend(_diagnostic_from_error(exc, source) for exc in type_errors)
     return diagnostics
 
@@ -125,7 +133,7 @@ def run_source(
     except AETHER_ERRORS as exc:
         error = exc.format() if isinstance(exc, AetherError) else f"{type(exc).__name__}: {exc}"
         return RunResult(success=False, error=error)
-    return RunResult(success=True, output=result.output)
+    return RunResult(success=True, output=result.output, exit_code=result.exit_code)
 
 
 def completion_items(source: str, line: int, column: int) -> list[CompletionItem]:

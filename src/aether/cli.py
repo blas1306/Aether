@@ -14,6 +14,7 @@ from .ir import print_ir
 from .pipeline import (
     DEFAULT_SSA_BUILDER,
     IRBackend,
+    IR_MAIN_RESULT_NAME,
     lower_to_verified_ssa,
     parse_source,
     prepare_typed_program,
@@ -443,21 +444,22 @@ def _execute_file(
             stderr=stderr,
         )
     if backend == "ast":
-        run_aether(
+        result = run_aether(
             source,
             source_root=path.parent,
             output_writer=stdout.write,
             input_reader=stdin.readline,
         )
-        return EXIT_SUCCESS
+        return result.exit_code
     if backend == "ir":
-        IRBackend().run(
+        env = IRBackend(output_writer=stdout.write).run(
             prepare_typed_program(
                 source,
                 TypeChecker(source_root=path.parent),
             )
         )
-        return EXIT_SUCCESS
+        result = env.lookup(IR_MAIN_RESULT_NAME)
+        return int(result.value) if result is not None else EXIT_SUCCESS
     raise ValueError(f"Unknown backend '{backend}'")
 
 

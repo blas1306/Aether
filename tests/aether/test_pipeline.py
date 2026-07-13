@@ -505,9 +505,10 @@ def test_ir_backend_matches_ast_for_supported_subset(source: str, call: str) -> 
     typed_program = prepare_typed_program(source, TypeChecker())
     ir_env = IRBackend().run(typed_program)
 
-    ast_result = run_aether(f"{source}\nobserved = {call};")
+    ast_result = run_aether(source)
 
-    assert ir_env.values[IR_MAIN_RESULT_NAME].value == ast_result.env["observed"].value
+    assert call == "main()"
+    assert ir_env.values[IR_MAIN_RESULT_NAME].value == ast_result.exit_code
 
 
 def test_ir_backend_reports_unsupported_features_clearly() -> None:

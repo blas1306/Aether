@@ -75,7 +75,11 @@ class AetherSession:
         except Exception:
             self._restore(snapshot)
             raise
-        return AetherRunResult(env=dict(env.values), output=self._interpreter.output)
+        return AetherRunResult(
+            env=dict(env.values),
+            output=self._interpreter.output,
+            exit_code=self._interpreter.last_exit_code,
+        )
 
     def workspace_values(self) -> dict[str, AetherValue]:
         return dict(self._interpreter.global_env.values)

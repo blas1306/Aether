@@ -12,6 +12,7 @@ Visibility = str | None
 class Program:
     statements: list["Statement"]
     package_name: str | None = None
+    entry_point: str | None = None
 
 
 class Statement(Protocol):
@@ -221,6 +222,7 @@ class FunctionDeclaration:
     visibility: Visibility = None
     line: int = 1
     column: int = 1
+    synthetic: bool = False
 
 
 @dataclass(frozen=True)

@@ -2144,10 +2144,50 @@ The typechecker is expected to catch semantic errors before execution whenever p
 Aether v0 runs through this pipeline:
 
 ```text
-Lexer -> Parser -> TypeChecker -> Interpreter
+Lexer -> Parser -> TypeChecker -> EntryPointNormalizer -> AST/IR/SSA/LLVM
 ```
 
-The interpreter should only run after lexical, syntactic, and semantic checks succeed.
+Entry-point normalization runs after semantic checks so diagnostics keep their
+original user source locations. The synthetic nodes are therefore absent from
+user-visible symbols, completion, formatting, and documentation. The AST
+interpreter and compiled backends consume the same normalized executable
+program.
+
+## Executable Entry Point
+
+An executable `.ae` entry file uses exactly one of two equivalent forms. In
+script mode, executable top-level statements are wrapped in an internal,
+synthetic entry function:
+
+```aether
+println("Hola");
+```
+
+Alternatively, the file may declare one explicit entry function. Its only
+valid signature is `int main()`; parameters, `void main()`, other return types,
+and duplicate/overloaded `main` declarations are errors:
+
+```aether
+int main() {
+    println("Hola");
+}
+```
+
+Reaching the end of `main` returns `0`. This exception applies only to `main`;
+every ordinary non-void function must still return on all paths. An explicit
+return becomes the process/backend exit code, while a panic remains a distinct
+failure with exit code `1`.
+
+An explicit `main` cannot be combined with executable top-level statements.
+Top-level declarations such as helper functions and constants remain valid;
+constant initialization is normalized into the entry function for compiled
+execution. A top-level `return` is invalid and is never interpreted as a return
+from the synthetic entry point.
+
+This guarantee currently applies only to the executable entry file. File
+imports, native module initialization, and top-level execution in imported
+modules remain AST-only; a native pipeline continues to reject imports rather
+than inventing module initialization semantics.
 
 ## Script and Session Execution
 

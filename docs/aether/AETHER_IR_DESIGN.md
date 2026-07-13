@@ -394,19 +394,19 @@ aether --backend=ir --emit-cfg program.ae
 aether bench benchmarks/sum_to.ae
 ```
 
-`aether program.ae` and `aether --backend=ast program.ae` both use the
-production AST backend. `--backend=ir` uses the experimental IR pipeline:
+`aether program.ae` uses LLVM by default, `--backend=ast` selects the AST
+interpreter, and `--backend=ir` uses the experimental IR pipeline:
 
 ```text
-source -> lexer -> parser -> typechecker -> IR lowering -> IR verifier -> IR interpreter
+source -> lexer -> parser -> typechecker -> entry-point normalization
+       -> IR lowering -> IR verifier -> IR interpreter
 ```
 
-IR execution currently requires a zero-argument `main()` function. If `main()`
-returns a non-void scalar value, `IRBackend.run` stores it in the returned
-runtime environment under `__ir_main_result`; the CLI does not print that value
-automatically. This keeps file-output behavior tied to explicit language
-output constructs, while the IR backend remains too small to support builtins
-such as `println`.
+Entry-point normalization supplies a marked synthetic `main` for script-mode
+entry files. If `main()` returns a scalar value, `IRBackend.run` stores it in
+the returned runtime environment under `__ir_main_result`; the CLI propagates
+an `int` result as its exit code without printing it. File output remains tied
+to explicit language output constructs such as `print` and `println`.
 
 `--emit-ir` lowers and verifies the checked program, prints deterministic
 textual IR, and does not execute it. It is a development tool and is accepted
