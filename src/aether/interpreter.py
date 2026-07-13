@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from math import trunc
 import os
 from pathlib import Path
@@ -18,9 +18,9 @@ from .modules import is_public_export, private_top_level_names, resolve_file_mod
 from .native_members import native_member_set, native_method, native_property
 from .parser import Parser
 from .scope import Scope
-from .stdlib import BuiltinFunction, is_builtin_namespace, make_builtins
+from .stdlib import BuiltinFunction, is_builtin, is_builtin_constant, is_builtin_namespace, make_builtins
 from .stdlib.math.linear_algebra import matmul_builtin
-from .stdlib.registry import builtin_aliases_for_import, builtin_constant_aliases_for_import, get_builtin_constant
+from .stdlib.registry import get_builtin_constant
 from .tokens import AETHER_TYPES, PRIMITIVE_TYPES
 from .types import (
     AetherType,
@@ -84,6 +84,10 @@ class Function:
     builtin_aliases: dict[str, str] | None = None
     builtin_constant_aliases: dict[str, str] | None = None
     imported_modules: set[str] | None = None
+    module_bindings: dict[str, str] | None = None
+    qualified_values: dict[str, AetherValue] | None = None
+    qualified_structs: dict[str, ast.StructDeclaration | ast.ClassDeclaration] | None = None
+    qualified_enums: dict[str, ast.EnumDeclaration] | None = None
     type_aliases: dict[str, AetherType] | None = None
     structs: dict[str, ast.StructDeclaration] | None = None
     struct_methods: dict[str, dict[str, "Function"]] | None = None
@@ -176,6 +180,10 @@ class _FunctionContext:
         self.previous_builtin_aliases: dict[str, str] = {}
         self.previous_builtin_constant_aliases: dict[str, str] = {}
         self.previous_imported_modules: set[str] = set()
+        self.previous_module_bindings: dict[str, str] = {}
+        self.previous_qualified_values: dict[str, AetherValue] = {}
+        self.previous_qualified_structs: dict[str, ast.StructDeclaration | ast.ClassDeclaration] = {}
+        self.previous_qualified_enums: dict[str, ast.EnumDeclaration] = {}
         self.previous_type_aliases: dict[str, AetherType] = {}
         self.previous_structs: dict[str, ast.StructDeclaration] = {}
         self.previous_struct_methods: dict[str, dict[str, Function]] = {}
@@ -186,6 +194,10 @@ class _FunctionContext:
         self.previous_builtin_aliases = self.interpreter.builtin_aliases
         self.previous_builtin_constant_aliases = self.interpreter.builtin_constant_aliases
         self.previous_imported_modules = self.interpreter.imported_modules
+        self.previous_module_bindings = self.interpreter.module_bindings
+        self.previous_qualified_values = self.interpreter.qualified_values
+        self.previous_qualified_structs = self.interpreter.qualified_structs
+        self.previous_qualified_enums = self.interpreter.qualified_enums
         self.previous_type_aliases = self.interpreter.type_aliases
         self.previous_structs = self.interpreter.structs
         self.previous_struct_methods = self.interpreter.struct_methods
@@ -202,6 +214,22 @@ class _FunctionContext:
         self.interpreter.imported_modules = {
             *self.previous_imported_modules,
             *(self.function.imported_modules or set()),
+        }
+        self.interpreter.module_bindings = {
+            **self.previous_module_bindings,
+            **(self.function.module_bindings or {}),
+        }
+        self.interpreter.qualified_values = {
+            **self.previous_qualified_values,
+            **(self.function.qualified_values or {}),
+        }
+        self.interpreter.qualified_structs = {
+            **self.previous_qualified_structs,
+            **(self.function.qualified_structs or {}),
+        }
+        self.interpreter.qualified_enums = {
+            **self.previous_qualified_enums,
+            **(self.function.qualified_enums or {}),
         }
         self.interpreter.type_aliases = {
             **self.previous_type_aliases,
@@ -228,6 +256,10 @@ class _FunctionContext:
         self.interpreter.builtin_aliases = self.previous_builtin_aliases
         self.interpreter.builtin_constant_aliases = self.previous_builtin_constant_aliases
         self.interpreter.imported_modules = self.previous_imported_modules
+        self.interpreter.module_bindings = self.previous_module_bindings
+        self.interpreter.qualified_values = self.previous_qualified_values
+        self.interpreter.qualified_structs = self.previous_qualified_structs
+        self.interpreter.qualified_enums = self.previous_qualified_enums
         self.interpreter.type_aliases = self.previous_type_aliases
         self.interpreter.structs = self.previous_structs
         self.interpreter.struct_methods = self.previous_struct_methods
@@ -262,6 +294,11 @@ class Interpreter:
         self.builtin_aliases: dict[str, str] = {}
         self.builtin_constant_aliases: dict[str, str] = {}
         self.imported_modules: set[str] = set()
+        self.module_bindings: dict[str, str] = {}
+        self.qualified_values: dict[str, AetherValue] = {}
+        self.qualified_structs: dict[str, ast.StructDeclaration | ast.ClassDeclaration] = {}
+        self.qualified_enums: dict[str, ast.EnumDeclaration] = {}
+        self._loaded_file_modules: dict[str, tuple[ast.Program, "Interpreter"]] = {}
         self.type_aliases: dict[str, AetherType] = {}
         self.structs: dict[str, ast.StructDeclaration] = {}
         self.struct_methods: dict[str, dict[str, Function]] = {}
@@ -279,6 +316,11 @@ class Interpreter:
         self._interpret_depth += 1
         self.last_exit_code = 0
         try:
+            for statement in program.statements:
+                if isinstance(statement, ast.ImportStatement):
+                    self._import_module_statement(statement)
+                elif isinstance(statement, ast.FromImportStatement):
+                    self._from_import(statement)
             for statement in program.statements:
                 self._execute(statement, self.global_env)
             if program.entry_point is not None:
@@ -506,7 +548,8 @@ class Interpreter:
             self._evaluate(statement.expression, env)
             return
         if isinstance(statement, ast.ImportStatement):
-            self._import_module(statement.module_name)
+            return
+        if isinstance(statement, ast.FromImportStatement):
             return
         if isinstance(statement, ast.IfStatement):
             condition = self._evaluate(statement.condition, env)
@@ -586,6 +629,10 @@ class Interpreter:
             dict(self.builtin_aliases),
             dict(self.builtin_constant_aliases),
             set(self.imported_modules),
+            dict(self.module_bindings),
+            dict(self.qualified_values),
+            dict(self.qualified_structs),
+            dict(self.qualified_enums),
             dict(self.type_aliases),
             dict(self.structs),
             {name: dict(methods) for name, methods in self.struct_methods.items()},
@@ -689,6 +736,34 @@ class Interpreter:
         if isinstance(expression, ast.FieldAccess):
             constant_name = _field_access_path(expression)
             constant_root = _field_access_root_name(expression)
+            canonical_member = self._resolve_module_member(constant_name) if constant_name is not None else None
+            if canonical_member is not None:
+                value = self.qualified_values.get(canonical_member)
+                if value is not None:
+                    return value
+                enum_name, _, variant_name = canonical_member.rpartition(".")
+                enum_declaration = self.qualified_enums.get(enum_name)
+                if enum_declaration is not None:
+                    if variant_name not in {variant.name for variant in enum_declaration.variants}:
+                        raise AetherTypeError(
+                            f"Enum '{enum_declaration.name}' has no variant '{variant_name}'.",
+                            line=expression.line,
+                            column=expression.column,
+                        )
+                    return AetherValue(
+                        EnumType(enum_declaration.name),
+                        EnumValue(enum_declaration.name, variant_name),
+                    )
+                builtin_constant = get_builtin_constant(canonical_member)
+                if builtin_constant is not None:
+                    return builtin_constant
+                raise AetherRuntimeError(
+                    f"Module '{canonical_member.rsplit('.', 1)[0]}' has no exported symbol "
+                    f"'{canonical_member.rsplit('.', 1)[1]}'.",
+                    line=expression.line,
+                    column=expression.column,
+                    kind="import",
+                )
             if isinstance(expression.target, ast.Identifier) and env.lookup(expression.target.name) is None:
                 enum_value = self._enum_variant_value(expression.target.name, expression.field_name, expression)
                 if enum_value is not None:
@@ -1194,19 +1269,21 @@ class Interpreter:
         return divmod(offset, cols)
 
     def _evaluate_call(self, expression: ast.CallExpression, env: Environment) -> AetherValue:
-        builtin_name = self.builtin_aliases.get(expression.callee, expression.callee)
+        canonical_callee = self._resolve_module_member(expression.callee)
+        builtin_name = self.builtin_aliases.get(expression.callee, canonical_callee or expression.callee)
+        builtin_is_visible = "." not in expression.callee or canonical_callee is not None
         named_args = {name: self._evaluate(value, env) for name, value in expression.keyword_arguments.items()}
         if expression.callee == "Exception":
             if named_args:
                 raise AetherRuntimeError("Exception(...) does not accept keyword arguments.")
             args = [self._evaluate(arg, env) for arg in expression.arguments]
             return self._construct_exception(args, expression)
-        if builtin_name in self.builtins:
+        if builtin_is_visible and builtin_name in self.builtins:
             args = [
                 self._evaluate_builtin_argument(arg, env, builtin_name)
                 for arg in expression.arguments
             ]
-            return self._call(expression.callee, args, named_args, env)
+            return self._call(builtin_name, args, named_args, env)
         method_value = self._evaluate_dotted_native_method_call(expression, env)
         if method_value is not None:
             return method_value
@@ -1224,7 +1301,9 @@ class Interpreter:
                 line=expression.line,
                 column=expression.column,
             )
-        struct = self._constructor_struct(expression.callee)
+        struct = self.qualified_structs.get(canonical_callee) if canonical_callee is not None else None
+        if struct is None:
+            struct = self._constructor_struct(expression.callee)
         if struct is not None:
             constructor_parameters = (
                 struct.constructor.parameters
@@ -1243,7 +1322,8 @@ class Interpreter:
             method = self._struct_method_function(receiver.type_name, expression.callee)
             if method is not None:
                 return self._call_struct_method(receiver, method, expression.arguments, named_args, env, expression)
-        function = env.get_function(expression.callee)
+        resolved_callee = canonical_callee or expression.callee
+        function = env.get_function(resolved_callee)
         if function is not None and isinstance(function.declaration, ast.FunctionDeclaration) and len(
             expression.arguments
         ) == len(function.declaration.parameters):
@@ -1261,7 +1341,7 @@ class Interpreter:
                 ]
         else:
             args = [self._evaluate(arg, env) for arg in expression.arguments]
-        return self._call(expression.callee, args, {}, env)
+        return self._call(resolved_callee, args, {}, env)
 
     def _evaluate_dotted_native_method_call(
         self,
@@ -1495,7 +1575,7 @@ class Interpreter:
         named_args: dict[str, AetherValue],
         env: Environment,
     ) -> AetherValue:
-        builtin_name = self.builtin_aliases.get(callee, callee)
+        builtin_name = self.builtin_aliases.get(callee, self._resolve_module_member(callee) or callee)
         builtin = self.builtins.get(builtin_name)
         if builtin is not None:
             if named_args:
@@ -1656,7 +1736,11 @@ class Interpreter:
             return self._numeric_or_string_binary(left, operator, right)
         if operator == "\\":
             if LINEAR_ALGEBRA_MODULE not in self.imported_modules:
-                raise AetherRuntimeError("Operator '\\' requires import Math.LinearAlgebra.")
+                raise AetherRuntimeError(
+                    "Operator '\\' requires module 'Math.LinearAlgebra'.",
+                    hint="import Math.LinearAlgebra;",
+                    kind="import",
+                )
             return self.builtins[LINEAR_ALGEBRA_SOLVE]([left, right])
         if operator in {"==", "!="}:
             if isinstance(left.value, ClassInstance) or isinstance(right.value, ClassInstance):
@@ -1775,14 +1859,18 @@ class Interpreter:
             raise AetherRuntimeError(f"Unsupported numeric operator '{operator}'.")
         return _coerced_numeric_result(value, result_type)
 
-    def _import_module(self, module_name: str) -> None:
-        if module_name in self.imported_modules:
-            return
+    def _import_module_statement(self, statement: ast.ImportStatement) -> None:
+        self._load_module(statement.module_name)
+        self.module_bindings[statement.local_binding] = statement.module_name
+        self.imported_modules.add(statement.module_name)
+
+    def _load_module(self, module_name: str) -> tuple[ast.Program, "Interpreter"] | None:
         if is_builtin_namespace(module_name):
-            self.builtin_aliases.update(builtin_aliases_for_import(module_name))
-            self.builtin_constant_aliases.update(builtin_constant_aliases_for_import(module_name))
             self.imported_modules.add(module_name)
-            return
+            return None
+        cached = self._loaded_file_modules.get(module_name)
+        if cached is not None:
+            return cached
         if module_name in self.import_stack:
             raise AetherRuntimeError(f"Cyclic import involving '{module_name}'.")
         module_path = resolve_file_module_path(module_name, self.source_root)
@@ -1804,10 +1892,74 @@ class Interpreter:
             input_reader=self.input_reader,
         )
         module_interpreter.interpret(program)
-        self._merge_module_runtime_exports(module_name, program, module_interpreter)
+        loaded = (program, module_interpreter)
+        self._loaded_file_modules[module_name] = loaded
+        self._record_qualified_module_exports(module_name, program, module_interpreter)
+        self.imported_modules.add(module_name)
+        return loaded
+
+    def _from_import(self, statement: ast.FromImportStatement) -> None:
+        module_name = statement.module_name
+        candidate_module = f"{module_name}.{statement.symbol}"
+        if is_builtin_namespace(candidate_module) or resolve_file_module_path(candidate_module, self.source_root).is_file():
+            self._load_module(candidate_module)
+            self.module_bindings[statement.local_binding] = candidate_module
+            self.imported_modules.add(candidate_module)
+            return
+        loaded = self._load_module(module_name)
+        local_name = statement.local_binding
+        canonical_name = f"{module_name}.{statement.symbol}"
+        if is_builtin(canonical_name):
+            self.builtin_aliases[local_name] = canonical_name
+        elif is_builtin_constant(canonical_name):
+            self.builtin_constant_aliases[local_name] = canonical_name
+        elif loaded is not None:
+            program, module_interpreter = loaded
+            if statement.symbol in private_top_level_names(program):
+                raise AetherRuntimeError(
+                    f"Symbol '{statement.symbol}' is not public in module '{module_name}'.",
+                    line=statement.symbol_line,
+                    column=statement.symbol_column,
+                    kind="import",
+                )
+            if canonical_name in self.global_env.functions:
+                self.global_env.functions[local_name] = self.global_env.functions[canonical_name]
+            elif canonical_name in self.qualified_values:
+                value = self.qualified_values[canonical_name]
+                is_const = module_interpreter.global_env.variable_scope.is_const(statement.symbol)
+                self.global_env.define(local_name, value, is_const=is_const)
+            elif statement.symbol in self._exported_structs(program, module_interpreter):
+                self.structs[local_name] = module_interpreter.structs[statement.symbol]
+                self.struct_methods[local_name] = dict(module_interpreter.struct_methods.get(statement.symbol, {}))
+            elif statement.symbol in self._exported_enums(program, module_interpreter):
+                self.enums[local_name] = module_interpreter.enums[statement.symbol]
+            elif statement.symbol in self._exported_interfaces(program, module_interpreter):
+                self.interfaces[local_name] = module_interpreter.interfaces[statement.symbol]
+            elif statement.symbol in self._exported_aliases(program, module_interpreter):
+                target_type = module_interpreter.type_aliases[statement.symbol]
+                if isinstance(target_type, str) and target_type in module_interpreter.structs:
+                    self.structs[local_name] = replace(module_interpreter.structs[target_type], name=local_name)
+                    self.struct_methods[local_name] = dict(module_interpreter.struct_methods.get(target_type, {}))
+                else:
+                    self.type_aliases[local_name] = target_type
+            else:
+                raise AetherRuntimeError(
+                    f"Module '{module_name}' has no exported symbol '{statement.symbol}'.",
+                    line=statement.symbol_line,
+                    column=statement.symbol_column,
+                    kind="import",
+                )
+        else:
+            raise AetherRuntimeError(
+                f"Module '{module_name}' has no exported symbol '{statement.symbol}'.",
+                line=statement.symbol_line,
+                column=statement.symbol_column,
+                kind="import",
+            )
+        self.imported_symbol_origins[local_name] = canonical_name
         self.imported_modules.add(module_name)
 
-    def _merge_module_runtime_exports(
+    def _record_qualified_module_exports(
         self,
         module_name: str,
         program: ast.Program,
@@ -1818,49 +1970,23 @@ class Interpreter:
         for name in private_top_level_names(program):
             self.private_imported_symbols.setdefault(name, set()).add(module_name)
         for name, value in self._exported_values(program, module_interpreter).items():
-            self._ensure_import_available(name, module_name)
-            is_const = module_interpreter.global_env.variable_scope.is_const(name)
-            self.global_env.define(name, value, is_const=is_const)
-            self.imported_symbol_origins[name] = module_name
+            self.qualified_values[f"{module_name}.{name}"] = value
         for name, function in self._exported_functions(program, module_interpreter).items():
-            self._ensure_import_available(name, module_name)
-            self.global_env.functions[name] = function
-            self.imported_symbol_origins[name] = module_name
+            self.global_env.functions[f"{module_name}.{name}"] = function
         for name, declaration in self._exported_structs(program, module_interpreter).items():
-            self._ensure_import_available(name, module_name)
-            self.structs[name] = declaration
-            self.struct_methods[name] = dict(module_interpreter.struct_methods.get(name, {}))
-            self.imported_symbol_origins[name] = module_name
+            self.qualified_structs[f"{module_name}.{name}"] = declaration
         for name, declaration in self._exported_enums(program, module_interpreter).items():
-            self._ensure_import_available(name, module_name)
-            self.enums[name] = declaration
-            self.imported_symbol_origins[name] = module_name
-        for name, declaration in self._exported_interfaces(program, module_interpreter).items():
-            self._ensure_import_available(name, module_name)
-            self.interfaces[name] = declaration
-            self.imported_symbol_origins[name] = module_name
-        for name, target_type in self._exported_aliases(program, module_interpreter).items():
-            self._ensure_import_available(name, module_name)
-            self.type_aliases[name] = target_type
-            self.imported_symbol_origins[name] = module_name
+            self.qualified_enums[f"{module_name}.{name}"] = declaration
 
-    def _ensure_import_available(self, name: str, module_name: str) -> None:
-        existing_origin = self.imported_symbol_origins.get(name)
-        if existing_origin is not None and existing_origin != module_name:
-            raise AetherRuntimeError(
-                f"Import collision for symbol '{name}' exported by both '{existing_origin}' and '{module_name}'."
-            )
-        if (
-            name in self.global_env.values
-            or name in self.global_env.functions
-            or name in self.type_aliases
-            or name in self.structs
-            or name in self.enums
-            or name in self.interfaces
-        ):
-            raise AetherRuntimeError(
-                f"Import collision: symbol '{name}' from module '{module_name}' conflicts with an existing symbol."
-            )
+    def _resolve_module_member(self, visible_name: str | None) -> str | None:
+        if visible_name is None:
+            return None
+        for binding in sorted(self.module_bindings, key=len, reverse=True):
+            if visible_name == binding:
+                return self.module_bindings[binding]
+            if visible_name.startswith(binding + "."):
+                return self.module_bindings[binding] + visible_name[len(binding) :]
+        return None
 
     def _exported_values(
         self,

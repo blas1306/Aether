@@ -149,7 +149,7 @@ public alias P = Point;
             "textDocument": {
                 "uri": uri,
                 "version": 1,
-                "text": "import Geometry;\nP p = P(1.0, 2.0);\n",
+                "text": "from Geometry import P;\nP p = P(1.0, 2.0);\n",
             }
         }
     )
@@ -319,6 +319,19 @@ def test_lsp_document_symbols_include_functions_variables_and_imports() -> None:
     assert by_name["value"]["kind"] == 13
 
 
+def test_lsp_document_symbols_use_visible_import_aliases() -> None:
+    symbols = _document_symbols_for(
+        "import Math.LinearAlgebra as LA;\n"
+        "from Math.LinearAlgebra import solve as linearSolve;\n"
+    )
+    by_name = {item["name"]: item for item in symbols}
+
+    assert by_name["LA"]["detail"] == "import Math.LinearAlgebra as LA"
+    assert by_name["linearSolve"]["detail"] == (
+        "from Math.LinearAlgebra import solve as linearSolve"
+    )
+
+
 def test_lsp_hover_returns_document_symbol_details() -> None:
     source = "double square(double x) { return x*x; }\nvalue = square(2);\n"
 
@@ -336,7 +349,7 @@ def test_lsp_hover_returns_document_symbol_details() -> None:
 
 
 def test_lsp_hover_returns_builtin_and_imported_alias_details() -> None:
-    source = "import Math.LinearAlgebra\nprintln(1);\nsolve(A, b);\n"
+    source = "from Math.LinearAlgebra import solve\nprintln(1);\nsolve(A, b);\n"
 
     println_hover = _hover_for(source, line=1, character=1)
     solve_hover = _hover_for(source, line=2, character=1)

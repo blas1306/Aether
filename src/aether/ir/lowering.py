@@ -2154,6 +2154,7 @@ def _feature_name(node: object) -> str:
         "ExpressionFunctionDeclaration": "expression functions",
         "VarDeclaration": "top-level variable declarations",
         "ImportStatement": "imports",
+        "FromImportStatement": "imports",
         "ExpressionStatement": "expression statements",
         "DestructuringAssignment": "destructuring assignments",
         "IndexAssignment": "index assignments",

@@ -52,7 +52,15 @@ _BLOCK_FUNCTION_RE = re.compile(
 )
 _FOR_LOOP_RE = re.compile(r"^for\s+(?P<name>[A-Za-z_]\w*)\s*=\s*(?P<expr>[^{\n]+)", re.IGNORECASE)
 _FOR_IN_RE = re.compile(r"^for\s+(?P<name>[A-Za-z_]\w*)\s+in\s+(?P<expr>[^{\n]+)", re.IGNORECASE)
-_IMPORT_RE = re.compile(r"^import\s+(?P<name>[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\b", re.IGNORECASE)
+_IMPORT_RE = re.compile(
+    r"^import\s+(?P<module>[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)(?:\s+as\s+(?P<alias>[A-Za-z_]\w*))?\b",
+    re.IGNORECASE,
+)
+_FROM_IMPORT_RE = re.compile(
+    r"^from\s+(?P<module>[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s+import\s+"
+    r"(?P<symbol>[A-Za-z_]\w*)(?:\s+as\s+(?P<alias>[A-Za-z_]\w*))?\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -571,19 +579,32 @@ def _extract_import_symbol(
     line_starts: list[int],
 ) -> DocumentSymbol | None:
     match = _IMPORT_RE.match(statement)
+    from_import = _FROM_IMPORT_RE.match(statement)
+    match = match or from_import
     if match is None:
         return None
-    name = match.group("name")
+    if from_import is not None:
+        name_group = "alias" if from_import.group("alias") is not None else "symbol"
+        name = from_import.group(name_group)
+        detail = f"from {from_import.group('module')} import {from_import.group('symbol')}"
+        if from_import.group("alias") is not None:
+            detail += f" as {name}"
+    else:
+        name_group = "alias" if match.group("alias") is not None else "module"
+        name = match.group(name_group)
+        detail = f"import {match.group('module')}"
+        if match.group("alias") is not None:
+            detail += f" as {name}"
     return _document_symbol(
         statement_span,
         line_starts,
-        name_start=leading_ws + match.start("name"),
-        name_end=leading_ws + match.end("name"),
+        name_start=leading_ws + match.start(name_group),
+        name_end=leading_ws + match.end(name_group),
         name=name,
         kind="module",
         origin="import",
-        signature=f"import {name}",
-        detail=f"import {name}",
+        signature=detail,
+        detail=detail,
     )
 
 

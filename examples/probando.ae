@@ -3,5 +3,5 @@ import Plots
 
 f(x) = sin(x);
 
-grid(true);
-plot(f, 0, 6);
+Plots.grid(true);
+Plots.plot(f, 0, 6);

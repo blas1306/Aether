@@ -30,7 +30,7 @@ println(EsPrimo2(25));
 n = [1; 2; 3; 4; 5; 6; 7; 8; 9; 10; 11; 12];
 p = [2; 3; 5; 7; 11; 13; 17; 19; 23; 29; 31; 37];
 
-A = ones(12, 2);
+A = Math.LinearAlgebra.ones(12, 2);
 
 for i in 0:11 {
     A[i, 1] = n[i]*ln(n[i]);
@@ -42,14 +42,14 @@ println("z = ", z);
 
 f(x) = z[0] + z[1] * x * ln(x);
 
-grid(true);
-title("Numeros primos y ajuste");
-xlabel("n");
-ylabel("p_n");
-plot(n, p, ".", label="p_n", color="red");
-plot!(f, 1, 13, label="ajuste");
+Plots.grid(true);
+Plots.title("Numeros primos y ajuste");
+Plots.xlabel("n");
+Plots.ylabel("p_n");
+Plots.plot(n, p, ".", label="p_n", color="red");
+Plots.plot!(f, 1, 13, label="ajuste");
 
-err2 = norm(p - A*z)^2;
+err2 = Math.LinearAlgebra.norm(p - A*z)^2;
 println("err2 = ", err2);
 
 public int p_n(int x) {

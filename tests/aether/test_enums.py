@@ -176,7 +176,7 @@ public enum SolverStatus {
 
     result = run_aether(
         """
-import Solver;
+from Solver import SolverStatus;
 
 SolverStatus s = SolverStatus.Converged;
 println(s);
@@ -199,12 +199,10 @@ private enum HiddenStatus {
         encoding="utf-8",
     )
 
-    with pytest.raises(AetherTypeError, match="private"):
+    with pytest.raises(AetherTypeError, match="not public"):
         run_aether(
             """
-import Solver;
-
-println(HiddenStatus.Secret);
+from Solver import HiddenStatus;
 """,
             source_root=tmp_path,
         )

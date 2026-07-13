@@ -550,11 +550,41 @@ class Parser:
             return ast.WhileStatement(self._expression(), self._block(), while_token.line, while_token.column)
         if self._match(TokenType.IMPORT):
             import_token = self._previous()
-            module_name = self._consume(TokenType.IDENTIFIER, "Expected module name after 'import'.").lexeme
-            while self._match(TokenType.DOT):
-                module_name += "." + self._consume(TokenType.IDENTIFIER, "Expected identifier after '.'.").lexeme
+            module_path = self._qualified_module_path("Expected module name after 'import'.")
+            alias_token = None
+            if self._match(TokenType.AS):
+                alias_token = self._consume(TokenType.IDENTIFIER, "Expected alias after 'as'.")
             self._consume_optional_import_terminator()
-            return ast.ImportStatement(module_name, import_token.line, import_token.column)
+            return ast.ImportStatement(
+                module_path,
+                alias_token.lexeme if alias_token is not None else None,
+                import_token.line,
+                import_token.column,
+                alias_token.line if alias_token is not None else None,
+                alias_token.column if alias_token is not None else None,
+            )
+        if self._match(TokenType.FROM):
+            from_token = self._previous()
+            module_path = self._qualified_module_path("Expected module name after 'from'.")
+            self._consume(TokenType.IMPORT, "Expected 'import' after module path.")
+            if self._check(TokenType.STAR):
+                raise self._error(self._peek(), "Wildcard imports are not supported.")
+            symbol_token = self._consume(TokenType.IDENTIFIER, "Expected symbol name after 'import'.")
+            alias_token = None
+            if self._match(TokenType.AS):
+                alias_token = self._consume(TokenType.IDENTIFIER, "Expected alias after 'as'.")
+            self._consume_optional_import_terminator()
+            return ast.FromImportStatement(
+                module_path,
+                symbol_token.lexeme,
+                alias_token.lexeme if alias_token is not None else None,
+                from_token.line,
+                from_token.column,
+                symbol_token.line,
+                symbol_token.column,
+                alias_token.line if alias_token is not None else None,
+                alias_token.column if alias_token is not None else None,
+            )
         if self._match(TokenType.FOR):
             for_token = self._previous()
             variable_type: AetherType | None = None
@@ -1000,6 +1030,12 @@ class Parser:
             return
         raise self._error(self._peek(), "Expected ';' or newline after import statement.")
 
+    def _qualified_module_path(self, message: str) -> tuple[str, ...]:
+        parts = [self._consume(TokenType.IDENTIFIER, message).lexeme]
+        while self._match(TokenType.DOT):
+            parts.append(self._consume(TokenType.IDENTIFIER, "Expected identifier after '.'.").lexeme)
+        return tuple(parts)
+
     def _synchronize(self) -> None:
         if self._is_at_end():
             return
@@ -1011,6 +1047,7 @@ class Parser:
             if self._peek().type in {
                 TokenType.PACKAGE,
                 TokenType.IMPORT,
+                TokenType.FROM,
                 TokenType.PUBLIC,
                 TokenType.PRIVATE,
                 TokenType.CONST,

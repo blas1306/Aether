@@ -184,6 +184,8 @@ def completion_items(source: str, line: int, column: int) -> list[CompletionItem
         add(builtin, "function", "Aether imported builtin")
     for constant in _imported_builtin_constant_aliases(source):
         add(constant, "constant", "Aether imported builtin constant")
+    for binding in _imported_module_bindings(source):
+        add(binding, "module", "Aether imported module")
     for name in sorted(_symbol_names(source)):
         add(name, "variable", "Aether symbol")
     return items
@@ -341,13 +343,12 @@ def _native_type_family(type_name: str) -> str | None:
 
 
 def _imported_builtin_aliases(source: str) -> set[str]:
-    from .stdlib.registry import builtin_aliases_for_import, is_builtin_namespace
+    from .stdlib.registry import is_builtin
 
     aliases: set[str] = set()
-    for match in re.finditer(r"^\s*import\s+([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\b", source, re.MULTILINE):
-        module_name = match.group(1)
-        if is_builtin_namespace(module_name):
-            aliases.update(builtin_aliases_for_import(module_name))
+    for match in _FROM_IMPORT_RE.finditer(source):
+        if is_builtin(f"{match.group('module')}.{match.group('symbol')}"):
+            aliases.add(match.group("alias") or match.group("symbol"))
     return aliases
 
 
@@ -387,11 +388,29 @@ def _enum_variants(source: str) -> dict[str, list[str]]:
 
 
 def _imported_builtin_constant_aliases(source: str) -> set[str]:
-    from .stdlib.registry import builtin_constant_aliases_for_import, is_builtin_namespace
+    from .stdlib.registry import is_builtin_constant
 
     aliases: set[str] = set()
-    for match in re.finditer(r"^\s*import\s+([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\b", source, re.MULTILINE):
-        module_name = match.group(1)
-        if is_builtin_namespace(module_name):
-            aliases.update(builtin_constant_aliases_for_import(module_name))
+    for match in _FROM_IMPORT_RE.finditer(source):
+        if is_builtin_constant(f"{match.group('module')}.{match.group('symbol')}"):
+            aliases.add(match.group("alias") or match.group("symbol"))
     return aliases
+
+
+_FROM_IMPORT_RE = re.compile(
+    r"^\s*from\s+(?P<module>[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\s+"
+    r"import\s+(?P<symbol>[A-Za-z_][A-Za-z0-9_]*)(?:\s+as\s+(?P<alias>[A-Za-z_][A-Za-z0-9_]*))?\b",
+    re.MULTILINE,
+)
+
+
+def _imported_module_bindings(source: str) -> set[str]:
+    bindings: set[str] = set()
+    pattern = re.compile(
+        r"^\s*import\s+(?P<module>[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)"
+        r"(?:\s+as\s+(?P<alias>[A-Za-z_][A-Za-z0-9_]*))?\b",
+        re.MULTILINE,
+    )
+    for match in pattern.finditer(source):
+        bindings.add(match.group("alias") or match.group("module"))
+    return bindings

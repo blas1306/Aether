@@ -188,8 +188,8 @@ def test_llvm_array_and_list_reuse_the_same_specialized_helpers() -> None:
 int main() {
     Array<int> ai = {2, 1}; List<int> li = {4, 3};
     Array<double> ad = {2.0, 1.0}; List<double> ld = {4.0, 3.0};
-    Array<string> as = {"b", "a"}; List<string> ls = {"d", "c"};
-    ai.sort(); li.sort(); ad.sort(); ld.sort(); as.sort(); ls.sort();
+    Array<string> atext = {"b", "a"}; List<string> ls = {"d", "c"};
+    ai.sort(); li.sort(); ad.sort(); ld.sort(); atext.sort(); ls.sort();
     return ai[0] + li[0];
 }
 """

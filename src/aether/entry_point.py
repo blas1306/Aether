@@ -15,6 +15,7 @@ _NON_EXECUTABLE_DECLARATIONS = (
     ast.EnumDeclaration,
     ast.ExpressionFunctionDeclaration,
     ast.FunctionDeclaration,
+    ast.FromImportStatement,
     ast.ImportStatement,
     ast.InterfaceDeclaration,
     ast.StructDeclaration,

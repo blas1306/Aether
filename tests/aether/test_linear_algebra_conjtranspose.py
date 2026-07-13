@@ -20,6 +20,7 @@ def _matrix_values(result, name: str) -> list[list[float]]:
 def test_conjtranspose_builtin_returns_conjugate_transpose_for_real_matrix() -> None:
     result = run_aether(
         """
+import Math.LinearAlgebra
 A = [1 2 3; 4 5 6];
 B = Math.LinearAlgebra.conjtranspose(A);
 println(B);
@@ -31,10 +32,10 @@ println(B);
     assert result.output == "[1 4; 2 5; 3 6]\n"
 
 
-def test_conjtranspose_import_exposes_unqualified_function() -> None:
+def test_conjtranspose_selective_import_exposes_unqualified_function() -> None:
     result = run_aether(
         """
-import Math.LinearAlgebra
+from Math.LinearAlgebra import conjtranspose
 A = [1 2; 3 4];
 B = conjtranspose(A);
 """
@@ -93,7 +94,7 @@ def test_conjtranspose_builtin_flips_row_vector_to_column() -> None:
         """
 import Math.LinearAlgebra
 v = [1, 2, 3];
-t = conjtranspose(v);
+t = Math.LinearAlgebra.conjtranspose(v);
 """
     )
 
@@ -107,7 +108,7 @@ def test_conjtranspose_builtin_flips_column_vector_to_row() -> None:
         """
 import Math.LinearAlgebra
 v = [1; 2; 3];
-t = conjtranspose(v);
+t = Math.LinearAlgebra.conjtranspose(v);
 """
     )
 

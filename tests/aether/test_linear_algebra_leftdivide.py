@@ -63,6 +63,7 @@ x = A \\ b;
 def test_linear_algebra_solve_builtin_matches_leftdivide() -> None:
     result = run_aether(
         """
+import Math.LinearAlgebra
 Matrix<double> A = [2 1; 1 3];
 Vector<double> b = [1; 2];
 x = Math.LinearAlgebra.solve(A, b);
@@ -134,7 +135,7 @@ def test_solve_returns_complex_for_real_matrix_with_complex_rhs() -> None:
 import Math.LinearAlgebra
 A = [2 0; 0 4];
 b = [2 + 2im; 8];
-x = solve(A, b);
+x = Math.LinearAlgebra.solve(A, b);
 """
     )
 
@@ -173,7 +174,7 @@ x = A \\ b;
 
 
 def test_leftdivide_requires_linear_algebra_import() -> None:
-    with pytest.raises(AetherTypeError, match=r"requires import Math\.LinearAlgebra"):
+    with pytest.raises(AetherTypeError, match=r"requires module 'Math\.LinearAlgebra'"):
         run_aether(
             """
 Matrix<double> A = [2 1; 1 3];
@@ -188,7 +189,8 @@ def test_leftdivide_missing_import_diagnostic_points_to_operator() -> None:
     diagnostics = analyze_source(source)
 
     assert len(diagnostics) == 1
-    assert "requires import Math.LinearAlgebra" in diagnostics[0].message
+    assert "requires module 'Math.LinearAlgebra'" in diagnostics[0].message
+    assert "Hint: import Math.LinearAlgebra;" in diagnostics[0].message
     assert diagnostics[0].line == 3
     assert diagnostics[0].column == 7
 

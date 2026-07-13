@@ -83,7 +83,7 @@ public alias P = Point;
         main_file = source_dir / "main.ae"
         main_file.write_text(
             """
-import Geometry;
+from Geometry import P;
 
 P p = P(1.0, 2.0);
 println(p.x);
@@ -128,7 +128,7 @@ import Math.LinearAlgebra
 A = [1 2; 3 4];
 println(A);
 
-B = transpose(A);
+B = Math.LinearAlgebra.transpose(A);
 println(B);
 
 v = [1; 2];

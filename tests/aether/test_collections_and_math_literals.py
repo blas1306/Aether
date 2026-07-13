@@ -926,6 +926,7 @@ println(b);
 def test_matrix_native_dimensions_and_transpose() -> None:
     result = run_aether(
         """
+import Math.LinearAlgebra
 Matrix<double> A = [1 2; 3 4];
 Matrix<double> B = A.transpose();
 println(A.rows);
@@ -939,7 +940,7 @@ println(B);
 
 
 def test_vector_native_length_and_norm() -> None:
-    result = run_aether("Vector<double, Row> v = [3 4]; println(v.length); println(v.norm());")
+    result = run_aether("import Math.LinearAlgebra; Vector<double, Row> v = [3 4]; println(v.length); println(v.norm());")
 
     assert result.output == "2\n5.0\n"
 
@@ -981,7 +982,7 @@ println(ys);
 println(xs);
 println(rows(A));
 println(columns(A));
-println(transpose(A));
+println(Math.LinearAlgebra.transpose(A));
 """
     )
 

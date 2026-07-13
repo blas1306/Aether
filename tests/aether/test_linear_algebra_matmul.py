@@ -3,9 +3,13 @@ from __future__ import annotations
 import pytest
 
 from aether.errors import AetherTypeError
-from aether.runner import run_aether
+from aether.runner import run_aether as _run_aether
 from aether.stdlib.math.linear_algebra import matmul_builtin
 from aether.types import AetherValue, MatrixType, TransposeVectorType, VectorType
+
+
+def run_aether(source: str):
+    return _run_aether("import Math.LinearAlgebra;\n" + source)
 
 
 def matrix_values(value: AetherValue) -> list[list[object]]:

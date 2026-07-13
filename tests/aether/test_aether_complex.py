@@ -131,7 +131,7 @@ def test_complex_linear_algebra_supported_surface() -> None:
 import Math.LinearAlgebra
 A = [1 im; 2 3 - im];
 v = [1 + im, 2];
-t = transpose(A);
+t = Math.LinearAlgebra.transpose(A);
 h = A';
 m = Math.LinearAlgebra.matmul(A, [1; im]);
 inner_value = Math.LinearAlgebra.inner(v, v);

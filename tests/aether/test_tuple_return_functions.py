@@ -101,7 +101,7 @@ def test_eig_result_can_be_destructured() -> None:
         """
 import Math.LinearAlgebra
 A = [3 2; 1 0; 0 0];
-Vec, Vap = eig(Math.LinearAlgebra.matmul(A', A));
+Vec, Vap = Math.LinearAlgebra.eig(Math.LinearAlgebra.matmul(A', A));
 println(rows(Vec));
 println(cols(Vec));
 println(rows(Vap));
@@ -121,9 +121,9 @@ import Math.LinearAlgebra
     int m = 3;
     int n = 2;
 
-    u = zeros(m, m);
-    s = zeros(m, n);
-    v = zeros(n, n);
+    u = Math.LinearAlgebra.zeros(m, m);
+    s = Math.LinearAlgebra.zeros(m, n);
+    v = Math.LinearAlgebra.zeros(n, n);
 
     return (u, s, v);
 }

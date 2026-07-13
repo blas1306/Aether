@@ -181,9 +181,41 @@ class ExpressionStatement:
 
 @dataclass(frozen=True)
 class ImportStatement:
-    module_name: str
+    module_path: tuple[str, ...]
+    alias: str | None = None
     line: int = 1
     column: int = 1
+    alias_line: int | None = None
+    alias_column: int | None = None
+
+    @property
+    def module_name(self) -> str:
+        return ".".join(self.module_path)
+
+    @property
+    def local_binding(self) -> str:
+        return self.alias or self.module_name
+
+
+@dataclass(frozen=True)
+class FromImportStatement:
+    module_path: tuple[str, ...]
+    symbol: str
+    alias: str | None = None
+    line: int = 1
+    column: int = 1
+    symbol_line: int = 1
+    symbol_column: int = 1
+    alias_line: int | None = None
+    alias_column: int | None = None
+
+    @property
+    def module_name(self) -> str:
+        return ".".join(self.module_path)
+
+    @property
+    def local_binding(self) -> str:
+        return self.alias or self.symbol
 
 
 @dataclass(frozen=True)

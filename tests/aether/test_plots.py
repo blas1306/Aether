@@ -14,7 +14,7 @@ def test_import_plots_plot_vector_creates_png_in_document_mode(tmp_path: Path) -
     run_aether(
         """
 import Plots
-plot([1; 2; 3]);
+Plots.plot([1; 2; 3]);
 """,
         plot_mode="document",
         plot_output_dir=tmp_path,
@@ -29,15 +29,15 @@ def test_plots_supports_vector_api_and_savefig(tmp_path: Path) -> None:
 import Plots
 x = [1; 2; 3; 4];
 y = [1; 4; 9; 16];
-plot(x, y, "bo");
-hold(true);
-scatter(x, y);
-grid("on");
-title("Parabola");
-xlabel("x");
-ylabel("y");
-legend("datos");
-path = savefig("demo");
+Plots.plot(x, y, "bo");
+Plots.hold(true);
+Plots.scatter(x, y);
+Plots.grid("on");
+Plots.title("Parabola");
+Plots.xlabel("x");
+Plots.ylabel("y");
+Plots.legend("datos");
+path = Plots.savefig("demo");
 """,
         plot_mode="document",
         plot_output_dir=tmp_path,
@@ -48,9 +48,10 @@ path = savefig("demo");
     assert saved.exists()
 
 
-def test_plots_qualified_calls_work_without_import(tmp_path: Path) -> None:
+def test_plots_qualified_calls_work_with_import(tmp_path: Path) -> None:
     result = run_aether(
         """
+import Plots
 Plots.plot([1; 2; 3]);
 path = Plots.savefig("qualified.png");
 """,
@@ -69,10 +70,10 @@ def test_unqualified_plot_requires_import() -> None:
 @pytest.mark.parametrize(
     ("source", "message"),
     [
-        ("import Plots\nplot([1; 2], [1; 2; 3]);", "same length"),
-        ("import Plots\nplot(1);", "numeric vector"),
-        ("import Plots\nList<int> xs = {}; plot(xs);", "numeric vector"),
-        ("import Plots\nplot([1 2; 3 4]);", "matrix shape 2x2"),
+        ("import Plots\nPlots.plot([1; 2], [1; 2; 3]);", "same length"),
+        ("import Plots\nPlots.plot(1);", "numeric vector"),
+        ("import Plots\nList<int> xs = {}; Plots.plot(xs);", "numeric vector"),
+        ("import Plots\nPlots.plot([1 2; 3 4]);", "matrix shape 2x2"),
     ],
 )
 def test_plots_reports_clear_data_errors(source: str, message: str) -> None:
@@ -84,8 +85,8 @@ def test_plots_sessions_do_not_share_figure_state(tmp_path: Path) -> None:
     first = AetherSession(plot_mode="document", plot_output_dir=tmp_path / "first")
     second = AetherSession(plot_mode="document", plot_output_dir=tmp_path / "second")
 
-    first.run('import Plots\nfigure(2); title("First"); plot([1; 2]);')
-    second.run('import Plots\nplot([1; 2]);')
+    first.run('import Plots\nPlots.figure(2); Plots.title("First"); Plots.plot([1; 2]);')
+    second.run('import Plots\nPlots.plot([1; 2]);')
 
     assert first._interpreter.plot_backend.get_active_figure() == 2
     assert second._interpreter.plot_backend.get_active_figure() == 1
@@ -99,13 +100,13 @@ def test_plots_figure_state_is_isolated_per_figure(tmp_path: Path) -> None:
     session.run(
         """
 import Plots
-figure(1);
-grid(true);
-title("F1");
-plot([1; 2]);
-figure(2);
-plot([2; 3]);
-figure(1);
+Plots.figure(1);
+Plots.grid(true);
+Plots.title("F1");
+Plots.plot([1; 2]);
+Plots.figure(2);
+Plots.plot([2; 3]);
+Plots.figure(1);
 """
     )
 
@@ -115,25 +116,25 @@ figure(1);
     assert backend.title_text == "F1"
 
 
-def test_plots_completions_include_qualified_and_imported_names() -> None:
+def test_plots_completions_include_qualified_module_names_only() -> None:
     labels = {item.label for item in completion_items("import Plots\n", 1, 1)}
 
     assert "Plots.plot" in labels
-    assert "plot" in labels
+    assert "plot" not in labels
 
 
 def test_analyze_source_accepts_imported_plot_alias() -> None:
-    assert analyze_source("import Plots\nplot([1; 2; 3]);") == []
+    assert analyze_source("from Plots import plot\nplot([1; 2; 3]);") == []
 
 
 def test_plots_v2_parser_accepts_bang_calls_and_keyword_arguments() -> None:
-    program = Parser(lex('plot!(x, y, label="datos", color="red");')).parse()
+    program = Parser(lex('Plots.plot!(x, y, label="datos", color="red");')).parse()
     statement = program.statements[0]
 
     assert isinstance(statement, ExpressionStatement)
     call = statement.expression
     assert isinstance(call, CallExpression)
-    assert call.callee == "plot!"
+    assert call.callee == "Plots.plot!"
     assert len(call.arguments) == 2
     assert set(call.keyword_arguments) == {"label", "color"}
 
@@ -144,9 +145,9 @@ def test_plots_v2_keyword_styles_and_mutating_series(tmp_path: Path) -> None:
 import Plots
 x = [1; 2; 3; 4];
 y = [1; 4; 9; 16];
-plot(x, y, label="cuadrados", color="blue", linewidth=2, title="Ajuste", xlabel="x", ylabel="y");
-scatter!(x, y, label="datos", marker="x", color="red");
-path = savefig("styled");
+Plots.plot(x, y, label="cuadrados", color="blue", linewidth=2, title="Ajuste", xlabel="x", ylabel="y");
+Plots.scatter!(x, y, label="datos", marker="x", color="red");
+path = Plots.savefig("styled");
 """,
         plot_mode="document",
         plot_output_dir=tmp_path,
@@ -160,8 +161,8 @@ def test_plots_v2_plot_function_samples_expression_function(tmp_path: Path) -> N
         """
 import Plots
 f(x) = x^2 + 1;
-plot(f, 0, 3, n=12, label="f", color="green");
-path = savefig("function_plot");
+Plots.plot(f, 0, 3, n=12, label="f", color="green");
+path = Plots.savefig("function_plot");
 """,
         plot_mode="document",
         plot_output_dir=tmp_path,
@@ -176,7 +177,7 @@ def test_plots_v2_plot_function_rejects_wrong_arity() -> None:
             """
 import Plots
 f(x, y) = x + y;
-plot(f, 0, 1);
+Plots.plot(f, 0, 1);
 """,
             plot_mode="document",
         )
@@ -187,7 +188,7 @@ def test_plots_v2_unknown_keyword_is_clear() -> None:
         run_aether(
             """
 import Plots
-plot([1; 2; 3], colour="red");
+Plots.plot([1; 2; 3], colour="red");
 """,
             plot_mode="document",
         )
@@ -199,10 +200,10 @@ def test_plots_v2_bar_histogram_and_matrix_columns(tmp_path: Path) -> None:
 import Plots
 x = [1; 2; 3];
 Y = [1 2; 4 5; 9 10];
-plot(x, Y, label="series");
-bar!(x, [2; 3; 4], color="gray", alpha=0.5);
-histogram!([1; 1; 2; 3; 3; 3], bins=3, label="hist");
-path = savefig("mixed");
+Plots.plot(x, Y, label="series");
+Plots.bar!(x, [2; 3; 4], color="gray", alpha=0.5);
+Plots.histogram!([1; 1; 2; 3; 3; 3], bins=3, label="hist");
+path = Plots.savefig("mixed");
 """,
         plot_mode="document",
         plot_output_dir=tmp_path,

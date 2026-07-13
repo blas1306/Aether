@@ -190,7 +190,7 @@ public struct Point {
 
     result = run_aether(
         """
-import Geometry;
+from Geometry import Point;
 
 Point p = Point(1.0, 2.0);
 println(p.x);
@@ -213,8 +213,8 @@ private struct Hidden {
         encoding="utf-8",
     )
 
-    with pytest.raises(AetherTypeError, match="private"):
-        run_aether("import Geometry;\nHidden h = Hidden(3);", source_root=tmp_path)
+    with pytest.raises(AetherTypeError, match="not public"):
+        run_aether("from Geometry import Hidden;", source_root=tmp_path)
 
 
 def test_default_private_struct_is_not_imported_from_package(tmp_path: Path) -> None:
@@ -229,8 +229,8 @@ struct Hidden {
         encoding="utf-8",
     )
 
-    with pytest.raises(AetherTypeError, match="private"):
-        run_aether("import Geometry;\nHidden h = Hidden(3);", source_root=tmp_path)
+    with pytest.raises(AetherTypeError, match="not public"):
+        run_aether("from Geometry import Hidden;", source_root=tmp_path)
 
 
 def test_alias_of_struct_works_for_type_and_constructor() -> None:
@@ -306,7 +306,8 @@ public double sumPoint(Point p) {
 
     result = run_aether(
         """
-import Geometry;
+from Geometry import Point;
+from Geometry import sumPoint;
 println(sumPoint(Point(1.0, 2.0)));
 """,
         source_root=tmp_path,
@@ -531,7 +532,8 @@ public struct Segment {
 
     result = run_aether(
         """
-import Geometry;
+from Geometry import Point;
+from Geometry import Segment;
 
 s = Segment(Point(0.0, 0.0), Point(1.0, 1.0));
 println(s.b.x);
@@ -559,7 +561,7 @@ public alias P = Point;
 
     result = run_aether(
         """
-import Geometry;
+from Geometry import P;
 
 P p = P(1.0, 2.0);
 println(p.x);

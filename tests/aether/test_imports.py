@@ -34,18 +34,9 @@ def test_import_builtin_namespace_can_end_at_eof() -> None:
     assert result.output == ""
 
 
-def test_import_builtin_namespace_exposes_unqualified_members() -> None:
-    result = run_aether(
-        """
-import Math.LinearAlgebra
-A = [1 2; 3 4];
-B = transpose(A);
-println(B);
-println(transpose([1; 2]));
-"""
-    )
-
-    assert result.output == "[1 3; 2 4]\n[1 2]\n"
+def test_import_builtin_namespace_does_not_expose_unqualified_members() -> None:
+    with pytest.raises(AetherTypeError, match="Undefined function 'transpose'"):
+        run_aether("import Math.LinearAlgebra\ntranspose([1 2]);")
 
 
 def test_builtin_namespace_members_require_import_for_unqualified_calls() -> None:
@@ -71,7 +62,10 @@ def test_import_file_from_subfolder_loads_module_source(tmp_path: Path) -> None:
     current_dir = os.getcwd()
     try:
         os.chdir(tmp_path)
-        result = run_aether("import ejemplos.SistemaLineal; println(sum(a, b));")
+        result = run_aether(
+            "import ejemplos.SistemaLineal; "
+            "println(ejemplos.SistemaLineal.sum(ejemplos.SistemaLineal.a, ejemplos.SistemaLineal.b));"
+        )
     finally:
         os.chdir(current_dir)
 
@@ -108,7 +102,7 @@ public int inc(int x) {
         encoding="utf-8",
     )
 
-    result = run_aether("import Math.Utils;\nprintln(inc(3));", source_root=tmp_path)
+    result = run_aether("import Math.Utils;\nprintln(Math.Utils.inc(3));", source_root=tmp_path)
 
     assert result.output == "4\n"
 
@@ -131,7 +125,7 @@ public int incTwice(int x) {
         encoding="utf-8",
     )
 
-    result = run_aether("import Math.Utils;\nprintln(incTwice(3));", source_root=tmp_path)
+    result = run_aether("import Math.Utils;\nprintln(Math.Utils.incTwice(3));", source_root=tmp_path)
 
     assert result.output == "5\n"
 
@@ -143,13 +137,13 @@ package M;
 import Math.LinearAlgebra;
 
 public double len(Vector<double, Column> v) {
-    return norm(v);
+    return Math.LinearAlgebra.norm(v);
 }
 """,
         encoding="utf-8",
     )
 
-    result = run_aether("import M;\nprintln(len([3; 4]));", source_root=tmp_path)
+    result = run_aether("import M;\nprintln(M.len([3; 4]));", source_root=tmp_path)
 
     assert result.output == "5.0\n"
 
@@ -168,7 +162,7 @@ public Real twice(Real x) {
         encoding="utf-8",
     )
 
-    result = run_aether("import M;\nprintln(twice(2.5));", source_root=tmp_path)
+    result = run_aether("import M;\nprintln(M.twice(2.5));", source_root=tmp_path)
 
     assert result.output == "5.0\n"
 
@@ -187,8 +181,8 @@ private int hidden(int x) {
         encoding="utf-8",
     )
 
-    with pytest.raises(AetherTypeError, match="private"):
-        run_aether("import Math.Utils;\nprintln(hidden(3));", source_root=tmp_path)
+    with pytest.raises(AetherTypeError, match="not public"):
+        run_aether("from Math.Utils import hidden;", source_root=tmp_path)
 
 
 def test_default_visibility_is_private_inside_package(tmp_path: Path) -> None:
@@ -205,8 +199,8 @@ int hidden(int x) {
         encoding="utf-8",
     )
 
-    with pytest.raises(AetherTypeError, match="private"):
-        run_aether("import Math.Utils;\nprintln(hidden(3));", source_root=tmp_path)
+    with pytest.raises(AetherTypeError, match="not public"):
+        run_aether("from Math.Utils import hidden;", source_root=tmp_path)
 
 
 def test_public_alias_is_imported_from_package(tmp_path: Path) -> None:
@@ -221,7 +215,7 @@ public alias Real = double;
         encoding="utf-8",
     )
 
-    result = run_aether("import Math.Types;\nReal x = 2.5;\nprintln(x);", source_root=tmp_path)
+    result = run_aether("from Math.Types import Real;\nReal x = 2.5;\nprintln(x);", source_root=tmp_path)
 
     assert result.output == "2.5\n"
 
@@ -236,7 +230,7 @@ public const int DEFAULT_ITER = 100;
         encoding="utf-8",
     )
 
-    result = run_aether("import Config;\nprintln(DEFAULT_ITER);", source_root=tmp_path)
+    result = run_aether("from Config import DEFAULT_ITER;\nprintln(DEFAULT_ITER);", source_root=tmp_path)
 
     assert result.output == "100\n"
 
@@ -268,18 +262,18 @@ def test_collision_between_file_imports_fails(tmp_path: Path) -> None:
     (tmp_path / "A.ae").write_text("package A;\npublic int f(int x) { return x + 1; }\n", encoding="utf-8")
     (tmp_path / "B.ae").write_text("package B;\npublic int f(int x) { return x + 2; }\n", encoding="utf-8")
 
-    with pytest.raises(AetherTypeError, match="Import collision for symbol 'f'"):
-        run_aether("import A;\nimport B;\nprintln(f(3));", source_root=tmp_path)
+    with pytest.raises(AetherTypeError, match="Symbol 'M' is already defined"):
+        run_aether("import A as M;\nimport B as M;", source_root=tmp_path)
 
 
 def test_collision_between_local_symbol_and_import_fails(tmp_path: Path) -> None:
     (tmp_path / "A.ae").write_text("package A;\npublic int f(int x) { return x + 1; }\n", encoding="utf-8")
 
-    with pytest.raises(AetherTypeError, match="conflicts with an existing symbol"):
-        run_aether("int f = 1;\nimport A;", source_root=tmp_path)
+    with pytest.raises(AetherTypeError, match="Symbol 'f' is already defined"):
+        run_aether("int f = 1;\nfrom A import f;", source_root=tmp_path)
 
 
-def test_script_without_package_keeps_legacy_file_import_exports(tmp_path: Path) -> None:
+def test_script_without_package_exposes_exports_through_module_binding(tmp_path: Path) -> None:
     (tmp_path / "Legacy.ae").write_text(
         """
 int a = 2;
@@ -290,6 +284,6 @@ int doubleIt(int x) {
         encoding="utf-8",
     )
 
-    result = run_aether("import Legacy;\nprintln(doubleIt(a));", source_root=tmp_path)
+    result = run_aether("import Legacy;\nprintln(Legacy.doubleIt(Legacy.a));", source_root=tmp_path)
 
     assert result.output == "4\n"

@@ -547,13 +547,13 @@ private class Hidden {
     )
 
     result = run_aether(
-        "import Counters;\nCounter c = Counter(4);\nprintln(c.getValue());",
+        "from Counters import Counter;\nCounter c = Counter(4);\nprintln(c.getValue());",
         source_root=tmp_path,
     )
     assert result.output == "4\n"
 
-    with pytest.raises(AetherTypeError, match="private"):
-        run_aether("import Counters;\nHidden h = Hidden(1);", source_root=tmp_path)
+    with pytest.raises(AetherTypeError, match="not public"):
+        run_aether("from Counters import Hidden;", source_root=tmp_path)
 
 
 def test_structs_still_have_value_semantics_and_public_fields() -> None:

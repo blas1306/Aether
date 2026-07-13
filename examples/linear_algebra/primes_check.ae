@@ -38,8 +38,8 @@ x = A \ b;
 println("Filas de A: ", m);
 println("Columnas de A: ", n);
 println("x = ", x);
-println("N(A) = ", N(A));
-println("R(A) = ", R(A));
+println("Math.LinearAlgebra.N(A) = ", Math.LinearAlgebra.N(A));
+println("Math.LinearAlgebra.R(A) = ", Math.LinearAlgebra.R(A));
 
 public double triple(double y) {
     return 3*y;

@@ -16,7 +16,7 @@ mt = st[0];
 my = sy[0];
 mbase = sbase[0];
 
-A = zeros(mt, mbase);
+A = Math.LinearAlgebra.zeros(mt, mbase);
 
 for i in 0:(mt - 1) {
     for j in 0:(mbase - 1) {
@@ -38,14 +38,14 @@ double modelo(double x) {
 
 println("z = ", z);
 
-err2 = norm(y - A*z)^2;
+err2 = Math.LinearAlgebra.norm(y - A*z)^2;
 println("err2 = ", err2);
 
-grid(true);
-title("Minimos Cuadrados");
-xlabel("t");
-ylabel("y");
-plot(t, y, ".", label="Datos", color="red");
-plot!(modelo, t[0]-1, t[mt-1]+1, label="Ajuste");
+Plots.grid(true);
+Plots.title("Minimos Cuadrados");
+Plots.xlabel("t");
+Plots.ylabel("y");
+Plots.plot(t, y, ".", label="Datos", color="red");
+Plots.plot!(modelo, t[0]-1, t[mt-1]+1, label="Ajuste");
 
 println(modelo(8));

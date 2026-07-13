@@ -5,13 +5,13 @@ println("Hello World!");
 A = [1 2; 3 4];
 println(A);
 
-B = transpose(A);
+B = Math.LinearAlgebra.transpose(A);
 println(B);
 
 U = [1 2];
 V = [3; 4];
 
-println(matmul(U, V));
+println(Math.LinearAlgebra.matmul(U, V));
 
 for v in V {
     println(v);

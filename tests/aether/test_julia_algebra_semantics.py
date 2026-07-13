@@ -79,7 +79,7 @@ def test_size_preserves_transposed_vector_identity() -> None:
         """
 import Math.LinearAlgebra
 v = [1, 2, 3];
-t = transpose(v);
+t = Math.LinearAlgebra.transpose(v);
 s = size(t);
 println(s);
 println(s[1]);
@@ -217,8 +217,8 @@ def test_transpose_vector_flips_orientation_and_double_transpose_returns_vector(
         """
 import Math.LinearAlgebra
 v = [1, 2, 3];
-t = transpose(v);
-w = transpose(t);
+t = Math.LinearAlgebra.transpose(v);
+w = Math.LinearAlgebra.transpose(t);
 a = t[1];
 println(a);
 """
@@ -246,8 +246,8 @@ y = A * [5; 6];
 
 
 def test_star_accepts_row_column_and_column_row_oriented_vector_products() -> None:
-    outer = run_aether("import Math.LinearAlgebra\nv = [1, 2, 3]; w = [4, 5, 6]; x = transpose(v) * w;")
-    result = run_aether("import Math.LinearAlgebra\nv = [1, 2, 3]; w = [4, 5, 6]; x = v * transpose(w);")
+    outer = run_aether("import Math.LinearAlgebra\nv = [1, 2, 3]; w = [4, 5, 6]; x = Math.LinearAlgebra.transpose(v) * w;")
+    result = run_aether("import Math.LinearAlgebra\nv = [1, 2, 3]; w = [4, 5, 6]; x = v * Math.LinearAlgebra.transpose(w);")
 
     assert outer.env["x"].type_name == MatrixType("int", 3, 3)
     assert matrix_values(outer.env["x"]) == [[4, 5, 6], [8, 10, 12], [12, 15, 18]]

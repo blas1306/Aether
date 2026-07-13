@@ -4,8 +4,13 @@ import numpy as np
 import pytest
 
 from aether.errors import AetherTypeError
-from aether.runner import run_aether
+from aether.runner import run_aether as _run_aether
 from aether.types import MatrixType
+
+
+def run_aether(source: str):
+    prefix = "" if "import Math.LinearAlgebra" in source else "import Math.LinearAlgebra;\n"
+    return _run_aether(prefix + source)
 
 
 def _matrix_values(result, name: str) -> list[list[float]]:
@@ -19,7 +24,7 @@ def test_svd_returns_full_factors_for_imported_short_name() -> None:
         """
 import Math.LinearAlgebra
 A = [3 2; 1 0; 0 0];
-U, S, V = SVD(A);
+U, S, V = Math.LinearAlgebra.SVD(A);
 R = Math.LinearAlgebra.matmul(Math.LinearAlgebra.matmul(U, S), V');
 """
     )
@@ -52,7 +57,7 @@ def test_svd_returns_complex_unitary_factors_for_complex_matrix() -> None:
         """
 import Math.LinearAlgebra
 A = [1 im; 2 0; 0 1 - im];
-U, S, V = SVD(A);
+U, S, V = Math.LinearAlgebra.SVD(A);
 R = Math.LinearAlgebra.matmul(Math.LinearAlgebra.matmul(U, S), V');
 """
     )
@@ -76,6 +81,6 @@ def test_svd_rejects_non_matrix_arguments() -> None:
         run_aether(
             """
 import Math.LinearAlgebra
-U, S, V = SVD([1, 2, 3]);
+U, S, V = Math.LinearAlgebra.SVD([1, 2, 3]);
 """
         )

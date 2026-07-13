@@ -3,8 +3,13 @@ from __future__ import annotations
 import pytest
 
 from aether.errors import AetherRuntimeError, AetherSyntaxError, AetherTypeError
-from aether.runner import run_aether
+from aether.runner import run_aether as _run_aether
 from aether.types import ListType, MatrixType, VectorType
+
+
+def run_aether(source: str):
+    prefix = "" if "import Math.LinearAlgebra" in source else "import Math.LinearAlgebra;\n"
+    return _run_aether(prefix + source)
 
 
 def test_inferred_assignment():
@@ -1126,10 +1131,12 @@ def test_linear_algebra_ones_matrix():
     assert result.output == "[1.0 1.0; 1.0 1.0; 1.0 1.0]\n"
 
 
-def test_linear_algebra_zeros_and_ones_aliases_after_import():
+def test_linear_algebra_zeros_and_ones_selective_imports():
     result = run_aether(
         """
 import Math.LinearAlgebra
+from Math.LinearAlgebra import zeros
+from Math.LinearAlgebra import ones
 Z = zeros(1, 2);
 O = ones(2, 1);
 println(Z);

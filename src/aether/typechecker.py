@@ -11,8 +11,14 @@ from .native_members import native_member_set, native_method, native_property
 from .parser import Parser
 from .scope import Scope
 from .symbols import EnumSymbol, FunctionSymbol, InterfaceSymbol, StructSymbol, VariableSymbol
-from .stdlib import infer_builtin_constant_type, infer_builtin_type, is_builtin, is_builtin_namespace, validate_builtin_arity
-from .stdlib.registry import builtin_aliases_for_import, builtin_constant_aliases_for_import
+from .stdlib import (
+    infer_builtin_constant_type,
+    infer_builtin_type,
+    is_builtin,
+    is_builtin_constant,
+    is_builtin_namespace,
+    validate_builtin_arity,
+)
 from .tokens import AETHER_TYPES, PRIMITIVE_TYPES
 from .types import (
     AetherType,
@@ -73,6 +79,14 @@ class TypeChecker:
         self.loop_depth = 0
         self.loop_variable_stack: list[tuple[str, Scope[VariableSymbol]]] = []
         self.imported_modules: set[str] = set()
+        self.module_bindings: dict[str, str] = {}
+        self.qualified_functions: dict[str, FunctionSymbol] = {}
+        self.qualified_variables: dict[str, VariableSymbol] = {}
+        self.qualified_structs: dict[str, StructSymbol] = {}
+        self.qualified_enums: dict[str, EnumSymbol] = {}
+        self.qualified_interfaces: dict[str, InterfaceSymbol] = {}
+        self.qualified_aliases: dict[str, AetherType] = {}
+        self._loaded_file_modules: dict[str, tuple[ast.Program, "TypeChecker"]] = {}
         self.builtin_aliases: dict[str, str] = {}
         self.builtin_constant_aliases: dict[str, str] = {}
         self.type_aliases: dict[str, AetherType] = {}
@@ -83,6 +97,8 @@ class TypeChecker:
         self._diagnostic_errors: list[AetherTypeError] | None = None
 
     def check(self, program: ast.Program) -> None:
+        self._validate_import_bindings(program.statements)
+        self._prepare_imports(program.statements)
         self._declare_enum_headers(program.statements)
         self._declare_interface_headers(program.statements)
         self._declare_struct_headers(program.statements)
@@ -98,6 +114,8 @@ class TypeChecker:
         self._diagnostic_errors = []
         try:
             for phase in (
+                lambda: self._validate_import_bindings(program.statements),
+                lambda: self._prepare_imports(program.statements),
                 lambda: self._declare_enum_headers(program.statements),
                 lambda: self._declare_interface_headers(program.statements),
                 lambda: self._declare_struct_headers(program.statements),
@@ -602,7 +620,8 @@ class TypeChecker:
             self._declare_expression_function(statement)
             return
         if isinstance(statement, ast.ImportStatement):
-            self._check_import(statement)
+            return
+        if isinstance(statement, ast.FromImportStatement):
             return
         if isinstance(statement, ast.ReturnStatement):
             self._check_return(statement, scope)
@@ -632,28 +651,97 @@ class TypeChecker:
             return
         raise AetherRuntimeError(f"Unsupported statement {statement!r}.")
 
+    def _validate_import_bindings(self, statements: list[ast.Statement]) -> None:
+        local_names = {
+            statement.name
+            for statement in statements
+            if isinstance(
+                statement,
+                (
+                    ast.VarDeclaration,
+                    ast.AliasDeclaration,
+                    ast.StructDeclaration,
+                    ast.ClassDeclaration,
+                    ast.InterfaceDeclaration,
+                    ast.EnumDeclaration,
+                    ast.FunctionDeclaration,
+                    ast.ExpressionFunctionDeclaration,
+                ),
+            )
+        }
+        existing_names = {
+            *self.global_scope.symbols,
+            *self.functions,
+            *self.type_aliases,
+            *self.structs,
+            *self.enums,
+            *self.interfaces,
+            *self.imported_symbol_origins,
+        }
+        bindings: dict[str, tuple[str, str]] = {
+            binding: (identity, binding)
+            for binding, identity in self.module_bindings.items()
+        }
+        for statement in statements:
+            if isinstance(statement, ast.ImportStatement):
+                binding = statement.local_binding
+                collision_name = statement.alias or statement.module_path[0]
+                identity = statement.module_name
+            elif isinstance(statement, ast.FromImportStatement):
+                binding = statement.local_binding
+                collision_name = binding
+                identity = f"{statement.module_name}.{statement.symbol}"
+            else:
+                continue
+            if collision_name in local_names or collision_name in existing_names:
+                raise AetherTypeError(
+                    f"Symbol '{collision_name}' is already defined in this scope.",
+                    line=statement.alias_line or statement.line,
+                    column=statement.alias_column or statement.column,
+                    kind="import",
+                )
+            if binding in bindings:
+                raise AetherTypeError(
+                    f"Symbol '{binding}' is already defined in this scope.",
+                    line=statement.alias_line or statement.line,
+                    column=statement.alias_column or statement.column,
+                    kind="import",
+                )
+            bindings[binding] = (identity, collision_name)
+
+    def _prepare_imports(self, statements: list[ast.Statement]) -> None:
+        for statement in statements:
+            if isinstance(statement, ast.ImportStatement):
+                self._check_import(statement)
+            elif isinstance(statement, ast.FromImportStatement):
+                self._check_from_import(statement)
+
     def _check_import(self, statement: ast.ImportStatement) -> None:
         module_name = statement.module_name
-        if module_name in self.imported_modules:
-            return
+        self._load_module(module_name, statement)
+        self.module_bindings[statement.local_binding] = module_name
+        self.imported_modules.add(module_name)
+
+    def _load_module(self, module_name: str, location: object) -> tuple[ast.Program, "TypeChecker"] | None:
         if is_builtin_namespace(module_name):
-            self.builtin_aliases.update(builtin_aliases_for_import(module_name))
-            self.builtin_constant_aliases.update(builtin_constant_aliases_for_import(module_name))
             self.imported_modules.add(module_name)
-            return
+            return None
+        cached = self._loaded_file_modules.get(module_name)
+        if cached is not None:
+            return cached
         if module_name in self.import_stack:
             raise AetherTypeError(
                 f"Cyclic import involving '{module_name}'.",
-                line=statement.line,
-                column=statement.column,
+                line=getattr(location, "line", None),
+                column=getattr(location, "column", None),
                 kind="import",
             )
         module_path = resolve_file_module_path(module_name, self.source_root)
         if not module_path.is_file():
             raise AetherTypeError(
                 f"Module '{module_name}' not found.",
-                line=statement.line,
-                column=statement.column,
+                line=getattr(location, "line", None),
+                column=getattr(location, "column", None),
                 hint="check the module name or the source root used to run Aether.",
                 kind="import",
             )
@@ -669,54 +757,91 @@ class TypeChecker:
             import_stack=(*self.import_stack, module_name),
         )
         module_checker.check(program)
+        loaded = (program, module_checker)
+        self._loaded_file_modules[module_name] = loaded
         for name, modules in module_checker.private_imported_symbols.items():
             self.private_imported_symbols.setdefault(name, set()).update(modules)
         self._record_private_imports(module_name, program)
         for name, symbol in self._exported_variables(program, module_checker).items():
-            self._ensure_import_available(name, module_name)
-            self.global_scope.define_local(name, symbol, is_const=symbol.is_const)
-            self.imported_symbol_origins[name] = module_name
+            self.qualified_variables[f"{module_name}.{name}"] = symbol
         for name, symbol in self._exported_functions(program, module_checker).items():
-            self._ensure_import_available(name, module_name)
-            self.functions[name] = symbol
-            self.imported_symbol_origins[name] = module_name
-        for name, declaration in self._exported_expression_functions(program, module_checker).items():
-            self.expression_functions[name] = declaration
+            self.qualified_functions[f"{module_name}.{name}"] = symbol
         for name, symbol in self._exported_structs(program, module_checker).items():
-            self._ensure_import_available(name, module_name)
-            self.structs[name] = symbol
-            self.imported_symbol_origins[name] = module_name
+            self.qualified_structs[f"{module_name}.{name}"] = symbol
         for name, symbol in self._exported_enums(program, module_checker).items():
-            self._ensure_import_available(name, module_name)
-            self.enums[name] = symbol
-            self.imported_symbol_origins[name] = module_name
+            self.qualified_enums[f"{module_name}.{name}"] = symbol
         for name, symbol in self._exported_interfaces(program, module_checker).items():
-            self._ensure_import_available(name, module_name)
-            self.interfaces[name] = symbol
-            self.imported_symbol_origins[name] = module_name
+            self.qualified_interfaces[f"{module_name}.{name}"] = symbol
         for name, target_type in self._exported_aliases(program, module_checker).items():
-            self._ensure_import_available(name, module_name)
-            self.type_aliases[name] = target_type
-            self.imported_symbol_origins[name] = module_name
+            self.qualified_aliases[f"{module_name}.{name}"] = target_type
         self.imported_modules.add(module_name)
+        return loaded
 
-    def _ensure_import_available(self, name: str, module_name: str) -> None:
-        existing_origin = self.imported_symbol_origins.get(name)
-        if existing_origin is not None and existing_origin != module_name:
+    def _check_from_import(self, statement: ast.FromImportStatement) -> None:
+        module_name = statement.module_name
+        candidate_module = f"{module_name}.{statement.symbol}"
+        if is_builtin_namespace(candidate_module) or resolve_file_module_path(candidate_module, self.source_root).is_file():
+            self._load_module(candidate_module, statement)
+            self.module_bindings[statement.local_binding] = candidate_module
+            self.imported_modules.add(candidate_module)
+            return
+        loaded = self._load_module(module_name, statement)
+        local_name = statement.local_binding
+        canonical_name = f"{module_name}.{statement.symbol}"
+        if is_builtin(canonical_name):
+            self.builtin_aliases[local_name] = canonical_name
+        elif is_builtin_constant(canonical_name):
+            self.builtin_constant_aliases[local_name] = canonical_name
+        elif loaded is not None:
+            program, module_checker = loaded
+            if statement.symbol in private_top_level_names(program):
+                raise AetherTypeError(
+                    f"Symbol '{statement.symbol}' is not public in module '{module_name}'.",
+                    line=statement.symbol_line,
+                    column=statement.symbol_column,
+                    kind="import",
+                )
+            if canonical_name in self.qualified_functions:
+                self.functions[local_name] = self.qualified_functions[canonical_name]
+                declaration = module_checker.expression_functions.get(statement.symbol)
+                if declaration is not None:
+                    self.expression_functions[local_name] = declaration
+            elif canonical_name in self.qualified_variables:
+                symbol = self.qualified_variables[canonical_name]
+                self.global_scope.define_local(local_name, symbol, is_const=symbol.is_const)
+            elif canonical_name in self.qualified_structs:
+                self.structs[local_name] = self.qualified_structs[canonical_name]
+            elif canonical_name in self.qualified_enums:
+                self.enums[local_name] = self.qualified_enums[canonical_name]
+            elif canonical_name in self.qualified_interfaces:
+                self.interfaces[local_name] = self.qualified_interfaces[canonical_name]
+            elif canonical_name in self.qualified_aliases:
+                target_type = self.qualified_aliases[canonical_name]
+                target_struct = (
+                    self.qualified_structs.get(f"{module_name}.{target_type}")
+                    if isinstance(target_type, str)
+                    else None
+                )
+                if target_struct is not None:
+                    self.structs[local_name] = replace(target_struct, name=local_name)
+                else:
+                    self.type_aliases[local_name] = target_type
+            else:
+                raise AetherTypeError(
+                    f"Module '{module_name}' has no exported symbol '{statement.symbol}'.",
+                    line=statement.symbol_line,
+                    column=statement.symbol_column,
+                    kind="import",
+                )
+        else:
             raise AetherTypeError(
-                f"Import collision for symbol '{name}' exported by both '{existing_origin}' and '{module_name}'."
+                f"Module '{module_name}' has no exported symbol '{statement.symbol}'.",
+                line=statement.symbol_line,
+                column=statement.symbol_column,
+                kind="import",
             )
-        if (
-            self.global_scope.lookup(name) is not None
-            or name in self.functions
-            or name in self.type_aliases
-            or name in self.structs
-            or name in self.enums
-            or name in self.interfaces
-        ):
-            raise AetherTypeError(
-                f"Import collision: symbol '{name}' from module '{module_name}' conflicts with an existing symbol."
-            )
+        self.imported_symbol_origins[local_name] = canonical_name
+        self.imported_modules.add(module_name)
 
     def _record_private_imports(self, module_name: str, program: ast.Program) -> None:
         for name in private_top_level_names(program):
@@ -1645,6 +1770,31 @@ class TypeChecker:
         if isinstance(expression, ast.FieldAccess):
             constant_name = _field_access_path(expression)
             constant_root = _field_access_root_name(expression)
+            canonical_member = self._resolve_module_member(constant_name) if constant_name is not None else None
+            if canonical_member is not None:
+                variable = self.qualified_variables.get(canonical_member)
+                if variable is not None:
+                    return variable.type_name
+                enum_name, _, variant_name = canonical_member.rpartition(".")
+                enum_symbol = self.qualified_enums.get(enum_name)
+                if enum_symbol is not None:
+                    if variant_name not in enum_symbol.variants:
+                        raise AetherTypeError(
+                            f"Enum '{enum_symbol.name}' has no variant '{variant_name}'.",
+                            line=expression.line,
+                            column=expression.column,
+                        )
+                    return EnumType(enum_symbol.name)
+                try:
+                    return infer_builtin_constant_type(canonical_member)
+                except AetherRuntimeError:
+                    raise AetherTypeError(
+                        f"Module '{canonical_member.rsplit('.', 1)[0]}' has no exported symbol "
+                        f"'{canonical_member.rsplit('.', 1)[1]}'.",
+                        line=expression.line,
+                        column=expression.column,
+                        kind="import",
+                    )
             if isinstance(expression.target, ast.Identifier) and scope.lookup(expression.target.name) is None:
                 enum_type = self._enum_variant_type(expression.target.name, expression.field_name, expression)
                 if enum_type is not None:
@@ -1710,9 +1860,11 @@ class TypeChecker:
         if operator == "\\":
             if LINEAR_ALGEBRA_MODULE not in self.imported_modules:
                 raise AetherTypeError(
-                    "Operator '\\' requires import Math.LinearAlgebra.",
+                    "Operator '\\' requires module 'Math.LinearAlgebra'.",
                     line=expression.line,
                     column=expression.column,
+                    hint="import Math.LinearAlgebra;",
+                    kind="import",
                 )
             return infer_builtin_type(LINEAR_ALGEBRA_SOLVE, [left_type, right_type])
         if operator in {"==", "!="}:
@@ -1899,7 +2051,9 @@ class TypeChecker:
         return component_type
 
     def _call_type(self, expression: ast.CallExpression, scope: Scope[VariableSymbol]) -> AetherType | None:
-        builtin_name = self.builtin_aliases.get(expression.callee, expression.callee)
+        canonical_callee = self._resolve_module_member(expression.callee)
+        builtin_name = self.builtin_aliases.get(expression.callee, canonical_callee or expression.callee)
+        builtin_is_visible = "." not in expression.callee or canonical_callee is not None
         if expression.callee == "Exception":
             if expression.keyword_arguments:
                 raise AetherTypeError("Exception(...) does not accept keyword arguments.")
@@ -1918,7 +2072,7 @@ class TypeChecker:
                     column=expression.column,
                 )
             return "Exception"
-        if is_builtin(builtin_name):
+        if builtin_is_visible and is_builtin(builtin_name):
             self._check_builtin_keyword_arguments(builtin_name, expression, scope)
             self._check_builtin_function_arguments(builtin_name, expression)
             validate_builtin_arity(builtin_name, len(expression.arguments))
@@ -1947,7 +2101,9 @@ class TypeChecker:
                 line=expression.line,
                 column=expression.column,
             )
-        struct = self._constructor_struct(expression.callee)
+        struct = self.qualified_structs.get(canonical_callee) if canonical_callee is not None else None
+        if struct is None:
+            struct = self._constructor_struct(expression.callee)
         if struct is not None:
             self._check_struct_constructor(expression, struct, scope)
             return struct.name
@@ -1955,6 +2111,8 @@ class TypeChecker:
         if method_return_type is not None:
             return method_return_type
         function = self.functions.get(expression.callee)
+        if function is None and canonical_callee is not None:
+            function = self.qualified_functions.get(canonical_callee)
         if function is None:
             private_message = self._private_import_message(expression.callee)
             if private_message is not None:
@@ -1997,6 +2155,16 @@ class TypeChecker:
                         continue
                 self._raise_implicit_conversion_error(argument_type, parameter.type_name)
         return function.return_type
+
+    def _resolve_module_member(self, visible_name: str | None) -> str | None:
+        if visible_name is None:
+            return None
+        for binding in sorted(self.module_bindings, key=len, reverse=True):
+            if visible_name == binding:
+                return self.module_bindings[binding]
+            if visible_name.startswith(binding + "."):
+                return self.module_bindings[binding] + visible_name[len(binding) :]
+        return None
 
     def _can_use_expected_collection_type(self, expression: ast.Expression, target_type: AetherType) -> bool:
         return (

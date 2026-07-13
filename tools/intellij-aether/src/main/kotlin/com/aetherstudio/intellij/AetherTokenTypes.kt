@@ -28,6 +28,7 @@ object AetherTokenTypes {
         "false",
         "float",
         "for",
+        "from",
         "function",
         "if",
         "import",

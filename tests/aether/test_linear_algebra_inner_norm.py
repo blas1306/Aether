@@ -3,9 +3,13 @@ from __future__ import annotations
 import pytest
 
 from aether.errors import AetherTypeError
-from aether.runner import run_aether
+from aether.runner import run_aether as _run_aether
 from aether.stdlib.math.linear_algebra import inner_builtin, norm_builtin
 from aether.types import AetherValue, TransposeVectorType, VectorType
+
+
+def run_aether(source: str):
+    return _run_aether("import Math.LinearAlgebra;\n" + source)
 
 
 def test_inner_row_vectors() -> None:
@@ -102,4 +106,3 @@ def test_norm_rejects_legacy_transpose_vector_values() -> None:
 
     with pytest.raises(AetherTypeError, match="legacy TransposeVector"):
         norm_builtin([legacy])
-

@@ -4,8 +4,13 @@ import numpy as np
 import pytest
 
 from aether.errors import AetherTypeError
-from aether.runner import run_aether
+from aether.runner import run_aether as _run_aether
 from aether.types import MatrixType, VectorType
+
+
+def run_aether(source: str):
+    prefix = "" if "import Math.LinearAlgebra" in source else "import Math.LinearAlgebra;\n"
+    return _run_aether(prefix + source)
 
 
 def _matrix_values(result, name: str) -> list[list[float]]:
@@ -25,7 +30,7 @@ def test_null_space_returns_kernel_basis_columns() -> None:
         """
 import Math.LinearAlgebra
 A = [1 1 1; 0 1 1];
-K = N(A);
+K = Math.LinearAlgebra.N(A);
 Z = Math.LinearAlgebra.matmul(A, K);
 s = size(K);
 """
@@ -44,7 +49,7 @@ def test_null_space_of_full_rank_matrix_has_zero_columns() -> None:
     result = run_aether(
         """
 import Math.LinearAlgebra
-K = N([1 0; 0 1]);
+K = Math.LinearAlgebra.N([1 0; 0 1]);
 s = size(K);
 """
     )
@@ -59,7 +64,7 @@ def test_null_space_returns_complex_kernel_basis_for_complex_matrix() -> None:
         """
 import Math.LinearAlgebra
 A = [1 im; 2 2im];
-K = N(A);
+K = Math.LinearAlgebra.N(A);
 Z = Math.LinearAlgebra.matmul(A, K);
 s = size(K);
 """
@@ -79,7 +84,7 @@ def test_range_returns_column_space_basis_columns() -> None:
         """
 import Math.LinearAlgebra
 A = [1 2; 0 0; 0 0];
-B = R(A);
+B = Math.LinearAlgebra.R(A);
 s = size(B);
 """
     )
@@ -99,7 +104,7 @@ def test_range_returns_complex_column_space_basis_for_complex_matrix() -> None:
         """
 import Math.LinearAlgebra
 A = [1 im; 0 0; 0 0];
-B = R(A);
+B = Math.LinearAlgebra.R(A);
 s = size(B);
 """
     )
@@ -119,7 +124,7 @@ def test_rank_returns_matrix_rank_as_int() -> None:
         """
 import Math.LinearAlgebra
 A = [1 2 3; 2 4 6; 1 1 1];
-r1 = rank(A);
+r1 = Math.LinearAlgebra.rank(A);
 r2 = Math.LinearAlgebra.rank([1 0; 0 1; 0 0]);
 println(r1);
 println(r2);
@@ -138,7 +143,7 @@ def test_rank_accepts_complex_matrices() -> None:
         """
 import Math.LinearAlgebra
 A = [1 im; 2 2im; 0 1];
-r = rank(A);
+r = Math.LinearAlgebra.rank(A);
 println(r);
 """
     )
@@ -152,8 +157,8 @@ def test_rank_of_zero_matrix_is_zero() -> None:
     result = run_aether(
         """
 import Math.LinearAlgebra
-Z = zeros(3, 4);
-r = rank(Z);
+Z = Math.LinearAlgebra.zeros(3, 4);
+r = Math.LinearAlgebra.rank(Z);
 """
     )
 
@@ -166,7 +171,7 @@ def test_subspace_functions_reject_non_matrix_arguments() -> None:
         run_aether(
             """
 import Math.LinearAlgebra
-K = N([1, 2, 3]);
+K = Math.LinearAlgebra.N([1, 2, 3]);
 """
         )
 
@@ -174,7 +179,7 @@ K = N([1, 2, 3]);
         run_aether(
             """
 import Math.LinearAlgebra
-B = R(1);
+B = Math.LinearAlgebra.R(1);
 """
         )
 
@@ -182,6 +187,6 @@ B = R(1);
         run_aether(
             """
 import Math.LinearAlgebra
-r = rank([1, 2, 3]);
+r = Math.LinearAlgebra.rank([1, 2, 3]);
 """
         )

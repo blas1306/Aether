@@ -1046,7 +1046,7 @@ The accepted order in v0 is:
 
 Visibility is recorded in the AST and symbol metadata. Inside a single file, `public` and `private` do not restrict access between declarations. Across file imports, packaged files export only `public` declarations.
 
-In files with a `package` declaration, top-level declarations without a visibility modifier are private by default. In scripts without `package`, existing script behavior is preserved and unmodified top-level declarations are available to legacy file imports.
+In files with a `package` declaration, top-level declarations without a visibility modifier are private by default. In scripts without `package`, unmodified top-level declarations are exportable through explicit module membership or selective imports.
 
 ## Packages and File Imports
 
@@ -1070,9 +1070,33 @@ Another file can import the package:
 
 ```aether
 import Math.LinearAlgebra;
-
-println(norm([1; 2; 3]));
+println(Math.LinearAlgebra.norm([1; 2; 3]));
 ```
+
+Imports create explicit bindings; importing a module never copies all of its
+exports into the local scope. The four supported forms are:
+
+```aether
+import Math.LinearAlgebra;                         // Math.LinearAlgebra
+import Math.LinearAlgebra as LA;                   // LA
+from Math.LinearAlgebra import solve;              // solve
+from Math.LinearAlgebra import solve as linearSolve; // linearSolve
+```
+
+The module's canonical identity is independent of its local binding. For
+example, `LA` above still identifies `Math.LinearAlgebra`. A selective import
+may bind a function, constant, type, or exported submodule; `from Math import
+LinearAlgebra as LA` therefore binds the same canonical submodule as the module
+alias example. Aliases collide with variables, functions, types, and other
+imports in the same scope regardless of declaration order. Duplicate bindings
+are errors, while a canonical binding and a differently named alias may
+coexist.
+
+`import`, `from`, and `as` are reserved keywords and cannot be declaration,
+parameter, alias, or local module names. Import paths and aliases retain their
+source locations in distinct AST nodes (`ImportStatement` and
+`FromImportStatement`), while semantic bindings retain both their visible name
+and canonical module origin.
 
 The initial file mapping is intentionally simple:
 
@@ -1093,20 +1117,21 @@ public const int DEFAULT_ITER = 100;
 ```
 
 ```aether
-import Math.Types;
+from Math.Types import Real;
+from Math.Types import DEFAULT_ITER;
 
 Real x = 2.5;
 println(DEFAULT_ITER);
 ```
 
-`private` declarations and declarations without a modifier remain usable inside their own file but are not visible through imports. Attempting to use a private imported name is a type error. File imports also reject missing modules, import cycles, collisions with local symbols, and collisions between two imported modules exporting the same unqualified name.
+`private` declarations and declarations without a modifier remain usable inside their own file but are not visible through selective imports. Attempting to import a private name is a type error. File imports also reject missing modules, missing exports, import cycles, and binding collisions.
 
-Builtin namespaces remain separate from file modules. A builtin import such as `import Math.LinearAlgebra` continues to expose the registered stdlib aliases. If a builtin namespace and a file module have the same name, the builtin namespace is preferred in this version.
+Builtin namespaces remain separate from file modules. A builtin import such as `import Math.LinearAlgebra` creates only the qualified module binding; use `from Math.LinearAlgebra import solve` for an unqualified local function. If a builtin namespace and a file module have the same name, the builtin namespace is preferred in this version.
 
 Current package/import limitations:
 
 - A package maps to one `.ae` file; multi-file packages are not implemented yet.
-- Specific imports, import aliases such as `import X as Y`, and explicit wildcards are not implemented yet.
+- Import lists, wildcard imports, relative imports, and reexports are not implemented.
 - Cyclic imports are rejected.
 - `private` is enforced across imports only; declarations in the same file can still use each other.
 - Advanced exceptions and multi-file package visibility are outside this version.
@@ -1478,7 +1503,7 @@ out-of-range indices raise an `AetherRuntimeError`. Method arguments are checked
 statically when their types are known: values passed to `push`, `insert`,
 `contains`, and `indexOf` must be assignable to `T`, and indices must be `int`.
 
-The functional builtins remain valid and keep the same signatures: `length(xs)`, `push(xs, value)`, `pop(xs)`, `insert(xs, index, value)`, `remove_at(xs, index)`, `contains(xs, value)`, `clear(xs)`, `copy(xs)`, `reverse(xs)`, `sort(xs)`, `rows(A)`, `columns(A)`, and `Math.LinearAlgebra.transpose(A)`/the imported `transpose(A)` alias still work. The global `size(value)` builtin retains its existing shape-vector semantics; `List<T>.size()` specifically returns the list length as an `int`.
+The functional builtins remain valid and keep the same signatures: `length(xs)`, `push(xs, value)`, `pop(xs)`, `insert(xs, index, value)`, `remove_at(xs, index)`, `contains(xs, value)`, `clear(xs)`, `copy(xs)`, `reverse(xs)`, `sort(xs)`, `rows(A)`, `columns(A)`, and `Math.LinearAlgebra.transpose(A)`/an explicit `from Math.LinearAlgebra import transpose` binding still work. The global `size(value)` builtin retains its existing shape-vector semantics; `List<T>.size()` specifically returns the list length as an `int`.
 
 `const` follows the same mutation rules as the functional builtins. Read-only properties and non-mutating copy methods are valid on constants, while mutating methods are rejected when the receiver is rooted in a constant variable:
 
@@ -1661,13 +1686,16 @@ Math.LinearAlgebra.R(A)
 Math.LinearAlgebra.rank(A)
 ```
 
-This namespace is a simulated builtin namespace for now, implemented through the Aether stdlib registry. Calls can always be resolved by their full builtin names, such as `"Math.LinearAlgebra.inner"`. A builtin `import Math.LinearAlgebra` also exposes the direct aliases in this namespace.
+This namespace is a simulated builtin namespace for now, implemented through the Aether stdlib registry. Its full names are available only through a matching module binding.
 
-Importing the builtin namespace exposes unqualified aliases for direct use:
+Importing the module preserves qualified access; selective imports provide unqualified names:
 
 ```aether
-import Math.LinearAlgebra
-S, D = eig(A);
+import Math.LinearAlgebra;
+S, D = Math.LinearAlgebra.eig(A);
+
+from Math.LinearAlgebra import eig;
+S2, D2 = eig(A);
 ```
 
 `Math.LinearAlgebra.inner(u, v)` computes the usual Euclidean inner product:
@@ -1766,13 +1794,21 @@ orientation:
 These expressions are not equivalent. Row-by-column multiplication is an inner
 product, while column-by-row multiplication is an outer product.
 
-`Math.LinearAlgebra.solve(A, b)` solves linear systems with Julia-like left-division semantics. The expression `A \ b` is equivalent to `Math.LinearAlgebra.solve(A, b)`.
+`Math.LinearAlgebra.solve(A, b)` solves linear systems with Julia-like left-division semantics. The expression `A \ b` lowers to the same central solve builtin, so both forms share type rules, dimension validation, algorithm selection, and errors.
+
+The `\` operator is syntactically part of the language but is semantically
+available only after the executable module successfully imports the canonical
+provider `Math.LinearAlgebra`. A module alias, importing any exported symbol
+from that module, or importing the `LinearAlgebra` submodule from `Math` all
+load the same provider identity and enable the operator. Without such an import,
+the frontend reports an import diagnostic before execution.
 
 The coefficient argument `A` must be a numeric mathematical matrix. The right-hand side `b` must be a numeric mathematical vector or matrix with `rows(b) == rows(A)`. Row-vector right-hand sides with matching length are treated as column vectors. The result is a `Matrix<double>`/`Vector<double>` for real systems, or `Matrix<complex>`/`Vector<complex>` when either `A` or `b` is complex:
 
 ```aether
 A = [2 1; 1 3];
 b = [1; 2];
+import Math.LinearAlgebra;
 println(A \ b); // [0.2; 0.6]
 
 B = [2 4; 8 12];

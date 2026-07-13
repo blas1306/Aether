@@ -23,7 +23,7 @@ public alias P = Point;
         encoding="utf-8",
     )
     main_file = source_dir / "main.ae"
-    main_file.write_text("import Geometry;\nP p = P(1.0, 2.0);\nprintln(p.x);\n", encoding="utf-8")
+    main_file.write_text("from Geometry import P;\nP p = P(1.0, 2.0);\nprintln(p.x);\n", encoding="utf-8")
 
     monkeypatch.chdir(project_root)
 

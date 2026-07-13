@@ -15,13 +15,13 @@ double tol = 1e-8;
 int maxiter = 100;
 
 Vector<double, Column> xn = x0;
-double res = norm(F(xn));
+double res = Math.LinearAlgebra.norm(F(xn));
 int iter = 0;
 
 while (res > tol && iter < maxiter) {
     z = JF(xn) \ (-F(xn));
     xn = xn + z;
-    res = norm(F(xn));
+    res = Math.LinearAlgebra.norm(F(xn));
     iter += 1;
 }
 

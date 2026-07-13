@@ -4,8 +4,13 @@ import numpy as np
 import pytest
 
 from aether.errors import AetherTypeError
-from aether.runner import run_aether
+from aether.runner import run_aether as _run_aether
 from aether.types import MatrixType
+
+
+def run_aether(source: str):
+    prefix = "" if "import Math.LinearAlgebra" in source else "import Math.LinearAlgebra;\n"
+    return _run_aether(prefix + source)
 
 
 def _matrix_values(result, name: str) -> list[list[float]]:
@@ -19,7 +24,7 @@ def test_eig_returns_real_diagonalization_for_imported_short_name() -> None:
         """
 import Math.LinearAlgebra
 A = [1 1; 0 2];
-S, D = eig(A);
+S, D = Math.LinearAlgebra.eig(A);
 left = Math.LinearAlgebra.matmul(A, S);
 right = Math.LinearAlgebra.matmul(S, D);
 """
@@ -51,7 +56,7 @@ def test_eig_returns_complex_diagonalization_for_complex_matrix() -> None:
         """
 import Math.LinearAlgebra
 A = [im 0; 0 2];
-S, D = eig(A);
+S, D = Math.LinearAlgebra.eig(A);
 left = Math.LinearAlgebra.matmul(A, S);
 right = Math.LinearAlgebra.matmul(S, D);
 """
@@ -71,7 +76,7 @@ def test_eig_can_return_complex_diagonalization_for_real_matrix() -> None:
         """
 import Math.LinearAlgebra
 A = [0 -1; 1 0];
-S, D = eig(A);
+S, D = Math.LinearAlgebra.eig(A);
 left = Math.LinearAlgebra.matmul(A, S);
 right = Math.LinearAlgebra.matmul(S, D);
 """
@@ -91,7 +96,7 @@ def test_eig_rejects_defective_matrix() -> None:
         run_aether(
             """
 import Math.LinearAlgebra
-S, D = eig([1 1; 0 1]);
+S, D = Math.LinearAlgebra.eig([1 1; 0 1]);
 """
         )
 
@@ -101,6 +106,6 @@ def test_eig_rejects_non_square_matrix() -> None:
         run_aether(
             """
 import Math.LinearAlgebra
-S, D = eig([1 2 3; 4 5 6]);
+S, D = Math.LinearAlgebra.eig([1 2 3; 4 5 6]);
 """
         )

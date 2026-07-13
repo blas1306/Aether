@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import threading
 from bisect import bisect_right
@@ -288,7 +289,7 @@ class AetherLanguageServer:
         name, token_start, token_end = token
 
         symbol = symbol_before_offset(source, name, offset)
-        if symbol is not None:
+        if symbol is not None and symbol.origin != "import":
             return _lsp_hover(
                 _symbol_hover_markdown(symbol),
                 _lsp_range_from_offsets(source, line_starts, token_start, token_end),
@@ -298,6 +299,12 @@ class AetherLanguageServer:
         if builtin_name is not None:
             return _lsp_hover(
                 _builtin_hover_markdown(name, builtin_name),
+                _lsp_range_from_offsets(source, line_starts, token_start, token_end),
+            )
+
+        if symbol is not None:
+            return _lsp_hover(
+                _symbol_hover_markdown(symbol),
                 _lsp_range_from_offsets(source, line_starts, token_start, token_end),
             )
 
@@ -408,6 +415,27 @@ def _resolve_builtin_hover_name(source: str, name: str) -> str | None:
     names = _safe_builtin_names()
     if name in names:
         return name
+    from_pattern = re.compile(
+        r"^\s*from\s+(?P<module>[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s+import\s+"
+        r"(?P<symbol>[A-Za-z_]\w*)(?:\s+as\s+(?P<alias>[A-Za-z_]\w*))?\b",
+        re.MULTILINE,
+    )
+    for match in from_pattern.finditer(source):
+        local_name = match.group("alias") or match.group("symbol")
+        canonical_name = f"{match.group('module')}.{match.group('symbol')}"
+        if local_name == name and canonical_name in names:
+            return canonical_name
+    import_pattern = re.compile(
+        r"^\s*import\s+(?P<module>[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)"
+        r"(?:\s+as\s+(?P<alias>[A-Za-z_]\w*))?\b",
+        re.MULTILINE,
+    )
+    for match in import_pattern.finditer(source):
+        binding = match.group("alias") or match.group("module")
+        if name.startswith(binding + "."):
+            canonical_name = match.group("module") + name[len(binding) :]
+            if canonical_name in names:
+                return canonical_name
     for symbol in extract_document_symbols(source):
         if symbol.origin != "import" or not _safe_is_builtin_namespace(symbol.name):
             continue

@@ -542,7 +542,7 @@ public struct Point {
 
     result = run_aether(
         """
-import Geometry;
+from Geometry import Point;
 
 Point p = Point(3, 4);
 println(p.norm());
@@ -569,8 +569,8 @@ private struct Hidden {
         encoding="utf-8",
     )
 
-    with pytest.raises(AetherTypeError, match="private"):
-        run_aether("import Geometry;\nHidden h = Hidden(1);\nprintln(h.value());", source_root=tmp_path)
+    with pytest.raises(AetherTypeError, match="not public"):
+        run_aether("from Geometry import Hidden;", source_root=tmp_path)
 
 
 def test_struct_methods_accept_and_return_enum_list_array_vector_and_matrix_types() -> None:

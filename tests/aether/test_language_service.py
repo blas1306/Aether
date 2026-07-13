@@ -69,7 +69,7 @@ public alias P = Point;
         encoding="utf-8",
     )
 
-    diagnostics = analyze_source("import Geometry;\nP p = P(1.0, 2.0);", source_root=tmp_path)
+    diagnostics = analyze_source("from Geometry import P;\nP p = P(1.0, 2.0);", source_root=tmp_path)
 
     assert diagnostics == []
 
@@ -123,7 +123,7 @@ public alias P = Point;
         encoding="utf-8",
     )
 
-    result = run_source("import Geometry;\nP p = P(1.0, 2.0);\nprintln(p.x);", source_root=tmp_path)
+    result = run_source("from Geometry import P;\nP p = P(1.0, 2.0);\nprintln(p.x);", source_root=tmp_path)
 
     assert result.success
     assert result.output == "1.0\n"
@@ -142,6 +142,26 @@ def test_completion_items_include_keywords_builtins_and_symbols() -> None:
     labels = {item.label for item in items}
 
     assert {"if", "for", "println", "sqrt", "value", "square"} <= labels
+
+
+def test_completion_items_respect_explicit_import_bindings() -> None:
+    module_labels = {
+        item.label
+        for item in completion_items("import Math.LinearAlgebra as LA;\n", 2, 1)
+    }
+    symbol_labels = {
+        item.label
+        for item in completion_items(
+            "from Math.LinearAlgebra import solve as linearSolve;\n",
+            2,
+            1,
+        )
+    }
+
+    assert "LA" in module_labels
+    assert "solve" not in module_labels
+    assert "linearSolve" in symbol_labels
+    assert "solve" not in symbol_labels
 
 
 def test_completion_items_include_exception_keywords() -> None:

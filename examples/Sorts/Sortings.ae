@@ -1,5 +1,3 @@
-import IllegalArgumentException
-
 public boolean validarArray(Array<int>? arr) {
     if arr == null {
         return false;

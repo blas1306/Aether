@@ -37,8 +37,8 @@ def test_log_is_base_10_and_ln_is_natural_log() -> None:
     assert values == pytest.approx([2.0, 1.0])
 
 
-def test_math_import_exposes_pi_constant() -> None:
-    result = run_aether("import Math\nprintln(pi); println(Math.pi);")
+def test_math_selective_import_exposes_pi_constant() -> None:
+    result = run_aether("import Math\nfrom Math import pi\nprintln(pi); println(Math.pi);")
 
     values = [float(line) for line in result.output.strip().splitlines()]
     assert values == pytest.approx([3.141592653589793, 3.141592653589793])
@@ -48,6 +48,7 @@ def test_math_factorial_function() -> None:
     result = run_aether(
         """
 import Math
+from Math import factorial
 println(factorial(5));
 println(Math.factorial(6));
 """
@@ -60,6 +61,8 @@ def test_math_floor_and_ceil_names() -> None:
     result = run_aether(
         """
 import Math
+from Math import floor
+from Math import ceil
 println(floor(3.9));
 println(ceil(3.1));
 println(Math.floor(-1.2));
@@ -72,10 +75,10 @@ println(Math.ceil(-1.2));
 
 def test_factorial_rejects_non_int_and_negative_values() -> None:
     with pytest.raises(AetherTypeError, match="expects an int argument"):
-        run_aether("import Math\nprintln(factorial(5.0));")
+        run_aether("from Math import factorial\nprintln(factorial(5.0));")
 
     with pytest.raises(AetherRuntimeError, match="requires a non-negative integer"):
-        run_aether("import Math\nprintln(factorial(-1));")
+        run_aether("from Math import factorial\nprintln(factorial(-1));")
 
 
 def test_expression_function_single_parameter() -> None:

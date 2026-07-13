@@ -27,6 +27,8 @@ class TokenType(str, Enum):
     FOR = "FOR"
     IN = "IN"
     IMPORT = "IMPORT"
+    FROM = "FROM"
+    AS = "AS"
     PACKAGE = "PACKAGE"
     CONST = "CONST"
     ALIAS = "ALIAS"
@@ -104,6 +106,8 @@ KEYWORDS: dict[str, TokenType] = {
     "for": TokenType.FOR,
     "in": TokenType.IN,
     "import": TokenType.IMPORT,
+    "from": TokenType.FROM,
+    "as": TokenType.AS,
     "package": TokenType.PACKAGE,
     "const": TokenType.CONST,
     "alias": TokenType.ALIAS,

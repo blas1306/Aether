@@ -4,8 +4,13 @@ import numpy as np
 import pytest
 
 from aether.errors import AetherTypeError
-from aether.runner import run_aether
+from aether.runner import run_aether as _run_aether
 from aether.types import MatrixType
+
+
+def run_aether(source: str):
+    prefix = "" if "import Math.LinearAlgebra" in source else "import Math.LinearAlgebra;\n"
+    return _run_aether(prefix + source)
 
 
 def _matrix_values(result, name: str) -> list[list[float]]:
@@ -19,7 +24,7 @@ def test_lu_returns_permutation_lower_and_upper_factors_after_import() -> None:
         """
 import Math.LinearAlgebra
 A = [2 1; 4 5];
-P, L, U = LU(A);
+P, L, U = Math.LinearAlgebra.LU(A);
 PA = Math.LinearAlgebra.matmul(P, A);
 R = Math.LinearAlgebra.matmul(L, U);
 """
@@ -39,7 +44,7 @@ def test_ldu_returns_permutation_unit_triangular_factors_and_diagonal_factor() -
         """
 import Math.LinearAlgebra
 A = [4 8; 2 6];
-P, L, D, U = LDU(A);
+P, L, D, U = Math.LinearAlgebra.LDU(A);
 PA = Math.LinearAlgebra.matmul(P, A);
 R = Math.LinearAlgebra.matmul(Math.LinearAlgebra.matmul(L, D), U);
 """
@@ -78,8 +83,8 @@ def test_lu_and_ldu_include_permutation_for_row_swaps() -> None:
         """
 import Math.LinearAlgebra
 A = [0 1; 1 0];
-P1, L1, U1 = LU(A);
-P2, L2, D2, U2 = LDU(A);
+P1, L1, U1 = Math.LinearAlgebra.LU(A);
+P2, L2, D2, U2 = Math.LinearAlgebra.LDU(A);
 PA1 = Math.LinearAlgebra.matmul(P1, A);
 PA2 = Math.LinearAlgebra.matmul(P2, A);
 R1 = Math.LinearAlgebra.matmul(L1, U1);
@@ -98,7 +103,7 @@ def test_lu_returns_complex_factors_for_complex_matrix() -> None:
         """
 import Math.LinearAlgebra
 A = [0 1 + im; 2 3];
-P, L, U = LU(A);
+P, L, U = Math.LinearAlgebra.LU(A);
 PA = Math.LinearAlgebra.matmul(P, A);
 R = Math.LinearAlgebra.matmul(L, U);
 """
@@ -119,7 +124,7 @@ def test_ldu_returns_complex_factors_for_complex_matrix() -> None:
         """
 import Math.LinearAlgebra
 A = [2 1 + im; 4 3];
-P, L, D, U = LDU(A);
+P, L, D, U = Math.LinearAlgebra.LDU(A);
 PA = Math.LinearAlgebra.matmul(P, A);
 R = Math.LinearAlgebra.matmul(Math.LinearAlgebra.matmul(L, D), U);
 """
@@ -141,7 +146,7 @@ def test_lu_and_ldu_reject_non_square_matrices() -> None:
         run_aether(
             """
 import Math.LinearAlgebra
-P, L, U = LU([1 2 3; 4 5 6]);
+P, L, U = Math.LinearAlgebra.LU([1 2 3; 4 5 6]);
 """
         )
 
@@ -149,7 +154,7 @@ P, L, U = LU([1 2 3; 4 5 6]);
         run_aether(
             """
 import Math.LinearAlgebra
-P, L, D, U = LDU([1 2 3; 4 5 6]);
+P, L, D, U = Math.LinearAlgebra.LDU([1 2 3; 4 5 6]);
 """
         )
 
@@ -159,6 +164,6 @@ def test_ldu_reports_when_zero_diagonal_prevents_unit_upper_factor() -> None:
         run_aether(
             """
 import Math.LinearAlgebra
-P, L, D, U = LDU([0 1; 0 0]);
+P, L, D, U = Math.LinearAlgebra.LDU([0 1; 0 0]);
 """
         )

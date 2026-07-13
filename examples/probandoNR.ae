@@ -21,6 +21,6 @@ double nr(double x0, double tol, int maxiter) {
 
 solNR = nr(1, 1e-8, 100);
 
-xn = solNR;
+double xn = solNR;
 
 println("x = ", xn);

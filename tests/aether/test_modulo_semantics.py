@@ -39,6 +39,7 @@ d = -5 % -3;
 def test_math_mod_uses_floor_modulo_for_ints() -> None:
     result = run_aether(
         """
+import Math
 a = Math.mod(5, 3);
 b = Math.mod(-5, 3);
 c = Math.mod(5, -3);
@@ -56,6 +57,7 @@ d = Math.mod(-5, -3);
 def test_percent_and_math_mod_support_decimals() -> None:
     result = run_aether(
         """
+import Math
 truncated = -5.5 % 2.0;
 floored = Math.mod(-5.5, 2.0);
 """
@@ -71,6 +73,7 @@ def test_integer_modulo_handles_in_range_factorials_exactly() -> None:
     result = run_aether(
         """
 import Math
+from Math import factorial
 wilson = (factorial(12) + 1) % 13;
 floored = Math.mod(factorial(12) + 1, 13);
 """
@@ -87,12 +90,12 @@ def test_percent_rejects_divisor_zero() -> None:
 
 def test_math_mod_rejects_divisor_zero() -> None:
     with pytest.raises(AetherRuntimeError, match="divisor zero"):
-        run_aether("x = Math.mod(5, 0);")
+        run_aether("import Math; x = Math.mod(5, 0);")
 
 
 def test_modulo_rejects_non_numeric_operands_in_lsp() -> None:
     percent_diagnostics = analyze_source('x = "a" % 2;')
-    builtin_diagnostics = analyze_source("x = Math.mod([1 2], 2);")
+    builtin_diagnostics = analyze_source("import Math; x = Math.mod([1 2], 2);")
 
     assert len(percent_diagnostics) == 1
     assert "requires real numeric operands" in percent_diagnostics[0].message

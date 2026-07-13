@@ -179,8 +179,8 @@ plugin ejecute ese backend.
 | Enum payloads | Sin sintaxis | No | No | No | No | No | No | No | No | Not implemented |
 | Genéricos de usuario | Formas genéricas se rechazan | No | No | No | No | No | No | No | interfaz negativa | Parsed but rejected |
 | Nominal typing UDT | Implemented | Implemented | Implemented | clases IR nominales existen sin integración | No camino fuente | No | No | símbolos | AST | AST-only |
-| Imports de archivo/módulo | `import A.B` | resolución, ciclos/colisiones | carga y merge de exports | import statement rechazada | No | No | No | LSP/symbols parcial | extensa AST | AST-only |
-| Imports selectivos/alias/wildcard | Sin sintaxis | No | No | No | No | No | No | No | No | Not implemented |
+| Imports de archivo/módulo | `import A.B [as C]` | identidad canónica, bindings, ciclos/colisiones | namespace explícito, sin wildcard implícito | import statement rechazada honestamente | No | No | No | LSP/symbols/highlight parcial | suite dedicada AST | AST-only |
+| Imports selectivos/alias/wildcard | `from A.B import x [as y]`; wildcard/listas rechazados | exports públicos y submódulos | binding directo conserva origen | rechazado como imports | No | No | No | completion/hover/symbols parcial | suite dedicada AST | AST-only |
 | `package` / namespace | Implemented, uno por archivo | visibilidad de exports | Implemented | programa deja de ser solo funciones | No | No | No | symbols/hover | imports AST | AST-only |
 | Resolución entre archivos | N/A | `source_root` + `.ae` | Implemented | No linker/lowering módulos | No | No | No | LSP recibe root | tests | AST-only |
 | Visibilidad top-level | public/private | Implemented | Implemented | no módulos | No | No | No | completion parcial | tests | AST-only |

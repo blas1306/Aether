@@ -267,13 +267,13 @@ public struct Circle implements Shape {
     )
 
     result = run_aether(
-        "import Geometry;\nShape s = Circle(4);\nprintln(s.area());",
+        "from Geometry import Shape;\nfrom Geometry import Circle;\nShape s = Circle(4);\nprintln(s.area());",
         source_root=tmp_path,
     )
     assert result.output == "16.0\n"
 
-    with pytest.raises(AetherTypeError, match="private"):
-        run_aether("import Geometry;\nHidden h = Circle(1);", source_root=tmp_path)
+    with pytest.raises(AetherTypeError, match="not public"):
+        run_aether("from Geometry import Hidden;", source_root=tmp_path)
 
 
 def test_public_struct_cannot_implement_private_interface_in_package(tmp_path: Path) -> None:
