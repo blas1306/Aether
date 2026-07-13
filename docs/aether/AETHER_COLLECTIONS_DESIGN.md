@@ -137,6 +137,21 @@ Array<int> xs = {1, 2, 3}; // Array<int>
 `Array<T>` and `List<T>` are distinct types. Aether should not implicitly
 convert between them merely because their element types match.
 
+An array can be copied over a half-open range with `array[start:end]`. Both
+bounds must be `int` and must satisfy
+`0 <= start <= end <= array.length`. The result has the same `Array<T>` type and
+owns a new container and element buffer:
+
+```aether
+Array<int> source = {1, 2, 3, 4};
+Array<int> copy = source[1:3]; // {2, 3}
+copy[0] = 99;                 // source remains {1, 2, 3, 4}
+```
+
+Invalid bounds panic with `Aether panic: Array slice out of bounds`. Partial
+bounds, steps, slices of other aggregate types through this operation, and
+slice assignment are outside the array-slicing feature.
+
 ## Brace Literal Typing
 
 Brace literals are target-typed collection literals.

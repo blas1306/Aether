@@ -423,9 +423,12 @@ println(box.items);
     assert result.output == "Array{1, 2}\n"
 
 
-def test_array_slicing_is_not_supported_yet() -> None:
-    with pytest.raises(AetherTypeError, match="Cannot slice value of type 'Array<int>'"):
-        run_aether("Array<int> a = {1, 2, 3}; a[0:1];")
+def test_array_slicing_returns_an_independent_array() -> None:
+    result = run_aether(
+        "Array<int> a = {1, 2, 3}; Array<int> b = a[0:2]; b[0] = 9; println(a[0]); println(b[0]);"
+    )
+
+    assert result.output.splitlines() == ["1", "9"]
 
 
 def test_list_literal_rejects_incompatible_elements() -> None:

@@ -626,6 +626,8 @@ class Parser:
                 return ast.Assignment(expression, value, equals.line, equals.column)
             if isinstance(expression, ast.IndexExpression):
                 return ast.Assignment(expression, value, equals.line, equals.column)
+            if isinstance(expression, ast.SliceExpression):
+                return ast.Assignment(expression, value, equals.line, equals.column)
             if isinstance(expression, ast.FieldAccess):
                 if not self._is_field_assignment_lvalue(expression):
                     raise self._error(
@@ -783,7 +785,10 @@ class Parser:
                     expr = ast.MatrixIndexExpression(expr, index, column, bracket.line, bracket.column)
                     continue
                 self._consume(TokenType.RIGHT_BRACKET, "Expected ']' after index.")
-                expr = ast.IndexExpression(expr, index, bracket.line, bracket.column)
+                if isinstance(index, ast.RangeExpression) and index.step is None:
+                    expr = ast.SliceExpression(expr, index.start, index.end, bracket.line, bracket.column)
+                else:
+                    expr = ast.IndexExpression(expr, index, bracket.line, bracket.column)
                 continue
             if self._match(TokenType.APOSTROPHE):
                 operator = self._previous()

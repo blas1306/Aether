@@ -75,6 +75,7 @@ class LLVMListRuntime:
             sections.append(f"{self._LIST_STRUCT_TYPE} = type {{ i64, i64, ptr }}")
         common.append_core(sections)
         array.append_allocation(sections)
+        array.append_slicing(sections)
         array.append_length_conversion(sections)
         if self._uses_list_allocation:
             sections.append(

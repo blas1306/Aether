@@ -942,6 +942,12 @@ class TypeChecker:
         )
 
     def _assign_variable(self, statement: ast.Assignment, scope: Scope[VariableSymbol]) -> None:
+        if isinstance(statement.name, ast.SliceExpression):
+            raise AetherTypeError(
+                "Slice assignment is not supported yet.",
+                line=statement.line,
+                column=statement.column,
+            )
         if isinstance(statement.name, ast.MatrixIndexExpression):
             self._assign_matrix_index(
                 ast.MatrixIndexAssignment(
@@ -1580,6 +1586,11 @@ class TypeChecker:
                 return self._index_type(expression, scope)
             except AetherTypeError as exc:
                 raise _with_source_location(exc, expression) from exc
+        if isinstance(expression, ast.SliceExpression):
+            try:
+                return self._slice_type(expression, scope)
+            except AetherTypeError as exc:
+                raise _with_source_location(exc, expression) from exc
         if isinstance(expression, ast.MatrixIndexExpression):
             try:
                 return self._matrix_index_type(expression, scope)
@@ -1788,6 +1799,30 @@ class TypeChecker:
         if isinstance(array_type, ArrayType):
             return array_element_type(array_type)
         return list_element_type(array_type)
+
+    def _slice_type(self, expression: ast.SliceExpression, scope: Scope[VariableSymbol]) -> AetherType | None:
+        collection_type = self._expression_type(expression.collection, scope)
+        start_type = self._expression_type(expression.start, scope)
+        end_type = self._expression_type(expression.end, scope)
+        if collection_type is UNKNOWN_TYPE or start_type is UNKNOWN_TYPE or end_type is UNKNOWN_TYPE:
+            return UNKNOWN_TYPE
+        if not isinstance(collection_type, ArrayType):
+            # Preserve the pre-existing List/Vector range semantics.  ArraySlice is
+            # the only new operation introduced by SliceExpression.
+            return self._index_type(
+                ast.IndexExpression(
+                    expression.collection,
+                    ast.RangeExpression(expression.start, expression.end),
+                    expression.line,
+                    expression.column,
+                ),
+                scope,
+            )
+        if start_type != "int":
+            raise AetherTypeError(f"Array slice start must be int, got '{type_to_string(start_type)}'.")
+        if end_type != "int":
+            raise AetherTypeError(f"Array slice end must be int, got '{type_to_string(end_type)}'.")
+        return collection_type
 
     def _matrix_index_type(self, expression: ast.MatrixIndexExpression, scope: Scope[VariableSymbol]) -> AetherType | None:
         matrix_type = self._expression_type(expression.matrix, scope)
@@ -3052,6 +3087,11 @@ class _StructMethodMutationAnalysis:
             self._scan_expression(expression.array, locals_in_scope)
             self._scan_expression(expression.index, locals_in_scope)
             return
+        if isinstance(expression, ast.SliceExpression):
+            self._scan_expression(expression.collection, locals_in_scope)
+            self._scan_expression(expression.start, locals_in_scope)
+            self._scan_expression(expression.end, locals_in_scope)
+            return
         if isinstance(expression, ast.MatrixIndexExpression):
             self._scan_expression(expression.matrix, locals_in_scope)
             self._scan_expression(expression.row, locals_in_scope)
@@ -3110,6 +3150,8 @@ def _assignment_root_name(expression: ast.Expression) -> str | None:
         return expression.name
     if isinstance(expression, ast.IndexExpression):
         return _assignment_root_name(expression.array)
+    if isinstance(expression, ast.SliceExpression):
+        return _assignment_root_name(expression.collection)
     if isinstance(expression, ast.MatrixIndexExpression):
         return _assignment_root_name(expression.matrix)
     if isinstance(expression, ast.FieldAccess):
@@ -3169,6 +3211,8 @@ def _source_location(node: object | None) -> tuple[int, int]:
         return _source_location(node.target)
     if isinstance(node, ast.IndexExpression):
         return _source_location(node.array)
+    if isinstance(node, ast.SliceExpression):
+        return _source_location(node.collection)
     if isinstance(node, ast.MatrixIndexExpression):
         return _source_location(node.matrix)
     if isinstance(node, ast.UnaryExpression):

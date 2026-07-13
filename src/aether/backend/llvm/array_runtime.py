@@ -12,6 +12,7 @@ class LLVMArrayRuntime:
     uses_type: bool
     uses_allocation: bool
     uses_indexing: bool
+    uses_slicing: bool
     uses_length_conversion: bool
 
     STRUCT_TYPE = "%AetherArray"
@@ -83,6 +84,55 @@ class LLVMArrayRuntime:
                     "convert:",
                     "  %result = trunc i64 %length to i32",
                     "  ret i32 %result",
+                    "}",
+                ]
+            )
+        )
+
+    def append_slicing(self, sections: list[str]) -> None:
+        if not self.uses_slicing:
+            return
+        sections.append('@.aether.array.slice.bounds = private unnamed_addr constant [40 x i8] c"Aether panic: Array slice out of bounds\\00"')
+        sections.append(
+            LLVMRuntimeCommon.panic_helper(
+                "aether_array_slice_bounds_panic", ".aether.array.slice.bounds", 40
+            )
+        )
+        sections.append(
+            "\n".join(
+                [
+                    "define private ptr @aether_array_slice(ptr %source, i32 %start32, i32 %end32, i64 %element_size) {",
+                    "entry:",
+                    "  %start = sext i32 %start32 to i64",
+                    "  %end = sext i32 %end32 to i64",
+                    self.length_pointer_line("%source_len_field", "%source", indent="  "),
+                    "  %source_length = load i64, ptr %source_len_field",
+                    "  %start_nonnegative = icmp sge i64 %start, 0",
+                    "  %ordered = icmp sle i64 %start, %end",
+                    "  %end_within_length = icmp sle i64 %end, %source_length",
+                    "  %start_valid = and i1 %start_nonnegative, %ordered",
+                    "  %valid = and i1 %start_valid, %end_within_length",
+                    "  br i1 %valid, label %allocate, label %bounds_panic",
+                    "bounds_panic:",
+                    "  call void @aether_array_slice_bounds_panic()",
+                    "  unreachable",
+                    "allocate:",
+                    "  %slice_length = sub i64 %end, %start",
+                    "  %copy_bytes = call i64 @aether_checked_allocation_bytes(i64 %slice_length, i64 %element_size)",
+                    "  %slice = call ptr @aether_array_new(i64 %element_size, i64 %slice_length)",
+                    "  %has_bytes = icmp ne i64 %copy_bytes, 0",
+                    "  br i1 %has_bytes, label %copy_elements, label %done",
+                    "copy_elements:",
+                    "  %start_bytes = call i64 @aether_checked_allocation_bytes(i64 %start, i64 %element_size)",
+                    self.data_pointer_line("%source_data_field", "%source", indent="  "),
+                    "  %source_data = load ptr, ptr %source_data_field",
+                    "  %copy_start = getelementptr i8, ptr %source_data, i64 %start_bytes",
+                    self.data_pointer_line("%slice_data_field", "%slice", indent="  "),
+                    "  %slice_data = load ptr, ptr %slice_data_field",
+                    "  call void @llvm.memcpy.p0.p0.i64(ptr %slice_data, ptr %copy_start, i64 %copy_bytes, i1 false)",
+                    "  br label %done",
+                    "done:",
+                    "  ret ptr %slice",
                     "}",
                 ]
             )

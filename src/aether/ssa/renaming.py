@@ -9,6 +9,7 @@ from aether.ir.model import (
     IRArrayGet,
     IRArrayLength,
     IRArrayNew,
+    IRArraySlice,
     IRArraySet,
     IRBasicBlock,
     IRBinaryOp,
@@ -66,6 +67,7 @@ from .model import (
     SSAArrayGet,
     SSAArrayLength,
     SSAArrayNew,
+    SSAArraySlice,
     SSAArraySet,
     SSABasicBlock,
     SSABinaryOp,
@@ -462,6 +464,14 @@ class SSARenamer:
             index = self._resolve_value(instruction.index)
             self._bind_value(result.name, result, bound_values)
             return SSAArrayGet(result, array, index)
+
+        if isinstance(instruction, IRArraySlice):
+            result = self._define_value(instruction.result)
+            array = self._resolve_value(instruction.array)
+            start = self._resolve_value(instruction.start)
+            end = self._resolve_value(instruction.end)
+            self._bind_value(result.name, result, bound_values)
+            return SSAArraySlice(result, array, start, end)
 
         if isinstance(instruction, IRListGet):
             result = self._define_value(instruction.result)

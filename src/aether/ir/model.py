@@ -275,6 +275,18 @@ class IRArrayGet(IRInstruction):
 
 
 @dataclass(frozen=True)
+class IRArraySlice(IRInstruction):
+    result: IRValue
+    array: IRValue
+    start: IRValue
+    end: IRValue
+
+    allocates = True
+    reads_memory = True
+    may_trap = True
+
+
+@dataclass(frozen=True)
 class IRListGet(IRInstruction):
     result: IRValue
     list_value: IRValue

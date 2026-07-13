@@ -7,6 +7,7 @@ from aether.ssa.model import (
     SSAArrayGet,
     SSAArrayLength,
     SSAArrayNew,
+    SSAArraySlice,
     SSAArraySet,
     SSABasicBlock,
     SSABinaryOp,
@@ -418,6 +419,14 @@ class SSAAlgebraicSimplifier:
                 instruction.result,
                 self._resolve(instruction.array, replacements),
                 self._resolve(instruction.index, replacements),
+            )
+
+        if isinstance(instruction, SSAArraySlice):
+            return SSAArraySlice(
+                instruction.result,
+                self._resolve(instruction.array, replacements),
+                self._resolve(instruction.start, replacements),
+                self._resolve(instruction.end, replacements),
             )
 
         if isinstance(instruction, SSAListGet):

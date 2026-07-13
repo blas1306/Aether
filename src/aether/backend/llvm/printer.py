@@ -9,6 +9,7 @@ from aether.ssa.model import (
     SSAArrayGet,
     SSAArrayLength,
     SSAArrayNew,
+    SSAArraySlice,
     SSAArraySet,
     SSABasicBlock,
     SSABinaryOp,
@@ -122,6 +123,7 @@ class LLVMPrinter:
         self._uses_array_type = False
         self._uses_array_allocation = False
         self._uses_array_indexing = False
+        self._uses_array_slicing = False
         self._uses_array_length_conversion = False
         self._uses_list_type = False
         self._uses_list_allocation = False
@@ -146,6 +148,7 @@ class LLVMPrinter:
             uses_type=self._uses_array_type,
             uses_allocation=self._uses_array_allocation,
             uses_indexing=self._uses_array_indexing,
+            uses_slicing=self._uses_array_slicing,
             uses_length_conversion=self._uses_array_length_conversion,
         )
         list_runtime = LLVMListRuntime(
@@ -167,6 +170,7 @@ class LLVMPrinter:
         uses_allocation = bool(
             self._uses_array_allocation
             or self._uses_list_allocation
+            or self._uses_array_slicing
             or uses_list_growth
             or self._sequence_sort_types
         )
@@ -175,11 +179,13 @@ class LLVMPrinter:
             uses_checked_allocation_size=bool(
                 self._uses_array_allocation
                 or self._uses_list_allocation
+                or self._uses_array_slicing
                 or self._sequence_sort_types
             ),
             uses_panic=bool(
                 uses_allocation
                 or self._uses_array_indexing
+                or self._uses_array_slicing
                 or self._uses_list_indexing
                 or self._uses_list_pop
                 or self._uses_list_remove_at
@@ -187,7 +193,7 @@ class LLVMPrinter:
                 or self._uses_list_length_conversion
                 or self._list_index_of_types
             ),
-            uses_free_and_memcpy=bool(self._sequence_sort_types or uses_list_growth),
+            uses_free_and_memcpy=bool(self._sequence_sort_types or uses_list_growth or self._uses_array_slicing),
             uses_memmove=self._uses_list_insert or self._uses_list_remove_at,
             sequence_sort_types=frozenset(self._sequence_sort_types),
         )
@@ -313,6 +319,8 @@ class LLVMPrinter:
             return "\n".join(self._print_vector_matrix_mul(instruction))
         if isinstance(instruction, SSAArrayGet):
             return "\n  ".join(self._print_array_get(instruction))
+        if isinstance(instruction, SSAArraySlice):
+            return self._print_array_slice(instruction)
         if isinstance(instruction, SSAListGet):
             return "\n  ".join(self._print_list_get(instruction))
         if isinstance(instruction, SSAVectorGet):
@@ -359,6 +367,7 @@ class LLVMPrinter:
             (
                 SSAArrayNew,
                 SSAArrayGet,
+                SSAArraySlice,
                 SSAListNew,
                 SSAListGet,
                 SSAListCopy,
@@ -1731,6 +1740,20 @@ class LLVMPrinter:
         return element_ptr.lines + [
             f"{result} = load {element_type}, ptr {element_ptr.value}"
         ]
+
+    def _print_array_slice(self, instruction: SSAArraySlice) -> str:
+        if not isinstance(instruction.array.type, ArrayType):
+            raise LLVMBackendError("LLVM array_slice expects an ArrayType source")
+        self._uses_array_type = True
+        self._uses_array_allocation = True
+        self._uses_array_slicing = True
+        result = self._new_temp(instruction.result)
+        element_size = self._sizeof(instruction.array.type.element)
+        return (
+            f"{result} = call ptr @aether_array_slice(ptr {self._operand(instruction.array)}, "
+            f"i32 {self._operand(instruction.start)}, i32 {self._operand(instruction.end)}, "
+            f"i64 {element_size})"
+        )
 
     def _print_list_get(self, instruction: SSAListGet) -> list[str]:
         if not isinstance(instruction.list_value.type, ListType):

@@ -4,6 +4,7 @@ from aether.ir.model import (
     IRArrayGet,
     IRArrayLength,
     IRArrayNew,
+    IRArraySlice,
     IRArraySet,
     IRBasicBlock,
     IRBinaryOp,
@@ -265,6 +266,8 @@ class DeadCodeEliminator:
             return (instruction.matrix, instruction.scalar)
         if isinstance(instruction, IRArrayGet):
             return (instruction.array, instruction.index)
+        if isinstance(instruction, IRArraySlice):
+            return (instruction.array, instruction.start, instruction.end)
         if isinstance(instruction, IRListGet):
             return (instruction.list_value, instruction.index)
         if isinstance(instruction, IRVectorGet):

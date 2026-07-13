@@ -634,6 +634,11 @@ class Interpreter:
                 return self._read_index(expression.array, expression.index, env)
             except AetherError as exc:
                 raise _with_source_location(exc, expression) from exc
+        if isinstance(expression, ast.SliceExpression):
+            try:
+                return self._read_array_slice(expression, env)
+            except AetherError as exc:
+                raise _with_source_location(exc, expression) from exc
         if isinstance(expression, ast.MatrixIndexExpression):
             try:
                 return self._read_matrix_index(expression.matrix, expression.row, expression.column, env)
@@ -887,6 +892,23 @@ class Interpreter:
         if isinstance(array_value.type_name, MatrixType):
             raise AetherTypeError("Matrix values require two-dimensional indexing with A[i, j].")
         return array_value.value[index]
+
+    def _read_array_slice(self, expression: ast.SliceExpression, env: Environment) -> AetherValue:
+        array_value = self._evaluate(expression.collection, env)
+        if not isinstance(array_value.type_name, ArrayType):
+            range_expression = ast.RangeExpression(expression.start, expression.end)
+            if isinstance(array_value.type_name, ListType):
+                return self._read_list_slice(array_value, range_expression, env)
+            return self._read_vector_slice(array_value, range_expression, env)
+        start_value = self._evaluate(expression.start, env)
+        end_value = self._evaluate(expression.end, env)
+        if start_value.type_name != "int" or end_value.type_name != "int":
+            raise AetherTypeError("Array slice bounds must be int.")
+        start = start_value.value
+        end = end_value.value
+        if start < 0 or start > end or end > len(array_value.value):
+            raise AetherRuntimeError("Aether panic: Array slice out of bounds")
+        return AetherValue(array_value.type_name, list(array_value.value[start:end]))
 
     def _read_matrix_index(
         self,
@@ -2145,6 +2167,8 @@ def _assignment_root_name(expression: ast.Expression) -> str | None:
         return expression.name
     if isinstance(expression, ast.IndexExpression):
         return _assignment_root_name(expression.array)
+    if isinstance(expression, ast.SliceExpression):
+        return _assignment_root_name(expression.collection)
     if isinstance(expression, ast.MatrixIndexExpression):
         return _assignment_root_name(expression.matrix)
     if isinstance(expression, ast.FieldAccess):

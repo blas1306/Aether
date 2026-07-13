@@ -7,6 +7,7 @@ from .model import (
     IRArrayGet,
     IRArrayLength,
     IRArrayNew,
+    IRArraySlice,
     IRArraySet,
     IRBasicBlock,
     IRBinaryOp,
@@ -233,6 +234,12 @@ class IRPrinter:
             return (
                 f"{self._typed_value(instruction.result)} = array_get "
                 f"{self._value(instruction.array)}, {self._value(instruction.index)}"
+            )
+        if isinstance(instruction, IRArraySlice):
+            return (
+                f"{self._typed_value(instruction.result)} = array_slice "
+                f"{self._value(instruction.array)}, {self._value(instruction.start)}, "
+                f"{self._value(instruction.end)}"
             )
         if isinstance(instruction, IRListGet):
             return (

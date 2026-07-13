@@ -12,6 +12,7 @@ from .model import (
     IRArrayGet,
     IRArrayLength,
     IRArrayNew,
+    IRArraySlice,
     IRArraySet,
     IRBasicBlock,
     IRBinaryOp,
@@ -382,6 +383,19 @@ class IRInterpreter:
             index = self._value(instruction.index, frame)
             self._check_array_index(array, index)
             frame.values[instruction.result] = array[index]
+            return False, None, None
+
+        if isinstance(instruction, IRArraySlice):
+            array = self._value(instruction.array, frame)
+            start = self._value(instruction.start, frame)
+            end = self._value(instruction.end, frame)
+            if not isinstance(array, list):
+                raise IRExecutionError("IR array slicing requires an array value")
+            if not isinstance(start, int) or isinstance(start, bool) or not isinstance(end, int) or isinstance(end, bool):
+                raise IRExecutionError("IR array slice bounds must be int")
+            if start < 0 or start > end or end > len(array):
+                raise IRExecutionError("Aether panic: Array slice out of bounds")
+            frame.values[instruction.result] = list(array[start:end])
             return False, None, None
 
         if isinstance(instruction, IRListGet):

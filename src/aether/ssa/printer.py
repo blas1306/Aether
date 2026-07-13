@@ -7,6 +7,7 @@ from .model import (
     SSAArrayGet,
     SSAArrayLength,
     SSAArrayNew,
+    SSAArraySlice,
     SSAArraySet,
     SSABasicBlock,
     SSABinaryOp,
@@ -229,6 +230,12 @@ class SSAPrinter:
             return (
                 f"{self._typed_value(instruction.result)} = array_get "
                 f"{self._value(instruction.array)}, {self._value(instruction.index)}"
+            )
+        if isinstance(instruction, SSAArraySlice):
+            return (
+                f"{self._typed_value(instruction.result)} = array_slice "
+                f"{self._value(instruction.array)}, {self._value(instruction.start)}, "
+                f"{self._value(instruction.end)}"
             )
         if isinstance(instruction, SSAListGet):
             return (

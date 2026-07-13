@@ -4,6 +4,7 @@ from aether.ssa.model import (
     SSAArrayGet,
     SSAArrayLength,
     SSAArrayNew,
+    SSAArraySlice,
     SSAArraySet,
     SSABasicBlock,
     SSABinaryOp,
@@ -247,6 +248,12 @@ class DeadPhiEliminator:
         if isinstance(instruction, SSAArrayGet):
             used_values.add(instruction.array)
             used_values.add(instruction.index)
+            return
+
+        if isinstance(instruction, SSAArraySlice):
+            used_values.add(instruction.array)
+            used_values.add(instruction.start)
+            used_values.add(instruction.end)
             return
 
         if isinstance(instruction, SSAListGet):

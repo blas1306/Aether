@@ -7,6 +7,7 @@ from .model import (
     IRArrayGet,
     IRArrayLength,
     IRArrayNew,
+    IRArraySlice,
     IRArraySet,
     IRBasicBlock,
     IRBinaryOp,
@@ -482,6 +483,10 @@ class IRVerifier:
 
         if isinstance(instruction, IRArrayGet):
             self._verify_array_get(instruction, state, value_types)
+            return self._define_value(state, instruction.result)
+
+        if isinstance(instruction, IRArraySlice):
+            self._verify_array_slice(instruction, state, value_types)
             return self._define_value(state, instruction.result)
 
         if isinstance(instruction, IRListGet):
@@ -980,6 +985,27 @@ class IRVerifier:
             self._fail(
                 f"Array get result type mismatch: expected "
                 f"{instruction.array.type.element}, got {instruction.result.type}"
+            )
+
+    def _verify_array_slice(
+        self,
+        instruction: IRArraySlice,
+        state: _State,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.array, state, value_types)
+        self._require_defined(instruction.start, state, value_types)
+        self._require_defined(instruction.end, state, value_types)
+        if not isinstance(instruction.array.type, ArrayType):
+            self._fail(f"Array slice expects array value, got {instruction.array.type}")
+        if not isinstance(instruction.start.type, IntType):
+            self._fail(f"Array slice start must be int, got {instruction.start.type}")
+        if not isinstance(instruction.end.type, IntType):
+            self._fail(f"Array slice end must be int, got {instruction.end.type}")
+        if instruction.result.type != instruction.array.type:
+            self._fail(
+                f"Array slice result type mismatch: expected "
+                f"{instruction.array.type}, got {instruction.result.type}"
             )
 
     def _verify_list_get(
@@ -1549,6 +1575,7 @@ class IRVerifier:
             (
                 IRArrayNew,
                 IRArrayGet,
+                IRArraySlice,
                 IRListNew,
                 IRListGet,
                 IRListCopy,

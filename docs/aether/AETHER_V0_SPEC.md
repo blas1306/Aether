@@ -1291,6 +1291,23 @@ Aether separates general programming collections from mathematical vectors and m
 brace literals is documented in
 [`AETHER_COLLECTIONS_DESIGN.md`](AETHER_COLLECTIONS_DESIGN.md).
 
+Arrays support 0-based, half-open slicing with two explicit `int` bounds:
+
+```aether
+Array<int> values = {1, 2, 3, 4, 5};
+Array<int> middle = values[1:4];       // {2, 3, 4}
+Array<int> whole = values[0:values.length];
+Array<int> empty = values[2:2];
+```
+
+`array[start:end]` returns a newly allocated `Array<T>` containing the elements
+in `[start, end)`. The new array does not share its container or element buffer
+with the source, so indexed assignment in one does not change the other. Bounds
+must satisfy `0 <= start <= end <= array.length`; otherwise execution panics with
+`Aether panic: Array slice out of bounds`. Only the explicit two-bound form is
+supported for arrays: `array[:]`, `array[start:]`, `array[:end]`, step slices,
+and slice assignment are not supported.
+
 The LLVM capacity, growth, allocation, and shrinking policy for
 length-changing `List<T>` operations is documented in
 [`AETHER_LIST_GROWTH_DESIGN.md`](AETHER_LIST_GROWTH_DESIGN.md). That document

@@ -10,6 +10,7 @@ from aether.ssa.model import (
     SSAArrayGet,
     SSAArrayLength,
     SSAArrayNew,
+    SSAArraySlice,
     SSAArraySet,
     SSABasicBlock,
     SSABinaryOp,
@@ -227,6 +228,7 @@ class SCCPAnalyzer:
             (
                 SSAArrayNew,
                 SSAArrayGet,
+                SSAArraySlice,
                 SSAListNew,
                 SSAListGet,
                 SSAListCopy,
@@ -397,6 +399,7 @@ class SCCPAnalyzer:
             (
                 SSAArrayNew,
                 SSAArrayGet,
+                SSAArraySlice,
                 SSAListNew,
                 SSAListGet,
                 SSAListCopy,
@@ -486,6 +489,8 @@ class SCCPAnalyzer:
             return (instruction.matrix, instruction.scalar)
         if isinstance(instruction, SSAArrayGet):
             return (instruction.array, instruction.index)
+        if isinstance(instruction, SSAArraySlice):
+            return (instruction.array, instruction.start, instruction.end)
         if isinstance(instruction, SSAListGet):
             return (instruction.list_value, instruction.index)
         if isinstance(instruction, SSAVectorGet):

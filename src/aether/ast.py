@@ -375,6 +375,15 @@ class IndexExpression:
 
 
 @dataclass(frozen=True)
+class SliceExpression:
+    collection: Expression
+    start: Expression
+    end: Expression
+    line: int = 1
+    column: int = 1
+
+
+@dataclass(frozen=True)
 class MatrixIndexExpression:
     matrix: Expression
     row: Expression

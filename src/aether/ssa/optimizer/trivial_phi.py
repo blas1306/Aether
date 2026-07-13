@@ -4,6 +4,7 @@ from aether.ssa.model import (
     SSAArrayGet,
     SSAArrayLength,
     SSAArrayNew,
+    SSAArraySlice,
     SSAArraySet,
     SSABasicBlock,
     SSABinaryOp,
@@ -467,6 +468,17 @@ class TrivialPhiEliminator:
             return (
                 SSAArrayGet(instruction.result, array, index),
                 int(array_rewritten) + int(index_rewritten),
+            )
+
+        if isinstance(instruction, SSAArraySlice):
+            array, array_rewritten = self._rewrite_value(instruction.array, replacements)
+            start, start_rewritten = self._rewrite_value(instruction.start, replacements)
+            end, end_rewritten = self._rewrite_value(instruction.end, replacements)
+            if not array_rewritten and not start_rewritten and not end_rewritten:
+                return instruction, 0
+            return (
+                SSAArraySlice(instruction.result, array, start, end),
+                int(array_rewritten) + int(start_rewritten) + int(end_rewritten),
             )
 
         if isinstance(instruction, SSAListGet):

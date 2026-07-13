@@ -7,6 +7,7 @@ from aether.ir.model import (
     IRArrayGet,
     IRArrayLength,
     IRArrayNew,
+    IRArraySlice,
     IRArraySet,
     IRBasicBlock,
     IRBinaryOp,
@@ -61,6 +62,7 @@ from .model import (
     SSAArrayGet,
     SSAArrayLength,
     SSAArrayNew,
+    SSAArraySlice,
     SSAArraySet,
     SSABasicBlock,
     SSABinaryOp,
@@ -713,6 +715,13 @@ class SSABuilder:
             array = self._resolve_value(instruction.array, state.value_map)
             index = self._resolve_value(instruction.index, state.value_map)
             return SSAArrayGet(result, array, index)
+
+        if isinstance(instruction, IRArraySlice):
+            result = self._define_value(instruction.result, state.value_map)
+            array = self._resolve_value(instruction.array, state.value_map)
+            start = self._resolve_value(instruction.start, state.value_map)
+            end = self._resolve_value(instruction.end, state.value_map)
+            return SSAArraySlice(result, array, start, end)
 
         if isinstance(instruction, IRListGet):
             result = self._define_value(instruction.result, state.value_map)

@@ -263,6 +263,18 @@ class SSAArrayGet(SSAInstruction):
 
 
 @dataclass(frozen=True)
+class SSAArraySlice(SSAInstruction):
+    result: SSAValue
+    array: SSAValue
+    start: SSAValue
+    end: SSAValue
+
+    allocates = True
+    reads_memory = True
+    may_trap = True
+
+
+@dataclass(frozen=True)
 class SSAListGet(SSAInstruction):
     result: SSAValue
     list_value: SSAValue

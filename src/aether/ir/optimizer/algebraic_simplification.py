@@ -7,6 +7,7 @@ from aether.ir.model import (
     IRArrayGet,
     IRArrayLength,
     IRArrayNew,
+    IRArraySlice,
     IRArraySet,
     IRBasicBlock,
     IRBinaryOp,
@@ -335,6 +336,13 @@ class AlgebraicSimplifier:
                 instruction,
                 array=self._resolve(instruction.array, replacements),
                 index=self._resolve(instruction.index, replacements),
+            )
+        if isinstance(instruction, IRArraySlice):
+            return replace(
+                instruction,
+                array=self._resolve(instruction.array, replacements),
+                start=self._resolve(instruction.start, replacements),
+                end=self._resolve(instruction.end, replacements),
             )
         if isinstance(instruction, IRListGet):
             return replace(

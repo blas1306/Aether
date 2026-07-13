@@ -18,6 +18,7 @@ from .model import (
     IRArrayGet,
     IRArrayLength,
     IRArrayNew,
+    IRArraySlice,
     IRArraySet,
     IRBasicBlock,
     IRBinaryOp,
@@ -1174,6 +1175,21 @@ class IRLowerer:
             self._require_same_type(index.type, IntType(), "array index must be int")
             result = context.temporary(indexed.type.element)
             context.block.instructions.append(IRArrayGet(result, indexed, index))
+            return result
+
+        if isinstance(expression, ast.SliceExpression):
+            array = self._lower_expression(expression.collection, context)
+            if not isinstance(array.type, ArrayType):
+                self._fail(
+                    f"IR backend only supports slicing arrays, got '{array.type}'.",
+                    expression,
+                )
+            start = self._lower_expression(expression.start, context)
+            self._require_same_type(start.type, IntType(), "array slice start must be int")
+            end = self._lower_expression(expression.end, context)
+            self._require_same_type(end.type, IntType(), "array slice end must be int")
+            result = context.temporary(array.type)
+            context.block.instructions.append(IRArraySlice(result, array, start, end))
             return result
 
         if isinstance(expression, ast.MatrixIndexExpression):
