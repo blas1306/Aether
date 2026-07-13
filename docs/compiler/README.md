@@ -75,6 +75,10 @@ Current compiler-design documents:
 - [CONTROL_FLOW_AUDIT.md](CONTROL_FLOW_AUDIT.md): technical audit of current
   `if`, `while`, `for`, `break`, `continue`, and `return` support across IR,
   CFG, SSA, optimizers, LLVM, and tests.
+- [ARRAY_SUBSYSTEM_AUDIT.md](ARRAY_SUBSYSTEM_AUDIT.md): comparative technical
+  audit of `Array<T>` across frontend, interpreters, IR, SSA, optimizers, LLVM,
+  runtime, tests, and documentation, using the current `List<T>` guarantees as
+  the baseline.
 - [LLVM_BACKEND.md](LLVM_BACKEND.md): initial textual LLVM IR backend for the
   smallest SSA subset, its type mapping, current limitations, and the fact
   that it is not connected to CLI yet.

@@ -43,7 +43,7 @@ Leyenda de `Spec`:
 | bool/boolean | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Completa |
 | string | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ✅ | ✅ documentada | Parcial backend |
 | List | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ✅ | ✅ documentada | Parcial backend fase 4e |
-| Array | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ parcialmente documentada | Parcial backend |
+| Array | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ⚠️ sin bounds/narrowing checked | ✅ | ⚠️ parcialmente documentada | Inconsistente entre AST/IR y LLVM |
 | Vector<Row> | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Completa con optimizer parcial |
 | Vector<Column> | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Completa con optimizer parcial |
 | Matrix | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ✅ documentada | Parcial backend |
@@ -73,7 +73,10 @@ Notas:
   `Vector`, `Matrix`) aliasan por asignacion, parametros y return cuando no hay
   conversion de elementos; `copy()` crea el contenedor independiente explicito.
 - `Array<T>` tiene backend para literales con tipo esperado, indexing,
-  assignment y length; no tiene API completa de colecciones.
+  assignment y length; no tiene API completa de colecciones. LLVM no valida
+  bounds de get/set, ArrayNew no comprueba overflow de bytes y `.length` trunca
+  i64 a i32 sin check. El detalle y roadmap estan en
+  [`ARRAY_SUBSYSTEM_AUDIT.md`](ARRAY_SUBSYSTEM_AUDIT.md).
 
 ## Expresiones
 
@@ -173,7 +176,11 @@ Notas:
 
 | Feature | Parser | Typechecker | AST Interpreter | IR | SSA | Optimizer | LLVM | Tests | Spec | Estado |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Array.length / length | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ⚠️ parcialmente documentada | Completa con optimizer parcial |
+| Array literal `{...}` con tipo esperado | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ allocation conservadora | ⚠️ OOM checked, bytes sin overflow check | ✅ | ✅ documentada | Funcional con riesgo de allocation |
+| Array.length / length | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ lectura eliminable | ⚠️ trunc i64→i32 sin check | ✅ caminos normales | ⚠️ parcialmente documentada | Narrowing nativo inseguro |
+| for sobre Array | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ hereda ArrayGet | ⚠️ loop acotado, get sin check propio | ⚠️ | ⚠️ parcialmente documentada | Funcional, safety parcial |
+| Array index read (`a[i]`) | ✅ | ✅ | ✅ bounds | ✅ bounds en interpreter | ✅ | ❌ DCE elimina get may-trap | ❌ sin bounds ni panic | ⚠️ AST/validos native | ⚠️ parcialmente documentada | Inseguro en LLVM |
+| Array index assignment (`a[i] = value`) | ✅ | ✅ | ✅ bounds | ✅ bounds en interpreter | ✅ | ✅ side-effect | ❌ sin bounds; store directo | ⚠️ AST/validos native | ⚠️ parcialmente documentada | Inseguro en LLVM |
 | Array.isEmpty | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ no documentada | No implementado |
 | Array.copy | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ⚠️ parcialmente documentada | Frontend solamente |
 | Array.contains | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ no documentada | No implementado |
