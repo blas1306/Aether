@@ -387,12 +387,20 @@ class IRVerifier:
             self._require_defined(instruction.value, state, value_types)
             if not isinstance(
                 instruction.value.type,
-                (IntType, BoolType, StringType, DoubleType),
+                (IntType, BoolType, StringType, DoubleType, VectorType, MatrixType),
             ):
                 self._fail(
-                    "Print value must be int, boolean, string, or double, "
+                    "Print value must be scalar, Vector, or Matrix, "
                     f"got {instruction.value.type}"
                 )
+            if isinstance(instruction.value.type, VectorType):
+                if instruction.aggregate_shape is None or len(instruction.aggregate_shape) != 1:
+                    self._fail("Vector print requires one known length")
+            elif isinstance(instruction.value.type, MatrixType):
+                if instruction.aggregate_shape is None or len(instruction.aggregate_shape) != 2:
+                    self._fail("Matrix print requires known rows and columns")
+            elif instruction.aggregate_shape is not None:
+                self._fail("Scalar print must not carry an aggregate shape")
             return state
 
         if isinstance(instruction, IRArrayNew):
@@ -1496,6 +1504,22 @@ class IRVerifier:
         left = instruction.left.type
         right = instruction.right.type
         operator = instruction.operator
+
+        if isinstance(left, (VectorType, MatrixType)):
+            expected_rank = 1 if isinstance(left, VectorType) else 2
+            shape = instruction.aggregate_shape
+            if operator not in {"eq", "ne"} or left != right:
+                self._fail(
+                    f"Aggregate compare requires equal operands and eq/ne, got {left}, {right}, {operator}"
+                )
+            if shape is None or len(shape) != expected_rank or any(size <= 0 for size in shape):
+                self._fail(f"Aggregate compare requires a positive rank-{expected_rank} shape")
+            if not isinstance(left.element, (IntType, DoubleType, BoolType, StringType)):
+                self._fail(f"Aggregate compare does not support element type {left.element}")
+            return BoolType()
+
+        if instruction.aggregate_shape is not None:
+            self._fail("Scalar compare must not carry an aggregate shape")
 
         if operator in {"lt", "le", "gt", "ge"}:
             if not (

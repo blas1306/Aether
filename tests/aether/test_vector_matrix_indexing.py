@@ -132,7 +132,7 @@ def test_parser_builds_dimension_property_access(source: str, property_name: str
 
 
 def test_parser_builds_assignment_with_vector_index_target() -> None:
-    program = Parser(lex("int main() { Vector<int, Row> v = [1, 2]; v[0] = 9; return v[0]; }")).parse()
+    program = Parser(lex("int main() { Vector<int, Row> v = [1, 2]; v[1] = 9; return v[1]; }")).parse()
     statement = program.statements[0].body[1]
 
     assert isinstance(statement, ast.Assignment)
@@ -142,7 +142,7 @@ def test_parser_builds_assignment_with_vector_index_target() -> None:
 
 
 def test_parser_builds_assignment_with_matrix_index_target() -> None:
-    program = Parser(lex("int main() { Matrix<int> A = [1, 2; 3, 4]; A[1, 0] = 9; return A[1, 0]; }")).parse()
+    program = Parser(lex("int main() { Matrix<int> A = [1, 2; 3, 4]; A[2, 1] = 9; return A[2, 1]; }")).parse()
     statement = program.statements[0].body[1]
 
     assert isinstance(statement, ast.Assignment)
@@ -159,7 +159,7 @@ def test_typechecker_accepts_vector_and_matrix_scalar_index_reads() -> None:
 int main() {
     Vector<int, Row> v = [4, 5, 6];
     Matrix<int> A = [1, 2; 3, 4];
-    return v[1] + A[1, 0];
+    return v[2] + A[2, 1];
 }
 """
             )
@@ -173,9 +173,9 @@ def test_typechecker_accepts_vector_and_matrix_index_writes() -> None:
 int main() {
     Vector<int, Row> v = [4, 5, 6];
     Matrix<int> A = [1, 2; 3, 4];
-    v[1] = 9;
-    A[1, 0] = v[1];
-    return A[1, 0];
+    v[2] = 9;
+    A[2, 1] = v[2];
+    return A[2, 1];
 }
 """
     )
@@ -203,7 +203,7 @@ int main() {
     Matrix<int> A = [1, 2; 3, 4];
     Matrix<int> B = [5, 6; 7, 8];
     Matrix<int> C = A + B;
-    return c[0] + C[0, 0];
+    return c[1] + C[1, 1];
 }
 """
     )
@@ -216,7 +216,7 @@ int main() {
     Matrix<int> A = [1, 2, 3; 4, 5, 6];
     Matrix<int> B = [7, 8; 9, 10; 11, 12];
     Matrix<int> C = A * B;
-    return C[0, 0] + C[1, 1];
+    return C[1, 1] + C[2, 2];
 }
 """
     )
@@ -231,7 +231,7 @@ int main() {
     Matrix<int> A = [3, 4; 5, 6];
     Vector<int, Row> r = [1, 2];
     Vector<int, Row> y = A * r;
-    return y[0];
+    return y[1];
 }
 """,
             "Matrix \\* Vector<Row>",
@@ -267,7 +267,7 @@ int main() {
     Matrix<int> A = [9, 8; 7, 6];
     Matrix<int> B = [1, 2; 3, 4];
     Matrix<int> C = A - B;
-    return c[0] + z[1] + C[1, 0];
+    return c[1] + z[2] + C[2, 1];
 }
 """
     )
@@ -280,7 +280,7 @@ int main() {
     Vector<int, Column> a = [1; 2; 3];
     Vector<int, Column> b = [4; 5; 6];
     Vector<int, Column> c = a + b;
-    return c[2];
+    return c[3];
 }
 """
     )
@@ -301,7 +301,7 @@ int main() {
     Vector<int, Column> a = [7; 8; 9];
     Vector<int, Column> b = [1; 2; 3];
     Vector<int, Column> c = a - b;
-    return c[2];
+    return c[3];
 }
 """
     )
@@ -323,7 +323,7 @@ int main() {
     Vector<int, Row> a = [1, 2, 3];
     Vector<int, Column> b = [4; 5; 6];
     Vector<int> c = a + b;
-    return c[0];
+    return c[1];
 }
 """
         )
@@ -337,7 +337,7 @@ int main() {
     Vector<int, Row> a = [1, 2, 3];
     Vector<int, Column> b = [4; 5; 6];
     Vector<int> c = a - b;
-    return c[0];
+    return c[1];
 }
 """
         )
@@ -370,7 +370,7 @@ int main() {
             """
 int main() {
     Vector<int, Row> v = [1, 2, 3];
-    v[0] = 1.5;
+    v[1] = 1.5;
     return 0;
 }
 """,
@@ -389,7 +389,7 @@ def test_typechecker_rejects_index_write_through_const_reference() -> None:
             """
 int main() {
     const Vector<int, Row> v = [1, 2, 3];
-    v[0] = 9;
+    v[1] = 9;
     return 0;
 }
 """
@@ -400,7 +400,7 @@ int main() {
             """
 int main() {
     const Matrix<int> A = [1, 2; 3, 4];
-    A[0, 0] = 9;
+    A[1, 1] = 9;
     return 0;
 }
 """
@@ -495,7 +495,7 @@ def test_lowering_and_ir_interpreter_execute_vector_index_read() -> None:
         """
 int main() {
     Vector<int, Row> v = [4, 5, 6];
-    return v[2];
+    return v[3];
 }
 """
     )
@@ -512,7 +512,7 @@ def test_lowering_and_ir_interpreter_execute_matrix_index_read() -> None:
         """
 int main() {
     Matrix<int> A = [1, 2; 3, 4];
-    return A[1, 0];
+    return A[2, 1];
 }
 """
     )
@@ -558,9 +558,9 @@ def test_lowering_and_ir_interpreter_execute_vector_and_matrix_index_writes() ->
 int main() {
     Vector<int, Row> v = [4, 5, 6];
     Matrix<int> A = [1, 2; 3, 4];
-    v[1] = 9;
-    A[1, 0] = v[1];
-    return A[1, 0];
+    v[2] = 9;
+    A[2, 1] = v[2];
+    return A[2, 1];
 }
 """
     )
@@ -582,7 +582,7 @@ int main() {
     Vector<int, Row> a = [1, 2, 3];
     Vector<int, Row> b = [4, 5, 6];
     Vector<int, Row> c = a + b;
-    return c[0] + c[1] + c[2];
+    return c[1] + c[2] + c[3];
 }
 """
     )
@@ -606,7 +606,7 @@ int main() {
     Vector<int, Row> a = [7, 8, 9];
     Vector<int, Row> b = [1, 2, 3];
     Vector<int, Row> c = a - b;
-    return c[0] + c[1] + c[2];
+    return c[1] + c[2] + c[3];
 }
 """
     )
@@ -630,7 +630,7 @@ int main() {
     Matrix<int> A = [1, 2; 3, 4];
     Matrix<int> B = [5, 6; 7, 8];
     Matrix<int> C = A + B;
-    return C[0, 0] + C[0, 1] + C[1, 0] + C[1, 1];
+    return C[1, 1] + C[1, 2] + C[2, 1] + C[2, 2];
 }
 """
     )
@@ -654,7 +654,7 @@ int main() {
     Matrix<int> A = [1, 2, 3; 4, 5, 6];
     Matrix<int> B = [7, 8; 9, 10; 11, 12];
     Matrix<int> C = A * B;
-    return C[0, 0] + C[0, 1] + C[1, 0] + C[1, 1];
+    return C[1, 1] + C[1, 2] + C[2, 1] + C[2, 2];
 }
 """
     )
@@ -679,7 +679,7 @@ int main() {
     Matrix<int> A = [9, 8; 7, 6];
     Matrix<int> B = [1, 2; 3, 4];
     Matrix<int> C = A - B;
-    return C[0, 0] + C[0, 1] + C[1, 0] + C[1, 1];
+    return C[1, 1] + C[1, 2] + C[2, 1] + C[2, 2];
 }
 """
     )
@@ -706,7 +706,7 @@ int main() {
     Matrix<int> A = [1, 2; 3, 4];
     Matrix<int> matrix_left = 4 * A;
     Matrix<int> matrix_right = A * 5;
-    return left[2] + right[1] + matrix_left[1, 0] + matrix_right[0, 1];
+    return left[3] + right[2] + matrix_left[2, 1] + matrix_right[1, 2];
 }
 """
     )
@@ -739,7 +739,7 @@ def test_ssa_preserves_vector_and_matrix_index_reads() -> None:
 int main() {
     Vector<int, Row> v = [4, 5, 6];
     Matrix<int> A = [1, 2; 3, 4];
-    return v[1] + A[0, 1];
+    return v[2] + A[1, 2];
 }
 """
     )
@@ -781,9 +781,9 @@ def test_ssa_preserves_vector_and_matrix_index_writes() -> None:
 int main() {
     Vector<int, Row> v = [4, 5, 6];
     Matrix<int> A = [1, 2; 3, 4];
-    v[1] = 9;
-    A[1, 0] = v[1];
-    return A[1, 0];
+    v[2] = 9;
+    A[2, 1] = v[2];
+    return A[2, 1];
 }
 """
     )
@@ -807,7 +807,7 @@ int main() {
     Matrix<int> A = [1, 2; 3, 4];
     Matrix<int> B = [5, 6; 7, 8];
     Matrix<int> C = A + B;
-    return c[1] + C[1, 0];
+    return c[2] + C[2, 1];
 }
 """
     )
@@ -828,7 +828,7 @@ int main() {
     Matrix<int> A = [1, 2, 3; 4, 5, 6];
     Matrix<int> B = [7, 8; 9, 10; 11, 12];
     Matrix<int> C = A * B;
-    return C[1, 1];
+    return C[2, 2];
 }
 """
     )
@@ -850,7 +850,7 @@ int main() {
     Matrix<int> A = [9, 8; 7, 6];
     Matrix<int> B = [1, 2; 3, 4];
     Matrix<int> C = A - B;
-    return c[1] + C[1, 0];
+    return c[2] + C[2, 1];
 }
 """
     )
@@ -874,7 +874,7 @@ int main() {
     Matrix<int> A = [1, 2; 3, 4];
     Matrix<int> matrix_left = 4 * A;
     Matrix<int> matrix_right = A * 5;
-    return left[2] + right[1] + matrix_left[1, 0] + matrix_right[0, 1];
+    return left[3] + right[2] + matrix_left[2, 1] + matrix_right[1, 2];
 }
 """
     )
@@ -898,7 +898,7 @@ int main() {
     Matrix<int> A = [1, 2; 3, 4];
     Matrix<int> B = [5, 6; 7, 8];
     Matrix<int> C = A + B;
-    return c[2] + C[1, 1];
+    return c[3] + C[2, 2];
 }
 """
     )
@@ -921,7 +921,7 @@ int main() {
     Matrix<double> A = [9.0, 8.0; 7.0, 6.0];
     Matrix<double> B = [1.0, 2.0; 3.0, 4.0];
     Matrix<double> C = A - B;
-    return c[2] + int(C[1, 1]);
+    return c[3] + int(C[2, 2]);
 }
 """
     )
@@ -945,7 +945,7 @@ int main() {
     Matrix<double> A = [1.0, 2.0; 3.0, 4.0];
     Matrix<double> matrix_left = 4 * A;
     Matrix<double> matrix_right = A * 5;
-    return left[2] + right[1] + int(matrix_left[1, 0]) + int(matrix_right[0, 1]);
+    return left[3] + right[2] + int(matrix_left[2, 1]) + int(matrix_right[1, 2]);
 }
 """
     )
@@ -967,7 +967,7 @@ int main() {
     Matrix<int> A = [1, 2, 3; 4, 5, 6];
     Matrix<int> B = [7, 8; 9, 10; 11, 12];
     Matrix<int> C = A * B;
-    return C[1, 1];
+    return C[2, 2];
 }
 """
     )
@@ -993,7 +993,7 @@ int main() {
     Vector<int, Row> a = [1, 2, 3];
     Vector<int, Row> b = [4, 5, 6];
     Vector<int, Row> c = a + b;
-    return c[0] + c[1] + c[2];
+    return c[1] + c[2] + c[3];
 }
 """,
             21,
@@ -1004,7 +1004,7 @@ int main() {
     Matrix<int> A = [1, 2; 3, 4];
     Matrix<int> B = [5, 6; 7, 8];
     Matrix<int> C = A + B;
-    return C[0, 0] + C[0, 1] + C[1, 0] + C[1, 1];
+    return C[1, 1] + C[1, 2] + C[2, 1] + C[2, 2];
 }
 """,
             36,
@@ -1015,7 +1015,7 @@ int main() {
     Vector<int, Row> a = [7, 8, 9];
     Vector<int, Row> b = [1, 2, 3];
     Vector<int, Row> c = a - b;
-    return c[0] + c[1] + c[2];
+    return c[1] + c[2] + c[3];
 }
 """,
             18,
@@ -1026,7 +1026,7 @@ int main() {
     Matrix<int> A = [9, 8; 7, 6];
     Matrix<int> B = [1, 2; 3, 4];
     Matrix<int> C = A - B;
-    return C[0, 0] + C[0, 1] + C[1, 0] + C[1, 1];
+    return C[1, 1] + C[1, 2] + C[2, 1] + C[2, 2];
 }
 """,
             20,
@@ -1037,7 +1037,7 @@ int main() {
     Vector<int, Row> v = [1, 2, 3];
     Vector<int, Row> left = 2 * v;
     Vector<int, Row> right = v * 3;
-    return left[0] + left[1] + left[2] + right[0] + right[1] + right[2];
+    return left[1] + left[2] + left[3] + right[1] + right[2] + right[3];
 }
 """,
             30,
@@ -1048,7 +1048,7 @@ int main() {
     Matrix<int> A = [1, 2; 3, 4];
     Matrix<int> left = 2 * A;
     Matrix<int> right = A * 3;
-    return left[0, 0] + left[0, 1] + left[1, 0] + left[1, 1] + right[0, 0] + right[0, 1] + right[1, 0] + right[1, 1];
+    return left[1, 1] + left[1, 2] + left[2, 1] + left[2, 2] + right[1, 1] + right[1, 2] + right[2, 1] + right[2, 2];
 }
 """,
             50,
@@ -1059,7 +1059,7 @@ int main() {
     Matrix<int> A = [1, 2, 3; 4, 5, 6];
     Matrix<int> B = [7, 8; 9, 10; 11, 12];
     Matrix<int> C = A * B;
-    return C[1, 1];
+    return C[2, 2];
 }
 """,
             154,
@@ -1070,7 +1070,7 @@ int main() {
     Matrix<int> A = [1, 2; 3, 4];
     Vector<int, Column> c = [5; 6];
     Vector<int, Column> r = A * c;
-    return r[1];
+    return r[2];
 }
 """,
             39,
@@ -1271,8 +1271,8 @@ def test_ir_optimizer_preserves_vector_and_matrix_sets() -> None:
 int main() {
     Vector<int, Row> v = [4, 5, 6];
     Matrix<int> A = [1, 2; 3, 4];
-    v[1] = 9;
-    A[1, 0] = 8;
+    v[2] = 9;
+    A[2, 1] = 8;
     return 0;
 }
 """
@@ -1330,9 +1330,9 @@ def test_llvm_emits_vector_and_matrix_get_loads() -> None:
     llvm = print_llvm(module)
 
     assert "load i32" in llvm
-    assert "mul i64 %matrix.row64" in llvm
-    assert ", 2" in llvm
-    assert "add i64" in llvm
+    assert "call i64 @aether_vector_check_index" in llvm
+    assert "call i64 @aether_matrix_check_index" in llvm
+    assert "i64 2" in llvm
 
 
 def test_llvm_emits_dimension_properties() -> None:
@@ -1421,8 +1421,9 @@ def test_llvm_emits_vector_and_matrix_set_stores() -> None:
     llvm = print_llvm(SSAVerifier(module).verify())
 
     assert "store i32 99" in llvm
-    assert "mul i64 %matrix.row64" in llvm
-    assert ", 2" in llvm
+    assert "call i64 @aether_vector_check_index" in llvm
+    assert "call i64 @aether_matrix_check_index" in llvm
+    assert "i64 2" in llvm
 
 
 @pytest.mark.skipif(shutil.which("clang") is None, reason="clang is not available")
@@ -1433,7 +1434,7 @@ def test_llvm_emits_vector_and_matrix_set_stores() -> None:
             """
 int main() {
     Vector<int, Row> v = [4, 5, 6];
-    return v[1];
+    return v[2];
 }
 """,
             5,
@@ -1442,7 +1443,7 @@ int main() {
             """
 int main() {
     Matrix<int> A = [1, 2; 3, 4];
-    return A[1, 1];
+    return A[2, 2];
 }
 """,
             4,
@@ -1451,8 +1452,8 @@ int main() {
             """
 int main() {
     Vector<int, Row> v = [4, 5, 6];
-    v[1] = 9;
-    return v[1];
+    v[2] = 9;
+    return v[2];
 }
 """,
             9,
@@ -1461,8 +1462,8 @@ int main() {
             """
 int main() {
     Matrix<int> A = [1, 2; 3, 4];
-    A[1, 0] = 9;
-    return A[1, 0];
+    A[2, 1] = 9;
+    return A[2, 1];
 }
 """,
             9,

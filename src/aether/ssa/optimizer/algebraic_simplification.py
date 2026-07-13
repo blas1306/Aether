@@ -263,6 +263,7 @@ class SSAAlgebraicSimplifier:
                 instruction.operator,
                 self._resolve(instruction.left, replacements),
                 self._resolve(instruction.right, replacements),
+                instruction.aggregate_shape,
             )
 
         if isinstance(instruction, SSACast):
@@ -285,6 +286,7 @@ class SSAAlgebraicSimplifier:
             return SSAPrint(
                 self._resolve(instruction.value, replacements),
                 instruction.newline,
+                instruction.aggregate_shape,
             )
 
         if isinstance(instruction, SSAArrayNew):

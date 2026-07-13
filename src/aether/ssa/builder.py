@@ -539,7 +539,13 @@ class SSABuilder:
             result = self._define_value(instruction.result, state.value_map)
             left = self._resolve_value(instruction.left, state.value_map)
             right = self._resolve_value(instruction.right, state.value_map)
-            return SSACompareOp(result, instruction.operator, left, right)
+            return SSACompareOp(
+                result,
+                instruction.operator,
+                left,
+                right,
+                instruction.aggregate_shape,
+            )
 
         if isinstance(instruction, IRCast):
             result = self._define_value(instruction.result, state.value_map)
@@ -558,7 +564,7 @@ class SSABuilder:
 
         if isinstance(instruction, IRPrint):
             value = self._resolve_value(instruction.value, state.value_map)
-            return SSAPrint(value, instruction.newline)
+            return SSAPrint(value, instruction.newline, instruction.aggregate_shape)
 
         if isinstance(instruction, IRArrayNew):
             result = self._define_value(instruction.result, state.value_map)

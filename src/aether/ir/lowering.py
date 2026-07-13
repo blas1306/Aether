@@ -142,6 +142,7 @@ class _IndexableIterable:
     element_type: IRType
     length: IRValue
     get_instruction: type[IRArrayGet] | type[IRListGet] | type[IRVectorGet]
+    index_base: int
 
 
 _MISSING_LOCAL = object()
@@ -853,7 +854,7 @@ class IRLowerer:
             loop_variable=statement.variable,
             loop_slot=loop_slot,
         ):
-            one = self._initialize_indexable_loop_index(context, index_slot)
+            one = self._initialize_indexable_loop_index(context, index_slot, iterable)
             self._emit_current_jump_if_open(context, blocks.condition.name)
 
             self._append_and_enter(context, blocks.condition)
@@ -888,6 +889,7 @@ class IRLowerer:
                 iterable.type.element,
                 length,
                 IRArrayGet,
+                0,
             )
         if isinstance(iterable.type, ListType):
             length = context.temporary(IntType())
@@ -897,6 +899,7 @@ class IRLowerer:
                 iterable.type.element,
                 length,
                 IRListGet,
+                0,
             )
         if isinstance(iterable.type, VectorType):
             length = context.temporary(IntType())
@@ -906,6 +909,7 @@ class IRLowerer:
                 iterable.type.element,
                 length,
                 IRVectorGet,
+                1,
             )
         self._fail(
             f"IR backend only supports for loops over int ranges, arrays, lists, and vectors, got '{iterable.type}'.",
@@ -916,12 +920,15 @@ class IRLowerer:
         self,
         context: _FunctionContext,
         index_slot: IRValue,
+        iterable: _IndexableIterable,
     ) -> IRValue:
         zero = context.temporary(IntType())
         context.block.instructions.append(IRConst(zero, 0))
         one = context.temporary(IntType())
         context.block.instructions.append(IRConst(one, 1))
-        context.block.instructions.append(IRStore(index_slot, zero))
+        context.block.instructions.append(
+            IRStore(index_slot, one if iterable.index_base == 1 else zero)
+        )
         return one
 
     def _lower_for_indexable_condition(
@@ -935,7 +942,12 @@ class IRLowerer:
         blocks.condition.instructions.append(IRLoad(current_index, index_slot))
         condition = context.temporary(BoolType())
         blocks.condition.instructions.append(
-            IRCompareOp(condition, "lt", current_index, iterable.length)
+            IRCompareOp(
+                condition,
+                "le" if iterable.index_base == 1 else "lt",
+                current_index,
+                iterable.length,
+            )
         )
         self._emit_branch(
             blocks.condition,
@@ -1027,6 +1039,39 @@ class IRLowerer:
             left = self._lower_expression(expression.left, context)
             right = self._lower_expression(expression.right, context)
             if compare_operator is not None:
+                aggregate_shape: tuple[int, ...] | None = None
+                if isinstance(left.type, VectorType) and left.type == right.type:
+                    left_length = context.vector_lengths.get(left.name)
+                    right_length = context.vector_lengths.get(right.name)
+                    if left_length is None or left_length != right_length:
+                        self._fail(
+                            "IR backend requires equal known Vector lengths for equality.",
+                            expression,
+                        )
+                    aggregate_shape = (left_length,)
+                elif isinstance(left.type, MatrixType) and left.type == right.type:
+                    left_dimensions = context.matrix_dimensions.get(left.name)
+                    right_dimensions = context.matrix_dimensions.get(right.name)
+                    if left_dimensions is None or left_dimensions != right_dimensions:
+                        self._fail(
+                            "IR backend requires equal known Matrix dimensions for equality.",
+                            expression,
+                        )
+                    aggregate_shape = left_dimensions
+                if aggregate_shape is not None:
+                    if compare_operator not in {"eq", "ne"}:
+                        self._fail("Aggregate ordered comparison is not supported.", expression)
+                    result = context.temporary(BoolType())
+                    context.block.instructions.append(
+                        IRCompareOp(
+                            result,
+                            compare_operator,
+                            left,
+                            right,
+                            aggregate_shape,
+                        )
+                    )
+                    return result
                 result_type = self._comparison_result_type(
                     compare_operator,
                     left.type,
@@ -1206,15 +1251,30 @@ class IRLowerer:
                 self._fail(f"{call.callee}(...) expects at least one argument.", call)
             values = tuple(self._lower_expression(argument, context) for argument in call.arguments)
             for value in values:
-                if not isinstance(value.type, (IntType, BoolType, StringType, DoubleType)):
+                if not isinstance(
+                    value.type,
+                    (IntType, BoolType, StringType, DoubleType, VectorType, MatrixType),
+                ):
                     self._fail(
                         f"IR backend {call.callee}(...) does not support values of type "
-                        f"'{value.type}'; supported types are int, boolean, string, and double.",
+                        f"'{value.type}'; supported types are scalar, Vector, and Matrix values.",
                         call,
                     )
             for index, value in enumerate(values):
                 newline = call.callee == "println" and index == len(values) - 1
-                context.block.instructions.append(IRPrint(value, newline))
+                aggregate_shape = None
+                if isinstance(value.type, VectorType):
+                    length = context.vector_lengths.get(value.name)
+                    if length is None:
+                        self._fail("IR backend requires a known Vector length for print.", call)
+                    aggregate_shape = (length,)
+                elif isinstance(value.type, MatrixType):
+                    aggregate_shape = context.matrix_dimensions.get(value.name)
+                    if aggregate_shape is None:
+                        self._fail("IR backend requires known Matrix dimensions for print.", call)
+                context.block.instructions.append(
+                    IRPrint(value, newline, aggregate_shape)
+                )
             return None
 
         method_name = call.callee.rsplit(".", 1)[-1]

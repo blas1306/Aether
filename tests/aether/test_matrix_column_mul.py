@@ -52,7 +52,7 @@ int main() {
     Matrix<int> A = [1, 2; 3, 4];
     Vector<int, Column> c = [5; 6];
     Vector<int, Column> r = A * c;
-    return r[0] + r[1];
+    return r[1] + r[2];
 }
 """
     )
@@ -98,7 +98,7 @@ int mul() {
     Matrix<int> A = [1, 2; 3, 4];
     Vector<int, Column> c = [5; 6];
     Vector<int, Column> r = A * c;
-    return r[0] + r[1];
+    return r[1] + r[2];
 }
 """
     )
@@ -120,7 +120,7 @@ int mul() {
     Matrix<int> A = [1, 2; 3, 4];
     Vector<int, Column> c = [5; 6];
     Vector<int, Column> r = A * c;
-    return r[0] + r[1];
+    return r[1] + r[2];
 }
 """
     )
@@ -146,7 +146,7 @@ int main() {
     Matrix<int> A = [1, 2; 3, 4];
     Vector<int, Column> c = [5; 6];
     Vector<int, Column> r = A * c;
-    return r[0] + r[1];
+    return r[1] + r[2];
 }
 """
     )
@@ -170,7 +170,7 @@ int main() {
     Matrix<int> A = [1, 2; 3, 4];
     Vector<int, Column> c = [5; 6];
     Vector<int, Column> r = A * c;
-    return r[0] + r[1];
+    return r[1] + r[2];
 }
 """,
         encoding="utf-8",
@@ -197,7 +197,7 @@ int main() {
     Matrix<int> A = [1, 2; 3, 4];
     Vector<int, Column> c = [5; 6];
     Vector<int, Column> r = A * c;
-    return r[0] + r[1];
+    return r[1] + r[2];
 }
 """,
         encoding="utf-8",
@@ -222,7 +222,7 @@ int main() {
     Vector<int, Row> r = [1, 2];
     Matrix<int> A = [3, 4; 5, 6];
     Vector<int, Row> out = r * A;
-    return out[0] + out[1];
+    return out[1] + out[2];
 }
 """
     )
@@ -254,7 +254,7 @@ int mul() {
     Vector<int, Row> r = [1, 2];
     Matrix<int> A = [3, 4; 5, 6];
     Vector<int, Row> out = r * A;
-    return out[0] + out[1];
+    return out[1] + out[2];
 }
 """
     )
@@ -276,7 +276,7 @@ int mul() {
     Vector<int, Row> r = [1, 2];
     Matrix<int> A = [3, 4; 5, 6];
     Vector<int, Row> out = r * A;
-    return out[0] + out[1];
+    return out[1] + out[2];
 }
 """
     )
@@ -302,7 +302,7 @@ int main() {
     Vector<int, Row> r = [1, 2];
     Matrix<int> A = [3, 4; 5, 6];
     Vector<int, Row> out = r * A;
-    return out[0] + out[1];
+    return out[1] + out[2];
 }
 """
     )
@@ -326,7 +326,7 @@ int main() {
     Vector<int, Row> r = [1, 2];
     Matrix<int> A = [3, 4; 5, 6];
     Vector<int, Row> out = r * A;
-    return out[0] + out[1];
+    return out[1] + out[2];
 }
 """,
         encoding="utf-8",
@@ -353,7 +353,7 @@ int main() {
     Vector<int, Row> r = [1, 2];
     Matrix<int> A = [3, 4; 5, 6];
     Vector<int, Row> out = r * A;
-    return out[0] + out[1];
+    return out[1] + out[2];
 }
 """,
         encoding="utf-8",

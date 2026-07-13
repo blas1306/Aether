@@ -52,7 +52,7 @@ int main() {
     Vector<int, Column> c = [1; 2; 3];
     Vector<int, Row> r = [4, 5];
     Matrix<int> M = c * r;
-    return M[0, 0] + M[2, 1];
+    return M[1, 1] + M[3, 2];
 }
 """
     )
@@ -94,7 +94,7 @@ int outer() {
     Vector<int, Column> c = [1; 2; 3];
     Vector<int, Row> r = [4, 5];
     Matrix<int> M = c * r;
-    return M[0, 0] + M[0, 1] + M[1, 0] + M[1, 1] + M[2, 0] + M[2, 1];
+    return M[1, 1] + M[1, 2] + M[2, 1] + M[2, 2] + M[3, 1] + M[3, 2];
 }
 """
     )
@@ -116,7 +116,7 @@ int outer() {
     Vector<int, Column> c = [1; 2; 3];
     Vector<int, Row> r = [4, 5];
     Matrix<int> M = c * r;
-    return M[2, 1];
+    return M[3, 2];
 }
 """
     )
@@ -142,7 +142,7 @@ int main() {
     Vector<int, Column> c = [1; 2; 3];
     Vector<int, Row> r = [4, 5];
     Matrix<int> M = c * r;
-    return M[0, 0] + M[0, 1] + M[1, 0] + M[1, 1] + M[2, 0] + M[2, 1];
+    return M[1, 1] + M[1, 2] + M[2, 1] + M[2, 2] + M[3, 1] + M[3, 2];
 }
 """
     )
@@ -166,7 +166,7 @@ int main() {
     Vector<int, Column> c = [1; 2; 3];
     Vector<int, Row> r = [4, 5];
     Matrix<int> M = c * r;
-    return M[0, 0] + M[0, 1] + M[1, 0] + M[1, 1] + M[2, 0] + M[2, 1];
+    return M[1, 1] + M[1, 2] + M[2, 1] + M[2, 2] + M[3, 1] + M[3, 2];
 }
 """,
         encoding="utf-8",
@@ -193,7 +193,7 @@ int main() {
     Vector<int, Column> c = [1; 2; 3];
     Vector<int, Row> r = [4, 5];
     Matrix<int> M = c * r;
-    return M[0, 0] + M[0, 1] + M[1, 0] + M[1, 1] + M[2, 0] + M[2, 1];
+    return M[1, 1] + M[1, 2] + M[2, 1] + M[2, 2] + M[3, 1] + M[3, 2];
 }
 """,
         encoding="utf-8",

@@ -146,6 +146,8 @@ class SSAGlobalConstantPropagator:
             return self._binary_constant(instruction, constants)
 
         if isinstance(instruction, SSACompareOp):
+            if instruction.aggregate_shape is not None:
+                return UNKNOWN
             return self._compare_constant(instruction, constants)
 
         if isinstance(instruction, SSACast):

@@ -278,6 +278,8 @@ class SCCPAnalyzer:
             return Overdefined()
 
     def _evaluate_compare(self, instruction: SSACompareOp) -> LatticeState:
+        if instruction.aggregate_shape is not None:
+            return Overdefined()
         left = self._state(instruction.left)
         right = self._state(instruction.right)
 

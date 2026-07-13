@@ -2,5 +2,5 @@ int main() {
     Matrix<int> A = [1, 2; 3, 4];
     Matrix<int> left = 2 * A;
     Matrix<int> right = A * 3;
-    return left[0, 0] + left[0, 1] + left[1, 0] + left[1, 1] + right[0, 0] + right[0, 1] + right[1, 0] + right[1, 1];
+    return left[1, 1] + left[1, 2] + left[2, 1] + left[2, 2] + right[1, 1] + right[1, 2] + right[2, 1] + right[2, 2];
 }

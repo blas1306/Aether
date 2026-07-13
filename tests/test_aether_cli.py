@@ -933,7 +933,7 @@ def test_emit_llvm_prints_vector_and_matrix_index_reads(tmp_path: Path) -> None:
 int main() {
     Vector<int, Row> v = [4, 5, 6];
     Matrix<int> A = [1, 2; 3, 4];
-    return v[1] + A[1, 0];
+    return v[2] + A[2, 1];
 }
 """,
         encoding="utf-8",
@@ -943,8 +943,8 @@ int main() {
 
     assert exit_code == EXIT_SUCCESS
     assert "load i32" in stdout
-    assert "mul i64 %matrix.row64" in stdout
-    assert ", 2" in stdout
+    assert "call i64 @aether_matrix_check_index" in stdout
+    assert "i64 2" in stdout
     assert "ret i32" in stdout
     assert stderr == ""
 
@@ -956,9 +956,9 @@ def test_emit_llvm_prints_vector_and_matrix_index_writes(tmp_path: Path) -> None
 int main() {
     Vector<int, Row> v = [4, 5, 6];
     Matrix<int> A = [1, 2; 3, 4];
-    v[1] = 9;
-    A[1, 0] = v[1];
-    return A[1, 0];
+    v[2] = 9;
+    A[2, 1] = v[2];
+    return A[2, 1];
 }
 """,
         encoding="utf-8",
@@ -969,7 +969,7 @@ int main() {
     assert exit_code == EXIT_SUCCESS
     assert "store i32 9" in stdout
     assert "ptr %matrix.elem" in stdout
-    assert "mul i64 %matrix.row64" in stdout
+    assert "call i64 @aether_matrix_check_index" in stdout
     assert "ret i32" in stdout
     assert stderr == ""
 
@@ -1670,7 +1670,7 @@ def test_build_accepts_vector_and_matrix_index_reads(
 int main() {
     Vector<int, Row> v = [4, 5, 6];
     Matrix<int> A = [1, 2; 3, 4];
-    return v[1] + A[1, 0];
+    return v[2] + A[2, 1];
 }
 """,
         encoding="utf-8",
@@ -1696,9 +1696,9 @@ def test_build_accepts_vector_and_matrix_index_writes(
 int main() {
     Vector<int, Row> v = [4, 5, 6];
     Matrix<int> A = [1, 2; 3, 4];
-    v[1] = 9;
-    A[1, 0] = v[1];
-    return A[1, 0];
+    v[2] = 9;
+    A[2, 1] = v[2];
+    return A[2, 1];
 }
 """,
         encoding="utf-8",
@@ -1980,7 +1980,7 @@ def test_build_index_reads_smoke_compiles_and_runs_with_clang_if_available(tmp_p
 int main() {
     Vector<int, Row> v = [4, 5, 6];
     Matrix<int> A = [1, 2; 3, 4];
-    return v[1] + A[1, 0];
+    return v[2] + A[2, 1];
 }
 """,
         encoding="utf-8",
@@ -2006,9 +2006,9 @@ def test_build_index_writes_smoke_compiles_and_runs_with_clang_if_available(tmp_
 int main() {
     Vector<int, Row> v = [4, 5, 6];
     Matrix<int> A = [1, 2; 3, 4];
-    v[1] = 9;
-    A[1, 0] = v[1];
-    return A[1, 0];
+    v[2] = 9;
+    A[2, 1] = v[2];
+    return A[2, 1];
 }
 """,
         encoding="utf-8",

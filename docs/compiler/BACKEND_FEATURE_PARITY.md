@@ -57,12 +57,12 @@ Referencias centrales:
 | AST interpreter | Implemented | Backend de superficie más completo; ejecuta scripts top-level y sesiones persistentes. |
 | IR lowering | Partial | Solo acepta programas formados por funciones top-level y un subconjunto de expresiones/tipos. |
 | IR verifier | Implemented para el modelo IR | Valida CFG, definiciones y tipos de todos los opcodes actuales; no prueba equivalencia con la semántica AST. |
-| IR interpreter | Partial | Ejecuta todos los opcodes IR actuales, pero difiere en índices Matrix y representación/overflow numérico. |
+| IR interpreter | Partial | Ejecuta todos los opcodes IR actuales; Vector/Matrix ya coinciden con AST, pero persisten diferencias generales de representación/overflow numérico. |
 | SSA builder | Implemented para IR verificable | `general` es el default; `pattern` queda como fallback limitado. |
 | SSA verifier | Partial | Amplia validación por opcode; no cierra dominancia de todos los usos ni exige exactamente un incoming por predecessor para cada phi. Véase `CONTROL_FLOW_AUDIT.md`. |
-| SSA optimizers | Partial / Broken | Funcionan para escalares y CFG, pero las listas manuales de efectos clasifican `VectorGet`/`MatrixGet` como eliminables. |
+| SSA optimizers | Partial | El modelo común de efectos conserva operaciones `may_trap`; DCE, SCCP, folding y simplificación mantienen los panics de Vector/Matrix. |
 | LLVM printer | Partial | Cubre escalares seleccionados, control, Array/List y álgebra lineal contigua; no UDT, módulos, nullable, excepciones ni runtime string completo. |
-| LLVM runtime | Partial | IO escalar y safety de Array/List; sin ownership/free/GC y sin checks correctos para Vector/Matrix. |
+| LLVM runtime | Partial | IO y safety de Array/List/Vector/Matrix; sin ownership/free/GC ni runtime string completo. |
 | CLI | Implemented | LLVM default; selección `llvm|ast|ir`; inspección tokens/AST/IR/CFG/SSA/LLVM; build y bench. |
 | IntelliJ | Partial | Highlighting, LSP, run config y typing helpers; sin formatter ni PSI semántico propio. |
 | REPL | Implemented, AST-only | Estado persistente y rollback transaccional; solo acepta `--backend=ast`. |
@@ -125,7 +125,7 @@ plugin ejecute ese backend.
 | `void` | Solo retorno/firma | Implemented | Implemented | VoidType | Implemented | void | Implemented | Símbolos | E2E | Implemented |
 | `null` / `T?` | Implemented | Implemented sin narrowing | Implemented | tipos nominales existen pero literal/lowering no | No camino fuente | Sin mapping | No | Diagnósticos | frontend | AST-only |
 | `print` / `println` escalares | Implemented | variádico builtin | Todos los tipos formateables | int/bool/string/double | SSAPrint no eliminable | `printf` (`io_runtime.py:18`) | Implemented | Completion | sondeo+backend print | Implemented |
-| Print de agregados/UDT | Implemented | Implemented | List/Array/Vector/Matrix/struct/etc. | lowering rechaza salvo escalares | No | No | No | Completion | AST y rechazo | AST-only |
+| Print de agregados/UDT | Implemented | Implemented | List/Array/Vector/Matrix/struct/etc. | Vector/Matrix con shape/orientación; otros agregados rechazados | preservado como efecto | helpers tipados | Vector/Matrix implementados | Completion | paridad E2E Vector/Matrix | Partial |
 | Formato de números | N/A | N/A | `format_value` de Aether | Python `str` en intérprete IR | N/A | `%d` / `%.17g` | libc | N/A | casos simples | Partial — no contrato común total |
 | `input` | Nodo dedicado | Contexto tipado requerido | int/float/string/bool/Vector/Matrix | Rechazado | No | No | No | Completion | AST | AST-only |
 
@@ -154,11 +154,11 @@ plugin ejecute ese backend.
 | List `sort` | método/global | int/double/string | estable in-place | IRSequenceSort | efecto | checked temp/offsets | Implemented | Completion | E2E | Implemented |
 | List `copy` | método/global | Implemented | shallow outer copy | IRListCopy | allocation conservada | checked allocation/memcpy | Implemented | Completion | E2E | Implemented |
 | List igualdad | Implemented | estructural/ref recursiva | Implemented | aggregate compare rechazado | No | No | No | Diagnósticos | AST | AST-only |
-| Vector literal/get/set/length | Implemented | orientación/shape | índices públicos 0-based para `v[i]` | opcodes dedicados; get `may_trap` | DCE preserva get/set | acceso LLVM sin bounds | fuera de rango aún inseguro en native | members | happy paths + regresión DCE | Broken |
-| Matrix literal/get/set/rows/columns | Implemented | shape | `A[i,j]` usa selectores 1-based | IR usa 0-based, valida offset plano y clasifica get `may_trap` | DCE preserva get/set | acceso sin bounds | semántica/safety divergente | members | happy paths + regresión DCE | Broken |
+| Vector literal/get/set/length | Implemented | orientación/shape | índices públicos 1-based | opcodes dedicados; checks y panic propios | DCE preserva get/set | `vector_runtime.py` valida y convierte offset | panic controlado | members | AST+IR+native, límites y writes | Implemented |
+| Matrix literal/get/set/rows/columns | Implemented | shape | índices públicos 1-based | valida fila y columna antes del offset | DCE preserva get/set | `matrix_runtime.py` valida coordenadas | panic controlado | members | esquinas, límites y regresión offset plano | Implemented |
 | Vector/Matrix aritmética básica | operadores +,-,* | shape/tipo | amplia | dimensiones estáticas/subconjunto int/double | preserva/optimiza usos | loops y allocations | happy paths | Completion | amplia E2E | Partial |
 | Builtins de álgebra lineal | llamadas/namespaces | Amplio | transpose, solve, factorizaciones, eig/SVD, etc. | la mayoría sin lowering | No | No | No | Completion/hover importado | AST exhaustivo | AST-only |
-| Vector/Matrix igualdad | Implemented | estructural | Implemented | aggregate compare rechazado | No | No | No | Diagnósticos | AST | AST-only |
+| Vector/Matrix igualdad | Implemented | estructural | Implemented | compare estructural con shape | metadata preservada, no folding escalar | helpers tipados | Implemented | Diagnósticos | AST+IR+native | Implemented |
 | Tuples y destructuring | literal/tipo/assignment | Implemented | retorno/destructuring | Sin tipos/opcodes de tuple en lowering | No | No | No | símbolos parciales | AST | AST-only |
 | Maps/dictionaries | No | No | No | No | No | No | No | No | No | Not implemented |
 
@@ -194,7 +194,7 @@ plugin ejecute ese backend.
 | Error de sintaxis | ubicación + recovery | N/A | no ejecuta | no alcanza | no alcanza | no alcanza | exit CLI 1 | LSP multi-diagnostic | tests | Implemented |
 | Error de tipos | N/A | ubicación/hint/kind | no ejecuta | no alcanza | no alcanza | no alcanza | exit CLI 1 | LSP diagnostics | tests | Implemented |
 | Bounds Array/List | N/A | índice int | checked | checked | DCE preserva | checked | panic + code 1 | diagnostics de tipo | safety E2E | Implemented |
-| Bounds Vector/Matrix | N/A | índice int | checked, Matrix 1-based | Vector checked; Matrix offset plano | DCE puede borrar gets | sin checks | UB/acceso inválido | hint Matrix dice erróneamente zero-based | sondeo | Broken |
+| Bounds Vector/Matrix | N/A | índice int | checked, ambos 1-based | mismos checks; Matrix por coordenada | DCE preserva gets `may_trap` | helpers específicos antes del acceso | panic + code 1 | diagnostics de tipo | E2E reads/writes y regresiones | Implemented |
 | División/módulo por cero | N/A | permitido runtime | AetherRuntimeError | IRExecutionError; folders no pliegan | SCCP conserva unknown | `fdiv` produce inf; no panic común | diverge | diagnostics solo estáticos | parcial | Broken |
 | Overflow entero | N/A | sin regla | Python int no acotado | Python int no acotado | constantes Python | i32 wrap/LLVM flags ausentes | wrap | No | sin paridad E2E | Broken |
 | Allocation overflow/OOM Array/List | N/A | N/A | host Python | checks lógicos seleccionados | instrucciones preservadas | helpers checked | panic | N/A | safety | Implemented |
@@ -226,8 +226,8 @@ entry points distintos, el cuerpo es el mismo y solo se adapta el wrapper.
 | List mutations + sort | `1\ntrue\n3\n` | mismo output | mismo output | List core completo |
 | Struct y class mínimos | ejecutan | lowering rechaza | no alcanza | AST-only confirmado |
 | nested function | ejecuta `2\n` | lowering rechaza `FunctionDeclaration` | no alcanza | AST-only y diagnóstico crudo |
-| Vector get muerto fuera de rango | sin lectura top-level observable | IR optimizado conserva el get y trapea | SSA conserva el get; native aún carece de bounds check | DCE corregido; safety native pendiente |
-| Matrix `[0,2]` sobre 2x2 | falla por selector 1-based | devuelve elemento plano `3` | acceso sin check | divergencia crítica |
+| Vector get muerto fuera de rango | sin lectura top-level observable | IR optimizado conserva el get y trapea | SSA conserva el get; native hace panic controlado | paridad de efectos y safety |
+| Matrix `[0,2]` sobre 2x2 | panic Matrix | mismo panic antes del offset | mismo panic, exit 1 | regresión cerrada |
 
 ## Modelo central de efectos de instrucciones
 
@@ -248,31 +248,26 @@ SCCP conservan operaciones constantes inválidas en vez de convertir un panic en
 una constante.
 
 La regresión de `IRVectorGet`/`SSAVectorGet` y
-`IRMatrixGet`/`SSAMatrixGet` muertos está corregida estructuralmente: ahora son
-lecturas `may_trap` y sobreviven DCE. Esto no completa la seguridad de Vector y
-Matrix:
-
-1. Los accesos LLVM siguen sin bounds checks (`printer.py:1816-1884`).
-2. Matrix conserva la divergencia 1-based en AST frente a offsets 0-based en
-   IR/LLVM.
-3. El intérprete IR valida el offset plano de Matrix, no cada coordenada por
-   separado.
-4. Calls se clasifican conservadoramente hasta que exista análisis fiable de
-   pureza/efectos interprocedural.
+`IRMatrixGet`/`SSAMatrixGet` muertos está corregida estructuralmente: son
+lecturas `may_trap` y sobreviven DCE. AST, IR y LLVM reciben índices públicos
+1-based. Vector valida `1 <= index <= length`; Matrix valida fila y columna por
+separado y solo entonces calcula el offset 0-based interno. Los helpers
+`aether_vector_check_index` y `aether_matrix_check_index` emiten panics propios,
+sin reutilizar Array. Calls siguen clasificándose conservadoramente hasta que
+exista análisis fiable de pureza/efectos interprocedural.
 
 ## Diferencias semánticas confirmadas
 
 - Entry point: AST ejecuta top-level y no llama `main`; IR requiere `main()`
   sin parámetros (`pipeline.py:222`); native expone el return como exit code.
-- Matrix: AST usa selectores 1-based para `A[i,j]`
-  (`interpreter.py:995-1017`), mientras los ejemplos/IR/LLVM son 0-based. El
-  hint agregado al error afirma incorrectamente que Aether es zero-based.
-- IR Matrix valida solo el offset `row * cols + column`
-  (`ir/interpreter.py:802`), no cada coordenada; LLVM no valida ninguna.
+- Vector/Matrix: la especificación, AST, IR, SSA, ejemplos y LLVM usan índices
+  públicos 1-based. Los offsets de storage siguen siendo 0-based y no forman
+  parte de la API.
 - Overflow: AST/IR usan enteros Python no acotados; native usa i32 y envuelve.
 - División por cero double: AST e IR levantan error; LLVM `fdiv` imprime `inf`.
-- Print: AST formatea agregados y UDT; IR/native solo int, boolean, string y
-  double. Los doubles nativos usan `%.17g`.
+- Print: delimitadores, orientación y shape de Vector/Matrix coinciden entre
+  AST/IR/native; List/Array y UDT continúan AST-only. El contrato general de
+  formato double sigue parcial porque native usa `%.17g`.
 - Strings: AST concatena/compara/interpola; LLVM solo transporta punteros de
   literales y puede imprimirlos.
 - Exit: CLI AST/IR reportan éxito 0; native retorna el valor de `main` (limitado
@@ -299,8 +294,9 @@ comportamiento.
 6. `ARRAY_SUBSYSTEM_AUDIT.md` tiene una nota de actualización correcta, pero su
    resumen y tablas históricas aún describen get/set LLVM inseguros y DCE de
    ArrayGet. Leer solo esas secciones produce una conclusión falsa.
-7. La spec/hint de indexación no explicita coherentemente la base distinta de
-   Matrix: el runtime AST dice 1-based y el hint envolvente dice zero-based.
+7. La auditoría anterior decía que Vector era 0-based; la especificación
+   normativa y la guía establecen 1-based para Vector y Matrix. Implementación,
+   ejemplos y tests ya fueron alineados con esa regla.
 8. `AETHER_IR_DESIGN.md` conserva un “supported subset” anterior a colecciones,
    for y álgebra lineal.
 
@@ -316,41 +312,39 @@ backend que los documentos agregados no reflejan de forma consistente.
 El frontend/AST constituye un lenguaje bastante más amplio que el compilador.
 El núcleo escalar y de control, Array, y casi toda la API List llegan a native;
 UDT, módulos, nullables, excepciones, tuples y numerosos builtins siguen siendo
-AST-only. La presencia de opcodes SSA/LLVM no convierte Vector/Matrix en
-soporte seguro: sus índices y DCE rompen semántica observable.
+AST-only. Vector/Matrix sí tienen ahora paridad real para literal, dimensiones,
+get/set, bounds, igualdad, impresión y el subconjunto aritmético compilable.
 
 Conteo de las 112 filas de features de la matriz (las 14 etapas de la tabla
 inicial no entran en este conteo):
 
-- 38 `Implemented` (incluye filas cuyo estado dice “Implemented para
+- 42 `Implemented` (incluye filas cuyo estado dice “Implemented para
   frontend” cuando ese era el alcance explícito de la feature tooling);
-- 18 `Partial`;
-- 39 `AST-only`;
-- 6 `Broken`;
+- 19 `Partial`;
+- 37 `AST-only`;
+- 3 `Broken`;
 - 9 `Not implemented`;
 - 1 `Parsed but rejected`;
 - 1 `Unknown` (arrays anidados en el pipeline nativo).
 
-El conteo es de capacidades, no una métrica de tamaño: aproximadamente 34% de
-las filas auditadas tienen el alcance declarado completo, mientras 35% son
+El conteo es de capacidades, no una métrica de tamaño: aproximadamente 38% de
+las filas auditadas tienen el alcance declarado completo, mientras 33% son
 AST-only. Los principales bloqueos son UDT/módulos fuera del lowering, runtime
-string incompleto y falta de un modelo central de efectos/safety para
-Vector/Matrix.
+string incompleto y builtins de álgebra lineal que siguen fuera del lowering.
 
 Features AST-only más relevantes: inferencia por assignment, aliases,
 `&&`/`||`, factorial, named arguments, float/complex/nullable, input, print de
-agregados, Array copy/equality, List slicing/equality, builtins avanzados de
+Array/List/UDT, Array copy/equality, List slicing/equality, builtins avanzados de
 álgebra lineal, tuples, todos los UDT, imports/packages y excepciones.
 
 ## Prioridades y próximos bloques recomendados
 
 ### P0 — programas básicos o seguridad
 
-1. Unificar y comprobar la semántica de índices Vector/Matrix: base pública,
-   checks por dimensión en AST/IR/LLVM y tests de panic antes de todo acceso.
-2. Introducir una clasificación única `side_effects`/`may_trap` compartida por
-   IR/SSA y corregir DCE para VectorGet/MatrixGet, allocations y divisiones.
-3. Definir y hacer coherente división/módulo por cero y overflow int entre
+Los bloques de índices/safety de Vector/Matrix y el modelo común de efectos ya
+están cerrados por P2.
+
+1. Definir y hacer coherente división/módulo por cero y overflow int entre
    AST, IR y native.
 
 ### P1 — paridad del núcleo

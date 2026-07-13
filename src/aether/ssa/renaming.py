@@ -271,7 +271,13 @@ class SSARenamer:
             left = self._resolve_value(instruction.left)
             right = self._resolve_value(instruction.right)
             self._bind_value(result.name, result, bound_values)
-            return SSACompareOp(result, instruction.operator, left, right)
+            return SSACompareOp(
+                result,
+                instruction.operator,
+                left,
+                right,
+                instruction.aggregate_shape,
+            )
 
         if isinstance(instruction, IRCast):
             result = self._define_value(instruction.result)
@@ -291,7 +297,7 @@ class SSARenamer:
 
         if isinstance(instruction, IRPrint):
             value = self._resolve_value(instruction.value)
-            return SSAPrint(value, instruction.newline)
+            return SSAPrint(value, instruction.newline, instruction.aggregate_shape)
 
         if isinstance(instruction, IRArrayNew):
             result = self._define_value(instruction.result)

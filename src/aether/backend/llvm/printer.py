@@ -73,8 +73,10 @@ from .list_runtime import (
     list_contains_helper_name,
     list_index_of_helper_name,
 )
+from .matrix_runtime import LLVMMatrixRuntime
 from .runtime import sequence_sort_helper_name
-from .runtime_common import LLVMRuntimeCommon
+from .runtime_common import LLVMRuntimeCommon, aggregate_helper_suffix
+from .vector_runtime import LLVMVectorRuntime
 
 
 @dataclass(frozen=True)
@@ -128,6 +130,12 @@ class LLVMPrinter:
         self._uses_array_indexing = False
         self._uses_array_slicing = False
         self._uses_array_length_conversion = False
+        self._uses_vector_indexing = False
+        self._uses_matrix_indexing = False
+        self._vector_equality_types: set[object] = set()
+        self._matrix_equality_types: set[object] = set()
+        self._vector_print_types: set[object] = set()
+        self._matrix_print_types: set[object] = set()
         self._uses_list_type = False
         self._uses_list_allocation = False
         self._uses_list_copy = False
@@ -198,12 +206,24 @@ class LLVMPrinter:
                 or self._uses_array_length_conversion
                 or self._uses_list_length_conversion
                 or self._list_index_of_types
+                or self._uses_vector_indexing
+                or self._uses_matrix_indexing
             ),
             uses_free_and_memcpy=bool(self._sequence_sort_types or uses_list_growth or self._uses_array_slicing),
             uses_memmove=self._uses_list_insert or self._uses_list_remove_at,
             sequence_sort_types=frozenset(self._sequence_sort_types),
         )
         runtime = list_runtime.declarations(common_runtime, array_runtime)
+        LLVMVectorRuntime(
+            self._uses_vector_indexing,
+            frozenset(self._vector_equality_types),
+            frozenset(self._vector_print_types),
+        ).append(runtime, common_runtime)
+        LLVMMatrixRuntime(
+            self._uses_matrix_indexing,
+            frozenset(self._matrix_equality_types),
+            frozenset(self._matrix_print_types),
+        ).append(runtime, common_runtime)
         LLVMIntegerRuntime(frozenset(self._checked_int_operators)).append(runtime, common_runtime)
         LLVMRuntimeIO(enabled=self._uses_print).append(runtime)
         sections = runtime + globals_ + functions
@@ -463,6 +483,37 @@ class LLVMPrinter:
         return f"{result} = {operator} {result_type} {left}, {right}"
 
     def _print_compare_op(self, instruction: SSACompareOp) -> str:
+        if instruction.aggregate_shape is not None:
+            self._uses_array_type = True
+            if isinstance(instruction.left.type, VectorType):
+                prefix = "vector"
+                element_type = instruction.left.type.element
+                self._vector_equality_types.add(element_type)
+            elif isinstance(instruction.left.type, MatrixType):
+                prefix = "matrix"
+                element_type = instruction.left.type.element
+                self._matrix_equality_types.add(element_type)
+            else:
+                raise LLVMBackendError("LLVM aggregate compare expects VectorType or MatrixType")
+            length = 1
+            for size in instruction.aggregate_shape:
+                length *= size
+            result = self._new_temp(instruction.result)
+            helper = f"aether_{prefix}_equal_{aggregate_helper_suffix(element_type)}"
+            left = self._operand(instruction.left)
+            right = self._operand(instruction.right)
+            if instruction.operator == "eq":
+                return f"{result} = call i1 @{helper}(ptr {left}, ptr {right}, i64 {length})"
+            if instruction.operator == "ne":
+                equal = self._synthetic_temp(f"{prefix}.equal")
+                return "\n  ".join(
+                    [
+                        f"{equal} = call i1 @{helper}(ptr {left}, ptr {right}, i64 {length})",
+                        f"{result} = xor i1 {equal}, true",
+                    ]
+                )
+            raise LLVMBackendError("LLVM aggregate compare only supports eq/ne")
+
         if (
             isinstance(instruction.left.type, StringType)
             or isinstance(instruction.right.type, StringType)
@@ -595,6 +646,32 @@ class LLVMPrinter:
         suffix = "ln" if instruction.newline else ""
         value = self._operand(instruction.value)
         call_result = self._synthetic_temp("print.result")
+
+        if isinstance(instruction.value.type, VectorType):
+            self._uses_array_type = True
+            if instruction.aggregate_shape is None or len(instruction.aggregate_shape) != 1:
+                raise LLVMBackendError("LLVM Vector print requires a known length")
+            element_type = instruction.value.type.element
+            self._vector_print_types.add(element_type)
+            helper = f"aether_vector_print_{aggregate_helper_suffix(element_type)}"
+            column = "true" if instruction.value.type.orientation == "column" else "false"
+            newline = "true" if instruction.newline else "false"
+            return (
+                f"call void @{helper}(ptr {value}, i64 {instruction.aggregate_shape[0]}, "
+                f"i1 {column}, i1 {newline})"
+            )
+        if isinstance(instruction.value.type, MatrixType):
+            self._uses_array_type = True
+            if instruction.aggregate_shape is None or len(instruction.aggregate_shape) != 2:
+                raise LLVMBackendError("LLVM Matrix print requires known dimensions")
+            element_type = instruction.value.type.element
+            self._matrix_print_types.add(element_type)
+            helper = f"aether_matrix_print_{aggregate_helper_suffix(element_type)}"
+            rows, columns = instruction.aggregate_shape
+            newline = "true" if instruction.newline else "false"
+            return (
+                f"call void @{helper}(ptr {value}, i64 {rows}, i64 {columns}, i1 {newline})"
+            )
 
         if isinstance(instruction.value.type, IntType):
             return (
@@ -1832,10 +1909,11 @@ class LLVMPrinter:
         if not isinstance(instruction.vector.type, VectorType):
             raise LLVMBackendError("LLVM vector_get expects a VectorType source")
         self._uses_array_type = True
+        self._uses_vector_indexing = True
 
         result = self._new_temp(instruction.result)
         element_type = llvm_type(instruction.result.type)
-        element_ptr = self._array_element_pointer(
+        element_ptr = self._vector_element_pointer(
             self._operand(instruction.vector),
             instruction.index,
             instruction.result.type,
@@ -1850,6 +1928,7 @@ class LLVMPrinter:
         if instruction.cols <= 0:
             raise LLVMBackendError("LLVM matrix_get requires a positive column count")
         self._uses_array_type = True
+        self._uses_matrix_indexing = True
 
         result = self._new_temp(instruction.result)
         element_type = llvm_type(instruction.result.type)
@@ -1887,9 +1966,10 @@ class LLVMPrinter:
         if instruction.value.type != instruction.vector.type.element:
             raise LLVMBackendError("LLVM vector_set value type must match vector element type")
         self._uses_array_type = True
+        self._uses_vector_indexing = True
 
         element_type = llvm_type(instruction.value.type)
-        element_ptr = self._array_element_pointer(
+        element_ptr = self._vector_element_pointer(
             self._operand(instruction.vector),
             instruction.index,
             instruction.value.type,
@@ -1924,6 +2004,7 @@ class LLVMPrinter:
         if instruction.value.type != instruction.matrix.type.element:
             raise LLVMBackendError("LLVM matrix_set value type must match matrix element type")
         self._uses_array_type = True
+        self._uses_matrix_indexing = True
 
         element_type = llvm_type(instruction.value.type)
         element_ptr = self._matrix_element_pointer(
@@ -2186,6 +2267,27 @@ class LLVMPrinter:
         )
         return self._ArrayPointer(element_ptr, lines)
 
+    def _vector_element_pointer(
+        self,
+        vector: str,
+        index: SSAValue,
+        element_type: object,
+    ) -> _ArrayPointer:
+        data = self._synthetic_temp("vector.data")
+        public_index64 = self._synthetic_temp("vector.index64")
+        offset = self._synthetic_temp("vector.offset")
+        element_ptr = self._synthetic_temp("vector.elem")
+        llvm_element_type = llvm_type(element_type)
+        lines = [LLVMArrayRuntime.index64_line(public_index64, self._operand(index))]
+        lines.append(
+            f"{offset} = call i64 @aether_vector_check_index(ptr {vector}, i64 {public_index64})"
+        )
+        lines.extend(self._array_data_pointer(data, vector))
+        lines.append(
+            f"{element_ptr} = getelementptr {llvm_element_type}, ptr {data}, i64 {offset}"
+        )
+        return self._ArrayPointer(element_ptr, lines)
+
     def _matrix_element_pointer(
         self,
         matrix: str,
@@ -2197,15 +2299,16 @@ class LLVMPrinter:
         data = self._synthetic_temp("matrix.data")
         row64 = self._synthetic_temp("matrix.row64")
         column64 = self._synthetic_temp("matrix.column64")
-        row_offset = self._synthetic_temp("matrix.row.offset")
         linear_index = self._synthetic_temp("matrix.index")
         element_ptr = self._synthetic_temp("matrix.elem")
         llvm_element_type = llvm_type(element_type)
-        lines = self._array_data_pointer(data, matrix)
-        lines.append(f"{row64} = sext i32 {self._operand(row)} to i64")
+        lines = [f"{row64} = sext i32 {self._operand(row)} to i64"]
         lines.append(f"{column64} = sext i32 {self._operand(column)} to i64")
-        lines.append(f"{row_offset} = mul i64 {row64}, {cols}")
-        lines.append(f"{linear_index} = add i64 {row_offset}, {column64}")
+        lines.append(
+            f"{linear_index} = call i64 @aether_matrix_check_index("
+            f"ptr {matrix}, i64 {row64}, i64 {column64}, i64 {cols})"
+        )
+        lines.extend(self._array_data_pointer(data, matrix))
         lines.append(
             f"{element_ptr} = getelementptr {llvm_element_type}, ptr {data}, i64 {linear_index}"
         )

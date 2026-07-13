@@ -160,6 +160,8 @@ class SSAConstantFolder:
         instruction: SSACompareOp,
         constants: dict[SSAValue, Any],
     ) -> SSAConst | None:
+        if instruction.aggregate_shape is not None:
+            return None
         operator = instruction.operator
         if operator not in self._COMPARE_OPERATORS:
             return None

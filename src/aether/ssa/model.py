@@ -16,6 +16,8 @@ from aether.instruction_effects import (
     ReadingAllocationMixin,
     SideEffectMixin,
     UnknownCallMixin,
+    MEMORY_READ,
+    PURE,
 )
 from aether.ir.types import IRType, VectorType
 
@@ -54,6 +56,11 @@ class SSACompareOp(SSAInstruction):
     operator: str
     left: SSAValue
     right: SSAValue
+    aggregate_shape: tuple[int, ...] | None = None
+
+    @property
+    def effects(self):
+        return MEMORY_READ if self.aggregate_shape is not None else PURE
 
 
 @dataclass(frozen=True)
@@ -73,6 +80,7 @@ class SSACall(UnknownCallMixin, SSAInstruction):
 class SSAPrint(SideEffectMixin, SSAInstruction):
     value: SSAValue
     newline: bool = False
+    aggregate_shape: tuple[int, ...] | None = None
 
 
 @dataclass(frozen=True)

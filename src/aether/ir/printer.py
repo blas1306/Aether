@@ -99,9 +99,14 @@ class IRPrinter:
                 f"{self._value(instruction.left)}, {self._value(instruction.right)}"
             )
         if isinstance(instruction, IRCompareOp):
+            shape = (
+                " shape " + "x".join(str(size) for size in instruction.aggregate_shape)
+                if instruction.aggregate_shape is not None
+                else ""
+            )
             return (
                 f"{self._typed_value(instruction.result)} = cmp_{instruction.operator} "
-                f"{self._value(instruction.left)}, {self._value(instruction.right)}"
+                f"{self._value(instruction.left)}, {self._value(instruction.right)}{shape}"
             )
         if isinstance(instruction, IRCast):
             return (
@@ -116,7 +121,12 @@ class IRPrinter:
             return f"{self._typed_value(instruction.result)} = {call}"
         if isinstance(instruction, IRPrint):
             operation = "println" if instruction.newline else "print"
-            return f"{operation} {self._value(instruction.value)}"
+            shape = (
+                " shape " + "x".join(str(size) for size in instruction.aggregate_shape)
+                if instruction.aggregate_shape is not None
+                else ""
+            )
+            return f"{operation} {self._value(instruction.value)}{shape}"
         if isinstance(instruction, IRArrayNew):
             elements = ", ".join(self._value(element) for element in instruction.elements)
             return f"{self._typed_value(instruction.result)} = array_new [{elements}]"
@@ -253,13 +263,13 @@ class IRPrinter:
         if isinstance(instruction, IRVectorGet):
             return (
                 f"{self._typed_value(instruction.result)} = vector_get "
-                f"{self._value(instruction.vector)}, {self._value(instruction.index)}"
+                f"{self._value(instruction.vector)}, {self._value(instruction.index)} base 1"
             )
         if isinstance(instruction, IRMatrixGet):
             return (
                 f"{self._typed_value(instruction.result)} = matrix_get "
                 f"{self._value(instruction.matrix)}, {self._value(instruction.row)}, "
-                f"{self._value(instruction.column)} cols {instruction.cols}"
+                f"{self._value(instruction.column)} cols {instruction.cols} base 1"
             )
         if isinstance(instruction, IRArraySet):
             return (
@@ -274,13 +284,13 @@ class IRPrinter:
         if isinstance(instruction, IRVectorSet):
             return (
                 f"vector_set {self._value(instruction.vector)}, "
-                f"{self._value(instruction.index)}, {self._value(instruction.value)}"
+                f"{self._value(instruction.index)}, {self._value(instruction.value)} base 1"
             )
         if isinstance(instruction, IRMatrixSet):
             return (
                 f"matrix_set {self._value(instruction.matrix)}, {self._value(instruction.row)}, "
                 f"{self._value(instruction.column)}, {self._value(instruction.value)} "
-                f"cols {instruction.cols}"
+                f"cols {instruction.cols} base 1"
             )
         if isinstance(instruction, IRArrayLength):
             return f"{self._typed_value(instruction.result)} = array_length {self._value(instruction.array)}"

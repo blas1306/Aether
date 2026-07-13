@@ -8,6 +8,12 @@ from typing import Any, Callable, NoReturn, Sequence
 from aether.array_safety import checked_array_length_to_int
 from aether.integer_arithmetic import checked_int_binary, ieee_divide
 from aether.list_safety import checked_list_index_to_int, checked_list_length_to_int
+from aether.vector_matrix_safety import (
+    MATRIX_INDEX_OUT_OF_BOUNDS,
+    VECTOR_INDEX_OUT_OF_BOUNDS,
+    checked_matrix_offset,
+    checked_vector_offset,
+)
 
 from .model import (
     IRArrayGet,
@@ -123,7 +129,44 @@ class IRInterpreter:
         return self._execute(function, frame)
 
     @staticmethod
-    def _format_print_value(value: Any) -> str:
+    def _format_print_value(
+        value: Any,
+        value_type: object,
+        aggregate_shape: tuple[int, ...] | None,
+    ) -> str:
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if isinstance(value_type, VectorType):
+            if not isinstance(value, list) or aggregate_shape is None:
+                raise IRExecutionError("IR Vector print requires a shaped vector value")
+            separator = "; " if value_type.orientation == "column" else " "
+            return "[" + separator.join(
+                IRInterpreter._format_aggregate_element(element, value_type.element)
+                for element in value
+            ) + "]"
+        if isinstance(value_type, MatrixType):
+            if not isinstance(value, list) or aggregate_shape is None or len(aggregate_shape) != 2:
+                raise IRExecutionError("IR Matrix print requires a shaped matrix value")
+            rows, columns = aggregate_shape
+            if len(value) != rows * columns:
+                raise IRExecutionError("IR Matrix print shape does not match its value")
+            rendered = [
+                " ".join(
+                    IRInterpreter._format_aggregate_element(element, value_type.element)
+                    for element in value[row * columns : (row + 1) * columns]
+                )
+                for row in range(rows)
+            ]
+            if rows == 1 and columns == 1:
+                return IRInterpreter._format_aggregate_element(value[0], value_type.element)
+            return "[" + "; ".join(rendered) + "]"
+        return str(value)
+
+    @staticmethod
+    def _format_aggregate_element(value: Any, value_type: object) -> str:
+        if isinstance(value_type, StringType):
+            escaped = str(value).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\t", "\\t")
+            return f'"{escaped}"'
         if isinstance(value, bool):
             return "true" if value else "false"
         return str(value)
@@ -188,11 +231,20 @@ class IRInterpreter:
         if isinstance(instruction, IRCompareOp):
             left = self._value(instruction.left, frame)
             right = self._value(instruction.right, frame)
-            frame.values[instruction.result] = self._compare(
-                instruction.operator,
-                left,
-                right,
-            )
+            if instruction.aggregate_shape is not None:
+                expected = math.prod(instruction.aggregate_shape)
+                if not isinstance(left, list) or not isinstance(right, list):
+                    raise IRExecutionError("IR aggregate compare requires aggregate values")
+                if len(left) != expected or len(right) != expected:
+                    raise IRExecutionError("IR aggregate compare shape mismatch")
+                equal = all(left_value == right_value for left_value, right_value in zip(left, right))
+                frame.values[instruction.result] = equal if instruction.operator == "eq" else not equal
+            else:
+                frame.values[instruction.result] = self._compare(
+                    instruction.operator,
+                    left,
+                    right,
+                )
             return False, None, None
 
         if isinstance(instruction, IRCast):
@@ -213,7 +265,11 @@ class IRInterpreter:
 
         if isinstance(instruction, IRPrint):
             value = self._value(instruction.value, frame)
-            text = self._format_print_value(value)
+            text = self._format_print_value(
+                value,
+                instruction.value.type,
+                instruction.aggregate_shape,
+            )
             if instruction.newline:
                 text += "\n"
             self.output += text
@@ -441,16 +497,16 @@ class IRInterpreter:
         if isinstance(instruction, IRVectorGet):
             vector = self._value(instruction.vector, frame)
             index = self._value(instruction.index, frame)
-            self._check_array_index(vector, index)
-            frame.values[instruction.result] = vector[index]
+            offset = self._check_vector_index(vector, index)
+            frame.values[instruction.result] = vector[offset]
             return False, None, None
 
         if isinstance(instruction, IRMatrixGet):
             matrix = self._value(instruction.matrix, frame)
             row = self._value(instruction.row, frame)
             column = self._value(instruction.column, frame)
-            self._check_matrix_index(matrix, row, column, instruction.cols)
-            frame.values[instruction.result] = matrix[row * instruction.cols + column]
+            offset = self._check_matrix_index(matrix, row, column, instruction.cols)
+            frame.values[instruction.result] = matrix[offset]
             return False, None, None
 
         if isinstance(instruction, IRVectorLength):
@@ -480,8 +536,8 @@ class IRInterpreter:
             vector = self._value(instruction.vector, frame)
             index = self._value(instruction.index, frame)
             value = self._value(instruction.value, frame)
-            self._check_array_index(vector, index)
-            vector[index] = value
+            offset = self._check_vector_index(vector, index)
+            vector[offset] = value
             return False, None, None
 
         if isinstance(instruction, IRMatrixSet):
@@ -489,8 +545,8 @@ class IRInterpreter:
             row = self._value(instruction.row, frame)
             column = self._value(instruction.column, frame)
             value = self._value(instruction.value, frame)
-            self._check_matrix_index(matrix, row, column, instruction.cols)
-            matrix[row * instruction.cols + column] = value
+            offset = self._check_matrix_index(matrix, row, column, instruction.cols)
+            matrix[offset] = value
             return False, None, None
 
         if isinstance(instruction, IRArrayLength):
@@ -811,13 +867,28 @@ class IRInterpreter:
             )
 
     @staticmethod
-    def _check_matrix_index(matrix: Any, row: Any, column: Any, cols: int) -> None:
+    def _check_vector_index(vector: Any, index: Any) -> int:
+        if not isinstance(vector, list):
+            raise IRExecutionError("IR vector indexing requires a vector value")
+        if type(index) is not int:
+            raise IRExecutionError("IR vector index must be int")
+        try:
+            return checked_vector_offset(index, len(vector))
+        except IndexError as error:
+            raise IRExecutionError(VECTOR_INDEX_OUT_OF_BOUNDS) from error
+
+    @staticmethod
+    def _check_matrix_index(matrix: Any, row: Any, column: Any, cols: int) -> int:
         if not isinstance(matrix, list):
             raise IRExecutionError("IR matrix indexing requires a matrix value")
         if type(row) is not int or type(column) is not int:
             raise IRExecutionError("IR matrix indices must be int")
-        offset = row * cols + column
-        IRInterpreter._check_array_index(matrix, offset)
+        try:
+            return checked_matrix_offset(row, column, len(matrix), cols)
+        except IndexError as error:
+            raise IRExecutionError(MATRIX_INDEX_OUT_OF_BOUNDS) from error
+        except ValueError as error:
+            raise IRExecutionError(f"IR matrix indexing has {error}") from error
 
     @staticmethod
     def _unsupported_binary(operator: str) -> NoReturn:

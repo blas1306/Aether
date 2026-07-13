@@ -131,12 +131,12 @@ def test_backend_parity_vector_get_trap_is_preserved_by_dce() -> None:
     source = """
 int main() {
     Vector<int, Row> values = [1, 2];
-    int ignored = values[2];
+        int ignored = values[3];
     return 0;
 }
 """
     ir = IRBackend().lower_verified(_typed(source))
-    with pytest.raises(IRExecutionError, match="index 2 out of bounds"):
+    with pytest.raises(IRExecutionError, match="Aether panic: Vector index out of bounds"):
         IRInterpreter(ir).call("main")
 
     optimized_ir = OptimizerPipeline().run(ir)
@@ -146,7 +146,7 @@ int main() {
         for block in function.blocks
         for instruction in block.instructions
     )
-    with pytest.raises(IRExecutionError, match="index 2 out of bounds"):
+    with pytest.raises(IRExecutionError, match="Aether panic: Vector index out of bounds"):
         IRInterpreter(optimized_ir).call("main")
 
     optimized_ssa = SSAOptimizerPipeline().run(lower_to_verified_ssa(_typed(source)))
@@ -158,17 +158,20 @@ int main() {
     )
 
 
-def test_backend_parity_characterization_matrix_index_base_and_bounds_diverge() -> None:
+def test_backend_parity_matrix_coordinates_are_one_based_and_checked_independently() -> None:
     ast_source = "Matrix<int> m = [1, 2; 3, 4]; int x = m[0, 2];"
     compiled_source = "int main() { Matrix<int> m = [1, 2; 3, 4]; return m[0, 2]; }"
 
-    with pytest.raises(AetherRuntimeError, match="Matrix row index 0"):
+    with pytest.raises(AetherRuntimeError, match="Aether panic: Matrix index out of bounds"):
         run_aether(ast_source)
 
-    # AST matrix selectors are 1-based. IR uses zero-based indices and checks
-    # only row * columns + column against the flat buffer, so column 2 is not
-    # rejected independently for a two-column matrix.
-    assert _run_ir(compiled_source) == (3, "")
+    with pytest.raises(IRExecutionError, match="Aether panic: Matrix index out of bounds"):
+        _run_ir(compiled_source)
+
+    if shutil.which("clang") is not None:
+        stdout = StringIO()
+        assert LLVMRunner().run(_typed(compiled_source), stdout=stdout) == 1
+        assert stdout.getvalue() == "Aether panic: Matrix index out of bounds\n"
 
 
 def test_backend_parity_characterization_nested_function_is_ast_only() -> None:

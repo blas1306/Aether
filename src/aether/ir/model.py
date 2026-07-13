@@ -17,6 +17,8 @@ from aether.instruction_effects import (
     ReadingAllocationMixin,
     SideEffectMixin,
     UnknownCallMixin,
+    MEMORY_READ,
+    PURE,
 )
 
 from .types import IRType, VectorType
@@ -68,6 +70,11 @@ class IRCompareOp(IRInstruction):
     operator: str
     left: IRValue
     right: IRValue
+    aggregate_shape: tuple[int, ...] | None = None
+
+    @property
+    def effects(self):
+        return MEMORY_READ if self.aggregate_shape is not None else PURE
 
 
 @dataclass(frozen=True)
@@ -87,6 +94,7 @@ class IRCall(UnknownCallMixin, IRInstruction):
 class IRPrint(SideEffectMixin, IRInstruction):
     value: IRValue
     newline: bool = False
+    aggregate_shape: tuple[int, ...] | None = None
 
 
 @dataclass(frozen=True)

@@ -4,8 +4,10 @@ import inspect
 
 from aether.backend.llvm.array_runtime import LLVMArrayRuntime
 from aether.backend.llvm.list_runtime import LLVMListRuntime
+from aether.backend.llvm.matrix_runtime import LLVMMatrixRuntime
 from aether.backend.llvm.printer import LLVMPrinter, print_llvm
 from aether.backend.llvm.runtime_common import LLVMRuntimeCommon
+from aether.backend.llvm.vector_runtime import LLVMVectorRuntime
 from aether.pipeline import lower_to_verified_ssa, prepare_typed_program
 from aether.typechecker import TypeChecker
 
@@ -43,11 +45,24 @@ def test_common_runtime_owns_shared_allocation_and_sort_helpers() -> None:
     assert "sequence_sort_helper" in source
 
 
+def test_vector_and_matrix_runtimes_own_their_semantic_helpers() -> None:
+    vector_source = inspect.getsource(LLVMVectorRuntime)
+    matrix_source = inspect.getsource(LLVMMatrixRuntime)
+
+    assert "aether_vector_check_index" in vector_source
+    assert "Vector index out of bounds" not in inspect.getsource(LLVMArrayRuntime)
+    assert "aether_matrix_check_index" in matrix_source
+    assert "row_valid" in matrix_source
+    assert "column_valid" in matrix_source
+
+
 def test_printer_delegates_runtime_generation() -> None:
     source = inspect.getsource(LLVMPrinter.print_module)
 
     assert "LLVMArrayRuntime(" in source
     assert "LLVMListRuntime(" in source
+    assert "LLVMVectorRuntime(" in source
+    assert "LLVMMatrixRuntime(" in source
     assert "LLVMRuntimeCommon(" in source
 
 

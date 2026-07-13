@@ -64,6 +64,12 @@ from .types import (
     promote_numeric,
     type_to_string,
 )
+from .vector_matrix_safety import (
+    MATRIX_INDEX_OUT_OF_BOUNDS,
+    VECTOR_INDEX_OUT_OF_BOUNDS,
+    checked_matrix_offset,
+    checked_vector_offset,
+)
 
 
 LINEAR_ALGEBRA_MODULE = "Math.LinearAlgebra"
@@ -1012,7 +1018,7 @@ class Interpreter:
             raise AetherTypeError(f"{label} index must be int or slice, got '{type_to_string(value.type_name)}'.")
         index = value.value - 1
         if index < 0 or index >= size:
-            raise AetherRuntimeError(f"{label} index {value.value} out of bounds for {size} ({_base_label(1)}).")
+            raise AetherRuntimeError(MATRIX_INDEX_OUT_OF_BOUNDS)
         return index
 
     def _slice_indices(self, expression: ast.Expression, env: Environment, size: int, label: str, *, base: int) -> list[int]:
@@ -1112,9 +1118,16 @@ class Interpreter:
             raise AetherTypeError(f"Cannot index non-indexable value of type '{type_to_string(array_value.type_name)}'.")
         if index_value.type_name != "int":
             raise AetherTypeError(f"Index must be int, got '{type_to_string(index_value.type_name)}'.")
+        length = _indexable_length(array_value)
+        if isinstance(array_value.type_name, (VectorType, TransposeVectorType)) or (
+            isinstance(array_value.type_name, MatrixType) and array_value.type_name.vector
+        ):
+            try:
+                return checked_vector_offset(index_value.value, length)
+            except IndexError as error:
+                raise AetherRuntimeError(VECTOR_INDEX_OUT_OF_BOUNDS) from error
         base = _index_base(array_value.type_name)
         index = index_value.value - base
-        length = _indexable_length(array_value)
         if index < 0 or index >= length:
             label = _indexable_label(array_value.type_name)
             raise AetherRuntimeError(
@@ -1139,13 +1152,11 @@ class Interpreter:
         column = column_value.value
         rows = len(matrix_value.value)
         cols = len(matrix_value.value[0].value) if matrix_value.value else 0
-        row_index = row - 1
-        column_index = column - 1
-        if row_index < 0 or row_index >= rows:
-            raise AetherRuntimeError(f"Matrix row index {row} out of bounds for {rows} rows ({_base_label(1)}).")
-        if column_index < 0 or column_index >= cols:
-            raise AetherRuntimeError(f"Matrix column index {column} out of bounds for {cols} columns ({_base_label(1)}).")
-        return row_index, column_index
+        try:
+            offset = checked_matrix_offset(row, column, rows * cols, cols)
+        except IndexError as error:
+            raise AetherRuntimeError(MATRIX_INDEX_OUT_OF_BOUNDS) from error
+        return divmod(offset, cols)
 
     def _evaluate_call(self, expression: ast.CallExpression, env: Environment) -> AetherValue:
         builtin_name = self.builtin_aliases.get(expression.callee, expression.callee)

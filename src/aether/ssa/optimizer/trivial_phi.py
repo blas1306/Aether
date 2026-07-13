@@ -210,7 +210,13 @@ class TrivialPhiEliminator:
             if not left_rewritten and not right_rewritten:
                 return instruction, 0
             return (
-                SSACompareOp(instruction.result, instruction.operator, left, right),
+                SSACompareOp(
+                    instruction.result,
+                    instruction.operator,
+                    left,
+                    right,
+                    instruction.aggregate_shape,
+                ),
                 int(left_rewritten) + int(right_rewritten),
             )
 
@@ -245,7 +251,7 @@ class TrivialPhiEliminator:
             value, rewritten = self._rewrite_value(instruction.value, replacements)
             if not rewritten:
                 return instruction, 0
-            return SSAPrint(value, instruction.newline), 1
+            return SSAPrint(value, instruction.newline, instruction.aggregate_shape), 1
 
         if isinstance(instruction, SSAArrayNew):
             elements = []

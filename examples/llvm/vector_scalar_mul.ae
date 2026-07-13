@@ -2,5 +2,5 @@ int main() {
     Vector<int, Row> v = [1, 2, 3];
     Vector<int, Row> left = 2 * v;
     Vector<int, Row> right = v * 3;
-    return left[0] + left[1] + left[2] + right[0] + right[1] + right[2];
+    return left[1] + left[2] + left[3] + right[1] + right[2] + right[3];
 }
