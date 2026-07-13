@@ -1,0 +1,11 @@
+boolean mark() {
+    println("called");
+    return true;
+}
+
+int main() {
+    println(false && mark());
+    println(true || mark());
+    println(true && mark());
+    println(false || mark());
+}

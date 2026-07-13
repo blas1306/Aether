@@ -662,7 +662,7 @@ class IRLowerer:
         self._append_and_enter(context, blocks.condition)
         condition = self._lower_expression(statement.condition, context)
         self._emit_branch(
-            blocks.condition,
+            context.block,
             condition,
             blocks.body.name,
             blocks.exit.name,
@@ -1033,6 +1033,8 @@ class IRLowerer:
             )
 
         if isinstance(expression, ast.BinaryExpression):
+            if expression.operator in {"&&", "||"}:
+                return self._lower_logical_expression(expression, context)
             binary_operator = _BINARY_OPERATORS.get(expression.operator)
             compare_operator = _COMPARE_OPERATORS.get(expression.operator)
             if binary_operator is None and compare_operator is None:
@@ -1233,6 +1235,68 @@ class IRLowerer:
             self._unsupported(expression, f"field '{expression.field_name}'")
 
         self._unsupported(expression)
+
+    def _lower_logical_expression(
+        self,
+        expression: ast.BinaryExpression,
+        context: _FunctionContext,
+    ) -> IRValue:
+        """Lower source-level &&/|| to control flow and a merge value.
+
+        The right operand is deliberately lowered only in its own basic block.
+        Mutable IR uses a private result slot here; SSA construction promotes
+        the two stores and merge load to a phi.
+        """
+        left = self._lower_expression(expression.left, context)
+        self._require_same_type(
+            left.type,
+            BoolType(),
+            f"left operand of '{expression.operator}' must be bool",
+        )
+
+        index = context.if_index()
+        rhs_block = self._new_block(f"logic.rhs{index}")
+        shortcut_block = self._new_block(f"logic.short{index}")
+        merge_block = self._new_block(f"logic.merge{index}")
+        result_slot = IRValue(f"$logic{index}", BoolType())
+
+        if expression.operator == "&&":
+            true_target = rhs_block.name
+            false_target = shortcut_block.name
+            shortcut_value = False
+        else:
+            true_target = shortcut_block.name
+            false_target = rhs_block.name
+            shortcut_value = True
+
+        self._emit_branch(
+            context.block,
+            left,
+            true_target,
+            false_target,
+            f"left operand of '{expression.operator}' must be bool",
+        )
+
+        self._append_and_enter(context, shortcut_block)
+        shortcut = context.temporary(BoolType())
+        context.block.instructions.append(IRConst(shortcut, shortcut_value))
+        context.block.instructions.append(IRStore(result_slot, shortcut))
+        self._emit_current_jump_if_open(context, merge_block.name)
+
+        self._append_and_enter(context, rhs_block)
+        right = self._lower_expression(expression.right, context)
+        self._require_same_type(
+            right.type,
+            BoolType(),
+            f"right operand of '{expression.operator}' must be bool",
+        )
+        context.block.instructions.append(IRStore(result_slot, right))
+        self._emit_current_jump_if_open(context, merge_block.name)
+
+        self._append_and_enter(context, merge_block)
+        result = context.temporary(BoolType())
+        context.block.instructions.append(IRLoad(result, result_slot))
+        return result
 
     def _lower_literal(self, literal: ast.Literal, context: _FunctionContext) -> IRValue:
         type_ = self._lower_type(literal.type_name)
