@@ -50,9 +50,18 @@ def test_aether_repl_workspace_updates_from_session() -> None:
     ]
 
 
+def test_aether_repl_uses_public_array_format() -> None:
+    repl = create_aether_repl()
+
+    repl.execute_line("Array<int> values = {1, 2, 3};")
+    events = repl.execute_line("println(values);")
+
+    assert [(event.kind, event.text) for event in events] == [("stdout", "{1, 2, 3}")]
+    assert repl.workspace_snapshot()[0]["summary"] == "{1, 2, 3}"
+
+
 def test_aether_repl_profile_uses_aether_prompt() -> None:
     repl = create_aether_repl()
 
     assert repl.profile.title == "Aether REPL"
     assert repl.prompt == "aether> "
-

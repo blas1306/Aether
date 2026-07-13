@@ -63,7 +63,7 @@ def test_array_slice_is_an_independent_copy() -> None:
         "Array<int> a = {1, 2, 3}; Array<int> b = a[0:2]; b[0] = 99; println(a); println(b);"
     )
 
-    assert result.output.splitlines() == ["Array{1, 2, 3}", "Array{99, 2}"]
+    assert result.output.splitlines() == ["{1, 2, 3}", "{99, 2}"]
 
 
 @pytest.mark.parametrize("bounds", ["2:1", "0:4", "-1:2", "0:-1"])

@@ -40,7 +40,7 @@ println(ys);
 
     assert result.env["xs"].type_name == ListType("int")
     assert result.env["ys"].type_name == ArrayType("int")
-    assert result.output == "{1, 2, 3}\nArray{4, 5, 6}\n"
+    assert result.output == "{1, 2, 3}\n{4, 5, 6}\n"
 
 
 def test_braced_literal_uses_function_parameter_context_for_list_and_array() -> None:
@@ -59,7 +59,7 @@ g({4, 5, 6});
 """
     )
 
-    assert result.output == "{1, 2, 3}\nArray{4, 5, 6}\n"
+    assert result.output == "{1, 2, 3}\n{4, 5, 6}\n"
 
 
 def test_braced_literal_uses_return_context_for_list_and_array() -> None:
@@ -78,7 +78,7 @@ println(makeArray());
 """
     )
 
-    assert result.output == "{1, 2, 3}\nArray{4, 5, 6}\n"
+    assert result.output == "{1, 2, 3}\n{4, 5, 6}\n"
 
 
 def test_empty_braced_literal_uses_expected_type_in_parameters_returns_and_fields() -> None:
@@ -115,7 +115,7 @@ println(lists.ys);
 """
     )
 
-    assert result.output == "0\n0\n0\n0\n{}\nArray{}\n"
+    assert result.output == "0\n0\n0\n0\n{}\n{}\n"
 
 
 def test_braced_literal_uses_field_assignment_context_for_list_and_array() -> None:
@@ -138,7 +138,7 @@ println(lists.ys);
 """
     )
 
-    assert result.output == "{3, 4}\nArray{5, 6}\n{}\nArray{}\n"
+    assert result.output == "{3, 4}\n{5, 6}\n{}\n{}\n"
 
 
 def test_push_pop_work_on_inferred_braced_literal_list() -> None:
@@ -282,7 +282,7 @@ println(length(a));
     )
 
     assert result.env["a"].type_name == ArrayType("int")
-    assert result.output == "Array{1, 2, 3}\n1\nArray{9, 2, 3}\n3\n"
+    assert result.output == "{1, 2, 3}\n1\n{9, 2, 3}\n3\n"
 
 
 def test_other_mutable_aggregates_alias_by_assignment() -> None:
@@ -305,7 +305,7 @@ println(A);
 """
     )
 
-    assert result.output == "Array{9, 2}\n[9 2]\n[9 2; 3 4]\n"
+    assert result.output == "{9, 2}\n[9 2]\n[9 2; 3 4]\n"
 
 
 def test_copy_array_creates_new_container() -> None:
@@ -320,7 +320,7 @@ println(b);
     )
 
     assert result.env["b"].type_name == ArrayType("int")
-    assert result.output == "Array{9, 2, 3}\nArray{100, 2, 3}\n"
+    assert result.output == "{9, 2, 3}\n{100, 2, 3}\n"
 
 
 def test_const_array_blocks_index_assignment() -> None:
@@ -364,14 +364,14 @@ def test_array_double_accepts_int_literals() -> None:
     result = run_aether("Array<double> a = {1, 2.5}; println(a);")
 
     assert result.env["a"].type_name == ArrayType("double")
-    assert result.output == "Array{1.0, 2.5}\n"
+    assert result.output == "{1.0, 2.5}\n"
 
 
 def test_array_string_literal_works() -> None:
     result = run_aether('Array<string> s = {"a", "b"}; println(s[1]); println(s);')
 
     assert result.env["s"].type_name == ArrayType("string")
-    assert result.output == "b\nArray{\"a\", \"b\"}\n"
+    assert result.output == "b\n{\"a\", \"b\"}\n"
 
 
 def test_nested_array_literal_works() -> None:
@@ -386,7 +386,7 @@ println(xss);
     )
 
     assert result.env["xss"].type_name == ArrayType(ArrayType("int"))
-    assert result.output == "Array{Array{1, 2}, Array{3, 4}}\n3\nArray{Array{1, 9}, Array{3, 4}}\n"
+    assert result.output == "{{1, 2}, {3, 4}}\n3\n{{1, 9}, {3, 4}}\n"
 
 
 def test_array_brace_literal_uses_function_and_return_type_context() -> None:
@@ -405,7 +405,7 @@ println(make());
 """
     )
 
-    assert result.output == "Array{4, 5}\nArray{1, 2, 3}\n"
+    assert result.output == "{4, 5}\n{1, 2, 3}\n"
 
 
 def test_array_brace_literal_uses_struct_field_context() -> None:
@@ -420,7 +420,7 @@ println(box.items);
 """
     )
 
-    assert result.output == "Array{1, 2}\n"
+    assert result.output == "{1, 2}\n"
 
 
 def test_array_slicing_returns_an_independent_array() -> None:
@@ -920,7 +920,7 @@ println(b);
     )
 
     assert result.env["b"].type_name == ArrayType("int")
-    assert result.output == "3\nArray{1, 2, 3}\nArray{9, 2, 3}\n"
+    assert result.output == "3\n{1, 2, 3}\n{9, 2, 3}\n"
 
 
 def test_matrix_native_dimensions_and_transpose() -> None:

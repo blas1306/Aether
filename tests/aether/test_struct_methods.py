@@ -617,4 +617,4 @@ println(b.matrixValue());
 """
     )
 
-    assert result.output == "Axis.Y\n{1, 2}\nArray{3, 4}\n[3.0 4.0]\n[1.0 2.0; 3.0 4.0]\n"
+    assert result.output == "Axis.Y\n{1, 2}\n{3, 4}\n[3.0 4.0]\n[1.0 2.0; 3.0 4.0]\n"

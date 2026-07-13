@@ -21,10 +21,10 @@ df(x) = exp(x) + x*exp(x);
 
 solNR = nr(f(x), df(x), 1, 1e-8, 100);
 
-x = solNR.x;
+xn = solNR.x;
 res = solNR.res;
 iter = solNR.iter;
 
-println("x = ", x);
+println("x = ", xn);
 println("res = ", res);
 println("iter = ", iter);

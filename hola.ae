@@ -6,5 +6,9 @@ boolean esMayor(int x) {
 	}
 }
 
-u1 = esMayor(19);
-u2 = esMayor(17);
+int main() {
+	println(esMayor(19));
+	println(esMayor(17));
+	return 0;
+}
+
