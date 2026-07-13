@@ -6,6 +6,7 @@ from math import trunc
 from typing import Any, Callable, NoReturn, Sequence
 
 from aether.array_safety import checked_array_length_to_int
+from aether.integer_arithmetic import checked_int_binary, ieee_divide
 from aether.list_safety import checked_list_index_to_int, checked_list_length_to_int
 
 from .model import (
@@ -180,6 +181,7 @@ class IRInterpreter:
                 instruction.operator,
                 left,
                 right,
+                checked_int=instruction.may_trap,
             )
             return False, None, None
 
@@ -736,7 +738,18 @@ class IRInterpreter:
         return -1
 
     @staticmethod
-    def _binary(operator: str, left: Any, right: Any) -> Any:
+    def _binary(
+        operator: str,
+        left: Any,
+        right: Any,
+        *,
+        checked_int: bool = False,
+    ) -> Any:
+        if checked_int:
+            try:
+                return checked_int_binary(operator, left, right)
+            except (OverflowError, ZeroDivisionError) as exc:
+                raise IRExecutionError(str(exc)) from exc
         if operator == "add":
             return left + right
         if operator == "sub":
@@ -744,9 +757,7 @@ class IRInterpreter:
         if operator == "mul":
             return left * right
         if operator == "div":
-            if right == 0:
-                raise IRExecutionError("IR division by zero")
-            return left / right
+            return ieee_divide(float(left), float(right))
         if operator in {"mod", "rem"}:
             if right == 0:
                 raise IRExecutionError("IR division by zero")

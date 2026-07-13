@@ -360,6 +360,10 @@ class SSADeadCodeEliminator:
             return
 
     def _pure_result(self, instruction: SSAInstruction) -> SSAValue | None:
-        if not isinstance(instruction, self._PURE_PRODUCERS):
+        if not isinstance(instruction, self._PURE_PRODUCERS) or getattr(
+            instruction,
+            "may_trap",
+            False,
+        ):
             return None
         return instruction.result

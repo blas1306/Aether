@@ -667,17 +667,17 @@ println(ys);
 
 def test_list_slice_step_zero_is_runtime_error() -> None:
     with pytest.raises(AetherRuntimeError, match="slice step cannot be 0"):
-        run_aether("List<int> xs = {10, 20, 30, 40}; xs[0:0:3];")
+        run_aether("List<int> xs = {10, 20, 30, 40}; println(xs[0:0:3]);")
 
 
 def test_list_slice_negative_index_is_runtime_error() -> None:
     with pytest.raises(AetherRuntimeError, match="negative list slice index"):
-        run_aether("List<int> xs = {10, 20, 30}; xs[-1:2];")
+        run_aether("List<int> xs = {10, 20, 30}; println(xs[-1:2]);")
 
 
 def test_list_slice_out_of_range_index_is_runtime_error() -> None:
     with pytest.raises(AetherRuntimeError, match="List slice index 3 out of bounds for length 3"):
-        run_aether("List<int> xs = {10, 20, 30}; xs[0:3];")
+        run_aether("List<int> xs = {10, 20, 30}; println(xs[0:3]);")
 
 
 def test_slice_on_non_list_indexing_context_fails() -> None:

@@ -69,7 +69,7 @@ def test_array_slice_is_an_independent_copy() -> None:
 @pytest.mark.parametrize("bounds", ["2:1", "0:4", "-1:2", "0:-1"])
 def test_array_slice_bounds_panic_in_language_interpreter(bounds: str) -> None:
     with pytest.raises(AetherRuntimeError, match=PANIC):
-        run_aether(f"Array<int> a = {{1, 2, 3}}; a[{bounds}];")
+        run_aether(f"Array<int> a = {{1, 2, 3}}; println(a[{bounds}]);")
 
 
 def test_array_slice_requires_array_and_int_bounds() -> None:

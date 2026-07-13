@@ -5,6 +5,7 @@ from math import trunc
 from typing import Any
 
 from aether.ir.types import DoubleType, IntType, StringType
+from aether.integer_arithmetic import checked_int_binary
 from aether.ssa.analysis import Constant, LatticeState, Overdefined, Unknown, Worklist
 from aether.ssa.model import (
     SSAArrayGet,
@@ -307,10 +308,11 @@ class SCCPAnalyzer:
             StringType,
         ):
             return Overdefined()
-        if operator in {"div", "mod", "rem"} and right.value == 0:
-            return Overdefined()
-
         try:
+            if isinstance(instruction.left.type, IntType) and isinstance(instruction.right.type, IntType):
+                return Constant(checked_int_binary(operator, left.value, right.value))
+            if operator in {"div", "mod", "rem"} and right.value == 0:
+                return Overdefined()
             return Constant(self._evaluate_binary_values(operator, left.value, right.value))
         except (ArithmeticError, TypeError, ValueError):
             return Overdefined()

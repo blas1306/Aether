@@ -667,7 +667,7 @@ def test_division_by_zero_error() -> None:
         ]
     )
 
-    with pytest.raises(IRExecutionError, match="division by zero"):
+    with pytest.raises(IRExecutionError, match="Aether panic: Division by zero"):
         IRInterpreter(module).call("divide", [1, 0])
 
 

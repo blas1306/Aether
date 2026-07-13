@@ -4,6 +4,7 @@ from math import trunc
 from typing import Any
 
 from aether.ir.types import DoubleType, IntType, StringType
+from aether.integer_arithmetic import checked_int_binary
 from aether.ssa.model import (
     SSABasicBlock,
     SSABinaryOp,
@@ -192,10 +193,11 @@ class SSAGlobalConstantPropagator:
 
         left = constants[instruction.left]
         right = constants[instruction.right]
-        if operator in {"div", "mod", "rem"} and right == 0:
-            return UNKNOWN
-
         try:
+            if isinstance(instruction.left.type, IntType) and isinstance(instruction.right.type, IntType):
+                return checked_int_binary(operator, left, right)
+            if operator in {"div", "mod", "rem"} and right == 0:
+                return UNKNOWN
             return self._evaluate_binary(operator, left, right)
         except (ArithmeticError, TypeError, ValueError):
             return UNKNOWN

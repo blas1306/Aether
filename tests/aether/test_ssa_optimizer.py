@@ -2101,7 +2101,7 @@ def test_ssa_dead_code_eliminator_removes_unused_const() -> None:
     _verify(result.module)
 
 
-def test_ssa_dead_code_eliminator_removes_unused_binary_op() -> None:
+def test_ssa_dead_code_eliminator_preserves_unused_int_binary_op_that_may_trap() -> None:
     int_type = IntType()
     left = SSAValue("left", int_type)
     right = SSAValue("right", int_type)
@@ -2131,9 +2131,9 @@ def test_ssa_dead_code_eliminator_removes_unused_binary_op() -> None:
 
     result = SSADeadCodeEliminator().run(module)
 
-    assert result.changed is True
-    assert result.stats == {"removed": 1}
-    assert "SSABinaryOp" not in _instruction_names(result.module)
+    assert result.changed is False
+    assert result.stats == {"removed": 0}
+    assert "SSABinaryOp" in _instruction_names(result.module)
     _verify(result.module)
 
 

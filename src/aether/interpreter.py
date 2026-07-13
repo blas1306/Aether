@@ -12,6 +12,7 @@ from plot_backend import PlotBackend
 from . import ast
 from .errors import AetherError, AetherInputError, AetherRuntimeError, AetherSyntaxError, AetherTypeError
 from .formatting import format_value
+from .integer_arithmetic import checked_int_binary, checked_int_negate, ieee_divide
 from .lexer import lex
 from .modules import is_public_export, private_top_level_names, resolve_file_module_path
 from .native_members import native_member_set, native_method, native_property
@@ -1687,16 +1688,29 @@ class Interpreter:
         ):
             raise AetherTypeError(f"Operator '{operator}' requires numeric operands.")
         result_type = promote_numeric(left.type_name, right.type_name, operator)
-        if operator == "+":
+        if (
+            left.type_name == "int"
+            and right.type_name == "int"
+            and operator in {"+", "-", "*", "/", "%"}
+        ):
+            operation = {"+": "add", "-": "sub", "*": "mul", "/": "div", "%": "rem"}[operator]
+            try:
+                value = checked_int_binary(operation, left.value, right.value)
+            except (OverflowError, ZeroDivisionError) as exc:
+                raise AetherRuntimeError(str(exc)) from exc
+        elif operator == "+":
             value = left.value + right.value
         elif operator == "-":
             value = left.value - right.value
         elif operator == "*":
             value = left.value * right.value
         elif operator == "/":
-            if right.value == 0:
-                raise AetherRuntimeError("Operator '/' is undefined for divisor zero.", kind="arithmetic")
-            value = left.value / right.value
+            if result_type == "complex":
+                if right.value == 0:
+                    raise AetherRuntimeError("Operator '/' is undefined for divisor zero.", kind="arithmetic")
+                value = left.value / right.value
+            else:
+                value = ieee_divide(float(left.value), float(right.value))
         elif operator == "%":
             if right.value == 0:
                 raise AetherRuntimeError("Operator '%' is undefined for divisor zero.")
@@ -2177,6 +2191,8 @@ def _assignment_root_name(expression: ast.Expression) -> str | None:
 
 
 def _with_source_location(exc: AetherError, node: object | None) -> AetherError:
+    if exc.message.startswith("Aether panic:"):
+        return exc
     line, column = _source_location(node)
     return type(exc)(
         exc.message,
@@ -2578,6 +2594,11 @@ def _is_numeric_scalar(value: AetherValue) -> bool:
 
 
 def _negate_value(value: AetherValue) -> AetherValue:
+    if value.type_name == "int":
+        try:
+            return AetherValue("int", checked_int_negate(value.value))
+        except OverflowError as exc:
+            raise AetherRuntimeError(str(exc)) from exc
     if value.type_name in NUMERIC_TYPES:
         return AetherValue(value.type_name, -value.value)
     if isinstance(value.type_name, VectorType):

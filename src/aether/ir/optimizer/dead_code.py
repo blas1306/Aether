@@ -169,7 +169,11 @@ class DeadCodeEliminator:
 
     @classmethod
     def _is_removable(cls, instruction: IRInstruction) -> bool:
-        return isinstance(instruction, cls._PURE_INSTRUCTIONS)
+        return isinstance(instruction, cls._PURE_INSTRUCTIONS) and not getattr(
+            instruction,
+            "may_trap",
+            False,
+        )
 
     @staticmethod
     def _result(instruction: IRInstruction) -> IRValue:

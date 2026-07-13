@@ -1232,13 +1232,14 @@ def test_emit_llvm_prints_sum(tmp_path: Path) -> None:
     exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
 
     assert exit_code == EXIT_SUCCESS
-    assert stdout == (
+    assert "@llvm.sadd.with.overflow.i32" in stdout
+    assert (
         "define i32 @inc(i32 %x) {\n"
         "entry:\n"
-        "  %0 = add i32 %x, 1\n"
+        "  %0 = call i32 @aether_checked_add_i32(i32 %x, i32 1)\n"
         "  ret i32 %0\n"
         "}\n"
-    )
+    ) in stdout
     assert stderr == ""
 
 
@@ -1256,13 +1257,14 @@ int add(int a, int b) {
     exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
 
     assert exit_code == EXIT_SUCCESS
-    assert stdout == (
+    assert "@llvm.sadd.with.overflow.i32" in stdout
+    assert (
         "define i32 @add(i32 %a, i32 %b) {\n"
         "entry:\n"
-        "  %0 = add i32 %a, %b\n"
+        "  %0 = call i32 @aether_checked_add_i32(i32 %a, i32 %b)\n"
         "  ret i32 %0\n"
         "}\n"
-    )
+    ) in stdout
     assert stderr == ""
 
 
@@ -1551,7 +1553,7 @@ int main() {
     assert "cond0:\n" in stdout
     assert "body0:\n" in stdout
     assert "  %0 = phi i32 [ %n, %entry ], [ %2, %body0 ]\n" in stdout
-    assert "  %2 = sub i32 %0, 1\n" in stdout
+    assert "  %2 = call i32 @aether_checked_sub_i32(i32 %0, i32 1)\n" in stdout
     assert "  %0 = call i32 @countdown(i32 5)\n" in stdout
     assert "%5" not in stdout
     assert stderr == ""

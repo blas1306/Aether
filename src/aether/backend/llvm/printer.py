@@ -67,6 +67,7 @@ from aether.ssa.model import (
 from .types import LLVMBackendError, llvm_type
 from .array_runtime import LLVMArrayRuntime
 from .io_runtime import LLVMRuntimeIO
+from .integer_runtime import LLVMIntegerRuntime
 from .list_runtime import (
     LLVMListRuntime,
     list_contains_helper_name,
@@ -141,6 +142,7 @@ class LLVMPrinter:
         self._list_contains_types: set[object] = set()
         self._list_index_of_types: set[object] = set()
         self._uses_print = False
+        self._checked_int_operators: set[str] = set()
 
         functions = [self._print_function(function) for function in module.functions]
         globals_ = [
@@ -187,6 +189,7 @@ class LLVMPrinter:
             ),
             uses_panic=bool(
                 uses_allocation
+                or self._checked_int_operators
                 or self._uses_array_indexing
                 or self._uses_array_slicing
                 or self._uses_list_indexing
@@ -201,6 +204,7 @@ class LLVMPrinter:
             sequence_sort_types=frozenset(self._sequence_sort_types),
         )
         runtime = list_runtime.declarations(common_runtime, array_runtime)
+        LLVMIntegerRuntime(frozenset(self._checked_int_operators)).append(runtime, common_runtime)
         LLVMRuntimeIO(enabled=self._uses_print).append(runtime)
         sections = runtime + globals_ + functions
         return "\n\n".join(sections)
@@ -419,12 +423,23 @@ class LLVMPrinter:
             )
 
         if (
-            isinstance(instruction.result.type, IntType)
-            and isinstance(instruction.left.type, IntType)
+            isinstance(instruction.left.type, IntType)
             and isinstance(instruction.right.type, IntType)
         ):
-            operator = self._INT_BINARY_OPERATORS.get(instruction.operator)
-            result_type = "i32"
+            if instruction.operator not in self._INT_BINARY_OPERATORS:
+                operator = None
+            else:
+                if instruction.operator == "div" and not isinstance(instruction.result.type, DoubleType):
+                    raise LLVMBackendError("LLVM checked int division result must be double")
+                if instruction.operator != "div" and not isinstance(instruction.result.type, IntType):
+                    raise LLVMBackendError("LLVM checked int arithmetic result must be int")
+                self._checked_int_operators.add(instruction.operator)
+                helper = LLVMIntegerRuntime.helper_name(instruction.operator)
+                result_type = llvm_type(instruction.result.type)
+                result = self._new_temp(instruction.result)
+                left = self._operand(instruction.left)
+                right = self._operand(instruction.right)
+                return f"{result} = call {result_type} @{helper}(i32 {left}, i32 {right})"
         elif (
             isinstance(instruction.result.type, DoubleType)
             and isinstance(instruction.left.type, DoubleType)

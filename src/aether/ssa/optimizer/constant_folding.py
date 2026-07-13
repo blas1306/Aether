@@ -4,6 +4,7 @@ from math import trunc
 from typing import Any
 
 from aether.ir.types import DoubleType, IntType, StringType
+from aether.integer_arithmetic import checked_int_binary
 from aether.ssa.model import (
     SSABasicBlock,
     SSABinaryOp,
@@ -142,13 +143,17 @@ class SSAConstantFolder:
 
         left = constants[instruction.left]
         right = constants[instruction.right]
-        if operator in {"div", "mod", "rem"} and right == 0:
-            return None
+        if isinstance(instruction.left.type, IntType) and isinstance(instruction.right.type, IntType):
+            try:
+                value = checked_int_binary(operator, left, right)
+            except (OverflowError, ZeroDivisionError):
+                return None
+        else:
+            if operator in {"div", "mod", "rem"} and right == 0:
+                return None
+            value = self._evaluate_binary(operator, left, right)
 
-        return SSAConst(
-            instruction.result,
-            self._evaluate_binary(operator, left, right),
-        )
+        return SSAConst(instruction.result, value)
 
     def _fold_compare(
         self,

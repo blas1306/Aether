@@ -6,7 +6,7 @@ import shutil
 import pytest
 
 from aether.backend.llvm import LLVMRunner
-from aether.errors import IRBackendUnsupportedFeatureError
+from aether.errors import AetherTypeError, IRBackendUnsupportedFeatureError
 from aether.ir import IRCall, IRInterpreter, IRPrint
 from aether.pipeline import IRBackend, lower_to_verified_ssa, prepare_typed_program
 from aether.runner import run_aether
@@ -152,15 +152,13 @@ int main() {
         IRBackend().lower(typed)
 
 
-def test_pure_expression_statement_remains_unsupported() -> None:
-    typed = _typed(
-        """
+def test_pure_expression_statement_is_rejected_by_frontend() -> None:
+    source = """
 int main() {
     1 + 2;
     return 0;
 }
 """
-    )
 
-    with pytest.raises(IRBackendUnsupportedFeatureError, match="expression statements"):
-        IRBackend().lower(typed)
+    with pytest.raises(AetherTypeError, match="Only calls can be used as expression statements"):
+        _typed(source)

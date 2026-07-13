@@ -75,13 +75,17 @@ def test_prints_main_returning_sum() -> None:
         ]
     )
 
-    assert print_llvm(module) == (
+    llvm = print_llvm(module)
+
+    assert "@llvm.sadd.with.overflow.i32" in llvm
+    assert "define private i32 @aether_checked_add_i32" in llvm
+    assert (
         "define i32 @main() {\n"
         "entry:\n"
-        "  %0 = add i32 2, 3\n"
+        "  %0 = call i32 @aether_checked_add_i32(i32 2, i32 3)\n"
         "  ret i32 %0\n"
         "}"
-    )
+    ) in llvm
 
 
 def test_prints_column_vector_literal_as_contiguous_array() -> None:
@@ -215,36 +219,39 @@ def test_prints_add_function_with_int_parameters() -> None:
         ]
     )
 
-    assert print_llvm(module) == (
+    llvm = print_llvm(module)
+
+    assert "@llvm.sadd.with.overflow.i32" in llvm
+    assert (
         "define i32 @add(i32 %a, i32 %b) {\n"
         "entry:\n"
-        "  %0 = add i32 %a, %b\n"
+        "  %0 = call i32 @aether_checked_add_i32(i32 %a, i32 %b)\n"
         "  ret i32 %0\n"
         "}"
-    )
+    ) in llvm
 
 
 @pytest.mark.parametrize(
-    ("operator", "llvm_operator"),
+    ("operator", "helper", "result_type"),
     [
-        ("sub", "sub"),
-        ("mul", "mul"),
-        ("div", "sdiv"),
-        ("mod", "srem"),
-        ("rem", "srem"),
+        ("sub", "sub", IntType()),
+        ("mul", "mul", IntType()),
+        ("div", "div", DoubleType()),
+        ("mod", "rem", IntType()),
+        ("rem", "rem", IntType()),
     ],
 )
-def test_prints_int_binary_operations(operator: str, llvm_operator: str) -> None:
+def test_prints_checked_int_binary_operations(operator: str, helper: str, result_type) -> None:
     int_type = IntType()
     left = SSAValue("left", int_type)
     right = SSAValue("right", int_type)
-    result = SSAValue("result", int_type)
+    result = SSAValue("result", result_type)
     module = SSAModule(
         [
             SSAFunction(
                 "main",
                 [],
-                int_type,
+                result_type,
                 [
                     SSABasicBlock(
                         "entry",
@@ -260,13 +267,16 @@ def test_prints_int_binary_operations(operator: str, llvm_operator: str) -> None
         ]
     )
 
-    assert print_llvm(module) == (
-        "define i32 @main() {\n"
+    llvm = print_llvm(module)
+    llvm_result_type = "double" if isinstance(result_type, DoubleType) else "i32"
+
+    assert (
+        f"define {llvm_result_type} @main() {{\n"
         "entry:\n"
-        f"  %0 = {llvm_operator} i32 8, 2\n"
-        "  ret i32 %0\n"
+        f"  %0 = call {llvm_result_type} @aether_checked_{helper}_i32(i32 8, i32 2)\n"
+        f"  ret {llvm_result_type} %0\n"
         "}"
-    )
+    ) in llvm
 
 
 @pytest.mark.parametrize(
@@ -1207,11 +1217,11 @@ def test_loop_carried_phi_uses_same_name_as_later_definition() -> None:
     sub_result = next(
         line.strip().split(" = ", 1)[0]
         for line in llvm_ir.splitlines()
-        if " = sub i32 " in line
+        if " = call i32 @aether_checked_sub_i32" in line
     )
 
     assert f"[ {sub_result}, %body0 ]" in llvm_ir
-    assert f"{sub_result} = sub i32 " in llvm_ir
+    assert f"{sub_result} = call i32 @aether_checked_sub_i32" in llvm_ir
 
 
 def test_empty_phi_incoming_has_clear_error() -> None:

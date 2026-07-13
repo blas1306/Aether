@@ -67,12 +67,12 @@ floored = Math.mod(-5.5, 2.0);
     assert result.env["floored"].type_name == "double"
 
 
-def test_integer_modulo_handles_large_factorials_exactly() -> None:
+def test_integer_modulo_handles_in_range_factorials_exactly() -> None:
     result = run_aether(
         """
 import Math
-wilson = ((22)! + 1) % 23;
-floored = Math.mod((22)! + 1, 23);
+wilson = ((12)! + 1) % 13;
+floored = Math.mod((12)! + 1, 13);
 """
     )
 
@@ -81,7 +81,7 @@ floored = Math.mod((22)! + 1, 23);
 
 
 def test_percent_rejects_divisor_zero() -> None:
-    with pytest.raises(AetherRuntimeError, match="divisor zero"):
+    with pytest.raises(AetherRuntimeError, match="Aether panic: Division by zero"):
         run_aether("x = 5 % 0;")
 
 

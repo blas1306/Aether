@@ -370,7 +370,8 @@ class IRLowerer:
             if isinstance(expression, ast.CallExpression):
                 self._lower_call(expression, context, result_required=False)
                 return
-            self._unsupported(statement)
+            self._lower_expression(expression, context)
+            return
 
         self._unsupported(statement)
 
@@ -1053,6 +1054,14 @@ class IRLowerer:
         if isinstance(expression, ast.UnaryExpression):
             if expression.operator != "-":
                 self._unsupported(expression, f"operator '{expression.operator}'")
+            if (
+                isinstance(expression.operand, ast.Literal)
+                and expression.operand.type_name == "int"
+                and expression.operand.value == 2**31
+            ):
+                result = context.temporary(IntType())
+                context.block.instructions.append(IRConst(result, -(2**31)))
+                return result
             operand = self._lower_expression(expression.operand, context)
             if not isinstance(operand.type, _NUMERIC_IR_TYPES):
                 self._unsupported(expression, f"operand type '{operand.type}'")

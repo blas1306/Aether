@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from .types import IRType, VectorType
+from aether.integer_arithmetic import int_operator_may_trap
+
+from .types import IRType, IntType, VectorType
 
 
 @dataclass(frozen=True)
@@ -45,6 +47,14 @@ class IRBinaryOp(IRInstruction):
     operator: str
     left: IRValue
     right: IRValue
+
+    @property
+    def may_trap(self) -> bool:
+        return (
+            isinstance(self.left.type, IntType)
+            and isinstance(self.right.type, IntType)
+            and int_operator_may_trap(self.operator)
+        )
 
 
 @dataclass(frozen=True)

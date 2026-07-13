@@ -568,6 +568,15 @@ class TypeChecker:
             return
         if isinstance(statement, ast.ExpressionStatement):
             self._expression_type(statement.expression, scope)
+            if not isinstance(statement.expression, (ast.CallExpression, ast.MethodCall, ast.InputCall)):
+                line, column = _source_location(statement.expression)
+                raise AetherTypeError(
+                    "Only calls can be used as expression statements.",
+                    line=line,
+                    column=column,
+                    hint="Use the expression in a declaration, assignment, return, condition, or call.",
+                    kind="statement",
+                )
             return
         if isinstance(statement, ast.IfStatement):
             self._require_condition_type(statement.condition, scope, "if")

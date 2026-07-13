@@ -1643,7 +1643,7 @@ def test_dead_code_eliminates_unused_constant_after_folding() -> None:
     )
 
 
-def test_dead_code_eliminates_unused_arithmetic_operation() -> None:
+def test_dead_code_preserves_unused_int_arithmetic_that_may_trap() -> None:
     int_type = IntType()
     left = IRParameter("a", int_type)
     right = IRParameter("b", int_type)
@@ -1666,14 +1666,9 @@ def test_dead_code_eliminates_unused_arithmetic_operation() -> None:
 
     optimization = DeadCodeEliminator().run(module)
 
-    assert optimization.changed is True
-    assert optimization.stats == {"removed": 1}
-    assert print_ir(optimization.module) == (
-        "func @main(%a: int, %b: int) -> int {\n"
-        "entry:\n"
-        "    return %a\n"
-        "}"
-    )
+    assert optimization.changed is False
+    assert optimization.stats == {"removed": 0}
+    assert optimization.module == module
 
 
 def test_dead_code_eliminates_unused_comparison() -> None:
