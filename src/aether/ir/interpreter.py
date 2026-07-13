@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import math
 from math import trunc
-from typing import Any, NoReturn, Sequence
+from typing import Any, Callable, NoReturn, Sequence
 
 from aether.array_safety import checked_array_length_to_int
 from aether.list_safety import checked_list_index_to_int, checked_list_length_to_int
@@ -52,6 +52,7 @@ from .model import (
     IRMatrixSet,
     IRModule,
     IROuterProduct,
+    IRPrint,
     IRReturn,
     IRStore,
     IRValue,
@@ -92,9 +93,16 @@ class _Frame:
 class IRInterpreter:
     """Execute the initial Aether IR control-flow subset."""
 
-    def __init__(self, module: IRModule) -> None:
+    def __init__(
+        self,
+        module: IRModule,
+        *,
+        write_output: Callable[[str], None] | None = None,
+    ) -> None:
         self.module = module
         self._functions = {function.name: function for function in module.functions}
+        self.output = ""
+        self._output_writer = write_output
 
     def call(self, function_name: str, arguments: Sequence[Any] = ()) -> Any:
         """Call an IR function by name using raw Python scalar values."""
@@ -112,6 +120,12 @@ class IRInterpreter:
             values=dict(zip(function.parameters, arguments)),
         )
         return self._execute(function, frame)
+
+    @staticmethod
+    def _format_print_value(value: Any) -> str:
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        return str(value)
 
     def _execute(self, function: IRFunction, frame: _Frame) -> Any:
         blocks = {block.name: block for block in function.blocks}
@@ -193,6 +207,16 @@ class IRInterpreter:
             result = self.call(instruction.function, arguments)
             if instruction.result is not None:
                 frame.values[instruction.result] = result
+            return False, None, None
+
+        if isinstance(instruction, IRPrint):
+            value = self._value(instruction.value, frame)
+            text = self._format_print_value(value)
+            if instruction.newline:
+                text += "\n"
+            self.output += text
+            if self._output_writer is not None:
+                self._output_writer(text)
             return False, None, None
 
         if isinstance(instruction, IRArrayNew):

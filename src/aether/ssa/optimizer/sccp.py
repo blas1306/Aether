@@ -49,6 +49,7 @@ from aether.ssa.model import (
     SSAMatrixSet,
     SSAModule,
     SSAOuterProduct,
+    SSAPrint,
     SSAPhi,
     SSAReturn,
     SSAValue,
@@ -447,6 +448,8 @@ class SCCPAnalyzer:
             return (instruction.condition,)
         if isinstance(instruction, SSACall):
             return instruction.arguments
+        if isinstance(instruction, SSAPrint):
+            return (instruction.value,)
         if isinstance(instruction, SSAArrayNew):
             return instruction.elements
         if isinstance(instruction, SSAListNew):

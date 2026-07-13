@@ -69,6 +69,12 @@ class IRCall(IRInstruction):
 
 
 @dataclass(frozen=True)
+class IRPrint(IRInstruction):
+    value: IRValue
+    newline: bool = False
+
+
+@dataclass(frozen=True)
 class IRArrayNew(IRInstruction):
     result: IRValue
     elements: tuple[IRValue, ...] = ()

@@ -42,6 +42,7 @@ from aether.ssa.model import (
     SSAMatrixRows,
     SSAModule,
     SSAOuterProduct,
+    SSAPrint,
     SSAPhi,
     SSAReturn,
     SSAValue,
@@ -239,6 +240,12 @@ class TrivialPhiEliminator:
                 ),
                 rewritten_uses,
             )
+
+        if isinstance(instruction, SSAPrint):
+            value, rewritten = self._rewrite_value(instruction.value, replacements)
+            if not rewritten:
+                return instruction, 0
+            return SSAPrint(value, instruction.newline), 1
 
         if isinstance(instruction, SSAArrayNew):
             elements = []

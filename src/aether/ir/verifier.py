@@ -47,6 +47,7 @@ from .model import (
     IRMatrixSet,
     IRModule,
     IROuterProduct,
+    IRPrint,
     IRReturn,
     IRStore,
     IRValue,
@@ -381,6 +382,18 @@ class IRVerifier:
             if instruction.result is None:
                 return state
             return self._define_value(state, instruction.result)
+
+        if isinstance(instruction, IRPrint):
+            self._require_defined(instruction.value, state, value_types)
+            if not isinstance(
+                instruction.value.type,
+                (IntType, BoolType, StringType, DoubleType),
+            ):
+                self._fail(
+                    "Print value must be int, boolean, string, or double, "
+                    f"got {instruction.value.type}"
+                )
+            return state
 
         if isinstance(instruction, IRArrayNew):
             self._verify_array_new(instruction, state, value_types)

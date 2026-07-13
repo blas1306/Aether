@@ -47,6 +47,7 @@ from .model import (
     IRMatrixSet,
     IROuterProduct,
     IRModule,
+    IRPrint,
     IRReturn,
     IRStore,
     IRValue,
@@ -113,6 +114,9 @@ class IRPrinter:
             if instruction.result is None:
                 return call
             return f"{self._typed_value(instruction.result)} = {call}"
+        if isinstance(instruction, IRPrint):
+            operation = "println" if instruction.newline else "print"
+            return f"{operation} {self._value(instruction.value)}"
         if isinstance(instruction, IRArrayNew):
             elements = ", ".join(self._value(element) for element in instruction.elements)
             return f"{self._typed_value(instruction.result)} = array_new [{elements}]"

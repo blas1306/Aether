@@ -43,6 +43,7 @@ from aether.ssa.model import (
     SSAMatrixSet,
     SSAModule,
     SSAOuterProduct,
+    SSAPrint,
     SSAPhi,
     SSAReturn,
     SSAValue,
@@ -151,6 +152,10 @@ class DeadPhiEliminator:
 
         if isinstance(instruction, SSACall):
             used_values.update(instruction.arguments)
+            return
+
+        if isinstance(instruction, SSAPrint):
+            used_values.add(instruction.value)
             return
 
         if isinstance(instruction, SSAArrayNew):

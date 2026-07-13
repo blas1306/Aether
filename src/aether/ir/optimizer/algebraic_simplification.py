@@ -46,6 +46,7 @@ from aether.ir.model import (
     IRMatrixSet,
     IRModule,
     IROuterProduct,
+    IRPrint,
     IRReturn,
     IRStore,
     IRValue,
@@ -262,6 +263,11 @@ class AlgebraicSimplifier:
                     self._resolve(argument, replacements)
                     for argument in instruction.arguments
                 ),
+            )
+        if isinstance(instruction, IRPrint):
+            return replace(
+                instruction,
+                value=self._resolve(instruction.value, replacements),
             )
         if isinstance(instruction, IRArrayNew):
             return replace(

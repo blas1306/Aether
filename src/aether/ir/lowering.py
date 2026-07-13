@@ -58,6 +58,7 @@ from .model import (
     IRModule,
     IROuterProduct,
     IRParameter,
+    IRPrint,
     IRReturn,
     IRStore,
     IRValue,
@@ -366,96 +367,8 @@ class IRLowerer:
 
         if isinstance(statement, ast.ExpressionStatement):
             expression = statement.expression
-            if isinstance(expression, ast.CallExpression) and (
-                expression.callee in {"pop", "remove_at"}
-                or expression.callee.endswith(".pop")
-                or expression.callee.endswith(".removeAt")
-            ):
-                self._lower_call(expression, context)
-                return
-            if isinstance(expression, ast.CallExpression) and (
-                expression.callee == "push" or expression.callee.endswith(".push")
-            ):
-                arguments = expression.arguments
-                if expression.callee.endswith(".push"):
-                    receiver = expression.callee.rsplit(".", 1)[0]
-                    arguments = [ast.Identifier(receiver, expression.line, expression.column), *arguments]
-                if expression.keyword_arguments or len(arguments) != 2:
-                    self._unsupported(expression, "invalid push call")
-                list_value = self._lower_expression(arguments[0], context)
-                if not isinstance(list_value.type, ListType):
-                    self._unsupported(expression, "push on non-list")
-                value = self._lower_expression(arguments[1], context, target_type=list_value.type.element)
-                self._require_same_type(
-                    value.type,
-                    list_value.type.element,
-                    "push value requires an implicit conversion",
-                )
-                context.block.instructions.append(IRListPush(list_value, value))
-                return
-            if isinstance(expression, ast.CallExpression) and (
-                expression.callee == "insert" or expression.callee.endswith(".insert")
-            ):
-                arguments = expression.arguments
-                if expression.callee.endswith(".insert"):
-                    receiver = expression.callee.rsplit(".", 1)[0]
-                    arguments = [ast.Identifier(receiver, expression.line, expression.column), *arguments]
-                if expression.keyword_arguments or len(arguments) != 3:
-                    self._unsupported(expression, "invalid insert call")
-                list_value = self._lower_expression(arguments[0], context)
-                if not isinstance(list_value.type, ListType):
-                    self._unsupported(expression, "insert on non-list")
-                index = self._lower_expression(arguments[1], context)
-                self._require_same_type(index.type, IntType(), "insert index must be int")
-                value = self._lower_expression(arguments[2], context, target_type=list_value.type.element)
-                self._require_same_type(
-                    value.type,
-                    list_value.type.element,
-                    "insert value requires an implicit conversion",
-                )
-                context.block.instructions.append(IRListInsert(list_value, index, value))
-                return
-            if isinstance(expression, ast.CallExpression) and (
-                expression.callee == "clear" or expression.callee.endswith(".clear")
-            ):
-                arguments = expression.arguments
-                if expression.callee.endswith(".clear"):
-                    receiver = expression.callee.rsplit(".", 1)[0]
-                    arguments = [ast.Identifier(receiver, expression.line, expression.column), *arguments]
-                if expression.keyword_arguments or len(arguments) != 1:
-                    self._unsupported(expression, "invalid clear call")
-                list_value = self._lower_expression(arguments[0], context)
-                if not isinstance(list_value.type, ListType):
-                    self._unsupported(expression, "clear on non-list")
-                context.block.instructions.append(IRListClear(list_value))
-                return
-            if isinstance(expression, ast.CallExpression) and (
-                expression.callee == "sort" or expression.callee.endswith(".sort")
-            ):
-                arguments = expression.arguments
-                if expression.callee.endswith(".sort"):
-                    receiver = expression.callee.rsplit(".", 1)[0]
-                    arguments = [ast.Identifier(receiver, expression.line, expression.column), *arguments]
-                if expression.keyword_arguments or len(arguments) != 1:
-                    self._unsupported(expression, "invalid sort call")
-                sequence = self._lower_expression(arguments[0], context)
-                if not isinstance(sequence.type, (ArrayType, ListType)):
-                    self._unsupported(expression, "sort on non-sequence")
-                context.block.instructions.append(IRSequenceSort(sequence))
-                return
-            if isinstance(expression, ast.CallExpression) and (
-                expression.callee == "reverse" or expression.callee.endswith(".reverse")
-            ):
-                arguments = expression.arguments
-                if expression.callee.endswith(".reverse"):
-                    receiver = expression.callee.rsplit(".", 1)[0]
-                    arguments = [ast.Identifier(receiver, expression.line, expression.column), *arguments]
-                if expression.keyword_arguments or len(arguments) != 1:
-                    self._unsupported(expression, "invalid reverse call")
-                list_value = self._lower_expression(arguments[0], context)
-                if not isinstance(list_value.type, ListType):
-                    self._unsupported(expression, "reverse on non-list")
-                context.block.instructions.append(IRListReverse(list_value))
+            if isinstance(expression, ast.CallExpression):
+                self._lower_call(expression, context, result_required=False)
                 return
             self._unsupported(statement)
 
@@ -1150,7 +1063,13 @@ class IRLowerer:
             return result
 
         if isinstance(expression, ast.CallExpression):
-            return self._lower_call(expression, context)
+            value = self._lower_call(expression, context, result_required=True)
+            if value is None:
+                self._fail(
+                    f"IR backend cannot use void call '{expression.callee}' as a value.",
+                    expression,
+                )
+            return value
 
         if isinstance(expression, ast.IndexExpression):
             indexed = self._lower_expression(expression.array, context)
@@ -1258,14 +1177,104 @@ class IRLowerer:
         context.block.instructions.append(IRConst(result, literal.value))
         return result
 
-    def _lower_call(self, call: ast.CallExpression, context: _FunctionContext) -> IRValue:
+    def _lower_call(
+        self,
+        call: ast.CallExpression,
+        context: _FunctionContext,
+        *,
+        result_required: bool,
+    ) -> IRValue | None:
         if call.keyword_arguments:
             self._unsupported(call, "keyword arguments")
+
+        if call.callee in {"print", "println"}:
+            if result_required:
+                self._fail(
+                    f"IR backend cannot use void call '{call.callee}' as a value.",
+                    call,
+                )
+            if not call.arguments:
+                self._fail(f"{call.callee}(...) expects at least one argument.", call)
+            values = tuple(self._lower_expression(argument, context) for argument in call.arguments)
+            for value in values:
+                if not isinstance(value.type, (IntType, BoolType, StringType, DoubleType)):
+                    self._fail(
+                        f"IR backend {call.callee}(...) does not support values of type "
+                        f"'{value.type}'; supported types are int, boolean, string, and double.",
+                        call,
+                    )
+            for index, value in enumerate(values):
+                newline = call.callee == "println" and index == len(values) - 1
+                context.block.instructions.append(IRPrint(value, newline))
+            return None
+
         method_name = call.callee.rsplit(".", 1)[-1]
         arguments = call.arguments
-        if "." in call.callee and method_name in {"copy", "contains", "indexOf", "pop", "removeAt"}:
+        list_methods = {
+            "copy",
+            "contains",
+            "indexOf",
+            "pop",
+            "removeAt",
+            "push",
+            "insert",
+            "clear",
+            "sort",
+            "reverse",
+        }
+        if "." in call.callee and method_name in list_methods:
             receiver = call.callee.rsplit(".", 1)[0]
             arguments = [ast.Identifier(receiver, call.line, call.column), *arguments]
+
+        if result_required and method_name in {"push", "insert", "clear", "sort", "reverse"}:
+            self._fail(
+                f"IR backend cannot use void call '{call.callee}' as a value.",
+                call,
+            )
+
+        if method_name == "push" and len(arguments) == 2:
+            list_value = self._lower_expression(arguments[0], context)
+            if isinstance(list_value.type, ListType):
+                value = self._lower_expression(
+                    arguments[1], context, target_type=list_value.type.element
+                )
+                self._require_same_type(
+                    value.type,
+                    list_value.type.element,
+                    "push value requires an implicit conversion",
+                )
+                context.block.instructions.append(IRListPush(list_value, value))
+                return None
+        if method_name == "insert" and len(arguments) == 3:
+            list_value = self._lower_expression(arguments[0], context)
+            if isinstance(list_value.type, ListType):
+                index = self._lower_expression(arguments[1], context)
+                self._require_same_type(index.type, IntType(), "insert index must be int")
+                value = self._lower_expression(
+                    arguments[2], context, target_type=list_value.type.element
+                )
+                self._require_same_type(
+                    value.type,
+                    list_value.type.element,
+                    "insert value requires an implicit conversion",
+                )
+                context.block.instructions.append(IRListInsert(list_value, index, value))
+                return None
+        if method_name == "clear" and len(arguments) == 1:
+            list_value = self._lower_expression(arguments[0], context)
+            if isinstance(list_value.type, ListType):
+                context.block.instructions.append(IRListClear(list_value))
+                return None
+        if method_name == "sort" and len(arguments) == 1:
+            sequence = self._lower_expression(arguments[0], context)
+            if isinstance(sequence.type, (ArrayType, ListType)):
+                context.block.instructions.append(IRSequenceSort(sequence))
+                return None
+        if method_name == "reverse" and len(arguments) == 1:
+            list_value = self._lower_expression(arguments[0], context)
+            if isinstance(list_value.type, ListType):
+                context.block.instructions.append(IRListReverse(list_value))
+                return None
         if method_name == "copy" and len(arguments) == 1:
             list_value = self._lower_expression(arguments[0], context)
             if isinstance(list_value.type, ListType):
@@ -1320,7 +1329,11 @@ class IRLowerer:
         if signature is None:
             self._unsupported(call, f"callee '{call.callee}'")
         if isinstance(signature.return_type, VoidType):
-            self._unsupported(call, "void return value")
+            if result_required:
+                self._fail(
+                    f"IR backend cannot use void call '{call.callee}' as a value.",
+                    call,
+                )
 
         if len(call.arguments) != len(signature.parameters):
             raise ValueError(
@@ -1340,6 +1353,10 @@ class IRLowerer:
                 parameter_type,
                 f"argument {index} to '{call.callee}' requires an implicit conversion",
             )
+
+        if isinstance(signature.return_type, VoidType):
+            context.block.instructions.append(IRCall(call.callee, arguments, None))
+            return None
 
         result = context.temporary(signature.return_type)
         context.block.instructions.append(IRCall(call.callee, arguments, result))

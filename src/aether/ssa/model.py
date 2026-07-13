@@ -57,6 +57,12 @@ class SSACall(SSAInstruction):
 
 
 @dataclass(frozen=True)
+class SSAPrint(SSAInstruction):
+    value: SSAValue
+    newline: bool = False
+
+
+@dataclass(frozen=True)
 class SSAArrayNew(SSAInstruction):
     result: SSAValue
     elements: tuple[SSAValue, ...] = ()

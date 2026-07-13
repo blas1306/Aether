@@ -46,6 +46,7 @@ from aether.ssa.model import (
     SSAMatrixSet,
     SSAModule,
     SSAOuterProduct,
+    SSAPrint,
     SSAPhi,
     SSAReturn,
     SSAValue,
@@ -278,6 +279,12 @@ class SSAAlgebraicSimplifier:
                     for argument in instruction.arguments
                 ),
                 instruction.result,
+            )
+
+        if isinstance(instruction, SSAPrint):
+            return SSAPrint(
+                self._resolve(instruction.value, replacements),
+                instruction.newline,
             )
 
         if isinstance(instruction, SSAArrayNew):

@@ -45,6 +45,7 @@ from aether.ir.model import (
     IRMatrixSet,
     IRModule,
     IROuterProduct,
+    IRPrint,
     IRReturn,
     IRStore,
     IRValue,
@@ -99,6 +100,7 @@ from .model import (
     SSAMatrixSet,
     SSAModule,
     SSAOuterProduct,
+    SSAPrint,
     SSAParameter,
     SSAPhi,
     SSAReturn,
@@ -553,6 +555,10 @@ class SSABuilder:
             if instruction.result is not None:
                 result = self._define_value(instruction.result, state.value_map)
             return SSACall(instruction.function, arguments, result)
+
+        if isinstance(instruction, IRPrint):
+            value = self._resolve_value(instruction.value, state.value_map)
+            return SSAPrint(value, instruction.newline)
 
         if isinstance(instruction, IRArrayNew):
             result = self._define_value(instruction.result, state.value_map)

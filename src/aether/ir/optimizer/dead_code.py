@@ -44,6 +44,7 @@ from aether.ir.model import (
     IRMatrixSet,
     IRModule,
     IROuterProduct,
+    IRPrint,
     IRReturn,
     IRStore,
     IRValue,
@@ -224,6 +225,8 @@ class DeadCodeEliminator:
             return (instruction.value,)
         if isinstance(instruction, IRCall):
             return instruction.arguments
+        if isinstance(instruction, IRPrint):
+            return (instruction.value,)
         if isinstance(instruction, IRArrayNew):
             return instruction.elements
         if isinstance(instruction, IRListNew):

@@ -65,6 +65,7 @@ from .model import (
     SSAMatrixSet,
     SSAModule,
     SSAOuterProduct,
+    SSAPrint,
     SSAPhi,
     SSAReturn,
     SSAValue,
@@ -280,6 +281,18 @@ class SSAVerifier:
 
             if isinstance(instruction, SSACall):
                 self._verify_call(instruction, value_types)
+                continue
+
+            if isinstance(instruction, SSAPrint):
+                self._require_defined(instruction.value, value_types)
+                if not isinstance(
+                    instruction.value.type,
+                    (IntType, BoolType, StringType, DoubleType),
+                ):
+                    self._fail(
+                        "Print value must be int, boolean, string, or double, "
+                        f"got {instruction.value.type}"
+                    )
                 continue
 
             if isinstance(instruction, SSAArrayNew):

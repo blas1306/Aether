@@ -48,6 +48,7 @@ from aether.ir.model import (
     IRMatrixRows,
     IRMatrixSet,
     IROuterProduct,
+    IRPrint,
     IRReturn,
     IRStore,
     IRValue,
@@ -105,6 +106,7 @@ from .model import (
     SSAMatrixRows,
     SSAMatrixSet,
     SSAOuterProduct,
+    SSAPrint,
     SSAParameter,
     SSAPhi,
     SSAReturn,
@@ -286,6 +288,10 @@ class SSARenamer:
                 result = self._define_value(instruction.result)
                 self._bind_value(result.name, result, bound_values)
             return SSACall(instruction.function, arguments, result)
+
+        if isinstance(instruction, IRPrint):
+            value = self._resolve_value(instruction.value)
+            return SSAPrint(value, instruction.newline)
 
         if isinstance(instruction, IRArrayNew):
             result = self._define_value(instruction.result)

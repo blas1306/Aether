@@ -49,6 +49,7 @@ from aether.ssa.model import (
     SSAModule,
     SSAOuterProduct,
     SSAParameter,
+    SSAPrint,
     SSAPhi,
     SSAReturn,
     SSAValue,
@@ -65,6 +66,7 @@ from aether.ssa.model import (
 
 from .types import LLVMBackendError, llvm_type
 from .array_runtime import LLVMArrayRuntime
+from .io_runtime import LLVMRuntimeIO
 from .list_runtime import (
     LLVMListRuntime,
     list_contains_helper_name,
@@ -138,6 +140,7 @@ class LLVMPrinter:
         self._sequence_sort_types: set[object] = set()
         self._list_contains_types: set[object] = set()
         self._list_index_of_types: set[object] = set()
+        self._uses_print = False
 
         functions = [self._print_function(function) for function in module.functions]
         globals_ = [
@@ -198,6 +201,7 @@ class LLVMPrinter:
             sequence_sort_types=frozenset(self._sequence_sort_types),
         )
         runtime = list_runtime.declarations(common_runtime, array_runtime)
+        LLVMRuntimeIO(enabled=self._uses_print).append(runtime)
         sections = runtime + globals_ + functions
         return "\n\n".join(sections)
 
@@ -267,6 +271,8 @@ class LLVMPrinter:
             return self._print_jump(instruction)
         if isinstance(instruction, SSACall):
             return self._print_call(instruction)
+        if isinstance(instruction, SSAPrint):
+            return self._print_print(instruction)
         if isinstance(instruction, SSAArrayNew):
             return self._print_array_new(instruction)
         if isinstance(instruction, SSAListNew):
@@ -568,6 +574,41 @@ class LLVMPrinter:
             )
         result = self._new_temp(instruction.result)
         return f"{result} = call {return_type} {callee}({arguments})"
+
+    def _print_print(self, instruction: SSAPrint) -> str:
+        self._uses_print = True
+        suffix = "ln" if instruction.newline else ""
+        value = self._operand(instruction.value)
+        call_result = self._synthetic_temp("print.result")
+
+        if isinstance(instruction.value.type, IntType):
+            return (
+                f"{call_result} = call i32 (ptr, ...) @printf("
+                f"ptr @.aether.io.int{suffix}, i32 {value})"
+            )
+        if isinstance(instruction.value.type, DoubleType):
+            return (
+                f"{call_result} = call i32 (ptr, ...) @printf("
+                f"ptr @.aether.io.double{suffix}, double {value})"
+            )
+        if isinstance(instruction.value.type, StringType):
+            return (
+                f"{call_result} = call i32 (ptr, ...) @printf("
+                f"ptr @.aether.io.string{suffix}, ptr {value})"
+            )
+        if isinstance(instruction.value.type, BoolType):
+            selected = self._synthetic_temp("print.bool")
+            return "\n  ".join(
+                [
+                    f"{selected} = select i1 {value}, ptr @.aether.io.true, ptr @.aether.io.false",
+                    f"{call_result} = call i32 (ptr, ...) @printf("
+                    f"ptr @.aether.io.string{suffix}, ptr {selected})",
+                ]
+            )
+        raise LLVMBackendError(
+            "LLVM print only supports int, boolean, string, and double; "
+            f"got {instruction.value.type}"
+        )
 
     def _print_array_new(self, instruction: SSAArrayNew) -> str:
         if not isinstance(instruction.result.type, ArrayType):
