@@ -48,6 +48,12 @@ from .model import (
     IRModule,
     IROuterProduct,
     IRPrint,
+    IRStructGet,
+    IRStructNew,
+    IRStructSet,
+    IRMethodResultNew,
+    IRMethodResultReceiver,
+    IRMethodResultValue,
     IRReturn,
     IRStore,
     IRUnaryOp,
@@ -75,6 +81,7 @@ from .types import (
     IRType,
     ListType,
     MatrixType,
+    MethodResultType,
     NullableType,
     StringType,
     StructType,
@@ -109,10 +116,12 @@ class IRVerifier:
     def __init__(self, module: IRModule) -> None:
         self.module = module
         self._functions: dict[str, IRFunction] = {}
+        self._structs = {}
 
     def verify(self) -> IRModule:
         """Verify the module and return it unchanged on success."""
         self._functions = {}
+        self._structs = {definition.name: definition for definition in self.module.structs}
         self._verify_module()
         return self.module
 
@@ -393,7 +402,7 @@ class IRVerifier:
             self._require_defined(instruction.value, state, value_types)
             if not isinstance(
                 instruction.value.type,
-                (IntType, BoolType, StringType, DoubleType, VectorType, MatrixType),
+                (IntType, BoolType, StringType, DoubleType, VectorType, MatrixType, StructType),
             ):
                 self._fail(
                     "Print value must be scalar, Vector, or Matrix, "
@@ -408,6 +417,62 @@ class IRVerifier:
             elif instruction.aggregate_shape is not None:
                 self._fail("Scalar print must not carry an aggregate shape")
             return state
+
+        if isinstance(instruction, IRStructNew):
+            definition = self._structs.get(instruction.result.type.name) if isinstance(instruction.result.type, StructType) else None
+            if definition is None or len(instruction.fields) != len(definition.fields):
+                self._fail("Struct new requires a declared struct and all canonical fields")
+            for value, (_name, field_type) in zip(instruction.fields, definition.fields):
+                self._require_defined(value, state, value_types)
+                self._require_type(value.type, field_type, "Struct field type mismatch")
+            return self._define_value(state, instruction.result)
+
+        if isinstance(instruction, IRStructGet):
+            self._require_defined(instruction.struct, state, value_types)
+            definition = self._structs.get(instruction.struct.type.name) if isinstance(instruction.struct.type, StructType) else None
+            if definition is None or not 0 <= instruction.field_index < len(definition.fields):
+                self._fail("Struct get requires a valid canonical field")
+            self._require_type(instruction.result.type, definition.fields[instruction.field_index][1], "Struct get result type mismatch")
+            return self._define_value(state, instruction.result)
+
+        if isinstance(instruction, IRStructSet):
+            self._require_defined(instruction.struct, state, value_types)
+            self._require_defined(instruction.value, state, value_types)
+            definition = self._structs.get(instruction.struct.type.name) if isinstance(instruction.struct.type, StructType) else None
+            if definition is None or not 0 <= instruction.field_index < len(definition.fields):
+                self._fail("Struct set requires a valid canonical field")
+            self._require_type(instruction.value.type, definition.fields[instruction.field_index][1], "Struct set value type mismatch")
+            self._require_type(instruction.result.type, instruction.struct.type, "Struct set result type mismatch")
+            return self._define_value(state, instruction.result)
+
+        if isinstance(instruction, IRMethodResultNew):
+            self._require_defined(instruction.receiver, state, value_types)
+            if not isinstance(instruction.result.type, MethodResultType):
+                self._fail("Method result requires MethodResultType")
+            self._require_type(instruction.receiver.type, instruction.result.type.receiver, "Method receiver type mismatch")
+            if isinstance(instruction.result.type.value, VoidType):
+                if instruction.value is not None:
+                    self._fail("Void method result cannot contain a source value")
+            else:
+                if instruction.value is None:
+                    self._fail("Non-void method result requires a source value")
+                self._require_defined(instruction.value, state, value_types)
+                self._require_type(instruction.value.type, instruction.result.type.value, "Method value type mismatch")
+            return self._define_value(state, instruction.result)
+
+        if isinstance(instruction, IRMethodResultReceiver):
+            self._require_defined(instruction.method_result, state, value_types)
+            if not isinstance(instruction.method_result.type, MethodResultType):
+                self._fail("Method receiver extraction requires MethodResultType")
+            self._require_type(instruction.result.type, instruction.method_result.type.receiver, "Method receiver result mismatch")
+            return self._define_value(state, instruction.result)
+
+        if isinstance(instruction, IRMethodResultValue):
+            self._require_defined(instruction.method_result, state, value_types)
+            if not isinstance(instruction.method_result.type, MethodResultType):
+                self._fail("Method value extraction requires MethodResultType")
+            self._require_type(instruction.result.type, instruction.method_result.type.value, "Method value result mismatch")
+            return self._define_value(state, instruction.result)
 
         if isinstance(instruction, IRArrayNew):
             self._verify_array_new(instruction, state, value_types)
@@ -1558,7 +1623,7 @@ class IRVerifier:
                     f"Compare op '{operator}' requires compatible operands, "
                     f"got {left} and {right}"
                 )
-            if not isinstance(left, (IntType, DoubleType, BoolType, StringType)):
+            if not isinstance(left, (IntType, DoubleType, BoolType, StringType, StructType)):
                 self._fail(
                     f"Compare op '{operator}' does not support operands of type {left}"
                 )
@@ -1658,6 +1723,12 @@ class IRVerifier:
                 IRMatrixScale,
                 IRVectorSub,
                 IRMatrixSub,
+                IRStructNew,
+                IRStructGet,
+                IRStructSet,
+                IRMethodResultNew,
+                IRMethodResultReceiver,
+                IRMethodResultValue,
             ),
         ):
             return instruction.result
@@ -1709,6 +1780,8 @@ class IRVerifier:
             return self._is_valid_type(type_.inner)
         if isinstance(type_, (ListType, ArrayType, VectorType, MatrixType)):
             return self._is_valid_type(type_.element)
+        if isinstance(type_, MethodResultType):
+            return self._is_valid_type(type_.receiver) and self._is_valid_type(type_.value)
         return False
 
     @staticmethod

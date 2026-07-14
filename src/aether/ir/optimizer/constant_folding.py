@@ -35,7 +35,7 @@ class ConstantFolder:
             optimized_function, function_folded = self._fold_function(function)
             functions.append(optimized_function)
             folded += function_folded
-        optimized = IRModule(functions)
+        optimized = IRModule(functions, list(module.structs))
         return OptimizationResult(
             optimized,
             changed=optimized != module,

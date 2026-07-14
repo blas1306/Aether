@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import re
 from typing import Any, Callable
 
-from aether.ir.types import ArrayType, BoolType, DoubleType, IntType, ListType, MatrixType, StringType, VectorType, VoidType
+from aether.ir.types import ArrayType, BoolType, DoubleType, IntType, ListType, MatrixType, MethodResultType, StringType, StructType, VectorType, VoidType
 from aether.ssa.model import (
     SSAArrayGet,
     SSAArrayLength,
@@ -50,6 +50,12 @@ from aether.ssa.model import (
     SSAOuterProduct,
     SSAParameter,
     SSAPrint,
+    SSAStructGet,
+    SSAStructNew,
+    SSAStructSet,
+    SSAMethodResultNew,
+    SSAMethodResultReceiver,
+    SSAMethodResultValue,
     SSAPhi,
     SSAReturn,
     SSAUnaryOp,
@@ -152,11 +158,21 @@ class LLVMPrinter:
         self._list_index_of_types: set[object] = set()
         self._uses_print = False
         self._checked_int_operators: set[str] = set()
+        self._structs = {definition.name: definition for definition in module.structs}
+        self._uses_strcmp = False
+        self._struct_sequence_equality_types: set[tuple[str, object]] = set()
+        self._struct_sequence_print_types: set[tuple[str, object]] = set()
 
         functions = [self._print_function(function) for function in module.functions]
         globals_ = [
             self._print_string_global(global_)
             for global_ in self._string_globals_by_value.values()
+        ]
+        struct_types = [
+            f"%struct.{definition.name} = type {{ "
+            + ", ".join(llvm_type(type_) for _name, type_ in definition.fields)
+            + " }"
+            for definition in module.structs
         ]
         array_runtime = LLVMArrayRuntime(
             uses_type=self._uses_array_type,
@@ -215,6 +231,20 @@ class LLVMPrinter:
             sequence_sort_types=frozenset(self._sequence_sort_types),
         )
         runtime = list_runtime.declarations(common_runtime, array_runtime)
+        runtime.extend(
+            self._struct_sequence_equality_helper(kind, element_type)
+            for kind, element_type in sorted(
+                self._struct_sequence_equality_types,
+                key=lambda item: (item[0], str(item[1])),
+            )
+        )
+        runtime.extend(
+            self._struct_sequence_print_helper(kind, element_type)
+            for kind, element_type in sorted(
+                self._struct_sequence_print_types,
+                key=lambda item: (item[0], str(item[1])),
+            )
+        )
         LLVMVectorRuntime(
             self._uses_vector_indexing,
             frozenset(self._vector_equality_types),
@@ -227,7 +257,11 @@ class LLVMPrinter:
         ).append(runtime, common_runtime)
         LLVMIntegerRuntime(frozenset(self._checked_int_operators)).append(runtime, common_runtime)
         LLVMRuntimeIO(enabled=self._uses_print).append(runtime)
-        sections = runtime + globals_ + functions
+        if self._uses_strcmp:
+            runtime.append("declare i32 @strcmp(ptr, ptr)")
+        if self._struct_sequence_print_types:
+            runtime.append("declare i32 @putchar(i32)")
+        sections = runtime + struct_types + globals_ + functions
         return "\n\n".join(sections)
 
     def _print_function(self, function: SSAFunction) -> str:
@@ -300,6 +334,18 @@ class LLVMPrinter:
             return self._print_call(instruction)
         if isinstance(instruction, SSAPrint):
             return self._print_print(instruction)
+        if isinstance(instruction, SSAStructNew):
+            return "\n  ".join(self._print_struct_new(instruction))
+        if isinstance(instruction, SSAStructGet):
+            return self._print_struct_get(instruction)
+        if isinstance(instruction, SSAStructSet):
+            return self._print_struct_set(instruction)
+        if isinstance(instruction, SSAMethodResultNew):
+            return "\n  ".join(self._print_method_result_new(instruction))
+        if isinstance(instruction, SSAMethodResultReceiver):
+            return self._print_method_result_receiver(instruction)
+        if isinstance(instruction, SSAMethodResultValue):
+            return self._print_method_result_value(instruction)
         if isinstance(instruction, SSAArrayNew):
             return self._print_array_new(instruction)
         if isinstance(instruction, SSAListNew):
@@ -429,6 +475,12 @@ class LLVMPrinter:
                 SSAMatrixScale,
                 SSAVectorSub,
                 SSAMatrixSub,
+                SSAStructNew,
+                SSAStructGet,
+                SSAStructSet,
+                SSAMethodResultNew,
+                SSAMethodResultReceiver,
+                SSAMethodResultValue,
             ),
         ):
             return instruction.result
@@ -499,6 +551,8 @@ class LLVMPrinter:
         return f"{result} = xor i1 {operand}, true"
 
     def _print_compare_op(self, instruction: SSACompareOp) -> str:
+        if isinstance(instruction.left.type, StructType):
+            return "\n  ".join(self._print_struct_compare(instruction))
         if instruction.aggregate_shape is not None:
             self._uses_array_type = True
             if isinstance(instruction.left.type, VectorType):
@@ -569,6 +623,151 @@ class LLVMPrinter:
         left = self._operand(instruction.left)
         right = self._operand(instruction.right)
         return f"{result} = {operation} {predicate} {operand_type} {left}, {right}"
+
+    def _print_struct_compare(self, instruction: SSACompareOp) -> list[str]:
+        if instruction.operator not in {"eq", "ne"} or instruction.left.type != instruction.right.type:
+            raise LLVMBackendError("LLVM struct comparison only supports equal nominal types with eq/ne")
+        struct_type = instruction.left.type
+        definition = self._structs.get(struct_type.name)
+        if definition is None:
+            raise LLVMBackendError(f"LLVM has no layout for struct {struct_type.name}")
+        lines: list[str] = []
+        comparisons: list[str] = []
+        for index, (_name, field_type) in enumerate(definition.fields):
+            left_field = self._synthetic_temp("struct.compare.left")
+            right_field = self._synthetic_temp("struct.compare.right")
+            lines.extend([
+                f"{left_field} = extractvalue {llvm_type(struct_type)} {self._operand(instruction.left)}, {index}",
+                f"{right_field} = extractvalue {llvm_type(struct_type)} {self._operand(instruction.right)}, {index}",
+            ])
+            comparisons.append(
+                self._emit_struct_field_equality(lines, left_field, right_field, field_type)
+            )
+        equal = comparisons[0] if comparisons else "true"
+        for comparison in comparisons[1:]:
+            combined = self._synthetic_temp("struct.compare.and")
+            lines.append(f"{combined} = and i1 {equal}, {comparison}")
+            equal = combined
+        result = self._new_temp(instruction.result)
+        if instruction.operator == "eq":
+            lines.append(f"{result} = and i1 {equal}, true")
+        else:
+            lines.append(f"{result} = xor i1 {equal}, true")
+        return lines
+
+    def _emit_struct_field_equality(
+        self,
+        lines: list[str],
+        left: str,
+        right: str,
+        field_type: object,
+    ) -> str:
+        result = self._synthetic_temp("struct.compare.field")
+        if isinstance(field_type, (IntType, BoolType)):
+            lines.append(f"{result} = icmp eq {llvm_type(field_type)} {left}, {right}")
+            return result
+        if isinstance(field_type, DoubleType):
+            lines.append(f"{result} = fcmp oeq double {left}, {right}")
+            return result
+        if isinstance(field_type, StringType):
+            self._uses_strcmp = True
+            compared = self._synthetic_temp("struct.compare.string")
+            lines.extend([
+                f"{compared} = call i32 @strcmp(ptr {left}, ptr {right})",
+                f"{result} = icmp eq i32 {compared}, 0",
+            ])
+            return result
+        if isinstance(field_type, StructType):
+            definition = self._structs.get(field_type.name)
+            if definition is None:
+                raise LLVMBackendError(f"LLVM has no layout for nested struct {field_type.name}")
+            nested: list[str] = []
+            for index, (_name, nested_type) in enumerate(definition.fields):
+                left_field = self._synthetic_temp("struct.compare.nested.left")
+                right_field = self._synthetic_temp("struct.compare.nested.right")
+                lines.extend([
+                    f"{left_field} = extractvalue {llvm_type(field_type)} {left}, {index}",
+                    f"{right_field} = extractvalue {llvm_type(field_type)} {right}, {index}",
+                ])
+                nested.append(self._emit_struct_field_equality(lines, left_field, right_field, nested_type))
+            equal = nested[0] if nested else "true"
+            for comparison in nested[1:]:
+                combined = self._synthetic_temp("struct.compare.nested.and")
+                lines.append(f"{combined} = and i1 {equal}, {comparison}")
+                equal = combined
+            lines.append(f"{result} = and i1 {equal}, true")
+            return result
+        if isinstance(field_type, (ArrayType, ListType)):
+            kind = "array" if isinstance(field_type, ArrayType) else "list"
+            if kind == "array":
+                self._uses_array_type = True
+            else:
+                self._uses_list_type = True
+            self._struct_sequence_equality_types.add((kind, field_type.element))
+            helper = self._struct_sequence_equality_helper_name(kind, field_type.element)
+            lines.append(f"{result} = call i1 @{helper}(ptr {left}, ptr {right})")
+            return result
+        raise LLVMBackendError(f"LLVM struct equality does not support field type {field_type}")
+
+    @staticmethod
+    def _struct_sequence_equality_helper_name(kind: str, element_type: object) -> str:
+        return f"aether_struct_{kind}_equal_{aggregate_helper_suffix(element_type)}"
+
+    def _struct_sequence_equality_helper(self, kind: str, element_type: object) -> str:
+        name = self._struct_sequence_equality_helper_name(kind, element_type)
+        layout = "%AetherArray" if kind == "array" else "%AetherList"
+        data_index = 1 if kind == "array" else 2
+        element_llvm = llvm_type(element_type)
+        compare_lines: list[str]
+        if isinstance(element_type, (IntType, BoolType)):
+            compare_lines = [f"  %equal = icmp eq {element_llvm} %left.value, %right.value"]
+        elif isinstance(element_type, DoubleType):
+            compare_lines = ["  %equal = fcmp oeq double %left.value, %right.value"]
+        elif isinstance(element_type, StringType):
+            self._uses_strcmp = True
+            compare_lines = [
+                "  %string.compare = call i32 @strcmp(ptr %left.value, ptr %right.value)",
+                "  %equal = icmp eq i32 %string.compare, 0",
+            ]
+        else:
+            raise LLVMBackendError(
+                f"LLVM struct sequence equality does not support element type {element_type}"
+            )
+        return "\n".join([
+            f"define private i1 @{name}(ptr %left, ptr %right) {{",
+            "entry:",
+            f"  %left.length.field = getelementptr {layout}, ptr %left, i32 0, i32 0",
+            "  %left.length = load i64, ptr %left.length.field",
+            f"  %right.length.field = getelementptr {layout}, ptr %right, i32 0, i32 0",
+            "  %right.length = load i64, ptr %right.length.field",
+            "  %same.length = icmp eq i64 %left.length, %right.length",
+            "  br i1 %same.length, label %prepare, label %not.equal",
+            "prepare:",
+            f"  %left.data.field = getelementptr {layout}, ptr %left, i32 0, i32 {data_index}",
+            "  %left.data = load ptr, ptr %left.data.field",
+            f"  %right.data.field = getelementptr {layout}, ptr %right, i32 0, i32 {data_index}",
+            "  %right.data = load ptr, ptr %right.data.field",
+            "  br label %loop",
+            "loop:",
+            "  %index = phi i64 [ 0, %prepare ], [ %next, %advance ]",
+            "  %done = icmp eq i64 %index, %left.length",
+            "  br i1 %done, label %all.equal, label %compare",
+            "compare:",
+            f"  %left.element = getelementptr {element_llvm}, ptr %left.data, i64 %index",
+            f"  %left.value = load {element_llvm}, ptr %left.element",
+            f"  %right.element = getelementptr {element_llvm}, ptr %right.data, i64 %index",
+            f"  %right.value = load {element_llvm}, ptr %right.element",
+            *compare_lines,
+            "  br i1 %equal, label %advance, label %not.equal",
+            "advance:",
+            "  %next = add i64 %index, 1",
+            "  br label %loop",
+            "all.equal:",
+            "  ret i1 true",
+            "not.equal:",
+            "  ret i1 false",
+            "}",
+        ])
 
     def _print_cast(self, instruction: SSACast) -> str:
         if isinstance(instruction.value.type, IntType) and isinstance(
@@ -663,6 +862,15 @@ class LLVMPrinter:
         value = self._operand(instruction.value)
         call_result = self._synthetic_temp("print.result")
 
+        if isinstance(instruction.value.type, StructType):
+            return "\n  ".join(
+                self._print_struct_value(
+                    instruction.value.type,
+                    value,
+                    newline=instruction.newline,
+                )
+            )
+
         if isinstance(instruction.value.type, VectorType):
             self._uses_array_type = True
             if instruction.aggregate_shape is None or len(instruction.aggregate_shape) != 1:
@@ -716,6 +924,202 @@ class LLVMPrinter:
         raise LLVMBackendError(
             "LLVM print only supports int, boolean, string, and double; "
             f"got {instruction.value.type}"
+        )
+
+    def _print_struct_value(
+        self,
+        struct_type: StructType,
+        operand: str,
+        *,
+        newline: bool,
+    ) -> list[str]:
+        definition = self._structs.get(struct_type.name)
+        if definition is None:
+            raise LLVMBackendError(f"LLVM has no layout for struct {struct_type.name}")
+        lines: list[str] = []
+        self._emit_text(lines, f"{struct_type.name}(")
+        for index, (field_name, field_type) in enumerate(definition.fields):
+            if index:
+                self._emit_text(lines, ", ")
+            self._emit_text(lines, f"{field_name}=")
+            field = self._synthetic_temp("struct.print.field")
+            lines.append(
+                f"{field} = extractvalue {llvm_type(struct_type)} {operand}, {index}"
+            )
+            self._emit_printed_value(lines, field, field_type)
+        self._emit_text(lines, ")\n" if newline else ")")
+        return lines
+
+    def _emit_text(self, lines: list[str], text: str) -> None:
+        global_ = self._string_global(text)
+        result = self._synthetic_temp("struct.print.text")
+        lines.append(
+            f"{result} = call i32 (ptr, ...) @printf(ptr @.aether.io.string, ptr {global_.name})"
+        )
+
+    def _emit_printed_value(self, lines: list[str], value: str, type_: object) -> None:
+        result = self._synthetic_temp("struct.print.value")
+        if isinstance(type_, IntType):
+            lines.append(f"{result} = call i32 (ptr, ...) @printf(ptr @.aether.io.int, i32 {value})")
+            return
+        if isinstance(type_, DoubleType):
+            lines.append(f"{result} = call i32 (ptr, ...) @printf(ptr @.aether.io.double, double {value})")
+            return
+        if isinstance(type_, StringType):
+            lines.append(f"{result} = call i32 (ptr, ...) @printf(ptr @.aether.io.string, ptr {value})")
+            return
+        if isinstance(type_, BoolType):
+            selected = self._synthetic_temp("struct.print.bool")
+            lines.extend([
+                f"{selected} = select i1 {value}, ptr @.aether.io.true, ptr @.aether.io.false",
+                f"{result} = call i32 (ptr, ...) @printf(ptr @.aether.io.string, ptr {selected})",
+            ])
+            return
+        if isinstance(type_, StructType):
+            lines.extend(self._print_struct_value(type_, value, newline=False))
+            return
+        if isinstance(type_, (ArrayType, ListType)):
+            kind = "array" if isinstance(type_, ArrayType) else "list"
+            if kind == "array":
+                self._uses_array_type = True
+            else:
+                self._uses_list_type = True
+            self._struct_sequence_print_types.add((kind, type_.element))
+            helper = self._struct_sequence_print_helper_name(kind, type_.element)
+            lines.append(f"call void @{helper}(ptr {value})")
+            return
+        raise LLVMBackendError(f"LLVM struct print does not support field type {type_}")
+
+    @staticmethod
+    def _struct_sequence_print_helper_name(kind: str, element_type: object) -> str:
+        return f"aether_struct_{kind}_print_{aggregate_helper_suffix(element_type)}"
+
+    def _struct_sequence_print_helper(self, kind: str, element_type: object) -> str:
+        name = self._struct_sequence_print_helper_name(kind, element_type)
+        layout = "%AetherArray" if kind == "array" else "%AetherList"
+        data_index = 1 if kind == "array" else 2
+        element_llvm = llvm_type(element_type)
+        if isinstance(element_type, IntType):
+            print_lines = [
+                "  %printed = call i32 (ptr, ...) @printf(ptr @.aether.io.int, i32 %value)"
+            ]
+        elif isinstance(element_type, DoubleType):
+            print_lines = [
+                "  %printed = call i32 (ptr, ...) @printf(ptr @.aether.io.double, double %value)"
+            ]
+        elif isinstance(element_type, StringType):
+            print_lines = [
+                "  %printed = call i32 (ptr, ...) @printf(ptr @.aether.io.string, ptr %value)"
+            ]
+        elif isinstance(element_type, BoolType):
+            print_lines = [
+                "  %text = select i1 %value, ptr @.aether.io.true, ptr @.aether.io.false",
+                "  %printed = call i32 (ptr, ...) @printf(ptr @.aether.io.string, ptr %text)",
+            ]
+        else:
+            raise LLVMBackendError(
+                f"LLVM struct sequence print does not support element type {element_type}"
+            )
+        return "\n".join([
+            f"define private void @{name}(ptr %sequence) {{",
+            "entry:",
+            "  %open = call i32 @putchar(i32 123)",
+            f"  %length.field = getelementptr {layout}, ptr %sequence, i32 0, i32 0",
+            "  %length = load i64, ptr %length.field",
+            f"  %data.field = getelementptr {layout}, ptr %sequence, i32 0, i32 {data_index}",
+            "  %data = load ptr, ptr %data.field",
+            "  br label %loop",
+            "loop:",
+            "  %index = phi i64 [ 0, %entry ], [ %next, %advance ]",
+            "  %done = icmp eq i64 %index, %length",
+            "  br i1 %done, label %exit, label %separator",
+            "separator:",
+            "  %first = icmp eq i64 %index, 0",
+            "  br i1 %first, label %print, label %comma",
+            "comma:",
+            "  %comma.char = call i32 @putchar(i32 44)",
+            "  %space.char = call i32 @putchar(i32 32)",
+            "  br label %print",
+            "print:",
+            f"  %element = getelementptr {element_llvm}, ptr %data, i64 %index",
+            f"  %value = load {element_llvm}, ptr %element",
+            *print_lines,
+            "  br label %advance",
+            "advance:",
+            "  %next = add i64 %index, 1",
+            "  br label %loop",
+            "exit:",
+            "  %close = call i32 @putchar(i32 125)",
+            "  ret void",
+            "}",
+        ])
+
+    def _print_struct_new(self, instruction: SSAStructNew) -> list[str]:
+        if not isinstance(instruction.result.type, StructType):
+            raise LLVMBackendError("LLVM struct_new result must be a StructType")
+        aggregate_type = llvm_type(instruction.result.type)
+        result = self._new_temp(instruction.result)
+        if not instruction.fields:
+            return [f"{result} = freeze {aggregate_type} undef"]
+        lines: list[str] = []
+        current = "undef"
+        for index, field in enumerate(instruction.fields):
+            target = result if index == len(instruction.fields) - 1 else self._synthetic_temp("struct.new")
+            lines.append(
+                f"{target} = insertvalue {aggregate_type} {current}, "
+                f"{llvm_type(field.type)} {self._operand(field)}, {index}"
+            )
+            current = target
+        return lines
+
+    def _print_struct_get(self, instruction: SSAStructGet) -> str:
+        result = self._new_temp(instruction.result)
+        return (
+            f"{result} = extractvalue {llvm_type(instruction.struct.type)} "
+            f"{self._operand(instruction.struct)}, {instruction.field_index}"
+        )
+
+    def _print_struct_set(self, instruction: SSAStructSet) -> str:
+        result = self._new_temp(instruction.result)
+        return (
+            f"{result} = insertvalue {llvm_type(instruction.struct.type)} "
+            f"{self._operand(instruction.struct)}, {llvm_type(instruction.value.type)} "
+            f"{self._operand(instruction.value)}, {instruction.field_index}"
+        )
+
+    def _print_method_result_new(self, instruction: SSAMethodResultNew) -> list[str]:
+        if not isinstance(instruction.result.type, MethodResultType):
+            raise LLVMBackendError("LLVM method_result requires MethodResultType")
+        result_type = llvm_type(instruction.result.type)
+        receiver_insert = (
+            self._new_temp(instruction.result)
+            if instruction.value is None
+            else self._synthetic_temp("method.result.receiver")
+        )
+        lines = [
+            f"{receiver_insert} = insertvalue {result_type} undef, "
+            f"{llvm_type(instruction.receiver.type)} {self._operand(instruction.receiver)}, 0"
+        ]
+        if instruction.value is not None:
+            result = self._new_temp(instruction.result)
+            lines.append(
+                f"{result} = insertvalue {result_type} {receiver_insert}, "
+                f"{llvm_type(instruction.value.type)} {self._operand(instruction.value)}, 1"
+            )
+        return lines
+
+    def _print_method_result_receiver(self, instruction: SSAMethodResultReceiver) -> str:
+        result = self._new_temp(instruction.result)
+        return (
+            f"{result} = extractvalue {llvm_type(instruction.method_result.type)} "
+            f"{self._operand(instruction.method_result)}, 0"
+        )
+
+    def _print_method_result_value(self, instruction: SSAMethodResultValue) -> str:
+        result = self._new_temp(instruction.result)
+        return (
+            f"{result} = extractvalue {llvm_type(instruction.method_result.type)} "
+            f"{self._operand(instruction.method_result)}, 1"
         )
 
     def _print_array_new(self, instruction: SSAArrayNew) -> str:

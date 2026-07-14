@@ -27,7 +27,7 @@ class LocalConstantPropagator:
             optimized_function, function_propagated = self._propagate_function(function)
             functions.append(optimized_function)
             propagated += function_propagated
-        optimized = IRModule(functions)
+        optimized = IRModule(functions, list(module.structs))
         return OptimizationResult(
             optimized,
             changed=optimized != module,

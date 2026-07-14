@@ -15,6 +15,7 @@ from aether.ir.types import (
     IRType,
     ListType,
     MatrixType,
+    MethodResultType,
     NullableType,
     StringType,
     StructType,
@@ -66,6 +67,12 @@ from .model import (
     SSAModule,
     SSAOuterProduct,
     SSAPrint,
+    SSAStructGet,
+    SSAStructNew,
+    SSAStructSet,
+    SSAMethodResultNew,
+    SSAMethodResultReceiver,
+    SSAMethodResultValue,
     SSAPhi,
     SSAReturn,
     SSAUnaryOp,
@@ -96,10 +103,12 @@ class SSAVerifier:
     def __init__(self, module: SSAModule) -> None:
         self.module = module
         self._functions: dict[str, SSAFunction] = {}
+        self._structs = {}
 
     def verify(self) -> SSAModule:
         """Verify the module and return it unchanged on success."""
         self._functions = {}
+        self._structs = {definition.name: definition for definition in self.module.structs}
         self._verify_module()
         return self.module
 
@@ -293,7 +302,7 @@ class SSAVerifier:
                 self._require_defined(instruction.value, value_types)
                 if not isinstance(
                     instruction.value.type,
-                    (IntType, BoolType, StringType, DoubleType, VectorType, MatrixType),
+                    (IntType, BoolType, StringType, DoubleType, VectorType, MatrixType, StructType),
                 ):
                     self._fail(
                         "Print value must be scalar, Vector, or Matrix, "
@@ -307,6 +316,62 @@ class SSAVerifier:
                         self._fail("Matrix print requires known rows and columns")
                 elif instruction.aggregate_shape is not None:
                     self._fail("Scalar print must not carry an aggregate shape")
+                continue
+
+            if isinstance(instruction, SSAStructNew):
+                definition = self._structs.get(instruction.result.type.name) if isinstance(instruction.result.type, StructType) else None
+                if definition is None or len(instruction.fields) != len(definition.fields):
+                    self._fail("Struct new requires a declared struct and all canonical fields")
+                for value, (_name, field_type) in zip(instruction.fields, definition.fields):
+                    self._require_defined(value, value_types)
+                    self._require_type(value.type, field_type, "Struct field type mismatch")
+                continue
+
+            if isinstance(instruction, SSAStructGet):
+                self._require_defined(instruction.struct, value_types)
+                definition = self._structs.get(instruction.struct.type.name) if isinstance(instruction.struct.type, StructType) else None
+                if definition is None or not 0 <= instruction.field_index < len(definition.fields):
+                    self._fail("Struct get requires a valid canonical field")
+                self._require_type(instruction.result.type, definition.fields[instruction.field_index][1], "Struct get result type mismatch")
+                continue
+
+            if isinstance(instruction, SSAStructSet):
+                self._require_defined(instruction.struct, value_types)
+                self._require_defined(instruction.value, value_types)
+                definition = self._structs.get(instruction.struct.type.name) if isinstance(instruction.struct.type, StructType) else None
+                if definition is None or not 0 <= instruction.field_index < len(definition.fields):
+                    self._fail("Struct set requires a valid canonical field")
+                self._require_type(instruction.value.type, definition.fields[instruction.field_index][1], "Struct set value type mismatch")
+                self._require_type(instruction.result.type, instruction.struct.type, "Struct set result type mismatch")
+                continue
+
+            if isinstance(instruction, SSAMethodResultNew):
+                self._require_defined(instruction.receiver, value_types)
+                if not isinstance(instruction.result.type, MethodResultType):
+                    self._fail("Method result requires MethodResultType")
+                self._require_type(instruction.receiver.type, instruction.result.type.receiver, "Method receiver type mismatch")
+                if isinstance(instruction.result.type.value, VoidType):
+                    if instruction.value is not None:
+                        self._fail("Void method result cannot contain a value")
+                else:
+                    if instruction.value is None:
+                        self._fail("Non-void method result requires a value")
+                    self._require_defined(instruction.value, value_types)
+                    self._require_type(instruction.value.type, instruction.result.type.value, "Method value mismatch")
+                continue
+
+            if isinstance(instruction, SSAMethodResultReceiver):
+                self._require_defined(instruction.method_result, value_types)
+                if not isinstance(instruction.method_result.type, MethodResultType):
+                    self._fail("Method receiver extraction requires MethodResultType")
+                self._require_type(instruction.result.type, instruction.method_result.type.receiver, "Method receiver result mismatch")
+                continue
+
+            if isinstance(instruction, SSAMethodResultValue):
+                self._require_defined(instruction.method_result, value_types)
+                if not isinstance(instruction.method_result.type, MethodResultType):
+                    self._fail("Method value extraction requires MethodResultType")
+                self._require_type(instruction.result.type, instruction.method_result.type.value, "Method value result mismatch")
                 continue
 
             if isinstance(instruction, SSAArrayNew):
@@ -1428,7 +1493,7 @@ class SSAVerifier:
                     f"Compare op '{operator}' requires compatible operands, "
                     f"got {left} and {right}"
                 )
-            if not isinstance(left, (IntType, DoubleType, BoolType, StringType)):
+            if not isinstance(left, (IntType, DoubleType, BoolType, StringType, StructType)):
                 self._fail(
                     f"Compare op '{operator}' does not support operands of type {left}"
                 )
@@ -1506,6 +1571,12 @@ class SSAVerifier:
                 SSAMatrixScale,
                 SSAVectorSub,
                 SSAMatrixSub,
+                SSAStructNew,
+                SSAStructGet,
+                SSAStructSet,
+                SSAMethodResultNew,
+                SSAMethodResultReceiver,
+                SSAMethodResultValue,
             ),
         ):
             return instruction.result
@@ -1557,6 +1628,8 @@ class SSAVerifier:
             return self._is_valid_type(type_.inner)
         if isinstance(type_, (ListType, ArrayType, VectorType, MatrixType)):
             return self._is_valid_type(type_.element)
+        if isinstance(type_, MethodResultType):
+            return self._is_valid_type(type_.receiver) and self._is_valid_type(type_.value)
         return False
 
     @staticmethod

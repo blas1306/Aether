@@ -30,7 +30,8 @@ class GeneralSSABuilder:
 
     def build_module(self, module: IRModule) -> SSAModule:
         ssa_module = SSAModule(
-            [self._build_function_unverified(function) for function in module.functions]
+            [self._build_function_unverified(function) for function in module.functions],
+            list(module.structs),
         )
         return self._verify_module(ssa_module)
 

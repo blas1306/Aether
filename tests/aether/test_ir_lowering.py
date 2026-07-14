@@ -590,7 +590,6 @@ int sumTo(int n) {
 @pytest.mark.parametrize(
     ("source", "node_name"),
     [
-        ("struct Point { int x; }", "StructDeclaration"),
         ("class Counter { int value; }", "ClassDeclaration"),
     ],
 )

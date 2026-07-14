@@ -48,6 +48,12 @@ from .model import (
     SSAOuterProduct,
     SSAParameter,
     SSAPrint,
+    SSAStructGet,
+    SSAStructNew,
+    SSAStructSet,
+    SSAMethodResultNew,
+    SSAMethodResultReceiver,
+    SSAMethodResultValue,
     SSAPhi,
     SSAReturn,
     SSAUnaryOp,
@@ -68,7 +74,13 @@ class SSAPrinter:
     """Produce a deterministic, human-readable representation of Aether SSA."""
 
     def print_module(self, module: SSAModule) -> str:
-        return "\n\n".join(self._print_function(function) for function in module.functions)
+        structs = [
+            f"struct @{definition.name} {{ "
+            + ", ".join(f"{name}: {type_}" for name, type_ in definition.fields)
+            + " }"
+            for definition in module.structs
+        ]
+        return "\n\n".join([*structs, *(self._print_function(function) for function in module.functions)])
 
     def _print_function(self, function: SSAFunction) -> str:
         parameters = ", ".join(self._typed_value(parameter) for parameter in function.parameters)
@@ -129,6 +141,19 @@ class SSAPrinter:
                 else ""
             )
             return f"{operation} {self._value(instruction.value)}{shape}"
+        if isinstance(instruction, SSAStructNew):
+            return f"{self._typed_value(instruction.result)} = struct_new [" + ", ".join(self._value(value) for value in instruction.fields) + "]"
+        if isinstance(instruction, SSAStructGet):
+            return f"{self._typed_value(instruction.result)} = struct_get {self._value(instruction.struct)}, {instruction.field_name}#{instruction.field_index}"
+        if isinstance(instruction, SSAStructSet):
+            return f"{self._typed_value(instruction.result)} = struct_set {self._value(instruction.struct)}, {instruction.field_name}#{instruction.field_index}, {self._value(instruction.value)}"
+        if isinstance(instruction, SSAMethodResultNew):
+            value = "" if instruction.value is None else f", {self._value(instruction.value)}"
+            return f"{self._typed_value(instruction.result)} = method_result {self._value(instruction.receiver)}{value}"
+        if isinstance(instruction, SSAMethodResultReceiver):
+            return f"{self._typed_value(instruction.result)} = method_receiver {self._value(instruction.method_result)}"
+        if isinstance(instruction, SSAMethodResultValue):
+            return f"{self._typed_value(instruction.result)} = method_value {self._value(instruction.method_result)}"
         if isinstance(instruction, SSAArrayNew):
             elements = ", ".join(self._value(element) for element in instruction.elements)
             return f"{self._typed_value(instruction.result)} = array_new [{elements}]"

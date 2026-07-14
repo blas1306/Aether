@@ -60,6 +60,12 @@ from .model import (
     IRModule,
     IROuterProduct,
     IRPrint,
+    IRStructGet,
+    IRStructNew,
+    IRStructSet,
+    IRMethodResultNew,
+    IRMethodResultReceiver,
+    IRMethodResultValue,
     IRReturn,
     IRStore,
     IRUnaryOp,
@@ -82,7 +88,9 @@ from .types import (
     InterfaceType,
     ListType,
     MatrixType,
+    MethodResultType,
     StringType,
+    StructType,
     VectorType,
     VoidType,
 )
@@ -109,6 +117,7 @@ class IRInterpreter:
     ) -> None:
         self.module = module
         self._functions = {function.name: function for function in module.functions}
+        self._structs = {definition.name: definition for definition in module.structs}
         self.output = ""
         self._output_writer = write_output
 
@@ -129,8 +138,8 @@ class IRInterpreter:
         )
         return self._execute(function, frame)
 
-    @staticmethod
     def _format_print_value(
+        self,
         value: Any,
         value_type: object,
         aggregate_shape: tuple[int, ...] | None,
@@ -142,7 +151,7 @@ class IRInterpreter:
                 raise IRExecutionError("IR Vector print requires a shaped vector value")
             separator = "; " if value_type.orientation == "column" else " "
             return "[" + separator.join(
-                IRInterpreter._format_aggregate_element(element, value_type.element)
+                self._format_aggregate_element(element, value_type.element)
                 for element in value
             ) + "]"
         if isinstance(value_type, MatrixType):
@@ -153,23 +162,40 @@ class IRInterpreter:
                 raise IRExecutionError("IR Matrix print shape does not match its value")
             rendered = [
                 " ".join(
-                    IRInterpreter._format_aggregate_element(element, value_type.element)
+                    self._format_aggregate_element(element, value_type.element)
                     for element in value[row * columns : (row + 1) * columns]
                 )
                 for row in range(rows)
             ]
             if rows == 1 and columns == 1:
-                return IRInterpreter._format_aggregate_element(value[0], value_type.element)
+                return self._format_aggregate_element(value[0], value_type.element)
             return "[" + "; ".join(rendered) + "]"
+        if isinstance(value_type, (ArrayType, ListType)):
+            if not isinstance(value, list):
+                raise IRExecutionError("IR sequence print requires a sequence value")
+            return "{" + ", ".join(
+                self._format_aggregate_element(element, value_type.element)
+                for element in value
+            ) + "}"
+        if isinstance(value_type, StructType):
+            definition = self._structs.get(value_type.name)
+            if definition is None or not isinstance(value, tuple):
+                raise IRExecutionError("IR Struct print requires a declared struct value")
+            fields = ", ".join(
+                f"{name}={self._format_print_value(field_value, field_type, None)}"
+                for (name, field_type), field_value in zip(definition.fields, value)
+            )
+            return f"{value_type.name}({fields})"
         return str(value)
 
-    @staticmethod
-    def _format_aggregate_element(value: Any, value_type: object) -> str:
+    def _format_aggregate_element(self, value: Any, value_type: object) -> str:
         if isinstance(value_type, StringType):
             escaped = str(value).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\t", "\\t")
             return f'"{escaped}"'
         if isinstance(value, bool):
             return "true" if value else "false"
+        if isinstance(value_type, StructType):
+            return self._format_print_value(value, value_type, None)
         return str(value)
 
     def _execute(self, function: IRFunction, frame: _Frame) -> Any:
@@ -285,6 +311,44 @@ class IRInterpreter:
             self.output += text
             if self._output_writer is not None:
                 self._output_writer(text)
+            return False, None, None
+
+        if isinstance(instruction, IRStructNew):
+            frame.values[instruction.result] = tuple(
+                self._value(field, frame) for field in instruction.fields
+            )
+            return False, None, None
+
+        if isinstance(instruction, IRStructGet):
+            struct = self._value(instruction.struct, frame)
+            if not isinstance(struct, tuple) or instruction.field_index >= len(struct):
+                raise IRExecutionError("IR struct_get requires a valid struct value")
+            frame.values[instruction.result] = struct[instruction.field_index]
+            return False, None, None
+
+        if isinstance(instruction, IRStructSet):
+            struct = self._value(instruction.struct, frame)
+            if not isinstance(struct, tuple) or instruction.field_index >= len(struct):
+                raise IRExecutionError("IR struct_set requires a valid struct value")
+            fields = list(struct)
+            fields[instruction.field_index] = self._value(instruction.value, frame)
+            frame.values[instruction.result] = tuple(fields)
+            return False, None, None
+
+        if isinstance(instruction, IRMethodResultNew):
+            receiver = self._value(instruction.receiver, frame)
+            value = None if instruction.value is None else self._value(instruction.value, frame)
+            frame.values[instruction.result] = (receiver, value)
+            return False, None, None
+
+        if isinstance(instruction, IRMethodResultReceiver):
+            pair = self._value(instruction.method_result, frame)
+            frame.values[instruction.result] = pair[0]
+            return False, None, None
+
+        if isinstance(instruction, IRMethodResultValue):
+            pair = self._value(instruction.method_result, frame)
+            frame.values[instruction.result] = pair[1]
             return False, None, None
 
         if isinstance(instruction, IRArrayNew):

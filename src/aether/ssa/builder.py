@@ -46,6 +46,12 @@ from aether.ir.model import (
     IRModule,
     IROuterProduct,
     IRPrint,
+    IRStructGet,
+    IRStructNew,
+    IRStructSet,
+    IRMethodResultNew,
+    IRMethodResultReceiver,
+    IRMethodResultValue,
     IRReturn,
     IRStore,
     IRUnaryOp,
@@ -102,6 +108,12 @@ from .model import (
     SSAModule,
     SSAOuterProduct,
     SSAPrint,
+    SSAStructGet,
+    SSAStructNew,
+    SSAStructSet,
+    SSAMethodResultNew,
+    SSAMethodResultReceiver,
+    SSAMethodResultValue,
     SSAParameter,
     SSAPhi,
     SSAReturn,
@@ -189,7 +201,10 @@ class SSABuilder:
     )
 
     def build(self, module: IRModule) -> SSAModule:
-        return SSAModule([self._build_function(function) for function in module.functions])
+        return SSAModule(
+            [self._build_function(function) for function in module.functions],
+            list(module.structs),
+        )
 
     def _build_function(self, function: IRFunction) -> SSAFunction:
         parameters = self._parameters(function)
@@ -572,6 +587,29 @@ class SSABuilder:
         if isinstance(instruction, IRPrint):
             value = self._resolve_value(instruction.value, state.value_map)
             return SSAPrint(value, instruction.newline, instruction.aggregate_shape)
+
+        if isinstance(instruction, IRStructNew):
+            result = self._define_value(instruction.result, state.value_map)
+            return SSAStructNew(
+                result,
+                tuple(self._resolve_value(value, state.value_map) for value in instruction.fields),
+            )
+        if isinstance(instruction, IRStructGet):
+            result = self._define_value(instruction.result, state.value_map)
+            return SSAStructGet(result, self._resolve_value(instruction.struct, state.value_map), instruction.field_index, instruction.field_name)
+        if isinstance(instruction, IRStructSet):
+            result = self._define_value(instruction.result, state.value_map)
+            return SSAStructSet(result, self._resolve_value(instruction.struct, state.value_map), instruction.field_index, instruction.field_name, self._resolve_value(instruction.value, state.value_map))
+        if isinstance(instruction, IRMethodResultNew):
+            result = self._define_value(instruction.result, state.value_map)
+            value = None if instruction.value is None else self._resolve_value(instruction.value, state.value_map)
+            return SSAMethodResultNew(result, self._resolve_value(instruction.receiver, state.value_map), value)
+        if isinstance(instruction, IRMethodResultReceiver):
+            result = self._define_value(instruction.result, state.value_map)
+            return SSAMethodResultReceiver(result, self._resolve_value(instruction.method_result, state.value_map))
+        if isinstance(instruction, IRMethodResultValue):
+            result = self._define_value(instruction.result, state.value_map)
+            return SSAMethodResultValue(result, self._resolve_value(instruction.method_result, state.value_map))
 
         if isinstance(instruction, IRArrayNew):
             result = self._define_value(instruction.result, state.value_map)

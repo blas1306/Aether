@@ -1,0 +1,15 @@
+struct Counter {
+    int value;
+
+    void inc() {
+        value += 1;
+    }
+}
+
+int main() {
+    Counter c = Counter(0);
+
+    c.inc();
+
+    println(c.value);
+}

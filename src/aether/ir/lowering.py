@@ -59,6 +59,13 @@ from .model import (
     IROuterProduct,
     IRParameter,
     IRPrint,
+    IRStructDefinition,
+    IRStructGet,
+    IRStructNew,
+    IRStructSet,
+    IRMethodResultNew,
+    IRMethodResultReceiver,
+    IRMethodResultValue,
     IRReturn,
     IRStore,
     IRUnaryOp,
@@ -83,7 +90,9 @@ from .types import (
     IRType,
     ListType,
     MatrixType,
+    MethodResultType,
     StringType,
+    StructType,
     VectorType,
     VoidType,
 )
@@ -114,6 +123,18 @@ _CAST_BUILTINS = {"int", "float", "double", "string", "boolean"}
 class _FunctionSignature:
     parameters: tuple[IRType, ...]
     return_type: IRType
+
+
+@dataclass(frozen=True)
+class _StructInfo:
+    declaration: ast.StructDeclaration
+    fields: tuple[tuple[str, IRType], ...]
+
+    def field(self, name: str) -> tuple[int, IRType] | None:
+        for index, (field_name, field_type) in enumerate(self.fields):
+            if field_name == name:
+                return index, field_type
+        return None
 
 
 @dataclass(frozen=True)
@@ -162,6 +183,8 @@ class _FunctionContext:
     next_temporary: int = 0
     next_if: int = 0
     next_loop: int = 0
+    method_owner: _StructInfo | None = None
+    source_return_type: IRType | None = None
 
     def temporary(self, type_: IRType) -> IRValue:
         value = IRValue(str(self.next_temporary), type_)
@@ -184,30 +207,102 @@ class IRLowerer:
 
     def __init__(self) -> None:
         self._signatures: dict[str, _FunctionSignature] = {}
+        self._structs: dict[str, _StructInfo] = {}
+        self._struct_names: set[str] = set()
+        self._aliases: dict[str, AetherType] = {}
+        self._method_names: dict[tuple[str, str], str] = {}
 
     def lower(self, program: ast.Program) -> IRModule:
         """Lower a typechecked program without changing the main pipeline."""
+        self._aliases = {
+            statement.name: statement.target_type
+            for statement in program.statements
+            if isinstance(statement, ast.AliasDeclaration)
+        }
+        declarations = [
+            statement
+            for statement in program.statements
+            if isinstance(statement, ast.StructDeclaration)
+        ]
+        self._struct_names = {declaration.name for declaration in declarations}
+        self._structs = {
+            declaration.name: _StructInfo(
+                declaration,
+                tuple(
+                    (field.name, self._lower_type(field.type_name))
+                    for field in declaration.fields
+                ),
+            )
+            for declaration in declarations
+        }
         self._signatures = self._collect_signatures(program)
+        functions: list[IRFunction] = []
+        for statement in program.statements:
+            if isinstance(statement, ast.FunctionDeclaration):
+                functions.append(self._lower_function(statement))
+            elif isinstance(statement, ast.StructDeclaration):
+                info = self._structs[statement.name]
+                for method in statement.methods:
+                    functions.append(self._lower_function(method, info))
+                if statement.constructor is not None:
+                    functions.append(self._lower_constructor(statement.constructor, info))
+            elif isinstance(statement, ast.AliasDeclaration):
+                continue
+            else:
+                self._unsupported(statement)
         return IRModule(
-            [self._lower_function(statement) for statement in program.statements]
+            functions,
+            [IRStructDefinition(info.declaration.name, info.fields) for info in self._structs.values()],
         )
 
     def _collect_signatures(self, program: ast.Program) -> dict[str, _FunctionSignature]:
         signatures: dict[str, _FunctionSignature] = {}
         for statement in program.statements:
-            if not isinstance(statement, ast.FunctionDeclaration):
+            if isinstance(statement, ast.FunctionDeclaration):
+                signatures[statement.name] = _FunctionSignature(
+                    tuple(self._lower_type(parameter.type_name) for parameter in statement.parameters),
+                    self._lower_type(statement.return_type),
+                )
+            elif isinstance(statement, ast.StructDeclaration):
+                owner = StructType(statement.name)
+                for method in statement.methods:
+                    name = self._method_function_name(statement.name, method.name)
+                    source_return = self._lower_type(method.return_type)
+                    signatures[name] = _FunctionSignature(
+                        (owner, *(self._lower_type(parameter.type_name) for parameter in method.parameters)),
+                        MethodResultType(owner, source_return),
+                    )
+                    self._method_names[(statement.name, method.name)] = name
+                if statement.constructor is not None:
+                    name = self._method_function_name(statement.name, "__ctor")
+                    signatures[name] = _FunctionSignature(
+                        (owner, *(self._lower_type(parameter.type_name) for parameter in statement.constructor.parameters)),
+                        MethodResultType(owner, VoidType()),
+                    )
+                    self._method_names[(statement.name, "__ctor")] = name
+            elif isinstance(statement, ast.AliasDeclaration):
+                continue
+            else:
                 self._unsupported(statement)
-            signatures[statement.name] = _FunctionSignature(
-                tuple(self._lower_type(parameter.type_name) for parameter in statement.parameters),
-                self._lower_type(statement.return_type),
-            )
         return signatures
 
-    def _lower_function(self, declaration: ast.FunctionDeclaration) -> IRFunction:
-        signature = self._signatures[declaration.name]
+    def _lower_function(
+        self,
+        declaration: ast.FunctionDeclaration,
+        owner: _StructInfo | None = None,
+    ) -> IRFunction:
+        function_name = (
+            self._method_function_name(owner.declaration.name, declaration.name)
+            if owner is not None
+            else declaration.name
+        )
+        signature = self._signatures[function_name]
+        source_parameters = declaration.parameters
+        if owner is not None:
+            source_parameters = [ast.Parameter(owner.declaration.name, "this"), *source_parameters]
         parameters = [
             IRParameter(parameter.name, parameter_type)
-            for parameter, parameter_type in zip(declaration.parameters, signature.parameters)
+            for parameter, parameter_type in zip(source_parameters, signature.parameters)
         ]
         block = IRBasicBlock("entry")
         blocks = [block]
@@ -216,10 +311,19 @@ class IRLowerer:
             blocks=blocks,
             return_type=signature.return_type,
             parameters={parameter.name: parameter for parameter in parameters},
+            method_owner=owner,
+            source_return_type=(self._lower_type(declaration.return_type) if owner is not None else None),
         )
+        if owner is not None:
+            this_parameter = context.parameters["this"]
+            this_slot = IRValue("this", this_parameter.type)
+            context.locals["this"] = this_slot
+            context.block.instructions.append(IRStore(this_slot, this_parameter))
         assigned_names = self._assigned_names(declaration.body)
         for parameter in parameters:
-            if parameter.name in assigned_names:
+            if parameter.name == "this":
+                continue
+            if parameter.name in assigned_names or isinstance(parameter.type, StructType):
                 slot = IRValue(parameter.name, parameter.type)
                 context.locals[parameter.name] = slot
                 context.block.instructions.append(IRStore(slot, parameter))
@@ -230,7 +334,9 @@ class IRLowerer:
             self._lower_statement(statement, context)
 
         if not self._is_terminated(context.block):
-            if isinstance(signature.return_type, VoidType):
+            if owner is not None and isinstance(context.source_return_type, VoidType):
+                context.block.instructions.append(IRReturn(self._method_result(context, None)))
+            elif isinstance(signature.return_type, VoidType):
                 context.block.instructions.append(IRReturn())
             else:
                 self._fail(
@@ -238,7 +344,22 @@ class IRLowerer:
                     declaration,
                 )
 
-        return IRFunction(declaration.name, parameters, signature.return_type, blocks)
+        return IRFunction(function_name, parameters, signature.return_type, blocks)
+
+    def _lower_constructor(
+        self,
+        declaration: ast.ConstructorDeclaration,
+        owner: _StructInfo,
+    ) -> IRFunction:
+        synthetic = ast.FunctionDeclaration(
+            "void",
+            "__ctor",
+            declaration.parameters,
+            declaration.body,
+            line=declaration.line,
+            column=declaration.column,
+        )
+        return self._lower_function(synthetic, owner)
 
     def _lower_statement(self, statement: ast.Statement, context: _FunctionContext) -> None:
         if isinstance(statement, ast.VarDeclaration):
@@ -280,6 +401,20 @@ class IRLowerer:
             if not isinstance(statement.name, str):
                 self._fail("IR backend requires a variable or aggregate element assignment target.", statement)
             slot = context.locals.get(statement.name)
+            if (
+                slot is None
+                and statement.name not in context.parameters
+                and context.method_owner is not None
+                and context.method_owner.field(statement.name) is not None
+            ):
+                self._lower_field_assignment(
+                    ast.Identifier("this", statement.line, statement.column),
+                    statement.name,
+                    statement.expression,
+                    statement,
+                    context,
+                )
+                return
             if slot is None:
                 parameter = context.parameters.get(statement.name)
                 if parameter is None:
@@ -302,6 +437,16 @@ class IRLowerer:
             )
             self._copy_aggregate_metadata(value, slot, context)
             context.block.instructions.append(IRStore(slot, value))
+            return
+
+        if isinstance(statement, ast.FieldAssignment):
+            self._lower_field_assignment(
+                statement.target,
+                statement.field_name,
+                statement.expression,
+                statement,
+                context,
+            )
             return
 
         if isinstance(statement, ast.IndexAssignment):
@@ -329,6 +474,26 @@ class IRLowerer:
             return
 
         if isinstance(statement, ast.ReturnStatement):
+            if context.method_owner is not None:
+                if statement.expression is None:
+                    if not isinstance(context.source_return_type, VoidType):
+                        self._fail("IR backend cannot return void from a non-void method.", statement)
+                    context.block.instructions.append(IRReturn(self._method_result(context, None)))
+                    return
+                if isinstance(context.source_return_type, VoidType):
+                    self._fail("IR backend cannot return a value from a void method.", statement)
+                value = self._lower_expression(
+                    statement.expression,
+                    context,
+                    target_type=context.source_return_type,
+                )
+                self._require_same_type(
+                    value.type,
+                    context.source_return_type,
+                    "method return requires an implicit conversion",
+                )
+                context.block.instructions.append(IRReturn(self._method_result(context, value)))
+                return
             if statement.expression is None:
                 if not isinstance(context.return_type, VoidType):
                     self._fail("IR backend cannot return void from a non-void function.", statement)
@@ -371,6 +536,16 @@ class IRLowerer:
             expression = statement.expression
             if isinstance(expression, ast.CallExpression):
                 self._lower_call(expression, context, result_required=False)
+                return
+            if isinstance(expression, ast.MethodCall):
+                self._lower_method_call(
+                    expression.target,
+                    expression.method_name,
+                    expression.arguments,
+                    context,
+                    result_required=False,
+                    node=expression,
+                )
                 return
             self._lower_expression(expression, context)
             return
@@ -1027,6 +1202,16 @@ class IRLowerer:
             parameter = context.parameters.get(expression.name)
             if parameter is not None:
                 return parameter
+            if context.method_owner is not None:
+                field = context.method_owner.field(expression.name)
+                if field is not None:
+                    receiver = self._lower_expression(ast.Identifier("this"), context)
+                    index, field_type = field
+                    result = context.temporary(field_type)
+                    context.block.instructions.append(
+                        IRStructGet(result, receiver, index, expression.name)
+                    )
+                    return result
             self._fail(
                 f"IR backend does not support identifier '{expression.name}' outside local scope yet.",
                 expression,
@@ -1061,6 +1246,14 @@ class IRLowerer:
                             expression,
                         )
                     aggregate_shape = left_dimensions
+                elif isinstance(left.type, StructType) and left.type == right.type:
+                    if compare_operator not in {"eq", "ne"}:
+                        self._fail("Struct ordered comparison is not supported.", expression)
+                    result = context.temporary(BoolType())
+                    context.block.instructions.append(
+                        IRCompareOp(result, compare_operator, left, right)
+                    )
+                    return result
                 if aggregate_shape is not None:
                     if compare_operator not in {"eq", "ne"}:
                         self._fail("Aggregate ordered comparison is not supported.", expression)
@@ -1138,6 +1331,22 @@ class IRLowerer:
                 )
             return value
 
+        if isinstance(expression, ast.MethodCall):
+            value = self._lower_method_call(
+                expression.target,
+                expression.method_name,
+                expression.arguments,
+                context,
+                result_required=True,
+                node=expression,
+            )
+            if value is None:
+                self._fail(
+                    f"IR backend cannot use void method '{expression.method_name}' as a value.",
+                    expression,
+                )
+            return value
+
         if isinstance(expression, ast.IndexExpression):
             indexed = self._lower_expression(expression.array, context)
             if isinstance(indexed.type, ListType):
@@ -1202,6 +1411,20 @@ class IRLowerer:
 
         if isinstance(expression, ast.FieldAccess):
             target = self._lower_expression(expression.target, context)
+            if isinstance(target.type, StructType):
+                info = self._structs.get(target.type.name)
+                field = info.field(expression.field_name) if info is not None else None
+                if field is None:
+                    self._fail(
+                        f"IR backend cannot resolve field '{expression.field_name}' on '{target.type.name}'.",
+                        expression,
+                    )
+                index, field_type = field
+                result = context.temporary(field_type)
+                context.block.instructions.append(
+                    IRStructGet(result, target, index, expression.field_name)
+                )
+                return result
             if expression.field_name == "length" and isinstance(target.type, ArrayType):
                 result = context.temporary(IntType())
                 context.block.instructions.append(IRArrayLength(result, target))
@@ -1328,11 +1551,11 @@ class IRLowerer:
             for value in values:
                 if not isinstance(
                     value.type,
-                    (IntType, BoolType, StringType, DoubleType, VectorType, MatrixType),
+                    (IntType, BoolType, StringType, DoubleType, VectorType, MatrixType, StructType),
                 ):
                     self._fail(
                         f"IR backend {call.callee}(...) does not support values of type "
-                        f"'{value.type}'; supported types are scalar, Vector, and Matrix values.",
+                        f"'{value.type}'; supported types are scalar and printable aggregate values.",
                         call,
                     )
             for index, value in enumerate(values):
@@ -1351,6 +1574,39 @@ class IRLowerer:
                     IRPrint(value, newline, aggregate_shape)
                 )
             return None
+
+        constructor = self._struct_for_type_name(call.callee)
+        if constructor is not None:
+            return self._lower_struct_constructor(call, constructor, context)
+
+        if "." in call.callee:
+            receiver_name, method_name = call.callee.rsplit(".", 1)
+            if method_name not in {
+                "copy", "contains", "indexOf", "pop", "removeAt", "push",
+                "insert", "clear", "sort", "reverse",
+            }:
+                receiver = self._dotted_expression(receiver_name, call.line, call.column)
+                return self._lower_method_call(
+                    receiver,
+                    method_name,
+                    call.arguments,
+                    context,
+                    result_required=result_required,
+                    node=call,
+                )
+
+        if (
+            context.method_owner is not None
+            and (context.method_owner.declaration.name, call.callee) in self._method_names
+        ):
+            return self._lower_method_call(
+                ast.Identifier("this", call.line, call.column),
+                call.callee,
+                call.arguments,
+                context,
+                result_required=result_required,
+                node=call,
+            )
 
         method_name = call.callee.rsplit(".", 1)[-1]
         arguments = call.arguments
@@ -1505,6 +1761,205 @@ class IRLowerer:
         result = context.temporary(signature.return_type)
         context.block.instructions.append(IRCall(call.callee, arguments, result))
         return result
+
+    def _lower_struct_constructor(
+        self,
+        call: ast.CallExpression,
+        info: _StructInfo,
+        context: _FunctionContext,
+    ) -> IRValue:
+        struct_type = StructType(info.declaration.name)
+        constructor = info.declaration.constructor
+        if constructor is None:
+            values = tuple(
+                self._lower_expression(argument, context, target_type=field_type)
+                for argument, (_name, field_type) in zip(call.arguments, info.fields)
+            )
+            if len(values) != len(info.fields):
+                self._fail("Checked positional struct constructor has invalid arity.", call)
+            for value, (_name, field_type) in zip(values, info.fields):
+                self._require_same_type(value.type, field_type, "struct field initialization")
+            result = context.temporary(struct_type)
+            context.block.instructions.append(IRStructNew(result, values))
+            return result
+
+        receiver = self._default_struct_value(info, context)
+        function_name = self._method_names[(info.declaration.name, "__ctor")]
+        signature = self._signatures[function_name]
+        arguments = tuple(
+            self._lower_expression(argument, context, target_type=parameter_type)
+            for argument, parameter_type in zip(call.arguments, signature.parameters[1:])
+        )
+        pair = context.temporary(signature.return_type)
+        context.block.instructions.append(IRCall(function_name, (receiver, *arguments), pair))
+        result = context.temporary(struct_type)
+        context.block.instructions.append(IRMethodResultReceiver(result, pair))
+        return result
+
+    def _lower_method_call(
+        self,
+        target_expression: ast.Expression,
+        method_name: str,
+        argument_expressions: list[ast.Expression],
+        context: _FunctionContext,
+        *,
+        result_required: bool,
+        node: object,
+    ) -> IRValue | None:
+        receiver = self._lower_expression(target_expression, context)
+        if not isinstance(receiver.type, StructType):
+            self._unsupported(node, f"method '{method_name}' on '{receiver.type}'")
+        function_name = self._method_names.get((receiver.type.name, method_name))
+        if function_name is None:
+            self._fail(
+                f"IR backend cannot resolve method '{receiver.type.name}.{method_name}'.",
+                node,
+            )
+        signature = self._signatures[function_name]
+        source_return = signature.return_type.value
+        arguments = tuple(
+            self._lower_expression(argument, context, target_type=parameter_type)
+            for argument, parameter_type in zip(
+                argument_expressions,
+                signature.parameters[1:],
+            )
+        )
+        pair = context.temporary(signature.return_type)
+        context.block.instructions.append(IRCall(function_name, (receiver, *arguments), pair))
+        updated_receiver = context.temporary(receiver.type)
+        context.block.instructions.append(IRMethodResultReceiver(updated_receiver, pair))
+        self._store_lvalue(target_expression, updated_receiver, context)
+
+        if isinstance(source_return, VoidType):
+            if result_required:
+                self._fail(
+                    f"IR backend cannot use void method '{method_name}' as a value.",
+                    node,
+                )
+            return None
+        if not result_required:
+            return None
+        result = context.temporary(source_return)
+        context.block.instructions.append(IRMethodResultValue(result, pair))
+        return result
+
+    def _lower_field_assignment(
+        self,
+        target: ast.Expression,
+        field_name: str,
+        expression: ast.Expression,
+        statement: ast.Statement,
+        context: _FunctionContext,
+    ) -> None:
+        aggregate = self._lower_expression(target, context)
+        if not isinstance(aggregate.type, StructType):
+            self._fail(f"IR backend field assignment expects a struct, got '{aggregate.type}'.", statement)
+        info = self._structs.get(aggregate.type.name)
+        field = info.field(field_name) if info is not None else None
+        if field is None:
+            self._fail(f"IR backend cannot resolve field '{field_name}'.", statement)
+        index, field_type = field
+        value = self._lower_expression(expression, context, target_type=field_type)
+        self._require_same_type(value.type, field_type, "field assignment")
+        updated = context.temporary(aggregate.type)
+        context.block.instructions.append(
+            IRStructSet(updated, aggregate, index, field_name, value)
+        )
+        if not self._store_lvalue(target, updated, context):
+            self._fail("IR backend requires a mutable struct lvalue for field assignment.", statement)
+
+    def _store_lvalue(
+        self,
+        expression: ast.Expression,
+        value: IRValue,
+        context: _FunctionContext,
+    ) -> bool:
+        if isinstance(expression, ast.Identifier):
+            slot = context.locals.get(expression.name)
+            if slot is None:
+                return False
+            self._require_same_type(value.type, slot.type, "struct receiver update")
+            context.block.instructions.append(IRStore(slot, value))
+            return True
+        if not isinstance(expression, ast.FieldAccess):
+            return False
+        parent = self._lower_expression(expression.target, context)
+        if not isinstance(parent.type, StructType):
+            return False
+        info = self._structs[parent.type.name]
+        field = info.field(expression.field_name)
+        if field is None:
+            return False
+        index, field_type = field
+        self._require_same_type(value.type, field_type, "nested struct receiver update")
+        updated_parent = context.temporary(parent.type)
+        context.block.instructions.append(
+            IRStructSet(updated_parent, parent, index, expression.field_name, value)
+        )
+        return self._store_lvalue(expression.target, updated_parent, context)
+
+    def _method_result(
+        self,
+        context: _FunctionContext,
+        value: IRValue | None,
+    ) -> IRValue:
+        receiver = self._lower_expression(ast.Identifier("this"), context)
+        result = context.temporary(context.return_type)
+        context.block.instructions.append(IRMethodResultNew(result, receiver, value))
+        return result
+
+    def _default_struct_value(
+        self,
+        info: _StructInfo,
+        context: _FunctionContext,
+    ) -> IRValue:
+        fields = tuple(self._default_value(field_type, context) for _name, field_type in info.fields)
+        result = context.temporary(StructType(info.declaration.name))
+        context.block.instructions.append(IRStructNew(result, fields))
+        return result
+
+    def _default_value(self, type_: IRType, context: _FunctionContext) -> IRValue:
+        if isinstance(type_, StructType):
+            return self._default_struct_value(self._structs[type_.name], context)
+        if isinstance(type_, ArrayType):
+            result = context.temporary(type_)
+            context.block.instructions.append(IRArrayNew(result, ()))
+            return result
+        if isinstance(type_, ListType):
+            result = context.temporary(type_)
+            context.block.instructions.append(IRListNew(result, ()))
+            return result
+        if isinstance(type_, BoolType):
+            literal: object = False
+        elif isinstance(type_, StringType):
+            literal = ""
+        elif isinstance(type_, (DoubleType, FloatType)):
+            literal = 0.0
+        else:
+            literal = 0
+        result = context.temporary(type_)
+        context.block.instructions.append(IRConst(result, literal))
+        return result
+
+    @staticmethod
+    def _method_function_name(owner: str, method: str) -> str:
+        return f"{owner}.{method}"
+
+    def _struct_for_type_name(self, name: str) -> _StructInfo | None:
+        resolved: AetherType = name
+        seen: set[str] = set()
+        while isinstance(resolved, str) and resolved in self._aliases and resolved not in seen:
+            seen.add(resolved)
+            resolved = self._aliases[resolved]
+        return self._structs.get(resolved) if isinstance(resolved, str) else None
+
+    @staticmethod
+    def _dotted_expression(name: str, line: int, column: int) -> ast.Expression:
+        parts = name.split(".")
+        expression: ast.Expression = ast.Identifier(parts[0], line, column)
+        for part in parts[1:]:
+            expression = ast.FieldAccess(expression, part, line, column)
+        return expression
 
     def _lower_braced_literal(
         self,
@@ -2051,6 +2506,10 @@ class IRLowerer:
         self._fail(f"IR backend does not support comparison operator '{operator}' yet.")
 
     def _lower_type(self, type_name: AetherType | None) -> IRType:
+        seen: set[str] = set()
+        while isinstance(type_name, str) and type_name in self._aliases and type_name not in seen:
+            seen.add(type_name)
+            type_name = self._aliases[type_name]
         if type_name == "int":
             return IntType()
         if type_name == "float":
@@ -2073,6 +2532,8 @@ class IRLowerer:
             return VectorType(self._lower_type(type_name.element_type), type_name.orientation)
         if isinstance(type_name, AetherMatrixType):
             return MatrixType(self._lower_type(type_name.element_type))
+        if isinstance(type_name, str) and type_name in self._struct_names:
+            return StructType(type_name)
         self._fail(f"IR backend does not support type '{type_name}' yet.")
 
     def _require_same_type(self, actual: IRType, expected: IRType, operation: str) -> None:

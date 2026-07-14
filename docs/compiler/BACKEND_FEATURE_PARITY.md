@@ -167,10 +167,11 @@ plugin ejecute ese backend.
 
 | Feature | Parser | Type checker | AST | IR | SSA | LLVM | Native | Tooling | Tests | Estado |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Struct fields/constructors | Implemented | nominal, aridad/tipos | Implemented | declaración top-level rechazada | No | No | No | symbols/completion | extensa AST | AST-only |
-| Struct methods/`this` | Implemented | mutabilidad inferida | Implemented | No | No | No | No | completion/symbols | extensa AST | AST-only |
-| Struct mutability/value semantics | Implemented | const root | copia por valor; agregados internos conservan refs | No | No | No | No | diagnostics | dedicada | AST-only |
-| Struct igualdad | Implemented | solo campos comparables | estructural recursiva | No | No | No | No | diagnostics | dedicada | AST-only |
+| Struct fields/constructors | Implemented | nominal, aridad/tipos | Implemented | `IRStructDefinition/New/Get/Set`; constructor posicional y explícito | opcodes agregados puros | `%struct.Name = type { ... }`, orden fuente canónico | Implemented para tipos de campo ya soportados por backend | symbols/completion | paridad AST/IR/native dedicada | Implemented (core) |
+| Struct methods/`this` | Implemented | mutabilidad inferida | Implemented | funciones `Name.method` con receptor/resultado explícitos | `MethodResultType` sin alias oculto | retorno agregado `{receiver, value}` | Implícito/explícito, llamadas mutadoras encadenadas | completion/symbols | métodos lectores/mutadores + constructor | Implemented (core) |
+| Struct mutability/value semantics | Implemented | const root | copia por valor; agregados internos conservan refs | `struct_set` reconstruye el agregado | stores promovidos y phis de agregados | parámetros/retornos LLVM por valor | copia local/parámetro/retorno independiente | diagnostics | copia, parámetro, retorno y nesting | Implemented |
+| Struct igualdad | Implemented | solo campos comparables | estructural recursiva | comparación nominal estructural | preservada por optimizadores | campo a campo; strings por contenido; Array/List escalares dinámicos | int/double/bool/string, nested Struct y Array/List escalares | diagnostics | igualdad nested/string/bool y List<int> | Partial: Enum/nullable y Vector/Matrix dentro de Struct esperan backend propio |
+| Struct impresión | Implemented | N/A | `Name(field=value, ...)` | `IRPrint` acepta Struct | preservada por DCE | emisión recursiva del formato público | escalares, nested Struct y Array/List escalares | N/A | formato exacto AST/IR/native | Partial: Vector/Matrix como campos requieren shape runtime |
 | Class fields/methods/constructors | Implemented | nominal/visibility | Implemented | declaración rechazada | No | No | No | symbols/completion | extensa AST | AST-only |
 | Class reference semantics | Implemented | Implemented | alias por assignment/arg/return | No | No | No | No | N/A | dedicada | AST-only |
 | Class `this` / visibility | Implemented | public/private | Implemented | No | No | No | No | completion filtra privados | tests | AST-only |
@@ -232,6 +233,29 @@ normalizado y el mismo `main`, explícito o sintético.
 | Matrix `[0,2]` sobre 2x2 | panic Matrix | mismo panic antes del offset | mismo panic, exit 1 | regresión cerrada |
 
 ## Modelo central de efectos de instrucciones
+
+### Representación de `struct` en backend
+
+Cada declaración fuente produce una sola `IRStructDefinition` nominal. Los
+campos se conservan en orden fuente y LLVM emite exactamente un tipo identificado
+`%struct.Name = type { ... }`; el layout no es `packed`, por lo que solo aplica
+el padding natural decidido por LLVM. Construcción, lectura y actualización son
+`struct_new`, `struct_get` y `struct_set`. La última es una operación funcional:
+produce un agregado nuevo y nunca una referencia al almacenamiento anterior.
+
+Asignaciones, argumentos y retornos transportan el agregado por valor. Un método
+se baja a `Name.method(receiver, ...)` y retorna el par interno
+`method_result<receiver, value>`. De ese par se extrae el receptor actualizado y,
+si corresponde, el resultado público. En LLVM el ABI interno equivalente es
+`{ %struct.Name, T }` (o `{ %struct.Name }` para `void`). Esta representación
+mantiene visible la mutación en SSA, permite que los stores se promuevan a phis y
+evita aliasing oculto. Los campos que ya son reference types (Array/List/etc.)
+conservan la política shallow existente del AST.
+
+Constant Folding, propagación local/global, SCCP, simplificación algebraica y
+DCE tratan las operaciones de agregado como productores puros y conservan sus
+dependencias. Las definiciones canónicas de layout se preservan al reconstruir
+módulos optimizados.
 
 Todas las instrucciones IR y SSA exponen `has_side_effects`, `may_trap`,
 `reads_memory`, `writes_memory`, `allocates` y la propiedad derivada

@@ -25,7 +25,7 @@ class DeadStoreEliminator:
             optimized_function, function_removed = self._eliminate_function(function)
             functions.append(optimized_function)
             removed_stores += function_removed
-        optimized = IRModule(functions)
+        optimized = IRModule(functions, list(module.structs))
         return OptimizationResult(
             optimized,
             changed=optimized != module,

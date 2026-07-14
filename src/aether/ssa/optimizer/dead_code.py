@@ -44,6 +44,12 @@ from aether.ssa.model import (
     SSAModule,
     SSAOuterProduct,
     SSAPrint,
+    SSAStructGet,
+    SSAStructNew,
+    SSAStructSet,
+    SSAMethodResultNew,
+    SSAMethodResultReceiver,
+    SSAMethodResultValue,
     SSAPhi,
     SSAReturn,
     SSAUnaryOp,
@@ -113,7 +119,7 @@ class SSADeadCodeEliminator:
             )
 
         return SSAOptimizationResult(
-            SSAModule(updated_functions),
+            SSAModule(updated_functions, list(module.structs)),
             changed=True,
             stats={"removed": removed},
         )
@@ -159,6 +165,24 @@ class SSADeadCodeEliminator:
 
         if isinstance(instruction, SSAPrint):
             used_values.add(instruction.value)
+            return
+        if isinstance(instruction, SSAStructNew):
+            used_values.update(instruction.fields)
+            return
+        if isinstance(instruction, SSAStructGet):
+            used_values.add(instruction.struct)
+            return
+        if isinstance(instruction, SSAStructSet):
+            used_values.add(instruction.struct)
+            used_values.add(instruction.value)
+            return
+        if isinstance(instruction, SSAMethodResultNew):
+            used_values.add(instruction.receiver)
+            if instruction.value is not None:
+                used_values.add(instruction.value)
+            return
+        if isinstance(instruction, (SSAMethodResultReceiver, SSAMethodResultValue)):
+            used_values.add(instruction.method_result)
             return
 
         if isinstance(instruction, SSAArrayNew):

@@ -45,6 +45,12 @@ from aether.ir.model import (
     IRModule,
     IROuterProduct,
     IRPrint,
+    IRStructGet,
+    IRStructNew,
+    IRStructSet,
+    IRMethodResultNew,
+    IRMethodResultReceiver,
+    IRMethodResultValue,
     IRReturn,
     IRStore,
     IRUnaryOp,
@@ -73,7 +79,7 @@ class DeadCodeEliminator:
             optimized_function, function_removed = self._eliminate_function(function)
             functions.append(optimized_function)
             removed += function_removed
-        optimized = IRModule(functions)
+        optimized = IRModule(functions, list(module.structs))
         return OptimizationResult(
             optimized,
             changed=optimized != module,
@@ -173,6 +179,16 @@ class DeadCodeEliminator:
             return instruction.arguments
         if isinstance(instruction, IRPrint):
             return (instruction.value,)
+        if isinstance(instruction, IRStructNew):
+            return instruction.fields
+        if isinstance(instruction, IRStructGet):
+            return (instruction.struct,)
+        if isinstance(instruction, IRStructSet):
+            return (instruction.struct, instruction.value)
+        if isinstance(instruction, IRMethodResultNew):
+            return (instruction.receiver,) if instruction.value is None else (instruction.receiver, instruction.value)
+        if isinstance(instruction, (IRMethodResultReceiver, IRMethodResultValue)):
+            return (instruction.method_result,)
         if isinstance(instruction, IRArrayNew):
             return instruction.elements
         if isinstance(instruction, IRListNew):

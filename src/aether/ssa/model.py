@@ -92,6 +92,48 @@ class SSAPrint(SideEffectMixin, SSAInstruction):
 
 
 @dataclass(frozen=True)
+class SSAStructNew(SSAInstruction):
+    result: SSAValue
+    fields: tuple[SSAValue, ...] = ()
+
+
+@dataclass(frozen=True)
+class SSAStructGet(SSAInstruction):
+    result: SSAValue
+    struct: SSAValue
+    field_index: int
+    field_name: str
+
+
+@dataclass(frozen=True)
+class SSAStructSet(SSAInstruction):
+    result: SSAValue
+    struct: SSAValue
+    field_index: int
+    field_name: str
+    value: SSAValue
+
+
+@dataclass(frozen=True)
+class SSAMethodResultNew(SSAInstruction):
+    result: SSAValue
+    receiver: SSAValue
+    value: SSAValue | None = None
+
+
+@dataclass(frozen=True)
+class SSAMethodResultReceiver(SSAInstruction):
+    result: SSAValue
+    method_result: SSAValue
+
+
+@dataclass(frozen=True)
+class SSAMethodResultValue(SSAInstruction):
+    result: SSAValue
+    method_result: SSAValue
+
+
+@dataclass(frozen=True)
 class SSAArrayNew(AllocationMixin, SSAInstruction):
     result: SSAValue
     elements: tuple[SSAValue, ...] = ()
@@ -436,3 +478,4 @@ class SSAFunction:
 @dataclass
 class SSAModule:
     functions: list[SSAFunction] = field(default_factory=list)
+    structs: list[object] = field(default_factory=list)

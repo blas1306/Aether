@@ -51,6 +51,12 @@ from aether.ssa.model import (
     SSAModule,
     SSAOuterProduct,
     SSAPrint,
+    SSAStructGet,
+    SSAStructNew,
+    SSAStructSet,
+    SSAMethodResultNew,
+    SSAMethodResultReceiver,
+    SSAMethodResultValue,
     SSAPhi,
     SSAReturn,
     SSAUnaryOp,
@@ -412,6 +418,12 @@ class SCCPAnalyzer:
                 SSAMatrixScale,
                 SSAVectorSub,
                 SSAMatrixSub,
+                SSAStructNew,
+                SSAStructGet,
+                SSAStructSet,
+                SSAMethodResultNew,
+                SSAMethodResultReceiver,
+                SSAMethodResultValue,
             ),
         ):
             return instruction.result
@@ -435,6 +447,16 @@ class SCCPAnalyzer:
             return instruction.arguments
         if isinstance(instruction, SSAPrint):
             return (instruction.value,)
+        if isinstance(instruction, SSAStructNew):
+            return instruction.fields
+        if isinstance(instruction, SSAStructGet):
+            return (instruction.struct,)
+        if isinstance(instruction, SSAStructSet):
+            return (instruction.struct, instruction.value)
+        if isinstance(instruction, SSAMethodResultNew):
+            return (instruction.receiver,) if instruction.value is None else (instruction.receiver, instruction.value)
+        if isinstance(instruction, (SSAMethodResultReceiver, SSAMethodResultValue)):
+            return (instruction.method_result,)
         if isinstance(instruction, SSAArrayNew):
             return instruction.elements
         if isinstance(instruction, SSAListNew):
@@ -584,7 +606,7 @@ class SCCPTransformer:
             )
 
         return SSAOptimizationResult(
-            SSAModule(updated_functions),
+            SSAModule(updated_functions, list(self.module.structs)),
             changed=True,
             stats=stats,
         )

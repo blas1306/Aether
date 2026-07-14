@@ -192,18 +192,6 @@ int outer() {
     [
         (
             """
-struct Point {
-    int x;
-    int y;
-}
-Point p = Point(2, 3);
-println(p.x + p.y);
-""",
-            "5\n",
-            "struct declarations",
-        ),
-        (
-            """
 class Counter {
     int value;
     public int getValue() { return value; }
@@ -215,7 +203,7 @@ println(c.getValue());
             "class declarations",
         ),
     ],
-    ids=("struct", "class"),
+    ids=("class",),
 )
 def test_backend_parity_characterization_user_types_are_ast_only(
     declaration: str,

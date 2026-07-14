@@ -106,6 +106,48 @@ class IRPrint(SideEffectMixin, IRInstruction):
 
 
 @dataclass(frozen=True)
+class IRStructNew(IRInstruction):
+    result: IRValue
+    fields: tuple[IRValue, ...] = ()
+
+
+@dataclass(frozen=True)
+class IRStructGet(IRInstruction):
+    result: IRValue
+    struct: IRValue
+    field_index: int
+    field_name: str
+
+
+@dataclass(frozen=True)
+class IRStructSet(IRInstruction):
+    result: IRValue
+    struct: IRValue
+    field_index: int
+    field_name: str
+    value: IRValue
+
+
+@dataclass(frozen=True)
+class IRMethodResultNew(IRInstruction):
+    result: IRValue
+    receiver: IRValue
+    value: IRValue | None = None
+
+
+@dataclass(frozen=True)
+class IRMethodResultReceiver(IRInstruction):
+    result: IRValue
+    method_result: IRValue
+
+
+@dataclass(frozen=True)
+class IRMethodResultValue(IRInstruction):
+    result: IRValue
+    method_result: IRValue
+
+
+@dataclass(frozen=True)
 class IRArrayNew(AllocationMixin, IRInstruction):
     result: IRValue
     elements: tuple[IRValue, ...] = ()
@@ -440,6 +482,13 @@ class IRFunction:
     blocks: list[IRBasicBlock] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class IRStructDefinition:
+    name: str
+    fields: tuple[tuple[str, IRType], ...]
+
+
 @dataclass
 class IRModule:
     functions: list[IRFunction] = field(default_factory=list)
+    structs: list[IRStructDefinition] = field(default_factory=list)

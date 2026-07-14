@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from aether.ir.types import ArrayType, BoolType, DoubleType, IntType, IRType, ListType, MatrixType, StringType, VectorType, VoidType
+from aether.ir.types import ArrayType, BoolType, DoubleType, IntType, IRType, ListType, MatrixType, MethodResultType, StringType, StructType, VectorType, VoidType
 
 
 class LLVMBackendError(Exception):
@@ -26,4 +26,11 @@ def llvm_type(type_: IRType) -> str:
         return "ptr"
     if isinstance(type_, MatrixType):
         return "ptr"
+    if isinstance(type_, StructType):
+        return f"%struct.{type_.name}"
+    if isinstance(type_, MethodResultType):
+        receiver = llvm_type(type_.receiver)
+        if isinstance(type_.value, VoidType):
+            return f"{{ {receiver} }}"
+        return f"{{ {receiver}, {llvm_type(type_.value)} }}"
     raise LLVMBackendError(f"LLVM backend does not support type {type_}")

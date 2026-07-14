@@ -115,7 +115,7 @@ class DeadPhiEliminator:
             )
 
         return SSAOptimizationResult(
-            SSAModule(updated_functions),
+            SSAModule(updated_functions, list(module.structs)),
             changed=True,
             stats={"removed_phis": removed_phis},
         )

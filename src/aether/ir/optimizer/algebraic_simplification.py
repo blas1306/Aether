@@ -76,7 +76,7 @@ class AlgebraicSimplifier:
             optimized_function, function_simplified = self._simplify_function(function)
             functions.append(optimized_function)
             simplified += function_simplified
-        optimized = IRModule(functions)
+        optimized = IRModule(functions, list(module.structs))
         return OptimizationResult(
             optimized,
             changed=optimized != module,

@@ -129,7 +129,7 @@ class TrivialPhiEliminator:
             )
 
         return SSAOptimizationResult(
-            SSAModule(updated_functions),
+            SSAModule(updated_functions, list(module.structs)),
             changed=True,
             stats={
                 "removed_trivial_phis": removed_trivial_phis,

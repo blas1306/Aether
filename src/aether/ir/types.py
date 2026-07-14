@@ -104,6 +104,22 @@ class StructType(IRType):
 
 
 @dataclass(frozen=True)
+class MethodResultType(IRType):
+    """Internal ABI value returned by a struct method.
+
+    Methods return both the (possibly updated) value receiver and their source
+    result.  Keeping that pair explicit avoids hidden aliases while allowing a
+    mutating method to retain normal value semantics.
+    """
+
+    receiver: StructType
+    value: IRType
+
+    def __str__(self) -> str:
+        return f"method_result<{self.receiver.name}, {self.value}>"
+
+
+@dataclass(frozen=True)
 class ClassRefType(IRType):
     name: str
 

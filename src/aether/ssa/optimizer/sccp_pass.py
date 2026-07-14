@@ -38,7 +38,7 @@ class SCCPPass:
             return SSAOptimizationResult(module, changed=False, stats=stats)
 
         return SSAOptimizationResult(
-            SSAModule(updated_functions),
+            SSAModule(updated_functions, list(module.structs)),
             changed=True,
             stats=stats,
         )

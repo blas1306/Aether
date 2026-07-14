@@ -49,6 +49,12 @@ from aether.ir.model import (
     IRMatrixSet,
     IROuterProduct,
     IRPrint,
+    IRStructGet,
+    IRStructNew,
+    IRStructSet,
+    IRMethodResultNew,
+    IRMethodResultReceiver,
+    IRMethodResultValue,
     IRReturn,
     IRStore,
     IRUnaryOp,
@@ -108,6 +114,12 @@ from .model import (
     SSAMatrixSet,
     SSAOuterProduct,
     SSAPrint,
+    SSAStructGet,
+    SSAStructNew,
+    SSAStructSet,
+    SSAMethodResultNew,
+    SSAMethodResultReceiver,
+    SSAMethodResultValue,
     SSAParameter,
     SSAPhi,
     SSAReturn,
@@ -306,6 +318,33 @@ class SSARenamer:
         if isinstance(instruction, IRPrint):
             value = self._resolve_value(instruction.value)
             return SSAPrint(value, instruction.newline, instruction.aggregate_shape)
+
+        if isinstance(instruction, IRStructNew):
+            result = self._define_value(instruction.result)
+            fields = tuple(self._resolve_value(value) for value in instruction.fields)
+            self._bind_value(result.name, result, bound_values)
+            return SSAStructNew(result, fields)
+        if isinstance(instruction, IRStructGet):
+            result = self._define_value(instruction.result)
+            self._bind_value(result.name, result, bound_values)
+            return SSAStructGet(result, self._resolve_value(instruction.struct), instruction.field_index, instruction.field_name)
+        if isinstance(instruction, IRStructSet):
+            result = self._define_value(instruction.result)
+            self._bind_value(result.name, result, bound_values)
+            return SSAStructSet(result, self._resolve_value(instruction.struct), instruction.field_index, instruction.field_name, self._resolve_value(instruction.value))
+        if isinstance(instruction, IRMethodResultNew):
+            result = self._define_value(instruction.result)
+            value = None if instruction.value is None else self._resolve_value(instruction.value)
+            self._bind_value(result.name, result, bound_values)
+            return SSAMethodResultNew(result, self._resolve_value(instruction.receiver), value)
+        if isinstance(instruction, IRMethodResultReceiver):
+            result = self._define_value(instruction.result)
+            self._bind_value(result.name, result, bound_values)
+            return SSAMethodResultReceiver(result, self._resolve_value(instruction.method_result))
+        if isinstance(instruction, IRMethodResultValue):
+            result = self._define_value(instruction.result)
+            self._bind_value(result.name, result, bound_values)
+            return SSAMethodResultValue(result, self._resolve_value(instruction.method_result))
 
         if isinstance(instruction, IRArrayNew):
             result = self._define_value(instruction.result)
