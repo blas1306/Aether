@@ -35,15 +35,18 @@ arquitectura, no capacidades solicitadas directamente por un programa.
 
 ## Perfiles actuales
 
-La versión actual del perfil es `3`. La versión `2` promovió `modules` e
-`imports` de `UNSUPPORTED` a `PARTIAL`; la versión `3` promueve `scalar-math`
-de `UNSUPPORTED` a `PARTIAL` en LLVM/native.
+La versión actual del perfil es `4`. La versión `2` promovió `modules` e
+`imports` de `UNSUPPORTED` a `PARTIAL`; la versión `3` promovió `scalar-math`
+de `UNSUPPORTED` a `PARTIAL` en LLVM/native; la versión `4` incorpora el
+subconjunto de callables top-level tipados y sin captura en ambos backends.
 
 El perfil AST representa el intérprete de referencia. Incluye módulos,
 imports, classes, interfaces, enums, input, errores y matemática escalar. Las
-funciones como valores son parciales: solo están cubiertas las funciones de
-expresión y el hook de referencias usado por `Plots`; Aether aún no posee un
-tipo callable general.
+funciones como valores son `PARTIAL`: el tipo estructural `R(P1, P2, ...)`
+cubre referencias a funciones top-level de usuario sin captura, variables,
+parámetros, `phi` y llamadas indirectas con compatibilidad exacta. Las
+funciones de expresión y el hook legado de `Plots` siguen siendo subconjuntos
+solo AST y no se confunden con el callable tipado.
 
 El perfil LLVM/native representa el recorrido completo
 AST→IR→SSA→LLVM→clang. Módulos e imports están en `PARTIAL`: compilan funciones,
@@ -53,10 +56,16 @@ resueltos por el frontend. Globals/constantes y statements ejecutables en un
 módulo importado se rechazan temprano porque el IR aún no modela storage ni
 inicialización de módulo. El núcleo matemático real consolidado (`int`/`double`)
 y `Math.pi` compila; los builtins complejos experimentales se detectan y se
-rechazan, por lo que `scalar-math` es `PARTIAL`. Callables, classes, interfaces,
-enums, input y errores siguen no soportados. Strings, primitivos, arithmetic,
-structs y colecciones quedan parciales porque sus subconjuntos compilables son
-reales pero no cubren toda la superficie AST.
+rechazan, por lo que `scalar-math` es `PARTIAL`. `function-values` también es
+`PARTIAL`: referencias a funciones top-level definidas por el usuario se
+bajan a punteros LLVM tipados y las llamadas indirectas conservan efectos
+desconocidos. Funciona con imports, aliases, parámetros primitivos, `void` y
+structs por valor compatibles con el ABI actual. No incluye closures, lambdas,
+captura, métodos enlazados, builtins como valores, funciones de expresión,
+retorno de callables ni funciones genéricas no especializadas. Classes,
+interfaces, enums, input y errores siguen no soportados. Strings, primitivos,
+arithmetic, structs y colecciones quedan parciales porque sus subconjuntos
+compilables son reales pero no cubren toda la superficie AST.
 Archivos y argumentos del proceso están no soportados en ambos perfiles porque
 todavía no son APIs válidas del lenguaje.
 

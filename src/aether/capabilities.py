@@ -12,6 +12,7 @@ from .types import (
     ArrayType,
     ClassType,
     EnumType,
+    FunctionType,
     InterfaceType,
     ListType,
     MatrixType,
@@ -30,7 +31,7 @@ if TYPE_CHECKING:
     from .pipeline import TypedProgram
 
 
-CAPABILITY_PROFILE_VERSION = "3"
+CAPABILITY_PROFILE_VERSION = "4"
 
 
 class BackendIdentity(str, Enum):
@@ -144,7 +145,10 @@ CAPABILITY_CATALOG: Mapping[Capability, CapabilityDefinition] = MappingProxyType
             _definition(Capability.INTEGER_SAFETY, "Checked i32 arithmetic and division."),
             _definition(Capability.FUNCTIONS, "Typed functions, parameters, calls, and recursion."),
             _definition(Capability.VOID_FUNCTIONS, "Functions and calls returning void."),
-            _definition(Capability.FUNCTION_VALUES, "Expression functions and function references used as values."),
+            _definition(
+                Capability.FUNCTION_VALUES,
+                "Typed top-level callable values plus AST expression-function compatibility.",
+            ),
             _definition(Capability.RETURN, "Function return statements."),
             _definition(Capability.IF, "Conditional control flow."),
             _definition(Capability.WHILE, "While loops."),
@@ -233,7 +237,6 @@ _NATIVE_COMPLETE = {
     Capability.CONTINUE,
 }
 _NATIVE_UNSUPPORTED = {
-    Capability.FUNCTION_VALUES,
     Capability.INPUT,
     Capability.PROCESS_ARGUMENTS,
     Capability.CLASSES,
@@ -693,6 +696,16 @@ class _CapabilityDetector:
         return visible_name
 
     def _record_type(self, type_name: AetherType | None, node: object) -> None:
+        if isinstance(type_name, FunctionType):
+            self._record(
+                Capability.FUNCTION_VALUES,
+                node,
+                detail="typed capture-free top-level callable",
+            )
+            for parameter_type in type_name.parameter_types:
+                self._record_type(parameter_type, node)
+            self._record_type(type_name.return_type, node)
+            return
         if type_name is None:
             return
         if isinstance(type_name, ArrayType):

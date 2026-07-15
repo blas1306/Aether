@@ -2065,6 +2065,49 @@ Rules:
 - Duplicate parameter names are not allowed.
 - Duplicate global function names are not allowed in v0.
 
+### Typed top-level callables
+
+A capture-free block function may be used as a value when its exact structural
+signature is known. Callable types use the return-type-first spelling already
+used by declarations:
+
+```aether
+double square(double x) { return x * x; }
+
+double apply(double(double) operation, double value) {
+    return operation(value);
+}
+
+int main() {
+    double(double) saved = square;
+    return int(apply(saved, 4.0));
+}
+```
+
+The textual form is `ReturnType(ParameterType, ...)`; therefore `void()` is a
+zero-argument procedure, `double(double)` maps one `double` to `double`, and
+`boolean(int, double)` takes two ordered parameters. Type aliases may name a
+callable. Compatibility is exact: parameter count, each parameter type in
+order, and return type must all match. Callable signatures do not apply the
+ordinary numeric widening rules.
+
+Callable values may flow through local variables, parameters and control-flow
+merges. They may refer to a visible user-defined top-level block function in
+the same module or through a full/selective import and alias. A local variable
+shadows a function name. Duplicate function names are already rejected, so v0
+has no overload set or ambiguous-overload selection rule.
+
+This first representation contains only the resolved function identity and
+signature; it has no captured environment. LLVM/native represents it as a
+typed function pointer and performs an indirect call with the existing
+parameter/return ABI, including `void` and supported structs by value.
+
+The following remain unsupported: callable return types, closures, lambdas,
+anonymous or nested function values, capture, bound instance methods,
+expression functions as values, builtin functions as values, partial
+application, variadic callables, and unspecialized generic functions. A
+top-level typed wrapper may be used when a builtin needs to be passed.
+
 Expression functions are available for compact mathematical definitions:
 
 ```aether

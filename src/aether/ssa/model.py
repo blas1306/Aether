@@ -99,6 +99,19 @@ class SSACall(SSAInstruction):
 
 
 @dataclass(frozen=True)
+class SSAFunctionRef(SSAInstruction):
+    result: SSAValue
+    function: str
+
+
+@dataclass(frozen=True)
+class SSACallIndirect(UnknownCallMixin, SSAInstruction):
+    callee: SSAValue
+    arguments: tuple[SSAValue, ...] = ()
+    result: SSAValue | None = None
+
+
+@dataclass(frozen=True)
 class SSAPrint(SideEffectMixin, SSAInstruction):
     value: SSAValue
     newline: bool = False

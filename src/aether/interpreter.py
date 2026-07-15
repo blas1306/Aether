@@ -29,6 +29,7 @@ from .types import (
     ClassType,
     EnumType,
     EnumValue,
+    FunctionType,
     InterfaceType,
     AetherRange,
     AetherValue,
@@ -98,8 +99,29 @@ class Function:
 @dataclass(frozen=True)
 class FunctionReference:
     name: str
+    signature: FunctionType
+    function: Function
+    interpreter: "Interpreter"
+    environment: None = None
+
+    @property
+    def arity(self) -> int:
+        return len(self.signature.parameter_types)
+
+    def call(self, args: list[AetherValue]) -> AetherValue:
+        return self.interpreter._call_function(self.name, self.function, args)
+
+
+@dataclass(frozen=True)
+class _PlotsFunctionReference:
+    """Legacy AST-only adapter; it is intentionally not a typed callable value."""
+
+    name: str
     arity: int
-    call: Callable[[list[AetherValue]], AetherValue]
+    callback: Callable[[list[AetherValue]], AetherValue]
+
+    def call(self, args: list[AetherValue]) -> AetherValue:
+        return self.callback(args)
 
 
 @dataclass
@@ -653,6 +675,8 @@ class Interpreter:
             try:
                 return env.get(expression.name)
             except AetherRuntimeError as exc:
+                if env.get_function(expression.name) is not None:
+                    return self._function_reference_value(expression.name, env)
                 field_value = self._implicit_method_field(expression.name, env)
                 if field_value is not None:
                     return field_value
@@ -738,6 +762,8 @@ class Interpreter:
             constant_root = _field_access_root_name(expression)
             canonical_member = self._resolve_module_member(constant_name) if constant_name is not None else None
             if canonical_member is not None:
+                if env.get_function(canonical_member) is not None:
+                    return self._function_reference_value(canonical_member, env)
                 value = self.qualified_values.get(canonical_member)
                 if value is not None:
                     return value
@@ -1269,6 +1295,28 @@ class Interpreter:
         return divmod(offset, cols)
 
     def _evaluate_call(self, expression: ast.CallExpression, env: Environment) -> AetherValue:
+        indirect = env.lookup(expression.callee) if "." not in expression.callee else None
+        if indirect is not None:
+            if not isinstance(indirect.value, FunctionReference) or not isinstance(
+                indirect.type_name, FunctionType
+            ):
+                raise AetherRuntimeError(
+                    f"Value '{expression.callee}' of type '{type_to_string(indirect.type_name)}' is not callable."
+                )
+            if expression.keyword_arguments:
+                raise AetherRuntimeError("Indirect calls do not accept keyword arguments.")
+            if len(expression.arguments) != indirect.value.arity:
+                raise AetherRuntimeError(
+                    f"Callable '{expression.callee}' expects {indirect.value.arity} arguments "
+                    f"but got {len(expression.arguments)}."
+                )
+            args = [
+                self._evaluate_with_expected_type(argument, env, parameter_type)
+                for argument, parameter_type in zip(
+                    expression.arguments, indirect.value.signature.parameter_types
+                )
+            ]
+            return indirect.value.call(args)
         canonical_callee = self._resolve_module_member(expression.callee)
         builtin_name = self.builtin_aliases.get(expression.callee, canonical_callee or expression.callee)
         builtin_is_visible = "." not in expression.callee or canonical_callee is not None
@@ -1555,10 +1603,10 @@ class Interpreter:
     def _evaluate_builtin_argument(self, expression: ast.Expression, env: Environment, builtin_name: str) -> AetherValue:
         if builtin_name.startswith("Plots.") and isinstance(expression, ast.Identifier):
             if env.lookup(expression.name) is None and env.get_function(expression.name) is not None:
-                return self._function_reference_value(expression.name, env)
+                return self._plots_function_reference_value(expression.name, env)
         return self._evaluate(expression, env)
 
-    def _function_reference_value(self, name: str, env: Environment) -> AetherValue:
+    def _plots_function_reference_value(self, name: str, env: Environment) -> AetherValue:
         function = env.get_function(name)
         if function is None:
             raise AetherRuntimeError(f"Undefined function '{name}'.")
@@ -1566,7 +1614,31 @@ class Interpreter:
         def call(args: list[AetherValue]) -> AetherValue:
             return self._call_user_function(name, args, env)
 
-        return AetherValue("function", FunctionReference(name, len(function.declaration.parameters), call))
+        return AetherValue(
+            "function",
+            _PlotsFunctionReference(name, len(function.declaration.parameters), call),
+        )
+
+    def _function_reference_value(self, name: str, env: Environment) -> AetherValue:
+        function = env.get_function(name)
+        if function is None:
+            raise AetherRuntimeError(f"Undefined function '{name}'.")
+        declaration = function.declaration
+        if not isinstance(declaration, ast.FunctionDeclaration):
+            raise AetherRuntimeError(
+                f"Function '{name}' has no concrete signature and cannot be used as a callable value."
+            )
+        signature = FunctionType(
+            tuple(self._resolve_type_aliases(parameter.type_name) for parameter in declaration.parameters),
+            self._resolve_type_aliases(declaration.return_type),
+        )
+        canonical_name = self.imported_symbol_origins.get(
+            name, self._resolve_module_member(name) or name
+        )
+        return AetherValue(
+            signature,
+            FunctionReference(canonical_name, signature, function, self),
+        )
 
     def _call(
         self,
@@ -1591,6 +1663,9 @@ class Interpreter:
         function = env.get_function(callee)
         if function is None:
             raise AetherRuntimeError(f"Undefined function '{callee}'.")
+        return self._call_function(callee, function, args)
+
+    def _call_function(self, callee: str, function: Function, args: list[AetherValue]) -> AetherValue:
         declaration = function.declaration
         if len(args) != len(declaration.parameters):
             raise AetherRuntimeError(
@@ -2139,6 +2214,18 @@ class Interpreter:
             return NullableType(self._resolve_type_aliases(type_name.base_type, resolving))
         if isinstance(type_name, TupleType):
             return TupleType(tuple(self._resolve_type_aliases(element, resolving) for element in type_name.element_types))
+        if isinstance(type_name, FunctionType):
+            return FunctionType(
+                tuple(
+                    self._resolve_type_aliases(element, resolving)
+                    for element in type_name.parameter_types
+                ),
+                (
+                    "void"
+                    if type_name.return_type == "void"
+                    else self._resolve_type_aliases(type_name.return_type, resolving)
+                ),
+            )
         if isinstance(type_name, MatrixType):
             element_type = self._resolve_vector_matrix_element_type(type_name.element_type, resolving)
             return MatrixType(element_type, type_name.rows, type_name.cols, type_name.vector)

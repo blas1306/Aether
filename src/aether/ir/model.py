@@ -113,6 +113,19 @@ class IRCall(IRInstruction):
 
 
 @dataclass(frozen=True)
+class IRFunctionRef(IRInstruction):
+    result: IRValue
+    function: str
+
+
+@dataclass(frozen=True)
+class IRCallIndirect(UnknownCallMixin, IRInstruction):
+    callee: IRValue
+    arguments: tuple[IRValue, ...] = ()
+    result: IRValue | None = None
+
+
+@dataclass(frozen=True)
 class IRPrint(SideEffectMixin, IRInstruction):
     value: IRValue
     newline: bool = False

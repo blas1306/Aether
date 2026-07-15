@@ -11,9 +11,11 @@ from aether.ir.model import (
     IRBranch,
     IRCast,
     IRCall,
+    IRCallIndirect,
     IRCompareOp,
     IRConst,
     IRFunction,
+    IRFunctionRef,
     IRInstruction,
     IRJump,
     IRListGet,
@@ -177,6 +179,10 @@ class DeadCodeEliminator:
             return (instruction.value,)
         if isinstance(instruction, IRCall):
             return instruction.arguments
+        if isinstance(instruction, IRFunctionRef):
+            return ()
+        if isinstance(instruction, IRCallIndirect):
+            return (instruction.callee, *instruction.arguments)
         if isinstance(instruction, IRPrint):
             return (instruction.value,)
         if isinstance(instruction, IRStructNew):

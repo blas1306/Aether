@@ -11,6 +11,7 @@ from aether.ssa.model import (
     SSABranch,
     SSACast,
     SSACall,
+    SSACallIndirect,
     SSACompareOp,
     SSAConst,
     SSAFunction,
@@ -255,6 +256,25 @@ class TrivialPhiEliminator:
                     instruction.result,
                     instruction.builtin,
                 ),
+                rewritten_uses,
+            )
+
+        if isinstance(instruction, SSACallIndirect):
+            callee, callee_rewritten = self._rewrite_value(
+                instruction.callee, replacements
+            )
+            arguments = []
+            rewritten_uses = int(callee_rewritten)
+            for argument in instruction.arguments:
+                rewritten_argument, rewritten = self._rewrite_value(
+                    argument, replacements
+                )
+                arguments.append(rewritten_argument)
+                rewritten_uses += int(rewritten)
+            if rewritten_uses == 0:
+                return instruction, 0
+            return (
+                SSACallIndirect(callee, tuple(arguments), instruction.result),
                 rewritten_uses,
             )
 

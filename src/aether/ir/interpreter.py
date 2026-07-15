@@ -29,9 +29,11 @@ from .model import (
     IRBranch,
     IRCast,
     IRCall,
+    IRCallIndirect,
     IRCompareOp,
     IRConst,
     IRFunction,
+    IRFunctionRef,
     IRInstruction,
     IRJump,
     IRListGet,
@@ -108,6 +110,11 @@ class IRExecutionError(RuntimeError):
 class _Frame:
     values: dict[IRValue, Any] = field(default_factory=dict)
     slots: dict[IRValue, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class _IRFunctionReference:
+    function: IRFunction
 
 
 class IRInterpreter:
@@ -312,6 +319,27 @@ class IRInterpreter:
                     raise IRExecutionError(str(exc)) from exc
             else:
                 result = self.call(instruction.function, arguments)
+            if instruction.result is not None:
+                frame.values[instruction.result] = result
+            return False, None, None
+
+        if isinstance(instruction, IRFunctionRef):
+            function = self._functions.get(instruction.function)
+            if function is None:
+                raise IRExecutionError(
+                    f"IR function reference '{instruction.function}' does not exist"
+                )
+            frame.values[instruction.result] = _IRFunctionReference(function)
+            return False, None, None
+
+        if isinstance(instruction, IRCallIndirect):
+            reference = self._value(instruction.callee, frame)
+            if not isinstance(reference, _IRFunctionReference):
+                raise IRExecutionError("IR indirect call callee is not a function reference")
+            arguments = [
+                self._value(argument, frame) for argument in instruction.arguments
+            ]
+            result = self.call(reference.function.name, arguments)
             if instruction.result is not None:
                 frame.values[instruction.result] = result
             return False, None, None

@@ -13,6 +13,7 @@ from aether.ir.types import (
     DoubleType,
     EnumType,
     FloatType,
+    FunctionType,
     IntType,
     InterfaceType,
     IRType,
@@ -38,9 +39,11 @@ from .model import (
     SSABranch,
     SSACast,
     SSACall,
+    SSACallIndirect,
     SSACompareOp,
     SSAConst,
     SSAFunction,
+    SSAFunctionRef,
     SSAInstruction,
     SSAJump,
     SSAListGet,
@@ -332,6 +335,25 @@ class SSAVerifier:
 
             if isinstance(instruction, SSACall):
                 self._verify_call(instruction, value_types)
+                continue
+
+            if isinstance(instruction, SSAFunctionRef):
+                callee = self._functions.get(instruction.function)
+                if callee is None:
+                    self._fail(f"Reference to undefined function '{instruction.function}'")
+                expected = FunctionType(
+                    tuple(parameter.type for parameter in callee.parameters),
+                    callee.return_type,
+                )
+                self._require_type(
+                    instruction.result.type,
+                    expected,
+                    f"Function reference '{instruction.function}' type mismatch",
+                )
+                continue
+
+            if isinstance(instruction, SSACallIndirect):
+                self._verify_indirect_call(instruction, value_types)
                 continue
 
             if isinstance(instruction, SSAPrint):
@@ -672,6 +694,43 @@ class SSAVerifier:
             self._fail(
                 f"Call result type mismatch: expected {callee.return_type}, "
                 f"got {instruction.result.type}"
+            )
+
+    def _verify_indirect_call(
+        self,
+        instruction: SSACallIndirect,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.callee, value_types)
+        if not isinstance(instruction.callee.type, FunctionType):
+            self._fail(f"Indirect call requires callable callee, got {instruction.callee.type}")
+        signature = instruction.callee.type
+        if len(instruction.arguments) != len(signature.parameter_types):
+            self._fail(
+                f"Indirect call expects {len(signature.parameter_types)} arguments, "
+                f"got {len(instruction.arguments)}"
+            )
+        for index, (argument, parameter_type) in enumerate(
+            zip(instruction.arguments, signature.parameter_types), start=1
+        ):
+            self._require_defined(argument, value_types)
+            self._require_type(
+                argument.type,
+                parameter_type,
+                f"Indirect call argument {index} type mismatch",
+            )
+        if isinstance(signature.return_type, VoidType):
+            if instruction.result is not None:
+                self._fail("Indirect call to void callable cannot produce a value")
+        elif instruction.result is None:
+            self._fail(
+                f"Indirect call must produce a result of type {signature.return_type}"
+            )
+        else:
+            self._require_type(
+                instruction.result.type,
+                signature.return_type,
+                "Indirect call result type mismatch",
             )
 
     def _verify_array_new(
@@ -1749,9 +1808,11 @@ class SSAVerifier:
 
     @staticmethod
     def _instruction_result(instruction: SSAInstruction) -> SSAValue | None:
-        if isinstance(instruction, (SSAConst, SSABinaryOp, SSAUnaryOp, SSACompareOp, SSACast, SSAPhi)):
+        if isinstance(instruction, (SSAConst, SSABinaryOp, SSAUnaryOp, SSACompareOp, SSACast, SSAPhi, SSAFunctionRef)):
             return instruction.result
         if isinstance(instruction, SSACall):
+            return instruction.result
+        if isinstance(instruction, SSACallIndirect):
             return instruction.result
         if isinstance(
             instruction,
@@ -1837,6 +1898,7 @@ class SSAVerifier:
                 ClassRefType,
                 InterfaceType,
                 EnumType,
+                FunctionType,
             ),
         ):
             return True

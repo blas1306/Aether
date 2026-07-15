@@ -14,9 +14,11 @@ from .model import (
     IRBranch,
     IRCast,
     IRCall,
+    IRCallIndirect,
     IRCompareOp,
     IRConst,
     IRFunction,
+    IRFunctionRef,
     IRInstruction,
     IRJump,
     IRListGet,
@@ -76,6 +78,7 @@ from .types import (
     DoubleType,
     EnumType,
     FloatType,
+    FunctionType,
     IntType,
     InterfaceType,
     IRType,
@@ -399,6 +402,27 @@ class IRVerifier:
                 return state
             return self._define_value(state, instruction.result)
 
+        if isinstance(instruction, IRFunctionRef):
+            callee = self._functions.get(instruction.function)
+            if callee is None:
+                self._fail(f"Reference to undefined function '{instruction.function}'")
+            expected = FunctionType(
+                tuple(parameter.type for parameter in callee.parameters),
+                callee.return_type,
+            )
+            self._require_type(
+                instruction.result.type,
+                expected,
+                f"Function reference '{instruction.function}' type mismatch",
+            )
+            return self._define_value(state, instruction.result)
+
+        if isinstance(instruction, IRCallIndirect):
+            self._verify_indirect_call(instruction, state, value_types)
+            if instruction.result is None:
+                return state
+            return self._define_value(state, instruction.result)
+
         if isinstance(instruction, IRPrint):
             self._require_defined(instruction.value, state, value_types)
             if not isinstance(
@@ -714,6 +738,44 @@ class IRVerifier:
             self._fail(
                 f"Call result type mismatch: expected {callee.return_type}, "
                 f"got {instruction.result.type}"
+            )
+
+    def _verify_indirect_call(
+        self,
+        instruction: IRCallIndirect,
+        state: _State,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.callee, state, value_types)
+        if not isinstance(instruction.callee.type, FunctionType):
+            self._fail(f"Indirect call requires callable callee, got {instruction.callee.type}")
+        signature = instruction.callee.type
+        if len(instruction.arguments) != len(signature.parameter_types):
+            self._fail(
+                f"Indirect call expects {len(signature.parameter_types)} arguments, "
+                f"got {len(instruction.arguments)}"
+            )
+        for index, (argument, parameter_type) in enumerate(
+            zip(instruction.arguments, signature.parameter_types), start=1
+        ):
+            self._require_defined(argument, state, value_types)
+            self._require_type(
+                argument.type,
+                parameter_type,
+                f"Indirect call argument {index} type mismatch",
+            )
+        if isinstance(signature.return_type, VoidType):
+            if instruction.result is not None:
+                self._fail("Indirect call to void callable cannot produce a value")
+        elif instruction.result is None:
+            self._fail(
+                f"Indirect call must produce a result of type {signature.return_type}"
+            )
+        else:
+            self._require_type(
+                instruction.result.type,
+                signature.return_type,
+                "Indirect call result type mismatch",
             )
 
     def _verify_array_new(
@@ -1708,9 +1770,11 @@ class IRVerifier:
 
     @staticmethod
     def _instruction_result(instruction: IRInstruction) -> IRValue | None:
-        if isinstance(instruction, (IRConst, IRLoad, IRBinaryOp, IRUnaryOp, IRCompareOp, IRCast)):
+        if isinstance(instruction, (IRConst, IRLoad, IRBinaryOp, IRUnaryOp, IRCompareOp, IRCast, IRFunctionRef)):
             return instruction.result
         if isinstance(instruction, IRCall):
+            return instruction.result
+        if isinstance(instruction, IRCallIndirect):
             return instruction.result
         if isinstance(
             instruction,
@@ -1794,6 +1858,7 @@ class IRVerifier:
                 ClassRefType,
                 InterfaceType,
                 EnumType,
+                FunctionType,
             ),
         ):
             return True

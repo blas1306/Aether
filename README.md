@@ -61,6 +61,9 @@ congelada, seguridad para producción ni v1 terminada.
   sigue en AST;
 - casts y `%`: native cubre `int <-> double` y remainder entero, no toda la
   superficie aceptada por el frontend;
+- callables: AST/native cubren referencias a funciones top-level de usuario
+  sin captura con firma exacta; faltan closures, lambdas, métodos enlazados,
+  builtins como valores y retorno de callables;
 - CLI/tooling: el CLI es funcional, pero el backend LLVM predeterminado cubre
   menos lenguaje que AST; LSP e IntelliJ son todavía incrementales;
 - niveles `-O`: existen para `--emit-ir`; `-O2` actualmente equivale a `-O1`.
@@ -79,7 +82,6 @@ compilación nativa completa.
 
 ### Planeado
 
-- callables tipados o funciones como parámetros;
 - módulos/imports y tipos de referencia en native;
 - runtime string, input native, archivos y argumentos del proceso;
 - módulo `testing` y una stdlib Aether distribuible;
@@ -240,9 +242,9 @@ parte de `Math.LinearAlgebra` son todavía AST-only.
 
 [`examples/numerical_methods/`](examples/numerical_methods/) contiene
 bisección, Newton-Raphson, secante, trapecios y Simpson con módulos,
-`RootResult`, tolerancia, límites de iteración y validaciones. Como Aether no
-tiene tipos función generales, usa una interfaz `ScalarFunction`; esa solución
-es reusable pero hoy solo AST.
+`RootResult`, tolerancia, límites de iteración y validaciones. Usa el alias
+callable `double(double)` y el mismo programa multi-módulo se valida en AST y
+LLVM/native; no necesita ya la antigua interfaz `ScalarFunction`.
 
 ```bash
 aether --backend=ast examples/numerical_methods/main.ae

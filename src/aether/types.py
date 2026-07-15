@@ -295,6 +295,43 @@ class ClassType:
         return hash(("Class", self.name))
 
 
+@dataclass(frozen=True, eq=False)
+class FunctionType:
+    """Structural type of a capture-free top-level function reference."""
+
+    parameter_types: tuple["AetherType", ...]
+    return_type: "AetherType"
+
+    def __post_init__(self) -> None:
+        for parameter_type in self.parameter_types:
+            if parameter_type == "void" or not (
+                isinstance(parameter_type, str) or is_known_type(parameter_type)
+            ):
+                raise AetherTypeError(
+                    f"Unknown callable parameter type '{type_to_string(parameter_type)}'."
+                )
+        if self.return_type != "void" and not (
+            isinstance(self.return_type, str) or is_known_type(self.return_type)
+        ):
+            raise AetherTypeError(
+                f"Unknown callable return type '{type_to_string(self.return_type)}'."
+            )
+
+    def __str__(self) -> str:
+        parameters = ", ".join(type_to_string(item) for item in self.parameter_types)
+        return f"{type_to_string(self.return_type)}({parameters})"
+
+    def __eq__(self, other: object) -> bool:
+        return (
+            isinstance(other, FunctionType)
+            and self.parameter_types == other.parameter_types
+            and self.return_type == other.return_type
+        )
+
+    def __hash__(self) -> int:
+        return hash(("Function", self.parameter_types, self.return_type))
+
+
 AetherType = (
     str
     | ArrayType
@@ -309,6 +346,7 @@ AetherType = (
     | EnumType
     | InterfaceType
     | ClassType
+    | FunctionType
 )
 NULL_TYPE = NullType()
 
@@ -390,6 +428,15 @@ def type_to_string(type_name: AetherType) -> str:
 
 
 def is_known_type(type_name: AetherType) -> bool:
+    if isinstance(type_name, FunctionType):
+        return all(
+            item != "void" and (isinstance(item, str) or is_known_type(item))
+            for item in type_name.parameter_types
+        ) and (
+            type_name.return_type == "void"
+            or isinstance(type_name.return_type, str)
+            or is_known_type(type_name.return_type)
+        )
     if isinstance(type_name, NullableType):
         return is_known_type(type_name.base_type)
     if isinstance(type_name, NullType):
@@ -515,6 +562,8 @@ def matrix_row_type(type_name: AetherType) -> ArrayType:
 
 
 def can_implicitly_convert(from_type: AetherType, to_type: AetherType) -> bool:
+    if isinstance(from_type, FunctionType) or isinstance(to_type, FunctionType):
+        return from_type == to_type
     if isinstance(to_type, NullableType):
         if isinstance(from_type, NullType):
             return True

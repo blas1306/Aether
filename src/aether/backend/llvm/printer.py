@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import re
 from typing import Any, Callable
 
-from aether.ir.types import ArrayType, BoolType, DoubleType, IntType, ListType, MatrixType, MethodResultType, StringType, StructType, VectorType, VoidType
+from aether.ir.types import ArrayType, BoolType, DoubleType, FunctionType, IntType, ListType, MatrixType, MethodResultType, StringType, StructType, VectorType, VoidType
 from aether.ssa.model import (
     SSAArrayGet,
     SSAArrayLength,
@@ -16,9 +16,11 @@ from aether.ssa.model import (
     SSABranch,
     SSACast,
     SSACall,
+    SSACallIndirect,
     SSACompareOp,
     SSAConst,
     SSAFunction,
+    SSAFunctionRef,
     SSAInstruction,
     SSAJump,
     SSAListGet,
@@ -276,6 +278,7 @@ class LLVMPrinter:
 
     def _print_function(self, function: SSAFunction) -> str:
         self._constants: dict[str, str] = {}
+        self._function_references: dict[str, str] = {}
         self._values: dict[str, str] = {
             self._key(parameter): self._parameter_name(parameter)
             for parameter in function.parameters
@@ -305,6 +308,11 @@ class LLVMPrinter:
             for instruction in block.instructions:
                 if isinstance(instruction, SSAConst):
                     self._record_const(instruction)
+                    continue
+                if isinstance(instruction, SSAFunctionRef):
+                    self._function_references[self._key(instruction.result)] = self._global_name(
+                        instruction.function
+                    )
                     continue
 
                 result = self._instruction_result(instruction)
@@ -345,6 +353,13 @@ class LLVMPrinter:
             return self._print_jump(instruction)
         if isinstance(instruction, SSACall):
             return self._print_call(instruction)
+        if isinstance(instruction, SSAFunctionRef):
+            self._function_references[self._key(instruction.result)] = self._global_name(
+                instruction.function
+            )
+            return None
+        if isinstance(instruction, SSACallIndirect):
+            return self._print_indirect_call(instruction)
         if isinstance(instruction, SSAPrint):
             return self._print_print(instruction)
         if isinstance(instruction, SSAStructNew):
@@ -453,6 +468,10 @@ class LLVMPrinter:
         if isinstance(instruction, SSABinaryOp | SSAUnaryOp | SSACompareOp | SSACast | SSAPhi):
             return instruction.result
         if isinstance(instruction, SSACall):
+            return instruction.result
+        if isinstance(instruction, SSAFunctionRef):
+            return instruction.result
+        if isinstance(instruction, SSACallIndirect):
             return instruction.result
         if isinstance(
             instruction,
@@ -868,6 +887,22 @@ class LLVMPrinter:
             raise LLVMBackendError(
                 "LLVM backend does not support assigning void call results"
             )
+        result = self._new_temp(instruction.result)
+        return f"{result} = call {return_type} {callee}({arguments})"
+
+    def _print_indirect_call(self, instruction: SSACallIndirect) -> str:
+        if not isinstance(instruction.callee.type, FunctionType):
+            raise LLVMBackendError("LLVM indirect call requires a callable callee")
+        arguments = ", ".join(
+            f"{llvm_type(argument.type)} {self._operand(argument)}"
+            for argument in instruction.arguments
+        )
+        callee = self._operand(instruction.callee)
+        return_type = llvm_type(instruction.callee.type.return_type)
+        if instruction.result is None:
+            return f"call {return_type} {callee}({arguments})"
+        if isinstance(instruction.result.type, VoidType):
+            raise LLVMBackendError("LLVM indirect call cannot assign a void result")
         result = self._new_temp(instruction.result)
         return f"{result} = call {return_type} {callee}({arguments})"
 
@@ -2931,6 +2966,8 @@ class LLVMPrinter:
         key = self._key(value)
         if key in self._constants:
             return self._constants[key]
+        if key in self._function_references:
+            return self._function_references[key]
         if key in self._values:
             return self._values[key]
         return self._local_name(value.name)

@@ -1,7 +1,7 @@
 # Numerical methods dogfood example
 
-This small multi-module program exercises Aether with reusable root-finding and
-quadrature algorithms:
+This multi-module program exercises reusable root-finding and quadrature
+algorithms written entirely in Aether:
 
 - bisection, Newton-Raphson, and secant methods;
 - trapezoid and Simpson integration;
@@ -9,34 +9,43 @@ quadrature algorithms:
 - tolerance and iteration limits;
 - invalid brackets, near-zero derivatives/denominators, and invalid Simpson
   subdivisions;
-- interfaces, structs by value, methods, imports, loops, exceptions, and
-  scalar mathematics.
+- typed top-level callables, structs by value, imports, loops, and real scalar
+  mathematics.
 
-Run it from the repository root:
+Run either backend from the repository root:
 
 ```bash
 aether --backend=ast examples/numerical_methods/main.ae
+aether --backend=llvm examples/numerical_methods/main.ae
 ```
 
-Every printed validation must end in `true`.
+Every printed validation must end in `true`, and both backends must produce the
+same twelve lines.
 
-## Why `ScalarFunction` is an interface
+## Callable API
 
-Aether currently has expression functions and ordinary typed functions, but it
-does not have a general function type that can be used for variables,
-parameters, or return values. Function references are only exposed through a
-special AST-interpreter path used by `Plots`. The example therefore models a
-callable scalar function with the existing `ScalarFunction.evaluate(double)`
-interface. This keeps the numerical algorithms reusable without adding a new
-language feature or hard-coding one equation into them.
+`Functions.ae` declares the structural alias:
 
-## Backend boundary
+```aether
+public alias ScalarCallable = double(double);
+```
 
-The example is intentionally still an AST-backend dogfood program. File
-imports and the consolidated real scalar-math builtins now lower through IR,
-SSA, and LLVM/native. The remaining blockers reported for this program are
-interfaces/interface dispatch, exceptions, and general string comparison.
-The numerical loops themselves use ordinary existing Aether syntax, but a
-complete native version must wait for those features (or for a first-class
-function design that replaces the interface). This is a known v1 blocker, not
-hidden by a second artificial implementation.
+The root solvers and integrators receive a `ScalarCallable` and invoke it
+directly. `main.ae` passes selectively imported functions from `Problems.ae`,
+so this example covers both callable aliases and cross-module symbol mangling.
+The old `ScalarFunction.evaluate(double)` interface workaround is no longer
+needed.
+
+Typed callables deliberately cover only capture-free user-defined top-level
+functions. A value such as `double(double)` is represented natively by an LLVM
+function pointer and has exact signature compatibility. Closures, lambdas,
+bound methods, builtin references, and returning callable values remain out of
+scope. A top-level wrapper can expose a builtin when needed.
+
+## Remaining error-model boundary
+
+Native `throw`/`try-catch` is still unsupported. To keep one honest program
+executable by both backends, invalid numerical inputs return the existing
+failure representation: root solvers return `RootResult(..., false)`, while an
+invalid integration interval count returns `0.0`. The last choice is only a
+dogfood sentinel; it is not proposed as the final numerical-library error API.

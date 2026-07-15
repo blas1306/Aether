@@ -4,7 +4,7 @@ from . import ast
 from .errors import AetherSyntaxError
 from .lexer import lex
 from .tokens import AETHER_TYPES, PRIMITIVE_TYPES, Token, TokenType
-from .types import AetherType, ArrayType, ListType, MatrixType, NULL_TYPE, NullableType, TupleType, VectorType
+from .types import AetherType, ArrayType, FunctionType, ListType, MatrixType, NULL_TYPE, NullableType, TupleType, VectorType
 
 
 STRING_ESCAPES = {'"': '"', "\\": "\\", "$": "$", "n": "\n", "t": "\t", "r": "\r"}
@@ -1080,7 +1080,7 @@ class Parser:
                 raise self._error(token, "'void' cannot be used as an array type.")
             if self._check(TokenType.QUESTION):
                 raise self._error(self._peek(), "'void' cannot be nullable.")
-            return "void"
+            return self._callable_type_suffix("void")
         return self._parse_type_annotation(message, allow_unknown_identifier=True)
 
     def _parse_type_annotation(self, message: str, *, allow_unknown_identifier: bool = True) -> AetherType:
@@ -1095,6 +1095,8 @@ class Parser:
             return self._nullable_suffix(TupleType(tuple(element_types)))
         token = self._consume_type(message, allow_unknown_identifier=allow_unknown_identifier)
         if token.lexeme == "void":
+            if self._check(TokenType.LEFT_PAREN):
+                return self._nullable_suffix(self._callable_type_suffix("void"))
             raise self._error(token, "'void' is only valid as a function return type.")
         if token.lexeme in {"Array", "List"}:
             element_type = "double"
@@ -1127,7 +1129,22 @@ class Parser:
         type_name: AetherType = token.lexeme
         if self._check(TokenType.LEFT_BRACKET):
             raise self._error(self._peek(), "Array type syntax 'T[]' is not public; use Array<T>.")
+        type_name = self._callable_type_suffix(type_name)
         return self._nullable_suffix(type_name)
+
+    def _callable_type_suffix(self, return_type: AetherType) -> AetherType:
+        if not self._match(TokenType.LEFT_PAREN):
+            return return_type
+        parameter_types: list[AetherType] = []
+        if not self._check(TokenType.RIGHT_PAREN):
+            while True:
+                parameter_types.append(
+                    self._parse_type_annotation("Expected callable parameter type.")
+                )
+                if not self._match(TokenType.COMMA):
+                    break
+        self._consume(TokenType.RIGHT_PAREN, "Expected ')' after callable parameter types.")
+        return FunctionType(tuple(parameter_types), return_type)
 
     def _nullable_suffix(self, type_name: AetherType) -> AetherType:
         if not self._match(TokenType.QUESTION):
@@ -1268,6 +1285,21 @@ class Parser:
                 cursor += 3
             else:
                 return None
+        if cursor < len(self.tokens) and self.tokens[cursor].type == TokenType.LEFT_PAREN:
+            cursor += 1
+            if cursor < len(self.tokens) and self.tokens[cursor].type == TokenType.RIGHT_PAREN:
+                cursor += 1
+            else:
+                while True:
+                    cursor = self._type_annotation_end_cursor(cursor)
+                    if cursor is None or cursor >= len(self.tokens):
+                        return None
+                    if self.tokens[cursor].type == TokenType.RIGHT_PAREN:
+                        cursor += 1
+                        break
+                    if self.tokens[cursor].type != TokenType.COMMA:
+                        return None
+                    cursor += 1
         if cursor < len(self.tokens) and self.tokens[cursor].type == TokenType.QUESTION:
             cursor += 1
         return cursor

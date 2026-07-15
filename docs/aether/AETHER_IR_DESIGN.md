@@ -498,10 +498,14 @@ The user-facing supported IR backend subset is:
 - simple user-defined function calls
 - the documented struct and collection subsets
 - combined multi-module declarations and cross-module calls
+- typed capture-free top-level function references and indirect calls
 
 The remaining broad exclusions include classes, interfaces, enums, exceptions,
-callable values, native module globals/initialization, JIT, Rust code
-generation, and the feature-specific gaps recorded in the capability profile.
+closures/lambdas/bound methods, native module globals/initialization, JIT, Rust
+code generation, and the feature-specific gaps recorded in the capability
+profile. Callable values are deliberately limited to user-defined top-level
+functions with an exact structural signature; the IR uses `function_ref` and
+`call_indirect` rather than an untyped address or string.
 IR/SSA and their verifier/optimizer paths are connected to LLVM/native; the IR
 interpreter remains a development backend with a narrower runtime surface.
 

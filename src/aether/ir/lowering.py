@@ -11,6 +11,7 @@ from ..scalar_math import NATIVE_SCALAR_MATH_FUNCTIONS, SCALAR_MATH_CONSTANTS
 from ..types import (
     AetherType,
     ArrayType as AetherArrayType,
+    FunctionType as AetherFunctionType,
     ListType as AetherListType,
     MatrixType as AetherMatrixType,
     VectorType as AetherVectorType,
@@ -26,9 +27,11 @@ from .model import (
     IRBranch,
     IRCast,
     IRCall,
+    IRCallIndirect,
     IRCompareOp,
     IRConst,
     IRFunction,
+    IRFunctionRef,
     IRJump,
     IRListGet,
     IRListCopy,
@@ -87,6 +90,7 @@ from .types import (
     ComplexType,
     DoubleType,
     FloatType,
+    FunctionType,
     IntType,
     IRType,
     ListType,
@@ -1218,6 +1222,12 @@ class IRLowerer:
             parameter = context.parameters.get(expression.name)
             if parameter is not None:
                 return parameter
+            signature = self._signatures.get(expression.name)
+            if signature is not None and not isinstance(signature.return_type, MethodResultType):
+                result_type = FunctionType(signature.parameters, signature.return_type)
+                result = context.temporary(result_type)
+                context.block.instructions.append(IRFunctionRef(result, expression.name))
+                return result
             if context.method_owner is not None:
                 field = context.method_owner.field(expression.name)
                 if field is not None:
@@ -1569,6 +1579,18 @@ class IRLowerer:
         if call.keyword_arguments:
             self._unsupported(call, "keyword arguments")
 
+        indirect_type: FunctionType | None = None
+        slot = context.locals.get(call.callee) if "." not in call.callee else None
+        parameter = context.parameters.get(call.callee) if "." not in call.callee else None
+        if slot is not None and isinstance(slot.type, FunctionType):
+            indirect_type = slot.type
+        elif parameter is not None and isinstance(parameter.type, FunctionType):
+            indirect_type = parameter.type
+        if indirect_type is not None:
+            return self._lower_indirect_call(
+                call, context, indirect_type, result_required=result_required
+            )
+
         builtin = self._canonical_builtin_name(call.callee)
         if builtin in NATIVE_SCALAR_MATH_FUNCTIONS:
             return self._lower_scalar_math_call(
@@ -1799,6 +1821,44 @@ class IRLowerer:
 
         result = context.temporary(signature.return_type)
         context.block.instructions.append(IRCall(call.callee, arguments, result))
+        return result
+
+    def _lower_indirect_call(
+        self,
+        call: ast.CallExpression,
+        context: _FunctionContext,
+        signature: FunctionType,
+        *,
+        result_required: bool,
+    ) -> IRValue | None:
+        callee = self._lower_expression(ast.Identifier(call.callee, call.line, call.column), context)
+        if callee.type != signature:
+            self._fail(f"Indirect callee '{call.callee}' lost its callable signature.", call)
+        if len(call.arguments) != len(signature.parameter_types):
+            self._fail(
+                f"Callable '{call.callee}' expects {len(signature.parameter_types)} arguments, "
+                f"got {len(call.arguments)}.",
+                call,
+            )
+        arguments = tuple(
+            self._lower_expression(argument, context, target_type=parameter_type)
+            for argument, parameter_type in zip(call.arguments, signature.parameter_types)
+        )
+        for index, (argument, parameter_type) in enumerate(
+            zip(arguments, signature.parameter_types), start=1
+        ):
+            self._require_same_type(
+                argument.type,
+                parameter_type,
+                f"argument {index} to indirect call '{call.callee}'",
+            )
+        if isinstance(signature.return_type, VoidType):
+            if result_required:
+                self._fail(f"IR backend cannot use void call '{call.callee}' as a value.", call)
+            context.block.instructions.append(IRCallIndirect(callee, arguments, None))
+            return None
+        result = context.temporary(signature.return_type)
+        context.block.instructions.append(IRCallIndirect(callee, arguments, result))
         return result
 
     def _lower_scalar_math_call(
@@ -2628,6 +2688,11 @@ class IRLowerer:
             return ArrayType(self._lower_type(type_name.element_type))
         if isinstance(type_name, AetherListType):
             return ListType(self._lower_type(type_name.element_type))
+        if isinstance(type_name, AetherFunctionType):
+            return FunctionType(
+                tuple(self._lower_type(item) for item in type_name.parameter_types),
+                self._lower_type(type_name.return_type),
+            )
         if isinstance(type_name, AetherVectorType):
             return VectorType(self._lower_type(type_name.element_type), type_name.orientation)
         if isinstance(type_name, AetherMatrixType):

@@ -11,6 +11,7 @@ from aether.ssa.model import (
     SSABranch,
     SSACast,
     SSACall,
+    SSACallIndirect,
     SSACompareOp,
     SSAConst,
     SSAFunction,
@@ -44,6 +45,12 @@ from aether.ssa.model import (
     SSAModule,
     SSAOuterProduct,
     SSAPrint,
+    SSAStructGet,
+    SSAStructNew,
+    SSAStructSet,
+    SSAMethodResultNew,
+    SSAMethodResultReceiver,
+    SSAMethodResultValue,
     SSAPhi,
     SSAReturn,
     SSAUnaryOp,
@@ -158,9 +165,36 @@ class DeadPhiEliminator:
         if isinstance(instruction, SSACall):
             used_values.update(instruction.arguments)
             return
+        if isinstance(instruction, SSACallIndirect):
+            used_values.add(instruction.callee)
+            used_values.update(instruction.arguments)
+            return
 
         if isinstance(instruction, SSAPrint):
             used_values.add(instruction.value)
+            return
+
+        if isinstance(instruction, SSAStructNew):
+            used_values.update(instruction.fields)
+            return
+
+        if isinstance(instruction, SSAStructGet):
+            used_values.add(instruction.struct)
+            return
+
+        if isinstance(instruction, SSAStructSet):
+            used_values.add(instruction.struct)
+            used_values.add(instruction.value)
+            return
+
+        if isinstance(instruction, SSAMethodResultNew):
+            used_values.add(instruction.receiver)
+            if instruction.value is not None:
+                used_values.add(instruction.value)
+            return
+
+        if isinstance(instruction, (SSAMethodResultReceiver, SSAMethodResultValue)):
+            used_values.add(instruction.method_result)
             return
 
         if isinstance(instruction, SSAArrayNew):

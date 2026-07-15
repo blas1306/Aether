@@ -14,6 +14,7 @@ from aether.ir.model import (
     IRBranch,
     IRCast,
     IRCall,
+    IRCallIndirect,
     IRCompareOp,
     IRConst,
     IRFunction,
@@ -265,6 +266,15 @@ class AlgebraicSimplifier:
         if isinstance(instruction, IRCall):
             return replace(
                 instruction,
+                arguments=tuple(
+                    self._resolve(argument, replacements)
+                    for argument in instruction.arguments
+                ),
+            )
+        if isinstance(instruction, IRCallIndirect):
+            return replace(
+                instruction,
+                callee=self._resolve(instruction.callee, replacements),
                 arguments=tuple(
                     self._resolve(argument, replacements)
                     for argument in instruction.arguments

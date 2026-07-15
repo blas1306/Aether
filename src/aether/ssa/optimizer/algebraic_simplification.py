@@ -14,6 +14,7 @@ from aether.ssa.model import (
     SSABranch,
     SSACast,
     SSACall,
+    SSACallIndirect,
     SSACompareOp,
     SSAConst,
     SSAFunction,
@@ -289,6 +290,15 @@ class SSAAlgebraicSimplifier:
                 ),
                 instruction.result,
                 instruction.builtin,
+            )
+        if isinstance(instruction, SSACallIndirect):
+            return SSACallIndirect(
+                self._resolve(instruction.callee, replacements),
+                tuple(
+                    self._resolve(argument, replacements)
+                    for argument in instruction.arguments
+                ),
+                instruction.result,
             )
 
         if isinstance(instruction, SSAPrint):

@@ -18,6 +18,7 @@ from aether.ssa.model import (
     SSABranch,
     SSACast,
     SSACall,
+    SSACallIndirect,
     SSACompareOp,
     SSAConst,
     SSAFunction,
@@ -445,6 +446,8 @@ class SCCPAnalyzer:
             return (instruction.condition,)
         if isinstance(instruction, SSACall):
             return instruction.arguments
+        if isinstance(instruction, SSACallIndirect):
+            return (instruction.callee, *instruction.arguments)
         if isinstance(instruction, SSAPrint):
             return (instruction.value,)
         if isinstance(instruction, SSAStructNew):

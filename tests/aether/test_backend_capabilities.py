@@ -44,7 +44,7 @@ def _required(source: str, *, source_root: Path | None = None):
 
 
 def test_profiles_are_versioned_identified_and_cover_the_canonical_catalog() -> None:
-    assert CAPABILITY_PROFILE_VERSION == "3"
+    assert CAPABILITY_PROFILE_VERSION == "4"
     assert AST_CAPABILITY_PROFILE.backend is BackendIdentity.AST
     assert NATIVE_CAPABILITY_PROFILE.backend is BackendIdentity.NATIVE
     assert AST_CAPABILITY_PROFILE.version == CAPABILITY_PROFILE_VERSION
@@ -219,25 +219,18 @@ def test_partial_string_capability_accepts_transport_but_rejects_interpolation()
     assert issue.requirement.detail == "interpolated string"
 
 
-def test_numerical_methods_example_passes_modules_and_reports_real_native_blockers(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_numerical_methods_example_is_accepted_by_native_profile() -> None:
     example = ROOT / "examples" / "numerical_methods"
     typed = _typed((example / "main.ae").read_text(encoding="utf-8"), source_root=example)
 
-    def fail_if_lowered(*_args, **_kwargs):
-        raise AssertionError("IR lowering must not run")
-
-    monkeypatch.setattr("aether.ir.lowering.IRLowerer.lower", fail_if_lowered)
-    with pytest.raises(BackendCapabilityError) as captured:
-        LLVMBuilder().emit_llvm(typed)
-
-    issues = captured.value.issues
+    issues = backend_capability_issues(typed, BackendIdentity.NATIVE)
     assert not any(issue.requirement.capability is Capability.MODULES for issue in issues)
     assert not any(issue.requirement.capability is Capability.IMPORTS for issue in issues)
-    assert any(issue.requirement.capability is Capability.INTERFACES for issue in issues)
-    assert any(issue.requirement.capability is Capability.ERROR_HANDLING for issue in issues)
+    assert not any(issue.requirement.capability is Capability.FUNCTION_VALUES for issue in issues)
+    assert not any(issue.requirement.capability is Capability.INTERFACES for issue in issues)
+    assert not any(issue.requirement.capability is Capability.ERROR_HANDLING for issue in issues)
     assert not any(issue.requirement.capability is Capability.SCALAR_MATH for issue in issues)
+    assert "call double %" in LLVMBuilder().emit_llvm(typed)
 
 
 def test_native_scalar_math_profile_accepts_consolidated_and_rejects_experimental_calls() -> None:

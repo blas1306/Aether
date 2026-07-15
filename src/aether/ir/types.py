@@ -47,6 +47,16 @@ class VoidType(IRType):
 
 
 @dataclass(frozen=True)
+class FunctionType(IRType):
+    parameter_types: tuple[IRType, ...]
+    return_type: IRType
+
+    def __str__(self) -> str:
+        parameters = ", ".join(str(item) for item in self.parameter_types)
+        return f"{self.return_type}({parameters})"
+
+
+@dataclass(frozen=True)
 class ComplexType(IRType):
     def __str__(self) -> str:
         return "complex"

@@ -14,9 +14,11 @@ from aether.ir.model import (
     IRBranch,
     IRCast,
     IRCall,
+    IRCallIndirect,
     IRCompareOp,
     IRConst,
     IRFunction,
+    IRFunctionRef,
     IRInstruction,
     IRJump,
     IRListGet,
@@ -77,9 +79,11 @@ from .model import (
     SSABranch,
     SSACast,
     SSACall,
+    SSACallIndirect,
     SSACompareOp,
     SSAConst,
     SSAFunction,
+    SSAFunctionRef,
     SSAInstruction,
     SSAJump,
     SSAListGet,
@@ -583,6 +587,25 @@ class SSABuilder:
             if instruction.result is not None:
                 result = self._define_value(instruction.result, state.value_map)
             return SSACall(instruction.function, arguments, result, instruction.builtin)
+
+        if isinstance(instruction, IRFunctionRef):
+            return SSAFunctionRef(
+                self._define_value(instruction.result, state.value_map),
+                instruction.function,
+            )
+
+        if isinstance(instruction, IRCallIndirect):
+            callee = self._resolve_value(instruction.callee, state.value_map)
+            arguments = tuple(
+                self._resolve_value(argument, state.value_map)
+                for argument in instruction.arguments
+            )
+            result = (
+                None
+                if instruction.result is None
+                else self._define_value(instruction.result, state.value_map)
+            )
+            return SSACallIndirect(callee, arguments, result)
 
         if isinstance(instruction, IRPrint):
             value = self._resolve_value(instruction.value, state.value_map)

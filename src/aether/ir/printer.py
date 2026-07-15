@@ -14,9 +14,11 @@ from .model import (
     IRBranch,
     IRCast,
     IRCall,
+    IRCallIndirect,
     IRCompareOp,
     IRConst,
     IRFunction,
+    IRFunctionRef,
     IRInstruction,
     IRJump,
     IRListGet,
@@ -136,6 +138,17 @@ class IRPrinter:
             arguments = ", ".join(self._value(argument) for argument in instruction.arguments)
             operation = "builtin" if instruction.builtin is not None else "call"
             call = f"{operation} {self._global_name(instruction.function)}({arguments})"
+            if instruction.result is None:
+                return call
+            return f"{self._typed_value(instruction.result)} = {call}"
+        if isinstance(instruction, IRFunctionRef):
+            return (
+                f"{self._typed_value(instruction.result)} = function_ref "
+                f"{self._global_name(instruction.function)}"
+            )
+        if isinstance(instruction, IRCallIndirect):
+            arguments = ", ".join(self._value(argument) for argument in instruction.arguments)
+            call = f"call_indirect {self._value(instruction.callee)}({arguments})"
             if instruction.result is None:
                 return call
             return f"{self._typed_value(instruction.result)} = {call}"

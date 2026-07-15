@@ -25,6 +25,7 @@ from .types import (
     ArrayType,
     ClassType,
     EnumType,
+    FunctionType,
     InterfaceType,
     ListType,
     MatrixType,
@@ -1583,6 +1584,12 @@ class TypeChecker:
         if self.global_scope.lookup(statement.name) is not None:
             raise AetherTypeError(f"Name '{statement.name}' is already defined as a variable.")
         return_type = self._resolve_type_aliases(statement.return_type, statement)
+        if isinstance(return_type, FunctionType):
+            raise AetherTypeError(
+                "Returning callable values is not supported yet.",
+                line=statement.line,
+                column=statement.column,
+            )
         if statement.name == "main":
             if return_type != "int":
                 raise AetherTypeError(
@@ -1801,6 +1808,9 @@ class TypeChecker:
                     return field_symbol.type_name
             symbol = scope.lookup(expression.name)
             if symbol is None:
+                function = self.functions.get(expression.name)
+                if function is not None:
+                    return self._function_reference_type(expression.name, function, expression)
                 constant_name = self.builtin_constant_aliases.get(expression.name, expression.name)
                 try:
                     return infer_builtin_constant_type(constant_name)
@@ -1904,6 +1914,9 @@ class TypeChecker:
             constant_root = _field_access_root_name(expression)
             canonical_member = self._resolve_module_member(constant_name) if constant_name is not None else None
             if canonical_member is not None:
+                function = self.qualified_functions.get(canonical_member)
+                if function is not None:
+                    return self._function_reference_type(canonical_member, function, expression)
                 variable = self.qualified_variables.get(canonical_member)
                 if variable is not None:
                     return variable.type_name
@@ -2183,6 +2196,9 @@ class TypeChecker:
         return component_type
 
     def _call_type(self, expression: ast.CallExpression, scope: Scope[VariableSymbol]) -> AetherType | None:
+        indirect_symbol = scope.lookup(expression.callee) if "." not in expression.callee else None
+        if indirect_symbol is not None:
+            return self._indirect_call_type(expression, indirect_symbol, scope)
         canonical_callee = self._resolve_module_member(expression.callee)
         builtin_name = self.builtin_aliases.get(expression.callee, canonical_callee or expression.callee)
         builtin_is_visible = "." not in expression.callee or canonical_callee is not None
@@ -2287,6 +2303,62 @@ class TypeChecker:
                         continue
                 self._raise_implicit_conversion_error(argument_type, parameter.type_name)
         return function.return_type
+
+    def _function_reference_type(
+        self,
+        name: str,
+        function: FunctionSymbol,
+        location: object,
+    ) -> FunctionType:
+        if function.return_type is UNKNOWN_TYPE or any(
+            parameter.type_name is UNKNOWN_TYPE for parameter in function.parameters
+        ):
+            raise AetherTypeError(
+                f"Function '{name}' has no concrete signature and cannot be used as a callable value.",
+                line=getattr(location, "line", None),
+                column=getattr(location, "column", None),
+            )
+        return FunctionType(
+            tuple(parameter.type_name for parameter in function.parameters),
+            function.return_type,
+        )
+
+    def _indirect_call_type(
+        self,
+        expression: ast.CallExpression,
+        symbol: VariableSymbol,
+        scope: Scope[VariableSymbol],
+    ) -> AetherType:
+        callable_type = symbol.type_name
+        if not isinstance(callable_type, FunctionType):
+            raise AetherTypeError(
+                f"Value '{expression.callee}' of type '{type_to_string(callable_type)}' is not callable.",
+                line=expression.line,
+                column=expression.column,
+            )
+        if expression.keyword_arguments:
+            raise AetherTypeError("Indirect calls do not accept keyword arguments.")
+        if len(expression.arguments) != len(callable_type.parameter_types):
+            raise AetherTypeError(
+                f"Callable '{expression.callee}' expects {len(callable_type.parameter_types)} arguments "
+                f"but got {len(expression.arguments)}.",
+                line=expression.line,
+                column=expression.column,
+                kind="arity",
+            )
+        for index, (argument, parameter_type) in enumerate(
+            zip(expression.arguments, callable_type.parameter_types), start=1
+        ):
+            argument_type = self._expression_type(argument, scope)
+            self._reject_void_value(argument_type, f"argument {index} to {expression.callee}(...)")
+            if argument_type is not UNKNOWN_TYPE and argument_type != parameter_type:
+                raise AetherTypeError(
+                    f"Argument {index} to callable '{expression.callee}' expects "
+                    f"'{type_to_string(parameter_type)}', got '{type_to_string(argument_type)}'.",
+                    line=expression.line,
+                    column=expression.column,
+                )
+        return callable_type.return_type
 
     def _resolve_module_member(self, visible_name: str | None) -> str | None:
         if visible_name is None:
@@ -2939,6 +3011,18 @@ class TypeChecker:
             return NullableType(self._resolve_type_aliases(type_name.base_type, location, resolving))
         if isinstance(type_name, TupleType):
             return TupleType(tuple(self._resolve_type_aliases(element, location, resolving) for element in type_name.element_types))
+        if isinstance(type_name, FunctionType):
+            return FunctionType(
+                tuple(
+                    self._resolve_type_aliases(parameter, location, resolving)
+                    for parameter in type_name.parameter_types
+                ),
+                (
+                    "void"
+                    if type_name.return_type == "void"
+                    else self._resolve_type_aliases(type_name.return_type, location, resolving)
+                ),
+            )
         if isinstance(type_name, MatrixType):
             element_type = self._resolve_vector_matrix_element_type(type_name.element_type, location, resolving)
             return MatrixType(element_type, type_name.rows, type_name.cols, type_name.vector)
@@ -2985,6 +3069,12 @@ class TypeChecker:
             symbol = self.structs.get(type_name)
             if symbol is not None and not is_public_export(symbol.visibility, package_name):
                 return type_name
+            return None
+        if isinstance(type_name, FunctionType):
+            for nested_type in (*type_name.parameter_types, type_name.return_type):
+                private_name = self._private_struct_type_name(nested_type, package_name)
+                if private_name is not None:
+                    return private_name
             return None
         if isinstance(type_name, ArrayType):
             return self._private_struct_type_name(type_name.element_type, package_name)

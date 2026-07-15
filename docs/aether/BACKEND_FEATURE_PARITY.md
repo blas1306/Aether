@@ -54,11 +54,13 @@ limitación native se reporta como incompatibilidad de backend con código
 cubre ese uso. Los verificadores IR/SSA y los rechazos específicos de LLVM se
 mantienen como defensa interna.
 
-La reconciliación inicial confirmó el resumen de esta auditoría y explicitó
-dos matices: “funciones como valores” es `PARTIAL` en AST solo por funciones de
-expresión y el hook especial de `Plots`, no un callable tipado general; y
-strings/native es `PARTIAL` por transporte de literales/parámetros/retornos,
-pero concat, comparación general e interpolación siguen fuera del subconjunto.
+La reconciliación inicial confirmó el resumen de esta auditoría. Desde el
+perfil 4, “funciones como valores” incluye un callable estructural tipado para
+funciones top-level sin captura en AST y native; permanece `PARTIAL` porque no
+incluye closures, lambdas, métodos enlazados, builtins como valores ni retorno
+de callables. Strings/native sigue `PARTIAL` por transporte de
+literales/parámetros/retornos, mientras concat, comparación general e
+interpolación quedan fuera del subconjunto.
 
 ## Tipos, declaraciones y operadores
 
@@ -92,7 +94,7 @@ pero concat, comparación general e interpolación siguen fuera del subconjunto.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Funciones tipadas y parámetros | C | C | C | C | C | C para tipos backend | C | C | C | C | C conservador | C | stack nativo | E2E | C | Parcial | La fila es parcial por tipos de parámetros que solo existen en AST. |
 | Funciones `void` | C | C | C | C | C | C | C | C | C | C | C | C | — | E2E | C | Completo | Calls void solo como statement. |
-| Funciones como parámetros/valores | N general | N | N | P solo special-case `Plots` | N | N | N | N | N | N | N | N | AST especial | Plots solamente | N | No implementado | No hay `FunctionType`; expression functions tampoco son valores. |
+| Funciones como parámetros/valores | C `R(P...)` | C `FunctionType` | C exacto, símbolos/imports | C valor explícito sin entorno | C `FunctionType`/`function_ref`/`call_indirect` | C local e imports | C firma/símbolo/void | C | C refs/calls/phi | C tipos/dominancia | C conservador, calls con efectos | C `ptr` y call indirecta | sin heap/environment | E2E AST/IR/SSA/clang | C | Parcial | Solo funciones block top-level de usuario sin captura; no closures, lambdas, bound methods, builtins/expresión como valor ni retorno callable. |
 | Expression functions `f(x)=...` | C | C | P tipo `unknown` por callsite | C | N | N | N | N | N | N | N | N | AST | AST | C | Solo AST | Útiles para exploración, no para callbacks ni compilación. |
 | Calls directas y recursión | C | C | C; firmas multifase | C | C | C | C | C | C | C | C conservador | C | — | E2E directa/mutua | P | Completo | Orden de declaración resuelto recientemente. |
 | `return` | C | C | C paths/tipo | C | C | C | C | C | C | C | C | C | exit `main` | E2E | C | Completo | `main` retorna int y no recibe parámetros. |
@@ -180,8 +182,9 @@ pero concat, comparación general e interpolación siguen fuera del subconjunto.
    structs ya no son el bloqueo principal.
 3. **Strings completos:** falta concat/equality/interpolación general,
    representación, encoding y ownership.
-4. **Callables tipados:** necesarios para una stdlib numérica reusable si no se
-   quiere depender de interfaces AST-only.
+4. **Callables avanzados:** el subconjunto top-level tipado ya permite una
+   stdlib numérica reusable; closures, lambdas y métodos enlazados quedan para
+   un diseño posterior y no bloquean ese caso.
 5. **Errores básicos compilados:** decidir y completar `throw`/`try-catch` o un
    perfil alternativo explícito.
 6. **IO de entrada, archivos y argumentos de proceso:** faltan capacidades
@@ -208,8 +211,8 @@ dejan SSA inválido.
   especiales dentro de ciertos helpers de structs.
 - El CLI elige LLVM por defecto aunque la mayor parte de módulos, UDT de
   referencia, errores y builtins matemáticos sean AST-only.
-- `Plots` puede recibir una función por un hook especial del intérprete, pero el
-  lenguaje no reconoce funciones como valores en ningún otro contexto.
+- `Plots` conserva un hook AST legado, separado del callable tipado general;
+  los builtins y funciones de expresión tampoco son valores callable.
 - El runtime AST de álgebra avanzada usa NumPy/SciPy del host; esa es una
   implementación prototipo, no un contrato aceptable de runtime native.
 
@@ -266,8 +269,8 @@ dejan SSA inválido.
    reutilizando el `CheckedProgram` y los tests multiarchivo existentes.
 3. Cerrar `%` double y las conversiones implícitas restantes; la matemática
    escalar real ya usa calls conocidas sin inflar el IR.
-4. Definir callables top-level tipados y su ABI; no comenzar por closures
-   capturantes.
+4. Mantener el ABI de callables top-level tipados y diseñar closures solo si
+   casos de uso posteriores justifican una representación `{code, environment}`.
 5. Bajar enums, después interfaces/classes con layout y ownership documentados.
 6. Completar runtime string y luego IO de entrada/archivos/args.
 7. Promover el ejemplo numérico a `math.numerics` solo después de callables,

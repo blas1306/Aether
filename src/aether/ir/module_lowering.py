@@ -11,6 +11,7 @@ from ..types import (
     ArrayType,
     ClassType,
     EnumType,
+    FunctionType,
     InterfaceType,
     ListType,
     MatrixType,
@@ -206,6 +207,11 @@ class _ModuleRewriter:
             return NullableType(self.type_name(type_name.base_type))
         if isinstance(type_name, TupleType):
             return TupleType(tuple(self.type_name(item) for item in type_name.element_types))
+        if isinstance(type_name, FunctionType):
+            return FunctionType(
+                tuple(self.type_name(item) for item in type_name.parameter_types),
+                self.type_name(type_name.return_type),
+            )
         if isinstance(type_name, VectorType):
             return VectorType(
                 self.type_name(type_name.element_type),
@@ -262,6 +268,9 @@ class _ModuleRewriter:
             )
         if isinstance(node, ast.Identifier):
             if node.name not in self.local_names and node.name not in self.field_names:
+                symbol = self.module.symbol_references.get(node.name)
+                if symbol is not None and symbol.id.kind == "function":
+                    return replace(node, name=mangle_symbol(symbol.id))
                 canonical = self.module.checker.builtin_constant_aliases.get(node.name)
                 constant = SCALAR_MATH_CONSTANTS.get(canonical) if canonical is not None else None
                 if constant is not None:
@@ -270,6 +279,9 @@ class _ModuleRewriter:
             return node
         if isinstance(node, ast.FieldAccess):
             dotted = self._field_access_name(node)
+            symbol = self.module.symbol_references.get(dotted) if dotted is not None else None
+            if symbol is not None and symbol.id.kind == "function":
+                return ast.Identifier(mangle_symbol(symbol.id), node.line, node.column)
             canonical = self._canonical_builtin_name(dotted) if dotted is not None else None
             constant = SCALAR_MATH_CONSTANTS.get(canonical) if canonical is not None else None
             if constant is not None:
