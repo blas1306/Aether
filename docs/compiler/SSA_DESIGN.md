@@ -98,9 +98,10 @@ This choice keeps destruction, moves, and assignments from becoming implicit
 SSA effects: DCE/SCCP cannot duplicate or erase them because they never see an
 unexpanded lifecycle program. For current trivial types the expanded form is
 the historical slot IR, so LLVM ABI and generated code remain unchanged. When
-`StringType` becomes non-trivial, expansion must produce concrete effectful
-hooks; those calls will then survive in SSA under the existing call-effect
-rules.
+`StringType` is non-trivial. Expansion produces concrete `__aether_retain` and
+`__aether_release` lifecycle builtins; SSA verifies them as effectful,
+potentially trapping memory operations, so DCE/SCCP/copy propagation preserve
+them. LLVM lowers them recursively for string-containing structs.
 
 ## Canonical SSA Invariants
 

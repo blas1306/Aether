@@ -425,10 +425,6 @@ class LLVMListRuntime:
             )
         common.append_sort(sections)
         search_types = self._list_contains_types | self._list_index_of_types
-        if any(isinstance(type_, StringType) for type_ in search_types) and not any(
-            isinstance(type_, StringType) for type_ in self._sequence_sort_types
-        ):
-            common.declare(sections, "declare i32 @strcmp(ptr, ptr)")
         search_helpers: dict[str, object] = {}
         for element_type in search_types:
             search_helpers.setdefault(self.list_search_helper_name(element_type), element_type)
@@ -515,8 +511,7 @@ class LLVMListRuntime:
             return "  %equal = fcmp oeq double %element, %needle"
         if isinstance(element_type, StringType):
             return "\n".join([
-                "  %strcmp_result = call i32 @strcmp(ptr %element, ptr %needle)",
-                "  %equal = icmp eq i32 %strcmp_result, 0",
+                "  %equal = call i1 @aether_string_equal(ptr %element, ptr %needle)",
             ])
         return f"  %equal = icmp eq {llvm_element_type} %element, %needle"
 

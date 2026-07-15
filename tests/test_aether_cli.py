@@ -1057,14 +1057,12 @@ string hello() {
     exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
 
     assert exit_code == EXIT_SUCCESS
-    assert stdout == (
-        '@.str.0 = private unnamed_addr constant [6 x i8] c"hello\\00"\n'
-        "\n"
-        "define ptr @hello() {\n"
-        "entry:\n"
-        "  ret ptr @.str.0\n"
-        "}\n"
-    )
+    assert "%AetherStringObject = type { i64, i64, i32, i32, [0 x i8] }" in stdout
+    assert '@.aether.str.0 = private constant' in stdout
+    assert 'i64 5, i64 0, i32 3, i32 0' in stdout
+    assert 'c"hello\\00"' in stdout
+    assert "define ptr @hello()" in stdout
+    assert "  ret ptr @.aether.str.0\n" in stdout
     assert stderr == ""
 
 
@@ -1086,8 +1084,9 @@ string second() {
     exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
 
     assert exit_code == EXIT_SUCCESS
-    assert stdout.count("private unnamed_addr constant") == 1
-    assert stdout.count("ret ptr @.str.0") == 2
+    assert stdout.count("@.aether.str.0 = private constant") == 1
+    assert "@.aether.str.1 = private constant" not in stdout
+    assert stdout.count("ret ptr @.aether.str.0") == 2
     assert stderr == ""
 
 
@@ -1109,9 +1108,9 @@ string caller() {
     exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
 
     assert exit_code == EXIT_SUCCESS
-    assert '@.str.0 = private unnamed_addr constant [3 x i8] c"hi\\00"\n' in stdout
+    assert '@.aether.str.0 = private constant' in stdout and 'c"hi\\00"' in stdout
     assert "define ptr @echo(ptr %text)" in stdout
-    assert "  %0 = call ptr @echo(ptr @.str.0)\n" in stdout
+    assert "  %0 = call ptr @echo(ptr @.aether.str.0)\n" in stdout
     assert stderr == ""
 
 
@@ -1130,9 +1129,9 @@ string hello() {
     exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
 
     assert exit_code == EXIT_SUCCESS
-    assert '@.str.0 = private unnamed_addr constant [6 x i8] c"hello\\00"\n' in stdout
+    assert '@.aether.str.0 = private constant' in stdout and 'c"hello\\00"' in stdout
     assert "define ptr @hello()" in stdout
-    assert "  ret ptr @.str.0\n" in stdout
+    assert "  ret ptr @.aether.str.0\n" in stdout
     assert stderr == ""
 
 
@@ -1152,9 +1151,11 @@ string copy() {
     exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
 
     assert exit_code == EXIT_SUCCESS
-    assert '@.str.0 = private unnamed_addr constant [6 x i8] c"hello\\00"\n' in stdout
+    assert '@.aether.str.0 = private constant' in stdout and 'c"hello\\00"' in stdout
     assert "define ptr @copy()" in stdout
-    assert "  ret ptr @.str.0\n" in stdout
+    assert "  ret ptr @.aether.str.0\n" in stdout
+    assert "call void @aether_string_retain" in stdout
+    assert "call void @aether_string_release" in stdout
     assert stderr == ""
 
 
@@ -1179,7 +1180,7 @@ string caller() {
     assert exit_code == EXIT_SUCCESS
     assert "define ptr @identity(ptr %value)" in stdout
     assert "  ret ptr %value\n" in stdout
-    assert "  %0 = call ptr @identity(ptr @.str.0)\n" in stdout
+    assert "  %0 = call ptr @identity(ptr @.aether.str.0)\n" in stdout
     assert "  ret ptr %0\n" in stdout
     assert stderr == ""
 
@@ -1204,10 +1205,10 @@ string choose(boolean flag) {
     exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
 
     assert exit_code == EXIT_SUCCESS
-    assert '@.str.0 = private unnamed_addr constant [6 x i8] c"world\\00"\n' in stdout
-    assert '@.str.1 = private unnamed_addr constant [6 x i8] c"hello\\00"\n' in stdout
+    assert '@.aether.str.0 = private constant' in stdout and 'c"hello\\00"' in stdout
+    assert '@.aether.str.1 = private constant' in stdout and 'c"world\\00"' in stdout
     assert "merge0:\n" in stdout
-    assert "  %0 = phi ptr [ @.str.0, %then0 ], [ @.str.1, %else0 ]\n" in stdout
+    assert "  %0 = phi ptr [ @.aether.str.1, %then0 ], [ @.aether.str.0, %else0 ]\n" in stdout
     assert "  ret ptr %0\n" in stdout
     assert stderr == ""
 
@@ -1227,7 +1228,7 @@ string bad(string x) {
 
     assert exit_code == EXIT_LANGUAGE_ERROR
     assert stdout == ""
-    assert "LLVM backend does not support string concatenation yet" in stderr
+    assert "AE-BACKEND-STRING_CONCATENATION" in stderr
 
 
 def test_emit_llvm_rejects_constant_string_arithmetic_without_folding(
@@ -1247,10 +1248,10 @@ string bad() {
 
     assert exit_code == EXIT_LANGUAGE_ERROR
     assert stdout == ""
-    assert "LLVM backend does not support string concatenation yet" in stderr
+    assert "AE-BACKEND-STRING_CONCATENATION" in stderr
 
 
-def test_emit_llvm_rejects_constant_string_comparison_without_folding(
+def test_emit_llvm_supports_constant_string_comparison_without_pointer_identity(
     tmp_path: Path,
 ) -> None:
     program = tmp_path / "emit_llvm_constant_string_eq.ae"
@@ -1265,9 +1266,11 @@ boolean bad() {
 
     exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
 
-    assert exit_code == EXIT_LANGUAGE_ERROR
-    assert stdout == ""
-    assert "LLVM backend does not support string equality yet" in stderr
+    assert exit_code == EXIT_SUCCESS
+    assert "call i1 @aether_string_equal" in stdout
+    assert "@memcmp" in stdout
+    assert "@strcmp" not in stdout
+    assert stderr == ""
 
 
 def test_emit_llvm_prints_sum(tmp_path: Path) -> None:

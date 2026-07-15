@@ -1,5 +1,12 @@
 # Auditoría completa de paridad de backends
 
+Actualización perfil 7 (15-07-2026): native completó transporte de handles al
+objeto UTF-8, igualdad por contenido, literales/vacío inmortales, ARC oculto,
+impresión length-aware y hooks de elementos string/struct para Array/List. Las
+filas históricas que describen `char *`, `%s`, `strcmp` o copia trivial son el
+snapshot previo a esta actualización. Concat native, parsing, split/trim,
+files y argv continúan no implementados.
+
 Última revisión: 15 de julio de 2026, incluyendo enums native y los ejemplos
 dogfood de métodos numéricos y expense tracker. Este documento reemplaza como
 referencia canónica a la auditoría histórica de `docs/compiler/`.

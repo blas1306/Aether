@@ -15,13 +15,13 @@ def sequence_sort_helper_name(type_: object) -> str:
     raise LLVMBackendError(f"LLVM sequence_sort does not support element type {type_}")
 
 
-def _element_size(type_: object) -> int:
+def _element_size(type_: object) -> str:
     if isinstance(type_, IntType):
-        return 4
+        return "4"
     if isinstance(type_, DoubleType):
-        return 8
+        return "8"
     if isinstance(type_, StringType):
-        return 8
+        return "ptrtoint (ptr getelementptr (ptr, ptr null, i64 1) to i64)"
     raise LLVMBackendError(f"LLVM sequence_sort does not support element type {type_}")
 
 def sequence_sort_helper(element_type: object) -> str:
@@ -134,8 +134,8 @@ def _sequence_sort_compare(element_type: object) -> str:
     if isinstance(element_type, StringType):
         return "\n".join(
             [
-                "  %sort_strcmp = call i32 @strcmp(ptr %left_value_cmp, ptr %right_value_cmp)",
-                "  %take_left_cmp = icmp sle i32 %sort_strcmp, 0",
+                "  %sort_compare = call i32 @aether_string_compare_bytes(ptr %left_value_cmp, ptr %right_value_cmp)",
+                "  %take_left_cmp = icmp sle i32 %sort_compare, 0",
             ]
         )
     if isinstance(element_type, DoubleType):

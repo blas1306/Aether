@@ -79,11 +79,6 @@ class LLVMTypeLayouts:
                 f"LLVM/native {collection} cannot store element type '{type_}': "
                 "the LLVM type is incomplete or unsized"
             )
-        if not layout.trivially_copyable:
-            raise LLVMBackendError(
-                f"LLVM/native {collection} cannot store element type '{type_}': "
-                "collection reallocation requires a defined trivial value copy"
-            )
         return layout
 
     def _compute(self, type_: IRType) -> TypeLayout:
@@ -96,7 +91,9 @@ class LLVMTypeLayouts:
         if isinstance(type_, DoubleType):
             return self._fixed(type_, 8)
         if isinstance(type_, StringType):
-            return self._reference(type_)
+            rendered = llvm_type(type_)
+            size = f"ptrtoint (ptr getelementptr ({rendered}, ptr null, i64 1) to i64)"
+            return TypeLayout(rendered, True, size, False, True, True, True, True, True)
         if isinstance(type_, (ArrayType, ListType, VectorType, MatrixType)):
             return self._reference(type_)
         if isinstance(type_, StructType):
@@ -153,18 +150,13 @@ class LLVMTypeLayouts:
                 return self._unsupported(
                     type_, f"field '{field_name}' of type '{field_type}' is incomplete or unsized"
                 )
-            if not field_layout.trivially_copyable:
-                return self._unsupported(
-                    type_, f"field '{field_name}' of type '{field_type}' has no trivial value copy"
-                )
-
         rendered = llvm_type(type_)
         size = f"ptrtoint (ptr getelementptr ({rendered}, ptr null, i64 1) to i64)"
         return TypeLayout(
             rendered,
             True,
             size,
-            True,
+            all(field.trivially_copyable for field in field_layouts),
             all(field.trivially_relocatable for field in field_layouts),
             any(field.needs_destroy for field in field_layouts),
             any(field.contains_references for field in field_layouts),

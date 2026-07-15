@@ -171,6 +171,13 @@ class IRCall(IRInstruction):
 
     @property
     def effects(self):
+        if self.builtin in {"__aether_retain", "__aether_release"}:
+            return InstructionEffects(
+                has_side_effects=True,
+                may_trap=True,
+                reads_memory=True,
+                writes_memory=True,
+            )
         if self.builtin is None:
             return UnknownCallMixin.effects
         if scalar_math_may_trap(

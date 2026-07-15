@@ -121,3 +121,11 @@ Para añadir o cambiar una capacidad:
 política. El registro no reemplaza la revisión de la auditoría: antes de marcar
 `COMPLETE` deben existir casos positivos, negativos y de límites, además de
 paridad observable cuando ambos backends implementen la feature.
+# Actualización de perfil 7: runtime string
+
+El perfil 7 separa `string-transport`, `string-equality`,
+`dynamic-string-object`, `string-lifecycle`, `string-concatenation`,
+`string-parsing` y `string-split-trim`. Native marca completos transporte,
+igualdad y objeto dinámico interno; lifecycle permanece parcial mientras no
+exista una API pública amplia de productores. Concatenación, parsing y
+split/trim están explícitamente unsupported.

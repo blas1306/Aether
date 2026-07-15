@@ -201,7 +201,8 @@ int main() {
     assert llvm.count("call void @aether_sort_i32") == 2
     assert llvm.count("call void @aether_sort_f64") == 2
     assert llvm.count("call void @aether_sort_string") == 2
-    assert "@strcmp" in llvm
+    assert "@aether_string_compare_bytes" in llvm
+    assert "@strcmp" not in llvm
     assert "fcmp uno double" in llvm
 
 

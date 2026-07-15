@@ -1,5 +1,13 @@
 # Aether Intermediate Representation: Initial Design
 
+## String lifecycle update (profile 7)
+
+`StringType` remains nominal in IR even though LLVM spells its handle `ptr`.
+It is not interchangeable with a generic C pointer. Generic lifecycle opcodes
+are verified before SSA and expand to effectful internal retain/release calls;
+string equality lowers to the length-aware runtime helper. Constants denote
+immortal `AetherStringObject` globals, not C-string payload pointers.
+
 ## Status
 
 This document is an initial design proposal for an Aether intermediate

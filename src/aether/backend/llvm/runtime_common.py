@@ -39,8 +39,7 @@ def aggregate_equal_helper(prefix: str, element_type: object) -> str:
     elif suffix == "string":
         comparison = "\n".join(
             [
-                "  %strcmp = call i32 @strcmp(ptr %left_value, ptr %right_value)",
-                "  %same = icmp eq i32 %strcmp, 0",
+                "  %same = call i1 @aether_string_equal(ptr %left_value, ptr %right_value)",
             ]
         )
     else:
@@ -112,15 +111,17 @@ def aggregate_print_helper(prefix: str, element_type: object, *, matrix: bool) -
         print_element = "\n".join(
             [
                 "  %boolean = select i1 %element, ptr @.aether.io.true, ptr @.aether.io.false",
-                "  %element_result = call i32 (ptr, ...) @printf(ptr @.aether.io.string, ptr %boolean)",
+                "  %boolean_stream = load ptr, ptr @stdout",
+                "  %element_result = call i32 @fputs(ptr %boolean, ptr %boolean_stream)",
             ]
         )
     else:
         print_element = "\n".join(
             [
-                f"  %quote_open = call i32 (ptr, ...) @printf(ptr @.aether.io.string, ptr @.aether.{prefix}.quote)",
-                "  %element_result = call i32 (ptr, ...) @printf(ptr @.aether.io.string, ptr %element)",
-                f"  %quote_close = call i32 (ptr, ...) @printf(ptr @.aether.io.string, ptr @.aether.{prefix}.quote)",
+                "  %quote_stream = load ptr, ptr @stdout",
+                f"  %quote_open = call i32 @fputs(ptr @.aether.{prefix}.quote, ptr %quote_stream)",
+                "  call void @aether_string_print(ptr %element)",
+                f"  %quote_close = call i32 @fputs(ptr @.aether.{prefix}.quote, ptr %quote_stream)",
             ]
         )
     return "\n".join(
@@ -130,7 +131,8 @@ def aggregate_print_helper(prefix: str, element_type: object, *, matrix: bool) -
             length_setup,
             "  %data_field = getelementptr %AetherArray, ptr %value, i32 0, i32 1",
             "  %data = load ptr, ptr %data_field",
-            f"  %open_result = call i32 (ptr, ...) @printf(ptr @.aether.io.string, ptr @.aether.{prefix}.open)",
+            "  %stream = load ptr, ptr @stdout",
+            f"  %open_result = call i32 @fputs(ptr @.aether.{prefix}.open, ptr %stream)",
             "  br label %loop",
             "loop:",
             "  %index = phi i64 [ 0, %entry ], [ %next, %continue ]",
@@ -141,7 +143,7 @@ def aggregate_print_helper(prefix: str, element_type: object, *, matrix: bool) -
             "  br i1 %first, label %body, label %separator_block",
             "separator_block:",
             separator,
-            "  %separator_result = call i32 (ptr, ...) @printf(ptr @.aether.io.string, ptr %separator)",
+            "  %separator_result = call i32 @fputs(ptr %separator, ptr %stream)",
             "  br label %body",
             "body:",
             f"  %element_ptr = getelementptr {llvm_element_type}, ptr %data, i64 %index",
@@ -152,8 +154,12 @@ def aggregate_print_helper(prefix: str, element_type: object, *, matrix: bool) -
             "  %next = add i64 %index, 1",
             "  br label %loop",
             "finish:",
-            "  %close_format = select i1 %newline, ptr @.aether.io.stringln, ptr @.aether.io.string",
-            f"  %close_result = call i32 (ptr, ...) @printf(ptr %close_format, ptr @.aether.{prefix}.close)",
+            f"  %close_result = call i32 @fputs(ptr @.aether.{prefix}.close, ptr %stream)",
+            "  br i1 %newline, label %linebreak, label %done",
+            "linebreak:",
+            "  %newline_result = call i32 @putchar(i32 10)",
+            "  br label %done",
+            "done:",
             "  ret void",
             "}",
         ]
@@ -232,7 +238,5 @@ class LLVMRuntimeCommon:
             self.declare(sections, "declare void @llvm.memmove.p0.p0.i64(ptr, ptr, i64, i1 immarg)")
 
     def append_sort(self, sections: list[str]) -> None:
-        if any(isinstance(type_, StringType) for type_ in self.sequence_sort_types):
-            self.declare(sections, "declare i32 @strcmp(ptr, ptr)")
         for element_type in sorted(self.sequence_sort_types, key=sequence_sort_helper_name):
             sections.append(sequence_sort_helper(element_type))

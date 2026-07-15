@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from .pipeline import TypedProgram
 
 
-CAPABILITY_PROFILE_VERSION = "6"
+CAPABILITY_PROFILE_VERSION = "7"
 
 
 class BackendIdentity(str, Enum):
@@ -61,6 +61,13 @@ class Capability(str, Enum):
     BREAK = "break"
     CONTINUE = "continue"
     STRINGS = "strings"
+    STRING_TRANSPORT = "string-transport"
+    STRING_EQUALITY = "string-equality"
+    DYNAMIC_STRING_OBJECT = "dynamic-string-object"
+    STRING_LIFECYCLE = "string-lifecycle"
+    STRING_CONCATENATION = "string-concatenation"
+    STRING_PARSING = "string-parsing"
+    STRING_SPLIT_TRIM = "string-split-trim"
     PRINT = "print"
     INPUT = "input"
     PROCESS_ARGUMENTS = "process-arguments"
@@ -158,6 +165,13 @@ CAPABILITY_CATALOG: Mapping[Capability, CapabilityDefinition] = MappingProxyType
             _definition(Capability.BREAK, "Loop break statements."),
             _definition(Capability.CONTINUE, "Loop continue statements."),
             _definition(Capability.STRINGS, "String values and string operations."),
+            _definition(Capability.STRING_TRANSPORT, "String literals, parameters, fields, elements, and returns."),
+            _definition(Capability.STRING_EQUALITY, "Length-aware string equality and inequality."),
+            _definition(Capability.DYNAMIC_STRING_OBJECT, "Owned immutable UTF-8 string objects."),
+            _definition(Capability.STRING_LIFECYCLE, "Retain/release and recursive string value lifecycle."),
+            _definition(Capability.STRING_CONCATENATION, "Public string concatenation."),
+            _definition(Capability.STRING_PARSING, "Public parsing from strings."),
+            _definition(Capability.STRING_SPLIT_TRIM, "Public split and trim text algorithms."),
             _definition(Capability.PRINT, "print and println output."),
             _definition(Capability.INPUT, "Typed input calls."),
             _definition(Capability.PROCESS_ARGUMENTS, "Access to process arguments."),
@@ -215,8 +229,10 @@ _AST_UNSUPPORTED = {
     Capability.GENERICS,
     Capability.FILES,
     Capability.OPTIMIZATION_PROFILES,
+    Capability.STRING_PARSING,
+    Capability.STRING_SPLIT_TRIM,
 }
-_AST_PARTIAL = {Capability.FUNCTION_VALUES}
+_AST_PARTIAL = {Capability.FUNCTION_VALUES, Capability.STRING_LIFECYCLE}
 AST_CAPABILITY_PROFILE = _profile(
     BackendIdentity.AST,
     {
@@ -241,6 +257,9 @@ _NATIVE_COMPLETE = {
     Capability.BREAK,
     Capability.CONTINUE,
     Capability.ENUMS,
+    Capability.STRING_TRANSPORT,
+    Capability.STRING_EQUALITY,
+    Capability.DYNAMIC_STRING_OBJECT,
 }
 _NATIVE_UNSUPPORTED = {
     Capability.INPUT,
@@ -252,6 +271,9 @@ _NATIVE_UNSUPPORTED = {
     Capability.GENERICS,
     Capability.ERROR_HANDLING,
     Capability.FILES,
+    Capability.STRING_CONCATENATION,
+    Capability.STRING_PARSING,
+    Capability.STRING_SPLIT_TRIM,
 }
 NATIVE_CAPABILITY_PROFILE = _profile(
     BackendIdentity.NATIVE,
@@ -297,6 +319,10 @@ E2E_TESTED_CAPABILITIES: Mapping[BackendIdentity, frozenset[Capability]] = Mappi
                 Capability.BREAK,
                 Capability.CONTINUE,
                 Capability.STRINGS,
+                Capability.STRING_TRANSPORT,
+                Capability.STRING_EQUALITY,
+                Capability.DYNAMIC_STRING_OBJECT,
+                Capability.STRING_CONCATENATION,
                 Capability.PRINT,
                 Capability.INPUT,
                 Capability.MODULES,
@@ -330,6 +356,9 @@ E2E_TESTED_CAPABILITIES: Mapping[BackendIdentity, frozenset[Capability]] = Mappi
                 Capability.BREAK,
                 Capability.CONTINUE,
                 Capability.ENUMS,
+                Capability.STRING_TRANSPORT,
+                Capability.STRING_EQUALITY,
+                Capability.DYNAMIC_STRING_OBJECT,
             }
         ),
     }
@@ -597,6 +626,8 @@ class _CapabilityDetector:
             self._record_type(node.type_name, node)
             if node.type_name == "string":
                 self._record(Capability.STRINGS, node)
+                self._record(Capability.STRING_TRANSPORT, node)
+                self._record(Capability.DYNAMIC_STRING_OBJECT, node)
             return
         if isinstance(node, ast.Identifier):
             canonical = self._canonical_name(node.name, constants=True)
@@ -629,6 +660,12 @@ class _CapabilityDetector:
                 detail = "string concatenation" if node.operator == "+" else "string equality"
                 self._record(
                     Capability.STRINGS,
+                    node,
+                    detail=detail,
+                    requires_complete_support=False,
+                )
+                self._record(
+                    Capability.STRING_CONCATENATION if node.operator == "+" else Capability.STRING_EQUALITY,
                     node,
                     detail=detail,
                     requires_complete_support=True,
@@ -775,6 +812,11 @@ class _CapabilityDetector:
             "Exception",
         }:
             self._record(Capability.PRIMITIVE_TYPES, node)
+            if type_name == "string":
+                self._record(Capability.STRINGS, node)
+                self._record(Capability.STRING_TRANSPORT, node)
+                self._record(Capability.DYNAMIC_STRING_OBJECT, node)
+                self._record(Capability.STRING_LIFECYCLE, node)
 
     def _record_collection_element(
         self,

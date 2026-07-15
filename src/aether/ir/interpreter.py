@@ -10,6 +10,7 @@ from aether.errors import AetherRuntimeError
 from aether.integer_arithmetic import checked_int_binary, ieee_divide
 from aether.list_safety import checked_list_index_to_int, checked_list_length_to_int
 from aether.stdlib.registry import call_builtin
+from aether.string_value import StringValue, as_string_value
 from aether.types import AetherValue
 from aether.vector_matrix_safety import (
     MATRIX_INDEX_OUT_OF_BOUNDS,
@@ -155,7 +156,14 @@ class IRInterpreter:
             )
 
         frame = _Frame(
-            values=dict(zip(function.parameters, arguments)),
+            values={
+                parameter: (
+                    as_string_value(argument)
+                    if isinstance(parameter.type, StringType) and isinstance(argument, (str, StringValue))
+                    else argument
+                )
+                for parameter, argument in zip(function.parameters, arguments)
+            },
         )
         return self._execute(function, frame)
 
@@ -256,7 +264,12 @@ class IRInterpreter:
         frame: _Frame,
     ) -> tuple[bool, Any, str | None]:
         if isinstance(instruction, IRConst):
-            frame.values[instruction.result] = instruction.value
+            frame.values[instruction.result] = (
+                as_string_value(instruction.value)
+                if isinstance(instruction.result.type, StringType)
+                and isinstance(instruction.value, (str, StringValue))
+                else instruction.value
+            )
             return False, None, None
 
         if isinstance(instruction, IRLoad):

@@ -44,7 +44,7 @@ def _required(source: str, *, source_root: Path | None = None):
 
 
 def test_profiles_are_versioned_identified_and_cover_the_canonical_catalog() -> None:
-    assert CAPABILITY_PROFILE_VERSION == "6"
+    assert CAPABILITY_PROFILE_VERSION == "7"
     assert AST_CAPABILITY_PROFILE.backend is BackendIdentity.AST
     assert NATIVE_CAPABILITY_PROFILE.backend is BackendIdentity.NATIVE
     assert AST_CAPABILITY_PROFILE.version == CAPABILITY_PROFILE_VERSION
@@ -226,32 +226,25 @@ def test_string_literal_transport_is_not_mistaken_for_a_dynamic_operation() -> N
     LLVMBuilder().emit_llvm(typed)
 
 
-@pytest.mark.parametrize(
-    ("operator", "detail"),
-    [("+", "string concatenation"), ("==", "string equality"), ("!=", "string equality")],
-)
-def test_native_detects_unsupported_string_operations_from_checked_operand_types(
-    operator: str,
-    detail: str,
-) -> None:
-    typed = _typed(
-        f"string operation(string left, string right) {{ "
-        f"string copy = left; boolean result = left {operator} right; return copy; }}"
-        if operator != "+"
-        else "string operation(string left, string right) { return left + right; }"
-    )
-
+def test_native_rejects_concat_but_accepts_string_equality() -> None:
+    typed = _typed("string operation(string left, string right) { return left + right; }")
     issue = next(
         issue
         for issue in backend_capability_issues(typed, BackendIdentity.NATIVE)
-        if issue.requirement.capability is Capability.STRINGS
+        if issue.requirement.capability is Capability.STRING_CONCATENATION
     )
 
-    assert issue.requirement.detail == detail
+    assert issue.requirement.detail == "string concatenation"
     assert issue.requirement.requires_complete_support is True
     assert issue.requirement.line == 1
     assert issue.requirement.column > 1
-    assert detail in issue.message
+    assert "string-concatenation" in issue.message
+
+    equality = _typed(
+        "string operation(string left, string right) { "
+        "string copy = left; boolean result = left == right; return copy; }"
+    )
+    assert not backend_capability_issues(equality, BackendIdentity.NATIVE)
 
 
 def test_string_capability_diagnostic_is_deduplicated() -> None:
@@ -263,7 +256,7 @@ def test_string_capability_diagnostic_is_deduplicated() -> None:
     issues = [
         issue
         for issue in backend_capability_issues(typed, BackendIdentity.NATIVE)
-        if issue.requirement.capability is Capability.STRINGS
+        if issue.requirement.capability is Capability.STRING_CONCATENATION
     ]
 
     assert len(issues) == 1
@@ -283,7 +276,7 @@ def test_string_operations_in_imported_modules_are_inspected(tmp_path: Path) -> 
     issue = next(
         issue
         for issue in backend_capability_issues(typed, BackendIdentity.NATIVE)
-        if issue.requirement.capability is Capability.STRINGS
+        if issue.requirement.capability is Capability.STRING_CONCATENATION
     )
 
     assert issue.requirement.detail == "string concatenation"

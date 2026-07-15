@@ -1,5 +1,11 @@
 # Informe de dogfooding generalista: expense tracker
 
+Actualización 15-07-2026: el ejemplo completo conserva paridad AST/native tras
+la migración de string. `List<Transaction>` atraviesa múltiples `push`, growth,
+filtros, returns, módulos, enum fields, igualdad e impresión con hooks
+recursivos para los tres fields string. Se mantienen las nueve validaciones
+funcionales más el listado final; no se añadieron CLI real ni persistencia.
+
 Revisión: 15 de julio de 2026. Programa:
 [`examples/expense_tracker/`](../../examples/expense_tracker/README.md).
 

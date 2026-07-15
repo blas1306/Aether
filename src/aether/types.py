@@ -5,6 +5,7 @@ from math import trunc
 from typing import Any
 
 from .errors import AetherTypeError
+from .string_value import StringValue, as_string_value
 
 
 TYPE_NAMES = {"int", "float", "double", "complex", "string", "boolean", "Exception"}
@@ -381,6 +382,18 @@ class AetherValue:
     type_name: AetherType
     value: Any
 
+    def __post_init__(self) -> None:
+        base_type = (
+            self.type_name.base_type
+            if isinstance(self.type_name, NullableType) and self.value is not None
+            else self.type_name
+        )
+        if base_type == "string" and isinstance(self.value, (str, StringValue)):
+            # General values come from runtime operations (builtins,
+            # interpolation, arguments). Source and IR literal construction
+            # opts into immortal storage explicitly.
+            object.__setattr__(self, "value", as_string_value(self.value, literal=False))
+
 
 @dataclass(frozen=True)
 class AetherExceptionValue:
@@ -463,7 +476,7 @@ def infer_type(value: object) -> str:
         return "double"
     if isinstance(value, complex):
         return "complex"
-    if isinstance(value, str):
+    if isinstance(value, (str, StringValue)):
         return "string"
     raise AetherTypeError(f"Cannot infer Aether type for value {value!r}.")
 

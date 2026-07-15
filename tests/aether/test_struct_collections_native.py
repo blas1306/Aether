@@ -59,10 +59,10 @@ def test_layout_uses_llvm_target_for_padding_nested_structs_and_references() -> 
     assert inner.size_operand == "ptrtoint (ptr getelementptr (%struct.Inner, ptr null, i64 1) to i64)"
     assert outer.size_operand == "ptrtoint (ptr getelementptr (%struct.Outer, ptr null, i64 1) to i64)"
     assert inner.trivially_copyable and not inner.contains_references
-    assert outer.trivially_copyable and outer.contains_references
+    assert not outer.trivially_copyable and outer.contains_references
     assert inner.trivially_relocatable and outer.trivially_relocatable
-    assert not inner.needs_destroy and not outer.needs_destroy
-    assert not inner.needs_retain and not outer.needs_retain
+    assert not inner.needs_destroy and outer.needs_destroy
+    assert not inner.needs_retain and outer.needs_retain
 
 
 def test_current_string_and_nested_collection_layouts_report_lifecycle_facts() -> None:
@@ -75,13 +75,10 @@ def test_current_string_and_nested_collection_layouts_report_lifecycle_facts() -
     string = layouts.layout(StringType())
     nested = layouts.collection_element("List", StructType("Record"))
 
-    # These facts describe today's immortal-payload ptr transport.  The
-    # approved future string handle is documented separately and will flip
-    # copy/retain/destroy when its runtime is introduced.
-    assert string.sized and string.trivially_copyable and string.trivially_relocatable
-    assert string.contains_references and not string.needs_retain and not string.needs_destroy
-    assert nested.sized and nested.trivially_copyable and nested.trivially_relocatable
-    assert nested.contains_references and not nested.needs_retain and not nested.needs_destroy
+    assert string.sized and not string.trivially_copyable and string.trivially_relocatable
+    assert string.contains_references and string.needs_retain and string.needs_destroy
+    assert nested.sized and not nested.trivially_copyable and nested.trivially_relocatable
+    assert nested.contains_references and nested.needs_retain and nested.needs_destroy
 
 
 @pytest.mark.skipif(shutil.which("clang") is None, reason="clang is required")

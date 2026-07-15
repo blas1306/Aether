@@ -690,6 +690,17 @@ class SSAVerifier:
         if instruction.builtin is not None:
             for argument in instruction.arguments:
                 self._require_defined(argument, value_types)
+            if instruction.builtin in {"__aether_retain", "__aether_release"}:
+                if instruction.function != instruction.builtin:
+                    self._fail("Lifecycle builtin call must retain its canonical semantic name")
+                if instruction.result is not None or len(instruction.arguments) != 1:
+                    self._fail("Lifecycle builtin requires one argument and no result")
+                argument_type = instruction.arguments[0].type
+                if not isinstance(argument_type, (StringType, StructType, MethodResultType)):
+                    self._fail(
+                        f"Lifecycle builtin does not support argument type {argument_type}"
+                    )
+                return
             if instruction.result is None:
                 self._fail(f"Scalar builtin '{instruction.builtin}' must produce a result")
             try:

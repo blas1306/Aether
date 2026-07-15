@@ -1,10 +1,34 @@
 # Decisión de diseño: modelo de strings y runtime de texto de Aether
 
-Estado: **decisiones bloqueantes aprobadas para Aether v1**, 15 de julio de
-2026. Este documento es normativo como contrato de diseño, pero **no declara
-implementado el runtime**. La representación LLVM pública actual, los perfiles
-de capacidades y el subconjunto ejecutable permanecen sin cambios hasta que
-las fases de implementación correspondientes se completen.
+Estado: **núcleo de representación y lifecycle implementado para Aether v1**,
+15 de julio de 2026. La ABI interna usa un handle `ptr` al objeto descrito aquí;
+ya no existe un camino native que interprete ese handle como `char *`.
+
+### Estado de implementación
+
+- Header físico actual: 24 bytes (`i64 length`, `i64 strong_count`, `i32 flags`,
+  `i32 reserved`) seguido por `length + 1` bytes inline; alineación 8 en los
+  globals emitidos y alineación natural del allocator en heap.
+- Vacío y literales: objetos `IMMORTAL|UTF8_VALID`, refcount cero y terminador
+  auxiliar; el vacío se canonicaliza a `@.aether.string.empty`.
+- Dinámicos: `aether_string_from_utf8` valida UTF-8, comprueba overflow y crea
+  un objeto con strong count uno. Retain/release no atómicos validan descriptor,
+  overflow y underflow.
+- Igualdad: identidad, longitud y `memcmp`; impresión: `fwrite(data,1,length)`.
+  No se usan `strcmp` ni `%s` para valores Aether.
+- `StringType` es no trivialmente copiable, trivialmente relocatable, requiere
+  retain/destroy y propaga esos hechos a structs. Lifecycle se verifica en su
+  forma genérica y se expande a hooks effectful antes de SSA.
+- Parámetros son borrowed y returns owned. El lowerer mueve locals al return,
+  retiene parámetros retornados y consume resultados owned de calls/get/pop.
+- Array/List aplican hooks por elemento en construcción, copy/slice, get, set,
+  push, insert, pop/remove, clear y growth. Growth/reorder usa relocation.
+- El intérprete AST/IR usa `StringValue` con bytes UTF-8, longitud y metadata de
+  ownership, no un `str` host como sustituto semántico.
+
+La sección 3 conserva el inventario histórico anterior a esta migración para
+explicar los puntos que fueron reemplazados. Concatenación native pública,
+parsing, split/trim, archivos y argv siguen fuera de esta fase.
 
 ## 1. Resumen de decisiones aprobadas
 

@@ -126,9 +126,9 @@ def test_struct_lifecycle_traits_are_recursive_and_source_ordered() -> None:
     )
     registry = LifecycleTypeRegistry([inner, outer])
     traits = registry.traits(StructType("Outer"))
-    assert traits.trivially_copyable
+    assert not traits.trivially_copyable
     assert traits.trivially_relocatable
-    assert not traits.needs_destroy
+    assert traits.needs_destroy
     assert traits.fields == outer.fields
     assert [step.path for step in registry.synthesis_plan(StructType("Outer"), "copy_init")] == [
         ("count",),

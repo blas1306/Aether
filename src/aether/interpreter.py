@@ -22,6 +22,7 @@ from .stdlib import BuiltinFunction, is_builtin, is_builtin_constant, is_builtin
 from .stdlib.math.linear_algebra import matmul_builtin
 from .stdlib.registry import get_builtin_constant
 from .tokens import AETHER_TYPES, PRIMITIVE_TYPES
+from .string_value import StringValue
 from .types import (
     AetherType,
     AetherExceptionValue,
@@ -672,6 +673,8 @@ class Interpreter:
 
     def _evaluate(self, expression: ast.Expression, env: Environment) -> AetherValue:
         if isinstance(expression, ast.Literal):
+            if expression.type_name == "string":
+                return AetherValue("string", StringValue.literal(expression.value))
             return AetherValue(expression.type_name, expression.value)
         if isinstance(expression, ast.InterpolatedString):
             return AetherValue("string", self._interpolate_string(expression, env))

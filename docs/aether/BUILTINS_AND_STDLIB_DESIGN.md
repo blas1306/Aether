@@ -1,7 +1,7 @@
 # Frontera entre builtins, stdlib y paquetes oficiales
 
 Estado: diseño para consolidación de v1, 14 de julio de 2026. Este documento
-clasifica responsabilidades; no implementa ni migra masivamente la librería
+clasifica responsabilidades; no migra masivamente la librería
 actual.
 
 ## Principio rector
@@ -29,7 +29,8 @@ un LLVM intrinsic, `libm` o runtime durante lowering.
 La aplicación concreta de esta frontera a strings se decide en
 [`STRING_RUNTIME_DESIGN.md`](STRING_RUNTIME_DESIGN.md), con lifecycle en
 [`VALUE_LIFECYCLE_DESIGN.md`](../compiler/VALUE_LIFECYCLE_DESIGN.md). El diseño
-está aprobado, pero no declara implementadas las primitivas, ARC ni el módulo
+está aprobado. Las primitivas internas de objeto UTF-8, ARC, igualdad e
+impresión length-aware ya están implementadas; todavía no declara implementado el módulo
 `text` descritos allí.
 
 ## Nivel 1: builtins e intrínsecos

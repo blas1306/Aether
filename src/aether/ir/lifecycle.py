@@ -7,6 +7,8 @@ from .model import (
     IRArrayNew,
     IRBasicBlock,
     IRConst,
+    IRCall,
+    IRCallIndirect,
     IRCopyInit,
     IRDestroy,
     IREnumConstant,
@@ -14,10 +16,15 @@ from .model import (
     IRInitDefault,
     IRInstruction,
     IRListNew,
+    IRListGet,
+    IRListPop,
+    IRListRemoveAt,
+    IRArrayGet,
     IRLoad,
     IRMethodResultNew,
     IRModule,
     IRMoveInit,
+    IRPrint,
     IRRelocate,
     IRStorage,
     IRStore,
@@ -81,9 +88,8 @@ class LifecycleFieldStep:
 class LifecycleTypeRegistry:
     """Recursive nominal type classification shared by verifier and lowering.
 
-    Strings deliberately remain trivial here.  The next runtime phase can
-    change only their traits and synthesized struct plans without changing the
-    lifecycle instruction contract introduced in this phase.
+    String ownership is expanded only after this registry and the verifier have
+    checked the generic lifecycle program.
     """
 
     def __init__(self, structs: list[IRStructDefinition]) -> None:
@@ -139,9 +145,7 @@ class LifecycleTypeRegistry:
         ):
             return LifecycleTraits(True, True, False, True)
         if isinstance(type_, StringType):
-            # Current strings are immortal C-string pointers.  Do not model ARC
-            # until AetherStringObject is introduced.
-            return LifecycleTraits(True, True, False, True)
+            return LifecycleTraits(False, True, True, True)
         if isinstance(type_, (ArrayType, ListType)):
             return LifecycleTraits(True, True, False, True)
         if isinstance(type_, VectorType):
@@ -220,12 +224,22 @@ class LifecycleExpander:
         self.registry = LifecycleTypeRegistry(module.structs)
         self._next = 0
         self._used_names: set[str] = set()
+        self._owned_values: set[IRValue] = set()
 
     def expand(self) -> IRModule:
         functions = [self._expand_function(function) for function in self.module.functions]
         return IRModule(functions, list(self.module.structs))
 
     def _expand_function(self, function: IRFunction) -> IRFunction:
+        self._owned_values = set()
+        for block in function.blocks:
+            for instruction in block.instructions:
+                if isinstance(instruction, (IRCall, IRCallIndirect)) and instruction.result is not None:
+                    if self.registry.traits(instruction.result.type).needs_destroy:
+                        self._owned_values.add(instruction.result)
+                elif isinstance(instruction, (IRArrayGet, IRListGet, IRListPop, IRListRemoveAt)):
+                    if self.registry.traits(instruction.result.type).needs_destroy:
+                        self._owned_values.add(instruction.result)
         self._used_names = {parameter.name for parameter in function.parameters}
         for block in function.blocks:
             for instruction in block.instructions:
@@ -286,20 +300,67 @@ class LifecycleExpander:
         if isinstance(instruction, IRInitDefault):
             emitted, value = self._default_value(instruction.destination.type)
             return [*emitted, IRStore(instruction.destination, value)]
-        if isinstance(instruction, (IRCopyInit, IRAssign)):
-            if isinstance(instruction.source, IRStorage):
-                temporary = self._temporary(instruction.source.type)
-                return [
-                    IRLoad(temporary, instruction.source),
-                    IRStore(instruction.destination, temporary),
-                ]
-            return [IRStore(instruction.destination, instruction.source)]
+        if isinstance(instruction, IRCopyInit):
+            source_instructions, source = self._loaded(instruction.source)
+            if not self.registry.traits(source.type).needs_destroy:
+                return [*source_instructions, IRStore(instruction.destination, source)]
+            if source in self._owned_values:
+                self._owned_values.remove(source)
+                return [*source_instructions, IRStore(instruction.destination, source)]
+            return [
+                *source_instructions,
+                IRCall("__aether_retain", (source,), None, "__aether_retain"),
+                IRStore(instruction.destination, source),
+            ]
+        if isinstance(instruction, IRAssign):
+            source_instructions, source = self._loaded(instruction.source)
+            if not self.registry.traits(source.type).needs_destroy:
+                return [*source_instructions, IRStore(instruction.destination, source)]
+            old = self._temporary(instruction.destination.type)
+            retain = []
+            if source in self._owned_values:
+                self._owned_values.remove(source)
+            else:
+                retain.append(IRCall("__aether_retain", (source,), None, "__aether_retain"))
+            return [
+                *source_instructions,
+                *retain,
+                IRLoad(old, instruction.destination),
+                IRStore(instruction.destination, source),
+                IRCall("__aether_release", (old,), None, "__aether_release"),
+            ]
+        if isinstance(instruction, (IRCall, IRCallIndirect)):
+            emitted: list[IRInstruction] = [instruction]
+            for argument in instruction.arguments:
+                if argument in self._owned_values:
+                    self._owned_values.remove(argument)
+                    emitted.append(
+                        IRCall("__aether_release", (argument,), None, "__aether_release")
+                    )
+            return emitted
+        if isinstance(instruction, IRPrint):
+            emitted = [instruction]
+            if instruction.value in self._owned_values:
+                self._owned_values.remove(instruction.value)
+                emitted.append(
+                    IRCall(
+                        "__aether_release",
+                        (instruction.value,),
+                        None,
+                        "__aether_release",
+                    )
+                )
+            return emitted
         if isinstance(instruction, IRMoveInit):
             temporary = self._temporary(instruction.source.type)
-            return [
+            result = [
                 IRLoad(temporary, instruction.source),
                 IRStore(instruction.destination, temporary),
             ]
+            if self.registry.traits(instruction.source.type).needs_destroy:
+                defaults, empty = self._default_value(instruction.source.type)
+                result.extend((*defaults, IRStore(instruction.source, empty)))
+            return result
         if isinstance(instruction, IRRelocate):
             temporary = self._temporary(instruction.source.type)
             return [
@@ -307,10 +368,20 @@ class LifecycleExpander:
                 IRStore(instruction.destination, temporary),
             ]
         if isinstance(instruction, IRDestroy):
-            # Every type in the current ABI is trivial.  Keeping this explicit
-            # until this pass is what lets verification observe the cleanup.
-            return []
+            if not self.registry.traits(instruction.value.type).needs_destroy:
+                return []
+            value = self._temporary(instruction.value.type)
+            return [
+                IRLoad(value, instruction.value),
+                IRCall("__aether_release", (value,), None, "__aether_release"),
+            ]
         return [instruction]
+
+    def _loaded(self, source: IRValue) -> tuple[list[IRInstruction], IRValue]:
+        if not isinstance(source, IRStorage):
+            return [], source
+        temporary = self._temporary(source.type)
+        return [IRLoad(temporary, source)], temporary
 
     def _default_value(self, type_: IRType) -> tuple[list[IRInstruction], IRValue]:
         instructions: list[IRInstruction] = []

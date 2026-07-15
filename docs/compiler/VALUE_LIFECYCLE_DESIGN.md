@@ -1,10 +1,10 @@
 # Lifecycle de valores de Aether
 
-Estado: **contrato e infraestructura IR implementados para Aether v1**, 15 de
-julio de 2026. El lowering AST→IR ya emite lifecycle y cleanup estructural, y
-el verifier comprueba el estado intra-función antes de SSA. `retain`/`release`,
-ARC y el nuevo objeto string siguen sin implementarse; el ABI LLVM vigente no
-cambió.
+Estado: **contrato, expansión ARC string y hooks aggregate implementados para
+Aether v1**, 15 de julio de 2026. El lowering AST→IR emite lifecycle y cleanup
+estructural, el verifier comprueba el estado antes de SSA y la expansión genera
+retain/release effectful para string y structs que lo contienen. El handle LLVM
+sigue ocupando una palabra, pero apunta al header de `AetherStringObject`.
 
 ## 1. Vocabulario e invariantes
 
@@ -134,10 +134,9 @@ Las propiedades conceptuales son:
   aunque hoy sean inmortales o tengan aliasing deliberado;
 - `needs_retain`: una copia lógica debe adquirir ownership transitivo.
 
-`LLVMTypeLayouts` conserva estos hechos separados. Durante la transición, sus
-valores describen el ABI **actual**: el `ptr` string apunta a payload literal y
-no existe ARC. El modelo aprobado futuro cambia string y cualquier struct que
-lo contenga, pero no se activará hasta migrar toda operación de colección.
+`LLVMTypeLayouts` conserva estos hechos separados. La clasificación aprobada de
+string ya está activa y se propaga recursivamente a structs y operaciones de
+elementos de colección.
 
 | Tipo | Sized | Copy trivial actual | Relocate trivial | Destroy actual | References | Retain actual | Contrato futuro relevante |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -362,9 +361,9 @@ tipos actuales; por eso SSA, sus optimizadores y LLVM no reciben efectos de
 ownership todavía. En IR, los opcodes declaran efectos obligatorios y DCE no
 puede eliminarlos.
 
-Optimizaciones futuras, no implementadas en esta fase: pairing probado de
-retain/release, move elision, return value optimization, no-ops para inmortales,
-cleanup de temporales y devirtualización de hooks de tipos conocidos. Todas
+Optimizaciones futuras, no implementadas en esta fase: pairing general probado
+de retain/release, ARC global e inlining/devirtualización de hooks. La expansión
+ya consume temporales owned obvios y mueve locals al return. Todas
 requieren una demostración sobre aliasing, aristas de control y panics; la
 adyacencia textual no basta.
 
@@ -391,7 +390,6 @@ de string hasta migrar conjuntamente structs, collections, calls y cleanup.
 - optimización ARC, RVO y política de concurrencia posterior;
 - `StringView`, substring y APIs públicas de texto.
 
-El siguiente bloque recomendado es cambiar la clasificación de `StringType` y
-añadir `AetherStringObject`, literales/vacío y hooks retain/release como una
-migración atómica con print/igualdad y recorridos aggregate. No se debe
-habilitar todavía concat ni productores dinámicos antes de cerrar esos hooks.
+El siguiente bloque recomendado es un optimizador ARC con análisis de alias y
+la primera API pública de construcción dinámica. No se habilitan todavía
+concat, parsing, split/trim, files ni argv.

@@ -111,11 +111,17 @@ double negativeRatio(int a, int b) {
 def test_lower_return_literal(source: str, expected_type, expected_value: object) -> None:
     module = _lower(source)
 
-    constant, terminator = module.functions[0].blocks[0].instructions
+    instructions = module.functions[0].blocks[0].instructions
+    constant, terminator = instructions[0], instructions[-1]
 
     assert constant == IRConst(constant.result, expected_value)
     assert constant.result.type == expected_type
     assert terminator == IRReturn(constant.result)
+    if isinstance(expected_type, StringType):
+        assert any(
+            isinstance(item, IRCall) and item.builtin == "__aether_retain"
+            for item in instructions
+        )
 
 
 def test_lower_row_vector_literal() -> None:

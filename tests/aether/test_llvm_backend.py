@@ -865,14 +865,13 @@ def test_prints_function_returning_string_literal_global() -> None:
         ]
     )
 
-    assert print_llvm(module) == (
-        '@.str.0 = private unnamed_addr constant [6 x i8] c"hello\\00"\n'
-        "\n"
-        "define ptr @hello() {\n"
-        "entry:\n"
-        "  ret ptr @.str.0\n"
-        "}"
-    )
+    llvm = print_llvm(module)
+    assert "%AetherStringObject = type { i64, i64, i32, i32, [0 x i8] }" in llvm
+    assert (
+        '@.aether.str.0 = private constant { i64, i64, i32, i32, [6 x i8] } '
+        '{ i64 5, i64 0, i32 3, i32 0, [6 x i8] c"hello\\00" }, align 8'
+    ) in llvm
+    assert "define ptr @hello() {\nentry:\n  ret ptr @.aether.str.0\n}" in llvm
 
 
 def test_prints_two_distinct_string_literals_as_two_globals() -> None:
@@ -898,10 +897,10 @@ def test_prints_two_distinct_string_literals_as_two_globals() -> None:
 
     llvm_ir = print_llvm(module)
 
-    assert '@.str.0 = private unnamed_addr constant [6 x i8] c"alpha\\00"' in llvm_ir
-    assert '@.str.1 = private unnamed_addr constant [5 x i8] c"beta\\00"' in llvm_ir
-    assert "  ret ptr @.str.0\n" in llvm_ir
-    assert "  ret ptr @.str.1\n" in llvm_ir
+    assert '@.aether.str.0 = private constant' in llvm_ir and 'c"alpha\\00"' in llvm_ir
+    assert '@.aether.str.1 = private constant' in llvm_ir and 'c"beta\\00"' in llvm_ir
+    assert "  ret ptr @.aether.str.0\n" in llvm_ir
+    assert "  ret ptr @.aether.str.1\n" in llvm_ir
 
 
 def test_deduplicates_repeated_string_literals_by_value() -> None:
@@ -927,8 +926,9 @@ def test_deduplicates_repeated_string_literals_by_value() -> None:
 
     llvm_ir = print_llvm(module)
 
-    assert llvm_ir.count("private unnamed_addr constant") == 1
-    assert llvm_ir.count("ret ptr @.str.0") == 2
+    assert llvm_ir.count("@.aether.str.0 = private constant") == 1
+    assert "@.aether.str.1 = private constant" not in llvm_ir
+    assert llvm_ir.count("ret ptr @.aether.str.0") == 2
 
 
 def test_escapes_string_literal_bytes_for_llvm_c_string() -> None:
@@ -951,8 +951,9 @@ def test_escapes_string_literal_bytes_for_llvm_c_string() -> None:
     )
 
     assert (
-        '@.str.0 = private unnamed_addr constant [9 x i8] '
-        'c"a\\0A\\09\\22\\5C\\01\\C3\\A9\\00"'
+        '@.aether.str.0 = private constant { i64, i64, i32, i32, [9 x i8] } '
+        '{ i64 8, i64 0, i32 3, i32 0, [9 x i8] '
+        'c"a\\0A\\09\\22\\5C\\01\\C3\\A9\\00" }, align 8'
     ) in print_llvm(module)
 
 
@@ -987,20 +988,10 @@ def test_prints_string_literal_as_call_argument() -> None:
         ]
     )
 
-    assert print_llvm(module) == (
-        '@.str.0 = private unnamed_addr constant [6 x i8] c"hello\\00"\n'
-        "\n"
-        "define ptr @echo(ptr %text) {\n"
-        "entry:\n"
-        "  ret ptr %text\n"
-        "}\n"
-        "\n"
-        "define ptr @main() {\n"
-        "entry:\n"
-        "  %0 = call ptr @echo(ptr @.str.0)\n"
-        "  ret ptr %0\n"
-        "}"
-    )
+    llvm = print_llvm(module)
+    assert '@.aether.str.0 = private constant' in llvm
+    assert "define ptr @echo(ptr %text) {\nentry:\n  ret ptr %text\n}" in llvm
+    assert "%0 = call ptr @echo(ptr @.aether.str.0)" in llvm
 
 
 def test_prints_void_call_without_result() -> None:
@@ -1284,7 +1275,7 @@ def test_prints_string_phi_as_ptr() -> None:
 
     llvm_ir = print_llvm(module)
 
-    assert "  %0 = phi ptr [ @.str.0, %then0 ], [ @.str.1, %else0 ]\n" in llvm_ir
+    assert "  %0 = phi ptr [ @.aether.str.0, %then0 ], [ @.aether.str.1, %else0 ]\n" in llvm_ir
     assert "  ret ptr %0" in llvm_ir
 
 
@@ -1385,7 +1376,7 @@ def test_string_binary_operation_has_clear_error() -> None:
         print_llvm(module)
 
 
-def test_string_comparison_has_clear_error() -> None:
+def test_string_comparison_uses_length_aware_runtime() -> None:
     string_type = StringType()
     bool_type = BoolType()
     left = SSAValue("left", string_type)
@@ -1412,11 +1403,10 @@ def test_string_comparison_has_clear_error() -> None:
         ]
     )
 
-    with pytest.raises(
-        LLVMBackendError,
-        match="LLVM backend does not support string equality yet",
-    ):
-        print_llvm(module)
+    llvm = print_llvm(module)
+    assert "call i1 @aether_string_equal" in llvm
+    assert "@memcmp" in llvm
+    assert "@strcmp" not in llvm
 
 
 def test_unknown_binary_operator_has_clear_error() -> None:

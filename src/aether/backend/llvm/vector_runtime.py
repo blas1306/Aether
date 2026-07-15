@@ -62,8 +62,6 @@ class LLVMVectorRuntime:
 
     def _append_equality(self, sections: list[str], common: LLVMRuntimeCommon) -> None:
         for element_type in sorted(self.equality_types, key=aggregate_helper_suffix):
-            if aggregate_helper_suffix(element_type) == "string":
-                common.declare(sections, "declare i32 @strcmp(ptr, ptr)")
             sections.append(aggregate_equal_helper("vector", element_type))
 
     def _append_print(self, sections: list[str]) -> None:

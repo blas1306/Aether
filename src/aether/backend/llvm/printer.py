@@ -89,12 +89,14 @@ from .runtime import sequence_sort_helper_name
 from .runtime_common import LLVMRuntimeCommon, aggregate_helper_suffix
 from .scalar_math_runtime import LLVMScalarMathRuntime
 from .vector_runtime import LLVMVectorRuntime
+from .string_runtime import LLVMStringRuntime
 
 
 @dataclass(frozen=True)
 class _StringGlobal:
     name: str
-    size: int
+    byte_length: int
+    payload_size: int
     initializer: str
 
 
@@ -162,13 +164,14 @@ class LLVMPrinter:
         self._list_contains_types: set[object] = set()
         self._list_index_of_types: set[object] = set()
         self._uses_print = False
+        self._uses_string_runtime = False
         self._checked_int_operators: set[str] = set()
         self._scalar_math_calls: set[tuple[str, tuple[object, ...], object]] = set()
         self._structs = {definition.name: definition for definition in module.structs}
         self._layouts = LLVMTypeLayouts(module.structs)
-        self._uses_strcmp = False
         self._struct_sequence_equality_types: set[tuple[str, object]] = set()
         self._struct_sequence_print_types: set[tuple[str, object]] = set()
+        self._collection_arc_helpers: set[tuple[str, object, bool]] = set()
 
         functions = [self._print_function(function) for function in module.functions]
         struct_types = [
@@ -256,6 +259,14 @@ class LLVMPrinter:
             ):
                 runtime.append(self._struct_sequence_print_helper(kind, element_type))
                 emitted_sequence_print_types.add((kind, element_type))
+        emitted_arc_helpers: set[tuple[str, object, bool]] = set()
+        while pending_arc := self._collection_arc_helpers - emitted_arc_helpers:
+            for kind, element_type, retain in sorted(
+                pending_arc,
+                key=lambda item: (item[0], str(item[1]), item[2]),
+            ):
+                runtime.append(self._collection_arc_helper(kind, element_type, retain=retain))
+                emitted_arc_helpers.add((kind, element_type, retain))
         LLVMVectorRuntime(
             self._uses_vector_indexing,
             frozenset(self._vector_equality_types),
@@ -269,13 +280,11 @@ class LLVMPrinter:
         LLVMIntegerRuntime(frozenset(self._checked_int_operators)).append(runtime, common_runtime)
         LLVMScalarMathRuntime(frozenset(self._scalar_math_calls)).append(runtime, common_runtime)
         LLVMRuntimeIO(enabled=self._uses_print).append(runtime)
-        if self._uses_strcmp:
-            runtime.append("declare i32 @strcmp(ptr, ptr)")
-        if self._struct_sequence_print_types:
-            runtime.append("declare i32 @putchar(i32)")
+        LLVMStringRuntime(enabled=self._uses_string_runtime).append(runtime)
         globals_ = [
-            self._print_string_global(global_)
+            rendered
             for global_ in self._string_globals_by_value.values()
+            if (rendered := self._print_string_global(global_))
         ]
         # Named aggregate bodies must precede every helper that performs a
         # typed GEP/load.  This also makes collection layout independent of
@@ -604,6 +613,8 @@ class LLVMPrinter:
                 self._matrix_equality_types.add(element_type)
             else:
                 raise LLVMBackendError("LLVM aggregate compare expects VectorType or MatrixType")
+            if isinstance(element_type, StringType):
+                self._uses_string_runtime = True
             length = 1
             for size in instruction.aggregate_shape:
                 length *= size
@@ -627,10 +638,24 @@ class LLVMPrinter:
             isinstance(instruction.left.type, StringType)
             or isinstance(instruction.right.type, StringType)
         ):
-            raise LLVMBackendError(
-                "LLVM backend does not support string equality yet; "
-                "only current literal-backed ptr transport is supported"
+            if (
+                instruction.left.type != instruction.right.type
+                or instruction.operator not in {"eq", "ne"}
+                or not isinstance(instruction.result.type, BoolType)
+            ):
+                raise LLVMBackendError("LLVM string comparison only supports homogeneous eq/ne")
+            self._uses_string_runtime = True
+            result = self._new_temp(instruction.result)
+            equal = self._synthetic_temp("string.equal")
+            lines = [
+                f"{equal} = call i1 @aether_string_equal(ptr {self._operand(instruction.left)}, ptr {self._operand(instruction.right)})"
+            ]
+            lines.append(
+                f"{result} = and i1 {equal}, true"
+                if instruction.operator == "eq"
+                else f"{result} = xor i1 {equal}, true"
             )
+            return "\n  ".join(lines)
 
         if (
             isinstance(instruction.result.type, BoolType)
@@ -714,12 +739,8 @@ class LLVMPrinter:
             lines.append(f"{result} = fcmp oeq double {left}, {right}")
             return result
         if isinstance(field_type, StringType):
-            self._uses_strcmp = True
-            compared = self._synthetic_temp("struct.compare.string")
-            lines.extend([
-                f"{compared} = call i32 @strcmp(ptr {left}, ptr {right})",
-                f"{result} = icmp eq i32 {compared}, 0",
-            ])
+            self._uses_string_runtime = True
+            lines.append(f"{result} = call i1 @aether_string_equal(ptr {left}, ptr {right})")
             return result
         if isinstance(field_type, StructType):
             definition = self._structs.get(field_type.name)
@@ -768,10 +789,9 @@ class LLVMPrinter:
         elif isinstance(element_type, DoubleType):
             compare_lines = ["  %equal = fcmp oeq double %left.value, %right.value"]
         elif isinstance(element_type, StringType):
-            self._uses_strcmp = True
+            self._uses_string_runtime = True
             compare_lines = [
-                "  %string.compare = call i32 @strcmp(ptr %left.value, ptr %right.value)",
-                "  %equal = icmp eq i32 %string.compare, 0",
+                "  %equal = call i1 @aether_string_equal(ptr %left.value, ptr %right.value)",
             ]
         else:
             raise LLVMBackendError(
@@ -884,6 +904,18 @@ class LLVMPrinter:
         return f"br {self._label_operand(instruction.target)}"
 
     def _print_call(self, instruction: SSACall) -> str:
+        if instruction.builtin in {"__aether_retain", "__aether_release"}:
+            if instruction.result is not None or len(instruction.arguments) != 1:
+                raise LLVMBackendError("LLVM lifecycle builtin requires one argument and no result")
+            argument = instruction.arguments[0]
+            lines: list[str] = []
+            self._emit_arc_value(
+                lines,
+                self._operand(argument),
+                argument.type,
+                retain=instruction.builtin == "__aether_retain",
+            )
+            return "\n  ".join(lines) if lines else "; trivial lifecycle"
         if instruction.builtin is not None:
             return self._print_scalar_math_call(instruction)
         arguments = ", ".join(
@@ -901,6 +933,98 @@ class LLVMPrinter:
             )
         result = self._new_temp(instruction.result)
         return f"{result} = call {return_type} {callee}({arguments})"
+
+    def _emit_arc_value(
+        self,
+        lines: list[str],
+        operand: str,
+        type_: object,
+        *,
+        retain: bool,
+    ) -> None:
+        if isinstance(type_, StringType):
+            self._uses_string_runtime = True
+            operation = "retain" if retain else "release"
+            lines.append(f"call void @aether_string_{operation}(ptr {operand})")
+            return
+        if isinstance(type_, StructType):
+            definition = self._structs.get(type_.name)
+            if definition is None:
+                raise LLVMBackendError(f"LLVM has no lifecycle layout for struct {type_.name}")
+            fields = list(enumerate(definition.fields))
+            if not retain:
+                fields.reverse()
+            for index, (_name, field_type) in fields:
+                if not self._layouts.layout(field_type).needs_destroy:
+                    continue
+                field = self._synthetic_temp("arc.field")
+                lines.append(
+                    f"{field} = extractvalue {llvm_type(type_)} {operand}, {index}"
+                )
+                self._emit_arc_value(lines, field, field_type, retain=retain)
+            return
+        if isinstance(type_, MethodResultType):
+            fields = ((0, type_.receiver), (1, type_.value))
+            ordered = fields if retain else tuple(reversed(fields))
+            for index, field_type in ordered:
+                if not self._layouts.layout(field_type).needs_destroy:
+                    continue
+                field = self._synthetic_temp("arc.method.field")
+                lines.append(
+                    f"{field} = extractvalue {llvm_type(type_)} {operand}, {index}"
+                )
+                self._emit_arc_value(lines, field, field_type, retain=retain)
+            return
+        raise LLVMBackendError(f"LLVM lifecycle builtin does not support type {type_}")
+
+    def _require_collection_arc_helper(
+        self,
+        kind: str,
+        element_type: object,
+        *,
+        retain: bool,
+    ) -> str:
+        self._collection_arc_helpers.add((kind, element_type, retain))
+        operation = "retain" if retain else "release"
+        return f"aether_{kind}_{operation}_elements_{aggregate_helper_suffix(element_type)}"
+
+    def _collection_arc_helper(
+        self,
+        kind: str,
+        element_type: object,
+        *,
+        retain: bool,
+    ) -> str:
+        name = self._require_collection_arc_helper(kind, element_type, retain=retain)
+        layout = "%AetherArray" if kind == "array" else "%AetherList"
+        data_index = 1 if kind == "array" else 2
+        rendered = llvm_type(element_type)
+        arc_lines: list[str] = []
+        self._emit_arc_value(arc_lines, "%element", element_type, retain=retain)
+        return "\n".join([
+            f"define private void @{name}(ptr %sequence) {{",
+            "entry:",
+            f"  %length_field = getelementptr {layout}, ptr %sequence, i32 0, i32 0",
+            "  %length = load i64, ptr %length_field",
+            f"  %data_field = getelementptr {layout}, ptr %sequence, i32 0, i32 {data_index}",
+            "  %data = load ptr, ptr %data_field",
+            "  br label %loop",
+            "loop:",
+            "  %index = phi i64 [ 0, %entry ], [ %next, %advance ]",
+            "  %done = icmp eq i64 %index, %length",
+            "  br i1 %done, label %exit, label %body",
+            "body:",
+            f"  %element_ptr = getelementptr {rendered}, ptr %data, i64 %index",
+            f"  %element = load {rendered}, ptr %element_ptr",
+            *(f"  {line}" for line in arc_lines),
+            "  br label %advance",
+            "advance:",
+            "  %next = add i64 %index, 1",
+            "  br label %loop",
+            "exit:",
+            "  ret void",
+            "}",
+        ])
 
     def _print_indirect_call(self, instruction: SSACallIndirect) -> str:
         if not isinstance(instruction.callee.type, FunctionType):
@@ -1030,10 +1154,9 @@ class LLVMPrinter:
 
         if isinstance(instruction.value.type, EnumType):
             lines, selected = self._enum_text_selection(instruction.value.type, value)
-            lines.append(
-                f"{call_result} = call i32 (ptr, ...) @printf("
-                f"ptr @.aether.io.string{suffix}, ptr {selected})"
-            )
+            lines.append(f"call void @aether_string_print(ptr {selected})")
+            if instruction.newline:
+                lines.append(f"{call_result} = call i32 @putchar(i32 10)")
             return "\n  ".join(lines)
 
         if isinstance(instruction.value.type, VectorType):
@@ -1042,6 +1165,8 @@ class LLVMPrinter:
                 raise LLVMBackendError("LLVM Vector print requires a known length")
             element_type = instruction.value.type.element
             self._vector_print_types.add(element_type)
+            if isinstance(element_type, StringType):
+                self._uses_string_runtime = True
             helper = f"aether_vector_print_{aggregate_helper_suffix(element_type)}"
             column = "true" if instruction.value.type.orientation == "column" else "false"
             newline = "true" if instruction.newline else "false"
@@ -1055,6 +1180,8 @@ class LLVMPrinter:
                 raise LLVMBackendError("LLVM Matrix print requires known dimensions")
             element_type = instruction.value.type.element
             self._matrix_print_types.add(element_type)
+            if isinstance(element_type, StringType):
+                self._uses_string_runtime = True
             helper = f"aether_matrix_print_{aggregate_helper_suffix(element_type)}"
             rows, columns = instruction.aggregate_shape
             newline = "true" if instruction.newline else "false"
@@ -1073,18 +1200,23 @@ class LLVMPrinter:
                 f"ptr @.aether.io.double{suffix}, double {value})"
             )
         if isinstance(instruction.value.type, StringType):
-            return (
-                f"{call_result} = call i32 (ptr, ...) @printf("
-                f"ptr @.aether.io.string{suffix}, ptr {value})"
-            )
+            self._uses_string_runtime = True
+            lines = [f"call void @aether_string_print(ptr {value})"]
+            if instruction.newline:
+                lines.append(f"{call_result} = call i32 @putchar(i32 10)")
+            return "\n  ".join(lines)
         if isinstance(instruction.value.type, BoolType):
             selected = self._synthetic_temp("print.bool")
+            stream = self._synthetic_temp("print.bool.stream")
+            lines = [
+                f"{selected} = select i1 {value}, ptr @.aether.io.true, ptr @.aether.io.false",
+                f"{stream} = load ptr, ptr @stdout",
+                f"{call_result} = call i32 @fputs(ptr {selected}, ptr {stream})",
+            ]
+            if instruction.newline:
+                lines.append(f"{self._synthetic_temp('print.bool.newline')} = call i32 @putchar(i32 10)")
             return "\n  ".join(
-                [
-                    f"{selected} = select i1 {value}, ptr @.aether.io.true, ptr @.aether.io.false",
-                    f"{call_result} = call i32 (ptr, ...) @printf("
-                    f"ptr @.aether.io.string{suffix}, ptr {selected})",
-                ]
+                lines
             )
         raise LLVMBackendError(
             "LLVM print only supports int, boolean, string, and double; "
@@ -1117,10 +1249,7 @@ class LLVMPrinter:
 
     def _emit_text(self, lines: list[str], text: str) -> None:
         global_ = self._string_global(text)
-        result = self._synthetic_temp("struct.print.text")
-        lines.append(
-            f"{result} = call i32 (ptr, ...) @printf(ptr @.aether.io.string, ptr {global_.name})"
-        )
+        lines.append(f"call void @aether_string_print(ptr {global_.name})")
 
     def _emit_printed_value(self, lines: list[str], value: str, type_: object) -> None:
         result = self._synthetic_temp("struct.print.value")
@@ -1131,21 +1260,22 @@ class LLVMPrinter:
             lines.append(f"{result} = call i32 (ptr, ...) @printf(ptr @.aether.io.double, double {value})")
             return
         if isinstance(type_, StringType):
-            lines.append(f"{result} = call i32 (ptr, ...) @printf(ptr @.aether.io.string, ptr {value})")
+            self._uses_string_runtime = True
+            lines.append(f"call void @aether_string_print(ptr {value})")
             return
         if isinstance(type_, BoolType):
             selected = self._synthetic_temp("struct.print.bool")
+            stream = self._synthetic_temp("struct.print.stream")
             lines.extend([
                 f"{selected} = select i1 {value}, ptr @.aether.io.true, ptr @.aether.io.false",
-                f"{result} = call i32 (ptr, ...) @printf(ptr @.aether.io.string, ptr {selected})",
+                f"{stream} = load ptr, ptr @stdout",
+                f"{result} = call i32 @fputs(ptr {selected}, ptr {stream})",
             ])
             return
         if isinstance(type_, EnumType):
             enum_lines, selected = self._enum_text_selection(type_, value)
             lines.extend(enum_lines)
-            lines.append(
-                f"{result} = call i32 (ptr, ...) @printf(ptr @.aether.io.string, ptr {selected})"
-            )
+            lines.append(f"call void @aether_string_print(ptr {selected})")
             return
         if isinstance(type_, StructType):
             lines.extend(self._print_struct_value(type_, value, newline=False))
@@ -1180,19 +1310,21 @@ class LLVMPrinter:
                 "  %printed = call i32 (ptr, ...) @printf(ptr @.aether.io.double, double %value)"
             ]
         elif isinstance(element_type, StringType):
+            self._uses_string_runtime = True
             print_lines = [
-                "  %printed = call i32 (ptr, ...) @printf(ptr @.aether.io.string, ptr %value)"
+                "  call void @aether_string_print(ptr %value)"
             ]
         elif isinstance(element_type, BoolType):
             print_lines = [
                 "  %text = select i1 %value, ptr @.aether.io.true, ptr @.aether.io.false",
-                "  %printed = call i32 (ptr, ...) @printf(ptr @.aether.io.string, ptr %text)",
+                "  %stream = load ptr, ptr @stdout",
+                "  %printed = call i32 @fputs(ptr %text, ptr %stream)",
             ]
         elif isinstance(element_type, EnumType):
             enum_lines, selected = self._enum_text_selection(element_type, "%value")
             print_lines = [
                 *(f"  {line}" for line in enum_lines),
-                f"  %printed = call i32 (ptr, ...) @printf(ptr @.aether.io.string, ptr {selected})",
+                f"  call void @aether_string_print(ptr {selected})",
             ]
         elif isinstance(element_type, StructType):
             print_lines = [
@@ -1348,6 +1480,8 @@ class LLVMPrinter:
             lines.append(
                 self._element_pointer_line(element_ptr, element_type, data, index)
             )
+            if layout.needs_retain:
+                self._emit_arc_value(lines, self._operand(element), element.type, retain=True)
             lines.append(self._store_element_line(element_type, self._operand(element), element_ptr))
 
         self._for_each_element(length, emit_element)
@@ -1363,7 +1497,11 @@ class LLVMPrinter:
         self._uses_list_copy = True
         result = self._new_temp(instruction.result)
         size = self._sizeof(instruction.list_value.type.element, collection="List")
-        return f"{result} = call ptr @aether_list_copy(ptr {self._operand(instruction.list_value)}, i64 {size})"
+        lines = [f"{result} = call ptr @aether_list_copy(ptr {self._operand(instruction.list_value)}, i64 {size})"]
+        if self._layouts.layout(instruction.list_value.type.element).needs_retain:
+            helper = self._require_collection_arc_helper("list", instruction.list_value.type.element, retain=True)
+            lines.append(f"call void @{helper}(ptr {result})")
+        return "\n  ".join(lines)
 
     def _print_list_contains(self, instruction: SSAListContains) -> str:
         if not isinstance(instruction.list_value.type, ListType):
@@ -1372,6 +1510,8 @@ class LLVMPrinter:
             raise LLVMBackendError("LLVM list_contains value type must match list element type")
         self._uses_list_type = True
         self._list_contains_types.add(instruction.value.type)
+        if isinstance(instruction.value.type, StringType):
+            self._uses_string_runtime = True
         result = self._new_temp(instruction.result)
         helper = list_contains_helper_name(instruction.value.type)
         value_type = llvm_type(instruction.value.type)
@@ -1387,6 +1527,8 @@ class LLVMPrinter:
             raise LLVMBackendError("LLVM list_index_of value type must match list element type")
         self._uses_list_type = True
         self._list_index_of_types.add(instruction.value.type)
+        if isinstance(instruction.value.type, StringType):
+            self._uses_string_runtime = True
         result = self._new_temp(instruction.result)
         helper = list_index_of_helper_name(instruction.value.type)
         value_type = llvm_type(instruction.value.type)
@@ -1408,11 +1550,17 @@ class LLVMPrinter:
             raise LLVMBackendError("LLVM list_clear expects a ListType source")
         self._uses_list_type = True
         length_field = self._synthetic_temp("list.clear.length_field")
-        return "\n  ".join(
+        lines: list[str] = []
+        element_type = instruction.list_value.type.element
+        if self._layouts.layout(element_type).needs_destroy:
+            helper = self._require_collection_arc_helper("list", element_type, retain=False)
+            lines.append(f"call void @{helper}(ptr {self._operand(instruction.list_value)})")
+        lines.extend(
             self._store_list_length(
                 "0", self._operand(instruction.list_value), length_field
             )
         )
+        return "\n  ".join(lines)
 
     def _print_list_push(self, instruction: SSAListPush) -> list[str]:
         if not isinstance(instruction.list_value.type, ListType):
@@ -1430,14 +1578,19 @@ class LLVMPrinter:
         element_ptr = self._synthetic_temp("list.push.element")
         new_length = self._synthetic_temp("list.push.new_length")
         length_field = self._synthetic_temp("list.push.length_field")
-        return [
+        lines = [
             f"{old_length} = call i64 @aether_list_prepare_push(ptr {list_value}, i64 {element_size})",
             *self._load_list_data(data, list_value, data_field),
             f"{element_ptr} = getelementptr {element_type}, ptr {data}, i64 {old_length}",
+        ]
+        if self._layouts.layout(instruction.value.type).needs_retain:
+            self._emit_arc_value(lines, self._operand(instruction.value), instruction.value.type, retain=True)
+        lines.extend([
             f"store {element_type} {self._operand(instruction.value)}, ptr {element_ptr}",
             f"{new_length} = add i64 {old_length}, 1",
             *self._store_list_length(new_length, list_value, length_field),
-        ]
+        ])
+        return lines
 
     def _print_list_insert(self, instruction: SSAListInsert) -> list[str]:
         if not isinstance(instruction.list_value.type, ListType):
@@ -1463,7 +1616,7 @@ class LLVMPrinter:
         element_ptr = self._synthetic_temp("list.insert.element")
         new_length = self._synthetic_temp("list.insert.new_length")
         length_field = self._synthetic_temp("list.insert.length_field")
-        return [
+        lines = [
             self._list_index64_line(index64, index),
             f"{old_length} = call i64 @aether_list_prepare_insert(ptr {list_value}, i64 {index64}, i64 {element_size})",
             *self._load_list_data(data, list_value, data_field),
@@ -1473,10 +1626,15 @@ class LLVMPrinter:
             f"{bytes_to_move} = mul i64 {elements_to_move}, {element_size}",
             f"call void @llvm.memmove.p0.p0.i64(ptr {destination}, ptr {source}, i64 {bytes_to_move}, i1 false)",
             f"{element_ptr} = getelementptr {element_type}, ptr {data}, i64 {index64}",
+        ]
+        if self._layouts.layout(instruction.value.type).needs_retain:
+            self._emit_arc_value(lines, self._operand(instruction.value), instruction.value.type, retain=True)
+        lines.extend([
             f"store {element_type} {self._operand(instruction.value)}, ptr {element_ptr}",
             f"{new_length} = add i64 {old_length}, 1",
             *self._store_list_length(new_length, list_value, length_field),
-        ]
+        ])
+        return lines
 
     def _print_list_pop(self, instruction: SSAListPop) -> list[str]:
         if not isinstance(instruction.list_value.type, ListType):
@@ -1546,6 +1704,8 @@ class LLVMPrinter:
         element_type = sequence_type.element
         helper = sequence_sort_helper_name(element_type)
         self._sequence_sort_types.add(element_type)
+        if isinstance(element_type, StringType):
+            self._uses_string_runtime = True
         sequence = self._operand(instruction.sequence)
         data = self._synthetic_temp("sort.data")
         length = self._synthetic_temp("sort.length")
@@ -2357,6 +2517,7 @@ class LLVMPrinter:
         element_type = llvm_type(element_ir_type)
         length = len(elements)
         allocation = self._aggregate_allocation(result_value, element_ir_type, length)
+        element_layout = self._layouts.layout(element_ir_type)
         result = allocation.result
         lines = [allocation.line]
         data = self._synthetic_temp("array.data")
@@ -2368,6 +2529,8 @@ class LLVMPrinter:
             lines.append(
                 self._element_pointer_line(element_ptr, element_type, data, index)
             )
+            if element_layout.needs_retain:
+                self._emit_arc_value(lines, self._operand(element), element.type, retain=True)
             lines.append(self._store_element_line(element_type, self._operand(element), element_ptr))
 
         self._for_each_element(length, emit_element)
@@ -2484,9 +2647,10 @@ class LLVMPrinter:
             instruction.result.type,
             check_bounds=True,
         )
-        return element_ptr.lines + [
-            f"{result} = load {element_type}, ptr {element_ptr.value}"
-        ]
+        lines = element_ptr.lines + [f"{result} = load {element_type}, ptr {element_ptr.value}"]
+        if self._layouts.layout(instruction.result.type).needs_retain:
+            self._emit_arc_value(lines, result, instruction.result.type, retain=True)
+        return lines
 
     def _print_array_slice(self, instruction: SSAArraySlice) -> str:
         if not isinstance(instruction.array.type, ArrayType):
@@ -2496,11 +2660,15 @@ class LLVMPrinter:
         self._uses_array_slicing = True
         result = self._new_temp(instruction.result)
         element_size = self._sizeof(instruction.array.type.element, collection="Array")
-        return (
+        lines = [
             f"{result} = call ptr @aether_array_slice(ptr {self._operand(instruction.array)}, "
             f"i32 {self._operand(instruction.start)}, i32 {self._operand(instruction.end)}, "
             f"i64 {element_size})"
-        )
+        ]
+        if self._layouts.layout(instruction.array.type.element).needs_retain:
+            helper = self._require_collection_arc_helper("array", instruction.array.type.element, retain=True)
+            lines.append(f"call void @{helper}(ptr {result})")
+        return "\n  ".join(lines)
 
     def _print_list_get(self, instruction: SSAListGet) -> list[str]:
         if not isinstance(instruction.list_value.type, ListType):
@@ -2515,9 +2683,10 @@ class LLVMPrinter:
             instruction.index,
             instruction.result.type,
         )
-        return element_ptr.lines + [
-            f"{result} = load {element_type}, ptr {element_ptr.value}"
-        ]
+        lines = element_ptr.lines + [f"{result} = load {element_type}, ptr {element_ptr.value}"]
+        if self._layouts.layout(instruction.result.type).needs_retain:
+            self._emit_arc_value(lines, result, instruction.result.type, retain=True)
+        return lines
 
     def _print_vector_get(self, instruction: SSAVectorGet) -> list[str]:
         if not isinstance(instruction.vector.type, VectorType):
@@ -2570,9 +2739,17 @@ class LLVMPrinter:
             instruction.value.type,
             check_bounds=True,
         )
-        return element_ptr.lines + [
-            f"store {element_type} {self._operand(instruction.value)}, ptr {element_ptr.value}"
-        ]
+        lines = list(element_ptr.lines)
+        layout = self._layouts.layout(instruction.value.type)
+        if layout.needs_retain:
+            old = self._synthetic_temp("array.set.old")
+            self._emit_arc_value(lines, self._operand(instruction.value), instruction.value.type, retain=True)
+            lines.append(f"{old} = load {element_type}, ptr {element_ptr.value}")
+            lines.append(f"store {element_type} {self._operand(instruction.value)}, ptr {element_ptr.value}")
+            self._emit_arc_value(lines, old, instruction.value.type, retain=False)
+            return lines
+        lines.append(f"store {element_type} {self._operand(instruction.value)}, ptr {element_ptr.value}")
+        return lines
 
     def _print_vector_set(self, instruction: SSAVectorSet) -> list[str]:
         if not isinstance(instruction.vector.type, VectorType):
@@ -2588,9 +2765,17 @@ class LLVMPrinter:
             instruction.index,
             instruction.value.type,
         )
-        return element_ptr.lines + [
-            f"store {element_type} {self._operand(instruction.value)}, ptr {element_ptr.value}"
-        ]
+        lines = list(element_ptr.lines)
+        layout = self._layouts.layout(instruction.value.type)
+        if layout.needs_retain:
+            old = self._synthetic_temp("list.set.old")
+            self._emit_arc_value(lines, self._operand(instruction.value), instruction.value.type, retain=True)
+            lines.append(f"{old} = load {element_type}, ptr {element_ptr.value}")
+            lines.append(f"store {element_type} {self._operand(instruction.value)}, ptr {element_ptr.value}")
+            self._emit_arc_value(lines, old, instruction.value.type, retain=False)
+            return lines
+        lines.append(f"store {element_type} {self._operand(instruction.value)}, ptr {element_ptr.value}")
+        return lines
 
     def _print_list_set(self, instruction: SSAListSet) -> list[str]:
         if not isinstance(instruction.list_value.type, ListType):
@@ -2606,9 +2791,17 @@ class LLVMPrinter:
             instruction.index,
             instruction.value.type,
         )
-        return element_ptr.lines + [
-            f"store {element_type} {self._operand(instruction.value)}, ptr {element_ptr.value}"
-        ]
+        lines = list(element_ptr.lines)
+        layout = self._layouts.layout(instruction.value.type)
+        if layout.needs_retain:
+            old = self._synthetic_temp("list.set.old")
+            self._emit_arc_value(lines, self._operand(instruction.value), instruction.value.type, retain=True)
+            lines.append(f"{old} = load {element_type}, ptr {element_ptr.value}")
+            lines.append(f"store {element_type} {self._operand(instruction.value)}, ptr {element_ptr.value}")
+            self._emit_arc_value(lines, old, instruction.value.type, retain=False)
+            return lines
+        lines.append(f"store {element_type} {self._operand(instruction.value)}, ptr {element_ptr.value}")
+        return lines
 
     def _print_matrix_set(self, instruction: SSAMatrixSet) -> list[str]:
         if not isinstance(instruction.matrix.type, MatrixType):
@@ -3111,10 +3304,25 @@ class LLVMPrinter:
         if existing is not None:
             return existing
 
-        encoded = value.encode("utf-8") + b"\x00"
+        try:
+            content = value.encode("utf-8", errors="strict")
+        except UnicodeEncodeError as exc:
+            raise LLVMBackendError("LLVM string literal is not valid UTF-8") from exc
+        self._uses_string_runtime = True
+        if not content:
+            global_ = _StringGlobal(
+                name="@.aether.string.empty",
+                byte_length=0,
+                payload_size=1,
+                initializer="\\00",
+            )
+            self._string_globals_by_value[value] = global_
+            return global_
+        encoded = content + b"\x00"
         global_ = _StringGlobal(
-            name=f"@.str.{self._next_string_global}",
-            size=len(encoded),
+            name=f"@.aether.str.{self._next_string_global}",
+            byte_length=len(content),
+            payload_size=len(encoded),
             initializer=self._escape_string_initializer(encoded),
         )
         self._next_string_global += 1
@@ -3123,9 +3331,13 @@ class LLVMPrinter:
 
     @staticmethod
     def _print_string_global(global_: _StringGlobal) -> str:
+        if global_.name == "@.aether.string.empty":
+            return ""
         return (
-            f"{global_.name} = private unnamed_addr constant "
-            f"[{global_.size} x i8] c\"{global_.initializer}\""
+            f"{global_.name} = private constant "
+            f"{{ i64, i64, i32, i32, [{global_.payload_size} x i8] }} "
+            f"{{ i64 {global_.byte_length}, i64 0, i32 3, i32 0, "
+            f"[{global_.payload_size} x i8] c\"{global_.initializer}\" }}, align 8"
         )
 
     @staticmethod

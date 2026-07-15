@@ -1,0 +1,478 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from .runtime_common import LLVMRuntimeCommon
+
+
+@dataclass(frozen=True)
+class LLVMStringRuntime:
+    """Private one-word UTF-8 string-object runtime.
+
+    The header spelling and helpers are compiler/runtime implementation details;
+    they deliberately do not establish a stable C ABI.
+    """
+
+    enabled: bool
+
+    HEADER_SIZE = 24
+    IMMORTAL = 1
+    UTF8_VALID = 2
+
+    def append(self, sections: list[str]) -> None:
+        if not self.enabled:
+            return
+
+        declare = LLVMRuntimeCommon.declare
+        declare(sections, "declare noalias ptr @malloc(i64)")
+        declare(sections, "declare void @free(ptr)")
+        declare(sections, "declare i32 @puts(ptr)")
+        declare(sections, "declare void @exit(i32) noreturn")
+        declare(sections, "declare i32 @memcmp(ptr, ptr, i64)")
+        declare(sections, "declare i64 @fwrite(ptr, i64, i64, ptr)")
+        declare(sections, "declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1 immarg)")
+        declare(sections, "declare { i64, i1 } @llvm.uadd.with.overflow.i64(i64, i64)")
+        declare(sections, "@stdout = external global ptr")
+
+        sections.extend(
+            [
+                "%AetherStringObject = type { i64, i64, i32, i32, [0 x i8] }",
+                '@.aether.string.empty = private constant { i64, i64, i32, i32, [1 x i8] } { i64 0, i64 0, i32 3, i32 0, [1 x i8] c"\\00" }, align 8',
+                self._panic_data(),
+                self._validate_descriptor(),
+                self._accessors(),
+                self._retain(),
+                self._release(),
+                self._equal(),
+                self._compare(),
+                self._print(),
+                self._utf8_validator(),
+                self._from_utf8(),
+            ]
+        )
+
+    @staticmethod
+    def _panic_data() -> str:
+        messages = (
+            ("descriptor", "Aether panic: invalid string descriptor"),
+            ("rc_overflow", "Aether panic: string reference count overflow"),
+            ("rc_underflow", "Aether panic: string reference count underflow"),
+            ("utf8", "Aether panic: invalid UTF-8 string data"),
+            ("size", "Aether panic: string allocation size overflow"),
+            ("oom", "Aether panic: string allocation failed"),
+        )
+        chunks: list[str] = []
+        for key, message in messages:
+            size = len(message.encode("utf-8")) + 1
+            chunks.append(
+                f'@.aether.string.{key} = private unnamed_addr constant [{size} x i8] c"{message}\\00"'
+            )
+            chunks.append("\n".join([
+                f"define private void @aether_string_{key}_panic() noreturn {{",
+                "entry:",
+                f"  %message = getelementptr [{size} x i8], ptr @.aether.string.{key}, i64 0, i64 0",
+                "  call i32 @puts(ptr %message)",
+                "  call void @exit(i32 1)",
+                "  unreachable",
+                "}",
+            ]))
+        return "\n\n".join(chunks)
+
+    @staticmethod
+    def _validate_descriptor() -> str:
+        return "\n".join([
+            "define private void @aether_string_validate(ptr %value) {",
+            "entry:",
+            "  %null = icmp eq ptr %value, null",
+            "  br i1 %null, label %panic, label %header",
+            "header:",
+            "  %flags_ptr = getelementptr i8, ptr %value, i64 16",
+            "  %flags = load i32, ptr %flags_ptr",
+            "  %reserved_ptr = getelementptr i8, ptr %value, i64 20",
+            "  %reserved = load i32, ptr %reserved_ptr",
+            "  %unknown = and i32 %flags, -4",
+            "  %known = icmp eq i32 %unknown, 0",
+            "  %valid_mask = and i32 %flags, 2",
+            "  %utf8 = icmp ne i32 %valid_mask, 0",
+            "  %reserved_zero = icmp eq i32 %reserved, 0",
+            "  %flags_ok = and i1 %known, %utf8",
+            "  %ok = and i1 %flags_ok, %reserved_zero",
+            "  br i1 %ok, label %done, label %panic",
+            "panic:",
+            "  call void @aether_string_descriptor_panic()",
+            "  unreachable",
+            "done:",
+            "  ret void",
+            "}",
+        ])
+
+    @staticmethod
+    def _accessors() -> str:
+        return "\n\n".join([
+            "\n".join([
+                "define private ptr @aether_string_empty() {",
+                "entry:",
+                "  ret ptr @.aether.string.empty",
+                "}",
+            ]),
+            "\n".join([
+                "define private i64 @aether_string_byte_length(ptr %value) {",
+                "entry:",
+                "  call void @aether_string_validate(ptr %value)",
+                "  %length = load i64, ptr %value",
+                "  %negative = icmp slt i64 %length, 0",
+                "  br i1 %negative, label %panic, label %done",
+                "panic:",
+                "  call void @aether_string_descriptor_panic()",
+                "  unreachable",
+                "done:",
+                "  ret i64 %length",
+                "}",
+            ]),
+            "\n".join([
+                "define private ptr @aether_string_data(ptr %value) {",
+                "entry:",
+                "  call void @aether_string_validate(ptr %value)",
+                "  %data = getelementptr i8, ptr %value, i64 24",
+                "  ret ptr %data",
+                "}",
+            ]),
+        ])
+
+    @staticmethod
+    def _retain() -> str:
+        return "\n".join([
+            "define private void @aether_string_retain(ptr %value) {",
+            "entry:",
+            "  call void @aether_string_validate(ptr %value)",
+            "  %flags_ptr = getelementptr i8, ptr %value, i64 16",
+            "  %flags = load i32, ptr %flags_ptr",
+            "  %immortal_mask = and i32 %flags, 1",
+            "  %immortal = icmp ne i32 %immortal_mask, 0",
+            "  br i1 %immortal, label %done, label %owned",
+            "owned:",
+            "  %count_ptr = getelementptr i8, ptr %value, i64 8",
+            "  %count = load i64, ptr %count_ptr",
+            "  %overflow = icmp eq i64 %count, 9223372036854775807",
+            "  %invalid = icmp sle i64 %count, 0",
+            "  %bad = or i1 %overflow, %invalid",
+            "  br i1 %bad, label %panic, label %increment",
+            "panic:",
+            "  call void @aether_string_rc_overflow_panic()",
+            "  unreachable",
+            "increment:",
+            "  %next = add i64 %count, 1",
+            "  store i64 %next, ptr %count_ptr",
+            "  br label %done",
+            "done:",
+            "  ret void",
+            "}",
+        ])
+
+    @staticmethod
+    def _release() -> str:
+        return "\n".join([
+            "define private void @aether_string_release(ptr %value) {",
+            "entry:",
+            "  call void @aether_string_validate(ptr %value)",
+            "  %flags_ptr = getelementptr i8, ptr %value, i64 16",
+            "  %flags = load i32, ptr %flags_ptr",
+            "  %immortal_mask = and i32 %flags, 1",
+            "  %immortal = icmp ne i32 %immortal_mask, 0",
+            "  br i1 %immortal, label %done, label %owned",
+            "owned:",
+            "  %count_ptr = getelementptr i8, ptr %value, i64 8",
+            "  %count = load i64, ptr %count_ptr",
+            "  %invalid = icmp sle i64 %count, 0",
+            "  br i1 %invalid, label %panic, label %decrement",
+            "panic:",
+            "  call void @aether_string_rc_underflow_panic()",
+            "  unreachable",
+            "decrement:",
+            "  %last = icmp eq i64 %count, 1",
+            "  br i1 %last, label %free, label %store",
+            "store:",
+            "  %next = sub i64 %count, 1",
+            "  store i64 %next, ptr %count_ptr",
+            "  br label %done",
+            "free:",
+            "  store i64 0, ptr %count_ptr",
+            "  call void @free(ptr %value)",
+            "  br label %done",
+            "done:",
+            "  ret void",
+            "}",
+        ])
+
+    @staticmethod
+    def _equal() -> str:
+        return "\n".join([
+            "define private i1 @aether_string_equal(ptr %left, ptr %right) {",
+            "entry:",
+            "  call void @aether_string_validate(ptr %left)",
+            "  call void @aether_string_validate(ptr %right)",
+            "  %same_handle = icmp eq ptr %left, %right",
+            "  br i1 %same_handle, label %equal, label %lengths",
+            "lengths:",
+            "  %left_length = load i64, ptr %left",
+            "  %right_length = load i64, ptr %right",
+            "  %same_length = icmp eq i64 %left_length, %right_length",
+            "  br i1 %same_length, label %empty_check, label %different",
+            "empty_check:",
+            "  %empty = icmp eq i64 %left_length, 0",
+            "  br i1 %empty, label %equal, label %bytes",
+            "bytes:",
+            "  %left_data = getelementptr i8, ptr %left, i64 24",
+            "  %right_data = getelementptr i8, ptr %right, i64 24",
+            "  %comparison = call i32 @memcmp(ptr %left_data, ptr %right_data, i64 %left_length)",
+            "  %same_bytes = icmp eq i32 %comparison, 0",
+            "  ret i1 %same_bytes",
+            "equal:",
+            "  ret i1 true",
+            "different:",
+            "  ret i1 false",
+            "}",
+        ])
+
+    @staticmethod
+    def _compare() -> str:
+        return "\n".join([
+            "define private i32 @aether_string_compare_bytes(ptr %left, ptr %right) {",
+            "entry:",
+            "  call void @aether_string_validate(ptr %left)",
+            "  call void @aether_string_validate(ptr %right)",
+            "  %same = icmp eq ptr %left, %right",
+            "  br i1 %same, label %equal, label %lengths",
+            "lengths:",
+            "  %left_length = load i64, ptr %left",
+            "  %right_length = load i64, ptr %right",
+            "  %left_shorter = icmp ult i64 %left_length, %right_length",
+            "  %minimum = select i1 %left_shorter, i64 %left_length, i64 %right_length",
+            "  %empty = icmp eq i64 %minimum, 0",
+            "  br i1 %empty, label %prefix, label %bytes",
+            "bytes:",
+            "  %left_data = getelementptr i8, ptr %left, i64 24",
+            "  %right_data = getelementptr i8, ptr %right, i64 24",
+            "  %comparison = call i32 @memcmp(ptr %left_data, ptr %right_data, i64 %minimum)",
+            "  %bytes_equal = icmp eq i32 %comparison, 0",
+            "  br i1 %bytes_equal, label %prefix, label %byte_result",
+            "byte_result:",
+            "  ret i32 %comparison",
+            "prefix:",
+            "  %same_length = icmp eq i64 %left_length, %right_length",
+            "  br i1 %same_length, label %equal, label %ordered",
+            "ordered:",
+            "  %order = select i1 %left_shorter, i32 -1, i32 1",
+            "  ret i32 %order",
+            "equal:",
+            "  ret i32 0",
+            "}",
+        ])
+
+    @staticmethod
+    def _print() -> str:
+        return "\n".join([
+            "define private void @aether_string_print(ptr %value) {",
+            "entry:",
+            "  %length = call i64 @aether_string_byte_length(ptr %value)",
+            "  %empty = icmp eq i64 %length, 0",
+            "  br i1 %empty, label %done, label %write",
+            "write:",
+            "  %data = call ptr @aether_string_data(ptr %value)",
+            "  %stream = load ptr, ptr @stdout",
+            "  %written = call i64 @fwrite(ptr %data, i64 1, i64 %length, ptr %stream)",
+            "  br label %done",
+            "done:",
+            "  ret void",
+            "}",
+        ])
+
+    @staticmethod
+    def _utf8_validator() -> str:
+        # Strict RFC 3629 ranges: rejects overlong forms, surrogates and values
+        # above U+10FFFF while accepting embedded U+0000.
+        return "\n".join([
+            "define private i1 @aether_string_is_valid_utf8(ptr %data, i64 %length) {",
+            "entry:",
+            "  %negative = icmp slt i64 %length, 0",
+            "  br i1 %negative, label %invalid, label %loop",
+            "loop:",
+            "  %index = phi i64 [ 0, %entry ], [ %next, %advance ]",
+            "  %done = icmp eq i64 %index, %length",
+            "  br i1 %done, label %valid, label %lead",
+            "lead:",
+            "  %p0 = getelementptr i8, ptr %data, i64 %index",
+            "  %b0 = load i8, ptr %p0",
+            "  %ascii = icmp ult i8 %b0, -128",
+            "  br i1 %ascii, label %one, label %class2",
+            "class2:",
+            "  %two_low = icmp uge i8 %b0, -62",
+            "  %two_high = icmp ule i8 %b0, -33",
+            "  %two = and i1 %two_low, %two_high",
+            "  br i1 %two, label %need2, label %class3",
+            "class3:",
+            "  %three_low = icmp uge i8 %b0, -32",
+            "  %three_high = icmp ule i8 %b0, -17",
+            "  %three = and i1 %three_low, %three_high",
+            "  br i1 %three, label %need3, label %class4",
+            "class4:",
+            "  %four_low = icmp uge i8 %b0, -16",
+            "  %four_high = icmp ule i8 %b0, -12",
+            "  %four = and i1 %four_low, %four_high",
+            "  br i1 %four, label %need4, label %invalid",
+            "need2:",
+            "  %remaining2 = sub i64 %length, %index",
+            "  %enough2 = icmp uge i64 %remaining2, 2",
+            "  br i1 %enough2, label %check2, label %invalid",
+            "check2:",
+            "  %i1_2 = add i64 %index, 1",
+            "  %p1_2 = getelementptr i8, ptr %data, i64 %i1_2",
+            "  %b1_2 = load i8, ptr %p1_2",
+            "  %c1_2 = and i8 %b1_2, -64",
+            "  %ok2 = icmp eq i8 %c1_2, -128",
+            "  br i1 %ok2, label %two_advance, label %invalid",
+            "need3:",
+            "  %remaining3 = sub i64 %length, %index",
+            "  %enough3 = icmp uge i64 %remaining3, 3",
+            "  br i1 %enough3, label %check3, label %invalid",
+            "check3:",
+            "  %i1_3 = add i64 %index, 1",
+            "  %i2_3 = add i64 %index, 2",
+            "  %p1_3 = getelementptr i8, ptr %data, i64 %i1_3",
+            "  %p2_3 = getelementptr i8, ptr %data, i64 %i2_3",
+            "  %b1_3 = load i8, ptr %p1_3",
+            "  %b2_3 = load i8, ptr %p2_3",
+            "  %c2_3 = and i8 %b2_3, -64",
+            "  %tail2_3 = icmp eq i8 %c2_3, -128",
+            "  %is_e0 = icmp eq i8 %b0, -32",
+            "  %is_ed = icmp eq i8 %b0, -19",
+            "  %b1_normal_low = icmp uge i8 %b1_3, -128",
+            "  %b1_normal_high = icmp ule i8 %b1_3, -65",
+            "  %b1_normal = and i1 %b1_normal_low, %b1_normal_high",
+            "  %b1_e0_low = icmp uge i8 %b1_3, -96",
+            "  %b1_ed_high = icmp ule i8 %b1_3, -97",
+            "  %not_e0 = xor i1 %is_e0, true",
+            "  %not_ed = xor i1 %is_ed, true",
+            "  %normal_lead = and i1 %not_e0, %not_ed",
+            "  %normal_case = and i1 %normal_lead, %b1_normal",
+            "  %e0_case = and i1 %is_e0, %b1_e0_low",
+            "  %ed_case = and i1 %is_ed, %b1_ed_high",
+            "  %special = or i1 %e0_case, %ed_case",
+            "  %head_ok3 = or i1 %normal_case, %special",
+            "  %ok3 = and i1 %head_ok3, %tail2_3",
+            "  br i1 %ok3, label %three_advance, label %invalid",
+            "need4:",
+            "  %remaining4 = sub i64 %length, %index",
+            "  %enough4 = icmp uge i64 %remaining4, 4",
+            "  br i1 %enough4, label %check4, label %invalid",
+            "check4:",
+            "  %i1_4 = add i64 %index, 1",
+            "  %i2_4 = add i64 %index, 2",
+            "  %i3_4 = add i64 %index, 3",
+            "  %p1_4 = getelementptr i8, ptr %data, i64 %i1_4",
+            "  %p2_4 = getelementptr i8, ptr %data, i64 %i2_4",
+            "  %p3_4 = getelementptr i8, ptr %data, i64 %i3_4",
+            "  %b1_4 = load i8, ptr %p1_4",
+            "  %b2_4 = load i8, ptr %p2_4",
+            "  %b3_4 = load i8, ptr %p3_4",
+            "  %c2_4 = and i8 %b2_4, -64",
+            "  %c3_4 = and i8 %b3_4, -64",
+            "  %tail2_4 = icmp eq i8 %c2_4, -128",
+            "  %tail3_4 = icmp eq i8 %c3_4, -128",
+            "  %tails4 = and i1 %tail2_4, %tail3_4",
+            "  %is_f0 = icmp eq i8 %b0, -16",
+            "  %is_f4 = icmp eq i8 %b0, -12",
+            "  %b1_normal4_low = icmp uge i8 %b1_4, -128",
+            "  %b1_normal4_high = icmp ule i8 %b1_4, -65",
+            "  %b1_normal4 = and i1 %b1_normal4_low, %b1_normal4_high",
+            "  %b1_f0_low = icmp uge i8 %b1_4, -112",
+            "  %b1_f4_high = icmp ule i8 %b1_4, -113",
+            "  %not_f0 = xor i1 %is_f0, true",
+            "  %not_f4 = xor i1 %is_f4, true",
+            "  %normal_lead4 = and i1 %not_f0, %not_f4",
+            "  %normal_case4 = and i1 %normal_lead4, %b1_normal4",
+            "  %f0_case = and i1 %is_f0, %b1_f0_low",
+            "  %f4_case = and i1 %is_f4, %b1_f4_high",
+            "  %special4 = or i1 %f0_case, %f4_case",
+            "  %head_ok4 = or i1 %normal_case4, %special4",
+            "  %ok4 = and i1 %head_ok4, %tails4",
+            "  br i1 %ok4, label %four_advance, label %invalid",
+            "one:",
+            "  %next1 = add i64 %index, 1",
+            "  br label %advance",
+            "two_advance:",
+            "  %next2 = add i64 %index, 2",
+            "  br label %advance",
+            "three_advance:",
+            "  %next3 = add i64 %index, 3",
+            "  br label %advance",
+            "four_advance:",
+            "  %next4 = add i64 %index, 4",
+            "  br label %advance",
+            "advance:",
+            "  %next = phi i64 [ %next1, %one ], [ %next2, %two_advance ], [ %next3, %three_advance ], [ %next4, %four_advance ]",
+            "  br label %loop",
+            "valid:",
+            "  ret i1 true",
+            "invalid:",
+            "  ret i1 false",
+            "}",
+        ])
+
+    @staticmethod
+    def _from_utf8() -> str:
+        return "\n".join([
+            "define private ptr @aether_string_from_utf8(ptr %bytes, i64 %length) {",
+            "entry:",
+            "  %negative = icmp slt i64 %length, 0",
+            "  %null = icmp eq ptr %bytes, null",
+            "  %nonempty = icmp ne i64 %length, 0",
+            "  %bad_null = and i1 %null, %nonempty",
+            "  %invalid_input = or i1 %negative, %bad_null",
+            "  br i1 %invalid_input, label %utf8_panic, label %empty_check",
+            "empty_check:",
+            "  %empty = icmp eq i64 %length, 0",
+            "  br i1 %empty, label %return_empty, label %validate",
+            "return_empty:",
+            "  ret ptr @.aether.string.empty",
+            "validate:",
+            "  %valid = call i1 @aether_string_is_valid_utf8(ptr %bytes, i64 %length)",
+            "  br i1 %valid, label %size_payload, label %utf8_panic",
+            "utf8_panic:",
+            "  call void @aether_string_utf8_panic()",
+            "  unreachable",
+            "size_payload:",
+            "  %payload_pair = call { i64, i1 } @llvm.uadd.with.overflow.i64(i64 %length, i64 1)",
+            "  %payload = extractvalue { i64, i1 } %payload_pair, 0",
+            "  %payload_overflow = extractvalue { i64, i1 } %payload_pair, 1",
+            "  br i1 %payload_overflow, label %size_panic, label %size_total",
+            "size_total:",
+            "  %total_pair = call { i64, i1 } @llvm.uadd.with.overflow.i64(i64 %payload, i64 24)",
+            "  %total = extractvalue { i64, i1 } %total_pair, 0",
+            "  %total_overflow = extractvalue { i64, i1 } %total_pair, 1",
+            "  br i1 %total_overflow, label %size_panic, label %allocate",
+            "size_panic:",
+            "  call void @aether_string_size_panic()",
+            "  unreachable",
+            "allocate:",
+            "  %object = call noalias ptr @malloc(i64 %total)",
+            "  %failed = icmp eq ptr %object, null",
+            "  br i1 %failed, label %oom, label %initialize",
+            "oom:",
+            "  call void @aether_string_oom_panic()",
+            "  unreachable",
+            "initialize:",
+            "  store i64 %length, ptr %object",
+            "  %count_ptr = getelementptr i8, ptr %object, i64 8",
+            "  store i64 1, ptr %count_ptr",
+            "  %flags_ptr = getelementptr i8, ptr %object, i64 16",
+            "  store i32 2, ptr %flags_ptr",
+            "  %reserved_ptr = getelementptr i8, ptr %object, i64 20",
+            "  store i32 0, ptr %reserved_ptr",
+            "  %data = getelementptr i8, ptr %object, i64 24",
+            "  call void @llvm.memcpy.p0.p0.i64(ptr %data, ptr %bytes, i64 %length, i1 false)",
+            "  %terminator = getelementptr i8, ptr %data, i64 %length",
+            "  store i8 0, ptr %terminator",
+            "  ret ptr %object",
+            "}",
+        ])
