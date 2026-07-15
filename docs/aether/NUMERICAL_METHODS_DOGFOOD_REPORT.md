@@ -5,7 +5,7 @@ Revisión: 15 de julio de 2026. Programa observado:
 
 El programa implementa bisección, Newton-Raphson, secante, trapecios y Simpson
 en módulos Aether. La versión actual se ejecuta tanto en el intérprete AST como
-en LLVM/native y ambos producen las mismas doce validaciones `true`. Usa
+en LLVM/native y ambos producen las mismas dieciocho validaciones `true`. Usa
 funciones importadas como valores y ya no depende de una interfaz
 `ScalarFunction`.
 
@@ -73,11 +73,18 @@ se corrigió para no eliminar un `phi` de loop todavía usado al construir
 ### Manejo de errores native
 
 `throw`/`try-catch` sigue siendo solo AST. Para conservar una única variante
-de calidad comparable entre backends, los root solvers usan
-`RootResult` con un `RootStatus` explícito y Simpson devuelve `0.0` ante un
-conteo inválido. Este
-último valor es un sentinel de dogfood, no el contrato recomendado para una
-futura `math.numerics`; un `Result` o excepciones compiladas debe resolverlo.
+de calidad comparable entre backends, los root solvers usan `RootResult` con
+un `RootStatus` explícito y ambos integradores usan `IntegrationResult` con
+`IntegrationStatus`. El sentinel ambiguo `0.0` fue eliminado sin depender de
+excepciones native.
+
+### Resultado de integración: resuelto con enum nominal
+
+Trapecios y Simpson distinguen éxito, cantidad de subintervalos no positiva y
+la exigencia de paridad de Simpson. El campo `value` solo tiene contrato de
+resultado cuando el estado es `Success`. Los límites invertidos continúan
+siendo válidos y las pruebas verifican
+`integral(a, b) = -integral(b, a)` en AST y LLVM/native.
 
 ### Resultado de convergencia: resuelto con enum nominal
 
@@ -102,8 +109,9 @@ options struct es preferible a ampliar la gramática solo por este ejemplo.
 
 La suite automatizada cubre convergencia y precisión de los tres métodos de
 raíces, bracket inválido, derivada y denominador casi nulos, precisión de
-trapecios/Simpson y subdivisiones inválidas. El mismo source multi-módulo pasa
-AST y clang real con output idéntico, incluyendo el enum de estado. El bloqueo
+trapecios/Simpson, las dos clases de subdivisión inválida y límites invertidos.
+El mismo source multi-módulo pasa AST y clang real con output idéntico,
+incluyendo ambos enums de estado. El bloqueo
 crítico original —pasar una
 función matemática reutilizable sin interfaz AST-only— queda cerrado dentro
 del alcance deliberadamente `PARTIAL` de callables top-level sin captura.

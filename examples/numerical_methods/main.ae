@@ -6,6 +6,8 @@ from Problems import quadraticMinusTwoDerivative;
 from Problems import square;
 from Results import RootResult;
 from Results import RootStatus;
+from Results import IntegrationResult;
+from Results import IntegrationStatus;
 from Roots import bisection;
 from Roots import newton;
 from Roots import secant;
@@ -28,9 +30,20 @@ println("invalid bracket rejected: ", invalidBracket.status == RootStatus.Invali
 println("zero derivative rejected: ", zeroDerivative.status == RootStatus.ZeroDerivative);
 println("zero secant denominator rejected: ", zeroSecantDenominator.status == RootStatus.ZeroDerivative);
 
-double trapezoidValue = trapezoid(square, 0.0, 1.0, 100);
-double simpsonValue = simpson(square, 0.0, 1.0, 100);
-println("trapezoid accurate: ", abs(trapezoidValue - 1.0 / 3.0) < 1e-4);
-println("simpson accurate: ", abs(simpsonValue - 1.0 / 3.0) < 1e-10);
+IntegrationResult trapezoidResult = trapezoid(square, 0.0, 1.0, 100);
+IntegrationResult simpsonResult = simpson(square, 0.0, 1.0, 100);
+println("trapezoid succeeded: ", trapezoidResult.status == IntegrationStatus.Success);
+println("trapezoid accurate: ", abs(trapezoidResult.value - 1.0 / 3.0) < 1e-4);
+println("simpson succeeded: ", simpsonResult.status == IntegrationStatus.Success);
+println("simpson accurate: ", abs(simpsonResult.value - 1.0 / 3.0) < 1e-10);
 
-println("invalid Simpson rejected: ", simpson(square, 0.0, 1.0, 3) == 0.0);
+IntegrationResult invalidTrapezoid = trapezoid(square, 0.0, 1.0, 0);
+IntegrationResult invalidSimpsonCount = simpson(square, 0.0, 1.0, -2);
+IntegrationResult oddSimpson = simpson(square, 0.0, 1.0, 3);
+IntegrationResult reversedTrapezoid = trapezoid(square, 1.0, 0.0, 100);
+IntegrationResult reversedSimpson = simpson(square, 1.0, 0.0, 100);
+println("invalid trapezoid count rejected: ", invalidTrapezoid.status == IntegrationStatus.NonPositiveSubintervalCount);
+println("invalid Simpson count rejected: ", invalidSimpsonCount.status == IntegrationStatus.NonPositiveSubintervalCount);
+println("odd Simpson count rejected: ", oddSimpson.status == IntegrationStatus.SimpsonRequiresEvenSubintervals);
+println("reversed trapezoid preserves sign: ", abs(reversedTrapezoid.value + 1.0 / 3.0) < 1e-4);
+println("reversed Simpson preserves sign: ", abs(reversedSimpson.value + 1.0 / 3.0) < 1e-10);

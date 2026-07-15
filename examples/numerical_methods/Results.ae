@@ -12,3 +12,14 @@ public struct RootResult {
     int iterations;
     RootStatus status;
 }
+
+public enum IntegrationStatus {
+    Success,
+    NonPositiveSubintervalCount,
+    SimpsonRequiresEvenSubintervals
+}
+
+public struct IntegrationResult {
+    double value;
+    IntegrationStatus status;
+}

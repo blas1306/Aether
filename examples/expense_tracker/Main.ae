@@ -1,0 +1,55 @@
+from Reports import Summary;
+from Reports import filterByType;
+from Reports import printTransactions;
+from Reports import summarize;
+from Ledger import AddTransactionStatus;
+from Ledger import addTransaction;
+from Transaction import Transaction;
+from Transaction import TransactionType;
+
+List<Transaction> transactions = {};
+
+AddTransactionStatus incomeStatus = addTransaction(
+    transactions,
+    1,
+    TransactionType.Income,
+    "Salary",
+    1500.0,
+    "work",
+    "2026-07-01"
+);
+AddTransactionStatus expenseStatus = addTransaction(
+    transactions,
+    2,
+    TransactionType.Expense,
+    "Dinner",
+    250.0,
+    "food",
+    "2026-07-15"
+);
+AddTransactionStatus invalidStatus = addTransaction(
+    transactions,
+    3,
+    TransactionType.Expense,
+    "Invalid",
+    0.0,
+    "test",
+    "2026-07-15"
+);
+
+Summary totals = summarize(transactions);
+List<Transaction> expenses = filterByType(transactions, TransactionType.Expense);
+List<Transaction> empty = {};
+Summary emptyTotals = summarize(empty);
+
+println("income added: ", incomeStatus == AddTransactionStatus.Added);
+println("expense added: ", expenseStatus == AddTransactionStatus.Added);
+println("non-positive rejected: ", invalidStatus == AddTransactionStatus.NonPositiveAmount);
+println("two transactions: ", transactions.length == 2);
+println("income total: ", totals.income == 1500.0);
+println("expense total: ", totals.expenses == 250.0);
+println("balance: ", totals.balance == 1250.0);
+println("expense filter: ", expenses.length == 1 && expenses[0].type == TransactionType.Expense);
+println("empty summary: ", emptyTotals.balance == 0.0);
+println("transactions:");
+printTransactions(transactions);

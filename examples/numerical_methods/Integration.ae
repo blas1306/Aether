@@ -1,15 +1,17 @@
 package Integration;
 
 from Functions import ScalarCallable;
+from Results import IntegrationResult;
+from Results import IntegrationStatus;
 
-public double trapezoid(
+public IntegrationResult trapezoid(
     ScalarCallable target,
     double left,
     double right,
     int intervals
 ) {
     if intervals <= 0 {
-        return 0.0;
+        return IntegrationResult(0.0, IntegrationStatus.NonPositiveSubintervalCount);
     }
 
     double step = (right - left) / double(intervals);
@@ -19,17 +21,20 @@ public double trapezoid(
         total = total + target(left + double(index) * step);
         index = index + 1;
     }
-    return total * step;
+    return IntegrationResult(total * step, IntegrationStatus.Success);
 }
 
-public double simpson(
+public IntegrationResult simpson(
     ScalarCallable target,
     double left,
     double right,
     int intervals
 ) {
-    if intervals <= 0 || intervals % 2 != 0 {
-        return 0.0;
+    if intervals <= 0 {
+        return IntegrationResult(0.0, IntegrationStatus.NonPositiveSubintervalCount);
+    }
+    if intervals % 2 != 0 {
+        return IntegrationResult(0.0, IntegrationStatus.SimpsonRequiresEvenSubintervals);
     }
 
     double step = (right - left) / double(intervals);
@@ -43,5 +48,5 @@ public double simpson(
         total = total + weight * target(left + double(index) * step);
         index = index + 1;
     }
-    return total * step / 3.0;
+    return IntegrationResult(total * step / 3.0, IntegrationStatus.Success);
 }

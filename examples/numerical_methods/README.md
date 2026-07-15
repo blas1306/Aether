@@ -6,9 +6,12 @@ algorithms written entirely in Aether:
 - bisection, Newton-Raphson, and secant methods;
 - trapezoid and Simpson integration;
 - `RootResult` as a structured convergence result with nominal `RootStatus`;
+- `IntegrationResult` as a structured quadrature result with nominal
+  `IntegrationStatus`;
 - tolerance and iteration limits;
 - invalid brackets, near-zero derivatives/denominators, and invalid Simpson
-  subdivisions;
+  subdivisions, including distinct non-positive and odd-count cases;
+- reversed integration limits, preserving `integral(a, b) = -integral(b, a)`;
 - typed top-level callables, structs by value, imports, loops, and real scalar
   mathematics.
 
@@ -20,7 +23,7 @@ aether --backend=llvm examples/numerical_methods/main.ae
 ```
 
 Every printed validation must end in `true`, and both backends must produce the
-same twelve lines.
+same eighteen lines.
 
 ## Callable API
 
@@ -52,10 +55,21 @@ and invalid brackets as `InvalidInterval`; Newton and secant report a near-zero
 derivative/denominator as `ZeroDerivative`; exhausted loops report
 `MaxIterations`.
 
+## Integration status API
+
+`trapezoid` and `simpson` return `IntegrationResult`, whose `value` is only a
+numerical answer when `status == IntegrationStatus.Success`. A non-positive
+subinterval count reports `NonPositiveSubintervalCount`; a positive odd count
+passed to Simpson reports `SimpsonRequiresEvenSubintervals`. This removes the
+ambiguous `0.0` sentinel: zero is a valid integral and is no longer also the
+error contract.
+
+The functions deliberately accept reversed limits. Their signed step preserves
+the standard identity `integral(a, b) = -integral(b, a)` in both backends.
+
 ## Remaining error-model boundary
 
 Native `throw`/`try-catch` is still unsupported. To keep one honest program
-executable by both backends, invalid numerical inputs return an explicit
-failure representation: root solvers return a `RootResult` status enum, while an
-invalid integration interval count returns `0.0`. The last choice is only a
-dogfood sentinel; it is not proposed as the final numerical-library error API.
+executable by both backends, expected numerical failures use nominal status
+enums in `RootResult` and `IntegrationResult`; no exception or sentinel is
+required.

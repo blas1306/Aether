@@ -1,0 +1,51 @@
+package Reports;
+
+from Transaction import Transaction;
+from Transaction import TransactionType;
+
+public struct Summary {
+    double income;
+    double expenses;
+    double balance;
+}
+
+public Summary summarize(List<Transaction> transactions) {
+    double income = 0.0;
+    double expenses = 0.0;
+
+    for Transaction transaction in transactions {
+        if transaction.type == TransactionType.Income {
+            income = income + transaction.amount;
+        } else {
+            expenses = expenses + transaction.amount;
+        }
+    }
+
+    return Summary(income, expenses, income - expenses);
+}
+
+public List<Transaction> filterByType(
+    List<Transaction> transactions,
+    TransactionType type
+) {
+    List<Transaction> matches = {};
+    for Transaction transaction in transactions {
+        if transaction.type == type {
+            matches.push(transaction);
+        }
+    }
+    return matches;
+}
+
+public void printTransactions(List<Transaction> transactions) {
+    for Transaction transaction in transactions {
+        println(
+            "#", transaction.id,
+            " | ", transaction.type,
+            " | ", transaction.date,
+            " | ", transaction.category,
+            " | ", transaction.description,
+            " | ", transaction.amount
+        );
+    }
+}

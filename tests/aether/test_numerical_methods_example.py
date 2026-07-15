@@ -24,9 +24,15 @@ EXPECTED_OUTPUT = [
     "invalid bracket rejected: true",
     "zero derivative rejected: true",
     "zero secant denominator rejected: true",
+    "trapezoid succeeded: true",
     "trapezoid accurate: true",
+    "simpson succeeded: true",
     "simpson accurate: true",
-    "invalid Simpson rejected: true",
+    "invalid trapezoid count rejected: true",
+    "invalid Simpson count rejected: true",
+    "odd Simpson count rejected: true",
+    "reversed trapezoid preserves sign: true",
+    "reversed Simpson preserves sign: true",
 ]
 
 

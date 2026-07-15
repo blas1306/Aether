@@ -1,0 +1,26 @@
+package Ledger;
+
+from Transaction import Transaction;
+from Transaction import TransactionType;
+
+public enum AddTransactionStatus {
+    Added,
+    NonPositiveAmount
+}
+
+public AddTransactionStatus addTransaction(
+    List<Transaction> transactions,
+    int id,
+    TransactionType type,
+    string description,
+    double amount,
+    string category,
+    string date
+) {
+    if amount <= 0.0 {
+        return AddTransactionStatus.NonPositiveAmount;
+    }
+
+    transactions.push(Transaction(id, type, description, amount, category, date));
+    return AddTransactionStatus.Added;
+}

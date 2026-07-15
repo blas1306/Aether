@@ -1,8 +1,8 @@
 # Auditoría completa de paridad de backends
 
-Última revisión: 15 de julio de 2026, incluyendo enums native y el ejemplo dogfood
-de métodos numéricos. Este documento reemplaza como referencia canónica a la
-auditoría histórica de `docs/compiler/`.
+Última revisión: 15 de julio de 2026, incluyendo enums native y los ejemplos
+dogfood de métodos numéricos y expense tracker. Este documento reemplaza como
+referencia canónica a la auditoría histórica de `docs/compiler/`.
 
 ## Criterio
 
@@ -139,15 +139,15 @@ interpolación quedan fuera del subconjunto.
 
 | Feature | Lexer/parser | AST | Typechecker | AST interpreter | IR model | IR lowering | IR verifier | IR interpreter | SSA | SSA verifier | Optimizers | LLVM/native | Runtime | Tests | Spec/docs | Estado global | Observaciones |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `Array<T>` literal | C target-typed | C | C | C | C | C | C | C | C | C | C allocation | C | C overflow/OOM | E2E | C | Completo | Header/buffer privilegiado. |
+| `Array<T>` literal | C target-typed | C | C | C | C | C | C | C | C | C | C allocation | P subconjunto escalar/enum; no Struct | P sin size/layout Struct | E2E escalares + dogfood Struct AST | C | Parcial | El frontend acepta `Array<Struct>`, pero LLVM falla tarde al calcular el tamaño del elemento. |
 | Bounds checks Array | — | — | índice int | C | efectos `may_trap` | C | C | C | C | C | C preserva | C | C | safety E2E | P histórico | Completo | Auditorías antiguas aún describen el estado inseguro ya corregido. |
 | Array get/set/length | C | C | C | C | C | C | C | C | C | C | C | C | C narrowing | E2E | P | Completo | Índices 0-based. |
 | Array sort | método/global | C | C tipos | C estable in-place | C sequence sort | C | C | C | C | C | C efecto | C | C temp checked | E2E | C | Completo | int/double/string. |
 | Array slicing | C `a[s:e]` | C | C | C copy | C | C | C | C | C | C | C | C | C bounds | E2E | C | Completo | 0-based, half-open, dos límites explícitos. |
 | Array copy/equality | C | C | C | C | P | N general | N | N | N | N | N | N | AST | AST | P | Solo AST | `copy` shallow y equality estructural no bajan. |
-| `List<T>` literal/new/get/set | C target-typed | C | C | C | C | C | C | C | C | C | C | C | C bounds/OOM | E2E | C | Completo | No hay keyword `new`; literal `{}` target-typed. |
+| `List<T>` literal/new/get/set | C target-typed | C | C | C | C | C | C | C | C | C | C | P subconjunto escalar/enum; no Struct | P sin size/layout Struct | E2E escalares + expense tracker AST | C | Parcial | No hay keyword `new`; `List<Struct>` se acepta pero LLVM falla tarde al calcular tamaño. |
 | List length/capacity/core mutation | métodos | C | C | C | C salvo capacity pública | C | C | C | C | C | C | C | C checked growth | E2E | P | Parcial | `capacity` se usa internamente pero no es API pública completa. |
-| List push/pop/insert/removeAt/clear | métodos/global | C | C | C | C | C | C | C | C | C | C efecto/trap | C | C | E2E+safety | C | Completo | No shrinking deliberado. |
+| List push/pop/insert/removeAt/clear | métodos/global | C | C | C | C | C | C | C | C | C | C efecto/trap | P sin elementos Struct | P layout/copia/ownership agregados | E2E+safety escalares + push Struct AST | C | Parcial | No shrinking deliberado; falta diagnóstico temprano para elementos no soportados. |
 | List contains/indexOf/reverse/copy/sort | métodos/global | C | C | C | C | C | C | C | C | C | C | C | C | E2E | C | Completo | Son derivables conceptualmente aunque hoy privilegiados. |
 | List slicing/equality | C | C | C | C | N | N | N | N | N | N | N | N | AST | AST | P | Solo AST | Slicing tiene formas limitadas. |
 | Vector literal/get/set/length | C | C | C shape/orientation | C 1-based | C | C | C | C | C | C | C traps | C | C | E2E+safety | C | Completo | Vector matemático, no colección dinámica. |
@@ -182,14 +182,16 @@ interpolación quedan fuera del subconjunto.
    structs y enums simples ya no son el bloqueo principal.
 3. **Strings completos:** falta concat/equality/interpolación general,
    representación, encoding y ownership.
-4. **Callables avanzados:** el subconjunto top-level tipado ya permite una
+4. **Colecciones de datos definidos por usuario:** `Array/List<Struct>` se
+   aceptan en frontend pero fallan tarde en LLVM por falta de size/layout/copia.
+5. **Callables avanzados:** el subconjunto top-level tipado ya permite una
    stdlib numérica reusable; closures, lambdas y métodos enlazados quedan para
    un diseño posterior y no bloquean ese caso.
-5. **Errores básicos compilados:** decidir y completar `throw`/`try-catch` o un
+6. **Errores básicos compilados:** decidir y completar `throw`/`try-catch` o un
    perfil alternativo explícito.
-6. **IO de entrada, archivos y argumentos de proceso:** faltan capacidades
+7. **IO de entrada, archivos y argumentos de proceso:** faltan capacidades
    generales mínimas.
-7. **Paridad del perfil:** cerrar `%` double, casts, formato y combinaciones de
+8. **Paridad del perfil:** cerrar `%` double, casts, formato y combinaciones de
    agregados antes de llamar estable al subconjunto.
 
 La deuda anterior del **SSA verifier** queda cerrada: el verificador comprueba
@@ -209,6 +211,9 @@ dejan SSA inválido.
   completa.
 - String equality general funciona en AST, pero LLVM solo posee comparaciones
   especiales dentro de ciertos helpers de structs.
+- `Array/List<Struct>` atraviesa frontend, IR y SSA, pero el emisor LLVM filtra
+  un error interno al necesitar el tamaño del elemento, en vez de rechazarlo
+  según el perfil antes del lowering.
 - El CLI elige LLVM por defecto aunque la mayor parte de módulos, UDT de
   referencia, errores y builtins matemáticos sean AST-only.
 - `Plots` conserva un hook AST legado, separado del callable tipado general;
@@ -223,8 +228,8 @@ dejan SSA inválido.
 - La existencia de genéricos privilegiados en Array/List/Vector/Matrix no
   implica genéricos de usuario.
 - Strings como `ptr` LLVM permiten transportar literales, no un runtime string.
-- La API List es amplia, pero ownership/free y capacity pública no están
-  cerrados.
+- La API List es amplia para elementos soportados, pero elementos struct,
+  ownership/free y capacity pública no están cerrados.
 - `-O2` existe como opción, pero es alias de `-O1` y no afecta native.
 - Builtins de álgebra lineal tienen typechecker e intérprete AST extensos, pero
   la mayoría no tiene IR.

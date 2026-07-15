@@ -57,8 +57,8 @@ La fuente de detalle por etapa es
 | Interfaces | Solo AST | Bajar representación y dispatch para structs y classes, preservando semántica de valor/referencia. |
 | Enums sin payload | Estable AST/native | Mantener identidad nominal, discriminantes deterministas, igualdad, impresión y uso en structs/funciones/colecciones compatibles. Payloads, ADTs y pattern matching nuevo no son requisito v1. |
 | Strings | Parcial | Literales, variables, parámetros, retorno, impresión, concatenación, igualdad e interpolación deben tener contrato de encoding y ownership coherente en native. |
-| `Array<T>` | Estable en el núcleo | Mantener literal, get/set, length, slicing, sort y bounds/overflow checks; definir qué métodos derivados quedan en stdlib. |
-| `List<T>` | Estable en el núcleo | Mantener get/set, growth, mutaciones, copy, búsqueda, reverse y sort; cerrar ownership/liberación sin introducir GC híbrido. |
+| `Array<T>` | Parcial para tipos de elemento backend | Mantener literal, get/set, length, slicing, sort y bounds/overflow checks; soportar o rechazar temprano elementos struct y definir qué métodos derivados quedan en stdlib. |
+| `List<T>` | Parcial para tipos de elemento backend | Mantener get/set, growth, mutaciones, copy, búsqueda, reverse y sort; completar layout/copia de structs y cerrar ownership/liberación sin introducir GC híbrido. |
 | `Vector<T>` y `Matrix<T>` | Parcial | Mantener literales, storage contiguo, índices 1-based, shape, operaciones básicas y checks; llevar el subconjunto matemático v1 seleccionado a native. |
 | Manejo básico de errores | Parcial | Panics de seguridad y `throw`/`try`/`catch` deben tener una semántica delimitada y coherente. Excepciones avanzadas no son requisito. |
 | Salida | Parcial | `print`/`println` deben cubrir valores v1 con formato documentado y consistente. |
@@ -71,7 +71,7 @@ La fuente de detalle por etapa es
 | CLI coherente | Parcial | `run`, build, selección de backend, inspección y niveles de optimización deben describir exactamente qué hacen. El backend por defecto no debe rechazar silenciosamente gran parte de la superficie promocionada. |
 | Paridad semántica AST/native | Parcial y bloqueante | Un programa dentro del perfil v1 debe producir los mismos valores, efectos, panics y errores observables en AST y native. |
 | Interoperabilidad futura por ABI C | No implementado | v1 debe documentar una frontera FFI/ABI C viable y no cerrar el diseño; no es necesario prometer estabilidad binaria completa ni wrappers extensos en v1. |
-| Programas medianos | Parcial, solo AST para la superficie amplia | Mantener al menos varios programas modulares no triviales con validaciones automatizadas; uno es `examples/numerical_methods/`. Al menos uno debe compilar nativamente usando el perfil v1. |
+| Programas medianos | Parcial, solo AST para la superficie amplia | Mantener al menos varios programas modulares no triviales con validaciones automatizadas; hoy existen `examples/numerical_methods/` y `examples/expense_tracker/`. Al menos uno debe compilar nativamente usando el perfil v1. |
 
 El estado compilable publicado se modela en los perfiles versionados descritos
 en [`BACKEND_CAPABILITY_PROFILES.md`](BACKEND_CAPABILITY_PROFILES.md). Estos
@@ -119,9 +119,10 @@ mantener ejemplos automatizados que combinen, no solo aíslen:
 6. build nativo reproducible;
 7. resultados equivalentes en AST y native dentro del perfil declarado.
 
-El ejemplo de métodos numéricos actual satisface 1, 3, 5 y parte de 2 en AST;
-expone precisamente por qué módulos, interfaces y errores compilados siguen
-siendo bloqueadores.
+El ejemplo de métodos numéricos satisface 1, 5, 6 y 7 para su perfil. El expense
+tracker satisface 1, 3 y 5 en AST, y revela que archivos, argumentos, strings
+dinámicos y colecciones de structs aún impiden cubrir 4, 6 y 7 para un programa
+generalista completo.
 
 ## Criterios de estabilidad
 

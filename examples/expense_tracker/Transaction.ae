@@ -1,0 +1,15 @@
+package Transaction;
+
+public enum TransactionType {
+    Expense,
+    Income
+}
+
+public struct Transaction {
+    int id;
+    TransactionType type;
+    string description;
+    double amount;
+    string category;
+    string date;
+}
