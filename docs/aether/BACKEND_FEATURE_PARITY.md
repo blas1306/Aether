@@ -62,6 +62,11 @@ de callables. Strings/native sigue `PARTIAL` por transporte de
 literales/parámetros/retornos, mientras concat, comparación general e
 interpolación quedan fuera del subconjunto.
 
+La propuesta para reemplazar el transporte `char*` por un modelo con UTF-8,
+longitud y ownership explícitos está en
+[`STRING_RUNTIME_DESIGN.md`](STRING_RUNTIME_DESIGN.md). La RFC está en revisión
+y no cambia ningún estado de esta matriz.
+
 ## Tipos, declaraciones y operadores
 
 | Feature | Lexer/parser | AST | Typechecker | AST interpreter | IR model | IR lowering | IR verifier | IR interpreter | SSA | SSA verifier | Optimizers | LLVM/native | Runtime | Tests | Spec/docs | Estado global | Observaciones |

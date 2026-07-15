@@ -70,3 +70,8 @@ desde `main`, no una CLI persistente.
 La próxima tarea recomendada es definir el contrato mínimo de string native
 (encoding, borrowed/owned, longitud y liberación) antes de exponer archivos o
 argv que produzcan texto dinámico.
+
+Ese contrato se desarrolla como propuesta en revisión en
+[`STRING_RUNTIME_DESIGN.md`](STRING_RUNTIME_DESIGN.md). El tracker sigue usando
+únicamente literales transportados; el enlace no implica que exista todavía un
+runtime string dinámico.

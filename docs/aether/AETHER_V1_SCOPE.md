@@ -79,6 +79,10 @@ perfiles no reducen la validez general de Aether: hacen que `run`, `build` y la
 emisión LLVM rechacen temprano, con ubicación, una feature válida que aún no
 pertenece al subconjunto del backend elegido.
 
+El contrato propuesto de semántica, representación, ABI y ownership de strings
+está en [`STRING_RUNTIME_DESIGN.md`](STRING_RUNTIME_DESIGN.md). Es una RFC en
+revisión: no modifica todavía este alcance ni el estado de capacidades.
+
 Una feature puede excluir una etapa solo por una razón explícita. Por ejemplo,
 el lexer no “implementa” bounds checks, y una declaración de tipo no necesita
 ejecución propia; esa no aplicabilidad debe documentarse, no contarse como una

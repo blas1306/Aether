@@ -26,6 +26,10 @@ Que una operación se sienta builtin no obliga a crear un nodo AST, opcode o
 helper de runtime específico. Una llamada conocida puede resolverse a stdlib,
 un LLVM intrinsic, `libm` o runtime durante lowering.
 
+La aplicación concreta de esta frontera a strings se propone en
+[`STRING_RUNTIME_DESIGN.md`](STRING_RUNTIME_DESIGN.md). Esa RFC está en revisión
+y no declara implementadas las primitivas ni el módulo `text` descritos allí.
+
 ## Nivel 1: builtins e intrínsecos
 
 ### Candidatos legítimos
