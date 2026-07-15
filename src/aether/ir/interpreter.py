@@ -22,6 +22,7 @@ from aether.vector_matrix_safety import (
 
 from .model import (
     IRAssign,
+    IRArrayCopy,
     IRArrayGet,
     IRArrayLength,
     IRArrayNew,
@@ -516,6 +517,17 @@ class IRInterpreter:
             )
             return False, None, None
 
+        if isinstance(instruction, IRArrayCopy):
+            array = self._value(instruction.array, frame)
+            if not isinstance(array, list):
+                raise IRExecutionError("IR array_copy requires an array value")
+            frame.values[instruction.result] = (
+                array.logical_copy()
+                if isinstance(array, CollectionObject)
+                else CollectionObject("Array", instruction.result.type.element, array)
+            )
+            return False, None, None
+
         if isinstance(instruction, IRListCopy):
             list_value = self._value(instruction.list_value, frame)
             if not isinstance(list_value, list):
@@ -523,7 +535,7 @@ class IRInterpreter:
             frame.values[instruction.result] = (
                 list_value.logical_copy()
                 if isinstance(list_value, CollectionObject)
-                else list(list_value)
+                else CollectionObject("List", instruction.result.type.element, list_value)
             )
             return False, None, None
 

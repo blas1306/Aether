@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from aether.ssa.model import (
+    SSAArrayCopy,
     SSAArrayGet,
     SSAArrayLength,
     SSAArrayNew,
@@ -577,6 +578,10 @@ class TrivialPhiEliminator:
                 SSAListSet(list_value, index, value),
                 int(list_rewritten) + int(index_rewritten) + int(value_rewritten),
             )
+
+        if isinstance(instruction, SSAArrayCopy):
+            array, rewritten = self._rewrite_value(instruction.array, replacements)
+            return (SSAArrayCopy(instruction.result, array), 1) if rewritten else (instruction, 0)
 
         if isinstance(instruction, SSAListCopy):
             list_value, rewritten = self._rewrite_value(instruction.list_value, replacements)

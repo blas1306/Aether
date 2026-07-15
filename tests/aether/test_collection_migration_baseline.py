@@ -209,10 +209,6 @@ int main() {
             "structural Array equality",
         ),
         (
-            "int main() { Array<int> a = {1}; Array<int> b = a.copy(); return b[0]; }",
-            "Array.copy()",
-        ),
-        (
             "struct Item { int value; } int main() { List<Item> xs = {Item(1)}; println(xs.contains(Item(1))); return 0; }",
             "List<Item>.contains() structural search",
         ),

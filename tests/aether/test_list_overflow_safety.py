@@ -74,7 +74,7 @@ def test_checked_list_int_conversions_cover_boundaries_and_sentinel() -> None:
         checked_list_index_to_int(INT32_MAX + 1)
 
 
-def test_list_new_and_copy_check_bytes_before_allocation_and_memcpy() -> None:
+def test_list_new_checks_bytes_and_typed_copy_delegates_to_checked_allocation() -> None:
     llvm = print_llvm(
         lower_to_verified_ssa(
             _typed("int main(){ List<int> xs={1,2,3}; List<int> ys=xs.copy(); return ys.length; }")
@@ -94,11 +94,12 @@ def test_list_new_and_copy_check_bytes_before_allocation_and_memcpy() -> None:
 
     copy_start = llvm.index("define private ptr @aether_list_copy")
     copy_end = llvm.index("\n}", copy_start)
-    copy_helper = llvm.index("call i64 @aether_checked_allocation_bytes", copy_start, copy_end)
     copy_allocation = llvm.index("call ptr @aether_list_new", copy_start, copy_end)
-    copy_memcpy = llvm.index("call void @llvm.memcpy", copy_start, copy_end)
-    assert copy_helper < copy_allocation < copy_memcpy
-    assert "br i1 %has_bytes, label %copy_elements, label %done" in llvm[copy_start:copy_end]
+    copy_load = llvm.index("%element = load i32", copy_start, copy_end)
+    copy_store = llvm.index("store i32 %element", copy_start, copy_end)
+    assert copy_allocation < copy_load < copy_store
+    assert "br label %copy.loop" in llvm[copy_start:copy_end]
+    assert "@llvm.memcpy" not in llvm[copy_start:copy_end]
 
 
 def test_sort_checks_total_and_run_bytes_and_avoids_wrapping_offsets() -> None:

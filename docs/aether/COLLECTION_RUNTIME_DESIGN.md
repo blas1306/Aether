@@ -1,10 +1,10 @@
 # RFC: semántica, ownership y lifecycle de `Array<T>` y `List<T>`
 
-Estado: **decisión aprobada; Fase 1 de objeto RC implementada para Aether v1**,
+Estado: **decisión aprobada; Fases 1 (objeto RC) y 2 (copia explícita) implementadas para Aether v1**,
 15 de julio de 2026.
 
-La representación RC, el lifecycle del handle, los cleanups de IR y la
-destrucción final native de Fase 1 están activos. `copy()` nuevo, slicing List,
+La representación RC, el lifecycle del handle, los cleanups de IR, la
+destrucción final native y `Array/List.copy()` están activos. Slicing List,
 iteración borrowed e igualdad native general continúan fuera de este cambio.
 
 Esta RFC congela la semántica pública de `Array<T>` y `List<T>` en las áreas
@@ -233,6 +233,26 @@ estas políticas internas para todos los backends:
 
 - preservar exactamente la capacity de origen; o
 - reducirla a `length` (y usar cero para la lista vacía).
+
+Fase 2 congela la segunda política: `List.copy()` usa `capacity = size`, y la
+lista vacía usa cero. AST guarda el mismo dato en el objeto privado, IR lo
+preserva semánticamente y el helper native inicializa length y capacity con el
+mismo valor.
+
+### 5.3 Estado implementado y rollback
+
+AST e IR interpreter reservan un objeto y buffer nuevos, hacen `copy_init` de
+cada elemento y, ante un error recuperable, destruyen en orden inverso el
+prefijo ya inicializado antes de liberar buffer y objeto. Los contadores de
+debug verifican esta ruta sin exponer identidad al lenguaje.
+
+IR usa los builtins tipados `array_copy` y `list_copy`, con tipo nominal del
+receiver, ubicación fuente y resultado owned. SSA conserva ambas allocations
+con efectos. LLVM genera un helper especializado por `T` que recorre el rango
+vivo y aplica retain recursivo a strings, handles anidados y fields de struct;
+no usa `memcpy` como sustituto de copia lógica. El panic native actual termina
+el proceso y no hace unwind: por ello no se afirma rollback observable ni
+exception safety native hasta que exista una política de unwind.
 
 Esta elección de rendimiento permanece abierta. Cualquiera de las dos conserva
 tamaño, orden, independencia del buffer y complejidad O(n · copy(T)); no puede

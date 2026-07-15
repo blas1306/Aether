@@ -267,9 +267,19 @@ class IRListNew(AllocationMixin, IRInstruction):
 
 
 @dataclass(frozen=True)
+class IRArrayCopy(ReadingAllocationMixin, IRInstruction):
+    result: IRValue
+    array: IRValue
+    source_location: IRSourceLocation | None = None
+
+    element_lifecycle = "copy_init"
+
+
+@dataclass(frozen=True)
 class IRListCopy(ReadingAllocationMixin, IRInstruction):
     result: IRValue
     list_value: IRValue
+    source_location: IRSourceLocation | None = None
 
     element_lifecycle = "copy_init"
 

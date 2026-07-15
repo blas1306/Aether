@@ -3,6 +3,7 @@ from __future__ import annotations
 from .builder import SSABuildError, SSABuilder
 from .general_builder import GeneralSSABuildError, GeneralSSABuilder
 from .model import (
+    SSAArrayCopy,
     SSAArrayGet,
     SSAArrayLength,
     SSAArrayNew,
@@ -79,6 +80,7 @@ __all__ = [
     "GeneralSSABuilder",
     "SSABuildError",
     "SSABuilder",
+    "SSAArrayCopy",
     "SSAArrayGet",
     "SSAArrayLength",
     "SSAArrayNew",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from aether.ssa.model import (
+    SSAArrayCopy,
     SSAArrayGet,
     SSAArrayLength,
     SSAArrayNew,
@@ -196,6 +197,10 @@ class SSADeadCodeEliminator:
 
         if isinstance(instruction, SSAListNew):
             used_values.update(instruction.elements)
+            return
+
+        if isinstance(instruction, SSAArrayCopy):
+            used_values.add(instruction.array)
             return
 
         if isinstance(instruction, SSAListCopy):

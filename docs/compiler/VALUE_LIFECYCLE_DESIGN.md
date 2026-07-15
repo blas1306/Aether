@@ -175,6 +175,12 @@ buffer y ejecuta la copia lógica de cada `T`. Slicing usa la misma copia lógic
 sobre un rango. La implementación clasifica el handle como no trivial y cubre
 coordinadamente assignment, parámetros, returns, fields, nesting y cleanup.
 
+Desde Fase 2, `Array/List.copy()` está implementado E2E mediante opcodes
+`array_copy`/`list_copy`. Los intérpretes destruyen el prefijo parcialmente
+inicializado en orden inverso si `copy_init(T)` falla. LLVM copia elemento por
+elemento con hooks recursivos; como el panic native es abortivo y no existe
+unwind, no promete rollback observable ante panic.
+
 ## 4. Lifecycle aprobado de string
 
 ```text

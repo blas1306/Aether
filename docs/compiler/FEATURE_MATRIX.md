@@ -161,7 +161,7 @@ Notas:
 | for sobre List | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Parcial backend fase 1 |
 | List index read (`xs[i]`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ may-trap | ✅ bounds + panic | ✅ | ✅ documentada | Seguro: `0 <= i < length` en AST/IR/native |
 | List index assignment (`xs[i] = value`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ side-effect | ✅ bounds + panic | ✅ | ✅ documentada | Seguro: check antes del store |
-| List.copy | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ checked bytes/OOM | ✅ | ✅ documentada | Orden seguro antes de allocation/memcpy |
+| List.copy | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ helper tipado por T | ✅ | ✅ documentada | Objeto/buffer nuevos; capacity=size; copy_init por elemento |
 | List.contains | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ búsqueda i64 | ✅ | ✅ documentada | No depende del narrowing de indexOf |
 | List.indexOf | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ may-trap | ✅ checked i64→i32 | ✅ | ✅ documentada | `-1` ausente; panic si índice > INT32_MAX |
 | List.push | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 4b con growth interno |
@@ -182,7 +182,7 @@ Notas:
 | Array index read (`a[i]`) | ✅ | ✅ | ✅ bounds | ✅ bounds en interpreter | ✅ | ❌ DCE elimina get may-trap | ❌ sin bounds ni panic | ⚠️ AST/validos native | ⚠️ parcialmente documentada | Inseguro en LLVM |
 | Array index assignment (`a[i] = value`) | ✅ | ✅ | ✅ bounds | ✅ bounds en interpreter | ✅ | ✅ side-effect | ❌ sin bounds; store directo | ⚠️ AST/validos native | ⚠️ parcialmente documentada | Inseguro en LLVM |
 | Array.isEmpty | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ no documentada | No implementado |
-| Array.copy | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ⚠️ parcialmente documentada | Frontend solamente |
+| Array.copy | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ helper tipado por T | ✅ | ✅ documentada | Copia exterior shallow E2E, resultado owned |
 | Array.contains | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ no documentada | No implementado |
 | Array.indexOf | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ no documentada | No implementado |
 | Array.swap | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ no documentada | No implementado |

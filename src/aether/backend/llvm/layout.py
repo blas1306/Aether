@@ -101,9 +101,9 @@ class LLVMTypeLayouts:
         if isinstance(type_, StructType):
             return self._struct(type_)
         if isinstance(type_, FunctionType):
-            return self._unsupported(
-                type_, "callable value-copy semantics inside aggregate collections are not defined"
-            )
+            # Aether callables currently lower to capture-free function
+            # pointers.  Copying a callable element copies that handle.
+            return self._reference(type_)
         if isinstance(type_, (ClassRefType, InterfaceType)):
             return self._unsupported(
                 type_, "class/interface references are outside the LLVM/native collection subset"

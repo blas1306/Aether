@@ -39,6 +39,10 @@ AddTransactionStatus invalidStatus = addTransaction(
 
 Summary totals = summarize(transactions);
 List<Transaction> expenses = filterByType(transactions, TransactionType.Expense);
+List<Transaction> transactionCopy = transactions.copy();
+Transaction editedCopy = transactionCopy[0];
+editedCopy.amount = 999.0;
+transactionCopy[0] = editedCopy;
 List<Transaction> empty = {};
 Summary emptyTotals = summarize(empty);
 
@@ -50,6 +54,7 @@ println("income total: ", totals.income == 1500.0);
 println("expense total: ", totals.expenses == 250.0);
 println("balance: ", totals.balance == 1250.0);
 println("expense filter: ", expenses.length == 1 && expenses[0].type == TransactionType.Expense);
+println("copy independent: ", transactions[0].amount == 1500.0 && transactionCopy[0].amount == 999.0);
 println("empty summary: ", emptyTotals.balance == 0.0);
 println("transactions:");
 printTransactions(transactions);

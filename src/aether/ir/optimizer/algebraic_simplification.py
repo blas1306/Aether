@@ -5,6 +5,7 @@ from typing import Any
 
 from aether.ir.model import (
     IRAssign,
+    IRArrayCopy,
     IRArrayGet,
     IRArrayLength,
     IRArrayNew,
@@ -409,6 +410,8 @@ class AlgebraicSimplifier:
                 index=self._resolve(instruction.index, replacements),
                 value=self._resolve(instruction.value, replacements),
             )
+        if isinstance(instruction, IRArrayCopy):
+            return replace(instruction, array=self._resolve(instruction.array, replacements))
         if isinstance(instruction, IRListCopy):
             return replace(instruction, list_value=self._resolve(instruction.list_value, replacements))
         if isinstance(instruction, IRListContains):

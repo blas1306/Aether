@@ -19,6 +19,7 @@ from ..types import (
 )
 from .model import (
     IRAssign,
+    IRArrayCopy,
     IRArrayGet,
     IRArrayLength,
     IRArrayNew,
@@ -1930,10 +1931,18 @@ class IRLowerer:
                 context.block.instructions.append(IRListReverse(list_value))
                 return None
         if method_name == "copy" and len(arguments) == 1:
-            list_value = self._lower_expression(arguments[0], context)
-            if isinstance(list_value.type, ListType):
-                result = context.temporary(list_value.type)
-                context.block.instructions.append(IRListCopy(result, list_value))
+            collection = self._lower_expression(arguments[0], context)
+            if isinstance(collection.type, ArrayType):
+                result = context.temporary(collection.type)
+                context.block.instructions.append(
+                    IRArrayCopy(result, collection, self._source_location(call))
+                )
+                return result
+            if isinstance(collection.type, ListType):
+                result = context.temporary(collection.type)
+                context.block.instructions.append(
+                    IRListCopy(result, collection, self._source_location(call))
+                )
                 return result
         if method_name == "contains" and len(arguments) == 2:
             list_value = self._lower_expression(arguments[0], context)

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from .model import (
     IRAssign,
+    IRArrayCopy,
     IRArrayLength,
     IRArrayNew,
     IRArraySlice,
@@ -256,7 +257,7 @@ class LifecycleExpander:
                 elif isinstance(instruction, (IRArrayGet, IRListGet, IRListPop, IRListRemoveAt)):
                     if self.registry.traits(instruction.result.type).needs_destroy:
                         self._owned_values.add(instruction.result)
-                elif isinstance(instruction, (IRArrayNew, IRListNew, IRListCopy, IRArraySlice)):
+                elif isinstance(instruction, (IRArrayNew, IRArrayCopy, IRListNew, IRListCopy, IRArraySlice)):
                     if self.registry.traits(instruction.result.type).needs_destroy:
                         self._owned_values.add(instruction.result)
                 elif isinstance(instruction, IRStructNew):

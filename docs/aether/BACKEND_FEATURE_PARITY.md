@@ -7,10 +7,11 @@ filas históricas que describen `char *`, `%s`, `strcmp` o copia trivial son el
 snapshot previo a esta actualización. Concat native, parsing, split/trim,
 files y argv continúan no implementados.
 
-Actualización perfil 8 (15-07-2026): la Fase 0 de colecciones añade detección
+Actualización perfil 8 (15-07-2026): la Fase 0 de colecciones añadió detección
 semántica tipada y diagnósticos previos al lowering para igualdad Array/List,
 `Array.copy()`, slicing List inclusivo legado y búsqueda estructural de structs.
-La Fase 1 posterior implementa RC y actualiza el perfil 9. La matriz exhaustiva por backend
+La Fase 1 implementó RC (perfil 9) y Fase 2 completó `Array/List.copy()` E2E
+(perfil 10), retirando sólo el diagnóstico de Array copy. La matriz exhaustiva por backend
 está en [`COLLECTION_MIGRATION_BASELINE.md`](COLLECTION_MIGRATION_BASELINE.md).
 
 Última revisión: 15 de julio de 2026, incluyendo enums native y los ejemplos
@@ -166,7 +167,7 @@ decisión aún no cambia representación ni estados de esta matriz.
 | Array get/set/length | C | C | C | C | C | C | C | C | C | C | C | C | C narrowing | E2E | P | Completo | Índices 0-based. |
 | Array sort | método/global | C | C tipos | C estable in-place | C sequence sort | C | C | C | C | C | C efecto | C | C temp checked | E2E | C | Completo | int/double/string. |
 | Array slicing | C `a[s:e]` | C | C | C copy | C | C | C | C | C | C | C | C | C bounds | E2E | C | Completo | 0-based, half-open, dos límites explícitos. |
-| Array copy/equality | C | C | C | C | P | N general | N | N | N | N | N | diagnóstico perfil 8 | AST | baseline + negativos | P | Solo AST diagnosticado | `copy` shallow y equality estructural no bajan; native falla antes de IR. |
+| Array copy/equality | C | C | C | C | P | C copy / N equality | C copy | C copy | C copy | C copy | C copy | C copy / diagnóstico equality | RC + helper tipado | E2E copy + negativos equality | P | Copy completo; equality AST-only | `copy` shallow crea objeto/buffer nuevos; igualdad estructural sigue diagnosticada. |
 | `List<T>` literal/new/get/set | C target-typed | C | C | C | C | C | C | C | C | C | C | C layout tipado incluido Struct soportado | C RC y destroy final | E2E escalares/enum/Struct + expense tracker | C | Parcial | No hay keyword `new`; layouts no representables se rechazan antes de LLVM. |
 | List length/capacity/core mutation | métodos | C | C | C | C salvo capacity pública | C | C | C | C | C | C | C | C checked growth | E2E | P | Parcial | `capacity` se usa internamente pero no es API pública completa. |
 | List push/pop/insert/removeAt/clear | métodos/global | C | C | C | C | C | C | C | C | C | C efecto/trap | P con Struct soportado | C hooks de elemento; sin destroy final | E2E+safety escalares/Struct/string | C | Parcial | No shrinking deliberado; clear sí destruye elementos vivos, el contenedor final se filtra. |

@@ -8,6 +8,7 @@ from aether.ir.types import DoubleType, IntType, StringType
 from aether.integer_arithmetic import checked_int_binary
 from aether.ssa.analysis import Constant, LatticeState, Overdefined, Unknown, Worklist
 from aether.ssa.model import (
+    SSAArrayCopy,
     SSAArrayGet,
     SSAArrayLength,
     SSAArrayNew,
@@ -389,6 +390,7 @@ class SCCPAnalyzer:
             instruction,
             (
                 SSAArrayNew,
+                SSAArrayCopy,
                 SSAArrayGet,
                 SSAArraySlice,
                 SSAListNew,
@@ -464,6 +466,8 @@ class SCCPAnalyzer:
             return instruction.elements
         if isinstance(instruction, SSAListNew):
             return instruction.elements
+        if isinstance(instruction, SSAArrayCopy):
+            return (instruction.array,)
         if isinstance(instruction, SSAListCopy):
             return (instruction.list_value,)
         if isinstance(instruction, SSAListContains):

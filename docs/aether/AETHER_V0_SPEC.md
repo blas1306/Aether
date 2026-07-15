@@ -1498,6 +1498,7 @@ Supported native methods:
 - `List<T>.clear() -> void`
 - `List<T>.size() -> int`
 - `List<T>.copy() -> List<T>`
+- `Array<T>.copy() -> Array<T>`
 - `List<T>.reverse() -> void`, mutates the list in place
 - `List<T>.sort() -> void`, mutates the list in place
 - `Matrix<T>.transpose() -> Matrix<T>`

@@ -25,7 +25,6 @@ class LLVMListRuntime:
 
     _uses_list_type: bool
     _uses_list_allocation: bool
-    _uses_list_copy: bool
     _uses_list_push: bool
     _uses_list_insert: bool
     _uses_list_pop: bool
@@ -100,33 +99,6 @@ class LLVMListRuntime:
                         self._list_strong_count_pointer("%strong_field", "%list"),
                         "  store i64 1, ptr %strong_field",
                         "  ret ptr %list",
-                        "}",
-                    ]
-                )
-            )
-        if self._uses_list_copy:
-            if not self._sequence_sort_types and not uses_list_growth:
-                common.declare(sections, "declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1 immarg)")
-            sections.append(
-                "\n".join(
-                    [
-                        "define private ptr @aether_list_copy(ptr %source, i64 %element_size) {",
-                        "entry:",
-                        self._list_length_pointer("%source_len_field", "%source"),
-                        "  %length = load i64, ptr %source_len_field",
-                        "  %bytes = call i64 @aether_checked_allocation_bytes(i64 %length, i64 %element_size)",
-                        "  %copy = call ptr @aether_list_new(i64 %element_size, i64 %length)",
-                        self._list_data_pointer("%source_data_field", "%source"),
-                        "  %source_data = load ptr, ptr %source_data_field",
-                        self._list_data_pointer("%copy_data_field", "%copy"),
-                        "  %copy_data = load ptr, ptr %copy_data_field",
-                        "  %has_bytes = icmp ne i64 %bytes, 0",
-                        "  br i1 %has_bytes, label %copy_elements, label %done",
-                        "copy_elements:",
-                        "  call void @llvm.memcpy.p0.p0.i64(ptr %copy_data, ptr %source_data, i64 %bytes, i1 false)",
-                        "  br label %done",
-                        "done:",
-                        "  ret ptr %copy",
                         "}",
                     ]
                 )

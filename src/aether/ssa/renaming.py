@@ -6,6 +6,7 @@ from typing import NoReturn
 from aether.analysis.cfg import CFG
 from aether.analysis.dominators import DominatorResult
 from aether.ir.model import (
+    IRArrayCopy,
     IRArrayGet,
     IRArrayLength,
     IRArrayNew,
@@ -74,6 +75,7 @@ from aether.ir.model import (
 from aether.ir.types import IRType
 
 from .model import (
+    SSAArrayCopy,
     SSAArrayGet,
     SSAArrayLength,
     SSAArrayNew,
@@ -381,6 +383,12 @@ class SSARenamer:
             )
             self._bind_value(result.name, result, bound_values)
             return SSAListNew(result, elements)
+
+        if isinstance(instruction, IRArrayCopy):
+            result = self._define_value(instruction.result)
+            array = self._resolve_value(instruction.array)
+            self._bind_value(result.name, result, bound_values)
+            return SSAArrayCopy(result, array)
 
         if isinstance(instruction, IRListCopy):
             result = self._define_value(instruction.result)

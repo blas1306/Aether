@@ -10,7 +10,7 @@ todavía una aplicación financiera persistente.
 - `Transaction.ae`: enum y struct nominal del dominio; la fecha es `string`.
 - `Ledger.ae`: alta validada en `List<Transaction>`.
 - `Reports.ae`: resumen, filtro e impresión mediante `for-in`.
-- `Main.ae`: demostración completa en memoria y sus nueve validaciones.
+- `Main.ae`: demostración completa en memoria y sus diez validaciones.
 
 ## AST y native
 
@@ -28,14 +28,14 @@ crecimiento y filtrado mediante los hooks ARC de elemento. Ya no hace falta un
 `NativeSubset.ae` separado.
 
 El formateo nativo existente de doubles usa `%g`, por lo que el listado muestra
-`1500`/`250` donde AST muestra `1500.0`/`250.0`; las nueve validaciones y toda la
+`1500`/`250` donde AST muestra `1500.0`/`250.0`; las diez validaciones y toda la
 lógica coinciden. Los strings son handles a objetos ARC; concat, parsing y las
 otras APIs públicas de producción dinámica siguen fuera del ejemplo.
 
-La Fase 0 de colecciones confirma además que `List<Transaction>` conserva
-aliasing en assignment/parámetros/returns, que los filtros producen la List que
-construyen, que `copy()` es superficial y que `clear()` destruye sus elementos
-vivos. El objeto List y su buffer todavía no tienen RC ni destrucción final.
+La Fase 2 confirma además que `List<Transaction>` conserva aliasing en
+assignment/parámetros/returns, que `copy()` crea un objeto y buffer exteriores
+independientes y que strings/structs siguen su lifecycle. El objeto List tiene
+strong RC y destrucción final.
 
 ## Límites deliberados
 

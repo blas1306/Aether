@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import NoReturn
 
 from aether.ir.model import (
+    IRArrayCopy,
     IRArrayGet,
     IRArrayLength,
     IRArrayNew,
@@ -70,6 +71,7 @@ from aether.ir.model import (
 from aether.ir.lifecycle import expand_lifecycle
 
 from .model import (
+    SSAArrayCopy,
     SSAArrayGet,
     SSAArrayLength,
     SSAArrayNew,
@@ -651,6 +653,11 @@ class SSABuilder:
                 for element in instruction.elements
             )
             return SSAListNew(result, elements)
+
+        if isinstance(instruction, IRArrayCopy):
+            result = self._define_value(instruction.result, state.value_map)
+            array = self._resolve_value(instruction.array, state.value_map)
+            return SSAArrayCopy(result, array)
 
         if isinstance(instruction, IRListCopy):
             result = self._define_value(instruction.result, state.value_map)

@@ -1,6 +1,13 @@
 # Baseline de migración de `Array<T>` y `List<T>`
 
-Estado: **Fase 0 completada; caracterización del 15 de julio de 2026**.
+Estado: **baseline histórica de Fase 0; Fases 1 y 2 completadas el 15 de julio de 2026**.
+
+> Actualización Fase 2: las tablas históricas siguientes conservan el punto de
+> partida. El estado vigente implementa `Array.copy()` y `List.copy()` en
+> AST/IR/SSA/LLVM/native. Ambos crean objeto y buffer exteriores nuevos,
+> ejecutan `copy_init(T)` elemento a elemento y retornan ownership. List
+> normaliza `capacity = size`; nesting conserva handles interiores compartidos.
+> El diagnóstico transitorio de `Array.copy()` fue retirado en el perfil 10.
 
 Este documento registra lo que hace el repositorio antes de migrar los
 contenedores a objetos con reference counting. La semántica aprobada está en
@@ -105,7 +112,7 @@ Para `List<Transaction>`, cada Transaction se mueve/copia por valor y su fecha
 string participa del lifecycle recursivo. El header y buffer de la List quedan
 filtrados al final; no hay double free actual porque no se intenta liberarlos.
 
-## `copy()` actual
+## `copy()` en la baseline histórica
 
 | Propiedad | AST Array/List | IR List | Native List | Native Array |
 | --- | --- | --- | --- | --- |
@@ -121,6 +128,11 @@ Las formas globales `copy(xs)` y de método `xs.copy()` convergen en la misma
 operación semántica. La detección de capability conserva la forma desazucarada
 tipada del receiver; no inspecciona texto. Array.copy se rechaza en native
 antes de IR mientras no exista un camino completo de lifecycle.
+
+La Fase 2 reemplaza ese estado: `array_copy` y `list_copy` son operaciones IR
+tipadas distintas de `copy_init`; ambas sobreviven SSA y llegan a helpers LLVM
+especializados por elemento. El intérprete implementa rollback del prefijo ante
+errores recoverables. Native conserva panic abortivo sin unwind.
 
 ## `const`
 

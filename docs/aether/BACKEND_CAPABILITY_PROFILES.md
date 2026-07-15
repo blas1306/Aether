@@ -141,6 +141,15 @@ convención borrowed y los returns entregan ownership. El perfil AST usa
 `CollectionObject` con identidad, contador lógico, estado alive/freed y
 contadores de prueba; permanece parcial porque panic continúa sin unwind.
 
+## Actualización de perfil 10: copia explícita de colecciones
+
+`Array.copy()` deja de requerir el diagnóstico transitorio del perfil 8.
+Array/List tienen operaciones tipadas en IR y SSA y helpers LLVM especializados
+por elemento. La copia exterior es independiente, List reduce capacity a size,
+y strings, structs, callables y handles anidados siguen el lifecycle de `T`.
+No se promocionan slicing List, igualdad de colecciones, for-in borrowed ni
+búsqueda estructural de structs.
+
 La CLI no añade por ahora un comando `capabilities`: ejecución AST valida el
 perfil AST, y `--emit-llvm`, ejecución LLVM, `build` y los perfiles LLVM/native
 de `bench` validan el perfil native. Los modos de inspección IR/SSA conservan

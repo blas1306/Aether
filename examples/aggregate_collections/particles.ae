@@ -23,6 +23,12 @@ int main() {
     println(particles[0].position.x == 1.0);
     particles[0] = first;
     println(particles[0].position.x == 9.0);
+    Array<Particle> copied = particles.copy();
+    Particle copiedFirst = copied[0];
+    copiedFirst.position.x = 42.0;
+    copied[0] = copiedFirst;
+    println(particles[0].position.x == 9.0);
+    println(copied[0].position.x == 42.0);
     println(particles.length == 2);
     return 0;
 }

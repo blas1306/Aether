@@ -218,7 +218,20 @@ def is_empty_builtin(args: list[AetherValue]) -> AetherValue:
 
 def copy_builtin(args: list[AetherValue]) -> AetherValue:
     xs = _require_list_or_array_arg(args, "copy")
-    return AetherValue(xs.type_name, list(xs.value))
+    from ..collection_value import CollectionObject
+
+    if isinstance(xs.value, CollectionObject):
+        return AetherValue(xs.type_name, xs.value.logical_copy())
+    # Compatibility for legacy host-created values.  Source-language
+    # collections use CollectionObject after the RC migration.
+    return AetherValue(
+        xs.type_name,
+        CollectionObject(
+            "Array" if isinstance(xs.type_name, ArrayType) else "List",
+            xs.type_name.element_type,
+            xs.value,
+        ),
+    )
 
 
 def push_builtin(args: list[AetherValue]) -> AetherValue:

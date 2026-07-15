@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from .pipeline import TypedProgram
 
 
-CAPABILITY_PROFILE_VERSION = "9"
+CAPABILITY_PROFILE_VERSION = "10"
 
 
 class BackendIdentity(str, Enum):
@@ -798,14 +798,6 @@ class _CapabilityDetector:
             return
         resolved = self._resolve_alias(target_type)
         canonical_operation = "indexOf" if operation == "index_of" else operation
-        if isinstance(resolved, ArrayType) and canonical_operation == "copy":
-            self._record(
-                Capability.ARRAY,
-                node,
-                detail="Array.copy()",
-                requires_complete_support=True,
-            )
-            return
         if not isinstance(resolved, ListType) or canonical_operation not in {"contains", "indexOf"}:
             return
         element_type = self._resolve_alias(resolved.element_type)
@@ -963,7 +955,7 @@ class _CapabilityDetector:
             # current representation preserves the language's alias semantics.
             return None
         if isinstance(type_name, FunctionType):
-            return "callable fields do not yet have defined aggregate collection copy semantics"
+            return None
         if isinstance(type_name, ClassType):
             return "class references are outside the LLVM/native collection subset"
         if isinstance(type_name, InterfaceType):
@@ -1072,15 +1064,6 @@ def backend_capability_issues(
             message = (
                 f"LLVM/native does not yet implement {requirement.detail}; "
                 "the approved operation compares ordered contents, not container identity."
-            )
-        elif (
-            backend is BackendIdentity.NATIVE
-            and requirement.capability is Capability.ARRAY
-            and requirement.detail == "Array.copy()"
-        ):
-            message = (
-                "LLVM/native Array.copy() is unavailable until explicit collection copy "
-                "has an end-to-end element lifecycle path."
             )
         else:
             message = (

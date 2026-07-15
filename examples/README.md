@@ -47,7 +47,7 @@ python3 src/main.py --cli < /dev/null
 ### Aggregate collections
 
 - **aggregate_collections/particles.ae** - Native `Array<Particle>` with nested
-  `Vec2` structs and explicit by-value get/set semantics.
+  `Vec2` structs, explicit by-value get/set semantics, and independent `copy()`.
 
 ### Linear Algebra
 

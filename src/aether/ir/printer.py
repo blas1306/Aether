@@ -5,6 +5,7 @@ from typing import Any
 
 from .model import (
     IRAssign,
+    IRArrayCopy,
     IRArrayGet,
     IRArrayLength,
     IRArrayNew,
@@ -227,6 +228,8 @@ class IRPrinter:
         if isinstance(instruction, IRListNew):
             elements = ", ".join(self._value(element) for element in instruction.elements)
             return f"{self._typed_value(instruction.result)} = list_new [{elements}]"
+        if isinstance(instruction, IRArrayCopy):
+            return f"{self._typed_value(instruction.result)} = array_copy {self._value(instruction.array)}"
         if isinstance(instruction, IRListCopy):
             return f"{self._typed_value(instruction.result)} = list_copy {self._value(instruction.list_value)}"
         if isinstance(instruction, IRListContains):

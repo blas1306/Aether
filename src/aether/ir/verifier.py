@@ -5,6 +5,7 @@ from typing import NoReturn
 
 from .model import (
     IRAssign,
+    IRArrayCopy,
     IRArrayGet,
     IRArrayLength,
     IRArrayNew,
@@ -718,6 +719,10 @@ class IRVerifier:
 
         if isinstance(instruction, IRListNew):
             self._verify_list_new(instruction, state, value_types)
+            return self._define_value(state, instruction.result)
+
+        if isinstance(instruction, IRArrayCopy):
+            self._verify_array_copy(instruction, state, value_types)
             return self._define_value(state, instruction.result)
 
         if isinstance(instruction, IRListCopy):
@@ -1602,11 +1607,29 @@ class IRVerifier:
         if not isinstance(instruction.result.type, IntType):
             self._fail(f"List length result must be int, got {instruction.result.type}")
 
+    def _verify_array_copy(self, instruction: IRArrayCopy, state: _State, value_types: dict[str, IRType]) -> None:
+        self._require_defined(instruction.array, state, value_types)
+        if not isinstance(instruction.array.type, ArrayType):
+            self._fail(f"Array copy expects array value, got {instruction.array.type}")
+        self._require_type(instruction.result.type, instruction.array.type, "Array copy result type mismatch")
+        assert self._lifecycle is not None
+        traits = self._lifecycle.traits(instruction.array.type.element)
+        if traits.reason is not None:
+            self._fail(
+                f"Array copy element type '{instruction.array.type.element}' has no lifecycle: {traits.reason}"
+            )
+
     def _verify_list_copy(self, instruction: IRListCopy, state: _State, value_types: dict[str, IRType]) -> None:
         self._require_defined(instruction.list_value, state, value_types)
         if not isinstance(instruction.list_value.type, ListType):
             self._fail(f"List copy expects list value, got {instruction.list_value.type}")
         self._require_type(instruction.result.type, instruction.list_value.type, "List copy result type mismatch")
+        assert self._lifecycle is not None
+        traits = self._lifecycle.traits(instruction.list_value.type.element)
+        if traits.reason is not None:
+            self._fail(
+                f"List copy element type '{instruction.list_value.type.element}' has no lifecycle: {traits.reason}"
+            )
 
     def _verify_list_contains(self, instruction: IRListContains, state: _State, value_types: dict[str, IRType]) -> None:
         self._require_defined(instruction.list_value, state, value_types)
@@ -2140,6 +2163,7 @@ class IRVerifier:
             instruction,
             (
                 IRArrayNew,
+                IRArrayCopy,
                 IRArrayGet,
                 IRArraySlice,
                 IRListNew,

@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from .model import (
+    SSAArrayCopy,
     SSAArrayGet,
     SSAArrayLength,
     SSAArrayNew,
@@ -175,6 +176,8 @@ class SSAPrinter:
         if isinstance(instruction, SSAListNew):
             elements = ", ".join(self._value(element) for element in instruction.elements)
             return f"{self._typed_value(instruction.result)} = list_new [{elements}]"
+        if isinstance(instruction, SSAArrayCopy):
+            return f"{self._typed_value(instruction.result)} = array_copy {self._value(instruction.array)}"
         if isinstance(instruction, SSAListCopy):
             return f"{self._typed_value(instruction.result)} = list_copy {self._value(instruction.list_value)}"
         if isinstance(instruction, SSAListContains):

@@ -186,25 +186,21 @@ int main() {
     assert "@llvm.memmove.p0.p0.i64" in llvm
 
 
-def test_unsupported_callable_field_is_a_source_located_capability_error() -> None:
+def test_callable_field_collection_copy_uses_capture_free_handle_layout() -> None:
     source = """
 struct Bad { int(int) callback; }
 int same(int value) { return value; }
 int main() {
     List<Bad> values = {Bad(same)};
-    return 0;
+    List<Bad> copied = values.copy();
+    return copied.length - 1;
 }
 """
-    with pytest.raises(BackendCapabilityError) as raised:
-        LLVMBuilder().emit_llvm(_typed(source))
-
-    error = raised.value
-    assert error.line == 5
-    assert error.column > 0
-    assert "List<Bad>" in str(error)
-    assert "field 'callback'" in str(error)
-    assert "callable" in str(error)
-    assert "LLVM/native" in str(error)
+    typed = _typed(source)
+    llvm = LLVMBuilder().emit_llvm(typed)
+    assert "define private ptr @aether_list_copy_struct_" in llvm
+    if shutil.which("clang") is not None:
+        assert LLVMRunner().run(typed) == 0
 
 
 def test_struct_collection_search_and_sort_fail_before_llvm_emission() -> None:
@@ -229,7 +225,7 @@ def test_particle_array_preliminary_example_matches_ast_and_native() -> None:
     source = (ROOT / "examples" / "aggregate_collections" / "particles.ae").read_text(
         encoding="utf-8"
     )
-    expected = "true\ntrue\ntrue\n"
+    expected = "true\ntrue\ntrue\ntrue\ntrue\n"
     assert run_aether(source).output == expected
     assert _native_output(source) == expected
 

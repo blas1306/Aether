@@ -4,6 +4,7 @@ from typing import Any
 
 from aether.ir.types import IntType
 from aether.ssa.model import (
+    SSAArrayCopy,
     SSAArrayGet,
     SSAArrayLength,
     SSAArrayNew,
@@ -494,6 +495,8 @@ class SSAAlgebraicSimplifier:
                 self._resolve(instruction.value, replacements),
             )
 
+        if isinstance(instruction, SSAArrayCopy):
+            return SSAArrayCopy(instruction.result, self._resolve(instruction.array, replacements))
         if isinstance(instruction, SSAListCopy):
             return SSAListCopy(instruction.result, self._resolve(instruction.list_value, replacements))
 

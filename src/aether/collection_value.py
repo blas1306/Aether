@@ -60,17 +60,34 @@ class CollectionObject(list[Any]):
     ) -> None:
         if kind not in {"Array", "List"}:
             raise ValueError(f"unknown Aether collection kind '{kind}'")
-        copied = [copy_init_value(element) for element in elements]
-        list.__init__(self, copied)
+        list.__init__(self)
         self.kind = kind
         self.element_type = element_type
         self.strong_count = 1
         self.unclaimed_owners = 1
-        self.capacity = len(copied) if kind == "Array" else max(len(copied), capacity or 0)
+        self.capacity = 0
         self.alive = True
         self.freed = False
         _DEBUG_COUNTERS.objects_allocated += 1
         _DEBUG_COUNTERS.buffers_allocated += 1
+        try:
+            for element in elements:
+                list.append(self, copy_init_value(element))
+        except BaseException:
+            # The destination is never published.  Roll back exactly the live
+            # prefix, mirroring native lifecycle order for recoverable hosts.
+            for copied in reversed(self):
+                destroy_value(copied)
+                _DEBUG_COUNTERS.elements_destroyed += 1
+            list.clear(self)
+            self.strong_count = 0
+            self.unclaimed_owners = 0
+            self.alive = False
+            self.freed = True
+            _DEBUG_COUNTERS.buffers_freed += 1
+            _DEBUG_COUNTERS.objects_freed += 1
+            raise
+        self.capacity = len(self) if kind == "Array" else max(len(self), capacity or 0)
 
     @property
     def size(self) -> int:
@@ -237,7 +254,15 @@ def copy_init_value(value: Any) -> Any:
     if isinstance(value, StringValue):
         return value.retain()
     if isinstance(value, tuple):
-        return tuple(copy_init_value(item) for item in value)
+        copied_items: list[Any] = []
+        try:
+            for item in value:
+                copied_items.append(copy_init_value(item))
+        except BaseException:
+            for copied in reversed(copied_items):
+                destroy_value(copied)
+            raise
+        return tuple(copied_items)
 
     from .types import AetherValue, NullableType, StructInstance, TupleType
 
@@ -250,14 +275,19 @@ def copy_init_value(value: Any) -> Any:
         value.value.retain()
         return value
     if isinstance(value.value, StructInstance):
+        copied_fields: dict[str, Any] = {}
+        try:
+            for name in value.value.field_order:
+                copied_fields[name] = copy_init_value(value.value.fields[name])
+        except BaseException:
+            for name in reversed(tuple(copied_fields)):
+                destroy_value(copied_fields[name])
+            raise
         return AetherValue(
             value.type_name,
             StructInstance(
                 value.value.type_name,
-                {
-                    name: copy_init_value(value.value.fields[name])
-                    for name in value.value.field_order
-                },
+                copied_fields,
                 value.value.field_order,
             ),
         )

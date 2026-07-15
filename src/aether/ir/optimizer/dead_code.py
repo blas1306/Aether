@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from aether.ir.model import (
     IRAssign,
+    IRArrayCopy,
     IRArrayGet,
     IRArrayLength,
     IRArrayNew,
@@ -212,6 +213,8 @@ class DeadCodeEliminator:
             return instruction.elements
         if isinstance(instruction, IRListNew):
             return instruction.elements
+        if isinstance(instruction, IRArrayCopy):
+            return (instruction.array,)
         if isinstance(instruction, IRListCopy):
             return (instruction.list_value,)
         if isinstance(instruction, IRListContains):

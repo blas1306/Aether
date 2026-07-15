@@ -180,6 +180,12 @@ class SSAListNew(AllocationMixin, SSAInstruction):
 
 
 @dataclass(frozen=True)
+class SSAArrayCopy(ReadingAllocationMixin, SSAInstruction):
+    result: SSAValue
+    array: SSAValue
+
+
+@dataclass(frozen=True)
 class SSAListCopy(ReadingAllocationMixin, SSAInstruction):
     result: SSAValue
     list_value: SSAValue

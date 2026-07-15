@@ -12,6 +12,7 @@ from .lifecycle import (
 )
 from .model import (
     IRAssign,
+    IRArrayCopy,
     IRArrayGet,
     IRArrayLength,
     IRArrayNew,
@@ -128,6 +129,7 @@ __all__ = [
     "FunctionType",
     "IRBasicBlock",
     "IRAssign",
+    "IRArrayCopy",
     "IRArrayGet",
     "IRArrayLength",
     "IRArrayNew",

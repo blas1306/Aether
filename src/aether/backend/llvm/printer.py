@@ -7,6 +7,7 @@ from typing import Any, Callable
 from aether.ir.model import IREnumConstant
 from aether.ir.types import ArrayType, BoolType, DoubleType, EnumType, FunctionType, IntType, ListType, MatrixType, MethodResultType, StringType, StructType, VectorType, VoidType
 from aether.ssa.model import (
+    SSAArrayCopy,
     SSAArrayGet,
     SSAArrayLength,
     SSAArrayNew,
@@ -152,7 +153,6 @@ class LLVMPrinter:
         self._matrix_print_types: set[object] = set()
         self._uses_list_type = False
         self._uses_list_allocation = False
-        self._uses_list_copy = False
         self._uses_list_push = False
         self._uses_list_insert = False
         self._uses_list_pop = False
@@ -173,6 +173,7 @@ class LLVMPrinter:
         self._struct_sequence_print_types: set[tuple[str, object]] = set()
         self._collection_arc_helpers: set[tuple[str, object, bool]] = set()
         self._collection_object_arc_helpers: set[tuple[str, object, bool]] = set()
+        self._collection_copy_helpers: set[tuple[str, object]] = set()
 
         functions = [self._print_function(function) for function in module.functions]
         struct_types = [
@@ -191,7 +192,6 @@ class LLVMPrinter:
         list_runtime = LLVMListRuntime(
             _uses_list_type=self._uses_list_type,
             _uses_list_allocation=self._uses_list_allocation,
-            _uses_list_copy=self._uses_list_copy,
             _uses_list_push=self._uses_list_push,
             _uses_list_insert=self._uses_list_insert,
             _uses_list_pop=self._uses_list_pop,
@@ -254,6 +254,11 @@ class LLVMPrinter:
             sequence_sort_types=frozenset(self._sequence_sort_types),
         )
         runtime = list_runtime.declarations(common_runtime, array_runtime)
+        for kind, element_type in sorted(
+            self._collection_copy_helpers,
+            key=lambda item: (item[0], str(item[1])),
+        ):
+            runtime.append(self._collection_copy_helper(kind, element_type))
         runtime.extend(
             self._struct_sequence_equality_helper(kind, element_type)
             for kind, element_type in sorted(
@@ -428,6 +433,8 @@ class LLVMPrinter:
             return self._print_array_new(instruction)
         if isinstance(instruction, SSAListNew):
             return self._print_list_new(instruction)
+        if isinstance(instruction, SSAArrayCopy):
+            return self._print_array_copy(instruction)
         if isinstance(instruction, SSAListCopy):
             return self._print_list_copy(instruction)
         if isinstance(instruction, SSAListContains):
@@ -527,6 +534,7 @@ class LLVMPrinter:
             instruction,
             (
                 SSAArrayNew,
+                SSAArrayCopy,
                 SSAArrayGet,
                 SSAArraySlice,
                 SSAListNew,
@@ -1121,6 +1129,53 @@ class LLVMPrinter:
             "}",
         ])
 
+    def _require_collection_copy_helper(self, kind: str, element_type: object) -> str:
+        self._collection_copy_helpers.add((kind, element_type))
+        return f"aether_{kind}_copy_{aggregate_helper_suffix(element_type)}"
+
+    def _collection_copy_helper(self, kind: str, element_type: object) -> str:
+        """Emit a typed element-by-element copy into a fresh RC object."""
+
+        name = self._require_collection_copy_helper(kind, element_type)
+        collection = "Array" if kind == "array" else "List"
+        layout = "%AetherArray" if kind == "array" else "%AetherList"
+        data_index = 1 if kind == "array" else 2
+        element_layout = self._layouts.collection_element(collection, element_type)
+        rendered = element_layout.llvm_type
+        size = element_layout.size_operand
+        assert size is not None
+        allocation = "aether_array_new" if kind == "array" else "aether_list_new"
+        copy_lines: list[str] = []
+        if element_layout.needs_retain:
+            self._emit_arc_value(copy_lines, "%element", element_type, retain=True)
+        return "\n".join([
+            f"define private ptr @{name}(ptr %source) {{",
+            "entry:",
+            f"  %source_length_field = getelementptr {layout}, ptr %source, i32 0, i32 0",
+            "  %length = load i64, ptr %source_length_field",
+            f"  %copy = call ptr @{allocation}(i64 {size}, i64 %length)",
+            f"  %source_data_field = getelementptr {layout}, ptr %source, i32 0, i32 {data_index}",
+            "  %source_data = load ptr, ptr %source_data_field",
+            f"  %copy_data_field = getelementptr {layout}, ptr %copy, i32 0, i32 {data_index}",
+            "  %copy_data = load ptr, ptr %copy_data_field",
+            "  br label %copy.loop",
+            "copy.loop:",
+            "  %index = phi i64 [ 0, %entry ], [ %next, %copy.body ]",
+            "  %done = icmp eq i64 %index, %length",
+            "  br i1 %done, label %exit, label %copy.body",
+            "copy.body:",
+            f"  %source_element_ptr = getelementptr {rendered}, ptr %source_data, i64 %index",
+            f"  %element = load {rendered}, ptr %source_element_ptr",
+            *(f"  {line}" for line in copy_lines),
+            f"  %copy_element_ptr = getelementptr {rendered}, ptr %copy_data, i64 %index",
+            f"  store {rendered} %element, ptr %copy_element_ptr",
+            "  %next = add i64 %index, 1",
+            "  br label %copy.loop",
+            "exit:",
+            "  ret ptr %copy",
+            "}",
+        ])
+
     def _require_collection_arc_helper(
         self,
         kind: str,
@@ -1599,6 +1654,19 @@ class LLVMPrinter:
             instruction.elements,
         )
 
+    def _print_array_copy(self, instruction: SSAArrayCopy) -> str:
+        if not isinstance(instruction.array.type, ArrayType):
+            raise LLVMBackendError("LLVM array_copy expects an ArrayType source")
+        if instruction.result.type != instruction.array.type:
+            raise LLVMBackendError("LLVM array_copy result type must match source type")
+        self._uses_array_type = True
+        self._uses_array_allocation = True
+        result = self._new_temp(instruction.result)
+        helper = self._require_collection_copy_helper(
+            "array", instruction.array.type.element
+        )
+        return f"{result} = call ptr @{helper}(ptr {self._operand(instruction.array)})"
+
     def _print_list_new(self, instruction: SSAListNew) -> str:
         if not isinstance(instruction.result.type, ListType):
             raise LLVMBackendError("LLVM list_new result must be ListType")
@@ -1638,14 +1706,11 @@ class LLVMPrinter:
             raise LLVMBackendError("LLVM list_copy result type must match source type")
         self._uses_list_type = True
         self._uses_list_allocation = True
-        self._uses_list_copy = True
         result = self._new_temp(instruction.result)
-        size = self._sizeof(instruction.list_value.type.element, collection="List")
-        lines = [f"{result} = call ptr @aether_list_copy(ptr {self._operand(instruction.list_value)}, i64 {size})"]
-        if self._layouts.layout(instruction.list_value.type.element).needs_retain:
-            helper = self._require_collection_arc_helper("list", instruction.list_value.type.element, retain=True)
-            lines.append(f"call void @{helper}(ptr {result})")
-        return "\n  ".join(lines)
+        helper = self._require_collection_copy_helper(
+            "list", instruction.list_value.type.element
+        )
+        return f"{result} = call ptr @{helper}(ptr {self._operand(instruction.list_value)})"
 
     def _print_list_contains(self, instruction: SSAListContains) -> str:
         if not isinstance(instruction.list_value.type, ListType):

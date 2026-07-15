@@ -30,6 +30,7 @@ from aether.ir.scalar_math import scalar_math_result_type
 from aether.ir.model import IREnumConstant
 
 from .model import (
+    SSAArrayCopy,
     SSAArrayGet,
     SSAArrayLength,
     SSAArrayNew,
@@ -490,6 +491,10 @@ class SSAVerifier:
 
             if isinstance(instruction, SSAListNew):
                 self._verify_list_new(instruction, value_types)
+                continue
+
+            if isinstance(instruction, SSAArrayCopy):
+                self._verify_array_copy(instruction, value_types)
                 continue
 
             if isinstance(instruction, SSAListCopy):
@@ -1340,6 +1345,12 @@ class SSAVerifier:
         if not isinstance(instruction.result.type, IntType):
             self._fail(f"List length result must be int, got {instruction.result.type}")
 
+    def _verify_array_copy(self, instruction: SSAArrayCopy, value_types: dict[str, IRType]) -> None:
+        self._require_defined(instruction.array, value_types)
+        if not isinstance(instruction.array.type, ArrayType):
+            self._fail(f"Array copy expects array value, got {instruction.array.type}")
+        self._require_type(instruction.result.type, instruction.array.type, "Array copy result type mismatch")
+
     def _verify_list_copy(self, instruction: SSAListCopy, value_types: dict[str, IRType]) -> None:
         self._require_defined(instruction.list_value, value_types)
         if not isinstance(instruction.list_value.type, ListType):
@@ -1907,6 +1918,7 @@ class SSAVerifier:
             instruction,
             (
                 SSAArrayNew,
+                SSAArrayCopy,
                 SSAArrayGet,
                 SSAArraySlice,
                 SSAListNew,
