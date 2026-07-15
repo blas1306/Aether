@@ -10,8 +10,8 @@ Initial SSA infrastructure now exists under `src/aether/ssa/`:
 
 - `model.py` defines the value-based SSA model.
 - `printer.py` defines deterministic textual SSA output.
-- `verifier.py` defines a minimum structural and type verifier for manually
-  built SSA modules.
+- `verifier.py` enforces structural, type, exact-phi, use-order, and dominance
+  invariants for built and manually assembled SSA modules.
 - `builder.py` defines the phase-1 SSA builder for linear functions, the
   phase-2 builder for simple acyclic `if`/`else` functions, and the phase-3
   builder for simple lowered `while` loops.
@@ -39,15 +39,16 @@ state, block emission, instruction conversion, pattern detection, and phi
 construction so it can continue serving comparison and migration diagnostics
 while `GeneralSSABuilder` is the default construction path.
 
-The current compiler still lowers to slot IR, verifies slot IR, interprets slot
-IR, and runs the existing local optimizer pipeline over slot IR. SSA is not used
-by the backend yet. It can be inspected from the CLI with
+The compiler lowers to verified slot IR and then uses verified SSA for its
+optimizer and LLVM/native path; the slot IR interpreter remains an alternate
+execution backend. SSA can also be inspected from the CLI with
 `aether --emit-ssa program.ae`, which prints the verified SSA module and exits.
 That inspection path uses `GeneralSSABuilder` by default.
 `aether --emit-ssa --ssa-builder=pattern program.ae` selects the older
 pattern-based builder explicitly for compatibility and comparison.
-`PhiPlacement`, `SSARenamer`, and `GeneralSSABuilder` are still not wired into
-execution, optimization, or backend selection.
+`PhiPlacement`, `SSARenamer`, and `GeneralSSABuilder` feed the default SSA
+optimizer/LLVM pipeline. The pattern builder remains an explicit diagnostic
+fallback.
 
 ## Implemented Phase 1
 

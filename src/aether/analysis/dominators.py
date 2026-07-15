@@ -10,9 +10,24 @@ class DominatorResult:
     _dominators: dict[str, frozenset[str]]
     _immediate_dominators: dict[str, str | None]
     _dominator_tree_children: dict[str, frozenset[str]]
+    _reachable: frozenset[str]
 
     def dominators(self, block_name: str) -> set[str]:
         return set(self._dominators[block_name])
+
+    def dominates(self, dominator: str, block_name: str) -> bool:
+        """Return whether ``dominator`` dominates ``block_name``.
+
+        Unreachable blocks are represented as isolated roots, so only an
+        unreachable block itself dominates that block.
+        """
+        return dominator in self._dominators[block_name]
+
+    def strictly_dominates(self, dominator: str, block_name: str) -> bool:
+        return dominator != block_name and self.dominates(dominator, block_name)
+
+    def is_reachable(self, block_name: str) -> bool:
+        return block_name in self._reachable
 
     def immediate_dominator(self, block_name: str) -> str | None:
         return self._immediate_dominators[block_name]
@@ -24,21 +39,26 @@ class DominatorResult:
 class DominatorAnalysis:
     """Compute function-local dominators for a block-level CFG."""
 
-    def __init__(self, cfg: CFG) -> None:
+    def __init__(self, cfg: CFG, *, entry_block: str | None = None) -> None:
         self._cfg = cfg
+        self._entry_block = entry_block
 
     def compute(self) -> DominatorResult:
         block_names = tuple(node.name for node in self._cfg.nodes)
         if not block_names:
-            return DominatorResult({}, {}, {})
+            return DominatorResult({}, {}, {}, frozenset())
 
-        entry = block_names[0]
+        entry = self._entry_block or block_names[0]
         block_set = set(block_names)
+        if entry not in block_set:
+            raise ValueError(
+                f"Dominator entry block '{entry}' is not present in the CFG"
+            )
         predecessors = self._predecessors(block_set)
         reachable = self._reachable(entry, block_set)
 
         dominators = self._compute_dominators(
-            block_names, block_set, predecessors, reachable
+            block_names, predecessors, reachable
         )
         block_indexes = {
             block_name: index for index, block_name in enumerate(block_names)
@@ -48,7 +68,12 @@ class DominatorAnalysis:
         )
         tree_children = self._compute_tree_children(block_names, immediate_dominators)
 
-        return DominatorResult(dominators, immediate_dominators, tree_children)
+        return DominatorResult(
+            dominators,
+            immediate_dominators,
+            tree_children,
+            frozenset(reachable),
+        )
 
     def _predecessors(self, block_set: set[str]) -> dict[str, set[str]]:
         predecessors = {block_name: set() for block_name in block_set}
@@ -76,17 +101,16 @@ class DominatorAnalysis:
     def _compute_dominators(
         self,
         block_names: tuple[str, ...],
-        block_set: set[str],
         predecessors: dict[str, set[str]],
         reachable: set[str],
     ) -> dict[str, frozenset[str]]:
-        entry = block_names[0]
+        entry = self._entry_block or block_names[0]
         dominators: dict[str, set[str]] = {}
         for block_name in block_names:
             if block_name == entry:
                 dominators[block_name] = {block_name}
             elif block_name in reachable:
-                dominators[block_name] = set(block_set)
+                dominators[block_name] = set(reachable)
             else:
                 dominators[block_name] = {block_name}
 
@@ -124,7 +148,7 @@ class DominatorAnalysis:
         dominators: dict[str, frozenset[str]],
         reachable: set[str],
     ) -> dict[str, str | None]:
-        entry = block_names[0]
+        entry = self._entry_block or block_names[0]
         immediate_dominators: dict[str, str | None] = {}
 
         for block_name in block_names:

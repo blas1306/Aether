@@ -2,14 +2,11 @@
 
 ## Status
 
-This document is an initial design note. It describes why Aether should grow a
-Static Single Assignment (SSA) form, how that form relates to the current IR,
-and what compiler analyses are needed first.
-
-It does not implement SSA. Dominator analysis now exists in
-`aether.analysis.dominators`, and dominance frontier computation exists in
-`aether.analysis.dominance_frontier`; phi insertion, SSA renaming, and new
-optimizer passes remain pending.
+This document describes Aether's implemented Static Single Assignment (SSA)
+form, how it relates to slot IR, and the invariants enforced before
+optimization and LLVM lowering. Dominators, dominance frontiers, phi
+insertion, dominator-tree renaming, verification, SSA optimizers, and LLVM
+consumption are implemented in the current pipeline.
 
 ## What SSA Is
 
@@ -85,6 +82,84 @@ AST -> checked AST -> slot IR -> verified slot IR -> CFG -> SSA IR -> SSA opts
 The first SSA conversion can focus on scalar local slots whose addresses do not
 escape. More complex memory-like state can remain in slots until Aether has
 alias analysis, aggregate lowering, and a clearer memory model.
+
+## Canonical SSA Invariants
+
+`SSAVerifier` treats terminators as the source of truth for the CFG. SSA does
+not store an independently mutable predecessor/successor cache, which prevents
+stale or phantom edges. The following rules are mandatory.
+
+### Blocks and CFG
+
+- Every block has a non-empty, function-local unique name.
+- `SSAFunction.entry_block` names an existing block; it need not depend on list
+  position.
+- Every block has exactly one final terminator (`branch`, `jump`, or `return`).
+  No instruction may follow it.
+- Every branch/jump target exists. Successors are exactly the targets of the
+  final terminator and predecessors are derived from those successors.
+- The model represents one incoming value per distinct predecessor block, not
+  per parallel edge. A branch whose true and false targets are identical is
+  therefore rejected instead of creating duplicate predecessor edges.
+
+### Definitions, uses, and types
+
+- Parameters and instruction results share one function-local namespace. Each
+  name is defined exactly once and every use names an existing definition.
+- A use carries exactly the type recorded at its definition. Instruction-level
+  operand/result rules and phi incoming types are also verified.
+- Parameters are available throughout their function. Constants are ordinary
+  instruction definitions and obey ordering and dominance like other results.
+
+### Dominance
+
+Dominators are computed with the classic iterative data-flow algorithm over
+blocks reachable from `entry_block`. Unreachable blocks are isolated roots for
+the entry-rooted dominance result. Immediate dominators and the dominator tree
+are derived from that single result; dominance frontiers reuse it.
+
+For a normal operand use:
+
+- a definition in the same block must occur at a smaller instruction index;
+- otherwise the definition's block must dominate the use's block.
+
+Phi operands are edge uses, not ordinary uses in the phi's block. For an
+incoming pair `(P, value)`, `value` must be available at the end of `P`: its
+definition either dominates `P`, or is in `P` before its terminator. This rule
+accepts loop-carried values and valid phi cycles on backedges while rejecting a
+value defined only in a sibling branch or after the corresponding edge.
+
+### Phi nodes
+
+- All phis are contiguous at the beginning of a block.
+- A phi contains exactly one incoming pair for every real predecessor block:
+  no missing, extra, duplicate, or unknown predecessor labels are allowed.
+- Every incoming value exists and has exactly the phi result type.
+- A block without predecessors cannot contain a phi. The entry block cannot
+  contain phis, including when a malformed CFG points a backedge at entry.
+- Self-references and cycles are valid only when the result is available at the
+  end of the labelled predecessor (for example, a real loop backedge).
+
+### Unreachable blocks
+
+Unreachable blocks are permitted, but never ignored. The verifier checks their
+names, terminators, targets, definitions, uses, types, phi placement, and exact
+predecessor sets. Because entry-rooted dominance has no path proof for an
+unreachable component, ordinary instruction definitions may only be used
+later in the same unreachable block; parameters remain available. A phi may
+use a value defined directly in its unreachable predecessor before the
+terminator. Cross-block uses without an entry-rooted dominance proof are
+rejected. General SSA construction currently drops unreachable slot-IR blocks,
+so this policy principally protects hand-built or optimizer-produced SSA.
+
+### Pipeline verification
+
+General SSA construction verifies its output. In normal development/test
+execution, `SSAOptimizerPipeline` verifies its input and every intermediate
+pass result; `verify_after_each=False` is available for optimized host
+runs that deliberately avoid that development cost. LLVM/native entry points
+force per-pass verification regardless of Python optimization mode, so invalid
+SSA cannot reach the LLVM printer through the supported build paths.
 
 ## Phi Nodes
 

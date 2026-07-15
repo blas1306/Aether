@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, fields, is_dataclass
 from typing import NoReturn
 
+from aether.analysis.cfg import CFG, CFGEdge, CFGNode
+from aether.analysis.dominators import DominatorAnalysis, DominatorResult
 from aether.ir.types import (
     ArrayType,
     BoolType,
@@ -93,6 +96,16 @@ class SSAVerificationError(ValueError):
     """Raised when an SSA module is internally inconsistent."""
 
 
+@dataclass(frozen=True)
+class _DefinitionSite:
+    block_name: str | None
+    instruction_index: int | None
+
+    @property
+    def is_parameter(self) -> bool:
+        return self.block_name is None
+
+
 class SSAVerifier:
     """Validate hand-built Aether SSA modules."""
 
@@ -131,16 +144,25 @@ class SSAVerifier:
             self._fail(f"Function '{function.name}' has no blocks")
 
         blocks = self._collect_blocks(function)
-        if "entry" not in blocks:
-            self._fail(f"Function '{function.name}' has no entry block")
+        if function.entry_block not in blocks:
+            self._fail(
+                f"Function '{function.name}' has no entry block "
+                f"'{function.entry_block}'"
+            )
 
         self._verify_block_structure(function, blocks)
         predecessors = self._predecessors(blocks)
-        value_types = self._collect_value_types(function)
+        value_types, definition_sites = self._collect_definitions(function)
 
         for block in function.blocks:
             self._verify_phi_placement(function, block)
             self._verify_instructions(function, block, blocks, predecessors, value_types)
+
+        dominators = DominatorAnalysis(
+            self._cfg(function),
+            entry_block=function.entry_block,
+        ).compute()
+        self._verify_dominance(function, predecessors, definition_sites, dominators)
 
     def _verify_parameters(self, function: SSAFunction) -> None:
         seen: set[str] = set()
@@ -158,6 +180,8 @@ class SSAVerifier:
     def _collect_blocks(self, function: SSAFunction) -> dict[str, SSABasicBlock]:
         blocks: dict[str, SSABasicBlock] = {}
         for block in function.blocks:
+            if not block.name:
+                self._fail(f"Function '{function.name}' has a block with no name")
             if block.name in blocks:
                 self._fail(f"Duplicate block '{block.name}' in function '{function.name}'")
             blocks[block.name] = block
@@ -199,6 +223,11 @@ class SSAVerifier:
             return
 
         if isinstance(instruction, SSABranch):
+            if instruction.true_target == instruction.false_target:
+                self._fail(
+                    f"Branch in function '{function.name}' has duplicate target "
+                    f"'{instruction.true_target}'"
+                )
             for target in (instruction.true_target, instruction.false_target):
                 if target not in blocks:
                     self._fail(
@@ -215,20 +244,26 @@ class SSAVerifier:
                 predecessors[successor].add(block.name)
         return predecessors
 
-    def _collect_value_types(self, function: SSAFunction) -> dict[str, IRType]:
+    def _collect_definitions(
+        self,
+        function: SSAFunction,
+    ) -> tuple[dict[str, IRType], dict[str, _DefinitionSite]]:
         value_types: dict[str, IRType] = {}
+        definition_sites: dict[str, _DefinitionSite] = {}
         for parameter in function.parameters:
             self._define_value_type(value_types, parameter, function)
+            definition_sites[parameter.name] = _DefinitionSite(None, None)
 
         for block in function.blocks:
-            for instruction in block.instructions:
+            for index, instruction in enumerate(block.instructions):
                 result = self._instruction_result(instruction)
                 if result is None:
                     continue
                 self._verify_type(result.type, f"value '{self._value(result)}'")
                 self._define_value_type(value_types, result, function)
+                definition_sites[result.name] = _DefinitionSite(block.name, index)
 
-        return value_types
+        return value_types, definition_sites
 
     def _define_value_type(
         self,
@@ -534,7 +569,14 @@ class SSAVerifier:
                 continue
 
             if isinstance(instruction, SSAPhi):
-                self._verify_phi(instruction, block, blocks, predecessors, value_types)
+                self._verify_phi(
+                    function,
+                    instruction,
+                    block,
+                    blocks,
+                    predecessors,
+                    value_types,
+                )
                 continue
 
             if isinstance(instruction, SSABranch):
@@ -1291,6 +1333,7 @@ class SSAVerifier:
 
     def _verify_phi(
         self,
+        function: SSAFunction,
         instruction: SSAPhi,
         block: SSABasicBlock,
         blocks: dict[str, SSABasicBlock],
@@ -1299,6 +1342,16 @@ class SSAVerifier:
     ) -> None:
         if not instruction.incoming:
             self._fail(f"Phi '{self._value(instruction.result)}' has no incoming values")
+        if block.name == function.entry_block:
+            self._fail(
+                f"Phi '{self._value(instruction.result)}' is not allowed in entry "
+                f"block '{block.name}'"
+            )
+        if not predecessors[block.name]:
+            self._fail(
+                f"Phi '{self._value(instruction.result)}' in block '{block.name}' "
+                "has no CFG predecessors"
+            )
 
         seen_blocks: set[str] = set()
         for incoming_block, value in instruction.incoming:
@@ -1326,6 +1379,148 @@ class SSAVerifier:
                     f"Phi '{self._value(instruction.result)}' type mismatch: "
                     f"expected {instruction.result.type}, got {value.type}"
                 )
+
+        missing_blocks = predecessors[block.name] - seen_blocks
+        if missing_blocks:
+            missing_block = min(missing_blocks)
+            self._fail(
+                f"Phi '{self._value(instruction.result)}' in block '{block.name}' "
+                f"is missing an incoming value for predecessor '{missing_block}'"
+            )
+
+    def _cfg(self, function: SSAFunction) -> CFG:
+        edges = tuple(
+            CFGEdge(block.name, successor)
+            for block in function.blocks
+            for successor in self._successors(block)
+        )
+        return CFG(
+            function.name,
+            tuple(CFGNode(block.name) for block in function.blocks),
+            edges,
+        )
+
+    def _verify_dominance(
+        self,
+        function: SSAFunction,
+        predecessors: dict[str, set[str]],
+        definition_sites: dict[str, _DefinitionSite],
+        dominators: DominatorResult,
+    ) -> None:
+        """Verify ordinary uses and edge-sensitive phi uses.
+
+        Parameters are available throughout the function. For unreachable
+        blocks, the entry-rooted dominance relation intentionally proves only
+        same-block ordering; phi values defined directly in an unreachable
+        predecessor are still checked at that predecessor's terminator.
+        """
+        blocks = {block.name: block for block in function.blocks}
+
+        for block in function.blocks:
+            for use_index, instruction in enumerate(block.instructions):
+                if isinstance(instruction, SSAPhi):
+                    self._verify_phi_dominance(
+                        instruction,
+                        block,
+                        blocks,
+                        predecessors,
+                        definition_sites,
+                        dominators,
+                    )
+                    continue
+
+                for value in self._instruction_operands(instruction):
+                    site = definition_sites[value.name]
+                    if site.is_parameter:
+                        continue
+
+                    assert site.block_name is not None
+                    assert site.instruction_index is not None
+                    if site.block_name == block.name:
+                        if site.instruction_index >= use_index:
+                            self._fail(
+                                f"SSA value '{self._value(value)}' is used before its "
+                                f"definition in block '{block.name}'"
+                            )
+                        continue
+
+                    if dominators.is_reachable(block.name) and dominators.dominates(
+                        site.block_name,
+                        block.name,
+                    ):
+                        continue
+
+                    self._fail(
+                        f"SSA value '{self._value(value)}' used in block "
+                        f"'{block.name}' is not dominated by its definition in "
+                        f"block '{site.block_name}'"
+                    )
+
+    def _verify_phi_dominance(
+        self,
+        instruction: SSAPhi,
+        block: SSABasicBlock,
+        blocks: dict[str, SSABasicBlock],
+        predecessors: dict[str, set[str]],
+        definition_sites: dict[str, _DefinitionSite],
+        dominators: DominatorResult,
+    ) -> None:
+        # Exact predecessor validation ran before this phase, so every incoming
+        # label is safe to resolve here.
+        assert {name for name, _value in instruction.incoming} == predecessors[block.name]
+
+        for predecessor, value in instruction.incoming:
+            site = definition_sites[value.name]
+            if site.is_parameter:
+                continue
+
+            assert site.block_name is not None
+            assert site.instruction_index is not None
+            if site.block_name == predecessor:
+                terminator_index = len(blocks[predecessor].instructions) - 1
+                if site.instruction_index < terminator_index:
+                    continue
+            elif dominators.is_reachable(predecessor) and dominators.dominates(
+                site.block_name,
+                predecessor,
+            ):
+                continue
+
+            self._fail(
+                f"Phi '{self._value(instruction.result)}' in block '{block.name}' "
+                f"uses value '{self._value(value)}' for predecessor "
+                f"'{predecessor}', but that value is not available at the end "
+                f"of the predecessor; its definition is in block "
+                f"'{site.block_name}'"
+            )
+
+    @classmethod
+    def _instruction_operands(cls, instruction: SSAInstruction) -> tuple[SSAValue, ...]:
+        if isinstance(instruction, (SSAConst, SSAPhi)):
+            return ()
+
+        operands: list[SSAValue] = []
+        for field in fields(instruction):
+            if field.name == "result":
+                continue
+            operands.extend(cls._contained_values(getattr(instruction, field.name)))
+        return tuple(operands)
+
+    @classmethod
+    def _contained_values(cls, value: object) -> list[SSAValue]:
+        if isinstance(value, SSAValue):
+            return [value]
+        if isinstance(value, (tuple, list)):
+            contained: list[SSAValue] = []
+            for item in value:
+                contained.extend(cls._contained_values(item))
+            return contained
+        if is_dataclass(value):
+            contained = []
+            for field in fields(value):
+                contained.extend(cls._contained_values(getattr(value, field.name)))
+            return contained
+        return []
 
     def _verify_return(
         self,

@@ -124,3 +124,58 @@ def test_dominators_for_entry_only_function() -> None:
     assert result.dominators("entry") == {"entry"}
     assert result.immediate_dominator("entry") is None
     assert result.dominator_tree_children("entry") == set()
+
+
+def test_nested_loops_and_multiple_returns() -> None:
+    result = DominatorAnalysis(
+        _cfg(
+            "nested",
+            [
+                "entry",
+                "outer",
+                "inner",
+                "inner_body",
+                "outer_latch",
+                "early_return",
+                "final_return",
+            ],
+            [
+                ("entry", "outer"),
+                ("outer", "inner"),
+                ("outer", "final_return"),
+                ("inner", "inner_body"),
+                ("inner", "outer_latch"),
+                ("inner_body", "inner"),
+                ("inner_body", "early_return"),
+                ("outer_latch", "outer"),
+            ],
+        )
+    ).compute()
+
+    assert result.dominators("inner_body") == {
+        "entry",
+        "outer",
+        "inner",
+        "inner_body",
+    }
+    assert result.immediate_dominator("outer_latch") == "inner"
+    assert result.immediate_dominator("early_return") == "inner_body"
+    assert result.immediate_dominator("final_return") == "outer"
+    assert result.strictly_dominates("outer", "inner_body")
+    assert not result.strictly_dominates("inner_body", "inner_body")
+
+
+def test_explicit_entry_need_not_be_first_cfg_node() -> None:
+    result = DominatorAnalysis(
+        _cfg(
+            "nonfirst",
+            ["dead", "start", "exit"],
+            [("start", "exit")],
+        ),
+        entry_block="start",
+    ).compute()
+
+    assert not result.is_reachable("dead")
+    assert result.is_reachable("start")
+    assert result.is_reachable("exit")
+    assert result.dominators("exit") == {"start", "exit"}

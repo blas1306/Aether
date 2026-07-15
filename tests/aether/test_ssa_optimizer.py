@@ -471,6 +471,7 @@ def _trivial_phi_then_dead_phi_module() -> SSAModule:
     bool_type = BoolType()
     condition = SSAValue("condition", bool_type)
     common = SSAValue("common", int_type)
+    alternate = SSAValue("alternate", int_type)
     trivial_phi = SSAValue("trivial_phi", int_type)
     dead_phi = SSAValue("dead_phi", int_type)
 
@@ -486,8 +487,12 @@ def _trivial_phi_then_dead_phi_module() -> SSAModule:
                         [
                             SSAConst(condition, True),
                             SSAConst(common, 7),
-                            SSABranch(condition, "then0", "else0"),
+                            SSABranch(condition, "path0", "alt0"),
                         ],
+                    ),
+                    SSABasicBlock(
+                        "path0",
+                        [SSABranch(condition, "then0", "else0")],
                     ),
                     SSABasicBlock("then0", [SSAJump("merge0")]),
                     SSABasicBlock("else0", [SSAJump("merge0")]),
@@ -495,9 +500,19 @@ def _trivial_phi_then_dead_phi_module() -> SSAModule:
                         "merge0",
                         [
                             SSAPhi(trivial_phi, (("then0", common), ("else0", common))),
+                            SSAJump("final0"),
+                        ],
+                    ),
+                    SSABasicBlock(
+                        "alt0",
+                        [SSAConst(alternate, 9), SSAJump("final0")],
+                    ),
+                    SSABasicBlock(
+                        "final0",
+                        [
                             SSAPhi(
                                 dead_phi,
-                                (("then0", trivial_phi), ("else0", common)),
+                                (("merge0", trivial_phi), ("alt0", alternate)),
                             ),
                             SSAReturn(common),
                         ],
@@ -528,18 +543,17 @@ def _self_referential_phi_module() -> SSAModule:
                         [
                             SSAConst(condition, True),
                             SSAConst(common, 7),
-                            SSABranch(condition, "then0", "else0"),
+                            SSAJump("loop0"),
                         ],
                     ),
-                    SSABasicBlock("then0", [SSAJump("merge0")]),
-                    SSABasicBlock("else0", [SSAJump("merge0")]),
                     SSABasicBlock(
-                        "merge0",
+                        "loop0",
                         [
-                            SSAPhi(phi_value, (("then0", common), ("else0", phi_value))),
-                            SSAReturn(phi_value),
+                            SSAPhi(phi_value, (("entry", common), ("loop0", phi_value))),
+                            SSABranch(condition, "loop0", "exit0"),
                         ],
                     ),
+                    SSABasicBlock("exit0", [SSAReturn(phi_value)]),
                 ],
             )
         ]

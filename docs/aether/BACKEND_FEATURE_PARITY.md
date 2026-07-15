@@ -166,8 +166,15 @@ CLI usa LLVM por defecto; REPL e integración IntelliJ ejecutan AST.
    generales mínimas.
 8. **Paridad del perfil:** cerrar `%` double, casts, formato y combinaciones de
    agregados antes de llamar estable al subconjunto.
-9. **SSA verifier:** completar dominancia de todos los usos y contrato exacto de
-   incoming por predecesor para phis.
+
+La deuda anterior del **SSA verifier** queda cerrada: el verificador comprueba
+dominancia y orden de todos los usos, trata operandos `phi` sobre su arista,
+exige un incoming exacto por predecesor, valida inalcanzables con la política
+documentada y se ejecuta tras construcción, tras cada pase SSA en
+desarrollo/tests y obligatoriamente antes del camino LLVM/native. Hay tests
+positivos y negativos directos para diamonds, loops/backedges, loops anidados,
+phis incompletos/sobrantes/duplicados, usos no dominados y productores que
+dejan SSA inválido.
 
 ## Inconsistencias semánticas confirmadas
 
@@ -222,27 +229,24 @@ CLI usa LLVM por defecto; REPL e integración IntelliJ ejecutan AST.
    cada bloque de backend.
 2. El perfil compilable no está representado como dato único reutilizable por
    diagnósticos, docs y CLI.
-3. SSA verifier aún deja huecos de dominancia/phi que pueden convertir un bug
-   de builder u optimización en LLVM inválido.
-4. Ownership de List/string/class y liberación no tiene contrato v1; añadir más
+3. Ownership de List/string/class y liberación no tiene contrato v1; añadir más
    referencias antes de fijarlo multiplica el riesgo.
-5. El runtime matemático AST mezcla semántica de lenguaje con bibliotecas
+4. El runtime matemático AST mezcla semántica de lenguaje con bibliotecas
    Python opcionales.
-6. Formato numérico y ciertos mensajes de panic no provienen de un contrato
+5. Formato numérico y ciertos mensajes de panic no provienen de un contrato
    único entre AST, IR y libc.
 
 ## Próximas acciones recomendadas
 
 1. Generar un perfil de capacidades versionado y usarlo en diagnóstico, CLI y
    documentación; corregir inmediatamente docs contradictorias.
-2. Completar el SSA verifier antes de ampliar el CFG con excepciones o dispatch.
-3. Diseñar y bajar módulos/imports hasta link native, con inicialización
+2. Diseñar y bajar módulos/imports hasta link native, con inicialización
    explícita y tests multiarchivo.
-4. Llevar matemática escalar a calls conocidas (`libm`/LLVM/runtime) y cerrar
+3. Llevar matemática escalar a calls conocidas (`libm`/LLVM/runtime) y cerrar
    `%` double; esto habilita programas numéricos sin inflar el IR.
-5. Definir callables top-level tipados y su ABI; no comenzar por closures
+4. Definir callables top-level tipados y su ABI; no comenzar por closures
    capturantes.
-6. Bajar enums, después interfaces/classes con layout y ownership documentados.
-7. Completar runtime string y luego IO de entrada/archivos/args.
-8. Promover el ejemplo numérico a `math.numerics` solo después de callables,
+5. Bajar enums, después interfaces/classes con layout y ownership documentados.
+6. Completar runtime string y luego IO de entrada/archivos/args.
+7. Promover el ejemplo numérico a `math.numerics` solo después de callables,
    módulos native y un módulo `testing` mínimo.

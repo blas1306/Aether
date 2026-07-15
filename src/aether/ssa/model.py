@@ -439,6 +439,13 @@ class SSAListIsEmpty(MemoryReadMixin, SSAInstruction):
 
 @dataclass(frozen=True)
 class SSAPhi(SSAInstruction):
+    """Select one value for each distinct CFG predecessor block.
+
+    ``incoming`` is an ordered serialization of a predecessor map. The SSA
+    verifier requires each real predecessor exactly once; parallel CFG edges
+    are not represented by this model.
+    """
+
     result: SSAValue
     incoming: tuple[tuple[str, SSAValue], ...]
 
@@ -468,6 +475,8 @@ class SSABasicBlock:
 
 @dataclass
 class SSAFunction:
+    """Function-local SSA graph rooted at ``entry_block``."""
+
     name: str
     parameters: list[SSAParameter]
     return_type: IRType

@@ -5,6 +5,7 @@ from typing import Protocol
 
 from aether.errors import AetherRuntimeError
 from aether.ssa.model import SSAModule
+from aether.ssa.verifier import SSAVerificationError, SSAVerifier
 
 from .algebraic_simplification import SSAAlgebraicSimplifier
 from .constant_folding import SSAConstantFolder
@@ -42,6 +43,7 @@ class SSAOptimizerPipeline:
         *,
         iterative: bool = False,
         max_iterations: int = 10,
+        verify_after_each: bool = __debug__,
     ) -> None:
         if max_iterations < 1:
             raise ValueError("max_iterations must be at least 1.")
@@ -60,14 +62,17 @@ class SSAOptimizerPipeline:
         )
         self._iterative = iterative
         self._max_iterations = max_iterations
+        self._verify_after_each = verify_after_each
 
     def run(self, module: SSAModule) -> SSAModule:
+        self._verify(module, "optimizer input")
         if self._iterative:
             return self._run_iterative(module)
         optimized, _changed = self._run_iteration(module)
         return optimized
 
     def run_with_trace(self, module: SSAModule) -> list[SSAOptimizationTraceStep]:
+        self._verify(module, "optimizer input")
         if self._iterative:
             return self._run_iterative_with_trace(module)
 
@@ -115,6 +120,7 @@ class SSAOptimizerPipeline:
         for optimization_pass in self._passes:
             result = self._run_pass(optimization_pass, optimized)
             optimized = result.module
+            self._verify(optimized, type(optimization_pass).__name__)
             changed = changed or result.changed
             if trace is not None:
                 name = type(optimization_pass).__name__
@@ -130,6 +136,16 @@ class SSAOptimizerPipeline:
                 )
 
         return optimized, changed
+
+    def _verify(self, module: SSAModule, stage: str) -> None:
+        if not self._verify_after_each:
+            return
+        try:
+            SSAVerifier(module).verify()
+        except SSAVerificationError as error:
+            raise SSAVerificationError(
+                f"SSA {stage} failed verification: {error}"
+            ) from error
 
     @staticmethod
     def _run_pass(

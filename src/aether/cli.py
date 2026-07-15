@@ -564,7 +564,7 @@ def _emit_llvm(source: str, *, path: Path, stdout: TextIO) -> None:
         TypeChecker(source_root=path.parent),
     )
     module = lower_to_verified_ssa(typed_program, builder=DEFAULT_SSA_BUILDER)
-    module = SSAOptimizerPipeline().run(module)
+    module = SSAOptimizerPipeline(verify_after_each=True).run(module)
     try:
         llvm_ir = LLVMBackend().emit(module)
     except LLVMBackendError as exc:

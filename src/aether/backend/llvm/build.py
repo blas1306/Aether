@@ -38,7 +38,7 @@ class LLVMBuilder:
 
     def emit_llvm(self, typed_program: object) -> str:
         module = lower_to_verified_ssa(typed_program, builder=DEFAULT_SSA_BUILDER)
-        module = SSAOptimizerPipeline().run(module)
+        module = SSAOptimizerPipeline(verify_after_each=True).run(module)
         return self._backend.emit(module)
 
     def build(

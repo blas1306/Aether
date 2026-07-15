@@ -289,14 +289,14 @@ def test_sccp_branch_unknown_marks_no_edges_yet() -> None:
                     [],
                     VoidType(),
                     [
-                        SSABasicBlock("entry", [SSABranch(condition, "then0", "else0")]),
+                        SSABasicBlock("entry", [SSAReturn()]),
                         SSABasicBlock(
                             "dead0",
                             [
                                 SSAConst(left, 1),
                                 SSAConst(right, 1),
                                 SSACompareOp(condition, "eq", left, right),
-                                SSAReturn(),
+                                SSABranch(condition, "then0", "else0"),
                             ],
                         ),
                         SSABasicBlock("then0", [SSAReturn()]),
