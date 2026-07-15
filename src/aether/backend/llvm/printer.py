@@ -172,6 +172,7 @@ class LLVMPrinter:
         self._struct_sequence_equality_types: set[tuple[str, object]] = set()
         self._struct_sequence_print_types: set[tuple[str, object]] = set()
         self._collection_arc_helpers: set[tuple[str, object, bool]] = set()
+        self._collection_object_arc_helpers: set[tuple[str, object, bool]] = set()
 
         functions = [self._print_function(function) for function in module.functions]
         struct_types = [
@@ -238,8 +239,17 @@ class LLVMPrinter:
                     for instruction in block.instructions
                     if isinstance(instruction, SSACall) and instruction.builtin is not None
                 )
+                or bool(self._collection_object_arc_helpers)
             ),
-            uses_free_and_memcpy=bool(self._sequence_sort_types or uses_list_growth or self._uses_array_slicing),
+            uses_free_and_memcpy=bool(
+                self._sequence_sort_types
+                or uses_list_growth
+                or self._uses_array_slicing
+                or any(
+                    not retain
+                    for _kind, _element, retain in self._collection_object_arc_helpers
+                )
+            ),
             uses_memmove=self._uses_list_insert or self._uses_list_remove_at,
             sequence_sort_types=frozenset(self._sequence_sort_types),
         )
@@ -267,6 +277,30 @@ class LLVMPrinter:
             ):
                 runtime.append(self._collection_arc_helper(kind, element_type, retain=retain))
                 emitted_arc_helpers.add((kind, element_type, retain))
+        if self._collection_object_arc_helpers:
+            runtime.append(
+                '@.aether.collection.rc = private unnamed_addr constant [49 x i8] '
+                'c"Aether panic: invalid collection reference count\\00"'
+            )
+            runtime.append("\n".join([
+                "define private void @aether_collection_rc_panic() noreturn {",
+                "entry:",
+                "  %message = getelementptr [49 x i8], ptr @.aether.collection.rc, i64 0, i64 0",
+                "  call i32 @puts(ptr %message)",
+                "  call void @exit(i32 1)",
+                "  unreachable",
+                "}",
+            ]))
+        emitted_object_arc: set[tuple[str, object, bool]] = set()
+        while pending_object_arc := self._collection_object_arc_helpers - emitted_object_arc:
+            for kind, element_type, retain in sorted(
+                pending_object_arc,
+                key=lambda item: (item[0], str(item[1]), item[2]),
+            ):
+                runtime.append(
+                    self._collection_object_arc_helper(kind, element_type, retain=retain)
+                )
+                emitted_object_arc.add((kind, element_type, retain))
         LLVMVectorRuntime(
             self._uses_vector_indexing,
             frozenset(self._vector_equality_types),
@@ -947,6 +981,15 @@ class LLVMPrinter:
             operation = "retain" if retain else "release"
             lines.append(f"call void @aether_string_{operation}(ptr {operand})")
             return
+        if isinstance(type_, (ArrayType, ListType)):
+            kind = "array" if isinstance(type_, ArrayType) else "list"
+            helper = self._require_collection_object_arc_helper(
+                kind,
+                type_.element,
+                retain=retain,
+            )
+            lines.append(f"call void @{helper}(ptr {operand})")
+            return
         if isinstance(type_, StructType):
             definition = self._structs.get(type_.name)
             if definition is None:
@@ -976,6 +1019,107 @@ class LLVMPrinter:
                 self._emit_arc_value(lines, field, field_type, retain=retain)
             return
         raise LLVMBackendError(f"LLVM lifecycle builtin does not support type {type_}")
+
+    def _require_collection_object_arc_helper(
+        self,
+        kind: str,
+        element_type: object,
+        *,
+        retain: bool,
+    ) -> str:
+        self._collection_object_arc_helpers.add((kind, element_type, retain))
+        operation = "retain" if retain else "release"
+        return f"aether_{kind}_{operation}_{aggregate_helper_suffix(element_type)}"
+
+    def _collection_object_arc_helper(
+        self,
+        kind: str,
+        element_type: object,
+        *,
+        retain: bool,
+    ) -> str:
+        name = self._require_collection_object_arc_helper(
+            kind,
+            element_type,
+            retain=retain,
+        )
+        layout = "%AetherArray" if kind == "array" else "%AetherList"
+        strong_index = 2 if kind == "array" else 3
+        data_index = 1 if kind == "array" else 2
+        if retain:
+            return "\n".join([
+                f"define private void @{name}(ptr %object) {{",
+                "entry:",
+                f"  %strong_field = getelementptr {layout}, ptr %object, i32 0, i32 {strong_index}",
+                "  %strong = load i64, ptr %strong_field",
+                "  %valid = icmp ugt i64 %strong, 0",
+                "  %overflow = icmp eq i64 %strong, 9223372036854775807",
+                "  %not_overflow = xor i1 %overflow, true",
+                "  %can_retain = and i1 %valid, %not_overflow",
+                "  br i1 %can_retain, label %increment, label %panic",
+                "panic:",
+                "  call void @aether_collection_rc_panic()",
+                "  unreachable",
+                "increment:",
+                "  %next = add nuw i64 %strong, 1",
+                "  store i64 %next, ptr %strong_field",
+                "  ret void",
+                "}",
+            ])
+
+        rendered = llvm_type(element_type)
+        element_destroy: list[str] = []
+        if self._layouts.layout(element_type).needs_destroy:
+            self._emit_arc_value(element_destroy, "%element", element_type, retain=False)
+        destroy_region = [
+            "destroy.entry:",
+            f"  %length_field = getelementptr {layout}, ptr %object, i32 0, i32 0",
+            "  %length = load i64, ptr %length_field",
+            f"  %data_field = getelementptr {layout}, ptr %object, i32 0, i32 {data_index}",
+            "  %data = load ptr, ptr %data_field",
+        ]
+        if element_destroy:
+            destroy_region.extend([
+                "  br label %destroy.loop",
+                "destroy.loop:",
+                "  %remaining = phi i64 [ %length, %destroy.entry ], [ %previous, %destroy.body ]",
+                "  %done = icmp eq i64 %remaining, 0",
+                "  br i1 %done, label %free, label %destroy.body",
+                "destroy.body:",
+                "  %previous = sub i64 %remaining, 1",
+                f"  %element_ptr = getelementptr {rendered}, ptr %data, i64 %previous",
+                f"  %element = load {rendered}, ptr %element_ptr",
+                *(f"  {line}" for line in element_destroy),
+                "  br label %destroy.loop",
+            ])
+        else:
+            destroy_region.append("  br label %free")
+        destroy_region.extend([
+            "free:",
+            "  call void @free(ptr %data)",
+            "  call void @free(ptr %object)",
+            "  ret void",
+        ])
+        return "\n".join([
+            f"define private void @{name}(ptr %object) {{",
+            "entry:",
+            f"  %strong_field = getelementptr {layout}, ptr %object, i32 0, i32 {strong_index}",
+            "  %strong = load i64, ptr %strong_field",
+            "  %valid = icmp ugt i64 %strong, 0",
+            "  br i1 %valid, label %decrement, label %panic",
+            "panic:",
+            "  call void @aether_collection_rc_panic()",
+            "  unreachable",
+            "decrement:",
+            "  %next = sub i64 %strong, 1",
+            "  store i64 %next, ptr %strong_field",
+            "  %last = icmp eq i64 %next, 0",
+            "  br i1 %last, label %destroy.entry, label %exit",
+            *destroy_region,
+            "exit:",
+            "  ret void",
+            "}",
+        ])
 
     def _require_collection_arc_helper(
         self,

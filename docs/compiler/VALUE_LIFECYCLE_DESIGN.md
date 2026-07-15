@@ -1,10 +1,10 @@
 # Lifecycle de valores de Aether
 
-Estado: **contrato, expansión ARC string y hooks aggregate implementados para
+Estado: **contrato, ARC string y RC de objetos Array/List implementados para
 Aether v1**, 15 de julio de 2026. El lowering AST→IR emite lifecycle y cleanup
 estructural, el verifier comprueba el estado antes de SSA y la expansión genera
-retain/release effectful para string y structs que lo contienen. El handle LLVM
-sigue ocupando una palabra, pero apunta al header de `AetherStringObject`.
+retain/release effectful para strings, colecciones y structs que los contienen.
+Los handles LLVM siguen ocupando una palabra.
 La caracterización previa a RC de Array/List y su superficie de migración está
 en [`COLLECTION_MIGRATION_BASELINE.md`](../aether/COLLECTION_MIGRATION_BASELINE.md).
 
@@ -150,18 +150,17 @@ elementos de colección.
 | string actual | sí, handle de una palabra | **no** | sí | **sí** | sí | **sí** | objeto UTF-8 ARC; default vacío; copy retain; destroy release |
 | struct | si todos los campos lo son y no hay ciclo by-value | `all(fields)` | `all(fields)` | `any(fields)` | `any(fields)` | `any(fields)` | síntesis recursiva nominal |
 | nested struct | misma regla recursiva | misma regla recursiva | misma regla recursiva | misma regla recursiva | misma regla recursiva | misma regla recursiva | los nombres no cortan el análisis |
-| `Array<T>` | handle `ptr` sized | sí en ABI actual, no en contrato final | sí | no hoy | sí | no hoy | reference type: copy retain, destroy release; `copy()` clona descriptor/buffer y copia T |
-| `List<T>` | handle `ptr` sized | sí en ABI actual, no en contrato final | sí | no hoy | sí | no hoy | igual; growth relocaliza T dentro del objeto compartido |
+| `Array<T>` | handle `ptr` sized | **no** | sí | **sí** | sí | **sí** | reference type: copy retain y destroy release |
+| `List<T>` | handle `ptr` sized | **no** | sí | **sí** | sí | **sí** | igual; growth relocaliza T dentro del objeto compartido |
 | `Vector<T>` / `Matrix<T>` | descriptor sized en subset native | sí en ABI actual | sí | no hoy | sí | no hoy | definir owner/alias de storage antes de hooks |
 
 Un tipo de colección no se declara migrado solo porque su descriptor sea
 copiable. Su operación `copy` también depende recursivamente del lifecycle de
 `T`. Hasta que existan hooks, el subset native solo admite representaciones
 para las que las operaciones actuales están demostradas. Los hooks de elemento
-string/struct ya están activos, pero el handle del contenedor no tiene RC ni
-destroy final.
+string/struct y el handle RC del contenedor están activos.
 
-### 3.1 Lifecycle aprobado de Array/List, todavía no implementado
+### 3.1 Lifecycle implementado de Array/List
 
 La decisión v1 de
 [`COLLECTION_RUNTIME_DESIGN.md`](../aether/COLLECTION_RUNTIME_DESIGN.md) trata
@@ -173,9 +172,8 @@ elementos, el buffer y el objeto exactamente una vez.
 
 Esto no es el método público `copy()`: ese método reserva otro descriptor y
 buffer y ejecuta la copia lógica de cada `T`. Slicing usa la misma copia lógica
-sobre un rango. La implementación actual aún clasifica el handle como trivial,
-por lo que los hooks finales deben habilitarse coordinadamente en assignment,
-parámetros, returns, fields y cleanup; activar sólo `destroy` sería inseguro.
+sobre un rango. La implementación clasifica el handle como no trivial y cubre
+coordinadamente assignment, parámetros, returns, fields, nesting y cleanup.
 
 ## 4. Lifecycle aprobado de string
 
@@ -371,7 +369,8 @@ panic/call sin prueba de equivalencia.
 puede conservar `IRSourceLocation`; la nominalidad viene del `IRType` completo.
 `LifecycleTypeRegistry` sintetiza planes de structs en orden fuente y orden
 inverso para destrucción/rollback. String y structs que lo contienen son no
-triviales; Array/List siguen siendo handles trivialmente copiados, sin destroy.
+triviales; Array/List son handles no trivialmente copiados, con destroy, pero
+siguen siendo trivialmente relocatables.
 
 La decisión aplicada es expandir lifecycle **después de `IRVerifier` y antes
 de SSA**. `LifecycleExpander` convierte el lifecycle string/struct en
@@ -393,11 +392,9 @@ los recorridos implementados. Igualdad por contenido y print length-aware están
 activos; concat, interpolación, parsing, split/trim, archivos, argv e input
 native continúan rechazados o sin API.
 
-Los recorridos actuales de `List` usan hooks de copy/destroy para elementos;
-growth usa relocation y `clear` destruye el rango vivo. El contenedor no tiene
-release final, así que header, buffer y elementos restantes se filtran. Activar
-destroy del contenedor sin migrar conjuntamente aliases, calls, returns y
-fields causaría double release o dangling pointers.
+Los recorridos de `List` usan hooks de copy/destroy para elementos; growth usa
+relocation y `clear` destruye el rango vivo. El objeto posee ahora contador,
+buffer y release final coordinado con aliases, calls, returns y fields.
 
 ## 11. Detalles aplazados no bloqueantes
 
@@ -407,6 +404,6 @@ fields causaría double release o dangling pointers.
 - optimización ARC, RVO y política de concurrencia posterior;
 - `StringView`, substring y APIs públicas de texto.
 
-El siguiente bloque de colecciones recomendado es RC de objeto coordinado según
-la baseline. La optimización ARC y nuevas APIs string pueden seguir después;
+El bloque RC coordinado de colecciones está implementado. La optimización ARC y
+nuevas APIs string pueden seguir después;
 concat, parsing, split/trim, files y argv permanecen aplazados.

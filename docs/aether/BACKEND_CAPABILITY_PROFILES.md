@@ -36,7 +36,7 @@ arquitectura, no capacidades solicitadas directamente por un programa.
 
 ## Perfiles actuales
 
-La versión actual del perfil es `8`. La versión `2` promovió `modules` e
+La versión actual del perfil es `9`. La versión `2` promovió `modules` e
 `imports` de `UNSUPPORTED` a `PARTIAL`; la versión `3` promovió `scalar-math`
 de `UNSUPPORTED` a `PARTIAL` en LLVM/native; la versión `4` incorpora el
 subconjunto de callables top-level tipados y sin captura en ambos backends. La
@@ -50,6 +50,10 @@ ubicación y motivo antes del lowering LLVM. La versión `7` separó transporte,
 igualdad, objeto dinámico y lifecycle de string tras activar ARC. La versión
 `8` agrega detección tipada de gaps de migración de colecciones sin promover ni
 degradar ninguna capability.
+La versión `9` agrega `collection-object-lifecycle`: es `COMPLETE` en native,
+con evidencia de RC fuerte, aliases, parámetros/returns, fields, nesting y
+destrucción final, y `PARTIAL` en AST mientras su instrumentación lógica no
+pretende sustituir el cleanup abortivo del proceso host.
 
 El perfil AST representa el intérprete de referencia. Incluye módulos,
 imports, classes, interfaces, enums, input, errores y matemática escalar. Las
@@ -126,6 +130,16 @@ amplias; los gaps se expresan como detalles semánticos que requieren soporte
 completo. Sólo deberían dividirse si esos subcontratos se vuelven capacidades
 de producto independientes. La evidencia completa está en
 [`COLLECTION_MIGRATION_BASELINE.md`](COLLECTION_MIGRATION_BASELINE.md).
+
+## Actualización de perfil 9: lifecycle de objetos colección
+
+`Array<T>` y `List<T>` se clasifican como handles no trivialmente copiables y
+trivialmente relocatables. Native usa un contador fuerte no atómico en el
+objeto privado, retain-before-release para assignment y destrucción recursiva
+del rango vivo, buffer y objeto al último owner. Los parámetros conservan la
+convención borrowed y los returns entregan ownership. El perfil AST usa
+`CollectionObject` con identidad, contador lógico, estado alive/freed y
+contadores de prueba; permanece parcial porque panic continúa sin unwind.
 
 La CLI no añade por ahora un comando `capabilities`: ejecución AST valida el
 perfil AST, y `--emit-llvm`, ejecución LLVM, `build` y los perfiles LLVM/native

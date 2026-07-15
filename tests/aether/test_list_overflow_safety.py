@@ -84,7 +84,11 @@ def test_list_new_and_copy_check_bytes_before_allocation_and_memcpy() -> None:
     new_start = llvm.index("define private ptr @aether_list_new")
     new_end = llvm.index("\n}", new_start)
     new_helper = llvm.index("call i64 @aether_checked_allocation_bytes", new_start, new_end)
-    new_header = llvm.index("call ptr @aether_alloc(i64 24)", new_start, new_end)
+    new_header = llvm.index(
+        "call ptr @aether_alloc(i64 ptrtoint (ptr getelementptr (%AetherList",
+        new_start,
+        new_end,
+    )
     new_data = llvm.index("call ptr @aether_alloc(i64 %data_size)", new_start, new_end)
     assert new_helper < new_header < new_data
 

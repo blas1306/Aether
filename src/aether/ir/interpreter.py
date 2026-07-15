@@ -6,6 +6,7 @@ from math import trunc
 from typing import Any, Callable, NoReturn, Sequence
 
 from aether.array_safety import checked_array_length_to_int
+from aether.collection_value import CollectionObject, copy_init_value, destroy_value
 from aether.errors import AetherRuntimeError
 from aether.integer_arithmetic import checked_int_binary, ieee_divide
 from aether.list_safety import checked_list_index_to_int, checked_list_length_to_int
@@ -299,8 +300,8 @@ class IRInterpreter:
                 raise IRExecutionError(
                     f"copy_init destination '%{instruction.destination.name}' is already alive"
                 )
-            frame.slots[instruction.destination] = self._lifecycle_value(
-                instruction.source, frame
+            frame.slots[instruction.destination] = copy_init_value(
+                self._lifecycle_value(instruction.source, frame)
             )
             return False, None, None
 
@@ -321,9 +322,10 @@ class IRInterpreter:
                 raise IRExecutionError(
                     f"assign destination '%{instruction.destination.name}' is not alive"
                 )
-            frame.slots[instruction.destination] = self._lifecycle_value(
-                instruction.source, frame
-            )
+            replacement = copy_init_value(self._lifecycle_value(instruction.source, frame))
+            old = frame.slots[instruction.destination]
+            frame.slots[instruction.destination] = replacement
+            destroy_value(old)
             return False, None, None
 
         if isinstance(instruction, IRDestroy):
@@ -331,7 +333,7 @@ class IRInterpreter:
                 raise IRExecutionError(
                     f"destroy operand '%{instruction.value.name}' is not alive"
                 )
-            del frame.slots[instruction.value]
+            destroy_value(frame.slots.pop(instruction.value))
             return False, None, None
 
         if isinstance(instruction, IRRelocate):
@@ -397,6 +399,16 @@ class IRInterpreter:
                 self._value(argument, frame) for argument in instruction.arguments
             ]
             if instruction.builtin is not None:
+                if instruction.builtin == "__aether_retain":
+                    if len(arguments) != 1 or instruction.result is not None:
+                        raise IRExecutionError("IR retain requires one argument and no result")
+                    copy_init_value(arguments[0])
+                    return False, None, None
+                if instruction.builtin == "__aether_release":
+                    if len(arguments) != 1 or instruction.result is not None:
+                        raise IRExecutionError("IR release requires one argument and no result")
+                    destroy_value(arguments[0])
+                    return False, None, None
                 try:
                     result = call_builtin(
                         instruction.builtin,
@@ -451,7 +463,8 @@ class IRInterpreter:
 
         if isinstance(instruction, IRStructNew):
             frame.values[instruction.result] = tuple(
-                self._value(field, frame) for field in instruction.fields
+                copy_init_value(self._value(field, frame))
+                for field in instruction.fields
             )
             return False, None, None
 
@@ -488,22 +501,30 @@ class IRInterpreter:
             return False, None, None
 
         if isinstance(instruction, IRArrayNew):
-            frame.values[instruction.result] = [
-                self._value(element, frame) for element in instruction.elements
-            ]
+            frame.values[instruction.result] = CollectionObject(
+                "Array",
+                instruction.result.type.element,
+                (self._value(element, frame) for element in instruction.elements),
+            )
             return False, None, None
 
         if isinstance(instruction, IRListNew):
-            frame.values[instruction.result] = [
-                self._value(element, frame) for element in instruction.elements
-            ]
+            frame.values[instruction.result] = CollectionObject(
+                "List",
+                instruction.result.type.element,
+                (self._value(element, frame) for element in instruction.elements),
+            )
             return False, None, None
 
         if isinstance(instruction, IRListCopy):
             list_value = self._value(instruction.list_value, frame)
             if not isinstance(list_value, list):
                 raise IRExecutionError("IR list_copy requires a list value")
-            frame.values[instruction.result] = list(list_value)
+            frame.values[instruction.result] = (
+                list_value.logical_copy()
+                if isinstance(list_value, CollectionObject)
+                else list(list_value)
+            )
             return False, None, None
 
         if isinstance(instruction, IRListContains):
@@ -591,12 +612,7 @@ class IRInterpreter:
             list_value = self._value(instruction.list_value, frame)
             if not isinstance(list_value, list):
                 raise IRExecutionError("IR list_reverse requires a list value")
-            left = 0
-            right = len(list_value) - 1
-            while left < right:
-                list_value[left], list_value[right] = list_value[right], list_value[left]
-                left += 1
-                right -= 1
+            list.reverse(list_value)
             return False, None, None
 
         if isinstance(instruction, IRSequenceSort):
@@ -687,7 +703,9 @@ class IRInterpreter:
                 raise IRExecutionError("IR array slice bounds must be int")
             if start < 0 or start > end or end > len(array):
                 raise IRExecutionError("Aether panic: Array slice out of bounds")
-            frame.values[instruction.result] = list(array[start:end])
+            frame.values[instruction.result] = CollectionObject(
+                "Array", instruction.result.type.element, array[start:end]
+            )
             return False, None, None
 
         if isinstance(instruction, IRListGet):
@@ -822,7 +840,11 @@ class IRInterpreter:
                 self._default_lifecycle_value(field_type)
                 for _name, field_type in definition.fields
             )
-        if isinstance(type_, (ArrayType, ListType, VectorType, MatrixType)):
+        if isinstance(type_, ArrayType):
+            return CollectionObject("Array", type_.element)
+        if isinstance(type_, ListType):
+            return CollectionObject("List", type_.element)
+        if isinstance(type_, (VectorType, MatrixType)):
             return []
         if isinstance(type_, StringType):
             return ""

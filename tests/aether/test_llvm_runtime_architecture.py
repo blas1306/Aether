@@ -79,8 +79,8 @@ int main() {
 """
     )
 
-    assert llvm.count("%AetherArray = type { i64, ptr }") == 1
-    assert llvm.count("%AetherList = type { i64, i64, ptr }") == 1
+    assert llvm.count("%AetherArray = type { i64, ptr, i64 }") == 1
+    assert llvm.count("%AetherList = type { i64, i64, ptr, i64 }") == 1
     assert llvm.count("declare noalias ptr @malloc(i64)") == 1
     assert llvm.count("declare void @free(ptr)") == 1
     assert llvm.count("declare void @llvm.memcpy.p0.p0.i64") == 1

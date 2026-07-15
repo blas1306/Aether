@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 
-from aether.ir.types import BoolType, DoubleType, EnumType, IntType, StringType, StructType
+from aether.ir.types import ArrayType, BoolType, DoubleType, EnumType, IntType, ListType, StringType, StructType
 
 from .runtime import sequence_sort_helper, sequence_sort_helper_name
 
@@ -23,6 +23,10 @@ def aggregate_helper_suffix(element_type: object) -> str:
     if isinstance(element_type, StructType):
         encoded = re.sub(r"[^A-Za-z0-9_]", "_", element_type.name)
         return f"struct_{len(element_type.name)}_{encoded}"
+    if isinstance(element_type, ArrayType):
+        return f"array_{aggregate_helper_suffix(element_type.element)}"
+    if isinstance(element_type, ListType):
+        return f"list_{aggregate_helper_suffix(element_type.element)}"
     raise TypeError(f"unsupported aggregate runtime element type {element_type}")
 
 

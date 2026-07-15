@@ -393,6 +393,19 @@ class AetherValue:
             # interpolation, arguments). Source and IR literal construction
             # opts into immortal storage explicitly.
             object.__setattr__(self, "value", as_string_value(self.value, literal=False))
+        if isinstance(base_type, (ArrayType, ListType)) and isinstance(self.value, list):
+            from .collection_value import CollectionObject
+
+            if not isinstance(self.value, CollectionObject):
+                object.__setattr__(
+                    self,
+                    "value",
+                    CollectionObject(
+                        "Array" if isinstance(base_type, ArrayType) else "List",
+                        base_type.element_type,
+                        self.value,
+                    ),
+                )
 
 
 @dataclass(frozen=True)
@@ -789,6 +802,13 @@ def copy_value(value: AetherValue) -> AetherValue:
     if isinstance(value.value, ClassInstance):
         return value
     if is_mutable_reference_type(value.type_name):
+        if isinstance(value.type_name, (ArrayType, ListType)):
+            from .collection_value import copy_init_value
+
+            return copy_init_value(value)
+        return value
+    if value.type_name == "string" and isinstance(value.value, StringValue):
+        value.value.retain()
         return value
     if isinstance(value.value, StructInstance):
         return AetherValue(

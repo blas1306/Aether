@@ -1,7 +1,11 @@
 # RFC: semántica, ownership y lifecycle de `Array<T>` y `List<T>`
 
-Estado: **decisión de diseño aprobada para Aether v1; implementación pendiente**,
+Estado: **decisión aprobada; Fase 1 de objeto RC implementada para Aether v1**,
 15 de julio de 2026.
+
+La representación RC, el lifecycle del handle, los cleanups de IR y la
+destrucción final native de Fase 1 están activos. `copy()` nuevo, slicing List,
+iteración borrowed e igualdad native general continúan fuera de este cambio.
 
 Esta RFC congela la semántica pública de `Array<T>` y `List<T>` en las áreas
 indicadas. Es documentación de diseño: no afirma que AST, IR, SSA, LLVM, ABI o

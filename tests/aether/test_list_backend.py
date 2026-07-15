@@ -211,7 +211,7 @@ int main() {
         )
     )
 
-    assert "%AetherList = type { i64, i64, ptr }" in llvm
+    assert "%AetherList = type { i64, i64, ptr, i64 }" in llvm
     assert "%AetherArray = type" not in llvm
     assert "define private ptr @aether_list_new" in llvm
     assert "@aether_list_new(i64 4, i64 3)" in llvm
@@ -228,7 +228,7 @@ def test_emit_llvm_prints_list_ir(tmp_path) -> None:
     exit_code = main(["--emit-llvm", str(program)], stdout=stdout, stderr=stderr)
 
     assert exit_code == EXIT_SUCCESS
-    assert "%AetherList = type { i64, i64, ptr }" in stdout.getvalue()
+    assert "%AetherList = type { i64, i64, ptr, i64 }" in stdout.getvalue()
     assert "@aether_list_new(i64 4, i64 3)" in stdout.getvalue()
     assert "@aether_checked_allocation_bytes" in stdout.getvalue()
     assert "call i32 @aether_list_length_to_int" in stdout.getvalue()
@@ -342,7 +342,7 @@ def test_optimizers_preserve_list_set_and_distinct_gets_around_it() -> None:
 def test_llvm_text_list_get_and_set_use_list_data_buffer() -> None:
     llvm = print_llvm(_ssa("int main() { List<int> xs = {1, 2}; xs[0] = 9; return xs[0]; }"))
 
-    assert "%AetherList = type { i64, i64, ptr }" in llvm
+    assert "%AetherList = type { i64, i64, ptr, i64 }" in llvm
     assert llvm.count("getelementptr %AetherList, ptr") >= 2
     assert "load ptr, ptr" in llvm
     assert "store i32" in llvm
@@ -1065,7 +1065,9 @@ def test_list_pop_llvm_reads_before_length_mutation_and_preserves_storage() -> N
     assert "i32 0, i32 1" not in pop_body
     assert "store ptr" not in pop_body
     assert "@aether_list_reserve" not in llvm
-    assert "call void @free" not in llvm
+    assert "call void @aether_list_release_i32" in llvm
+    assert "call void @free(ptr %data)" in llvm
+    assert "call void @free(ptr %object)" in llvm
 
 
 def test_list_pop_emit_llvm_and_clang(tmp_path) -> None:

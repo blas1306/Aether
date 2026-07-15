@@ -63,6 +63,10 @@ class LLVMListRuntime:
     def _list_data_pointer(cls, result: str, list_value: str) -> str:
         return cls._list_field_pointer(result, list_value, 2)
 
+    @classmethod
+    def _list_strong_count_pointer(cls, result: str, list_value: str) -> str:
+        return cls._list_field_pointer(result, list_value, 3)
+
     def declarations(
         self,
         common: LLVMRuntimeCommon,
@@ -73,7 +77,7 @@ class LLVMListRuntime:
         uses_checked_allocation_size = common.uses_checked_allocation_size
         array.append_type(sections)
         if self._uses_list_type:
-            sections.append(f"{self._LIST_STRUCT_TYPE} = type {{ i64, i64, ptr }}")
+            sections.append(f"{self._LIST_STRUCT_TYPE} = type {{ i64, i64, ptr, i64 }}")
         common.append_core(sections)
         array.append_allocation(sections)
         array.append_slicing(sections)
@@ -85,7 +89,7 @@ class LLVMListRuntime:
                         "define private ptr @aether_list_new(i64 %element_size, i64 %length) {",
                         "entry:",
                         "  %data_size = call i64 @aether_checked_allocation_bytes(i64 %length, i64 %element_size)",
-                        "  %list = call ptr @aether_alloc(i64 24)",
+                        "  %list = call ptr @aether_alloc(i64 ptrtoint (ptr getelementptr (%AetherList, ptr null, i64 1) to i64))",
                         self._list_length_pointer("%len_field", "%list"),
                         "  store i64 %length, ptr %len_field",
                         self._list_capacity_pointer("%cap_field", "%list"),
@@ -93,6 +97,8 @@ class LLVMListRuntime:
                         "  %data = call ptr @aether_alloc(i64 %data_size)",
                         self._list_data_pointer("%data_field", "%list"),
                         "  store ptr %data, ptr %data_field",
+                        self._list_strong_count_pointer("%strong_field", "%list"),
+                        "  store i64 1, ptr %strong_field",
                         "  ret ptr %list",
                         "}",
                     ]

@@ -34,13 +34,17 @@ class LLVMArrayRuntime:
     def data_pointer_line(cls, result: str, array: str, *, indent: str = "") -> str:
         return cls.field_pointer_line(result, array, 1, indent=indent)
 
+    @classmethod
+    def strong_count_pointer_line(cls, result: str, array: str, *, indent: str = "") -> str:
+        return cls.field_pointer_line(result, array, 2, indent=indent)
+
     @staticmethod
     def index64_line(result: str, index: str) -> str:
         return f"{result} = sext i32 {index} to i64"
 
     def append_type(self, sections: list[str]) -> None:
         if self.uses_type:
-            sections.append(f"{self.STRUCT_TYPE} = type {{ i64, ptr }}")
+            sections.append(f"{self.STRUCT_TYPE} = type {{ i64, ptr, i64 }}")
 
     def append_allocation(self, sections: list[str]) -> None:
         if not self.uses_allocation:
@@ -51,12 +55,14 @@ class LLVMArrayRuntime:
                     "define private ptr @aether_array_new(i64 %element_size, i64 %length) {",
                     "entry:",
                     "  %data_size = call i64 @aether_checked_allocation_bytes(i64 %length, i64 %element_size)",
-                    "  %array = call ptr @aether_alloc(i64 16)",
+                    "  %array = call ptr @aether_alloc(i64 ptrtoint (ptr getelementptr (%AetherArray, ptr null, i64 1) to i64))",
                     self.length_pointer_line("%len_field", "%array", indent="  "),
                     "  store i64 %length, ptr %len_field",
                     "  %data = call ptr @aether_alloc(i64 %data_size)",
                     self.data_pointer_line("%data_field", "%array", indent="  "),
                     "  store ptr %data, ptr %data_field",
+                    self.strong_count_pointer_line("%strong_field", "%array", indent="  "),
+                    "  store i64 1, ptr %strong_field",
                     "  ret ptr %array",
                     "}",
                 ]

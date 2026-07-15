@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from .pipeline import TypedProgram
 
 
-CAPABILITY_PROFILE_VERSION = "8"
+CAPABILITY_PROFILE_VERSION = "9"
 
 
 class BackendIdentity(str, Enum):
@@ -84,6 +84,7 @@ class Capability(str, Enum):
     ARRAY = "array"
     ARRAY_SLICING = "array-slicing"
     LIST = "list"
+    COLLECTION_OBJECT_LIFECYCLE = "collection-object-lifecycle"
     AGGREGATE_COLLECTION_ELEMENTS = "aggregate-collection-elements"
     VECTOR = "vector"
     MATRIX = "matrix"
@@ -189,6 +190,10 @@ CAPABILITY_CATALOG: Mapping[Capability, CapabilityDefinition] = MappingProxyType
             _definition(Capability.ARRAY_SLICING, "Array and collection slicing."),
             _definition(Capability.LIST, "List values and operations."),
             _definition(
+                Capability.COLLECTION_OBJECT_LIFECYCLE,
+                "Strong RC ownership and final destruction for Array/List objects.",
+            ),
+            _definition(
                 Capability.AGGREGATE_COLLECTION_ELEMENTS,
                 "By-value aggregate elements in Array and List storage.",
             ),
@@ -232,7 +237,11 @@ _AST_UNSUPPORTED = {
     Capability.STRING_PARSING,
     Capability.STRING_SPLIT_TRIM,
 }
-_AST_PARTIAL = {Capability.FUNCTION_VALUES, Capability.STRING_LIFECYCLE}
+_AST_PARTIAL = {
+    Capability.FUNCTION_VALUES,
+    Capability.STRING_LIFECYCLE,
+    Capability.COLLECTION_OBJECT_LIFECYCLE,
+}
 AST_CAPABILITY_PROFILE = _profile(
     BackendIdentity.AST,
     {
@@ -260,6 +269,7 @@ _NATIVE_COMPLETE = {
     Capability.STRING_TRANSPORT,
     Capability.STRING_EQUALITY,
     Capability.DYNAMIC_STRING_OBJECT,
+    Capability.COLLECTION_OBJECT_LIFECYCLE,
 }
 _NATIVE_UNSUPPORTED = {
     Capability.INPUT,
@@ -322,6 +332,7 @@ E2E_TESTED_CAPABILITIES: Mapping[BackendIdentity, frozenset[Capability]] = Mappi
                 Capability.STRING_TRANSPORT,
                 Capability.STRING_EQUALITY,
                 Capability.DYNAMIC_STRING_OBJECT,
+                Capability.COLLECTION_OBJECT_LIFECYCLE,
                 Capability.STRING_CONCATENATION,
                 Capability.PRINT,
                 Capability.INPUT,
@@ -359,6 +370,7 @@ E2E_TESTED_CAPABILITIES: Mapping[BackendIdentity, frozenset[Capability]] = Mappi
                 Capability.STRING_TRANSPORT,
                 Capability.STRING_EQUALITY,
                 Capability.DYNAMIC_STRING_OBJECT,
+                Capability.COLLECTION_OBJECT_LIFECYCLE,
             }
         ),
     }
@@ -837,11 +849,13 @@ class _CapabilityDetector:
             return
         if isinstance(type_name, ArrayType):
             self._record(Capability.ARRAY, node)
+            self._record(Capability.COLLECTION_OBJECT_LIFECYCLE, node)
             self._record_collection_element("Array", type_name.element_type, node)
             self._record_type(type_name.element_type, node)
             return
         if isinstance(type_name, ListType):
             self._record(Capability.LIST, node)
+            self._record(Capability.COLLECTION_OBJECT_LIFECYCLE, node)
             self._record_collection_element("List", type_name.element_type, node)
             self._record_type(type_name.element_type, node)
             return

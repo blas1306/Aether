@@ -696,7 +696,10 @@ class SSAVerifier:
                 if instruction.result is not None or len(instruction.arguments) != 1:
                     self._fail("Lifecycle builtin requires one argument and no result")
                 argument_type = instruction.arguments[0].type
-                if not isinstance(argument_type, (StringType, StructType, MethodResultType)):
+                if not isinstance(
+                    argument_type,
+                    (StringType, StructType, MethodResultType, ArrayType, ListType),
+                ):
                     self._fail(
                         f"Lifecycle builtin does not support argument type {argument_type}"
                     )

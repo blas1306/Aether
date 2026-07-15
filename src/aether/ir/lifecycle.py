@@ -4,7 +4,10 @@ from dataclasses import dataclass
 
 from .model import (
     IRAssign,
+    IRArrayLength,
     IRArrayNew,
+    IRArraySlice,
+    IRArraySet,
     IRBasicBlock,
     IRConst,
     IRCall,
@@ -16,9 +19,15 @@ from .model import (
     IRInitDefault,
     IRInstruction,
     IRListNew,
+    IRListCopy,
     IRListGet,
+    IRListInsert,
+    IRListIsEmpty,
+    IRListLength,
     IRListPop,
     IRListRemoveAt,
+    IRListPush,
+    IRListSet,
     IRArrayGet,
     IRLoad,
     IRMethodResultNew,
@@ -26,6 +35,7 @@ from .model import (
     IRMoveInit,
     IRPrint,
     IRRelocate,
+    IRReturn,
     IRStorage,
     IRStore,
     IRStructDefinition,
@@ -147,7 +157,10 @@ class LifecycleTypeRegistry:
         if isinstance(type_, StringType):
             return LifecycleTraits(False, True, True, True)
         if isinstance(type_, (ArrayType, ListType)):
-            return LifecycleTraits(True, True, False, True)
+            # Collection values are one-word handles, but copying a live handle
+            # creates another strong owner.  Relocation remains bitwise because
+            # it consumes the source lifetime.
+            return LifecycleTraits(False, True, True, True)
         if isinstance(type_, VectorType):
             return LifecycleTraits(
                 True,
@@ -225,6 +238,7 @@ class LifecycleExpander:
         self._next = 0
         self._used_names: set[str] = set()
         self._owned_values: set[IRValue] = set()
+        self._used_values: set[IRValue] = set()
 
     def expand(self) -> IRModule:
         functions = [self._expand_function(function) for function in self.module.functions]
@@ -232,12 +246,20 @@ class LifecycleExpander:
 
     def _expand_function(self, function: IRFunction) -> IRFunction:
         self._owned_values = set()
+        self._used_values = set()
         for block in function.blocks:
             for instruction in block.instructions:
+                self._used_values.update(self._instruction_operands(instruction))
                 if isinstance(instruction, (IRCall, IRCallIndirect)) and instruction.result is not None:
                     if self.registry.traits(instruction.result.type).needs_destroy:
                         self._owned_values.add(instruction.result)
                 elif isinstance(instruction, (IRArrayGet, IRListGet, IRListPop, IRListRemoveAt)):
+                    if self.registry.traits(instruction.result.type).needs_destroy:
+                        self._owned_values.add(instruction.result)
+                elif isinstance(instruction, (IRArrayNew, IRListNew, IRListCopy, IRArraySlice)):
+                    if self.registry.traits(instruction.result.type).needs_destroy:
+                        self._owned_values.add(instruction.result)
+                elif isinstance(instruction, IRStructNew):
                     if self.registry.traits(instruction.result.type).needs_destroy:
                         self._owned_values.add(instruction.result)
         self._used_names = {parameter.name for parameter in function.parameters}
@@ -276,7 +298,7 @@ class LifecycleExpander:
             and isinstance(load, IRLoad)
             and load.slot == store.slot
             and hasattr(returned, "transferred_storage")
-            and getattr(returned, "transferred_storage") == store.slot
+            and getattr(returned, "transferred_storage") in {None, store.slot}
             and getattr(returned, "value", None) == load.result
         ):
             return instructions
@@ -297,6 +319,69 @@ class LifecycleExpander:
         return [*prefix, IRReturn(store.value)]
 
     def _expand_instruction(self, instruction: IRInstruction) -> list[IRInstruction]:
+        if isinstance(instruction, IRReturn):
+            # Ownership transfer has been discharged into concrete retain/move
+            # and cleanup operations.  Keeping the pre-expansion storage marker
+            # would make later IR optimization re-verify a slot that is no
+            # longer semantically transferred.
+            return [IRReturn(instruction.value)]
+        if isinstance(instruction, IRStructNew):
+            emitted: list[IRInstruction] = []
+            for field in instruction.fields:
+                if not self.registry.traits(field.type).needs_destroy:
+                    continue
+                if field in self._owned_values:
+                    self._owned_values.remove(field)
+                else:
+                    emitted.append(
+                        IRCall("__aether_retain", (field,), None, "__aether_retain")
+                    )
+            emitted.append(instruction)
+            return self._release_unused_result(instruction, emitted)
+        if isinstance(instruction, (IRArrayGet, IRListGet)):
+            emitted: list[IRInstruction] = [instruction]
+            collection = (
+                instruction.array
+                if isinstance(instruction, IRArrayGet)
+                else instruction.list_value
+            )
+            if collection in self._owned_values:
+                self._owned_values.remove(collection)
+                emitted.append(
+                    IRCall("__aether_release", (collection,), None, "__aether_release")
+                )
+            return self._release_unused_result(instruction, emitted)
+        if isinstance(instruction, (IRArrayLength, IRListLength, IRListIsEmpty)):
+            emitted = [instruction]
+            collection = (
+                instruction.array
+                if isinstance(instruction, IRArrayLength)
+                else instruction.list_value
+            )
+            if collection in self._owned_values:
+                self._owned_values.remove(collection)
+                emitted.append(
+                    IRCall("__aether_release", (collection,), None, "__aether_release")
+                )
+            return emitted
+        if isinstance(instruction, (IRArrayNew, IRListNew)):
+            emitted: list[IRInstruction] = [instruction]
+            for element in instruction.elements:
+                if element in self._owned_values:
+                    self._owned_values.remove(element)
+                    emitted.append(
+                        IRCall("__aether_release", (element,), None, "__aether_release")
+                    )
+            return self._release_unused_result(instruction, emitted)
+        if isinstance(instruction, (IRArraySet, IRListSet, IRListPush, IRListInsert)):
+            emitted = [instruction]
+            value = instruction.value
+            if value in self._owned_values:
+                self._owned_values.remove(value)
+                emitted.append(
+                    IRCall("__aether_release", (value,), None, "__aether_release")
+                )
+            return emitted
         if isinstance(instruction, IRInitDefault):
             emitted, value = self._default_value(instruction.destination.type)
             return [*emitted, IRStore(instruction.destination, value)]
@@ -337,7 +422,7 @@ class LifecycleExpander:
                     emitted.append(
                         IRCall("__aether_release", (argument,), None, "__aether_release")
                     )
-            return emitted
+            return self._release_unused_result(instruction, emitted)
         if isinstance(instruction, IRPrint):
             emitted = [instruction]
             if instruction.value in self._owned_values:
@@ -375,7 +460,39 @@ class LifecycleExpander:
                 IRLoad(value, instruction.value),
                 IRCall("__aether_release", (value,), None, "__aether_release"),
             ]
-        return [instruction]
+        return self._release_unused_result(instruction, [instruction])
+
+    def _release_unused_result(
+        self,
+        instruction: IRInstruction,
+        emitted: list[IRInstruction],
+    ) -> list[IRInstruction]:
+        result = getattr(instruction, "result", None)
+        if (
+            isinstance(result, IRValue)
+            and result in self._owned_values
+            and result not in self._used_values
+        ):
+            self._owned_values.remove(result)
+            emitted.append(IRCall("__aether_release", (result,), None, "__aether_release"))
+        return emitted
+
+    @staticmethod
+    def _instruction_operands(instruction: IRInstruction) -> set[IRValue]:
+        operands: set[IRValue] = set()
+
+        def visit(value: object) -> None:
+            if isinstance(value, IRValue):
+                operands.add(value)
+            elif isinstance(value, (tuple, list)):
+                for item in value:
+                    visit(item)
+
+        for name, value in vars(instruction).items():
+            if name in {"result", "destination", "source_location"}:
+                continue
+            visit(value)
+        return operands
 
     def _loaded(self, source: IRValue) -> tuple[list[IRInstruction], IRValue]:
         if not isinstance(source, IRStorage):

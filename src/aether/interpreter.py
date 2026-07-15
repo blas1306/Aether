@@ -23,6 +23,7 @@ from .stdlib.math.linear_algebra import matmul_builtin
 from .stdlib.registry import get_builtin_constant
 from .tokens import AETHER_TYPES, PRIMITIVE_TYPES
 from .string_value import StringValue
+from .collection_value import CollectionObject, destroy_value
 from .types import (
     AetherType,
     AetherExceptionValue,
@@ -137,15 +138,30 @@ class Environment:
             parent_scope = self.parent.variable_scope if self.parent is not None else None
             self.variable_scope = Scope(parent=parent_scope)
         self.functions: dict[str, Function] = {}
+        self.owned_values: set[str] = set()
 
     @property
     def values(self) -> dict[str, AetherValue]:
         return self.variable_scope.symbols
 
-    def define(self, name: str, value: AetherValue, *, forbid_shadowing: bool = False, is_const: bool = False) -> None:
+    def define(
+        self,
+        name: str,
+        value: AetherValue,
+        *,
+        forbid_shadowing: bool = False,
+        is_const: bool = False,
+        owned: bool = True,
+    ) -> None:
         if contains_struct_value(value):
             value = copy_value(value)
+        if owned and isinstance(value.value, CollectionObject):
+            value.value.claim_owner()
         self.variable_scope.define_local(name, value, forbid_shadowing=forbid_shadowing, is_const=is_const)
+        if owned and isinstance(value.value, CollectionObject):
+            self.owned_values.add(name)
+        elif isinstance(value.value, StructInstance):
+            self.owned_values.add(name)
 
     def assign(self, name: str, value: AetherValue, *, array_literal_context: bool = False) -> None:
         scope = self.variable_scope.resolve_scope(name)
@@ -158,9 +174,36 @@ class Environment:
             raise AetherTypeError(f"Cannot assign to constant '{name}'.")
         current = scope.symbols[name]
         if array_literal_context:
-            scope.symbols[name] = coerce_array_literal_value(value, current.type_name)
+            replacement = coerce_array_literal_value(value, current.type_name)
+            self._replace_owned(scope, name, replacement)
             return
-        scope.symbols[name] = coerce_implicit(value, current.type_name)
+        self._replace_owned(scope, name, coerce_implicit(value, current.type_name))
+
+    def _replace_owned(self, scope: Scope[AetherValue], name: str, replacement: AetherValue) -> None:
+        owner_env = self._environment_for_scope(scope)
+        if isinstance(replacement.value, CollectionObject):
+            replacement.value.claim_owner()
+        old = scope.symbols[name]
+        scope.symbols[name] = replacement
+        if owner_env is not None and name in owner_env.owned_values:
+            destroy_value(old)
+            owner_env.owned_values.discard(name)
+        if owner_env is not None and isinstance(replacement.value, CollectionObject):
+            owner_env.owned_values.add(name)
+
+    def _environment_for_scope(self, scope: Scope[AetherValue]) -> "Environment | None":
+        cursor: Environment | None = self
+        while cursor is not None:
+            if cursor.variable_scope is scope:
+                return cursor
+            cursor = cursor.parent
+        return None
+
+    def cleanup(self) -> None:
+        for name in reversed(tuple(self.variable_scope.symbols)):
+            if name in self.owned_values:
+                destroy_value(self.variable_scope.symbols[name])
+        self.owned_values.clear()
 
     def get(self, name: str) -> AetherValue:
         return self.variable_scope.require(name)
@@ -182,6 +225,7 @@ class Environment:
 class _ReturnSignal(Exception):
     def __init__(self, value: AetherValue) -> None:
         self.value = value
+        self.has_owned_result = False
 
 
 class _BreakSignal(Exception):
@@ -646,8 +690,17 @@ class Interpreter:
         raise AetherRuntimeError(f"Unsupported statement {statement!r}.")
 
     def _execute_block(self, statements: list[ast.Statement], env: Environment) -> None:
-        for statement in statements:
-            self._execute(statement, env)
+        try:
+            for statement in statements:
+                self._execute(statement, env)
+        except _ReturnSignal as signal:
+            if not signal.has_owned_result and isinstance(signal.value.value, CollectionObject):
+                signal.value.value.offer_owner()
+                signal.has_owned_result = True
+            raise
+        finally:
+            if env is not self.global_env:
+                env.cleanup()
 
     def _function(
         self,
@@ -1250,7 +1303,12 @@ class Interpreter:
             raise AetherTypeError(f"Struct '{instance.type_name}' has no field '{statement.field_name}'.")
         field_type = instance.fields[statement.field_name].type_name
         value = self._evaluate_with_expected_type(statement.expression, env, field_type)
-        instance.fields[statement.field_name] = coerce_implicit(value, field_type)
+        replacement = coerce_implicit(value, field_type)
+        if isinstance(replacement.value, CollectionObject):
+            replacement.value.claim_owner()
+        old = instance.fields[statement.field_name]
+        instance.fields[statement.field_name] = replacement
+        destroy_value(old)
 
     def _assign_implicit_method_field(self, field_name: str, expression: ast.Expression, env: Environment) -> None:
         receiver = self._method_receiver_value(env)
@@ -1261,7 +1319,12 @@ class Interpreter:
             raise AetherRuntimeError(f"Undefined variable '{field_name}'.")
         field_type = instance.fields[field_name].type_name
         value = self._evaluate_with_expected_type(expression, env, field_type)
-        instance.fields[field_name] = coerce_implicit(value, field_type)
+        replacement = coerce_implicit(value, field_type)
+        if isinstance(replacement.value, CollectionObject):
+            replacement.value.claim_owner()
+        old = instance.fields[field_name]
+        instance.fields[field_name] = replacement
+        destroy_value(old)
 
     def _require_index(self, array_value: AetherValue, index_value: AetherValue) -> int:
         if not is_indexable_type(array_value.type_name):
@@ -1721,11 +1784,21 @@ class Interpreter:
             if isinstance(declaration, ast.ExpressionFunctionDeclaration):
                 local_env = Environment(parent=function.closure or self.global_env)
                 for parameter, arg in zip(declaration.parameters, args):
-                    local_env.define(parameter.name, arg)
-                return self._evaluate(declaration.expression, local_env)
+                    local_env.define(parameter.name, arg, owned=False)
+                try:
+                    result = self._evaluate(declaration.expression, local_env)
+                    if isinstance(result.value, CollectionObject):
+                        result.value.offer_owner()
+                    return result
+                finally:
+                    local_env.cleanup()
             local_env = Environment(parent=function.closure or self.global_env)
             for parameter, arg in zip(declaration.parameters, args):
-                local_env.define(parameter.name, coerce_implicit(arg, self._resolve_type_aliases(parameter.type_name)))
+                local_env.define(
+                    parameter.name,
+                    coerce_implicit(arg, self._resolve_type_aliases(parameter.type_name)),
+                    owned=False,
+                )
             return_type = self._resolve_type_aliases(declaration.return_type)
             previous_return_type = self.current_return_type
             self.current_return_type = return_type
@@ -1782,9 +1855,9 @@ class Interpreter:
             else:
                 method_receiver = receiver
             local_env = Environment(parent=function.closure or self.global_env, method_receiver=method_receiver)
-            local_env.define("this", method_receiver, is_const=True)
+            local_env.define("this", method_receiver, is_const=True, owned=False)
             for parameter, parameter_type, arg in zip(declaration.parameters, parameter_types, args):
-                local_env.define(parameter.name, coerce_implicit(arg, parameter_type))
+                local_env.define(parameter.name, coerce_implicit(arg, parameter_type), owned=False)
             return_type = self._resolve_type_aliases(declaration.return_type)
             previous_return_type = self.current_return_type
             self.current_return_type = return_type

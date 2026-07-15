@@ -44,9 +44,9 @@ Native execution and builds require `clang` on `PATH`.
 
 The textual runtime is assembled on demand from three focused generators:
 
-- `array_runtime.py` owns `%AetherArray = type { i64, ptr }`, Array allocation,
+- `array_runtime.py` owns `%AetherArray = type { i64, ptr, i64 }`, Array allocation,
   checked length conversion, bounds panic/checks, and Array field accessors.
-- `list_runtime.py` owns `%AetherList = type { i64, i64, ptr }`, capacity,
+- `list_runtime.py` owns `%AetherList = type { i64, i64, ptr, i64 }`, capacity,
   growth, and List-only operations.
 - `runtime_common.py` owns checked allocation arithmetic, checked `malloc`,
   deduplicated libc/intrinsic declarations, and the sort helpers shared by
@@ -171,7 +171,7 @@ are skipped.
   storage using the phase 1 layout:
 
   ```llvm
-  %AetherList = type { i64, i64, ptr }
+  %AetherList = type { i64, i64, ptr, i64 }
   ; length, capacity, data
   ```
 

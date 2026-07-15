@@ -109,12 +109,12 @@ def test_runtime_double_total_order_and_stability() -> None:
     result = sort_builtin([sequence])
 
     assert result.type_name == "void"
-    assert [item.value for item in values[:4]] == [float("-inf"), -0.0, 0.0, 2.0]
-    assert values[1] is negative_zero
-    assert values[2] is positive_zero
-    assert values[4].value == float("inf")
-    assert values[5] is nan_first and math.isnan(values[5].value)
-    assert values[6] is nan_second and math.isnan(values[6].value)
+    assert [item.value for item in sequence.value[:4]] == [float("-inf"), -0.0, 0.0, 2.0]
+    assert sequence.value[1] is negative_zero
+    assert sequence.value[2] is positive_zero
+    assert sequence.value[4].value == float("inf")
+    assert sequence.value[5] is nan_first and math.isnan(sequence.value[5].value)
+    assert sequence.value[6] is nan_second and math.isnan(sequence.value[6].value)
 
 
 def test_ir_interpreter_uses_utf8_byte_order_and_double_total_order() -> None:

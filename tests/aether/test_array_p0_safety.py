@@ -148,7 +148,11 @@ def test_array_new_checks_bytes_before_allocations_and_stores() -> None:
     start = llvm.index("define private ptr @aether_array_new")
     end = llvm.index("\n}", start)
     helper = llvm.index("call i64 @aether_checked_allocation_bytes", start, end)
-    header = llvm.index("call ptr @aether_alloc(i64 16)", start, end)
+    header = llvm.index(
+        "call ptr @aether_alloc(i64 ptrtoint (ptr getelementptr (%AetherArray",
+        start,
+        end,
+    )
     length_store = llvm.index("store i64 %length", start, end)
     data = llvm.index("call ptr @aether_alloc(i64 %data_size)", start, end)
     data_store = llvm.index("store ptr %data", start, end)

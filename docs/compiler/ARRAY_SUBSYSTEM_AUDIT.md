@@ -110,7 +110,7 @@ alias analysis.
 El layout emitido es:
 
 ```llvm
-%AetherArray = type { i64, ptr }
+%AetherArray = type { i64, ptr, i64 } ; length, buffer, strong_count (Fase 1)
 ; campo 0: length
 ; campo 1: data
 ```

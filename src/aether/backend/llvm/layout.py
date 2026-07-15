@@ -94,7 +94,9 @@ class LLVMTypeLayouts:
             rendered = llvm_type(type_)
             size = f"ptrtoint (ptr getelementptr ({rendered}, ptr null, i64 1) to i64)"
             return TypeLayout(rendered, True, size, False, True, True, True, True, True)
-        if isinstance(type_, (ArrayType, ListType, VectorType, MatrixType)):
+        if isinstance(type_, (ArrayType, ListType)):
+            return self._collection_reference(type_)
+        if isinstance(type_, (VectorType, MatrixType)):
             return self._reference(type_)
         if isinstance(type_, StructType):
             return self._struct(type_)
@@ -125,6 +127,12 @@ class LLVMTypeLayouts:
         rendered = llvm_type(type_)
         size = f"ptrtoint (ptr getelementptr ({rendered}, ptr null, i64 1) to i64)"
         return TypeLayout(rendered, True, size, True, True, False, True, False, True)
+
+    @staticmethod
+    def _collection_reference(type_: IRType) -> TypeLayout:
+        rendered = llvm_type(type_)
+        size = f"ptrtoint (ptr getelementptr ({rendered}, ptr null, i64 1) to i64)"
+        return TypeLayout(rendered, True, size, False, True, True, True, True, True)
 
     def _struct(self, type_: StructType) -> TypeLayout:
         definition = self._structs.get(type_.name)

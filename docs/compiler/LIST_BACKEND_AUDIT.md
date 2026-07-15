@@ -184,7 +184,7 @@ IR/backend:
 La representacion LLVM temporal de `List<T>` es:
 
 ```llvm
-%AetherList = type { i64, i64, ptr }
+%AetherList = type { i64, i64, ptr, i64 } ; size, capacity, buffer, strong_count
 ; fields:
 ; 0 length
 ; 1 capacity
@@ -248,7 +248,7 @@ solo soporte operacional, no la existencia nominal del tipo.
 ### Opcion Recomendada
 
 ```llvm
-%AetherList = type { i64, i64, ptr }
+%AetherList = type { i64, i64, ptr, i64 } ; size, capacity, buffer, strong_count
 ; fields:
 ; 0 length
 ; 1 capacity
