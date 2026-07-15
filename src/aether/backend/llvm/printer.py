@@ -83,6 +83,7 @@ from .list_runtime import (
 from .matrix_runtime import LLVMMatrixRuntime
 from .runtime import sequence_sort_helper_name
 from .runtime_common import LLVMRuntimeCommon, aggregate_helper_suffix
+from .scalar_math_runtime import LLVMScalarMathRuntime
 from .vector_runtime import LLVMVectorRuntime
 
 
@@ -158,6 +159,7 @@ class LLVMPrinter:
         self._list_index_of_types: set[object] = set()
         self._uses_print = False
         self._checked_int_operators: set[str] = set()
+        self._scalar_math_calls: set[tuple[str, tuple[object, ...], object]] = set()
         self._structs = {definition.name: definition for definition in module.structs}
         self._uses_strcmp = False
         self._struct_sequence_equality_types: set[tuple[str, object]] = set()
@@ -225,6 +227,13 @@ class LLVMPrinter:
                 or self._list_index_of_types
                 or self._uses_vector_indexing
                 or self._uses_matrix_indexing
+                or any(
+                    instruction.may_trap
+                    for function in module.functions
+                    for block in function.blocks
+                    for instruction in block.instructions
+                    if isinstance(instruction, SSACall) and instruction.builtin is not None
+                )
             ),
             uses_free_and_memcpy=bool(self._sequence_sort_types or uses_list_growth or self._uses_array_slicing),
             uses_memmove=self._uses_list_insert or self._uses_list_remove_at,
@@ -256,6 +265,7 @@ class LLVMPrinter:
             frozenset(self._matrix_print_types),
         ).append(runtime, common_runtime)
         LLVMIntegerRuntime(frozenset(self._checked_int_operators)).append(runtime, common_runtime)
+        LLVMScalarMathRuntime(frozenset(self._scalar_math_calls)).append(runtime, common_runtime)
         LLVMRuntimeIO(enabled=self._uses_print).append(runtime)
         if self._uses_strcmp:
             runtime.append("declare i32 @strcmp(ptr, ptr)")
@@ -843,6 +853,8 @@ class LLVMPrinter:
         return f"br {self._label_operand(instruction.target)}"
 
     def _print_call(self, instruction: SSACall) -> str:
+        if instruction.builtin is not None:
+            return self._print_scalar_math_call(instruction)
         arguments = ", ".join(
             f"{llvm_type(argument.type)} {self._operand(argument)}"
             for argument in instruction.arguments
@@ -858,6 +870,88 @@ class LLVMPrinter:
             )
         result = self._new_temp(instruction.result)
         return f"{result} = call {return_type} {callee}({arguments})"
+
+    def _print_scalar_math_call(self, instruction: SSACall) -> str:
+        if instruction.result is None:
+            raise LLVMBackendError("LLVM scalar builtin call must produce a result")
+        name = instruction.builtin
+        if name is None or name != instruction.function:
+            raise LLVMBackendError("LLVM scalar builtin call lost its canonical identity")
+        self._scalar_math_calls.add(
+            (name, tuple(argument.type for argument in instruction.arguments), instruction.result.type)
+        )
+        result = self._new_temp(instruction.result)
+        lines: list[str] = []
+
+        if name in {"sin", "cos", "tan", "exp", "ln", "log", "sqrt"}:
+            argument = self._scalar_math_as_double(instruction.arguments[0], lines)
+            symbol = {
+                "ln": "log",
+                "log": "log10",
+                "sqrt": "llvm.sqrt.f64",
+            }.get(name, name)
+            lines.append(f"{result} = call double @{symbol}(double {argument})")
+            return "\n  ".join(lines)
+
+        if name == "abs":
+            argument = instruction.arguments[0]
+            if isinstance(argument.type, IntType):
+                lines.append(
+                    f"{result} = call i32 @aether_checked_abs_i32(i32 {self._operand(argument)})"
+                )
+            elif isinstance(argument.type, DoubleType):
+                lines.append(
+                    f"{result} = call double @llvm.fabs.f64(double {self._operand(argument)})"
+                )
+            else:
+                raise LLVMBackendError(f"LLVM abs does not support type {argument.type}")
+            return "\n  ".join(lines)
+
+        if name == "Math.factorial":
+            argument = instruction.arguments[0]
+            if not isinstance(argument.type, IntType):
+                raise LLVMBackendError("LLVM Math.factorial expects i32")
+            return (
+                f"{result} = call i32 @aether_checked_factorial_i32(i32 {self._operand(argument)})"
+            )
+
+        if name in {"Math.floor", "Math.ceil"}:
+            argument = instruction.arguments[0]
+            if isinstance(argument.type, IntType):
+                return f"{result} = add i32 {self._operand(argument)}, 0"
+            value = self._scalar_math_as_double(argument, lines)
+            operation = name.rsplit(".", 1)[1]
+            lines.append(f"{result} = call i32 @aether_{operation}_to_i32(double {value})")
+            return "\n  ".join(lines)
+
+        if name == "Math.mod":
+            left, right = instruction.arguments
+            if isinstance(left.type, IntType) and isinstance(right.type, IntType):
+                return (
+                    f"{result} = call i32 @aether_floor_mod_i32("
+                    f"i32 {self._operand(left)}, i32 {self._operand(right)})"
+                )
+            left_value = self._scalar_math_as_double(left, lines)
+            right_value = self._scalar_math_as_double(right, lines)
+            lines.append(
+                f"{result} = call double @aether_floor_mod_f64("
+                f"double {left_value}, double {right_value})"
+            )
+            return "\n  ".join(lines)
+
+        raise LLVMBackendError(f"LLVM has no scalar math lowering for '{name}'")
+
+    def _scalar_math_as_double(self, value: SSAValue, lines: list[str]) -> str:
+        operand = self._operand(value)
+        if isinstance(value.type, DoubleType):
+            return operand
+        if isinstance(value.type, IntType):
+            converted = self._synthetic_temp("math.to.double")
+            lines.append(f"{converted} = sitofp i32 {operand} to double")
+            return converted
+        raise LLVMBackendError(
+            f"LLVM/native scalar math supports int/double arguments, got {value.type}"
+        )
 
     def _print_print(self, instruction: SSAPrint) -> str:
         self._uses_print = True

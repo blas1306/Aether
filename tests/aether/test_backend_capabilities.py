@@ -44,7 +44,7 @@ def _required(source: str, *, source_root: Path | None = None):
 
 
 def test_profiles_are_versioned_identified_and_cover_the_canonical_catalog() -> None:
-    assert CAPABILITY_PROFILE_VERSION == "2"
+    assert CAPABILITY_PROFILE_VERSION == "3"
     assert AST_CAPABILITY_PROFILE.backend is BackendIdentity.AST
     assert NATIVE_CAPABILITY_PROFILE.backend is BackendIdentity.NATIVE
     assert AST_CAPABILITY_PROFILE.version == CAPABILITY_PROFILE_VERSION
@@ -155,15 +155,11 @@ int main() {
     )
     issues = backend_capability_issues(typed, BackendIdentity.NATIVE)
 
-    assert [issue.requirement.capability for issue in issues].count(Capability.SCALAR_MATH) == 1
+    assert [issue.requirement.capability for issue in issues].count(Capability.SCALAR_MATH) == 0
     assert {issue.requirement.capability for issue in issues} >= {
         Capability.CLASSES,
         Capability.ENUMS,
-        Capability.SCALAR_MATH,
     }
-    assert next(
-        issue for issue in issues if issue.requirement.capability is Capability.SCALAR_MATH
-    ).requirement.line == 5
 
 
 def test_ast_accepts_feature_marked_complete() -> None:
@@ -241,4 +237,23 @@ def test_numerical_methods_example_passes_modules_and_reports_real_native_blocke
     assert not any(issue.requirement.capability is Capability.IMPORTS for issue in issues)
     assert any(issue.requirement.capability is Capability.INTERFACES for issue in issues)
     assert any(issue.requirement.capability is Capability.ERROR_HANDLING for issue in issues)
-    assert any(issue.requirement.capability is Capability.SCALAR_MATH for issue in issues)
+    assert not any(issue.requirement.capability is Capability.SCALAR_MATH for issue in issues)
+
+
+def test_native_scalar_math_profile_accepts_consolidated_and_rejects_experimental_calls() -> None:
+    assert NATIVE_CAPABILITY_PROFILE.support_for(Capability.SCALAR_MATH).state is CapabilityState.PARTIAL
+
+    supported = _typed("int main() { double x = sqrt(4.0) + sin(0.0); return 0; }")
+    assert not any(
+        issue.requirement.capability is Capability.SCALAR_MATH
+        for issue in backend_capability_issues(supported, BackendIdentity.NATIVE)
+    )
+
+    experimental = _typed("int main() { double x = real(1.0); return 0; }")
+    issue = next(
+        issue
+        for issue in backend_capability_issues(experimental, BackendIdentity.NATIVE)
+        if issue.requirement.capability is Capability.SCALAR_MATH
+    )
+    assert issue.requirement.requires_complete_support is True
+    assert issue.requirement.detail == "experimental scalar builtin 'real'"

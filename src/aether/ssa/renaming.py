@@ -313,7 +313,7 @@ class SSARenamer:
             if instruction.result is not None:
                 result = self._define_value(instruction.result)
                 self._bind_value(result.name, result, bound_values)
-            return SSACall(instruction.function, arguments, result)
+            return SSACall(instruction.function, arguments, result, instruction.builtin)
 
         if isinstance(instruction, IRPrint):
             value = self._resolve_value(instruction.value)

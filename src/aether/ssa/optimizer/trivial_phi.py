@@ -253,6 +253,7 @@ class TrivialPhiEliminator:
                     instruction.function,
                     tuple(arguments),
                     instruction.result,
+                    instruction.builtin,
                 ),
                 rewritten_uses,
             )

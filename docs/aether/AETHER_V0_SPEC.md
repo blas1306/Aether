@@ -2199,7 +2199,11 @@ println(x);
 
 `rows(matrix)` and `cols(matrix)` accept one `Matrix<T>` argument and return `int` dimensions.
 
-`sin(x)`, `cos(x)`, `tan(x)`, `exp(x)`, `ln(x)`, and `log(x)` accept one real numeric scalar and return `double`. `sqrt(x)` accepts numeric scalars and returns `double` for non-negative real inputs or `complex` for negative/complex inputs. `abs(x)` accepts one numeric scalar and returns `double` for `complex` inputs. `real(x)`, `imag(x)`, `conj(x)`, and `angle(x)` are available for numeric scalars. `Math.mod(a, b)` accepts two real numeric scalars and returns floor/Python-like modulo.
+`sin(x)`, `cos(x)`, `tan(x)`, `exp(x)`, `ln(x)`, and `log(x)` accept one real numeric scalar and return `double`. `sqrt(x)` returns `double` for non-negative real inputs and `complex` for negative or complex inputs. `abs(x)` preserves real input type, uses checked i32 overflow for `int`, and returns `double` for `complex`. `real(x)`, `imag(x)`, `conj(x)`, and `angle(x)` are experimental complex-aware builtins. `Math.mod(a, b)` accepts two real numeric scalars and returns floor/Python-like modulo. `Math.floor(x)` and `Math.ceil(x)` return `int` and reject non-finite or out-of-range results. `Math.factorial(x)` accepts a non-negative `int` and is checked for i32 overflow.
+
+Real scalar math follows IEEE-754 without consulting `errno` where the public contract remains real: invalid logarithm domains produce NaN, logarithm of zero produces negative infinity, and exponential overflow produces positive infinity. Negative real `sqrt` retains the legacy complex result. Operations whose public result is `int` retain checked panics because NaN, infinity, and out-of-range values have no representable result.
+
+The only current mathematical constant is `Math.pi`, with exact language type `double`; aliases and selective imports preserve that identity. It lowers as an immediate constant and requires neither a runtime global nor module initialization. There is no global `PI` and no `E` constant in Aether v0.
 
 `Math.LinearAlgebra.inner(u, v)`, `Math.LinearAlgebra.norm(v)`, `Math.LinearAlgebra.transpose(A)`, `Math.LinearAlgebra.matmul(A, B)`, `Math.LinearAlgebra.solve(A, b)`, `Math.LinearAlgebra.eig(A)`, `Math.LinearAlgebra.SVD(A)`, `Math.LinearAlgebra.LU(A)`, `Math.LinearAlgebra.LDU(A)`, `Math.LinearAlgebra.N(A)`, `Math.LinearAlgebra.R(A)`, and `Math.LinearAlgebra.rank(A)` are explicit simulated-namespace builtins for numeric mathematical vectors and matrices. See `Math.LinearAlgebra` above.
 

@@ -6,6 +6,7 @@ from typing import Any
 from .. import ast
 from ..errors import IRBackendUnsupportedFeatureError
 from ..modules import CheckedModule, CheckedProgram, QualifiedSymbol, SymbolId
+from ..scalar_math import SCALAR_MATH_CONSTANTS
 from ..types import (
     ArrayType,
     ClassType,
@@ -41,7 +42,16 @@ def combine_checked_program(checked: CheckedProgram) -> ast.Program:
     """
 
     if len(checked.modules) == 1:
-        return checked.modules[checked.root_module].program
+        program = checked.modules[checked.root_module].program
+        return ast.Program(
+            [
+                statement
+                for statement in program.statements
+                if not isinstance(statement, (ast.ImportStatement, ast.FromImportStatement))
+            ],
+            package_name=program.package_name,
+            entry_point=program.entry_point,
+        )
 
     rewritten: list[ast.Statement] = []
     for module_id in checked.dependency_order():
@@ -95,6 +105,8 @@ class _ModuleRewriter:
         self.checked = checked
         self.is_root = is_root
         self.method_names: set[str] = set()
+        self.local_names: set[str] = set()
+        self.field_names: set[str] = set()
 
     def statement(self, node: ast.Statement, *, top_level: bool = False) -> ast.Statement:
         if isinstance(node, ast.FunctionDeclaration):
@@ -105,17 +117,27 @@ class _ModuleRewriter:
                 else:
                     symbol = self._own_symbol(node.name, "function")
                     name = mangle_symbol(symbol.id)
-            return replace(
-                node,
-                name=name,
-                return_type=self.type_name(node.return_type),
-                parameters=[self.parameter(parameter) for parameter in node.parameters],
-                body=[self.statement(statement) for statement in node.body],
-            )
+            previous_local_names = self.local_names
+            self.local_names = {
+                *(parameter.name for parameter in node.parameters),
+                *self._declared_local_names(node.body),
+            }
+            try:
+                return replace(
+                    node,
+                    name=name,
+                    return_type=self.type_name(node.return_type),
+                    parameters=[self.parameter(parameter) for parameter in node.parameters],
+                    body=[self.statement(statement) for statement in node.body],
+                )
+            finally:
+                self.local_names = previous_local_names
         if isinstance(node, ast.StructDeclaration):
             symbol = self._own_symbol(node.name, "struct") if top_level else None
             previous_method_names = self.method_names
+            previous_field_names = self.field_names
             self.method_names = {method.name for method in node.methods}
+            self.field_names = {field.name for field in node.fields}
             try:
                 methods = [self.statement(method) for method in node.methods]
                 constructor = (
@@ -125,6 +147,7 @@ class _ModuleRewriter:
                 )
             finally:
                 self.method_names = previous_method_names
+                self.field_names = previous_field_names
             return replace(
                 node,
                 name=mangle_symbol(symbol.id) if symbol is not None else node.name,
@@ -155,11 +178,19 @@ class _ModuleRewriter:
         return replace(node, type_name=self.type_name(node.type_name))
 
     def constructor(self, node: ast.ConstructorDeclaration) -> ast.ConstructorDeclaration:
-        return replace(
-            node,
-            parameters=[self.parameter(parameter) for parameter in node.parameters],
-            body=[self.statement(statement) for statement in node.body],
-        )
+        previous_local_names = self.local_names
+        self.local_names = {
+            *(parameter.name for parameter in node.parameters),
+            *self._declared_local_names(node.body),
+        }
+        try:
+            return replace(
+                node,
+                parameters=[self.parameter(parameter) for parameter in node.parameters],
+                body=[self.statement(statement) for statement in node.body],
+            )
+        finally:
+            self.local_names = previous_local_names
 
     def type_name(self, type_name: Any) -> Any:
         if isinstance(type_name, str):
@@ -221,12 +252,29 @@ class _ModuleRewriter:
                 and not ("." not in node.callee and node.callee in self.method_names)
                 else node.callee
             )
+            if symbol is None:
+                callee = self._canonical_builtin_name(callee)
             return replace(
                 node,
                 callee=callee,
                 arguments=[self.value(argument) for argument in node.arguments],
                 keyword_arguments={key: self.value(value) for key, value in node.keyword_arguments.items()},
             )
+        if isinstance(node, ast.Identifier):
+            if node.name not in self.local_names and node.name not in self.field_names:
+                canonical = self.module.checker.builtin_constant_aliases.get(node.name)
+                constant = SCALAR_MATH_CONSTANTS.get(canonical) if canonical is not None else None
+                if constant is not None:
+                    type_name, value = constant
+                    return ast.Literal(value, type_name)
+            return node
+        if isinstance(node, ast.FieldAccess):
+            dotted = self._field_access_name(node)
+            canonical = self._canonical_builtin_name(dotted) if dotted is not None else None
+            constant = SCALAR_MATH_CONSTANTS.get(canonical) if canonical is not None else None
+            if constant is not None:
+                type_name, value = constant
+                return ast.Literal(value, type_name)
         if isinstance(node, ast.FunctionDeclaration):
             return self.statement(node)
         if isinstance(node, ast.VarDeclaration):
@@ -235,6 +283,46 @@ class _ModuleRewriter:
             return node
         changes = {field.name: self.value(getattr(node, field.name)) for field in fields(node)}
         return replace(node, **changes)
+
+    def _canonical_builtin_name(self, name: str) -> str:
+        direct = self.module.checker.builtin_aliases.get(name)
+        if direct is not None:
+            return direct
+        for binding in sorted(self.module.checker.module_bindings, key=len, reverse=True):
+            if name == binding:
+                return self.module.checker.module_bindings[binding]
+            if name.startswith(binding + "."):
+                return self.module.checker.module_bindings[binding] + name[len(binding) :]
+        return name
+
+    @classmethod
+    def _declared_local_names(cls, statements: list[ast.Statement]) -> set[str]:
+        names: set[str] = set()
+        for statement in statements:
+            if isinstance(statement, ast.VarDeclaration):
+                names.add(statement.name)
+            elif isinstance(statement, ast.ForInStatement):
+                names.add(statement.variable)
+                names.update(cls._declared_local_names(statement.body))
+            elif isinstance(statement, ast.IfStatement):
+                names.update(cls._declared_local_names(statement.body))
+                if statement.else_body is not None:
+                    names.update(cls._declared_local_names(statement.else_body))
+            elif isinstance(statement, ast.WhileStatement):
+                names.update(cls._declared_local_names(statement.body))
+        return names
+
+    @staticmethod
+    def _field_access_name(expression: ast.Expression) -> str | None:
+        parts: list[str] = []
+        current = expression
+        while isinstance(current, ast.FieldAccess):
+            parts.append(current.field_name)
+            current = current.target
+        if not isinstance(current, ast.Identifier):
+            return None
+        parts.append(current.name)
+        return ".".join(reversed(parts))
 
     def _own_symbol(self, name: str, kind: str) -> QualifiedSymbol:
         symbol = self.module.symbol_references.get(name)

@@ -21,12 +21,16 @@ from .types import (
     TupleType,
     VectorType,
 )
+from .scalar_math import (
+    EXPERIMENTAL_SCALAR_MATH_FUNCTIONS,
+    SCALAR_MATH_OPERATIONS,
+)
 
 if TYPE_CHECKING:
     from .pipeline import TypedProgram
 
 
-CAPABILITY_PROFILE_VERSION = "2"
+CAPABILITY_PROFILE_VERSION = "3"
 
 
 class BackendIdentity(str, Enum):
@@ -237,7 +241,6 @@ _NATIVE_UNSUPPORTED = {
     Capability.CLASS_METHODS,
     Capability.INTERFACES,
     Capability.ENUMS,
-    Capability.SCALAR_MATH,
     Capability.GENERICS,
     Capability.ERROR_HANDLING,
     Capability.FILES,
@@ -373,25 +376,7 @@ class BackendCapabilityError(AetherError):
         return "\n".join(lines)
 
 
-_SCALAR_MATH_FUNCTIONS = {
-    "sin",
-    "cos",
-    "tan",
-    "exp",
-    "ln",
-    "log",
-    "sqrt",
-    "abs",
-    "complex",
-    "real",
-    "imag",
-    "conj",
-    "angle",
-    "Math.mod",
-    "Math.factorial",
-    "Math.floor",
-    "Math.ceil",
-}
+_SCALAR_MATH_FUNCTIONS = frozenset(SCALAR_MATH_OPERATIONS)
 _FUNCTION_PLOT_BUILTINS = {"Plots.plot", "Plots.plot!"}
 
 
@@ -662,7 +647,17 @@ class _CapabilityDetector:
         if canonical in {"print", "println"}:
             self._record(Capability.PRINT, call)
         if canonical in _SCALAR_MATH_FUNCTIONS:
-            self._record(Capability.SCALAR_MATH, call)
+            experimental = canonical in EXPERIMENTAL_SCALAR_MATH_FUNCTIONS
+            self._record(
+                Capability.SCALAR_MATH,
+                call,
+                detail=(
+                    f"experimental scalar builtin '{canonical}'"
+                    if experimental
+                    else None
+                ),
+                requires_complete_support=experimental,
+            )
         if (
             canonical in _FUNCTION_PLOT_BUILTINS
             and call.arguments

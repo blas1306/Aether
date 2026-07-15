@@ -3,12 +3,14 @@ from __future__ import annotations
 from collections.abc import Callable
 import cmath
 import math
-from math import ceil, cos, exp, factorial as math_factorial, floor, log, log10, pi, sin, sqrt, tan
+from math import ceil, cos, exp, factorial as math_factorial, floor, log, log10, sin, sqrt, tan
 
 from ..array_safety import checked_array_length_to_int
 from ..errors import AetherRuntimeError, AetherTypeError
 from ..formatting import format_value
+from ..integer_arithmetic import INT_MAX, INT_MIN, INTEGER_OVERFLOW_MESSAGE
 from ..list_safety import checked_list_index_to_int, checked_list_length_to_int
+from ..scalar_math import SCALAR_MATH_CONSTANTS
 from ..types import (
     AetherType,
     AetherValue,
@@ -90,8 +92,9 @@ def builtin_definitions() -> list[BuiltinDefinition]:
 
 
 def builtin_constant_definitions() -> list[BuiltinConstantDefinition]:
+    pi_type, pi_value = SCALAR_MATH_CONSTANTS["Math.pi"]
     return [
-        BuiltinConstantDefinition("Math.pi", "double", pi),
+        BuiltinConstantDefinition("Math.pi", pi_type, pi_value),
     ]
 
 
@@ -344,22 +347,34 @@ def cols_builtin(args: list[AetherValue]) -> AetherValue:
 def math_unary_builtin(label: str, function: Callable[[float], float]) -> BuiltinFunction:
     def builtin(args: list[AetherValue]) -> AetherValue:
         value = _require_real_numeric_unary_arg(args, label)
-        return AetherValue("double", function(value.value))
+        try:
+            result = function(value.value)
+        except ValueError:
+            # C libm/LLVM return NaN for invalid real domains.  Python's math
+            # module raises instead, so normalize the AST implementation here.
+            result = float("nan")
+        except OverflowError:
+            result = math.copysign(float("inf"), value.value)
+        return AetherValue("double", result)
 
     return builtin
 
 
 def ln_builtin(args: list[AetherValue]) -> AetherValue:
     value = _require_real_numeric_unary_arg(args, "ln")
-    if value.value <= 0:
-        raise AetherRuntimeError("ln(...) is only defined for positive real numbers.")
+    if value.value == 0:
+        return AetherValue("double", float("-inf"))
+    if value.value < 0:
+        return AetherValue("double", float("nan"))
     return AetherValue("double", log(value.value))
 
 
 def log_builtin(args: list[AetherValue]) -> AetherValue:
     value = _require_real_numeric_unary_arg(args, "log")
-    if value.value <= 0:
-        raise AetherRuntimeError("log(...) is only defined for positive real numbers.")
+    if value.value == 0:
+        return AetherValue("double", float("-inf"))
+    if value.value < 0:
+        return AetherValue("double", float("nan"))
     return AetherValue("double", log10(value.value))
 
 
@@ -367,8 +382,6 @@ def sqrt_builtin(args: list[AetherValue]) -> AetherValue:
     value = _require_numeric_unary_arg(args, "sqrt")
     if value.type_name == "complex" or value.value < 0:
         return AetherValue("complex", cmath.sqrt(value.value))
-    if value.value < 0:
-        raise AetherRuntimeError("sqrt(...) is only defined for non-negative real numbers in Aether v0.")
     return AetherValue("double", sqrt(value.value))
 
 
@@ -376,6 +389,8 @@ def abs_builtin(args: list[AetherValue]) -> AetherValue:
     value = _require_numeric_unary_arg(args, "abs")
     if value.type_name == "complex":
         return AetherValue("double", abs(value.value))
+    if value.type_name == "int" and value.value == INT_MIN:
+        raise AetherRuntimeError(INTEGER_OVERFLOW_MESSAGE)
     return AetherValue(value.type_name, abs(value.value))
 
 
@@ -419,7 +434,12 @@ def mod_builtin(args: list[AetherValue]) -> AetherValue:
     if left.type_name == "int" and right.type_name == "int":
         result = left.value % right.value
     else:
-        result = left.value - floor(left.value / right.value) * right.value
+        quotient = left.value / right.value
+        result = (
+            float("nan")
+            if not math.isfinite(quotient)
+            else left.value - floor(quotient) * right.value
+        )
     if result_type == "int":
         result = int(result)
     else:
@@ -431,17 +451,32 @@ def factorial_builtin(args: list[AetherValue]) -> AetherValue:
     value = _require_int_unary_arg(args, "Math.factorial")
     if value.value < 0:
         raise AetherRuntimeError("Math.factorial(...) requires a non-negative integer.")
-    return AetherValue("int", math_factorial(value.value))
+    result = math_factorial(value.value)
+    if result > INT_MAX:
+        raise AetherRuntimeError(INTEGER_OVERFLOW_MESSAGE)
+    return AetherValue("int", result)
 
 
 def floor_builtin(args: list[AetherValue]) -> AetherValue:
     value = _require_real_numeric_unary_arg(args, "Math.floor")
-    return AetherValue("int", floor(value.value))
+    try:
+        result = floor(value.value)
+    except (OverflowError, ValueError) as exc:
+        raise AetherRuntimeError("Math.floor(...) cannot convert NaN or infinity to int.") from exc
+    if result < INT_MIN or result > INT_MAX:
+        raise AetherRuntimeError("Math.floor(...) cannot convert NaN or infinity to int.")
+    return AetherValue("int", result)
 
 
 def ceil_builtin(args: list[AetherValue]) -> AetherValue:
     value = _require_real_numeric_unary_arg(args, "Math.ceil")
-    return AetherValue("int", ceil(value.value))
+    try:
+        result = ceil(value.value)
+    except (OverflowError, ValueError) as exc:
+        raise AetherRuntimeError("Math.ceil(...) cannot convert NaN or infinity to int.") from exc
+    if result < INT_MIN or result > INT_MAX:
+        raise AetherRuntimeError("Math.ceil(...) cannot convert NaN or infinity to int.")
+    return AetherValue("int", result)
 
 
 def _require_numeric_unary_arg(args: list[AetherValue], label: str) -> AetherValue:

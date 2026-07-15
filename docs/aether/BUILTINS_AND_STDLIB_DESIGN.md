@@ -173,8 +173,10 @@ No son obligatorios para esta consolidación de v1.
 
 ### Funciones matemáticas escalares
 
-`sin`, `cos`, `tan`, `sqrt`, `exp`, `log`, `abs`, `floor`, `ceil` y `round`
-deben sentirse inmediatas y predecibles. La superficie preferida es `math.x`
+El inventario actual consolidado es `sin`, `cos`, `tan`, `sqrt`, `exp`, `ln`,
+`log`, `abs`, `Math.mod`, `Math.factorial`, `Math.floor` y `Math.ceil`.
+`round` y las demás operaciones de `libm` son propuestas futuras, no API
+existente. La superficie preferida a futuro es `math.x`
 con imports selectivos; mantener aliases globales actuales es una decisión de
 compatibilidad separada.
 
@@ -253,4 +255,3 @@ Mover una operación existente desde builtin hacia stdlib requiere:
 
 Hasta cumplirlos, la ubicación Python actual describe implementación, no la
 arquitectura pública definitiva.
-

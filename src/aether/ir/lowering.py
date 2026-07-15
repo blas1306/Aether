@@ -7,6 +7,7 @@ from typing import NoReturn
 
 from .. import ast
 from ..errors import IRBackendUnsupportedFeatureError
+from ..scalar_math import NATIVE_SCALAR_MATH_FUNCTIONS, SCALAR_MATH_CONSTANTS
 from ..types import (
     AetherType,
     ArrayType as AetherArrayType,
@@ -96,6 +97,7 @@ from .types import (
     VectorType,
     VoidType,
 )
+from .scalar_math import scalar_math_result_type
 
 
 _BINARY_OPERATORS = {
@@ -211,12 +213,19 @@ class IRLowerer:
         self._struct_names: set[str] = set()
         self._aliases: dict[str, AetherType] = {}
         self._method_names: dict[tuple[str, str], str] = {}
+        self._builtin_aliases: dict[str, str] = {}
+        self._builtin_constant_aliases: dict[str, str] = {}
+        self._module_bindings: dict[str, str] = {}
 
     def lower_checked_program(self, checked_program: object) -> IRModule:
         """Lower a complete semantic program using the combined-module strategy."""
 
         from .module_lowering import combine_checked_program
 
+        root = checked_program.modules[checked_program.root_module]
+        self._builtin_aliases = dict(root.checker.builtin_aliases)
+        self._builtin_constant_aliases = dict(root.checker.builtin_constant_aliases)
+        self._module_bindings = dict(root.checker.module_bindings)
         return self.lower(combine_checked_program(checked_program))
 
     def lower(self, program: ast.Program) -> IRModule:
@@ -1219,6 +1228,12 @@ class IRLowerer:
                         IRStructGet(result, receiver, index, expression.name)
                     )
                     return result
+            constant = self._scalar_math_constant(expression.name)
+            if constant is not None:
+                type_name, value = constant
+                result = context.temporary(self._lower_type(type_name))
+                context.block.instructions.append(IRConst(result, value))
+                return result
             self._fail(
                 f"IR backend does not support identifier '{expression.name}' outside local scope yet.",
                 expression,
@@ -1324,7 +1339,8 @@ class IRLowerer:
             if not isinstance(operand.type, _NUMERIC_IR_TYPES):
                 self._unsupported(expression, f"operand type '{operand.type}'")
             zero = context.temporary(operand.type)
-            context.block.instructions.append(IRConst(zero, 0))
+            zero_value: object = 0.0 if isinstance(operand.type, (FloatType, DoubleType)) else 0
+            context.block.instructions.append(IRConst(zero, zero_value))
             result = context.temporary(operand.type)
             context.block.instructions.append(IRBinaryOp(result, "sub", zero, operand))
             return result
@@ -1417,6 +1433,13 @@ class IRLowerer:
             return result
 
         if isinstance(expression, ast.FieldAccess):
+            dotted = self._field_access_name(expression)
+            constant = self._scalar_math_constant(dotted) if dotted is not None else None
+            if constant is not None:
+                type_name, value = constant
+                result = context.temporary(self._lower_type(type_name))
+                context.block.instructions.append(IRConst(result, value))
+                return result
             target = self._lower_expression(expression.target, context)
             if isinstance(target.type, StructType):
                 info = self._structs.get(target.type.name)
@@ -1545,6 +1568,15 @@ class IRLowerer:
     ) -> IRValue | None:
         if call.keyword_arguments:
             self._unsupported(call, "keyword arguments")
+
+        builtin = self._canonical_builtin_name(call.callee)
+        if builtin in NATIVE_SCALAR_MATH_FUNCTIONS:
+            return self._lower_scalar_math_call(
+                call,
+                builtin,
+                context,
+                result_required=result_required,
+            )
 
         if call.callee in {"print", "println"}:
             if result_required:
@@ -1768,6 +1800,67 @@ class IRLowerer:
         result = context.temporary(signature.return_type)
         context.block.instructions.append(IRCall(call.callee, arguments, result))
         return result
+
+    def _lower_scalar_math_call(
+        self,
+        call: ast.CallExpression,
+        builtin: str,
+        context: _FunctionContext,
+        *,
+        result_required: bool,
+    ) -> IRValue:
+        if not result_required:
+            # Calls whose checked semantics can panic remain represented even
+            # when their value is discarded; DCE consults the builtin effects.
+            pass
+        arguments = tuple(self._lower_expression(argument, context) for argument in call.arguments)
+        result_type = self._scalar_math_result_type(builtin, arguments, call)
+        result = context.temporary(result_type)
+        context.block.instructions.append(IRCall(builtin, arguments, result, builtin))
+        return result
+
+    def _scalar_math_result_type(
+        self,
+        builtin: str,
+        arguments: tuple[IRValue, ...],
+        node: object,
+    ) -> IRType:
+        try:
+            return scalar_math_result_type(
+                builtin,
+                tuple(argument.type for argument in arguments),
+            )
+        except ValueError as exc:
+            self._fail(f"IR scalar math signature error: {exc}.", node)
+
+    def _canonical_builtin_name(self, name: str) -> str:
+        direct = self._builtin_aliases.get(name)
+        if direct is not None:
+            return direct
+        for binding in sorted(self._module_bindings, key=len, reverse=True):
+            if name == binding:
+                return self._module_bindings[binding]
+            if name.startswith(binding + "."):
+                return self._module_bindings[binding] + name[len(binding) :]
+        return name
+
+    def _scalar_math_constant(self, name: str | None) -> tuple[str, object] | None:
+        if name is None:
+            return None
+        canonical = self._builtin_constant_aliases.get(name, self._canonical_builtin_name(name))
+        return SCALAR_MATH_CONSTANTS.get(canonical)
+
+    @staticmethod
+    def _field_access_name(expression: ast.Expression) -> str | None:
+        parts: list[str] = []
+        current = expression
+        while isinstance(current, ast.FieldAccess):
+            parts.append(current.field_name)
+            current = current.target
+        if not isinstance(current, ast.Identifier):
+            return None
+        parts.append(current.name)
+        return ".".join(reversed(parts))
 
     def _lower_struct_constructor(
         self,

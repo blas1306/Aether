@@ -288,6 +288,7 @@ class SSAAlgebraicSimplifier:
                     for argument in instruction.arguments
                 ),
                 instruction.result,
+                instruction.builtin,
             )
 
         if isinstance(instruction, SSAPrint):

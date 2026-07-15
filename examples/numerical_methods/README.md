@@ -32,10 +32,11 @@ language feature or hard-coding one equation into them.
 
 ## Backend boundary
 
-The example is intentionally an AST-backend dogfood program. File imports,
-interfaces, interface dispatch, and exceptions do not lower to the current IR,
-SSA, or LLVM/native pipeline. The numerical loops themselves use ordinary
-existing Aether syntax, but a native version must wait for those missing
-backend features (or for a complete first-class function design). This is a
-known v1 blocker, not hidden by a second artificial implementation.
-
+The example is intentionally still an AST-backend dogfood program. File
+imports and the consolidated real scalar-math builtins now lower through IR,
+SSA, and LLVM/native. The remaining blockers reported for this program are
+interfaces/interface dispatch, exceptions, and general string comparison.
+The numerical loops themselves use ordinary existing Aether syntax, but a
+complete native version must wait for those features (or for a first-class
+function design that replaces the interface). This is a known v1 blocker, not
+hidden by a second artificial implementation.

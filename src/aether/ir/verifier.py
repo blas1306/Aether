@@ -88,6 +88,7 @@ from .types import (
     VectorType,
     VoidType,
 )
+from .scalar_math import scalar_math_result_type
 
 
 class IRVerificationError(ValueError):
@@ -654,6 +655,26 @@ class IRVerifier:
         state: _State,
         value_types: dict[str, IRType],
     ) -> None:
+        if instruction.builtin is not None:
+            for argument in instruction.arguments:
+                self._require_defined(argument, state, value_types)
+            if instruction.result is None:
+                self._fail(f"Scalar builtin '{instruction.builtin}' must produce a result")
+            try:
+                expected_type = scalar_math_result_type(
+                    instruction.builtin,
+                    tuple(argument.type for argument in instruction.arguments),
+                )
+            except ValueError as exc:
+                self._fail(str(exc))
+            if instruction.function != instruction.builtin:
+                self._fail("Scalar builtin call must retain its canonical semantic name")
+            if instruction.result.type != expected_type:
+                self._fail(
+                    f"Scalar builtin '{instruction.builtin}' result type mismatch: "
+                    f"expected {expected_type}, got {instruction.result.type}"
+                )
+            return
         callee = self._functions.get(instruction.function)
         if callee is None:
             self._fail(f"Call to undefined function '{instruction.function}'")

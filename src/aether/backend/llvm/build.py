@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import re
 import shutil
 import subprocess
+import sys
 import tempfile
 
 from aether import ast
@@ -90,8 +92,11 @@ class LLVMBuilder:
             raise LLVMBuildError("clang is required to build native executables.")
 
         try:
+            command = [clang_path, str(llvm_path), "-o", str(output_path)]
+            if sys.platform != "win32" and self._requires_libm(llvm_path):
+                command.append("-lm")
             completed = subprocess.run(
-                [clang_path, str(llvm_path), "-o", str(output_path)],
+                command,
                 check=False,
                 capture_output=True,
                 text=True,
@@ -115,6 +120,15 @@ class LLVMBuilder:
             clang_stdout=completed.stdout,
             clang_stderr=completed.stderr,
         )
+
+    @staticmethod
+    def _requires_libm(llvm_path: Path) -> bool:
+        llvm = llvm_path.read_text(encoding="utf-8")
+        return re.search(
+            r"(?:declare double @(?:sin|cos|tan|exp|log|log10)\(double\)|"
+            r"@llvm\.(?:sqrt|fabs|floor|ceil)\.f64)",
+            llvm,
+        ) is not None
 
     @staticmethod
     def _kept_llvm_path(output_path: Path) -> Path:

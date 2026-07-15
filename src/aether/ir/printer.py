@@ -134,7 +134,8 @@ class IRPrinter:
             )
         if isinstance(instruction, IRCall):
             arguments = ", ".join(self._value(argument) for argument in instruction.arguments)
-            call = f"call {self._global_name(instruction.function)}({arguments})"
+            operation = "builtin" if instruction.builtin is not None else "call"
+            call = f"{operation} {self._global_name(instruction.function)}({arguments})"
             if instruction.result is None:
                 return call
             return f"{self._typed_value(instruction.result)} = {call}"

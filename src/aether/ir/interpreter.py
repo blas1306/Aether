@@ -6,8 +6,11 @@ from math import trunc
 from typing import Any, Callable, NoReturn, Sequence
 
 from aether.array_safety import checked_array_length_to_int
+from aether.errors import AetherRuntimeError
 from aether.integer_arithmetic import checked_int_binary, ieee_divide
 from aether.list_safety import checked_list_index_to_int, checked_list_length_to_int
+from aether.stdlib.registry import call_builtin
+from aether.types import AetherValue
 from aether.vector_matrix_safety import (
     MATRIX_INDEX_OUT_OF_BOUNDS,
     VECTOR_INDEX_OUT_OF_BOUNDS,
@@ -84,6 +87,7 @@ from .types import (
     ArrayType,
     ClassRefType,
     DoubleType,
+    FloatType,
     IntType,
     InterfaceType,
     ListType,
@@ -294,7 +298,20 @@ class IRInterpreter:
             arguments = [
                 self._value(argument, frame) for argument in instruction.arguments
             ]
-            result = self.call(instruction.function, arguments)
+            if instruction.builtin is not None:
+                try:
+                    result = call_builtin(
+                        instruction.builtin,
+                        [
+                            AetherValue(self._aether_scalar_type(argument.type), value)
+                            for argument, value in zip(instruction.arguments, arguments)
+                        ],
+                        self._output_writer or (lambda _text: None),
+                    ).value
+                except AetherRuntimeError as exc:
+                    raise IRExecutionError(str(exc)) from exc
+            else:
+                result = self.call(instruction.function, arguments)
             if instruction.result is not None:
                 frame.values[instruction.result] = result
             return False, None, None
@@ -917,6 +934,16 @@ class IRInterpreter:
         if isinstance(target_type, IntType):
             return trunc(value)
         raise IRExecutionError(f"IR cast to '{target_type}' is not supported")
+
+    @staticmethod
+    def _aether_scalar_type(type_: object) -> str:
+        if isinstance(type_, IntType):
+            return "int"
+        if isinstance(type_, FloatType):
+            return "float"
+        if isinstance(type_, DoubleType):
+            return "double"
+        raise IRExecutionError(f"IR scalar builtin does not support argument type '{type_}'")
 
     @staticmethod
     def _check_array_index(array: Any, index: Any) -> None:

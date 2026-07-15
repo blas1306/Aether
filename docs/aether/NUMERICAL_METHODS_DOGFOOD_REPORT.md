@@ -1,14 +1,14 @@
 # Informe de fricciones: métodos numéricos
 
-Revisión: 14 de julio de 2026. Programa observado:
+Revisión: 15 de julio de 2026. Programa observado:
 [`examples/numerical_methods/`](../../examples/numerical_methods/README.md).
 
 El programa implementa bisección, Newton-Raphson, secante, trapecios y Simpson
 en cinco módulos Aether. Se ejecutó correctamente con el intérprete AST y todas
 sus validaciones imprimieron `true`. La resolución multi-módulo native ya
 atraviesa los imports; el diagnóstico temprano actual enumera los bloqueos
-reales siguientes: interfaces, manejo de errores, comparación de strings y
-matemática escalar.
+reales siguientes: interfaces, manejo de errores y comparación de strings.
+La matemática escalar consolidada ya no aparece como bloqueo.
 
 Escala de severidad: **crítica** impide el objetivo central; **alta** bloquea un
 programa v1 razonable; **media** obliga a boilerplate o reduce calidad; **baja**
@@ -78,7 +78,8 @@ es local o cosmética.
   excepciones y muchos builtins publicados son solo AST. Un programa válido
   necesita conocer y pedir `--backend=ast`.
 - **Ejemplo mínimo:** `aether examples/numerical_methods/main.ae` informa ahora
-  `interfaces`, `error-handling`, strings parciales y `scalar-math`, no imports.
+  `interfaces`, `error-handling` y strings parciales, no imports ni matemática
+  escalar.
 - **Backend afectado:** CLI y native.
 - **Severidad:** alta.
 - **Solución recomendada:** cerrar el perfil nativo v1 o hacer que la ayuda y
@@ -88,23 +89,26 @@ es local o cosmética.
 - **¿Puede resolverse en stdlib?:** no.
 - **¿Requiere runtime/backend?:** CLI y compilador.
 
-## F05 — Matemática escalar no está bajada
+## F05 — Matemática escalar bajada (resuelto para el núcleo real)
 
-- **Clasificación:** Problema de librería estándar.
-- **Descripción:** `abs`, `sqrt`, `sin`, etc. están registrados como builtins
-  y funcionan en AST, pero una call a `abs` es rechazada por IR lowering. Los
-  algoritmos numéricos dependen al menos de `abs`.
+- **Clasificación:** Resuelto; capacidad native parcial por el subconjunto
+  complejo experimental.
+- **Descripción:** `abs`, `sqrt`, `sin`, `cos`, `tan`, `exp`, `ln`, `log`,
+  `Math.floor`, `Math.ceil`, `Math.mod`, `Math.factorial` y `Math.pi` atraviesan
+  IR, SSA y LLVM/native para `int`/`double`. Los algoritmos del ejemplo ya no
+  son rechazados por sus usos de `abs`.
 - **Ejemplo mínimo:**
   `int main() { println(abs(-1.0)); return 0; }`.
-- **Backend afectado:** IR, SSA y LLVM/native.
-- **Severidad:** crítica para la identidad matemática.
-- **Solución recomendada:** calls conocidas con contratos de tipo/dominio y
-  lowering a LLVM intrinsics, `libm` o runtime; no crear un nodo AST por nombre.
-- **¿Bloquea Aether v1?:** sí para el núcleo escalar seleccionado.
+- **Backend afectado:** soporte implementado en IR, SSA y LLVM/native.
+- **Severidad:** cerrada para el núcleo real; `complex` continúa fuera del
+  perfil native.
+- **Solución aplicada:** call común con identidad builtin, intrinsics LLVM,
+  `libm` y helpers checked de runtime.
+- **¿Bloquea Aether v1?:** no para el núcleo escalar seleccionado.
 - **¿Requiere cambio de sintaxis?:** no.
 - **¿Puede resolverse en stdlib?:** parcialmente; las composiciones sí, las
   primitivas eficientes necesitan backend/runtime.
-- **¿Requiere runtime/backend?:** sí.
+- **¿Requiere runtime/backend?:** implementado; queda pendiente un ABI complejo.
 
 ## F06 — `try`/`catch` y `throw` son solo AST
 
@@ -243,7 +247,9 @@ valida:
 - precisión de trapecios y Simpson;
 - excepción por subdivisiones inválidas de Simpson.
 
-La fricción dominante no fue la sintaxis matemática: fue la brecha entre la
-superficie AST y el backend nativo. La próxima mejora de mayor retorno es el
-pipeline compilado de módulos, seguido por callables tipados y matemática
-escalar conocida por el backend.
+La matemática escalar ya no bloquea native. El ejemplo completo todavía no
+compila por interfaces, `throw`/`try-catch` y comparación general de strings.
+La próxima mejora de mayor retorno es un callable tipado mínimo para funciones
+top-level; después conviene decidir el modelo de errores compilado. Globals e
+inicialización de módulos siguen siendo deuda general, pero no son el bloqueo
+que reporta este ejemplo declarativo.

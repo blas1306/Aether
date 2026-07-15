@@ -582,7 +582,7 @@ class SSABuilder:
             result = None
             if instruction.result is not None:
                 result = self._define_value(instruction.result, state.value_map)
-            return SSACall(instruction.function, arguments, result)
+            return SSACall(instruction.function, arguments, result, instruction.builtin)
 
         if isinstance(instruction, IRPrint):
             value = self._resolve_value(instruction.value, state.value_map)

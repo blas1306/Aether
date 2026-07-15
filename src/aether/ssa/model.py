@@ -18,7 +18,9 @@ from aether.instruction_effects import (
     UnknownCallMixin,
     MEMORY_READ,
     PURE,
+    InstructionEffects,
 )
+from aether.scalar_math import scalar_math_may_trap
 from aether.ir.types import IRType, VectorType
 
 
@@ -78,10 +80,22 @@ class SSACast(CheckedCastMixin, SSAInstruction):
 
 
 @dataclass(frozen=True)
-class SSACall(UnknownCallMixin, SSAInstruction):
+class SSACall(SSAInstruction):
     function: str
     arguments: tuple[SSAValue, ...] = ()
     result: SSAValue | None = None
+    builtin: str | None = None
+
+    @property
+    def effects(self):
+        if self.builtin is None:
+            return UnknownCallMixin.effects
+        if scalar_math_may_trap(
+            self.builtin,
+            tuple(argument.type for argument in self.arguments),
+        ):
+            return InstructionEffects(may_trap=True)
+        return PURE
 
 
 @dataclass(frozen=True)

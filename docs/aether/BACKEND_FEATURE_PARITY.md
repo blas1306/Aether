@@ -78,7 +78,7 @@ pero concat, comparación general e interpolación siguen fuera del subconjunto.
 | Overflow entero y negación mínima | — | — | permite runtime | C: panic i32 | C `may_trap` | C | C | C | C | C | C preserva traps | C intrinsics checked | C | E2E AST/IR/native | P | Completo | Contrato implementado después de la auditoría histórica. |
 | División por cero | — | — | permite runtime | C | C | C | C | C | C | C | C | C | C | E2E | P | Completo | Int hace panic; double usa IEEE-754 en los tres backends. |
 | `%` truncante | C | C | C | C int/double | C `rem` | C | C | C int/double | C | C | C | P: solo int | P | AST+int native | C | Parcial | LLVM no emite `frem`; divisor cero double difiere en mensaje/camino. |
-| `Math.mod` floor-mod | llamada normal | C | C | C | N | N | N | N | N | N | N | N | AST | AST | C | Solo AST | Es builtin de namespace, no operador. |
+| `Math.mod` floor-mod | llamada normal | C | C | C | C call builtin | C | C | C | C | C | C checked | C helper tipado | runtime mínimo | AST/IR/native | C | Completo int/double | Es builtin de namespace, no operador. |
 | Comparaciones ordenadas | C | C | C | C | C | C int/double | C | C | C | C | C | C int/double | — | E2E | C | Parcial | Otros numéricos/agregados tienen cobertura distinta. |
 | Igualdad escalar | C | C | C | C | C | C | C | C | C | C | C | P | P string | amplia | P | Parcial | String native por contenido solo dentro de igualdad de struct; compare string general se rechaza. |
 | Igualdad agregada | C | C | C | C | P | P Struct/Vector/Matrix | C subset | C subset | C subset | C subset | P | P | helpers | amplia por tipo | P | Parcial | Array/List generales son AST-only; structs tienen límites de tipos de campo. |
@@ -159,8 +159,8 @@ pero concat, comparación general e interpolación siguen fuera del subconjunto.
 
 | Feature | Lexer/parser | AST | Typechecker | AST interpreter | IR model | IR lowering | IR verifier | IR interpreter | SSA | SSA verifier | Optimizers | LLVM/native | Runtime | Tests | Spec/docs | Estado global | Observaciones |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Matemática escalar (`sin`, `sqrt`, `abs`, etc.) | calls | C | C | C | N | N | N | N | N | N | N | N | AST Python math | AST | C | Solo AST | `abs` basta para impedir native del núcleo numérico. |
-| `PI` y `E` | import/member | C | C para `Math.pi` | C para `Math.pi` | N | N | N | N | N | N | N | N | AST | `pi` AST | P | Parcial | Solo `Math.pi`; `E` no existe. |
+| Matemática escalar (`sin`, `sqrt`, `abs`, etc.) | calls | C | C | C IEEE/checked + sqrt complejo heredado | C call con id builtin | C reales consolidados | C firmas | C registry AST | C preserva id | C firmas | C efectos/DCE | C int/double | intrinsics, `libm`, helpers checked | AST/IR/SSA/native | C + auditoría | Parcial | `float`, builtins complejos y la divergencia `sqrt(real negativo)` quedan fuera de la paridad completa. |
+| `PI` y `E` | import/member | C | C para `Math.pi` | C para `Math.pi` | C const double | C directa | C | C | C | C | C | C inmediata | sin global/init | AST/IR/native | P | Parcial | Solo `Math.pi`; `PI` global y `E` no existen. |
 | `throw` / `try-catch` | C | C | C | C | N | N | N | N | N | N | N | N | AST exceptions | AST | C | Solo AST | Sin finally, jerarquías ni stack traces. |
 | Panics de safety | — | — | tipos preventivos | C | efectos/traps | C | C | C | C | C | C preserva | C | C `puts/exit` | E2E | P dispersa | Completo | Array/List/Vector/Matrix, overflow int y allocation. |
 | CLI run/build/inspect/bench | — | — | usa frontend | AST seleccionable | usa IR | C subset | C | C subset | export/build | C | perfiles parciales | default/build C subset | clang | tests CLI | P desactualizada | Parcial | Perfil LLVM default es mucho menor que superficie aceptada. |
@@ -182,12 +182,11 @@ pero concat, comparación general e interpolación siguen fuera del subconjunto.
    representación, encoding y ownership.
 4. **Callables tipados:** necesarios para una stdlib numérica reusable si no se
    quiere depender de interfaces AST-only.
-5. **Matemática escalar native:** hoy hasta `abs` se rechaza en lowering.
-6. **Errores básicos compilados:** decidir y completar `throw`/`try-catch` o un
+5. **Errores básicos compilados:** decidir y completar `throw`/`try-catch` o un
    perfil alternativo explícito.
-7. **IO de entrada, archivos y argumentos de proceso:** faltan capacidades
+6. **IO de entrada, archivos y argumentos de proceso:** faltan capacidades
    generales mínimas.
-8. **Paridad del perfil:** cerrar `%` double, casts, formato y combinaciones de
+7. **Paridad del perfil:** cerrar `%` double, casts, formato y combinaciones de
    agregados antes de llamar estable al subconjunto.
 
 La deuda anterior del **SSA verifier** queda cerrada: el verificador comprueba
@@ -265,8 +264,8 @@ dejan SSA inválido.
    documentación; corregir inmediatamente docs contradictorias.
 2. Extender el modelo IR con globals e inicialización explícita de módulos,
    reutilizando el `CheckedProgram` y los tests multiarchivo existentes.
-3. Llevar matemática escalar a calls conocidas (`libm`/LLVM/runtime) y cerrar
-   `%` double; esto habilita programas numéricos sin inflar el IR.
+3. Cerrar `%` double y las conversiones implícitas restantes; la matemática
+   escalar real ya usa calls conocidas sin inflar el IR.
 4. Definir callables top-level tipados y su ABI; no comenzar por closures
    capturantes.
 5. Bajar enums, después interfaces/classes con layout y ownership documentados.

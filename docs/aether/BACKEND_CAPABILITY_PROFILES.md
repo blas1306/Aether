@@ -35,8 +35,9 @@ arquitectura, no capacidades solicitadas directamente por un programa.
 
 ## Perfiles actuales
 
-La versión actual del perfil es `2`; el cambio desde `1` promueve
-`modules` e `imports` de `UNSUPPORTED` a `PARTIAL` en LLVM/native.
+La versión actual del perfil es `3`. La versión `2` promovió `modules` e
+`imports` de `UNSUPPORTED` a `PARTIAL`; la versión `3` promueve `scalar-math`
+de `UNSUPPORTED` a `PARTIAL` en LLVM/native.
 
 El perfil AST representa el intérprete de referencia. Incluye módulos,
 imports, classes, interfaces, enums, input, errores y matemática escalar. Las
@@ -50,8 +51,10 @@ funciones `void`, structs, constructores, métodos y firmas cross-module mediant
 imports completos/selectivos y aliases, con transitividad, privacidad y ciclos
 resueltos por el frontend. Globals/constantes y statements ejecutables en un
 módulo importado se rechazan temprano porque el IR aún no modela storage ni
-inicialización de módulo. Callables, classes, interfaces, enums, input, errores
-y matemática escalar siguen no soportados. Strings, primitivos, arithmetic,
+inicialización de módulo. El núcleo matemático real consolidado (`int`/`double`)
+y `Math.pi` compila; los builtins complejos experimentales se detectan y se
+rechazan, por lo que `scalar-math` es `PARTIAL`. Callables, classes, interfaces,
+enums, input y errores siguen no soportados. Strings, primitivos, arithmetic,
 structs y colecciones quedan parciales porque sus subconjuntos compilables son
 reales pero no cubren toda la superficie AST.
 Archivos y argumentos del proceso están no soportados en ambos perfiles porque
