@@ -300,6 +300,11 @@ Los perfiles incluyen AST, IR, SSA, LLVM emit, native build y native runtime.
 Son mediciones aproximadas locales, no una suite científica de performance.
 Véase [benchmarks/README.md](benchmarks/README.md).
 
+## Historia y decisiones de diseño
+
+- [Changelog de hitos](CHANGELOG.md)
+- [Evolución de Aether](docs/EVOLUTION.md)
+
 ## Arquitectura del repositorio
 
 - `src/aether/`: frontend, intérprete, IR, SSA, backend LLVM, runtime, CLI y
