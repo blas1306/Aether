@@ -42,6 +42,16 @@ class IRInstruction(EffectTrackedInstruction):
 
 
 @dataclass(frozen=True)
+class IREnumConstant:
+    """Nominal enum constant retained until LLVM code generation."""
+
+    enum_name: str
+    member_name: str
+    member_id: int
+    discriminant: int
+
+
+@dataclass(frozen=True)
 class IRConst(IRInstruction):
     result: IRValue
     value: Any

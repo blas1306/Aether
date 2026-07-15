@@ -70,8 +70,9 @@ congelada, seguridad para producción ni v1 terminada.
 
 ### Experimental o solo AST
 
-- módulos de archivo, packages, imports/aliases y visibilidad;
-- classes por referencia, interfaces y enums;
+- módulos de archivo, packages, imports/aliases y visibilidad son parciales en native;
+- classes por referencia e interfaces siguen solo AST;
+- enums nominales sin payload son completos en AST/native (`i32` interno en LLVM);
 - expression functions `f(x) = ...`, tuples y destructuring;
 - `input`, `throw`/`try`/`catch`, nullable y `complex`;
 - builtins matemáticos escalares y álgebra lineal avanzada;
@@ -82,7 +83,7 @@ compilación nativa completa.
 
 ### Planeado
 
-- módulos/imports y tipos de referencia en native;
+- globals/inicialización de módulos y tipos de referencia en native;
 - runtime string, input native, archivos y argumentos del proceso;
 - módulo `testing` y una stdlib Aether distribuible;
 - frontera futura de interoperabilidad por ABI C.
@@ -149,7 +150,7 @@ Lexer -> Parser -> TypeChecker -> EntryPointNormalizer -> AST Interpreter
 ```
 
 Es el backend con mayor cobertura y el usado por el REPL. Incluye módulos,
-classes, interfaces, enums, exceptions, input y builtins científicos que aún no
+classes, interfaces, exceptions, input y builtins científicos que aún no
 compilan.
 
 ### IR interpreter

@@ -11,6 +11,7 @@ from ..scalar_math import NATIVE_SCALAR_MATH_FUNCTIONS, SCALAR_MATH_CONSTANTS
 from ..types import (
     AetherType,
     ArrayType as AetherArrayType,
+    EnumType as AetherEnumType,
     FunctionType as AetherFunctionType,
     ListType as AetherListType,
     MatrixType as AetherMatrixType,
@@ -30,6 +31,7 @@ from .model import (
     IRCallIndirect,
     IRCompareOp,
     IRConst,
+    IREnumConstant,
     IRFunction,
     IRFunctionRef,
     IRJump,
@@ -89,6 +91,7 @@ from .types import (
     BoolType,
     ComplexType,
     DoubleType,
+    EnumType,
     FloatType,
     FunctionType,
     IntType,
@@ -121,7 +124,7 @@ _COMPARE_OPERATORS = {
 }
 _NUMERIC_IR_TYPES = (IntType, FloatType, DoubleType, ComplexType)
 _REAL_IR_TYPES = (IntType, FloatType, DoubleType)
-_EQUALITY_IR_TYPES = (IntType, DoubleType, BoolType, StringType)
+_EQUALITY_IR_TYPES = (IntType, DoubleType, BoolType, StringType, EnumType)
 _CAST_BUILTINS = {"int", "float", "double", "string", "boolean"}
 
 
@@ -141,6 +144,20 @@ class _StructInfo:
             if field_name == name:
                 return index, field_type
         return None
+
+
+@dataclass(frozen=True)
+class _EnumInfo:
+    declaration: ast.EnumDeclaration
+    variants: tuple[str, ...]
+
+    @property
+    def type(self) -> EnumType:
+        return EnumType(
+            self.declaration.name,
+            self.variants,
+            self.declaration.display_name or self.declaration.name,
+        )
 
 
 @dataclass(frozen=True)
@@ -215,6 +232,7 @@ class IRLowerer:
         self._signatures: dict[str, _FunctionSignature] = {}
         self._structs: dict[str, _StructInfo] = {}
         self._struct_names: set[str] = set()
+        self._enums: dict[str, _EnumInfo] = {}
         self._aliases: dict[str, AetherType] = {}
         self._method_names: dict[tuple[str, str], str] = {}
         self._builtin_aliases: dict[str, str] = {}
@@ -244,6 +262,18 @@ class IRLowerer:
             for statement in program.statements
             if isinstance(statement, ast.StructDeclaration)
         ]
+        enum_declarations = [
+            statement
+            for statement in program.statements
+            if isinstance(statement, ast.EnumDeclaration)
+        ]
+        self._enums = {
+            declaration.name: _EnumInfo(
+                declaration,
+                tuple(variant.name for variant in declaration.variants),
+            )
+            for declaration in enum_declarations
+        }
         self._struct_names = {declaration.name for declaration in declarations}
         self._structs = {
             declaration.name: _StructInfo(
@@ -267,6 +297,8 @@ class IRLowerer:
                 if statement.constructor is not None:
                     functions.append(self._lower_constructor(statement.constructor, info))
             elif isinstance(statement, ast.AliasDeclaration):
+                continue
+            elif isinstance(statement, ast.EnumDeclaration):
                 continue
             else:
                 self._unsupported(statement)
@@ -301,6 +333,8 @@ class IRLowerer:
                     )
                     self._method_names[(statement.name, "__ctor")] = name
             elif isinstance(statement, ast.AliasDeclaration):
+                continue
+            elif isinstance(statement, ast.EnumDeclaration):
                 continue
             else:
                 self._unsupported(statement)
@@ -1450,6 +1484,30 @@ class IRLowerer:
                 result = context.temporary(self._lower_type(type_name))
                 context.block.instructions.append(IRConst(result, value))
                 return result
+            if dotted is not None:
+                enum_name, separator, member_name = dotted.rpartition(".")
+                enum_info = self._enums.get(enum_name) if separator else None
+                if enum_info is not None:
+                    try:
+                        member_id = enum_info.variants.index(member_name)
+                    except ValueError:
+                        self._fail(
+                            f"IR backend cannot resolve enum member '{dotted}'.",
+                            expression,
+                        )
+                    result = context.temporary(enum_info.type)
+                    context.block.instructions.append(
+                        IRConst(
+                            result,
+                            IREnumConstant(
+                                enum_name,
+                                member_name,
+                                member_id,
+                                member_id,
+                            ),
+                        )
+                    )
+                    return result
             target = self._lower_expression(expression.target, context)
             if isinstance(target.type, StructType):
                 info = self._structs.get(target.type.name)
@@ -1612,7 +1670,7 @@ class IRLowerer:
             for value in values:
                 if not isinstance(
                     value.type,
-                    (IntType, BoolType, StringType, DoubleType, VectorType, MatrixType, StructType),
+                    (IntType, BoolType, StringType, DoubleType, EnumType, VectorType, MatrixType, StructType),
                 ):
                     self._fail(
                         f"IR backend {call.callee}(...) does not support values of type "
@@ -2693,12 +2751,19 @@ class IRLowerer:
                 tuple(self._lower_type(item) for item in type_name.parameter_types),
                 self._lower_type(type_name.return_type),
             )
+        if isinstance(type_name, AetherEnumType):
+            enum_info = self._enums.get(type_name.name)
+            if enum_info is not None:
+                return enum_info.type
+            self._fail(f"IR backend cannot resolve enum type '{type_name.name}'.")
         if isinstance(type_name, AetherVectorType):
             return VectorType(self._lower_type(type_name.element_type), type_name.orientation)
         if isinstance(type_name, AetherMatrixType):
             return MatrixType(self._lower_type(type_name.element_type))
         if isinstance(type_name, str) and type_name in self._struct_names:
             return StructType(type_name)
+        if isinstance(type_name, str) and type_name in self._enums:
+            return self._enums[type_name].type
         self._fail(f"IR backend does not support type '{type_name}' yet.")
 
     def _require_same_type(self, actual: IRType, expected: IRType, operation: str) -> None:

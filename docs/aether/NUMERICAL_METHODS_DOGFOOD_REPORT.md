@@ -74,15 +74,18 @@ se corrigió para no eliminar un `phi` de loop todavía usado al construir
 
 `throw`/`try-catch` sigue siendo solo AST. Para conservar una única variante
 de calidad comparable entre backends, los root solvers usan
-`RootResult(..., false)` y Simpson devuelve `0.0` ante un conteo inválido. Este
+`RootResult` con un `RootStatus` explícito y Simpson devuelve `0.0` ante un
+conteo inválido. Este
 último valor es un sentinel de dogfood, no el contrato recomendado para una
 futura `math.numerics`; un `Result` o excepciones compiladas debe resolverlo.
 
-### Resultado de convergencia
+### Resultado de convergencia: resuelto con enum nominal
 
-`RootResult.converged` no distingue bracket inválido, derivada/denominador casi
-nulos y agotamiento de iteraciones. Un enum de estado sería más expresivo
-cuando enums tengan backend native.
+`RootResult.status` usa `RootStatus` con `Converged`, `MaxIterations`,
+`InvalidInterval` y `ZeroDerivative`. Los tres algoritmos ya no esconden causas
+esperables tras un booleano. El enum atraviesa imports selectivos, campo de
+struct, returns, comparaciones, IR, SSA y LLVM/native con output idéntico al
+intérprete AST.
 
 ### Testing y distribución
 
@@ -100,6 +103,7 @@ options struct es preferible a ampliar la gramática solo por este ejemplo.
 La suite automatizada cubre convergencia y precisión de los tres métodos de
 raíces, bracket inválido, derivada y denominador casi nulos, precisión de
 trapecios/Simpson y subdivisiones inválidas. El mismo source multi-módulo pasa
-AST y clang real con output idéntico. El bloqueo crítico original —pasar una
+AST y clang real con output idéntico, incluyendo el enum de estado. El bloqueo
+crítico original —pasar una
 función matemática reutilizable sin interfaz AST-only— queda cerrado dentro
 del alcance deliberadamente `PARTIAL` de callables top-level sin captura.

@@ -25,6 +25,7 @@ from .types import (
     ArrayType,
     ClassType,
     EnumType,
+    EnumIdentity,
     FunctionType,
     InterfaceType,
     ListType,
@@ -106,6 +107,7 @@ class TypeChecker:
         self.imported_symbol_origins: dict[str, str] = {}
         self.private_imported_symbols: dict[str, set[str]] = {}
         self._diagnostic_errors: list[AetherTypeError] | None = None
+        self._module_identity = import_stack[-1] if import_stack else "__entry__"
 
     @property
     def loaded_file_modules(self) -> dict[str, tuple[ast.Program, "TypeChecker"]]:
@@ -114,6 +116,7 @@ class TypeChecker:
         return dict(self._loaded_file_modules)
 
     def check(self, program: ast.Program) -> None:
+        self._module_identity = program.package_name or (self.import_stack[-1] if self.import_stack else "__entry__")
         self._validate_import_bindings(program.statements)
         self._prepare_imports(program.statements)
         self._declare_enum_headers(program.statements)
@@ -129,6 +132,7 @@ class TypeChecker:
         self._validate_type_aliases()
 
     def check_collecting_errors(self, program: ast.Program) -> list[AetherTypeError]:
+        self._module_identity = program.package_name or (self.import_stack[-1] if self.import_stack else "__entry__")
         previous_errors = self._diagnostic_errors
         self._diagnostic_errors = []
         try:
@@ -199,6 +203,7 @@ class TypeChecker:
                 statement.name,
                 tuple(variant.name for variant in statement.variants),
                 statement.visibility,
+                EnumIdentity(self._module_identity, statement.name),
             )
 
     def _declare_interface_headers(self, statements: list[ast.Statement]) -> None:
@@ -1929,7 +1934,7 @@ class TypeChecker:
                             line=expression.line,
                             column=expression.column,
                         )
-                    return EnumType(enum_symbol.name)
+                    return EnumType(enum_symbol.name, enum_symbol.identity)
                 try:
                     return infer_builtin_constant_type(canonical_member)
                 except AetherRuntimeError:
@@ -2737,7 +2742,7 @@ class TypeChecker:
                 line=getattr(location, "line", None),
                 column=getattr(location, "column", None),
             )
-        return EnumType(enum_name)
+        return EnumType(enum_name, enum.identity)
 
     def _input_call_type(
         self,
@@ -2986,7 +2991,8 @@ class TypeChecker:
                 struct = self.structs[type_name]
                 return ClassType(type_name) if struct.kind == "class" else type_name
             if type_name in self.enums:
-                return EnumType(type_name)
+                enum = self.enums[type_name]
+                return EnumType(type_name, enum.identity)
             if type_name in self.interfaces:
                 return InterfaceType(type_name)
             if type_name not in AETHER_TYPES:

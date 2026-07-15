@@ -27,6 +27,7 @@ from aether.ir.types import (
     VoidType,
 )
 from aether.ir.scalar_math import scalar_math_result_type
+from aether.ir.model import IREnumConstant
 
 from .model import (
     SSAArrayGet,
@@ -360,7 +361,7 @@ class SSAVerifier:
                 self._require_defined(instruction.value, value_types)
                 if not isinstance(
                     instruction.value.type,
-                    (IntType, BoolType, StringType, DoubleType, VectorType, MatrixType, StructType),
+                    (IntType, BoolType, StringType, DoubleType, EnumType, VectorType, MatrixType, StructType),
                 ):
                     self._fail(
                         "Print value must be scalar, Vector, or Matrix, "
@@ -1626,6 +1627,29 @@ class SSAVerifier:
         value = instruction.value
         result_type = instruction.result.type
 
+        if isinstance(value, IREnumConstant):
+            if not isinstance(result_type, EnumType):
+                self._fail(
+                    f"Enum const type mismatch: expected enum {value.enum_name}, got {result_type}"
+                )
+            if value.enum_name != result_type.name:
+                self._fail(
+                    f"Enum const identity mismatch: expected {result_type.name}, got {value.enum_name}"
+                )
+            if not 0 <= value.member_id < len(result_type.variants):
+                self._fail(
+                    f"Enum const member id {value.member_id} is invalid for {result_type.name}"
+                )
+            if result_type.variants[value.member_id] != value.member_name:
+                self._fail(
+                    f"Enum const member '{value.member_name}' does not match declaration {result_type.name}"
+                )
+            if value.discriminant != value.member_id:
+                self._fail(
+                    f"Enum const discriminant {value.discriminant} is invalid for member '{value.member_name}'"
+                )
+            return
+
         if isinstance(value, bool):
             expected: IRType | tuple[type[IRType], ...] = BoolType()
         elif isinstance(value, int):
@@ -1768,7 +1792,7 @@ class SSAVerifier:
                     f"Compare op '{operator}' requires compatible operands, "
                     f"got {left} and {right}"
                 )
-            if not isinstance(left, (IntType, DoubleType, BoolType, StringType, StructType)):
+            if not isinstance(left, (IntType, DoubleType, BoolType, StringType, StructType, EnumType)):
                 self._fail(
                     f"Compare op '{operator}' does not support operands of type {left}"
                 )
@@ -1884,6 +1908,8 @@ class SSAVerifier:
             self._fail(f"Invalid SSA type for {context}: {type_!r}")
 
     def _is_valid_type(self, type_: IRType) -> bool:
+        if isinstance(type_, EnumType):
+            return bool(type_.name) and bool(type_.variants) and len(set(type_.variants)) == len(type_.variants)
         if isinstance(
             type_,
             (
@@ -1897,7 +1923,6 @@ class SSAVerifier:
                 StructType,
                 ClassRefType,
                 InterfaceType,
-                EnumType,
                 FunctionType,
             ),
         ):

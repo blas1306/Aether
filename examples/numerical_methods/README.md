@@ -5,7 +5,7 @@ algorithms written entirely in Aether:
 
 - bisection, Newton-Raphson, and secant methods;
 - trapezoid and Simpson integration;
-- `RootResult` as a structured convergence result;
+- `RootResult` as a structured convergence result with nominal `RootStatus`;
 - tolerance and iteration limits;
 - invalid brackets, near-zero derivatives/denominators, and invalid Simpson
   subdivisions;
@@ -42,10 +42,20 @@ function pointer and has exact signature compatibility. Closures, lambdas,
 bound methods, builtin references, and returning callable values remain out of
 scope. A top-level wrapper can expose a builtin when needed.
 
+## Root status API
+
+`Results.ae` declares the payload-free enum `RootStatus` with `Converged`,
+`MaxIterations`, `InvalidInterval`, and `ZeroDerivative`. `RootResult.status`
+uses that type directly, so callers compare qualified members instead of
+interpreting a boolean or integer error code. Bisection reports invalid input
+and invalid brackets as `InvalidInterval`; Newton and secant report a near-zero
+derivative/denominator as `ZeroDerivative`; exhausted loops report
+`MaxIterations`.
+
 ## Remaining error-model boundary
 
 Native `throw`/`try-catch` is still unsupported. To keep one honest program
-executable by both backends, invalid numerical inputs return the existing
-failure representation: root solvers return `RootResult(..., false)`, while an
+executable by both backends, invalid numerical inputs return an explicit
+failure representation: root solvers return a `RootResult` status enum, while an
 invalid integration interval count returns `0.0`. The last choice is only a
 dogfood sentinel; it is not proposed as the final numerical-library error API.

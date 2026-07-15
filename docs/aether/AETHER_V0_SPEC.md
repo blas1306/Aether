@@ -993,6 +993,14 @@ struct Result {
 println(SolverStatus.Converged); // SolverStatus.Converged
 ```
 
+The runtime value retains the enum declaration identity, variant identity, and
+its zero-based source-order discriminant. AST, IR, and SSA keep the nominal
+type; LLVM/native lowers the ABI value to `i32`. That integer representation is
+internal and does not introduce an implicit conversion to or from `int`, nor a
+stable external C enum ABI. Imports and aliases preserve the owning
+module/declaration identity, so homonymous enums from different modules remain
+incompatible.
+
 Packaged files export only public enums:
 
 ```aether
@@ -1022,6 +1030,8 @@ Current enum limitations:
 - No custom constructors.
 - No `match` or `switch` yet.
 - No per-variant visibility.
+- No explicit numeric discriminants or implicit integer casts.
+- No flags/bitwise enum semantics or reflection.
 
 ## Visibility Modifiers
 

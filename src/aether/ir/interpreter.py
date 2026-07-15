@@ -32,6 +32,7 @@ from .model import (
     IRCallIndirect,
     IRCompareOp,
     IRConst,
+    IREnumConstant,
     IRFunction,
     IRFunctionRef,
     IRInstruction,
@@ -89,6 +90,7 @@ from .types import (
     ArrayType,
     ClassRefType,
     DoubleType,
+    EnumType,
     FloatType,
     IntType,
     InterfaceType,
@@ -157,6 +159,10 @@ class IRInterpreter:
     ) -> str:
         if isinstance(value, bool):
             return "true" if value else "false"
+        if isinstance(value_type, EnumType):
+            if not isinstance(value, IREnumConstant) or value.enum_name != value_type.name:
+                raise IRExecutionError("IR Enum print requires a matching nominal enum value")
+            return f"{value_type.display_name or value_type.name}.{value.member_name}"
         if isinstance(value_type, VectorType):
             if not isinstance(value, list) or aggregate_shape is None:
                 raise IRExecutionError("IR Vector print requires a shaped vector value")
@@ -205,6 +211,8 @@ class IRInterpreter:
             return f'"{escaped}"'
         if isinstance(value, bool):
             return "true" if value else "false"
+        if isinstance(value_type, EnumType):
+            return self._format_print_value(value, value_type, None)
         if isinstance(value_type, StructType):
             return self._format_print_value(value, value_type, None)
         return str(value)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .types import AetherType
+from .types import AetherType, EnumIdentity
 
 
 @dataclass(frozen=True)
@@ -38,6 +38,7 @@ class EnumSymbol:
     name: str
     variants: tuple[str, ...]
     visibility: str | None = None
+    identity: EnumIdentity | None = None
 
 
 @dataclass(frozen=True)

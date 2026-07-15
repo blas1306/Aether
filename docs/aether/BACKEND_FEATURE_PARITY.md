@@ -1,7 +1,7 @@
 # Auditoría completa de paridad de backends
 
-Última revisión: 14 de julio de 2026, sobre `a7a59b0` más el ejemplo dogfood de
-métodos numéricos. Este documento reemplaza como referencia canónica a la
+Última revisión: 15 de julio de 2026, incluyendo enums native y el ejemplo dogfood
+de métodos numéricos. Este documento reemplaza como referencia canónica a la
 auditoría histórica de `docs/compiler/`.
 
 ## Criterio
@@ -128,11 +128,11 @@ interpolación quedan fuera del subconjunto.
 | Struct fields/constructores | C | C | C nominal | C | C definiciones/new/get/set | C subset | C | C | C | C | C | C subset | helpers print/equality | E2E dedicado | P obsoleta | Parcial | Core int/double/bool/string/nested y Array/List escalares; aún hay límites de campo. |
 | Métodos de struct y `this` | C | C | C mutabilidad | C | C funciones + method result | C | C | C | C | C | C | C | — | E2E | P | Completo | Para tipos de firma soportados por backend. |
 | Semántica por valor de struct | — | C | C const | C copia | C reconstrucción | C | C | C | C | C | C | C by-value | — | E2E copia/arg/return | C | Completo | Campos reference mantienen copia shallow deliberada. |
-| Igualdad/print de struct | C | C | C comparabilidad | C | C recursivo subset | C | C | C | C | C | C | C subset | helpers | E2E | P | Parcial | Enum/nullable/Vector/Matrix como campos esperan soporte adicional. |
+| Igualdad/print de struct | C | C | C comparabilidad | C | C recursivo subset | C | C | C | C | C | C | C subset | helpers | E2E | P | Parcial | Enum ya está soportado como campo; nullable/Vector/Matrix conservan límites. |
 | Classes por referencia | C | C | C visibilidad/alias | C | P tipo nominal | N | P nominal | N | N | N | N | N | AST objects | amplia AST | C | Solo AST | Sin ownership/layout native. |
 | Constructores/métodos/`this` de class | C | C | C | C | N | N | N | N | N | N | N | N | AST | amplia AST | C | Solo AST | Public/private funciona en frontend. |
 | Interfaces y dispatch | C | C | C conformidad | C struct/class | P tipo nominal | N | P nominal | N | N | N | N | N | AST dispatch | amplia AST + dogfood | C | Solo AST | Bloquea callables por interfaz en el ejemplo numérico. |
-| Enums sin payload | C | C | C nominal | C | P tipo nominal | N | P nominal | N | N | N | N | N | AST | AST | C | Solo AST | Igualdad e impresión funcionan solo AST. |
+| Enums sin payload | C | C | C identidad módulo/declaración | C valor nominal+discriminante | C `enum Name` + constante nominal | C | C miembros/discriminantes/tipos | C | C phis/tipos | C nominal/dominancia | C folding preserva tipo | C `i32` ABI interno | metadata de impresión | AST+IR+SSA+clang O0/O1/O2 | C | Completo | Sin payload, ADT, casts implícitos, bit flags ni pattern matching nuevo. Imports, aliases, homónimos, structs, arrays/list compatibles y callables funcionan. |
 | Genéricos de usuario | P: se reconocen para rechazo | P | N | N | N | N | N | N | N | N | N | N | N | negativos | C como no soportado | No implementado | Array/List/Vector/Matrix son genéricos privilegiados, no evidencia de generics generales. |
 
 ## Array, List, Vector y Matrix
@@ -178,8 +178,8 @@ interpolación quedan fuera del subconjunto.
 1. **Inicialización y globals de módulos:** declaraciones soportadas ya cruzan
    imports; falta storage e inicialización single-execution para el resto de la
    semántica AST.
-2. **Classes, interfaces y enums native:** la promesa generalista está partida;
-   structs ya no son el bloqueo principal.
+2. **Classes e interfaces native:** la promesa generalista sigue partida;
+   structs y enums simples ya no son el bloqueo principal.
 3. **Strings completos:** falta concat/equality/interpolación general,
    representación, encoding y ownership.
 4. **Callables avanzados:** el subconjunto top-level tipado ya permite una
@@ -271,7 +271,7 @@ dejan SSA inválido.
    escalar real ya usa calls conocidas sin inflar el IR.
 4. Mantener el ABI de callables top-level tipados y diseñar closures solo si
    casos de uso posteriores justifican una representación `{code, environment}`.
-5. Bajar enums, después interfaces/classes con layout y ownership documentados.
+5. Diseñar interfaces/classes con layout, dispatch y ownership documentados.
 6. Completar runtime string y luego IO de entrada/archivos/args.
 7. Promover el ejemplo numérico a `math.numerics` solo después de callables,
    módulos native y un módulo `testing` mínimo.

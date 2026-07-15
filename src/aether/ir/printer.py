@@ -17,6 +17,7 @@ from .model import (
     IRCallIndirect,
     IRCompareOp,
     IRConst,
+    IREnumConstant,
     IRFunction,
     IRFunctionRef,
     IRInstruction,
@@ -400,6 +401,8 @@ class IRPrinter:
 
     @staticmethod
     def _literal(value: Any) -> str:
+        if isinstance(value, IREnumConstant):
+            return f"{value.enum_name}.{value.member_name}#{value.discriminant}"
         if value is None:
             return "null"
         if isinstance(value, bool):

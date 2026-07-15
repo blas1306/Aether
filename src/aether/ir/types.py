@@ -148,6 +148,8 @@ class InterfaceType(IRType):
 @dataclass(frozen=True)
 class EnumType(IRType):
     name: str
+    variants: tuple[str, ...] = ()
+    display_name: str | None = None
 
     def __str__(self) -> str:
         return f"enum {self.name}"

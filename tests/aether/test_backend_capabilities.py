@@ -44,7 +44,7 @@ def _required(source: str, *, source_root: Path | None = None):
 
 
 def test_profiles_are_versioned_identified_and_cover_the_canonical_catalog() -> None:
-    assert CAPABILITY_PROFILE_VERSION == "4"
+    assert CAPABILITY_PROFILE_VERSION == "5"
     assert AST_CAPABILITY_PROFILE.backend is BackendIdentity.AST
     assert NATIVE_CAPABILITY_PROFILE.backend is BackendIdentity.NATIVE
     assert AST_CAPABILITY_PROFILE.version == CAPABILITY_PROFILE_VERSION
@@ -156,10 +156,8 @@ int main() {
     issues = backend_capability_issues(typed, BackendIdentity.NATIVE)
 
     assert [issue.requirement.capability for issue in issues].count(Capability.SCALAR_MATH) == 0
-    assert {issue.requirement.capability for issue in issues} >= {
-        Capability.CLASSES,
-        Capability.ENUMS,
-    }
+    assert {issue.requirement.capability for issue in issues} >= {Capability.CLASSES}
+    assert Capability.ENUMS not in {issue.requirement.capability for issue in issues}
 
 
 def test_ast_accepts_feature_marked_complete() -> None:

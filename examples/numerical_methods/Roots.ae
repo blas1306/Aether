@@ -2,6 +2,7 @@ package Roots;
 
 from Functions import ScalarCallable;
 from Results import RootResult;
+from Results import RootStatus;
 
 public RootResult bisection(
     ScalarCallable target,
@@ -11,19 +12,19 @@ public RootResult bisection(
     int maxIterations
 ) {
     if tolerance <= 0.0 || maxIterations <= 0 || left >= right {
-        return RootResult((left + right) / 2.0, 0, false);
+        return RootResult((left + right) / 2.0, 0, RootStatus.InvalidInterval);
     }
 
     double fLeft = target(left);
     double fRight = target(right);
     if abs(fLeft) <= tolerance {
-        return RootResult(left, 0, true);
+        return RootResult(left, 0, RootStatus.Converged);
     }
     if abs(fRight) <= tolerance {
-        return RootResult(right, 0, true);
+        return RootResult(right, 0, RootStatus.Converged);
     }
     if fLeft * fRight > 0.0 {
-        return RootResult((left + right) / 2.0, 0, false);
+        return RootResult((left + right) / 2.0, 0, RootStatus.InvalidInterval);
     }
 
     int iterations = 0;
@@ -34,7 +35,7 @@ public RootResult bisection(
         iterations = iterations + 1;
 
         if abs(fMiddle) <= tolerance || abs(right - left) / 2.0 <= tolerance {
-            return RootResult(middle, iterations, true);
+            return RootResult(middle, iterations, RootStatus.Converged);
         }
         if fLeft * fMiddle < 0.0 {
             right = middle;
@@ -43,7 +44,7 @@ public RootResult bisection(
             fLeft = fMiddle;
         }
     }
-    return RootResult(middle, iterations, false);
+    return RootResult(middle, iterations, RootStatus.MaxIterations);
 }
 
 public RootResult newton(
@@ -54,7 +55,7 @@ public RootResult newton(
     int maxIterations
 ) {
     if tolerance <= 0.0 || maxIterations <= 0 {
-        return RootResult(initial, 0, false);
+        return RootResult(initial, 0, RootStatus.InvalidInterval);
     }
 
     double x = initial;
@@ -62,18 +63,21 @@ public RootResult newton(
     while iterations < maxIterations {
         double fx = target(x);
         if abs(fx) <= tolerance {
-            return RootResult(x, iterations, true);
+            return RootResult(x, iterations, RootStatus.Converged);
         }
 
         double slope = derivative(x);
         if abs(slope) <= tolerance {
-            return RootResult(x, iterations, false);
+            return RootResult(x, iterations, RootStatus.ZeroDerivative);
         }
 
         x = x - fx / slope;
         iterations = iterations + 1;
     }
-    return RootResult(x, iterations, abs(target(x)) <= tolerance);
+    if abs(target(x)) <= tolerance {
+        return RootResult(x, iterations, RootStatus.Converged);
+    }
+    return RootResult(x, iterations, RootStatus.MaxIterations);
 }
 
 public RootResult secant(
@@ -84,7 +88,7 @@ public RootResult secant(
     int maxIterations
 ) {
     if tolerance <= 0.0 || maxIterations <= 0 {
-        return RootResult(current, 0, false);
+        return RootResult(current, 0, RootStatus.InvalidInterval);
     }
 
     double fPrevious = target(previous);
@@ -92,12 +96,12 @@ public RootResult secant(
     int iterations = 0;
     while iterations < maxIterations {
         if abs(fCurrent) <= tolerance {
-            return RootResult(current, iterations, true);
+            return RootResult(current, iterations, RootStatus.Converged);
         }
 
         double denominator = fCurrent - fPrevious;
         if abs(denominator) <= tolerance {
-            return RootResult(current, iterations, false);
+            return RootResult(current, iterations, RootStatus.ZeroDerivative);
         }
 
         double next = current - fCurrent * (current - previous) / denominator;
@@ -107,5 +111,8 @@ public RootResult secant(
         fCurrent = target(current);
         iterations = iterations + 1;
     }
-    return RootResult(current, iterations, abs(fCurrent) <= tolerance);
+    if abs(fCurrent) <= tolerance {
+        return RootResult(current, iterations, RootStatus.Converged);
+    }
+    return RootResult(current, iterations, RootStatus.MaxIterations);
 }

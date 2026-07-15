@@ -499,8 +499,9 @@ The user-facing supported IR backend subset is:
 - the documented struct and collection subsets
 - combined multi-module declarations and cross-module calls
 - typed capture-free top-level function references and indirect calls
+- nominal payload-free enums, including constants, equality, phis and calls
 
-The remaining broad exclusions include classes, interfaces, enums, exceptions,
+The remaining broad exclusions include classes, interfaces, exceptions,
 closures/lambdas/bound methods, native module globals/initialization, JIT, Rust
 code generation, and the feature-specific gaps recorded in the capability
 profile. Callable values are deliberately limited to user-defined top-level
@@ -827,6 +828,13 @@ categories:
 | `class Name` | Reference to a named class instance |
 | `interface Name` | Interface-typed value or dispatch reference |
 | `enum Name` | Named enum value |
+
+Implemented enums carry the collision-free semantic declaration name plus the
+ordered variant table in `EnumType`. `IREnumConstant` records enum name, member
+name, member id, and discriminant. Verifiers reject unresolved enum types,
+invalid members/discriminants, enum/int mixing, cross-enum comparisons, and
+phis with different nominal types. LLVM alone erases the representation to
+`i32`; frontend IR and SSA never do.
 
 These spellings are provisional. In particular, the implementation may choose
 `i64` instead of `int`, `boolean` instead of `bool`, or explicit forms such as

@@ -35,10 +35,12 @@ arquitectura, no capacidades solicitadas directamente por un programa.
 
 ## Perfiles actuales
 
-La versión actual del perfil es `4`. La versión `2` promovió `modules` e
+La versión actual del perfil es `5`. La versión `2` promovió `modules` e
 `imports` de `UNSUPPORTED` a `PARTIAL`; la versión `3` promovió `scalar-math`
 de `UNSUPPORTED` a `PARTIAL` en LLVM/native; la versión `4` incorpora el
-subconjunto de callables top-level tipados y sin captura en ambos backends.
+subconjunto de callables top-level tipados y sin captura en ambos backends. La
+versión `5` promueve `enums` a `COMPLETE` en LLVM/native para la semántica
+existente de enums nominales sin payload.
 
 El perfil AST representa el intérprete de referencia. Incluye módulos,
 imports, classes, interfaces, enums, input, errores y matemática escalar. Las
@@ -62,8 +64,12 @@ bajan a punteros LLVM tipados y las llamadas indirectas conservan efectos
 desconocidos. Funciona con imports, aliases, parámetros primitivos, `void` y
 structs por valor compatibles con el ABI actual. No incluye closures, lambdas,
 captura, métodos enlazados, builtins como valores, funciones de expresión,
-retorno de callables ni funciones genéricas no especializadas. Classes,
-interfaces, enums, input y errores siguen no soportados. Strings, primitivos,
+retorno de callables ni funciones genéricas no especializadas. Los enums sin
+payload son `COMPLETE`: conservan identidad módulo/declaración en frontend,
+IR y SSA, usan discriminantes deterministas por orden fuente, cruzan firmas,
+structs, colecciones compatibles, imports/aliases y se imprimen como
+`EnumName.VariantName`; LLVM los representa como `i32`. Classes, interfaces,
+input y errores siguen no soportados. Strings, primitivos,
 arithmetic, structs y colecciones quedan parciales porque sus subconjuntos
 compilables son reales pero no cubren toda la superficie AST.
 Archivos y argumentos del proceso están no soportados en ambos perfiles porque

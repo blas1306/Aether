@@ -6,6 +6,7 @@ from aether.ir.types import (
     ArrayType,
     BoolType,
     DoubleType,
+    EnumType,
     IntType,
     ListType,
     MatrixType,
@@ -521,7 +522,7 @@ class LLVMListRuntime:
 
     @staticmethod
     def list_contains_helper_name(type_: object) -> str:
-        if isinstance(type_, IntType):
+        if isinstance(type_, (IntType, EnumType)):
             return "aether_list_contains_int"
         if isinstance(type_, DoubleType):
             return "aether_list_contains_double"
@@ -535,7 +536,7 @@ class LLVMListRuntime:
 
     @staticmethod
     def list_index_of_helper_name(type_: object) -> str:
-        if isinstance(type_, IntType):
+        if isinstance(type_, (IntType, EnumType)):
             return "aether_list_index_of_int"
         if isinstance(type_, DoubleType):
             return "aether_list_index_of_double"
@@ -549,7 +550,7 @@ class LLVMListRuntime:
 
     @staticmethod
     def list_search_helper_name(type_: object) -> str:
-        if isinstance(type_, IntType):
+        if isinstance(type_, (IntType, EnumType)):
             return "aether_list_search_int"
         if isinstance(type_, DoubleType):
             return "aether_list_search_double"

@@ -1,8 +1,14 @@
 package Results;
 
+public enum RootStatus {
+    Converged,
+    MaxIterations,
+    InvalidInterval,
+    ZeroDerivative
+}
+
 public struct RootResult {
     double value;
     int iterations;
-    boolean converged;
+    RootStatus status;
 }
-

@@ -26,6 +26,11 @@ class ArrayType:
     element_type: AetherType
 
     def __post_init__(self) -> None:
+        # Nominal names are resolved by the typechecker after parsing.  Keep
+        # primitive validation here, but do not reject a syntactically valid
+        # enum/struct name before its declaration table exists.
+        if isinstance(self.element_type, str) and self.element_type != "void":
+            return
         if not is_known_type(self.element_type):
             raise AetherTypeError(f"Unknown array element type '{type_to_string(self.element_type)}'.")
 
@@ -48,6 +53,8 @@ class ListType:
     element_type: AetherType
 
     def __post_init__(self) -> None:
+        if isinstance(self.element_type, str) and self.element_type != "void":
+            return
         if not is_known_type(self.element_type):
             raise AetherTypeError(f"Unknown list element type '{type_to_string(self.element_type)}'.")
 
@@ -241,22 +248,40 @@ class NullableType:
         return hash(("Nullable", self.base_type))
 
 
+@dataclass(frozen=True)
+class EnumIdentity:
+    """Stable nominal identity for a source enum declaration.
+
+    ``owner`` is the semantic module/package id, never an absolute path.
+    ``declaration`` is the declaration name within that module.
+    """
+
+    owner: str
+    declaration: str
+
+    def __str__(self) -> str:
+        return f"{self.owner}.{self.declaration}"
+
+
 @dataclass(frozen=True, eq=False)
 class EnumType:
     name: str
+    identity: EnumIdentity | None = None
 
     def __str__(self) -> str:
         return self.name
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, EnumType):
+            if self.identity is not None or other.identity is not None:
+                return self.identity is not None and self.identity == other.identity
             return self.name == other.name
         if isinstance(other, str):
             return self.name == other
         return False
 
     def __hash__(self) -> int:
-        return hash(("Enum", self.name))
+        return hash(("Enum", self.identity if self.identity is not None else self.name))
 
 
 @dataclass(frozen=True, eq=False)
@@ -377,10 +402,30 @@ class ClassInstance:
     field_order: tuple[str, ...]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class EnumValue:
     enum_name: str
     variant_name: str
+    enum_id: EnumIdentity | None = None
+    member_id: int = 0
+    discriminant: int = 0
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, EnumValue):
+            return False
+        if self.enum_id is not None or other.enum_id is not None:
+            return (
+                self.enum_id is not None
+                and self.enum_id == other.enum_id
+                and self.member_id == other.member_id
+                and self.discriminant == other.discriminant
+            )
+        return self.enum_name == other.enum_name and self.variant_name == other.variant_name
+
+    def __hash__(self) -> int:
+        if self.enum_id is not None:
+            return hash((self.enum_id, self.member_id, self.discriminant))
+        return hash((self.enum_name, self.variant_name))
 
 
 @dataclass(frozen=True)

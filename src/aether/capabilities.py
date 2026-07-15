@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from .pipeline import TypedProgram
 
 
-CAPABILITY_PROFILE_VERSION = "4"
+CAPABILITY_PROFILE_VERSION = "5"
 
 
 class BackendIdentity(str, Enum):
@@ -235,6 +235,7 @@ _NATIVE_COMPLETE = {
     Capability.FOR,
     Capability.BREAK,
     Capability.CONTINUE,
+    Capability.ENUMS,
 }
 _NATIVE_UNSUPPORTED = {
     Capability.INPUT,
@@ -243,7 +244,6 @@ _NATIVE_UNSUPPORTED = {
     Capability.CLASS_CONSTRUCTORS,
     Capability.CLASS_METHODS,
     Capability.INTERFACES,
-    Capability.ENUMS,
     Capability.GENERICS,
     Capability.ERROR_HANDLING,
     Capability.FILES,
@@ -323,6 +323,7 @@ E2E_TESTED_CAPABILITIES: Mapping[BackendIdentity, frozenset[Capability]] = Mappi
                 Capability.FOR,
                 Capability.BREAK,
                 Capability.CONTINUE,
+                Capability.ENUMS,
             }
         ),
     }

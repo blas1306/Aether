@@ -164,6 +164,13 @@ class _ModuleRewriter:
                 name=mangle_symbol(symbol.id) if symbol is not None else node.name,
                 target_type=self.type_name(node.target_type),
             )
+        if isinstance(node, ast.EnumDeclaration):
+            symbol = self._own_symbol(node.name, "enum") if top_level else None
+            return replace(
+                node,
+                name=mangle_symbol(symbol.id) if symbol is not None else node.name,
+                display_name=node.display_name or node.name,
+            )
         if isinstance(node, ast.VarDeclaration):
             return replace(
                 node,
@@ -279,6 +286,15 @@ class _ModuleRewriter:
             return node
         if isinstance(node, ast.FieldAccess):
             dotted = self._field_access_name(node)
+            enum_reference, separator, variant = dotted.rpartition(".") if dotted is not None else ("", "", "")
+            enum_symbol = self.module.symbol_references.get(enum_reference) if separator else None
+            if enum_symbol is not None and enum_symbol.id.kind == "enum":
+                return ast.FieldAccess(
+                    ast.Identifier(mangle_symbol(enum_symbol.id), node.line, node.column),
+                    variant,
+                    node.line,
+                    node.column,
+                )
             symbol = self.module.symbol_references.get(dotted) if dotted is not None else None
             if symbol is not None and symbol.id.kind == "function":
                 return ast.Identifier(mangle_symbol(symbol.id), node.line, node.column)

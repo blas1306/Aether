@@ -128,6 +128,9 @@ class EnumDeclaration:
     line: int = 1
     column: int = 1
     visibility: Visibility = None
+    # Backend-only canonicalization may rename ``name`` for collision-free
+    # linkage while retaining the source spelling used by print/diagnostics.
+    display_name: str | None = None
 
 
 @dataclass(frozen=True)

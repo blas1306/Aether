@@ -4,7 +4,8 @@ from dataclasses import dataclass
 import re
 from typing import Any, Callable
 
-from aether.ir.types import ArrayType, BoolType, DoubleType, FunctionType, IntType, ListType, MatrixType, MethodResultType, StringType, StructType, VectorType, VoidType
+from aether.ir.model import IREnumConstant
+from aether.ir.types import ArrayType, BoolType, DoubleType, EnumType, FunctionType, IntType, ListType, MatrixType, MethodResultType, StringType, StructType, VectorType, VoidType
 from aether.ssa.model import (
     SSAArrayGet,
     SSAArrayLength,
@@ -627,8 +628,13 @@ class LLVMPrinter:
 
         if (
             isinstance(instruction.result.type, BoolType)
-            and isinstance(instruction.left.type, IntType)
-            and isinstance(instruction.right.type, IntType)
+            and (
+                isinstance(instruction.left.type, IntType)
+                and isinstance(instruction.right.type, IntType)
+                or isinstance(instruction.left.type, EnumType)
+                and instruction.left.type == instruction.right.type
+                and instruction.operator in {"eq", "ne"}
+            )
         ):
             operation = "icmp"
             predicate = self._INT_COMPARE_OPERATORS.get(instruction.operator)
@@ -695,7 +701,7 @@ class LLVMPrinter:
         field_type: object,
     ) -> str:
         result = self._synthetic_temp("struct.compare.field")
-        if isinstance(field_type, (IntType, BoolType)):
+        if isinstance(field_type, (IntType, BoolType, EnumType)):
             lines.append(f"{result} = icmp eq {llvm_type(field_type)} {left}, {right}")
             return result
         if isinstance(field_type, DoubleType):
@@ -1003,6 +1009,14 @@ class LLVMPrinter:
                 )
             )
 
+        if isinstance(instruction.value.type, EnumType):
+            lines, selected = self._enum_text_selection(instruction.value.type, value)
+            lines.append(
+                f"{call_result} = call i32 (ptr, ...) @printf("
+                f"ptr @.aether.io.string{suffix}, ptr {selected})"
+            )
+            return "\n  ".join(lines)
+
         if isinstance(instruction.value.type, VectorType):
             self._uses_array_type = True
             if instruction.aggregate_shape is None or len(instruction.aggregate_shape) != 1:
@@ -1106,6 +1120,13 @@ class LLVMPrinter:
                 f"{selected} = select i1 {value}, ptr @.aether.io.true, ptr @.aether.io.false",
                 f"{result} = call i32 (ptr, ...) @printf(ptr @.aether.io.string, ptr {selected})",
             ])
+            return
+        if isinstance(type_, EnumType):
+            enum_lines, selected = self._enum_text_selection(type_, value)
+            lines.extend(enum_lines)
+            lines.append(
+                f"{result} = call i32 (ptr, ...) @printf(ptr @.aether.io.string, ptr {selected})"
+            )
             return
         if isinstance(type_, StructType):
             lines.extend(self._print_struct_value(type_, value, newline=False))
@@ -2932,8 +2953,8 @@ class LLVMPrinter:
         return f"{result} = sext i32 {index} to i64"
 
     def _sizeof(self, type_: object) -> int:
-        if isinstance(type_, (IntType, BoolType)):
-            return 4 if isinstance(type_, IntType) else 1
+        if isinstance(type_, (IntType, EnumType, BoolType)):
+            return 1 if isinstance(type_, BoolType) else 4
         if isinstance(type_, DoubleType):
             return 8
         if isinstance(type_, (StringType, ArrayType, ListType, VectorType, MatrixType)):
@@ -2994,6 +3015,14 @@ class LLVMPrinter:
         return name
 
     def _literal(self, value: Any, result: SSAValue) -> str:
+        if isinstance(result.type, EnumType):
+            if not isinstance(value, IREnumConstant):
+                raise LLVMBackendError(
+                    "LLVM enum constants require nominal IREnumConstant metadata"
+                )
+            if value.enum_name != result.type.name:
+                raise LLVMBackendError("LLVM enum constant identity mismatch")
+            return str(value.discriminant)
         if isinstance(result.type, IntType):
             if isinstance(value, bool) or not isinstance(value, int):
                 raise LLVMBackendError(
@@ -3021,6 +3050,24 @@ class LLVMPrinter:
         raise LLVMBackendError(
             f"LLVM backend does not support SSAConst of type {result.type}"
         )
+
+    def _enum_text_selection(self, type_: EnumType, value: str) -> tuple[list[str], str]:
+        invalid = self._string_global(f"<invalid {type_.display_name or type_.name}>")
+        selected = invalid.name
+        lines: list[str] = []
+        display_name = type_.display_name or type_.name
+        for discriminant, member_name in enumerate(type_.variants):
+            matches = self._synthetic_temp("print.enum.match")
+            updated = self._synthetic_temp("print.enum.text")
+            member = self._string_global(f"{display_name}.{member_name}")
+            lines.extend(
+                [
+                    f"{matches} = icmp eq i32 {value}, {discriminant}",
+                    f"{updated} = select i1 {matches}, ptr {member.name}, ptr {selected}",
+                ]
+            )
+            selected = updated
+        return lines, selected
 
     def _string_global(self, value: str) -> _StringGlobal:
         existing = self._string_globals_by_value.get(value)

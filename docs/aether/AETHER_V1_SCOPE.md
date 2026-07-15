@@ -1,7 +1,7 @@
 # Alcance formal de Aether v1
 
 Estado del documento: propuesta normativa de alcance, revisada contra el
-repositorio el 14 de julio de 2026. Describe qué debe significar **v1**; no
+repositorio el 15 de julio de 2026. Describe qué debe significar **v1**; no
 declara que el estado actual ya sea v1.
 
 ## Identidad
@@ -55,7 +55,7 @@ La fuente de detalle por etapa es
 | Structs por valor | Estable en el núcleo | Mantener construcción, métodos, copia, parámetros, retorno, igualdad e impresión para campos soportados; documentar el ABI. |
 | Classes por referencia | Solo AST | Bajar layout, construcción, aliasing, visibilidad, métodos y ownership al backend sin convertirlas accidentalmente en valores. |
 | Interfaces | Solo AST | Bajar representación y dispatch para structs y classes, preservando semántica de valor/referencia. |
-| Enums sin payload | Solo AST | Bajar representación, variantes, igualdad, impresión y uso en structs/funciones. Los payloads no son requisito v1. |
+| Enums sin payload | Estable AST/native | Mantener identidad nominal, discriminantes deterministas, igualdad, impresión y uso en structs/funciones/colecciones compatibles. Payloads, ADTs y pattern matching nuevo no son requisito v1. |
 | Strings | Parcial | Literales, variables, parámetros, retorno, impresión, concatenación, igualdad e interpolación deben tener contrato de encoding y ownership coherente en native. |
 | `Array<T>` | Estable en el núcleo | Mantener literal, get/set, length, slicing, sort y bounds/overflow checks; definir qué métodos derivados quedan en stdlib. |
 | `List<T>` | Estable en el núcleo | Mantener get/set, growth, mutaciones, copy, búsqueda, reverse y sort; cerrar ownership/liberación sin introducir GC híbrido. |

@@ -5,6 +5,7 @@ from Problems import quadraticMinusTwo;
 from Problems import quadraticMinusTwoDerivative;
 from Problems import square;
 from Results import RootResult;
+from Results import RootStatus;
 from Roots import bisection;
 from Roots import newton;
 from Roots import secant;
@@ -13,19 +14,19 @@ RootResult bisected = bisection(quadraticMinusTwo, 0.0, 2.0, 1e-10, 100);
 RootResult newtonResult = newton(quadraticMinusTwo, quadraticMinusTwoDerivative, 1.0, 1e-10, 100);
 RootResult secantResult = secant(quadraticMinusTwo, 0.0, 2.0, 1e-10, 100);
 
-println("bisection converged: ", bisected.converged);
+println("bisection converged: ", bisected.status == RootStatus.Converged);
 println("bisection accurate: ", abs(bisected.value * bisected.value - 2.0) < 1e-8);
-println("newton converged: ", newtonResult.converged);
+println("newton converged: ", newtonResult.status == RootStatus.Converged);
 println("newton accurate: ", abs(newtonResult.value * newtonResult.value - 2.0) < 1e-8);
-println("secant converged: ", secantResult.converged);
+println("secant converged: ", secantResult.status == RootStatus.Converged);
 println("secant accurate: ", abs(secantResult.value * secantResult.value - 2.0) < 1e-8);
 
 RootResult invalidBracket = bisection(noRealRoot, -1.0, 1.0, 1e-10, 100);
 RootResult zeroDerivative = newton(quadraticMinusTwo, quadraticMinusTwoDerivative, 0.0, 1e-10, 100);
 RootResult zeroSecantDenominator = secant(quadraticMinusTwo, -1.0, 1.0, 1e-10, 100);
-println("invalid bracket rejected: ", !invalidBracket.converged);
-println("zero derivative rejected: ", !zeroDerivative.converged);
-println("zero secant denominator rejected: ", !zeroSecantDenominator.converged);
+println("invalid bracket rejected: ", invalidBracket.status == RootStatus.InvalidInterval);
+println("zero derivative rejected: ", zeroDerivative.status == RootStatus.ZeroDerivative);
+println("zero secant denominator rejected: ", zeroSecantDenominator.status == RootStatus.ZeroDerivative);
 
 double trapezoidValue = trapezoid(square, 0.0, 1.0, 100);
 double simpsonValue = simpson(square, 0.0, 1.0, 100);

@@ -27,6 +27,7 @@ from .types import (
     AetherExceptionValue,
     ClassInstance,
     ClassType,
+    EnumIdentity,
     EnumType,
     EnumValue,
     FunctionType,
@@ -325,6 +326,8 @@ class Interpreter:
         self.structs: dict[str, ast.StructDeclaration] = {}
         self.struct_methods: dict[str, dict[str, Function]] = {}
         self.enums: dict[str, ast.EnumDeclaration] = {}
+        self._enum_identity_by_declaration_id: dict[int, EnumIdentity] = {}
+        self._module_identity = import_stack[-1] if import_stack else "__entry__"
         self.interfaces: dict[str, ast.InterfaceDeclaration] = {}
         self.source_root = Path(source_root).expanduser().resolve() if source_root is not None else Path.cwd()
         self.import_stack = import_stack
@@ -335,6 +338,7 @@ class Interpreter:
         self.last_exit_code = 0
 
     def interpret(self, program: ast.Program) -> Environment:
+        self._module_identity = program.package_name or (self.import_stack[-1] if self.import_stack else "__entry__")
         self._interpret_depth += 1
         self.last_exit_code = 0
         try:
@@ -492,6 +496,10 @@ class Interpreter:
             return
         if isinstance(statement, ast.EnumDeclaration):
             self.enums[statement.name] = statement
+            self._enum_identity_by_declaration_id[id(statement)] = EnumIdentity(
+                self._module_identity,
+                statement.name,
+            )
             return
         if isinstance(statement, ast.Assignment):
             if isinstance(statement.name, ast.MatrixIndexExpression):
@@ -777,8 +785,11 @@ class Interpreter:
                             column=expression.column,
                         )
                     return AetherValue(
-                        EnumType(enum_declaration.name),
-                        EnumValue(enum_declaration.name, variant_name),
+                        EnumType(
+                            enum_declaration.name,
+                            self._enum_identity(enum_declaration),
+                        ),
+                        self._make_enum_value(enum_declaration, variant_name),
                     )
                 builtin_constant = get_builtin_constant(canonical_member)
                 if builtin_constant is not None:
@@ -1565,7 +1576,39 @@ class Interpreter:
                 line=getattr(location, "line", None),
                 column=getattr(location, "column", None),
             )
-        return AetherValue(EnumType(enum_name), EnumValue(enum_name, variant_name))
+        return AetherValue(
+            EnumType(enum_name, self._enum_identity(declaration)),
+            self._make_enum_value(declaration, variant_name),
+        )
+
+    def _enum_identity(self, declaration: ast.EnumDeclaration) -> EnumIdentity:
+        identity = self._enum_identity_by_declaration_id.get(id(declaration))
+        if identity is None:
+            identity = EnumIdentity(self._module_identity, declaration.name)
+            self._enum_identity_by_declaration_id[id(declaration)] = identity
+        return identity
+
+    def _make_enum_value(
+        self,
+        declaration: ast.EnumDeclaration,
+        variant_name: str,
+        *,
+        display_name: str | None = None,
+    ) -> EnumValue:
+        variants = tuple(variant.name for variant in declaration.variants)
+        try:
+            member_id = variants.index(variant_name)
+        except ValueError as exc:
+            raise AetherTypeError(
+                f"Enum '{declaration.name}' has no variant '{variant_name}'."
+            ) from exc
+        return EnumValue(
+            display_name or declaration.name,
+            variant_name,
+            self._enum_identity(declaration),
+            member_id,
+            member_id,
+        )
 
     def _read_field(self, target: ast.Expression, field_name: str, env: Environment) -> AetherValue:
         struct_value = self._evaluate(target, env)
@@ -1969,6 +2012,14 @@ class Interpreter:
         module_interpreter.interpret(program)
         loaded = (program, module_interpreter)
         self._loaded_file_modules[module_name] = loaded
+        # Imported functions retain declaration objects from their defining
+        # module (including transitively imported enum declarations).  Copy
+        # the semantic identities alongside those closures so executing the
+        # function in the caller cannot accidentally re-home an enum to the
+        # entry module.
+        self._enum_identity_by_declaration_id.update(
+            module_interpreter._enum_identity_by_declaration_id
+        )
         self._record_qualified_module_exports(module_name, program, module_interpreter)
         self.imported_modules.add(module_name)
         return loaded
@@ -2010,7 +2061,11 @@ class Interpreter:
                 )
                 self.struct_methods[local_name] = dict(module_interpreter.struct_methods.get(statement.symbol, {}))
             elif statement.symbol in self._exported_enums(program, module_interpreter):
-                self.enums[local_name] = module_interpreter.enums[statement.symbol]
+                declaration = module_interpreter.enums[statement.symbol]
+                self.enums[local_name] = declaration
+                self._enum_identity_by_declaration_id[id(declaration)] = module_interpreter._enum_identity(
+                    declaration
+                )
             elif statement.symbol in self._exported_interfaces(program, module_interpreter):
                 self.interfaces[local_name] = module_interpreter.interfaces[statement.symbol]
             elif statement.symbol in self._exported_aliases(program, module_interpreter):
@@ -2055,6 +2110,9 @@ class Interpreter:
             self.qualified_structs[f"{module_name}.{name}"] = declaration
         for name, declaration in self._exported_enums(program, module_interpreter).items():
             self.qualified_enums[f"{module_name}.{name}"] = declaration
+            self._enum_identity_by_declaration_id[id(declaration)] = module_interpreter._enum_identity(
+                declaration
+            )
 
     def _resolve_module_member(self, visible_name: str | None) -> str | None:
         if visible_name is None:
@@ -2197,7 +2255,8 @@ class Interpreter:
                 declaration = self.structs[type_name]
                 return ClassType(type_name) if isinstance(declaration, ast.ClassDeclaration) else type_name
             if type_name in self.enums:
-                return EnumType(type_name)
+                declaration = self.enums[type_name]
+                return EnumType(type_name, self._enum_identity(declaration))
             if type_name in self.interfaces:
                 return InterfaceType(type_name)
             if type_name not in AETHER_TYPES:
