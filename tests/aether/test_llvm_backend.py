@@ -1380,7 +1380,7 @@ def test_string_binary_operation_has_clear_error() -> None:
 
     with pytest.raises(
         LLVMBackendError,
-        match="LLVM backend does not support string binary operations yet",
+        match="LLVM backend does not support string concatenation yet",
     ):
         print_llvm(module)
 
@@ -1414,7 +1414,7 @@ def test_string_comparison_has_clear_error() -> None:
 
     with pytest.raises(
         LLVMBackendError,
-        match="LLVM backend does not support string comparisons yet",
+        match="LLVM backend does not support string equality yet",
     ):
         print_llvm(module)
 

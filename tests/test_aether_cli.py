@@ -1227,7 +1227,7 @@ string bad(string x) {
 
     assert exit_code == EXIT_LANGUAGE_ERROR
     assert stdout == ""
-    assert "LLVM backend does not support string binary operations yet" in stderr
+    assert "LLVM backend does not support string concatenation yet" in stderr
 
 
 def test_emit_llvm_rejects_constant_string_arithmetic_without_folding(
@@ -1247,7 +1247,7 @@ string bad() {
 
     assert exit_code == EXIT_LANGUAGE_ERROR
     assert stdout == ""
-    assert "LLVM backend does not support string binary operations yet" in stderr
+    assert "LLVM backend does not support string concatenation yet" in stderr
 
 
 def test_emit_llvm_rejects_constant_string_comparison_without_folding(
@@ -1267,7 +1267,7 @@ boolean bad() {
 
     assert exit_code == EXIT_LANGUAGE_ERROR
     assert stdout == ""
-    assert "LLVM backend does not support string comparisons yet" in stderr
+    assert "LLVM backend does not support string equality yet" in stderr
 
 
 def test_emit_llvm_prints_sum(tmp_path: Path) -> None:

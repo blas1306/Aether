@@ -1,0 +1,384 @@
+# Lifecycle de valores de Aether
+
+Estado: **decisión de diseño aprobada para Aether v1**, 15 de julio de 2026.
+Este documento fija el contrato semántico que debe guiar el lowering futuro.
+La infraestructura de clasificación puede representar ya estos conceptos, pero
+la Fase 0 **no** inserta cleanup, retain/release ni destructores, y no cambia el
+ABI LLVM vigente.
+
+## 1. Vocabulario e invariantes
+
+Una ubicación está **viva** desde que termina una inicialización exitosa hasta
+que es destruida o usada como fuente de una relocation. Una ubicación no
+inicializada no contiene un valor Aether y no se puede leer ni destruir.
+Un *owning slot* mantiene las referencias owned transitivas de su valor; un
+borrow permite leer durante una región acotada y no se destruye.
+
+El compilador modelará, directa o sintéticamente, estas operaciones:
+
+```text
+init_default(destination)
+copy_init(destination, source)
+move_init(destination, source)
+assign(destination, source)
+destroy(value)
+relocate(destination, source, count)
+```
+
+`copy` crea otro valor vivo; `move` y `relocate` transfieren un valor y ponen
+fin a la vida en el origen. Por ello una copia lógica nunca se reemplaza por
+`memcpy` solo porque la representación tenga tamaño fijo.
+
+## 2. Contrato de las operaciones
+
+### `init_default(destination)`
+
+- Pre: `destination` es storage válido, alineado, sized y no inicializado.
+- Post: contiene el valor default del tipo y está vivo; no existe fuente.
+- Aliasing/self: no aplica. El storage no puede solapar otro valor vivo.
+- Panic: si puede fallar, la ubicación queda no inicializada. Quien llama
+  conserva la responsabilidad por los valores anteriores ya inicializados.
+- Bytes: `memset(0)` solo es válido si el layout declara explícitamente que el
+  patrón cero es su default. No es válido para el string futuro, cuyo default
+  es el singleton vacío no nulo.
+
+### `copy_init(destination, source)`
+
+- Pre: `destination` está no inicializado; `source` está vivo y es legible.
+- Post: ambos contienen valores lógicamente iguales e independientes respecto
+  a mutaciones permitidas; pueden compartir almacenamiento inmutable.
+- Fuente: sigue viva y conserva todo su ownership.
+- Aliasing: el storage no puede solaparse. Un borrow que designa el mismo valor
+  lógico no cambia el contrato.
+- Self: `copy_init(&x, &x)` es inválido porque `destination` no estaría sin
+  inicializar.
+- Panic: ante fallo no nace un valor completo en `destination`. Un hook
+  compuesto revierte los campos que sí llegó a inicializar, en orden inverso.
+- Bytes: `memcpy` es una implementación válida solo para tipos
+  `is_trivially_copyable`. En cualquier otro tipo debe ejecutarse el hook.
+
+### `move_init(destination, source)`
+
+- Pre: `destination` está no inicializado y `source` está vivo.
+- Post: `destination` recibe el valor y su ownership sin retain; `source` queda
+  en el estado moved-from definido por el tipo. Para string queda vivo con el
+  singleton vacío; para un tipo interno puede quedar no inicializado si su
+  contrato lo declara y el verificador impide leerlo o destruirlo.
+- Fuente: no conserva el valor original.
+- Aliasing/self: storage solapado o idéntico no es válido para `move_init`.
+- Panic: la transferencia de una representación sized no debe fallar. Si un
+  tipo requiere trabajo que puede fallar, debe completar primero la parte
+  fallable sin consumir la fuente o definir rollback explícito.
+- Bytes: una carga/store, `memcpy` o `memmove` puede mover un tipo
+  `is_trivially_relocatable`, pero debe aplicarse después el estado moved-from
+  exigido si la fuente sigue siendo una ubicación viva.
+
+### `assign(destination, source)`
+
+- Pre: ambos están vivos y los tipos son asignables.
+- Post: `destination` contiene una copia lógica del valor observado en
+  `source`; `source` sigue vivo.
+- Aliasing: debe preservar aliasing indirecto. Se adquiere primero el nuevo
+  ownership, luego se reemplaza el destino y por último se destruye el valor
+  anterior.
+- Self: es válida y no cambia el valor ni su lifetime.
+- Panic: si adquirir la copia falla, `destination` conserva el valor anterior.
+  Una vez hecho el commit, un destructor no debe producir un panic recuperable;
+  una violación interna aborta el proceso.
+- Bytes: equivale a store/memcpy solo para tipos trivialmente copiables. En
+  general no equivale a `destroy` seguido de `copy_init`, porque ese orden
+  rompe self-assignment y aliasing.
+
+### `destroy(value)`
+
+- Pre: `value` está vivo y es owned por esa ubicación.
+- Post: libera sus recursos transitivos exactamente una vez y la ubicación
+  queda no inicializada. Destruirla de nuevo es inválido.
+- Fuente/self: no hay fuente. Los borrows no se destruyen y no pueden sobrevivir
+  al owner del que dependen.
+- Panic: cleanup normal no produce un panic recuperable. Underflow, double
+  destroy o un descriptor corrupto son fallos internos/traps. Durante unwind
+  futuro, un segundo panic termina el proceso.
+- Bytes: es no-op solo cuando `needs_destroy == false`; borrar bytes no ejecuta
+  destrucción.
+
+### `relocate(destination, source, count)`
+
+- Pre: los `count` destinos están sin inicializar; los `count` orígenes están
+  vivos, forman rangos válidos del mismo tipo y la operación conoce si se
+  solapan.
+- Post: cada destino contiene el valor y ownership correspondiente; las
+  ubicaciones fuente dejan de contener objetos vivos, aunque sus bytes
+  permanezcan. No se destruyen después.
+- Fuente: se consume. Relocation **no** es copy.
+- Aliasing: rangos idénticos son no-op. Con solapamiento parcial se respeta la
+  dirección de `memmove`; nunca puede haber dos ubicaciones vivas para el mismo
+  elemento como resultado intermedio observable.
+- Self: un rango idéntico conserva sus elementos vivos y cuenta como no-op.
+- Panic: una relocation bitwise no falla. Una implementación por hooks mueve
+  en un orden seguro y debe llevar el prefijo/sufijo ya consumido para cleanup
+  preciso ante un fallo excepcional.
+- Bytes: `memmove` es válido solo para tipos `is_trivially_relocatable` y solo
+  si la vida del rango fuente termina. `memcpy` exige además ausencia de
+  solapamiento. Ninguno representa una copia lógica de un tipo no trivial.
+
+## 3. Clasificación canónica de tipos
+
+Las propiedades conceptuales son:
+
+- `is_sized`: tiene tamaño/alineación conocidos para el target;
+- `is_trivially_copyable`: copiar bytes crea un segundo valor vivo válido;
+- `is_trivially_relocatable`: mover bytes es válido si muere el origen;
+- `needs_destroy`: abandonar un valor vivo requiere un hook;
+- `contains_references`: la representación contiene referencias/descriptores,
+  aunque hoy sean inmortales o tengan aliasing deliberado;
+- `needs_retain`: una copia lógica debe adquirir ownership transitivo.
+
+`LLVMTypeLayouts` conserva estos hechos separados. Durante la transición, sus
+valores describen el ABI **actual**: el `ptr` string apunta a payload literal y
+no existe ARC. El modelo aprobado futuro cambia string y cualquier struct que
+lo contenga, pero no se activará hasta migrar toda operación de colección.
+
+| Tipo | Sized | Copy trivial actual | Relocate trivial | Destroy actual | References | Retain actual | Contrato futuro relevante |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `int`, `boolean`, `double` | sí | sí | sí | no | no | no | sin cambio |
+| `float` | frontend sí; native no | no definido native | no definido | no | no | no | fijar ABI antes de almacenarlo |
+| enum sin payload | sí | sí | sí | no | no | no | sin cambio |
+| callable top-level | una palabra donde está soportado | sí para transporte directo | sí | no | sí, a código | no | closures requerirán otro layout/lifecycle |
+| class reference | una palabra conceptual; fuera del subset native | no prometido | sí si el modelo conserva handle | por definir | sí | por definir | coordinar con ownership general de objetos |
+| string actual | sí, `ptr` a payload inmortal | sí | sí | no | sí | no | solo es seguro para transporte demostrado |
+| string aprobado | sí, handle de una palabra | **no** | sí | **sí** | sí | **sí** | default vacío; copy retain; destroy release |
+| struct | si todos los campos lo son y no hay ciclo by-value | `all(fields)` | `all(fields)` | `any(fields)` | `any(fields)` | `any(fields)` | síntesis recursiva nominal |
+| nested struct | misma regla recursiva | misma regla recursiva | misma regla recursiva | misma regla recursiva | misma regla recursiva | misma regla recursiva | los nombres no cortan el análisis |
+| `Array<T>` | descriptor sized | sí en ABI actual soportado | sí | no hoy | sí | no hoy | backing store deberá destruir/copiar `T` |
+| `List<T>` | descriptor sized | sí en ABI actual soportado | sí | no hoy | sí | no hoy | owner del buffer; growth relocaliza `T` |
+| `Vector<T>` / `Matrix<T>` | descriptor sized en subset native | sí en ABI actual | sí | no hoy | sí | no hoy | definir owner/alias de storage antes de hooks |
+
+Un tipo de colección no se declara seguro solo porque su descriptor sea
+copiable. Su operación `copy` también depende recursivamente del lifecycle de
+`T`. Hasta que existan hooks, el subset native solo admite representaciones
+para las que las operaciones actuales están demostradas; producir strings
+owned dentro de esos recorridos permanece prohibido.
+
+## 4. Lifecycle aprobado de string
+
+```text
+init_default(dst):
+    dst = empty_singleton
+
+copy_init(dst, src):
+    retain(src.handle)
+    dst.handle = src.handle
+
+move_init(dst, src):
+    dst.handle = src.handle
+    src.handle = empty_singleton
+
+assign(dst, src):
+    retain(src.handle)
+    old = dst.handle
+    dst.handle = src.handle
+    release(old)
+
+destroy(value):
+    release(value.handle)
+
+relocate(dst, src, count):
+    transferir los handles sin retain/release
+    terminar la vida de las ubicaciones fuente
+```
+
+El vacío y los literales son inmortales, por lo que retain/release son no-op
+para ellos. Todo handle Aether publicado es no nulo. `retain` comprueba overflow
+de `strong_count` antes de incrementar y hace panic; `assign` aún conserva el
+destino si falla ese retain. Relocation no deja una copia y nunca incrementa el
+contador.
+
+## 5. Síntesis para structs
+
+Para:
+
+```aether
+struct Person {
+    string name;
+    int age;
+}
+```
+
+se sintetizan hooks por campo:
+
+```text
+init_default(Person dst): init_default(dst.name); init_default(dst.age)
+copy_init(Person dst, Person src): copy_init(dst.name, src.name); copy_init(dst.age, src.age)
+move_init(Person dst, Person src): move_init(dst.name, src.name); move_init(dst.age, src.age)
+assign(Person dst, Person src): assign(dst.name, src.name); assign(dst.age, src.age)
+destroy(Person value): destroy(value.age); destroy(value.name)
+```
+
+Inicialización/copia avanza en orden de declaración; destrucción y rollback
+usan el orden inverso. Si copiar el campo `k` hace panic, se destruyen
+exactamente los campos `[0, k)` ya inicializados y el struct destino nunca se
+publica como vivo. Para el primer ARC, `retain` solo falla por overflow, que es
+un panic checked. La política sigue exigiendo rollback si el runtime soporta
+unwind; si el panic aborta el proceso no se observa leak, pero el IR debe
+conservar metadata de inicialización parcial para no cerrar esa posibilidad.
+
+`assign` de structs no puede hacerse campo a campo ingenuamente si source y
+destination se solapan. El hook debe tratar self-assignment como no-op o
+adquirir primero todas las referencias que podrían perderse antes del commit.
+
+## 6. Array y List
+
+### Array
+
+- Un literal/default inicializa elementos uno por uno y lleva un contador de
+  prefijo vivo para rollback.
+- `get` por valor ejecuta `copy_init`; un borrow efímero solo es válido si el
+  análisis prueba que no escapa.
+- `set`/overwrite ejecuta `assign`, incluyendo self-aliasing.
+- Copia y slice crean storage nuevo y hacen `copy_init` por elemento.
+- Destrucción recorre exactamente los elementos vivos y después libera storage.
+- Arrays de structs usan el hook sintetizado del struct, no búsqueda ad hoc de
+  fields string.
+
+### List
+
+- `push`/`insert` hacen `copy_init`, o `move_init` únicamente desde un temporal
+  consumible probado.
+- `pop` mueve el último elemento al resultado y reduce el rango vivo sin
+  destruir el valor transferido.
+- `removeAt` mueve el eliminado al resultado cuando existe; los restantes se
+  desplazan por relocation y ninguna ubicación fantasma se destruye.
+- `set` usa `assign`; `clear` destruye `[0, length)` una sola vez y pone length
+  en cero antes de exponer el estado final.
+- Growth reserva un buffer y relocaliza `[0, length)`. El buffer anterior se
+  libera sin destruir sus bytes ya consumidos.
+- Destrucción hace `clear` y luego libera el buffer. Capacity nunca determina
+  cuántos elementos están vivos.
+
+Para tipos no triviales, `memcpy` no es copy. `memmove` solo es relocation si
+la fuente deja de estar viva. Insert/remove con solapamiento debe elegir el
+orden correcto; ninguna operación destruye dos veces ni destruye un elemento
+que fue transferido como resultado.
+
+## 7. Convención de llamadas
+
+- Parámetros string y, por composición, parámetros aggregate se reciben
+  borrowed durante la call. Guardarlos o retornarlos exige adquirir ownership.
+- Returns transfieren un valor owned al caller.
+- Un temporal owned es responsabilidad de su expresión/scope hasta que se
+  mueve a un slot, argumento owned futuro o return; un temporal borrowed nunca
+  se destruye.
+- Calls directas, indirectas, métodos, constructors, imports cross-module,
+  builtins y runtime calls usan la misma convención declarada en la firma
+  semántica. La indirección no puede borrar los efectos de lifecycle.
+- Constructors inicializan `this`/resultado como storage parcial y solo
+  publican el valor al completar todos los campos.
+- Builtins/runtime deben declarar por parámetro `borrowed`, `consuming` o
+  `owned` y si el resultado es owned. En ausencia de declaración se asumen
+  efectos conservadores y no se eliden operaciones.
+
+Casos normativos:
+
+```aether
+string identity(string value) { return value; }
+```
+
+`value` es borrowed; el return hace retain y entrega una referencia owned.
+
+```aether
+string literal() { return "hello"; }
+```
+
+El resultado es owned por convención, pero el retain efectivo del literal
+inmortal es no-op.
+
+```aether
+string build() {
+    string result = futureConcat(...);
+    return result;
+}
+```
+
+El resultado owned del concat se mueve al local y luego al caller. El lowering
+puede transferirlo sin retain/release redundante si prueba que no existe otro
+uso ni cleanup posterior del local.
+
+## 8. Cleanup y control de flujo
+
+La estrategia aprobada es preservar scopes léxicos durante AST→IR y emitir
+operaciones de lifecycle explícitas **antes de SSA**. El lowerer mantiene una
+pila de owning slots e inserta cleanup en fin de scope, `return`, `break`,
+`continue` y cada arista que abandona una región. Ramas se unen solo después de
+reconciliar qué valores están inicializados/movidos.
+
+Un pase de ownership sobre IR previo a SSA puede complementar y verificar la
+emisión si IR conserva scope ids, estado de inicialización y ownership. No se
+recomienda que sea la única fuente de verdad. Un pase posterior a SSA es más
+difícil: los slots y scopes léxicos ya se repartieron entre valores y phis,
+returns/branches comparten aristas, y dominancia/liveness no expresan por sí
+solas qué uso consume ownership ni cómo hacer rollback parcial.
+
+Panic abortivo ejecuta la terminación segura del runtime. Si se incorpora
+unwind, cada punto que puede hacer panic necesitará una arista excepcional con
+cleanup del conjunto exacto de valores vivos.
+
+## 9. Forma futura en IR y verificación
+
+La IR semántica puede introducir operaciones genéricas:
+
+```text
+init_default T, dst
+copy_value T, dst, src
+move_value T, dst, src
+assign_value T, dst, src
+destroy_value T, value
+relocate_values T, dst, src, count
+```
+
+`retain`/`release` quedan como primitivas de lowering/runtime, no como API de
+usuario. Las operaciones genéricas sobreviven hasta que el tipo y control de
+flujo estén verificados; antes de LLVM se expanden a no-op, load/store,
+memcpy/memmove o calls/hooks recursivos. Solo retain/release/runtime calls y
+movimientos concretos necesitan llegar a LLVM.
+
+El verificador exige tipo sized, destination no inicializado donde corresponda,
+un único destroy/consume por vida, source viva, convenciones de calls/returns,
+dominancia y estado coherente en phis. Un phi de un valor owned representa un
+owner en el bloque destino y cada arista transfiere exactamente uno; no crea
+owners implícitos. Lifecycle y calls con panic son efectos observables para
+DCE. Ningún optimizador puede borrarlos, duplicarlos o moverlos a través de un
+panic/call sin prueba de equivalencia.
+
+Optimizaciones futuras, no implementadas en esta fase: pairing probado de
+retain/release, move elision, return value optimization, no-ops para inmortales,
+cleanup de temporales y devirtualización de hooks de tipos conocidos. Todas
+requieren una demostración sobre aliasing, aristas de control y panics; la
+adyacencia textual no basta.
+
+## 10. Auditoría preventiva de la representación actual
+
+Hoy string native es un `ptr` a payload estático. Copia, asignación, returns,
+structs y Array/List son seguros únicamente en el subconjunto demostrado donde
+todos los strings transportados son literales inmortales. Igualdad/concat
+generales e interpolación se rechazan temprano por operación tipada. Parsing,
+split/trim, archivos, argv e input native no existen y por ello no pueden crear
+payload owned.
+
+Los recorridos actuales de `List` hacen copy/slice/reallocation/clear con
+memcpy/memmove y sin hooks. En cuanto exista un productor owned, esos mismos
+recorridos causarían leaks, double release o dangling pointers. Por eso no se
+habilitará ningún productor dinámico ni se cambiará la clasificación efectiva
+de string hasta migrar conjuntamente structs, collections, calls y cleanup.
+
+## 11. Detalles aplazados no bloqueantes
+
+- forma exacta de metadata/operaciones IR y estrategia de unwind;
+- lifecycle general de classes y ownership de buffers Vector/Matrix;
+- optimización ARC, RVO y política de concurrencia posterior;
+- `StringView`, substring y APIs públicas de texto.
+
+El primer bloque de implementación después de esta Fase 0 es introducir las
+operaciones de lifecycle estructurales y su verificador antes de SSA, todavía
+sin cambiar strings. Luego puede migrarse de forma atómica el objeto string,
+literales/vacío, print/igualdad y todos los recorridos aggregate.

@@ -217,6 +217,80 @@ def test_partial_string_capability_accepts_transport_but_rejects_interpolation()
     assert issue.requirement.detail == "interpolated string"
 
 
+def test_string_literal_transport_is_not_mistaken_for_a_dynamic_operation() -> None:
+    typed = _typed('string choose(boolean flag) { if flag { return "yes"; } return "no"; }')
+
+    issues = backend_capability_issues(typed, BackendIdentity.NATIVE)
+
+    assert not any(issue.requirement.capability is Capability.STRINGS for issue in issues)
+    LLVMBuilder().emit_llvm(typed)
+
+
+@pytest.mark.parametrize(
+    ("operator", "detail"),
+    [("+", "string concatenation"), ("==", "string equality"), ("!=", "string equality")],
+)
+def test_native_detects_unsupported_string_operations_from_checked_operand_types(
+    operator: str,
+    detail: str,
+) -> None:
+    typed = _typed(
+        f"string operation(string left, string right) {{ "
+        f"string copy = left; boolean result = left {operator} right; return copy; }}"
+        if operator != "+"
+        else "string operation(string left, string right) { return left + right; }"
+    )
+
+    issue = next(
+        issue
+        for issue in backend_capability_issues(typed, BackendIdentity.NATIVE)
+        if issue.requirement.capability is Capability.STRINGS
+    )
+
+    assert issue.requirement.detail == detail
+    assert issue.requirement.requires_complete_support is True
+    assert issue.requirement.line == 1
+    assert issue.requirement.column > 1
+    assert detail in issue.message
+
+
+def test_string_capability_diagnostic_is_deduplicated() -> None:
+    typed = _typed(
+        "string join(string left, string right) { "
+        "string first = left + right; return first + right; }"
+    )
+
+    issues = [
+        issue
+        for issue in backend_capability_issues(typed, BackendIdentity.NATIVE)
+        if issue.requirement.capability is Capability.STRINGS
+    ]
+
+    assert len(issues) == 1
+    assert issues[0].requirement.detail == "string concatenation"
+
+
+def test_string_operations_in_imported_modules_are_inspected(tmp_path: Path) -> None:
+    (tmp_path / "Text.ae").write_text(
+        "package Text; public string join(string left, string right) { return left + right; }",
+        encoding="utf-8",
+    )
+    typed = _typed(
+        'import Text; int main() { println("transport only"); return 0; }',
+        source_root=tmp_path,
+    )
+
+    issue = next(
+        issue
+        for issue in backend_capability_issues(typed, BackendIdentity.NATIVE)
+        if issue.requirement.capability is Capability.STRINGS
+    )
+
+    assert issue.requirement.detail == "string concatenation"
+    assert issue.requirement.line == 1
+    assert issue.requirement.column > 1
+
+
 def test_numerical_methods_example_is_accepted_by_native_profile() -> None:
     example = ROOT / "examples" / "numerical_methods"
     typed = _typed((example / "main.ae").read_text(encoding="utf-8"), source_root=example)

@@ -28,6 +28,10 @@ la semántica por valor ni se sustituyeron structs por punteros.
   solapados usan `memmove`.
 - Sólo llegan a esas copias elementos clasificados como sized y trivialmente
   copiables. Los structs aceptados se verifican recursivamente.
+- La clasificación distingue además relocation trivial, `needs_destroy`,
+  referencias contenidas y `needs_retain`. Para el ABI actual de strings
+  inmortales esos hechos siguen indicando copy trivial y sin cleanup; no
+  anticipan ARC.
 - Los tipos nominales se emiten antes que los helpers que los usan.
 
 ## Subconjunto de campos admitido
@@ -67,11 +71,15 @@ Siguen fuera de alcance argumentos, archivos, parsing, split/trim, excepciones,
 GC, destructores y strings dinámicas. El tracker es una demostración directa
 desde `main`, no una CLI persistente.
 
-La próxima tarea recomendada es definir el contrato mínimo de string native
-(encoding, borrowed/owned, longitud y liberación) antes de exponer archivos o
-argv que produzcan texto dinámico.
+El contrato mínimo de string native queda aprobado en
+[`STRING_RUNTIME_DESIGN.md`](STRING_RUNTIME_DESIGN.md), y las reglas de copy,
+move, assign, destroy, colecciones, calls y cleanup en
+[`VALUE_LIFECYCLE_DESIGN.md`](../compiler/VALUE_LIFECYCLE_DESIGN.md). El tracker
+sigue usando únicamente literales transportados: no existe todavía runtime
+string dinámico ni cleanup efectivo.
 
-Ese contrato se desarrolla como propuesta en revisión en
-[`STRING_RUNTIME_DESIGN.md`](STRING_RUNTIME_DESIGN.md). El tracker sigue usando
-únicamente literales transportados; el enlace no implica que exista todavía un
-runtime string dinámico.
+La próxima implementación recomendada es introducir operaciones estructurales
+de lifecycle y su verificación antes de SSA; después debe migrarse en conjunto
+objeto/literales/vacío, print/igualdad y todos los recorridos de structs,
+Array/List. Archivos, argv, concat, parsing y split/trim siguen bloqueados hasta
+que ese recorrido esté balanceado.

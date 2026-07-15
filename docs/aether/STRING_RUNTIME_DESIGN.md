@@ -1,15 +1,16 @@
-# RFC: modelo de strings y runtime de texto de Aether
+# Decisión de diseño: modelo de strings y runtime de texto de Aether
 
-Estado: **propuesta en revisión**, 15 de julio de 2026. Este documento no es
-normativo todavía y no declara implementado ningún cambio. La especificación
-vigente, los perfiles de capacidades y el backend conservan su estado actual
-hasta que esta RFC sea aprobada y ejecutada por fases.
+Estado: **decisiones bloqueantes aprobadas para Aether v1**, 15 de julio de
+2026. Este documento es normativo como contrato de diseño, pero **no declara
+implementado el runtime**. La representación LLVM pública actual, los perfiles
+de capacidades y el subconjunto ejecutable permanecen sin cambios hasta que
+las fases de implementación correspondientes se completen.
 
-## 1. Resumen de la recomendación
+## 1. Resumen de decisiones aprobadas
 
-La recomendación para Aether v1 es:
+Para Aether v1 se aprueba:
 
-| Dimensión | Decisión propuesta |
+| Dimensión | Decisión aprobada |
 | --- | --- |
 | Semántica | `string` es un valor inmutable, no nulo, con igualdad por contenido; copiar el valor puede compartir almacenamiento. |
 | Encoding | UTF-8 válido y canónico como secuencia de bytes; sin normalización Unicode implícita. |
@@ -19,9 +20,9 @@ La recomendación para Aether v1 es:
 | Terminador | Un byte `0` adicional obligatorio por conveniencia de interoperabilidad; la longitud, nunca el terminador, es la autoridad. |
 | ABI interna | El handle se pasa y retorna por valor; fields y elementos contienen el mismo handle. No se declara una ABI C pública estable. |
 | Copia | Retain lógico al duplicar ownership; move bitwise al reubicar; release al sobrescribir o destruir. |
-| Índices | No se propone `s[i]` en v1. No se confundirá byte, code point y grapheme. |
-| Longitudes | `byteLength` O(1); `codePointCount` O(n); `graphemeCount` futuro. No se propone un `length` ambiguo para string. |
-| Orden | `==`/`!=` por contenido. Los operadores `< <= > >=` no se proponen para string v1; sort y un compare interno usan bytes UTF-8 unsigned. |
+| Índices | No existe `s[i]` en v1. No se confundirá byte, code point y grapheme. |
+| Longitudes | El objeto conserva byte length O(1); los nombres públicos quedan aplazados y no habrá un `length` ambiguo. |
+| Orden | `==`/`!=` por contenido. Los operadores `< <= > >=` no existen para string v1; sort y un compare interno usan bytes UTF-8 unsigned. |
 | Substring | Fuera del primer runtime; la primera API segura debería copiar y usar límites de code points. Las views se aplazan. |
 | División de APIs | Solo representación, validación, allocation, lifecycle y operaciones esenciales viven en runtime; algoritmos de texto viven en stdlib. |
 
@@ -30,10 +31,16 @@ una palabra en firmas, structs y colecciones— sin seguir confundiendo un valor
 Aether con un `char*`. El coste es real: antes de producir strings dinámicas el
 backend debe adquirir hooks de lifecycle y distinguir copia de reubicación.
 
+Quedan **aplazados**, y no reabren las decisiones anteriores: offsets/alignment
+físicos exactos del header, spelling de helpers, metadata IR, APIs públicas de
+longitud/parsing y mecanismo de unwind. Son **extensiones futuras** substring,
+`StringView`, graphemes, normalización/collation, hashing cacheado, SSO,
+interning dinámico, concurrencia y una ABI C versionada.
+
 ## 2. Alcance y no objetivos
 
-Esta RFC define el contrato que debe aprobarse antes de implementar el nuevo
-runtime. No implementa concatenación, interpolación native, archivos, process
+Esta decisión define el contrato aprobado que precede a la implementación del
+nuevo runtime. No implementa concatenación, interpolación native, archivos, process
 args, parsing, formatting, GC, reference counting, destructores ni cambios de
 sintaxis. Tampoco decide la gestión de memoria general de classes y
 colecciones.
@@ -187,11 +194,11 @@ dinámicas, archivos, args, parsing ni liberación.
   pero no una API de texto. `length` no acepta string.
 - Sort de strings AST usa bytes UTF-8; native usa `strcmp`. Coinciden para UTF-8
   válido sin cero interno, pero `strcmp` trunca ante un cero embebido.
-- El perfil native marca `strings` como `PARTIAL`. El detector rechaza
-  interpolación y operaciones cuando encuentra un literal string. La función
-  `_contains_string_literal` no detecta necesariamente `a + b` si ambos son
-  parámetros o variables string; ese caso puede llegar al rechazo tardío del
-  printer.
+- El perfil native marca `strings` como `PARTIAL`. Desde Fase 0, el detector
+  conserva tipos de expresión y rechaza interpolación, concatenación e igualdad
+  por la operación tipada concreta. No depende de encontrar un literal y
+  examina también módulos importados; un literal meramente transportado no se
+  rechaza.
 - Los verificadores permiten más operaciones string que LLVM. Los tests cubren
   esta divergencia y verifican el rechazo claro.
 - Los tests LLVM fijan explícitamente `string -> ptr`, globales con `\00`,
@@ -298,7 +305,7 @@ iguales. Una futura API explícita podrá normalizar o comparar ignorando case.
 
 ### 4.6 Orden
 
-Los operadores `<`, `<=`, `>` y `>=` no se proponen para string v1. El
+Los operadores `<`, `<=`, `>` y `>=` no están definidos para string v1. El
 typechecker actual ya los rechaza y esa restricción evita fingir collation
 humana.
 
@@ -311,13 +318,13 @@ después un método `compareTo` es una decisión separada.
 
 ### 4.7 Índices y longitudes
 
-No se propone `s[i]` en v1. Un índice sin unidad sería engañoso:
+No se define `s[i]` en v1. Un índice sin unidad sería engañoso:
 
 - byte: O(1), pero puede cortar UTF-8;
 - code point: requiere scan O(n) sin índice auxiliar;
 - grapheme cluster: requiere reglas Unicode extensas y versionadas.
 
-Se proponen nombres explícitos:
+Como extensión futura se consideran nombres explícitos:
 
 - `s.byteLength -> int`: cantidad de bytes, O(1), con check al estrechar i64 a
   `int` si el tipo público sigue siendo i32;
@@ -325,15 +332,15 @@ Se proponen nombres explícitos:
 - `s.graphemeCount()`: futura, fuera de v1 y probablemente dependiente de un
   módulo Unicode.
 
-No se agrega `string.length` hasta aprobar qué unidad significaría. Internamente
+No se agrega `string.length`; cualquier API futura deberá nombrar la unidad. Internamente
 el header siempre usa `i64 byte_length` aunque la API pública retorne `int`.
 
 ### 4.8 Substring y slicing
 
-No son requisito del primer runtime. La primera API recomendada es una
-`substring` que recibe índices de code points, valida límites y copia los bytes
-seleccionados a un nuevo string. Será O(n) para ubicar límites y O(k) para
-copiar.
+No hay slicing ni substring en v1 inicial. Cuando se agregue, la primera
+`substring` devolverá una copia owned, no una view. La unidad pública de sus
+índices sigue aplazada; si usa code points será O(n) para ubicar límites y O(k)
+para copiar.
 
 Las views se aplazan porque añaden offset/owner al descriptor, complican FFI y
 pueden retener un buffer enorme por una substring mínima. Una API por bytes
@@ -396,22 +403,21 @@ typedef struct AetherStringObject *AetherString;
 
 ### 7.2 Header y payload
 
-El layout v1 propuesto es:
+La forma conceptual aprobada es:
 
 ```text
-offset  size  campo
-0       8     i64 byte_length
-8       8     i64 strong_count
-16      4     i32 flags
-20      4     i32 reserved
-24      N+1   u8 data[N], u8 terminator
+i64 byte_length
+i64 strong_count
+i32 flags
+i32 reserved
+u8 data[byte_length]
+u8 terminator
 ```
 
-El header mide exactamente 24 bytes y se alinea a 8 bytes. Los enteros usan los
-anchos indicados y la endianness del target; no dependen de tamaños Python. El
-handle conserva tamaño/alineación de puntero. La implementación LLVM debe fijar
-alignment 8 para el objeto aun en targets donde el ABI natural de `i64` sea
-menor. Esta es una ABI **interna de la fase v1**, no una promesa binaria pública.
+El orden lógico, los anchos de campos y los bytes inline quedan aprobados. Los
+offsets, padding y alignment físico exactos se fijarán al implementar contra el
+DataLayout del target y sus tests. El handle conserva tamaño/alineación de
+puntero. Esta representación es interna y no es una ABI C pública estable.
 
 Flags iniciales:
 
@@ -438,17 +444,17 @@ Invariantes:
   constituyen descriptor malformado y deben atraparse en builds de runtime con
   checks, no procesarse como C string.
 
-Una allocation dinámica necesita `24 + byte_length + 1` bytes. Runtime debe
-comprobar por separado `byte_length <= INT64_MAX`, overflow de `length + 1`,
-overflow de suma con 24, límites del allocator y fallo de allocation antes de
-escribir. El máximo real es el menor entre `INT64_MAX`, `SIZE_MAX - 25` y la
-política de recursos del runtime.
+Una allocation dinámica necesita `header_size + byte_length + 1` bytes. Runtime
+debe comprobar por separado `byte_length <= INT64_MAX`, overflow de `length +
+1`, overflow al sumar el header, límites del allocator y fallo de allocation
+antes de escribir. El máximo real depende también del target y de la política
+de recursos del runtime.
 
 ### 7.3 Vacío, literal y dinámico
 
 - **Vacío:** singleton estático `{0, 0, IMMORTAL|UTF8_VALID, 0, [0]}`. Su
   handle nunca es null.
-- **Literal:** global read-only con header de 24 bytes y `N+1` bytes inline.
+- **Literal:** global read-only con el header interno y `N+1` bytes inline.
   `IMMORTAL|UTF8_VALID`, refcount cero. No se copia al heap.
 - **Dinámico:** una allocation contigua, flags `UTF8_VALID`, refcount inicial
   uno y payload terminado en cero. Después de publicarse no se modifica.
@@ -485,9 +491,9 @@ abierta la migración.
 proceso batch, pero un string que escapa del arena requiere promoción/copia o
 lifetime estático. No son la política general del valor público.
 
-### 8.2 Política mínima v1 propuesta
+### 8.2 Política mínima v1 aprobada
 
-Se propone **reference counting fuerte, no atómico e intrusivo**, solo para
+Se aprueba **reference counting fuerte, no atómico e intrusivo**, solo para
 `AetherStringObject` dinámico:
 
 - literales y vacío son `IMMORTAL` y no modifican contador;
@@ -499,7 +505,7 @@ Se propone **reference counting fuerte, no atómico e intrusivo**, solo para
 - Aether v1 no permite compartir objetos dinámicos entre threads. Antes de
   agregar threads se deberá elegir RC atómico, transferencia estática o GC.
 
-No se propone copy-on-write: los strings son inmutables. Un builder mutable
+No habrá copy-on-write: los strings son inmutables. Un builder mutable
 nunca se comparte como string y no se expone al usuario.
 
 ### 8.3 Convención de ownership interna
@@ -626,7 +632,8 @@ Para una API que exige solo `const char*`:
   interno;
 - el adaptador debe buscar cero interno en los `length` bytes y rechazarlo con
   error; entregarlo silenciosamente truncaría contenido;
-- el puntero correcto es `object + 24`, no el handle;
+- el puntero correcto se obtiene mediante el accessor interno de `data`, no
+  reinterpretando el handle como C string;
 - el borrow dura como máximo la call C; el wrapper mantiene vivo el objeto;
 - C recibe UTF-8, no locale encoding.
 
@@ -690,7 +697,8 @@ aislado desaparezca ni se cambia associativity observable. Un builder mutable:
 - usa growth checked;
 - no es un `string` hasta `finish`;
 - queda thread-confined;
-- se libera ante error/panic por la estrategia que se apruebe para cleanup.
+- se libera ante error/panic mediante lifecycle explícito antes de SSA; el
+  mecanismo exacto de unwind queda aplazado.
 
 Interpolación debe bajar a formatting de cada segmento y al mismo builder, no a
 un opcode por tipo embebido.
@@ -807,7 +815,7 @@ igualdad lean exactamente los mismos bytes. Recomendación:
 ## 19. Thread safety
 
 Los bytes inmutables y los objetos `IMMORTAL` pueden leerse concurrentemente.
-El RC no atómico propuesto no permite compartir una string dinámica entre
+El RC no atómico aprobado no permite compartir una string dinámica entre
 threads. Esto es aceptable solo mientras Aether no tenga concurrencia native.
 
 Antes de agregarla se debe aprobar una de estas políticas: RC atómico para
@@ -841,7 +849,7 @@ alto nivel; FFI trata toda memoria externa como no confiable.
 
 ## 21. Compatibilidad y migración desde el repositorio actual
 
-| Área | Estado actual | Diseño propuesto | Migración necesaria |
+| Área | Estado actual | Diseño aprobado | Migración necesaria |
 | --- | --- | --- | --- |
 | Literal | global `[N+1 x i8]`, ptr al byte 0 | global header+payload inmortal | cambiar emisión y tests; conservar UTF-8/dedupe. |
 | Parámetro | `ptr` C string por valor | `ptr` handle por valor, borrowed durante call | ABI spelling igual, significado/lifecycle nuevo. |
@@ -894,7 +902,7 @@ rechazadas antes de lowering; el detector usa tipos chequeados y detecta
 **Tests:** diagnósticos por concat/comparison/interpolación con parámetros,
 variables, imports y ubicación; perfil sigue `PARTIAL`.
 
-**Riesgo:** confundir propuesta aprobada con capacidad implementada.
+**Riesgo:** confundir decisión aprobada con capacidad implementada.
 
 **Desbloquea:** migración controlada sin errores tardíos del printer.
 
@@ -1017,49 +1025,52 @@ consideran con mediciones.
 - **ICU obligatorio:** rechazado para runtime mínimo; collation, graphemes y
   case Unicode completo pertenecen a una capa opcional/futura.
 
-## 24. Preguntas abiertas para aprobación humana
+## 24. Decisiones cerradas y detalles aplazados
 
-### Bloqueantes antes de implementar
+### Decisiones bloqueantes cerradas
 
-1. ¿Se aprueba el handle de una palabra a objeto, en lugar de `(ptr,length)`?
-2. ¿Se aprueba exactamente el header de 24 bytes, sus flags iniciales y
-   alignment 8?
-3. ¿Se aprueba RC fuerte no atómico como política inicial para strings
-   dinámicas, con strings cross-thread prohibidas hasta otra RFC?
-4. ¿Se aprueba el cero final obligatorio aun cuando toda semántica use longitud?
-5. ¿Se aprueba ABI interna por valor para el handle y resultados owned?
-6. ¿Se aprueba que `TypeLayout` separe copy, move/relocation y destroy antes de
-   habilitar cualquier productor dinámico?
-7. ¿Se aprueba UTF-8 válido como invariante estricto y error —no replacement—
-   por defecto en fronteras externas?
-8. ¿Qué mecanismo de cleanup verificable usará IR ante branches, returns y
-   panics: instrucciones retain/release explícitas, ownership SSA o un lowering
-   posterior dedicado?
+1. El valor es un handle no nulo de una palabra a objeto, no `(ptr,length)`.
+2. El objeto contiene longitud `i64`, strong count `i64`, flags/reserved `i32`
+   y bytes UTF-8 inline con terminador auxiliar. Offsets y padding físicos no
+   forman una ABI C pública y se fijarán con DataLayout al implementar.
+3. Strings dinámicas usan RC fuerte no atómico; no pueden compartirse entre
+   threads hasta aprobar otro modelo de concurrencia.
+4. El terminador cero es obligatorio pero nunca es autoridad de longitud.
+5. El handle circula por valor; parámetros son borrowed y returns owned.
+6. Lifecycle separa copy, move/relocation, assign y destroy antes de habilitar
+   productores dinámicos.
+7. UTF-8 válido es invariante estricto; fronteras externas no hacen replacement
+   silencioso.
+8. Cleanup preservará scopes durante AST→IR y emitirá lifecycle explícito antes
+   de SSA, según
+   [`VALUE_LIFECYCLE_DESIGN.md`](../compiler/VALUE_LIFECYCLE_DESIGN.md).
+9. Igualdad/desigualdad comparan contenido; no hay identidad pública ni orden
+   relacional, indexación o slicing en v1 inicial.
+10. La primera substring futura será una copia owned; `StringView` queda fuera
+    de v1 inicial.
 
-### Importantes pero aplazables
+### Detalles no bloqueantes aplazados
 
-1. ¿Se confirma que no habrá `s[i]` ni `string.length` ambiguo en v1?
-2. ¿La primera substring usa code points y copia, como recomienda esta RFC?
-3. ¿Se aprueban `byteLength` y `codePointCount` como nombres públicos?
-4. ¿Debe `compareBytes` quedar interno o exponerse como API explícita?
-5. ¿Qué forma nominal exacta tendrán los resultados de parsing mientras no
-   exista Result con payload?
-6. ¿Cuál es el límite configurable para strings/lecturas completas además del
-   límite del address space?
+1. Offsets/alignment exactos del header y nombres finales de helpers internos.
+2. Nombres públicos para byte/code-point counts y unidad de substring.
+3. Si `compareBytes` será solo interno o una API explícita.
+4. Forma nominal de parsing antes de un `Result<T,E>` con payload.
+5. Límites configurables de strings y lecturas completas.
+6. Forma exacta de metadata IR, unwind y cleanup ante panic recuperable.
 
-### Futuras
+### Extensiones futuras
 
-1. ¿RC atómico, ownership estático o GC cuando exista concurrencia?
-2. ¿Cómo se migra el header a un GC tracing y qué roots requiere el ABI?
-3. ¿Se justifica cache de hash, SSO o interning dinámico con benchmarks?
-4. ¿Qué módulo/version de Unicode proveerá graphemes, normalización y case?
-5. ¿Se expondrá alguna ABI C versionada o solo wrappers generados?
-6. ¿Se admitirán substring views bajo un tipo distinto de `string`?
+1. RC atómico, ownership estático o GC al incorporar concurrencia.
+2. Migración del header y roots para tracing GC.
+3. Cache de hash, SSO o interning dinámico solo con benchmarks.
+4. Módulo/versionado Unicode para graphemes, normalización y case.
+5. ABI C versionada o wrappers generados.
+6. Views bajo un tipo distinto de `string`.
 
 ## 25. Recomendación final y primer bloque
 
-Aether debería aprobar `string` como valor inmutable UTF-8, no nulo, con
-igualdad por bytes y almacenamiento compartido. La representación recomendada
+Aether aprueba `string` como valor inmutable UTF-8, no nulo, con
+igualdad por bytes y almacenamiento compartido. La representación aprobada
 es un handle de una palabra a un objeto inline con longitud `i64`, refcount,
 flags y terminador auxiliar. Literales son objetos inmortales; strings
 dinámicas usan RC no atómico hasta que el lenguaje tenga una política general
@@ -1071,9 +1082,9 @@ sin cambiar sintaxis. La alternativa `(ptr,length)` hace más cara toda
 colección y todavía deja ownership sin resolver; `char*` no satisface seguridad
 ni complejidad.
 
-El primer bloque recomendado, sin implementar aquí, es la **Fase 0**: aprobar
-las ocho decisiones bloqueantes y corregir la detección temprana para todas las
-operaciones string tipadas. El primer bloque de runtime posterior es la **Fase
-1 completa** —objeto, literales, vacío, print, equality y transporte— junto con
-la interfaz de lifecycle. No debe implementarse concat ni ningún productor heap
-hasta que copy/move/destroy y cleanup estén verificados.
+La **Fase 0** queda materializada por esta decisión, el contrato canónico de
+lifecycle, la clasificación y la detección temprana de operaciones string
+tipadas. El primer bloque de runtime posterior es la **Fase 1 completa**
+—objeto, literales, vacío, print, equality y transporte— junto con operaciones
+estructurales de lifecycle verificables. No debe implementarse concat ni ningún
+productor heap hasta que copy/move/destroy y cleanup estén verificados.

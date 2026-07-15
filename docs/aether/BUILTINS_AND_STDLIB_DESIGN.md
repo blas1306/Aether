@@ -26,9 +26,11 @@ Que una operación se sienta builtin no obliga a crear un nodo AST, opcode o
 helper de runtime específico. Una llamada conocida puede resolverse a stdlib,
 un LLVM intrinsic, `libm` o runtime durante lowering.
 
-La aplicación concreta de esta frontera a strings se propone en
-[`STRING_RUNTIME_DESIGN.md`](STRING_RUNTIME_DESIGN.md). Esa RFC está en revisión
-y no declara implementadas las primitivas ni el módulo `text` descritos allí.
+La aplicación concreta de esta frontera a strings se decide en
+[`STRING_RUNTIME_DESIGN.md`](STRING_RUNTIME_DESIGN.md), con lifecycle en
+[`VALUE_LIFECYCLE_DESIGN.md`](../compiler/VALUE_LIFECYCLE_DESIGN.md). El diseño
+está aprobado, pero no declara implementadas las primitivas, ARC ni el módulo
+`text` descritos allí.
 
 ## Nivel 1: builtins e intrínsecos
 
@@ -65,7 +67,7 @@ salida del crecimiento posterior.
 | Módulo | Responsabilidad | Dependencias | Mínimo v1 | Puede esperar | Escribible en Aether | Necesita runtime/intrínseco |
 | --- | --- | --- | --- | --- | --- | --- |
 | `io` | consola, streams y archivos básicos | `text`, `system` mínimo | print/println, input tipado, archivo texto básico y errores | buffering avanzado, codecs extensibles | wrappers, lectura por líneas, helpers | stdin/stdout/stderr, handles, bytes, close |
-| `text` | strings, búsqueda, split/join y conversión | runtime string | encoding/longitud definidos, concat, equality, slices o substring seguro | regex, normalización Unicode completa | algoritmos sobre iteración de code units/points | representación, allocation, decoding/encoding |
+| `text` | strings, búsqueda, split/join y conversión | runtime string | encoding/longitud definidos, concat, equality y substring owned cuando se apruebe su API | slicing/views, regex, normalización Unicode completa | algoritmos sobre iteración de code units/points | representación, allocation, decoding/encoding |
 | `collections` | colecciones generales | generics, equality; hashing para Map/Set | APIs derivadas de Array/List que se seleccionen | Map, Set, Queue, Stack si hashing/generics no están listos | la mayoría de algoritmos y estructuras | allocation y primitivas Array/List |
 | `time` | reloj monotónico, fecha/duración mínima | `system` | reloj monotónico para medición | zonas horarias, calendarios | Duration y formato parcial | clocks del SO |
 | `system` | proceso, args, entorno, exit, plataforma | runtime/ABI C | argumentos, código de salida, variables de entorno seleccionadas | procesos hijos completos | wrappers y validación | llamadas del SO/libc |

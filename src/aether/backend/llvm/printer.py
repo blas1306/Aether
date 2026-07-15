@@ -532,8 +532,8 @@ class LLVMPrinter:
             or isinstance(instruction.right.type, StringType)
         ):
             raise LLVMBackendError(
-                "LLVM backend does not support string binary operations yet; "
-                "only string literals as ptr values are supported"
+                "LLVM backend does not support string concatenation yet; "
+                "only current literal-backed ptr transport is supported"
             )
 
         if (
@@ -628,8 +628,8 @@ class LLVMPrinter:
             or isinstance(instruction.right.type, StringType)
         ):
             raise LLVMBackendError(
-                "LLVM backend does not support string comparisons yet; "
-                "only string literals as ptr values are supported"
+                "LLVM backend does not support string equality yet; "
+                "only current literal-backed ptr transport is supported"
             )
 
         if (

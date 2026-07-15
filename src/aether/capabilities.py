@@ -619,12 +619,14 @@ class _CapabilityDetector:
                     detail="double remainder",
                     requires_complete_support=True,
                 )
-            if node.operator in {"+", "==", "!="} and _contains_string_literal(node):
-                detail = (
-                    "string binary operations"
-                    if node.operator == "+"
-                    else "string comparisons"
-                )
+            left_type = self.checker.type_of_expression(node.left)
+            right_type = self.checker.type_of_expression(node.right)
+            if (
+                left_type == "string"
+                and right_type == "string"
+                and node.operator in {"+", "==", "!="}
+            ):
+                detail = "string concatenation" if node.operator == "+" else "string equality"
                 self._record(
                     Capability.STRINGS,
                     node,
@@ -892,7 +894,7 @@ def backend_capability_issues(
         if (
             backend is BackendIdentity.NATIVE
             and requirement.capability is Capability.STRINGS
-            and requirement.detail in {"string binary operations", "string comparisons"}
+            and requirement.detail in {"string concatenation", "string equality"}
         ):
             message = (
                 f"LLVM backend does not support {requirement.detail} yet; "
@@ -955,14 +957,6 @@ def _ast_hint(
         "This is valid Aether for the current AST profile; run it with "
         "'aether --backend=ast'."
     )
-
-
-def _contains_string_literal(node: object) -> bool:
-    if isinstance(node, ast.Literal):
-        return node.type_name == "string"
-    if isinstance(node, ast.BinaryExpression):
-        return _contains_string_literal(node.left) or _contains_string_literal(node.right)
-    return False
 
 
 def _contains_double_literal(node: object) -> bool:

@@ -60,12 +60,16 @@ funciones top-level sin captura en AST y native; permanece `PARTIAL` porque no
 incluye closures, lambdas, métodos enlazados, builtins como valores ni retorno
 de callables. Strings/native sigue `PARTIAL` por transporte de
 literales/parámetros/retornos, mientras concat, comparación general e
-interpolación quedan fuera del subconjunto.
+interpolación quedan fuera del subconjunto. El detector consulta tipos de
+operandos registrados por el typechecker: no rechaza un literal transportado y
+sí señala `a+b`/`a==b` sin depender de literales, incluidos módulos importados.
 
-La propuesta para reemplazar el transporte `char*` por un modelo con UTF-8,
-longitud y ownership explícitos está en
-[`STRING_RUNTIME_DESIGN.md`](STRING_RUNTIME_DESIGN.md). La RFC está en revisión
-y no cambia ningún estado de esta matriz.
+La decisión aprobada para reemplazar en fases el transporte `char*` por un
+modelo con UTF-8, longitud y ownership explícitos está en
+[`STRING_RUNTIME_DESIGN.md`](STRING_RUNTIME_DESIGN.md), y el contrato de
+lifecycle en
+[`VALUE_LIFECYCLE_DESIGN.md`](../compiler/VALUE_LIFECYCLE_DESIGN.md). La
+decisión aún no cambia representación ni estados de esta matriz.
 
 ## Tipos, declaraciones y operadores
 
@@ -116,7 +120,7 @@ y no cambia ningún estado de esta matriz.
 | Feature | Lexer/parser | AST | Typechecker | AST interpreter | IR model | IR lowering | IR verifier | IR interpreter | SSA | SSA verifier | Optimizers | LLVM/native | Runtime | Tests | Spec/docs | Estado global | Observaciones |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | String literal/variable/arg/return | C | C | C | C | C ptr-like | C | C | C | C | C | P | C para transporte | P sin ownership | backend subset | C | Parcial | Falta modelo de encoding/heap/vida útil para strings no literales. |
-| Concat, igualdad e interpolación string | C | C | C | C | P binary/compare | P | C nominal | P | P | P | P | N general | AST | AST+rechazos | C | Solo AST | Interpolación se resuelve en AST; LLVM rechaza binary string. |
+| Concat, igualdad e interpolación string | C | C | C | C | P binary/compare | P | C nominal | P | P | P | P | N general | AST | AST+rechazos tipados | C | Solo AST | Interpolación se resuelve en AST; LLVM rechaza cada operación por tipo antes de lowering, también sin literales y en imports. |
 | `print` / `println` escalares | llamada | C | C variádico | C | C `IRPrint` | C | C | C | C | C | C efecto | C | `printf`/helpers | E2E | C | Completo | Formato double general aún usa contratos host distintos en casos extremos. |
 | Print Array/List | llamada | C | C | C | P tipos | N general | N | N | N | N | N | N | AST | AST | P | Solo AST | Struct con campos Array/List escalares tiene helper específico, no print general de la colección. |
 | Print Struct/Vector/Matrix | llamada | C | C | C | C subset | C subset | C | C | C | C | C | C subset | helpers | E2E | P | Parcial | Shape/tipos de campos limitan el subconjunto struct. |

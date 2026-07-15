@@ -42,7 +42,10 @@ class TypeLayout:
     sized: bool
     size_operand: str | None
     trivially_copyable: bool
+    trivially_relocatable: bool
+    needs_destroy: bool
     contains_references: bool
+    needs_retain: bool
     supported_as_collection_element: bool
     reason: str | None = None
     alignment: str = "target-natural"
@@ -118,13 +121,13 @@ class LLVMTypeLayouts:
 
     @staticmethod
     def _fixed(type_: IRType, size: int) -> TypeLayout:
-        return TypeLayout(llvm_type(type_), True, str(size), True, False, True)
+        return TypeLayout(llvm_type(type_), True, str(size), True, True, False, False, False, True)
 
     @staticmethod
     def _reference(type_: IRType) -> TypeLayout:
         rendered = llvm_type(type_)
         size = f"ptrtoint (ptr getelementptr ({rendered}, ptr null, i64 1) to i64)"
-        return TypeLayout(rendered, True, size, True, True, True)
+        return TypeLayout(rendered, True, size, True, True, False, True, False, True)
 
     def _struct(self, type_: StructType) -> TypeLayout:
         definition = self._structs.get(type_.name)
@@ -162,7 +165,10 @@ class LLVMTypeLayouts:
             True,
             size,
             True,
+            all(field.trivially_relocatable for field in field_layouts),
+            any(field.needs_destroy for field in field_layouts),
             any(field.contains_references for field in field_layouts),
+            any(field.needs_retain for field in field_layouts),
             True,
         )
 
@@ -172,4 +178,4 @@ class LLVMTypeLayouts:
             rendered = llvm_type(type_)
         except LLVMBackendError:
             rendered = "<unsupported>"
-        return TypeLayout(rendered, False, None, False, False, False, reason)
+        return TypeLayout(rendered, False, None, False, False, False, False, False, False, reason)

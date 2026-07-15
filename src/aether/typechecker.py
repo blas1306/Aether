@@ -80,6 +80,10 @@ class TypeChecker:
         ] = {}
         self._module_function_declaration_ids: set[int] = set()
         self.expression_function_call_stack: set[str] = set()
+        # Semantic facts retained after checking for consumers such as backend
+        # capability validation.  AST nodes are not universally hashable, so
+        # identity is the stable key for the lifetime of the checked program.
+        self._expression_types: dict[int, AetherType | None] = {}
         self.current_return_type: AetherType | None = None
         self.current_function_name: str | None = None
         self.current_method_struct: StructSymbol | None = None
@@ -116,6 +120,7 @@ class TypeChecker:
         return dict(self._loaded_file_modules)
 
     def check(self, program: ast.Program) -> None:
+        self._expression_types.clear()
         self._module_identity = program.package_name or (self.import_stack[-1] if self.import_stack else "__entry__")
         self._validate_import_bindings(program.statements)
         self._prepare_imports(program.statements)
@@ -132,6 +137,7 @@ class TypeChecker:
         self._validate_type_aliases()
 
     def check_collecting_errors(self, program: ast.Program) -> list[AetherTypeError]:
+        self._expression_types.clear()
         self._module_identity = program.package_name or (self.import_stack[-1] if self.import_stack else "__entry__")
         previous_errors = self._diagnostic_errors
         self._diagnostic_errors = []
@@ -1795,7 +1801,17 @@ class TypeChecker:
                 f"The condition of '{construct}' must be boolean, got '{type_to_string(condition_type)}'."
             )
 
+    def type_of_expression(self, expression: ast.Expression) -> AetherType | None:
+        """Return the type established while checking ``expression``."""
+
+        return self._expression_types.get(id(expression))
+
     def _expression_type(self, expression: ast.Expression, scope: Scope[VariableSymbol]) -> AetherType | None:
+        result = self._infer_expression_type(expression, scope)
+        self._expression_types[id(expression)] = result
+        return result
+
+    def _infer_expression_type(self, expression: ast.Expression, scope: Scope[VariableSymbol]) -> AetherType | None:
         if isinstance(expression, ast.Literal):
             return expression.type_name
         if isinstance(expression, ast.InterpolatedString):

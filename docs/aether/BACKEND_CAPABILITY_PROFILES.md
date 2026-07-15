@@ -9,8 +9,9 @@ El perfil **no** redefine la gramática ni el sistema de tipos, no negocia
 features dinámicamente y no sustituye los verificadores de IR o SSA. El parser
 y el typechecker siguen decidiendo si un programa es Aether válido. Después del
 typechecking, un detector recorre el AST chequeado (nunca el texto fuente) y
-produce requisitos deduplicados con ubicación. La validación del perfil ocurre
-antes del lowering específico de backend.
+consulta los tipos de expresión conservados por cada `TypeChecker`. Produce
+requisitos deduplicados con ubicación. La validación del perfil ocurre antes
+del lowering específico de backend.
 
 ## Modelo
 
@@ -79,6 +80,21 @@ arithmetic, structs y colecciones quedan parciales porque sus subconjuntos
 compilables son reales pero no cubren toda la superficie AST.
 Archivos y argumentos del proceso están no soportados en ambos perfiles porque
 todavía no son APIs válidas del lenguaje.
+
+Para `strings`, el subset native distingue la operación semántica concreta:
+
+- transporte de literales, variables, parámetros, returns, fields y elementos
+  bajo la representación inmortal actual: aceptado;
+- concatenación, igualdad/desigualdad general e interpolación: rechazadas
+  temprano con el nodo operador tipado y su ubicación;
+- productores dinámicos, parsing, split/trim, archivos y argumentos: no se
+  infieren por la mera presencia de texto y siguen fuera de su capacidad
+  propia o sin API de lenguaje.
+
+Un literal aislado no solicita soporte completo. `a + b` y `a == b` sí se
+detectan cuando ambos operandos son string, aunque no haya literales y aunque la
+operación viva en un módulo importado. Es una corrección del detector del perfil
+6, no un cambio de estados o schema, por lo que no incrementa su versión.
 
 La CLI no añade por ahora un comando `capabilities`: ejecución AST valida el
 perfil AST, y `--emit-llvm`, ejecución LLVM, `build` y los perfiles LLVM/native
