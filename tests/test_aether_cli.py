@@ -187,6 +187,28 @@ def test_backend_ast_remains_explicit_file_execution(tmp_path: Path) -> None:
     assert ast_stderr == ""
 
 
+def test_default_native_backend_reports_unsupported_class_before_codegen(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    program = tmp_path / "native_class.ae"
+    program.write_text("class Counter { int value; }\n", encoding="utf-8")
+
+    def fail_if_codegen_runs(*_args, **_kwargs):
+        raise AssertionError("native codegen must not run")
+
+    monkeypatch.setattr("aether.ir.lowering.IRLowerer.lower", fail_if_codegen_runs)
+    exit_code, stdout, stderr = run_cli([str(program)])
+
+    assert exit_code == EXIT_LANGUAGE_ERROR
+    assert stdout == ""
+    assert "AE-BACKEND-CLASSES" in stderr
+    assert "LLVM/native backend does not support capability 'classes'" in stderr
+    assert "--backend=ast" in stderr
+    assert "line 1, column 7" in stderr
+    assert "Traceback" not in stderr
+
+
 def test_default_llvm_execution_preserves_program_stdout_and_stderr(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

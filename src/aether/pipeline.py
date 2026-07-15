@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Literal, Protocol
 
 from . import ast
+from .capabilities import BackendIdentity, validate_backend_capabilities
 from .errors import AetherRuntimeError, IRBackendUnsupportedFeatureError
 from .entry_point import normalize_entry_point
 from .interpreter import Environment, Interpreter
@@ -69,6 +70,7 @@ class ASTBackend:
     name: ClassVar[str] = "ast"
 
     def run(self, typed_program: TypedProgram) -> Environment:
+        validate_backend_capabilities(typed_program, BackendIdentity.AST)
         return run_ast_backend(typed_program.program, self.interpreter)
 
 

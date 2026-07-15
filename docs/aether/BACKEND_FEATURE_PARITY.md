@@ -38,6 +38,28 @@ lexer -> parser -> typechecker -> EntryPointNormalizer -> IR lowering
 No existe intérprete SSA. AST e IR interpreter son backends alternativos. La
 CLI usa LLVM por defecto; REPL e integración IntelliJ ejecutan AST.
 
+## Perfil programático y validación temprana
+
+La auditoría detallada se consolida para consumo del compilador mediante los
+perfiles versionados de `src/aether/capabilities.py`; su contrato y política de
+actualización están en
+[`BACKEND_CAPABILITY_PROFILES.md`](BACKEND_CAPABILITY_PROFILES.md). El perfil
+no reemplaza esta auditoría: agrupa capacidades observables por el usuario y la
+auditoría conserva evidencia por etapa, arquitectura y deuda interna.
+
+Después de parsing y typechecking, el detector recorre el AST chequeado y
+valida el perfil AST o LLVM/native antes del lowering específico. Una
+limitación native se reporta como incompatibilidad de backend con código
+`AE-BACKEND-*`, ubicación y sugerencia de AST únicamente cuando el perfil AST
+cubre ese uso. Los verificadores IR/SSA y los rechazos específicos de LLVM se
+mantienen como defensa interna.
+
+La reconciliación inicial confirmó el resumen de esta auditoría y explicitó
+dos matices: “funciones como valores” es `PARTIAL` en AST solo por funciones de
+expresión y el hook especial de `Plots`, no un callable tipado general; y
+strings/native es `PARTIAL` por transporte de literales/parámetros/retornos,
+pero concat, comparación general e interpolación siguen fuera del subconjunto.
+
 ## Tipos, declaraciones y operadores
 
 | Feature | Lexer/parser | AST | Typechecker | AST interpreter | IR model | IR lowering | IR verifier | IR interpreter | SSA | SSA verifier | Optimizers | LLVM/native | Runtime | Tests | Spec/docs | Estado global | Observaciones |

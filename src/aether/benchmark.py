@@ -257,8 +257,15 @@ def _optimize_ssa(source: str, path: Path) -> None:
 
 def _emit_llvm(source: str, path: Path) -> None:
     from .backend.llvm import LLVMBackend
+    from .capabilities import BackendIdentity, validate_backend_capabilities
+    from .ssa import SSAVerifier
+    from .ssa.optimizer import SSAOptimizerPipeline
 
-    LLVMBackend().emit(_optimized_ssa(source, path))
+    typed_program = _typed_program(source, path)
+    validate_backend_capabilities(typed_program, BackendIdentity.NATIVE)
+    module = SSAPipeline().run(typed_program).ssa_module
+    module = SSAVerifier(SSAOptimizerPipeline().run(module)).verify()
+    LLVMBackend().emit(module)
 
 
 def _build_native(source: str, path: Path, output_path: Path) -> None:

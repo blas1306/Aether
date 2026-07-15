@@ -556,6 +556,7 @@ def _emit_ssa(
 
 def _emit_llvm(source: str, *, path: Path, stdout: TextIO) -> None:
     from .backend.llvm import LLVMBackend, LLVMBackendError
+    from .capabilities import BackendIdentity, validate_backend_capabilities
     from .errors import AetherRuntimeError
     from .ssa.optimizer import SSAOptimizerPipeline
 
@@ -563,6 +564,7 @@ def _emit_llvm(source: str, *, path: Path, stdout: TextIO) -> None:
         source,
         TypeChecker(source_root=path.parent),
     )
+    validate_backend_capabilities(typed_program, BackendIdentity.NATIVE)
     module = lower_to_verified_ssa(typed_program, builder=DEFAULT_SSA_BUILDER)
     module = SSAOptimizerPipeline(verify_after_each=True).run(module)
     try:

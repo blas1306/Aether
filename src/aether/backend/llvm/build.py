@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 
 from aether.pipeline import DEFAULT_SSA_BUILDER, lower_to_verified_ssa
+from aether.capabilities import BackendIdentity, validate_backend_capabilities
 from aether.ssa.optimizer import SSAOptimizerPipeline
 
 from .backend import LLVMBackend
@@ -37,6 +38,7 @@ class LLVMBuilder:
         self._clang = clang
 
     def emit_llvm(self, typed_program: object) -> str:
+        validate_backend_capabilities(typed_program, BackendIdentity.NATIVE)
         module = lower_to_verified_ssa(typed_program, builder=DEFAULT_SSA_BUILDER)
         module = SSAOptimizerPipeline(verify_after_each=True).run(module)
         return self._backend.emit(module)

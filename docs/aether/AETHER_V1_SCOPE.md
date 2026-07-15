@@ -73,6 +73,12 @@ La fuente de detalle por etapa es
 | Interoperabilidad futura por ABI C | No implementado | v1 debe documentar una frontera FFI/ABI C viable y no cerrar el diseño; no es necesario prometer estabilidad binaria completa ni wrappers extensos en v1. |
 | Programas medianos | Parcial, solo AST para la superficie amplia | Mantener al menos varios programas modulares no triviales con validaciones automatizadas; uno es `examples/numerical_methods/`. Al menos uno debe compilar nativamente usando el perfil v1. |
 
+El estado compilable publicado se modela en los perfiles versionados descritos
+en [`BACKEND_CAPABILITY_PROFILES.md`](BACKEND_CAPABILITY_PROFILES.md). Estos
+perfiles no reducen la validez general de Aether: hacen que `run`, `build` y la
+emisión LLVM rechacen temprano, con ubicación, una feature válida que aún no
+pertenece al subconjunto del backend elegido.
+
 Una feature puede excluir una etapa solo por una razón explícita. Por ejemplo,
 el lexer no “implementa” bounds checks, y una declaración de tipo no necesita
 ejecución propia; esa no aplicabilidad debe documentarse, no contarse como una
@@ -173,4 +179,3 @@ v1. Solo debe cambiar si aparece al menos una de estas condiciones:
 No se cambia sintaxis por preferencia estética. Toda excepción al congelamiento
 debe incluir un programa mínimo, impacto de compatibilidad, alternativa sin
 cambio sintáctico, actualización de spec y tests de migración o rechazo.
-
