@@ -112,6 +112,11 @@ NumPy, SciPy o un stack gráfico.
 Debe seguir siendo builtin o un tipo privilegiado porque su layout, allocation,
 bounds checks, slicing y paso por ABI afectan al compilador.
 
+Su semántica v1 es la de un reference type mutable de longitud fija. Assignment
+copia la referencia; `copy()` y slicing crean otro descriptor y buffer. El
+contrato de ownership, const, iteración e igualdad se define en
+[`COLLECTION_RUNTIME_DESIGN.md`](COLLECTION_RUNTIME_DESIGN.md).
+
 Primitivas esenciales:
 
 - allocation/literal target-typed;
@@ -133,6 +138,11 @@ que siempre sea intrínseca.
 
 Puede seguir privilegiada por su header dinámico `{length, capacity, data}` y
 por la seguridad del crecimiento.
+
+También es un reference type mutable. Sus aliases comparten header y observan
+growth y mutaciones; `copy()` crea un contenedor independiente sin copiar
+profundamente referencias anidadas. El runtime debe tratar el handle con el
+lifecycle RC aprobado, separado de la copia lógica de elementos.
 
 Primitivas:
 

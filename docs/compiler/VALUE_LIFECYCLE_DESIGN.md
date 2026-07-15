@@ -149,8 +149,8 @@ elementos de colección.
 | string aprobado | sí, handle de una palabra | **no** | sí | **sí** | sí | **sí** | default vacío; copy retain; destroy release |
 | struct | si todos los campos lo son y no hay ciclo by-value | `all(fields)` | `all(fields)` | `any(fields)` | `any(fields)` | `any(fields)` | síntesis recursiva nominal |
 | nested struct | misma regla recursiva | misma regla recursiva | misma regla recursiva | misma regla recursiva | misma regla recursiva | misma regla recursiva | los nombres no cortan el análisis |
-| `Array<T>` | descriptor sized | sí en ABI actual soportado | sí | no hoy | sí | no hoy | backing store deberá destruir/copiar `T` |
-| `List<T>` | descriptor sized | sí en ABI actual soportado | sí | no hoy | sí | no hoy | owner del buffer; growth relocaliza `T` |
+| `Array<T>` | handle `ptr` sized | sí en ABI actual, no en contrato final | sí | no hoy | sí | no hoy | reference type: copy retain, destroy release; `copy()` clona descriptor/buffer y copia T |
+| `List<T>` | handle `ptr` sized | sí en ABI actual, no en contrato final | sí | no hoy | sí | no hoy | igual; growth relocaliza T dentro del objeto compartido |
 | `Vector<T>` / `Matrix<T>` | descriptor sized en subset native | sí en ABI actual | sí | no hoy | sí | no hoy | definir owner/alias de storage antes de hooks |
 
 Un tipo de colección no se declara seguro solo porque su descriptor sea
@@ -158,6 +158,22 @@ copiable. Su operación `copy` también depende recursivamente del lifecycle de
 `T`. Hasta que existan hooks, el subset native solo admite representaciones
 para las que las operaciones actuales están demostradas; producir strings
 owned dentro de esos recorridos permanece prohibido.
+
+### 3.1 Lifecycle aprobado de Array/List, todavía no implementado
+
+La decisión v1 de
+[`COLLECTION_RUNTIME_DESIGN.md`](../aether/COLLECTION_RUNTIME_DESIGN.md) trata
+Array/List como handles reference type a un objeto contenedor con strong RC no
+atómico. Para el **handle**, `copy_init` retiene y comparte, `move_init`
+transfiere, `assign` hace retain-before-release, `destroy` libera y `relocate`
+mueve bits invalidando la fuente. El último release destruye el rango vivo de
+elementos, el buffer y el objeto exactamente una vez.
+
+Esto no es el método público `copy()`: ese método reserva otro descriptor y
+buffer y ejecuta la copia lógica de cada `T`. Slicing usa la misma copia lógica
+sobre un rango. La implementación actual aún clasifica el handle como trivial,
+por lo que los hooks finales deben habilitarse coordinadamente en assignment,
+parámetros, returns, fields y cleanup; activar sólo `destroy` sería inseguro.
 
 ## 4. Lifecycle aprobado de string
 

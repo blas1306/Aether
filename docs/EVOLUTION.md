@@ -162,13 +162,13 @@ El contrato detallado está en
 elementos, pero no agregar ni retirar posiciones. Su storage es contiguo en el
 subconjunto native y los accesos tienen bounds checks.
 
-La semántica actual del contenedor es de referencia mutable, no de value type.
-Asignar un Array crea un alias al mismo objeto. En cambio, sus elementos se
-cargan y almacenan según la semántica de `T`: un elemento struct se mueve o
-copia por valor y conserva el lifecycle de sus campos. Un slice crea un Array
-con storage independiente. Esta distinción entre identidad del contenedor y
-semántica del elemento evita describir como deep copy una operación que no lo
-es.
+Para v1 se aprobó como reference type mutable. Asignar un Array copia la
+referencia y produce aliasing; `copy()` y slicing crean otro contenedor y otro
+buffer mediante copia lógica superficial de los elementos. La implementación
+actual ya exhibe gran parte del aliasing, pero todavía no completa retain,
+release y destrucción final del objeto contenedor. El contrato y la migración
+pendiente están en
+[`aether/COLLECTION_RUNTIME_DESIGN.md`](aether/COLLECTION_RUNTIME_DESIGN.md).
 
 ### Lists
 
@@ -177,13 +177,13 @@ estable mantiene longitud, capacidad y puntero al buffer; crecer puede reemplaza
 el buffer, pero no la identidad que comparten los aliases. Las operaciones de
 crecimiento validan overflow y allocation, y no hay shrinking automático.
 
-El aliasing por asignación y la estabilidad del header están decididos. También
-lo están las transferencias básicas de elementos: push/insert copian o mueven,
-pop/remove transfieren el resultado, clear destruye el rango vivo y growth
-relocaliza. Sigue abierta la política final de lifetime para header y buffer,
-su integración con classes y contenedores anidados, y la eventual necesidad de
-APIs públicas como `reserve` o `shrinkToFit`. No se presupone que la respuesta
-sea un GC.
+Para v1 se aprobó que assignment, parámetros y returns copien o transfieran la
+referencia al mismo objeto. `copy()` es la operación explícita que crea header y
+buffer independientes; no hace deep copy de referencias anidadas. También se
+aprobó un handle de una palabra a objeto heap con strong RC no atómico como
+representación principal. Falta migrar el lifecycle completo del contenedor y
+unificar const, slicing, for-in e igualdad. Capacity de `List.copy()`,
+`reserve`, `shrinkToFit`, views y un GC futuro siguen como detalles separados.
 
 ### Runtime
 

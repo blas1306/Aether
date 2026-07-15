@@ -57,8 +57,8 @@ La fuente de detalle por etapa es
 | Interfaces | Solo AST | Bajar representación y dispatch para structs y classes, preservando semántica de valor/referencia. |
 | Enums sin payload | Estable AST/native | Mantener identidad nominal, discriminantes deterministas, igualdad, impresión y uso en structs/funciones/colecciones compatibles. Payloads, ADTs y pattern matching nuevo no son requisito v1. |
 | Strings | Parcial | Literales, variables, parámetros, retorno, impresión, concatenación, igualdad e interpolación deben tener contrato de encoding y ownership coherente en native. |
-| `Array<T>` | Parcial para tipos de elemento backend | Mantener literal, get/set, length, slicing, sort y bounds/overflow checks; soportar o rechazar temprano elementos struct y definir qué métodos derivados quedan en stdlib. |
-| `List<T>` | Parcial para tipos de elemento backend | Mantener get/set, growth, mutaciones, copy, búsqueda, reverse y sort; completar layout/copia de structs y cerrar ownership/liberación sin introducir GC híbrido. |
+| `Array<T>` | Parcial para tipos de elemento backend | Adoptar reference semantics v1: assignment/params/returns comparten el objeto con lifecycle seguro; `copy()` y slicing crean storage independiente; completar const, for-in e igualdad estructural E2E. |
+| `List<T>` | Parcial para tipos de elemento backend | Adoptar las mismas reference semantics, con longitud dinámica y growth: completar strong RC, destrucción, copy explícito, slicing semiabierto, const, for-in e igualdad/búsqueda coherentes. |
 | `Vector<T>` y `Matrix<T>` | Parcial | Mantener literales, storage contiguo, índices 1-based, shape, operaciones básicas y checks; llevar el subconjunto matemático v1 seleccionado a native. |
 | Manejo básico de errores | Parcial | Panics de seguridad y `throw`/`try`/`catch` deben tener una semántica delimitada y coherente. Excepciones avanzadas no son requisito. |
 | Salida | Parcial | `print`/`println` deben cubrir valores v1 con formato documentado y consistente. |
@@ -82,6 +82,12 @@ pertenece al subconjunto del backend elegido.
 El contrato propuesto de semántica, representación, ABI y ownership de strings
 está en [`STRING_RUNTIME_DESIGN.md`](STRING_RUNTIME_DESIGN.md). Es una RFC en
 revisión: no modifica todavía este alcance ni el estado de capacidades.
+
+La semántica de colecciones aprobada para v1 está en
+[`COLLECTION_RUNTIME_DESIGN.md`](COLLECTION_RUNTIME_DESIGN.md). Array y List son
+reference types mutables; assignment copia la referencia, mientras `copy()` y
+slicing copian el contenido a otro contenedor. Esa decisión de alcance no
+afirma que el lifecycle RC ni la paridad de backends ya estén implementados.
 
 Una feature puede excluir una etapa solo por una razón explícita. Por ejemplo,
 el lexer no “implementa” bounds checks, y una declaración de tipo no necesita
