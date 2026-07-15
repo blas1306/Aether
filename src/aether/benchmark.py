@@ -353,7 +353,10 @@ def _run_native_executable(executable: Path, expected_exit_code: int | None) -> 
 
 
 def _typed_program(source: str, path: Path) -> TypedProgram:
-    return prepare_typed_program(source, TypeChecker(source_root=path.parent))
+    return prepare_typed_program(
+        source,
+        TypeChecker(source_root=path.parent, entry_path=path),
+    )
 
 
 def _benchmark_error(exc: Exception, profile: str) -> AetherError:

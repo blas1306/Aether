@@ -5,8 +5,10 @@ Revisión: 14 de julio de 2026. Programa observado:
 
 El programa implementa bisección, Newton-Raphson, secante, trapecios y Simpson
 en cinco módulos Aether. Se ejecutó correctamente con el intérprete AST y todas
-sus validaciones imprimieron `true`. La compilación nativa se detiene de forma
-explícita en el primer import.
+sus validaciones imprimieron `true`. La resolución multi-módulo native ya
+atraviesa los imports; el diagnóstico temprano actual enumera los bloqueos
+reales siguientes: interfaces, manejo de errores, comparación de strings y
+matemática escalar.
 
 Escala de severidad: **crítica** impide el objetivo central; **alta** bloquea un
 programa v1 razonable; **media** obliga a boilerplate o reduce calidad; **baja**
@@ -51,17 +53,18 @@ es local o cosmética.
 - **¿Puede resolverse en stdlib?:** no.
 - **¿Requiere runtime/backend?:** sí, principalmente ABI y dispatch.
 
-## F03 — Los imports de archivo no llegan al compilador
+## F03 — Imports native implementados para declaraciones, inicialización pendiente
 
-- **Clasificación:** Feature parcial.
-- **Descripción:** módulos, aliases, visibilidad, ciclos e inicialización
-  funcionan en AST; el lowering rechaza cualquier `ImportStatement`. El
-  programa mediano debe ejecutarse con `--backend=ast`.
+- **Clasificación:** Feature parcial, bloqueo principal resuelto.
+- **Descripción:** funciones y structs cross-module, aliases, visibilidad,
+  transitividad y ciclos llegan a LLVM/native mediante IR combinado. Globals,
+  constantes y statements top-level importados todavía requieren storage e
+  inicialización explícitos.
 - **Ejemplo mínimo:** `from Roots import bisection;`.
 - **Backend afectado:** IR, SSA, LLVM/native y linker/build.
 - **Severidad:** crítica para programas medianos.
-- **Solución recomendada:** separar resolución frontend de link, producir una
-  unidad tipada por módulo y definir inicialización/orden una sola vez.
+- **Solución recomendada:** extender IR con globals y fijar inicialización/orden
+  una sola vez sobre el `CheckedProgram` ya existente.
 - **¿Bloquea Aether v1?:** sí.
 - **¿Requiere cambio de sintaxis?:** no.
 - **¿Puede resolverse en stdlib?:** no.
@@ -71,11 +74,11 @@ es local o cosmética.
 ## F04 — El backend predeterminado no ejecuta la superficie amplia
 
 - **Clasificación:** Problema de ergonomía.
-- **Descripción:** `aether file.ae` selecciona LLVM, pero interfaces, imports,
+- **Descripción:** `aether file.ae` selecciona LLVM, pero interfaces,
   excepciones y muchos builtins publicados son solo AST. Un programa válido
   necesita conocer y pedir `--backend=ast`.
-- **Ejemplo mínimo:** `aether examples/numerical_methods/main.ae` falla con
-  “IR backend does not support imports yet”.
+- **Ejemplo mínimo:** `aether examples/numerical_methods/main.ae` informa ahora
+  `interfaces`, `error-handling`, strings parciales y `scalar-math`, no imports.
 - **Backend afectado:** CLI y native.
 - **Severidad:** alta.
 - **Solución recomendada:** cerrar el perfil nativo v1 o hacer que la ayuda y
@@ -196,7 +199,7 @@ es local o cosmética.
 ## F11 — El hint de “supported IR subset” está desactualizado
 
 - **Clasificación:** Falta de documentación.
-- **Descripción:** el error de imports/builtins enumera solo funciones,
+- **Descripción:** varios errores de lowering/builtins enumeran solo funciones,
   locales, literales escalares, aritmética, comparaciones, control y calls. No
   menciona structs, Array/List, for, short-circuit ni Vector/Matrix ya
   soportados.
@@ -224,7 +227,7 @@ es local o cosmética.
   promover después el código dogfood con tests de compatibilidad.
 - **¿Bloquea Aether v1?:** no para consolidación; sí para publicar esa API.
 - **¿Requiere cambio de sintaxis?:** no.
-- **¿Puede resolverse en stdlib?:** sí, tras resolver módulos/callables.
+- **¿Puede resolverse en stdlib?:** sí, tras resolver callables y búsqueda/instalación de stdlib.
 - **¿Requiere runtime/backend?:** resolución/link de módulos.
 
 ## Resultado de la prueba
@@ -244,4 +247,3 @@ La fricción dominante no fue la sintaxis matemática: fue la brecha entre la
 superficie AST y el backend nativo. La próxima mejora de mayor retorno es el
 pipeline compilado de módulos, seguido por callables tipados y matemática
 escalar conocida por el backend.
-

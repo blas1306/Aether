@@ -212,6 +212,13 @@ class IRLowerer:
         self._aliases: dict[str, AetherType] = {}
         self._method_names: dict[tuple[str, str], str] = {}
 
+    def lower_checked_program(self, checked_program: object) -> IRModule:
+        """Lower a complete semantic program using the combined-module strategy."""
+
+        from .module_lowering import combine_checked_program
+
+        return self.lower(combine_checked_program(checked_program))
+
     def lower(self, program: ast.Program) -> IRModule:
         """Lower a typechecked program without changing the main pipeline."""
         self._aliases = {

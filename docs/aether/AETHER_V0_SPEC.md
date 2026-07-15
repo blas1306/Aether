@@ -2258,10 +2258,12 @@ constant initialization is normalized into the entry function for compiled
 execution. A top-level `return` is invalid and is never interpreted as a return
 from the synthetic entry point.
 
-This guarantee currently applies only to the executable entry file. File
-imports, native module initialization, and top-level execution in imported
-modules remain AST-only; a native pipeline continues to reject imports rather
-than inventing module initialization semantics.
+This guarantee applies to the executable entry file. Native compilation accepts
+the declaration-only subset of file modules (supported functions and structs,
+including aliases and selective imports) by combining checked modules into one
+IR module. Globals/constants and executable top-level statements in imported
+modules remain AST-only and receive an early capability diagnostic; native does
+not invent module initialization semantics for them.
 
 ## Script and Session Execution
 

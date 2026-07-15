@@ -35,6 +35,9 @@ arquitectura, no capacidades solicitadas directamente por un programa.
 
 ## Perfiles actuales
 
+La versión actual del perfil es `2`; el cambio desde `1` promueve
+`modules` e `imports` de `UNSUPPORTED` a `PARTIAL` en LLVM/native.
+
 El perfil AST representa el intérprete de referencia. Incluye módulos,
 imports, classes, interfaces, enums, input, errores y matemática escalar. Las
 funciones como valores son parciales: solo están cubiertas las funciones de
@@ -42,10 +45,15 @@ expresión y el hook de referencias usado por `Plots`; Aether aún no posee un
 tipo callable general.
 
 El perfil LLVM/native representa el recorrido completo
-AST→IR→SSA→LLVM→clang. Módulos/imports, callables, classes, interfaces, enums,
-input, errores y matemática escalar están marcados como no soportados. Strings,
-primitivos, arithmetic, structs y colecciones quedan parciales porque sus
-subconjuntos compilables son reales pero no cubren toda la superficie AST.
+AST→IR→SSA→LLVM→clang. Módulos e imports están en `PARTIAL`: compilan funciones,
+funciones `void`, structs, constructores, métodos y firmas cross-module mediante
+imports completos/selectivos y aliases, con transitividad, privacidad y ciclos
+resueltos por el frontend. Globals/constantes y statements ejecutables en un
+módulo importado se rechazan temprano porque el IR aún no modela storage ni
+inicialización de módulo. Callables, classes, interfaces, enums, input, errores
+y matemática escalar siguen no soportados. Strings, primitivos, arithmetic,
+structs y colecciones quedan parciales porque sus subconjuntos compilables son
+reales pero no cubren toda la superficie AST.
 Archivos y argumentos del proceso están no soportados en ambos perfiles porque
 todavía no son APIs válidas del lenguaje.
 

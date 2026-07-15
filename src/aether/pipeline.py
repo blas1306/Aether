@@ -10,6 +10,7 @@ from .errors import AetherRuntimeError, IRBackendUnsupportedFeatureError
 from .entry_point import normalize_entry_point
 from .interpreter import Environment, Interpreter
 from .lexer import lex
+from .modules import CheckedProgram, build_checked_program, with_root_program
 from .parser import Parser
 from .tokens import Token
 from .typechecker import TypeChecker
@@ -33,6 +34,7 @@ class TypedProgram:
 
     program: ast.Program
     checker: TypeChecker
+    checked_program: CheckedProgram
 
 
 class PipelineBackend(Protocol):
@@ -86,7 +88,7 @@ class IRBackend:
     def lower(self, typed_program: TypedProgram) -> IRModule:
         from .ir.lowering import IRLowerer
 
-        return IRLowerer().lower(typed_program.program)
+        return IRLowerer().lower_checked_program(typed_program.checked_program)
 
     def verify(self, module: IRModule) -> IRModule:
         from .ir.verifier import IRVerificationError, IRVerifier
@@ -203,7 +205,13 @@ def prepare_typed_program(source: str, checker: TypeChecker) -> TypedProgram:
     """Run the frontend stages and return the checked program boundary."""
     program = parse_source(source)
     checked_program = typecheck_program(program, checker)
-    return TypedProgram(normalize_entry_point(checked_program, checker), checker)
+    semantic_program = build_checked_program(checked_program, checker)
+    normalized = normalize_entry_point(checked_program, checker)
+    return TypedProgram(
+        normalized,
+        checker,
+        with_root_program(semantic_program, normalized),
+    )
 
 
 def lower_to_verified_ssa(

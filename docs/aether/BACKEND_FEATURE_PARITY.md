@@ -73,7 +73,7 @@ pero concat, comparación general e interpolación siguen fuera del subconjunto.
 | Variables locales tipadas mutables | C | C | C | C | C | C | C | C | C | C | C | C | — | E2E | C | Completo | Requieren inicializador. |
 | `const` local | C | C | C | C | sin opcode propio | C, se borra tras TC | C | C | C | C | C | C | — | frontend+backend | C | Completo | La garantía es estática; no necesita representación runtime distinta. |
 | Inferencia `x = expr` | C | C | C | C | N para global implícito | N | N | N | N | N | N | N | AST | frontend | C | Solo AST | El compilador exige locales que ya estén declarados. |
-| Alias de tipo | C | C | C | C | se resuelve | P: top-level alias aceptado solo como metadata | C | C | C | C | C | C para usos soportados | — | AST+struct backend | C | Parcial | Imports/aliases de módulos siguen fuera de native. |
+| Alias de tipo | C | C | C | C | se resuelve | P: top-level alias aceptado solo como metadata | C | C | C | C | C | C para usos soportados, incluidos aliases importados | — | AST+struct backend | C | Parcial | El alias conserva identidad semántica separada del nombre interno. |
 | Operadores `+ - * /` escalares | C | C | C | C | C | C int/double | C | C | C | C | C checked | C int/double | C | E2E+safety | P | Parcial | `float`, `complex`, string y agregados amplían la superficie AST. |
 | Overflow entero y negación mínima | — | — | permite runtime | C: panic i32 | C `may_trap` | C | C | C | C | C | C preserva traps | C intrinsics checked | C | E2E AST/IR/native | P | Completo | Contrato implementado después de la auditoría histórica. |
 | División por cero | — | — | permite runtime | C | C | C | C | C | C | C | C | C | C | E2E | P | Completo | Int hace panic; double usa IEEE-754 en los tres backends. |
@@ -101,7 +101,7 @@ pero concat, comparación general e interpolación siguen fuera del subconjunto.
 | `for` sobre rango | C | C | C | C | CFG | C pasos +/-/dinámicos | C | C | C | C | C | C | — | E2E | C | Completo | Rango es inclusivo según spec actual. |
 | `for-in` sobre colección | C | C | C | C amplio | CFG/get/length | P Array/List/Vector | C subset | C subset | C subset | C subset | P | C subset | bounds helpers | E2E subset | P | Parcial | Matrix y otras colecciones no comparten iterable general. |
 | `break` / `continue` | C | C | C solo loop | C | jumps | C | C | C | C | C | C | C | — | E2E nested | C | Completo | Se bajan a targets del loop activo. |
-| Entry point y top-level script | C | C | C | C | función `main` | C tras normalización | C | C | C | C | C | C | exit code | E2E | C | Completo | Aplica al módulo de entrada; módulos importados no compilan. |
+| Entry point y top-level script | C | C | C | C | función `main` | C tras normalización | C | C | C | C | C | C | exit code | E2E | C | Completo en raíz | Solo `main` del módulo raíz conserva ABI; un `main` importado se manglea. Statements top-level importados aún requieren inicialización. |
 | Tuples y destructuring | C | C | C | C | N | N | N | N | N | N | N | N | AST | AST | C | Solo AST | Incluye retornos múltiples en AST. |
 
 ## Strings, IO y proceso
@@ -121,8 +121,8 @@ pero concat, comparación general e interpolación siguen fuera del subconjunto.
 
 | Feature | Lexer/parser | AST | Typechecker | AST interpreter | IR model | IR lowering | IR verifier | IR interpreter | SSA | SSA verifier | Optimizers | LLVM/native | Runtime | Tests | Spec/docs | Estado global | Observaciones |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Packages, módulos e imports | C | C | C aliases/selectivos/ciclos | C carga/cache | N unidad multi-módulo | N: rechaza import | N | N | N | N | N | N | AST loader | amplia AST | P contradictoria | Solo AST | Un package mapea a un archivo; no hay link/inicialización native. |
-| Visibilidad top-level | C | C | C en imports | C | N módulos | N | N | N | N | N | N | N | AST | AST | C | Solo AST | Dentro del mismo archivo no restringe acceso. |
+| Packages, módulos e imports | C | C | C aliases/selectivos/ciclos | C carga/cache | C programa chequeado; IR combinado | C declaraciones soportadas | C | C | C | C | C | C subset | sin runtime nuevo | unit+IR+native E2E | C subset | Parcial | Un package mapea a un archivo. Faltan globals/constantes y statements top-level importados, diagnosticados antes del lowering. |
+| Visibilidad top-level | C | C | C en imports | C | identidad/export metadata | C consume referencias resueltas | C | C | C | C | C | C subset | — | semantic+native | C | Parcial native | Privacidad se valida semánticamente; dentro del mismo archivo no restringe acceso. |
 | Struct fields/constructores | C | C | C nominal | C | C definiciones/new/get/set | C subset | C | C | C | C | C | C subset | helpers print/equality | E2E dedicado | P obsoleta | Parcial | Core int/double/bool/string/nested y Array/List escalares; aún hay límites de campo. |
 | Métodos de struct y `this` | C | C | C mutabilidad | C | C funciones + method result | C | C | C | C | C | C | C | — | E2E | P | Completo | Para tipos de firma soportados por backend. |
 | Semántica por valor de struct | — | C | C const | C copia | C reconstrucción | C | C | C | C | C | C | C by-value | — | E2E copia/arg/return | C | Completo | Campos reference mantienen copia shallow deliberada. |
@@ -173,8 +173,9 @@ pero concat, comparación general e interpolación siguen fuera del subconjunto.
 
 ## Bloqueadores reales para Aether v1
 
-1. **Módulos native:** sin compilación/link de imports no hay programas medianos
-   compilados, aunque el frontend modular sea funcional.
+1. **Inicialización y globals de módulos:** declaraciones soportadas ya cruzan
+   imports; falta storage e inicialización single-execution para el resto de la
+   semántica AST.
 2. **Classes, interfaces y enums native:** la promesa generalista está partida;
    structs ya no son el bloqueo principal.
 3. **Strings completos:** falta concat/equality/interpolación general,
@@ -262,8 +263,8 @@ dejan SSA inválido.
 
 1. Generar un perfil de capacidades versionado y usarlo en diagnóstico, CLI y
    documentación; corregir inmediatamente docs contradictorias.
-2. Diseñar y bajar módulos/imports hasta link native, con inicialización
-   explícita y tests multiarchivo.
+2. Extender el modelo IR con globals e inicialización explícita de módulos,
+   reutilizando el `CheckedProgram` y los tests multiarchivo existentes.
 3. Llevar matemática escalar a calls conocidas (`libm`/LLVM/runtime) y cerrar
    `%` double; esto habilita programas numéricos sin inflar el IR.
 4. Definir callables top-level tipados y su ABI; no comenzar por closures

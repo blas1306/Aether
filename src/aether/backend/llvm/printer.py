@@ -279,7 +279,10 @@ class LLVMPrinter:
             f"{llvm_type(parameter.type)} {self._parameter_name(parameter)}"
             for parameter in function.parameters
         )
-        lines = [f"define {return_type} {self._global_name(function.name)}({parameters}) {{"]
+        linkage = "private " if function.name.startswith("__ae_m") else ""
+        lines = [
+            f"define {linkage}{return_type} {self._global_name(function.name)}({parameters}) {{"
+        ]
 
         for block in function.blocks:
             lines.extend(self._print_block(block, function))

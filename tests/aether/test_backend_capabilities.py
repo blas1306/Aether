@@ -44,7 +44,7 @@ def _required(source: str, *, source_root: Path | None = None):
 
 
 def test_profiles_are_versioned_identified_and_cover_the_canonical_catalog() -> None:
-    assert CAPABILITY_PROFILE_VERSION == "1"
+    assert CAPABILITY_PROFILE_VERSION == "2"
     assert AST_CAPABILITY_PROFILE.backend is BackendIdentity.AST
     assert NATIVE_CAPABILITY_PROFILE.backend is BackendIdentity.NATIVE
     assert AST_CAPABILITY_PROFILE.version == CAPABILITY_PROFILE_VERSION
@@ -223,7 +223,7 @@ def test_partial_string_capability_accepts_transport_but_rejects_interpolation()
     assert issue.requirement.detail == "interpolated string"
 
 
-def test_numerical_methods_example_gets_early_native_module_diagnostic(
+def test_numerical_methods_example_passes_modules_and_reports_real_native_blockers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     example = ROOT / "examples" / "numerical_methods"
@@ -237,8 +237,8 @@ def test_numerical_methods_example_gets_early_native_module_diagnostic(
         LLVMBuilder().emit_llvm(typed)
 
     issues = captured.value.issues
-    assert any(issue.requirement.capability is Capability.MODULES for issue in issues)
-    assert next(
-        issue for issue in issues if issue.requirement.capability is Capability.MODULES
-    ).requirement.line == 1
+    assert not any(issue.requirement.capability is Capability.MODULES for issue in issues)
+    assert not any(issue.requirement.capability is Capability.IMPORTS for issue in issues)
+    assert any(issue.requirement.capability is Capability.INTERFACES for issue in issues)
     assert any(issue.requirement.capability is Capability.ERROR_HANDLING for issue in issues)
+    assert any(issue.requirement.capability is Capability.SCALAR_MATH for issue in issues)

@@ -65,6 +65,7 @@ class TypeChecker:
         *,
         source_root: str | Path | None = None,
         import_stack: tuple[str, ...] = (),
+        entry_path: str | Path | None = None,
     ) -> None:
         self.global_scope: Scope[VariableSymbol] = Scope()
         self.functions: dict[str, FunctionSymbol] = {}
@@ -96,9 +97,20 @@ class TypeChecker:
         self.type_aliases: dict[str, AetherType] = {}
         self.source_root = Path(source_root).expanduser().resolve() if source_root is not None else Path.cwd()
         self.import_stack = import_stack
+        self.entry_path = (
+            Path(entry_path).expanduser().resolve()
+            if entry_path is not None
+            else None
+        )
         self.imported_symbol_origins: dict[str, str] = {}
         self.private_imported_symbols: dict[str, set[str]] = {}
         self._diagnostic_errors: list[AetherTypeError] | None = None
+
+    @property
+    def loaded_file_modules(self) -> dict[str, tuple[ast.Program, "TypeChecker"]]:
+        """Direct file dependencies already resolved and typechecked."""
+
+        return dict(self._loaded_file_modules)
 
     def check(self, program: ast.Program) -> None:
         self._validate_import_bindings(program.statements)
@@ -820,8 +832,10 @@ class TypeChecker:
         if cached is not None:
             return cached
         if module_name in self.import_stack:
+            cycle_start = self.import_stack.index(module_name)
+            cycle = (*self.import_stack[cycle_start:], module_name)
             raise AetherTypeError(
-                f"Cyclic import involving '{module_name}'.",
+                f"Cyclic import involving '{module_name}': {' -> '.join(cycle)}.",
                 line=getattr(location, "line", None),
                 column=getattr(location, "column", None),
                 kind="import",
@@ -845,6 +859,7 @@ class TypeChecker:
         module_checker = TypeChecker(
             source_root=self.source_root,
             import_stack=(*self.import_stack, module_name),
+            entry_path=module_path,
         )
         module_checker.check(program)
         loaded = (program, module_checker)
@@ -900,7 +915,10 @@ class TypeChecker:
                 symbol = self.qualified_variables[canonical_name]
                 self.global_scope.define_local(local_name, symbol, is_const=symbol.is_const)
             elif canonical_name in self.qualified_structs:
-                self.structs[local_name] = self.qualified_structs[canonical_name]
+                self.structs[local_name] = replace(
+                    self.qualified_structs[canonical_name],
+                    name=local_name,
+                )
             elif canonical_name in self.qualified_enums:
                 self.enums[local_name] = self.qualified_enums[canonical_name]
             elif canonical_name in self.qualified_interfaces:

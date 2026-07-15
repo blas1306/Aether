@@ -1929,7 +1929,10 @@ class Interpreter:
                 is_const = module_interpreter.global_env.variable_scope.is_const(statement.symbol)
                 self.global_env.define(local_name, value, is_const=is_const)
             elif statement.symbol in self._exported_structs(program, module_interpreter):
-                self.structs[local_name] = module_interpreter.structs[statement.symbol]
+                self.structs[local_name] = replace(
+                    module_interpreter.structs[statement.symbol],
+                    name=local_name,
+                )
                 self.struct_methods[local_name] = dict(module_interpreter.struct_methods.get(statement.symbol, {}))
             elif statement.symbol in self._exported_enums(program, module_interpreter):
                 self.enums[local_name] = module_interpreter.enums[statement.symbol]

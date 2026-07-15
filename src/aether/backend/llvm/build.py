@@ -6,6 +6,8 @@ import shutil
 import subprocess
 import tempfile
 
+from aether import ast
+from aether.errors import AetherTypeError
 from aether.pipeline import DEFAULT_SSA_BUILDER, lower_to_verified_ssa
 from aether.capabilities import BackendIdentity, validate_backend_capabilities
 from aether.ssa.optimizer import SSAOptimizerPipeline
@@ -51,6 +53,7 @@ class LLVMBuilder:
         keep_llvm: bool = False,
     ) -> LLVMBuildResult:
         llvm_ir = self.emit_llvm(typed_program)
+        _validate_native_entry_point(typed_program)
         output_path = output_path.resolve()
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -118,3 +121,17 @@ class LLVMBuilder:
         if output_path.suffix:
             return output_path.with_name(f"{output_path.name}.ll")
         return output_path.with_suffix(".ll")
+
+
+def _validate_native_entry_point(typed_program: object) -> None:
+    program = getattr(typed_program, "program", None)
+    functions = getattr(program, "statements", ())
+    if any(
+        isinstance(statement, ast.FunctionDeclaration) and statement.name == "main"
+        for statement in functions
+    ):
+        return
+    raise AetherTypeError(
+        "Native executable requires one entry point in the root module: int main().",
+        kind="entry-point",
+    )

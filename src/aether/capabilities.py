@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from .pipeline import TypedProgram
 
 
-CAPABILITY_PROFILE_VERSION = "1"
+CAPABILITY_PROFILE_VERSION = "2"
 
 
 class BackendIdentity(str, Enum):
@@ -232,8 +232,6 @@ _NATIVE_UNSUPPORTED = {
     Capability.FUNCTION_VALUES,
     Capability.INPUT,
     Capability.PROCESS_ARGUMENTS,
-    Capability.MODULES,
-    Capability.IMPORTS,
     Capability.CLASSES,
     Capability.CLASS_CONSTRUCTORS,
     Capability.CLASS_METHODS,
@@ -405,8 +403,47 @@ class _CapabilityDetector:
         self._function_depth = 0
 
     def detect(self) -> tuple[CapabilityRequirement, ...]:
-        self._visit(self.typed_program.program)
+        checked = self.typed_program.checked_program
+        for module_id in checked.dependency_order():
+            module = checked.modules[module_id]
+            self._visit(module.program)
+            if module_id != checked.root_module:
+                self._record_imported_initialization_requirements(module.program)
         return tuple(self._requirements.values())
+
+    def _record_imported_initialization_requirements(self, program: ast.Program) -> None:
+        declarations = (
+            ast.AliasDeclaration,
+            ast.ClassDeclaration,
+            ast.EnumDeclaration,
+            ast.ExpressionFunctionDeclaration,
+            ast.FunctionDeclaration,
+            ast.FromImportStatement,
+            ast.ImportStatement,
+            ast.InterfaceDeclaration,
+            ast.StructDeclaration,
+        )
+        for statement in program.statements:
+            detail: str | None = None
+            if isinstance(statement, ast.VarDeclaration):
+                detail = "imported top-level globals/constants and module initialization"
+            elif not isinstance(statement, declarations):
+                detail = "executable statements in an imported module"
+            if detail is None:
+                continue
+            self._record(
+                Capability.MODULES,
+                statement,
+                detail=detail,
+                requires_complete_support=True,
+            )
+            self._record(
+                Capability.IMPORTS,
+                statement,
+                detail=detail,
+                requires_complete_support=True,
+            )
+            return
 
     def _record(
         self,

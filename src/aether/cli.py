@@ -455,7 +455,7 @@ def _execute_file(
         env = IRBackend(output_writer=stdout.write).run(
             prepare_typed_program(
                 source,
-                TypeChecker(source_root=path.parent),
+                TypeChecker(source_root=path.parent, entry_path=path),
             )
         )
         result = env.lookup(IR_MAIN_RESULT_NAME)
@@ -488,7 +488,7 @@ def _emit_ir(
 ) -> None:
     typed_program = prepare_typed_program(
         source,
-        TypeChecker(source_root=path.parent),
+        TypeChecker(source_root=path.parent, entry_path=path),
     )
     backend = IRBackend()
     module = backend.lower_verified(typed_program)
@@ -514,7 +514,7 @@ def _emit_cfg(source: str, *, path: Path, stdout: TextIO) -> None:
 
     typed_program = prepare_typed_program(
         source,
-        TypeChecker(source_root=path.parent),
+        TypeChecker(source_root=path.parent, entry_path=path),
     )
     module = IRBackend().lower(typed_program)
     builder = CFGBuilder()
@@ -540,7 +540,7 @@ def _emit_ssa(
 
     typed_program = prepare_typed_program(
         source,
-        TypeChecker(source_root=path.parent),
+        TypeChecker(source_root=path.parent, entry_path=path),
     )
     try:
         module = lower_to_verified_ssa(typed_program, builder=builder)
@@ -562,7 +562,7 @@ def _emit_llvm(source: str, *, path: Path, stdout: TextIO) -> None:
 
     typed_program = prepare_typed_program(
         source,
-        TypeChecker(source_root=path.parent),
+        TypeChecker(source_root=path.parent, entry_path=path),
     )
     validate_backend_capabilities(typed_program, BackendIdentity.NATIVE)
     module = lower_to_verified_ssa(typed_program, builder=DEFAULT_SSA_BUILDER)
@@ -586,7 +586,7 @@ def _build_native(
 
     typed_program = prepare_typed_program(
         source,
-        TypeChecker(source_root=path.parent),
+        TypeChecker(source_root=path.parent, entry_path=path),
     )
     try:
         return LLVMBuilder().build(
@@ -610,7 +610,7 @@ def _run_native(
 
     typed_program = prepare_typed_program(
         source,
-        TypeChecker(source_root=path.parent),
+        TypeChecker(source_root=path.parent, entry_path=path),
     )
     try:
         return LLVMRunner().run(typed_program, stdout=stdout, stderr=stderr)

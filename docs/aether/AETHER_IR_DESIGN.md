@@ -35,7 +35,7 @@ experimental IR backend and `--emit-ir`. The main pipeline prepares the same
 checked program boundary for both AST and IR backends, but IR lowering remains
 an experimental backend concern and does not invoke the typechecker itself.
 
-The currently supported lowering subset is deliberately small:
+The initial scalar lowering subset includes:
 
 - Top-level, explicitly typed function declarations.
 - Typed parameters.
@@ -64,13 +64,36 @@ produce numbered temporaries in deterministic source evaluation order.
 
 Comparison results are always `bool` in IR and can feed `IRBranch`.
 
+### Multi-module lowering (implemented)
+
+Semantic analysis now exposes a `CheckedProgram` containing the root module,
+all loaded `CheckedModule` values, stable `ModuleId`/`SymbolId` identities,
+canonical paths, dependencies, declarations, visibility and resolved imports.
+The backend never opens source files or resolves import strings.
+
+Native uses a **combined IR module**: dependency declarations are emitted once
+in dependency-first order, and semantic symbols receive deterministic names
+derived from logical module/name/kind length prefixes. Absolute paths never
+participate in mangling; root `main` and runtime ABI symbols remain unchanged.
+This is smaller and safer than separate compilation while IR has no external
+declaration model. A future per-module strategy can reuse the same semantic
+identities and replace only this combination boundary.
+
+The compiled subset includes free/void functions, structs, constructors,
+methods, imported types and cross-module signatures through full/selective
+imports and module/symbol aliases. Cycles remain frontend errors. Imported
+globals/constants or executable top-level statements are rejected by the
+native capability profile: implementing them requires explicit IR global
+storage and a single-execution initialization policy.
+
 Unsupported syntax raises a clear `IRBackendUnsupportedFeatureError` naming the
 language feature or unsupported lowering case and includes a short summary of
 the supported subset. Current limitations include:
 
 - No `for`, `do`/`while`, `break`/`continue`, or non-while loop control flow.
 - No structs, classes, interfaces, constructors, methods, or fields.
-- No lists, arrays, nullable values, imports, or packages.
+- Nullable values remain unsupported; lists/arrays and modules/packages have
+  explicitly documented compiled subsets.
 - No SSA conversion, phi nodes, or execution-time optimizations.
 - No builtin calls, keyword arguments, or expression functions.
 - No implicit conversion instructions.
@@ -473,11 +496,14 @@ The user-facing supported IR backend subset is:
 - if/else
 - while
 - simple user-defined function calls
+- the documented struct and collection subsets
+- combined multi-module declarations and cross-module calls
 
-The IR backend does not yet support structs, classes, lists, arrays, packages,
-advanced imports, builtins, top-level scripting statements, methods,
-constructors, interfaces, enums, exceptions, `for`, `break`, `continue`,
-optimizer integration for execution, SSA, JIT, or Rust code generation.
+The remaining broad exclusions include classes, interfaces, enums, exceptions,
+callable values, native module globals/initialization, JIT, Rust code
+generation, and the feature-specific gaps recorded in the capability profile.
+IR/SSA and their verifier/optimizer paths are connected to LLVM/native; the IR
+interpreter remains a development backend with a narrower runtime surface.
 
 The CLI also has a minimal development benchmark harness:
 
