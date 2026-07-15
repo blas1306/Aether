@@ -225,7 +225,7 @@ def test_particle_array_preliminary_example_matches_ast_and_native() -> None:
     source = (ROOT / "examples" / "aggregate_collections" / "particles.ae").read_text(
         encoding="utf-8"
     )
-    expected = "true\ntrue\ntrue\ntrue\ntrue\n"
+    expected = "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n"
     assert run_aether(source).output == expected
     assert _native_output(source) == expected
 

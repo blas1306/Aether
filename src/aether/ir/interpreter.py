@@ -46,6 +46,7 @@ from .model import (
     IRJump,
     IRListGet,
     IRListCopy,
+    IRListSlice,
     IRListContains,
     IRListClear,
     IRListPop,
@@ -713,10 +714,33 @@ class IRInterpreter:
                 raise IRExecutionError("IR array slicing requires an array value")
             if not isinstance(start, int) or isinstance(start, bool) or not isinstance(end, int) or isinstance(end, bool):
                 raise IRExecutionError("IR array slice bounds must be int")
-            if start < 0 or start > end or end > len(array):
-                raise IRExecutionError("Aether panic: Array slice out of bounds")
-            frame.values[instruction.result] = CollectionObject(
-                "Array", instruction.result.type.element, array[start:end]
+            if start > end:
+                raise IRExecutionError("Aether panic: Array slice start is greater than end")
+            if start < 0 or end < 0 or start > len(array) or end > len(array):
+                raise IRExecutionError("Aether panic: Array slice index out of bounds")
+            frame.values[instruction.result] = (
+                array.logical_slice(start, end)
+                if isinstance(array, CollectionObject)
+                else CollectionObject("Array", instruction.result.type.element, array[start:end])
+            )
+            return False, None, None
+
+        if isinstance(instruction, IRListSlice):
+            list_value = self._value(instruction.list_value, frame)
+            start = self._value(instruction.start, frame)
+            end = self._value(instruction.end, frame)
+            if not isinstance(list_value, list):
+                raise IRExecutionError("IR list slicing requires a list value")
+            if not isinstance(start, int) or isinstance(start, bool) or not isinstance(end, int) or isinstance(end, bool):
+                raise IRExecutionError("IR list slice bounds must be int")
+            if start > end:
+                raise IRExecutionError("Aether panic: List slice start is greater than end")
+            if start < 0 or end < 0 or start > len(list_value) or end > len(list_value):
+                raise IRExecutionError("Aether panic: List slice index out of bounds")
+            frame.values[instruction.result] = (
+                list_value.logical_slice(start, end)
+                if isinstance(list_value, CollectionObject)
+                else CollectionObject("List", instruction.result.type.element, list_value[start:end])
             )
             return False, None, None
 

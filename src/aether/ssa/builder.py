@@ -24,6 +24,7 @@ from aether.ir.model import (
     IRJump,
     IRListGet,
     IRListCopy,
+    IRListSlice,
     IRListContains,
     IRListClear,
     IRListPop,
@@ -91,6 +92,7 @@ from .model import (
     SSAJump,
     SSAListGet,
     SSAListCopy,
+    SSAListSlice,
     SSAListContains,
     SSAListClear,
     SSAListPop,
@@ -811,6 +813,13 @@ class SSABuilder:
             start = self._resolve_value(instruction.start, state.value_map)
             end = self._resolve_value(instruction.end, state.value_map)
             return SSAArraySlice(result, array, start, end)
+
+        if isinstance(instruction, IRListSlice):
+            result = self._define_value(instruction.result, state.value_map)
+            list_value = self._resolve_value(instruction.list_value, state.value_map)
+            start = self._resolve_value(instruction.start, state.value_map)
+            end = self._resolve_value(instruction.end, state.value_map)
+            return SSAListSlice(result, list_value, start, end)
 
         if isinstance(instruction, IRListGet):
             result = self._define_value(instruction.result, state.value_map)

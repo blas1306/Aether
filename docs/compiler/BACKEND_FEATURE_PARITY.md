@@ -150,14 +150,14 @@ plugin ejecute ese backend.
 | `Array<T>` literal | target-typed `{}` | Implemented | Implemented | IRArrayNew | SSAArrayNew | header+buffer checked | Implemented | members | E2E | Implemented |
 | Array get/set | Implemented | tipos/const | bounds checked | bounds checked | conservados como may-trap/effect | bounds helper antes de acceso | panic controlado | Diagnostics | P0 AST+IR+native | Implemented |
 | Array `.length` | Implemented | int | Implemented | checked i64→int | preservado may-trap | checked helper | panic overflow | Completion | P0 | Implemented |
-| Array slicing `a[start:end]` | Implemented | solo Array/int | inclusive, copia nueva | IRArraySlice bounds | preservado | runtime checked | Implemented | sintaxis | AST+IR+native | Implemented |
+| Array slicing `a[start:end]` | Implemented | Array/int | half-open, copia nueva | IRArraySlice bounds | preservado | runtime checked | Implemented | sintaxis | AST+IR+native | Implemented |
 | Array `sort` | método/global | int/double/string | estable in-place | IRSequenceSort | efecto conservado | helpers checked | Implemented | Completion | E2E | Implemented |
 | Array `copy` | método/global | Implemented | shallow outer copy | Sin opcode; rechazado | No | No | No | Completion | AST | AST-only |
 | Array igualdad | Implemented | estructural | Implemented | aggregate compare rechazado | No | No | No | Diagnósticos | AST | AST-only |
 | Arrays anidados | Implemented hasta profundidad 2 | Implemented | Implemented | tipos recursivos posibles, sin E2E confiable | posible | punteros posibles | No prueba representativa | Completion genérica | frontend solamente | Unknown |
 | `List<T>` literal/new | `{}`; no keyword `new` | target-typed | Implemented | IRListNew | SSAListNew | `{length,capacity,data}` | Implemented | members | E2E | Implemented |
 | List get/set/length/is_empty | Implemented | tipos/const | bounds checked | opcodes dedicados | may-trap/effect preservados | helpers bounds/narrowing | panic controlado | Completion | E2E safety | Implemented |
-| List slicing | `SliceExpression` | Implemented con límites | Implemented, varias formas limitadas | Solo ArraySlice; List rechazada | No | No | No | sintaxis | AST | AST-only |
+| List slicing | `SliceExpression` | List/int | half-open, copia nueva | IRListSlice | SSAListSlice | helper checked | Implemented | sintaxis | E2E + bounds/lifecycle | Implemented |
 | List `push` | método/global | Implemented | Implemented | IRListPush | efecto | growth checked | Implemented | Completion | E2E | Implemented |
 | List `pop` | método/global | Implemented | Implemented | IRListPop | may-trap/effect | empty panic | Implemented | Completion | E2E | Implemented |
 | List `insert` | método/global | Implemented | Implemented | IRListInsert | efecto/may-trap | bounds/growth checked | Implemented | Completion | E2E | Implemented |

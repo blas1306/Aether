@@ -118,10 +118,8 @@ Operaciones:
 - Las listas usan indices 0-based.
 - `xs[i]` lee un elemento.
 - `xs[i] = value` muta el contenedor.
-- `xs[start:end]` y `xs[start:step:end]` existen para listas.
-- Los bounds de slices son inclusivos.
-- Slices negativos no estan permitidos como indices; un `step` negativo si esta
-  permitido.
+- `xs[start:end]` existe para listas con límites 0-based y semiabiertos.
+- Steps, rangos abiertos e índices negativos no están soportados.
 - El resultado de slice es un nuevo contenedor `List<T>` con los elementos
   seleccionados.
 - Slice assignment no esta soportado.

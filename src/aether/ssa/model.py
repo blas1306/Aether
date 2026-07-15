@@ -386,6 +386,14 @@ class SSAArraySlice(ReadingAllocationMixin, SSAInstruction):
     start: SSAValue
     end: SSAValue
 
+
+@dataclass(frozen=True)
+class SSAListSlice(ReadingAllocationMixin, SSAInstruction):
+    result: SSAValue
+    list_value: SSAValue
+    start: SSAValue
+    end: SSAValue
+
 @dataclass(frozen=True)
 class SSAListGet(MemoryReadMayTrapMixin, SSAInstruction):
     result: SSAValue

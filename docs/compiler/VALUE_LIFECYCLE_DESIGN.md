@@ -264,6 +264,9 @@ adquirir primero todas las referencias que podrían perderse antes del commit.
 
 ### List
 
+- Slice crea un objeto/buffer nuevo con `size == capacity == end-start` y
+  ejecuta `copy_init` en orden. En runtimes recuperables, un fallo destruye el
+  prefijo inicializado en orden inverso antes de liberar buffer y objeto.
 - `push`/`insert` hacen `copy_init`, o `move_init` únicamente desde un temporal
   consumible probado.
 - `pop` mueve el último elemento al resultado y reduce el rango vivo sin

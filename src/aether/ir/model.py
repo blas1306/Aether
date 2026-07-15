@@ -493,6 +493,18 @@ class IRArraySlice(ReadingAllocationMixin, IRInstruction):
     array: IRValue
     start: IRValue
     end: IRValue
+    source_location: IRSourceLocation | None = None
+
+    element_lifecycle = "copy_init"
+
+
+@dataclass(frozen=True)
+class IRListSlice(ReadingAllocationMixin, IRInstruction):
+    result: IRValue
+    list_value: IRValue
+    start: IRValue
+    end: IRValue
+    source_location: IRSourceLocation | None = None
 
     element_lifecycle = "copy_init"
 

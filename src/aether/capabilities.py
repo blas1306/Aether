@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from .pipeline import TypedProgram
 
 
-CAPABILITY_PROFILE_VERSION = "10"
+CAPABILITY_PROFILE_VERSION = "11"
 
 
 class BackendIdentity(str, Enum):
@@ -726,18 +726,7 @@ class _CapabilityDetector:
             self._record(Capability.VECTOR if node.vector else Capability.MATRIX, node)
             return
         if isinstance(node, ast.SliceExpression):
-            collection_type = self.checker.type_of_expression(node.collection)
-            resolved = self._resolve_alias(collection_type) if collection_type is not None else None
-            self._record(
-                Capability.ARRAY_SLICING,
-                node,
-                detail=(
-                    "legacy inclusive List slicing"
-                    if isinstance(resolved, ListType)
-                    else None
-                ),
-                requires_complete_support=isinstance(resolved, ListType),
-            )
+            self._record(Capability.ARRAY_SLICING, node)
 
     def _record_call(self, call: ast.CallExpression) -> None:
         desugared = self.checker.desugared_method_call(call)
@@ -1046,16 +1035,6 @@ def backend_capability_issues(
             message = (
                 "LLVM/native cannot use this collection element layout: "
                 f"{requirement.detail}."
-            )
-        elif (
-            backend is BackendIdentity.NATIVE
-            and requirement.capability is Capability.ARRAY_SLICING
-            and requirement.detail == "legacy inclusive List slicing"
-        ):
-            message = (
-                "LLVM/native List slicing is unavailable during collection migration: "
-                "the AST backend still uses legacy inclusive bounds while the approved "
-                "contract is half-open [start, end)."
             )
         elif (
             backend is BackendIdentity.NATIVE

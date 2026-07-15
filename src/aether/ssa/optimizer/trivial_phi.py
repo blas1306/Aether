@@ -20,6 +20,7 @@ from aether.ssa.model import (
     SSAJump,
     SSAListGet,
     SSAListCopy,
+    SSAListSlice,
     SSAListContains,
     SSAListClear,
     SSAListPop,
@@ -524,6 +525,17 @@ class TrivialPhiEliminator:
             return (
                 SSAArraySlice(instruction.result, array, start, end),
                 int(array_rewritten) + int(start_rewritten) + int(end_rewritten),
+            )
+
+        if isinstance(instruction, SSAListSlice):
+            list_value, list_rewritten = self._rewrite_value(instruction.list_value, replacements)
+            start, start_rewritten = self._rewrite_value(instruction.start, replacements)
+            end, end_rewritten = self._rewrite_value(instruction.end, replacements)
+            if not list_rewritten and not start_rewritten and not end_rewritten:
+                return instruction, 0
+            return (
+                SSAListSlice(instruction.result, list_value, start, end),
+                int(list_rewritten) + int(start_rewritten) + int(end_rewritten),
             )
 
         if isinstance(instruction, SSAListGet):

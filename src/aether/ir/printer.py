@@ -29,6 +29,7 @@ from .model import (
     IRJump,
     IRListGet,
     IRListCopy,
+    IRListSlice,
     IRListContains,
     IRListClear,
     IRListPop,
@@ -350,6 +351,12 @@ class IRPrinter:
             return (
                 f"{self._typed_value(instruction.result)} = array_slice "
                 f"{self._value(instruction.array)}, {self._value(instruction.start)}, "
+                f"{self._value(instruction.end)}"
+            )
+        if isinstance(instruction, IRListSlice):
+            return (
+                f"{self._typed_value(instruction.result)} = list_slice "
+                f"{self._value(instruction.list_value)}, {self._value(instruction.start)}, "
                 f"{self._value(instruction.end)}"
             )
         if isinstance(instruction, IRListGet):

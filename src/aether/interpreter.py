@@ -1105,10 +1105,10 @@ class Interpreter:
 
     def _read_array_slice(self, expression: ast.SliceExpression, env: Environment) -> AetherValue:
         array_value = self._evaluate(expression.collection, env)
+        if isinstance(array_value.type_name, ListType):
+            return self._read_list_slice(array_value, expression, env)
         if not isinstance(array_value.type_name, ArrayType):
             range_expression = ast.RangeExpression(expression.start, expression.end)
-            if isinstance(array_value.type_name, ListType):
-                return self._read_list_slice(array_value, range_expression, env)
             return self._read_vector_slice(array_value, range_expression, env)
         start_value = self._evaluate(expression.start, env)
         end_value = self._evaluate(expression.end, env)
@@ -1116,8 +1116,12 @@ class Interpreter:
             raise AetherTypeError("Array slice bounds must be int.")
         start = start_value.value
         end = end_value.value
-        if start < 0 or start > end or end > len(array_value.value):
-            raise AetherRuntimeError("Aether panic: Array slice out of bounds")
+        if start > end:
+            raise AetherRuntimeError("Aether panic: Array slice start is greater than end")
+        if start < 0 or end < 0 or start > len(array_value.value) or end > len(array_value.value):
+            raise AetherRuntimeError("Aether panic: Array slice index out of bounds")
+        if isinstance(array_value.value, CollectionObject):
+            return AetherValue(array_value.type_name, array_value.value.logical_slice(start, end))
         return AetherValue(array_value.type_name, list(array_value.value[start:end]))
 
     def _read_matrix_index(
@@ -1172,29 +1176,18 @@ class Interpreter:
         index_expression: ast.Expression,
         env: Environment,
     ) -> AetherValue:
-        if not isinstance(index_expression, ast.RangeExpression):
+        if not isinstance(index_expression, ast.SliceExpression):
             raise AetherTypeError("List slices require explicit start and end.")
         start = self._evaluate_list_slice_component(index_expression.start, env, "start")
         end = self._evaluate_list_slice_component(index_expression.end, env, "end")
-        step = (
-            self._evaluate_list_slice_component(index_expression.step, env, "step")
-            if index_expression.step is not None
-            else 1
-        )
-        if step == 0:
-            raise AetherRuntimeError("List slice step cannot be 0.")
-        if start < 0 or end < 0:
-            raise AetherRuntimeError("negative list slice index is not supported.")
-
         length = len(list_value.value)
-        selected: list[AetherValue] = []
-        index = start
-        while index <= end if step > 0 else index >= end:
-            if index >= length:
-                raise AetherRuntimeError(f"List slice index {index} out of bounds for length {length} (0-based).")
-            selected.append(list_value.value[index])
-            index += step
-        return AetherValue(list_value.type_name, selected)
+        if start > end:
+            raise AetherRuntimeError("Aether panic: List slice start is greater than end")
+        if start < 0 or end < 0 or start > length or end > length:
+            raise AetherRuntimeError("Aether panic: List slice index out of bounds")
+        if isinstance(list_value.value, CollectionObject):
+            return AetherValue(list_value.type_name, list_value.value.logical_slice(start, end))
+        return AetherValue(list_value.type_name, list(list_value.value[start:end]))
 
     def _evaluate_list_slice_component(self, expression: ast.Expression, env: Environment, label: str) -> int:
         value = self._evaluate(expression, env)

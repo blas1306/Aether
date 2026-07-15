@@ -602,7 +602,7 @@ println(v[1]);
     assert result.output == "10\n10\n"
 
 
-def test_list_slice_start_end_is_inclusive_and_zero_based() -> None:
+def test_list_slice_start_end_is_half_open_and_zero_based() -> None:
     result = run_aether(
         """
 List<int> xs = {10, 20, 30, 40, 50};
@@ -612,38 +612,20 @@ println(a);
     )
 
     assert result.env["a"].type_name == ListType("int")
-    assert result.output == "{20, 30, 40}\n"
+    assert result.output == "{20, 30}\n"
 
 
-def test_list_slice_start_step_end_is_inclusive() -> None:
-    result = run_aether(
-        """
-List<int> xs = {10, 20, 30, 40, 50};
-List<int> b = xs[0:2:4];
-println(b);
-"""
-    )
-
-    assert result.output == "{10, 30, 50}\n"
-
-
-def test_list_slice_negative_step_walks_backwards() -> None:
-    result = run_aether(
-        """
-List<int> xs = {10, 20, 30, 40, 50};
-List<int> c = xs[4:-1:2];
-println(c);
-"""
-    )
-
-    assert result.output == "{50, 40, 30}\n"
+@pytest.mark.parametrize("slice_expression", ["xs[0:2:4]", "xs[4:-1:2]"])
+def test_list_slice_steps_are_not_supported(slice_expression: str) -> None:
+    with pytest.raises(AetherTypeError, match="without a step"):
+        run_aether(f"List<int> xs = {{10, 20, 30, 40, 50}}; {slice_expression};")
 
 
 def test_list_slice_can_copy_whole_container() -> None:
     result = run_aether(
         """
 List<int> xs = {10, 20, 30, 40, 50};
-List<int> d = xs[0:length(xs)-1];
+List<int> d = xs[0:length(xs)];
 println(d);
 """
     )
@@ -655,7 +637,7 @@ def test_list_slice_result_is_new_container() -> None:
     result = run_aether(
         """
 List<int> xs = {10, 20, 30};
-List<int> ys = xs[0:2];
+List<int> ys = xs[0:3];
 ys[0] = 99;
 println(xs);
 println(ys);
@@ -665,19 +647,19 @@ println(ys);
     assert result.output == "{10, 20, 30}\n{99, 20, 30}\n"
 
 
-def test_list_slice_step_zero_is_runtime_error() -> None:
-    with pytest.raises(AetherRuntimeError, match="slice step cannot be 0"):
+def test_list_slice_step_zero_is_rejected() -> None:
+    with pytest.raises(AetherTypeError, match="without a step"):
         run_aether("List<int> xs = {10, 20, 30, 40}; println(xs[0:0:3]);")
 
 
 def test_list_slice_negative_index_is_runtime_error() -> None:
-    with pytest.raises(AetherRuntimeError, match="negative list slice index"):
+    with pytest.raises(AetherRuntimeError, match="List slice index out of bounds"):
         run_aether("List<int> xs = {10, 20, 30}; println(xs[-1:2]);")
 
 
 def test_list_slice_out_of_range_index_is_runtime_error() -> None:
-    with pytest.raises(AetherRuntimeError, match="List slice index 3 out of bounds for length 3"):
-        run_aether("List<int> xs = {10, 20, 30}; println(xs[0:3]);")
+    with pytest.raises(AetherRuntimeError, match="List slice index out of bounds"):
+        run_aether("List<int> xs = {10, 20, 30}; println(xs[0:4]);")
 
 
 def test_slice_on_non_list_indexing_context_fails() -> None:

@@ -4,7 +4,8 @@ Actualización 15-07-2026: el ejemplo completo conserva paridad AST/native tras
 la migración de string. `List<Transaction>` atraviesa múltiples `push`, growth,
 filtros, returns, módulos, enum fields, igualdad e impresión con hooks
 recursivos para los tres fields string. Se mantienen diez validaciones
-funcionales más el listado final; no se añadieron CLI real ni persistencia.
+funcionales, una validación de slice, más el listado final; no se añadieron CLI
+real ni persistencia.
 
 Revisión: 15 de julio de 2026. Programa:
 [`examples/expense_tracker/`](../../examples/expense_tracker/README.md).
@@ -14,8 +15,8 @@ Revisión: 15 de julio de 2026. Programa:
 `Main.ae` funciona completo en AST y LLVM/native con el mismo modelo modular:
 `List<Transaction>`, enum nominal, strings literales transportadas, alta con
 validación, dos reallocations o más, resumen, filtro, lista vacía, `for-in` e
-impresión. Las diez validaciones, incluida independencia de una copia explícita,
-producen `true` en ambos backends.
+impresión. Las once validaciones, incluidas la independencia de una copia
+explícita y de `transactions[0:1]`, producen `true` en ambos backends.
 
 El bloqueo anterior era exclusivamente de layout: IR y SSA conservaban
 `StructType`, y los GEP/load/store ya estaban tipados, pero el emisor calculaba
@@ -60,7 +61,7 @@ structs; `contains/indexOf` estructural permanece fuera del subconjunto.
 - Array de struct con padding, enum, string y struct anidado.
 - List de struct con push, varias reallocations, insert, get/set, copy,
   removeAt, pop, reverse, clear, impresión y for-in.
-- Slicing independiente de Array y copia por valor del elemento.
+- Slicing independiente de Array/List y copia por valor del elemento.
 - Verificadores IR/SSA para identidad nominal, layout conocido y ciclos.
 - Ejemplo preliminar de simulación en
   [`particles.ae`](../../examples/aggregate_collections/particles.ae), usando
@@ -86,5 +87,5 @@ usa strings ARC y cleanup de elementos. El último owner de una List libera sus
 Transaction vivos, buffer y objeto. `copy()` crea storage exterior distinto y
 conserva los strings mediante lifecycle recursivo.
 
-La próxima fase recomendada es unificar slicing List con límites semiabiertos;
-archivos, argv, concat, parsing y split/trim siguen aplazados.
+La próxima fase recomendada es unificar `const` y `for-in` borrowed; archivos,
+argv, concat, parsing y split/trim siguen aplazados.

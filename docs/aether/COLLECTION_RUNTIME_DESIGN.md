@@ -122,8 +122,8 @@ de elementos están más avanzados que el lifecycle del contenedor.
 | Returns | Mismo handle sin ownership final completo | Referencia owned | Retain/transfer seguro y cleanup. |
 | `copy()` | Copia exterior; cobertura desigual | Descriptor+buffer nuevos, copia lógica de T | Paridad E2E y rollback/lifecycle. |
 | `const` | Restricción por raíz, parcial | Read-only a través de la referencia | Unificar diagnósticos y paths encadenados. |
-| Array slice | Copy `[start,end)` | Igual | Completar lifecycle de elementos. |
-| List slice | Copy exterior, inclusivo y AST-only | Copy `[start,end)` | Cambio semántico y paridad de backends. |
+| Array slice | Copy `[start,end)` E2E | Igual | Completo en Fase 3. |
+| List slice | Copy `[start,end)` E2E | Igual | Completo en Fase 3. |
 | `for-in` | Snapshot AST o get por valor según backend | Borrow read-only por vuelta | Unificar y prohibir mutación estructural. |
 | Igualdad | Estructural AST; cobertura desigual | Estructural E2E | Implementar backends y alinear búsqueda. |
 | Destrucción | No finaliza contenedor | Release y finalización al último owner | Implementación coordinada obligatoria. |
@@ -430,10 +430,10 @@ Slicing:
 No existe `Slice<T>` público en v1 y una implementación no puede ocultar una
 view bajo `Array<T>` o `List<T>`.
 
-La implementación actual es inconsistente: Array ya usa `[start,end)` y copia;
-List es AST-only, usa end inclusivo y conserva una forma histórica con step.
-La migración debe unificar la forma de dos límites en semiabierta. La forma con
-step requiere una decisión separada y no modifica esta regla.
+Desde la Fase 3, Array y List usan `[start,end)` en AST, IR y native. Ambos
+crean un objeto y buffer exteriores independientes, ejecutan `copy_init` por
+elemento y devuelven una referencia owned. Steps, índices negativos, límites
+abiertos y slice assignment permanecen fuera del lenguaje.
 
 ## 10. Iteración `for-in`
 
@@ -709,11 +709,11 @@ copia de referencia de la copia de contenido.
 | --- | --- | --- |
 | Parser/sintaxis | Tipos, literales y operaciones ya existen. | Ninguna sintaxis nueva. |
 | Typechecker | Const por raíz y aliasing básico ya aparecen. | Const consistente, borrow de loop, prohibición de escape/mutación e igualdad comparable. |
-| Intérprete AST | Contenedores Python ya aliasan; `copy()` exterior existe. | Objeto/lifecycle conceptual coherente, slice List semiabierto y for-in sin snapshot divergente. |
-| IR/SSA | Handles y varias instrucciones especializadas existen. | Lifecycle del handle, borrow read-only, Array copy E2E e igualdad. |
+| Intérprete AST | `CollectionObject` modela RC, copy y slice semiabierto. | For-in sin snapshot divergente. |
+| IR/SSA | `array_slice`/`list_slice` son allocations con lectura y posible panic. | Borrow read-only e igualdad. |
 | LLVM/runtime | Header heap, buffer y aliasing ya existen. | Strong RC, final release, rollback y hooks de elemento completos. |
 | ABI interna | `ptr` por valor ya coincide con el handle propuesto. | Convenciones owned/borrowed/transfer y cleanup; no se declara ABI pública. |
-| Slicing | Array coincide. | Unificar List y completar lifecycle. |
+| Slicing | Array/List coinciden E2E con `[start,end)`. | Sin views, steps ni optimizaciones avanzadas. |
 | Búsqueda/igualdad | Cobertura parcial y alguna identidad accidental. | Una sola semántica de Eq(T) en todos los backends. |
 | Dogfood | Expense Tracker depende de mutación por parámetros y ya coincide. | Verificar lifetime y paridad sin cambiar su resultado. |
 
@@ -763,7 +763,7 @@ Estas decisiones no reabren la semántica aprobada:
 - diseño de `Slice<T>` y views con lifetime/strides;
 - ownership independiente de Vector/Matrix;
 - sustitución futura de RC por GC;
-- compatibilidad o deprecación de la forma List slice con step.
+- posible diseño futuro de step, sin compatibilidad implícita con la forma eliminada.
 
 ## 21. Extensiones futuras
 
@@ -781,14 +781,14 @@ Pueden diseñarse después, sin alterar la base v1:
 - representaciones especializadas de Array para kernels, manteniendo la
   semántica pública.
 
-## 22. Plan de implementación propuesto (no ejecutado)
+## 22. Plan de implementación y estado
 
 ### Fase 0 — congelar y caracterizar
 
 - congelar esta RFC y enlazarla desde el alcance v1;
 - agregar después tests de caracterización de aliasing, copy, const, slices,
   loops y Eq(T);
-- preparar diagnósticos de mutación/escape en `for-in` y slice List inclusivo;
+- preparar diagnósticos de mutación/escape en `for-in` y caracterizar slicing List;
 - auditar retains/releases actuales sin habilitar frees finales.
 
 ### Fase 1 — objeto RC y lifecycle del handle
@@ -806,18 +806,18 @@ Pueden diseñarse después, sin alterar la base v1:
 - cubrir nested collections y structs con fields colección;
 - congelar y probar la política de capacity de List copy.
 
-### Fase 3 — const consistente
+### Fase 3 — slicing copying semiabierto (completa)
+
+- conservar Array `[start,end)`;
+- migrar List a `[start,end)` E2E;
+- rechazar step, rangos abiertos e índices negativos;
+- usar copia lógica y rollback de T.
+
+### Fase 4 — const consistente
 
 - aplicar read-only a través de la referencia en todos los paths;
 - distinguir value paths de objetos reference type alcanzados;
 - unificar diagnósticos AST/native.
-
-### Fase 4 — slicing copying semiabierto
-
-- conservar Array `[start,end)`;
-- migrar List de inclusivo AST-only a `[start,end)` E2E;
-- resolver compatibilidad de step separadamente;
-- usar copia lógica y rollback de T.
 
 ### Fase 5 — `for-in` borrowed read-only
 

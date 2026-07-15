@@ -27,6 +27,7 @@ from aether.ssa.model import (
     SSAJump,
     SSAListGet,
     SSAListCopy,
+    SSAListSlice,
     SSAListContains,
     SSAListClear,
     SSAListPop,
@@ -159,6 +160,7 @@ class LLVMPrinter:
         self._uses_list_remove_at = False
         self._uses_list_reverse = False
         self._uses_list_indexing = False
+        self._uses_list_slicing = False
         self._uses_list_length_conversion = False
         self._sequence_sort_types: set[object] = set()
         self._list_contains_types: set[object] = set()
@@ -198,6 +200,7 @@ class LLVMPrinter:
             _uses_list_remove_at=self._uses_list_remove_at,
             _uses_list_reverse=self._uses_list_reverse,
             _uses_list_indexing=self._uses_list_indexing,
+            _uses_list_slicing=self._uses_list_slicing,
             _uses_list_length_conversion=self._uses_list_length_conversion,
             _sequence_sort_types=frozenset(self._sequence_sort_types),
             _list_contains_types=frozenset(self._list_contains_types),
@@ -208,6 +211,7 @@ class LLVMPrinter:
             self._uses_array_allocation
             or self._uses_list_allocation
             or self._uses_array_slicing
+            or self._uses_list_slicing
             or uses_list_growth
             or self._sequence_sort_types
         )
@@ -217,6 +221,7 @@ class LLVMPrinter:
                 self._uses_array_allocation
                 or self._uses_list_allocation
                 or self._uses_array_slicing
+                or self._uses_list_slicing
                 or self._sequence_sort_types
             ),
             uses_panic=bool(
@@ -224,6 +229,7 @@ class LLVMPrinter:
                 or self._checked_int_operators
                 or self._uses_array_indexing
                 or self._uses_array_slicing
+                or self._uses_list_slicing
                 or self._uses_list_indexing
                 or self._uses_list_pop
                 or self._uses_list_remove_at
@@ -245,6 +251,7 @@ class LLVMPrinter:
                 self._sequence_sort_types
                 or uses_list_growth
                 or self._uses_array_slicing
+                or self._uses_list_slicing
                 or any(
                     not retain
                     for _kind, _element, retain in self._collection_object_arc_helpers
@@ -485,6 +492,8 @@ class LLVMPrinter:
             return "\n  ".join(self._print_array_get(instruction))
         if isinstance(instruction, SSAArraySlice):
             return self._print_array_slice(instruction)
+        if isinstance(instruction, SSAListSlice):
+            return self._print_list_slice(instruction)
         if isinstance(instruction, SSAListGet):
             return "\n  ".join(self._print_list_get(instruction))
         if isinstance(instruction, SSAVectorGet):
@@ -540,6 +549,7 @@ class LLVMPrinter:
                 SSAListNew,
                 SSAListGet,
                 SSAListCopy,
+                SSAListSlice,
                 SSAListContains,
                 SSAListIndexOf,
                 SSAListPop,
@@ -2876,6 +2886,26 @@ class LLVMPrinter:
         ]
         if self._layouts.layout(instruction.array.type.element).needs_retain:
             helper = self._require_collection_arc_helper("array", instruction.array.type.element, retain=True)
+            lines.append(f"call void @{helper}(ptr {result})")
+        return "\n  ".join(lines)
+
+    def _print_list_slice(self, instruction: SSAListSlice) -> str:
+        if not isinstance(instruction.list_value.type, ListType):
+            raise LLVMBackendError("LLVM list_slice expects a ListType source")
+        self._uses_list_type = True
+        self._uses_list_allocation = True
+        self._uses_list_slicing = True
+        result = self._new_temp(instruction.result)
+        element_size = self._sizeof(instruction.list_value.type.element, collection="List")
+        lines = [
+            f"{result} = call ptr @aether_list_slice(ptr {self._operand(instruction.list_value)}, "
+            f"i32 {self._operand(instruction.start)}, i32 {self._operand(instruction.end)}, "
+            f"i64 {element_size})"
+        ]
+        if self._layouts.layout(instruction.list_value.type.element).needs_retain:
+            helper = self._require_collection_arc_helper(
+                "list", instruction.list_value.type.element, retain=True
+            )
             lines.append(f"call void @{helper}(ptr {result})")
         return "\n  ".join(lines)
 

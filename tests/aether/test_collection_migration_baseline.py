@@ -180,21 +180,18 @@ int main() {
     )
 
 
-def test_known_semantic_gap_list_slice_remains_legacy_inclusive_in_ast() -> None:
+def test_migration_baseline_list_slice_is_half_open_and_backend_complete() -> None:
     source = """
 int main() {
     List<int> values = {10, 20, 30, 40};
     println(values[0:0]);
     println(values[1:3]);
-    println(values[3:1]);
+    println(values[4:4]);
     return 0;
 }
 """
 
-    assert run_aether(source).output == "{10}\n{20, 30, 40}\n{}\n"
-    with pytest.raises(BackendCapabilityError, match="legacy inclusive bounds") as captured:
-        LLVMBuilder().emit_llvm(_typed(source))
-    assert captured.value.issues[0].requirement.capability is Capability.ARRAY_SLICING
+    _assert_current_output_on_all_backends(source, "{}\n{20, 30}\n{}\n")
 
 
 @pytest.mark.parametrize(

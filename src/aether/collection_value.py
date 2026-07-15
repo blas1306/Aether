@@ -152,6 +152,19 @@ class CollectionObject(list[Any]):
             capacity=len(self) if self.kind == "List" else None,
         )
 
+    def logical_slice(self, start: int, end: int) -> "CollectionObject":
+        """Create an owned, outer-independent half-open slice."""
+
+        self._require_live()
+        if start < 0 or end < 0 or start > end or start > len(self) or end > len(self):
+            raise IndexError(f"{self.kind} slice out of bounds")
+        return CollectionObject(
+            self.kind,
+            self.element_type,
+            (list.__getitem__(self, index) for index in range(start, end)),
+            capacity=end - start if self.kind == "List" else None,
+        )
+
     def __deepcopy__(self, memo: dict[int, Any]) -> "CollectionObject":
         """Host-only snapshot support for the transactional REPL/session.
 

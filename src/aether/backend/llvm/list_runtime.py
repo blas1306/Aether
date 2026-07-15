@@ -31,6 +31,7 @@ class LLVMListRuntime:
     _uses_list_remove_at: bool
     _uses_list_reverse: bool
     _uses_list_indexing: bool
+    _uses_list_slicing: bool
     _uses_list_length_conversion: bool
     _sequence_sort_types: frozenset[object]
     _list_contains_types: frozenset[object]
@@ -99,6 +100,63 @@ class LLVMListRuntime:
                         self._list_strong_count_pointer("%strong_field", "%list"),
                         "  store i64 1, ptr %strong_field",
                         "  ret ptr %list",
+                        "}",
+                    ]
+                )
+            )
+        if self._uses_list_slicing:
+            sections.append('@.aether.list.slice.index = private unnamed_addr constant [45 x i8] c"Aether panic: List slice index out of bounds\\00"')
+            sections.append('@.aether.list.slice.order = private unnamed_addr constant [51 x i8] c"Aether panic: List slice start is greater than end\\00"')
+            sections.append(
+                common.panic_helper("aether_list_slice_index_panic", ".aether.list.slice.index", 45)
+            )
+            sections.append(
+                common.panic_helper("aether_list_slice_order_panic", ".aether.list.slice.order", 51)
+            )
+            sections.append(
+                "\n".join(
+                    [
+                        "define private ptr @aether_list_slice(ptr %source, i32 %start32, i32 %end32, i64 %element_size) {",
+                        "entry:",
+                        "  %start = sext i32 %start32 to i64",
+                        "  %end = sext i32 %end32 to i64",
+                        self._list_length_pointer("%source_len_field", "%source"),
+                        "  %source_length = load i64, ptr %source_len_field",
+                        "  %start_negative = icmp slt i64 %start, 0",
+                        "  %end_negative = icmp slt i64 %end, 0",
+                        "  %negative = or i1 %start_negative, %end_negative",
+                        "  br i1 %negative, label %index_panic, label %check_order",
+                        "check_order:",
+                        "  %ordered = icmp sle i64 %start, %end",
+                        "  br i1 %ordered, label %check_range, label %order_panic",
+                        "check_range:",
+                        "  %start_within_length = icmp sle i64 %start, %source_length",
+                        "  %end_within_length = icmp sle i64 %end, %source_length",
+                        "  %within_length = and i1 %start_within_length, %end_within_length",
+                        "  br i1 %within_length, label %allocate, label %index_panic",
+                        "index_panic:",
+                        "  call void @aether_list_slice_index_panic()",
+                        "  unreachable",
+                        "order_panic:",
+                        "  call void @aether_list_slice_order_panic()",
+                        "  unreachable",
+                        "allocate:",
+                        "  %slice_length = sub i64 %end, %start",
+                        "  %copy_bytes = call i64 @aether_checked_allocation_bytes(i64 %slice_length, i64 %element_size)",
+                        "  %slice = call ptr @aether_list_new(i64 %element_size, i64 %slice_length)",
+                        "  %has_bytes = icmp ne i64 %copy_bytes, 0",
+                        "  br i1 %has_bytes, label %copy_elements, label %done",
+                        "copy_elements:",
+                        "  %start_bytes = call i64 @aether_checked_allocation_bytes(i64 %start, i64 %element_size)",
+                        self._list_data_pointer("%source_data_field", "%source"),
+                        "  %source_data = load ptr, ptr %source_data_field",
+                        "  %copy_start = getelementptr i8, ptr %source_data, i64 %start_bytes",
+                        self._list_data_pointer("%slice_data_field", "%slice"),
+                        "  %slice_data = load ptr, ptr %slice_data_field",
+                        "  call void @llvm.memcpy.p0.p0.i64(ptr %slice_data, ptr %copy_start, i64 %copy_bytes, i1 false)",
+                        "  br label %done",
+                        "done:",
+                        "  ret ptr %slice",
                         "}",
                     ]
                 )

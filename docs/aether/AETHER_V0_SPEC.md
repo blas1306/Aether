@@ -1348,7 +1348,7 @@ Aether separates general programming collections from mathematical vectors and m
 brace literals is documented in
 [`AETHER_COLLECTIONS_DESIGN.md`](AETHER_COLLECTIONS_DESIGN.md).
 
-Arrays support 0-based, half-open slicing with two explicit `int` bounds:
+Arrays and lists support 0-based, half-open slicing with two explicit `int` bounds:
 
 ```aether
 Array<int> values = {1, 2, 3, 4, 5};
@@ -1357,12 +1357,12 @@ Array<int> whole = values[0:values.length];
 Array<int> empty = values[2:2];
 ```
 
-`array[start:end]` returns a newly allocated `Array<T>` containing the elements
+`collection[start:end]` returns a newly allocated collection of the same type containing the elements
 in `[start, end)`. The new array does not share its container or element buffer
 with the source, so indexed assignment in one does not change the other. Bounds
-must satisfy `0 <= start <= end <= array.length`; otherwise execution panics with
-`Aether panic: Array slice out of bounds`. Only the explicit two-bound form is
-supported for arrays: `array[:]`, `array[start:]`, `array[:end]`, step slices,
+must satisfy `0 <= start <= end <= collection.length`; otherwise execution panics with
+`Aether panic: Array slice out of bounds` or `Aether panic: List slice out of bounds`.
+Only the explicit two-bound form is supported: `collection[:]`, `collection[start:]`, `collection[:end]`, step slices,
 and slice assignment are not supported.
 
 The LLVM capacity, growth, allocation, and shrinking policy for
@@ -1402,18 +1402,22 @@ println(names); // {"Ana", "Luis"}
 List elements must be homogeneous or numerically promotable. Lists use commas only; `{1 2 3}` is a syntax error.
 The expected target type can come from an explicit variable declaration, assignment to an existing variable, function parameter, return type, or struct field. Numeric widening follows the same implicit-conversion rules as assignments: for example, `List<double> xs = {1, 2.5};` is valid, while `List<int> xs = {1, 2.5};` is not. `array(...)`, `int[]`, and other `T[]` spellings are not public Aether v0 syntax.
 
-Lists support explicit range slices with inclusive, 0-based bounds:
+Lists use the same copying, half-open rule as arrays:
 
 ```aether
 List<int> xs = {10, 20, 30, 40, 50};
 
-List<int> a = xs[1:3];            // {20, 30, 40}
-List<int> b = xs[0:2:4];          // {10, 30, 50}
-List<int> c = xs[4:-1:2];         // {50, 40, 30}
-List<int> d = xs[0:length(xs)-1]; // shallow copy of the list container
+List<int> a = xs[1:4];          // {20, 30, 40}
+List<int> empty = xs[0:0];      // {}
+List<int> whole = xs[0:length(xs)];
 ```
 
-The supported forms are `xs[start:end]` and `xs[start:step:end]`. `start`, `end`, and `step` must be `int` expressions. If `step` is omitted it is `1`; if `step > 0`, the slice reads indices while `i <= end`; if `step < 0`, it reads indices while `i >= end`. `step` cannot be `0`. Negative list slice indices are not supported. If any generated index is out of range, evaluation raises an `AetherRuntimeError`. The result has type `List<T>` and is a new list container with the selected elements. The forms `xs[:end]`, `xs[start:]`, and `xs[:]` are not supported for lists. Slice assignment remains unsupported.
+Only `xs[start:end]` is supported and both bounds must be `int`. The result has
+type `List<T>`, owns a new object and buffer, and has `size == capacity ==
+end-start`. Elements are copied logically in order; nested collection handles
+remain shared. Negative bounds, `start > end`, and bounds greater than length
+panic without clamping. Steps, open bounds, views and slice assignment are not
+supported.
 
 The original `List<T>` API remains exposed as global builtins:
 

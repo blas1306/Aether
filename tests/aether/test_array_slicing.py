@@ -17,7 +17,8 @@ from aether.ssa.optimizer import SSAOptimizerPipeline
 from aether.typechecker import TypeChecker
 
 
-PANIC = "Aether panic: Array slice out of bounds"
+PANIC = "Aether panic: Array slice"
+INDEX_PANIC = "Aether panic: Array slice index out of bounds"
 
 
 def _typed(source: str):
@@ -141,4 +142,4 @@ def test_native_array_slice_bounds_panic() -> None:
     source = "int main() { Array<int> a = {1, 2, 3}; Array<int> b = a[-1:2]; return 0; }"
 
     assert LLVMRunner().run(_typed(source), stdout=output) == 1
-    assert output.getvalue() == f"{PANIC}\n"
+    assert output.getvalue() == f"{INDEX_PANIC}\n"

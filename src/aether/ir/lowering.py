@@ -41,6 +41,7 @@ from .model import (
     IRInitDefault,
     IRJump,
     IRListGet,
+    IRListSlice,
     IRListCopy,
     IRListContains,
     IRListClear,
@@ -1560,18 +1561,25 @@ class IRLowerer:
             return result
 
         if isinstance(expression, ast.SliceExpression):
-            array = self._lower_expression(expression.collection, context)
-            if not isinstance(array.type, ArrayType):
+            collection = self._lower_expression(expression.collection, context)
+            if not isinstance(collection.type, (ArrayType, ListType)):
                 self._fail(
-                    f"IR backend only supports slicing arrays, got '{array.type}'.",
+                    f"IR backend only supports slicing arrays and lists, got '{collection.type}'.",
                     expression,
                 )
             start = self._lower_expression(expression.start, context)
-            self._require_same_type(start.type, IntType(), "array slice start must be int")
+            self._require_same_type(start.type, IntType(), "collection slice start must be int")
             end = self._lower_expression(expression.end, context)
-            self._require_same_type(end.type, IntType(), "array slice end must be int")
-            result = context.temporary(array.type)
-            context.block.instructions.append(IRArraySlice(result, array, start, end))
+            self._require_same_type(end.type, IntType(), "collection slice end must be int")
+            result = context.temporary(collection.type)
+            if isinstance(collection.type, ArrayType):
+                context.block.instructions.append(
+                    IRArraySlice(result, collection, start, end, self._source_location(expression))
+                )
+            else:
+                context.block.instructions.append(
+                    IRListSlice(result, collection, start, end, self._source_location(expression))
+                )
             return result
 
         if isinstance(expression, ast.MatrixIndexExpression):

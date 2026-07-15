@@ -98,10 +98,16 @@ class LLVMArrayRuntime:
     def append_slicing(self, sections: list[str]) -> None:
         if not self.uses_slicing:
             return
-        sections.append('@.aether.array.slice.bounds = private unnamed_addr constant [40 x i8] c"Aether panic: Array slice out of bounds\\00"')
+        sections.append('@.aether.array.slice.index = private unnamed_addr constant [46 x i8] c"Aether panic: Array slice index out of bounds\\00"')
+        sections.append('@.aether.array.slice.order = private unnamed_addr constant [52 x i8] c"Aether panic: Array slice start is greater than end\\00"')
         sections.append(
             LLVMRuntimeCommon.panic_helper(
-                "aether_array_slice_bounds_panic", ".aether.array.slice.bounds", 40
+                "aether_array_slice_index_panic", ".aether.array.slice.index", 46
+            )
+        )
+        sections.append(
+            LLVMRuntimeCommon.panic_helper(
+                "aether_array_slice_order_panic", ".aether.array.slice.order", 52
             )
         )
         sections.append(
@@ -113,14 +119,23 @@ class LLVMArrayRuntime:
                     "  %end = sext i32 %end32 to i64",
                     self.length_pointer_line("%source_len_field", "%source", indent="  "),
                     "  %source_length = load i64, ptr %source_len_field",
-                    "  %start_nonnegative = icmp sge i64 %start, 0",
+                    "  %start_negative = icmp slt i64 %start, 0",
+                    "  %end_negative = icmp slt i64 %end, 0",
+                    "  %negative = or i1 %start_negative, %end_negative",
+                    "  br i1 %negative, label %index_panic, label %check_order",
+                    "check_order:",
                     "  %ordered = icmp sle i64 %start, %end",
+                    "  br i1 %ordered, label %check_range, label %order_panic",
+                    "check_range:",
+                    "  %start_within_length = icmp sle i64 %start, %source_length",
                     "  %end_within_length = icmp sle i64 %end, %source_length",
-                    "  %start_valid = and i1 %start_nonnegative, %ordered",
-                    "  %valid = and i1 %start_valid, %end_within_length",
-                    "  br i1 %valid, label %allocate, label %bounds_panic",
-                    "bounds_panic:",
-                    "  call void @aether_array_slice_bounds_panic()",
+                    "  %within_length = and i1 %start_within_length, %end_within_length",
+                    "  br i1 %within_length, label %allocate, label %index_panic",
+                    "index_panic:",
+                    "  call void @aether_array_slice_index_panic()",
+                    "  unreachable",
+                    "order_panic:",
+                    "  call void @aether_array_slice_order_panic()",
                     "  unreachable",
                     "allocate:",
                     "  %slice_length = sub i64 %end, %start",

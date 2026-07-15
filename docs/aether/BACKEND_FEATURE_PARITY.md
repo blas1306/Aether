@@ -9,9 +9,9 @@ files y argv continúan no implementados.
 
 Actualización perfil 8 (15-07-2026): la Fase 0 de colecciones añadió detección
 semántica tipada y diagnósticos previos al lowering para igualdad Array/List,
-`Array.copy()`, slicing List inclusivo legado y búsqueda estructural de structs.
-La Fase 1 implementó RC (perfil 9) y Fase 2 completó `Array/List.copy()` E2E
-(perfil 10), retirando sólo el diagnóstico de Array copy. La matriz exhaustiva por backend
+`Array.copy()`, el antiguo gap de slicing List y búsqueda estructural de structs.
+La Fase 1 implementó RC (perfil 9), Fase 2 completó `Array/List.copy()` E2E
+(perfil 10) y Fase 3 completó slicing semiabierto E2E (perfil 11). La matriz exhaustiva por backend
 está en [`COLLECTION_MIGRATION_BASELINE.md`](COLLECTION_MIGRATION_BASELINE.md).
 
 Última revisión: 15 de julio de 2026, incluyendo enums native y los ejemplos
@@ -172,7 +172,7 @@ decisión aún no cambia representación ni estados de esta matriz.
 | List length/capacity/core mutation | métodos | C | C | C | C salvo capacity pública | C | C | C | C | C | C | C | C checked growth | E2E | P | Parcial | `capacity` se usa internamente pero no es API pública completa. |
 | List push/pop/insert/removeAt/clear | métodos/global | C | C | C | C | C | C | C | C | C | C efecto/trap | P con Struct soportado | C hooks de elemento; sin destroy final | E2E+safety escalares/Struct/string | C | Parcial | No shrinking deliberado; clear sí destruye elementos vivos, el contenedor final se filtra. |
 | List contains/indexOf/reverse/copy/sort | métodos/global | C | C | C | C | C | C | C | C | C | C | P | P | E2E + baseline | C | Parcial | Copy es exterior superficial. Search de referencias usa identidad; Eq estructural de struct se diagnostica; sort sólo int/double/string. |
-| List slicing/equality | C | C | C | C legado | N | N | N | N | N | N | N | diagnóstico perfil 8 | AST | baseline + negativos | P | Gap diagnosticado | AST slicing usa end inclusivo, contrario a `[start,end)`; igualdad AST es estructural. |
+| List slicing/equality | C | C | C | C slice / equality legado | C slice | C slice | C slice | C slice | C slice | C slice | C slice con efectos | C slice / diagnóstico equality | RC + copy_init | E2E slicing + bounds | C slicing | Slicing completo; equality AST-only | Slice 0-based `[start,end)`, objeto/buffer nuevos y capacity=size; igualdad sigue diagnosticada. |
 | Vector literal/get/set/length | C | C | C shape/orientation | C 1-based | C | C | C | C | C | C | C traps | C | C | E2E+safety | C | Completo | Vector matemático, no colección dinámica. |
 | Operaciones Vector | C operadores | C | C shapes | C | C add/sub/scale/dot/outer/mul | C subset int/double | C | C | C | C | P sin álgebra específica | C subset | C loops | E2E amplia | P | Parcial | Transpose y varios builtins siguen AST-only. |
 | Matrix literal/get/set/rows/columns | C | C | C shape | C 1-based | C | C | C | C | C | C | C traps | C | C | E2E+safety | C | Completo | Storage contiguo; valida fila/columna antes del offset. |

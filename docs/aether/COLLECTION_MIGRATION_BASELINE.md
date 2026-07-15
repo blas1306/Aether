@@ -41,7 +41,7 @@ antes de un lowering que no puede garantizar el contrato).
 | `Array.copy()` | objeto/buffer exterior nuevos | lista Python exterior nueva | sin operación E2E | diagnóstico temprano native | diagnosticado |
 | `const List view = mutable` | const por alias | binding restringido | chequeado antes de IR | chequeado antes de native | coincide |
 | slice Array | copia `[start,end)` | semiabierto | semiabierto | semiabierto | coincide |
-| slice List | copia `[start,end)` | **inclusivo** legado | no implementado | diagnóstico temprano | gap diagnosticado |
+| slice List | copia `[start,end)` | semiabierto | semiabierto | semiabierto | coincide desde Fase 3 |
 | `for-in` | borrow read-only por iteración | snapshot exterior; binding especial | longitud capturada; get por valor | longitud capturada; get por valor | parcial |
 | mutar iterable/binding en `for-in` | prohibido | diagnóstico tipado | diagnóstico tipado | diagnóstico tipado | coincide para casos directos |
 | `Array/List ==` | contenido ordenado | estructural recursivo | no general | diagnóstico temprano | gap diagnosticado |
@@ -159,15 +159,14 @@ un contenedor exterior independiente. `[0:0]` y `start == end` dan vacío;
 end mayor que length producen el error de bounds correspondiente. Los hooks de
 copy de elemento retienen strings y referencias contenidas en structs.
 
-### List: gap legado
+### List: Fase 3
 
-Sólo AST ejecuta hoy slicing de List y usa end **inclusivo**. En una List no
-vacía, `[0:0]` contiene el primer elemento y `[1:3]` contiene tres elementos.
-`start > end` da vacío por el slicing host; en una List vacía `[0:0]` falla por
-el chequeo legado del índice inicial. El resultado es una copia exterior.
-
-Native rechaza un SliceExpression tipado como List con un diagnóstico que
-explica la divergencia. No se cambió la semántica AST ni la ABI durante Fase 0.
+AST, IR, SSA y native ejecutan slicing semiabierto `[start,end)`. `[0:0]` y
+`[length:length]` producen List vacía; `[0:length]` copia toda la lista. El
+resultado tiene objeto, buffer y capacity propios, con `size == capacity ==
+end-start`. Negativos, `start > end` o límites mayores que length producen
+panic sin clamping. Los handles de elementos anidados se retienen: sólo el
+contenedor exterior es independiente.
 
 ## `for-in`
 
@@ -329,29 +328,23 @@ a mantener una partición interna accidental.
 - cleanup omitido en break/continue/return produce leaks dependientes de CFG;
 - `copy()` o slice parcial puede retener strings pero no nested containers;
 - optimizers que consideren lifecycle puro pueden eliminar operaciones necesarias;
-- cambiar simultáneamente slicing y ABI dificulta aislar regresiones;
+- cambiar simultáneamente slicing y ABI habría dificultado aislar regresiones;
 - el formato de print ya diverge y no debe confundirse con ownership.
 
 ## Dogfooding de Fase 0
 
-- **Expense Tracker**: `List<Transaction>` conserva aliasing; append y filtros
-  retornan handles/Lists según las operaciones actuales; copy es superficial;
-  clear ejecuta destroy de fields string vivos, pero la destrucción final del
-  contenedor sigue ausente. AST y native mantienen la lógica observable.
-- **Partículas**: Array/List de structs, get/set por valor, aliasing de handle,
-  parámetros y returns mantienen los resultados AST/native existentes.
+- **Expense Tracker**: `List<Transaction>` conserva aliasing; `copy()` y el
+  slice `[0:1]` independizan el exterior y preservan los fields string.
+- **Partículas**: el slice `Array<Particle>[0:1]` copia el struct por valor y
+  permite reemplazarlo sin modificar el slot original.
 - **Numerical Methods**: no depende del futuro RC de contenedores y sirve como
   guardia de regresiones indirectas de frontend, IR y ejecución.
 
-## Primer bloque RC recomendado
+## Siguiente fase recomendada
 
-El primer bloque debe introducir el object header privado, los traits de layout
-y helpers unitarios `alloc/retain/release`, sin activar todavía destrucción en
-todos los programas. Inmediatamente después debe cablear de forma coordinada
-locals, parámetros, assignment retain-before-release, returns/moves y fields.
-Sólo entonces se habilita el release final de header/buffer. La puerta de ese
-bloque son tests de objeto vacío, self-assignment, último owner, return de
-local/parámetro/field, nested containers y strings; no `copy()` o slicing nuevos.
+Tras RC, copia explícita y slicing copying, la siguiente fase debe unificar
+`const` y `for-in` borrowed. Igualdad estructural E2E puede abordarse después,
+sin mezclarla con views o cambios de ABI.
 
 `ARRAY`, `LIST` y especialmente `ARRAY_SLICING` son capabilities más amplias
 que algunas operaciones aquí diagnosticadas. El perfil 8 usa detalles

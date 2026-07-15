@@ -29,6 +29,12 @@ int main() {
     copied[0] = copiedFirst;
     println(particles[0].position.x == 9.0);
     println(copied[0].position.x == 42.0);
+    Array<Particle> sliced = particles[0:1];
+    Particle slicedFirst = sliced[0];
+    slicedFirst.position.x = 77.0;
+    sliced[0] = slicedFirst;
+    println(particles[0].position.x == 9.0);
+    println(sliced[0].position.x == 77.0);
     println(particles.length == 2);
     return 0;
 }

@@ -50,6 +50,7 @@ from .model import (
     SSAJump,
     SSAListGet,
     SSAListCopy,
+    SSAListSlice,
     SSAListContains,
     SSAListClear,
     SSAListPop,
@@ -594,6 +595,10 @@ class SSAVerifier:
 
             if isinstance(instruction, SSAArraySlice):
                 self._verify_array_slice(instruction, value_types)
+                continue
+
+            if isinstance(instruction, SSAListSlice):
+                self._verify_list_slice(instruction, value_types)
                 continue
 
             if isinstance(instruction, SSAListGet):
@@ -1357,6 +1362,22 @@ class SSAVerifier:
             self._fail(f"List copy expects list value, got {instruction.list_value.type}")
         self._require_type(instruction.result.type, instruction.list_value.type, "List copy result type mismatch")
 
+    def _verify_list_slice(self, instruction: SSAListSlice, value_types: dict[str, IRType]) -> None:
+        self._require_defined(instruction.list_value, value_types)
+        self._require_defined(instruction.start, value_types)
+        self._require_defined(instruction.end, value_types)
+        if not isinstance(instruction.list_value.type, ListType):
+            self._fail(f"List slice expects list value, got {instruction.list_value.type}")
+        if not isinstance(instruction.start.type, IntType):
+            self._fail(f"List slice start must be int, got {instruction.start.type}")
+        if not isinstance(instruction.end.type, IntType):
+            self._fail(f"List slice end must be int, got {instruction.end.type}")
+        self._require_type(
+            instruction.result.type,
+            instruction.list_value.type,
+            "List slice result type mismatch",
+        )
+
     def _verify_list_contains(self, instruction: SSAListContains, value_types: dict[str, IRType]) -> None:
         self._require_defined(instruction.list_value, value_types)
         self._require_defined(instruction.value, value_types)
@@ -1924,6 +1945,7 @@ class SSAVerifier:
                 SSAListNew,
                 SSAListGet,
                 SSAListCopy,
+                SSAListSlice,
                 SSAListContains,
                 SSAListIndexOf,
                 SSAListPop,

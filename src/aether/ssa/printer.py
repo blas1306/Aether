@@ -24,6 +24,7 @@ from .model import (
     SSAJump,
     SSAListGet,
     SSAListCopy,
+    SSAListSlice,
     SSAListContains,
     SSAListClear,
     SSAListPop,
@@ -298,6 +299,12 @@ class SSAPrinter:
             return (
                 f"{self._typed_value(instruction.result)} = array_slice "
                 f"{self._value(instruction.array)}, {self._value(instruction.start)}, "
+                f"{self._value(instruction.end)}"
+            )
+        if isinstance(instruction, SSAListSlice):
+            return (
+                f"{self._typed_value(instruction.result)} = list_slice "
+                f"{self._value(instruction.list_value)}, {self._value(instruction.start)}, "
                 f"{self._value(instruction.end)}"
             )
         if isinstance(instruction, SSAListGet):

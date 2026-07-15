@@ -26,6 +26,7 @@ from aether.ir.model import (
     IRJump,
     IRListGet,
     IRListCopy,
+    IRListSlice,
     IRListContains,
     IRListClear,
     IRListPop,
@@ -95,6 +96,7 @@ from .model import (
     SSAJump,
     SSAListGet,
     SSAListCopy,
+    SSAListSlice,
     SSAListContains,
     SSAListClear,
     SSAListPop,
@@ -559,6 +561,14 @@ class SSARenamer:
             end = self._resolve_value(instruction.end)
             self._bind_value(result.name, result, bound_values)
             return SSAArraySlice(result, array, start, end)
+
+        if isinstance(instruction, IRListSlice):
+            result = self._define_value(instruction.result)
+            list_value = self._resolve_value(instruction.list_value)
+            start = self._resolve_value(instruction.start)
+            end = self._resolve_value(instruction.end)
+            self._bind_value(result.name, result, bound_values)
+            return SSAListSlice(result, list_value, start, end)
 
         if isinstance(instruction, IRListGet):
             result = self._define_value(instruction.result)

@@ -22,6 +22,7 @@ from .model import (
     IRListNew,
     IRListCopy,
     IRListGet,
+    IRListSlice,
     IRListInsert,
     IRListIsEmpty,
     IRListLength,
@@ -257,7 +258,10 @@ class LifecycleExpander:
                 elif isinstance(instruction, (IRArrayGet, IRListGet, IRListPop, IRListRemoveAt)):
                     if self.registry.traits(instruction.result.type).needs_destroy:
                         self._owned_values.add(instruction.result)
-                elif isinstance(instruction, (IRArrayNew, IRArrayCopy, IRListNew, IRListCopy, IRArraySlice)):
+                elif isinstance(
+                    instruction,
+                    (IRArrayNew, IRArrayCopy, IRListNew, IRListCopy, IRArraySlice, IRListSlice),
+                ):
                     if self.registry.traits(instruction.result.type).needs_destroy:
                         self._owned_values.add(instruction.result)
                 elif isinstance(instruction, IRStructNew):

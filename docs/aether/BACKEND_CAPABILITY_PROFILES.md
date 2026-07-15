@@ -117,14 +117,14 @@ split/trim están explícitamente unsupported.
 El detector conserva la forma `MethodCall` tipada usada al desazucarar calls
 dotted y distingue, sin regex ni inspección del source:
 
-- `Array.copy()`, todavía sin camino IR/native end-to-end;
-- slicing cuyo receiver es List, con semántica AST inclusiva legado;
+- `Array.copy()`, que entonces no tenía camino IR/native end-to-end;
+- slicing cuyo receiver era List, resuelto posteriormente por la Fase 3;
 - `==`/`!=` con operandos Array o List, estructural sólo en AST;
 - `contains`/`indexOf` de `List<Struct>`, que requiere un `Eq(T)` estructural
   todavía ausente de IR/native.
 
-Todos producen un diagnóstico ubicado antes del lowering. Assignment, aliases,
-parámetros, returns, List.copy, Array slicing y el subset seguro existente no
+Los gaps todavía abiertos producen un diagnóstico ubicado antes del lowering.
+Assignment, aliases, parámetros, returns, copy y slicing y el subset seguro existente no
 se desactivan. `array`, `list` y `array-slicing` son capabilities deliberadamente
 amplias; los gaps se expresan como detalles semánticos que requieren soporte
 completo. Sólo deberían dividirse si esos subcontratos se vuelven capacidades
@@ -147,8 +147,17 @@ contadores de prueba; permanece parcial porque panic continúa sin unwind.
 Array/List tienen operaciones tipadas en IR y SSA y helpers LLVM especializados
 por elemento. La copia exterior es independiente, List reduce capacity a size,
 y strings, structs, callables y handles anidados siguen el lifecycle de `T`.
-No se promocionan slicing List, igualdad de colecciones, for-in borrowed ni
-búsqueda estructural de structs.
+No se promocionan igualdad de colecciones, for-in borrowed ni búsqueda
+estructural de structs.
+
+## Actualización de perfil 11: slicing copying semiabierto
+
+`Array<T>` y `List<T>` comparten `collection[start:end]` con límites 0-based y
+semiabiertos. El resultado owned tiene objeto y buffer propios; List normaliza
+`capacity` a `size`. `IRArraySlice`/`IRListSlice` y sus equivalentes SSA son
+allocation, lectura y posible panic, por lo que los optimizers los preservan.
+Se elimina el diagnóstico transitorio de List slicing native. No se habilitan
+steps, views, rangos abiertos ni índices negativos.
 
 La CLI no añade por ahora un comando `capabilities`: ejecución AST valida el
 perfil AST, y `--emit-llvm`, ejecución LLVM, `build` y los perfiles LLVM/native

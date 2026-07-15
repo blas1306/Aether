@@ -2181,9 +2181,7 @@ class TypeChecker:
             raise AetherTypeError(f"Cannot index non-indexable value of type '{type_to_string(array_type)}'.")
         if index_type == "slice":
             if isinstance(array_type, ListType):
-                if isinstance(expression.index, ast.RangeExpression):
-                    return array_type
-                raise AetherTypeError("List slices require explicit start and end.")
+                raise AetherTypeError("List slicing only supports collection[start:end] without a step.")
             if isinstance(array_type, VectorType):
                 return VectorType(array_type.element_type, orientation=array_type.orientation)
             if isinstance(array_type, TransposeVectorType):
@@ -2213,9 +2211,8 @@ class TypeChecker:
         end_type = self._expression_type(expression.end, scope)
         if collection_type is UNKNOWN_TYPE or start_type is UNKNOWN_TYPE or end_type is UNKNOWN_TYPE:
             return UNKNOWN_TYPE
-        if not isinstance(collection_type, ArrayType):
-            # Preserve the pre-existing List/Vector range semantics.  ArraySlice is
-            # the only new operation introduced by SliceExpression.
+        if not isinstance(collection_type, (ArrayType, ListType)):
+            # Vector ranges keep their pre-existing, separate semantics.
             return self._index_type(
                 ast.IndexExpression(
                     expression.collection,
@@ -2225,10 +2222,15 @@ class TypeChecker:
                 ),
                 scope,
             )
+        collection_name = "Array" if isinstance(collection_type, ArrayType) else "List"
         if start_type != "int":
-            raise AetherTypeError(f"Array slice start must be int, got '{type_to_string(start_type)}'.")
+            raise AetherTypeError(
+                f"{collection_name} slice start must be int, got '{type_to_string(start_type)}'."
+            )
         if end_type != "int":
-            raise AetherTypeError(f"Array slice end must be int, got '{type_to_string(end_type)}'.")
+            raise AetherTypeError(
+                f"{collection_name} slice end must be int, got '{type_to_string(end_type)}'."
+            )
         return collection_type
 
     def _matrix_index_type(self, expression: ast.MatrixIndexExpression, scope: Scope[VariableSymbol]) -> AetherType | None:
