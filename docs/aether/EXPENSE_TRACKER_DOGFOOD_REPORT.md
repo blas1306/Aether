@@ -32,21 +32,20 @@ la semántica por valor ni se sustituyeron structs por punteros.
   por valor.
 - Slice/copy/reserve usan `element_size`; realloc usa `memcpy` y los movimientos
   solapados usan `memmove`.
-- Sólo llegan a esas copias elementos clasificados como sized y trivialmente
-  copiables. Los structs aceptados se verifican recursivamente.
-- La clasificación distingue además relocation trivial, `needs_destroy`,
-  referencias contenidas y `needs_retain`. Para el ABI actual de strings
-  inmortales esos hechos siguen indicando copy trivial y sin cleanup; no
-  anticipan ARC.
+- Sólo llegan a esas copias elementos sized con un lifecycle representable. Los
+  structs aceptados se verifican recursivamente.
+- La clasificación distingue relocation trivial, `needs_destroy`, referencias
+  contenidas y `needs_retain`. String y structs que lo contienen usan ARC y
+  cleanup; el handle Array/List aún es trivial y carece de destroy final.
 - Los tipos nominales se emiten antes que los helpers que los usan.
 
 ## Subconjunto de campos admitido
 
 Se admiten primitivas nativas (`int`, `boolean`, `double`), enums sin payload,
 structs acíclicos anidados, strings y descriptores/referencias de colecciones ya
-representables. Un campo string es hoy un `ptr`: copiarlo preserva el transporte
-de literales estáticos, pero no define ownership, liberación ni strings
-dinámicas.
+representables. Un field string es un handle a `AetherStringObject`: copy y
+destroy retienen/liberan recursivamente. Las APIs públicas de concat, parsing y
+producción dinámica general siguen fuera del subset.
 
 Se rechazan antes de LLVM structs incompletos/recursivos por valor y, para
 elementos de colección, campos callable, class/interface, nullable, float,
@@ -67,25 +66,26 @@ structs; `contains/indexOf` estructural permanece fuera del subconjunto.
   `Vec2` porque guardar `Vector<double>` dentro de un struct sólo copiaría hoy
   su descriptor/referencia y no ofrece ownership profundo.
 
-La única diferencia de presentación observada es el formateo preexistente de
-double: native `%g` imprime `1500`, AST imprime `1500.0`. No afecta cálculos ni
-validaciones.
+La diferencia principal de presentación es el formateo preexistente de double:
+native `%g` imprime `1500`, AST imprime `1500.0`. La baseline también registra
+que strings dentro de colecciones se imprimen con comillas en AST/IR y sin ellas
+en native. No afecta cálculos ni validaciones del tracker.
 
 ## Límites restantes y próxima tarea
 
 Siguen fuera de alcance argumentos, archivos, parsing, split/trim, excepciones,
-GC, destructores y strings dinámicas. El tracker es una demostración directa
-desde `main`, no una CLI persistente.
+GC y destructores de contenedor. El tracker es una demostración directa desde
+`main`, no una CLI persistente.
 
 El contrato mínimo de string native queda aprobado en
 [`STRING_RUNTIME_DESIGN.md`](STRING_RUNTIME_DESIGN.md), y las reglas de copy,
 move, assign, destroy, colecciones, calls y cleanup en
 [`VALUE_LIFECYCLE_DESIGN.md`](../compiler/VALUE_LIFECYCLE_DESIGN.md). El tracker
-sigue usando únicamente literales transportados: no existe todavía runtime
-string dinámico ni cleanup efectivo.
+usa strings ARC y cleanup de elementos. `clear()` destruye los Transaction
+vivos, pero el último owner de una List todavía no libera su header, buffer ni
+elementos restantes.
 
-La próxima implementación recomendada es introducir operaciones estructurales
-de lifecycle y su verificación antes de SSA; después debe migrarse en conjunto
-objeto/literales/vacío, print/igualdad y todos los recorridos de structs,
-Array/List. Archivos, argv, concat, parsing y split/trim siguen bloqueados hasta
-que ese recorrido esté balanceado.
+La próxima implementación recomendada es el RC coordinado del objeto Array/List
+descrito en [`COLLECTION_MIGRATION_BASELINE.md`](COLLECTION_MIGRATION_BASELINE.md):
+header, retain/release, locals, parámetros, returns y fields antes de activar el
+free final. Archivos, argv, concat, parsing y split/trim siguen aplazados.

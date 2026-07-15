@@ -36,17 +36,20 @@ arquitectura, no capacidades solicitadas directamente por un programa.
 
 ## Perfiles actuales
 
-La versión actual del perfil es `6`. La versión `2` promovió `modules` e
+La versión actual del perfil es `8`. La versión `2` promovió `modules` e
 `imports` de `UNSUPPORTED` a `PARTIAL`; la versión `3` promovió `scalar-math`
 de `UNSUPPORTED` a `PARTIAL` en LLVM/native; la versión `4` incorpora el
 subconjunto de callables top-level tipados y sin captura en ambos backends. La
 versión `5` promueve `enums` a `COMPLETE` en LLVM/native para la semántica
 existente de enums nominales sin payload. La versión `6` agrega
 `aggregate-collection-elements`: es `COMPLETE` en AST y `PARTIAL` en native.
-El subconjunto native cubre structs nominales acíclicos y trivialmente
-copiables con primitivas, enums, structs anidados y strings/otros descriptores
-transportables; las combinaciones sin layout/copia definida se rechazan con
-ubicación y motivo antes del lowering LLVM.
+El subconjunto native cubre structs nominales acíclicos con lifecycle
+representable: primitivas, enums, structs anidados y strings/otros descriptores;
+las combinaciones sin layout/copia definida se rechazan con
+ubicación y motivo antes del lowering LLVM. La versión `7` separó transporte,
+igualdad, objeto dinámico y lifecycle de string tras activar ARC. La versión
+`8` agrega detección tipada de gaps de migración de colecciones sin promover ni
+degradar ninguna capability.
 
 El perfil AST representa el intérprete de referencia. Incluye módulos,
 imports, classes, interfaces, enums, input, errores y matemática escalar. Las
@@ -84,17 +87,45 @@ todavía no son APIs válidas del lenguaje.
 Para `strings`, el subset native distingue la operación semántica concreta:
 
 - transporte de literales, variables, parámetros, returns, fields y elementos
-  bajo la representación inmortal actual: aceptado;
-- concatenación, igualdad/desigualdad general e interpolación: rechazadas
-  temprano con el nodo operador tipado y su ubicación;
+  bajo handles `AetherStringObject` ARC: aceptado;
+- igualdad/desigualdad por contenido: aceptada;
+- concatenación e interpolación: rechazadas temprano con el nodo operador
+  tipado y su ubicación;
 - productores dinámicos, parsing, split/trim, archivos y argumentos: no se
   infieren por la mera presencia de texto y siguen fuera de su capacidad
   propia o sin API de lenguaje.
 
-Un literal aislado no solicita soporte completo. `a + b` y `a == b` sí se
-detectan cuando ambos operandos son string, aunque no haya literales y aunque la
-operación viva en un módulo importado. Es una corrección del detector del perfil
-6, no un cambio de estados o schema, por lo que no incrementa su versión.
+Un literal aislado no solicita soporte completo. `a + b` y `a == b` se detectan
+cuando ambos operandos son string, aunque no haya literales y aunque la
+operación viva en un módulo importado.
+
+## Actualización de perfil 7: runtime string
+
+El perfil 7 separa `string-transport`, `string-equality`,
+`dynamic-string-object`, `string-lifecycle`, `string-concatenation`,
+`string-parsing` y `string-split-trim`. Native marca completos transporte,
+igualdad y objeto dinámico interno; lifecycle permanece parcial mientras no
+exista una API pública amplia de productores. Concatenación, parsing y
+split/trim están explícitamente unsupported.
+
+## Actualización de perfil 8: baseline de colecciones
+
+El detector conserva la forma `MethodCall` tipada usada al desazucarar calls
+dotted y distingue, sin regex ni inspección del source:
+
+- `Array.copy()`, todavía sin camino IR/native end-to-end;
+- slicing cuyo receiver es List, con semántica AST inclusiva legado;
+- `==`/`!=` con operandos Array o List, estructural sólo en AST;
+- `contains`/`indexOf` de `List<Struct>`, que requiere un `Eq(T)` estructural
+  todavía ausente de IR/native.
+
+Todos producen un diagnóstico ubicado antes del lowering. Assignment, aliases,
+parámetros, returns, List.copy, Array slicing y el subset seguro existente no
+se desactivan. `array`, `list` y `array-slicing` son capabilities deliberadamente
+amplias; los gaps se expresan como detalles semánticos que requieren soporte
+completo. Sólo deberían dividirse si esos subcontratos se vuelven capacidades
+de producto independientes. La evidencia completa está en
+[`COLLECTION_MIGRATION_BASELINE.md`](COLLECTION_MIGRATION_BASELINE.md).
 
 La CLI no añade por ahora un comando `capabilities`: ejecución AST valida el
 perfil AST, y `--emit-llvm`, ejecución LLVM, `build` y los perfiles LLVM/native
@@ -121,11 +152,3 @@ Para añadir o cambiar una capacidad:
 política. El registro no reemplaza la revisión de la auditoría: antes de marcar
 `COMPLETE` deben existir casos positivos, negativos y de límites, además de
 paridad observable cuando ambos backends implementen la feature.
-# Actualización de perfil 7: runtime string
-
-El perfil 7 separa `string-transport`, `string-equality`,
-`dynamic-string-object`, `string-lifecycle`, `string-concatenation`,
-`string-parsing` y `string-split-trim`. Native marca completos transporte,
-igualdad y objeto dinámico interno; lifecycle permanece parcial mientras no
-exista una API pública amplia de productores. Concatenación, parsing y
-split/trim están explícitamente unsupported.

@@ -24,20 +24,28 @@ aether --backend=native examples/expense_tracker/Main.ae
 El mismo programa completo funciona en ambos backends. LLVM almacena cada
 `Transaction` por valor en un buffer contiguo, obtiene su tamaño del layout del
 target y conserva los punteros de sus literales `string` durante get/set,
-crecimiento y filtrado. Ya no hace falta un `NativeSubset.ae` separado.
+crecimiento y filtrado mediante los hooks ARC de elemento. Ya no hace falta un
+`NativeSubset.ae` separado.
 
 El formateo nativo existente de doubles usa `%g`, por lo que el listado muestra
 `1500`/`250` donde AST muestra `1500.0`/`250.0`; las nueve validaciones y toda la
-lógica coinciden. Esto no es ownership de strings dinámicas: sólo se transporta
-la representación `ptr` ya soportada.
+lógica coinciden. Los strings son handles a objetos ARC; concat, parsing y las
+otras APIs públicas de producción dinámica siguen fuera del ejemplo.
+
+La Fase 0 de colecciones confirma además que `List<Transaction>` conserva
+aliasing en assignment/parámetros/returns, que los filtros producen la List que
+construyen, que `copy()` es superficial y que `clear()` destruye sus elementos
+vivos. El objeto List y su buffer todavía no tienen RC ni destrucción final.
 
 ## Límites deliberados
 
 - No hay argumentos de proceso ni `main(args)`.
 - No hay archivos, CSV, parsing numérico, `split` o `trim`.
-- No hay construcción/ownership general de strings dinámicas.
+- No hay concat ni APIs generales de parsing/construcción dinámica de strings.
 - Las fechas no se validan ni se ordenan.
 - No se agregaron excepciones, GC ni destructores.
 
 El estado y la estrategia de layout están documentados en
 [`EXPENSE_TRACKER_DOGFOOD_REPORT.md`](../../docs/aether/EXPENSE_TRACKER_DOGFOOD_REPORT.md).
+La baseline de ownership está en
+[`COLLECTION_MIGRATION_BASELINE.md`](../../docs/aether/COLLECTION_MIGRATION_BASELINE.md).

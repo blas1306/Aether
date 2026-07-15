@@ -84,11 +84,19 @@ class TypeChecker:
         # capability validation.  AST nodes are not universally hashable, so
         # identity is the stable key for the lifetime of the checked program.
         self._expression_types: dict[int, AetherType | None] = {}
+        self._desugared_method_calls: dict[int, ast.MethodCall] = {}
         self.current_return_type: AetherType | None = None
         self.current_function_name: str | None = None
         self.current_method_struct: StructSymbol | None = None
         self.loop_depth = 0
         self.loop_variable_stack: list[tuple[str, Scope[VariableSymbol]]] = []
+        # Direct collection lvalues currently being traversed by ``for-in``.
+        # This is semantic AST state (path + resolved root scope), not a source
+        # spelling heuristic.  Phase 0 only uses it for mutations that are
+        # unambiguously incompatible with the approved read-only borrow.
+        self.loop_collection_stack: list[
+            tuple[tuple[str, ...], Scope[VariableSymbol]]
+        ] = []
         self.imported_modules: set[str] = set()
         self.module_bindings: dict[str, str] = {}
         self.qualified_functions: dict[str, FunctionSymbol] = {}
@@ -121,6 +129,7 @@ class TypeChecker:
 
     def check(self, program: ast.Program) -> None:
         self._expression_types.clear()
+        self._desugared_method_calls.clear()
         self._module_identity = program.package_name or (self.import_stack[-1] if self.import_stack else "__entry__")
         self._validate_import_bindings(program.statements)
         self._prepare_imports(program.statements)
@@ -138,6 +147,7 @@ class TypeChecker:
 
     def check_collecting_errors(self, program: ast.Program) -> list[AetherTypeError]:
         self._expression_types.clear()
+        self._desugared_method_calls.clear()
         self._module_identity = program.package_name or (self.import_stack[-1] if self.import_stack else "__entry__")
         previous_errors = self._diagnostic_errors
         self._diagnostic_errors = []
@@ -1507,16 +1517,44 @@ class TypeChecker:
             forbid_shadowing=True,
         )
         self.loop_variable_stack.append((statement.variable, loop_scope))
+        collection_path = (
+            _direct_lvalue_path(statement.iterable)
+            if isinstance(iterable_type, (ArrayType, ListType))
+            else None
+        )
+        collection_scope = (
+            scope.resolve_scope(collection_path[0])
+            if collection_path is not None
+            else None
+        )
+        if collection_path is not None and collection_scope is not None:
+            self.loop_collection_stack.append((collection_path, collection_scope))
         self.loop_depth += 1
         try:
             self._check_statements(statement.body, loop_scope)
         finally:
             self.loop_depth -= 1
+            if collection_path is not None and collection_scope is not None:
+                self.loop_collection_stack.pop()
             self.loop_variable_stack.pop()
 
     def _is_active_loop_variable_assignment(self, name: str, scope: Scope[VariableSymbol]) -> bool:
         target_scope = scope.resolve_scope(name)
         return any(loop_name == name and loop_scope is target_scope for loop_name, loop_scope in self.loop_variable_stack)
+
+    def _is_active_loop_collection_mutation(
+        self,
+        expression: ast.Expression,
+        scope: Scope[VariableSymbol],
+    ) -> bool:
+        path = _direct_lvalue_path(expression)
+        if path is None:
+            return False
+        target_scope = scope.resolve_scope(path[0])
+        return any(
+            active_path == path and active_scope is target_scope
+            for active_path, active_scope in self.loop_collection_stack
+        )
 
     def _lookup_before_global(self, name: str, scope: Scope[VariableSymbol]) -> VariableSymbol | None:
         cursor: Scope[VariableSymbol] | None = scope
@@ -1805,6 +1843,11 @@ class TypeChecker:
         """Return the type established while checking ``expression``."""
 
         return self._expression_types.get(id(expression))
+
+    def desugared_method_call(self, expression: ast.CallExpression) -> ast.MethodCall | None:
+        """Return the typed receiver form of a legacy dotted native call."""
+
+        return self._desugared_method_calls.get(id(expression))
 
     def _expression_type(self, expression: ast.Expression, scope: Scope[VariableSymbol]) -> AetherType | None:
         result = self._infer_expression_type(expression, scope)
@@ -2409,17 +2452,16 @@ class TypeChecker:
         root_name, target, method_name = receiver
         if scope.lookup(root_name) is None:
             return None
-        return self._method_call_type(
-            ast.MethodCall(
-                target,
-                method_name,
-                expression.arguments,
-                expression.keyword_arguments,
-                expression.line,
-                expression.column,
-            ),
-            scope,
+        method_call = ast.MethodCall(
+            target,
+            method_name,
+            expression.arguments,
+            expression.keyword_arguments,
+            expression.line,
+            expression.column,
         )
+        self._desugared_method_calls[id(expression)] = method_call
+        return self._method_call_type(method_call, scope)
 
     def _method_call_type(self, expression: ast.MethodCall, scope: Scope[VariableSymbol]) -> AetherType | None:
         target_type = self._expression_type(expression.target, scope)
@@ -2583,15 +2625,34 @@ class TypeChecker:
     ) -> None:
         if builtin_name not in LIST_MUTATING_BUILTINS or not expression.arguments:
             return
-        root_name = _assignment_root_name(expression.arguments[0])
+        target = expression.arguments[0]
+        root_name = _assignment_root_name(target)
+        if root_name is not None and self._is_active_loop_variable_assignment(root_name, scope):
+            raise AetherTypeError(
+                f"Cannot mutate borrowed loop variable '{root_name}' during for-in iteration.",
+                line=getattr(target, "line", expression.line),
+                column=getattr(target, "column", expression.column),
+                hint="Assign the element to a normal variable first; that copy follows the element type's value/reference semantics.",
+                kind="for-in-borrow",
+            )
+        if self._is_active_loop_collection_mutation(target, scope):
+            path = _direct_lvalue_path(target)
+            label = ".".join(path) if path is not None else root_name or "collection"
+            raise AetherTypeError(
+                f"Cannot structurally mutate collection '{label}' while iterating over it.",
+                line=getattr(target, "line", expression.line),
+                column=getattr(target, "column", expression.column),
+                hint="Finish the for-in loop before push/pop/insert/removeAt/clear/reverse/sort, or iterate over an explicit copy.",
+                kind="for-in-borrow",
+            )
         if root_name is not None and scope.is_const(root_name) and not self._is_method_receiver_mutation_target(
-            expression.arguments[0],
+            target,
             scope,
         ):
             raise AetherTypeError(
                 f"Cannot mutate constant '{root_name}'.",
-                line=expression.arguments[0].line,
-                column=expression.arguments[0].column,
+                line=target.line,
+                column=target.column,
             )
 
     def _constructor_struct(self, callee: str) -> StructSymbol | None:
@@ -3618,6 +3679,22 @@ def _assignment_root_name(expression: ast.Expression) -> str | None:
         return _assignment_root_name(expression.matrix)
     if isinstance(expression, ast.FieldAccess):
         return _assignment_root_name(expression.target)
+    return None
+
+
+def _direct_lvalue_path(expression: ast.Expression) -> tuple[str, ...] | None:
+    """Return a typed-AST lvalue path suitable for direct alias checks.
+
+    Indexed/computed paths deliberately return ``None``: Phase 0 does not try
+    to prove general aliasing or borrow escape without the future borrow IR.
+    """
+
+    if isinstance(expression, ast.Identifier):
+        return (expression.name,)
+    if isinstance(expression, ast.FieldAccess):
+        parent = _direct_lvalue_path(expression.target)
+        if parent is not None:
+            return (*parent, expression.field_name)
     return None
 
 

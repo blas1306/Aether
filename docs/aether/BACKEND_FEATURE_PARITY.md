@@ -7,6 +7,12 @@ filas históricas que describen `char *`, `%s`, `strcmp` o copia trivial son el
 snapshot previo a esta actualización. Concat native, parsing, split/trim,
 files y argv continúan no implementados.
 
+Actualización perfil 8 (15-07-2026): la Fase 0 de colecciones añade detección
+semántica tipada y diagnósticos previos al lowering para igualdad Array/List,
+`Array.copy()`, slicing List inclusivo legado y búsqueda estructural de structs.
+No cambia estados del perfil ni implementa RC. La matriz exhaustiva por backend
+está en [`COLLECTION_MIGRATION_BASELINE.md`](COLLECTION_MIGRATION_BASELINE.md).
+
 Última revisión: 15 de julio de 2026, incluyendo enums native y los ejemplos
 dogfood de métodos numéricos y expense tracker. Este documento reemplaza como
 referencia canónica a la auditoría histórica de `docs/compiler/`.
@@ -155,17 +161,17 @@ decisión aún no cambia representación ni estados de esta matriz.
 
 | Feature | Lexer/parser | AST | Typechecker | AST interpreter | IR model | IR lowering | IR verifier | IR interpreter | SSA | SSA verifier | Optimizers | LLVM/native | Runtime | Tests | Spec/docs | Estado global | Observaciones |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `Array<T>` literal | C target-typed | C | C | C | C | C | C | C | C | C | C allocation | P subconjunto escalar/enum; no Struct | P sin size/layout Struct | E2E escalares + dogfood Struct AST | C | Parcial | El frontend acepta `Array<Struct>`, pero LLVM falla tarde al calcular el tamaño del elemento. |
+| `Array<T>` literal | C target-typed | C | C | C | C | C | C | C | C | C | C allocation | P layout tipado incluido Struct soportado | P sin RC del contenedor | E2E escalares/enum/Struct | C | Parcial | Structs acíclicos sized, nested y strings usan TypeLayout y hooks; otros layouts se diagnostican temprano. |
 | Bounds checks Array | — | — | índice int | C | efectos `may_trap` | C | C | C | C | C | C preserva | C | C | safety E2E | P histórico | Completo | Auditorías antiguas aún describen el estado inseguro ya corregido. |
 | Array get/set/length | C | C | C | C | C | C | C | C | C | C | C | C | C narrowing | E2E | P | Completo | Índices 0-based. |
 | Array sort | método/global | C | C tipos | C estable in-place | C sequence sort | C | C | C | C | C | C efecto | C | C temp checked | E2E | C | Completo | int/double/string. |
 | Array slicing | C `a[s:e]` | C | C | C copy | C | C | C | C | C | C | C | C | C bounds | E2E | C | Completo | 0-based, half-open, dos límites explícitos. |
-| Array copy/equality | C | C | C | C | P | N general | N | N | N | N | N | N | AST | AST | P | Solo AST | `copy` shallow y equality estructural no bajan. |
-| `List<T>` literal/new/get/set | C target-typed | C | C | C | C | C | C | C | C | C | C | P subconjunto escalar/enum; no Struct | P sin size/layout Struct | E2E escalares + expense tracker AST | C | Parcial | No hay keyword `new`; `List<Struct>` se acepta pero LLVM falla tarde al calcular tamaño. |
+| Array copy/equality | C | C | C | C | P | N general | N | N | N | N | N | diagnóstico perfil 8 | AST | baseline + negativos | P | Solo AST diagnosticado | `copy` shallow y equality estructural no bajan; native falla antes de IR. |
+| `List<T>` literal/new/get/set | C target-typed | C | C | C | C | C | C | C | C | C | C | P layout tipado incluido Struct soportado | P sin RC del contenedor | E2E escalares/enum/Struct + expense tracker | C | Parcial | No hay keyword `new`; layouts no representables se rechazan antes de LLVM. |
 | List length/capacity/core mutation | métodos | C | C | C | C salvo capacity pública | C | C | C | C | C | C | C | C checked growth | E2E | P | Parcial | `capacity` se usa internamente pero no es API pública completa. |
-| List push/pop/insert/removeAt/clear | métodos/global | C | C | C | C | C | C | C | C | C | C efecto/trap | P sin elementos Struct | P layout/copia/ownership agregados | E2E+safety escalares + push Struct AST | C | Parcial | No shrinking deliberado; falta diagnóstico temprano para elementos no soportados. |
-| List contains/indexOf/reverse/copy/sort | métodos/global | C | C | C | C | C | C | C | C | C | C | C | C | E2E | C | Completo | Son derivables conceptualmente aunque hoy privilegiados. |
-| List slicing/equality | C | C | C | C | N | N | N | N | N | N | N | N | AST | AST | P | Solo AST | Slicing tiene formas limitadas. |
+| List push/pop/insert/removeAt/clear | métodos/global | C | C | C | C | C | C | C | C | C | C efecto/trap | P con Struct soportado | C hooks de elemento; sin destroy final | E2E+safety escalares/Struct/string | C | Parcial | No shrinking deliberado; clear sí destruye elementos vivos, el contenedor final se filtra. |
+| List contains/indexOf/reverse/copy/sort | métodos/global | C | C | C | C | C | C | C | C | C | C | P | P | E2E + baseline | C | Parcial | Copy es exterior superficial. Search de referencias usa identidad; Eq estructural de struct se diagnostica; sort sólo int/double/string. |
+| List slicing/equality | C | C | C | C legado | N | N | N | N | N | N | N | diagnóstico perfil 8 | AST | baseline + negativos | P | Gap diagnosticado | AST slicing usa end inclusivo, contrario a `[start,end)`; igualdad AST es estructural. |
 | Vector literal/get/set/length | C | C | C shape/orientation | C 1-based | C | C | C | C | C | C | C traps | C | C | E2E+safety | C | Completo | Vector matemático, no colección dinámica. |
 | Operaciones Vector | C operadores | C | C shapes | C | C add/sub/scale/dot/outer/mul | C subset int/double | C | C | C | C | P sin álgebra específica | C subset | C loops | E2E amplia | P | Parcial | Transpose y varios builtins siguen AST-only. |
 | Matrix literal/get/set/rows/columns | C | C | C shape | C 1-based | C | C | C | C | C | C | C traps | C | C | E2E+safety | C | Completo | Storage contiguo; valida fila/columna antes del offset. |
@@ -243,9 +249,10 @@ dejan SSA inválido.
   `ComplexType` en IR no tienen un camino fuente ejecutable completo.
 - La existencia de genéricos privilegiados en Array/List/Vector/Matrix no
   implica genéricos de usuario.
-- Strings como `ptr` LLVM permiten transportar literales, no un runtime string.
-- La API List es amplia para elementos soportados, pero elementos struct,
-  ownership/free y capacity pública no están cerrados.
+- Strings son handles a `AetherStringObject` con ARC interno, pero concat y las
+  APIs públicas de producción dinámica permanecen fuera del subset.
+- La API List es amplia para elementos soportados, incluidos structs con layout,
+  pero RC/free del contenedor, Eq(T) general y capacity pública no están cerrados.
 - `-O2` existe como opción, pero es alias de `-O1` y no afecta native.
 - Builtins de álgebra lineal tienen typechecker e intérprete AST extensos, pero
   la mayoría no tiene IR.
@@ -275,8 +282,8 @@ dejan SSA inválido.
    cada bloque de backend.
 2. El perfil compilable no está representado como dato único reutilizable por
    diagnósticos, docs y CLI.
-3. Ownership de List/string/class y liberación no tiene contrato v1; añadir más
-   referencias antes de fijarlo multiplica el riesgo.
+3. String ya tiene ARC, pero Array/List y classes no tienen destrucción final;
+   habilitar frees sin retain/release coordinado produciría dangling/double-free.
 4. El runtime matemático AST mezcla semántica de lenguaje con bibliotecas
    Python opcionales.
 5. Formato numérico y ciertos mensajes de panic no provienen de un contrato
@@ -293,6 +300,7 @@ dejan SSA inválido.
 4. Mantener el ABI de callables top-level tipados y diseñar closures solo si
    casos de uso posteriores justifican una representación `{code, environment}`.
 5. Diseñar interfaces/classes con layout, dispatch y ownership documentados.
-6. Completar runtime string y luego IO de entrada/archivos/args.
+6. Migrar RC de Array/List según la RFC y baseline; luego ampliar APIs string e
+   IO de entrada/archivos/args.
 7. Promover el ejemplo numérico a `math.numerics` solo después de callables,
    módulos native y un módulo `testing` mínimo.

@@ -5,6 +5,8 @@ Aether v1**, 15 de julio de 2026. El lowering AST→IR emite lifecycle y cleanup
 estructural, el verifier comprueba el estado antes de SSA y la expansión genera
 retain/release effectful para string y structs que lo contienen. El handle LLVM
 sigue ocupando una palabra, pero apunta al header de `AetherStringObject`.
+La caracterización previa a RC de Array/List y su superficie de migración está
+en [`COLLECTION_MIGRATION_BASELINE.md`](../aether/COLLECTION_MIGRATION_BASELINE.md).
 
 ## 1. Vocabulario e invariantes
 
@@ -145,19 +147,19 @@ elementos de colección.
 | enum sin payload | sí | sí | sí | no | no | no | sin cambio |
 | callable top-level | una palabra donde está soportado | sí para transporte directo | sí | no | sí, a código | no | closures requerirán otro layout/lifecycle |
 | class reference | una palabra conceptual; fuera del subset native | no prometido | sí si el modelo conserva handle | por definir | sí | por definir | coordinar con ownership general de objetos |
-| string actual | sí, `ptr` a payload inmortal | sí | sí | no | sí | no | solo es seguro para transporte demostrado |
-| string aprobado | sí, handle de una palabra | **no** | sí | **sí** | sí | **sí** | default vacío; copy retain; destroy release |
+| string actual | sí, handle de una palabra | **no** | sí | **sí** | sí | **sí** | objeto UTF-8 ARC; default vacío; copy retain; destroy release |
 | struct | si todos los campos lo son y no hay ciclo by-value | `all(fields)` | `all(fields)` | `any(fields)` | `any(fields)` | `any(fields)` | síntesis recursiva nominal |
 | nested struct | misma regla recursiva | misma regla recursiva | misma regla recursiva | misma regla recursiva | misma regla recursiva | misma regla recursiva | los nombres no cortan el análisis |
 | `Array<T>` | handle `ptr` sized | sí en ABI actual, no en contrato final | sí | no hoy | sí | no hoy | reference type: copy retain, destroy release; `copy()` clona descriptor/buffer y copia T |
 | `List<T>` | handle `ptr` sized | sí en ABI actual, no en contrato final | sí | no hoy | sí | no hoy | igual; growth relocaliza T dentro del objeto compartido |
 | `Vector<T>` / `Matrix<T>` | descriptor sized en subset native | sí en ABI actual | sí | no hoy | sí | no hoy | definir owner/alias de storage antes de hooks |
 
-Un tipo de colección no se declara seguro solo porque su descriptor sea
+Un tipo de colección no se declara migrado solo porque su descriptor sea
 copiable. Su operación `copy` también depende recursivamente del lifecycle de
 `T`. Hasta que existan hooks, el subset native solo admite representaciones
-para las que las operaciones actuales están demostradas; producir strings
-owned dentro de esos recorridos permanece prohibido.
+para las que las operaciones actuales están demostradas. Los hooks de elemento
+string/struct ya están activos, pero el handle del contenedor no tiene RC ni
+destroy final.
 
 ### 3.1 Lifecycle aprobado de Array/List, todavía no implementado
 
@@ -368,14 +370,14 @@ panic/call sin prueba de equivalencia.
 `IRStorage` distingue ubicaciones addressable owned de `IRValue`. Cada opcode
 puede conservar `IRSourceLocation`; la nominalidad viene del `IRType` completo.
 `LifecycleTypeRegistry` sintetiza planes de structs en orden fuente y orden
-inverso para destrucción/rollback. Todos los tipos del ABI actual clasifican
-como triviales, incluida la representación string antigua.
+inverso para destrucción/rollback. String y structs que lo contienen son no
+triviales; Array/List siguen siendo handles trivialmente copiados, sin destroy.
 
 La decisión aplicada es expandir lifecycle **después de `IRVerifier` y antes
-de SSA**. `LifecycleExpander` lo convierte en load/store/default/no-op para los
-tipos actuales; por eso SSA, sus optimizadores y LLVM no reciben efectos de
-ownership todavía. En IR, los opcodes declaran efectos obligatorios y DCE no
-puede eliminarlos.
+de SSA**. `LifecycleExpander` convierte el lifecycle string/struct en
+retain/release effectful y conserva load/store/default/no-op para tipos
+triviales. En IR, los opcodes declaran efectos obligatorios y DCE no puede
+eliminarlos.
 
 Optimizaciones futuras, no implementadas en esta fase: pairing general probado
 de retain/release, ARC global e inlining/devirtualización de hooks. La expansión
@@ -385,18 +387,17 @@ adyacencia textual no basta.
 
 ## 10. Auditoría preventiva de la representación actual
 
-Hoy string native es un `ptr` a payload estático. Copia, asignación, returns,
-structs y Array/List son seguros únicamente en el subconjunto demostrado donde
-todos los strings transportados son literales inmortales. Igualdad/concat
-generales e interpolación se rechazan temprano por operación tipada. Parsing,
-split/trim, archivos, argv e input native no existen y por ello no pueden crear
-payload owned.
+Hoy string native es un handle a `AetherStringObject` con ARC. Copia,
+asignación, returns, structs y elementos Array/List invocan retain/release en
+los recorridos implementados. Igualdad por contenido y print length-aware están
+activos; concat, interpolación, parsing, split/trim, archivos, argv e input
+native continúan rechazados o sin API.
 
-Los recorridos actuales de `List` hacen copy/slice/reallocation/clear con
-memcpy/memmove y sin hooks. En cuanto exista un productor owned, esos mismos
-recorridos causarían leaks, double release o dangling pointers. Por eso no se
-habilitará ningún productor dinámico ni se cambiará la clasificación efectiva
-de string hasta migrar conjuntamente structs, collections, calls y cleanup.
+Los recorridos actuales de `List` usan hooks de copy/destroy para elementos;
+growth usa relocation y `clear` destruye el rango vivo. El contenedor no tiene
+release final, así que header, buffer y elementos restantes se filtran. Activar
+destroy del contenedor sin migrar conjuntamente aliases, calls, returns y
+fields causaría double release o dangling pointers.
 
 ## 11. Detalles aplazados no bloqueantes
 
@@ -406,6 +407,6 @@ de string hasta migrar conjuntamente structs, collections, calls y cleanup.
 - optimización ARC, RVO y política de concurrencia posterior;
 - `StringView`, substring y APIs públicas de texto.
 
-El siguiente bloque recomendado es un optimizador ARC con análisis de alias y
-la primera API pública de construcción dinámica. No se habilitan todavía
-concat, parsing, split/trim, files ni argv.
+El siguiente bloque de colecciones recomendado es RC de objeto coordinado según
+la baseline. La optimización ARC y nuevas APIs string pueden seguir después;
+concat, parsing, split/trim, files y argv permanecen aplazados.

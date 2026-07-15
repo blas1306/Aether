@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from .pipeline import TypedProgram
 
 
-CAPABILITY_PROFILE_VERSION = "7"
+CAPABILITY_PROFILE_VERSION = "8"
 
 
 class BackendIdentity(str, Enum):
@@ -670,6 +670,23 @@ class _CapabilityDetector:
                     detail=detail,
                     requires_complete_support=True,
                 )
+            if node.operator in {"==", "!="}:
+                left_resolved = self._resolve_alias(left_type) if left_type is not None else None
+                right_resolved = self._resolve_alias(right_type) if right_type is not None else None
+                if isinstance(left_resolved, ArrayType) and isinstance(right_resolved, ArrayType):
+                    self._record(
+                        Capability.ARRAY,
+                        node,
+                        detail="structural Array equality",
+                        requires_complete_support=True,
+                    )
+                elif isinstance(left_resolved, ListType) and isinstance(right_resolved, ListType):
+                    self._record(
+                        Capability.LIST,
+                        node,
+                        detail="structural List equality",
+                        requires_complete_support=True,
+                    )
             return
         if isinstance(node, ast.UnaryExpression):
             self._record(Capability.ARITHMETIC, node)
@@ -679,6 +696,13 @@ class _CapabilityDetector:
             return
         if isinstance(node, ast.CallExpression):
             self._record_call(node)
+            return
+        if isinstance(node, ast.MethodCall):
+            self._record_collection_operation(
+                node.target,
+                node.method_name,
+                node,
+            )
             return
         if isinstance(node, ast.ArrayLiteral):
             self._record(Capability.ARRAY, node)
@@ -690,10 +714,34 @@ class _CapabilityDetector:
             self._record(Capability.VECTOR if node.vector else Capability.MATRIX, node)
             return
         if isinstance(node, ast.SliceExpression):
-            self._record(Capability.ARRAY_SLICING, node)
+            collection_type = self.checker.type_of_expression(node.collection)
+            resolved = self._resolve_alias(collection_type) if collection_type is not None else None
+            self._record(
+                Capability.ARRAY_SLICING,
+                node,
+                detail=(
+                    "legacy inclusive List slicing"
+                    if isinstance(resolved, ListType)
+                    else None
+                ),
+                requires_complete_support=isinstance(resolved, ListType),
+            )
 
     def _record_call(self, call: ast.CallExpression) -> None:
+        desugared = self.checker.desugared_method_call(call)
+        if desugared is not None:
+            self._record_collection_operation(
+                desugared.target,
+                desugared.method_name,
+                call,
+            )
         canonical = self._canonical_name(call.callee)
+        if canonical in {"copy", "contains", "index_of"} and call.arguments:
+            self._record_collection_operation(
+                call.arguments[0],
+                canonical,
+                call,
+            )
         if canonical in {"print", "println"}:
             self._record(Capability.PRINT, call)
         if canonical in _SCALAR_MATH_FUNCTIONS:
@@ -726,6 +774,38 @@ class _CapabilityDetector:
                 Capability.CLASS_CONSTRUCTORS if symbol.kind == "class" else Capability.STRUCT_CONSTRUCTORS,
                 call,
             )
+
+    def _record_collection_operation(
+        self,
+        target: ast.Expression,
+        operation: str,
+        node: object,
+    ) -> None:
+        target_type = self.checker.type_of_expression(target)
+        if target_type is None:
+            return
+        resolved = self._resolve_alias(target_type)
+        canonical_operation = "indexOf" if operation == "index_of" else operation
+        if isinstance(resolved, ArrayType) and canonical_operation == "copy":
+            self._record(
+                Capability.ARRAY,
+                node,
+                detail="Array.copy()",
+                requires_complete_support=True,
+            )
+            return
+        if not isinstance(resolved, ListType) or canonical_operation not in {"contains", "indexOf"}:
+            return
+        element_type = self._resolve_alias(resolved.element_type)
+        symbol = self.checker.structs.get(element_type) if isinstance(element_type, str) else None
+        if symbol is None or symbol.kind != "struct":
+            return
+        self._record(
+            Capability.AGGREGATE_COLLECTION_ELEMENTS,
+            node,
+            detail=f"List<{element_type}>.{canonical_operation}() structural search",
+            requires_complete_support=True,
+        )
 
     def _canonical_name(self, visible_name: str, *, constants: bool = False) -> str:
         aliases = (
@@ -946,10 +1026,47 @@ def backend_capability_issues(
             backend is BackendIdentity.NATIVE
             and requirement.capability is Capability.AGGREGATE_COLLECTION_ELEMENTS
             and requirement.detail is not None
+            and "structural search" in requirement.detail
+        ):
+            message = (
+                "LLVM/native cannot perform this collection search yet: "
+                f"{requirement.detail}; structural Eq(T) is not implemented end to end."
+            )
+        elif (
+            backend is BackendIdentity.NATIVE
+            and requirement.capability is Capability.AGGREGATE_COLLECTION_ELEMENTS
+            and requirement.detail is not None
         ):
             message = (
                 "LLVM/native cannot use this collection element layout: "
                 f"{requirement.detail}."
+            )
+        elif (
+            backend is BackendIdentity.NATIVE
+            and requirement.capability is Capability.ARRAY_SLICING
+            and requirement.detail == "legacy inclusive List slicing"
+        ):
+            message = (
+                "LLVM/native List slicing is unavailable during collection migration: "
+                "the AST backend still uses legacy inclusive bounds while the approved "
+                "contract is half-open [start, end)."
+            )
+        elif (
+            backend is BackendIdentity.NATIVE
+            and requirement.detail in {"structural Array equality", "structural List equality"}
+        ):
+            message = (
+                f"LLVM/native does not yet implement {requirement.detail}; "
+                "the approved operation compares ordered contents, not container identity."
+            )
+        elif (
+            backend is BackendIdentity.NATIVE
+            and requirement.capability is Capability.ARRAY
+            and requirement.detail == "Array.copy()"
+        ):
+            message = (
+                "LLVM/native Array.copy() is unavailable until explicit collection copy "
+                "has an end-to-end element lifecycle path."
             )
         else:
             message = (

@@ -9,11 +9,17 @@ runtime ya hayan migrado, y no modifica todavía la especificación normativa.
 
 Documentos relacionados: [diseño general de colecciones](AETHER_COLLECTIONS_DESIGN.md),
 [crecimiento de List](AETHER_LIST_GROWTH_DESIGN.md),
+[baseline de migración Fase 0](COLLECTION_MIGRATION_BASELINE.md),
 [lifecycle de valores](../compiler/VALUE_LIFECYCLE_DESIGN.md),
 [runtime de strings](STRING_RUNTIME_DESIGN.md),
 [sort de secuencias](AETHER_SEQUENCE_SORT_DESIGN.md),
 [Vector/Matrix](AETHER_VECTOR_MATRIX_DESIGN.md) y
 [paridad de backends](BACKEND_FEATURE_PARITY.md).
+
+La baseline de Fase 0 es la fuente descriptiva del comportamiento observado
+por backend y de los diagnósticos transitorios. Esta RFC continúa siendo el
+contrato aprobado; la baseline no afirma que RC, ABI, slicing List, borrow o
+igualdad native ya estén implementados.
 
 ## 1. Decisiones aprobadas
 

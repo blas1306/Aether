@@ -25,6 +25,10 @@ aether --backend=llvm examples/numerical_methods/main.ae
 Every printed validation must end in `true`, and both backends must produce the
 same eighteen lines.
 
+La caracterización de Fase 0 de Array/List se ejecuta también como guardia de
+regresión indirecta para este programa. No cambia sus contratos numéricos, sus
+callables ni sus resultados; el RC futuro de colecciones permanece pendiente.
+
 ## Callable API
 
 `Functions.ae` declares the structural alias:
