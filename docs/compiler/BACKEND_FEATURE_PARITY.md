@@ -1,4 +1,17 @@
-# Auditoría de paridad de features por backend
+# Auditoría de paridad de features por backend (ubicación histórica)
+
+La auditoría canónica, actualizada el 14 de julio de 2026 y desglosada por
+lexer/parser, AST, typechecker, intérpretes, IR, SSA, optimizadores,
+LLVM/native, runtime, tests y documentación, está en:
+
+[`docs/aether/BACKEND_FEATURE_PARITY.md`](../aether/BACKEND_FEATURE_PARITY.md).
+
+El contenido que sigue se conserva temporalmente como registro histórico de la
+auditoría del 13 de julio. No debe usarse para decidir el estado actual: no
+incluye correctamente los commits posteriores de short-circuit, resolución
+multifase y backend de structs.
+
+---
 
 Última revisión: 2026-07-13.
 

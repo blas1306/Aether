@@ -1,0 +1,3 @@
+float f = input("Ingrese la funcion: ");
+
+println("f(x) = ", f);

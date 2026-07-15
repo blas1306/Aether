@@ -1,0 +1,28 @@
+package Problems;
+
+from Functions import ScalarFunction;
+
+public struct QuadraticMinusTwo implements ScalarFunction {
+    double evaluate(double x) {
+        return x * x - 2.0;
+    }
+}
+
+public struct QuadraticMinusTwoDerivative implements ScalarFunction {
+    double evaluate(double x) {
+        return 2.0 * x;
+    }
+}
+
+public struct NoRealRoot implements ScalarFunction {
+    double evaluate(double x) {
+        return x * x + 1.0;
+    }
+}
+
+public struct SquareFunction implements ScalarFunction {
+    double evaluate(double x) {
+        return x * x;
+    }
+}
+

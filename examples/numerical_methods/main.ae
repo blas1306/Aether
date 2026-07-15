@@ -1,0 +1,45 @@
+from Integration import simpson;
+from Integration import trapezoid;
+from Problems import NoRealRoot;
+from Problems import QuadraticMinusTwo;
+from Problems import QuadraticMinusTwoDerivative;
+from Problems import SquareFunction;
+from Results import RootResult;
+from Roots import bisection;
+from Roots import newton;
+from Roots import secant;
+
+QuadraticMinusTwo target = QuadraticMinusTwo();
+QuadraticMinusTwoDerivative derivative = QuadraticMinusTwoDerivative();
+
+RootResult bisected = bisection(target, 0.0, 2.0, 1e-10, 100);
+RootResult newtonResult = newton(target, derivative, 1.0, 1e-10, 100);
+RootResult secantResult = secant(target, 0.0, 2.0, 1e-10, 100);
+
+println("bisection converged: ", bisected.converged);
+println("bisection accurate: ", abs(bisected.value * bisected.value - 2.0) < 1e-8);
+println("newton converged: ", newtonResult.converged);
+println("newton accurate: ", abs(newtonResult.value * newtonResult.value - 2.0) < 1e-8);
+println("secant converged: ", secantResult.converged);
+println("secant accurate: ", abs(secantResult.value * secantResult.value - 2.0) < 1e-8);
+
+NoRealRoot noRoot = NoRealRoot();
+RootResult invalidBracket = bisection(noRoot, -1.0, 1.0, 1e-10, 100);
+RootResult zeroDerivative = newton(target, derivative, 0.0, 1e-10, 100);
+RootResult zeroSecantDenominator = secant(target, -1.0, 1.0, 1e-10, 100);
+println("invalid bracket rejected: ", !invalidBracket.converged);
+println("zero derivative rejected: ", !zeroDerivative.converged);
+println("zero secant denominator rejected: ", !zeroSecantDenominator.converged);
+
+SquareFunction square = SquareFunction();
+double trapezoidValue = trapezoid(square, 0.0, 1.0, 100);
+double simpsonValue = simpson(square, 0.0, 1.0, 100);
+println("trapezoid accurate: ", abs(trapezoidValue - 1.0 / 3.0) < 1e-4);
+println("simpson accurate: ", abs(simpsonValue - 1.0 / 3.0) < 1e-10);
+
+try {
+    simpson(square, 0.0, 1.0, 3);
+    println("invalid Simpson rejected: false");
+} catch (error) {
+    println("invalid Simpson rejected: ", error.message == "simpson requires a positive even interval count");
+}

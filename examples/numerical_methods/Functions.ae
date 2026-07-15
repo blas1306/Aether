@@ -1,0 +1,8 @@
+package Functions;
+
+// Aether no tiene tipos funcion de primera clase. Esta interfaz mantiene los
+// algoritmos reutilizables sin introducir sintaxis ni semantica nuevas.
+public interface ScalarFunction {
+    double evaluate(double x);
+}
+

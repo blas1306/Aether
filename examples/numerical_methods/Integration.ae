@@ -1,0 +1,47 @@
+package Integration;
+
+from Functions import ScalarFunction;
+
+public double trapezoid(
+    ScalarFunction target,
+    double left,
+    double right,
+    int intervals
+) {
+    if intervals <= 0 {
+        throw "trapezoid requires a positive interval count";
+    }
+
+    double step = (right - left) / intervals;
+    double total = (target.evaluate(left) + target.evaluate(right)) / 2.0;
+    int index = 1;
+    while index < intervals {
+        total = total + target.evaluate(left + index * step);
+        index = index + 1;
+    }
+    return total * step;
+}
+
+public double simpson(
+    ScalarFunction target,
+    double left,
+    double right,
+    int intervals
+) {
+    if intervals <= 0 || intervals % 2 != 0 {
+        throw "simpson requires a positive even interval count";
+    }
+
+    double step = (right - left) / intervals;
+    double total = target.evaluate(left) + target.evaluate(right);
+    int index = 1;
+    while index < intervals {
+        double weight = 2.0;
+        if index % 2 != 0 {
+            weight = 4.0;
+        }
+        total = total + weight * target.evaluate(left + index * step);
+        index = index + 1;
+    }
+    return total * step / 3.0;
+}

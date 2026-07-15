@@ -1,0 +1,111 @@
+package Roots;
+
+from Functions import ScalarFunction;
+from Results import RootResult;
+
+public RootResult bisection(
+    ScalarFunction target,
+    double left,
+    double right,
+    double tolerance,
+    int maxIterations
+) {
+    if tolerance <= 0.0 || maxIterations <= 0 || left >= right {
+        return RootResult((left + right) / 2.0, 0, false);
+    }
+
+    double fLeft = target.evaluate(left);
+    double fRight = target.evaluate(right);
+    if abs(fLeft) <= tolerance {
+        return RootResult(left, 0, true);
+    }
+    if abs(fRight) <= tolerance {
+        return RootResult(right, 0, true);
+    }
+    if fLeft * fRight > 0.0 {
+        return RootResult((left + right) / 2.0, 0, false);
+    }
+
+    int iterations = 0;
+    double middle = (left + right) / 2.0;
+    while iterations < maxIterations {
+        middle = (left + right) / 2.0;
+        double fMiddle = target.evaluate(middle);
+        iterations = iterations + 1;
+
+        if abs(fMiddle) <= tolerance || abs(right - left) / 2.0 <= tolerance {
+            return RootResult(middle, iterations, true);
+        }
+        if fLeft * fMiddle < 0.0 {
+            right = middle;
+        } else {
+            left = middle;
+            fLeft = fMiddle;
+        }
+    }
+    return RootResult(middle, iterations, false);
+}
+
+public RootResult newton(
+    ScalarFunction target,
+    ScalarFunction derivative,
+    double initial,
+    double tolerance,
+    int maxIterations
+) {
+    if tolerance <= 0.0 || maxIterations <= 0 {
+        return RootResult(initial, 0, false);
+    }
+
+    double x = initial;
+    int iterations = 0;
+    while iterations < maxIterations {
+        double fx = target.evaluate(x);
+        if abs(fx) <= tolerance {
+            return RootResult(x, iterations, true);
+        }
+
+        double slope = derivative.evaluate(x);
+        if abs(slope) <= tolerance {
+            return RootResult(x, iterations, false);
+        }
+
+        x = x - fx / slope;
+        iterations = iterations + 1;
+    }
+    return RootResult(x, iterations, abs(target.evaluate(x)) <= tolerance);
+}
+
+public RootResult secant(
+    ScalarFunction target,
+    double previous,
+    double current,
+    double tolerance,
+    int maxIterations
+) {
+    if tolerance <= 0.0 || maxIterations <= 0 {
+        return RootResult(current, 0, false);
+    }
+
+    double fPrevious = target.evaluate(previous);
+    double fCurrent = target.evaluate(current);
+    int iterations = 0;
+    while iterations < maxIterations {
+        if abs(fCurrent) <= tolerance {
+            return RootResult(current, iterations, true);
+        }
+
+        double denominator = fCurrent - fPrevious;
+        if abs(denominator) <= tolerance {
+            return RootResult(current, iterations, false);
+        }
+
+        double next = current - fCurrent * (current - previous) / denominator;
+        previous = current;
+        fPrevious = fCurrent;
+        current = next;
+        fCurrent = target.evaluate(current);
+        iterations = iterations + 1;
+    }
+    return RootResult(current, iterations, abs(fCurrent) <= tolerance);
+}

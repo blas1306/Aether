@@ -1,0 +1,8 @@
+package Results;
+
+public struct RootResult {
+    double value;
+    int iterations;
+    boolean converged;
+}
+
