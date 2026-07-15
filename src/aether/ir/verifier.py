@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import NoReturn
 
 from .model import (
+    IRAssign,
     IRArrayGet,
     IRArrayLength,
     IRArrayNew,
@@ -17,10 +18,13 @@ from .model import (
     IRCallIndirect,
     IRCompareOp,
     IRConst,
+    IRCopyInit,
+    IRDestroy,
     IREnumConstant,
     IRFunction,
     IRFunctionRef,
     IRInstruction,
+    IRInitDefault,
     IRJump,
     IRListGet,
     IRListCopy,
@@ -49,6 +53,7 @@ from .model import (
     IRMatrixRows,
     IRMatrixSet,
     IRModule,
+    IRMoveInit,
     IROuterProduct,
     IRPrint,
     IRStructGet,
@@ -58,6 +63,8 @@ from .model import (
     IRMethodResultReceiver,
     IRMethodResultValue,
     IRReturn,
+    IRRelocate,
+    IRStorage,
     IRStore,
     IRUnaryOp,
     IRValue,
@@ -71,6 +78,7 @@ from .model import (
     IRVectorNew,
     IRVectorSet,
 )
+from .lifecycle import LifecycleTypeRegistry
 from .types import (
     ArrayType,
     BoolType,
@@ -103,11 +111,15 @@ class IRVerificationError(ValueError):
 class _State:
     values: frozenset[str]
     slots: frozenset[str]
+    moved: frozenset[str] = frozenset()
+    destroyed: frozenset[str] = frozenset()
 
     def intersect(self, other: _State) -> _State:
         return _State(
             values=self.values & other.values,
             slots=self.slots & other.slots,
+            moved=self.moved & other.moved,
+            destroyed=self.destroyed & other.destroyed,
         )
 
 
@@ -122,11 +134,13 @@ class IRVerifier:
         self.module = module
         self._functions: dict[str, IRFunction] = {}
         self._structs = {}
+        self._lifecycle: LifecycleTypeRegistry | None = None
 
     def verify(self) -> IRModule:
         """Verify the module and return it unchanged on success."""
         self._functions = {}
         self._structs = {definition.name: definition for definition in self.module.structs}
+        self._lifecycle = LifecycleTypeRegistry(self.module.structs)
         self._verify_module()
         return self.module
 
@@ -293,17 +307,36 @@ class IRVerifier:
         slot_types: dict[str, IRType] = {}
         for block in function.blocks:
             for instruction in block.instructions:
-                if not isinstance(instruction, IRStore):
-                    continue
-                self._verify_type(instruction.slot.type, f"slot '{self._value(instruction.slot)}'")
-                existing = slot_types.get(instruction.slot.name)
-                if existing is not None and existing != instruction.slot.type:
-                    self._fail(
-                        f"Slot '{self._value(instruction.slot)}' type mismatch: "
-                        f"expected {existing}, got {instruction.slot.type}"
-                    )
-                slot_types[instruction.slot.name] = instruction.slot.type
+                for slot in self._instruction_storages(instruction):
+                    self._verify_type(slot.type, f"slot '{self._value(slot)}'")
+                    existing = slot_types.get(slot.name)
+                    if existing is not None and existing != slot.type:
+                        self._fail(
+                            f"Slot '{self._value(slot)}' type mismatch: "
+                            f"expected {existing}, got {slot.type}"
+                        )
+                    slot_types[slot.name] = slot.type
         return slot_types
+
+    @staticmethod
+    def _instruction_storages(instruction: IRInstruction) -> tuple[IRValue, ...]:
+        if isinstance(instruction, IRStore):
+            return (instruction.slot,)
+        if isinstance(instruction, IRLoad):
+            return (instruction.slot,) if isinstance(instruction.slot, IRStorage) else ()
+        if isinstance(instruction, IRInitDefault):
+            return (instruction.destination,)
+        if isinstance(instruction, (IRCopyInit, IRAssign)):
+            if isinstance(instruction.source, IRStorage):
+                return (instruction.destination, instruction.source)
+            return (instruction.destination,)
+        if isinstance(instruction, (IRRelocate, IRMoveInit)):
+            return (instruction.destination, instruction.source)
+        if isinstance(instruction, IRDestroy):
+            return (instruction.value,)
+        if isinstance(instruction, IRReturn) and instruction.transferred_storage is not None:
+            return (instruction.transferred_storage,)
+        return ()
 
     def _verify_reachable_values(
         self,
@@ -333,6 +366,20 @@ class IRVerifier:
 
             for successor in self._successors(block):
                 existing = inputs.get(successor)
+                if existing is not None:
+                    lifecycle_slots = {
+                        name
+                        for name in slot_types
+                        if self._is_lifecycle_storage(function, name)
+                    }
+                    if (existing.slots & lifecycle_slots) != (output.slots & lifecycle_slots):
+                        inconsistent = sorted(
+                            (existing.slots ^ output.slots) & lifecycle_slots
+                        )[0]
+                        self._fail(
+                            f"Lifecycle state for storage '%{inconsistent}' is inconsistent "
+                            f"across control-flow paths entering block '{successor}'"
+                        )
                 updated = output if existing is None else existing.intersect(output)
                 if updated != existing:
                     inputs[successor] = updated
@@ -353,6 +400,22 @@ class IRVerifier:
                     value_types,
                     slot_types,
                 )
+
+    @staticmethod
+    def _is_lifecycle_storage(function: IRFunction, name: str) -> bool:
+        return any(
+            isinstance(instruction, (IRInitDefault, IRCopyInit, IRMoveInit, IRAssign, IRDestroy, IRRelocate))
+            and any(
+                isinstance(value, IRStorage) and value.name == name
+                for value in (
+                    getattr(instruction, "destination", None),
+                    getattr(instruction, "source", None),
+                    getattr(instruction, "value", None),
+                )
+            )
+            for block in function.blocks
+            for instruction in block.instructions
+        )
 
     def _transfer_block(
         self,
@@ -403,7 +466,105 @@ class IRVerifier:
                 slot_types[instruction.slot.name],
                 f"Store type mismatch for slot '{self._value(instruction.slot)}'",
             )
-            return _State(state.values, state.slots | {instruction.slot.name})
+            return _State(
+                state.values,
+                state.slots | {instruction.slot.name},
+                state.moved - {instruction.slot.name},
+                state.destroyed - {instruction.slot.name},
+            )
+
+        if isinstance(instruction, IRInitDefault):
+            self._verify_lifecycle_destination(instruction.destination, slot_types)
+            self._require_uninitialized(instruction.destination, state, "init_default")
+            traits = self._lifecycle_traits(instruction.destination.type)
+            if not traits.supports_default:
+                self._fail(
+                    f"init_default is not supported for type {instruction.destination.type}: "
+                    f"{traits.reason or 'no valid default value'}"
+                )
+            return self._initialize_storage(state, instruction.destination)
+
+        if isinstance(instruction, IRCopyInit):
+            self._verify_lifecycle_destination(instruction.destination, slot_types)
+            self._require_uninitialized(instruction.destination, state, "copy_init")
+            self._require_lifecycle_source(instruction.source, state, value_types, slot_types)
+            self._require_type(
+                instruction.source.type,
+                instruction.destination.type,
+                f"copy_init type mismatch for '{self._value(instruction.destination)}'",
+            )
+            return self._initialize_storage(state, instruction.destination)
+
+        if isinstance(instruction, IRMoveInit):
+            self._verify_lifecycle_destination(instruction.destination, slot_types)
+            self._verify_lifecycle_destination(instruction.source, slot_types)
+            if instruction.destination.name == instruction.source.name:
+                self._fail("move_init source and destination must not be the same storage")
+            self._require_uninitialized(instruction.destination, state, "move_init")
+            self._require_live_storage(instruction.source, state, "move_init source")
+            self._require_type(
+                instruction.source.type,
+                instruction.destination.type,
+                f"move_init type mismatch for '{self._value(instruction.destination)}'",
+            )
+            initialized = self._initialize_storage(state, instruction.destination)
+            return _State(
+                initialized.values,
+                initialized.slots - {instruction.source.name},
+                initialized.moved | {instruction.source.name},
+                initialized.destroyed - {instruction.source.name},
+            )
+
+        if isinstance(instruction, IRAssign):
+            self._verify_lifecycle_destination(instruction.destination, slot_types)
+            self._require_live_storage(instruction.destination, state, "assign destination")
+            self._require_lifecycle_source(instruction.source, state, value_types, slot_types)
+            self._require_type(
+                instruction.source.type,
+                instruction.destination.type,
+                f"assign type mismatch for '{self._value(instruction.destination)}'",
+            )
+            # Self-assignment is deliberately valid.  Future non-trivial hooks
+            # must retain-before-release or detect the alias.
+            return state
+
+        if isinstance(instruction, IRDestroy):
+            self._verify_lifecycle_destination(instruction.value, slot_types)
+            self._require_live_storage(instruction.value, state, "destroy operand")
+            return _State(
+                state.values,
+                state.slots - {instruction.value.name},
+                state.moved - {instruction.value.name},
+                state.destroyed | {instruction.value.name},
+            )
+
+        if isinstance(instruction, IRRelocate):
+            self._verify_lifecycle_destination(instruction.destination, slot_types)
+            self._verify_lifecycle_destination(instruction.source, slot_types)
+            if type(instruction.count) is not int or instruction.count <= 0:
+                self._fail(f"relocate count must be positive, got {instruction.count}")
+            if instruction.destination.name == instruction.source.name:
+                self._fail("relocate source and destination must not be the same storage")
+            self._require_uninitialized(instruction.destination, state, "relocate")
+            self._require_live_storage(instruction.source, state, "relocate source")
+            self._require_type(
+                instruction.source.type,
+                instruction.destination.type,
+                f"relocate type mismatch for '{self._value(instruction.destination)}'",
+            )
+            traits = self._lifecycle_traits(instruction.source.type)
+            if not traits.trivially_relocatable:
+                self._fail(
+                    f"relocate is not permitted for non-relocatable type "
+                    f"{instruction.source.type}: {traits.reason or 'layout forbids relocation'}"
+                )
+            initialized = self._initialize_storage(state, instruction.destination)
+            return _State(
+                initialized.values,
+                initialized.slots - {instruction.source.name},
+                initialized.moved | {instruction.source.name},
+                initialized.destroyed - {instruction.source.name},
+            )
 
         if isinstance(instruction, IRBinaryOp):
             self._require_defined(instruction.left, state, value_types)
@@ -721,6 +882,34 @@ class IRVerifier:
 
         if isinstance(instruction, IRReturn):
             self._verify_return(function, instruction, state, value_types)
+            lifecycle_live = {
+                name
+                for name in state.slots
+                if self._is_lifecycle_storage(function, name)
+            }
+            transferred = (
+                {instruction.transferred_storage.name}
+                if instruction.transferred_storage is not None
+                else set()
+            )
+            if instruction.transferred_storage is not None:
+                self._verify_lifecycle_destination(
+                    instruction.transferred_storage,
+                    slot_types,
+                )
+                self._require_live_storage(
+                    instruction.transferred_storage,
+                    state,
+                    "return transfer",
+                )
+                if instruction.value is None or instruction.value.type != instruction.transferred_storage.type:
+                    self._fail("return transfer storage must match the returned value type")
+            missing = sorted(lifecycle_live - transferred)
+            if missing:
+                self._fail(
+                    "Return exits with live owning storage lacking cleanup: "
+                    + ", ".join(f"%{name}" for name in missing)
+                )
             return state
 
         self._fail(f"Unsupported IR instruction '{type(instruction).__name__}'")
@@ -1554,6 +1743,16 @@ class IRVerifier:
                 )
             return
 
+        if isinstance(instruction.value, IRStorage):
+            self._require_live_storage(
+                instruction.value,
+                state,
+                "returned storage",
+            )
+            self._fail(
+                f"Return operand '{self._value(instruction.value)}' is storage; "
+                "load or explicitly transfer it as a value"
+            )
         self._require_defined(instruction.value, state, value_types)
         if instruction.value.type != function.return_type:
             self._fail(
@@ -1833,7 +2032,79 @@ class IRVerifier:
 
     def _require_slot_stored(self, slot: IRValue, state: _State) -> None:
         if slot.name not in state.slots:
+            if slot.name in state.moved:
+                self._fail(f"Use of slot '{self._value(slot)}' after move")
+            if slot.name in state.destroyed:
+                self._fail(f"Use of slot '{self._value(slot)}' after destroy")
+            if isinstance(slot, IRStorage):
+                self._fail(f"Slot '{self._value(slot)}' loaded before initialization")
             self._fail(f"Slot '{self._value(slot)}' loaded before store")
+
+    def _verify_lifecycle_destination(
+        self,
+        storage: IRStorage,
+        slot_types: dict[str, IRType],
+    ) -> None:
+        if not isinstance(storage, IRStorage):
+            self._fail(
+                f"Lifecycle destination '{self._value(storage)}' must be IRStorage, "
+                f"not a computed value"
+            )
+        self._require_slot_exists(storage, slot_types)
+        if isinstance(storage.type, VoidType):
+            self._fail("Lifecycle operations cannot target void storage")
+
+    def _require_uninitialized(
+        self,
+        storage: IRStorage,
+        state: _State,
+        operation: str,
+    ) -> None:
+        if storage.name in state.slots:
+            self._fail(
+                f"{operation} destination '{self._value(storage)}' is already alive"
+            )
+
+    def _require_live_storage(
+        self,
+        storage: IRStorage,
+        state: _State,
+        operation: str,
+    ) -> None:
+        if storage.name in state.slots:
+            return
+        if storage.name in state.moved:
+            self._fail(f"{operation} '{self._value(storage)}' is used after move")
+        if storage.name in state.destroyed:
+            self._fail(f"{operation} '{self._value(storage)}' is used after destroy")
+        self._fail(f"{operation} '{self._value(storage)}' is used before initialization")
+
+    def _require_lifecycle_source(
+        self,
+        source: IRValue,
+        state: _State,
+        value_types: dict[str, IRType],
+        slot_types: dict[str, IRType],
+    ) -> None:
+        if isinstance(source, IRStorage):
+            self._require_slot_exists(source, slot_types)
+            self._require_live_storage(source, state, "lifecycle source")
+            return
+        self._require_defined(source, state, value_types)
+
+    @staticmethod
+    def _initialize_storage(state: _State, storage: IRStorage) -> _State:
+        return _State(
+            state.values,
+            state.slots | {storage.name},
+            state.moved - {storage.name},
+            state.destroyed - {storage.name},
+        )
+
+    def _lifecycle_traits(self, type_: IRType):
+        if self._lifecycle is None:
+            raise AssertionError("lifecycle registry not initialized")
+        return self._lifecycle.traits(type_)
 
     def _require_type(self, actual: IRType, expected: IRType, message: str) -> None:
         if actual != expected:

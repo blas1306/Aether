@@ -33,6 +33,24 @@ class IRValue:
 
 
 @dataclass(frozen=True)
+class IRStorage(IRValue):
+    """An addressable owning location, distinct from an immutable IR value.
+
+    The initial IR historically used ``IRValue`` for both SSA-like values and
+    mutable slots.  Lifecycle instructions require that distinction to be
+    explicit so the verifier cannot accidentally destroy a temporary or use a
+    computed value as destination storage.
+    """
+
+
+@dataclass(frozen=True)
+class IRSourceLocation:
+    line: int
+    column: int
+    path: str | None = None
+
+
+@dataclass(frozen=True)
 class IRParameter(IRValue):
     pass
 
@@ -67,6 +85,47 @@ class IRLoad(MemoryReadMixin, IRInstruction):
 class IRStore(MemoryWriteOnlyMixin, IRInstruction):
     slot: IRValue
     value: IRValue
+
+
+@dataclass(frozen=True)
+class IRInitDefault(SideEffectMixin, IRInstruction):
+    destination: IRStorage
+    source_location: IRSourceLocation | None = None
+
+
+@dataclass(frozen=True)
+class IRCopyInit(SideEffectMixin, IRInstruction):
+    destination: IRStorage
+    source: IRValue
+    source_location: IRSourceLocation | None = None
+
+
+@dataclass(frozen=True)
+class IRMoveInit(SideEffectMixin, IRInstruction):
+    destination: IRStorage
+    source: IRStorage
+    source_location: IRSourceLocation | None = None
+
+
+@dataclass(frozen=True)
+class IRAssign(SideEffectMixin, IRInstruction):
+    destination: IRStorage
+    source: IRValue
+    source_location: IRSourceLocation | None = None
+
+
+@dataclass(frozen=True)
+class IRDestroy(SideEffectMixin, IRInstruction):
+    value: IRStorage
+    source_location: IRSourceLocation | None = None
+
+
+@dataclass(frozen=True)
+class IRRelocate(SideEffectMixin, IRInstruction):
+    destination: IRStorage
+    source: IRStorage
+    count: int
+    source_location: IRSourceLocation | None = None
 
 
 @dataclass(frozen=True)
@@ -189,17 +248,23 @@ class IRArrayNew(AllocationMixin, IRInstruction):
     result: IRValue
     elements: tuple[IRValue, ...] = ()
 
+    element_lifecycle = "copy_init"
+
 
 @dataclass(frozen=True)
 class IRListNew(AllocationMixin, IRInstruction):
     result: IRValue
     elements: tuple[IRValue, ...] = ()
 
+    element_lifecycle = "copy_init"
+
 
 @dataclass(frozen=True)
 class IRListCopy(ReadingAllocationMixin, IRInstruction):
     result: IRValue
     list_value: IRValue
+
+    element_lifecycle = "copy_init"
 
 
 @dataclass(frozen=True)
@@ -220,11 +285,16 @@ class IRListIndexOf(MemoryReadMayTrapMixin, IRInstruction):
 class IRListClear(MemoryWriteMixin, IRInstruction):
     list_value: IRValue
 
+    element_lifecycle = "destroy"
+
 
 @dataclass(frozen=True)
 class IRListPush(MutatingAllocationMixin, IRInstruction):
     list_value: IRValue
     value: IRValue
+
+    element_lifecycle = "copy_init"
+    growth_lifecycle = "relocate"
 
 
 @dataclass(frozen=True)
@@ -233,6 +303,9 @@ class IRListInsert(MutatingAllocationMixin, IRInstruction):
     index: IRValue
     value: IRValue
 
+    element_lifecycle = "copy_init"
+    shift_lifecycle = "relocate"
+
 
 @dataclass(frozen=True)
 class IRListRemoveAt(MemoryWriteMayTrapMixin, IRInstruction):
@@ -240,11 +313,16 @@ class IRListRemoveAt(MemoryWriteMayTrapMixin, IRInstruction):
     list_value: IRValue
     index: IRValue
 
+    result_lifecycle = "move_init"
+    shift_lifecycle = "relocate"
+
 
 @dataclass(frozen=True)
 class IRListPop(MemoryWriteMayTrapMixin, IRInstruction):
     result: IRValue
     list_value: IRValue
+
+    result_lifecycle = "move_init"
 
 
 @dataclass(frozen=True)
@@ -389,6 +467,8 @@ class IRArrayGet(MemoryReadMayTrapMixin, IRInstruction):
     array: IRValue
     index: IRValue
 
+    element_lifecycle = "copy_init"
+
 
 @dataclass(frozen=True)
 class IRArraySlice(ReadingAllocationMixin, IRInstruction):
@@ -397,11 +477,15 @@ class IRArraySlice(ReadingAllocationMixin, IRInstruction):
     start: IRValue
     end: IRValue
 
+    element_lifecycle = "copy_init"
+
 @dataclass(frozen=True)
 class IRListGet(MemoryReadMayTrapMixin, IRInstruction):
     result: IRValue
     list_value: IRValue
     index: IRValue
+
+    element_lifecycle = "copy_init"
 
 
 @dataclass(frozen=True)
@@ -446,12 +530,16 @@ class IRArraySet(MemoryWriteMayTrapMixin, IRInstruction):
     index: IRValue
     value: IRValue
 
+    element_lifecycle = "assign"
+
 
 @dataclass(frozen=True)
 class IRListSet(MemoryWriteMayTrapMixin, IRInstruction):
     list_value: IRValue
     index: IRValue
     value: IRValue
+
+    element_lifecycle = "assign"
 
 
 @dataclass(frozen=True)
@@ -503,6 +591,7 @@ class IRJump(SideEffectMixin, IRInstruction):
 @dataclass(frozen=True)
 class IRReturn(SideEffectMixin, IRInstruction):
     value: IRValue | None = None
+    transferred_storage: IRStorage | None = None
 
 
 @dataclass

@@ -881,23 +881,26 @@ Código que asume directa o indirectamente `string == ptr al payload`:
 - `backend/llvm/list_runtime.py`: contains/indexOf/search por `strcmp`;
 - `backend/llvm/vector_runtime.py` y `matrix_runtime.py`: helpers comunes de
   igualdad/print string;
-- Array/List lowering y runtime: memcpy/memmove, clear/copy/slice/reallocation
-  sin element lifecycle;
-- IR/SSA verifiers y optimizers: string binary/compare sin representación ni
-  efectos de allocation;
+- Array/List lowering anota copy/assign/move/relocate/destroy por operación;
+  el runtime aún usa memcpy/memmove porque todos los elementos actuales son
+  trivialmente relocatables;
+- IR lowering/verifier/interpreter ya implementan lifecycle estructural. Se
+  expande antes de SSA; string conserva todavía su clasificación trivial y no
+  hay efectos ARC;
 - tests LLVM/native y documentación que fijan global C, `%s`, `strcmp`, una
   palabra y shallow copy.
 
 ## 22. Plan de implementación por fases
 
-### Fase 0: contrato y diagnósticos
+### Fase 0: contrato, diagnósticos e IR lifecycle (completada)
 
-**Subsistemas:** esta RFC, capability profiles/detector, auditoría y errores
-públicos.
+**Subsistemas:** esta RFC, capability profiles/detector, auditoría, errores
+públicos, `IRStorage`, seis opcodes lifecycle, análisis de inicialización,
+cleanup de scopes e intérprete/expansión pre-SSA.
 
-**Invariantes:** no cambia representación; operaciones dinámicas siguen
+**Invariantes:** no cambia representación ni ABI; operaciones dinámicas siguen
 rechazadas antes de lowering; el detector usa tipos chequeados y detecta
-`a+b`/`a==b` aunque no haya literal.
+`a+b`/`a==b` aunque no haya literal. String sigue trivial y no se simula ARC.
 
 **Tests:** diagnósticos por concat/comparison/interpolación con parámetros,
 variables, imports y ubicación; perfil sigue `PARTIAL`.
@@ -932,9 +935,9 @@ promesa para strings futuras.
 
 ### Fase 2: strings dinámicas y lifecycle
 
-**Subsistemas:** allocator string, UTF-8 validator, RC, ownership lowering y
-verifier, cleanup de scopes/branches/returns, hooks recursivos de TypeLayout,
-Array/List y builder interno.
+**Subsistemas:** allocator string, UTF-8 validator, RC, expansión de los
+opcodes lifecycle ya verificados a hooks concretos, Array/List runtime y
+builder interno.
 
 **Invariantes:** cada objeto owned tiene contador balanceado; concat hace una
 allocation; copy vs move está definido en toda operación; ningún panic pierde
@@ -1082,9 +1085,9 @@ sin cambiar sintaxis. La alternativa `(ptr,length)` hace más cara toda
 colección y todavía deja ownership sin resolver; `char*` no satisface seguridad
 ni complejidad.
 
-La **Fase 0** queda materializada por esta decisión, el contrato canónico de
-lifecycle, la clasificación y la detección temprana de operaciones string
-tipadas. El primer bloque de runtime posterior es la **Fase 1 completa**
-—objeto, literales, vacío, print, equality y transporte— junto con operaciones
-estructurales de lifecycle verificables. No debe implementarse concat ni ningún
-productor heap hasta que copy/move/destroy y cleanup estén verificados.
+La **Fase 0** queda materializada por esta decisión, el contrato canónico, los
+opcodes lifecycle verificables, cleanup de control de flujo, clasificación y
+diagnóstico temprano. El primer bloque de runtime posterior es la **Fase 1
+completa** —objeto, literales, vacío, print, equality y transporte— cambiando
+la clasificación de string y expandiendo los opcodes a hooks reales. No debe
+implementarse concat ni ningún productor heap antes de cerrar ese bloque.

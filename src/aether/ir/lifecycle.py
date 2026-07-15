@@ -1,0 +1,365 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from .model import (
+    IRAssign,
+    IRArrayNew,
+    IRBasicBlock,
+    IRConst,
+    IRCopyInit,
+    IRDestroy,
+    IREnumConstant,
+    IRFunction,
+    IRInitDefault,
+    IRInstruction,
+    IRListNew,
+    IRLoad,
+    IRMethodResultNew,
+    IRModule,
+    IRMoveInit,
+    IRRelocate,
+    IRStorage,
+    IRStore,
+    IRStructDefinition,
+    IRStructNew,
+    IRValue,
+    IRVectorNew,
+)
+from .types import (
+    ArrayType,
+    BoolType,
+    ClassRefType,
+    ComplexType,
+    DoubleType,
+    EnumType,
+    FloatType,
+    FunctionType,
+    IntType,
+    InterfaceType,
+    IRType,
+    ListType,
+    MatrixType,
+    MethodResultType,
+    NullableType,
+    StringType,
+    StructType,
+    VectorType,
+    VoidType,
+)
+
+
+LIFECYCLE_INSTRUCTIONS = (
+    IRInitDefault,
+    IRCopyInit,
+    IRMoveInit,
+    IRAssign,
+    IRDestroy,
+    IRRelocate,
+)
+
+
+@dataclass(frozen=True)
+class LifecycleTraits:
+    """Representation-independent lifecycle facts used before LLVM layout."""
+
+    trivially_copyable: bool
+    trivially_relocatable: bool
+    needs_destroy: bool
+    supports_default: bool
+    fields: tuple[tuple[str, IRType], ...] = ()
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
+class LifecycleFieldStep:
+    operation: str
+    path: tuple[str, ...]
+    type: IRType
+
+
+class LifecycleTypeRegistry:
+    """Recursive nominal type classification shared by verifier and lowering.
+
+    Strings deliberately remain trivial here.  The next runtime phase can
+    change only their traits and synthesized struct plans without changing the
+    lifecycle instruction contract introduced in this phase.
+    """
+
+    def __init__(self, structs: list[IRStructDefinition]) -> None:
+        self._structs = {definition.name: definition for definition in structs}
+        self._cache: dict[IRType, LifecycleTraits] = {}
+        self._active: set[str] = set()
+
+    def traits(self, type_: IRType) -> LifecycleTraits:
+        cached = self._cache.get(type_)
+        if cached is not None:
+            return cached
+        result = self._compute(type_)
+        self._cache[type_] = result
+        return result
+
+    def synthesis_plan(
+        self,
+        type_: IRType,
+        operation: str,
+    ) -> tuple[LifecycleFieldStep, ...]:
+        """Flatten recursive struct lifecycle in its required source order."""
+
+        if operation not in {
+            "init_default",
+            "copy_init",
+            "move_init",
+            "assign",
+            "destroy",
+            "relocate",
+            "rollback",
+        }:
+            raise ValueError(f"unknown lifecycle operation '{operation}'")
+
+        result: list[LifecycleFieldStep] = []
+
+        def visit(current: IRType, path: tuple[str, ...]) -> None:
+            traits = self.traits(current)
+            fields = traits.fields
+            if not fields:
+                result.append(LifecycleFieldStep(operation, path, current))
+                return
+            ordered = reversed(fields) if operation in {"destroy", "rollback"} else fields
+            for field_name, field_type in ordered:
+                visit(field_type, (*path, field_name))
+
+        visit(type_, ())
+        return tuple(result)
+
+    def _compute(self, type_: IRType) -> LifecycleTraits:
+        if isinstance(
+            type_,
+            (IntType, FloatType, DoubleType, BoolType, ComplexType, EnumType),
+        ):
+            return LifecycleTraits(True, True, False, True)
+        if isinstance(type_, StringType):
+            # Current strings are immortal C-string pointers.  Do not model ARC
+            # until AetherStringObject is introduced.
+            return LifecycleTraits(True, True, False, True)
+        if isinstance(type_, (ArrayType, ListType)):
+            return LifecycleTraits(True, True, False, True)
+        if isinstance(type_, VectorType):
+            return LifecycleTraits(
+                True,
+                True,
+                False,
+                type_.orientation in {"row", "column"},
+                reason=(
+                    None
+                    if type_.orientation in {"row", "column"}
+                    else "vector default requires a concrete orientation"
+                ),
+            )
+        if isinstance(type_, MatrixType):
+            return LifecycleTraits(
+                True,
+                True,
+                False,
+                False,
+                reason="matrix default requires compile-time dimensions",
+            )
+        if isinstance(type_, FunctionType):
+            return LifecycleTraits(True, True, False, False)
+        if isinstance(type_, (ClassRefType, InterfaceType, NullableType)):
+            return LifecycleTraits(
+                False,
+                False,
+                False,
+                False,
+                reason=f"lifecycle layout for '{type_}' is not defined",
+            )
+        if isinstance(type_, VoidType):
+            return LifecycleTraits(False, False, False, False, reason="void has no storage")
+        if isinstance(type_, MethodResultType):
+            fields = (("receiver", type_.receiver), ("value", type_.value))
+            return self._aggregate_traits(fields)
+        if isinstance(type_, StructType):
+            definition = self._structs.get(type_.name)
+            if definition is None:
+                return LifecycleTraits(
+                    False,
+                    False,
+                    False,
+                    False,
+                    reason=f"nominal struct '{type_.name}' has no definition",
+                )
+            if type_.name in self._active:
+                return LifecycleTraits(False, False, False, False, reason="recursive layout")
+            self._active.add(type_.name)
+            try:
+                return self._aggregate_traits(definition.fields)
+            finally:
+                self._active.remove(type_.name)
+        return LifecycleTraits(False, False, False, False, reason="unknown IR type")
+
+    def _aggregate_traits(
+        self,
+        fields: tuple[tuple[str, IRType], ...],
+    ) -> LifecycleTraits:
+        children = [self.traits(field_type) for _name, field_type in fields]
+        return LifecycleTraits(
+            all(child.trivially_copyable for child in children),
+            all(child.trivially_relocatable for child in children),
+            any(child.needs_destroy for child in children),
+            all(child.supports_default for child in children),
+            fields,
+        )
+
+
+class LifecycleExpander:
+    """Expand verified lifecycle IR immediately before SSA construction."""
+
+    def __init__(self, module: IRModule) -> None:
+        self.module = module
+        self.registry = LifecycleTypeRegistry(module.structs)
+        self._next = 0
+        self._used_names: set[str] = set()
+
+    def expand(self) -> IRModule:
+        functions = [self._expand_function(function) for function in self.module.functions]
+        return IRModule(functions, list(self.module.structs))
+
+    def _expand_function(self, function: IRFunction) -> IRFunction:
+        self._used_names = {parameter.name for parameter in function.parameters}
+        for block in function.blocks:
+            for instruction in block.instructions:
+                result = getattr(instruction, "result", None)
+                if isinstance(result, IRValue):
+                    self._used_names.add(result.name)
+        numeric_names = [int(name) for name in self._used_names if name.isdigit()]
+        self._next = max(numeric_names, default=-1) + 1
+        blocks = []
+        for block in function.blocks:
+            instructions: list[IRInstruction] = []
+            for instruction in block.instructions:
+                instructions.extend(self._expand_instruction(instruction))
+            blocks.append(IRBasicBlock(block.name, self._fold_trivial_return_transfer(instructions)))
+        return IRFunction(function.name, list(function.parameters), function.return_type, blocks)
+
+    @staticmethod
+    def _fold_trivial_return_transfer(
+        instructions: list[IRInstruction],
+    ) -> list[IRInstruction]:
+        """Remove the temporary return slot after all lifecycle is trivial.
+
+        The verified pre-expansion IR has already proved the ownership
+        transfer.  For the current ABI, store+load through ``$return`` adds no
+        code and folding it restores the primitive IR shape consumed by SSA.
+        """
+
+        if len(instructions) < 3:
+            return instructions
+        store, load, returned = instructions[-3:]
+        if not (
+            isinstance(store, IRStore)
+            and isinstance(store.slot, IRStorage)
+            and isinstance(load, IRLoad)
+            and load.slot == store.slot
+            and hasattr(returned, "transferred_storage")
+            and getattr(returned, "transferred_storage") == store.slot
+            and getattr(returned, "value", None) == load.result
+        ):
+            return instructions
+        from .model import IRReturn
+
+        prefix = instructions[:-3]
+        if (
+            prefix
+            and isinstance(prefix[-1], IRLoad)
+            and prefix[-1].result == store.value
+        ):
+            moved_load = prefix[-1]
+            return [
+                *prefix[:-1],
+                IRLoad(load.result, moved_load.slot),
+                IRReturn(load.result),
+            ]
+        return [*prefix, IRReturn(store.value)]
+
+    def _expand_instruction(self, instruction: IRInstruction) -> list[IRInstruction]:
+        if isinstance(instruction, IRInitDefault):
+            emitted, value = self._default_value(instruction.destination.type)
+            return [*emitted, IRStore(instruction.destination, value)]
+        if isinstance(instruction, (IRCopyInit, IRAssign)):
+            if isinstance(instruction.source, IRStorage):
+                temporary = self._temporary(instruction.source.type)
+                return [
+                    IRLoad(temporary, instruction.source),
+                    IRStore(instruction.destination, temporary),
+                ]
+            return [IRStore(instruction.destination, instruction.source)]
+        if isinstance(instruction, IRMoveInit):
+            temporary = self._temporary(instruction.source.type)
+            return [
+                IRLoad(temporary, instruction.source),
+                IRStore(instruction.destination, temporary),
+            ]
+        if isinstance(instruction, IRRelocate):
+            temporary = self._temporary(instruction.source.type)
+            return [
+                IRLoad(temporary, instruction.source),
+                IRStore(instruction.destination, temporary),
+            ]
+        if isinstance(instruction, IRDestroy):
+            # Every type in the current ABI is trivial.  Keeping this explicit
+            # until this pass is what lets verification observe the cleanup.
+            return []
+        return [instruction]
+
+    def _default_value(self, type_: IRType) -> tuple[list[IRInstruction], IRValue]:
+        instructions: list[IRInstruction] = []
+        if isinstance(type_, StructType):
+            traits = self.registry.traits(type_)
+            values = []
+            for _name, field_type in traits.fields:
+                field_instructions, field_value = self._default_value(field_type)
+                instructions.extend(field_instructions)
+                values.append(field_value)
+            result = self._temporary(type_)
+            instructions.append(IRStructNew(result, tuple(values)))
+            return instructions, result
+        if isinstance(type_, ArrayType):
+            result = self._temporary(type_)
+            return [IRArrayNew(result, ())], result
+        if isinstance(type_, ListType):
+            result = self._temporary(type_)
+            return [IRListNew(result, ())], result
+        if isinstance(type_, VectorType):
+            result = self._temporary(type_)
+            return [IRVectorNew(result, (), type_.orientation)], result
+        if isinstance(type_, EnumType):
+            if not type_.variants:
+                raise ValueError(f"enum '{type_.name}' has no default variant")
+            result = self._temporary(type_)
+            value = IREnumConstant(type_.name, type_.variants[0], 0, 0)
+            return [IRConst(result, value)], result
+        if isinstance(type_, BoolType):
+            literal: object = False
+        elif isinstance(type_, StringType):
+            literal = ""
+        elif isinstance(type_, (DoubleType, FloatType, ComplexType)):
+            literal = 0.0
+        elif isinstance(type_, IntType):
+            literal = 0
+        else:
+            raise ValueError(f"type '{type_}' has no lifecycle default")
+        result = self._temporary(type_)
+        return [IRConst(result, literal)], result
+
+    def _temporary(self, type_: IRType) -> IRValue:
+        while True:
+            name = str(self._next)
+            self._next += 1
+            if name not in self._used_names:
+                self._used_names.add(name)
+                return IRValue(name, type_)
+
+
+def expand_lifecycle(module: IRModule) -> IRModule:
+    return LifecycleExpander(module).expand()

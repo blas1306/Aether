@@ -67,6 +67,7 @@ from aether.ir.model import (
     IRVectorNew,
     IRVectorSet,
 )
+from aether.ir.lifecycle import expand_lifecycle
 
 from .model import (
     SSAArrayGet,
@@ -205,6 +206,7 @@ class SSABuilder:
     )
 
     def build(self, module: IRModule) -> SSAModule:
+        module = expand_lifecycle(module)
         return SSAModule(
             [self._build_function(function) for function in module.functions],
             list(module.structs),

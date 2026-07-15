@@ -18,6 +18,7 @@ from ..types import (
     VectorType as AetherVectorType,
 )
 from .model import (
+    IRAssign,
     IRArrayGet,
     IRArrayLength,
     IRArrayNew,
@@ -31,9 +32,12 @@ from .model import (
     IRCallIndirect,
     IRCompareOp,
     IRConst,
+    IRCopyInit,
+    IRDestroy,
     IREnumConstant,
     IRFunction,
     IRFunctionRef,
+    IRInitDefault,
     IRJump,
     IRListGet,
     IRListCopy,
@@ -62,6 +66,7 @@ from .model import (
     IRMatrixRows,
     IRMatrixSet,
     IRModule,
+    IRMoveInit,
     IROuterProduct,
     IRParameter,
     IRPrint,
@@ -73,6 +78,8 @@ from .model import (
     IRMethodResultReceiver,
     IRMethodResultValue,
     IRReturn,
+    IRSourceLocation,
+    IRStorage,
     IRStore,
     IRUnaryOp,
     IRValue,
@@ -164,6 +171,7 @@ class _EnumInfo:
 class _LoopTargets:
     break_target: str
     continue_target: str
+    scope_depth: int
 
 
 @dataclass(frozen=True)
@@ -194,12 +202,19 @@ _MISSING_LOCAL = object()
 
 
 @dataclass
+class _ScopeFrame:
+    storages: list[IRStorage] = field(default_factory=list)
+
+
+@dataclass
 class _FunctionContext:
     block: IRBasicBlock
     blocks: list[IRBasicBlock]
     return_type: IRType
     parameters: dict[str, IRParameter]
     locals: dict[str, IRValue] = field(default_factory=dict)
+    scopes: list[_ScopeFrame] = field(default_factory=lambda: [_ScopeFrame()])
+    used_storage_names: set[str] = field(default_factory=set)
     matrix_dimensions: dict[str, tuple[int, int]] = field(default_factory=dict)
     vector_lengths: dict[str, int] = field(default_factory=dict)
     loop_targets: list[_LoopTargets] = field(default_factory=list)
@@ -370,17 +385,17 @@ class IRLowerer:
         )
         if owner is not None:
             this_parameter = context.parameters["this"]
-            this_slot = IRValue("this", this_parameter.type)
+            this_slot = self._storage("this", this_parameter.type, context)
             context.locals["this"] = this_slot
-            context.block.instructions.append(IRStore(this_slot, this_parameter))
+            context.block.instructions.append(IRCopyInit(this_slot, this_parameter))
         assigned_names = self._assigned_names(declaration.body)
         for parameter in parameters:
             if parameter.name == "this":
                 continue
             if parameter.name in assigned_names or isinstance(parameter.type, StructType):
-                slot = IRValue(parameter.name, parameter.type)
+                slot = self._storage(parameter.name, parameter.type, context)
                 context.locals[parameter.name] = slot
-                context.block.instructions.append(IRStore(slot, parameter))
+                context.block.instructions.append(IRCopyInit(slot, parameter))
 
         for statement in declaration.body:
             if self._is_terminated(context.block):
@@ -389,8 +404,11 @@ class IRLowerer:
 
         if not self._is_terminated(context.block):
             if owner is not None and isinstance(context.source_return_type, VoidType):
-                context.block.instructions.append(IRReturn(self._method_result(context, None)))
+                value = self._method_result(context, None)
+                self._emit_cleanup(context)
+                context.block.instructions.append(IRReturn(value))
             elif isinstance(signature.return_type, VoidType):
+                self._emit_cleanup(context)
                 context.block.instructions.append(IRReturn())
             else:
                 self._fail(
@@ -439,10 +457,12 @@ class IRLowerer:
                 slot_type,
                 f"variable '{statement.name}' requires an implicit conversion",
             )
-            slot = IRValue(statement.name, slot_type)
+            slot = self._storage(statement.name, slot_type, context)
             context.locals[statement.name] = slot
             self._copy_aggregate_metadata(value, slot, context)
-            context.block.instructions.append(IRStore(slot, value))
+            context.block.instructions.append(
+                IRCopyInit(slot, value, self._source_location(statement))
+            )
             return
 
         if isinstance(statement, ast.Assignment):
@@ -476,9 +496,9 @@ class IRLowerer:
                         f"IR backend does not support assignment to '{statement.name}' outside local scope yet.",
                         statement,
                     )
-                slot = IRValue(statement.name, parameter.type)
+                slot = self._storage(statement.name, parameter.type, context)
                 context.locals[statement.name] = slot
-                context.blocks[0].instructions.insert(0, IRStore(slot, parameter))
+                context.blocks[0].instructions.insert(0, IRCopyInit(slot, parameter))
             value = self._lower_expression(
                 statement.expression,
                 context,
@@ -490,7 +510,11 @@ class IRLowerer:
                 f"assignment to '{statement.name}' requires an implicit conversion",
             )
             self._copy_aggregate_metadata(value, slot, context)
-            context.block.instructions.append(IRStore(slot, value))
+            if not isinstance(slot, IRStorage):
+                self._fail("Lifecycle assignment requires owning local storage.", statement)
+            context.block.instructions.append(
+                IRAssign(slot, value, self._source_location(statement))
+            )
             return
 
         if isinstance(statement, ast.FieldAssignment):
@@ -532,7 +556,9 @@ class IRLowerer:
                 if statement.expression is None:
                     if not isinstance(context.source_return_type, VoidType):
                         self._fail("IR backend cannot return void from a non-void method.", statement)
-                    context.block.instructions.append(IRReturn(self._method_result(context, None)))
+                    result = self._method_result(context, None)
+                    self._emit_cleanup(context)
+                    context.block.instructions.append(IRReturn(result))
                     return
                 if isinstance(context.source_return_type, VoidType):
                     self._fail("IR backend cannot return a value from a void method.", statement)
@@ -546,24 +572,17 @@ class IRLowerer:
                     context.source_return_type,
                     "method return requires an implicit conversion",
                 )
-                context.block.instructions.append(IRReturn(self._method_result(context, value)))
+                result = self._method_result(context, value)
+                self._emit_cleanup(context)
+                context.block.instructions.append(IRReturn(result))
                 return
             if statement.expression is None:
                 if not isinstance(context.return_type, VoidType):
                     self._fail("IR backend cannot return void from a non-void function.", statement)
+                self._emit_cleanup(context)
                 context.block.instructions.append(IRReturn())
                 return
-            value = self._lower_expression(
-                statement.expression,
-                context,
-                target_type=context.return_type,
-            )
-            self._require_same_type(
-                value.type,
-                context.return_type,
-                "return requires an implicit conversion",
-            )
-            context.block.instructions.append(IRReturn(value))
+            self._lower_owned_return(statement.expression, statement, context)
             return
 
         if isinstance(statement, ast.IfStatement):
@@ -605,6 +624,103 @@ class IRLowerer:
             return
 
         self._unsupported(statement)
+
+    @staticmethod
+    def _source_location(node: object) -> IRSourceLocation | None:
+        line = getattr(node, "line", None)
+        column = getattr(node, "column", None)
+        if not isinstance(line, int) or not isinstance(column, int):
+            return None
+        return IRSourceLocation(line, column)
+
+    def _storage(
+        self,
+        preferred_name: str,
+        type_: IRType,
+        context: _FunctionContext,
+        *,
+        register: bool = True,
+    ) -> IRStorage:
+        name = preferred_name
+        suffix = 1
+        while name in context.used_storage_names:
+            name = f"{preferred_name}.${suffix}"
+            suffix += 1
+        context.used_storage_names.add(name)
+        storage = IRStorage(name, type_)
+        if register:
+            context.scopes[-1].storages.append(storage)
+        return storage
+
+    @contextmanager
+    def _scope(self, context: _FunctionContext) -> Iterator[None]:
+        saved_locals = dict(context.locals)
+        context.scopes.append(_ScopeFrame())
+        depth = len(context.scopes) - 1
+        try:
+            yield
+        finally:
+            if not self._is_terminated(context.block):
+                self._emit_cleanup(context, minimum_scope_depth=depth)
+            context.scopes.pop()
+            context.locals = saved_locals
+
+    def _emit_cleanup(
+        self,
+        context: _FunctionContext,
+        *,
+        minimum_scope_depth: int = 0,
+        excluding: set[str] | None = None,
+    ) -> None:
+        excluded = excluding or set()
+        for scope in reversed(context.scopes[minimum_scope_depth:]):
+            for storage in reversed(scope.storages):
+                if storage.name not in excluded:
+                    context.block.instructions.append(IRDestroy(storage))
+
+    def _lower_owned_return(
+        self,
+        expression: ast.Expression,
+        statement: ast.ReturnStatement,
+        context: _FunctionContext,
+    ) -> None:
+        return_storage = self._storage(
+            "$return",
+            context.return_type,
+            context,
+            register=False,
+        )
+        moved_local: IRStorage | None = None
+        if isinstance(expression, ast.Identifier):
+            candidate = context.locals.get(expression.name)
+            if isinstance(candidate, IRStorage) and candidate.type == context.return_type:
+                moved_local = candidate
+
+        location = self._source_location(statement)
+        if moved_local is not None:
+            context.block.instructions.append(
+                IRMoveInit(return_storage, moved_local, location)
+            )
+        else:
+            value = self._lower_expression(
+                expression,
+                context,
+                target_type=context.return_type,
+            )
+            self._require_same_type(
+                value.type,
+                context.return_type,
+                "return requires an implicit conversion",
+            )
+            context.block.instructions.append(
+                IRCopyInit(return_storage, value, location)
+            )
+
+        result = context.temporary(context.return_type)
+        context.block.instructions.append(IRLoad(result, return_storage))
+        excluded = {moved_local.name} if moved_local is not None else set()
+        self._emit_cleanup(context, excluding=excluded)
+        context.block.instructions.append(IRReturn(result, return_storage))
 
     @staticmethod
     def _new_block(name: str) -> IRBasicBlock:
@@ -707,20 +823,18 @@ class IRLowerer:
         statement: ast.BreakStatement,
         context: _FunctionContext,
     ) -> None:
-        self._emit_current_jump_if_open(
-            context,
-            self._active_loop_targets(statement, context).break_target,
-        )
+        targets = self._active_loop_targets(statement, context)
+        self._emit_cleanup(context, minimum_scope_depth=targets.scope_depth)
+        self._emit_current_jump_if_open(context, targets.break_target)
 
     def _emit_continue(
         self,
         statement: ast.ContinueStatement,
         context: _FunctionContext,
     ) -> None:
-        self._emit_current_jump_if_open(
-            context,
-            self._active_loop_targets(statement, context).continue_target,
-        )
+        targets = self._active_loop_targets(statement, context)
+        self._emit_cleanup(context, minimum_scope_depth=targets.scope_depth)
+        self._emit_current_jump_if_open(context, targets.continue_target)
 
     @contextmanager
     def _loop_context(
@@ -739,7 +853,9 @@ class IRLowerer:
             previous_local = context.locals.get(loop_variable, _MISSING_LOCAL)
             context.locals[loop_variable] = loop_slot
 
-        context.loop_targets.append(_LoopTargets(break_target, continue_target))
+        context.loop_targets.append(
+            _LoopTargets(break_target, continue_target, len(context.scopes))
+        )
         try:
             yield
         finally:
@@ -915,11 +1031,12 @@ class IRLowerer:
         statement: ast.ForInStatement,
         context: _FunctionContext,
     ) -> None:
-        if isinstance(statement.iterable, ast.RangeExpression):
-            self._lower_for_range(statement, statement.iterable, context)
-            return
+        with self._scope(context):
+            if isinstance(statement.iterable, ast.RangeExpression):
+                self._lower_for_range(statement, statement.iterable, context)
+                return
 
-        self._lower_for_indexable(statement, context)
+            self._lower_for_indexable(statement, context)
 
     def _lower_for_range(
         self,
@@ -945,7 +1062,7 @@ class IRLowerer:
         if step_value == 0:
             self._fail("IR backend does not support for ranges with a zero step yet.", statement)
 
-        loop_slot = IRValue(statement.variable, IntType())
+        loop_slot = self._storage(statement.variable, IntType(), context)
 
         with self._loop_context(
             context,
@@ -954,7 +1071,7 @@ class IRLowerer:
             loop_variable=statement.variable,
             loop_slot=loop_slot,
         ):
-            context.block.instructions.append(IRStore(loop_slot, start))
+            context.block.instructions.append(IRCopyInit(loop_slot, start))
             self._emit_current_jump_if_open(context, blocks.condition.name)
 
             self._append_and_enter(context, blocks.condition)
@@ -979,7 +1096,7 @@ class IRLowerer:
             blocks.increment.instructions.append(
                 IRBinaryOp(next_value, "add", current_for_increment, step)
             )
-            blocks.increment.instructions.append(IRStore(loop_slot, next_value))
+            blocks.increment.instructions.append(IRAssign(loop_slot, next_value))
             self._emit_jump_if_open(blocks.increment, blocks.condition.name)
 
             self._append_and_enter(context, blocks.exit)
@@ -1074,8 +1191,9 @@ class IRLowerer:
         blocks = self._new_for_blocks(index)
         iterable = self._lower_indexable_iterable(statement, context)
 
-        index_slot = IRValue(f"for.{index}.index", IntType())
-        loop_slot = IRValue(statement.variable, iterable.element_type)
+        index_slot = self._storage(f"for.{index}.index", IntType(), context)
+        loop_slot = self._storage(statement.variable, iterable.element_type, context)
+        context.block.instructions.append(IRInitDefault(loop_slot))
 
         with self._loop_context(
             context,
@@ -1157,7 +1275,7 @@ class IRLowerer:
         one = context.temporary(IntType())
         context.block.instructions.append(IRConst(one, 1))
         context.block.instructions.append(
-            IRStore(index_slot, one if iterable.index_base == 1 else zero)
+            IRCopyInit(index_slot, one if iterable.index_base == 1 else zero)
         )
         return one
 
@@ -1200,7 +1318,7 @@ class IRLowerer:
         context.block.instructions.append(
             iterable.get_instruction(element, iterable.value, body_index)
         )
-        context.block.instructions.append(IRStore(loop_slot, element))
+        context.block.instructions.append(IRAssign(loop_slot, element))
 
     def _lower_for_indexable_increment(
         self,
@@ -1215,7 +1333,7 @@ class IRLowerer:
         blocks.increment.instructions.append(
             IRBinaryOp(next_index, "add", increment_index, one)
         )
-        blocks.increment.instructions.append(IRStore(index_slot, next_index))
+        blocks.increment.instructions.append(IRAssign(index_slot, next_index))
         self._emit_jump_if_open(blocks.increment, blocks.condition.name)
 
     def _lower_statements(
@@ -1223,10 +1341,11 @@ class IRLowerer:
         statements: list[ast.Statement],
         context: _FunctionContext,
     ) -> None:
-        for statement in statements:
-            if self._is_terminated(context.block):
-                self._fail("IR backend does not support statements after a terminated block yet.", statement)
-            self._lower_statement(statement, context)
+        with self._scope(context):
+            for statement in statements:
+                if self._is_terminated(context.block):
+                    self._fail("IR backend does not support statements after a terminated block yet.", statement)
+                self._lower_statement(statement, context)
 
     def _lower_expression(
         self,
@@ -2120,10 +2239,10 @@ class IRLowerer:
     ) -> bool:
         if isinstance(expression, ast.Identifier):
             slot = context.locals.get(expression.name)
-            if slot is None:
+            if not isinstance(slot, IRStorage):
                 return False
             self._require_same_type(value.type, slot.type, "struct receiver update")
-            context.block.instructions.append(IRStore(slot, value))
+            context.block.instructions.append(IRAssign(slot, value))
             return True
         if not isinstance(expression, ast.FieldAccess):
             return False

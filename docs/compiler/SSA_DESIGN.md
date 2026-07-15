@@ -76,12 +76,31 @@ slot/load/store IR, not as a replacement for the initial lowering boundary.
 That gives Aether a conservative pipeline:
 
 ```text
-AST -> checked AST -> slot IR -> verified slot IR -> CFG -> SSA IR -> SSA opts
+AST -> checked AST -> lifecycle slot IR -> verified lifecycle IR
+    -> lifecycle expansion -> CFG -> SSA IR -> SSA opts
 ```
 
 The first SSA conversion can focus on scalar local slots whose addresses do not
 escape. More complex memory-like state can remain in slots until Aether has
 alias analysis, aggregate lowering, and a clearer memory model.
+
+## Lifecycle phase boundary
+
+Aether uses the pre-SSA expansion strategy. Structural lifecycle instructions
+remain visible through AST lowering, IR printing, IR interpretation and
+`IRVerifier`; standalone IR passes preserve them as mandatory effects. The
+standard optimizer boundary and both SSA builders invoke the same
+`LifecycleExpander` before rewriting, phi placement or renaming. Expansion is
+legal only after lifecycle verification has established initialization and
+cleanup.
+
+This choice keeps destruction, moves, and assignments from becoming implicit
+SSA effects: DCE/SCCP cannot duplicate or erase them because they never see an
+unexpanded lifecycle program. For current trivial types the expanded form is
+the historical slot IR, so LLVM ABI and generated code remain unchanged. When
+`StringType` becomes non-trivial, expansion must produce concrete effectful
+hooks; those calls will then survive in SSA under the existing call-effect
+rules.
 
 ## Canonical SSA Invariants
 

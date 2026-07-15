@@ -719,3 +719,13 @@ tamanos envueltos y narrowing silencioso estan cerrados. Persisten brechas de
 superficie publica, ownership y consolidacion del runtime que quedaron
 explicitamente fuera de esta tarea; no requieren cambiar `int`, el layout ni
 la API de List.
+
+## 16. Actualización: lifecycle estructural pre-SSA
+
+Los opcodes List conservan ahora un contrato explícito por elemento: get/copy,
+push e insert hacen `copy_init`; set hace `assign`; pop y el resultado de
+removeAt hacen `move_init`; clear hace `destroy`; growth y desplazamientos
+declaran `relocate`. La representación y runtime siguen usando el camino
+trivial permitido por `TypeLayout`; no hay retain/release ni destrucción real
+de strings todavía. Al volver no trivial `StringType`, estas intenciones deben
+expandirse a hooks antes de habilitar productores dinámicos.

@@ -6,6 +6,7 @@ from aether.analysis.cfg import CFGBuilder
 from aether.analysis.dominance_frontier import DominanceFrontierAnalysis
 from aether.analysis.dominators import DominatorAnalysis
 from aether.ir.model import IRFunction, IRModule
+from aether.ir.lifecycle import expand_lifecycle
 
 from .model import SSAFunction, SSAModule
 from .phi_placement import PhiPlacement
@@ -29,6 +30,7 @@ class GeneralSSABuilder:
         return self.build_module(module)
 
     def build_module(self, module: IRModule) -> SSAModule:
+        module = expand_lifecycle(module)
         ssa_module = SSAModule(
             [self._build_function_unverified(function) for function in module.functions],
             list(module.structs),

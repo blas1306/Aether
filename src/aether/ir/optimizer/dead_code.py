@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from aether.ir.model import (
+    IRAssign,
     IRArrayGet,
     IRArrayLength,
     IRArrayNew,
@@ -14,9 +15,12 @@ from aether.ir.model import (
     IRCallIndirect,
     IRCompareOp,
     IRConst,
+    IRCopyInit,
+    IRDestroy,
     IRFunction,
     IRFunctionRef,
     IRInstruction,
+    IRInitDefault,
     IRJump,
     IRListGet,
     IRListCopy,
@@ -54,6 +58,9 @@ from aether.ir.model import (
     IRMethodResultReceiver,
     IRMethodResultValue,
     IRReturn,
+    IRRelocate,
+    IRMoveInit,
+    IRStorage,
     IRStore,
     IRUnaryOp,
     IRValue,
@@ -171,6 +178,12 @@ class DeadCodeEliminator:
             return ()
         if isinstance(instruction, IRStore):
             return (instruction.value,)
+        if isinstance(instruction, IRInitDefault):
+            return ()
+        if isinstance(instruction, (IRCopyInit, IRAssign)):
+            return () if isinstance(instruction.source, IRStorage) else (instruction.source,)
+        if isinstance(instruction, (IRMoveInit, IRDestroy, IRRelocate)):
+            return ()
         if isinstance(instruction, (IRBinaryOp, IRCompareOp)):
             return (instruction.left, instruction.right)
         if isinstance(instruction, IRUnaryOp):

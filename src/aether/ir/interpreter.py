@@ -19,6 +19,7 @@ from aether.vector_matrix_safety import (
 )
 
 from .model import (
+    IRAssign,
     IRArrayGet,
     IRArrayLength,
     IRArrayNew,
@@ -32,10 +33,13 @@ from .model import (
     IRCallIndirect,
     IRCompareOp,
     IRConst,
+    IRCopyInit,
+    IRDestroy,
     IREnumConstant,
     IRFunction,
     IRFunctionRef,
     IRInstruction,
+    IRInitDefault,
     IRJump,
     IRListGet,
     IRListCopy,
@@ -64,6 +68,7 @@ from .model import (
     IRMatrixRows,
     IRMatrixSet,
     IRModule,
+    IRMoveInit,
     IROuterProduct,
     IRPrint,
     IRStructGet,
@@ -73,6 +78,8 @@ from .model import (
     IRMethodResultReceiver,
     IRMethodResultValue,
     IRReturn,
+    IRRelocate,
+    IRStorage,
     IRStore,
     IRUnaryOp,
     IRValue,
@@ -88,6 +95,7 @@ from .model import (
 )
 from .types import (
     ArrayType,
+    BoolType,
     ClassRefType,
     DoubleType,
     EnumType,
@@ -261,6 +269,68 @@ class IRInterpreter:
 
         if isinstance(instruction, IRStore):
             frame.slots[instruction.slot] = self._value(instruction.value, frame)
+            return False, None, None
+
+        if isinstance(instruction, IRInitDefault):
+            if instruction.destination in frame.slots:
+                raise IRExecutionError(
+                    f"init_default destination '%{instruction.destination.name}' is already alive"
+                )
+            frame.slots[instruction.destination] = self._default_lifecycle_value(
+                instruction.destination.type
+            )
+            return False, None, None
+
+        if isinstance(instruction, IRCopyInit):
+            if instruction.destination in frame.slots:
+                raise IRExecutionError(
+                    f"copy_init destination '%{instruction.destination.name}' is already alive"
+                )
+            frame.slots[instruction.destination] = self._lifecycle_value(
+                instruction.source, frame
+            )
+            return False, None, None
+
+        if isinstance(instruction, IRMoveInit):
+            if instruction.destination in frame.slots:
+                raise IRExecutionError(
+                    f"move_init destination '%{instruction.destination.name}' is already alive"
+                )
+            if instruction.source not in frame.slots:
+                raise IRExecutionError(
+                    f"move_init source '%{instruction.source.name}' is not alive"
+                )
+            frame.slots[instruction.destination] = frame.slots.pop(instruction.source)
+            return False, None, None
+
+        if isinstance(instruction, IRAssign):
+            if instruction.destination not in frame.slots:
+                raise IRExecutionError(
+                    f"assign destination '%{instruction.destination.name}' is not alive"
+                )
+            frame.slots[instruction.destination] = self._lifecycle_value(
+                instruction.source, frame
+            )
+            return False, None, None
+
+        if isinstance(instruction, IRDestroy):
+            if instruction.value not in frame.slots:
+                raise IRExecutionError(
+                    f"destroy operand '%{instruction.value.name}' is not alive"
+                )
+            del frame.slots[instruction.value]
+            return False, None, None
+
+        if isinstance(instruction, IRRelocate):
+            if instruction.destination in frame.slots:
+                raise IRExecutionError(
+                    f"relocate destination '%{instruction.destination.name}' is already alive"
+                )
+            if instruction.source not in frame.slots:
+                raise IRExecutionError(
+                    f"relocate source '%{instruction.source.name}' is not alive"
+                )
+            frame.slots[instruction.destination] = frame.slots.pop(instruction.source)
             return False, None, None
 
         if isinstance(instruction, IRBinaryOp):
@@ -718,6 +788,40 @@ class IRInterpreter:
             return True, self._value(instruction.value, frame), None
 
         raise IRExecutionError(f"Unsupported IR instruction {type(instruction).__name__}")
+
+    def _lifecycle_value(self, value: IRValue, frame: _Frame) -> Any:
+        if isinstance(value, IRStorage):
+            if value not in frame.slots:
+                raise IRExecutionError(
+                    f"Lifecycle source '%{value.name}' is not alive"
+                )
+            return frame.slots[value]
+        return self._value(value, frame)
+
+    def _default_lifecycle_value(self, type_: object) -> Any:
+        if isinstance(type_, StructType):
+            definition = self._structs.get(type_.name)
+            if definition is None:
+                raise IRExecutionError(
+                    f"Cannot default-initialize unknown struct '{type_.name}'"
+                )
+            return tuple(
+                self._default_lifecycle_value(field_type)
+                for _name, field_type in definition.fields
+            )
+        if isinstance(type_, (ArrayType, ListType, VectorType, MatrixType)):
+            return []
+        if isinstance(type_, StringType):
+            return ""
+        if isinstance(type_, (DoubleType, FloatType)):
+            return 0.0
+        if isinstance(type_, BoolType):
+            return False
+        if isinstance(type_, EnumType):
+            if not type_.variants:
+                raise IRExecutionError(f"Enum '{type_.name}' has no default value")
+            return IREnumConstant(type_.name, type_.variants[0], 0, 0)
+        return 0
 
     def _execute_vector_binary(
         self,

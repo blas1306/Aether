@@ -64,6 +64,34 @@ produce numbered temporaries in deterministic source evaluation order.
 
 Comparison results are always `bool` in IR and can feed `IRBranch`.
 
+### Structural value lifecycle (implemented)
+
+The pre-SSA IR now distinguishes immutable `IRValue` instances from owning,
+addressable `IRStorage`. AST lowering emits `IRInitDefault`, `IRCopyInit`,
+`IRMoveInit`, `IRAssign`, `IRDestroy`, and `IRRelocate` instead of encoding
+ownership-changing actions as runtime calls. Operations retain their exact
+nominal type and an optional source location.
+
+`IRVerifier` runs a conservative forward data-flow analysis over each CFG. It
+tracks definitely-live, moved, destroyed, and uninitialized storage, rejects
+inconsistent branch merges, and requires cleanup on every return except the
+one storage explicitly transferred to the caller. This is deliberately not a
+borrow checker: parameters remain borrowed by convention and the analysis is
+limited to compiler-produced owning slots.
+
+The lowerer preserves lexical scopes and emits reverse-order cleanup on normal
+scope exit, return, break, continue, branch exit, and loop iteration exit. A
+direct local return uses `move_init`; returning a borrowed parameter or a
+computed value creates an owned `copy_init` return slot. Struct traits and
+field plans are synthesized recursively.
+
+Lifecycle is verified and then expanded by `LifecycleExpander` at the standard
+IR-optimizer/SSA boundary. Standalone IR passes still classify the structural
+opcodes as mandatory effects and preserve them. For the current all-trivial
+ABI expansion means load/store, semantic default construction, or no-op.
+Consequently no string retain/release runtime, string ABI change, or extra
+primitive LLVM code is introduced by this phase.
+
 ### Multi-module lowering (implemented)
 
 Semantic analysis now exposes a `CheckedProgram` containing the root module,

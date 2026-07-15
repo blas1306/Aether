@@ -4,6 +4,10 @@ from dataclasses import replace
 from typing import Any
 
 from aether.ir.model import (
+    IRAssign,
+    IRCopyInit,
+    IRDestroy,
+    IRInitDefault,
     IRBasicBlock,
     IRConst,
     IRFunction,
@@ -11,6 +15,8 @@ from aether.ir.model import (
     IRLoad,
     IRModule,
     IRStore,
+    IRMoveInit,
+    IRRelocate,
     IRValue,
 )
 
@@ -94,6 +100,19 @@ class LocalConstantPropagator:
                 return instruction, False
             value_constants[instruction.result.name] = constant
             return IRConst(instruction.result, constant), True
+
+        if isinstance(instruction, (IRInitDefault, IRCopyInit, IRAssign)):
+            slot_constants.pop(instruction.destination.name, None)
+            return instruction, False
+
+        if isinstance(instruction, (IRMoveInit, IRRelocate)):
+            slot_constants.pop(instruction.destination.name, None)
+            slot_constants.pop(instruction.source.name, None)
+            return instruction, False
+
+        if isinstance(instruction, IRDestroy):
+            slot_constants.pop(instruction.value.name, None)
+            return instruction, False
 
         self._forget_defined_value(instruction, value_constants)
         return instruction, False

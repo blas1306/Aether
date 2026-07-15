@@ -20,6 +20,7 @@ from aether.ir import (
     IntType,
     StringType,
     VectorType,
+    expand_lifecycle,
     print_ir,
 )
 from aether.errors import IRBackendUnsupportedFeatureError
@@ -30,7 +31,10 @@ from aether.typechecker import TypeChecker
 def _lower(source: str):
     program = parse_source(source)
     TypeChecker().check(program)
-    return IRLowerer().lower(program)
+    # These regression assertions predate structural lifecycle IR and exercise
+    # the primitive form consumed by SSA.  Lifecycle-specific lowering is
+    # covered in test_ir_lifecycle.py before this explicit phase boundary.
+    return expand_lifecycle(IRLowerer().lower(program))
 
 
 def test_lower_simple_add_function() -> None:

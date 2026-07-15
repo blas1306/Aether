@@ -593,3 +593,12 @@ mejor componente es sort compartido; sus debilidades no son APIs faltantes,
 sino seguridad elemental de operaciones ya publicas. Hasta resolver bounds,
 overflow de new, narrowing y `may_trap`, el estado tecnico objetivo es
 **inconsistente**.
+
+## Actualización: lifecycle estructural pre-SSA
+
+Array IR declara ahora la intención por elemento: literal/slice/get por valor
+usan `copy_init` y overwrite usa `assign`. La clasificación recursiva decide si
+copy/relocation trivial es legal. El runtime y ABI no cambiaron en esta fase:
+los tipos actuales siguen siendo triviales, por lo que LLVM conserva sus
+load/store y memcpy existentes. Destrucción de elementos no triviales y hooks
+de buffers quedan bloqueados hasta migrar la clasificación de string.

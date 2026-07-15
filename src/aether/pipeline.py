@@ -109,6 +109,7 @@ class IRBackend:
         module: IRModule,
         optimizer: IROptimizer | None = None,
     ) -> IRModule:
+        from .ir.lifecycle import expand_lifecycle
         from .ir.optimizer import OptimizerPipeline
 
         pipeline = (
@@ -116,7 +117,11 @@ class IRBackend:
             if optimizer is not None
             else OptimizerPipeline(iterative=True)
         )
-        return self.verify(pipeline.run(module))
+        # Lifecycle has already been verified at this boundary.  Optimizing
+        # the current all-trivial representation after structural expansion
+        # recovers the historical scalar opportunities without teaching the
+        # optimizer to rewrite ownership actions.
+        return self.verify(pipeline.run(expand_lifecycle(module)))
 
     def run(self, typed_program: TypedProgram) -> Environment:
         from .ir.interpreter import IRExecutionError, IRInterpreter

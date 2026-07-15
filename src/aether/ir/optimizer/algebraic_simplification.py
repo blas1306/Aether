@@ -4,6 +4,7 @@ from dataclasses import replace
 from typing import Any
 
 from aether.ir.model import (
+    IRAssign,
     IRArrayGet,
     IRArrayLength,
     IRArrayNew,
@@ -17,6 +18,7 @@ from aether.ir.model import (
     IRCallIndirect,
     IRCompareOp,
     IRConst,
+    IRCopyInit,
     IRFunction,
     IRInstruction,
     IRListGet,
@@ -50,6 +52,7 @@ from aether.ir.model import (
     IRPrint,
     IRReturn,
     IRStore,
+    IRStorage,
     IRUnaryOp,
     IRValue,
     IRVectorGet,
@@ -241,6 +244,13 @@ class AlgebraicSimplifier:
             return instruction
         if isinstance(instruction, IRStore):
             return replace(instruction, value=self._resolve(instruction.value, replacements))
+        if isinstance(instruction, (IRCopyInit, IRAssign)):
+            if isinstance(instruction.source, IRStorage):
+                return instruction
+            return replace(
+                instruction,
+                source=self._resolve(instruction.source, replacements),
+            )
         if isinstance(instruction, IRBinaryOp):
             return replace(
                 instruction,

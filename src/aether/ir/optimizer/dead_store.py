@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 from aether.ir.model import (
+    IRAssign,
+    IRCopyInit,
+    IRDestroy,
+    IRInitDefault,
     IRBasicBlock,
     IRBranch,
     IRFunction,
@@ -10,6 +14,8 @@ from aether.ir.model import (
     IRModule,
     IRReturn,
     IRStore,
+    IRMoveInit,
+    IRRelocate,
 )
 
 from .result import OptimizationResult
@@ -70,6 +76,11 @@ class DeadStoreEliminator:
         store: IRStore,
     ) -> bool:
         for later in instructions[index + 1 :]:
+            if isinstance(
+                later,
+                (IRInitDefault, IRCopyInit, IRMoveInit, IRAssign, IRDestroy, IRRelocate),
+            ):
+                return False
             if isinstance(later, IRLoad) and later.slot.name == store.slot.name:
                 return False
             if isinstance(later, IRStore) and later.slot.name == store.slot.name:

@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from .model import (
+    IRAssign,
     IRArrayGet,
     IRArrayLength,
     IRArrayNew,
@@ -17,10 +18,13 @@ from .model import (
     IRCallIndirect,
     IRCompareOp,
     IRConst,
+    IRCopyInit,
+    IRDestroy,
     IREnumConstant,
     IRFunction,
     IRFunctionRef,
     IRInstruction,
+    IRInitDefault,
     IRJump,
     IRListGet,
     IRListCopy,
@@ -50,6 +54,7 @@ from .model import (
     IRMatrixSet,
     IROuterProduct,
     IRModule,
+    IRMoveInit,
     IRPrint,
     IRStructGet,
     IRStructNew,
@@ -58,6 +63,7 @@ from .model import (
     IRMethodResultReceiver,
     IRMethodResultValue,
     IRReturn,
+    IRRelocate,
     IRStore,
     IRUnaryOp,
     IRValue,
@@ -110,6 +116,30 @@ class IRPrinter:
             return f"{self._typed_value(instruction.result)} = load {self._value(instruction.slot)}"
         if isinstance(instruction, IRStore):
             return f"store {self._value(instruction.slot)}, {self._value(instruction.value)}"
+        if isinstance(instruction, IRInitDefault):
+            return f"init_default {self._typed_value(instruction.destination)}"
+        if isinstance(instruction, IRCopyInit):
+            return (
+                f"copy_init {self._typed_value(instruction.destination)}, "
+                f"{self._value(instruction.source)}"
+            )
+        if isinstance(instruction, IRMoveInit):
+            return (
+                f"move_init {self._typed_value(instruction.destination)}, "
+                f"{self._value(instruction.source)}"
+            )
+        if isinstance(instruction, IRAssign):
+            return (
+                f"assign {self._typed_value(instruction.destination)}, "
+                f"{self._value(instruction.source)}"
+            )
+        if isinstance(instruction, IRDestroy):
+            return f"destroy {self._typed_value(instruction.value)}"
+        if isinstance(instruction, IRRelocate):
+            return (
+                f"relocate {self._typed_value(instruction.destination)}, "
+                f"{self._value(instruction.source)}, {instruction.count}"
+            )
         if isinstance(instruction, IRBinaryOp):
             return (
                 f"{self._typed_value(instruction.result)} = {instruction.operator} "
@@ -384,7 +414,12 @@ class IRPrinter:
         if isinstance(instruction, IRReturn):
             if instruction.value is None:
                 return "return"
-            return f"return {self._value(instruction.value)}"
+            transfer = (
+                f" transfer {self._value(instruction.transferred_storage)}"
+                if instruction.transferred_storage is not None
+                else ""
+            )
+            return f"return {self._value(instruction.value)}{transfer}"
         raise TypeError(f"Unsupported IR instruction: {type(instruction).__name__}")
 
     @staticmethod

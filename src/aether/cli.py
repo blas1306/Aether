@@ -493,9 +493,12 @@ def _emit_ir(
     backend = IRBackend()
     module = backend.lower_verified(typed_program)
     if show_passes:
+        from .ir.lifecycle import expand_lifecycle
         from .ir.optimizer import build_optimizer_pipeline
 
-        trace = build_optimizer_pipeline(optimization_profile).run_with_trace(module)
+        trace = build_optimizer_pipeline(optimization_profile).run_with_trace(
+            expand_lifecycle(module)
+        )
         backend.verify(trace[-1].module)
         _print_ir_trace(trace, stdout=stdout)
         return

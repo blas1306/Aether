@@ -1,10 +1,10 @@
 # Lifecycle de valores de Aether
 
-Estado: **decisión de diseño aprobada para Aether v1**, 15 de julio de 2026.
-Este documento fija el contrato semántico que debe guiar el lowering futuro.
-La infraestructura de clasificación puede representar ya estos conceptos, pero
-la Fase 0 **no** inserta cleanup, retain/release ni destructores, y no cambia el
-ABI LLVM vigente.
+Estado: **contrato e infraestructura IR implementados para Aether v1**, 15 de
+julio de 2026. El lowering AST→IR ya emite lifecycle y cleanup estructural, y
+el verifier comprueba el estado intra-función antes de SSA. `retain`/`release`,
+ARC y el nuevo objeto string siguen sin implementarse; el ABI LLVM vigente no
+cambió.
 
 ## 1. Vocabulario e invariantes
 
@@ -323,17 +323,17 @@ Panic abortivo ejecuta la terminación segura del runtime. Si se incorpora
 unwind, cada punto que puede hacer panic necesitará una arista excepcional con
 cleanup del conjunto exacto de valores vivos.
 
-## 9. Forma futura en IR y verificación
+## 9. Forma implementada en IR y verificación
 
-La IR semántica puede introducir operaciones genéricas:
+La IR semántica implementa operaciones genéricas tipadas:
 
 ```text
-init_default T, dst
-copy_value T, dst, src
-move_value T, dst, src
-assign_value T, dst, src
-destroy_value T, value
-relocate_values T, dst, src, count
+init_default dst: T
+copy_init dst: T, src
+move_init dst: T, src
+assign dst: T, src
+destroy value: T
+relocate dst: T, src, count
 ```
 
 `retain`/`release` quedan como primitivas de lowering/runtime, no como API de
@@ -349,6 +349,18 @@ owner en el bloque destino y cada arista transfiere exactamente uno; no crea
 owners implícitos. Lifecycle y calls con panic son efectos observables para
 DCE. Ningún optimizador puede borrarlos, duplicarlos o moverlos a través de un
 panic/call sin prueba de equivalencia.
+
+`IRStorage` distingue ubicaciones addressable owned de `IRValue`. Cada opcode
+puede conservar `IRSourceLocation`; la nominalidad viene del `IRType` completo.
+`LifecycleTypeRegistry` sintetiza planes de structs en orden fuente y orden
+inverso para destrucción/rollback. Todos los tipos del ABI actual clasifican
+como triviales, incluida la representación string antigua.
+
+La decisión aplicada es expandir lifecycle **después de `IRVerifier` y antes
+de SSA**. `LifecycleExpander` lo convierte en load/store/default/no-op para los
+tipos actuales; por eso SSA, sus optimizadores y LLVM no reciben efectos de
+ownership todavía. En IR, los opcodes declaran efectos obligatorios y DCE no
+puede eliminarlos.
 
 Optimizaciones futuras, no implementadas en esta fase: pairing probado de
 retain/release, move elision, return value optimization, no-ops para inmortales,
@@ -373,12 +385,13 @@ de string hasta migrar conjuntamente structs, collections, calls y cleanup.
 
 ## 11. Detalles aplazados no bloqueantes
 
-- forma exacta de metadata/operaciones IR y estrategia de unwind;
+- metadata para inicialización parcial con unwind (la forma normal de IR ya
+  está fijada);
 - lifecycle general de classes y ownership de buffers Vector/Matrix;
 - optimización ARC, RVO y política de concurrencia posterior;
 - `StringView`, substring y APIs públicas de texto.
 
-El primer bloque de implementación después de esta Fase 0 es introducir las
-operaciones de lifecycle estructurales y su verificador antes de SSA, todavía
-sin cambiar strings. Luego puede migrarse de forma atómica el objeto string,
-literales/vacío, print/igualdad y todos los recorridos aggregate.
+El siguiente bloque recomendado es cambiar la clasificación de `StringType` y
+añadir `AetherStringObject`, literales/vacío y hooks retain/release como una
+migración atómica con print/igualdad y recorridos aggregate. No se debe
+habilitar todavía concat ni productores dinámicos antes de cerrar esos hooks.
