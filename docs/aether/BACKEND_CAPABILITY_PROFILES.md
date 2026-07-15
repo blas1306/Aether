@@ -35,12 +35,17 @@ arquitectura, no capacidades solicitadas directamente por un programa.
 
 ## Perfiles actuales
 
-La versión actual del perfil es `5`. La versión `2` promovió `modules` e
+La versión actual del perfil es `6`. La versión `2` promovió `modules` e
 `imports` de `UNSUPPORTED` a `PARTIAL`; la versión `3` promovió `scalar-math`
 de `UNSUPPORTED` a `PARTIAL` en LLVM/native; la versión `4` incorpora el
 subconjunto de callables top-level tipados y sin captura en ambos backends. La
 versión `5` promueve `enums` a `COMPLETE` en LLVM/native para la semántica
-existente de enums nominales sin payload.
+existente de enums nominales sin payload. La versión `6` agrega
+`aggregate-collection-elements`: es `COMPLETE` en AST y `PARTIAL` en native.
+El subconjunto native cubre structs nominales acíclicos y trivialmente
+copiables con primitivas, enums, structs anidados y strings/otros descriptores
+transportables; las combinaciones sin layout/copia definida se rechazan con
+ubicación y motivo antes del lowering LLVM.
 
 El perfil AST representa el intérprete de referencia. Incluye módulos,
 imports, classes, interfaces, enums, input, errores y matemática escalar. Las

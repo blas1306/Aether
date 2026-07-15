@@ -6,7 +6,7 @@ import shutil
 import pytest
 
 from aether.backend.llvm import LLVMRunner
-from aether.errors import AetherTypeError, IRBackendUnsupportedFeatureError
+from aether.errors import AetherTypeError
 from aether.ir import IRCall, IRInterpreter, IRPrint
 from aether.pipeline import IRBackend, lower_to_verified_ssa, prepare_typed_program
 from aether.runner import run_aether
@@ -134,7 +134,7 @@ def test_native_llvm_prints_scalars_and_booleans_as_text() -> None:
     assert stderr.getvalue() == ""
 
 
-def test_backend_rejects_print_of_aggregate_with_specific_diagnostic() -> None:
+def test_backend_prints_list_aggregate() -> None:
     typed = _typed(
         """
 int main() {
@@ -145,11 +145,20 @@ int main() {
 """
     )
 
-    with pytest.raises(
-        IRBackendUnsupportedFeatureError,
-        match=r"println.*does not support values of type 'list<int>'",
-    ):
-        IRBackend().lower(typed)
+    module = IRBackend().lower_verified(typed)
+    assert any(
+        isinstance(instruction, IRPrint)
+        for function in module.functions
+        for block in function.blocks
+        for instruction in block.instructions
+    )
+
+    if shutil.which("clang") is not None:
+        stdout = StringIO()
+        stderr = StringIO()
+        assert LLVMRunner().run(typed, stdout=stdout, stderr=stderr) == 0
+        assert stdout.getvalue() == "{1, 2}\n"
+        assert stderr.getvalue() == ""
 
 
 def test_pure_expression_statement_is_rejected_by_frontend() -> None:

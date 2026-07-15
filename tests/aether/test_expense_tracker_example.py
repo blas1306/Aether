@@ -6,7 +6,7 @@ import shutil
 
 import pytest
 
-from aether.backend.llvm import LLVMBackendError, LLVMRunner
+from aether.backend.llvm import LLVMBuilder, LLVMRunner
 from aether.pipeline import prepare_typed_program
 from aether.runner import run_aether
 from aether.typechecker import TypeChecker
@@ -28,13 +28,6 @@ MAIN_OUTPUT = [
     "#1 | TransactionType.Income | 2026-07-01 | work | Salary | 1500.0",
     "#2 | TransactionType.Expense | 2026-07-15 | food | Dinner | 250.0",
 ]
-NATIVE_SUBSET_OUTPUT = [
-    "native enum in struct: true",
-    "native string field: Dinner",
-    "native income: true",
-    "native expenses: true",
-    "native balance: true",
-]
 
 
 def _source(name: str) -> str:
@@ -52,24 +45,19 @@ def test_expense_tracker_ast_covers_ledger_reports_filtering_and_listing() -> No
     assert result.output.splitlines() == MAIN_OUTPUT
 
 
-def test_expense_tracker_native_subset_matches_ast() -> None:
-    ast_result = run_aether(_source("NativeSubset.ae"), source_root=EXAMPLE)
-
-    assert ast_result.output.splitlines() == NATIVE_SUBSET_OUTPUT
-
-    if shutil.which("clang") is None:
-        pytest.skip("clang is required")
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang is required")
+def test_expense_tracker_full_native_runs_list_of_struct_with_same_validations() -> None:
     stdout = StringIO()
     stderr = StringIO()
-    assert LLVMRunner().run(_typed("NativeSubset.ae"), stdout=stdout, stderr=stderr) == 0
-    assert stdout.getvalue().splitlines() == NATIVE_SUBSET_OUTPUT
+    typed = _typed("Main.ae")
+    assert LLVMRunner().run(typed, stdout=stdout, stderr=stderr) == 0
+    native_lines = stdout.getvalue().splitlines()
+
+    assert native_lines[:10] == MAIN_OUTPUT[:10]
+    assert native_lines[10].startswith("#1 | TransactionType.Income | 2026-07-01 | work | Salary | 1500")
+    assert native_lines[11].startswith("#2 | TransactionType.Expense | 2026-07-15 | food | Dinner | 250")
     assert stderr.getvalue() == ""
 
-
-@pytest.mark.skipif(shutil.which("clang") is None, reason="clang is required")
-def test_expense_tracker_full_native_exposes_list_of_struct_runtime_gap() -> None:
-    with pytest.raises(
-        LLVMBackendError,
-        match=r"LLVM backend does not know the size of struct .*Transaction",
-    ):
-        LLVMRunner().run(_typed("Main.ae"))
+    llvm = LLVMBuilder().emit_llvm(typed)
+    assert "@aether_list_prepare_push" in llvm
+    assert "ptrtoint (ptr getelementptr (%struct." in llvm

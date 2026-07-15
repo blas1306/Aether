@@ -137,6 +137,22 @@ Array<int> xs = {1, 2, 3}; // Array<int>
 `Array<T>` and `List<T>` are distinct types. Aether should not implicitly
 convert between them merely because their element types match.
 
+### Struct elements in LLVM/native
+
+`Array<Struct>` and `List<Struct>` use contiguous by-value storage. Their
+element pointer is a typed LLVM GEP over the real nominal `%struct.Name`; no
+array of struct pointers is introduced. Loads and stores copy the aggregate
+value. List growth/copy and Array slicing use the target-derived element size
+and are enabled only for recursively sized, trivially copyable layouts.
+
+The current admitted struct subset contains native primitives, payload-free
+enums, acyclic nested structs, transported string pointers, and existing
+collection descriptors whose reference aliasing is already language semantics.
+This makes byte copying valid for the admitted representation. Callable,
+class/interface, nullable, incomplete, infinitely recursive, float/complex, or
+otherwise unsupported fields are rejected before LLVM. Literal string pointers
+are transport-safe; dynamic string ownership is not solved by this support.
+
 An array can be copied over a half-open range with `array[start:end]`. Both
 bounds must be `int` and must satisfy
 `0 <= start <= end <= array.length`. The result has the same `Array<T>` type and

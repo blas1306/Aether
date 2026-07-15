@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from .pipeline import TypedProgram
 
 
-CAPABILITY_PROFILE_VERSION = "5"
+CAPABILITY_PROFILE_VERSION = "6"
 
 
 class BackendIdentity(str, Enum):
@@ -77,6 +77,7 @@ class Capability(str, Enum):
     ARRAY = "array"
     ARRAY_SLICING = "array-slicing"
     LIST = "list"
+    AGGREGATE_COLLECTION_ELEMENTS = "aggregate-collection-elements"
     VECTOR = "vector"
     MATRIX = "matrix"
     SCALAR_MATH = "scalar-math"
@@ -173,6 +174,10 @@ CAPABILITY_CATALOG: Mapping[Capability, CapabilityDefinition] = MappingProxyType
             _definition(Capability.ARRAY, "Array values and operations."),
             _definition(Capability.ARRAY_SLICING, "Array and collection slicing."),
             _definition(Capability.LIST, "List values and operations."),
+            _definition(
+                Capability.AGGREGATE_COLLECTION_ELEMENTS,
+                "By-value aggregate elements in Array and List storage.",
+            ),
             _definition(Capability.VECTOR, "Vector values and operations."),
             _definition(Capability.MATRIX, "Matrix values and operations."),
             _definition(Capability.SCALAR_MATH, "Scalar mathematical functions and constants."),
@@ -307,6 +312,7 @@ E2E_TESTED_CAPABILITIES: Mapping[BackendIdentity, frozenset[Capability]] = Mappi
                 Capability.ARRAY,
                 Capability.ARRAY_SLICING,
                 Capability.LIST,
+                Capability.AGGREGATE_COLLECTION_ELEMENTS,
                 Capability.VECTOR,
                 Capability.MATRIX,
                 Capability.SCALAR_MATH,
@@ -395,6 +401,7 @@ class _CapabilityDetector:
         checked = self.typed_program.checked_program
         for module_id in checked.dependency_order():
             module = checked.modules[module_id]
+            self.checker = module.checker
             self._visit(module.program)
             if module_id != checked.root_module:
                 self._record_imported_initialization_requirements(module.program)
@@ -711,10 +718,12 @@ class _CapabilityDetector:
             return
         if isinstance(type_name, ArrayType):
             self._record(Capability.ARRAY, node)
+            self._record_collection_element("Array", type_name.element_type, node)
             self._record_type(type_name.element_type, node)
             return
         if isinstance(type_name, ListType):
             self._record(Capability.LIST, node)
+            self._record_collection_element("List", type_name.element_type, node)
             self._record_type(type_name.element_type, node)
             return
         if isinstance(type_name, (VectorType, TransposeVectorType)):
@@ -765,6 +774,90 @@ class _CapabilityDetector:
         }:
             self._record(Capability.PRIMITIVE_TYPES, node)
 
+    def _record_collection_element(
+        self,
+        collection: str,
+        element_type: AetherType,
+        node: object,
+    ) -> None:
+        resolved = self._resolve_alias(element_type)
+        is_struct = isinstance(resolved, str) and (
+            (symbol := self.checker.structs.get(resolved)) is not None
+            and symbol.kind == "struct"
+        )
+        reason = self._collection_element_reason(resolved, ())
+        if not is_struct and reason is None:
+            return
+        detail = f"{collection}<{resolved}>"
+        if reason is not None:
+            detail += f": {reason}"
+        self._record(
+            Capability.AGGREGATE_COLLECTION_ELEMENTS,
+            node,
+            detail=detail,
+            requires_complete_support=reason is not None,
+        )
+
+    def _resolve_alias(self, type_name: AetherType) -> AetherType:
+        seen: set[str] = set()
+        while isinstance(type_name, str) and type_name in self.checker.type_aliases:
+            if type_name in seen:
+                return type_name
+            seen.add(type_name)
+            type_name = self.checker.type_aliases[type_name]
+        return type_name
+
+    def _collection_element_reason(
+        self,
+        type_name: AetherType,
+        active: tuple[str, ...],
+    ) -> str | None:
+        type_name = self._resolve_alias(type_name)
+        if type_name in {"int", "double", "boolean", "string"}:
+            return None
+        if isinstance(type_name, EnumType):
+            return None
+        if isinstance(
+            type_name,
+            (ArrayType, ListType, VectorType, MatrixType, TransposeVectorType),
+        ):
+            # These are existing reference/descriptor values. Copying their
+            # current representation preserves the language's alias semantics.
+            return None
+        if isinstance(type_name, FunctionType):
+            return "callable fields do not yet have defined aggregate collection copy semantics"
+        if isinstance(type_name, ClassType):
+            return "class references are outside the LLVM/native collection subset"
+        if isinstance(type_name, InterfaceType):
+            return "interface references are outside the LLVM/native collection subset"
+        if isinstance(type_name, NullableType):
+            return "nullable values have no current LLVM/native storage ABI"
+        if isinstance(type_name, (NullType, TupleType)) or type_name in {
+            "float",
+            "complex",
+            "void",
+            "Exception",
+        }:
+            return f"type '{type_name}' has no sized collection-element ABI in LLVM/native"
+        if not isinstance(type_name, str):
+            return f"type '{type_name}' has no supported LLVM/native collection layout"
+
+        symbol = self.checker.structs.get(type_name)
+        if symbol is None:
+            if type_name in self.checker.enums:
+                return None
+            return f"nominal type '{type_name}' is opaque or incomplete"
+        if symbol.kind != "struct":
+            return f"'{type_name}' is a class/reference type, not a by-value struct"
+        if type_name in active:
+            cycle = " -> ".join((*active, type_name))
+            return f"recursive by-value layout has infinite size ({cycle})"
+        for field in symbol.fields:
+            reason = self._collection_element_reason(field.type_name, (*active, type_name))
+            if reason is not None:
+                return f"field '{field.name}' of type '{field.type_name}' is unsupported: {reason}"
+        return None
+
 
 def detect_required_capabilities(
     typed_program: TypedProgram,
@@ -804,6 +897,15 @@ def backend_capability_issues(
             message = (
                 f"LLVM backend does not support {requirement.detail} yet; "
                 "capability 'strings' is partial in LLVM/native."
+            )
+        elif (
+            backend is BackendIdentity.NATIVE
+            and requirement.capability is Capability.AGGREGATE_COLLECTION_ELEMENTS
+            and requirement.detail is not None
+        ):
+            message = (
+                "LLVM/native cannot use this collection element layout: "
+                f"{requirement.detail}."
             )
         else:
             message = (

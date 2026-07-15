@@ -1,5 +1,19 @@
 # List Backend Audit
 
+## Actualización: elementos struct por valor
+
+LLVM/native admite ahora `List<Struct>` para layouts recursivamente sized y
+trivialmente copiables. `LLVMTypeLayouts` produce el tipo y el tamaño de target;
+el runtime genérico conserva `{length, capacity, data}` y recibe
+`element_size`. Reserve/copy usan `memcpy`, insert/removeAt usan `memmove`, y
+get/set/push/pop cargan o almacenan el `%struct` por valor. Esto cubre strings
+literales como punteros transportados, no ownership dinámico. Sort y búsqueda
+estructural de structs siguen rechazados explícitamente.
+
+Las secciones históricas por fases de este documento describen el camino de
+migración; esta actualización prevalece cuando indiquen que una operación ya
+implementada seguía fuera de alcance.
+
 ## Alcance
 
 Auditoria de la implementacion actual de `List<T>` y estado de la migracion al

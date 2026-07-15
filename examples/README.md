@@ -44,6 +44,11 @@ python3 src/main.py --cli < /dev/null
 
 - **list_api.ae** - Native `List<T>` methods, const behavior, and common invalid operations
 
+### Aggregate collections
+
+- **aggregate_collections/particles.ae** - Native `Array<Particle>` with nested
+  `Vec2` structs and explicit by-value get/set semantics.
+
 ### Linear Algebra
 
 - **basic_operations.ae** - Basic matrix/vector operations: creation, transposition, matrix multiplication, and iteration

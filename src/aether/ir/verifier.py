@@ -131,6 +131,7 @@ class IRVerifier:
         return self.module
 
     def _verify_module(self) -> None:
+        self._verify_struct_definitions()
         seen: set[str] = set()
         for function in self.module.functions:
             if function.name in seen:
@@ -140,6 +141,45 @@ class IRVerifier:
 
         for function in self.module.functions:
             self._verify_function(function)
+
+    def _verify_struct_definitions(self) -> None:
+        if len(self._structs) != len(self.module.structs):
+            self._fail("Duplicate nominal struct definition")
+        edges: dict[str, tuple[str, ...]] = {}
+        for definition in self.module.structs:
+            if not definition.name:
+                self._fail("Struct definition name must not be empty")
+            field_names = [name for name, _type in definition.fields]
+            if len(field_names) != len(set(field_names)):
+                self._fail(f"Struct '{definition.name}' has duplicate fields")
+            for field_name, field_type in definition.fields:
+                if isinstance(field_type, VoidType) or not self._is_valid_type(field_type):
+                    self._fail(
+                        f"Struct '{definition.name}' field '{field_name}' has invalid or incomplete type {field_type}"
+                    )
+            edges[definition.name] = tuple(
+                field_type.name
+                for _field_name, field_type in definition.fields
+                if isinstance(field_type, StructType)
+            )
+
+        visited: set[str] = set()
+        active: list[str] = []
+
+        def visit(name: str) -> None:
+            if name in visited:
+                return
+            if name in active:
+                cycle = " -> ".join((*active[active.index(name):], name))
+                self._fail(f"Recursive by-value struct layout has infinite size: {cycle}")
+            active.append(name)
+            for target in edges.get(name, ()):
+                visit(target)
+            active.pop()
+            visited.add(name)
+
+        for name in edges:
+            visit(name)
 
     def _verify_function(self, function: IRFunction) -> None:
         self._verify_parameters(function)
@@ -428,10 +468,21 @@ class IRVerifier:
             self._require_defined(instruction.value, state, value_types)
             if not isinstance(
                 instruction.value.type,
-                (IntType, BoolType, StringType, DoubleType, EnumType, VectorType, MatrixType, StructType),
+                (
+                    IntType,
+                    BoolType,
+                    StringType,
+                    DoubleType,
+                    EnumType,
+                    ArrayType,
+                    ListType,
+                    VectorType,
+                    MatrixType,
+                    StructType,
+                ),
             ):
                 self._fail(
-                    "Print value must be scalar, Vector, or Matrix, "
+                    "Print value must be a printable scalar or aggregate, "
                     f"got {instruction.value.type}"
                 )
             if isinstance(instruction.value.type, VectorType):
@@ -1870,6 +1921,8 @@ class IRVerifier:
     def _is_valid_type(self, type_: IRType) -> bool:
         if isinstance(type_, EnumType):
             return bool(type_.name) and bool(type_.variants) and len(set(type_.variants)) == len(type_.variants)
+        if isinstance(type_, StructType):
+            return bool(type_.name) and type_.name in self._structs
         if isinstance(
             type_,
             (
@@ -1880,7 +1933,6 @@ class IRVerifier:
                 StringType,
                 VoidType,
                 ComplexType,
-                StructType,
                 ClassRefType,
                 InterfaceType,
                 FunctionType,

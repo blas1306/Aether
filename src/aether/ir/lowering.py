@@ -1670,7 +1670,18 @@ class IRLowerer:
             for value in values:
                 if not isinstance(
                     value.type,
-                    (IntType, BoolType, StringType, DoubleType, EnumType, VectorType, MatrixType, StructType),
+                    (
+                        IntType,
+                        BoolType,
+                        StringType,
+                        DoubleType,
+                        EnumType,
+                        ArrayType,
+                        ListType,
+                        VectorType,
+                        MatrixType,
+                        StructType,
+                    ),
                 ):
                     self._fail(
                         f"IR backend {call.callee}(...) does not support values of type "
@@ -1787,6 +1798,11 @@ class IRLowerer:
         if method_name == "sort" and len(arguments) == 1:
             sequence = self._lower_expression(arguments[0], context)
             if isinstance(sequence.type, (ArrayType, ListType)):
+                if isinstance(sequence.type.element, StructType):
+                    self._fail(
+                        f"LLVM/native {sequence.type} sort is unsupported because structs have no implicit ordering.",
+                        call,
+                    )
                 context.block.instructions.append(IRSequenceSort(sequence))
                 return None
         if method_name == "reverse" and len(arguments) == 1:
@@ -1803,6 +1819,11 @@ class IRLowerer:
         if method_name == "contains" and len(arguments) == 2:
             list_value = self._lower_expression(arguments[0], context)
             if isinstance(list_value.type, ListType):
+                if isinstance(list_value.type.element, StructType):
+                    self._fail(
+                        f"LLVM/native {list_value.type} contains is unsupported because structural search is not implemented.",
+                        call,
+                    )
                 value = self._lower_expression(
                     arguments[1], context, target_type=list_value.type.element
                 )
@@ -1817,6 +1838,11 @@ class IRLowerer:
         if method_name == "indexOf" and len(arguments) == 2:
             list_value = self._lower_expression(arguments[0], context)
             if isinstance(list_value.type, ListType):
+                if isinstance(list_value.type.element, StructType):
+                    self._fail(
+                        f"LLVM/native {list_value.type} indexOf is unsupported because structural search is not implemented.",
+                        call,
+                    )
                 value = self._lower_expression(
                     arguments[1], context, target_type=list_value.type.element
                 )

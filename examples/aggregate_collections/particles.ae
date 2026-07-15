@@ -1,0 +1,28 @@
+struct Vec2 {
+    double x;
+    double y;
+}
+
+struct Particle {
+    double mass;
+    Vec2 position;
+    Vec2 velocity;
+}
+
+int main() {
+    Array<Particle> particles = {
+        Particle(2.0, Vec2(1.0, 2.0), Vec2(0.5, -0.5)),
+        Particle(3.0, Vec2(4.0, 5.0), Vec2(1.0, 1.5))
+    };
+
+    Particle first = particles[0];
+    first.position.x = 9.0;
+
+    // Reading copied the struct by value; the stored particle is unchanged
+    // until an explicit indexed set writes the updated aggregate back.
+    println(particles[0].position.x == 1.0);
+    particles[0] = first;
+    println(particles[0].position.x == 9.0);
+    println(particles.length == 2);
+    return 0;
+}
