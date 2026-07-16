@@ -15,6 +15,7 @@ class LLVMStringRuntime:
 
     enabled: bool
     parsing: bool = False
+    splitting: bool = False
 
     HEADER_SIZE = 24
     IMMORTAL = 1
@@ -53,6 +54,8 @@ class LLVMStringRuntime:
                 self._from_utf8(),
             ]
         )
+        if self.splitting:
+            sections.append(self._split())
         if self.parsing:
             declare(sections, "declare ptr @newlocale(i32, ptr, ptr)")
             declare(sections, "declare void @freelocale(ptr)")
@@ -593,6 +596,118 @@ class LLVMStringRuntime:
                 "  ret ptr @.aether.string.empty",
                 "}",
             ]),
+        ])
+
+    @staticmethod
+    def _split() -> str:
+        # Left-to-right exact byte matching.  Advancing by separator length
+        # after a match makes candidates non-overlapping.  The first pass
+        # obtains an exact Array length; the second creates owned fragments.
+        return "\n".join([
+            '@.aether.string.split.empty = private unnamed_addr constant [53 x i8] c"Aether panic: string split separator cannot be empty\\00"',
+            "define private void @aether_string_split_empty_panic() noreturn {",
+            "entry:",
+            "  %message = getelementptr [53 x i8], ptr @.aether.string.split.empty, i64 0, i64 0",
+            "  call i32 @puts(ptr %message)",
+            "  call void @exit(i32 1)",
+            "  unreachable",
+            "}",
+            "define private ptr @aether_string_split(ptr %text, ptr %separator) {",
+            "entry:",
+            "  call void @aether_string_validate(ptr %text)",
+            "  call void @aether_string_validate(ptr %separator)",
+            "  %text_length = call i64 @aether_string_byte_length(ptr %text)",
+            "  %separator_length = call i64 @aether_string_byte_length(ptr %separator)",
+            "  %separator_empty = icmp eq i64 %separator_length, 0",
+            "  br i1 %separator_empty, label %empty_separator, label %prepare",
+            "empty_separator:",
+            "  call void @aether_string_split_empty_panic()",
+            "  unreachable",
+            "prepare:",
+            "  %text_data = call ptr @aether_string_data(ptr %text)",
+            "  %separator_data = call ptr @aether_string_data(ptr %separator)",
+            "  br label %count_loop",
+            "count_loop:",
+            "  %count_index = phi i64 [ 0, %prepare ], [ %count_next_index, %count_advance ]",
+            "  %matches = phi i64 [ 0, %prepare ], [ %count_next_matches, %count_advance ]",
+            "  %count_remaining = sub i64 %text_length, %count_index",
+            "  %count_can_match = icmp uge i64 %count_remaining, %separator_length",
+            "  br i1 %count_can_match, label %count_compare, label %count_done",
+            "count_compare:",
+            "  %count_candidate = getelementptr i8, ptr %text_data, i64 %count_index",
+            "  %count_comparison = call i32 @memcmp(ptr %count_candidate, ptr %separator_data, i64 %separator_length)",
+            "  %count_matched = icmp eq i32 %count_comparison, 0",
+            "  br i1 %count_matched, label %count_match, label %count_miss",
+            "count_match:",
+            "  %match_pair = call { i64, i1 } @llvm.uadd.with.overflow.i64(i64 %matches, i64 1)",
+            "  %matched_count = extractvalue { i64, i1 } %match_pair, 0",
+            "  %match_overflow = extractvalue { i64, i1 } %match_pair, 1",
+            "  br i1 %match_overflow, label %size_panic, label %count_match_advance",
+            "count_match_advance:",
+            "  %index_after_match = add i64 %count_index, %separator_length",
+            "  br label %count_advance",
+            "count_miss:",
+            "  %index_after_miss = add i64 %count_index, 1",
+            "  br label %count_advance",
+            "count_advance:",
+            "  %count_next_index = phi i64 [ %index_after_match, %count_match_advance ], [ %index_after_miss, %count_miss ]",
+            "  %count_next_matches = phi i64 [ %matched_count, %count_match_advance ], [ %matches, %count_miss ]",
+            "  br label %count_loop",
+            "count_done:",
+            "  %part_pair = call { i64, i1 } @llvm.uadd.with.overflow.i64(i64 %matches, i64 1)",
+            "  %part_count = extractvalue { i64, i1 } %part_pair, 0",
+            "  %part_overflow = extractvalue { i64, i1 } %part_pair, 1",
+            "  br i1 %part_overflow, label %size_panic, label %allocate",
+            "size_panic:",
+            "  call void @aether_string_size_panic()",
+            "  unreachable",
+            "allocate:",
+            "  %result = call ptr @aether_array_new(i64 ptrtoint (ptr getelementptr (ptr, ptr null, i64 1) to i64), i64 %part_count)",
+            "  %data_field = getelementptr %AetherArray, ptr %result, i32 0, i32 1",
+            "  %result_data = load ptr, ptr %data_field",
+            "  %no_matches = icmp eq i64 %matches, 0",
+            "  br i1 %no_matches, label %return_original, label %split_loop",
+            "return_original:",
+            "  call void @aether_string_retain(ptr %text)",
+            "  store ptr %text, ptr %result_data",
+            "  ret ptr %result",
+            "split_loop:",
+            "  %split_index = phi i64 [ 0, %allocate ], [ %split_next_index, %split_advance ]",
+            "  %fragment_start = phi i64 [ 0, %allocate ], [ %split_next_start, %split_advance ]",
+            "  %part_index = phi i64 [ 0, %allocate ], [ %split_next_part, %split_advance ]",
+            "  %split_remaining = sub i64 %text_length, %split_index",
+            "  %split_can_match = icmp uge i64 %split_remaining, %separator_length",
+            "  br i1 %split_can_match, label %split_compare, label %store_final",
+            "split_compare:",
+            "  %split_candidate = getelementptr i8, ptr %text_data, i64 %split_index",
+            "  %split_comparison = call i32 @memcmp(ptr %split_candidate, ptr %separator_data, i64 %separator_length)",
+            "  %split_matched = icmp eq i32 %split_comparison, 0",
+            "  br i1 %split_matched, label %store_fragment, label %split_miss",
+            "store_fragment:",
+            "  %fragment_length = sub i64 %split_index, %fragment_start",
+            "  %fragment_data = getelementptr i8, ptr %text_data, i64 %fragment_start",
+            "  %fragment = call ptr @aether_string_from_utf8(ptr %fragment_data, i64 %fragment_length)",
+            "  %fragment_slot = getelementptr ptr, ptr %result_data, i64 %part_index",
+            "  store ptr %fragment, ptr %fragment_slot",
+            "  %index_after_fragment = add i64 %split_index, %separator_length",
+            "  %part_after_fragment = add i64 %part_index, 1",
+            "  br label %split_advance",
+            "split_miss:",
+            "  %index_after_split_miss = add i64 %split_index, 1",
+            "  br label %split_advance",
+            "split_advance:",
+            "  %split_next_index = phi i64 [ %index_after_fragment, %store_fragment ], [ %index_after_split_miss, %split_miss ]",
+            "  %split_next_start = phi i64 [ %index_after_fragment, %store_fragment ], [ %fragment_start, %split_miss ]",
+            "  %split_next_part = phi i64 [ %part_after_fragment, %store_fragment ], [ %part_index, %split_miss ]",
+            "  br label %split_loop",
+            "store_final:",
+            "  %final_length = sub i64 %text_length, %fragment_start",
+            "  %final_data = getelementptr i8, ptr %text_data, i64 %fragment_start",
+            "  %final_fragment = call ptr @aether_string_from_utf8(ptr %final_data, i64 %final_length)",
+            "  %final_slot = getelementptr ptr, ptr %result_data, i64 %part_index",
+            "  store ptr %final_fragment, ptr %final_slot",
+            "  ret ptr %result",
+            "}",
         ])
 
     @staticmethod

@@ -1292,6 +1292,16 @@ It preserves internal whitespace, embedded NUL, valid UTF-8, and every
 non-ASCII whitespace code point. It is locale-independent and does not modify
 the receiver. An all-whitespace result is the canonical empty string.
 
+`s.split(separator)` takes exactly one `string` and returns a new owned
+`Array<string>`. It compares exact UTF-8 bytes from left to right and consumes
+non-overlapping matches (`"ababa".split("aba")` is `{"", "ba"}`). Leading,
+trailing, and repeated separators preserve empty fields. An empty separator is
+invalid and panics with `Aether panic: string split separator cannot be empty`.
+Embedded NUL and multibyte separators are ordinary length-aware bytes. Every
+fragment is owned; this is not regex, CSV, normalization/segmentation,
+split-by-whitespace, or split-with-limit. The initial search is O(n * m), with
+O(n) total fragment bytes copied.
+
 Numeric parsing is explicit and structured:
 
 ```aether

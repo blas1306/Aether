@@ -104,6 +104,20 @@ def test_expense_tracker_persists_and_verifies_explicit_summary(tmp_path: Path) 
     )
 
 
+def test_expense_tracker_split_check_preserves_empty_fields_ast_and_native() -> None:
+    arguments = ["split-check", ",", "food,,work"]
+    expected = "split parts: 3\nfood\n\nwork\n"
+    assert run_aether(
+        _source("Main.ae"), source_root=EXAMPLE, program_arguments=arguments
+    ).output == expected
+
+    stdout = StringIO()
+    assert LLVMRunner().run(
+        _typed("Main.ae"), stdout=stdout, program_arguments=arguments
+    ) == 0
+    assert stdout.getvalue() == expected
+
+
 @pytest.mark.skipif(shutil.which("clang") is None, reason="clang is required")
 def test_expense_tracker_native_persistence_check(tmp_path: Path) -> None:
     path = tmp_path / "native-summary.txt"

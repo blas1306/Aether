@@ -16,7 +16,7 @@ from ..string_parsing import (
     PARSE_STATUS_TYPE,
     PARSE_STATUS_VARIANTS,
 )
-from ..string_value import STRING_TRIM_BUILTIN
+from ..string_value import STRING_SPLIT_BUILTIN, STRING_TRIM_BUILTIN
 from ..process_arguments import PROCESS_ARGS_BUILTIN
 from ..text_file_io import (
     APPEND_TEXT_BUILTIN,
@@ -1937,7 +1937,7 @@ class IRLowerer:
             receiver_name, method_name = call.callee.rsplit(".", 1)
             if method_name not in {
                 "copy", "contains", "indexOf", "pop", "removeAt", "push",
-                "insert", "clear", "sort", "reverse", "trim",
+                "insert", "clear", "sort", "reverse", "trim", "split",
             }:
                 receiver = self._dotted_expression(receiver_name, call.line, call.column)
                 return self._lower_method_call(
@@ -1979,6 +1979,28 @@ class IRLowerer:
                     (receiver,),
                     result,
                     STRING_TRIM_BUILTIN,
+                    self._source_location(call),
+                )
+            )
+            return result if result_required else None
+        if "." in call.callee and method_name == "split":
+            receiver_name = call.callee.rsplit(".", 1)[0]
+            receiver_expression = self._dotted_expression(
+                receiver_name, call.line, call.column
+            )
+            receiver = self._lower_expression(receiver_expression, context)
+            if len(call.arguments) != 1 or not isinstance(receiver.type, StringType):
+                self._fail("IR string.split() requires string receiver and one separator.", call)
+            separator = self._lower_expression(call.arguments[0], context)
+            if not isinstance(separator.type, StringType):
+                self._fail("IR string.split() separator must be string.", call)
+            result = context.temporary(ArrayType(StringType()))
+            context.block.instructions.append(
+                IRCall(
+                    STRING_SPLIT_BUILTIN,
+                    (receiver, separator),
+                    result,
+                    STRING_SPLIT_BUILTIN,
                     self._source_location(call),
                 )
             )
@@ -2364,6 +2386,23 @@ class IRLowerer:
                     (receiver,),
                     result,
                     STRING_TRIM_BUILTIN,
+                    self._source_location(node),
+                )
+            )
+            return result if result_required else None
+        if method_name == "split" and isinstance(receiver.type, StringType):
+            if len(argument_expressions) != 1:
+                self._fail("IR string.split() expects exactly one argument.", node)
+            separator = self._lower_expression(argument_expressions[0], context)
+            if not isinstance(separator.type, StringType):
+                self._fail("IR string.split() separator must be string.", node)
+            result = context.temporary(ArrayType(StringType()))
+            context.block.instructions.append(
+                IRCall(
+                    STRING_SPLIT_BUILTIN,
+                    (receiver, separator),
+                    result,
+                    STRING_SPLIT_BUILTIN,
                     self._source_location(node),
                 )
             )

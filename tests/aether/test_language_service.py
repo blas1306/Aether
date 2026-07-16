@@ -211,4 +211,8 @@ def test_completion_items_include_native_members_after_dot() -> None:
         assert matrix_labels[label] == kind
     for label, kind in {"length": "property", "norm": "method"}.items():
         assert vector_labels[label] == kind
-    assert string_labels == {"byteLength": "property", "trim": "method"}
+    assert string_labels == {
+        "byteLength": "property",
+        "trim": "method",
+        "split": "method",
+    }

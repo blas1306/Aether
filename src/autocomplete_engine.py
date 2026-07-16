@@ -151,7 +151,7 @@ SNIPPET_SUGGESTIONS: tuple[CommandSuggestion, ...] = (
 
 
 NATIVE_TYPE_MEMBERS: dict[str, tuple[tuple[str, str], ...]] = {
-    "string": (("byteLength", "property"), ("trim", "method")),
+    "string": (("byteLength", "property"), ("trim", "method"), ("split", "method")),
     "List": (("length", "property"), ("copy", "method"), ("reverse", "method"), ("sort", "method")),
     "Array": (("length", "property"), ("copy", "method")),
     "Matrix": (("rows", "property"), ("columns", "property"), ("transpose", "method")),
@@ -591,13 +591,20 @@ def _native_member_suggestions(
         if not _match_prefix(name, prefix):
             continue
         is_method = kind == "method"
+        signature = f"{type_family}.{name}{'()' if is_method else ''}"
+        description = f"Native {type_family} {kind}."
+        if type_family == "string" and name == "split":
+            signature = "string.split(string separator) -> Array<string>"
+            description = (
+                "Split on exact non-overlapping UTF-8 byte matches; preserves empty fields."
+            )
         suggestions.append(
             CommandSuggestion(
                 name=name,
                 label=name,
                 insert_text=f"{name}()" if is_method else name,
-                signature=f"{type_family}.{name}{'()' if is_method else ''}",
-                description=f"Native {type_family} {kind}.",
+                signature=signature,
+                description=description,
                 category="members",
                 kind=kind,
                 source="language",

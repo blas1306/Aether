@@ -2681,21 +2681,36 @@ class TypeChecker:
                 line=expression.line,
                 column=expression.column,
             )
-        if resolved == "string" and expression.method_name == "trim":
+        if resolved == "string" and expression.method_name in {"trim", "split"}:
             if expression.keyword_arguments:
                 raise AetherTypeError(
-                    "string.trim() does not accept keyword arguments.",
+                    f"string.{expression.method_name}() does not accept keyword arguments.",
                     line=expression.line,
                     column=expression.column,
                 )
-            if expression.arguments:
+            expected_arity = 0 if expression.method_name == "trim" else 1
+            if len(expression.arguments) != expected_arity:
                 raise AetherTypeError(
-                    "string.trim() expects zero arguments.",
+                    (
+                        "string.trim() expects zero arguments."
+                        if expression.method_name == "trim"
+                        else "string.split(...) expects exactly one argument."
+                    ),
                     line=expression.line,
                     column=expression.column,
                     kind="arity",
                 )
-            return "string"
+            if expression.method_name == "trim":
+                return "string"
+            separator_type = self._expression_type(expression.arguments[0], scope)
+            if separator_type is not UNKNOWN_TYPE and separator_type != "string":
+                raise AetherTypeError(
+                    "string.split(...) expects a string separator, "
+                    f"got '{type_to_string(separator_type)}'.",
+                    line=expression.line,
+                    column=expression.column,
+                )
+            return ArrayType("string")
         desugared = ast.CallExpression(
             method.builtin_name,
             [expression.target, *expression.arguments],

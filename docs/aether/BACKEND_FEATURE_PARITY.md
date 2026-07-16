@@ -45,6 +45,12 @@ Actualización perfil 18 (16-07-2026): `io.readText`, `io.writeText` e
 validan UTF-8 al leer, normalizan errores y sobreviven O0/O1/O2. Windows y
 otras fronteras POSIX native permanecen diagnosticadas explícitamente.
 
+Actualización perfil 19 (16-07-2026): `string.split(string)` es E2E en
+AST/IR/SSA/LLVM. Hace matching exacto por bytes, no solapado, conserva campos
+vacíos y NUL/UTF-8, rechaza separator vacío y devuelve un `Array<string>` con
+fragments owned. La call conserva efectos de lectura/allocation/panic y
+sobrevive clang O0/O1/O2.
+
 Última revisión: 15 de julio de 2026, incluyendo enums native y los ejemplos
 dogfood de métodos numéricos y expense tracker. Este documento reemplaza como
 referencia canónica a la auditoría histórica de `docs/compiler/`.
@@ -167,6 +173,7 @@ representación y lifecycle ya están activos en esta matriz.
 | Concat e igualdad string | C | C | C tipos exactos | C bytes | C binary tipado / compare | C | C efectos/tipos | C `StringValue` | C | C | C effect-aware | C | `aether_string_concat`/`equal` | E2E+O0/O1/O2 | C | Completo | Solo `string + string`; sin conversiones implícitas. |
 | `string.byteLength` | C property | C | C `int` | C O(1) | call tipada | C | C | C | C | C | C | C checked i64→i32 | header explícito | E2E UTF-8/NUL | C | Completo | Cuenta bytes, no code points ni graphemes. |
 | `string.trim()` | C método | C | C read-only, cero args, owned | C bytes | call builtin tipada+loc | C | C firma/efectos | C `StringValue` | C | C | C effect-aware | C | `aether_string_trim` | E2E+O0/O1/O2 | C | Completo | Sólo whitespace ASCII `20 09 0A 0D 0C 0B`; conserva NUL/UTF-8/no-ASCII. |
+| `string.split(string)` | C método | C | C read-only, un arg, `Array<string>` owned | C bytes | call builtin tipada+loc | C | C firma/efectos | C `StringValue`+Array | C | C | C effect-aware | C lifecycle Array/string | `aether_string_split` dos pasadas | E2E+O0/O1/O2 | C | Completo | Matching exacto no solapado; conserva vacíos/NUL/UTF-8; separator vacío hace panic. |
 | `parseInt` / `parseDouble` | C llamada | C | C resultados nominales | C bytes compartidos | C calls tipadas+loc | C | C firma/layout | C | C | C | C effect-aware | C ABI struct | parser i32 + DFA/`strtod_l` locale C | E2E+O0/O1/O2 | C | Completo | Sin trim/locale implícito; defaults 0 no son sentinels; NaN/infinito rechazados. |
 | Interpolación/formatting string | C | C | C | C | N | N | N | N | N | N | N | N | N | AST | C | Solo AST | No se habilitó conversión ni formatting native. |
 | `print` / `println` escalares | llamada | C | C variádico | C | C `IRPrint` | C | C | C | C | C | C efecto | C | `printf`/helpers | E2E | C | Completo | Formato double general aún usa contratos host distintos en casos extremos. |
@@ -286,8 +293,8 @@ dejan SSA inválido.
 - La existencia de genéricos privilegiados en Array/List/Vector/Matrix no
   implica genéricos de usuario.
 - Strings son handles a `AetherStringObject` con ARC interno; concat,
-  `byteLength` y `trim` ASCII están activos, mientras otras APIs de producción
-  siguen fuera.
+  `byteLength`, `trim` ASCII y `split` exacto están activos, mientras otras APIs
+  de producción siguen fuera.
 - La API List es amplia para elementos soportados, incluidos structs con layout,
   con RC/free final y Eq(T) general; capacity pública no está cerrada.
 - `-O2` existe como opción, pero es alias de `-O1` y no afecta native.

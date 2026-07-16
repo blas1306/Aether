@@ -1,7 +1,7 @@
 # Decisión de diseño: modelo de strings y runtime de texto de Aether
 
 Estado: **núcleo de representación y lifecycle implementado para Aether v1**,
-15 de julio de 2026. La ABI interna usa un handle `ptr` al objeto descrito aquí;
+16 de julio de 2026. La ABI interna usa un handle `ptr` al objeto descrito aquí;
 ya no existe un camino native que interprete ese handle como `char *`.
 
 ### Estado de implementación
@@ -23,6 +23,10 @@ ya no existe un camino native que interprete ese handle como `char *`.
 - `s.trim()` elimina únicamente space, tab, LF, CR, form feed y vertical tab
   ASCII en ambos extremos. Baja a `aether_string_trim`, conserva NUL/UTF-8 y
   devuelve owned mediante retain, singleton vacío o una allocation/copia.
+- `s.split(separator)` compara bytes UTF-8 exactos de izquierda a derecha,
+  preserva todos los campos vacíos y consume coincidencias no solapadas. El
+  separador vacío hace panic. Dos pasadas crean un `Array<string>` exacto con
+  fragments owned; el fast path sin matches retiene el receiver.
 - `parseInt(string)` y `parseDouble(string)` producen resultados nominales con
   `ParseStatus`, consumen bytes por longitud y son estrictos/independientes del
   locale. El contrato completo está en
@@ -38,8 +42,8 @@ ya no existe un camino native que interprete ese handle como `char *`.
   ownership, no un `str` host como sustituto semántico.
 
 La sección 3 conserva el inventario histórico anterior a esta migración para
-explicar los puntos que fueron reemplazados. Split, archivos, argv,
-formatting e interpolación native siguen fuera de esta fase.
+explicar los puntos que fueron reemplazados. Formatting e interpolación native
+siguen fuera de esta fase.
 
 ## 1. Resumen de decisiones aprobadas
 
@@ -58,6 +62,7 @@ Para Aether v1 se aprueba:
 | Índices | No existe `s[i]` en v1. No se confundirá byte, code point y grapheme. |
 | Longitudes | El objeto conserva byte length O(1), expuesto como `s.byteLength`; no habrá un `length` ambiguo. |
 | Trimming | `s.trim()` usa exclusivamente los bytes ASCII `20 09 0A 0D 0C 0B`; no aplica locale ni whitespace Unicode. |
+| Split | `s.split(separator)` usa matches exactos por bytes UTF-8, no solapados; conserva vacíos y rechaza separator vacío. |
 | Orden | `==`/`!=` por contenido. Los operadores `< <= > >=` no existen para string v1; sort y un compare interno usan bytes UTF-8 unsigned. |
 | Substring | Fuera del primer runtime; la primera API segura debería copiar y usar límites de code points. Las views se aplazan. |
 | División de APIs | Solo representación, validación, allocation, lifecycle y operaciones esenciales viven en runtime; algoritmos de texto viven en stdlib. |
@@ -723,13 +728,15 @@ Regla:
 | compare por bytes | runtime primitive interna | Sort y búsqueda ordenada. |
 | hashing | runtime primitive futura | Debe compartir bytes/seed con Map/Set. |
 | decode siguiente code point | runtime primitive pequeña o iterator builtin | Validación y scan eficiente. |
-| `split`, `replace` | stdlib Aether futura | Algoritmos sobre iteración/builder; no implementados aún. |
+| `split` | builtin + runtime primitive implementada | Dos pasadas length-aware, resultado `Array<string>` exacto y owned. |
+| `replace` | stdlib Aether futura | Algoritmo sobre iteración/builder; no implementado aún. |
 | `contains`, `startsWith`, `endsWith`, `find` | stdlib Aether | No requieren opcode; pueden usar bytes seguros. |
 | case conversion | stdlib/módulo Unicode futuro | Tablas Unicode versionadas; no runtime mínimo. |
 | parsing y formatting | stdlib sobre primitivas numéricas | Política de errores y formato, no layout string. |
 
 Una call runtime conocida puede tener effects precisos en IR/SSA. No es
-necesario crear `IRStringTrim`, `IRStringSplit`, etc.
+necesario crear `IRStringTrim` o `IRStringSplit`: usan calls tipadas con
+identidad builtin canónica, ubicación y efectos explícitos.
 
 ## 13. Concatenación, interpolación y construcción
 
@@ -828,8 +835,9 @@ Una futura `system.args()` puede devolver `List<string>` owned:
 - Handles, close y errores pertenecen a `io`; el objeto string no posee el
   archivo ni una mapping por defecto.
 
-El expense tracker podrá añadir CSV solo después de estas fronteras, split,
-trim, parsing y una política de errores; esta RFC no diseña CSV.
+El expense tracker sólo podrá añadir CSV después de definir escaping, schema y
+una política de errores sobre estas fronteras, split, trim y parsing; esta RFC
+no diseña CSV.
 
 ## 16. Evolución de gestión de memoria
 
@@ -1023,7 +1031,8 @@ error y wrappers de primitivas numéricas.
 salida es UTF-8 válida.
 
 **Tests:** `trim` ya cubre ASCII exacto, multibyte, whitespace no ASCII, NUL,
-vacío, ownership y O0/O1/O2. Quedan split/contains/find/replace/starts/ends;
+vacío, ownership y O0/O1/O2. `split` cubre vacíos, overlap, UTF-8, NUL,
+rollback, lifecycle y O0/O1/O2. Quedan contains/find/replace/starts/ends;
 parsing cubre válido, inválido,
 overflow y trailing data; paridad AST/native.
 

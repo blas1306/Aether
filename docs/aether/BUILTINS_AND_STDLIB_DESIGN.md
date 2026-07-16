@@ -51,7 +51,13 @@ El perfil 16 añade `string.trim()` como método read-only. Su helper necesita
 header, ARC, fast paths y allocation length-aware, por lo que pertenece al
 nivel intrínseco aunque no introduce un nodo AST ni opcode dedicado. Recorta
 exclusivamente los seis whitespace ASCII de Aether v1; conserva NUL, UTF-8 y
-whitespace Unicode. No habilita `split`, substring, views ni un módulo `text`.
+whitespace Unicode. No habilita substring, views ni un módulo `text`.
+
+El perfil 19 añade `string.split(string separator) -> Array<string>` como
+método read-only e intrínseco length-aware. Compara bytes exactos, preserva
+campos vacíos, usa matches no solapados y rechaza el separador vacío con panic.
+Cada fragmento es owned; no introduce views, regex, normalización, escaping,
+CSV, límite de partes ni segmentación Unicode.
 
 El perfil 18 implementa el núcleo de archivos de texto del módulo estándar
 `io`: `readText`, `writeText` y `appendText`. Sus helpers son intrínsecos por la
@@ -95,7 +101,7 @@ salida del crecimiento posterior.
 | Módulo | Responsabilidad | Dependencias | Mínimo v1 | Puede esperar | Escribible en Aether | Necesita runtime/intrínseco |
 | --- | --- | --- | --- | --- | --- | --- |
 | `io` | consola, streams y archivos básicos | `text`, `system` mínimo | print/println, input tipado, archivo texto básico y errores | buffering avanzado, codecs extensibles | wrappers, lectura por líneas, helpers | stdin/stdout/stderr, handles, bytes, close |
-| `text` | strings, búsqueda, split/join y conversión | runtime string | encoding definido, `byteLength`, concat, igualdad y `trim` ASCII | split/join, substring, slicing/views, regex, normalización Unicode completa | algoritmos sobre iteración de code units/points | representación, allocation, trim básico, decoding/encoding |
+| `text` | strings, búsqueda, split/join y conversión | runtime string | encoding definido, `byteLength`, concat, igualdad, `trim` ASCII y `split` exacto | join, substring, slicing/views, regex, normalización Unicode completa | algoritmos sobre iteración de code units/points | representación, allocation, trim/split básico, decoding/encoding |
 | `collections` | colecciones generales | generics, equality; hashing para Map/Set | APIs derivadas de Array/List que se seleccionen | Map, Set, Queue, Stack si hashing/generics no están listos | la mayoría de algoritmos y estructuras | allocation y primitivas Array/List |
 | `time` | reloj monotónico, fecha/duración mínima | `system` | reloj monotónico para medición | zonas horarias, calendarios | Duration y formato parcial | clocks del SO |
 | `System` (compatibilidad actual; futuro `system`) | proceso, args, entorno, exit, plataforma | runtime/ABI C | `args()`; código de salida ya proviene de `main` | entorno, plataforma y procesos hijos | wrappers y validación | frontera `argc/argv` POSIX; UTF-16 pendiente en Windows |

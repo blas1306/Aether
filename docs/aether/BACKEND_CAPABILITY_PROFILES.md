@@ -36,7 +36,7 @@ arquitectura, no capacidades solicitadas directamente por un programa.
 
 ## Perfiles actuales
 
-La versión actual del perfil es `18`. La versión `2` promovió `modules` e
+La versión actual del perfil es `19`. La versión `2` promovió `modules` e
 `imports` de `UNSUPPORTED` a `PARTIAL`; la versión `3` promovió `scalar-math`
 de `UNSUPPORTED` a `PARTIAL` en LLVM/native; la versión `4` incorpora el
 subconjunto de callables top-level tipados y sin captura en ambos backends. La
@@ -117,6 +117,12 @@ POSIX todavía no fijan el acceso portable a `errno`. La capability amplia
 `files` refiere sólo a este subconjunto de texto, no a binarios, streams o
 directorios.
 
+La versión `19` agrega la capacidad granular `string-split`, completa en AST y
+native. Se detecta únicamente desde el miembro nativo tipado `string.split` y
+exige evidencia E2E en ambos backends. La capability histórica combinada
+`string-split-trim` permanece unsupported para no declarar regex, CSV,
+segmentación Unicode ni una superficie general de texto.
+
 Para `strings`, el subset native distingue la operación semántica concreta:
 
 - transporte de literales, variables, parámetros, returns, fields y elementos
@@ -126,9 +132,9 @@ Para `strings`, el subset native distingue la operación semántica concreta:
 - interpolación y formatting: rechazados temprano con su nodo y ubicación;
 - parsing numérico explícito: aceptado mediante `parseInt`/`parseDouble`;
 - trimming ASCII explícito: aceptado mediante `s.trim()`;
-- otros productores dinámicos, split y archivos: no se
-  infieren por la mera presencia de texto y siguen fuera de su capacidad
-  propia o sin API de lenguaje.
+- split byte-exacto explícito: aceptado mediante `s.split(separator)`;
+- otros productores dinámicos y archivos no se infieren por la mera presencia
+  de texto y siguen en su capacidad propia o sin API de lenguaje.
 
 Un literal aislado no solicita soporte completo. `a + b` y `a == b` se detectan
 cuando ambos operandos son string, aunque no haya literales y aunque la

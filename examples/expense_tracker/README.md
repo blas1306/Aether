@@ -24,6 +24,7 @@ aether run examples/expense_tracker/Main.ae -- add income 4 100.0 work "Side pro
 aether run examples/expense_tracker/Main.ae -- list
 aether run examples/expense_tracker/Main.ae -- summary
 aether run examples/expense_tracker/Main.ae -- persist-check /tmp/aether-summary.txt
+aether run examples/expense_tracker/Main.ae -- split-check , "food,,work"
 ```
 
 Sin argumentos se ejecuta el dogfood histórico completo. Con argumentos,
@@ -45,8 +46,9 @@ lógica coinciden. `transactionLabel` construye una etiqueta owned mediante
 `250.0` desde `"\t250.0\n"` aplicando `.trim()` antes de los parsers; sólo
 consume `value` tras comprobar `ParseStatus.Success`. Una llamada directa sin
 trim sigue produciendo `InvalidFormat`, y descripción/categoría se recortan
-antes de construir la transacción. Split y formatting siguen fuera del
-ejemplo.
+antes de construir la transacción. `split-check <separator> <text>` ejercita
+la primitiva byte-based preservando campos vacíos; es sólo una inspección de
+texto simple, no un parser CSV ni un formato persistente.
 
 La Fase 2 confirma además que `List<Transaction>` conserva aliasing en
 assignment/parámetros/returns, que `copy()` crea un objeto y buffer exteriores
@@ -68,14 +70,15 @@ transacciones de demostración creadas en esa ejecución.
 
 `persist-check <path>` es un dogfood mínimo de archivos de texto: escribe un
 resumen fijo y explícito, lo relee y compara, y hace append de `verified\n`.
-El formato no se llama CSV y no persiste transacciones estructuradas porque aún
-no existe `split` ni un parser con escaping.
+El formato no se llama CSV y no persiste transacciones estructuradas: `split`
+no implementa escaping ni convierte este archivo en un formato definitivo.
 
 ## Límites deliberados
 
 - `main` continúa siendo `int main()`; los argumentos se consultan con
   `System.args()`.
-- No hay archivos binarios, CSV, persistencia estructurada ni `split`.
+- No hay archivos binarios, CSV ni persistencia estructurada; `split-check` no
+  acepta escaping de separadores.
 - No hay conversiones implícitas ni otras APIs generales de texto.
 - Las fechas no se validan ni se ordenan.
 - No se agregaron excepciones, GC ni destructores.

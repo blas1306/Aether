@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     from .pipeline import TypedProgram
 
 
-CAPABILITY_PROFILE_VERSION = "18"
+CAPABILITY_PROFILE_VERSION = "19"
 
 
 class BackendIdentity(str, Enum):
@@ -78,6 +78,7 @@ class Capability(str, Enum):
     INTEGER_STRING_PARSING = "integer-string-parsing"
     DOUBLE_STRING_PARSING = "double-string-parsing"
     STRING_TRIM = "string-trim"
+    STRING_SPLIT = "string-split"
     STRING_SPLIT_TRIM = "string-split-trim"
     PRINT = "print"
     INPUT = "input"
@@ -195,6 +196,7 @@ CAPABILITY_CATALOG: Mapping[Capability, CapabilityDefinition] = MappingProxyType
             _definition(Capability.INTEGER_STRING_PARSING, "Strict structured decimal parsing from string to int."),
             _definition(Capability.DOUBLE_STRING_PARSING, "Strict structured locale-independent parsing from string to double."),
             _definition(Capability.STRING_TRIM, "Explicit trimming of Aether v1 ASCII whitespace."),
+            _definition(Capability.STRING_SPLIT, "Exact byte-based string splitting into owned fields."),
             _definition(Capability.STRING_SPLIT_TRIM, "Public split and trim text algorithms."),
             _definition(Capability.PRINT, "print and println output."),
             _definition(Capability.INPUT, "Typed input calls."),
@@ -318,6 +320,7 @@ _NATIVE_COMPLETE = {
     Capability.INTEGER_STRING_PARSING,
     Capability.DOUBLE_STRING_PARSING,
     Capability.STRING_TRIM,
+    Capability.STRING_SPLIT,
     Capability.CLI_ARGUMENT_FORWARDING,
     Capability.COLLECTION_OBJECT_LIFECYCLE,
     Capability.CONST_COLLECTION_REFERENCES,
@@ -391,6 +394,7 @@ E2E_TESTED_CAPABILITIES: Mapping[BackendIdentity, frozenset[Capability]] = Mappi
                 Capability.INTEGER_STRING_PARSING,
                 Capability.DOUBLE_STRING_PARSING,
                 Capability.STRING_TRIM,
+                Capability.STRING_SPLIT,
                 Capability.PROCESS_ARGUMENTS,
                 Capability.CLI_ARGUMENT_FORWARDING,
                 Capability.PRINT,
@@ -441,6 +445,7 @@ E2E_TESTED_CAPABILITIES: Mapping[BackendIdentity, frozenset[Capability]] = Mappi
                 Capability.INTEGER_STRING_PARSING,
                 Capability.DOUBLE_STRING_PARSING,
                 Capability.STRING_TRIM,
+                Capability.STRING_SPLIT,
                 Capability.PROCESS_ARGUMENTS,
                 Capability.CLI_ARGUMENT_FORWARDING,
                 Capability.COLLECTION_OBJECT_LIFECYCLE,
@@ -921,11 +926,19 @@ class _CapabilityDetector:
             return
         resolved = self._resolve_alias(target_type)
         canonical_operation = "indexOf" if operation == "index_of" else operation
-        if resolved == "string" and canonical_operation == "trim":
+        if resolved == "string" and canonical_operation in {"trim", "split"}:
             self._record(
-                Capability.STRING_TRIM,
+                (
+                    Capability.STRING_TRIM
+                    if canonical_operation == "trim"
+                    else Capability.STRING_SPLIT
+                ),
                 node,
-                detail="explicit ASCII string trimming",
+                detail=(
+                    "explicit ASCII string trimming"
+                    if canonical_operation == "trim"
+                    else "exact byte-based string splitting"
+                ),
                 requires_complete_support=True,
             )
             return

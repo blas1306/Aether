@@ -5,7 +5,13 @@ IMMORTAL = 1 << 0
 UTF8_VALID = 1 << 1
 MAX_STRING_LENGTH = (1 << 63) - 1
 STRING_HEADER_SIZE = 24
+ARRAY_HEADER_SIZE = 24
+STRING_HANDLE_SIZE = 8
 STRING_TRIM_BUILTIN = "__aether_string_trim"
+STRING_SPLIT_BUILTIN = "__aether_string_split"
+STRING_SPLIT_EMPTY_SEPARATOR_MESSAGE = (
+    "Aether panic: string split separator cannot be empty"
+)
 ASCII_WHITESPACE_BYTES = frozenset((0x20, 0x09, 0x0A, 0x0D, 0x0C, 0x0B))
 
 
@@ -248,6 +254,107 @@ def aether_string_trim(value: StringValue) -> StringValue:
     if allocation_size > MAX_STRING_LENGTH:
         raise OverflowError("Aether string allocation size overflow")
     return StringValue.from_utf8(data[start:end])
+
+
+def aether_string_split(
+    text: StringValue,
+    separator: StringValue,
+    *,
+    wrap_values: bool = False,
+):
+    """Split an Aether string on exact, non-overlapping UTF-8 byte matches.
+
+    This is deliberately a two-pass, length-aware implementation.  The first
+    pass counts left-to-right non-overlapping matches; the second creates an
+    exact-size ``Array<string>`` and transfers one owned string into every
+    element.  Empty fields are preserved.  Non-empty fragments are independent
+    allocations, except for the permitted no-match fast path which retains the
+    receiver.  Complexity is O(n * m) for text length ``n`` and separator
+    length ``m``; total fragment bytes copied are O(n).
+    """
+
+    if not isinstance(text, StringValue) or not isinstance(separator, StringValue):
+        raise TypeError("Aether string split requires string receiver and separator")
+    text._require_live()
+    separator._require_live()
+    separator_length = separator.byte_length
+    if separator_length == 0:
+        from .errors import AetherRuntimeError
+
+        raise AetherRuntimeError(STRING_SPLIT_EMPTY_SEPARATOR_MESSAGE)
+
+    data = text.utf8_bytes
+    separator_bytes = separator.utf8_bytes
+    text_length = text.byte_length
+    matches = 0
+    index = 0
+    last_candidate = text_length - separator_length
+    while index <= last_candidate:
+        if data[index : index + separator_length] == separator_bytes:
+            if matches >= MAX_STRING_LENGTH - 1:
+                raise OverflowError("Aether string split part count overflow")
+            matches += 1
+            index += separator_length
+        else:
+            index += 1
+
+    part_count = matches + 1
+    # The native Array<string> buffer contains one pointer-sized handle per
+    # part.  Its object header is a separate fixed-size allocation.
+    if ARRAY_HEADER_SIZE > MAX_STRING_LENGTH:
+        raise OverflowError("Aether string split Array header size overflow")
+    if part_count > MAX_STRING_LENGTH // STRING_HANDLE_SIZE:
+        raise OverflowError("Aether string split Array allocation size overflow")
+
+    from .collection_value import array_alloc
+
+    def store_fragment(fragment: StringValue) -> None:
+        fragment.claim_owner()
+        stored: object = fragment
+        if wrap_values:
+            from .types import AetherValue
+
+            stored = AetherValue("string", fragment)
+        try:
+            list.append(result, stored)
+        except BaseException:
+            fragment.release()
+            raise
+
+    def fragment_from_range(start: int, end: int) -> StringValue:
+        length = end - start
+        if length == 0:
+            return EMPTY_STRING
+        if length > MAX_STRING_LENGTH - STRING_HEADER_SIZE - 1:
+            raise OverflowError("Aether string split fragment allocation size overflow")
+        return StringValue.from_utf8(data[start:end])
+
+    result = array_alloc("string")
+    try:
+        if matches == 0:
+            fragment = text.offer_owner()
+            store_fragment(fragment)
+            result.capacity = part_count
+            return result
+
+        start = 0
+        index = 0
+        while index <= last_candidate:
+            if data[index : index + separator_length] != separator_bytes:
+                index += 1
+                continue
+            fragment = fragment_from_range(start, index)
+            store_fragment(fragment)
+            index += separator_length
+            start = index
+
+        fragment = fragment_from_range(start, text_length)
+        store_fragment(fragment)
+        result.capacity = part_count
+        return result
+    except BaseException:
+        result.release()
+        raise
 
 
 def as_string_value(value: str | StringValue, *, literal: bool = True) -> StringValue:

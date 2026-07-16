@@ -72,7 +72,7 @@ _ENUM_RE = re.compile(
 )
 _NATIVE_TYPE_MEMBERS: dict[str, tuple[tuple[str, str], ...]] = {
     "FileReadResult": (("content", "property"), ("status", "property")),
-    "string": (("byteLength", "property"), ("trim", "method")),
+    "string": (("byteLength", "property"), ("trim", "method"), ("split", "method")),
     "List": (
         ("length", "property"),
         ("is_empty", "property"),
@@ -168,7 +168,12 @@ def completion_items(source: str, line: int, column: int) -> list[CompletionItem
     if native_context is not None:
         type_family, members = native_context
         for member, kind in members:
-            add(member, kind, type_family)
+            detail = (
+                "string.split(string separator) -> Array<string>"
+                if type_family == "string" and member == "split"
+                else type_family
+            )
+            add(member, kind, detail)
         return items
 
     struct_context = _struct_member_context(source, line, column)

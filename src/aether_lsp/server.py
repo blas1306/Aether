@@ -295,6 +295,13 @@ class AetherLanguageServer:
             return None
         name, token_start, token_end = token
 
+        native_hover = _native_member_hover_markdown(source, name, token_start)
+        if native_hover is not None:
+            return _lsp_hover(
+                native_hover,
+                _lsp_range_from_offsets(source, line_starts, token_start, token_end),
+            )
+
         symbol = symbol_visible_at_offset(source, name, offset)
         if symbol is not None and symbol.origin != "import":
             return _lsp_hover(
@@ -473,6 +480,39 @@ def _builtin_hover_markdown(name: str, builtin_name: str) -> str:
     else:
         signature = f"{name}(...) -> {builtin_name}(...)"
         description = "Aether builtin imported into the current document."
+    return f"```aether\n{signature}\n```\n\n{description}"
+
+
+def _native_member_hover_markdown(
+    source: str, name: str, token_start: int
+) -> str | None:
+    if "." in name:
+        receiver_name, member_name = name.rsplit(".", 1)
+    else:
+        receiver_name, member_name = "", name
+    if member_name not in {"byteLength", "trim", "split"}:
+        return None
+    prefix = source[:token_start]
+    if receiver_name:
+        receiver = re.escape(receiver_name)
+    else:
+        access = re.search(r"(?P<receiver>[A-Za-z_]\w*)\.\s*$", prefix)
+        if access is None:
+            return None
+        receiver = re.escape(access.group("receiver"))
+    if re.search(rf"\bstring\s+{receiver}\b", prefix) is None:
+        return None
+    if member_name == "byteLength":
+        signature = "string.byteLength -> int"
+        description = "UTF-8 byte length in O(1)."
+    elif member_name == "trim":
+        signature = "string.trim() -> string"
+        description = "Returns an owned string with Aether v1 ASCII boundary whitespace removed."
+    else:
+        signature = "string.split(string separator) -> Array<string>"
+        description = (
+            "Exact non-overlapping UTF-8 byte matching; preserves empty fields and returns owned fragments."
+        )
     return f"```aether\n{signature}\n```\n\n{description}"
 
 

@@ -333,11 +333,22 @@ def test_lsp_completion_exposes_string_byte_length_property() -> None:
 
     byte_length = _item_by_label(items, "byteLength")
     trim = _item_by_label(items, "trim")
+    split = _item_by_label(items, "split")
     assert byte_length["kind"] == 10
     assert byte_length["textEdit"]["newText"] == "byteLength"
     assert trim["kind"] == 2
     assert trim["textEdit"]["newText"] == "trim($0)"
     assert trim["insertTextFormat"] == 2
+    assert split["kind"] == 2
+    assert split["detail"] == "string.split(string separator) -> Array<string>"
+    assert split["textEdit"]["newText"] == "split($0)"
+
+
+def test_lsp_hover_exposes_string_split_signature() -> None:
+    source = 'string text = "a,b";\nArray<string> parts = text.split(",");'
+    hover = _hover_for(source, line=1, character=len("Array<string> parts = text.spl"))
+    assert hover is not None
+    assert "string.split(string separator) -> Array<string>" in hover["contents"]["value"]
 
 
 def test_lsp_completion_stays_quiet_inside_strings_and_comments() -> None:

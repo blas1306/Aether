@@ -88,7 +88,7 @@ from aether.string_parsing import (
     PARSE_DOUBLE_BUILTIN,
     PARSE_INT_BUILTIN,
 )
-from aether.string_value import STRING_TRIM_BUILTIN
+from aether.string_value import STRING_SPLIT_BUILTIN, STRING_TRIM_BUILTIN
 from aether.process_arguments import PROCESS_ARGS_BUILTIN
 from aether.text_file_io import (
     FILE_READ_RESULT_TYPE,
@@ -1045,6 +1045,17 @@ class IRVerifier:
                     or not isinstance(instruction.result.type, StringType)
                 ):
                     self._fail("String trim builtin requires string -> owned string")
+                return
+            if instruction.builtin == STRING_SPLIT_BUILTIN:
+                if instruction.function != STRING_SPLIT_BUILTIN:
+                    self._fail("String split builtin must retain its canonical semantic name")
+                if (
+                    instruction.result is None
+                    or len(instruction.arguments) != 2
+                    or any(not isinstance(argument.type, StringType) for argument in instruction.arguments)
+                    or instruction.result.type != ArrayType(StringType())
+                ):
+                    self._fail("String split builtin requires (string, string) -> owned array<string>")
                 return
             if instruction.builtin in {PARSE_INT_BUILTIN, PARSE_DOUBLE_BUILTIN}:
                 expected_name = (

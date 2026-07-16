@@ -59,7 +59,7 @@ congelada, seguridad para producción ni v1 terminada.
 
 ### Parcial
 
-- strings: transporte UTF-8 owned, concatenación, igualdad, `byteLength`, trim
+- strings: transporte UTF-8 owned, concatenación, igualdad, `byteLength`, `trim` y `split`
   y parsing están en AST/native; interpolación y formatting siguen parciales;
 - Vector/Matrix: el núcleo es native, la mayor parte de `Math.LinearAlgebra`
   sigue en AST;

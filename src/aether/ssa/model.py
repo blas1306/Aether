@@ -117,6 +117,8 @@ class SSACall(SSAInstruction):
             return MEMORY_READ_MAY_TRAP
         if self.builtin == "__aether_string_trim":
             return MUTATING_ALLOCATION
+        if self.builtin == "__aether_string_split":
+            return MUTATING_ALLOCATION
         if self.builtin in {"parseInt", "parseDouble"}:
             return MEMORY_READ
         if self.builtin in {"__aether_retain", "__aether_release"}:

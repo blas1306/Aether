@@ -1,11 +1,16 @@
 # Informe de dogfooding generalista: expense tracker
 
+Actualización split (perfil 19): `split-check <separator> <text>` aplica
+`string.split` a argumentos reales, muestra la cantidad exacta y recorre los
+campos borrowed, incluidos vacíos. Funciona en AST/native y no se denomina CSV:
+no hay escaping, schema ni persistencia estructurada.
+
 Actualización archivos de texto (perfil 18): el comando
 `persist-check <path>` escribe un resumen textual fijo con `io.writeText`, lo
 relee mediante `io.readText`, valida status e igualdad y agrega `verified\n`
 con `io.appendText`. Usa un path suministrado por el test y funciona en AST y
 native Linux. No pretende persistir la lista de transacciones ni denomina CSV
-al formato: eso espera `split` o un parser con escaping.
+al formato: eso requiere un parser con escaping además de la primitiva `split`.
 
 Actualización argumentos (perfil 17): `Main.ae` conserva el escenario de
 validación histórico sin argumentos y agrega una CLI mínima basada en
@@ -13,7 +18,7 @@ validación histórico sin argumentos y agrega una CLI mínima basada en
 usan `trim`, `parseInt` y `parseDouble`; errores esperables retornan `2` con
 diagnósticos de cantidad, comando/tipo, ID o monto. Cada proceso crea su propia
 `List<Transaction>`: la lista aún no se serializa; no hay environment, stdin,
-split, parser de shell ni framework general de subcomandos.
+parser de shell ni framework general de subcomandos.
 
 Actualización 15-07-2026: el ejemplo completo conserva paridad AST/native tras
 la migración de string. `List<Transaction>` atraviesa múltiples `push`, growth,
@@ -114,7 +119,7 @@ en native. No afecta cálculos ni validaciones del tracker.
 
 ## Límites restantes y próxima tarea
 
-Siguen fuera de alcance persistencia estructurada, split, excepciones y GC. El
+Siguen fuera de alcance persistencia estructurada, escaping, excepciones y GC. El
 tracker sólo verifica un resumen textual explícito; no es todavía una base de
 datos ni un formato de intercambio.
 
@@ -130,4 +135,5 @@ La fase de igualdad estructural E2E quedó completada: copias y slices de
 `List<Transaction>` comparan contenido, y búsqueda encuentra transacciones
 equivalentes aunque sean valores independientes. La etiqueta dinámica
 `food: Dinner` prueba retorno, temporales y cleanup ARC, y su longitud esperada
-es 12 bytes. Archivos, argv y split siguen aplazados.
+es 12 bytes. Archivos, argv y split ya tienen dogfood limitado; CSV y
+persistencia definitiva siguen aplazados.

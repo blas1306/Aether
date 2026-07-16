@@ -17,8 +17,10 @@ from aether.integer_arithmetic import checked_int_binary, ieee_divide
 from aether.list_safety import checked_list_index_to_int, checked_list_length_to_int
 from aether.stdlib.registry import call_builtin
 from aether.string_value import (
+    STRING_SPLIT_BUILTIN,
     STRING_TRIM_BUILTIN,
     StringValue,
+    aether_string_split,
     aether_string_trim,
     as_string_value,
 )
@@ -466,6 +468,16 @@ class IRInterpreter:
                     if not isinstance(value, StringValue):
                         raise IRExecutionError("IR string trim requires a string value")
                     frame.values[instruction.result] = aether_string_trim(value)
+                    return False, None, None
+                if instruction.builtin == STRING_SPLIT_BUILTIN:
+                    if len(arguments) != 2 or instruction.result is None:
+                        raise IRExecutionError(
+                            "IR string split requires receiver, separator, and result"
+                        )
+                    text, separator = arguments
+                    if not isinstance(text, StringValue) or not isinstance(separator, StringValue):
+                        raise IRExecutionError("IR string split operands must be strings")
+                    frame.values[instruction.result] = aether_string_split(text, separator)
                     return False, None, None
                 if instruction.builtin in {PARSE_INT_BUILTIN, PARSE_DOUBLE_BUILTIN}:
                     if len(arguments) != 1 or instruction.result is None:

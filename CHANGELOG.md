@@ -14,6 +14,11 @@ curso.
 
 ### Added
 
+- `string.split(string) -> Array<string>` end-to-end en AST, IR, SSA y
+  LLVM/native: matching byte-based no solapado, campos vacíos, UTF-8/NUL,
+  separator vacío con panic y fragments owned con rollback en intérpretes.
+- Completions/signature LSP y comando dogfood `split-check` en Expense Tracker;
+  no declara CSV, regex, views, escaping ni segmentación Unicode.
 - Documentación histórica de los hitos del lenguaje y de las decisiones que
   llevaron desde el prototipo matemático hasta el diseño generalista actual.
 - Referencias `const` de Array/List con read-only por camino de acceso y
@@ -38,6 +43,7 @@ curso.
   Tracker consume comandos reales sin cambiar la firma pública de `main`.
 - El perfil 18 agrega `text-file-read`, `text-file-write` y `text-file-append`;
   Expense Tracker dogfoodea persistencia de un resumen textual no-CSV.
+- El perfil 19 agrega la capacidad granular completa `string-split`.
 
 ### Notes
 

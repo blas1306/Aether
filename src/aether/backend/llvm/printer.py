@@ -5,7 +5,7 @@ import re
 from typing import Any, Callable
 
 from aether.ir.model import IREnumConstant
-from aether.string_value import STRING_TRIM_BUILTIN
+from aether.string_value import STRING_SPLIT_BUILTIN, STRING_TRIM_BUILTIN
 from aether.ir.types import ArrayType, BoolType, DoubleType, EnumType, FloatType, FunctionType, IntType, ListType, MatrixType, MethodResultType, StringType, StructType, VectorType, VoidType
 from aether.ssa.model import (
     SSAArrayCopy,
@@ -186,6 +186,7 @@ class LLVMPrinter:
         self._uses_process_context = native_entry
         self._uses_process_arguments = False
         self._uses_string_parsing = False
+        self._uses_string_split = False
         self._uses_text_file_io = False
         self._checked_int_operators: set[str] = set()
         self._scalar_math_calls: set[tuple[str, tuple[object, ...], object]] = set()
@@ -355,6 +356,7 @@ class LLVMPrinter:
         LLVMStringRuntime(
             enabled=self._uses_string_runtime,
             parsing=self._uses_string_parsing,
+            splitting=self._uses_string_split,
         ).append(runtime)
         LLVMTextFileRuntime(self._uses_text_file_io).append(runtime)
         LLVMProcessRuntime(
@@ -1200,6 +1202,26 @@ class LLVMPrinter:
             return (
                 f"{result} = call ptr @aether_string_trim("
                 f"ptr {self._operand(instruction.arguments[0])})"
+            )
+        if instruction.builtin == STRING_SPLIT_BUILTIN:
+            if (
+                instruction.result is None
+                or len(instruction.arguments) != 2
+                or any(not isinstance(argument.type, StringType) for argument in instruction.arguments)
+                or instruction.result.type != ArrayType(StringType())
+            ):
+                raise LLVMBackendError(
+                    "LLVM string split requires (string, string) -> owned Array<string>"
+                )
+            self._uses_string_runtime = True
+            self._uses_string_split = True
+            self._uses_array_type = True
+            self._uses_array_allocation = True
+            result = self._new_temp(instruction.result)
+            return (
+                f"{result} = call ptr @aether_string_split("
+                f"ptr {self._operand(instruction.arguments[0])}, "
+                f"ptr {self._operand(instruction.arguments[1])})"
             )
         if instruction.builtin == READ_TEXT_BUILTIN:
             if (

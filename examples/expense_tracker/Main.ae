@@ -118,6 +118,18 @@ List<Transaction> demoTransactions() {
 }
 
 int runCommand(Array<string> args) {
+    if args[0] == "split-check" {
+        if args.length < 3 {
+            println("insufficient arguments: split-check <separator> <text>");
+            return 2;
+        }
+        Array<string> parts = args[2].split(args[1]);
+        println("split parts: ", parts.length);
+        for string part in parts {
+            println(part);
+        }
+        return 0;
+    }
     if args[0] == "persist-check" {
         if args.length < 2 {
             println("insufficient arguments: persist-check <path>");

@@ -23,7 +23,13 @@ from ..string_parsing import (
     parse_double_bytes,
     parse_int_bytes,
 )
-from ..string_value import STRING_TRIM_BUILTIN, StringValue, aether_string_trim
+from ..string_value import (
+    STRING_SPLIT_BUILTIN,
+    STRING_TRIM_BUILTIN,
+    StringValue,
+    aether_string_split,
+    aether_string_trim,
+)
 from ..text_file_io import FILE_STATUS_TYPE, FileStatus
 from ..types import (
     AetherType,
@@ -117,6 +123,12 @@ def builtin_definitions() -> list[BuiltinDefinition]:
             _constant_runtime(_string_trim_runtime),
             _string_trim_type,
             _exactly_one("string.trim"),
+        ),
+        BuiltinDefinition(
+            STRING_SPLIT_BUILTIN,
+            _constant_runtime(_string_split_runtime),
+            _string_split_type,
+            _exactly_two("string.split"),
         ),
     ]
     definitions.extend(
@@ -218,6 +230,33 @@ def _string_trim_type(arg_types: list[AetherType | None]) -> AetherType | None:
             f"string.trim() requires a string receiver, got '{type_to_string(arg_types[0])}'."
         )
     return "string"
+
+
+def _string_split_runtime(args: list[AetherValue]) -> AetherValue:
+    if (
+        len(args) != 2
+        or args[0].type_name != "string"
+        or args[1].type_name != "string"
+        or not isinstance(args[0].value, StringValue)
+        or not isinstance(args[1].value, StringValue)
+    ):
+        raise AetherTypeError("string.split(...) requires string receiver and separator.")
+    return AetherValue(
+        ArrayType("string"),
+        aether_string_split(args[0].value, args[1].value, wrap_values=True),
+    )
+
+
+def _string_split_type(arg_types: list[AetherType | None]) -> AetherType | None:
+    if len(arg_types) != 2:
+        raise AetherTypeError("string.split(...) expects exactly one argument.")
+    if arg_types[0] is not None and arg_types[0] != "string":
+        raise AetherTypeError("string.split(...) requires a string receiver.")
+    if arg_types[1] is not None and arg_types[1] != "string":
+        raise AetherTypeError(
+            f"string.split(...) expects a string separator, got '{type_to_string(arg_types[1])}'."
+        )
+    return ArrayType("string")
 
 
 def _parse_string_bytes(args: list[AetherValue], label: str) -> bytes:

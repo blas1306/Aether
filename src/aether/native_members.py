@@ -75,6 +75,7 @@ STRING_NATIVE_MEMBERS = NativeMemberSet(
     },
     methods={
         "trim": NativeMember("trim", "__aether_string_trim", "method"),
+        "split": NativeMember("split", "__aether_string_split", "method"),
     },
 )
 
