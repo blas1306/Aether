@@ -358,7 +358,9 @@ class IRInterpreter:
                 instruction.operator,
                 left,
                 right,
-                checked_int=instruction.may_trap,
+                checked_int=isinstance(instruction.left.type, IntType)
+                and isinstance(instruction.right.type, IntType)
+                and instruction.may_trap,
             )
             return False, None, None
 
@@ -411,6 +413,17 @@ class IRInterpreter:
                 self._value(argument, frame) for argument in instruction.arguments
             ]
             if instruction.builtin is not None:
+                if instruction.builtin == "__aether_string_byte_length":
+                    if len(arguments) != 1 or instruction.result is None:
+                        raise IRExecutionError("IR string byteLength requires one argument and a result")
+                    value = arguments[0]
+                    if not isinstance(value, StringValue):
+                        raise IRExecutionError("IR string byteLength requires a string value")
+                    result = value.byte_length
+                    if result > (1 << 31) - 1:
+                        raise IRExecutionError("Aether string byte length does not fit in int")
+                    frame.values[instruction.result] = result
+                    return False, None, None
                 if instruction.builtin == "__aether_retain":
                     if len(arguments) != 1 or instruction.result is not None:
                         raise IRExecutionError("IR retain requires one argument and no result")

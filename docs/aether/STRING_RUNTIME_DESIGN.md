@@ -16,6 +16,10 @@ ya no existe un camino native que interprete ese handle como `char *`.
   overflow y underflow.
 - Igualdad: identidad, longitud y `memcmp`; impresión: `fwrite(data,1,length)`.
   No se usan `strcmp` ni `%s` para valores Aether.
+- Concatenación pública: `string + string -> string` baja a
+  `aether_string_concat`, comprueba overflow, reserva una vez y devuelve owned.
+- `s.byteLength` carga la longitud explícita en O(1), la estrecha al `int`
+  público con check y cuenta bytes UTF-8, no caracteres.
 - `StringType` es no trivialmente copiable, trivialmente relocatable, requiere
   retain/destroy y propaga esos hechos a structs. Lifecycle se verifica en su
   forma genérica y se expande a hooks effectful antes de SSA.
@@ -27,8 +31,8 @@ ya no existe un camino native que interprete ese handle como `char *`.
   ownership, no un `str` host como sustituto semántico.
 
 La sección 3 conserva el inventario histórico anterior a esta migración para
-explicar los puntos que fueron reemplazados. Concatenación native pública,
-parsing, split/trim, archivos y argv siguen fuera de esta fase.
+explicar los puntos que fueron reemplazados. Parsing, split/trim, archivos,
+argv, formatting e interpolación native siguen fuera de esta fase.
 
 ## 1. Resumen de decisiones aprobadas
 
@@ -45,7 +49,7 @@ Para Aether v1 se aprueba:
 | ABI interna | El handle se pasa y retorna por valor; fields y elementos contienen el mismo handle. No se declara una ABI C pública estable. |
 | Copia | Retain lógico al duplicar ownership; move bitwise al reubicar; release al sobrescribir o destruir. |
 | Índices | No existe `s[i]` en v1. No se confundirá byte, code point y grapheme. |
-| Longitudes | El objeto conserva byte length O(1); los nombres públicos quedan aplazados y no habrá un `length` ambiguo. |
+| Longitudes | El objeto conserva byte length O(1), expuesto como `s.byteLength`; no habrá un `length` ambiguo. |
 | Orden | `==`/`!=` por contenido. Los operadores `< <= > >=` no existen para string v1; sort y un compare interno usan bytes UTF-8 unsigned. |
 | Substring | Fuera del primer runtime; la primera API segura debería copiar y usar límites de code points. Las views se aplazan. |
 | División de APIs | Solo representación, validación, allocation, lifecycle y operaciones esenciales viven en runtime; algoritmos de texto viven en stdlib. |
@@ -348,10 +352,13 @@ No se define `s[i]` en v1. Un índice sin unidad sería engañoso:
 - code point: requiere scan O(n) sin índice auxiliar;
 - grapheme cluster: requiere reglas Unicode extensas y versionadas.
 
-Como extensión futura se consideran nombres explícitos:
+La primera API pública de longitud es:
 
-- `s.byteLength -> int`: cantidad de bytes, O(1), con check al estrechar i64 a
-  `int` si el tipo público sigue siendo i32;
+- `s.byteLength -> int`: cantidad de bytes, O(1), con check al estrechar el i64
+  interno al i32 público.
+
+Como extensiones futuras se consideran nombres explícitos:
+
 - `s.codePointCount() -> int`: cantidad de Unicode scalar values, O(n);
 - `s.graphemeCount()`: futura, fuera de v1 y probablemente dependiente de un
   módulo Unicode.
@@ -683,7 +690,7 @@ Regla:
 | crear desde bytes UTF-8 | runtime primitive | Validación, overflow, allocation y ownership. |
 | `byteLength` | builtin/accessor de representación | Carga checked del header; no necesita opcode nuevo. |
 | igualdad | operador bajado a runtime call | Necesita header/data y `memcmp`; no instruction especial por backend. |
-| concat | runtime primitive futura | Overflow, una allocation y lifecycle. |
+| concat | runtime primitive implementada | Overflow, una allocation y lifecycle. |
 | validate UTF-8 | runtime primitive | Frontera de seguridad compartida por IO/FFI. |
 | retain/release | compiler-inserted runtime primitive | Lifecycle no visible al usuario. |
 | acceso a byte | runtime primitive interna/futura | Bounds; la API pública preferida es `Bytes`. |
@@ -711,6 +718,11 @@ AST, pero implementarlo solo en la fase dinámica:
 
 La operación es O(|a|+|b|), puede allocation-fail y no es pura a efectos del
 optimizador. Los ceros internos se copian normalmente.
+
+La implementación conserva cada `+` como una operación tipada string en
+IR/SSA, con efectos de lectura, allocation y panic. Cada helper produce un
+owner; el lowering lo mueve a un slot/return o libera el temporal después del
+uso borrowed. No se pliegan concatenaciones constantes ni se fusionan cadenas.
 
 Para `a + b + c + d` y para interpolación, el compilador podrá reconocer una
 cadena en un mismo expression tree y bajar segmentos a un builder interno o
@@ -957,7 +969,7 @@ Esta fase debe introducir la interfaz de hooks aunque retain/release sean no-op
 para objetos inmortales. No debe conservar `trivially_copyable=true` como
 promesa para strings futuras.
 
-### Fase 2: strings dinámicas y lifecycle
+### Fase 2: strings dinámicas y lifecycle (completada para concat y byte length)
 
 **Subsistemas:** allocator string, UTF-8 validator, RC, expansión de los
 opcodes lifecycle ya verificados a hooks concretos, Array/List runtime y

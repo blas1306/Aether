@@ -23,7 +23,7 @@ Revisión: 15 de julio de 2026. Programa:
 `Main.ae` funciona completo en AST y LLVM/native con el mismo modelo modular:
 `List<Transaction>`, enum nominal, strings literales transportadas, alta con
 validación, dos reallocations o más, resumen, filtro, lista vacía, `for-in` e
-impresión. Las once validaciones, incluidas la independencia de una copia
+impresión. Las validaciones, incluidas la independencia de una copia
 explícita y de `transactions[0:1]`, producen `true` en ambos backends.
 
 El bloqueo anterior era exclusivamente de layout: IR y SSA conservaban
@@ -54,8 +54,9 @@ la semántica por valor ni se sustituyeron structs por punteros.
 Se admiten primitivas nativas (`int`, `boolean`, `double`), enums sin payload,
 structs acíclicos anidados, strings y descriptores/referencias de colecciones ya
 representables. Un field string es un handle a `AetherStringObject`: copy y
-destroy retienen/liberan recursivamente. Las APIs públicas de concat, parsing y
-producción dinámica general siguen fuera del subset.
+destroy retienen/liberan recursivamente. `transactionLabel` prueba concat owned
+sobre fields borrowed y `Main.ae` valida `byteLength`; parsing y producción
+textual avanzada siguen fuera del subset.
 
 Se rechazan antes de LLVM structs incompletos/recursivos por valor y, para
 elementos de colección, class/interface, nullable, float,
@@ -98,5 +99,6 @@ conserva los strings mediante lifecycle recursivo.
 
 La fase de igualdad estructural E2E quedó completada: copias y slices de
 `List<Transaction>` comparan contenido, y búsqueda encuentra transacciones
-equivalentes aunque sean valores independientes. Archivos, argv, concat,
-parsing y split/trim siguen aplazados.
+equivalentes aunque sean valores independientes. La etiqueta dinámica
+`food: Dinner` prueba retorno, temporales y cleanup ARC, y su longitud esperada
+es 12 bytes. Archivos, argv, parsing y split/trim siguen aplazados.

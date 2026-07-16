@@ -33,6 +33,11 @@ está aprobado. Las primitivas internas de objeto UTF-8, ARC, igualdad e
 impresión length-aware ya están implementadas; todavía no declara implementado el módulo
 `text` descritos allí.
 
+El núcleo público implementado añade dos operaciones que requieren conocer la
+representación: `string + string` y la property `s.byteLength`. `+` nunca
+convierte números, booleanos ni valores nominales; puede asignar y hacer panic.
+`byteLength` es O(1) y cuenta bytes UTF-8, no code points ni graphemes.
+
 ## Nivel 1: builtins e intrínsecos
 
 ### Candidatos legítimos
@@ -68,7 +73,7 @@ salida del crecimiento posterior.
 | Módulo | Responsabilidad | Dependencias | Mínimo v1 | Puede esperar | Escribible en Aether | Necesita runtime/intrínseco |
 | --- | --- | --- | --- | --- | --- | --- |
 | `io` | consola, streams y archivos básicos | `text`, `system` mínimo | print/println, input tipado, archivo texto básico y errores | buffering avanzado, codecs extensibles | wrappers, lectura por líneas, helpers | stdin/stdout/stderr, handles, bytes, close |
-| `text` | strings, búsqueda, split/join y conversión | runtime string | encoding/longitud definidos, concat, equality y substring owned cuando se apruebe su API | slicing/views, regex, normalización Unicode completa | algoritmos sobre iteración de code units/points | representación, allocation, decoding/encoding |
+| `text` | strings, búsqueda, split/join y conversión | runtime string | encoding definido, `byteLength`, concat e igualdad | substring, slicing/views, regex, normalización Unicode completa | algoritmos sobre iteración de code units/points | representación, allocation, decoding/encoding |
 | `collections` | colecciones generales | generics, equality; hashing para Map/Set | APIs derivadas de Array/List que se seleccionen | Map, Set, Queue, Stack si hashing/generics no están listos | la mayoría de algoritmos y estructuras | allocation y primitivas Array/List |
 | `time` | reloj monotónico, fecha/duración mínima | `system` | reloj monotónico para medición | zonas horarias, calendarios | Duration y formato parcial | clocks del SO |
 | `system` | proceso, args, entorno, exit, plataforma | runtime/ABI C | argumentos, código de salida, variables de entorno seleccionadas | procesos hijos completos | wrappers y validación | llamadas del SO/libc |

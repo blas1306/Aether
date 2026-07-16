@@ -593,14 +593,21 @@ class LLVMPrinter:
         return None
 
     def _print_binary_op(self, instruction: SSABinaryOp) -> str:
-        if (
-            isinstance(instruction.result.type, StringType)
-            or isinstance(instruction.left.type, StringType)
-            or isinstance(instruction.right.type, StringType)
+        if isinstance(instruction.left.type, StringType) or isinstance(
+            instruction.right.type, StringType
         ):
-            raise LLVMBackendError(
-                "LLVM backend does not support string concatenation yet; "
-                "only current literal-backed ptr transport is supported"
+            if not (
+                instruction.operator == "add"
+                and isinstance(instruction.left.type, StringType)
+                and isinstance(instruction.right.type, StringType)
+                and isinstance(instruction.result.type, StringType)
+            ):
+                raise LLVMBackendError("LLVM string concatenation requires string + string -> string")
+            self._uses_string_runtime = True
+            result = self._new_temp(instruction.result)
+            return (
+                f"{result} = call ptr @aether_string_concat("
+                f"ptr {self._operand(instruction.left)}, ptr {self._operand(instruction.right)})"
             )
 
         if (
@@ -1134,6 +1141,23 @@ class LLVMPrinter:
         return f"br {self._label_operand(instruction.target)}"
 
     def _print_call(self, instruction: SSACall) -> str:
+        if instruction.builtin == "__aether_string_byte_length":
+            if (
+                instruction.result is None
+                or len(instruction.arguments) != 1
+                or not isinstance(instruction.arguments[0].type, StringType)
+                or not isinstance(instruction.result.type, IntType)
+            ):
+                raise LLVMBackendError("LLVM string byteLength requires string -> int")
+            self._uses_string_runtime = True
+            result = self._new_temp(instruction.result)
+            length64 = self._synthetic_temp("string.byte_length64")
+            return "\n  ".join(
+                [
+                    f"{length64} = call i64 @aether_string_byte_length(ptr {self._operand(instruction.arguments[0])})",
+                    f"{result} = call i32 @aether_string_byte_length_to_int(i64 {length64})",
+                ]
+            )
         if instruction.builtin in {"__aether_retain", "__aether_release"}:
             if instruction.result is not None or len(instruction.arguments) != 1:
                 raise LLVMBackendError("LLVM lifecycle builtin requires one argument and no result")

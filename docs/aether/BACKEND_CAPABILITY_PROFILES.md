@@ -93,8 +93,8 @@ Para `strings`, el subset native distingue la operación semántica concreta:
 - transporte de literales, variables, parámetros, returns, fields y elementos
   bajo handles `AetherStringObject` ARC: aceptado;
 - igualdad/desigualdad por contenido: aceptada;
-- concatenación e interpolación: rechazadas temprano con el nodo operador
-  tipado y su ubicación;
+- concatenación `string + string` y `s.byteLength`: aceptadas;
+- interpolación y formatting: rechazados temprano con su nodo y ubicación;
 - productores dinámicos, parsing, split/trim, archivos y argumentos: no se
   infieren por la mera presencia de texto y siguen fuera de su capacidad
   propia o sin API de lenguaje.
@@ -182,6 +182,15 @@ deterministas `__ae_eq_*`, con fast path de handle, length, recorrido ordenado y
 salida temprana; los mismos helpers sirven a operadores y búsqueda. `float` y
 `double` conservan IEEE-754 y string delega en `aether_string_equal`. El perfil
 no incorpora hashing, Map/Set ni comparadores configurables.
+
+## Actualización de perfil 14: concat y byte length
+
+Se agrega `string-byte-length` y se promueve `string-concatenation` a completa
+en AST y native. El detector conserva la ubicación del `+` y de la property;
+IR/SSA verifican tipos y marcan concat como allocation con posible panic. LLVM
+usa `aether_string_concat` y convierte el `i64` interno de byte length al `int`
+público con check. Interpolación, formatting, parsing y algoritmos de texto no
+cambian de estado.
 
 La CLI no añade por ahora un comando `capabilities`: ejecución AST valida el
 perfil AST, y `--emit-llvm`, ejecución LLVM, `build` y los perfiles LLVM/native

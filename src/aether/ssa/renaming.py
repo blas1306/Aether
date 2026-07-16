@@ -286,7 +286,7 @@ class SSARenamer:
             left = self._resolve_value(instruction.left)
             right = self._resolve_value(instruction.right)
             self._bind_value(result.name, result, bound_values)
-            return SSABinaryOp(result, instruction.operator, left, right)
+            return SSABinaryOp(result, instruction.operator, left, right, instruction.source_location)
 
         if isinstance(instruction, IRUnaryOp):
             result = self._define_value(instruction.result)

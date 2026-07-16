@@ -44,7 +44,7 @@ def _required(source: str, *, source_root: Path | None = None):
 
 
 def test_profiles_are_versioned_identified_and_cover_the_canonical_catalog() -> None:
-    assert CAPABILITY_PROFILE_VERSION == "13"
+    assert CAPABILITY_PROFILE_VERSION == "14"
     assert AST_CAPABILITY_PROFILE.backend is BackendIdentity.AST
     assert NATIVE_CAPABILITY_PROFILE.backend is BackendIdentity.NATIVE
     assert AST_CAPABILITY_PROFILE.version == CAPABILITY_PROFILE_VERSION
@@ -234,25 +234,33 @@ def test_string_literal_transport_is_not_mistaken_for_a_dynamic_operation() -> N
     LLVMBuilder().emit_llvm(typed)
 
 
-def test_native_rejects_concat_but_accepts_string_equality() -> None:
+def test_native_accepts_concat_and_string_equality() -> None:
     typed = _typed("string operation(string left, string right) { return left + right; }")
-    issue = next(
-        issue
-        for issue in backend_capability_issues(typed, BackendIdentity.NATIVE)
-        if issue.requirement.capability is Capability.STRING_CONCATENATION
-    )
-
-    assert issue.requirement.detail == "string concatenation"
-    assert issue.requirement.requires_complete_support is True
-    assert issue.requirement.line == 1
-    assert issue.requirement.column > 1
-    assert "string-concatenation" in issue.message
+    assert not backend_capability_issues(typed, BackendIdentity.NATIVE)
+    assert "call ptr @aether_string_concat" in LLVMBuilder().emit_llvm(typed)
 
     equality = _typed(
         "string operation(string left, string right) { "
         "string copy = left; boolean result = left == right; return copy; }"
     )
     assert not backend_capability_issues(equality, BackendIdentity.NATIVE)
+
+
+def test_string_concat_and_byte_length_are_complete_profile_14_capabilities() -> None:
+    required = _required(
+        'int main() { string value = "é" + "🙂"; return value.byteLength; }'
+    )
+
+    assert Capability.STRING_CONCATENATION in required
+    assert Capability.STRING_BYTE_LENGTH in required
+    assert (
+        NATIVE_CAPABILITY_PROFILE.support_for(Capability.STRING_CONCATENATION).state
+        is CapabilityState.COMPLETE
+    )
+    assert (
+        NATIVE_CAPABILITY_PROFILE.support_for(Capability.STRING_BYTE_LENGTH).state
+        is CapabilityState.COMPLETE
+    )
 
 
 def test_string_capability_diagnostic_is_deduplicated() -> None:
@@ -267,11 +275,10 @@ def test_string_capability_diagnostic_is_deduplicated() -> None:
         if issue.requirement.capability is Capability.STRING_CONCATENATION
     ]
 
-    assert len(issues) == 1
-    assert issues[0].requirement.detail == "string concatenation"
+    assert issues == []
 
 
-def test_string_operations_in_imported_modules_are_inspected(tmp_path: Path) -> None:
+def test_string_operations_in_imported_modules_are_supported(tmp_path: Path) -> None:
     (tmp_path / "Text.ae").write_text(
         "package Text; public string join(string left, string right) { return left + right; }",
         encoding="utf-8",
@@ -281,15 +288,11 @@ def test_string_operations_in_imported_modules_are_inspected(tmp_path: Path) -> 
         source_root=tmp_path,
     )
 
-    issue = next(
-        issue
+    assert not any(
+        issue.requirement.capability is Capability.STRING_CONCATENATION
         for issue in backend_capability_issues(typed, BackendIdentity.NATIVE)
-        if issue.requirement.capability is Capability.STRING_CONCATENATION
     )
-
-    assert issue.requirement.detail == "string concatenation"
-    assert issue.requirement.line == 1
-    assert issue.requirement.column > 1
+    assert "call ptr @aether_string_concat" in LLVMBuilder().emit_llvm(typed)
 
 
 def test_numerical_methods_example_is_accepted_by_native_profile() -> None:

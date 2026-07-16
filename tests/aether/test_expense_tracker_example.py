@@ -31,6 +31,8 @@ MAIN_OUTPUT = [
     "copy independent: true",
     "slice independent: true",
     "empty summary: true",
+    "dynamic label: true",
+    "label byte length: true",
     "transactions:",
     "#1 | TransactionType.Income | 2026-07-01 | work | Salary | 1500.0",
     "#2 | TransactionType.Expense | 2026-07-15 | food | Dinner | 250.0",
@@ -74,9 +76,9 @@ def test_expense_tracker_full_native_runs_list_of_struct_with_same_validations()
     assert LLVMRunner().run(typed, stdout=stdout, stderr=stderr) == 0
     native_lines = stdout.getvalue().splitlines()
 
-    assert native_lines[:16] == MAIN_OUTPUT[:16]
-    assert native_lines[16].startswith("#1 | TransactionType.Income | 2026-07-01 | work | Salary | 1500")
-    assert native_lines[17].startswith("#2 | TransactionType.Expense | 2026-07-15 | food | Dinner | 250")
+    assert native_lines[:18] == MAIN_OUTPUT[:18]
+    assert native_lines[18].startswith("#1 | TransactionType.Income | 2026-07-01 | work | Salary | 1500")
+    assert native_lines[19].startswith("#2 | TransactionType.Expense | 2026-07-15 | food | Dinner | 250")
     assert stderr.getvalue() == ""
 
     llvm = LLVMBuilder().emit_llvm(typed)

@@ -1213,7 +1213,7 @@ string choose(boolean flag) {
     assert stderr == ""
 
 
-def test_emit_llvm_rejects_string_arithmetic_with_clear_error(tmp_path: Path) -> None:
+def test_emit_llvm_supports_string_concatenation(tmp_path: Path) -> None:
     program = tmp_path / "emit_llvm_string_add.ae"
     program.write_text(
         """
@@ -1226,12 +1226,12 @@ string bad(string x) {
 
     exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
 
-    assert exit_code == EXIT_LANGUAGE_ERROR
-    assert stdout == ""
-    assert "AE-BACKEND-STRING_CONCATENATION" in stderr
+    assert exit_code == 0
+    assert stderr == ""
+    assert "call ptr @aether_string_concat" in stdout
 
 
-def test_emit_llvm_rejects_constant_string_arithmetic_without_folding(
+def test_emit_llvm_keeps_constant_string_concatenation_effectful(
     tmp_path: Path,
 ) -> None:
     program = tmp_path / "emit_llvm_constant_string_add.ae"
@@ -1246,9 +1246,9 @@ string bad() {
 
     exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
 
-    assert exit_code == EXIT_LANGUAGE_ERROR
-    assert stdout == ""
-    assert "AE-BACKEND-STRING_CONCATENATION" in stderr
+    assert exit_code == 0
+    assert stderr == ""
+    assert "call ptr @aether_string_concat" in stdout
 
 
 def test_emit_llvm_supports_constant_string_comparison_without_pointer_identity(

@@ -17,6 +17,7 @@ from aether.instruction_effects import (
     SideEffectMixin,
     UnknownCallMixin,
     MEMORY_READ,
+    MEMORY_READ_MAY_TRAP,
     PURE,
     InstructionEffects,
 )
@@ -51,6 +52,7 @@ class SSABinaryOp(CheckedBinaryMixin, SSAInstruction):
     operator: str
     left: SSAValue
     right: SSAValue
+    source_location: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -93,6 +95,8 @@ class SSACall(SSAInstruction):
 
     @property
     def effects(self):
+        if self.builtin == "__aether_string_byte_length":
+            return MEMORY_READ_MAY_TRAP
         if self.builtin in {"__aether_retain", "__aether_release"}:
             return InstructionEffects(
                 has_side_effects=True,

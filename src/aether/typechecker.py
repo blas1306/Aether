@@ -2911,6 +2911,8 @@ class TypeChecker:
         if members is not None:
             native = native_property(resolved, field_name)
             if native is not None:
+                if native.builtin_name == "__aether_string_byte_length":
+                    return "int"
                 return infer_builtin_type(native.builtin_name, [resolved])
             if field_name in members.methods:
                 raise AetherTypeError(

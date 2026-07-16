@@ -5,6 +5,9 @@ Aether v1**, 15 de julio de 2026. El lowering AST→IR emite lifecycle y cleanup
 estructural, el verifier comprueba el estado antes de SSA y la expansión genera
 retain/release effectful para strings, colecciones y structs que los contienen.
 Los handles LLVM siguen ocupando una palabra.
+La concatenación string es un productor owned: sus operandos son borrows, los
+resultados intermedios se liberan tras la siguiente concatenación/call y un
+resultado movido a local o return transfiere su referencia.
 La caracterización previa a RC de Array/List y su superficie de migración está
 en [`COLLECTION_MIGRATION_BASELINE.md`](../aether/COLLECTION_MIGRATION_BASELINE.md).
 
@@ -407,8 +410,9 @@ adyacencia textual no basta.
 Hoy string native es un handle a `AetherStringObject` con ARC. Copia,
 asignación, returns, structs y elementos Array/List invocan retain/release en
 los recorridos implementados. Igualdad por contenido y print length-aware están
-activos; concat, interpolación, parsing, split/trim, archivos, argv e input
-native continúan rechazados o sin API.
+activos. Concat produce objetos owned y `byteLength` consulta el header;
+interpolación, parsing, split/trim, archivos, argv e input native continúan
+rechazados o sin API.
 
 Los recorridos de `List` usan hooks de copy/destroy para elementos; growth usa
 relocation y `clear` destruye el rango vivo. El objeto posee ahora contador,

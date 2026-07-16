@@ -540,3 +540,12 @@ and Array/List retain their comparable element type. `SSAListContains` and
 memory reads, so DCE may remove an unused comparison but optimizers must not
 duplicate or rewrite it as pointer identity. Constant propagation does not
 fold aggregate equality and does not assume `x == x` for floating-point values.
+
+## Current string-concat invariant (profile 14)
+
+A string-typed `SSABinaryOp add` is not pure: it reads both descriptors,
+allocates one owned result and may panic on size overflow or allocation
+failure. DCE, SCCP, GCP, DeadPhi and algebraic simplification must preserve the
+operation and its ARC cleanup. Constant string concatenations are deliberately
+not folded or fused. `byteLength` is a checked memory-reading builtin and
+returns the public i32 `int`, not the header's i64 directly.

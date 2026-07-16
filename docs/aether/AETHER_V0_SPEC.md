@@ -1279,6 +1279,12 @@ string s = "hola" + " mundo"; // valid
 ```
 
 `string + numeric` and `numeric + string` are not allowed.
+Concatenation is immutable, may allocate, preserves embedded NUL bytes, and
+returns an owned string. No implicit formatting or conversion is performed.
+
+`s.byteLength` returns the number of UTF-8 bytes as `int` in O(1). It is not a
+character, code-point, or grapheme count: `"é".byteLength == 2` and
+`"🙂".byteLength == 4`.
 
 String literals support interpolation with `$expr$`. The expression is parsed as Aether, typechecked in the current scope, evaluated at runtime, and formatted with the same display rules used by `print(...)` and `println(...)`.
 

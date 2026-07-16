@@ -1000,6 +1000,17 @@ class IRVerifier:
         if instruction.builtin is not None:
             for argument in instruction.arguments:
                 self._require_defined(argument, state, value_types)
+            if instruction.builtin == "__aether_string_byte_length":
+                if instruction.function != instruction.builtin:
+                    self._fail("String byte-length builtin must retain its canonical semantic name")
+                if (
+                    instruction.result is None
+                    or len(instruction.arguments) != 1
+                    or not isinstance(instruction.arguments[0].type, StringType)
+                    or not isinstance(instruction.result.type, IntType)
+                ):
+                    self._fail("String byte-length builtin requires string -> int")
+                return
             if instruction.builtin in {"__aether_retain", "__aether_release"}:
                 if instruction.function != instruction.builtin:
                     self._fail("Lifecycle builtin call must retain its canonical semantic name")

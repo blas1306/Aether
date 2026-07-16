@@ -69,8 +69,17 @@ MATRIX_NATIVE_MEMBERS = NativeMemberSet(
     },
 )
 
+STRING_NATIVE_MEMBERS = NativeMemberSet(
+    properties={
+        "byteLength": NativeMember("byteLength", "__aether_string_byte_length", "property"),
+    },
+    methods={},
+)
+
 
 def native_member_set(type_name: AetherType) -> NativeMemberSet | None:
+    if type_name == "string":
+        return STRING_NATIVE_MEMBERS
     if isinstance(type_name, ListType):
         return LIST_NATIVE_MEMBERS
     if isinstance(type_name, ArrayType):

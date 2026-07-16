@@ -204,7 +204,13 @@ class TrivialPhiEliminator:
             if not left_rewritten and not right_rewritten:
                 return instruction, 0
             return (
-                SSABinaryOp(instruction.result, instruction.operator, left, right),
+                SSABinaryOp(
+                    instruction.result,
+                    instruction.operator,
+                    left,
+                    right,
+                    instruction.source_location,
+                ),
                 int(left_rewritten) + int(right_rewritten),
             )
 

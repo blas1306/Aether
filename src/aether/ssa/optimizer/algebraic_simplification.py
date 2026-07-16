@@ -259,6 +259,7 @@ class SSAAlgebraicSimplifier:
                 instruction.operator,
                 self._resolve(instruction.left, replacements),
                 self._resolve(instruction.right, replacements),
+                instruction.source_location,
             )
 
         if isinstance(instruction, SSAUnaryOp):

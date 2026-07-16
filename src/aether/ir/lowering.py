@@ -1502,7 +1502,19 @@ class IRLowerer:
                     return aggregate_binary
             result_type = self._binary_result_type(expression.operator, left.type, right.type)
             result = context.temporary(result_type)
-            context.block.instructions.append(IRBinaryOp(result, binary_operator, left, right))
+            context.block.instructions.append(
+                IRBinaryOp(
+                    result,
+                    binary_operator,
+                    left,
+                    right,
+                    (
+                        self._source_location(expression)
+                        if isinstance(result_type, StringType)
+                        else None
+                    ),
+                )
+            )
             return result
 
         if isinstance(expression, ast.UnaryExpression):
@@ -1684,6 +1696,17 @@ class IRLowerer:
             if expression.field_name == "length" and isinstance(target.type, ListType):
                 result = context.temporary(IntType())
                 context.block.instructions.append(IRListLength(result, target))
+                return result
+            if expression.field_name == "byteLength" and isinstance(target.type, StringType):
+                result = context.temporary(IntType())
+                context.block.instructions.append(
+                    IRCall(
+                        "__aether_string_byte_length",
+                        (target,),
+                        result,
+                        "__aether_string_byte_length",
+                    )
+                )
                 return result
             if expression.field_name == "is_empty" and isinstance(target.type, ListType):
                 result = context.temporary(BoolType())

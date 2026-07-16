@@ -1717,6 +1717,15 @@ class Interpreter:
         if members is not None:
             native = native_property(struct_value.type_name, field_name)
             if native is not None:
+                if native.builtin_name == "__aether_string_byte_length":
+                    if not isinstance(struct_value.value, StringValue):
+                        raise AetherRuntimeError("byteLength requires a string value.")
+                    length = struct_value.value.byte_length
+                    if length > (1 << 31) - 1:
+                        raise AetherRuntimeError(
+                            "Aether string byte length does not fit in int"
+                        )
+                    return AetherValue("int", length)
                 return self._call(native.builtin_name, [struct_value], {}, env)
             if field_name in members.methods:
                 raise AetherTypeError(f"{field_name} is a method and must be called.")

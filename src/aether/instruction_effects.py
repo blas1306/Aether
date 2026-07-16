@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from aether.integer_arithmetic import int_operator_may_trap
-from aether.ir.types import DoubleType, IntType
+from aether.ir.types import DoubleType, IntType, StringType
 
 
 @dataclass(frozen=True)
@@ -131,6 +131,12 @@ class UnknownCallMixin:
 class CheckedBinaryMixin:
     @property
     def effects(self) -> InstructionEffects:
+        if (
+            self.operator == "add"
+            and isinstance(self.left.type, StringType)
+            and isinstance(self.right.type, StringType)
+        ):
+            return READING_ALLOCATION
         if (
             isinstance(self.left.type, IntType)
             and isinstance(self.right.type, IntType)

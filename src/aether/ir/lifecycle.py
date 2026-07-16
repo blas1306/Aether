@@ -10,6 +10,7 @@ from .model import (
     IRArraySlice,
     IRArraySet,
     IRBasicBlock,
+    IRBinaryOp,
     IRConst,
     IRCall,
     IRCallIndirect,
@@ -255,6 +256,12 @@ class LifecycleExpander:
                 if isinstance(instruction, (IRCall, IRCallIndirect)) and instruction.result is not None:
                     if self.registry.traits(instruction.result.type).needs_destroy:
                         self._owned_values.add(instruction.result)
+                elif (
+                    isinstance(instruction, IRBinaryOp)
+                    and instruction.operator == "add"
+                    and isinstance(instruction.result.type, StringType)
+                ):
+                    self._owned_values.add(instruction.result)
                 elif isinstance(instruction, (IRArrayGet, IRListGet, IRListPop, IRListRemoveAt)):
                     if isinstance(instruction, (IRArrayGet, IRListGet)) and instruction.borrowed:
                         continue
@@ -332,6 +339,19 @@ class LifecycleExpander:
             # would make later IR optimization re-verify a slot that is no
             # longer semantically transferred.
             return [IRReturn(instruction.value)]
+        if (
+            isinstance(instruction, IRBinaryOp)
+            and instruction.operator == "add"
+            and isinstance(instruction.result.type, StringType)
+        ):
+            emitted: list[IRInstruction] = [instruction]
+            for operand in (instruction.left, instruction.right):
+                if operand in self._owned_values:
+                    self._owned_values.remove(operand)
+                    emitted.append(
+                        IRCall("__aether_release", (operand,), None, "__aether_release")
+                    )
+            return self._release_unused_result(instruction, emitted)
         if isinstance(instruction, IRStructNew):
             emitted: list[IRInstruction] = []
             for field in instruction.fields:

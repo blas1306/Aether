@@ -10,7 +10,8 @@ todavía una aplicación financiera persistente.
 - `Transaction.ae`: enum y struct nominal del dominio; la fecha es `string`.
 - `Ledger.ae`: alta validada en `List<Transaction>`.
 - `Reports.ae`: resumen, filtro e impresión mediante `for-in`.
-- `Main.ae`: demostración completa en memoria y sus once validaciones.
+- `Main.ae`: demostración completa en memoria y sus validaciones de dominio,
+  collections y strings dinámicas.
 
 ## AST y native
 
@@ -23,14 +24,15 @@ aether --backend=native examples/expense_tracker/Main.ae
 
 El mismo programa completo funciona en ambos backends. LLVM almacena cada
 `Transaction` por valor en un buffer contiguo, obtiene su tamaño del layout del
-target y conserva los punteros de sus literales `string` durante get/set,
+target y conserva los handles de sus valores `string` durante get/set,
 crecimiento y filtrado mediante los hooks ARC de elemento. Ya no hace falta un
 `NativeSubset.ae` separado.
 
 El formateo nativo existente de doubles usa `%g`, por lo que el listado muestra
-`1500`/`250` donde AST muestra `1500.0`/`250.0`; las once validaciones y toda la
-lógica coinciden. Los strings son handles a objetos ARC; concat, parsing y las
-otras APIs públicas de producción dinámica siguen fuera del ejemplo.
+`1500`/`250` donde AST muestra `1500.0`/`250.0`; las validaciones y toda la
+lógica coinciden. `transactionLabel` construye una etiqueta owned mediante
+`category + ": " + description`, y `Main.ae` valida su `byteLength`. Parsing,
+split/trim y formatting siguen fuera del ejemplo.
 
 La Fase 2 confirma además que `List<Transaction>` conserva aliasing en
 assignment/parámetros/returns, que `copy()` crea un objeto y buffer exteriores
@@ -50,7 +52,7 @@ copia el struct y retiene sus strings.
 
 - No hay argumentos de proceso ni `main(args)`.
 - No hay archivos, CSV, parsing numérico, `split` o `trim`.
-- No hay concat ni APIs generales de parsing/construcción dinámica de strings.
+- No hay conversiones implícitas, parsing ni otras APIs generales de texto.
 - Las fechas no se validan ni se ordenan.
 - No se agregaron excepciones, GC ni destructores.
 

@@ -4,8 +4,8 @@ Actualización perfil 7 (15-07-2026): native completó transporte de handles al
 objeto UTF-8, igualdad por contenido, literales/vacío inmortales, ARC oculto,
 impresión length-aware y hooks de elementos string/struct para Array/List. Las
 filas históricas que describen `char *`, `%s`, `strcmp` o copia trivial son el
-snapshot previo a esta actualización. Concat native, parsing, split/trim,
-files y argv continúan no implementados.
+snapshot previo a esta actualización. Parsing, split/trim, files y argv
+continúan no implementados.
 
 Actualización perfil 8 (15-07-2026): la Fase 0 de colecciones añadió detección
 semántica tipada y diagnósticos previos al lowering para igualdad Array/List,
@@ -19,6 +19,10 @@ Array/List y `contains/indexOf`. AST, IR, SSA y LLVM/native comparan contenido
 recursivo; classes/interfaces/callables se diagnostican y no usan identidad.
 LLVM reutiliza helpers tipados deterministas y conserva IEEE-754, incluido
 `NaN != NaN`.
+
+Actualización perfil 14 (15-07-2026): concat string y `s.byteLength` son E2E
+en AST/IR/SSA/LLVM. Concat produce ownership, asigna una sola vez por helper y
+conserva efectos de panic/allocation; interpolación y formatting siguen fuera.
 
 Última revisión: 15 de julio de 2026, incluyendo enums native y los ejemplos
 dogfood de métodos numéricos y expense tracker. Este documento reemplaza como
@@ -78,18 +82,16 @@ La reconciliación inicial confirmó el resumen de esta auditoría. Desde el
 perfil 4, “funciones como valores” incluye un callable estructural tipado para
 funciones top-level sin captura en AST y native; permanece `PARTIAL` porque no
 incluye closures, lambdas, métodos enlazados, builtins como valores ni retorno
-de callables. Strings/native sigue `PARTIAL` por transporte de
-literales/parámetros/retornos, mientras concat, comparación general e
-interpolación quedan fuera del subconjunto. El detector consulta tipos de
-operandos registrados por el typechecker: no rechaza un literal transportado y
-sí señala `a+b`/`a==b` sin depender de literales, incluidos módulos importados.
+de callables. Strings/native sigue `PARTIAL` porque interpolación, formatting y
+otras APIs de texto quedan fuera; transporte, igualdad, concat y `byteLength`
+son E2E. El detector consulta tipos de operandos registrados por el typechecker.
 
 La decisión aprobada para reemplazar en fases el transporte `char*` por un
 modelo con UTF-8, longitud y ownership explícitos está en
 [`STRING_RUNTIME_DESIGN.md`](STRING_RUNTIME_DESIGN.md), y el contrato de
 lifecycle en
 [`VALUE_LIFECYCLE_DESIGN.md`](../compiler/VALUE_LIFECYCLE_DESIGN.md). La
-decisión aún no cambia representación ni estados de esta matriz.
+representación y lifecycle ya están activos en esta matriz.
 
 ## Tipos, declaraciones y operadores
 
@@ -139,8 +141,10 @@ decisión aún no cambia representación ni estados de esta matriz.
 
 | Feature | Lexer/parser | AST | Typechecker | AST interpreter | IR model | IR lowering | IR verifier | IR interpreter | SSA | SSA verifier | Optimizers | LLVM/native | Runtime | Tests | Spec/docs | Estado global | Observaciones |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| String literal/variable/arg/return | C | C | C | C | C ptr-like | C | C | C | C | C | P | C para transporte | P sin ownership | backend subset | C | Parcial | Falta modelo de encoding/heap/vida útil para strings no literales. |
-| Concat, igualdad e interpolación string | C | C | C | C | P binary / C compare | P concat / C compare | C nominal | P concat / C compare | C compare | C compare | C compare | C igualdad | `aether_string_equal` | E2E igualdad | C | Parcial | Igualdad exacta está completa en AST/native; concat e interpolación general siguen fuera del backend native. |
+| String literal/variable/arg/return | C | C | C | C | C handle | C | C | C | C | C | C lifecycle | C | `AetherStringObject` ARC | E2E | C | Completo | UTF-8 explícito, vacío/literales inmortales y dinámicos owned. |
+| Concat e igualdad string | C | C | C tipos exactos | C bytes | C binary tipado / compare | C | C efectos/tipos | C `StringValue` | C | C | C effect-aware | C | `aether_string_concat`/`equal` | E2E+O0/O1/O2 | C | Completo | Solo `string + string`; sin conversiones implícitas. |
+| `string.byteLength` | C property | C | C `int` | C O(1) | call tipada | C | C | C | C | C | C | C checked i64→i32 | header explícito | E2E UTF-8/NUL | C | Completo | Cuenta bytes, no code points ni graphemes. |
+| Interpolación/formatting string | C | C | C | C | N | N | N | N | N | N | N | N | N | AST | C | Solo AST | No se habilitó conversión ni formatting native. |
 | `print` / `println` escalares | llamada | C | C variádico | C | C `IRPrint` | C | C | C | C | C | C efecto | C | `printf`/helpers | E2E | C | Completo | Formato double general aún usa contratos host distintos en casos extremos. |
 | Print Array/List | llamada | C | C | C | P tipos | N general | N | N | N | N | N | N | AST | AST | P | Solo AST | Struct con campos Array/List escalares tiene helper específico, no print general de la colección. |
 | Print Struct/Vector/Matrix | llamada | C | C | C | C subset | C subset | C | C | C | C | C | C subset | helpers | E2E | P | Parcial | Shape/tipos de campos limitan el subconjunto struct. |
@@ -209,8 +213,8 @@ decisión aún no cambia representación ni estados de esta matriz.
    semántica AST.
 2. **Classes e interfaces native:** la promesa generalista sigue partida;
    structs y enums simples ya no son el bloqueo principal.
-3. **Strings completos:** falta concat/interpolación general y cerrar el modelo
-   de representación, encoding y ownership; igualdad exacta ya es E2E.
+3. **Strings completos:** representación, ownership, concat, igualdad y byte
+   length son E2E; faltan interpolación, formatting y algoritmos de texto.
 4. **Colecciones de datos definidos por usuario:** Eq y búsqueda de
    `Array/List<Struct>` son E2E; otras operaciones aún pueden estar limitadas
    por size/layout/copia.
@@ -257,8 +261,8 @@ dejan SSA inválido.
   `ComplexType` en IR no tienen un camino fuente ejecutable completo.
 - La existencia de genéricos privilegiados en Array/List/Vector/Matrix no
   implica genéricos de usuario.
-- Strings son handles a `AetherStringObject` con ARC interno, pero concat y las
-  APIs públicas de producción dinámica permanecen fuera del subset.
+- Strings son handles a `AetherStringObject` con ARC interno; concat y
+  `byteLength` están activos, mientras otras APIs de producción siguen fuera.
 - La API List es amplia para elementos soportados, incluidos structs con layout,
   con RC/free final y Eq(T) general; capacity pública no está cerrada.
 - `-O2` existe como opción, pero es alias de `-O1` y no afecta native.

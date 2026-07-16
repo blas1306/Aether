@@ -1343,7 +1343,7 @@ def test_string_type_maps_to_ptr() -> None:
     assert "define ptr @main()" in print_llvm(module)
 
 
-def test_string_binary_operation_has_clear_error() -> None:
+def test_string_binary_operation_calls_owned_concat_runtime() -> None:
     string_type = StringType()
     left = SSAValue("left", string_type)
     right = SSAValue("right", string_type)
@@ -1369,11 +1369,10 @@ def test_string_binary_operation_has_clear_error() -> None:
         ]
     )
 
-    with pytest.raises(
-        LLVMBackendError,
-        match="LLVM backend does not support string concatenation yet",
-    ):
-        print_llvm(module)
+    llvm = print_llvm(module)
+
+    assert "call ptr @aether_string_concat" in llvm
+    assert "define private ptr @aether_string_concat(ptr %left, ptr %right)" in llvm
 
 
 def test_string_comparison_uses_length_aware_runtime() -> None:

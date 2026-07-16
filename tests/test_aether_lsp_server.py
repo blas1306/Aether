@@ -327,6 +327,15 @@ def test_lsp_completion_supports_native_member_context() -> None:
     assert copy["insertTextFormat"] == 2
 
 
+def test_lsp_completion_exposes_string_byte_length_property() -> None:
+    source = 'string text = "é";\ntext.'
+    items = _completion_items_for(source, line=1, character=len("text."))
+
+    byte_length = _item_by_label(items, "byteLength")
+    assert byte_length["kind"] == 10
+    assert byte_length["textEdit"]["newText"] == "byteLength"
+
+
 def test_lsp_completion_stays_quiet_inside_strings_and_comments() -> None:
     assert _completion_items_for('"pri', line=0, character=len('"pri')) == []
     assert _completion_items_for("// pri", line=0, character=len("// pri")) == []

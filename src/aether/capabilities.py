@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from .pipeline import TypedProgram
 
 
-CAPABILITY_PROFILE_VERSION = "13"
+CAPABILITY_PROFILE_VERSION = "14"
 
 
 class BackendIdentity(str, Enum):
@@ -66,6 +66,7 @@ class Capability(str, Enum):
     DYNAMIC_STRING_OBJECT = "dynamic-string-object"
     STRING_LIFECYCLE = "string-lifecycle"
     STRING_CONCATENATION = "string-concatenation"
+    STRING_BYTE_LENGTH = "string-byte-length"
     STRING_PARSING = "string-parsing"
     STRING_SPLIT_TRIM = "string-split-trim"
     PRINT = "print"
@@ -175,6 +176,7 @@ CAPABILITY_CATALOG: Mapping[Capability, CapabilityDefinition] = MappingProxyType
             _definition(Capability.DYNAMIC_STRING_OBJECT, "Owned immutable UTF-8 string objects."),
             _definition(Capability.STRING_LIFECYCLE, "Retain/release and recursive string value lifecycle."),
             _definition(Capability.STRING_CONCATENATION, "Public string concatenation."),
+            _definition(Capability.STRING_BYTE_LENGTH, "Constant-time public string byte length."),
             _definition(Capability.STRING_PARSING, "Public parsing from strings."),
             _definition(Capability.STRING_SPLIT_TRIM, "Public split and trim text algorithms."),
             _definition(Capability.PRINT, "print and println output."),
@@ -289,6 +291,8 @@ _NATIVE_COMPLETE = {
     Capability.STRING_TRANSPORT,
     Capability.STRING_EQUALITY,
     Capability.DYNAMIC_STRING_OBJECT,
+    Capability.STRING_CONCATENATION,
+    Capability.STRING_BYTE_LENGTH,
     Capability.COLLECTION_OBJECT_LIFECYCLE,
     Capability.CONST_COLLECTION_REFERENCES,
     Capability.BORROWED_FOR_IN_ELEMENTS,
@@ -305,7 +309,6 @@ _NATIVE_UNSUPPORTED = {
     Capability.GENERICS,
     Capability.ERROR_HANDLING,
     Capability.FILES,
-    Capability.STRING_CONCATENATION,
     Capability.STRING_PARSING,
     Capability.STRING_SPLIT_TRIM,
 }
@@ -360,6 +363,7 @@ E2E_TESTED_CAPABILITIES: Mapping[BackendIdentity, frozenset[Capability]] = Mappi
                 Capability.CONST_COLLECTION_REFERENCES,
                 Capability.BORROWED_FOR_IN_ELEMENTS,
                 Capability.STRING_CONCATENATION,
+                Capability.STRING_BYTE_LENGTH,
                 Capability.PRINT,
                 Capability.INPUT,
                 Capability.MODULES,
@@ -398,6 +402,8 @@ E2E_TESTED_CAPABILITIES: Mapping[BackendIdentity, frozenset[Capability]] = Mappi
                 Capability.STRING_TRANSPORT,
                 Capability.STRING_EQUALITY,
                 Capability.DYNAMIC_STRING_OBJECT,
+                Capability.STRING_CONCATENATION,
+                Capability.STRING_BYTE_LENGTH,
                 Capability.COLLECTION_OBJECT_LIFECYCLE,
                 Capability.CONST_COLLECTION_REFERENCES,
                 Capability.BORROWED_FOR_IN_ELEMENTS,
@@ -692,6 +698,14 @@ class _CapabilityDetector:
             dotted = _dotted_name(node)
             if dotted is not None and self._canonical_name(dotted, constants=True) == "Math.pi":
                 self._record(Capability.SCALAR_MATH, node)
+            target_type = self.checker.type_of_expression(node.target)
+            if self._resolve_alias(target_type) == "string" and node.field_name == "byteLength":
+                self._record(
+                    Capability.STRING_BYTE_LENGTH,
+                    node,
+                    detail="string byte length",
+                    requires_complete_support=True,
+                )
             return
         if isinstance(node, ast.BinaryExpression):
             self._record(Capability.ARITHMETIC, node)

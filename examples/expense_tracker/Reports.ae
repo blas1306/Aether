@@ -37,6 +37,10 @@ public List<Transaction> filterByType(
     return matches;
 }
 
+public string transactionLabel(Transaction transaction) {
+    return transaction.category + ": " + transaction.description;
+}
+
 public void printTransactions(List<Transaction> transactions) {
     for Transaction transaction in transactions {
         println(

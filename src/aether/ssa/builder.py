@@ -560,7 +560,7 @@ class SSABuilder:
             result = self._define_value(instruction.result, state.value_map)
             left = self._resolve_value(instruction.left, state.value_map)
             right = self._resolve_value(instruction.right, state.value_map)
-            return SSABinaryOp(result, instruction.operator, left, right)
+            return SSABinaryOp(result, instruction.operator, left, right, instruction.source_location)
 
         if isinstance(instruction, IRUnaryOp):
             result = self._define_value(instruction.result, state.value_map)

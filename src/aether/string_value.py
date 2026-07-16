@@ -3,6 +3,8 @@ from __future__ import annotations
 
 IMMORTAL = 1 << 0
 UTF8_VALID = 1 << 1
+MAX_STRING_LENGTH = (1 << 63) - 1
+STRING_HEADER_SIZE = 24
 
 
 class StringValue:
@@ -154,9 +156,7 @@ class StringValue:
     def __add__(self, other: object) -> "StringValue":
         if not isinstance(other, StringValue):
             return NotImplemented
-        self._require_live()
-        other._require_live()
-        return StringValue.from_utf8(self._utf8 + other._utf8)
+        return aether_string_concat(self, other)
 
 
 # The valid empty handle is unique and immortal in the interpreter model too.
@@ -178,6 +178,35 @@ def aether_string_equal(left: object, right: object) -> bool:
     left._require_live()
     right._require_live()
     return left.byte_length == right.byte_length and left.utf8_bytes == right.utf8_bytes
+
+
+def aether_string_concat(left: StringValue, right: StringValue) -> StringValue:
+    """Concatenate two UTF-8 string objects and return one owned result.
+
+    Empty fast paths still honor the owned-return convention: borrowed dynamic
+    operands acquire another owner, while an unclaimed temporary can transfer
+    its existing owner.
+    """
+
+    if not isinstance(left, StringValue) or not isinstance(right, StringValue):
+        raise TypeError("Aether string concatenation requires two string values")
+    left._require_live()
+    right._require_live()
+    left_length = left.byte_length
+    right_length = right.byte_length
+    if left_length == 0 and right_length == 0:
+        return EMPTY_STRING
+    if left_length == 0:
+        return right.offer_owner()
+    if right_length == 0:
+        return left.offer_owner()
+    total = left_length + right_length
+    if total > MAX_STRING_LENGTH:
+        raise OverflowError("Aether string concatenation length overflow")
+    allocation_size = STRING_HEADER_SIZE + total + 1
+    if allocation_size > MAX_STRING_LENGTH:
+        raise OverflowError("Aether string allocation size overflow")
+    return StringValue.from_utf8(left.utf8_bytes + right.utf8_bytes)
 
 
 def as_string_value(value: str | StringValue, *, literal: bool = True) -> StringValue:
