@@ -4,7 +4,7 @@ from dataclasses import replace
 from math import trunc
 from typing import Any
 
-from aether.ir.types import DoubleType, IntType
+from aether.ir.types import DoubleType, FloatType, IntType
 from aether.integer_arithmetic import checked_int_binary
 from aether.ir.model import (
     IRBasicBlock,
@@ -217,7 +217,7 @@ class ConstantFolder:
 
     @staticmethod
     def _evaluate_cast(value: Any, target_type: object) -> Any:
-        if isinstance(target_type, DoubleType):
+        if isinstance(target_type, (FloatType, DoubleType)):
             return float(value)
         if isinstance(target_type, IntType):
             return trunc(value)

@@ -396,7 +396,7 @@ def test_prints_int_compare_operations(operator: str, predicate: str) -> None:
         ("gt", "ogt"),
         ("ge", "oge"),
         ("eq", "oeq"),
-        ("ne", "one"),
+        ("ne", "une"),
     ],
 )
 def test_prints_double_compare_operations(operator: str, predicate: str) -> None:

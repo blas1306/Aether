@@ -1333,6 +1333,8 @@ Supported:
 - `string == string`
 - `boolean == boolean`
 - nominal structural equality between comparable values of the same struct type
+- ordered structural equality between `Array<T>`/`List<T>` values when `T`
+  supports equality
 - `!=` for comparable values
 
 Not supported in v0:
@@ -1518,9 +1520,10 @@ Supported native methods:
 
 List method indices are zero-based. `indexOf(value)` returns the first matching
 index and returns `-1` for an empty list or when the value is absent. It uses
-the same equality as `contains`: scalar and string values use language value
-equality, while reference types use reference identity; it does not perform
-deep comparison. `insert(index, value)` accepts `0 <= index <= size()`, while
+the same internal `Eq(T)` contract as `contains`, `==`, `!=`, structs and
+nested Array/List values. It compares collection content recursively, never
+reference identity. Classes, interfaces and callables do not define Eq, so
+search over those element types is a static error. `insert(index, value)` accepts `0 <= index <= size()`, while
 `removeAt(index)` accepts `0 <= index < size()`. `pop()` on an empty list and
 out-of-range indices raise an `AetherRuntimeError`. Method arguments are checked
 statically when their types are known: values passed to `push`, `insert`,

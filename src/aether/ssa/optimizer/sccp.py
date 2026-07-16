@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from math import trunc
 from typing import Any
 
-from aether.ir.types import DoubleType, IntType, StringType
+from aether.ir.types import DoubleType, FloatType, IntType, StringType
 from aether.integer_arithmetic import checked_int_binary
 from aether.ssa.analysis import Constant, LatticeState, Overdefined, Unknown, Worklist
 from aether.ssa.model import (
@@ -343,7 +343,7 @@ class SCCPAnalyzer:
             return Overdefined()
 
         try:
-            if isinstance(instruction.result.type, DoubleType):
+            if isinstance(instruction.result.type, (FloatType, DoubleType)):
                 return Constant(float(value.value))
             if isinstance(instruction.result.type, IntType):
                 return Constant(trunc(value.value))

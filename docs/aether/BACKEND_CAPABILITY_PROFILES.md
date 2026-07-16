@@ -169,6 +169,20 @@ verificadores, optimizers y LLVM sin retain automático. La detección de
 mutación del iterable alcanza receiver directo y aliases locales simples; no
 promete alias analysis general ni iteración mutable.
 
+## Actualización de perfil 13: Eq estructural y búsqueda derivada
+
+Se agregan `structural-equality` y `eq-collection-search`, completas en AST y
+native con evidencia E2E. El typechecker construye el witness interno `Eq(T)`:
+primitivas comparables, enums nominales, structs cuyos fields tienen Eq y
+Array/List recursivos. Classes, interfaces y callables no tienen Eq y nunca se
+comparan por identidad. `contains/indexOf` requieren Eq del elemento.
+
+IR/SSA verifican el tipo nominal de cada `eq/ne` y búsqueda. LLVM emite helpers
+deterministas `__ae_eq_*`, con fast path de handle, length, recorrido ordenado y
+salida temprana; los mismos helpers sirven a operadores y búsqueda. `float` y
+`double` conservan IEEE-754 y string delega en `aether_string_equal`. El perfil
+no incorpora hashing, Map/Set ni comparadores configurables.
+
 La CLI no añade por ahora un comando `capabilities`: ejecución AST valida el
 perfil AST, y `--emit-llvm`, ejecución LLVM, `build` y los perfiles LLVM/native
 de `bench` validan el perfil native. Los modos de inspección IR/SSA conservan

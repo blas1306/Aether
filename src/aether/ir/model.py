@@ -23,7 +23,7 @@ from aether.instruction_effects import (
 )
 from aether.scalar_math import scalar_math_may_trap
 
-from .types import IRType, VectorType
+from .types import ArrayType, IRType, ListType, MatrixType, StringType, StructType, VectorType
 
 
 @dataclass(frozen=True)
@@ -153,7 +153,12 @@ class IRCompareOp(IRInstruction):
 
     @property
     def effects(self):
-        return MEMORY_READ if self.aggregate_shape is not None else PURE
+        return (
+            MEMORY_READ
+            if self.aggregate_shape is not None
+            or isinstance(self.left.type, (ArrayType, ListType, MatrixType, StringType, StructType, VectorType))
+            else PURE
+        )
 
 
 @dataclass(frozen=True)

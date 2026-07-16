@@ -1,16 +1,17 @@
 # RFC: semántica, ownership y lifecycle de `Array<T>` y `List<T>`
 
-Estado: **decisión aprobada; Fases 1–5 implementadas para Aether v1**,
+Estado: **decisión aprobada; Fases 1–6 implementadas para Aether v1**,
 15 de julio de 2026.
 
 La representación RC, el lifecycle del handle, los cleanups de IR, la
 destrucción final native, `copy()`, slicing semiabierto, `const` por alias e
-iteración borrowed están activos. La igualdad native general continúa fuera de
-este cambio.
+iteración borrowed, `Eq(T)`, igualdad estructural y búsqueda derivada están
+activos en AST/IR/SSA/LLVM/native.
 
 Esta RFC congela la semántica pública de `Array<T>` y `List<T>` en las áreas
-indicadas. Es documentación de diseño: no afirma que AST, IR, SSA, LLVM, ABI o
-runtime ya hayan migrado, y no modifica todavía la especificación normativa.
+indicadas. Además del contrato de diseño, su estado inicial registra qué fases
+ya migraron en AST, IR, SSA, LLVM, ABI y runtime; la especificación normativa
+se actualiza en paralelo.
 
 Documentos relacionados: [diseño general de colecciones](AETHER_COLLECTIONS_DESIGN.md),
 [crecimiento de List](AETHER_LIST_GROWTH_DESIGN.md),
@@ -21,10 +22,9 @@ Documentos relacionados: [diseño general de colecciones](AETHER_COLLECTIONS_DES
 [Vector/Matrix](AETHER_VECTOR_MATRIX_DESIGN.md) y
 [paridad de backends](BACKEND_FEATURE_PARITY.md).
 
-La baseline de Fase 0 es la fuente descriptiva del comportamiento observado
-por backend y de los diagnósticos transitorios. Esta RFC continúa siendo el
-contrato aprobado; la baseline no afirma que RC, ABI, slicing List, borrow o
-igualdad native ya estén implementados.
+La baseline de Fase 0 conserva el comportamiento histórico por backend y sus
+diagnósticos transitorios. Esta RFC continúa siendo el contrato aprobado y las
+actualizaciones de perfil de la baseline registran las fases ya implementadas.
 
 ## 1. Decisiones aprobadas
 
@@ -512,11 +512,18 @@ ni cantidad de aliases. Por tanto:
 - nested collections se comparan estructuralmente;
 - strings comparan contenido;
 - `NaN` conserva IEEE-754, incluido `NaN != NaN`;
-- classes usan la igualdad que Aether defina para ellas;
+- classes y callables no satisfacen `Eq` en esta fase;
 - si `T` no soporta igualdad, la colección tampoco.
 
 `contains` e `indexOf` deben usar la misma igualdad de `T`, no identidad
 accidental. Esta RFC no expone un operador público de identidad del contenedor.
+
+El sistema de tipos nominal finito y las APIs actuales no permiten construir
+un ciclo de colecciones bien tipado: `List<T>` no puede contenerse a sí misma
+sin un tipo recursivo infinito. El dispatcher AST mantiene visited-pairs de
+forma defensiva para una evolución futura; LLVM no paga ese costo mientras la
+invariante siga vigente. Si se introducen tipos recursivos o borrado de tipos,
+la semántica de ciclos deberá aprobarse antes de habilitarlos.
 
 ## 12. Representación y ownership internos recomendados
 
@@ -849,15 +856,15 @@ Pueden diseñarse después, sin alterar la base v1:
   iterable;
 - dejar la iteración mutable para otra RFC.
 
-### Fase 6 — igualdad y APIs derivadas
+### Fase 6 — igualdad y APIs derivadas (completa)
 
 - implementar igualdad estructural ordenada E2E;
 - hacer que `contains`/`indexOf` usen Eq(T);
 - cubrir NaN, strings, structs, classes admitidas y nested collections.
 
-El primer bloque recomendado es **Fase 0 seguida de Fase 1**. RC y destrucción
-del contenedor deben activarse como un cambio coordinado: habilitar solamente
-el release final sobre handles que todavía no retienen sería inseguro.
+Las seis fases están completas. La evolución siguiente debe mantener `Eq(T)`
+como contrato interno hasta que exista evidencia para una interface pública;
+hashing, Map/Set y comparadores personalizados permanecen fuera de alcance.
 
 ## 23. Resumen normativo
 

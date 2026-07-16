@@ -195,34 +195,27 @@ int main() {
 
 
 @pytest.mark.parametrize(
-    ("source", "detail"),
+    ("source", "expected"),
     [
         (
             "int main() { List<int> a = {1}; List<int> b = {1}; println(a == b); return 0; }",
-            "structural List equality",
+            "true\n",
         ),
         (
             "int main() { Array<int> a = {1}; Array<int> b = {1}; println(a != b); return 0; }",
-            "structural Array equality",
+            "false\n",
         ),
         (
             "struct Item { int value; } int main() { List<Item> xs = {Item(1)}; println(xs.contains(Item(1))); return 0; }",
-            "List<Item>.contains() structural search",
+            "true\n",
         ),
     ],
 )
-def test_migration_baseline_divergent_operations_fail_before_ir_lowering(
-    monkeypatch: pytest.MonkeyPatch,
+def test_migration_baseline_eq_operations_are_supported_end_to_end(
     source: str,
-    detail: str,
+    expected: str,
 ) -> None:
-    def fail_if_lowered(*_args, **_kwargs):
-        raise AssertionError("IR lowering must not run")
-
-    monkeypatch.setattr("aether.ir.lowering.IRLowerer.lower", fail_if_lowered)
-    with pytest.raises(BackendCapabilityError) as captured:
-        LLVMBuilder().emit_llvm(_typed(source))
-    assert captured.value.issues[0].requirement.detail == detail
+    _assert_current_output_on_all_backends(source, expected)
 
 
 def test_migration_baseline_collection_equality_is_structural_in_ast() -> None:
@@ -244,7 +237,7 @@ int main() {
     assert run_aether(source).output == "true\ntrue\ntrue\n"
 
 
-def test_migration_baseline_search_uses_identity_for_reference_elements() -> None:
+def test_migration_baseline_search_uses_structural_eq_for_nested_collections() -> None:
     source = """
 int main() {
     List<int> nested = {1};
@@ -258,7 +251,7 @@ int main() {
 }
 """
 
-    _assert_current_output_on_all_backends(source, "true\nfalse\n0\n-1\n")
+    _assert_current_output_on_all_backends(source, "true\ntrue\n0\n0\n")
 
 
 def test_migration_baseline_string_elements_survive_copy_set_and_clear() -> None:

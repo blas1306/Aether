@@ -5,6 +5,7 @@ from pathlib import Path
 
 from . import ast
 from .errors import AetherError, AetherRuntimeError, AetherTypeError
+from .equality import eq_capability, types_support_equality
 from .lexer import lex
 from .modules import is_public_export, private_top_level_names, resolve_file_module_path
 from .native_members import native_member_set, native_method, native_property
@@ -2214,9 +2215,13 @@ class TypeChecker:
                 )
             return infer_builtin_type(LINEAR_ALGEBRA_SOLVE, [left_type, right_type])
         if operator in {"==", "!="}:
-            if self._type_mentions_class(left_type) or self._type_mentions_class(right_type):
-                raise AetherTypeError("Class equality is not supported yet.")
             if not self._types_comparable_for_equality(left_type, right_type):
+                left_resolved = self._resolve_type_aliases(left_type)
+                right_resolved = self._resolve_type_aliases(right_type)
+                if left_resolved == right_resolved and not self._type_supports_equality(left_resolved):
+                    raise AetherTypeError(
+                        f"Type {type_to_string(left_resolved)} does not define equality."
+                    )
                 raise AetherTypeError(
                     f"Cannot compare '{type_to_string(left_type)}' and '{type_to_string(right_type)}' "
                     f"with '{operator}'."
@@ -2434,6 +2439,11 @@ class TypeChecker:
             ]
             for argument_type in argument_types:
                 self._reject_void_value(argument_type, f"argument to {expression.callee}(...)")
+            if builtin_name in {"contains", "index_of"} and argument_types:
+                self._require_collection_search_eq(
+                    argument_types[0],
+                    "contains" if builtin_name == "contains" else "indexOf",
+                )
             return infer_builtin_type(builtin_name, argument_types)
         method_type = self._dotted_native_method_call_type(expression, scope)
         if method_type is not None:
@@ -3364,71 +3374,40 @@ class TypeChecker:
         return False
 
     def _types_comparable_for_equality(self, left_type: AetherType, right_type: AetherType) -> bool:
-        left = self._resolve_type_aliases(left_type)
-        right = self._resolve_type_aliases(right_type)
-        if isinstance(left, NullType):
-            if isinstance(right, NullType):
-                return True
-            return isinstance(right, NullableType) and self._type_supports_equality(right.base_type)
-        if isinstance(right, NullType):
-            return isinstance(left, NullableType) and self._type_supports_equality(left.base_type)
-        if isinstance(left, NullableType) and isinstance(right, NullableType):
-            return self._types_comparable_for_equality(left.base_type, right.base_type)
-        if isinstance(left, NullableType):
-            return self._types_comparable_for_equality(left.base_type, right)
-        if isinstance(right, NullableType):
-            return self._types_comparable_for_equality(left, right.base_type)
-        if isinstance(left, VectorType) and isinstance(right, VectorType):
-            return left.length == right.length and self._types_comparable_for_equality(
-                left.element_type,
-                right.element_type,
-            )
-        if isinstance(left, ArrayType) and isinstance(right, ArrayType):
-            return self._types_comparable_for_equality(left.element_type, right.element_type)
-        if isinstance(left, ListType) and isinstance(right, ListType):
-            return self._types_comparable_for_equality(left.element_type, right.element_type)
-        if isinstance(left, MatrixType) and isinstance(right, MatrixType):
-            return left.rows == right.rows and left.cols == right.cols and self._types_comparable_for_equality(
-                left.element_type,
-                right.element_type,
-            )
-        if left == right:
-            return self._type_supports_equality(left)
-        return left in NUMERIC_TYPES and right in NUMERIC_TYPES
+        return types_support_equality(
+            left_type,
+            right_type,
+            resolve_alias=self._resolve_type_aliases,
+            resolve_struct=self._eq_struct_definition,
+        )
 
     def _type_supports_equality(
         self,
         type_name: AetherType,
         visiting_structs: frozenset[str] = frozenset(),
     ) -> bool:
-        resolved = self._resolve_type_aliases(type_name)
-        if isinstance(resolved, (ClassType, InterfaceType)):
-            return False
-        if isinstance(resolved, str):
-            struct = self.structs.get(resolved)
-            if struct is None:
-                return resolved != "void"
-            if struct.kind == "class":
-                return False
-            if resolved in visiting_structs:
-                return True
-            nested_visiting = visiting_structs | {resolved}
-            return all(
-                self._type_supports_equality(field.type_name, nested_visiting)
-                for field in struct.fields
-            )
-        if isinstance(resolved, NullableType):
-            return self._type_supports_equality(resolved.base_type, visiting_structs)
-        if isinstance(resolved, (ArrayType, ListType)):
-            return self._type_supports_equality(resolved.element_type, visiting_structs)
-        if isinstance(resolved, (MatrixType, VectorType, TransposeVectorType)):
-            return self._type_supports_equality(resolved.element_type, visiting_structs)
-        if isinstance(resolved, TupleType):
-            return all(
-                self._type_supports_equality(element_type, visiting_structs)
-                for element_type in resolved.element_types
-            )
-        return not isinstance(resolved, RangeType) or resolved.element_type == "int"
+        return eq_capability(
+            type_name,
+            resolve_alias=self._resolve_type_aliases,
+            resolve_struct=self._eq_struct_definition,
+            _visiting=visiting_structs,
+        ) is not None
+
+    def _eq_struct_definition(self, name: str) -> tuple[str, tuple[AetherType, ...]] | None:
+        symbol = self.structs.get(name)
+        if symbol is None:
+            return None
+        return symbol.kind, tuple(field.type_name for field in symbol.fields)
+
+    def _require_collection_search_eq(self, collection_type: AetherType, operation: str) -> None:
+        resolved = self._resolve_type_aliases(collection_type)
+        if not isinstance(resolved, ListType):
+            return
+        if self._type_supports_equality(resolved.element_type):
+            return
+        raise AetherTypeError(
+            f"{type_to_string(resolved)}.{operation} requires Eq({type_to_string(resolved.element_type)})."
+        )
 
     def _can_assign_array_literal(
         self,

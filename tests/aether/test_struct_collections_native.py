@@ -203,11 +203,13 @@ int main() {
         assert LLVMRunner().run(typed) == 0
 
 
-def test_struct_collection_search_and_sort_fail_before_llvm_emission() -> None:
-    for operation, reason in (("values.contains(Item(1))", "structural search"), ("values.sort()", "only supports sequences")):
-        source = f"struct Item {{ int value; }} int main() {{ List<Item> values = {{Item(1)}}; {operation}; return 0; }}"
-        with pytest.raises(Exception, match=reason):
-            LLVMBuilder().emit_llvm(_typed(source))
+def test_struct_collection_search_is_native_but_sort_remains_rejected() -> None:
+    source = "struct Item { int value; } int main() { List<Item> values = {Item(1)}; println(values.contains(Item(1))); return 0; }"
+    assert _native_output(source) == "true\n"
+
+    source = "struct Item { int value; } int main() { List<Item> values = {Item(1)}; values.sort(); return 0; }"
+    with pytest.raises(Exception, match="only supports sequences"):
+        LLVMBuilder().emit_llvm(_typed(source))
 
 
 def test_ir_verifier_rejects_incomplete_and_recursive_collection_layouts() -> None:
@@ -225,7 +227,7 @@ def test_particle_array_preliminary_example_matches_ast_and_native() -> None:
     source = (ROOT / "examples" / "aggregate_collections" / "particles.ae").read_text(
         encoding="utf-8"
     )
-    expected = "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n"
+    expected = "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n"
     assert run_aether(source).output == expected
     assert _native_output(source) == expected
 

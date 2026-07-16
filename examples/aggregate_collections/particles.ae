@@ -30,12 +30,15 @@ int main() {
     particles[0] = first;
     println(particles[0].position.x == 9.0);
     Array<Particle> copied = particles.copy();
+    println(particles == copied);
     Particle copiedFirst = copied[0];
     copiedFirst.position.x = 42.0;
     copied[0] = copiedFirst;
     println(particles[0].position.x == 9.0);
     println(copied[0].position.x == 42.0);
+    println(particles != copied);
     Array<Particle> sliced = particles[0:1];
+    println(particles[0:1] == sliced);
     Particle slicedFirst = sliced[0];
     slicedFirst.position.x = 77.0;
     sliced[0] = slicedFirst;

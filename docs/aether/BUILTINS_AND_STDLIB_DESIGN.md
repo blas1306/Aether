@@ -272,3 +272,13 @@ Mover una operación existente desde builtin hacia stdlib requiere:
 
 Hasta cumplirlos, la ubicación Python actual describe implementación, no la
 arquitectura pública definitiva.
+
+## Capacidad interna `Eq(T)`
+
+`contains` e `indexOf` son algoritmos derivados de la capacidad semántica
+interna `Eq(T)` y tienen costo `O(n · eq(T))`. No definen reglas especiales por
+tipo ni consumen el argumento. La misma capacidad gobierna `==`, `!=`, structs
+y Array/List anidados. Por ahora no es una interface pública: no hay custom
+comparators, hashing, Map/Set ni igualdad de classes/callables. Una interface
+pública futura puede reutilizar el concepto, pero no queda prometida por esta
+fase.

@@ -7,6 +7,7 @@ from math import ceil, cos, exp, factorial as math_factorial, floor, log, log10,
 
 from ..array_safety import checked_array_length_to_int
 from ..errors import AetherRuntimeError, AetherTypeError
+from ..equality import aether_values_equal
 from ..formatting import format_value
 from ..integer_arithmetic import INT_MAX, INT_MIN, INTEGER_OVERFLOW_MESSAGE
 from ..list_safety import checked_list_index_to_int, checked_list_length_to_int
@@ -295,13 +296,8 @@ def index_of_builtin(args: list[AetherValue]) -> AetherValue:
 
 
 def _list_index_of(xs: AetherValue, value: AetherValue) -> int:
-    reference_type = isinstance(
-        value.type_name,
-        (ArrayType, ClassType, InterfaceType, ListType, MatrixType, VectorType),
-    )
     for index, element in enumerate(xs.value):
-        equal = element.value is value.value if reference_type else element.value == value.value
-        if equal:
+        if aether_values_equal(element, value):
             return index
     return -1
 

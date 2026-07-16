@@ -14,6 +14,12 @@ La Fase 1 implementó RC (perfil 9), Fase 2 completó `Array/List.copy()` E2E
 (perfil 10) y Fase 3 completó slicing semiabierto E2E (perfil 11). La matriz exhaustiva por backend
 está en [`COLLECTION_MIGRATION_BASELINE.md`](COLLECTION_MIGRATION_BASELINE.md).
 
+Actualización perfil 13 (15-07-2026): `Eq(T)` unifica `==`, `!=`, structs,
+Array/List y `contains/indexOf`. AST, IR, SSA y LLVM/native comparan contenido
+recursivo; classes/interfaces/callables se diagnostican y no usan identidad.
+LLVM reutiliza helpers tipados deterministas y conserva IEEE-754, incluido
+`NaN != NaN`.
+
 Última revisión: 15 de julio de 2026, incluyendo enums native y los ejemplos
 dogfood de métodos numéricos y expense tracker. Este documento reemplaza como
 referencia canónica a la auditoría histórica de `docs/compiler/`.
@@ -105,7 +111,7 @@ decisión aún no cambia representación ni estados de esta matriz.
 | `%` truncante | C | C | C | C int/double | C `rem` | C | C | C int/double | C | C | C | P: solo int | P | AST+int native | C | Parcial | LLVM no emite `frem`; divisor cero double difiere en mensaje/camino. |
 | `Math.mod` floor-mod | llamada normal | C | C | C | C call builtin | C | C | C | C | C | C checked | C helper tipado | runtime mínimo | AST/IR/native | C | Completo int/double | Es builtin de namespace, no operador. |
 | Comparaciones ordenadas | C | C | C | C | C | C int/double | C | C | C | C | C | C int/double | — | E2E | C | Parcial | Otros numéricos/agregados tienen cobertura distinta. |
-| Igualdad escalar | C | C | C | C | C | C | C | C | C | C | C | P | P string | amplia | P | Parcial | String native por contenido solo dentro de igualdad de struct; compare string general se rechaza. |
+| Igualdad escalar | C | C | C | C | C | C | C | C | C | C | C | C Eq tipado | `aether_string_equal`/helpers Eq | amplia | C | Completa para tipos Eq | Primitivas, string, enums, structs y Array/List; classes/callables sin Eq. |
 | Igualdad agregada | C | C | C | C | P | P Struct/Vector/Matrix | C subset | C subset | C subset | C subset | P | P | helpers | amplia por tipo | P | Parcial | Array/List generales son AST-only; structs tienen límites de tipos de campo. |
 | `&&` / <code>&#124;&#124;</code> short-circuit | C | C | C boolean | C | CFG | C por branches/merge | C | C | C con phi | C | C SCCP | C | — | E2E | P desactualizada | Implementado pero sin documentación | Código y tests son completos; spec/matrices aún dicen AST-only. |
 | `!` prefijo | C | C | C boolean | C | C | C | C | C | C | C | C | C `xor` | — | E2E | C | Completo | No existe factorial postfix. |
@@ -134,7 +140,7 @@ decisión aún no cambia representación ni estados de esta matriz.
 | Feature | Lexer/parser | AST | Typechecker | AST interpreter | IR model | IR lowering | IR verifier | IR interpreter | SSA | SSA verifier | Optimizers | LLVM/native | Runtime | Tests | Spec/docs | Estado global | Observaciones |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | String literal/variable/arg/return | C | C | C | C | C ptr-like | C | C | C | C | C | P | C para transporte | P sin ownership | backend subset | C | Parcial | Falta modelo de encoding/heap/vida útil para strings no literales. |
-| Concat, igualdad e interpolación string | C | C | C | C | P binary/compare | P | C nominal | P | P | P | P | N general | AST | AST+rechazos tipados | C | Solo AST | Interpolación se resuelve en AST; LLVM rechaza cada operación por tipo antes de lowering, también sin literales y en imports. |
+| Concat, igualdad e interpolación string | C | C | C | C | P binary / C compare | P concat / C compare | C nominal | P concat / C compare | C compare | C compare | C compare | C igualdad | `aether_string_equal` | E2E igualdad | C | Parcial | Igualdad exacta está completa en AST/native; concat e interpolación general siguen fuera del backend native. |
 | `print` / `println` escalares | llamada | C | C variádico | C | C `IRPrint` | C | C | C | C | C | C efecto | C | `printf`/helpers | E2E | C | Completo | Formato double general aún usa contratos host distintos en casos extremos. |
 | Print Array/List | llamada | C | C | C | P tipos | N general | N | N | N | N | N | N | AST | AST | P | Solo AST | Struct con campos Array/List escalares tiene helper específico, no print general de la colección. |
 | Print Struct/Vector/Matrix | llamada | C | C | C | C subset | C subset | C | C | C | C | C | C subset | helpers | E2E | P | Parcial | Shape/tipos de campos limitan el subconjunto struct. |
@@ -167,12 +173,12 @@ decisión aún no cambia representación ni estados de esta matriz.
 | Array get/set/length | C | C | C | C | C | C | C | C | C | C | C | C | C narrowing | E2E | P | Completo | Índices 0-based. |
 | Array sort | método/global | C | C tipos | C estable in-place | C sequence sort | C | C | C | C | C | C efecto | C | C temp checked | E2E | C | Completo | int/double/string. |
 | Array slicing | C `a[s:e]` | C | C | C copy | C | C | C | C | C | C | C | C | C bounds | E2E | C | Completo | 0-based, half-open, dos límites explícitos. |
-| Array copy/equality | C | C | C | C | P | C copy / N equality | C copy | C copy | C copy | C copy | C copy | C copy / diagnóstico equality | RC + helper tipado | E2E copy + negativos equality | P | Copy completo; equality AST-only | `copy` shallow crea objeto/buffer nuevos; igualdad estructural sigue diagnosticada. |
+| Array copy/equality | C | C | C | C | C | C | C | C | C | C | C | C | RC + helper Eq tipado | E2E | C | Completa | `copy` crea storage exterior nuevo; igualdad compara contenido mediante Eq(T). |
 | `List<T>` literal/new/get/set | C target-typed | C | C | C | C | C | C | C | C | C | C | C layout tipado incluido Struct soportado | C RC y destroy final | E2E escalares/enum/Struct + expense tracker | C | Parcial | No hay keyword `new`; layouts no representables se rechazan antes de LLVM. |
 | List length/capacity/core mutation | métodos | C | C | C | C salvo capacity pública | C | C | C | C | C | C | C | C checked growth | E2E | P | Parcial | `capacity` se usa internamente pero no es API pública completa. |
 | List push/pop/insert/removeAt/clear | métodos/global | C | C | C | C | C | C | C | C | C | C efecto/trap | P con Struct soportado | C hooks de elemento; sin destroy final | E2E+safety escalares/Struct/string | C | Parcial | No shrinking deliberado; clear sí destruye elementos vivos, el contenedor final se filtra. |
-| List contains/indexOf/reverse/copy/sort | métodos/global | C | C | C | C | C | C | C | C | C | C | P | P | E2E + baseline | C | Parcial | Copy es exterior superficial. Search de referencias usa identidad; Eq estructural de struct se diagnostica; sort sólo int/double/string. |
-| List slicing/equality | C | C | C | C slice / equality legado | C slice | C slice | C slice | C slice | C slice | C slice | C slice con efectos | C slice / diagnóstico equality | RC + copy_init | E2E slicing + bounds | C slicing | Slicing completo; equality AST-only | Slice 0-based `[start,end)`, objeto/buffer nuevos y capacity=size; igualdad sigue diagnosticada. |
+| List contains/indexOf/reverse/copy/sort | métodos/global | C | C | C | C | C | C | C | C | C | C | C Eq search | helpers Eq compartidos | E2E + baseline | C salvo sort general | Completa para búsqueda Eq | Copy exterior superficial; búsqueda estructural; sort sigue limitado a int/double/string. |
+| List slicing/equality | C | C | C | C | C | C | C | C | C | C | C | C | RC + copy_init + Eq | E2E | C | Completa | Slice `[start,end)` independiente; igualdad ignora capacity e identidad. |
 | Vector literal/get/set/length | C | C | C shape/orientation | C 1-based | C | C | C | C | C | C | C traps | C | C | E2E+safety | C | Completo | Vector matemático, no colección dinámica. |
 | Operaciones Vector | C operadores | C | C shapes | C | C add/sub/scale/dot/outer/mul | C subset int/double | C | C | C | C | P sin álgebra específica | C subset | C loops | E2E amplia | P | Parcial | Transpose y varios builtins siguen AST-only. |
 | Matrix literal/get/set/rows/columns | C | C | C shape | C 1-based | C | C | C | C | C | C | C traps | C | C | E2E+safety | C | Completo | Storage contiguo; valida fila/columna antes del offset. |
@@ -203,10 +209,11 @@ decisión aún no cambia representación ni estados de esta matriz.
    semántica AST.
 2. **Classes e interfaces native:** la promesa generalista sigue partida;
    structs y enums simples ya no son el bloqueo principal.
-3. **Strings completos:** falta concat/equality/interpolación general,
-   representación, encoding y ownership.
-4. **Colecciones de datos definidos por usuario:** `Array/List<Struct>` se
-   aceptan en frontend pero fallan tarde en LLVM por falta de size/layout/copia.
+3. **Strings completos:** falta concat/interpolación general y cerrar el modelo
+   de representación, encoding y ownership; igualdad exacta ya es E2E.
+4. **Colecciones de datos definidos por usuario:** Eq y búsqueda de
+   `Array/List<Struct>` son E2E; otras operaciones aún pueden estar limitadas
+   por size/layout/copia.
 5. **Callables avanzados:** el subconjunto top-level tipado ya permite una
    stdlib numérica reusable; closures, lambdas y métodos enlazados quedan para
    un diseño posterior y no bloquean ese caso.
@@ -232,8 +239,8 @@ dejan SSA inválido.
   remainder entero.
 - `float` y `complex` son tipos aceptados en frontend sin representación native
   completa.
-- String equality general funciona en AST, pero LLVM solo posee comparaciones
-  especiales dentro de ciertos helpers de structs.
+- String equality general usa `aether_string_equal` en AST/native y se reutiliza
+  dentro de Eq de structs y colecciones.
 - `Array/List<Struct>` atraviesa frontend, IR y SSA, pero el emisor LLVM filtra
   un error interno al necesitar el tamaño del elemento, en vez de rechazarlo
   según el perfil antes del lowering.
@@ -253,7 +260,7 @@ dejan SSA inválido.
 - Strings son handles a `AetherStringObject` con ARC interno, pero concat y las
   APIs públicas de producción dinámica permanecen fuera del subset.
 - La API List es amplia para elementos soportados, incluidos structs con layout,
-  con RC/free final del contenedor; Eq(T) general y capacity pública no están cerrados.
+  con RC/free final y Eq(T) general; capacity pública no está cerrada.
 - `-O2` existe como opción, pero es alias de `-O1` y no afecta native.
 - Builtins de álgebra lineal tienen typechecker e intérprete AST extensos, pero
   la mayoría no tiene IR.

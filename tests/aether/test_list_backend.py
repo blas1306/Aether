@@ -418,7 +418,7 @@ def test_list_copy_is_shallow_with_independent_outer_buffer(source: str, expecte
         ("int main(){ List<boolean> xs={true,false}; if(xs.contains(false)){return 3;} return 0; }", 3),
         ('int main(){ List<string> xs={"a","bb"}; if(xs.contains("bb")){return 4;} return 0; }', 4),
         ("int main(){ List<List<int>> xs={{1}}; List<int> same=xs[0]; if(xs.contains(same)){return 5;} return 0; }", 5),
-        ("int main(){ List<List<int>> xs={{1}}; List<int> other={1}; if(xs.contains(other)){return 5;} return 0; }", 0),
+        ("int main(){ List<List<int>> xs={{1}}; List<int> other={1}; if(xs.contains(other)){return 5;} return 0; }", 5),
     ],
 )
 def test_list_contains_uses_language_equality(source: str, expected: int) -> None:
@@ -441,7 +441,7 @@ def test_list_contains_uses_language_equality(source: str, expected: int) -> Non
         ("int main(){ List<boolean> xs={true,false}; return xs.indexOf(false); }", 1),
         ('int main(){ List<string> xs={"a","bb"}; return xs.indexOf("bb"); }', 1),
         ("int main(){ List<List<int>> xs={{1}}; List<int> same=xs[0]; return xs.indexOf(same); }", 0),
-        ("int main(){ List<List<int>> xs={{1}}; List<int> other={1}; return xs.indexOf(other)+1; }", 0),
+        ("int main(){ List<List<int>> xs={{1}}; List<int> other={1}; return xs.indexOf(other)+1; }", 1),
     ],
 )
 def test_list_index_of_uses_language_equality(source: str, expected: int) -> None:

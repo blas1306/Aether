@@ -1,6 +1,6 @@
 # Baseline de migración de `Array<T>` y `List<T>`
 
-Estado: **baseline histórica de Fase 0; Fases 1–5 completadas el 15 de julio de 2026**.
+Estado: **baseline histórica de Fase 0; Fases 1–6 completadas el 15 de julio de 2026**.
 
 > Actualización Fase 2: las tablas históricas siguientes conservan el punto de
 > partida. El estado vigente implementa `Array.copy()` y `List.copy()` en
@@ -14,6 +14,11 @@ Estado: **baseline histórica de Fase 0; Fases 1–5 completadas el 15 de julio 
 > un elemento borrowed no-owning; una copia a local/field/return adquiere
 > ownership mediante `copy_init`. Se detecta mutación del iterable directo y
 > mediante aliases locales simples.
+>
+> Actualización Fase 6: `Eq(T)` es una capacidad semántica interna única.
+> Array/List y structs comparan contenido recursivamente; `contains/indexOf`
+> usan el mismo dispatcher y classes/callables se rechazan sin identidad como
+> fallback. IR/SSA preservan el tipo y LLVM reutiliza helpers `__ae_eq_*`.
 
 Este documento registra lo que hace el repositorio antes de migrar los
 contenedores a objetos con reference counting. La semántica aprobada está en
@@ -50,10 +55,10 @@ antes de un lowering que no puede garantizar el contrato).
 | slice List | copia `[start,end)` | semiabierto | semiabierto | semiabierto | coincide desde Fase 3 |
 | `for-in` | borrow read-only por iteración | binding borrowed no-owning | `borrow_element`, índice y length | load de slot sin retain | coincide para Array/List |
 | mutar iterable/binding en `for-in` | prohibido | diagnóstico tipado | verifier + diagnóstico | verifier + diagnóstico | directo y aliases locales simples |
-| `Array/List ==` | contenido ordenado | estructural recursivo | no general | diagnóstico temprano | gap diagnosticado |
-| `contains/indexOf` primitivo/string | `Eq(T)` | contenido | contenido | contenido | coincide en subset |
-| búsqueda de referencias anidadas | `Eq(T)` estructural | identidad | identidad | identidad | gap caracterizado |
-| búsqueda de struct | `Eq(T)` estructural | estructural Python | no E2E general | diagnóstico temprano específico | gap diagnosticado |
+| `Array/List ==` | contenido ordenado | estructural recursivo | estructural recursivo | helper tipado recursivo | coincide |
+| `contains/indexOf` primitivo/string | `Eq(T)` | contenido | contenido | contenido | coincide |
+| búsqueda de referencias anidadas | `Eq(T)` estructural | estructural | estructural | estructural | coincide |
+| búsqueda de struct | `Eq(T)` estructural | fields en orden | fields en orden | helper de struct reutilizado | coincide |
 | destrucción de contenedor | release y destroy al último owner | GC Python, sin modelo Aether | ninguna | ninguna | gap: leak deliberado |
 | lifecycle de elementos string | retain/release exacto | referencias Python | modelado por hooks | ARC en operaciones implementadas | parcial; container final leak |
 | print anidado/string | presentación uniforme | braces internos; strings con comillas | listas anidadas con `[]`; strings con comillas | braces internos; strings sin comillas | gap de presentación |
@@ -205,18 +210,17 @@ escape general, llamadas que capturen el handle ni rutas calculadas.
 
 | Elemento/operación | AST | IR/native | Baseline |
 | --- | --- | --- | --- |
-| Array/List `==`, `!=` | contenido ordenado y recursivo | no general | diagnóstico native |
+| Array/List `==`, `!=` | contenido ordenado y recursivo | contenido ordenado y recursivo | coincide |
 | int/bool/enum search | valor | valor | coincide |
 | double search | valor IEEE; NaN no se encuentra | igual | coincide |
 | string search | contenido | contenido length-aware | coincide |
-| nested Array/List search | identidad del handle | identidad del handle | gap frente a Eq estructural |
-| class search | identidad | classes no soportadas | gap/diagnosticado por class |
-| struct search | igualdad estructural host | no Eq(T) general | diagnóstico específico |
+| nested Array/List search | Eq estructural | Eq estructural | coincide |
+| class search | diagnóstico `requires Eq` | diagnóstico `requires Eq` | classes sin Eq |
+| struct search | fields en orden | helper Eq del struct | coincide |
 | sort | int/double/string, estable e in-place | mismo subset | fuera del gap de igualdad |
 
-`contains` e `indexOf` comparten su noción de igualdad por tipo, pero no la
-igualdad estructural general de contenedores. No existe aún una infraestructura
-`Eq(T)` reutilizable end-to-end, por lo que Fase 0 no cambió esa conducta.
+`contains`, `indexOf`, `==` y `!=` consumen el mismo contrato `Eq(T)`. El
+sentinel de `indexOf` continúa siendo `-1`; capacity e identidad no participan.
 
 ## Ownership histórico y allocations
 

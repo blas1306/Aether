@@ -5,7 +5,7 @@ import re
 from typing import Any, Callable
 
 from aether.ir.model import IREnumConstant
-from aether.ir.types import ArrayType, BoolType, DoubleType, EnumType, FunctionType, IntType, ListType, MatrixType, MethodResultType, StringType, StructType, VectorType, VoidType
+from aether.ir.types import ArrayType, BoolType, DoubleType, EnumType, FloatType, FunctionType, IntType, ListType, MatrixType, MethodResultType, StringType, StructType, VectorType, VoidType
 from aether.ssa.model import (
     SSAArrayCopy,
     SSAArrayGet,
@@ -133,7 +133,7 @@ class LLVMPrinter:
         "gt": "ogt",
         "ge": "oge",
         "eq": "oeq",
-        "ne": "one",
+        "ne": "une",
     }
     _IDENTIFIER_RE = re.compile(r"^[A-Za-z_$._][A-Za-z0-9_$._-]*$")
     _LIST_STRUCT_TYPE = "%AetherList"
@@ -172,6 +172,7 @@ class LLVMPrinter:
         self._structs = {definition.name: definition for definition in module.structs}
         self._layouts = LLVMTypeLayouts(module.structs)
         self._struct_sequence_equality_types: set[tuple[str, object]] = set()
+        self._eq_helper_types: set[object] = set()
         self._struct_sequence_print_types: set[tuple[str, object]] = set()
         self._collection_arc_helpers: set[tuple[str, object, bool]] = set()
         self._collection_object_arc_helpers: set[tuple[str, object, bool]] = set()
@@ -266,6 +267,11 @@ class LLVMPrinter:
             key=lambda item: (item[0], str(item[1])),
         ):
             runtime.append(self._collection_copy_helper(kind, element_type))
+        emitted_eq_helpers: set[object] = set()
+        while pending_eq := self._eq_helper_types - emitted_eq_helpers:
+            for type_ in sorted(pending_eq, key=str):
+                runtime.append(self._equality_helper(type_))
+                emitted_eq_helpers.add(type_)
         runtime.extend(
             self._struct_sequence_equality_helper(kind, element_type)
             for kind, element_type in sorted(
@@ -622,6 +628,13 @@ class LLVMPrinter:
         ):
             operator = self._DOUBLE_BINARY_OPERATORS.get(instruction.operator)
             result_type = "double"
+        elif (
+            isinstance(instruction.result.type, FloatType)
+            and isinstance(instruction.left.type, FloatType)
+            and isinstance(instruction.right.type, FloatType)
+        ):
+            operator = self._DOUBLE_BINARY_OPERATORS.get(instruction.operator)
+            result_type = "float"
         else:
             raise LLVMBackendError(
                 "LLVM backend only supports homogeneous i32 or double binary operations"
@@ -651,8 +664,22 @@ class LLVMPrinter:
         return f"{result} = xor i1 {operand}, true"
 
     def _print_compare_op(self, instruction: SSACompareOp) -> str:
-        if isinstance(instruction.left.type, StructType):
-            return "\n  ".join(self._print_struct_compare(instruction))
+        if isinstance(instruction.left.type, (ArrayType, ListType, StructType)):
+            if instruction.left.type != instruction.right.type or instruction.operator not in {"eq", "ne"}:
+                raise LLVMBackendError("LLVM structural comparison requires homogeneous eq/ne")
+            helper = self._require_equality_helper(instruction.left.type)
+            llvm = llvm_type(instruction.left.type)
+            equal = self._synthetic_temp("structural.equal")
+            result = self._new_temp(instruction.result)
+            lines = [
+                f"{equal} = call i1 @{helper}({llvm} {self._operand(instruction.left)}, {llvm} {self._operand(instruction.right)})"
+            ]
+            lines.append(
+                f"{result} = and i1 {equal}, true"
+                if instruction.operator == "eq"
+                else f"{result} = xor i1 {equal}, true"
+            )
+            return "\n  ".join(lines)
         if instruction.aggregate_shape is not None:
             self._uses_array_type = True
             if isinstance(instruction.left.type, VectorType):
@@ -724,12 +751,12 @@ class LLVMPrinter:
             operand_type = "i32"
         elif (
             isinstance(instruction.result.type, BoolType)
-            and isinstance(instruction.left.type, DoubleType)
-            and isinstance(instruction.right.type, DoubleType)
+            and isinstance(instruction.left.type, (FloatType, DoubleType))
+            and instruction.left.type == instruction.right.type
         ):
             operation = "fcmp"
             predicate = self._DOUBLE_COMPARE_OPERATORS.get(instruction.operator)
-            operand_type = "double"
+            operand_type = llvm_type(instruction.left.type)
         else:
             raise LLVMBackendError(
                 "LLVM backend only supports i32 or double comparisons producing i1"
@@ -775,6 +802,141 @@ class LLVMPrinter:
         else:
             lines.append(f"{result} = xor i1 {equal}, true")
         return lines
+
+    def _require_equality_helper(self, type_: object) -> str:
+        self._eq_helper_types.add(type_)
+        if isinstance(type_, StringType):
+            self._uses_string_runtime = True
+        if isinstance(type_, ArrayType):
+            self._uses_array_type = True
+        if isinstance(type_, ListType):
+            self._uses_list_type = True
+        return f"__ae_eq_{aggregate_helper_suffix(type_)}"
+
+    def _equality_compare_line(
+        self,
+        type_: object,
+        result: str,
+        left: str,
+        right: str,
+    ) -> str:
+        llvm = llvm_type(type_)
+        if isinstance(type_, (IntType, BoolType, EnumType)):
+            return f"  {result} = icmp eq {llvm} {left}, {right}"
+        if isinstance(type_, (FloatType, DoubleType)):
+            return f"  {result} = fcmp oeq {llvm} {left}, {right}"
+        helper = self._require_equality_helper(type_)
+        return f"  {result} = call i1 @{helper}({llvm} {left}, {llvm} {right})"
+
+    def _equality_helper(self, type_: object) -> str:
+        name = self._require_equality_helper(type_)
+        llvm = llvm_type(type_)
+        if isinstance(type_, (IntType, BoolType, EnumType)):
+            return "\n".join([
+                f"define private i1 @{name}({llvm} %left, {llvm} %right) {{",
+                "entry:",
+                f"  %equal = icmp eq {llvm} %left, %right",
+                "  ret i1 %equal",
+                "}",
+            ])
+        if isinstance(type_, (FloatType, DoubleType)):
+            return "\n".join([
+                f"define private i1 @{name}({llvm} %left, {llvm} %right) {{",
+                "entry:",
+                f"  %equal = fcmp oeq {llvm} %left, %right",
+                "  ret i1 %equal",
+                "}",
+            ])
+        if isinstance(type_, StringType):
+            self._uses_string_runtime = True
+            return "\n".join([
+                f"define private i1 @{name}(ptr %left, ptr %right) {{",
+                "entry:",
+                "  %equal = call i1 @aether_string_equal(ptr %left, ptr %right)",
+                "  ret i1 %equal",
+                "}",
+            ])
+        if isinstance(type_, StructType):
+            definition = self._structs.get(type_.name)
+            if definition is None:
+                raise LLVMBackendError(f"LLVM has no layout for struct {type_.name}")
+            lines = [
+                f"define private i1 @{name}({llvm} %left, {llvm} %right) {{",
+                "entry:",
+            ]
+            if not definition.fields:
+                lines.extend(["  ret i1 true", "}"])
+                return "\n".join(lines)
+            lines.append("  br label %field.0")
+            for index, (_field_name, field_type) in enumerate(definition.fields):
+                next_label = f"field.{index + 1}" if index + 1 < len(definition.fields) else "equal"
+                lines.extend([
+                    f"field.{index}:",
+                    f"  %left.{index} = extractvalue {llvm} %left, {index}",
+                    f"  %right.{index} = extractvalue {llvm} %right, {index}",
+                    self._equality_compare_line(
+                        field_type,
+                        f"%same.{index}",
+                        f"%left.{index}",
+                        f"%right.{index}",
+                    ),
+                    f"  br i1 %same.{index}, label %{next_label}, label %different",
+                ])
+            lines.extend([
+                "equal:",
+                "  ret i1 true",
+                "different:",
+                "  ret i1 false",
+                "}",
+            ])
+            return "\n".join(lines)
+        if isinstance(type_, (ArrayType, ListType)):
+            layout = "%AetherArray" if isinstance(type_, ArrayType) else "%AetherList"
+            data_index = 1 if isinstance(type_, ArrayType) else 2
+            element = type_.element
+            element_llvm = llvm_type(element)
+            compare = self._equality_compare_line(
+                element, "%same.element", "%left.value", "%right.value"
+            )
+            return "\n".join([
+                f"define private i1 @{name}(ptr %left, ptr %right) {{",
+                "entry:",
+                "  %same.handle = icmp eq ptr %left, %right",
+                "  br i1 %same.handle, label %equal, label %lengths",
+                "lengths:",
+                f"  %left.length.field = getelementptr {layout}, ptr %left, i32 0, i32 0",
+                "  %left.length = load i64, ptr %left.length.field",
+                f"  %right.length.field = getelementptr {layout}, ptr %right, i32 0, i32 0",
+                "  %right.length = load i64, ptr %right.length.field",
+                "  %same.length = icmp eq i64 %left.length, %right.length",
+                "  br i1 %same.length, label %prepare, label %different",
+                "prepare:",
+                f"  %left.data.field = getelementptr {layout}, ptr %left, i32 0, i32 {data_index}",
+                "  %left.data = load ptr, ptr %left.data.field",
+                f"  %right.data.field = getelementptr {layout}, ptr %right, i32 0, i32 {data_index}",
+                "  %right.data = load ptr, ptr %right.data.field",
+                "  br label %loop",
+                "loop:",
+                "  %index = phi i64 [ 0, %prepare ], [ %next, %advance ]",
+                "  %done = icmp eq i64 %index, %left.length",
+                "  br i1 %done, label %equal, label %compare",
+                "compare:",
+                f"  %left.element = getelementptr {element_llvm}, ptr %left.data, i64 %index",
+                f"  %left.value = load {element_llvm}, ptr %left.element",
+                f"  %right.element = getelementptr {element_llvm}, ptr %right.data, i64 %index",
+                f"  %right.value = load {element_llvm}, ptr %right.element",
+                compare,
+                "  br i1 %same.element, label %advance, label %different",
+                "advance:",
+                "  %next = add i64 %index, 1",
+                "  br label %loop",
+                "equal:",
+                "  ret i1 true",
+                "different:",
+                "  ret i1 false",
+                "}",
+            ])
+        raise LLVMBackendError(f"LLVM cannot emit Eq({type_})")
 
     def _emit_struct_field_equality(
         self,
@@ -894,6 +1056,22 @@ class LLVMPrinter:
         elif isinstance(instruction.value.type, DoubleType) and isinstance(
             instruction.result.type,
             IntType,
+        ):
+            operator = "fptosi"
+        elif isinstance(instruction.value.type, DoubleType) and isinstance(
+            instruction.result.type, FloatType
+        ):
+            operator = "fptrunc"
+        elif isinstance(instruction.value.type, FloatType) and isinstance(
+            instruction.result.type, DoubleType
+        ):
+            operator = "fpext"
+        elif isinstance(instruction.value.type, IntType) and isinstance(
+            instruction.result.type, FloatType
+        ):
+            operator = "sitofp"
+        elif isinstance(instruction.value.type, FloatType) and isinstance(
+            instruction.result.type, IntType
         ):
             operator = "fptosi"
         else:
@@ -1729,6 +1907,7 @@ class LLVMPrinter:
             raise LLVMBackendError("LLVM list_contains value type must match list element type")
         self._uses_list_type = True
         self._list_contains_types.add(instruction.value.type)
+        self._require_equality_helper(instruction.value.type)
         if isinstance(instruction.value.type, StringType):
             self._uses_string_runtime = True
         result = self._new_temp(instruction.result)
@@ -1746,6 +1925,7 @@ class LLVMPrinter:
             raise LLVMBackendError("LLVM list_index_of value type must match list element type")
         self._uses_list_type = True
         self._list_index_of_types.add(instruction.value.type)
+        self._require_equality_helper(instruction.value.type)
         if isinstance(instruction.value.type, StringType):
             self._uses_string_runtime = True
         result = self._new_temp(instruction.result)
@@ -3510,7 +3690,7 @@ class LLVMPrinter:
                     "LLVM backend does not support non-bool SSAConst values"
                 )
             return "1" if value else "0"
-        if isinstance(result.type, DoubleType):
+        if isinstance(result.type, (FloatType, DoubleType)):
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 raise LLVMBackendError(
                     "LLVM backend does not support non-double SSAConst values"

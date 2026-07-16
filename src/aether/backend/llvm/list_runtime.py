@@ -7,15 +7,17 @@ from aether.ir.types import (
     BoolType,
     DoubleType,
     EnumType,
+    FloatType,
     IntType,
     ListType,
     MatrixType,
     StringType,
+    StructType,
     VectorType,
 )
 
 from .array_runtime import LLVMArrayRuntime
-from .runtime_common import LLVMRuntimeCommon
+from .runtime_common import LLVMRuntimeCommon, aggregate_helper_suffix
 from .types import LLVMBackendError, llvm_type
 
 
@@ -543,54 +545,64 @@ class LLVMListRuntime:
 
     @staticmethod
     def _list_element_compare(element_type: object, llvm_element_type: str) -> str:
-        if isinstance(element_type, DoubleType):
-            return "  %equal = fcmp oeq double %element, %needle"
-        if isinstance(element_type, StringType):
-            return "\n".join([
-                "  %equal = call i1 @aether_string_equal(ptr %element, ptr %needle)",
-            ])
-        return f"  %equal = icmp eq {llvm_element_type} %element, %needle"
+        helper = f"__ae_eq_{aggregate_helper_suffix(element_type)}"
+        return (
+            f"  %equal = call i1 @{helper}({llvm_element_type} %element, "
+            f"{llvm_element_type} %needle)"
+        )
 
     @staticmethod
     def list_contains_helper_name(type_: object) -> str:
-        if isinstance(type_, (IntType, EnumType)):
+        if isinstance(type_, IntType):
             return "aether_list_contains_int"
+        if isinstance(type_, EnumType):
+            return f"aether_list_contains_{aggregate_helper_suffix(type_)}"
         if isinstance(type_, DoubleType):
             return "aether_list_contains_double"
+        if isinstance(type_, FloatType):
+            return "aether_list_contains_float"
         if isinstance(type_, BoolType):
             return "aether_list_contains_bool"
         if isinstance(type_, StringType):
             return "aether_list_contains_string"
-        if isinstance(type_, (ListType, ArrayType, VectorType, MatrixType)):
-            return "aether_list_contains_ref"
+        if isinstance(type_, (ListType, ArrayType, StructType)):
+            return f"aether_list_contains_{aggregate_helper_suffix(type_)}"
         raise LLVMBackendError(f"LLVM list_contains does not support element type {type_}")
 
     @staticmethod
     def list_index_of_helper_name(type_: object) -> str:
-        if isinstance(type_, (IntType, EnumType)):
+        if isinstance(type_, IntType):
             return "aether_list_index_of_int"
+        if isinstance(type_, EnumType):
+            return f"aether_list_index_of_{aggregate_helper_suffix(type_)}"
         if isinstance(type_, DoubleType):
             return "aether_list_index_of_double"
+        if isinstance(type_, FloatType):
+            return "aether_list_index_of_float"
         if isinstance(type_, BoolType):
             return "aether_list_index_of_bool"
         if isinstance(type_, StringType):
             return "aether_list_index_of_string"
-        if isinstance(type_, (ListType, ArrayType, VectorType, MatrixType)):
-            return "aether_list_index_of_ref"
+        if isinstance(type_, (ListType, ArrayType, StructType)):
+            return f"aether_list_index_of_{aggregate_helper_suffix(type_)}"
         raise LLVMBackendError(f"LLVM list_index_of does not support element type {type_}")
 
     @staticmethod
     def list_search_helper_name(type_: object) -> str:
-        if isinstance(type_, (IntType, EnumType)):
+        if isinstance(type_, IntType):
             return "aether_list_search_int"
+        if isinstance(type_, EnumType):
+            return f"aether_list_search_{aggregate_helper_suffix(type_)}"
         if isinstance(type_, DoubleType):
             return "aether_list_search_double"
+        if isinstance(type_, FloatType):
+            return "aether_list_search_float"
         if isinstance(type_, BoolType):
             return "aether_list_search_bool"
         if isinstance(type_, StringType):
             return "aether_list_search_string"
-        if isinstance(type_, (ListType, ArrayType, VectorType, MatrixType)):
-            return "aether_list_search_ref"
+        if isinstance(type_, (ListType, ArrayType, StructType)):
+            return f"aether_list_search_{aggregate_helper_suffix(type_)}"
         raise LLVMBackendError(f"LLVM list search does not support element type {type_}")
 
 

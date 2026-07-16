@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from .pipeline import TypedProgram
 
 
-CAPABILITY_PROFILE_VERSION = "12"
+CAPABILITY_PROFILE_VERSION = "13"
 
 
 class BackendIdentity(str, Enum):
@@ -88,6 +88,8 @@ class Capability(str, Enum):
     BORROWED_FOR_IN_ELEMENTS = "borrowed-for-in-elements"
     COLLECTION_OBJECT_LIFECYCLE = "collection-object-lifecycle"
     AGGREGATE_COLLECTION_ELEMENTS = "aggregate-collection-elements"
+    STRUCTURAL_EQUALITY = "structural-equality"
+    EQ_COLLECTION_SEARCH = "eq-collection-search"
     VECTOR = "vector"
     MATRIX = "matrix"
     SCALAR_MATH = "scalar-math"
@@ -207,6 +209,14 @@ CAPABILITY_CATALOG: Mapping[Capability, CapabilityDefinition] = MappingProxyType
                 Capability.AGGREGATE_COLLECTION_ELEMENTS,
                 "By-value aggregate elements in Array and List storage.",
             ),
+            _definition(
+                Capability.STRUCTURAL_EQUALITY,
+                "Typed structural Eq(T) for structs and Array/List values.",
+            ),
+            _definition(
+                Capability.EQ_COLLECTION_SEARCH,
+                "List contains/indexOf using the element type's Eq(T).",
+            ),
             _definition(Capability.VECTOR, "Vector values and operations."),
             _definition(Capability.MATRIX, "Matrix values and operations."),
             _definition(Capability.SCALAR_MATH, "Scalar mathematical functions and constants."),
@@ -282,6 +292,8 @@ _NATIVE_COMPLETE = {
     Capability.COLLECTION_OBJECT_LIFECYCLE,
     Capability.CONST_COLLECTION_REFERENCES,
     Capability.BORROWED_FOR_IN_ELEMENTS,
+    Capability.STRUCTURAL_EQUALITY,
+    Capability.EQ_COLLECTION_SEARCH,
 }
 _NATIVE_UNSUPPORTED = {
     Capability.INPUT,
@@ -364,6 +376,8 @@ E2E_TESTED_CAPABILITIES: Mapping[BackendIdentity, frozenset[Capability]] = Mappi
                 Capability.ARRAY_SLICING,
                 Capability.LIST,
                 Capability.AGGREGATE_COLLECTION_ELEMENTS,
+                Capability.STRUCTURAL_EQUALITY,
+                Capability.EQ_COLLECTION_SEARCH,
                 Capability.VECTOR,
                 Capability.MATRIX,
                 Capability.SCALAR_MATH,
@@ -387,6 +401,8 @@ E2E_TESTED_CAPABILITIES: Mapping[BackendIdentity, frozenset[Capability]] = Mappi
                 Capability.COLLECTION_OBJECT_LIFECYCLE,
                 Capability.CONST_COLLECTION_REFERENCES,
                 Capability.BORROWED_FOR_IN_ELEMENTS,
+                Capability.STRUCTURAL_EQUALITY,
+                Capability.EQ_COLLECTION_SEARCH,
             }
         ),
     }
@@ -713,14 +729,14 @@ class _CapabilityDetector:
                 right_resolved = self._resolve_alias(right_type) if right_type is not None else None
                 if isinstance(left_resolved, ArrayType) and isinstance(right_resolved, ArrayType):
                     self._record(
-                        Capability.ARRAY,
+                        Capability.STRUCTURAL_EQUALITY,
                         node,
                         detail="structural Array equality",
                         requires_complete_support=True,
                     )
                 elif isinstance(left_resolved, ListType) and isinstance(right_resolved, ListType):
                     self._record(
-                        Capability.LIST,
+                        Capability.STRUCTURAL_EQUALITY,
                         node,
                         detail="structural List equality",
                         requires_complete_support=True,
@@ -815,16 +831,18 @@ class _CapabilityDetector:
         canonical_operation = "indexOf" if operation == "index_of" else operation
         if not isinstance(resolved, ListType) or canonical_operation not in {"contains", "indexOf"}:
             return
+        self._record(
+            Capability.EQ_COLLECTION_SEARCH,
+            node,
+            detail=f"{resolved}.{canonical_operation}() using Eq({resolved.element_type})",
+            requires_complete_support=True,
+        )
         element_type = self._resolve_alias(resolved.element_type)
         symbol = self.checker.structs.get(element_type) if isinstance(element_type, str) else None
         if symbol is None or symbol.kind != "struct":
             return
-        self._record(
-            Capability.AGGREGATE_COLLECTION_ELEMENTS,
-            node,
-            detail=f"List<{element_type}>.{canonical_operation}() structural search",
-            requires_complete_support=True,
-        )
+        # Storage support remains tracked independently; Eq-based search is a
+        # complete capability even when other aggregate element APIs are not.
 
     def _canonical_name(self, visible_name: str, *, constants: bool = False) -> str:
         aliases = (
@@ -896,7 +914,7 @@ class _CapabilityDetector:
             )
             self._record_type(type_name.base_type, node)
             return
-        if isinstance(type_name, NullType) or type_name in {"float", "complex"}:
+        if isinstance(type_name, NullType) or type_name == "complex":
             self._record(
                 Capability.PRIMITIVE_TYPES,
                 node,
@@ -906,6 +924,7 @@ class _CapabilityDetector:
             return
         if isinstance(type_name, str) and type_name in {
             "int",
+            "float",
             "double",
             "boolean",
             "string",
@@ -958,7 +977,7 @@ class _CapabilityDetector:
         active: tuple[str, ...],
     ) -> str | None:
         type_name = self._resolve_alias(type_name)
-        if type_name in {"int", "double", "boolean", "string"}:
+        if type_name in {"int", "float", "double", "boolean", "string"}:
             return None
         if isinstance(type_name, EnumType):
             return None
@@ -978,7 +997,6 @@ class _CapabilityDetector:
         if isinstance(type_name, NullableType):
             return "nullable values have no current LLVM/native storage ABI"
         if isinstance(type_name, (NullType, TupleType)) or type_name in {
-            "float",
             "complex",
             "void",
             "Exception",

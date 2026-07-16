@@ -44,7 +44,7 @@ def _required(source: str, *, source_root: Path | None = None):
 
 
 def test_profiles_are_versioned_identified_and_cover_the_canonical_catalog() -> None:
-    assert CAPABILITY_PROFILE_VERSION == "12"
+    assert CAPABILITY_PROFILE_VERSION == "13"
     assert AST_CAPABILITY_PROFILE.backend is BackendIdentity.AST
     assert NATIVE_CAPABILITY_PROFILE.backend is BackendIdentity.NATIVE
     assert AST_CAPABILITY_PROFILE.version == CAPABILITY_PROFILE_VERSION

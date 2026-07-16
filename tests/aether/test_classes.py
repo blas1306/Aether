@@ -642,7 +642,7 @@ println(view.getValue());
 
 
 def test_class_equality_reports_class_specific_error() -> None:
-    with pytest.raises(AetherTypeError, match="Class equality is not supported yet"):
+    with pytest.raises(AetherTypeError, match="Type Counter does not define equality"):
         run_aether(
             """
 class Counter {

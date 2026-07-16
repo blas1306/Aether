@@ -52,7 +52,8 @@ The initial scalar lowering subset includes:
 - Arithmetic `+`, `-`, `*`, `/`, and `%`.
 - Comparisons lowered to `IRCompareOp`: ordered integer comparisons
   `<`, `<=`, `>`, and `>=`; equality comparisons `==` and `!=` for `int`,
-  `boolean`, and `string`.
+  `boolean`, `float`, `double`, `string`, nominal enums, comparable structs,
+  and recursively comparable `Array<T>`/`List<T>`.
 - Unary minus, currently lowered as a typed zero followed by `sub`.
 - Assignment to already declared local variables and parameters, represented
   with mutable slots.

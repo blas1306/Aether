@@ -115,3 +115,8 @@ incluyendo ambos enums de estado. El bloqueo
 crítico original —pasar una
 función matemática reutilizable sin interfaz AST-only— queda cerrado dentro
 del alcance deliberadamente `PARTIAL` de callables top-level sin captura.
+
+La incorporación de `Eq(T)` no altera los métodos numéricos: enums de estado,
+structs resultado y comparaciones IEEE conservan paridad AST/native. Los
+callables siguen deliberadamente sin Eq y los optimizers no aplican la ley
+inválida `x == x` a floats que pueden contener NaN.

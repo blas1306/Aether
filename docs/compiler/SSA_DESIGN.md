@@ -529,3 +529,14 @@ This document intentionally does not add:
 The next practical compiler step is to build phi placement on top of the
 existing CFG, dominator, and dominance-frontier analyses. SSA conversion should
 come after that foundation is stable.
+
+## Current equality invariant (profile 13)
+
+The implemented SSA model preserves the full nominal operand type on
+`SSACompareOp`; `eq/ne` are valid only when the verifier can construct
+`Eq(T)`. Comparable structs are checked recursively from module definitions,
+and Array/List retain their comparable element type. `SSAListContains` and
+`SSAListIndexOf` enforce the same witness. Structural comparisons are pure
+memory reads, so DCE may remove an unused comparison but optimizers must not
+duplicate or rewrite it as pointer identity. Constant propagation does not
+fold aggregate equality and does not assume `x == x` for floating-point values.

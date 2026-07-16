@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 
-from aether.ir.types import ArrayType, BoolType, DoubleType, EnumType, FunctionType, IntType, ListType, StringType, StructType, VoidType
+from aether.ir.types import ArrayType, BoolType, DoubleType, EnumType, FloatType, FunctionType, IntType, ListType, StringType, StructType, VoidType
 
 from .runtime import sequence_sort_helper, sequence_sort_helper_name
 
@@ -13,6 +13,8 @@ def aggregate_helper_suffix(element_type: object) -> str:
         return "i32"
     if isinstance(element_type, DoubleType):
         return "f64"
+    if isinstance(element_type, FloatType):
+        return "f32"
     if isinstance(element_type, BoolType):
         return "i1"
     if isinstance(element_type, StringType):
@@ -42,11 +44,12 @@ def aggregate_equal_helper(prefix: str, element_type: object) -> str:
     llvm_element_type = {
         "i32": "i32",
         "f64": "double",
+        "f32": "float",
         "i1": "i1",
         "string": "ptr",
     }[suffix]
-    if suffix == "f64":
-        comparison = "  %same = fcmp oeq double %left_value, %right_value"
+    if suffix in {"f32", "f64"}:
+        comparison = f"  %same = fcmp oeq {llvm_element_type} %left_value, %right_value"
     elif suffix == "string":
         comparison = "\n".join(
             [
@@ -92,6 +95,7 @@ def aggregate_print_helper(prefix: str, element_type: object, *, matrix: bool) -
     llvm_element_type = {
         "i32": "i32",
         "f64": "double",
+        "f32": "float",
         "i1": "i1",
         "string": "ptr",
     }[suffix]

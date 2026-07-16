@@ -159,7 +159,7 @@ println(Point(1, 2) == 1);
 
 
 def test_struct_with_class_field_is_not_comparable() -> None:
-    with pytest.raises(AetherTypeError, match="Cannot compare 'Wrapper' and 'Wrapper'"):
+    with pytest.raises(AetherTypeError, match="Type Wrapper does not define equality"):
         run_aether(
             """
 class Box {
@@ -176,7 +176,7 @@ println(Wrapper(Box(1)) == Wrapper(Box(1)));
 
 
 def test_struct_with_interface_field_is_not_comparable() -> None:
-    with pytest.raises(AetherTypeError, match="Cannot compare 'Wrapper' and 'Wrapper'"):
+    with pytest.raises(AetherTypeError, match="Type Wrapper does not define equality"):
         run_aether(
             """
 interface ValueView {
@@ -198,7 +198,7 @@ println(Wrapper(Box(1)) == Wrapper(Box(1)));
 
 
 def test_class_equality_remains_unsupported() -> None:
-    with pytest.raises(AetherTypeError, match="Class equality is not supported yet"):
+    with pytest.raises(AetherTypeError, match="Type Counter does not define equality"):
         run_aether(
             """
 class Counter {

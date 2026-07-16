@@ -28,6 +28,7 @@ from aether.ir.types import (
 )
 from aether.ir.scalar_math import scalar_math_result_type
 from aether.ir.model import IREnumConstant
+from aether.ir.equality import ir_eq_capability
 
 from .model import (
     SSAArrayCopy,
@@ -1454,6 +1455,8 @@ class SSAVerifier:
         if not isinstance(instruction.list_value.type, ListType):
             self._fail(f"List contains expects list value, got {instruction.list_value.type}")
         self._require_type(instruction.value.type, instruction.list_value.type.element, "List contains value type mismatch")
+        if ir_eq_capability(instruction.value.type, self._structs) is None:
+            self._fail(f"List contains requires Eq({instruction.value.type})")
         if not isinstance(instruction.result.type, BoolType):
             self._fail(f"List contains result must be bool, got {instruction.result.type}")
 
@@ -1463,6 +1466,8 @@ class SSAVerifier:
         if not isinstance(instruction.list_value.type, ListType):
             self._fail(f"List index_of expects list value, got {instruction.list_value.type}")
         self._require_type(instruction.value.type, instruction.list_value.type.element, "List index_of value type mismatch")
+        if ir_eq_capability(instruction.value.type, self._structs) is None:
+            self._fail(f"List index_of requires Eq({instruction.value.type})")
         if not isinstance(instruction.result.type, IntType):
             self._fail(f"List index_of result must be int, got {instruction.result.type}")
 
@@ -1959,7 +1964,7 @@ class SSAVerifier:
                     f"Compare op '{operator}' requires compatible operands, "
                     f"got {left} and {right}"
                 )
-            if not isinstance(left, (IntType, DoubleType, BoolType, StringType, StructType, EnumType)):
+            if ir_eq_capability(left, self._structs) is None:
                 self._fail(
                     f"Compare op '{operator}' does not support operands of type {left}"
                 )
@@ -1972,9 +1977,10 @@ class SSAVerifier:
         target = instruction.result.type
         if (
             isinstance(source, IntType)
-            and isinstance(target, DoubleType)
-            or isinstance(source, DoubleType)
-            and isinstance(target, IntType)
+            and isinstance(target, (FloatType, DoubleType))
+            or isinstance(source, (FloatType, DoubleType))
+            and isinstance(target, (IntType, FloatType, DoubleType))
+            and source != target
         ):
             return
         self._fail(f"Cast requires int/double operands, got {source} to {target}")

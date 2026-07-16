@@ -61,7 +61,8 @@ Se rechazan antes de LLVM structs incompletos/recursivos por valor y, para
 elementos de colección, class/interface, nullable, float,
 complex u otros tipos sin ABI native. El diagnóstico incluye Array/List, tipo
 elemento, backend, motivo y ubicación fuente. `sort` no inventa orden para
-structs; `contains/indexOf` estructural permanece fuera del subconjunto.
+structs; `contains/indexOf` y la igualdad de `Transaction` usan `Eq(Transaction)`
+en AST y native.
 
 ## Evidencia
 
@@ -95,6 +96,7 @@ usa strings ARC y cleanup de elementos. El último owner de una List libera sus
 Transaction vivos, buffer y objeto. `copy()` crea storage exterior distinto y
 conserva los strings mediante lifecycle recursivo.
 
-La próxima fase recomendada es igualdad estructural E2E y `Eq(T)` compartido
-por `contains/indexOf`; archivos, argv, concat, parsing y split/trim siguen
-aplazados.
+La fase de igualdad estructural E2E quedó completada: copias y slices de
+`List<Transaction>` comparan contenido, y búsqueda encuentra transacciones
+equivalentes aunque sean valores independientes. Archivos, argv, concat,
+parsing y split/trim siguen aplazados.

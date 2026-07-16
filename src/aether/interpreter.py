@@ -11,6 +11,7 @@ from plot_backend import PlotBackend
 
 from . import ast
 from .errors import AetherError, AetherInputError, AetherRuntimeError, AetherSyntaxError, AetherTypeError
+from .equality import aether_values_equal, types_support_equality
 from .formatting import format_value
 from .integer_arithmetic import checked_int_binary, checked_int_negate, ieee_divide
 from .lexer import lex
@@ -1965,26 +1966,17 @@ class Interpreter:
                 )
             return self.builtins[LINEAR_ALGEBRA_SOLVE]([left, right])
         if operator in {"==", "!="}:
-            if isinstance(left.value, ClassInstance) or isinstance(right.value, ClassInstance):
-                raise AetherTypeError("Class equality is not supported yet.")
-            if isinstance(left.value, StructInstance) or isinstance(right.value, StructInstance):
-                if (
-                    not isinstance(left.value, StructInstance)
-                    or not isinstance(right.value, StructInstance)
-                    or left.value.type_name != right.value.type_name
-                ):
-                    raise AetherTypeError(
-                        f"Cannot compare '{type_to_string(left.type_name)}' and '{type_to_string(right.type_name)}' "
-                        f"with '{operator}'."
-                    )
-                result = _values_equal(left, right)
-                return AetherValue("boolean", result if operator == "==" else not result)
-            if not _types_comparable_for_equality(left.type_name, right.type_name):
+            if not types_support_equality(
+                left.type_name,
+                right.type_name,
+                resolve_alias=self._resolve_type_aliases,
+                resolve_struct=self._eq_struct_definition,
+            ):
                 raise AetherTypeError(
                     f"Cannot compare '{type_to_string(left.type_name)}' and '{type_to_string(right.type_name)}' "
                     f"with '{operator}'."
                 )
-            result = _values_equal(left, right)
+            result = aether_values_equal(left, right)
             return AetherValue("boolean", result if operator == "==" else not result)
         if operator in {"<", "<=", ">", ">="}:
             if left.type_name not in REAL_NUMERIC_TYPES or right.type_name not in REAL_NUMERIC_TYPES:
@@ -2006,6 +1998,13 @@ class Interpreter:
         if expression.operator == "||":
             return AetherValue("boolean", right.value)
         raise AetherRuntimeError(f"Unsupported logical operator '{expression.operator}'.")
+
+    def _eq_struct_definition(self, name: str) -> tuple[str, tuple[AetherType, ...]] | None:
+        declaration = self.structs.get(name)
+        if declaration is None:
+            return None
+        kind = "class" if isinstance(declaration, ast.ClassDeclaration) else "struct"
+        return kind, tuple(field.type_name for field in declaration.fields)
 
     def _numeric_or_string_binary(self, left: AetherValue, operator: str, right: AetherValue) -> AetherValue:
         if operator == "+" and left.type_name == "string" and right.type_name == "string":
@@ -2847,50 +2846,6 @@ def _common_list_primitive_type(primitive_types: list[AetherType]) -> str:
         raise AetherTypeError("List literals must contain homogeneous compatible element types.") from exc
 
 
-def _types_comparable_for_equality(left_type: AetherType, right_type: AetherType) -> bool:
-    if left_type == right_type:
-        return True
-    if isinstance(left_type, NullType):
-        return isinstance(right_type, NullableType)
-    if isinstance(right_type, NullType):
-        return isinstance(left_type, NullableType)
-    if isinstance(left_type, NullableType) and isinstance(right_type, NullableType):
-        return _types_comparable_for_equality(left_type.base_type, right_type.base_type)
-    if isinstance(left_type, NullableType):
-        return _types_comparable_for_equality(left_type.base_type, right_type)
-    if isinstance(right_type, NullableType):
-        return _types_comparable_for_equality(left_type, right_type.base_type)
-    if isinstance(left_type, VectorType) and isinstance(right_type, VectorType):
-        return left_type.length == right_type.length and _types_comparable_for_equality(
-            left_type.element_type,
-            right_type.element_type,
-        )
-    if isinstance(left_type, TransposeVectorType) and isinstance(right_type, TransposeVectorType):
-        return left_type.length == right_type.length and _types_comparable_for_equality(
-            left_type.element_type,
-            right_type.element_type,
-        )
-    if isinstance(left_type, ArrayType) and isinstance(right_type, ArrayType):
-        return _types_comparable_for_equality(left_type.element_type, right_type.element_type)
-    if isinstance(left_type, ListType) and isinstance(right_type, ListType):
-        return _types_comparable_for_equality(left_type.element_type, right_type.element_type)
-    if isinstance(left_type, MatrixType) and isinstance(right_type, MatrixType):
-        return left_type.rows == right_type.rows and left_type.cols == right_type.cols and _types_comparable_for_equality(
-            left_type.element_type,
-            right_type.element_type,
-        )
-    if (
-        is_array_type(left_type)
-        or is_array_type(right_type)
-        or is_list_type(left_type)
-        or is_list_type(right_type)
-        or is_matrix_type(left_type)
-        or is_matrix_type(right_type)
-    ):
-        return False
-    return left_type in NUMERIC_TYPES and right_type in NUMERIC_TYPES
-
-
 def _evaluate_scalar_array_binary(left: AetherValue, operator: str, right: AetherValue) -> AetherValue | None:
     left_is_matrix = is_matrix_type(left.type_name)
     right_is_matrix = is_matrix_type(right.type_name)
@@ -3355,52 +3310,6 @@ def _apply_array_element_operator(
     else:
         raise AetherRuntimeError(f"Unsupported array operator '{operator}'.")
     return _coerced_numeric_result(result, result_element_type)
-
-
-def _values_equal(left: AetherValue, right: AetherValue) -> bool:
-    if isinstance(left.value, ClassInstance) or isinstance(right.value, ClassInstance):
-        raise AetherTypeError("Class equality is not supported yet.")
-    if isinstance(left.value, StructInstance) or isinstance(right.value, StructInstance):
-        if (
-            not isinstance(left.value, StructInstance)
-            or not isinstance(right.value, StructInstance)
-            or left.value.type_name != right.value.type_name
-        ):
-            return False
-        return all(
-            _values_equal(left.value.fields[field_name], right.value.fields[field_name])
-            for field_name in left.value.field_order
-        )
-    if isinstance(left.type_name, NullableType):
-        if left.value is None:
-            return right.value is None
-        left = AetherValue(left.type_name.base_type, left.value)
-    if isinstance(right.type_name, NullableType):
-        if right.value is None:
-            return left.value is None
-        right = AetherValue(right.type_name.base_type, right.value)
-    if isinstance(left.type_name, VectorType) and isinstance(right.type_name, VectorType):
-        if len(left.value) != len(right.value):
-            return False
-        return all(
-            _values_equal(left_element, right_element)
-            for left_element, right_element in zip(left.value, right.value)
-        )
-    if isinstance(left.type_name, TransposeVectorType) and isinstance(right.type_name, TransposeVectorType):
-        return _values_equal(left.value, right.value)
-    if isinstance(left.type_name, MatrixType) and isinstance(right.type_name, MatrixType):
-        if len(left.value) != len(right.value):
-            return False
-        return all(_values_equal(left_row, right_row) for left_row, right_row in zip(left.value, right.value))
-    if isinstance(left.type_name, ArrayType) and isinstance(right.type_name, ArrayType):
-        if len(left.value) != len(right.value):
-            return False
-        return all(_values_equal(left_element, right_element) for left_element, right_element in zip(left.value, right.value))
-    if isinstance(left.type_name, ListType) and isinstance(right.type_name, ListType):
-        if len(left.value) != len(right.value):
-            return False
-        return all(_values_equal(left_element, right_element) for left_element, right_element in zip(left.value, right.value))
-    return left.value == right.value
 
 
 def _compare_values(left: object, operator: str, right: object) -> bool:

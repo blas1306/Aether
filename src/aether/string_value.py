@@ -139,8 +139,7 @@ class StringValue:
     def __eq__(self, other: object) -> bool:
         self._require_live()
         if isinstance(other, StringValue):
-            other._require_live()
-            return self is other or self._utf8 == other._utf8
+            return aether_string_equal(self, other)
         if isinstance(other, str):
             try:
                 return self._utf8 == other.encode("utf-8", errors="strict")
@@ -167,6 +166,18 @@ EMPTY_STRING.flags = IMMORTAL | UTF8_VALID
 EMPTY_STRING.strong_count = 0
 EMPTY_STRING.unclaimed_owners = 0
 EMPTY_STRING._released = False
+
+
+def aether_string_equal(left: object, right: object) -> bool:
+    """Length-aware Aether string equality used by every Python runtime path."""
+
+    if left is right:
+        return True
+    if not isinstance(left, StringValue) or not isinstance(right, StringValue):
+        return False
+    left._require_live()
+    right._require_live()
+    return left.byte_length == right.byte_length and left.utf8_bytes == right.utf8_bytes
 
 
 def as_string_value(value: str | StringValue, *, literal: bool = True) -> StringValue:

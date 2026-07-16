@@ -114,6 +114,7 @@ from .types import (
     VectorType,
     VoidType,
 )
+from .equality import ir_eq_capability, ir_values_equal
 
 
 class IRExecutionError(RuntimeError):
@@ -373,7 +374,16 @@ class IRInterpreter:
         if isinstance(instruction, IRCompareOp):
             left = self._value(instruction.left, frame)
             right = self._value(instruction.right, frame)
-            if instruction.aggregate_shape is not None:
+            if instruction.operator in {"eq", "ne"} and ir_eq_capability(
+                instruction.left.type, self._structs
+            ) is not None:
+                equal = ir_values_equal(
+                    instruction.left.type, left, right, self._structs
+                )
+                frame.values[instruction.result] = (
+                    equal if instruction.operator == "eq" else not equal
+                )
+            elif instruction.aggregate_shape is not None:
                 expected = math.prod(instruction.aggregate_shape)
                 if not isinstance(left, list) or not isinstance(right, list):
                     raise IRExecutionError("IR aggregate compare requires aggregate values")
@@ -545,11 +555,9 @@ class IRInterpreter:
             if not isinstance(list_value, list):
                 raise IRExecutionError("IR list_contains requires a list value")
             value = self._value(instruction.value, frame)
-            reference_type = isinstance(
-                instruction.value.type,
-                (ArrayType, ClassRefType, InterfaceType, ListType, MatrixType, VectorType),
-            )
-            frame.values[instruction.result] = self._list_index_of(list_value, value, reference_type) >= 0
+            frame.values[instruction.result] = self._list_index_of(
+                list_value, value, instruction.value.type
+            ) >= 0
             return False, None, None
 
         if isinstance(instruction, IRListIndexOf):
@@ -557,13 +565,9 @@ class IRInterpreter:
             if not isinstance(list_value, list):
                 raise IRExecutionError("IR list_index_of requires a list value")
             value = self._value(instruction.value, frame)
-            reference_type = isinstance(
-                instruction.value.type,
-                (ArrayType, ClassRefType, InterfaceType, ListType, MatrixType, VectorType),
-            )
             try:
                 frame.values[instruction.result] = checked_list_index_to_int(
-                    self._list_index_of(list_value, value, reference_type)
+                    self._list_index_of(list_value, value, instruction.value.type)
                 )
             except OverflowError as error:
                 raise IRExecutionError(str(error)) from error
@@ -1088,10 +1092,9 @@ class IRInterpreter:
             raise IRExecutionError(f"IR value '%{value.name}' is not initialized")
         return frame.values[value]
 
-    @staticmethod
-    def _list_index_of(list_value: list[Any], value: Any, reference_type: bool) -> int:
+    def _list_index_of(self, list_value: list[Any], value: Any, element_type: object) -> int:
         for index, element in enumerate(list_value):
-            if (element is value) if reference_type else (element == value):
+            if ir_values_equal(element_type, element, value, self._structs):
                 return index
         return -1
 
@@ -1140,7 +1143,7 @@ class IRInterpreter:
 
     @staticmethod
     def _cast(value: Any, target_type: object) -> Any:
-        if isinstance(target_type, DoubleType):
+        if isinstance(target_type, (FloatType, DoubleType)):
             return float(value)
         if isinstance(target_type, IntType):
             return trunc(value)

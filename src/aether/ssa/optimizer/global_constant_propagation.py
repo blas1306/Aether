@@ -3,7 +3,7 @@ from __future__ import annotations
 from math import trunc
 from typing import Any
 
-from aether.ir.types import DoubleType, IntType, StringType
+from aether.ir.types import DoubleType, FloatType, IntType, StringType
 from aether.integer_arithmetic import checked_int_binary
 from aether.ssa.model import (
     SSABasicBlock,
@@ -252,7 +252,7 @@ class SSAGlobalConstantPropagator:
             return UNKNOWN
 
         try:
-            if isinstance(instruction.result.type, DoubleType):
+            if isinstance(instruction.result.type, (FloatType, DoubleType)):
                 return float(constants[instruction.value])
             if isinstance(instruction.result.type, IntType):
                 return trunc(constants[instruction.value])

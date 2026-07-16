@@ -114,6 +114,7 @@ from .types import (
     VoidType,
 )
 from .scalar_math import scalar_math_result_type
+from .equality import ir_eq_capability
 
 
 _BINARY_OPERATORS = {
@@ -133,7 +134,7 @@ _COMPARE_OPERATORS = {
 }
 _NUMERIC_IR_TYPES = (IntType, FloatType, DoubleType, ComplexType)
 _REAL_IR_TYPES = (IntType, FloatType, DoubleType)
-_EQUALITY_IR_TYPES = (IntType, DoubleType, BoolType, StringType, EnumType)
+_EQUALITY_IR_TYPES = (IntType, FloatType, DoubleType, BoolType, StringType, EnumType)
 _CAST_BUILTINS = {"int", "float", "double", "string", "boolean"}
 
 
@@ -1456,6 +1457,16 @@ class IRLowerer:
                         IRCompareOp(result, compare_operator, left, right)
                     )
                     return result
+                elif isinstance(left.type, (ArrayType, ListType)) and left.type == right.type:
+                    if compare_operator not in {"eq", "ne"}:
+                        self._fail("Collection ordered comparison is not supported.", expression)
+                    if ir_eq_capability(left.type, self._structs) is None:
+                        self._fail(f"{left.type} does not define equality.", expression)
+                    result = context.temporary(BoolType())
+                    context.block.instructions.append(
+                        IRCompareOp(result, compare_operator, left, right)
+                    )
+                    return result
                 if aggregate_shape is not None:
                     if compare_operator not in {"eq", "ne"}:
                         self._fail("Aggregate ordered comparison is not supported.", expression)
@@ -1970,11 +1981,8 @@ class IRLowerer:
         if method_name == "contains" and len(arguments) == 2:
             list_value = self._lower_expression(arguments[0], context)
             if isinstance(list_value.type, ListType):
-                if isinstance(list_value.type.element, StructType):
-                    self._fail(
-                        f"LLVM/native {list_value.type} contains is unsupported because structural search is not implemented.",
-                        call,
-                    )
+                if ir_eq_capability(list_value.type.element, self._structs) is None:
+                    self._fail(f"{list_value.type}.contains requires Eq({list_value.type.element}).", call)
                 value = self._lower_expression(
                     arguments[1], context, target_type=list_value.type.element
                 )
@@ -1989,11 +1997,8 @@ class IRLowerer:
         if method_name == "indexOf" and len(arguments) == 2:
             list_value = self._lower_expression(arguments[0], context)
             if isinstance(list_value.type, ListType):
-                if isinstance(list_value.type.element, StructType):
-                    self._fail(
-                        f"LLVM/native {list_value.type} indexOf is unsupported because structural search is not implemented.",
-                        call,
-                    )
+                if ir_eq_capability(list_value.type.element, self._structs) is None:
+                    self._fail(f"{list_value.type}.indexOf requires Eq({list_value.type.element}).", call)
                 value = self._lower_expression(
                     arguments[1], context, target_type=list_value.type.element
                 )
@@ -2905,7 +2910,7 @@ class IRLowerer:
             )
 
         if operator in {"eq", "ne"}:
-            if left == right and isinstance(left, _EQUALITY_IR_TYPES):
+            if left == right and ir_eq_capability(left, self._structs) is not None:
                 return BoolType()
             self._fail(
                 f"IR backend does not support equality comparison with operand types '{left}' and '{right}' yet."
@@ -2967,9 +2972,10 @@ class IRLowerer:
     def _is_supported_numeric_cast(source: IRType, target: IRType) -> bool:
         return (
             isinstance(source, IntType)
-            and isinstance(target, DoubleType)
-            or isinstance(source, DoubleType)
-            and isinstance(target, IntType)
+            and isinstance(target, (FloatType, DoubleType))
+            or isinstance(source, (FloatType, DoubleType))
+            and isinstance(target, (IntType, FloatType, DoubleType))
+            and source != target
         )
 
     @staticmethod

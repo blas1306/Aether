@@ -90,6 +90,8 @@ class LLVMTypeLayouts:
             return self._fixed(type_, 1)
         if isinstance(type_, DoubleType):
             return self._fixed(type_, 8)
+        if isinstance(type_, FloatType):
+            return self._fixed(type_, 4)
         if isinstance(type_, StringType):
             rendered = llvm_type(type_)
             size = f"ptrtoint (ptr getelementptr ({rendered}, ptr null, i64 1) to i64)"
@@ -108,8 +110,6 @@ class LLVMTypeLayouts:
             return self._unsupported(
                 type_, "class/interface references are outside the LLVM/native collection subset"
             )
-        if isinstance(type_, FloatType):
-            return self._unsupported(type_, "float is not represented by the current LLVM/native backend")
         if isinstance(type_, ComplexType):
             return self._unsupported(type_, "complex is not represented by the current LLVM/native backend")
         if isinstance(type_, NullableType):

@@ -21,7 +21,7 @@ from aether.instruction_effects import (
     InstructionEffects,
 )
 from aether.scalar_math import scalar_math_may_trap
-from aether.ir.types import IRType, VectorType
+from aether.ir.types import ArrayType, IRType, ListType, MatrixType, StringType, StructType, VectorType
 
 
 @dataclass(frozen=True)
@@ -70,7 +70,12 @@ class SSACompareOp(SSAInstruction):
 
     @property
     def effects(self):
-        return MEMORY_READ if self.aggregate_shape is not None else PURE
+        return (
+            MEMORY_READ
+            if self.aggregate_shape is not None
+            or isinstance(self.left.type, (ArrayType, ListType, MatrixType, StringType, StructType, VectorType))
+            else PURE
+        )
 
 
 @dataclass(frozen=True)

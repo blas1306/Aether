@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from aether.ir.types import ArrayType, BoolType, DoubleType, EnumType, FunctionType, IntType, IRType, ListType, MatrixType, MethodResultType, StringType, StructType, VectorType, VoidType
+from aether.ir.types import ArrayType, BoolType, DoubleType, EnumType, FloatType, FunctionType, IntType, IRType, ListType, MatrixType, MethodResultType, StringType, StructType, VectorType, VoidType
 
 
 class LLVMBackendError(Exception):
@@ -14,6 +14,8 @@ def llvm_type(type_: IRType) -> str:
         return "i32"
     if isinstance(type_, DoubleType):
         return "double"
+    if isinstance(type_, FloatType):
+        return "float"
     if isinstance(type_, VoidType):
         return "void"
     if isinstance(type_, BoolType):

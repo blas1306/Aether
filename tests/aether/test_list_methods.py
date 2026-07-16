@@ -115,7 +115,7 @@ println(empty.indexOf(1));
     assert result.output == "0\n1\n3\n-1\n-1\n"
 
 
-def test_list_index_of_ast_interpreter_uses_scalar_and_reference_equality() -> None:
+def test_list_index_of_ast_interpreter_uses_eq_for_scalars_and_nested_lists() -> None:
     result = run_aether(
         """
 List<double> doubles = {1.5, 2.5};
@@ -132,7 +132,7 @@ println(refs.indexOf(other));
 """
     )
 
-    assert result.output == "1\n1\n1\n0\n-1\n"
+    assert result.output == "1\n1\n1\n0\n0\n"
 
 
 def test_list_clear_method_empties_list() -> None:

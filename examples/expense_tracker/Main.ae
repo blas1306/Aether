@@ -40,6 +40,24 @@ AddTransactionStatus invalidStatus = addTransaction(
 Summary totals = summarize(transactions);
 List<Transaction> expenses = filterByType(transactions, TransactionType.Expense);
 List<Transaction> transactionCopy = transactions.copy();
+boolean copyEquality = transactions == transactionCopy;
+boolean sliceEquality = transactions == transactions[0:2];
+boolean containsTransaction = transactions.contains(Transaction(
+    2,
+    TransactionType.Expense,
+    "Dinner",
+    250.0,
+    "food",
+    "2026-07-15"
+));
+boolean indexTransaction = transactions.indexOf(Transaction(
+    2,
+    TransactionType.Expense,
+    "Dinner",
+    250.0,
+    "food",
+    "2026-07-15"
+)) == 1;
 Transaction editedCopy = transactionCopy[0];
 editedCopy.amount = 999.0;
 transactionCopy[0] = editedCopy;
@@ -58,6 +76,10 @@ println("income total: ", totals.income == 1500.0);
 println("expense total: ", totals.expenses == 250.0);
 println("balance: ", totals.balance == 1250.0);
 println("expense filter: ", expenses.length == 1 && expenses[0].type == TransactionType.Expense);
+println("copy equality: ", copyEquality);
+println("slice equality: ", sliceEquality);
+println("contains transaction: ", containsTransaction);
+println("index transaction: ", indexTransaction);
 println("copy independent: ", transactions[0].amount == 1500.0 && transactionCopy[0].amount == 999.0);
 println("slice independent: ", transactions[0].amount == 1500.0 && transactionSlice[0].amount == 777.0);
 println("empty summary: ", emptyTotals.balance == 0.0);

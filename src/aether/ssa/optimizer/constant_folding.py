@@ -3,7 +3,7 @@ from __future__ import annotations
 from math import trunc
 from typing import Any
 
-from aether.ir.types import DoubleType, IntType, StringType
+from aether.ir.types import DoubleType, FloatType, IntType, StringType
 from aether.integer_arithmetic import checked_int_binary
 from aether.ssa.model import (
     SSABasicBlock,
@@ -250,7 +250,7 @@ class SSAConstantFolder:
 
     @staticmethod
     def _evaluate_cast(value: Any, target_type: object) -> Any:
-        if isinstance(target_type, DoubleType):
+        if isinstance(target_type, (FloatType, DoubleType)):
             return float(value)
         if isinstance(target_type, IntType):
             return trunc(value)
