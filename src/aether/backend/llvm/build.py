@@ -13,6 +13,7 @@ from aether.errors import AetherTypeError
 from aether.pipeline import DEFAULT_SSA_BUILDER, lower_to_verified_ssa
 from aether.capabilities import BackendIdentity, validate_backend_capabilities
 from aether.ssa.optimizer import SSAOptimizerPipeline
+from aether.ssa import SSACall
 
 from .backend import LLVMBackend
 
@@ -45,7 +46,18 @@ class LLVMBuilder:
         validate_backend_capabilities(typed_program, BackendIdentity.NATIVE)
         module = lower_to_verified_ssa(typed_program, builder=DEFAULT_SSA_BUILDER)
         module = SSAOptimizerPipeline(verify_after_each=True).run(module)
-        return self._backend.emit(module)
+        if sys.platform == "win32" and any(
+            isinstance(instruction, SSACall)
+            and instruction.builtin == "System.args"
+            for function in module.functions
+            for block in function.blocks
+            for instruction in block.instructions
+        ):
+            raise LLVMBuildError(
+                "native System.args() is not supported on Windows yet; "
+                "explicit UTF-16 argv conversion is pending."
+            )
+        return self._backend.emit(module, native_entry=True)
 
     def build(
         self,

@@ -215,7 +215,9 @@ def test_llvm_runtime_uses_checked_single_allocation_concat_without_c_string_api
     assert "@llvm.uadd.with.overflow.i64" in helper
     assert helper.count("@llvm.memcpy.p0.p0.i64") == 2
     assert "call void @aether_string_retain" in helper
-    assert "@strlen" not in llvm
+    # strlen is confined to the POSIX argv boundary; Aether string semantics
+    # remain length-aware and the concat helper never calls it.
+    assert "@strlen" not in helper
     assert "@strcat" not in llvm
     assert "@sprintf" not in llvm
 
@@ -229,7 +231,7 @@ def test_native_owned_temporaries_release_after_borrow_and_chain_but_return_tran
         )
     )
     chain = llvm.split("define ptr @chain", 1)[1].split("\n}", 1)[0]
-    main = llvm.split("define i32 @main", 1)[1].split("\n}", 1)[0]
+    main = llvm.split("define i32 @__aether_program_main", 1)[1].split("\n}", 1)[0]
 
     assert chain.count("call ptr @aether_string_concat") == 2
     assert chain.count("call void @aether_string_release") == 1

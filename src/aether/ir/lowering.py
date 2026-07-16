@@ -17,6 +17,7 @@ from ..string_parsing import (
     PARSE_STATUS_VARIANTS,
 )
 from ..string_value import STRING_TRIM_BUILTIN
+from ..process_arguments import PROCESS_ARGS_BUILTIN
 from ..types import (
     AetherType,
     ArrayType as AetherArrayType,
@@ -1841,6 +1842,20 @@ class IRLowerer:
             )
 
         builtin = self._canonical_builtin_name(call.callee)
+        if builtin == PROCESS_ARGS_BUILTIN:
+            if call.arguments:
+                self._fail("System.args() requires zero arguments.", call)
+            result = context.temporary(ArrayType(StringType()))
+            context.block.instructions.append(
+                IRCall(
+                    PROCESS_ARGS_BUILTIN,
+                    (),
+                    result,
+                    PROCESS_ARGS_BUILTIN,
+                    self._source_location(call),
+                )
+            )
+            return result if result_required else None
         if builtin in PARSE_BUILTINS:
             return self._lower_parse_call(call, builtin, context)
         if builtin in NATIVE_SCALAR_MATH_FUNCTIONS:

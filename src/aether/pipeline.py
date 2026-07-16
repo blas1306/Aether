@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Literal, Protocol
 
@@ -81,8 +81,14 @@ class IRBackend:
 
     name: ClassVar[str] = "ir"
 
-    def __init__(self, *, output_writer: Callable[[str], None] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        output_writer: Callable[[str], None] | None = None,
+        program_arguments: Sequence[str] = (),
+    ) -> None:
         self.output_writer = output_writer
+        self.program_arguments = tuple(program_arguments)
         self.output = ""
 
     def lower(self, typed_program: TypedProgram) -> IRModule:
@@ -130,7 +136,11 @@ class IRBackend:
         module = self.lower_verified(typed_program)
         entry = _ir_entry_point(module)
         self.output = ""
-        interpreter = IRInterpreter(module, write_output=self.output_writer)
+        interpreter = IRInterpreter(
+            module,
+            write_output=self.output_writer,
+            program_arguments=self.program_arguments,
+        )
 
         try:
             result = interpreter.call(entry.name)

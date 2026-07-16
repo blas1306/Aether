@@ -44,7 +44,7 @@ def _required(source: str, *, source_root: Path | None = None):
 
 
 def test_profiles_are_versioned_identified_and_cover_the_canonical_catalog() -> None:
-    assert CAPABILITY_PROFILE_VERSION == "16"
+    assert CAPABILITY_PROFILE_VERSION == "17"
     assert AST_CAPABILITY_PROFILE.backend is BackendIdentity.AST
     assert NATIVE_CAPABILITY_PROFILE.backend is BackendIdentity.NATIVE
     assert AST_CAPABILITY_PROFILE.version == CAPABILITY_PROFILE_VERSION
@@ -62,6 +62,14 @@ def test_profiles_are_versioned_identified_and_cover_the_canonical_catalog() -> 
     assert (
         NATIVE_CAPABILITY_PROFILE.support_for(Capability.COLLECTION_OBJECT_LIFECYCLE).state
         is CapabilityState.COMPLETE
+    )
+    assert (
+        AST_CAPABILITY_PROFILE.support_for(Capability.PROCESS_ARGUMENTS).state
+        is CapabilityState.COMPLETE
+    )
+    assert (
+        NATIVE_CAPABILITY_PROFILE.support_for(Capability.PROCESS_ARGUMENTS).state
+        is CapabilityState.PARTIAL
     )
 
 
@@ -208,7 +216,8 @@ def test_native_still_emits_supported_program_and_runs_ssa_verifier(
     monkeypatch.setattr(SSAVerifier, "verify", recording_verify)
     llvm = LLVMBuilder().emit_llvm(_typed("int main() { return 0; }"))
 
-    assert "define i32 @main()" in llvm
+    assert "define i32 @__aether_program_main()" in llvm
+    assert "define i32 @main(i32 %argc, ptr %argv)" in llvm
     assert calls >= 1
 
 

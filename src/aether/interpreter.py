@@ -373,12 +373,14 @@ class Interpreter:
         plot_output_dir: str | Path | None = None,
         output_writer: Callable[[str], None] | None = None,
         input_reader: Callable[[], str] | None = None,
+        program_arguments: tuple[bytes, ...] = (),
     ) -> None:
         self.global_env = Environment()
         self.output_parts: list[str] = []
         self.output_writer = output_writer
         self._uses_default_input_reader = input_reader is None
         self.input_reader = input_reader or sys.stdin.readline
+        self.program_arguments = program_arguments
         self.plot_backend = PlotBackend(
             plot_mode=_default_plot_mode(plot_mode),
             output_dir=_default_plot_output_dir(plot_output_dir),
@@ -386,6 +388,7 @@ class Interpreter:
         self.builtins: dict[str, BuiltinFunction] = make_builtins(
             self._write_output,
             plot_backend=self.plot_backend,
+            program_arguments=self.program_arguments,
         )
         self.builtin_aliases: dict[str, str] = {}
         self.builtin_constant_aliases: dict[str, str] = {}
@@ -2121,6 +2124,7 @@ class Interpreter:
             plot_output_dir=self.plot_backend.output_dir,
             output_writer=self.output_writer,
             input_reader=self.input_reader,
+            program_arguments=self.program_arguments,
         )
         module_interpreter.interpret(program)
         loaded = (program, module_interpreter)

@@ -36,7 +36,7 @@ arquitectura, no capacidades solicitadas directamente por un programa.
 
 ## Perfiles actuales
 
-La versión actual del perfil es `16`. La versión `2` promovió `modules` e
+La versión actual del perfil es `17`. La versión `2` promovió `modules` e
 `imports` de `UNSUPPORTED` a `PARTIAL`; la versión `3` promovió `scalar-math`
 de `UNSUPPORTED` a `PARTIAL` en LLVM/native; la versión `4` incorpora el
 subconjunto de callables top-level tipados y sin captura en ambos backends. La
@@ -85,8 +85,9 @@ structs, colecciones compatibles, imports/aliases y se imprimen como
 input y errores siguen no soportados. Strings, primitivos,
 arithmetic, structs y colecciones quedan parciales porque sus subconjuntos
 compilables son reales pero no cubren toda la superficie AST.
-Archivos y argumentos del proceso están no soportados en ambos perfiles porque
-todavía no son APIs válidas del lenguaje.
+Archivos permanecen no soportados. Los argumentos del proceso son completos en
+AST y native POSIX mediante `System.args()`; el camino native de Windows queda
+limitado hasta incorporar conversión explícita desde UTF-16.
 
 La versión `15` marca completas en AST y native las capacidades
 `string-parsing`, `integer-string-parsing` y `double-string-parsing`. El
@@ -99,6 +100,14 @@ native. El detector la solicita sólo para el método tipado `s.trim()`. La
 capacidad histórica `string-split-trim` permanece unsupported: completar trim
 no declara soporte de split ni de procesamiento Unicode general.
 
+La versión `17` completa `process-arguments` en AST, lo marca `PARTIAL` en
+native por la limitación de plataforma y agrega `cli-argument-forwarding`.
+AST recibe una lista inyectada explícitamente y native POSIX usa un wrapper C
+`main(argc, argv)` que valida UTF-8 antes de invocar el `main()` Aether interno.
+Cada call crea un Array owned independiente; sus efectos de
+lectura/asignación/panic impiden DCE, folding o CSE. Windows no se promociona:
+requiere una frontera wide-char con conversión explícita desde UTF-16.
+
 Para `strings`, el subset native distingue la operación semántica concreta:
 
 - transporte de literales, variables, parámetros, returns, fields y elementos
@@ -108,7 +117,7 @@ Para `strings`, el subset native distingue la operación semántica concreta:
 - interpolación y formatting: rechazados temprano con su nodo y ubicación;
 - parsing numérico explícito: aceptado mediante `parseInt`/`parseDouble`;
 - trimming ASCII explícito: aceptado mediante `s.trim()`;
-- otros productores dinámicos, split, archivos y argumentos: no se
+- otros productores dinámicos, split y archivos: no se
   infieren por la mera presencia de texto y siguen fuera de su capacidad
   propia o sin API de lenguaje.
 

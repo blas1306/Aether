@@ -41,6 +41,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Run Aether language programs.",
         epilog=(
             "The default command compiles and runs with LLVM: aether program.ae\n"
+            "Forward program arguments explicitly: aether run program.ae -- arg1 arg2\n"
             "Development inspection tools: --tokens, --ast, --emit-ir, "
             "--emit-cfg, --emit-ssa, --emit-llvm, build, and bench"
         ),
@@ -194,6 +195,9 @@ def main(
         return _main_bench(argv_list[1:], stdout=stdout, stderr=stderr)
     if argv_list and argv_list[0] == "build":
         return _main_build(argv_list[1:], stdout=stdout, stderr=stderr)
+    if argv_list and argv_list[0] == "run":
+        argv_list = argv_list[1:]
+    argv_list, program_arguments = _split_program_arguments(argv_list)
 
     parser = build_parser()
 
@@ -313,6 +317,7 @@ def main(
             stdin=stdin,
             stdout=stdout,
             stderr=stderr,
+            program_arguments=program_arguments,
         ),
         stderr=stderr,
     )
@@ -435,6 +440,7 @@ def _execute_file(
     stdin: TextIO,
     stdout: TextIO,
     stderr: TextIO,
+    program_arguments: Sequence[str] = (),
 ) -> int:
     if backend == "llvm":
         return _run_native(
@@ -442,6 +448,7 @@ def _execute_file(
             path=path,
             stdout=stdout,
             stderr=stderr,
+            program_arguments=program_arguments,
         )
     if backend == "ast":
         result = run_aether(
@@ -449,10 +456,14 @@ def _execute_file(
             source_root=path.parent,
             output_writer=stdout.write,
             input_reader=stdin.readline,
+            program_arguments=program_arguments,
         )
         return result.exit_code
     if backend == "ir":
-        env = IRBackend(output_writer=stdout.write).run(
+        env = IRBackend(
+            output_writer=stdout.write,
+            program_arguments=program_arguments,
+        ).run(
             prepare_typed_program(
                 source,
                 TypeChecker(source_root=path.parent, entry_path=path),
@@ -571,7 +582,22 @@ def _emit_llvm(source: str, *, path: Path, stdout: TextIO) -> None:
     module = lower_to_verified_ssa(typed_program, builder=DEFAULT_SSA_BUILDER)
     module = SSAOptimizerPipeline(verify_after_each=True).run(module)
     try:
-        llvm_ir = LLVMBackend().emit(module)
+        from .ssa import SSACall
+
+        uses_process_arguments = any(
+            isinstance(instruction, SSACall)
+            and instruction.builtin == "System.args"
+            for function in module.functions
+            for block in function.blocks
+            for instruction in block.instructions
+        )
+        if sys.platform == "win32" and uses_process_arguments:
+            raise AetherRuntimeError(
+                "LLVM/native System.args() is not supported on Windows yet; "
+                "explicit UTF-16 argv conversion is pending.",
+                kind="llvm",
+            )
+        llvm_ir = LLVMBackend().emit(module, native_entry=uses_process_arguments)
     except LLVMBackendError as exc:
         raise AetherRuntimeError(str(exc), kind="llvm") from exc
     print(llvm_ir, file=stdout)
@@ -607,6 +633,7 @@ def _run_native(
     path: Path,
     stdout: TextIO,
     stderr: TextIO,
+    program_arguments: Sequence[str] = (),
 ) -> int:
     from .backend.llvm import LLVMBackendError, LLVMRunError, LLVMRunner
     from .errors import AetherRuntimeError
@@ -616,7 +643,12 @@ def _run_native(
         TypeChecker(source_root=path.parent, entry_path=path),
     )
     try:
-        return LLVMRunner().run(typed_program, stdout=stdout, stderr=stderr)
+        return LLVMRunner().run(
+            typed_program,
+            stdout=stdout,
+            stderr=stderr,
+            program_arguments=program_arguments,
+        )
     except LLVMRunError as exc:
         raise AetherRuntimeError(str(exc), kind="llvm") from exc
     except LLVMBackendError as exc:
@@ -637,6 +669,17 @@ def _optimization_profile_from_args(
     if opt:
         return "O1"
     return "O0"
+
+
+def _split_program_arguments(argv: Sequence[str]) -> tuple[list[str], list[str]]:
+    """Split once at the CLI boundary; shell quoting is already resolved."""
+
+    values = list(argv)
+    try:
+        separator = values.index("--")
+    except ValueError:
+        return values, []
+    return values[:separator], values[separator + 1 :]
 
 
 def _print_ir_trace(trace: list[OptimizationTraceStep], *, stdout: TextIO) -> None:

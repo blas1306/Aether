@@ -64,7 +64,7 @@ La fuente de detalle por etapa es
 | Salida | Parcial | `print`/`println` deben cubrir valores v1 con formato documentado y consistente. |
 | Entrada | Solo AST | `input` tipado debe funcionar en ejecución nativa o quedar reemplazado por una API v1 equivalente explícita. |
 | Archivos | No implementado | Proveer una API mínima y testeada para abrir/cerrar, leer y escribir texto/binario, con errores definidos. |
-| Argumentos del proceso | No implementado | Exponer argumentos y código de salida mediante una API `system` o equivalente; `main` seguirá sin parámetros mientras no cambie la especificación. |
+| Argumentos del proceso | Estable AST/native en POSIX | `System.args()` devuelve un snapshot owned `Array<string>`; `main` sigue sin parámetros y `run file -- ...` reenvía sin reinterpretar quoting. Falta validar el camino UTF-16 de Windows. |
 | Matemática escalar | Parcial, mayormente AST | Seleccionar y llevar a native al menos `sin`, `cos`, `tan`, `sqrt`, `exp`, `log`/`ln`, `abs`, `floor`, `ceil` y constantes acordadas. |
 | Módulos matemáticos | Parcial, AST | Formalizar `math` y un núcleo de `math.linalg`; `math.numerics` puede comenzar como código Aether. No todo el catálogo actual es requisito v1. |
 | Tests del lenguaje | Parcial pero amplio | Cada feature v1 debe tener pruebas positivas, negativas, safety y paridad; los skips deben depender solo de herramientas opcionales conocidas. |

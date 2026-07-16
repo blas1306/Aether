@@ -1885,12 +1885,10 @@ def test_build_accepts_keep_llvm_option(
     )
 
     assert exit_code == EXIT_SUCCESS
-    assert llvm_path.read_text(encoding="utf-8") == (
-        "define i32 @main() {\n"
-        "entry:\n"
-        "  ret i32 5\n"
-        "}"
-    )
+    kept = llvm_path.read_text(encoding="utf-8")
+    assert "define i32 @__aether_program_main()" in kept
+    assert "  ret i32 5" in kept
+    assert "define i32 @main(i32 %argc, ptr %argv)" in kept
     assert f"Built executable: {output.resolve()}\n" in stdout
     assert f"Kept LLVM IR: {llvm_path.resolve()}\n" in stdout
     assert stderr == ""
@@ -1917,12 +1915,10 @@ def test_build_keep_llvm_default_output_uses_build_directory(
     exit_code, stdout, stderr = run_cli(["build", str(program), "--keep-llvm"])
 
     assert exit_code == EXIT_SUCCESS
-    assert llvm_path.read_text(encoding="utf-8") == (
-        "define i32 @main() {\n"
-        "entry:\n"
-        "  ret i32 5\n"
-        "}"
-    )
+    kept = llvm_path.read_text(encoding="utf-8")
+    assert "define i32 @__aether_program_main()" in kept
+    assert "  ret i32 5" in kept
+    assert "define i32 @main(i32 %argc, ptr %argv)" in kept
     assert f"Built executable: {expected_output.resolve()}\n" in stdout
     assert f"Kept LLVM IR: {llvm_path.resolve()}\n" in stdout
     assert stderr == ""

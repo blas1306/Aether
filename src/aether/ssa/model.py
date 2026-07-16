@@ -19,6 +19,7 @@ from aether.instruction_effects import (
     MEMORY_READ,
     MEMORY_READ_MAY_TRAP,
     MUTATING_ALLOCATION,
+    READING_ALLOCATION,
     PURE,
     InstructionEffects,
 )
@@ -97,6 +98,8 @@ class SSACall(SSAInstruction):
 
     @property
     def effects(self):
+        if self.builtin == "System.args":
+            return READING_ALLOCATION
         if self.builtin == "__aether_string_byte_length":
             return MEMORY_READ_MAY_TRAP
         if self.builtin == "__aether_string_trim":

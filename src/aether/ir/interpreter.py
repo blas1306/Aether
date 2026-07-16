@@ -8,6 +8,11 @@ from typing import Any, Callable, NoReturn, Sequence
 from aether.array_safety import checked_array_length_to_int
 from aether.collection_value import CollectionObject, copy_init_value, destroy_value
 from aether.errors import AetherRuntimeError
+from aether.process_arguments import (
+    PROCESS_ARGS_BUILTIN,
+    normalize_program_arguments,
+    process_args_ir_snapshot,
+)
 from aether.integer_arithmetic import checked_int_binary, ieee_divide
 from aether.list_safety import checked_list_index_to_int, checked_list_length_to_int
 from aether.stdlib.registry import call_builtin
@@ -152,12 +157,14 @@ class IRInterpreter:
         module: IRModule,
         *,
         write_output: Callable[[str], None] | None = None,
+        program_arguments: Sequence[str] = (),
     ) -> None:
         self.module = module
         self._functions = {function.name: function for function in module.functions}
         self._structs = {definition.name: definition for definition in module.structs}
         self.output = ""
         self._output_writer = write_output
+        self._program_arguments = normalize_program_arguments(program_arguments)
 
     def call(self, function_name: str, arguments: Sequence[Any] = ()) -> Any:
         """Call an IR function by name using raw Python scalar values."""
@@ -425,6 +432,13 @@ class IRInterpreter:
                 self._value(argument, frame) for argument in instruction.arguments
             ]
             if instruction.builtin is not None:
+                if instruction.builtin == PROCESS_ARGS_BUILTIN:
+                    if arguments or instruction.result is None:
+                        raise IRExecutionError("System.args requires zero arguments and a result")
+                    frame.values[instruction.result] = process_args_ir_snapshot(
+                        self._program_arguments
+                    )
+                    return False, None, None
                 if instruction.builtin == "__aether_string_byte_length":
                     if len(arguments) != 1 or instruction.result is None:
                         raise IRExecutionError("IR string byteLength requires one argument and a result")

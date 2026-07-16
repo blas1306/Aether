@@ -11,5 +11,5 @@ class LLVMBackend:
     def __init__(self, printer: LLVMPrinter | None = None) -> None:
         self._printer = printer or LLVMPrinter()
 
-    def emit(self, module: SSAModule) -> str:
-        return self._printer.print_module(module)
+    def emit(self, module: SSAModule, *, native_entry: bool = False) -> str:
+        return self._printer.print_module(module, native_entry=native_entry)

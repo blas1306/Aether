@@ -27,6 +27,7 @@ class MutationKind(str, Enum):
 class RuntimeContext:
     write_output: OutputWriter
     plot_backend: Any | None = None
+    program_arguments: tuple[bytes, ...] = ()
 
 
 RuntimeFactory = Callable[[RuntimeContext], BuiltinFunction]
@@ -48,8 +49,17 @@ class BuiltinConstantDefinition:
     value: object
 
 
-def make_builtin_registry(write_output: OutputWriter, *, plot_backend: Any | None = None) -> dict[str, BuiltinFunction]:
-    context = RuntimeContext(write_output=write_output, plot_backend=plot_backend)
+def make_builtin_registry(
+    write_output: OutputWriter,
+    *,
+    plot_backend: Any | None = None,
+    program_arguments: tuple[bytes, ...] = (),
+) -> dict[str, BuiltinFunction]:
+    context = RuntimeContext(
+        write_output=write_output,
+        plot_backend=plot_backend,
+        program_arguments=program_arguments,
+    )
     return {name: definition.make_runtime(context) for name, definition in _definitions().items()}
 
 
@@ -60,8 +70,17 @@ def make_builtin_constants() -> dict[str, AetherValue]:
     }
 
 
-def make_builtins(write_output: OutputWriter, *, plot_backend: Any | None = None) -> dict[str, BuiltinFunction]:
-    return make_builtin_registry(write_output, plot_backend=plot_backend)
+def make_builtins(
+    write_output: OutputWriter,
+    *,
+    plot_backend: Any | None = None,
+    program_arguments: tuple[bytes, ...] = (),
+) -> dict[str, BuiltinFunction]:
+    return make_builtin_registry(
+        write_output,
+        plot_backend=plot_backend,
+        program_arguments=program_arguments,
+    )
 
 
 def get_builtin(name: str, write_output: OutputWriter, *, plot_backend: Any | None = None) -> BuiltinFunction | None:

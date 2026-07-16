@@ -20,6 +20,8 @@ curso.
   `for-in` con borrow no-owning por elemento en AST, IR, SSA y LLVM/native.
 - `string.trim()` end-to-end con whitespace ASCII exacto, fast paths ARC,
   preservación de UTF-8/NUL y paridad AST/IR/SSA/LLVM en O0/O1/O2.
+- `System.args()` end-to-end con snapshots owned `Array<string>`, forwarding
+  después de `--`, inyección AST/IR y wrapper native `main(argc, argv)` POSIX.
 
 ### Changed
 
@@ -29,6 +31,8 @@ curso.
   `borrowed-for-in-elements`.
 - El perfil de capacidades 16 agrega `string-trim`; parsing numérico conserva
   su gramática estricta y requiere trim explícito.
+- El perfil 17 agrega `process-arguments` y `cli-argument-forwarding`; Expense
+  Tracker consume comandos reales sin cambiar la firma pública de `main`.
 
 ### Notes
 

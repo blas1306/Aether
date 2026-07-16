@@ -7,7 +7,9 @@ from Ledger import AddTransactionStatus;
 from Ledger import addTransaction;
 from Transaction import Transaction;
 from Transaction import TransactionType;
+import System;
 
+void runDemo() {
 List<Transaction> transactions = {};
 
 string rawExpenseId = " 2 ";
@@ -105,3 +107,73 @@ println("dynamic label: ", expenseLabel == "food: Dinner");
 println("label byte length: ", expenseLabel.byteLength == 12);
 println("transactions:");
 printTransactions(transactions);
+}
+
+List<Transaction> demoTransactions() {
+    List<Transaction> transactions = {};
+    addTransaction(transactions, 1, TransactionType.Income, "Salary", 1500.0, "work", "2026-07-01");
+    addTransaction(transactions, 2, TransactionType.Expense, "Dinner", 250.0, "food", "2026-07-15");
+    return transactions;
+}
+
+int runCommand(Array<string> args) {
+    if args[0] == "list" {
+        printTransactions(demoTransactions());
+        return 0;
+    }
+    if args[0] == "summary" {
+        Summary totals = summarize(demoTransactions());
+        println("income: ", totals.income);
+        println("expenses: ", totals.expenses);
+        println("balance: ", totals.balance);
+        return 0;
+    }
+    if args[0] == "add" {
+        if args.length < 6 {
+            println("insufficient arguments: add <expense|income> <id> <amount> <category> <description>");
+            return 2;
+        }
+        IntParseResult parsedId = parseInt(args[2].trim());
+        if parsedId.status != ParseStatus.Success {
+            println("invalid ID: ", args[2]);
+            return 2;
+        }
+        DoubleParseResult parsedAmount = parseDouble(args[3].trim());
+        if parsedAmount.status != ParseStatus.Success || parsedAmount.value <= 0.0 {
+            println("invalid amount: ", args[3]);
+            return 2;
+        }
+        TransactionType type = TransactionType.Expense;
+        if args[1] == "income" {
+            type = TransactionType.Income;
+        } else {
+            if args[1] != "expense" {
+                println("unknown transaction type: ", args[1]);
+                return 2;
+            }
+        }
+        List<Transaction> transactions = {};
+        AddTransactionStatus status = addTransaction(
+            transactions, parsedId.value, type, args[5].trim(), parsedAmount.value,
+            args[4].trim(), "current-process"
+        );
+        if status != AddTransactionStatus.Added {
+            println("invalid amount: ", args[3]);
+            return 2;
+        }
+        println("transaction added: ", transactionLabel(transactions[0]));
+        println("note: transactions are not persisted between processes");
+        return 0;
+    }
+    println("unknown command: ", args[0]);
+    return 2;
+}
+
+int main() {
+    Array<string> args = System.args();
+    if args.length == 0 {
+        runDemo();
+        return 0;
+    }
+    return runCommand(args);
+}

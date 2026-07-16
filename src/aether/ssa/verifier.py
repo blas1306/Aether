@@ -36,6 +36,7 @@ from aether.string_parsing import (
     PARSE_INT_BUILTIN,
 )
 from aether.string_value import STRING_TRIM_BUILTIN
+from aether.process_arguments import PROCESS_ARGS_BUILTIN
 
 from .model import (
     SSAArrayCopy,
@@ -778,6 +779,16 @@ class SSAVerifier:
         if instruction.builtin is not None:
             for argument in instruction.arguments:
                 self._require_defined(argument, value_types)
+            if instruction.builtin == PROCESS_ARGS_BUILTIN:
+                if instruction.function != PROCESS_ARGS_BUILTIN:
+                    self._fail("Process-arguments builtin must retain its canonical semantic name")
+                if (
+                    instruction.result is None
+                    or instruction.arguments
+                    or instruction.result.type != ArrayType(StringType())
+                ):
+                    self._fail("System.args builtin requires () -> owned array<string>")
+                return
             if instruction.builtin == "__aether_string_byte_length":
                 if instruction.function != instruction.builtin:
                     self._fail("String byte-length builtin must retain its canonical semantic name")

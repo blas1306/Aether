@@ -10,19 +10,27 @@ todavía una aplicación financiera persistente.
 - `Transaction.ae`: enum y struct nominal del dominio; la fecha es `string`.
 - `Ledger.ae`: alta validada en `List<Transaction>`.
 - `Reports.ae`: resumen, filtro e impresión mediante `for-in`.
-- `Main.ae`: demostración completa en memoria y sus validaciones de dominio,
-  collections y strings dinámicas.
+- `Main.ae`: CLI mínima y demostración completa en memoria con validaciones de
+  dominio, collections y strings dinámicas.
 
 ## AST y native
 
 Desde la raíz del repositorio:
 
 ```bash
-aether --backend=ast examples/expense_tracker/Main.ae
-aether --backend=native examples/expense_tracker/Main.ae
+aether run examples/expense_tracker/Main.ae
+aether run examples/expense_tracker/Main.ae -- add expense 3 19.95 food "Lunch with friends"
+aether run examples/expense_tracker/Main.ae -- add income 4 100.0 work "Side project"
+aether run examples/expense_tracker/Main.ae -- list
+aether run examples/expense_tracker/Main.ae -- summary
 ```
 
-El mismo programa completo funciona en ambos backends. LLVM almacena cada
+Sin argumentos se ejecuta el dogfood histórico completo. Con argumentos,
+`System.args()` entrega el comando y sus operandos como un snapshot
+`Array<string>`; `--` pertenece al CLI de Aether y no llega al programa. El
+shell conserva una descripción entre comillas como un único argumento.
+
+El mismo programa completo funciona en AST y native. LLVM almacena cada
 `Transaction` por valor en un buffer contiguo, obtiene su tamaño del layout del
 target y conserva los handles de sus valores `string` durante get/set,
 crecimiento y filtrado mediante los hooks ARC de elemento. Ya no hace falta un
@@ -53,10 +61,15 @@ Las Fases 4–5 hacen `const` read-only por alias y convierten los recorridos de
 `Transaction`; `matches.push(transaction)` es la adquisición owning normal que
 copia el struct y retiene sus strings.
 
+Cada proceso parte de una lista nueva. `add` demuestra validación y construcción
+de la transacción, pero no persiste el alta; `list` y `summary` operan sobre dos
+transacciones de demostración creadas en esa ejecución.
+
 ## Límites deliberados
 
-- No hay argumentos de proceso ni `main(args)`.
-- No hay archivos, CSV, `split` o `trim`.
+- `main` continúa siendo `int main()`; los argumentos se consultan con
+  `System.args()`.
+- No hay archivos, CSV ni `split`.
 - No hay conversiones implícitas ni otras APIs generales de texto.
 - Las fechas no se validan ni se ordenan.
 - No se agregaron excepciones, GC ni destructores.

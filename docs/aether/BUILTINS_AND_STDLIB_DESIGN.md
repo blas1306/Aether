@@ -91,7 +91,16 @@ salida del crecimiento posterior.
 | `text` | strings, búsqueda, split/join y conversión | runtime string | encoding definido, `byteLength`, concat, igualdad y `trim` ASCII | split/join, substring, slicing/views, regex, normalización Unicode completa | algoritmos sobre iteración de code units/points | representación, allocation, trim básico, decoding/encoding |
 | `collections` | colecciones generales | generics, equality; hashing para Map/Set | APIs derivadas de Array/List que se seleccionen | Map, Set, Queue, Stack si hashing/generics no están listos | la mayoría de algoritmos y estructuras | allocation y primitivas Array/List |
 | `time` | reloj monotónico, fecha/duración mínima | `system` | reloj monotónico para medición | zonas horarias, calendarios | Duration y formato parcial | clocks del SO |
-| `system` | proceso, args, entorno, exit, plataforma | runtime/ABI C | argumentos, código de salida, variables de entorno seleccionadas | procesos hijos completos | wrappers y validación | llamadas del SO/libc |
+| `System` (compatibilidad actual; futuro `system`) | proceso, args, entorno, exit, plataforma | runtime/ABI C | `args()`; código de salida ya proviene de `main` | entorno, plataforma y procesos hijos | wrappers y validación | frontera `argc/argv` POSIX; UTF-16 pendiente en Windows |
+
+### API de argumentos consolidada
+
+`import System; System.args()` es el builtin namespaced actual. Acepta cero
+argumentos y devuelve exactamente `Array<string>`. Cada llamada asigna un
+snapshot nuevo (`O(argc)`): mutar un resultado no afecta llamadas posteriores.
+El array posee strings UTF-8 copiados de la frontera del proceso y participa en
+el lifecycle normal de Array/string. No expone `argc`, `argv`, environment,
+stdin ni parsing de flags.
 | `testing` | asserts, suites y resultados | `io`, errores | `assert`, comparación y runner reproducible | property testing, mocks | casi todo | exit code/stack mínimo opcional |
 | `math` | escalares, constantes y utilidades numéricas | LLVM/`libm` | núcleo escalar y `PI`; decidir `E` | funciones especiales | composición y wrappers | intrinsics/`libm` para primitivas |
 | `math.linalg` | álgebra lineal de Vector/Matrix | math, storage contiguo, BLAS/LAPACK opcional | operaciones básicas y un contrato de shapes | eig/SVD/factorizaciones amplias | validación, algoritmos pequeños, dispatch | kernels, FFI y allocations eficientes |

@@ -43,6 +43,8 @@ imprime `25`.
 - `int` checked de 32 bits, `double`, `boolean`, funciones tipadas y `void`;
 - `if`, `while`, rangos, `for-in`, `break`, `continue` y short-circuit;
 - entry point explícito `int main()` o script normalizado a `main`;
+- argumentos de proceso mediante snapshots owned `System.args()` y forwarding
+  del CLI después de `--`;
 - structs por valor, constructores, métodos, `this`, copia, igualdad e
   impresión para el subconjunto de campos soportado por backend;
 - núcleo compilado de Array/List con bounds, overflow y allocation checks;
@@ -55,8 +57,8 @@ congelada, seguridad para producción ni v1 terminada.
 
 ### Parcial
 
-- strings: los literales pueden fluir e imprimirse en native, pero concat,
-  igualdad general, interpolación, encoding y ownership no están completos;
+- strings: transporte UTF-8 owned, concatenación, igualdad, `byteLength`, trim
+  y parsing están en AST/native; interpolación y formatting siguen parciales;
 - Vector/Matrix: el núcleo es native, la mayor parte de `Math.LinearAlgebra`
   sigue en AST;
 - casts y `%`: native cubre `int <-> double` y remainder entero, no toda la
@@ -84,7 +86,7 @@ compilación nativa completa.
 ### Planeado
 
 - globals/inicialización de módulos y tipos de referencia en native;
-- runtime string, input native, archivos y argumentos del proceso;
+- input native, archivos y environment variables;
 - módulo `testing` y una stdlib Aether distribuible;
 - frontera futura de interoperabilidad por ABI C.
 
@@ -121,6 +123,16 @@ Ejecutar un archivo con el backend predeterminado LLVM/native:
 ```bash
 aether examples/llvm/gcd_iterative.ae
 ```
+
+Pasar argumentos al programa (el shell ya resuelve quoting):
+
+```bash
+aether run program.ae -- add "Dinner with friends"
+```
+
+El programa consulta `System.args()` tras `import System;`. El array no incluye
+el ejecutable, `run`, el archivo ni `--`. Sin separador se entregan cero
+argumentos.
 
 Ejecutar la superficie más amplia con el intérprete AST:
 
@@ -181,9 +193,10 @@ La ejecución temporal propaga stdout, stderr y exit code y elimina sus
 artefactos. `aether build` conserva el ejecutable; `--keep-llvm` conserva
 también el `.ll`.
 
-El runtime LLVM actual aporta IO y helpers checked para aritmética entera,
-allocations, Array, List, Vector, Matrix, sort y ciertos agregados. No tiene GC,
-ownership completo de strings/classes ni FFI pública.
+El runtime LLVM actual aporta IO, contexto de argumentos y helpers checked para
+aritmética entera, strings UTF-8, allocations, Array, List, Vector, Matrix,
+sort y ciertos agregados. No tiene GC, ownership completo de classes ni FFI
+pública.
 
 ## Herramientas del compilador
 

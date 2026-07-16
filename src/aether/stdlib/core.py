@@ -11,6 +11,7 @@ from ..equality import aether_values_equal
 from ..formatting import format_value
 from ..integer_arithmetic import INT_MAX, INT_MIN, INTEGER_OVERFLOW_MESSAGE
 from ..list_safety import checked_list_index_to_int, checked_list_length_to_int
+from ..process_arguments import PROCESS_ARGS_BUILTIN, PROCESS_ARGS_TYPE, process_args_snapshot
 from ..scalar_math import SCALAR_MATH_CONSTANTS
 from ..string_parsing import (
     DOUBLE_PARSE_RESULT_TYPE,
@@ -68,6 +69,12 @@ def builtin_definitions() -> list[BuiltinDefinition]:
     definitions = [
         BuiltinDefinition("print", _make_print_runtime, _print_type),
         BuiltinDefinition("println", _make_println_runtime, _print_type),
+        BuiltinDefinition(
+            PROCESS_ARGS_BUILTIN,
+            _make_process_args_runtime,
+            _process_args_type,
+            _exactly_zero(PROCESS_ARGS_BUILTIN),
+        ),
         BuiltinDefinition("input", _constant_runtime(_input_runtime), _input_type, _zero_or_one("input")),
         BuiltinDefinition("length", _constant_runtime(length_builtin), _length_type, _exactly_one("length")),
         BuiltinDefinition("is_empty", _constant_runtime(is_empty_builtin), _is_empty_type, _exactly_one("is_empty")),
@@ -226,6 +233,27 @@ def _constant_runtime(function: BuiltinFunction) -> RuntimeFactory:
         return function
 
     return factory
+
+
+def _make_process_args_runtime(context: RuntimeContext) -> BuiltinFunction:
+    def process_args_runtime(_args: list[AetherValue]) -> AetherValue:
+        return process_args_snapshot(context.program_arguments)
+
+    return process_args_runtime
+
+
+def _process_args_type(arg_types: list[AetherType | None]) -> AetherType:
+    if arg_types:
+        raise AetherTypeError("System.args() expects zero arguments.")
+    return PROCESS_ARGS_TYPE
+
+
+def _exactly_zero(label: str):
+    def validate(arg_count: int) -> None:
+        if arg_count != 0:
+            raise AetherTypeError(f"{label}() expects zero arguments.")
+
+    return validate
 
 
 def _exactly_one(label: str):

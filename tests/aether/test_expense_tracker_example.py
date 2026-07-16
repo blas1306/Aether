@@ -56,6 +56,39 @@ def test_expense_tracker_ast_covers_ledger_reports_filtering_and_listing() -> No
     assert result.output.splitlines() == MAIN_OUTPUT
 
 
+def test_expense_tracker_consumes_real_add_arguments_without_persistence() -> None:
+    result = run_aether(
+        _source("Main.ae"),
+        source_root=EXAMPLE,
+        program_arguments=[
+            "add", "expense", " 3 ", "19.95", " food ", " Lunch with friends "
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert result.output.splitlines() == [
+        "transaction added: food: Lunch with friends",
+        "note: transactions are not persisted between processes",
+    ]
+
+
+def test_expense_tracker_reports_expected_cli_errors() -> None:
+    cases = [
+        (["add", "expense"], "insufficient arguments:"),
+        (["add", "expense", "bad", "2.0", "food", "Dinner"], "invalid ID: bad"),
+        (["add", "expense", "1", "bad", "food", "Dinner"], "invalid amount: bad"),
+        (["unknown"], "unknown command: unknown"),
+    ]
+    for arguments, expected in cases:
+        result = run_aether(
+            _source("Main.ae"),
+            source_root=EXAMPLE,
+            program_arguments=arguments,
+        )
+        assert result.exit_code == 2
+        assert result.output.startswith(expected)
+
+
 def test_expense_tracker_for_in_transaction_is_read_only() -> None:
     source = """
 from Transaction import Transaction;

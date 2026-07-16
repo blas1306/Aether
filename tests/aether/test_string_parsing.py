@@ -254,7 +254,10 @@ def test_parsing_survives_optimizers_and_real_clang(profile: str, tmp_path: Path
     assert "call %struct.IntParseResult @aether_parse_int" in llvm
     assert "call %struct.DoubleParseResult @aether_parse_double" in llvm
     assert "@strtod_l" in llvm and "@newlocale" in llvm
-    assert "@strlen" not in llvm
+    parse_int = llvm.split("define private %struct.IntParseResult @aether_parse_int", 1)[1].split("\n}", 1)[0]
+    parse_double = llvm.split("define private %struct.DoubleParseResult @aether_parse_double", 1)[1].split("\n}", 1)[0]
+    assert "@strlen" not in parse_int
+    assert "@strlen" not in parse_double
 
     llvm_path = tmp_path / f"string-parsing-{profile}.ll"
     executable = tmp_path / f"string-parsing-{profile}"
@@ -279,7 +282,10 @@ def test_native_runtime_is_length_aware_and_uses_explicit_c_locale() -> None:
     assert '@.aether.locale.c' in llvm
     assert "call ptr @newlocale(i32 2" in llvm
     assert "call double @strtod_l" in llvm
-    assert "@strlen" not in llvm
+    parse_int = llvm.split("define private %struct.IntParseResult @aether_parse_int", 1)[1].split("\n}", 1)[0]
+    parse_double = llvm.split("define private %struct.DoubleParseResult @aether_parse_double", 1)[1].split("\n}", 1)[0]
+    assert "@strlen" not in parse_int
+    assert "@strlen" not in parse_double
 
 
 def test_parse_results_cross_module_boundaries_in_ast_and_native(tmp_path: Path) -> None:

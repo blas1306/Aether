@@ -244,7 +244,7 @@ def test_llvm_trim_helper_is_length_aware_owned_and_has_exact_fast_paths() -> No
     assert "call void @aether_string_retain(ptr %value)" in helper
     assert "ret ptr @.aether.string.empty" in helper
     assert "call ptr @aether_string_from_utf8" in helper
-    assert "@strlen" not in llvm and "@isspace" not in llvm
+    assert "@strlen" not in helper and "@isspace" not in helper
 
 
 @pytest.mark.skipif(shutil.which("clang") is None, reason="clang is required")

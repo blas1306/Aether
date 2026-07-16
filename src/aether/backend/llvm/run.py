@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+from collections.abc import Sequence
 from typing import BinaryIO, TextIO
 
 from .build import LLVMBuildError, LLVMBuilder
@@ -25,6 +26,7 @@ class LLVMRunner:
         *,
         stdout: TextIO | BinaryIO | None = None,
         stderr: TextIO | BinaryIO | None = None,
+        program_arguments: Sequence[str] = (),
     ) -> int:
         suffix = ".exe" if os.name == "nt" else ""
         with tempfile.TemporaryDirectory(prefix="aether-run-") as temporary_dir:
@@ -42,6 +44,7 @@ class LLVMRunner:
                 executable_path,
                 stdout=stdout,
                 stderr=stderr,
+                program_arguments=program_arguments,
             )
 
     def _run_executable(
@@ -50,6 +53,7 @@ class LLVMRunner:
         *,
         stdout: TextIO | BinaryIO | None,
         stderr: TextIO | BinaryIO | None,
+        program_arguments: Sequence[str] = (),
     ) -> int:
         stdout_target = _subprocess_stream(stdout)
         stderr_target = _subprocess_stream(stderr)
@@ -58,7 +62,7 @@ class LLVMRunner:
 
         try:
             completed = subprocess.run(
-                [str(executable_path)],
+                [str(executable_path), *program_arguments],
                 check=False,
                 stdout=subprocess.PIPE if capture_stdout else stdout_target,
                 stderr=subprocess.PIPE if capture_stderr else stderr_target,

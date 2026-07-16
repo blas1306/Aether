@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from .pipeline import TypedProgram
 
 
-CAPABILITY_PROFILE_VERSION = "16"
+CAPABILITY_PROFILE_VERSION = "17"
 
 
 class BackendIdentity(str, Enum):
@@ -76,6 +76,7 @@ class Capability(str, Enum):
     PRINT = "print"
     INPUT = "input"
     PROCESS_ARGUMENTS = "process-arguments"
+    CLI_ARGUMENT_FORWARDING = "cli-argument-forwarding"
     MODULES = "modules"
     IMPORTS = "imports"
     STRUCTS = "structs"
@@ -189,6 +190,10 @@ CAPABILITY_CATALOG: Mapping[Capability, CapabilityDefinition] = MappingProxyType
             _definition(Capability.PRINT, "print and println output."),
             _definition(Capability.INPUT, "Typed input calls."),
             _definition(Capability.PROCESS_ARGUMENTS, "Access to process arguments."),
+            _definition(
+                Capability.CLI_ARGUMENT_FORWARDING,
+                "CLI forwarding after the first -- separator.",
+            ),
             _definition(Capability.MODULES, "Package and module units."),
             _definition(Capability.IMPORTS, "Module and symbol imports."),
             _definition(Capability.STRUCTS, "Struct values and fields."),
@@ -259,7 +264,6 @@ def _profile(
 
 
 _AST_UNSUPPORTED = {
-    Capability.PROCESS_ARGUMENTS,
     Capability.GENERICS,
     Capability.FILES,
     Capability.OPTIMIZATION_PROFILES,
@@ -303,6 +307,7 @@ _NATIVE_COMPLETE = {
     Capability.INTEGER_STRING_PARSING,
     Capability.DOUBLE_STRING_PARSING,
     Capability.STRING_TRIM,
+    Capability.CLI_ARGUMENT_FORWARDING,
     Capability.COLLECTION_OBJECT_LIFECYCLE,
     Capability.CONST_COLLECTION_REFERENCES,
     Capability.BORROWED_FOR_IN_ELEMENTS,
@@ -311,7 +316,6 @@ _NATIVE_COMPLETE = {
 }
 _NATIVE_UNSUPPORTED = {
     Capability.INPUT,
-    Capability.PROCESS_ARGUMENTS,
     Capability.CLASSES,
     Capability.CLASS_CONSTRUCTORS,
     Capability.CLASS_METHODS,
@@ -377,6 +381,8 @@ E2E_TESTED_CAPABILITIES: Mapping[BackendIdentity, frozenset[Capability]] = Mappi
                 Capability.INTEGER_STRING_PARSING,
                 Capability.DOUBLE_STRING_PARSING,
                 Capability.STRING_TRIM,
+                Capability.PROCESS_ARGUMENTS,
+                Capability.CLI_ARGUMENT_FORWARDING,
                 Capability.PRINT,
                 Capability.INPUT,
                 Capability.MODULES,
@@ -421,6 +427,8 @@ E2E_TESTED_CAPABILITIES: Mapping[BackendIdentity, frozenset[Capability]] = Mappi
                 Capability.INTEGER_STRING_PARSING,
                 Capability.DOUBLE_STRING_PARSING,
                 Capability.STRING_TRIM,
+                Capability.PROCESS_ARGUMENTS,
+                Capability.CLI_ARGUMENT_FORWARDING,
                 Capability.COLLECTION_OBJECT_LIFECYCLE,
                 Capability.CONST_COLLECTION_REFERENCES,
                 Capability.BORROWED_FOR_IN_ELEMENTS,
@@ -823,6 +831,12 @@ class _CapabilityDetector:
                 else Capability.DOUBLE_STRING_PARSING,
                 call,
                 requires_complete_support=True,
+            )
+        if canonical == "System.args":
+            self._record(
+                Capability.PROCESS_ARGUMENTS,
+                call,
+                detail="owned Array<string> process snapshot",
             )
         if canonical in {"copy", "contains", "index_of"} and call.arguments:
             self._record_collection_operation(

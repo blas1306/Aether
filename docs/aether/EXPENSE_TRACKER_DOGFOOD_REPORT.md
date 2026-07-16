@@ -1,5 +1,13 @@
 # Informe de dogfooding generalista: expense tracker
 
+Actualización argumentos (perfil 17): `Main.ae` conserva el escenario de
+validación histórico sin argumentos y agrega una CLI mínima basada en
+`System.args()`: `add expense`, `add income`, `list` y `summary`. ID y monto
+usan `trim`, `parseInt` y `parseDouble`; errores esperables retornan `2` con
+diagnósticos de cantidad, comando/tipo, ID o monto. Cada proceso crea su propia
+`List<Transaction>`: no hay persistencia, archivos, environment, stdin, split,
+parser de shell ni framework general de subcomandos.
+
 Actualización 15-07-2026: el ejemplo completo conserva paridad AST/native tras
 la migración de string. `List<Transaction>` atraviesa múltiples `push`, growth,
 filtros, returns, módulos, enum fields, igualdad e impresión con hooks

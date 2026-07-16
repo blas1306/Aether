@@ -2296,6 +2296,7 @@ Aether v0 recognizes these builtins:
 - `Math.LinearAlgebra.N(A)`
 - `Math.LinearAlgebra.R(A)`
 - `Math.LinearAlgebra.rank(A)`
+- `System.args()` (requiere `import System;`)
 
 Side-effect builtins such as `print(...)`, `println(...)`, and plotting commands return `void`, except `savefig(...)`, which returns the output path as a `string`.
 - `int(...)`
@@ -2389,6 +2390,14 @@ IR module. Globals/constants and executable top-level statements in imported
 modules remain AST-only and receive an early capability diagnostic; native does
 not invent module initialization semantics for them.
 
+Process arguments do not change this signature. After `import System;`,
+`System.args()` accepts zero arguments and returns a fresh owned
+`Array<string>` snapshot in process order. Each call creates an independent
+mutable Array and independently owned string objects, in `O(argc)` time.
+Arguments are UTF-8 and never include the executable name. Process transports
+cannot represent embedded NUL; this is an operating-system boundary, not a
+restriction on ordinary Aether strings.
+
 ## Script and Session Execution
 
 `run_aether(source)` executes in a fresh Aether session each time, so globals do not persist across calls.
@@ -2405,6 +2414,16 @@ operation:
 ```bash
 aether hello.ae
 ```
+
+The explicit run spelling and program-argument separator are:
+
+```bash
+aether run hello.ae -- one "two words" --flag
+```
+
+Only the values after the first `--` reach `System.args()`. Aether does not
+reparse shell quoting or interpret those values as compiler flags. Without
+`--`, the program receives zero arguments.
 
 This executes the same canonical pipeline used by `AetherSession`. A persistent
 interactive session is available with:

@@ -83,7 +83,8 @@ def test_ir_combines_transitive_selective_and_aliased_calls(tmp_path: Path) -> N
     ]
     llvm = LLVMBuilder().emit_llvm(typed)
     assert "define private i32 @__ae_m1_C__function_4_base" in llvm
-    assert "define i32 @main()" in llvm
+    assert "define i32 @__aether_program_main()" in llvm
+    assert "define i32 @main(i32 %argc, ptr %argv)" in llvm
 
 
 def test_diamond_dependency_is_lowered_exactly_once(tmp_path: Path) -> None:

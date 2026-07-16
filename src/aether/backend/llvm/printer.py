@@ -93,6 +93,8 @@ from .runtime_common import LLVMRuntimeCommon, aggregate_helper_suffix
 from .scalar_math_runtime import LLVMScalarMathRuntime
 from .vector_runtime import LLVMVectorRuntime
 from .string_runtime import LLVMStringRuntime
+from .process_runtime import LLVMProcessRuntime
+from aether.process_arguments import PROCESS_ARGS_BUILTIN
 
 
 @dataclass(frozen=True)
@@ -139,7 +141,12 @@ class LLVMPrinter:
     _IDENTIFIER_RE = re.compile(r"^[A-Za-z_$._][A-Za-z0-9_$._-]*$")
     _LIST_STRUCT_TYPE = "%AetherList"
 
-    def print_module(self, module: SSAModule) -> str:
+    def print_module(self, module: SSAModule, *, native_entry: bool = False) -> str:
+        self._native_entry = native_entry
+        self._entry_symbol = "__aether_program_main"
+        occupied_symbols = {function.name for function in module.functions if function.name != "main"}
+        while self._entry_symbol in occupied_symbols:
+            self._entry_symbol += "_entry"
         self._string_globals_by_value: dict[str, _StringGlobal] = {}
         self._next_string_global = 0
         self._uses_array_type = False
@@ -167,7 +174,9 @@ class LLVMPrinter:
         self._list_contains_types: set[object] = set()
         self._list_index_of_types: set[object] = set()
         self._uses_print = False
-        self._uses_string_runtime = False
+        self._uses_string_runtime = native_entry
+        self._uses_process_context = native_entry
+        self._uses_process_arguments = False
         self._uses_string_parsing = False
         self._checked_int_operators: set[str] = set()
         self._scalar_math_calls: set[tuple[str, tuple[object, ...], object]] = set()
@@ -338,6 +347,10 @@ class LLVMPrinter:
             enabled=self._uses_string_runtime,
             parsing=self._uses_string_parsing,
         ).append(runtime)
+        LLVMProcessRuntime(
+            self._uses_process_context or self._uses_process_arguments,
+            snapshots=self._uses_process_arguments,
+        ).append(runtime)
         globals_ = [
             rendered
             for global_ in self._string_globals_by_value.values()
@@ -346,7 +359,12 @@ class LLVMPrinter:
         # Named aggregate bodies must precede every helper that performs a
         # typed GEP/load.  This also makes collection layout independent of
         # which user function happened to mention a struct first.
-        sections = struct_types + runtime + globals_ + functions
+        wrappers = (
+            [LLVMProcessRuntime.entry_wrapper(self._entry_symbol)]
+            if native_entry
+            else []
+        )
+        sections = struct_types + runtime + globals_ + functions + wrappers
         return "\n\n".join(sections)
 
     def _print_function(self, function: SSAFunction) -> str:
@@ -1146,6 +1164,19 @@ class LLVMPrinter:
         return f"br {self._label_operand(instruction.target)}"
 
     def _print_call(self, instruction: SSACall) -> str:
+        if instruction.builtin == PROCESS_ARGS_BUILTIN:
+            if (
+                instruction.result is None
+                or instruction.arguments
+                or instruction.result.type != ArrayType(StringType())
+            ):
+                raise LLVMBackendError("LLVM System.args requires () -> owned Array<string>")
+            self._uses_process_arguments = True
+            self._uses_array_type = True
+            self._uses_array_allocation = True
+            self._uses_string_runtime = True
+            result = self._new_temp(instruction.result)
+            return f"{result} = call ptr @aether_process_args_snapshot()"
         if instruction.builtin == STRING_TRIM_BUILTIN:
             if (
                 instruction.result is None
@@ -3889,11 +3920,12 @@ class LLVMPrinter:
             return raw
         raise LLVMBackendError(f"LLVM backend does not support block label '{name}'")
 
-    @staticmethod
-    def _global_name(name: str) -> str:
+    def _global_name(self, name: str) -> str:
         raw = name[1:] if name.startswith("@") else name
         if not raw:
             raise LLVMBackendError("LLVM backend does not support empty function names")
+        if self._native_entry and raw == "main":
+            return f"@{self._entry_symbol}"
         return f"@{raw}"
 
     @staticmethod

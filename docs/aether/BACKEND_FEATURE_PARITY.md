@@ -35,6 +35,11 @@ AST/IR/SSA/LLVM, recorta exactamente seis whitespace ASCII, conserva NUL,
 UTF-8 y espacios no ASCII, y mantiene fast paths/ownership en O0/O1/O2. Parsing
 sigue estricto y sólo acepta whitespace tras un `trim()` explícito.
 
+Actualización perfil 17 (15-07-2026): `System.args()` y el forwarding posterior
+a `--` son E2E en AST/IR/SSA/LLVM/native POSIX. El wrapper nativo valida todo
+`argv` como UTF-8 antes del `main()` Aether interno; cada call produce un
+`Array<string>` owned e independiente. Windows/UTF-16 queda pendiente.
+
 Última revisión: 15 de julio de 2026, incluyendo enums native y los ejemplos
 dogfood de métodos numéricos y expense tracker. Este documento reemplaza como
 referencia canónica a la auditoría histórica de `docs/compiler/`.
@@ -163,7 +168,7 @@ representación y lifecycle ya están activos en esta matriz.
 | Print Array/List | llamada | C | C | C | P tipos | N general | N | N | N | N | N | N | AST | AST | P | Solo AST | Struct con campos Array/List escalares tiene helper específico, no print general de la colección. |
 | Print Struct/Vector/Matrix | llamada | C | C | C | C subset | C subset | C | C | C | C | C | C subset | helpers | E2E | P | Parcial | Shape/tipos de campos limitan el subconjunto struct. |
 | `input` tipado | C nodo dedicado | C | C por contexto | C | N | N | N | N | N | N | N | N | AST stdin | AST | C | Solo AST | No existe input native. |
-| Argumentos del proceso | N | N | N | N | N | N | N | N | N | N | N | N | N | N | N | No implementado | `main` con parámetros es error deliberado. |
+| Argumentos del proceso (`System.args`) | — | C call | C `Array<string>`/arity | C inyectable | C builtin tipado | C | C | C | C | C | C efectos alloc/read/panic | C POSIX | contexto + wrapper `argc/argv` | E2E | C | Completo POSIX | `main` sigue sin parámetros; snapshot nuevo O(argc), UTF-8 estricto y Windows UTF-16 pendiente. |
 | Archivos (API del lenguaje) | N | N | N | N | N | N | N | N | N | N | N | N | N | N | N | No implementado | La lectura de módulos fuente no es file IO para programas Aether. |
 
 ## Módulos y tipos definidos por usuario
