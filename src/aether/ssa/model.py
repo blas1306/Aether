@@ -105,7 +105,7 @@ class SSACall(SSAInstruction):
                 reads_memory=True,
                 allocates=True,
             )
-        if self.builtin in {"io.writeText", "io.appendText"}:
+        if self.builtin in {"io.writeText", "io.writeTextAtomic", "io.appendText"}:
             return InstructionEffects(
                 has_side_effects=True,
                 reads_memory=True,

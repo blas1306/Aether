@@ -45,10 +45,11 @@ imprime `25`.
 - entry point explícito `int main()` o script normalizado a `main`;
 - argumentos de proceso mediante snapshots owned `System.args()` y forwarding
   del CLI después de `--`;
-- archivos de texto UTF-8 con `io.readText`, `io.writeText` e `io.appendText`,
+- archivos de texto UTF-8 con `io.readText`, `io.writeText`,
+  `io.writeTextAtomic` e `io.appendText`,
   resultados nominales y bytes length-aware;
 - persistencia ALPT1 manual del Expense Tracker en AST/native Linux, con
-  payloads length-prefixed, versionado y rechazo fail-closed;
+  payloads length-prefixed, rechazo fail-closed y save atómico/durable POSIX;
 - structs por valor, constructores, métodos, `this`, copia, igualdad e
   impresión para el subconjunto de campos soportado por backend;
 - núcleo compilado de Array/List con bounds, overflow y allocation checks;
@@ -140,7 +141,8 @@ argumentos.
 
 La API mínima de archivos requiere `import io;`. Es exclusivamente de texto
 UTF-8: `FileReadResult loaded = io.readText(path)` y
-`FileStatus status = io.writeText(path, content)`/`io.appendText(...)`. No
+`FileStatus status = io.writeText(path, content)`/`io.writeTextAtomic(...)`/
+`io.appendText(...)`. No
 normaliza newlines ni agrega terminadores; native está disponible por ahora en
 Linux/POSIX.
 
@@ -151,8 +153,9 @@ aether run examples/expense_tracker/Main.ae -- expenses.alpt add expense 1 19.95
 aether run examples/expense_tracker/Main.ae -- expenses.alpt list
 ```
 
-El archivo usa ALPT1 revision 1. El guardado actual trunca mediante
-`io.writeText` y no ofrece todavía actualización atómica.
+El archivo usa ALPT1 revision 1. `saveLedger` publica mediante
+`io.writeTextAtomic`: temporal seguro, fsync, rename y fsync del directorio en
+POSIX; no añade locking ni backups.
 
 Ejecutar la superficie más amplia con el intérprete AST:
 

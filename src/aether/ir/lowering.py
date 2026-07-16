@@ -25,6 +25,7 @@ from ..text_file_io import (
     FILE_STATUS_VARIANTS,
     READ_TEXT_BUILTIN,
     TEXT_FILE_BUILTINS,
+    WRITE_TEXT_ATOMIC_BUILTIN,
     WRITE_TEXT_BUILTIN,
 )
 from ..text_codec import (
@@ -3373,7 +3374,7 @@ def _program_uses_file_io(program: ast.Program) -> bool:
         if isinstance(value, ast.CallExpression):
             canonical = value.callee
             if canonical in TEXT_FILE_BUILTINS or canonical.rsplit(".", 1)[-1] in {
-                "readText", "writeText", "appendText"
+                "readText", "writeText", "writeTextAtomic", "appendText"
             }:
                 return True
         if not is_dataclass(value):

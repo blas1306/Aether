@@ -7,11 +7,13 @@ from ..text_file_io import (
     FILE_READ_RESULT_TYPE,
     FILE_STATUS_TYPE,
     READ_TEXT_BUILTIN,
+    WRITE_TEXT_ATOMIC_BUILTIN,
     WRITE_TEXT_BUILTIN,
     FileStatus,
     append_text,
     read_text,
     write_text,
+    write_text_atomic,
 )
 from ..types import (
     AetherType,
@@ -29,6 +31,12 @@ def builtin_definitions() -> list[BuiltinDefinition]:
     return [
         BuiltinDefinition(READ_TEXT_BUILTIN, _constant(_read_runtime), _read_type, _arity(READ_TEXT_BUILTIN, 1)),
         BuiltinDefinition(WRITE_TEXT_BUILTIN, _constant(_write_runtime), _write_type, _arity(WRITE_TEXT_BUILTIN, 2)),
+        BuiltinDefinition(
+            WRITE_TEXT_ATOMIC_BUILTIN,
+            _constant(_write_atomic_runtime),
+            _write_atomic_type,
+            _arity(WRITE_TEXT_ATOMIC_BUILTIN, 2),
+        ),
         BuiltinDefinition(APPEND_TEXT_BUILTIN, _constant(_append_runtime), _write_type, _arity(APPEND_TEXT_BUILTIN, 2)),
     ]
 
@@ -72,6 +80,11 @@ def _read_type(arg_types: list[AetherType | None]) -> AetherType:
 def _write_type(arg_types: list[AetherType | None]) -> AetherType:
     label = WRITE_TEXT_BUILTIN if len(arg_types) != 2 else "text-file write"
     _require_string_types(arg_types, label, 2)
+    return EnumType(FILE_STATUS_TYPE, EnumIdentity("__builtin__", FILE_STATUS_TYPE))
+
+
+def _write_atomic_type(arg_types: list[AetherType | None]) -> AetherType:
+    _require_string_types(arg_types, WRITE_TEXT_ATOMIC_BUILTIN, 2)
     return EnumType(FILE_STATUS_TYPE, EnumIdentity("__builtin__", FILE_STATUS_TYPE))
 
 
@@ -122,3 +135,8 @@ def _write_runtime(args: list[AetherValue]) -> AetherValue:
 def _append_runtime(args: list[AetherValue]) -> AetherValue:
     path, content = _require_strings(args, APPEND_TEXT_BUILTIN, 2)
     return _status_value(append_text(path, content))
+
+
+def _write_atomic_runtime(args: list[AetherValue]) -> AetherValue:
+    path, content = _require_strings(args, WRITE_TEXT_ATOMIC_BUILTIN, 2)
+    return _status_value(write_text_atomic(path, content))

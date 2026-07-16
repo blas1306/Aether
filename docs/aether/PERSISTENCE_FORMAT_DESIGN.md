@@ -1,8 +1,9 @@
 # Formato oficial de persistencia Aether v1
 
-Estado: RFC aprobada e implementación ALPT1 inicial disponible en perfil 20.
+Estado: RFC aprobada; ALPT1 y guardado atómico/durable POSIX disponibles en
+perfil 21.
 
-## Implementación de referencia (perfil 20)
+## Implementación de referencia (perfil 21)
 
 `examples/expense_tracker/Persistence.ae` implementa manualmente el codec puro
 `encodeLedger`/`decodeLedger` para `Transaction` y `List<Transaction>`, y los
@@ -23,9 +24,9 @@ rechaza zero, NaN e infinitos porque `amount` debe ser finito y positivo. El
 reader acepta la gramática decimal finita de `parseDouble`, tal como especifica
 esta RFC, y exige spelling canónico para enteros y longitudes.
 
-`saveLedger` usa `io.writeText` y por tanto **no es atómico**. La fase pendiente
-es agregar temp file en el mismo directorio, flush/fsync, rename de reemplazo y
-sync del directorio antes de prometer atomicidad o durabilidad ante corte.
+`saveLedger` codifica primero y después usa `io.writeTextAtomic`. Un fallo de
+encode no toca el filesystem; un fallo anterior al rename conserva el ledger
+previo. `Success` sólo se retorna después de sincronizar temporal y directorio.
 
 Esta RFC define el formato textual de persistencia Aether v1 y usa Expense
 Tracker como primer schema. No agrega APIs, sintaxis ni capacidades al
@@ -647,30 +648,34 @@ un modo de preservación raw futuro.
 
 ## Escritura segura y atomicidad
 
-`io.writeText(path, content)` trunca el destino y no proporciona por sí solo
-una actualización atómica. Una implementación de persistencia no debe anunciar
-durabilidad segura usando sólo esa secuencia.
-
-La estrategia objetivo es:
+`io.writeText(path, content)` conserva su contrato truncante. La persistencia
+usa en cambio `io.writeTextAtomic(path, content)`, que implementa:
 
 1. validar todo el ledger y construir el contenido completo;
 2. crear un archivo temporal único en el mismo directorio del destino;
 3. escribir todos los bytes y comprobar short writes/errores;
-4. hacer flush del archivo y, si se promete durabilidad ante corte de energía,
-   sincronizarlo;
+4. hacer `fsync` del archivo;
 5. cerrar el temporal;
 6. renombrarlo sobre el destino mediante rename atómico de mismo filesystem;
 7. sincronizar el directorio cuando la plataforma lo requiera;
 8. limpiar el temporal en todo fallo previo al rename.
 
-Permisos, symlinks, colisiones, Windows y semántica de reemplazo deben definirse
-en la API de archivos que habilite esta fase. `appendText` NO es apropiado para
-ALPT1: invalidaría `record-count` y `end-file`, y un crash podría dejar un
-registro parcial.
+La publicación y la durabilidad son contratos distintos. Antes del rename, un
+error deja el destino anterior intacto y se intenta eliminar el temporal.
+Después del rename, un fallo de apertura/fsync/close del directorio retorna
+error aunque el contenido nuevo ya sea visible; no se intenta revertirlo. Las
+garantías ante power loss dependen de POSIX, filesystem y hardware.
 
-Hasta que existan primitivas de temporal/flush/rename, puede haber un writer
-experimental explícitamente no atómico, pero no debe llamarse persistencia
-segura ni ser usado por defecto por Expense Tracker.
+Los temporales se crean con `mkstemp`, nombre interno reconocible y modo `0600`
+en el mismo directorio. El rename reemplaza el symlink destino mismo y publica
+un inode nuevo; no preserva mode/owner/ACL/xattrs/timestamps anteriores. No hay
+locking: writers concurrentes son last-successful-rename-wins, sin detección de
+lost updates. Cleanup es best-effort y una caída o fallo de unlink puede dejar
+un temporal huérfano; no hay recolección automática.
+
+Windows y POSIX no-Linux permanecen fuera del runtime native hasta contar con
+paths wide-character, reemplazo durable y errno comprobados. `appendText` NO es
+apropiado para ALPT1: invalidaría `record-count` y `end-file`.
 
 ## Escala, lectura completa y streaming
 

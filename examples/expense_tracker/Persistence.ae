@@ -525,7 +525,7 @@ public LedgerStatus saveLedger(string path, List<Transaction> transactions) {
     if encoded.status != LedgerStatus.Success {
         return encoded.status;
     }
-    FileStatus saved = io.writeText(path, encoded.content);
+    FileStatus saved = io.writeTextAtomic(path, encoded.content);
     if saved != FileStatus.Success {
         return mapFileStatus(saved);
     }

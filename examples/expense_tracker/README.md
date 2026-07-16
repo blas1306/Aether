@@ -88,8 +88,9 @@ parsearlo mediante `split`.
 - `main` continúa siendo `int main()`; los argumentos se consultan con
   `System.args()`.
 - No hay archivos binarios, JSON, CSV, reflection ni codecs automáticos.
-- El guardado actual usa `io.writeText`: puede truncar ante un fallo y no se
-  anuncia como atómico.
+- `saveLedger` usa `io.writeTextAtomic`: en POSIX publica con temporal seguro,
+  fsync, rename y fsync del directorio. No hay locking, backups, clonación de
+  metadata ni transacciones multiarchivo.
 - No hay conversiones implícitas ni otras APIs generales de texto.
 - Las fechas no se validan ni se ordenan.
 - No se agregaron excepciones, GC ni destructores.

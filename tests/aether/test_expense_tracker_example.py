@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from io import StringIO
 from pathlib import Path
+import errno
+import os
 import shutil
 
 import pytest
@@ -117,6 +119,28 @@ def test_expense_tracker_persists_across_processes_and_refuses_corrupt_overwrite
     assert rejected.exit_code == 3
     assert "UnsupportedFormatVersion" in rejected.output
     assert path.read_bytes() == corrupt
+
+
+def test_expense_tracker_atomic_save_failure_preserves_previous_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "atomic-failure.alpt"
+    source = _source("Main.ae")
+    first = [str(path), "add", "expense", "1", "19.95", "food", "Lunch", "2026-07-16"]
+    second = [str(path), "add", "income", "2", "1000", "work", "Salary", "2026-07-17"]
+    assert run_aether(source, source_root=EXAMPLE, program_arguments=first).exit_code == 0
+    previous = path.read_bytes()
+
+    monkeypatch.setattr(
+        os,
+        "write",
+        lambda *_args: (_ for _ in ()).throw(OSError(errno.ENOSPC, "full")),
+    )
+    failed = run_aether(source, source_root=EXAMPLE, program_arguments=second)
+    assert failed.exit_code == 4
+    assert "LedgerStatus.IoError" in failed.output
+    assert path.read_bytes() == previous
+    assert list(tmp_path.glob(".*.aether-atomic-*.tmp")) == []
 
 
 def test_expense_tracker_persists_and_verifies_explicit_summary(tmp_path: Path) -> None:

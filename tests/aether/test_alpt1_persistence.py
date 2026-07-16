@@ -233,6 +233,25 @@ int main() {
     assert run_aether(source, source_root=EXAMPLE).output == "true\n" * 3
 
 
+def test_alpt1_save_encode_failure_does_not_touch_filesystem(tmp_path: Path) -> None:
+    path = tmp_path / "encode-failure.alpt"
+    path.write_bytes(b"existing-ledger")
+    source = f'''
+from Persistence import LedgerStatus;
+from Persistence import saveLedger;
+from Transaction import Transaction;
+from Transaction import TransactionType;
+int main() {{
+    List<Transaction> values = {{}};
+    values.push(Transaction(1, TransactionType.Expense, "bad", 1.0 / 0.0, "c", "d"));
+    println(saveLedger({_quote(str(path))}, values) == LedgerStatus.InvalidDouble);
+    return 0;
+}}
+'''
+    assert run_aether(source, source_root=EXAMPLE).output == "true\n"
+    assert path.read_bytes() == b"existing-ledger"
+
+
 def test_alpt1_load_maps_invalid_utf8_and_save_is_not_attempted(tmp_path: Path) -> None:
     path = tmp_path / "invalid.alpt"
     path.write_bytes(b"AETHER-PERSISTENCE\n\xff")

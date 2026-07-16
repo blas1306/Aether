@@ -31,6 +31,7 @@ from .text_file_io import (
     APPEND_TEXT_BUILTIN,
     FILE_READ_RESULT_TYPE,
     READ_TEXT_BUILTIN,
+    WRITE_TEXT_ATOMIC_BUILTIN,
     WRITE_TEXT_BUILTIN,
 )
 
@@ -38,7 +39,7 @@ if TYPE_CHECKING:
     from .pipeline import TypedProgram
 
 
-CAPABILITY_PROFILE_VERSION = "20"
+CAPABILITY_PROFILE_VERSION = "21"
 
 
 class BackendIdentity(str, Enum):
@@ -112,10 +113,13 @@ class Capability(str, Enum):
     TEXT_FILE_READ = "text-file-read"
     TEXT_FILE_WRITE = "text-file-write"
     TEXT_FILE_APPEND = "text-file-append"
+    ATOMIC_TEXT_FILE_WRITE = "atomic-text-file-write"
+    DURABLE_TEXT_FILE_WRITE = "durable-text-file-write"
     ALPT1_ENCODE = "alpt1-encode"
     ALPT1_DECODE = "alpt1-decode"
     EXPENSE_LEDGER_LOAD = "expense-ledger-load"
     EXPENSE_LEDGER_SAVE = "expense-ledger-save"
+    EXPENSE_LEDGER_ATOMIC_SAVE = "expense-ledger-atomic-save"
     OPTIMIZATION_PROFILES = "optimization-profiles"
 
 
@@ -255,10 +259,13 @@ CAPABILITY_CATALOG: Mapping[Capability, CapabilityDefinition] = MappingProxyType
             _definition(Capability.TEXT_FILE_READ, "Complete UTF-8 text-file reads."),
             _definition(Capability.TEXT_FILE_WRITE, "Complete UTF-8 text-file writes."),
             _definition(Capability.TEXT_FILE_APPEND, "Complete UTF-8 text-file appends."),
+            _definition(Capability.ATOMIC_TEXT_FILE_WRITE, "Atomic same-filesystem UTF-8 text-file replacement."),
+            _definition(Capability.DURABLE_TEXT_FILE_WRITE, "Durable UTF-8 text-file replacement with file and directory fsync."),
             _definition(Capability.ALPT1_ENCODE, "Manual canonical ALPT1 Transaction ledger encoding."),
             _definition(Capability.ALPT1_DECODE, "Fail-closed byte-aware ALPT1 Transaction ledger decoding."),
             _definition(Capability.EXPENSE_LEDGER_LOAD, "Expense ledger loading through io.readText and ALPT1 decode."),
-            _definition(Capability.EXPENSE_LEDGER_SAVE, "Non-atomic expense ledger saving through ALPT1 encode and io.writeText."),
+            _definition(Capability.EXPENSE_LEDGER_SAVE, "Expense ledger saving through canonical ALPT1 encoding."),
+            _definition(Capability.EXPENSE_LEDGER_ATOMIC_SAVE, "Atomic and durable POSIX expense ledger saving through io.writeTextAtomic."),
             _definition(Capability.OPTIMIZATION_PROFILES, "Selectable compiler optimization profiles."),
         )
     }
@@ -294,6 +301,9 @@ _AST_PARTIAL = {
     Capability.FUNCTION_VALUES,
     Capability.STRING_LIFECYCLE,
     Capability.COLLECTION_OBJECT_LIFECYCLE,
+    Capability.ATOMIC_TEXT_FILE_WRITE,
+    Capability.DURABLE_TEXT_FILE_WRITE,
+    Capability.EXPENSE_LEDGER_ATOMIC_SAVE,
 }
 AST_CAPABILITY_PROFILE = _profile(
     BackendIdentity.AST,
@@ -435,10 +445,13 @@ E2E_TESTED_CAPABILITIES: Mapping[BackendIdentity, frozenset[Capability]] = Mappi
                 Capability.TEXT_FILE_READ,
                 Capability.TEXT_FILE_WRITE,
                 Capability.TEXT_FILE_APPEND,
+                Capability.ATOMIC_TEXT_FILE_WRITE,
+                Capability.DURABLE_TEXT_FILE_WRITE,
                 Capability.ALPT1_ENCODE,
                 Capability.ALPT1_DECODE,
                 Capability.EXPENSE_LEDGER_LOAD,
                 Capability.EXPENSE_LEDGER_SAVE,
+                Capability.EXPENSE_LEDGER_ATOMIC_SAVE,
             }
         ),
         BackendIdentity.NATIVE: frozenset(
@@ -473,10 +486,13 @@ E2E_TESTED_CAPABILITIES: Mapping[BackendIdentity, frozenset[Capability]] = Mappi
                 Capability.TEXT_FILE_READ,
                 Capability.TEXT_FILE_WRITE,
                 Capability.TEXT_FILE_APPEND,
+                Capability.ATOMIC_TEXT_FILE_WRITE,
+                Capability.DURABLE_TEXT_FILE_WRITE,
                 Capability.ALPT1_ENCODE,
                 Capability.ALPT1_DECODE,
                 Capability.EXPENSE_LEDGER_LOAD,
                 Capability.EXPENSE_LEDGER_SAVE,
+                Capability.EXPENSE_LEDGER_ATOMIC_SAVE,
             }
         ),
     }
@@ -874,6 +890,12 @@ class _CapabilityDetector:
                 detail="manual Expense Tracker ALPT1 codec",
                 requires_complete_support=True,
             )
+        if canonical.rsplit(".", 1)[-1] == "saveLedger":
+            self._record(
+                Capability.EXPENSE_LEDGER_ATOMIC_SAVE,
+                call,
+                detail="atomic durable POSIX ALPT1 publication",
+            )
         if canonical in {"parseInt", "parseDouble"}:
             self._record(
                 Capability.STRING_PARSING,
@@ -897,6 +919,7 @@ class _CapabilityDetector:
         text_file_capability = {
             READ_TEXT_BUILTIN: Capability.TEXT_FILE_READ,
             WRITE_TEXT_BUILTIN: Capability.TEXT_FILE_WRITE,
+            WRITE_TEXT_ATOMIC_BUILTIN: Capability.ATOMIC_TEXT_FILE_WRITE,
             APPEND_TEXT_BUILTIN: Capability.TEXT_FILE_APPEND,
         }.get(canonical)
         if text_file_capability is not None:
@@ -909,6 +932,8 @@ class _CapabilityDetector:
                 text_file_capability,
                 call,
             )
+            if canonical == WRITE_TEXT_ATOMIC_BUILTIN:
+                self._record(Capability.DURABLE_TEXT_FILE_WRITE, call)
         if canonical in {"copy", "contains", "index_of"} and call.arguments:
             self._record_collection_operation(
                 call.arguments[0],

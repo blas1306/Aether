@@ -14,6 +14,11 @@ curso.
 
 ### Added
 
+- `io.writeTextAtomic(path, content) -> FileStatus` en AST y native Linux:
+  temporal seguro en el mismo directorio, escritura exacta, fsync de archivo,
+  rename atómico, fsync de directorio y cleanup best-effort con fault injection.
+- `saveLedger` del Expense Tracker publica ALPT1 atómicamente y preserva el
+  ledger anterior ante fallos simulados previos al rename.
 - Codec manual ALPT1 revision 1 para `Transaction`/`List<Transaction>`, con
   resultados nominales, parser byte-aware fail-closed, formatting binary64
   round-trip y wrappers `loadLedger`/`saveLedger`.
@@ -52,6 +57,8 @@ curso.
 - El perfil 19 agrega la capacidad granular completa `string-split`.
 - El perfil 20 agrega `alpt1-encode`, `alpt1-decode`,
   `expense-ledger-load` y `expense-ledger-save`; no declara atomicidad.
+- El perfil 21 agrega `atomic-text-file-write`, `durable-text-file-write` y
+  `expense-ledger-atomic-save`, parciales por plataforma en AST y native.
 
 ### Notes
 

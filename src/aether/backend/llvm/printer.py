@@ -101,6 +101,7 @@ from aether.text_file_io import (
     FILE_READ_RESULT_TYPE,
     FILE_STATUS_TYPE,
     READ_TEXT_BUILTIN,
+    WRITE_TEXT_ATOMIC_BUILTIN,
     WRITE_TEXT_BUILTIN,
 )
 from aether.text_codec import (
@@ -1248,7 +1249,11 @@ class LLVMPrinter:
                 f"{result} = call %struct.{FILE_READ_RESULT_TYPE} "
                 f"@aether_read_text(ptr {self._operand(instruction.arguments[0])})"
             )
-        if instruction.builtin in {WRITE_TEXT_BUILTIN, APPEND_TEXT_BUILTIN}:
+        if instruction.builtin in {
+            WRITE_TEXT_BUILTIN,
+            WRITE_TEXT_ATOMIC_BUILTIN,
+            APPEND_TEXT_BUILTIN,
+        }:
             if (
                 instruction.result is None
                 or len(instruction.arguments) != 2
@@ -1260,6 +1265,12 @@ class LLVMPrinter:
             self._uses_string_runtime = True
             self._uses_text_file_io = True
             result = self._new_temp(instruction.result)
+            if instruction.builtin == WRITE_TEXT_ATOMIC_BUILTIN:
+                return (
+                    f"{result} = call i32 @aether_write_text_atomic("
+                    f"ptr {self._operand(instruction.arguments[0])}, "
+                    f"ptr {self._operand(instruction.arguments[1])})"
+                )
             append = "true" if instruction.builtin == APPEND_TEXT_BUILTIN else "false"
             return (
                 f"{result} = call i32 @aether_write_text("

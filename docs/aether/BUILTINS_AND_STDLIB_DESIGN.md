@@ -60,7 +60,8 @@ Cada fragmento es owned; no introduce views, regex, normalización, escaping,
 CSV, límite de partes ni segmentación Unicode.
 
 El perfil 18 implementa el núcleo de archivos de texto del módulo estándar
-`io`: `readText`, `writeText` y `appendText`. Sus helpers son intrínsecos por la
+`io`: `readText`, `writeText` y `appendText`; el perfil 21 añade
+`writeTextAtomic`. Sus helpers son intrínsecos por la
 frontera de filesystem, los bytes length-aware, los efectos y el ownership;
 los nombres públicos no sugieren soporte binario. `FileStatus` y
 `FileReadResult` normalizan errores esperables sin excepciones. El contrato

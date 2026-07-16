@@ -44,7 +44,7 @@ def _required(source: str, *, source_root: Path | None = None):
 
 
 def test_profiles_are_versioned_identified_and_cover_the_canonical_catalog() -> None:
-    assert CAPABILITY_PROFILE_VERSION == "20"
+    assert CAPABILITY_PROFILE_VERSION == "21"
     assert AST_CAPABILITY_PROFILE.backend is BackendIdentity.AST
     assert NATIVE_CAPABILITY_PROFILE.backend is BackendIdentity.NATIVE
     assert AST_CAPABILITY_PROFILE.version == CAPABILITY_PROFILE_VERSION
@@ -71,6 +71,13 @@ def test_profiles_are_versioned_identified_and_cover_the_canonical_catalog() -> 
         NATIVE_CAPABILITY_PROFILE.support_for(Capability.PROCESS_ARGUMENTS).state
         is CapabilityState.PARTIAL
     )
+    for capability in (
+        Capability.ATOMIC_TEXT_FILE_WRITE,
+        Capability.DURABLE_TEXT_FILE_WRITE,
+        Capability.EXPENSE_LEDGER_ATOMIC_SAVE,
+    ):
+        assert AST_CAPABILITY_PROFILE.support_for(capability).state is CapabilityState.PARTIAL
+        assert NATIVE_CAPABILITY_PROFILE.support_for(capability).state is CapabilityState.PARTIAL
 
 
 def test_profile_rejects_unknown_capabilities_and_invalid_states() -> None:

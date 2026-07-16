@@ -36,7 +36,7 @@ arquitectura, no capacidades solicitadas directamente por un programa.
 
 ## Perfiles actuales
 
-La versión actual del perfil es `20`. La versión `2` promovió `modules` e
+La versión actual del perfil es `21`. La versión `2` promovió `modules` e
 `imports` de `UNSUPPORTED` a `PARTIAL`; la versión `3` promovió `scalar-math`
 de `UNSUPPORTED` a `PARTIAL` en LLVM/native; la versión `4` incorpora el
 subconjunto de callables top-level tipados y sin captura en ambos backends. La
@@ -129,6 +129,13 @@ Linux/POSIX. Describen exclusivamente el codec manual revision 1 de
 `Transaction`; no declaran serialización genérica, reflection, migrations ni
 atomic save. El detector las solicita desde las calls nominales del módulo de
 persistencia y el E2E cubre parser puro, corrupción, archivos y procesos.
+
+La versión `21` agrega `atomic-text-file-write`,
+`durable-text-file-write` y `expense-ledger-atomic-save`. Son parciales por
+plataforma en ambos perfiles: POSIX AST y Linux native ejecutan
+temp + fsync + rename + fsync del directorio; Windows y POSIX no-Linux reciben
+diagnóstico temprano. No declaran locking, backups, metadata cloning,
+transacciones multiarchivo ni cleanup de huérfanos tras una caída.
 
 Para `strings`, el subset native distingue la operación semántica concreta:
 

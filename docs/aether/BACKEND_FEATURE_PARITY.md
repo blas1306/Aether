@@ -45,6 +45,12 @@ Actualización perfil 18 (16-07-2026): `io.readText`, `io.writeText` e
 validan UTF-8 al leer, normalizan errores y sobreviven O0/O1/O2. Windows y
 otras fronteras POSIX native permanecen diagnosticadas explícitamente.
 
+Actualización perfil 21 (16-07-2026): `io.writeTextAtomic` publica mediante
+temporal seguro en el mismo directorio, `fsync` de archivo, rename y `fsync` de
+directorio. AST y native Linux preservan bytes/NUL y limpian fallos normales
+previos al rename; `saveLedger` ya la usa. No hay locking, metadata cloning,
+rollback posterior al rename ni soporte Windows simulado.
+
 Actualización perfil 19 (16-07-2026): `string.split(string)` es E2E en
 AST/IR/SSA/LLVM. Hace matching exacto por bytes, no solapado, conserva campos
 vacíos y NUL/UTF-8, rechaza separator vacío y devuelve un `Array<string>` con
@@ -56,7 +62,7 @@ Actualización perfil 20 (16-07-2026): el codec manual ALPT1 de
 cursor consume bytes UTF-8 exactos, el encoder concatena fragmentos en una
 asignación final, los doubles usan `%.17g` bajo locale C y el parser staged
 rechaza corrupción sin publicar resultados parciales. `loadLedger`/`saveLedger`
-envuelven `io.readText`/`io.writeText`; el save todavía no es atómico.
+envuelven `io.readText` y, desde perfil 21, `io.writeTextAtomic`.
 
 Última revisión: 15 de julio de 2026, incluyendo enums native y los ejemplos
 dogfood de métodos numéricos y expense tracker. Este documento reemplaza como
@@ -188,7 +194,7 @@ representación y lifecycle ya están activos en esta matriz.
 | Print Struct/Vector/Matrix | llamada | C | C | C | C subset | C subset | C | C | C | C | C | C subset | helpers | E2E | P | Parcial | Shape/tipos de campos limitan el subconjunto struct. |
 | `input` tipado | C nodo dedicado | C | C por contexto | C | N | N | N | N | N | N | N | N | AST stdin | AST | C | Solo AST | No existe input native. |
 | Argumentos del proceso (`System.args`) | — | C call | C `Array<string>`/arity | C inyectable | C builtin tipado | C | C | C | C | C | C efectos alloc/read/panic | C POSIX | contexto + wrapper `argc/argv` | E2E | C | Completo POSIX | `main` sigue sin parámetros; snapshot nuevo O(argc), UTF-8 estricto y Windows UTF-16 pendiente. |
-| Archivos texto (`io.readText`/`writeText`/`appendText`) | — | C calls | C firmas/resultados nominales | C binario explícito | C builtin+loc | C | C firma/layout | C bytes | C | C | C efectos IO/alloc | C Linux | helpers incremental/exact-write | E2E+O0/O1/O2 | C | Completo AST, parcial native | Sólo UTF-8; NUL contenido sí, NUL/path vacío no; sin streams/binarios/directorios. |
+| Archivos texto (`io.readText`/`writeText`/`writeTextAtomic`/`appendText`) | — | C calls | C firmas/resultados nominales | C binario explícito | C builtin+loc | C | C firma/layout | C bytes | C | C | C efectos IO/alloc | C Linux | helpers incremental/exact-write/atomic durable | E2E+faults+O0/O1/O2 | C | Completo AST, parcial native | Atomic usa temp+fsync+rename+dir-fsync; UTF-8/NUL exactos; sin locking/streams/binarios. |
 
 ## Módulos y tipos definidos por usuario
 

@@ -1,5 +1,11 @@
 # Informe de dogfooding generalista: expense tracker
 
+Actualización atomic save (perfil 21): `saveLedger` usa
+`io.writeTextAtomic` después de completar el encode. Los fallos simulados de
+write/fsync/close/rename conservan el ledger anterior y limpian el temporal;
+un fallo de fsync del directorio reporta error con el contenido nuevo ya
+visible. La CLI mantiene exit code `4` para fallo de guardado.
+
 Actualización ALPT1 (perfil 20): `Persistence.ae` implementa codecs manuales
 puros para `Transaction` y `List<Transaction>`, con los seis fields incluido
 `date`, header/versionado exactos, payloads length-prefixed, parser staged y
@@ -10,8 +16,7 @@ procesos AST/native separados, además de corrupción y UTF-8 inválido.
 
 El encoder usa fragmentos y una concatenación final lineal. Los doubles finitos
 se escriben con 17 dígitos significativos bajo locale C para round-trip; amount
-no positivo, NaN e infinito se rechazan. `saveLedger` usa `io.writeText` y es
-explícitamente no atómico. No se añadieron JSON, CSV, reflection, migrations,
+no positivo, NaN e infinito se rechazan. No se añadieron JSON, CSV, reflection, migrations,
 serialization genérica ni un engine de schemas.
 
 Actualización split (perfil 19): `split-check <separator> <text>` aplica
@@ -133,9 +138,10 @@ en native. No afecta cálculos ni validaciones del tracker.
 
 ## Límites restantes y próxima tarea
 
-Siguen fuera de alcance atomic save, locking/concurrencia, migrations,
-checksums, excepciones y GC. El tracker persiste un ledger ALPT1 validado, pero
-no es una base de datos ni promete durabilidad ante crash durante `writeText`.
+Siguen fuera de alcance locking, coordinación de concurrencia, backups,
+migrations, checksums, excepciones y GC. Cada publicación es atómica y
+last-successful-rename-wins; la durabilidad depende de las garantías reales de
+`fsync` del sistema operativo, filesystem y hardware. No es una base de datos.
 
 El contrato mínimo de string native queda aprobado en
 [`STRING_RUNTIME_DESIGN.md`](STRING_RUNTIME_DESIGN.md), y las reglas de copy,
@@ -149,5 +155,6 @@ La fase de igualdad estructural E2E quedó completada: copias y slices de
 `List<Transaction>` comparan contenido, y búsqueda encuentra transacciones
 equivalentes aunque sean valores independientes. La etiqueta dinámica
 `food: Dinner` prueba retorno, temporales y cleanup ARC, y su longitud esperada
-es 12 bytes. Archivos, argv y split ya tienen dogfood; CSV permanece fuera y
-la siguiente fase concreta es escritura atómica/durable del ledger ALPT1.
+es 12 bytes. Archivos, argv y split ya tienen dogfood; CSV permanece fuera. La
+siguiente fase recomendada es recuperación explícita y opt-in de temporales
+huérfanos, sin convertirla en limpieza automática.
