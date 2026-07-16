@@ -82,6 +82,12 @@ from .model import (
 )
 from .lifecycle import LifecycleTypeRegistry
 from .equality import ir_eq_capability
+from aether.string_parsing import (
+    DOUBLE_PARSE_RESULT_TYPE,
+    INT_PARSE_RESULT_TYPE,
+    PARSE_DOUBLE_BUILTIN,
+    PARSE_INT_BUILTIN,
+)
 from .types import (
     ArrayType,
     BoolType,
@@ -1010,6 +1016,35 @@ class IRVerifier:
                     or not isinstance(instruction.result.type, IntType)
                 ):
                     self._fail("String byte-length builtin requires string -> int")
+                return
+            if instruction.builtin in {PARSE_INT_BUILTIN, PARSE_DOUBLE_BUILTIN}:
+                expected_name = (
+                    INT_PARSE_RESULT_TYPE
+                    if instruction.builtin == PARSE_INT_BUILTIN
+                    else DOUBLE_PARSE_RESULT_TYPE
+                )
+                if instruction.function != instruction.builtin:
+                    self._fail("String parsing builtin must retain its canonical semantic name")
+                if (
+                    instruction.result is None
+                    or len(instruction.arguments) != 1
+                    or not isinstance(instruction.arguments[0].type, StringType)
+                    or instruction.result.type != StructType(expected_name)
+                ):
+                    self._fail(
+                        f"String parsing builtin '{instruction.builtin}' requires "
+                        f"string -> struct {expected_name}"
+                    )
+                definition = self._structs.get(expected_name)
+                expected_value = IntType() if instruction.builtin == PARSE_INT_BUILTIN else DoubleType()
+                if definition is None or len(definition.fields) != 2:
+                    self._fail(f"String parsing result '{expected_name}' requires its canonical layout")
+                if definition.fields[0] != ("value", expected_value):
+                    self._fail(f"String parsing result '{expected_name}' has an invalid value field")
+                if definition.fields[1][0] != "status" or not isinstance(
+                    definition.fields[1][1], EnumType
+                ):
+                    self._fail(f"String parsing result '{expected_name}' has an invalid status field")
                 return
             if instruction.builtin in {"__aether_retain", "__aether_release"}:
                 if instruction.function != instruction.builtin:

@@ -20,6 +20,10 @@ ya no existe un camino native que interprete ese handle como `char *`.
   `aether_string_concat`, comprueba overflow, reserva una vez y devuelve owned.
 - `s.byteLength` carga la longitud explícita en O(1), la estrecha al `int`
   público con check y cuenta bytes UTF-8, no caracteres.
+- `parseInt(string)` y `parseDouble(string)` producen resultados nominales con
+  `ParseStatus`, consumen bytes por longitud y son estrictos/independientes del
+  locale. El contrato completo está en
+  [`STRING_PARSING_DESIGN.md`](STRING_PARSING_DESIGN.md).
 - `StringType` es no trivialmente copiable, trivialmente relocatable, requiere
   retain/destroy y propaga esos hechos a structs. Lifecycle se verifica en su
   forma genérica y se expande a hooks effectful antes de SSA.
@@ -31,8 +35,8 @@ ya no existe un camino native que interprete ese handle como `char *`.
   ownership, no un `str` host como sustituto semántico.
 
 La sección 3 conserva el inventario histórico anterior a esta migración para
-explicar los puntos que fueron reemplazados. Parsing, split/trim, archivos,
-argv, formatting e interpolación native siguen fuera de esta fase.
+explicar los puntos que fueron reemplazados. Split/trim, archivos, argv,
+formatting e interpolación native siguen fuera de esta fase.
 
 ## 1. Resumen de decisiones aprobadas
 

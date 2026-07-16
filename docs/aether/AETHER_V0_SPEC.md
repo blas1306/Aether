@@ -1286,6 +1286,24 @@ returns an owned string. No implicit formatting or conversion is performed.
 character, code-point, or grapheme count: `"é".byteLength == 2` and
 `"🙂".byteLength == 4`.
 
+Numeric parsing is explicit and structured:
+
+```aether
+IntParseResult identifier = parseInt("+42");
+DoubleParseResult amount = parseDouble("-2.5e-3");
+if amount.status == ParseStatus.Success {
+    println(amount.value);
+}
+```
+
+`parseInt` accepts exactly `sign? digit+` in decimal ASCII and checks the i32
+range. `parseDouble` accepts decimal mantissas with an optional point and
+optional signed `e`/`E` exponent as specified in
+[`STRING_PARSING_DESIGN.md`](STRING_PARSING_DESIGN.md). Both reject whitespace,
+non-ASCII, embedded NUL and trailing text without throwing. Empty,
+invalid-format and out-of-range inputs are distinguished by `ParseStatus`.
+NaN/infinity spellings are not accepted; double underflow follows IEEE-754.
+
 String literals support interpolation with `$expr$`. The expression is parsed as Aether, typechecked in the current scope, evaluated at runtime, and formatted with the same display rules used by `print(...)` and `println(...)`.
 
 ```aether

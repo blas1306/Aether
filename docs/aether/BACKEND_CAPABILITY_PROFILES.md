@@ -36,7 +36,7 @@ arquitectura, no capacidades solicitadas directamente por un programa.
 
 ## Perfiles actuales
 
-La versión actual del perfil es `12`. La versión `2` promovió `modules` e
+La versión actual del perfil es `15`. La versión `2` promovió `modules` e
 `imports` de `UNSUPPORTED` a `PARTIAL`; la versión `3` promovió `scalar-math`
 de `UNSUPPORTED` a `PARTIAL` en LLVM/native; la versión `4` incorpora el
 subconjunto de callables top-level tipados y sin captura en ambos backends. La
@@ -88,6 +88,12 @@ compilables son reales pero no cubren toda la superficie AST.
 Archivos y argumentos del proceso están no soportados en ambos perfiles porque
 todavía no son APIs válidas del lenguaje.
 
+La versión `15` marca completas en AST y native las capacidades
+`string-parsing`, `integer-string-parsing` y `double-string-parsing`. El
+detector las solicita por las calls tipadas `parseInt`/`parseDouble`; la
+presencia de un string no las activa. La evidencia E2E incluye resultados
+nominales, IR/SSA, locale C, límites, NUL/UTF-8, colecciones y clang O0/O1/O2.
+
 Para `strings`, el subset native distingue la operación semántica concreta:
 
 - transporte de literales, variables, parámetros, returns, fields y elementos
@@ -95,7 +101,8 @@ Para `strings`, el subset native distingue la operación semántica concreta:
 - igualdad/desigualdad por contenido: aceptada;
 - concatenación `string + string` y `s.byteLength`: aceptadas;
 - interpolación y formatting: rechazados temprano con su nodo y ubicación;
-- productores dinámicos, parsing, split/trim, archivos y argumentos: no se
+- parsing numérico explícito: aceptado mediante `parseInt`/`parseDouble`;
+- otros productores dinámicos, split/trim, archivos y argumentos: no se
   infieren por la mera presencia de texto y siguen fuera de su capacidad
   propia o sin API de lenguaje.
 

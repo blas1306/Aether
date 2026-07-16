@@ -4,8 +4,9 @@ Actualización perfil 7 (15-07-2026): native completó transporte de handles al
 objeto UTF-8, igualdad por contenido, literales/vacío inmortales, ARC oculto,
 impresión length-aware y hooks de elementos string/struct para Array/List. Las
 filas históricas que describen `char *`, `%s`, `strcmp` o copia trivial son el
-snapshot previo a esta actualización. Parsing, split/trim, files y argv
-continúan no implementados.
+snapshot previo a esta actualización. En ese perfil parsing, split/trim, files
+y argv continuaban no implementados; parsing numérico se completa en el perfil
+15 documentado más abajo.
 
 Actualización perfil 8 (15-07-2026): la Fase 0 de colecciones añadió detección
 semántica tipada y diagnósticos previos al lowering para igualdad Array/List,
@@ -23,6 +24,11 @@ LLVM reutiliza helpers tipados deterministas y conserva IEEE-754, incluido
 Actualización perfil 14 (15-07-2026): concat string y `s.byteLength` son E2E
 en AST/IR/SSA/LLVM. Concat produce ownership, asigna una sola vez por helper y
 conserva efectos de panic/allocation; interpolación y formatting siguen fuera.
+
+Actualización perfil 15 (15-07-2026): `parseInt`/`parseDouble` y los resultados
+nominales con `ParseStatus` son E2E en AST/IR/SSA/LLVM, incluidos bytes NUL/UTF-8,
+locale C, structs/colecciones y clang O0/O1/O2. NaN/infinito se rechazan y
+underflow double sigue IEEE-754.
 
 Última revisión: 15 de julio de 2026, incluyendo enums native y los ejemplos
 dogfood de métodos numéricos y expense tracker. Este documento reemplaza como
@@ -144,6 +150,7 @@ representación y lifecycle ya están activos en esta matriz.
 | String literal/variable/arg/return | C | C | C | C | C handle | C | C | C | C | C | C lifecycle | C | `AetherStringObject` ARC | E2E | C | Completo | UTF-8 explícito, vacío/literales inmortales y dinámicos owned. |
 | Concat e igualdad string | C | C | C tipos exactos | C bytes | C binary tipado / compare | C | C efectos/tipos | C `StringValue` | C | C | C effect-aware | C | `aether_string_concat`/`equal` | E2E+O0/O1/O2 | C | Completo | Solo `string + string`; sin conversiones implícitas. |
 | `string.byteLength` | C property | C | C `int` | C O(1) | call tipada | C | C | C | C | C | C | C checked i64→i32 | header explícito | E2E UTF-8/NUL | C | Completo | Cuenta bytes, no code points ni graphemes. |
+| `parseInt` / `parseDouble` | C llamada | C | C resultados nominales | C bytes compartidos | C calls tipadas+loc | C | C firma/layout | C | C | C | C effect-aware | C ABI struct | parser i32 + DFA/`strtod_l` locale C | E2E+O0/O1/O2 | C | Completo | Sin trim/locale implícito; defaults 0 no son sentinels; NaN/infinito rechazados. |
 | Interpolación/formatting string | C | C | C | C | N | N | N | N | N | N | N | N | N | AST | C | Solo AST | No se habilitó conversión ni formatting native. |
 | `print` / `println` escalares | llamada | C | C variádico | C | C `IRPrint` | C | C | C | C | C | C efecto | C | `printf`/helpers | E2E | C | Completo | Formato double general aún usa contratos host distintos en casos extremos. |
 | Print Array/List | llamada | C | C | C | P tipos | N general | N | N | N | N | N | N | AST | AST | P | Solo AST | Struct con campos Array/List escalares tiene helper específico, no print general de la colección. |

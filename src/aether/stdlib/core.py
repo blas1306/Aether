@@ -12,6 +12,17 @@ from ..formatting import format_value
 from ..integer_arithmetic import INT_MAX, INT_MIN, INTEGER_OVERFLOW_MESSAGE
 from ..list_safety import checked_list_index_to_int, checked_list_length_to_int
 from ..scalar_math import SCALAR_MATH_CONSTANTS
+from ..string_parsing import (
+    DOUBLE_PARSE_RESULT_TYPE,
+    INT_PARSE_RESULT_TYPE,
+    PARSE_DOUBLE_BUILTIN,
+    PARSE_INT_BUILTIN,
+    PARSE_STATUS_TYPE,
+    ParseStatus,
+    parse_double_bytes,
+    parse_int_bytes,
+)
+from ..string_value import StringValue
 from ..types import (
     AetherType,
     AetherValue,
@@ -24,6 +35,10 @@ from ..types import (
     REAL_NUMERIC_TYPES,
     TransposeVectorType,
     VectorType,
+    EnumIdentity,
+    EnumType,
+    EnumValue,
+    StructInstance,
     VOID_VALUE,
     can_implicitly_convert,
     coerce_implicit,
@@ -87,6 +102,8 @@ def builtin_definitions() -> list[BuiltinDefinition]:
         BuiltinDefinition("Math.factorial", _constant_runtime(factorial_builtin), _factorial_type, _exactly_one("Math.factorial")),
         BuiltinDefinition("Math.floor", _constant_runtime(floor_builtin), _real_to_int_type("Math.floor"), _exactly_one("Math.floor")),
         BuiltinDefinition("Math.ceil", _constant_runtime(ceil_builtin), _real_to_int_type("Math.ceil"), _exactly_one("Math.ceil")),
+        BuiltinDefinition(PARSE_INT_BUILTIN, _constant_runtime(_parse_int_runtime), _parse_int_type, _exactly_one(PARSE_INT_BUILTIN)),
+        BuiltinDefinition(PARSE_DOUBLE_BUILTIN, _constant_runtime(_parse_double_runtime), _parse_double_type, _exactly_one(PARSE_DOUBLE_BUILTIN)),
     ]
     definitions.extend(
         BuiltinDefinition(
@@ -102,9 +119,83 @@ def builtin_definitions() -> list[BuiltinDefinition]:
 
 def builtin_constant_definitions() -> list[BuiltinConstantDefinition]:
     pi_type, pi_value = SCALAR_MATH_CONSTANTS["Math.pi"]
-    return [
+    constants = [
         BuiltinConstantDefinition("Math.pi", pi_type, pi_value),
     ]
+    status_type = EnumType(PARSE_STATUS_TYPE, EnumIdentity("__builtin__", PARSE_STATUS_TYPE))
+    constants.extend(
+        BuiltinConstantDefinition(
+            f"{PARSE_STATUS_TYPE}.{status.name}",
+            status_type,
+            EnumValue(
+                PARSE_STATUS_TYPE,
+                status.name,
+                status_type.identity,
+                int(status),
+                int(status),
+            ),
+        )
+        for status in ParseStatus
+    )
+    return constants
+
+
+def _parse_result(type_name: str, value_type: str, value: int | float, status: ParseStatus) -> AetherValue:
+    status_type = EnumType(PARSE_STATUS_TYPE, EnumIdentity("__builtin__", PARSE_STATUS_TYPE))
+    status_value = EnumValue(
+        PARSE_STATUS_TYPE,
+        status.name,
+        status_type.identity,
+        int(status),
+        int(status),
+    )
+    return AetherValue(
+        type_name,
+        StructInstance(
+            type_name,
+            {
+                "value": AetherValue(value_type, value),
+                "status": AetherValue(status_type, status_value),
+            },
+            ("value", "status"),
+        ),
+    )
+
+
+def _parse_int_runtime(args: list[AetherValue]) -> AetherValue:
+    parsed = parse_int_bytes(_parse_string_bytes(args, PARSE_INT_BUILTIN))
+    return _parse_result(INT_PARSE_RESULT_TYPE, "int", int(parsed.value), parsed.status)
+
+
+def _parse_double_runtime(args: list[AetherValue]) -> AetherValue:
+    parsed = parse_double_bytes(_parse_string_bytes(args, PARSE_DOUBLE_BUILTIN))
+    return _parse_result(DOUBLE_PARSE_RESULT_TYPE, "double", float(parsed.value), parsed.status)
+
+
+def _parse_string_bytes(args: list[AetherValue], label: str) -> bytes:
+    if len(args) != 1 or args[0].type_name != "string" or not isinstance(args[0].value, StringValue):
+        actual = "no argument" if not args else type_to_string(args[0].type_name)
+        raise AetherTypeError(f"{label}(...) expects one string argument, got '{actual}'.")
+    return args[0].value.utf8_bytes
+
+
+def _parse_int_type(arg_types: list[AetherType | None]) -> AetherType | None:
+    _parse_argument_type(arg_types, PARSE_INT_BUILTIN)
+    return INT_PARSE_RESULT_TYPE
+
+
+def _parse_double_type(arg_types: list[AetherType | None]) -> AetherType | None:
+    _parse_argument_type(arg_types, PARSE_DOUBLE_BUILTIN)
+    return DOUBLE_PARSE_RESULT_TYPE
+
+
+def _parse_argument_type(arg_types: list[AetherType | None], label: str) -> None:
+    if len(arg_types) != 1:
+        raise AetherTypeError(f"{label}(...) expects exactly one argument.")
+    if arg_types[0] is not None and arg_types[0] != "string":
+        raise AetherTypeError(
+            f"{label}(...) expects a string argument, got '{type_to_string(arg_types[0])}'."
+        )
 
 
 def _constant_runtime(function: BuiltinFunction) -> RuntimeFactory:

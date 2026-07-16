@@ -10,6 +10,16 @@ from Transaction import TransactionType;
 
 List<Transaction> transactions = {};
 
+IntParseResult parsedExpenseId = parseInt("2");
+DoubleParseResult parsedExpenseAmount = parseDouble("250.0");
+DoubleParseResult invalidParsedAmount = parseDouble(" 250.0");
+int expenseId = 0;
+double expenseAmount = 0.0;
+if parsedExpenseId.status == ParseStatus.Success && parsedExpenseAmount.status == ParseStatus.Success {
+    expenseId = parsedExpenseId.value;
+    expenseAmount = parsedExpenseAmount.value;
+}
+
 AddTransactionStatus incomeStatus = addTransaction(
     transactions,
     1,
@@ -21,10 +31,10 @@ AddTransactionStatus incomeStatus = addTransaction(
 );
 AddTransactionStatus expenseStatus = addTransaction(
     transactions,
-    2,
+    expenseId,
     TransactionType.Expense,
     "Dinner",
-    250.0,
+    expenseAmount,
     "food",
     "2026-07-15"
 );
@@ -44,18 +54,18 @@ List<Transaction> transactionCopy = transactions.copy();
 boolean copyEquality = transactions == transactionCopy;
 boolean sliceEquality = transactions == transactions[0:2];
 boolean containsTransaction = transactions.contains(Transaction(
-    2,
+    expenseId,
     TransactionType.Expense,
     "Dinner",
-    250.0,
+    expenseAmount,
     "food",
     "2026-07-15"
 ));
 boolean indexTransaction = transactions.indexOf(Transaction(
-    2,
+    expenseId,
     TransactionType.Expense,
     "Dinner",
-    250.0,
+    expenseAmount,
     "food",
     "2026-07-15"
 )) == 1;
@@ -71,6 +81,8 @@ Summary emptyTotals = summarize(empty);
 string expenseLabel = transactionLabel(expenses[0]);
 
 println("income added: ", incomeStatus == AddTransactionStatus.Added);
+println("numeric strings parsed: ", parsedExpenseId.status == ParseStatus.Success && parsedExpenseAmount.status == ParseStatus.Success);
+println("invalid amount handled: ", invalidParsedAmount.status == ParseStatus.InvalidFormat);
 println("expense added: ", expenseStatus == AddTransactionStatus.Added);
 println("non-positive rejected: ", invalidStatus == AddTransactionStatus.NonPositiveAmount);
 println("two transactions: ", transactions.length == 2);

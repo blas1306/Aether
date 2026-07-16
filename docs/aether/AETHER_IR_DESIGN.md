@@ -1351,7 +1351,16 @@ The unoptimized IR must remain executable.
 This phase is an evaluation point, not a commitment to rewrite the complete
 language core.
 
-## 13. Risks and Guardrails
+## 13. Typed string parsing calls (profile 15)
+
+`parseInt` and `parseDouble` lower to distinct typed builtin calls. Each call
+retains its string argument, nominal result struct, source location and memory
+read effect through SSA. The verifiers require the canonical two-field layout;
+invalid input returns `ParseStatus` and does not create an exceptional edge.
+The optimizers do not constant-fold parsing and preserve every call whose
+structured result is used.
+
+## 14. Risks and Guardrails
 
 ### Do not port the whole language at once
 
@@ -1387,7 +1396,7 @@ Struct value behavior, class reference behavior, shallow `const`, nullability,
 numeric conversions, evaluation order, and observable runtime errors must not
 change merely because a backend representation makes another behavior easier.
 
-## 14. Open Questions
+## 15. Open Questions
 
 The following decisions should remain open until implementation experience
 provides evidence:

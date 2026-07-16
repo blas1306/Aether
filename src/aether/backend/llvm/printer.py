@@ -167,6 +167,7 @@ class LLVMPrinter:
         self._list_index_of_types: set[object] = set()
         self._uses_print = False
         self._uses_string_runtime = False
+        self._uses_string_parsing = False
         self._checked_int_operators: set[str] = set()
         self._scalar_math_calls: set[tuple[str, tuple[object, ...], object]] = set()
         self._structs = {definition.name: definition for definition in module.structs}
@@ -332,7 +333,10 @@ class LLVMPrinter:
         LLVMIntegerRuntime(frozenset(self._checked_int_operators)).append(runtime, common_runtime)
         LLVMScalarMathRuntime(frozenset(self._scalar_math_calls)).append(runtime, common_runtime)
         LLVMRuntimeIO(enabled=self._uses_print).append(runtime)
-        LLVMStringRuntime(enabled=self._uses_string_runtime).append(runtime)
+        LLVMStringRuntime(
+            enabled=self._uses_string_runtime,
+            parsing=self._uses_string_parsing,
+        ).append(runtime)
         globals_ = [
             rendered
             for global_ in self._string_globals_by_value.values()
@@ -1141,6 +1145,25 @@ class LLVMPrinter:
         return f"br {self._label_operand(instruction.target)}"
 
     def _print_call(self, instruction: SSACall) -> str:
+        if instruction.builtin in {"parseInt", "parseDouble"}:
+            expected = "IntParseResult" if instruction.builtin == "parseInt" else "DoubleParseResult"
+            if (
+                instruction.result is None
+                or len(instruction.arguments) != 1
+                or not isinstance(instruction.arguments[0].type, StringType)
+                or instruction.result.type != StructType(expected)
+            ):
+                raise LLVMBackendError(
+                    f"LLVM {instruction.builtin} requires string -> struct {expected}"
+                )
+            self._uses_string_runtime = True
+            self._uses_string_parsing = True
+            result = self._new_temp(instruction.result)
+            helper = "aether_parse_int" if instruction.builtin == "parseInt" else "aether_parse_double"
+            return (
+                f"{result} = call {llvm_type(instruction.result.type)} "
+                f"@{helper}(ptr {self._operand(instruction.arguments[0])})"
+            )
         if instruction.builtin == "__aether_string_byte_length":
             if (
                 instruction.result is None

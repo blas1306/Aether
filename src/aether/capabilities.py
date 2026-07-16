@@ -26,12 +26,13 @@ from .scalar_math import (
     EXPERIMENTAL_SCALAR_MATH_FUNCTIONS,
     SCALAR_MATH_OPERATIONS,
 )
+from .string_parsing import DOUBLE_PARSE_RESULT_TYPE, INT_PARSE_RESULT_TYPE
 
 if TYPE_CHECKING:
     from .pipeline import TypedProgram
 
 
-CAPABILITY_PROFILE_VERSION = "14"
+CAPABILITY_PROFILE_VERSION = "15"
 
 
 class BackendIdentity(str, Enum):
@@ -68,6 +69,8 @@ class Capability(str, Enum):
     STRING_CONCATENATION = "string-concatenation"
     STRING_BYTE_LENGTH = "string-byte-length"
     STRING_PARSING = "string-parsing"
+    INTEGER_STRING_PARSING = "integer-string-parsing"
+    DOUBLE_STRING_PARSING = "double-string-parsing"
     STRING_SPLIT_TRIM = "string-split-trim"
     PRINT = "print"
     INPUT = "input"
@@ -178,6 +181,8 @@ CAPABILITY_CATALOG: Mapping[Capability, CapabilityDefinition] = MappingProxyType
             _definition(Capability.STRING_CONCATENATION, "Public string concatenation."),
             _definition(Capability.STRING_BYTE_LENGTH, "Constant-time public string byte length."),
             _definition(Capability.STRING_PARSING, "Public parsing from strings."),
+            _definition(Capability.INTEGER_STRING_PARSING, "Strict structured decimal parsing from string to int."),
+            _definition(Capability.DOUBLE_STRING_PARSING, "Strict structured locale-independent parsing from string to double."),
             _definition(Capability.STRING_SPLIT_TRIM, "Public split and trim text algorithms."),
             _definition(Capability.PRINT, "print and println output."),
             _definition(Capability.INPUT, "Typed input calls."),
@@ -256,7 +261,6 @@ _AST_UNSUPPORTED = {
     Capability.GENERICS,
     Capability.FILES,
     Capability.OPTIMIZATION_PROFILES,
-    Capability.STRING_PARSING,
     Capability.STRING_SPLIT_TRIM,
 }
 _AST_PARTIAL = {
@@ -293,6 +297,9 @@ _NATIVE_COMPLETE = {
     Capability.DYNAMIC_STRING_OBJECT,
     Capability.STRING_CONCATENATION,
     Capability.STRING_BYTE_LENGTH,
+    Capability.STRING_PARSING,
+    Capability.INTEGER_STRING_PARSING,
+    Capability.DOUBLE_STRING_PARSING,
     Capability.COLLECTION_OBJECT_LIFECYCLE,
     Capability.CONST_COLLECTION_REFERENCES,
     Capability.BORROWED_FOR_IN_ELEMENTS,
@@ -309,7 +316,6 @@ _NATIVE_UNSUPPORTED = {
     Capability.GENERICS,
     Capability.ERROR_HANDLING,
     Capability.FILES,
-    Capability.STRING_PARSING,
     Capability.STRING_SPLIT_TRIM,
 }
 NATIVE_CAPABILITY_PROFILE = _profile(
@@ -364,6 +370,9 @@ E2E_TESTED_CAPABILITIES: Mapping[BackendIdentity, frozenset[Capability]] = Mappi
                 Capability.BORROWED_FOR_IN_ELEMENTS,
                 Capability.STRING_CONCATENATION,
                 Capability.STRING_BYTE_LENGTH,
+                Capability.STRING_PARSING,
+                Capability.INTEGER_STRING_PARSING,
+                Capability.DOUBLE_STRING_PARSING,
                 Capability.PRINT,
                 Capability.INPUT,
                 Capability.MODULES,
@@ -404,6 +413,9 @@ E2E_TESTED_CAPABILITIES: Mapping[BackendIdentity, frozenset[Capability]] = Mappi
                 Capability.DYNAMIC_STRING_OBJECT,
                 Capability.STRING_CONCATENATION,
                 Capability.STRING_BYTE_LENGTH,
+                Capability.STRING_PARSING,
+                Capability.INTEGER_STRING_PARSING,
+                Capability.DOUBLE_STRING_PARSING,
                 Capability.COLLECTION_OBJECT_LIFECYCLE,
                 Capability.CONST_COLLECTION_REFERENCES,
                 Capability.BORROWED_FOR_IN_ELEMENTS,
@@ -793,6 +805,20 @@ class _CapabilityDetector:
                 call,
             )
         canonical = self._canonical_name(call.callee)
+        if canonical in {"parseInt", "parseDouble"}:
+            self._record(
+                Capability.STRING_PARSING,
+                call,
+                detail="explicit structured numeric parsing",
+                requires_complete_support=True,
+            )
+            self._record(
+                Capability.INTEGER_STRING_PARSING
+                if canonical == "parseInt"
+                else Capability.DOUBLE_STRING_PARSING,
+                call,
+                requires_complete_support=True,
+            )
         if canonical in {"copy", "contains", "index_of"} and call.arguments:
             self._record_collection_operation(
                 call.arguments[0],
@@ -962,6 +988,7 @@ class _CapabilityDetector:
         is_struct = isinstance(resolved, str) and (
             (symbol := self.checker.structs.get(resolved)) is not None
             and symbol.kind == "struct"
+            or resolved in {INT_PARSE_RESULT_TYPE, DOUBLE_PARSE_RESULT_TYPE}
         )
         reason = self._collection_element_reason(resolved, ())
         if not is_struct and reason is None:
@@ -991,6 +1018,8 @@ class _CapabilityDetector:
         active: tuple[str, ...],
     ) -> str | None:
         type_name = self._resolve_alias(type_name)
+        if type_name in {INT_PARSE_RESULT_TYPE, DOUBLE_PARSE_RESULT_TYPE}:
+            return None
         if type_name in {"int", "float", "double", "boolean", "string"}:
             return None
         if isinstance(type_name, EnumType):

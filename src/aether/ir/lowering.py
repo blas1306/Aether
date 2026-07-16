@@ -2,12 +2,20 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields as dataclass_fields, is_dataclass
 from typing import NoReturn
 
 from .. import ast
 from ..errors import IRBackendUnsupportedFeatureError
 from ..scalar_math import NATIVE_SCALAR_MATH_FUNCTIONS, SCALAR_MATH_CONSTANTS
+from ..string_parsing import (
+    DOUBLE_PARSE_RESULT_TYPE,
+    INT_PARSE_RESULT_TYPE,
+    PARSE_BUILTINS,
+    PARSE_DOUBLE_BUILTIN,
+    PARSE_STATUS_TYPE,
+    PARSE_STATUS_VARIANTS,
+)
 from ..types import (
     AetherType,
     ArrayType as AetherArrayType,
@@ -275,12 +283,17 @@ class IRLowerer:
             for statement in program.statements
             if isinstance(statement, ast.AliasDeclaration)
         }
-        declarations = [
+        uses_parsing = _program_uses_parsing(program)
+        declarations = (
+            _builtin_parse_struct_declarations() if uses_parsing else []
+        ) + [
             statement
             for statement in program.statements
             if isinstance(statement, ast.StructDeclaration)
         ]
-        enum_declarations = [
+        enum_declarations = (
+            [_builtin_parse_enum_declaration()] if uses_parsing else []
+        ) + [
             statement
             for statement in program.statements
             if isinstance(statement, ast.EnumDeclaration)
@@ -1827,6 +1840,8 @@ class IRLowerer:
             )
 
         builtin = self._canonical_builtin_name(call.callee)
+        if builtin in PARSE_BUILTINS:
+            return self._lower_parse_call(call, builtin, context)
         if builtin in NATIVE_SCALAR_MATH_FUNCTIONS:
             return self._lower_scalar_math_call(
                 call,
@@ -2140,6 +2155,32 @@ class IRLowerer:
         result_type = self._scalar_math_result_type(builtin, arguments, call)
         result = context.temporary(result_type)
         context.block.instructions.append(IRCall(builtin, arguments, result, builtin))
+        return result
+
+    def _lower_parse_call(
+        self,
+        call: ast.CallExpression,
+        builtin: str,
+        context: _FunctionContext,
+    ) -> IRValue:
+        arguments = tuple(self._lower_expression(argument, context) for argument in call.arguments)
+        if len(arguments) != 1 or not isinstance(arguments[0].type, StringType):
+            self._fail(f"IR builtin '{builtin}' requires string -> structured parse result.", call)
+        result_type = StructType(
+            INT_PARSE_RESULT_TYPE
+            if builtin != PARSE_DOUBLE_BUILTIN
+            else DOUBLE_PARSE_RESULT_TYPE
+        )
+        result = context.temporary(result_type)
+        context.block.instructions.append(
+            IRCall(
+                builtin,
+                arguments,
+                result,
+                builtin,
+                self._source_location(call),
+            )
+        )
         return result
 
     def _scalar_math_result_type(
@@ -3052,6 +3093,74 @@ class IRLowerer:
             line=line if isinstance(line, int) else None,
             column=column if isinstance(column, int) else None,
         )
+
+
+def _builtin_parse_enum_declaration() -> ast.EnumDeclaration:
+    return ast.EnumDeclaration(
+        PARSE_STATUS_TYPE,
+        [ast.EnumVariant(name) for name in PARSE_STATUS_VARIANTS],
+        display_name=PARSE_STATUS_TYPE,
+    )
+
+
+def _builtin_parse_struct_declarations() -> list[ast.StructDeclaration]:
+    status_type = AetherEnumType(PARSE_STATUS_TYPE)
+    return [
+        ast.StructDeclaration(
+            INT_PARSE_RESULT_TYPE,
+            [ast.StructField("value", "int"), ast.StructField("status", status_type)],
+        ),
+        ast.StructDeclaration(
+            DOUBLE_PARSE_RESULT_TYPE,
+            [ast.StructField("value", "double"), ast.StructField("status", status_type)],
+        ),
+    ]
+
+
+def _program_uses_parsing(program: ast.Program) -> bool:
+    parse_names = {
+        *PARSE_BUILTINS,
+        PARSE_STATUS_TYPE,
+        INT_PARSE_RESULT_TYPE,
+        DOUBLE_PARSE_RESULT_TYPE,
+    }
+
+    def type_uses_parsing(value: object) -> bool:
+        if isinstance(value, str):
+            return value in parse_names
+        if isinstance(value, AetherEnumType):
+            return value.name == PARSE_STATUS_TYPE
+        if is_dataclass(value):
+            return any(
+                type_uses_parsing(getattr(value, item.name))
+                for item in dataclass_fields(value)
+            )
+        if isinstance(value, (list, tuple)):
+            return any(type_uses_parsing(item) for item in value)
+        return False
+
+    def visit(value: object) -> bool:
+        if isinstance(value, ast.CallExpression) and value.callee in PARSE_BUILTINS:
+            return True
+        if isinstance(value, ast.Identifier) and value.name == PARSE_STATUS_TYPE:
+            return True
+        if isinstance(value, (str, int, float, bool, bytes)) or value is None:
+            return False
+        if isinstance(value, dict):
+            return any(visit(item) for item in value.values())
+        if isinstance(value, (list, tuple)):
+            return any(visit(item) for item in value)
+        if not is_dataclass(value):
+            return False
+        for item in dataclass_fields(value):
+            field_value = getattr(value, item.name)
+            if item.name in {"type_name", "return_type", "target_type"} and type_uses_parsing(field_value):
+                return True
+            if visit(field_value):
+                return True
+        return False
+
+    return visit(program)
 
 
 def _feature_name(node: object) -> str:

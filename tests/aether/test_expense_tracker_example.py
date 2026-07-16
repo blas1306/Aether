@@ -17,6 +17,8 @@ ROOT = Path(__file__).resolve().parents[2]
 EXAMPLE = ROOT / "examples" / "expense_tracker"
 MAIN_OUTPUT = [
     "income added: true",
+    "numeric strings parsed: true",
+    "invalid amount handled: true",
     "expense added: true",
     "non-positive rejected: true",
     "two transactions: true",
@@ -76,9 +78,9 @@ def test_expense_tracker_full_native_runs_list_of_struct_with_same_validations()
     assert LLVMRunner().run(typed, stdout=stdout, stderr=stderr) == 0
     native_lines = stdout.getvalue().splitlines()
 
-    assert native_lines[:18] == MAIN_OUTPUT[:18]
-    assert native_lines[18].startswith("#1 | TransactionType.Income | 2026-07-01 | work | Salary | 1500")
-    assert native_lines[19].startswith("#2 | TransactionType.Expense | 2026-07-15 | food | Dinner | 250")
+    assert native_lines[:20] == MAIN_OUTPUT[:20]
+    assert native_lines[20].startswith("#1 | TransactionType.Income | 2026-07-01 | work | Salary | 1500")
+    assert native_lines[21].startswith("#2 | TransactionType.Expense | 2026-07-15 | food | Dinner | 250")
     assert stderr.getvalue() == ""
 
     llvm = LLVMBuilder().emit_llvm(typed)

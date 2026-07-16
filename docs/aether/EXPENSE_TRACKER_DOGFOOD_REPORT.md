@@ -7,6 +7,11 @@ recursivos para los tres fields string. Se mantienen diez validaciones
 funcionales, una validación de slice, más el listado final; no se añadieron CLI
 real ni persistencia.
 
+Actualización parsing (perfil 15): `Main.ae` obtiene un identificador mediante
+`parseInt("2")` y un monto mediante `parseDouble("250.0")`, comprueba ambos
+`ParseStatus.Success` antes de consumir `value` y maneja `" 250.0"` como
+`InvalidFormat`. No se añadieron argv, input, archivos, trim ni split.
+
 Actualización const/borrow: los tres recorridos de `List<Transaction>` en
 `Reports.ae` usan ahora el binding borrowed read-only sin copia automática por
 vuelta. El filtro adquiere ownership únicamente al ejecutar `push(transaction)`;
@@ -53,7 +58,8 @@ la semántica por valor ni se sustituyeron structs por punteros.
 
 Se admiten primitivas nativas (`int`, `boolean`, `double`), enums sin payload,
 structs acíclicos anidados, strings y descriptores/referencias de colecciones ya
-representables. Un field string es un handle a `AetherStringObject`: copy y
+representables, incluidos los resultados nominales de parsing. Un field string
+es un handle a `AetherStringObject`: copy y
 destroy retienen/liberan recursivamente. `transactionLabel` prueba concat owned
 sobre fields borrowed y `Main.ae` valida `byteLength`; parsing y producción
 textual avanzada siguen fuera del subset.
@@ -85,7 +91,7 @@ en native. No afecta cálculos ni validaciones del tracker.
 
 ## Límites restantes y próxima tarea
 
-Siguen fuera de alcance argumentos, archivos, parsing, split/trim, excepciones
+Siguen fuera de alcance argumentos, archivos, split/trim, excepciones
 y GC. El tracker es una demostración directa desde
 `main`, no una CLI persistente.
 
@@ -101,4 +107,4 @@ La fase de igualdad estructural E2E quedó completada: copias y slices de
 `List<Transaction>` comparan contenido, y búsqueda encuentra transacciones
 equivalentes aunque sean valores independientes. La etiqueta dinámica
 `food: Dinner` prueba retorno, temporales y cleanup ARC, y su longitud esperada
-es 12 bytes. Archivos, argv, parsing y split/trim siguen aplazados.
+es 12 bytes. Archivos, argv y split/trim siguen aplazados.

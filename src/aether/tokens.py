@@ -89,6 +89,9 @@ AETHER_TYPES = {
     "Vector",
     "Exception",
     "void",
+    "ParseStatus",
+    "IntParseResult",
+    "DoubleParseResult",
 }
 PRIMITIVE_TYPES = {"int", "float", "double", "complex", "string", "boolean"}
 

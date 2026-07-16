@@ -592,7 +592,13 @@ class SSABuilder:
             result = None
             if instruction.result is not None:
                 result = self._define_value(instruction.result, state.value_map)
-            return SSACall(instruction.function, arguments, result, instruction.builtin)
+            return SSACall(
+                instruction.function,
+                arguments,
+                result,
+                instruction.builtin,
+                instruction.source_location,
+            )
 
         if isinstance(instruction, IRFunctionRef):
             return SSAFunctionRef(

@@ -293,6 +293,7 @@ class SSAAlgebraicSimplifier:
                 ),
                 instruction.result,
                 instruction.builtin,
+                instruction.source_location,
             )
         if isinstance(instruction, SSACallIndirect):
             return SSACallIndirect(

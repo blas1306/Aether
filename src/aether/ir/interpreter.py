@@ -12,6 +12,13 @@ from aether.integer_arithmetic import checked_int_binary, ieee_divide
 from aether.list_safety import checked_list_index_to_int, checked_list_length_to_int
 from aether.stdlib.registry import call_builtin
 from aether.string_value import StringValue, as_string_value
+from aether.string_parsing import (
+    PARSE_DOUBLE_BUILTIN,
+    PARSE_INT_BUILTIN,
+    PARSE_STATUS_TYPE,
+    parse_double_bytes,
+    parse_int_bytes,
+)
 from aether.types import AetherValue
 from aether.vector_matrix_safety import (
     MATRIX_INDEX_OUT_OF_BOUNDS,
@@ -423,6 +430,28 @@ class IRInterpreter:
                     if result > (1 << 31) - 1:
                         raise IRExecutionError("Aether string byte length does not fit in int")
                     frame.values[instruction.result] = result
+                    return False, None, None
+                if instruction.builtin in {PARSE_INT_BUILTIN, PARSE_DOUBLE_BUILTIN}:
+                    if len(arguments) != 1 or instruction.result is None:
+                        raise IRExecutionError("IR string parsing requires one argument and a result")
+                    text = arguments[0]
+                    if not isinstance(text, StringValue):
+                        raise IRExecutionError("IR string parsing requires a string value")
+                    parsed = (
+                        parse_int_bytes(text.utf8_bytes)
+                        if instruction.builtin == PARSE_INT_BUILTIN
+                        else parse_double_bytes(text.utf8_bytes)
+                    )
+                    status = int(parsed.status)
+                    frame.values[instruction.result] = (
+                        parsed.value,
+                        IREnumConstant(
+                            PARSE_STATUS_TYPE,
+                            parsed.status.name,
+                            status,
+                            status,
+                        ),
+                    )
                     return False, None, None
                 if instruction.builtin == "__aether_retain":
                     if len(arguments) != 1 or instruction.result is not None:

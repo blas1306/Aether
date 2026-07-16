@@ -92,11 +92,14 @@ class SSACall(SSAInstruction):
     arguments: tuple[SSAValue, ...] = ()
     result: SSAValue | None = None
     builtin: str | None = None
+    source_location: Any | None = None
 
     @property
     def effects(self):
         if self.builtin == "__aether_string_byte_length":
             return MEMORY_READ_MAY_TRAP
+        if self.builtin in {"parseInt", "parseDouble"}:
+            return MEMORY_READ
         if self.builtin in {"__aether_retain", "__aether_release"}:
             return InstructionEffects(
                 has_side_effects=True,

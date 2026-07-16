@@ -29,6 +29,12 @@ from aether.ir.types import (
 from aether.ir.scalar_math import scalar_math_result_type
 from aether.ir.model import IREnumConstant
 from aether.ir.equality import ir_eq_capability
+from aether.string_parsing import (
+    DOUBLE_PARSE_RESULT_TYPE,
+    INT_PARSE_RESULT_TYPE,
+    PARSE_DOUBLE_BUILTIN,
+    PARSE_INT_BUILTIN,
+)
 
 from .model import (
     SSAArrayCopy,
@@ -781,6 +787,25 @@ class SSAVerifier:
                     or not isinstance(instruction.result.type, IntType)
                 ):
                     self._fail("String byte-length builtin requires string -> int")
+                return
+            if instruction.builtin in {PARSE_INT_BUILTIN, PARSE_DOUBLE_BUILTIN}:
+                expected_name = (
+                    INT_PARSE_RESULT_TYPE
+                    if instruction.builtin == PARSE_INT_BUILTIN
+                    else DOUBLE_PARSE_RESULT_TYPE
+                )
+                if instruction.function != instruction.builtin:
+                    self._fail("String parsing builtin must retain its canonical semantic name")
+                if (
+                    instruction.result is None
+                    or len(instruction.arguments) != 1
+                    or not isinstance(instruction.arguments[0].type, StringType)
+                    or instruction.result.type != StructType(expected_name)
+                ):
+                    self._fail(
+                        f"String parsing builtin '{instruction.builtin}' requires "
+                        f"string -> struct {expected_name}"
+                    )
                 return
             if instruction.builtin in {"__aether_retain", "__aether_release"}:
                 if instruction.function != instruction.builtin:

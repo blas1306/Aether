@@ -38,6 +38,15 @@ representación: `string + string` y la property `s.byteLength`. `+` nunca
 convierte números, booleanos ni valores nominales; puede asignar y hacer panic.
 `byteLength` es O(1) y cuenta bytes UTF-8, no code points ni graphemes.
 
+El perfil 15 añade `parseInt(string)` y `parseDouble(string)` como builtins
+globales explícitos. Esta ubicación coincide con los builtins globales actuales
+y evita fingir un método estático que el lenguaje todavía no soporta. Devuelven
+`IntParseResult`/`DoubleParseResult` con `ParseStatus`; su gramática byte-aware,
+defaults y política IEEE están en
+[`STRING_PARSING_DESIGN.md`](STRING_PARSING_DESIGN.md). Son intrínsecos porque
+native necesita acceso length-aware al objeto string y control explícito del
+locale, no porque exista una conversión implícita.
+
 ## Nivel 1: builtins e intrínsecos
 
 ### Candidatos legítimos

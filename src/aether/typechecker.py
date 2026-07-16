@@ -23,6 +23,11 @@ from .stdlib import (
     MutationKind,
 )
 from .tokens import AETHER_TYPES, PRIMITIVE_TYPES
+from .string_parsing import (
+    DOUBLE_PARSE_RESULT_TYPE,
+    INT_PARSE_RESULT_TYPE,
+    PARSE_STATUS_TYPE,
+)
 from .types import (
     AetherType,
     ArrayType,
@@ -2899,6 +2904,19 @@ class TypeChecker:
         location: object | None = None,
     ) -> AetherType:
         resolved = self._resolve_type_aliases(target_type, location)
+        if resolved in {INT_PARSE_RESULT_TYPE, DOUBLE_PARSE_RESULT_TYPE}:
+            if field_name == "value":
+                return "int" if resolved == INT_PARSE_RESULT_TYPE else "double"
+            if field_name == "status":
+                return EnumType(
+                    PARSE_STATUS_TYPE,
+                    EnumIdentity("__builtin__", PARSE_STATUS_TYPE),
+                )
+            raise AetherTypeError(
+                f"Struct '{resolved}' has no field '{field_name}'.",
+                line=getattr(location, "line", None),
+                column=getattr(location, "column", None),
+            )
         if resolved == "Exception":
             if field_name in {"message", "kind"}:
                 return "string"
@@ -3226,6 +3244,11 @@ class TypeChecker:
                 column=getattr(location, "column", None),
             )
         if isinstance(type_name, str):
+            if type_name == PARSE_STATUS_TYPE:
+                return EnumType(
+                    PARSE_STATUS_TYPE,
+                    EnumIdentity("__builtin__", PARSE_STATUS_TYPE),
+                )
             if type_name in self.type_aliases:
                 if type_name in resolving:
                     cycle_name = resolving[0] if resolving else type_name

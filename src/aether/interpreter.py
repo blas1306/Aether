@@ -24,6 +24,7 @@ from .stdlib.math.linear_algebra import matmul_builtin
 from .stdlib.registry import get_builtin_constant
 from .tokens import AETHER_TYPES, PRIMITIVE_TYPES
 from .string_value import StringValue
+from .string_parsing import PARSE_STATUS_TYPE
 from .collection_value import CollectionObject, destroy_value
 from .types import (
     AetherType,
@@ -2358,6 +2359,11 @@ class Interpreter:
         if type_name is None:
             raise AetherTypeError("Cannot infer type in this declaration.")
         if isinstance(type_name, str):
+            if type_name == PARSE_STATUS_TYPE:
+                return EnumType(
+                    PARSE_STATUS_TYPE,
+                    EnumIdentity("__builtin__", PARSE_STATUS_TYPE),
+                )
             if type_name in self.type_aliases:
                 if type_name in resolving:
                     cycle_name = resolving[0] if resolving else type_name

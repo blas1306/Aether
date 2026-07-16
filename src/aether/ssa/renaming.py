@@ -321,7 +321,13 @@ class SSARenamer:
             if instruction.result is not None:
                 result = self._define_value(instruction.result)
                 self._bind_value(result.name, result, bound_values)
-            return SSACall(instruction.function, arguments, result, instruction.builtin)
+            return SSACall(
+                instruction.function,
+                arguments,
+                result,
+                instruction.builtin,
+                instruction.source_location,
+            )
 
         if isinstance(instruction, IRFunctionRef):
             result = self._define_value(instruction.result)

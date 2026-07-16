@@ -8,7 +8,10 @@ from .errors import AetherTypeError
 from .string_value import StringValue, as_string_value
 
 
-TYPE_NAMES = {"int", "float", "double", "complex", "string", "boolean", "Exception"}
+TYPE_NAMES = {
+    "int", "float", "double", "complex", "string", "boolean", "Exception",
+    "ParseStatus", "IntParseResult", "DoubleParseResult",
+}
 REAL_NUMERIC_TYPES = {"int", "float", "double"}
 NUMERIC_TYPES = REAL_NUMERIC_TYPES | {"complex"}
 VOID_VALUE = None

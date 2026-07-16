@@ -31,8 +31,11 @@ crecimiento y filtrado mediante los hooks ARC de elemento. Ya no hace falta un
 El formateo nativo existente de doubles usa `%g`, por lo que el listado muestra
 `1500`/`250` donde AST muestra `1500.0`/`250.0`; las validaciones y toda la
 lógica coinciden. `transactionLabel` construye una etiqueta owned mediante
-`category + ": " + description`, y `Main.ae` valida su `byteLength`. Parsing,
-split/trim y formatting siguen fuera del ejemplo.
+`category + ": " + description`, y `Main.ae` valida su `byteLength`.
+`Main.ae` también obtiene el identificador `2` con `parseInt("2")` y el monto
+`250.0` con `parseDouble("250.0")`; sólo consume `value` tras comprobar
+`ParseStatus.Success` y demuestra el manejo de un monto con whitespace como
+`InvalidFormat`. Split/trim y formatting siguen fuera del ejemplo.
 
 La Fase 2 confirma además que `List<Transaction>` conserva aliasing en
 assignment/parámetros/returns, que `copy()` crea un objeto y buffer exteriores
@@ -51,8 +54,8 @@ copia el struct y retiene sus strings.
 ## Límites deliberados
 
 - No hay argumentos de proceso ni `main(args)`.
-- No hay archivos, CSV, parsing numérico, `split` o `trim`.
-- No hay conversiones implícitas, parsing ni otras APIs generales de texto.
+- No hay archivos, CSV, `split` o `trim`.
+- No hay conversiones implícitas ni otras APIs generales de texto.
 - Las fechas no se validan ni se ordenan.
 - No se agregaron excepciones, GC ni destructores.
 
