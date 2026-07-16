@@ -66,6 +66,13 @@ los nombres públicos no sugieren soporte binario. `FileStatus` y
 `FileReadResult` normalizan errores esperables sin excepciones. El contrato
 completo está en [`TEXT_FILE_IO_DESIGN.md`](TEXT_FILE_IO_DESIGN.md).
 
+El perfil 20 incorpora un namespace `text` de soporte interno para ALPT1:
+`byteAt`, `byteSlice`, `formatInt`, `formatDouble` y `concatFragments`. No es un
+framework de serialization ni una API de schema. Las dos operaciones de cursor
+trabajan en offsets de bytes, el formatting es locale-independent y la
+concatenación suma longitudes con checks antes de una única asignación final.
+Su primer consumidor es `examples/expense_tracker/Persistence.ae`.
+
 ## Nivel 1: builtins e intrínsecos
 
 ### Candidatos legítimos

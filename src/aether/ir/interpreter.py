@@ -40,6 +40,18 @@ from aether.text_file_io import (
     read_text,
     write_text,
 )
+from aether.text_codec import (
+    TEXT_BYTE_AT_BUILTIN,
+    TEXT_BYTE_SLICE_BUILTIN,
+    TEXT_CONCAT_FRAGMENTS_BUILTIN,
+    TEXT_FORMAT_DOUBLE_BUILTIN,
+    TEXT_FORMAT_INT_BUILTIN,
+    byte_at,
+    byte_slice,
+    concat_fragments,
+    format_double,
+    format_int,
+)
 from aether.types import AetherValue
 from aether.vector_matrix_safety import (
     MATRIX_INDEX_OUT_OF_BOUNDS,
@@ -537,6 +549,31 @@ class IRInterpreter:
                         status,
                         status,
                     )
+                    return False, None, None
+                if instruction.builtin == TEXT_BYTE_AT_BUILTIN:
+                    if len(arguments) != 2 or instruction.result is None or not isinstance(arguments[0], StringValue):
+                        raise IRExecutionError("IR text.byteAt requires (string, int) -> int")
+                    frame.values[instruction.result] = byte_at(arguments[0], arguments[1])
+                    return False, None, None
+                if instruction.builtin == TEXT_BYTE_SLICE_BUILTIN:
+                    if len(arguments) != 3 or instruction.result is None or not isinstance(arguments[0], StringValue):
+                        raise IRExecutionError("IR text.byteSlice requires (string, int, int) -> string")
+                    frame.values[instruction.result] = byte_slice(arguments[0], arguments[1], arguments[2])
+                    return False, None, None
+                if instruction.builtin == TEXT_FORMAT_INT_BUILTIN:
+                    if len(arguments) != 1 or instruction.result is None:
+                        raise IRExecutionError("IR text.formatInt requires int -> string")
+                    frame.values[instruction.result] = format_int(arguments[0])
+                    return False, None, None
+                if instruction.builtin == TEXT_FORMAT_DOUBLE_BUILTIN:
+                    if len(arguments) != 1 or instruction.result is None:
+                        raise IRExecutionError("IR text.formatDouble requires double -> string")
+                    frame.values[instruction.result] = format_double(arguments[0])
+                    return False, None, None
+                if instruction.builtin == TEXT_CONCAT_FRAGMENTS_BUILTIN:
+                    if len(arguments) != 1 or instruction.result is None or not isinstance(arguments[0], list):
+                        raise IRExecutionError("IR text.concatFragments requires List<string> -> string")
+                    frame.values[instruction.result] = concat_fragments(arguments[0])
                     return False, None, None
                 if instruction.builtin == "__aether_retain":
                     if len(arguments) != 1 or instruction.result is not None:

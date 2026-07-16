@@ -27,6 +27,14 @@ from ..text_file_io import (
     TEXT_FILE_BUILTINS,
     WRITE_TEXT_BUILTIN,
 )
+from ..text_codec import (
+    TEXT_BYTE_AT_BUILTIN,
+    TEXT_BYTE_SLICE_BUILTIN,
+    TEXT_CONCAT_FRAGMENTS_BUILTIN,
+    TEXT_FORMAT_DOUBLE_BUILTIN,
+    TEXT_FORMAT_INT_BUILTIN,
+    TEXT_CODEC_BUILTINS,
+)
 from ..types import (
     AetherType,
     ArrayType as AetherArrayType,
@@ -1874,6 +1882,8 @@ class IRLowerer:
             return self._lower_parse_call(call, builtin, context)
         if builtin in TEXT_FILE_BUILTINS:
             return self._lower_text_file_call(call, builtin, context)
+        if builtin in TEXT_CODEC_BUILTINS:
+            return self._lower_text_codec_call(call, builtin, context)
         if builtin in NATIVE_SCALAR_MATH_FUNCTIONS:
             return self._lower_scalar_math_call(
                 call,
@@ -2285,6 +2295,31 @@ class IRLowerer:
                 builtin,
                 self._source_location(call),
             )
+        )
+        return result
+
+    def _lower_text_codec_call(
+        self,
+        call: ast.CallExpression,
+        builtin: str,
+        context: _FunctionContext,
+    ) -> IRValue:
+        arguments = tuple(self._lower_expression(argument, context) for argument in call.arguments)
+        signatures: dict[str, tuple[tuple[IRType, ...], IRType]] = {
+            TEXT_BYTE_AT_BUILTIN: ((StringType(), IntType()), IntType()),
+            TEXT_BYTE_SLICE_BUILTIN: ((StringType(), IntType(), IntType()), StringType()),
+            TEXT_FORMAT_INT_BUILTIN: ((IntType(),), StringType()),
+            TEXT_FORMAT_DOUBLE_BUILTIN: ((DoubleType(),), StringType()),
+            TEXT_CONCAT_FRAGMENTS_BUILTIN: ((ListType(StringType()),), StringType()),
+        }
+        expected, result_type = signatures[builtin]
+        if len(arguments) != len(expected) or any(
+            argument.type != wanted for argument, wanted in zip(arguments, expected)
+        ):
+            self._fail(f"IR text codec builtin '{builtin}' has an invalid signature.", call)
+        result = context.temporary(result_type)
+        context.block.instructions.append(
+            IRCall(builtin, arguments, result, builtin, self._source_location(call))
         )
         return result
 

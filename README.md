@@ -47,6 +47,8 @@ imprime `25`.
   del CLI después de `--`;
 - archivos de texto UTF-8 con `io.readText`, `io.writeText` e `io.appendText`,
   resultados nominales y bytes length-aware;
+- persistencia ALPT1 manual del Expense Tracker en AST/native Linux, con
+  payloads length-prefixed, versionado y rechazo fail-closed;
 - structs por valor, constructores, métodos, `this`, copia, igualdad e
   impresión para el subconjunto de campos soportado por backend;
 - núcleo compilado de Array/List con bounds, overflow y allocation checks;
@@ -141,6 +143,16 @@ UTF-8: `FileReadResult loaded = io.readText(path)` y
 `FileStatus status = io.writeText(path, content)`/`io.appendText(...)`. No
 normaliza newlines ni agrega terminadores; native está disponible por ahora en
 Linux/POSIX.
+
+El Expense Tracker demuestra persistencia estructurada sin JSON/reflection:
+
+```bash
+aether run examples/expense_tracker/Main.ae -- expenses.alpt add expense 1 19.95 food "Lunch" 2026-07-16
+aether run examples/expense_tracker/Main.ae -- expenses.alpt list
+```
+
+El archivo usa ALPT1 revision 1. El guardado actual trunca mediante
+`io.writeText` y no ofrece todavía actualización atómica.
 
 Ejecutar la superficie más amplia con el intérprete AST:
 

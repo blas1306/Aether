@@ -36,7 +36,7 @@ arquitectura, no capacidades solicitadas directamente por un programa.
 
 ## Perfiles actuales
 
-La versión actual del perfil es `19`. La versión `2` promovió `modules` e
+La versión actual del perfil es `20`. La versión `2` promovió `modules` e
 `imports` de `UNSUPPORTED` a `PARTIAL`; la versión `3` promovió `scalar-math`
 de `UNSUPPORTED` a `PARTIAL` en LLVM/native; la versión `4` incorpora el
 subconjunto de callables top-level tipados y sin captura en ambos backends. La
@@ -122,6 +122,13 @@ native. Se detecta únicamente desde el miembro nativo tipado `string.split` y
 exige evidencia E2E en ambos backends. La capability histórica combinada
 `string-split-trim` permanece unsupported para no declarar regex, CSV,
 segmentación Unicode ni una superficie general de texto.
+
+La versión `20` agrega `alpt1-encode`, `alpt1-decode`,
+`expense-ledger-load` y `expense-ledger-save`, completas en AST y native
+Linux/POSIX. Describen exclusivamente el codec manual revision 1 de
+`Transaction`; no declaran serialización genérica, reflection, migrations ni
+atomic save. El detector las solicita desde las calls nominales del módulo de
+persistencia y el E2E cubre parser puro, corrupción, archivos y procesos.
 
 Para `strings`, el subset native distingue la operación semántica concreta:
 

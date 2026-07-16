@@ -56,28 +56,29 @@ def test_expense_tracker_ast_covers_ledger_reports_filtering_and_listing() -> No
     assert result.output.splitlines() == MAIN_OUTPUT
 
 
-def test_expense_tracker_consumes_real_add_arguments_without_persistence() -> None:
+def test_expense_tracker_consumes_real_add_arguments_and_persists(tmp_path: Path) -> None:
+    ledger = tmp_path / "expenses.alpt"
     result = run_aether(
         _source("Main.ae"),
         source_root=EXAMPLE,
         program_arguments=[
-            "add", "expense", " 3 ", "19.95", " food ", " Lunch with friends "
+            str(ledger), "add", "expense", " 3 ", "19.95", "food",
+            "Lunch with friends", "2026-07-16",
         ],
     )
 
     assert result.exit_code == 0
-    assert result.output.splitlines() == [
-        "transaction added: food: Lunch with friends",
-        "note: transactions are not persisted between processes",
-    ]
+    assert result.output == "transaction added: food: Lunch with friends\n"
+    assert ledger.read_bytes().startswith(b"AETHER-PERSISTENCE\nformat-version 1\n")
 
 
-def test_expense_tracker_reports_expected_cli_errors() -> None:
+def test_expense_tracker_reports_expected_cli_errors(tmp_path: Path) -> None:
+    path = str(tmp_path / "errors.alpt")
     cases = [
-        (["add", "expense"], "insufficient arguments:"),
-        (["add", "expense", "bad", "2.0", "food", "Dinner"], "invalid ID: bad"),
-        (["add", "expense", "1", "bad", "food", "Dinner"], "invalid amount: bad"),
-        (["unknown"], "unknown command: unknown"),
+        ([path, "add", "expense"], "insufficient arguments:"),
+        ([path, "add", "expense", "bad", "2.0", "food", "Dinner", "2026-07-16"], "invalid ID: bad"),
+        ([path, "add", "expense", "1", "bad", "food", "Dinner", "2026-07-16"], "invalid amount: bad"),
+        ([path, "unknown"], "unknown command: unknown"),
     ]
     for arguments, expected in cases:
         result = run_aether(
@@ -87,6 +88,35 @@ def test_expense_tracker_reports_expected_cli_errors() -> None:
         )
         assert result.exit_code == 2
         assert result.output.startswith(expected)
+
+
+def test_expense_tracker_persists_across_processes_and_refuses_corrupt_overwrite(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "ledger.alpt"
+    source = _source("Main.ae")
+    commands = [
+        [str(path), "add", "expense", "1", "19.95", "food", "Lunch", "2026-07-16"],
+        [str(path), "add", "income", "2", "1000", "work", "Salary", "2026-07-17"],
+    ]
+    for arguments in commands:
+        result = run_aether(source, source_root=EXAMPLE, program_arguments=arguments)
+        assert result.exit_code == 0
+
+    listed = run_aether(source, source_root=EXAMPLE, program_arguments=[str(path), "list"])
+    assert listed.exit_code == 0
+    assert "#1 | TransactionType.Expense | 2026-07-16 | food | Lunch" in listed.output
+    assert "#2 | TransactionType.Income | 2026-07-17 | work | Salary" in listed.output
+    summary = run_aether(source, source_root=EXAMPLE, program_arguments=[str(path), "summary"])
+    assert summary.exit_code == 0
+    assert summary.output == "income: 1000.0\nexpenses: 19.95\nbalance: 980.05\n"
+
+    corrupt = b"AETHER-PERSISTENCE\nformat-version 9\n"
+    path.write_bytes(corrupt)
+    rejected = run_aether(source, source_root=EXAMPLE, program_arguments=commands[0])
+    assert rejected.exit_code == 3
+    assert "UnsupportedFormatVersion" in rejected.output
+    assert path.read_bytes() == corrupt
 
 
 def test_expense_tracker_persists_and_verifies_explicit_summary(tmp_path: Path) -> None:

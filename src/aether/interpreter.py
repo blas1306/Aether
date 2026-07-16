@@ -130,6 +130,67 @@ class _PlotsFunctionReference:
         return self.callback(args)
 
 
+def _claim_or_copy_struct_value(value: AetherValue) -> AetherValue:
+    """Initialize an owning struct slot from a returned/temporary value.
+
+    References carrying an unclaimed owner are moved into the destination;
+    borrowed references are retained.  This is the aggregate counterpart of
+    ``claim_owner`` already used for top-level string/collection slots.
+    """
+
+    if isinstance(value.value, (CollectionObject, StringValue)):
+        if value.value.unclaimed_owners:
+            value.value.claim_owner()
+        else:
+            value.value.retain()
+        return value
+    if isinstance(value.value, StructInstance):
+        fields = {
+            name: _claim_or_copy_struct_value(field)
+            for name, field in value.value.fields.items()
+        }
+        return AetherValue(
+            value.type_name,
+            StructInstance(value.value.type_name, fields, value.value.field_order),
+        )
+    if isinstance(value.value, AetherValue):
+        nested = _claim_or_copy_struct_value(value.value)
+        return AetherValue(value.type_name, nested)
+    if isinstance(value.value, tuple):
+        return AetherValue(
+            value.type_name,
+            tuple(
+                _claim_or_copy_struct_value(element)
+                if isinstance(element, AetherValue)
+                else element
+                for element in value.value
+            ),
+        )
+    return value
+
+
+def _coerce_owned_return_value(value: AetherValue, target_type: AetherType) -> AetherValue:
+    """Apply scalar return conversions without copying transferred owners."""
+
+    if isinstance(target_type, TupleType):
+        return AetherValue(
+            target_type,
+            tuple(
+                _coerce_owned_return_value(element, element_type)
+                for element, element_type in zip(value.value, target_type.element_types)
+            ),
+        )
+    if isinstance(target_type, NullableType):
+        if value.value is None:
+            return AetherValue(target_type, None)
+        base = value.type_name.base_type if isinstance(value.type_name, NullableType) else value.type_name
+        coerced = _coerce_owned_return_value(AetherValue(base, value.value), target_type.base_type)
+        return AetherValue(target_type, coerced.value)
+    if target_type == "float" and value.type_name == "double":
+        return AetherValue("float", float(value.value))
+    return value
+
+
 @dataclass
 class Environment:
     parent: "Environment | None" = None
@@ -159,7 +220,9 @@ class Environment:
         owned: bool = True,
         borrowed_iteration: bool = False,
     ) -> None:
-        if owned and contains_struct_value(value):
+        if owned and isinstance(value.value, StructInstance):
+            value = _claim_or_copy_struct_value(value)
+        elif owned and contains_struct_value(value):
             value = copy_value(value)
         if owned and isinstance(value.value, (CollectionObject, StringValue)):
             value.value.claim_owner()
@@ -733,10 +796,7 @@ class Interpreter:
             for statement in statements:
                 self._execute(statement, env)
         except _ReturnSignal as signal:
-            if not signal.has_owned_result and isinstance(
-                signal.value.value, (CollectionObject, StringValue)
-            ):
-                signal.value.value.offer_owner()
+            if not signal.has_owned_result and self._offer_return_owners(signal.value):
                 signal.has_owned_result = True
             raise
         finally:
@@ -1849,12 +1909,38 @@ class Interpreter:
                 try:
                     self._execute_block(declaration.body, local_env)
                 except _ReturnSignal as signal:
+                    if signal.has_owned_result:
+                        # The block retained/moved every reference reachable
+                        # from the returned value before local cleanup.  A
+                        # second aggregate copy here would over-retain it.
+                        return _coerce_owned_return_value(signal.value, return_type)
                     return coerce_return_value(signal.value, return_type)
             finally:
                 self.current_return_type = previous_return_type
             if return_type == "void":
                 return AetherValue("void", VOID_VALUE)
             raise AetherRuntimeError(f"Function '{callee}' ended without returning a value.")
+
+    def _offer_return_owners(self, value: AetherValue) -> bool:
+        """Protect references nested in a returned aggregate during cleanup."""
+
+        if isinstance(value.value, (CollectionObject, StringValue)):
+            value.value.offer_owner()
+            return True
+        if isinstance(value.value, StructInstance):
+            offered = False
+            for field in value.value.fields.values():
+                offered = self._offer_return_owners(field) or offered
+            return offered
+        if isinstance(value.value, AetherValue):
+            return self._offer_return_owners(value.value)
+        if isinstance(value.value, tuple):
+            offered = False
+            for element in value.value:
+                if isinstance(element, AetherValue):
+                    offered = self._offer_return_owners(element) or offered
+            return offered
+        return False
 
     def _call_struct_method(
         self,

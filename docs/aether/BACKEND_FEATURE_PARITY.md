@@ -51,6 +51,13 @@ vacíos y NUL/UTF-8, rechaza separator vacío y devuelve un `Array<string>` con
 fragments owned. La call conserva efectos de lectura/allocation/panic y
 sobrevive clang O0/O1/O2.
 
+Actualización perfil 20 (16-07-2026): el codec manual ALPT1 de
+`Transaction`/`List<Transaction>` es E2E en AST, IR, SSA y LLVM/native. El
+cursor consume bytes UTF-8 exactos, el encoder concatena fragmentos en una
+asignación final, los doubles usan `%.17g` bajo locale C y el parser staged
+rechaza corrupción sin publicar resultados parciales. `loadLedger`/`saveLedger`
+envuelven `io.readText`/`io.writeText`; el save todavía no es atómico.
+
 Última revisión: 15 de julio de 2026, incluyendo enums native y los ejemplos
 dogfood de métodos numéricos y expense tracker. Este documento reemplaza como
 referencia canónica a la auditoría histórica de `docs/compiler/`.

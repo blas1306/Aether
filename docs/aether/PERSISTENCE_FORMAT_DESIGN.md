@@ -1,6 +1,31 @@
 # Formato oficial de persistencia Aether v1
 
-Estado: propuesta de RFC, sin implementación.
+Estado: RFC aprobada e implementación ALPT1 inicial disponible en perfil 20.
+
+## Implementación de referencia (perfil 20)
+
+`examples/expense_tracker/Persistence.ae` implementa manualmente el codec puro
+`encodeLedger`/`decodeLedger` para `Transaction` y `List<Transaction>`, y los
+wrappers `loadLedger`/`saveLedger`. La lógica de schema permanece en Aether;
+el namespace interno `text` aporta sólo cursor por bytes, slicing UTF-8 seguro,
+formatting decimal y concatenación lineal de fragmentos. No hay reflection,
+schema dinámico, JSON, CSV ni serialización genérica.
+
+La implementación fija los siguientes límites de recursos v1: 10.000 records,
+64 fields por record y 1.048.576 bytes por payload. Los errores retornan lista
+o contenido vacío y un `LedgerStatus`; el offset es el comienzo del token
+ofensivo, el byte de framing ofensivo o EOF para truncación. Nunca se publica
+un prefijo válido.
+
+El writer usa decimal i32 canónico y `%.17g` bajo locale C para binary64. Es
+determinista y conserva round-trip, incluido zero con signo; Expense Tracker
+rechaza zero, NaN e infinitos porque `amount` debe ser finito y positivo. El
+reader acepta la gramática decimal finita de `parseDouble`, tal como especifica
+esta RFC, y exige spelling canónico para enteros y longitudes.
+
+`saveLedger` usa `io.writeText` y por tanto **no es atómico**. La fase pendiente
+es agregar temp file en el mismo directorio, flush/fsync, rename de reemplazo y
+sync del directorio antes de prometer atomicidad o durabilidad ante corte.
 
 Esta RFC define el formato textual de persistencia Aether v1 y usa Expense
 Tracker como primer schema. No agrega APIs, sintaxis ni capacidades al

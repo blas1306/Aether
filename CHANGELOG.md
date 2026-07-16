@@ -14,6 +14,12 @@ curso.
 
 ### Added
 
+- Codec manual ALPT1 revision 1 para `Transaction`/`List<Transaction>`, con
+  resultados nominales, parser byte-aware fail-closed, formatting binary64
+  round-trip y wrappers `loadLedger`/`saveLedger`.
+- Expense Tracker persistente entre procesos con path explícito, rechazo de
+  archivos corruptos sin overwrite y dogfood AST/IR/SSA/LLVM/native.
+
 - `string.split(string) -> Array<string>` end-to-end en AST, IR, SSA y
   LLVM/native: matching byte-based no solapado, campos vacíos, UTF-8/NUL,
   separator vacío con panic y fragments owned con rollback en intérpretes.
@@ -44,6 +50,8 @@ curso.
 - El perfil 18 agrega `text-file-read`, `text-file-write` y `text-file-append`;
   Expense Tracker dogfoodea persistencia de un resumen textual no-CSV.
 - El perfil 19 agrega la capacidad granular completa `string-split`.
+- El perfil 20 agrega `alpt1-encode`, `alpt1-decode`,
+  `expense-ledger-load` y `expense-ledger-save`; no declara atomicidad.
 
 ### Notes
 

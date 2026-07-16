@@ -2,14 +2,15 @@
 
 Este ejemplo modular prueba el núcleo generalista de Aether con un dominio no
 matemático. Modela ingresos y gastos, valida montos, mantiene una
-`List<Transaction>`, resume, filtra y lista transacciones. No pretende ser
-todavía una aplicación financiera persistente.
+`List<Transaction>`, resume, filtra, lista y persiste transacciones mediante el
+formato versionado ALPT1.
 
 ## Estructura
 
 - `Transaction.ae`: enum y struct nominal del dominio; la fecha es `string`.
 - `Ledger.ae`: alta validada en `List<Transaction>`.
 - `Reports.ae`: resumen, filtro e impresión mediante `for-in`.
+- `Persistence.ae`: codec ALPT1 puro y wrappers explícitos de load/save.
 - `Main.ae`: CLI mínima y demostración completa en memoria con validaciones de
   dominio, collections y strings dinámicas.
 
@@ -19,10 +20,10 @@ Desde la raíz del repositorio:
 
 ```bash
 aether run examples/expense_tracker/Main.ae
-aether run examples/expense_tracker/Main.ae -- add expense 3 19.95 food "Lunch with friends"
-aether run examples/expense_tracker/Main.ae -- add income 4 100.0 work "Side project"
-aether run examples/expense_tracker/Main.ae -- list
-aether run examples/expense_tracker/Main.ae -- summary
+aether run examples/expense_tracker/Main.ae -- expenses.alpt add expense 3 19.95 food "Lunch with friends" 2026-07-16
+aether run examples/expense_tracker/Main.ae -- expenses.alpt add income 4 100.0 work "Side project" 2026-07-17
+aether run examples/expense_tracker/Main.ae -- expenses.alpt list
+aether run examples/expense_tracker/Main.ae -- expenses.alpt summary
 aether run examples/expense_tracker/Main.ae -- persist-check /tmp/aether-summary.txt
 aether run examples/expense_tracker/Main.ae -- split-check , "food,,work"
 ```
@@ -64,21 +65,31 @@ Las Fases 4–5 hacen `const` read-only por alias y convierten los recorridos de
 `Transaction`; `matches.push(transaction)` es la adquisición owning normal que
 copia el struct y retiene sus strings.
 
-Cada proceso parte de una lista nueva. `add` demuestra validación y construcción
-de la transacción, pero no persiste el alta; `list` y `summary` operan sobre dos
-transacciones de demostración creadas en esa ejecución.
+El primer argumento de la CLI persistente es siempre el path. Un archivo
+inexistente se trata como ledger vacío; `add` guarda sólo después de una carga
+completa válida. `list` y `summary` sobre un path inexistente muestran el
+estado vacío. Un archivo corrupto o de versión incompatible nunca se
+sobrescribe automáticamente. Exit codes: `2` uso/dominio, `3` carga/formato y
+`4` guardado; éxito usa `0`.
 
-`persist-check <path>` es un dogfood mínimo de archivos de texto: escribe un
-resumen fijo y explícito, lo relee y compara, y hace append de `verified\n`.
-El formato no se llama CSV y no persiste transacciones estructuradas: `split`
-no implementa escaping ni convierte este archivo en un formato definitivo.
+ALPT1 incluye los seis fields (`id`, `type`, `amount`, `category`,
+`description`, `date`), usa payloads length-prefixed en bytes UTF-8 y nombres
+estables de enum. El writer es canónico. El parser es fail-closed, acepta fields
+aditivos desconocidos según la RFC y rechaza duplicados, faltantes, tipos,
+versiones, framing y trailing data inválidos.
+
+`persist-check <path>` se conserva como dogfood aislado de archivos de texto:
+escribe un resumen fijo, lo relee y hace append de `verified\n`. Ese archivo
+auxiliar no es el ledger ni CSV; la CLI `add|list|summary` usa ALPT1 y no intenta
+parsearlo mediante `split`.
 
 ## Límites deliberados
 
 - `main` continúa siendo `int main()`; los argumentos se consultan con
   `System.args()`.
-- No hay archivos binarios, CSV ni persistencia estructurada; `split-check` no
-  acepta escaping de separadores.
+- No hay archivos binarios, JSON, CSV, reflection ni codecs automáticos.
+- El guardado actual usa `io.writeText`: puede truncar ante un fallo y no se
+  anuncia como atómico.
 - No hay conversiones implícitas ni otras APIs generales de texto.
 - Las fechas no se validan ni se ordenan.
 - No se agregaron excepciones, GC ni destructores.

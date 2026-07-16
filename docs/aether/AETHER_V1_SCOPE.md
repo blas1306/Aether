@@ -64,6 +64,7 @@ La fuente de detalle por etapa es
 | Salida | Parcial | `print`/`println` deben cubrir valores v1 con formato documentado y consistente. |
 | Entrada | Solo AST | `input` tipado debe funcionar en ejecución nativa o quedar reemplazado por una API v1 equivalente explícita. |
 | Archivos de texto UTF-8 | Estable AST; parcial native por plataforma | `io.readText`/`writeText`/`appendText`, status nominales, NUL y newlines exactos. Native está habilitado en Linux/POSIX; Windows requiere paths UTF-16. No incluye binarios, streams ni directorios. |
+| Persistencia ALPT1 de Expense Tracker | Estable AST/native Linux para revision 1 | Codec manual de `Transaction`, parser fail-closed, load/save explícitos y CLI entre procesos. No implica reflection, serialization genérica, migrations ni atomic save. |
 | Argumentos del proceso | Estable AST/native en POSIX | `System.args()` devuelve un snapshot owned `Array<string>`; `main` sigue sin parámetros y `run file -- ...` reenvía sin reinterpretar quoting. Falta validar el camino UTF-16 de Windows. |
 | Matemática escalar | Parcial, mayormente AST | Seleccionar y llevar a native al menos `sin`, `cos`, `tan`, `sqrt`, `exp`, `log`/`ln`, `abs`, `floor`, `ceil` y constantes acordadas. |
 | Módulos matemáticos | Parcial, AST | Formalizar `math` y un núcleo de `math.linalg`; `math.numerics` puede comenzar como código Aether. No todo el catálogo actual es requisito v1. |

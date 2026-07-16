@@ -16,6 +16,7 @@ class LLVMStringRuntime:
     enabled: bool
     parsing: bool = False
     splitting: bool = False
+    codec: bool = False
 
     HEADER_SIZE = 24
     IMMORTAL = 1
@@ -56,17 +57,203 @@ class LLVMStringRuntime:
         )
         if self.splitting:
             sections.append(self._split())
-        if self.parsing:
+        if self.parsing or self.codec:
             declare(sections, "declare ptr @newlocale(i32, ptr, ptr)")
             declare(sections, "declare void @freelocale(ptr)")
-            declare(sections, "declare double @strtod_l(ptr, ptr, ptr)")
+            if self.parsing:
+                declare(sections, "declare double @strtod_l(ptr, ptr, ptr)")
+            if self.codec:
+                declare(sections, "declare ptr @uselocale(ptr)")
+                declare(sections, "declare i32 @snprintf(ptr, i64, ptr, ...)")
             sections.extend(
                 [
                     '@.aether.locale.c = private unnamed_addr constant [2 x i8] c"C\\00"',
-                    self._parse_int(),
-                    self._parse_double(),
                 ]
             )
+        if self.parsing:
+            sections.extend([self._parse_int(), self._parse_double()])
+        if self.codec:
+            sections.append(self._codec_helpers())
+
+    @staticmethod
+    def _codec_helpers() -> str:
+        return "\n\n".join([
+            '\n'.join([
+                '@.aether.text.range = private unnamed_addr constant [48 x i8] c"Aether panic: invalid internal text codec range\\00"',
+                '@.aether.text.int.format = private unnamed_addr constant [3 x i8] c"%d\\00"',
+                '@.aether.text.double.format = private unnamed_addr constant [6 x i8] c"%.17g\\00"',
+                "define private void @aether_text_range_panic() noreturn {",
+                "entry:",
+                "  %message = getelementptr [48 x i8], ptr @.aether.text.range, i64 0, i64 0",
+                "  call i32 @puts(ptr %message)",
+                "  call void @exit(i32 1)",
+                "  unreachable",
+                "}",
+            ]),
+            '\n'.join([
+                "define private i32 @aether_text_byte_at(ptr %value, i32 %offset32) {",
+                "entry:",
+                "  call void @aether_string_validate(ptr %value)",
+                "  %negative = icmp slt i32 %offset32, 0",
+                "  %offset = sext i32 %offset32 to i64",
+                "  %length = call i64 @aether_string_byte_length(ptr %value)",
+                "  %past_end = icmp uge i64 %offset, %length",
+                "  %invalid = or i1 %negative, %past_end",
+                "  br i1 %invalid, label %panic, label %load",
+                "load:",
+                "  %data = call ptr @aether_string_data(ptr %value)",
+                "  %byte_ptr = getelementptr i8, ptr %data, i64 %offset",
+                "  %byte = load i8, ptr %byte_ptr",
+                "  %result = zext i8 %byte to i32",
+                "  ret i32 %result",
+                "panic:",
+                "  call void @aether_text_range_panic()",
+                "  unreachable",
+                "}",
+            ]),
+            '\n'.join([
+                "define private ptr @aether_text_byte_slice(ptr %value, i32 %start32, i32 %slice_length32) {",
+                "entry:",
+                "  call void @aether_string_validate(ptr %value)",
+                "  %negative_start = icmp slt i32 %start32, 0",
+                "  %negative_length = icmp slt i32 %slice_length32, 0",
+                "  %negative = or i1 %negative_start, %negative_length",
+                "  %start = sext i32 %start32 to i64",
+                "  %slice_length = sext i32 %slice_length32 to i64",
+                "  %end_pair = call { i64, i1 } @llvm.uadd.with.overflow.i64(i64 %start, i64 %slice_length)",
+                "  %end = extractvalue { i64, i1 } %end_pair, 0",
+                "  %overflow = extractvalue { i64, i1 } %end_pair, 1",
+                "  %length = call i64 @aether_string_byte_length(ptr %value)",
+                "  %past_end = icmp ugt i64 %end, %length",
+                "  %bad_sum = or i1 %overflow, %past_end",
+                "  %invalid = or i1 %negative, %bad_sum",
+                "  br i1 %invalid, label %panic, label %slice",
+                "slice:",
+                "  %data = call ptr @aether_string_data(ptr %value)",
+                "  %start_ptr = getelementptr i8, ptr %data, i64 %start",
+                "  %result = call ptr @aether_string_from_utf8(ptr %start_ptr, i64 %slice_length)",
+                "  ret ptr %result",
+                "panic:",
+                "  call void @aether_text_range_panic()",
+                "  unreachable",
+                "}",
+            ]),
+            '\n'.join([
+                "define private ptr @aether_text_format_int(i32 %value) {",
+                "entry:",
+                "  %buffer = alloca [16 x i8], align 1",
+                "  %data = getelementptr [16 x i8], ptr %buffer, i64 0, i64 0",
+                "  %format = getelementptr [3 x i8], ptr @.aether.text.int.format, i64 0, i64 0",
+                "  %written32 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr %data, i64 16, ptr %format, i32 %value)",
+                "  %written = sext i32 %written32 to i64",
+                "  %result = call ptr @aether_string_from_utf8(ptr %data, i64 %written)",
+                "  ret ptr %result",
+                "}",
+            ]),
+            '\n'.join([
+                "define private ptr @aether_text_format_double(double %value) {",
+                "entry:",
+                "  %bits = bitcast double %value to i64",
+                "  %exponent = and i64 %bits, 9218868437227405312",
+                "  %nonfinite = icmp eq i64 %exponent, 9218868437227405312",
+                "  br i1 %nonfinite, label %panic, label %prepare",
+                "prepare:",
+                "  %locale_name = getelementptr [2 x i8], ptr @.aether.locale.c, i64 0, i64 0",
+                "  %locale = call ptr @newlocale(i32 2, ptr %locale_name, ptr null)",
+                "  %locale_failed = icmp eq ptr %locale, null",
+                "  br i1 %locale_failed, label %panic, label %format_value",
+                "format_value:",
+                "  %previous = call ptr @uselocale(ptr %locale)",
+                "  %buffer = alloca [64 x i8], align 1",
+                "  %data = getelementptr [64 x i8], ptr %buffer, i64 0, i64 0",
+                "  %format = getelementptr [6 x i8], ptr @.aether.text.double.format, i64 0, i64 0",
+                "  %written32 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr %data, i64 64, ptr %format, double %value)",
+                "  %ignored = call ptr @uselocale(ptr %previous)",
+                "  call void @freelocale(ptr %locale)",
+                "  %written = sext i32 %written32 to i64",
+                "  %result = call ptr @aether_string_from_utf8(ptr %data, i64 %written)",
+                "  ret ptr %result",
+                "panic:",
+                "  call void @aether_text_range_panic()",
+                "  unreachable",
+                "}",
+            ]),
+            '\n'.join([
+                "define private ptr @aether_text_concat_fragments(ptr %list) {",
+                "entry:",
+                "  %length_field = getelementptr %AetherList, ptr %list, i32 0, i32 0",
+                "  %count = load i64, ptr %length_field",
+                "  %data_field = getelementptr %AetherList, ptr %list, i32 0, i32 2",
+                "  %fragments = load ptr, ptr %data_field",
+                "  br label %sum_loop",
+                "sum_loop:",
+                "  %sum_index = phi i64 [ 0, %entry ], [ %sum_next, %sum_fragment ]",
+                "  %total = phi i64 [ 0, %entry ], [ %next_total, %sum_fragment ]",
+                "  %sum_done = icmp eq i64 %sum_index, %count",
+                "  br i1 %sum_done, label %sum_finish, label %sum_fragment",
+                "sum_fragment:",
+                "  %sum_slot = getelementptr ptr, ptr %fragments, i64 %sum_index",
+                "  %sum_value = load ptr, ptr %sum_slot",
+                "  call void @aether_string_validate(ptr %sum_value)",
+                "  %fragment_length = call i64 @aether_string_byte_length(ptr %sum_value)",
+                "  %sum_pair = call { i64, i1 } @llvm.uadd.with.overflow.i64(i64 %total, i64 %fragment_length)",
+                "  %next_total = extractvalue { i64, i1 } %sum_pair, 0",
+                "  %sum_overflow = extractvalue { i64, i1 } %sum_pair, 1",
+                "  %sum_next = add i64 %sum_index, 1",
+                "  br i1 %sum_overflow, label %panic, label %sum_loop",
+                "sum_finish:",
+                "  %empty = icmp eq i64 %total, 0",
+                "  br i1 %empty, label %return_empty, label %allocate_size",
+                "allocate_size:",
+                "  %payload_pair = call { i64, i1 } @llvm.uadd.with.overflow.i64(i64 %total, i64 1)",
+                "  %payload_size = extractvalue { i64, i1 } %payload_pair, 0",
+                "  %payload_overflow = extractvalue { i64, i1 } %payload_pair, 1",
+                "  %object_pair = call { i64, i1 } @llvm.uadd.with.overflow.i64(i64 %payload_size, i64 24)",
+                "  %object_size = extractvalue { i64, i1 } %object_pair, 0",
+                "  %object_overflow = extractvalue { i64, i1 } %object_pair, 1",
+                "  %size_overflow = or i1 %payload_overflow, %object_overflow",
+                "  br i1 %size_overflow, label %panic, label %allocate",
+                "allocate:",
+                "  %object = call noalias ptr @malloc(i64 %object_size)",
+                "  %failed = icmp eq ptr %object, null",
+                "  br i1 %failed, label %panic, label %initialize",
+                "initialize:",
+                "  store i64 %total, ptr %object",
+                "  %count_ptr = getelementptr i8, ptr %object, i64 8",
+                "  store i64 1, ptr %count_ptr",
+                "  %flags_ptr = getelementptr i8, ptr %object, i64 16",
+                "  store i32 2, ptr %flags_ptr",
+                "  %reserved_ptr = getelementptr i8, ptr %object, i64 20",
+                "  store i32 0, ptr %reserved_ptr",
+                "  %destination = getelementptr i8, ptr %object, i64 24",
+                "  br label %copy_loop",
+                "copy_loop:",
+                "  %copy_index = phi i64 [ 0, %initialize ], [ %copy_next, %copy_fragment ]",
+                "  %offset = phi i64 [ 0, %initialize ], [ %next_offset, %copy_fragment ]",
+                "  %copy_done = icmp eq i64 %copy_index, %count",
+                "  br i1 %copy_done, label %finish, label %copy_fragment",
+                "copy_fragment:",
+                "  %copy_slot = getelementptr ptr, ptr %fragments, i64 %copy_index",
+                "  %copy_value = load ptr, ptr %copy_slot",
+                "  %copy_length = call i64 @aether_string_byte_length(ptr %copy_value)",
+                "  %copy_data = call ptr @aether_string_data(ptr %copy_value)",
+                "  %copy_destination = getelementptr i8, ptr %destination, i64 %offset",
+                "  call void @llvm.memcpy.p0.p0.i64(ptr %copy_destination, ptr %copy_data, i64 %copy_length, i1 false)",
+                "  %next_offset = add i64 %offset, %copy_length",
+                "  %copy_next = add i64 %copy_index, 1",
+                "  br label %copy_loop",
+                "finish:",
+                "  %terminator = getelementptr i8, ptr %destination, i64 %total",
+                "  store i8 0, ptr %terminator",
+                "  ret ptr %object",
+                "return_empty:",
+                "  ret ptr @.aether.string.empty",
+                "panic:",
+                "  call void @aether_string_size_panic()",
+                "  unreachable",
+                "}",
+            ]),
+        ])
 
     @staticmethod
     def _parse_int() -> str:

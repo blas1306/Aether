@@ -204,6 +204,13 @@ class IRCall(IRInstruction):
             return MUTATING_ALLOCATION
         if self.builtin in {"parseInt", "parseDouble"}:
             return MEMORY_READ
+        if self.builtin in {"text.byteAt"}:
+            return MEMORY_READ_MAY_TRAP
+        if self.builtin in {
+            "text.byteSlice", "text.formatInt", "text.formatDouble",
+            "text.concatFragments",
+        }:
+            return READING_ALLOCATION
         if self.builtin in {"__aether_retain", "__aether_release"}:
             return InstructionEffects(
                 has_side_effects=True,

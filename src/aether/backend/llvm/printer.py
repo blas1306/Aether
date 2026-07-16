@@ -103,6 +103,14 @@ from aether.text_file_io import (
     READ_TEXT_BUILTIN,
     WRITE_TEXT_BUILTIN,
 )
+from aether.text_codec import (
+    TEXT_BYTE_AT_BUILTIN,
+    TEXT_BYTE_SLICE_BUILTIN,
+    TEXT_CONCAT_FRAGMENTS_BUILTIN,
+    TEXT_FORMAT_DOUBLE_BUILTIN,
+    TEXT_FORMAT_INT_BUILTIN,
+    TEXT_CODEC_BUILTINS,
+)
 
 
 @dataclass(frozen=True)
@@ -187,6 +195,7 @@ class LLVMPrinter:
         self._uses_process_arguments = False
         self._uses_string_parsing = False
         self._uses_string_split = False
+        self._uses_text_codec = False
         self._uses_text_file_io = False
         self._checked_int_operators: set[str] = set()
         self._scalar_math_calls: set[tuple[str, tuple[object, ...], object]] = set()
@@ -357,6 +366,7 @@ class LLVMPrinter:
             enabled=self._uses_string_runtime,
             parsing=self._uses_string_parsing,
             splitting=self._uses_string_split,
+            codec=self._uses_text_codec,
         ).append(runtime)
         LLVMTextFileRuntime(self._uses_text_file_io).append(runtime)
         LLVMProcessRuntime(
@@ -1291,6 +1301,37 @@ class LLVMPrinter:
                     f"{length64} = call i64 @aether_string_byte_length(ptr {self._operand(instruction.arguments[0])})",
                     f"{result} = call i32 @aether_string_byte_length_to_int(i64 {length64})",
                 ]
+            )
+        if instruction.builtin in TEXT_CODEC_BUILTINS:
+            if instruction.result is None:
+                raise LLVMBackendError("LLVM text codec builtin requires a result")
+            signatures = {
+                TEXT_BYTE_AT_BUILTIN: ((StringType(), IntType()), IntType(), "aether_text_byte_at"),
+                TEXT_BYTE_SLICE_BUILTIN: ((StringType(), IntType(), IntType()), StringType(), "aether_text_byte_slice"),
+                TEXT_FORMAT_INT_BUILTIN: ((IntType(),), StringType(), "aether_text_format_int"),
+                TEXT_FORMAT_DOUBLE_BUILTIN: ((DoubleType(),), StringType(), "aether_text_format_double"),
+                TEXT_CONCAT_FRAGMENTS_BUILTIN: ((ListType(StringType()),), StringType(), "aether_text_concat_fragments"),
+            }
+            expected_arguments, expected_result, helper = signatures[instruction.builtin]
+            if (
+                tuple(argument.type for argument in instruction.arguments) != expected_arguments
+                or instruction.result.type != expected_result
+            ):
+                raise LLVMBackendError(
+                    f"LLVM text codec builtin '{instruction.builtin}' has an invalid signature"
+                )
+            self._uses_string_runtime = True
+            self._uses_text_codec = True
+            if instruction.builtin == TEXT_CONCAT_FRAGMENTS_BUILTIN:
+                self._uses_list_type = True
+            result = self._new_temp(instruction.result)
+            arguments = ", ".join(
+                f"{llvm_type(argument.type)} {self._operand(argument)}"
+                for argument in instruction.arguments
+            )
+            return (
+                f"{result} = call {llvm_type(instruction.result.type)} "
+                f"@{helper}({arguments})"
             )
         if instruction.builtin in {"__aether_retain", "__aether_release"}:
             if instruction.result is not None or len(instruction.arguments) != 1:

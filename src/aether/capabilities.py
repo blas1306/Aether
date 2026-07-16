@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     from .pipeline import TypedProgram
 
 
-CAPABILITY_PROFILE_VERSION = "19"
+CAPABILITY_PROFILE_VERSION = "20"
 
 
 class BackendIdentity(str, Enum):
@@ -112,6 +112,10 @@ class Capability(str, Enum):
     TEXT_FILE_READ = "text-file-read"
     TEXT_FILE_WRITE = "text-file-write"
     TEXT_FILE_APPEND = "text-file-append"
+    ALPT1_ENCODE = "alpt1-encode"
+    ALPT1_DECODE = "alpt1-decode"
+    EXPENSE_LEDGER_LOAD = "expense-ledger-load"
+    EXPENSE_LEDGER_SAVE = "expense-ledger-save"
     OPTIMIZATION_PROFILES = "optimization-profiles"
 
 
@@ -251,6 +255,10 @@ CAPABILITY_CATALOG: Mapping[Capability, CapabilityDefinition] = MappingProxyType
             _definition(Capability.TEXT_FILE_READ, "Complete UTF-8 text-file reads."),
             _definition(Capability.TEXT_FILE_WRITE, "Complete UTF-8 text-file writes."),
             _definition(Capability.TEXT_FILE_APPEND, "Complete UTF-8 text-file appends."),
+            _definition(Capability.ALPT1_ENCODE, "Manual canonical ALPT1 Transaction ledger encoding."),
+            _definition(Capability.ALPT1_DECODE, "Fail-closed byte-aware ALPT1 Transaction ledger decoding."),
+            _definition(Capability.EXPENSE_LEDGER_LOAD, "Expense ledger loading through io.readText and ALPT1 decode."),
+            _definition(Capability.EXPENSE_LEDGER_SAVE, "Non-atomic expense ledger saving through ALPT1 encode and io.writeText."),
             _definition(Capability.OPTIMIZATION_PROFILES, "Selectable compiler optimization profiles."),
         )
     }
@@ -327,6 +335,10 @@ _NATIVE_COMPLETE = {
     Capability.BORROWED_FOR_IN_ELEMENTS,
     Capability.STRUCTURAL_EQUALITY,
     Capability.EQ_COLLECTION_SEARCH,
+    Capability.ALPT1_ENCODE,
+    Capability.ALPT1_DECODE,
+    Capability.EXPENSE_LEDGER_LOAD,
+    Capability.EXPENSE_LEDGER_SAVE,
 }
 _NATIVE_UNSUPPORTED = {
     Capability.INPUT,
@@ -423,6 +435,10 @@ E2E_TESTED_CAPABILITIES: Mapping[BackendIdentity, frozenset[Capability]] = Mappi
                 Capability.TEXT_FILE_READ,
                 Capability.TEXT_FILE_WRITE,
                 Capability.TEXT_FILE_APPEND,
+                Capability.ALPT1_ENCODE,
+                Capability.ALPT1_DECODE,
+                Capability.EXPENSE_LEDGER_LOAD,
+                Capability.EXPENSE_LEDGER_SAVE,
             }
         ),
         BackendIdentity.NATIVE: frozenset(
@@ -457,6 +473,10 @@ E2E_TESTED_CAPABILITIES: Mapping[BackendIdentity, frozenset[Capability]] = Mappi
                 Capability.TEXT_FILE_READ,
                 Capability.TEXT_FILE_WRITE,
                 Capability.TEXT_FILE_APPEND,
+                Capability.ALPT1_ENCODE,
+                Capability.ALPT1_DECODE,
+                Capability.EXPENSE_LEDGER_LOAD,
+                Capability.EXPENSE_LEDGER_SAVE,
             }
         ),
     }
@@ -841,6 +861,19 @@ class _CapabilityDetector:
                 call,
             )
         canonical = self._canonical_name(call.callee)
+        persistence_capability = {
+            "encodeLedger": Capability.ALPT1_ENCODE,
+            "decodeLedger": Capability.ALPT1_DECODE,
+            "loadLedger": Capability.EXPENSE_LEDGER_LOAD,
+            "saveLedger": Capability.EXPENSE_LEDGER_SAVE,
+        }.get(canonical.rsplit(".", 1)[-1])
+        if persistence_capability is not None:
+            self._record(
+                persistence_capability,
+                call,
+                detail="manual Expense Tracker ALPT1 codec",
+                requires_complete_support=True,
+            )
         if canonical in {"parseInt", "parseDouble"}:
             self._record(
                 Capability.STRING_PARSING,

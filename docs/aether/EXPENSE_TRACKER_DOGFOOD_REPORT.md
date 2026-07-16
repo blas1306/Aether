@@ -1,5 +1,19 @@
 # Informe de dogfooding generalista: expense tracker
 
+Actualización ALPT1 (perfil 20): `Persistence.ae` implementa codecs manuales
+puros para `Transaction` y `List<Transaction>`, con los seis fields incluido
+`date`, header/versionado exactos, payloads length-prefixed, parser staged y
+resultados nominales. `loadLedger`/`saveLedger` separan filesystem del codec.
+La CLI usa `<path> add|list|summary`, persiste entre procesos y nunca guarda
+sobre un archivo corrupto. El E2E ejecuta expense, income, list y summary en
+procesos AST/native separados, además de corrupción y UTF-8 inválido.
+
+El encoder usa fragmentos y una concatenación final lineal. Los doubles finitos
+se escriben con 17 dígitos significativos bajo locale C para round-trip; amount
+no positivo, NaN e infinito se rechazan. `saveLedger` usa `io.writeText` y es
+explícitamente no atómico. No se añadieron JSON, CSV, reflection, migrations,
+serialization genérica ni un engine de schemas.
+
 Actualización split (perfil 19): `split-check <separator> <text>` aplica
 `string.split` a argumentos reales, muestra la cantidad exacta y recorre los
 campos borrowed, incluidos vacíos. Funciona en AST/native y no se denomina CSV:
@@ -119,9 +133,9 @@ en native. No afecta cálculos ni validaciones del tracker.
 
 ## Límites restantes y próxima tarea
 
-Siguen fuera de alcance persistencia estructurada, escaping, excepciones y GC. El
-tracker sólo verifica un resumen textual explícito; no es todavía una base de
-datos ni un formato de intercambio.
+Siguen fuera de alcance atomic save, locking/concurrencia, migrations,
+checksums, excepciones y GC. El tracker persiste un ledger ALPT1 validado, pero
+no es una base de datos ni promete durabilidad ante crash durante `writeText`.
 
 El contrato mínimo de string native queda aprobado en
 [`STRING_RUNTIME_DESIGN.md`](STRING_RUNTIME_DESIGN.md), y las reglas de copy,
@@ -135,5 +149,5 @@ La fase de igualdad estructural E2E quedó completada: copias y slices de
 `List<Transaction>` comparan contenido, y búsqueda encuentra transacciones
 equivalentes aunque sean valores independientes. La etiqueta dinámica
 `food: Dinner` prueba retorno, temporales y cleanup ARC, y su longitud esperada
-es 12 bytes. Archivos, argv y split ya tienen dogfood limitado; CSV y
-persistencia definitiva siguen aplazados.
+es 12 bytes. Archivos, argv y split ya tienen dogfood; CSV permanece fuera y
+la siguiente fase concreta es escritura atómica/durable del ledger ALPT1.

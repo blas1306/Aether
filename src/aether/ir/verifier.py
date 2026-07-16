@@ -96,6 +96,14 @@ from aether.text_file_io import (
     READ_TEXT_BUILTIN,
     TEXT_FILE_BUILTINS,
 )
+from aether.text_codec import (
+    TEXT_BYTE_AT_BUILTIN,
+    TEXT_BYTE_SLICE_BUILTIN,
+    TEXT_CONCAT_FRAGMENTS_BUILTIN,
+    TEXT_FORMAT_DOUBLE_BUILTIN,
+    TEXT_FORMAT_INT_BUILTIN,
+    TEXT_CODEC_BUILTINS,
+)
 from .types import (
     ArrayType,
     BoolType,
@@ -1117,6 +1125,23 @@ class IRVerifier:
                     or instruction.result.type.name != FILE_STATUS_TYPE
                 ):
                     self._fail("Text-file write result must be FileStatus")
+                return
+            if instruction.builtin in TEXT_CODEC_BUILTINS:
+                if instruction.function != instruction.builtin or instruction.result is None:
+                    self._fail("Text codec builtin must retain its canonical name and result")
+                signatures = {
+                    TEXT_BYTE_AT_BUILTIN: ((StringType(), IntType()), IntType()),
+                    TEXT_BYTE_SLICE_BUILTIN: ((StringType(), IntType(), IntType()), StringType()),
+                    TEXT_FORMAT_INT_BUILTIN: ((IntType(),), StringType()),
+                    TEXT_FORMAT_DOUBLE_BUILTIN: ((DoubleType(),), StringType()),
+                    TEXT_CONCAT_FRAGMENTS_BUILTIN: ((ListType(StringType()),), StringType()),
+                }
+                expected_arguments, expected_result = signatures[instruction.builtin]
+                if (
+                    tuple(argument.type for argument in instruction.arguments) != expected_arguments
+                    or instruction.result.type != expected_result
+                ):
+                    self._fail(f"Text codec builtin '{instruction.builtin}' has an invalid signature")
                 return
             if instruction.builtin in {"__aether_retain", "__aether_release"}:
                 if instruction.function != instruction.builtin:
