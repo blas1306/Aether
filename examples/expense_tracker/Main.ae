@@ -10,9 +10,13 @@ from Transaction import TransactionType;
 
 List<Transaction> transactions = {};
 
-IntParseResult parsedExpenseId = parseInt("2");
-DoubleParseResult parsedExpenseAmount = parseDouble("250.0");
-DoubleParseResult invalidParsedAmount = parseDouble(" 250.0");
+string rawExpenseId = " 2 ";
+string rawExpenseAmount = "\t250.0\n";
+string rawDescription = "  Dinner  ";
+string rawCategory = "\tfood\r";
+IntParseResult parsedExpenseId = parseInt(rawExpenseId.trim());
+DoubleParseResult parsedExpenseAmount = parseDouble(rawExpenseAmount.trim());
+DoubleParseResult invalidParsedAmount = parseDouble(rawExpenseAmount);
 int expenseId = 0;
 double expenseAmount = 0.0;
 if parsedExpenseId.status == ParseStatus.Success && parsedExpenseAmount.status == ParseStatus.Success {
@@ -33,9 +37,9 @@ AddTransactionStatus expenseStatus = addTransaction(
     transactions,
     expenseId,
     TransactionType.Expense,
-    "Dinner",
+    rawDescription.trim(),
     expenseAmount,
-    "food",
+    rawCategory.trim(),
     "2026-07-15"
 );
 AddTransactionStatus invalidStatus = addTransaction(

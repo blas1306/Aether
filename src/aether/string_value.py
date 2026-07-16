@@ -5,6 +5,8 @@ IMMORTAL = 1 << 0
 UTF8_VALID = 1 << 1
 MAX_STRING_LENGTH = (1 << 63) - 1
 STRING_HEADER_SIZE = 24
+STRING_TRIM_BUILTIN = "__aether_string_trim"
+ASCII_WHITESPACE_BYTES = frozenset((0x20, 0x09, 0x0A, 0x0D, 0x0C, 0x0B))
 
 
 class StringValue:
@@ -207,6 +209,45 @@ def aether_string_concat(left: StringValue, right: StringValue) -> StringValue:
     if allocation_size > MAX_STRING_LENGTH:
         raise OverflowError("Aether string allocation size overflow")
     return StringValue.from_utf8(left.utf8_bytes + right.utf8_bytes)
+
+
+def aether_string_trim(value: StringValue) -> StringValue:
+    """Trim Aether v1 ASCII whitespace and return an owned string.
+
+    The scan is deliberately byte based.  The six ASCII whitespace bytes are
+    single-byte UTF-8 code units and cannot occur inside a valid multibyte
+    sequence, so trimming only at the two ends preserves valid UTF-8.  Embedded
+    NUL is ordinary content and is never treated as whitespace.
+    """
+
+    if not isinstance(value, StringValue):
+        raise TypeError("Aether string trim requires a string value")
+    value._require_live()
+    data = value.utf8_bytes
+    length = value.byte_length
+
+    start = 0
+    while start < length and data[start] in ASCII_WHITESPACE_BYTES:
+        start += 1
+    if start == length:
+        return EMPTY_STRING
+
+    end = length
+    while end > start and data[end - 1] in ASCII_WHITESPACE_BYTES:
+        end -= 1
+    if start == 0 and end == length:
+        # ``offer_owner`` is the interpreter model's owned-return operation:
+        # it retains a borrowed object and may transfer an already-unclaimed
+        # temporary owner.  Native always performs the retain fast path.
+        return value.offer_owner()
+
+    trimmed_length = end - start
+    if trimmed_length > MAX_STRING_LENGTH:
+        raise OverflowError("Aether string trim length overflow")
+    allocation_size = STRING_HEADER_SIZE + trimmed_length + 1
+    if allocation_size > MAX_STRING_LENGTH:
+        raise OverflowError("Aether string allocation size overflow")
+    return StringValue.from_utf8(data[start:end])
 
 
 def as_string_value(value: str | StringValue, *, literal: bool = True) -> StringValue:

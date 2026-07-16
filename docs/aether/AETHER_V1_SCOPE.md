@@ -56,7 +56,7 @@ La fuente de detalle por etapa es
 | Classes por referencia | Solo AST | Bajar layout, construcción, aliasing, visibilidad, métodos y ownership al backend sin convertirlas accidentalmente en valores. |
 | Interfaces | Solo AST | Bajar representación y dispatch para structs y classes, preservando semántica de valor/referencia. |
 | Enums sin payload | Estable AST/native | Mantener identidad nominal, discriminantes deterministas, igualdad, impresión y uso en structs/funciones/colecciones compatibles. Payloads, ADTs y pattern matching nuevo no son requisito v1. |
-| Strings | Parcial | Literales, variables, parámetros, retorno, impresión, concatenación, igualdad e interpolación deben tener contrato de encoding y ownership coherente en native. |
+| Strings | Parcial | Literales, variables, parámetros, retorno, impresión, concatenación, igualdad, `byteLength` y `trim` ASCII ya tienen contrato coherente; falta interpolación/formatting native y la superficie de texto v1 restante. |
 | `Array<T>` | Parcial para tipos de elemento backend | Adoptar reference semantics v1: assignment/params/returns comparten el objeto con lifecycle seguro; `copy()` y slicing crean storage independiente; completar const, for-in e igualdad estructural E2E. |
 | `List<T>` | Parcial para tipos de elemento backend | Adoptar las mismas reference semantics, con longitud dinámica y growth: completar strong RC, destrucción, copy explícito, slicing semiabierto, const, for-in e igualdad/búsqueda coherentes. |
 | `Vector<T>` y `Matrix<T>` | Parcial | Mantener literales, storage contiguo, índices 1-based, shape, operaciones básicas y checks; llevar el subconjunto matemático v1 seleccionado a native. |

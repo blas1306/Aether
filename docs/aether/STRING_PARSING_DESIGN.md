@@ -54,6 +54,12 @@ Ambos parsers son estrictos: vacío es `Empty`; whitespace, coma decimal,
 underscores, prefijos, trailing garbage, NUL embebido y cualquier byte no ASCII
 son `InvalidFormat`. No se aplica `trim` implícito.
 
+El perfil 16 agrega el método explícito `string.trim()`. Por tanto
+`parseInt(" 42 ")` sigue siendo `InvalidFormat`, mientras
+`parseInt(" 42 ".trim())` es `Success`; lo mismo aplica a `parseDouble`. Trim
+no forma parte del parser y sólo elimina space, tab, LF, CR, form feed y
+vertical tab ASCII en los extremos. Los parsers no llaman al helper de trim.
+
 ## Runtime y backends
 
 La semántica compartida del host vive en `string_parsing.py` y trabaja sobre
@@ -81,8 +87,8 @@ en locals, retornos, structs anidados, `Array`/`List`, copy, slice y `for-in`.
 
 ## Fuera de alcance
 
-No se añadieron formatting/toString general, conversiones implícitas, trim,
-split, input, argv, archivos, iteración Unicode, spellings de NaN/infinito ni
+No se añadieron formatting/toString general, conversiones implícitas, split,
+input, argv, archivos, iteración Unicode, spellings de NaN/infinito ni
 constant folding de parsing. La dependencia native actual de `newlocale` y
 `strtod_l` forma parte del runtime POSIX usado por el backend clang; portar el
 backend a una libc sin esas APIs requiere un adaptador locale-equivalente.

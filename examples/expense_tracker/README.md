@@ -32,10 +32,12 @@ El formateo nativo existente de doubles usa `%g`, por lo que el listado muestra
 `1500`/`250` donde AST muestra `1500.0`/`250.0`; las validaciones y toda la
 lógica coinciden. `transactionLabel` construye una etiqueta owned mediante
 `category + ": " + description`, y `Main.ae` valida su `byteLength`.
-`Main.ae` también obtiene el identificador `2` con `parseInt("2")` y el monto
-`250.0` con `parseDouble("250.0")`; sólo consume `value` tras comprobar
-`ParseStatus.Success` y demuestra el manejo de un monto con whitespace como
-`InvalidFormat`. Split/trim y formatting siguen fuera del ejemplo.
+`Main.ae` también obtiene el identificador `2` desde `" 2 "` y el monto
+`250.0` desde `"\t250.0\n"` aplicando `.trim()` antes de los parsers; sólo
+consume `value` tras comprobar `ParseStatus.Success`. Una llamada directa sin
+trim sigue produciendo `InvalidFormat`, y descripción/categoría se recortan
+antes de construir la transacción. Split y formatting siguen fuera del
+ejemplo.
 
 La Fase 2 confirma además que `List<Transaction>` conserva aliasing en
 assignment/parámetros/returns, que `copy()` crea un objeto y buffer exteriores

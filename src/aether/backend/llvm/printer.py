@@ -5,6 +5,7 @@ import re
 from typing import Any, Callable
 
 from aether.ir.model import IREnumConstant
+from aether.string_value import STRING_TRIM_BUILTIN
 from aether.ir.types import ArrayType, BoolType, DoubleType, EnumType, FloatType, FunctionType, IntType, ListType, MatrixType, MethodResultType, StringType, StructType, VectorType, VoidType
 from aether.ssa.model import (
     SSAArrayCopy,
@@ -1145,6 +1146,20 @@ class LLVMPrinter:
         return f"br {self._label_operand(instruction.target)}"
 
     def _print_call(self, instruction: SSACall) -> str:
+        if instruction.builtin == STRING_TRIM_BUILTIN:
+            if (
+                instruction.result is None
+                or len(instruction.arguments) != 1
+                or not isinstance(instruction.arguments[0].type, StringType)
+                or not isinstance(instruction.result.type, StringType)
+            ):
+                raise LLVMBackendError("LLVM string trim requires string -> owned string")
+            self._uses_string_runtime = True
+            result = self._new_temp(instruction.result)
+            return (
+                f"{result} = call ptr @aether_string_trim("
+                f"ptr {self._operand(instruction.arguments[0])})"
+            )
         if instruction.builtin in {"parseInt", "parseDouble"}:
             expected = "IntParseResult" if instruction.builtin == "parseInt" else "DoubleParseResult"
             if (

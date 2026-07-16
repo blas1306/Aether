@@ -18,6 +18,8 @@ curso.
   llevaron desde el prototipo matemático hasta el diseño generalista actual.
 - Referencias `const` de Array/List con read-only por camino de acceso y
   `for-in` con borrow no-owning por elemento en AST, IR, SSA y LLVM/native.
+- `string.trim()` end-to-end con whitespace ASCII exacto, fast paths ARC,
+  preservación de UTF-8/NUL y paridad AST/IR/SSA/LLVM en O0/O1/O2.
 
 ### Changed
 
@@ -25,6 +27,8 @@ curso.
   mutación del iterable se rechaza también para aliases locales simples.
 - El perfil de capacidades 12 separa `const-collection-references` y
   `borrowed-for-in-elements`.
+- El perfil de capacidades 16 agrega `string-trim`; parsing numérico conserva
+  su gramática estricta y requiere trim explícito.
 
 ### Notes
 

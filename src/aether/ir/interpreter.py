@@ -11,7 +11,12 @@ from aether.errors import AetherRuntimeError
 from aether.integer_arithmetic import checked_int_binary, ieee_divide
 from aether.list_safety import checked_list_index_to_int, checked_list_length_to_int
 from aether.stdlib.registry import call_builtin
-from aether.string_value import StringValue, as_string_value
+from aether.string_value import (
+    STRING_TRIM_BUILTIN,
+    StringValue,
+    aether_string_trim,
+    as_string_value,
+)
 from aether.string_parsing import (
     PARSE_DOUBLE_BUILTIN,
     PARSE_INT_BUILTIN,
@@ -430,6 +435,14 @@ class IRInterpreter:
                     if result > (1 << 31) - 1:
                         raise IRExecutionError("Aether string byte length does not fit in int")
                     frame.values[instruction.result] = result
+                    return False, None, None
+                if instruction.builtin == STRING_TRIM_BUILTIN:
+                    if len(arguments) != 1 or instruction.result is None:
+                        raise IRExecutionError("IR string trim requires one receiver and a result")
+                    value = arguments[0]
+                    if not isinstance(value, StringValue):
+                        raise IRExecutionError("IR string trim requires a string value")
+                    frame.values[instruction.result] = aether_string_trim(value)
                     return False, None, None
                 if instruction.builtin in {PARSE_INT_BUILTIN, PARSE_DOUBLE_BUILTIN}:
                     if len(arguments) != 1 or instruction.result is None:

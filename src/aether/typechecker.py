@@ -2680,6 +2680,21 @@ class TypeChecker:
                 line=expression.line,
                 column=expression.column,
             )
+        if resolved == "string" and expression.method_name == "trim":
+            if expression.keyword_arguments:
+                raise AetherTypeError(
+                    "string.trim() does not accept keyword arguments.",
+                    line=expression.line,
+                    column=expression.column,
+                )
+            if expression.arguments:
+                raise AetherTypeError(
+                    "string.trim() expects zero arguments.",
+                    line=expression.line,
+                    column=expression.column,
+                    kind="arity",
+                )
+            return "string"
         desugared = ast.CallExpression(
             method.builtin_name,
             [expression.target, *expression.arguments],

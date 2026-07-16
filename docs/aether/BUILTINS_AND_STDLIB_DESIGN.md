@@ -47,6 +47,12 @@ defaults y política IEEE están en
 native necesita acceso length-aware al objeto string y control explícito del
 locale, no porque exista una conversión implícita.
 
+El perfil 16 añade `string.trim()` como método read-only. Su helper necesita
+header, ARC, fast paths y allocation length-aware, por lo que pertenece al
+nivel intrínseco aunque no introduce un nodo AST ni opcode dedicado. Recorta
+exclusivamente los seis whitespace ASCII de Aether v1; conserva NUL, UTF-8 y
+whitespace Unicode. No habilita `split`, substring, views ni un módulo `text`.
+
 ## Nivel 1: builtins e intrínsecos
 
 ### Candidatos legítimos
@@ -82,7 +88,7 @@ salida del crecimiento posterior.
 | Módulo | Responsabilidad | Dependencias | Mínimo v1 | Puede esperar | Escribible en Aether | Necesita runtime/intrínseco |
 | --- | --- | --- | --- | --- | --- | --- |
 | `io` | consola, streams y archivos básicos | `text`, `system` mínimo | print/println, input tipado, archivo texto básico y errores | buffering avanzado, codecs extensibles | wrappers, lectura por líneas, helpers | stdin/stdout/stderr, handles, bytes, close |
-| `text` | strings, búsqueda, split/join y conversión | runtime string | encoding definido, `byteLength`, concat e igualdad | substring, slicing/views, regex, normalización Unicode completa | algoritmos sobre iteración de code units/points | representación, allocation, decoding/encoding |
+| `text` | strings, búsqueda, split/join y conversión | runtime string | encoding definido, `byteLength`, concat, igualdad y `trim` ASCII | split/join, substring, slicing/views, regex, normalización Unicode completa | algoritmos sobre iteración de code units/points | representación, allocation, trim básico, decoding/encoding |
 | `collections` | colecciones generales | generics, equality; hashing para Map/Set | APIs derivadas de Array/List que se seleccionen | Map, Set, Queue, Stack si hashing/generics no están listos | la mayoría de algoritmos y estructuras | allocation y primitivas Array/List |
 | `time` | reloj monotónico, fecha/duración mínima | `system` | reloj monotónico para medición | zonas horarias, calendarios | Duration y formato parcial | clocks del SO |
 | `system` | proceso, args, entorno, exit, plataforma | runtime/ABI C | argumentos, código de salida, variables de entorno seleccionadas | procesos hijos completos | wrappers y validación | llamadas del SO/libc |

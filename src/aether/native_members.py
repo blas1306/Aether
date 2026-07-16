@@ -73,7 +73,9 @@ STRING_NATIVE_MEMBERS = NativeMemberSet(
     properties={
         "byteLength": NativeMember("byteLength", "__aether_string_byte_length", "property"),
     },
-    methods={},
+    methods={
+        "trim": NativeMember("trim", "__aether_string_trim", "method"),
+    },
 )
 
 

@@ -1,6 +1,6 @@
 # Auditoría de paridad de features por backend (ubicación histórica)
 
-La auditoría canónica, actualizada el 14 de julio de 2026 y desglosada por
+La auditoría canónica, actualizada el 15 de julio de 2026 y desglosada por
 lexer/parser, AST, typechecker, intérpretes, IR, SSA, optimizadores,
 LLVM/native, runtime, tests y documentación, está en:
 

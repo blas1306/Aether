@@ -12,6 +12,13 @@ Actualización parsing (perfil 15): `Main.ae` obtiene un identificador mediante
 `ParseStatus.Success` antes de consumir `value` y maneja `" 250.0"` como
 `InvalidFormat`. No se añadieron argv, input, archivos, trim ni split.
 
+Actualización trim (perfil 16): las entradas simuladas ahora son `" 2 "` y
+`"\t250.0\n"`; `Main.ae` aplica `.trim()` antes de `parseInt`/`parseDouble` y
+mantiene una llamada directa sin trim que prueba `InvalidFormat`. Descripción y
+categoría también se recortan antes de construir `Transaction`, por lo que la
+etiqueta sigue siendo `food: Dinner`. No se añadieron split, input, argv ni
+archivos.
+
 Actualización const/borrow: los tres recorridos de `List<Transaction>` en
 `Reports.ae` usan ahora el binding borrowed read-only sin copia automática por
 vuelta. El filtro adquiere ownership únicamente al ejecutar `push(transaction)`;
@@ -61,8 +68,9 @@ structs acíclicos anidados, strings y descriptores/referencias de colecciones y
 representables, incluidos los resultados nominales de parsing. Un field string
 es un handle a `AetherStringObject`: copy y
 destroy retienen/liberan recursivamente. `transactionLabel` prueba concat owned
-sobre fields borrowed y `Main.ae` valida `byteLength`; parsing y producción
-textual avanzada siguen fuera del subset.
+sobre fields borrowed y `Main.ae` valida `byteLength`; parsing estricto y trim
+ASCII explícito están activos, mientras producción textual avanzada sigue
+fuera del subset.
 
 Se rechazan antes de LLVM structs incompletos/recursivos por valor y, para
 elementos de colección, class/interface, nullable, float,
@@ -91,7 +99,7 @@ en native. No afecta cálculos ni validaciones del tracker.
 
 ## Límites restantes y próxima tarea
 
-Siguen fuera de alcance argumentos, archivos, split/trim, excepciones
+Siguen fuera de alcance argumentos, archivos, split, excepciones
 y GC. El tracker es una demostración directa desde
 `main`, no una CLI persistente.
 
@@ -107,4 +115,4 @@ La fase de igualdad estructural E2E quedó completada: copias y slices de
 `List<Transaction>` comparan contenido, y búsqueda encuentra transacciones
 equivalentes aunque sean valores independientes. La etiqueta dinámica
 `food: Dinner` prueba retorno, temporales y cleanup ARC, y su longitud esperada
-es 12 bytes. Archivos, argv y split/trim siguen aplazados.
+es 12 bytes. Archivos, argv y split siguen aplazados.

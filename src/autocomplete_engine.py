@@ -151,7 +151,7 @@ SNIPPET_SUGGESTIONS: tuple[CommandSuggestion, ...] = (
 
 
 NATIVE_TYPE_MEMBERS: dict[str, tuple[tuple[str, str], ...]] = {
-    "string": (("byteLength", "property"),),
+    "string": (("byteLength", "property"), ("trim", "method")),
     "List": (("length", "property"), ("copy", "method"), ("reverse", "method"), ("sort", "method")),
     "Array": (("length", "property"), ("copy", "method")),
     "Matrix": (("rows", "property"), ("columns", "property"), ("transpose", "method")),

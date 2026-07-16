@@ -1360,6 +1360,14 @@ invalid input returns `ParseStatus` and does not create an exceptional edge.
 The optimizers do not constant-fold parsing and preserve every call whose
 structured result is used.
 
+### Typed string trim call (profile 16)
+
+`string.trim()` lowers to the canonical builtin call `__aether_string_trim`
+with one string receiver, an owned string result and source location. IR and
+SSA verifiers enforce `string -> string`. Its effects include memory reads,
+possible ARC writes, allocation and panic, so DCE/SCCP/GCP/copy propagation do
+not erase or fold it. No `trim(trim(x))` rewrite or literal folding is applied.
+
 ## 14. Risks and Guardrails
 
 ### Do not port the whole language at once

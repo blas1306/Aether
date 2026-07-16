@@ -71,7 +71,7 @@ _ENUM_RE = re.compile(
     re.DOTALL,
 )
 _NATIVE_TYPE_MEMBERS: dict[str, tuple[tuple[str, str], ...]] = {
-    "string": (("byteLength", "property"),),
+    "string": (("byteLength", "property"), ("trim", "method")),
     "List": (
         ("length", "property"),
         ("is_empty", "property"),

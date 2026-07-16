@@ -72,7 +72,7 @@ def get_builtin(name: str, write_output: OutputWriter, *, plot_backend: Any | No
 
 
 def is_builtin(name: str) -> bool:
-    return name in _definitions()
+    return name in _definitions() and not name.startswith("__aether_")
 
 
 def is_builtin_constant(name: str) -> bool:
@@ -80,7 +80,9 @@ def is_builtin_constant(name: str) -> bool:
 
 
 def builtin_names() -> tuple[str, ...]:
-    return tuple(sorted(_definitions()))
+    return tuple(
+        sorted(name for name in _definitions() if not name.startswith("__aether_"))
+    )
 
 
 def builtin_constant_names() -> tuple[str, ...]:

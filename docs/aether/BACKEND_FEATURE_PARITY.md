@@ -30,6 +30,11 @@ nominales con `ParseStatus` son E2E en AST/IR/SSA/LLVM, incluidos bytes NUL/UTF-
 locale C, structs/colecciones y clang O0/O1/O2. NaN/infinito se rechazan y
 underflow double sigue IEEE-754.
 
+Actualización perfil 16 (15-07-2026): `string.trim()` es E2E en
+AST/IR/SSA/LLVM, recorta exactamente seis whitespace ASCII, conserva NUL,
+UTF-8 y espacios no ASCII, y mantiene fast paths/ownership en O0/O1/O2. Parsing
+sigue estricto y sólo acepta whitespace tras un `trim()` explícito.
+
 Última revisión: 15 de julio de 2026, incluyendo enums native y los ejemplos
 dogfood de métodos numéricos y expense tracker. Este documento reemplaza como
 referencia canónica a la auditoría histórica de `docs/compiler/`.
@@ -89,8 +94,9 @@ perfil 4, “funciones como valores” incluye un callable estructural tipado pa
 funciones top-level sin captura en AST y native; permanece `PARTIAL` porque no
 incluye closures, lambdas, métodos enlazados, builtins como valores ni retorno
 de callables. Strings/native sigue `PARTIAL` porque interpolación, formatting y
-otras APIs de texto quedan fuera; transporte, igualdad, concat y `byteLength`
-son E2E. El detector consulta tipos de operandos registrados por el typechecker.
+otras APIs de texto quedan fuera; transporte, igualdad, concat, `byteLength` y
+`trim` son E2E. El detector consulta tipos de operandos registrados por el
+typechecker.
 
 La decisión aprobada para reemplazar en fases el transporte `char*` por un
 modelo con UTF-8, longitud y ownership explícitos está en
@@ -150,6 +156,7 @@ representación y lifecycle ya están activos en esta matriz.
 | String literal/variable/arg/return | C | C | C | C | C handle | C | C | C | C | C | C lifecycle | C | `AetherStringObject` ARC | E2E | C | Completo | UTF-8 explícito, vacío/literales inmortales y dinámicos owned. |
 | Concat e igualdad string | C | C | C tipos exactos | C bytes | C binary tipado / compare | C | C efectos/tipos | C `StringValue` | C | C | C effect-aware | C | `aether_string_concat`/`equal` | E2E+O0/O1/O2 | C | Completo | Solo `string + string`; sin conversiones implícitas. |
 | `string.byteLength` | C property | C | C `int` | C O(1) | call tipada | C | C | C | C | C | C | C checked i64→i32 | header explícito | E2E UTF-8/NUL | C | Completo | Cuenta bytes, no code points ni graphemes. |
+| `string.trim()` | C método | C | C read-only, cero args, owned | C bytes | call builtin tipada+loc | C | C firma/efectos | C `StringValue` | C | C | C effect-aware | C | `aether_string_trim` | E2E+O0/O1/O2 | C | Completo | Sólo whitespace ASCII `20 09 0A 0D 0C 0B`; conserva NUL/UTF-8/no-ASCII. |
 | `parseInt` / `parseDouble` | C llamada | C | C resultados nominales | C bytes compartidos | C calls tipadas+loc | C | C firma/layout | C | C | C | C effect-aware | C ABI struct | parser i32 + DFA/`strtod_l` locale C | E2E+O0/O1/O2 | C | Completo | Sin trim/locale implícito; defaults 0 no son sentinels; NaN/infinito rechazados. |
 | Interpolación/formatting string | C | C | C | C | N | N | N | N | N | N | N | N | N | AST | C | Solo AST | No se habilitó conversión ni formatting native. |
 | `print` / `println` escalares | llamada | C | C variádico | C | C `IRPrint` | C | C | C | C | C | C efecto | C | `printf`/helpers | E2E | C | Completo | Formato double general aún usa contratos host distintos en casos extremos. |
@@ -268,8 +275,9 @@ dejan SSA inválido.
   `ComplexType` en IR no tienen un camino fuente ejecutable completo.
 - La existencia de genéricos privilegiados en Array/List/Vector/Matrix no
   implica genéricos de usuario.
-- Strings son handles a `AetherStringObject` con ARC interno; concat y
-  `byteLength` están activos, mientras otras APIs de producción siguen fuera.
+- Strings son handles a `AetherStringObject` con ARC interno; concat,
+  `byteLength` y `trim` ASCII están activos, mientras otras APIs de producción
+  siguen fuera.
 - La API List es amplia para elementos soportados, incluidos structs con layout,
   con RC/free final y Eq(T) general; capacity pública no está cerrada.
 - `-O2` existe como opción, pero es alias de `-O1` y no afecta native.

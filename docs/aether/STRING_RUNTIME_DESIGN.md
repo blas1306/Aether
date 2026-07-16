@@ -20,6 +20,9 @@ ya no existe un camino native que interprete ese handle como `char *`.
   `aether_string_concat`, comprueba overflow, reserva una vez y devuelve owned.
 - `s.byteLength` carga la longitud explícita en O(1), la estrecha al `int`
   público con check y cuenta bytes UTF-8, no caracteres.
+- `s.trim()` elimina únicamente space, tab, LF, CR, form feed y vertical tab
+  ASCII en ambos extremos. Baja a `aether_string_trim`, conserva NUL/UTF-8 y
+  devuelve owned mediante retain, singleton vacío o una allocation/copia.
 - `parseInt(string)` y `parseDouble(string)` producen resultados nominales con
   `ParseStatus`, consumen bytes por longitud y son estrictos/independientes del
   locale. El contrato completo está en
@@ -35,7 +38,7 @@ ya no existe un camino native que interprete ese handle como `char *`.
   ownership, no un `str` host como sustituto semántico.
 
 La sección 3 conserva el inventario histórico anterior a esta migración para
-explicar los puntos que fueron reemplazados. Split/trim, archivos, argv,
+explicar los puntos que fueron reemplazados. Split, archivos, argv,
 formatting e interpolación native siguen fuera de esta fase.
 
 ## 1. Resumen de decisiones aprobadas
@@ -54,6 +57,7 @@ Para Aether v1 se aprueba:
 | Copia | Retain lógico al duplicar ownership; move bitwise al reubicar; release al sobrescribir o destruir. |
 | Índices | No existe `s[i]` en v1. No se confundirá byte, code point y grapheme. |
 | Longitudes | El objeto conserva byte length O(1), expuesto como `s.byteLength`; no habrá un `length` ambiguo. |
+| Trimming | `s.trim()` usa exclusivamente los bytes ASCII `20 09 0A 0D 0C 0B`; no aplica locale ni whitespace Unicode. |
 | Orden | `==`/`!=` por contenido. Los operadores `< <= > >=` no existen para string v1; sort y un compare interno usan bytes UTF-8 unsigned. |
 | Substring | Fuera del primer runtime; la primera API segura debería copiar y usar límites de code points. Las views se aplazan. |
 | División de APIs | Solo representación, validación, allocation, lifecycle y operaciones esenciales viven en runtime; algoritmos de texto viven en stdlib. |
@@ -382,6 +386,23 @@ pueden retener un buffer enorme por una substring mínima. Una API por bytes
 debe vivir en el futuro tipo `Bytes` o llevar un nombre explícitamente unsafe;
 nunca debe construir UTF-8 inválido silenciosamente.
 
+### 4.9 Trimming explícito
+
+`s.trim()` devuelve un string owned e inmutable y elimina solamente estos seis
+bytes en los extremos: `0x20` (space), `0x09` (tab), `0x0A` (LF), `0x0D` (CR),
+`0x0C` (form feed) y `0x0B` (vertical tab). Conserva whitespace interno, NUL
+embebido y cualquier espacio no ASCII, incluido NBSP. No observa locale ni
+tablas Unicode.
+
+El scan por bytes es seguro para UTF-8 válido: esos seis caracteres ASCII son
+code units de un byte y ninguno puede aparecer dentro de una secuencia
+multibyte. No hace falta iterar code points para recortar los extremos.
+
+El helper `aether_string_trim` tiene tres caminos: si no cambia nada retiene el
+receiver; si todo se elimina devuelve el singleton vacío inmortal; si cambia
+parcialmente comprueba tamaño y hace una allocation y una copia exacta del
+rango. Nunca usa `strlen`, `%s` ni `isspace`.
+
 ## 5. Encoding y frontera con bytes
 
 UTF-8 válido es un invariante de todo valor `string` Aether.
@@ -695,13 +716,14 @@ Regla:
 | `byteLength` | builtin/accessor de representación | Carga checked del header; no necesita opcode nuevo. |
 | igualdad | operador bajado a runtime call | Necesita header/data y `memcmp`; no instruction especial por backend. |
 | concat | runtime primitive implementada | Overflow, una allocation y lifecycle. |
+| `trim` | builtin + runtime primitive implementada | Scan length-aware, fast paths owned y allocation segura del rango. |
 | validate UTF-8 | runtime primitive | Frontera de seguridad compartida por IO/FFI. |
 | retain/release | compiler-inserted runtime primitive | Lifecycle no visible al usuario. |
 | acceso a byte | runtime primitive interna/futura | Bounds; la API pública preferida es `Bytes`. |
 | compare por bytes | runtime primitive interna | Sort y búsqueda ordenada. |
 | hashing | runtime primitive futura | Debe compartir bytes/seed con Map/Set. |
 | decode siguiente code point | runtime primitive pequeña o iterator builtin | Validación y scan eficiente. |
-| `trim`, `split`, `replace` | stdlib Aether | Algoritmos sobre iteración/builder. |
+| `split`, `replace` | stdlib Aether futura | Algoritmos sobre iteración/builder; no implementados aún. |
 | `contains`, `startsWith`, `endsWith`, `find` | stdlib Aether | No requieren opcode; pueden usar bytes seguros. |
 | case conversion | stdlib/módulo Unicode futuro | Tablas Unicode versionadas; no runtime mínimo. |
 | parsing y formatting | stdlib sobre primitivas numéricas | Política de errores y formato, no layout string. |
@@ -992,7 +1014,7 @@ parciales. Es el mayor bloque técnico.
 
 **Desbloquea:** concat, formatting básico e interpolación native.
 
-### Fase 3: stdlib `text` y parsing
+### Fase 3: stdlib `text` y parsing (parsing y `trim` ASCII explícito completados)
 
 **Subsistemas:** módulo stdlib Aether, iterador UTF-8, builder, structs/enums de
 error y wrappers de primitivas numéricas.
@@ -1000,8 +1022,9 @@ error y wrappers de primitivas numéricas.
 **Invariantes:** unidad explícita; sin normalización/locale implícitos; toda
 salida es UTF-8 válida.
 
-**Tests:** trim/split/contains/find/replace/starts/ends con ASCII, multibyte,
-combining marks, cero, vacío y strings grandes; parsing válido, inválido,
+**Tests:** `trim` ya cubre ASCII exacto, multibyte, whitespace no ASCII, NUL,
+vacío, ownership y O0/O1/O2. Quedan split/contains/find/replace/starts/ends;
+parsing cubre válido, inválido,
 overflow y trailing data; paridad AST/native.
 
 **Riesgo:** promover demasiados métodos a intrinsics o inventar Result antes de

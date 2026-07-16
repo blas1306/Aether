@@ -88,6 +88,7 @@ from aether.string_parsing import (
     PARSE_DOUBLE_BUILTIN,
     PARSE_INT_BUILTIN,
 )
+from aether.string_value import STRING_TRIM_BUILTIN
 from .types import (
     ArrayType,
     BoolType,
@@ -1016,6 +1017,17 @@ class IRVerifier:
                     or not isinstance(instruction.result.type, IntType)
                 ):
                     self._fail("String byte-length builtin requires string -> int")
+                return
+            if instruction.builtin == STRING_TRIM_BUILTIN:
+                if instruction.function != STRING_TRIM_BUILTIN:
+                    self._fail("String trim builtin must retain its canonical semantic name")
+                if (
+                    instruction.result is None
+                    or len(instruction.arguments) != 1
+                    or not isinstance(instruction.arguments[0].type, StringType)
+                    or not isinstance(instruction.result.type, StringType)
+                ):
+                    self._fail("String trim builtin requires string -> owned string")
                 return
             if instruction.builtin in {PARSE_INT_BUILTIN, PARSE_DOUBLE_BUILTIN}:
                 expected_name = (

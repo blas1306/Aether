@@ -22,7 +22,7 @@ from ..string_parsing import (
     parse_double_bytes,
     parse_int_bytes,
 )
-from ..string_value import StringValue
+from ..string_value import STRING_TRIM_BUILTIN, StringValue, aether_string_trim
 from ..types import (
     AetherType,
     AetherValue,
@@ -104,6 +104,12 @@ def builtin_definitions() -> list[BuiltinDefinition]:
         BuiltinDefinition("Math.ceil", _constant_runtime(ceil_builtin), _real_to_int_type("Math.ceil"), _exactly_one("Math.ceil")),
         BuiltinDefinition(PARSE_INT_BUILTIN, _constant_runtime(_parse_int_runtime), _parse_int_type, _exactly_one(PARSE_INT_BUILTIN)),
         BuiltinDefinition(PARSE_DOUBLE_BUILTIN, _constant_runtime(_parse_double_runtime), _parse_double_type, _exactly_one(PARSE_DOUBLE_BUILTIN)),
+        BuiltinDefinition(
+            STRING_TRIM_BUILTIN,
+            _constant_runtime(_string_trim_runtime),
+            _string_trim_type,
+            _exactly_one("string.trim"),
+        ),
     ]
     definitions.extend(
         BuiltinDefinition(
@@ -170,6 +176,23 @@ def _parse_int_runtime(args: list[AetherValue]) -> AetherValue:
 def _parse_double_runtime(args: list[AetherValue]) -> AetherValue:
     parsed = parse_double_bytes(_parse_string_bytes(args, PARSE_DOUBLE_BUILTIN))
     return _parse_result(DOUBLE_PARSE_RESULT_TYPE, "double", float(parsed.value), parsed.status)
+
+
+def _string_trim_runtime(args: list[AetherValue]) -> AetherValue:
+    if len(args) != 1 or args[0].type_name != "string" or not isinstance(args[0].value, StringValue):
+        actual = "no receiver" if not args else type_to_string(args[0].type_name)
+        raise AetherTypeError(f"string.trim() requires a string receiver, got '{actual}'.")
+    return AetherValue("string", aether_string_trim(args[0].value))
+
+
+def _string_trim_type(arg_types: list[AetherType | None]) -> AetherType | None:
+    if len(arg_types) != 1:
+        raise AetherTypeError("string.trim() expects zero arguments.")
+    if arg_types[0] is not None and arg_types[0] != "string":
+        raise AetherTypeError(
+            f"string.trim() requires a string receiver, got '{type_to_string(arg_types[0])}'."
+        )
+    return "string"
 
 
 def _parse_string_bytes(args: list[AetherValue], label: str) -> bytes:

@@ -182,12 +182,13 @@ def test_completion_items_include_enum_keyword_and_variants_after_dot() -> None:
 
 
 def test_completion_items_include_native_members_after_dot() -> None:
-    source = "List<int> xs = {1, 2};\nArray<int> a = {1, 2};\nMatrix<double> A = [1 2; 3 4];\nVector<double> v = [3 4];\n"
+    source = "List<int> xs = {1, 2};\nArray<int> a = {1, 2};\nMatrix<double> A = [1 2; 3 4];\nVector<double> v = [3 4];\nstring text = \" value \";\n"
 
-    list_labels = {item.label: item.kind for item in completion_items(source + "xs.", 5, len("xs.") + 1)}
-    array_labels = {item.label: item.kind for item in completion_items(source + "a.", 5, len("a.") + 1)}
-    matrix_labels = {item.label: item.kind for item in completion_items(source + "A.", 5, len("A.") + 1)}
-    vector_labels = {item.label: item.kind for item in completion_items(source + "v.", 5, len("v.") + 1)}
+    list_labels = {item.label: item.kind for item in completion_items(source + "xs.", 6, len("xs.") + 1)}
+    array_labels = {item.label: item.kind for item in completion_items(source + "a.", 6, len("a.") + 1)}
+    matrix_labels = {item.label: item.kind for item in completion_items(source + "A.", 6, len("A.") + 1)}
+    vector_labels = {item.label: item.kind for item in completion_items(source + "v.", 6, len("v.") + 1)}
+    string_labels = {item.label: item.kind for item in completion_items(source + "text.", 6, len("text.") + 1)}
 
     list_members = {
         "length": "property",
@@ -210,3 +211,4 @@ def test_completion_items_include_native_members_after_dot() -> None:
         assert matrix_labels[label] == kind
     for label, kind in {"length": "property", "norm": "method"}.items():
         assert vector_labels[label] == kind
+    assert string_labels == {"byteLength": "property", "trim": "method"}

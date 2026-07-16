@@ -16,6 +16,7 @@ from ..string_parsing import (
     PARSE_STATUS_TYPE,
     PARSE_STATUS_VARIANTS,
 )
+from ..string_value import STRING_TRIM_BUILTIN
 from ..types import (
     AetherType,
     ArrayType as AetherArrayType,
@@ -1905,7 +1906,7 @@ class IRLowerer:
             receiver_name, method_name = call.callee.rsplit(".", 1)
             if method_name not in {
                 "copy", "contains", "indexOf", "pop", "removeAt", "push",
-                "insert", "clear", "sort", "reverse",
+                "insert", "clear", "sort", "reverse", "trim",
             }:
                 receiver = self._dotted_expression(receiver_name, call.line, call.column)
                 return self._lower_method_call(
@@ -1932,6 +1933,25 @@ class IRLowerer:
 
         method_name = call.callee.rsplit(".", 1)[-1]
         arguments = call.arguments
+        if "." in call.callee and method_name == "trim":
+            receiver_name = call.callee.rsplit(".", 1)[0]
+            receiver_expression = self._dotted_expression(
+                receiver_name, call.line, call.column
+            )
+            receiver = self._lower_expression(receiver_expression, context)
+            if call.arguments or not isinstance(receiver.type, StringType):
+                self._fail("IR string.trim() requires string receiver and zero arguments.", call)
+            result = context.temporary(StringType())
+            context.block.instructions.append(
+                IRCall(
+                    STRING_TRIM_BUILTIN,
+                    (receiver,),
+                    result,
+                    STRING_TRIM_BUILTIN,
+                    self._source_location(call),
+                )
+            )
+            return result if result_required else None
         list_methods = {
             "copy",
             "contains",
@@ -2271,6 +2291,20 @@ class IRLowerer:
         node: object,
     ) -> IRValue | None:
         receiver = self._lower_expression(target_expression, context)
+        if method_name == "trim" and isinstance(receiver.type, StringType):
+            if argument_expressions:
+                self._fail("IR string.trim() expects zero arguments.", node)
+            result = context.temporary(StringType())
+            context.block.instructions.append(
+                IRCall(
+                    STRING_TRIM_BUILTIN,
+                    (receiver,),
+                    result,
+                    STRING_TRIM_BUILTIN,
+                    self._source_location(node),
+                )
+            )
+            return result if result_required else None
         if not isinstance(receiver.type, StructType):
             self._unsupported(node, f"method '{method_name}' on '{receiver.type}'")
         function_name = self._method_names.get((receiver.type.name, method_name))

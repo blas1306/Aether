@@ -1286,6 +1286,12 @@ returns an owned string. No implicit formatting or conversion is performed.
 character, code-point, or grapheme count: `"é".byteLength == 2` and
 `"🙂".byteLength == 4`.
 
+`s.trim()` returns an owned immutable string after removing only ASCII space,
+tab, line feed, carriage return, form feed, and vertical tab from both ends.
+It preserves internal whitespace, embedded NUL, valid UTF-8, and every
+non-ASCII whitespace code point. It is locale-independent and does not modify
+the receiver. An all-whitespace result is the canonical empty string.
+
 Numeric parsing is explicit and structured:
 
 ```aether
@@ -1303,6 +1309,8 @@ optional signed `e`/`E` exponent as specified in
 non-ASCII, embedded NUL and trailing text without throwing. Empty,
 invalid-format and out-of-range inputs are distinguished by `ParseStatus`.
 NaN/infinity spellings are not accepted; double underflow follows IEEE-754.
+Parsing remains strict: callers that want boundary whitespace removed must
+write it explicitly, for example `parseInt(" 42 ".trim())`.
 
 String literals support interpolation with `$expr$`. The expression is parsed as Aether, typechecked in the current scope, evaluated at runtime, and formatted with the same display rules used by `print(...)` and `println(...)`.
 
