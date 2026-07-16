@@ -41,6 +41,11 @@ La Fase 3 añade un slice `transactions[0:1]`: el resultado conserva strings y
 structs mediante `copy_init`, pero reemplazar su `Transaction` no cambia el
 slot correspondiente de la lista original.
 
+Las Fases 4–5 hacen `const` read-only por alias y convierten los recorridos de
+`Reports.ae` en borrows por elemento. Resumen y listado no copian cada
+`Transaction`; `matches.push(transaction)` es la adquisición owning normal que
+copia el struct y retiene sus strings.
+
 ## Límites deliberados
 
 - No hay argumentos de proceso ni `main(args)`.

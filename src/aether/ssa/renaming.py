@@ -552,7 +552,9 @@ class SSARenamer:
             array = self._resolve_value(instruction.array)
             index = self._resolve_value(instruction.index)
             self._bind_value(result.name, result, bound_values)
-            return SSAArrayGet(result, array, index)
+            return SSAArrayGet(
+                result, array, index, instruction.borrowed, instruction.borrow_scope
+            )
 
         if isinstance(instruction, IRArraySlice):
             result = self._define_value(instruction.result)
@@ -575,7 +577,13 @@ class SSARenamer:
             list_value = self._resolve_value(instruction.list_value)
             index = self._resolve_value(instruction.index)
             self._bind_value(result.name, result, bound_values)
-            return SSAListGet(result, list_value, index)
+            return SSAListGet(
+                result,
+                list_value,
+                index,
+                instruction.borrowed,
+                instruction.borrow_scope,
+            )
 
         if isinstance(instruction, IRVectorGet):
             result = self._define_value(instruction.result)

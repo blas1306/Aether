@@ -15,6 +15,12 @@ int main() {
         Particle(3.0, Vec2(4.0, 5.0), Vec2(1.0, 1.5))
     };
 
+    double totalMass = 0.0;
+    for Particle particle in particles {
+        totalMass = totalMass + particle.mass;
+    }
+    println(totalMass == 5.0);
+
     Particle first = particles[0];
     first.position.x = 9.0;
 

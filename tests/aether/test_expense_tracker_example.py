@@ -7,6 +7,7 @@ import shutil
 import pytest
 
 from aether.backend.llvm import LLVMBuilder, LLVMRunner
+from aether.errors import AetherTypeError
 from aether.pipeline import prepare_typed_program
 from aether.runner import run_aether
 from aether.typechecker import TypeChecker
@@ -45,6 +46,20 @@ def test_expense_tracker_ast_covers_ledger_reports_filtering_and_listing() -> No
 
     assert result.exit_code == 0
     assert result.output.splitlines() == MAIN_OUTPUT
+
+
+def test_expense_tracker_for_in_transaction_is_read_only() -> None:
+    source = """
+from Transaction import Transaction;
+void invalidReport(List<Transaction> transactions) {
+    for Transaction transaction in transactions {
+        transaction.amount = 0.0;
+    }
+}
+int main() { return 0; }
+"""
+    with pytest.raises(AetherTypeError, match="Cannot mutate borrowed iteration element 'transaction'"):
+        prepare_typed_program(source, TypeChecker(source_root=EXAMPLE))
 
 
 @pytest.mark.skipif(shutil.which("clang") is None, reason="clang is required")

@@ -8,6 +8,19 @@ optimization and LLVM lowering. Dominators, dominance frontiers, phi
 insertion, dominator-tree renaming, verification, SSA optimizers, and LLVM
 consumption are implemented in the current pipeline.
 
+## Borrowed `for-in` elements
+
+`SSAArrayGet` and `SSAListGet` preserve the `borrowed` bit and iteration-scope
+identifier produced by IR lowering. This form remains an SSA value but is not
+an owner. The verifier rejects scope mismatches, mutation receivers and phis of
+unacquired borrows. A lifecycle retain represents the `borrow -> copy_init`
+acquisition for a normal owning local or return.
+
+The metadata survives algebraic and trivial-phi rewrites, DCE retains the
+may-trap memory read, and LLVM uses it to suppress only the element retain.
+Borrows are generated inside the loop body and never form loop-carried phis;
+the design intentionally stops short of a general borrow checker.
+
 ## What SSA Is
 
 Static Single Assignment is an intermediate representation discipline where

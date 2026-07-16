@@ -7,6 +7,14 @@ recursivos para los tres fields string. Se mantienen diez validaciones
 funcionales, una validación de slice, más el listado final; no se añadieron CLI
 real ni persistencia.
 
+Actualización const/borrow: los tres recorridos de `List<Transaction>` en
+`Reports.ae` usan ahora el binding borrowed read-only sin copia automática por
+vuelta. El filtro adquiere ownership únicamente al ejecutar `push(transaction)`;
+summary y print leen directamente. Un test negativo del dogfood confirma que
+`transaction.amount = 0.0` se rechaza. El ejemplo de partículas suma masa con
+`for Particle particle in particles`; cuando necesita modificar conserva la
+copia local explícita y el set indexado posterior.
+
 Revisión: 15 de julio de 2026. Programa:
 [`examples/expense_tracker/`](../../examples/expense_tracker/README.md).
 
@@ -87,5 +95,6 @@ usa strings ARC y cleanup de elementos. El último owner de una List libera sus
 Transaction vivos, buffer y objeto. `copy()` crea storage exterior distinto y
 conserva los strings mediante lifecycle recursivo.
 
-La próxima fase recomendada es unificar `const` y `for-in` borrowed; archivos,
-argv, concat, parsing y split/trim siguen aplazados.
+La próxima fase recomendada es igualdad estructural E2E y `Eq(T)` compartido
+por `contains/indexOf`; archivos, argv, concat, parsing y split/trim siguen
+aplazados.

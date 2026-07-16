@@ -13,7 +13,7 @@ class StringValue:
     UTF-8 bytes, byte length, immortality and a checked strong owner count.
     """
 
-    __slots__ = ("_utf8", "flags", "strong_count", "_released")
+    __slots__ = ("_utf8", "flags", "strong_count", "unclaimed_owners", "_released")
 
     def __init__(self, utf8: bytes, *, immortal: bool = False) -> None:
         try:
@@ -23,6 +23,7 @@ class StringValue:
         self._utf8 = bytes(utf8)
         self.flags = UTF8_VALID | (IMMORTAL if immortal else 0)
         self.strong_count = 0 if immortal else 1
+        self.unclaimed_owners = 0 if immortal else 1
         self._released = False
 
     @classmethod
@@ -76,6 +77,25 @@ class StringValue:
         self.strong_count += 1
         return self
 
+    def claim_owner(self) -> "StringValue":
+        self._require_live()
+        if self.immortal:
+            return self
+        if self.unclaimed_owners:
+            self.unclaimed_owners -= 1
+            return self
+        return self.retain()
+
+    def offer_owner(self) -> "StringValue":
+        self._require_live()
+        if self.immortal:
+            return self
+        if self.unclaimed_owners:
+            return self
+        self.retain()
+        self.unclaimed_owners += 1
+        return self
+
     def release(self) -> None:
         self._require_live()
         if self.immortal:
@@ -83,6 +103,8 @@ class StringValue:
         if self.strong_count <= 0:
             raise RuntimeError("Aether string reference count underflow")
         self.strong_count -= 1
+        if self.unclaimed_owners > self.strong_count:
+            self.unclaimed_owners = self.strong_count
         if self.strong_count == 0:
             self._released = True
 
@@ -143,6 +165,7 @@ EMPTY_STRING = object.__new__(StringValue)
 EMPTY_STRING._utf8 = b""
 EMPTY_STRING.flags = IMMORTAL | UTF8_VALID
 EMPTY_STRING.strong_count = 0
+EMPTY_STRING.unclaimed_owners = 0
 EMPTY_STRING._released = False
 
 

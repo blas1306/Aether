@@ -1194,8 +1194,9 @@ class IRLowerer:
         iterable = self._lower_indexable_iterable(statement, context)
 
         index_slot = self._storage(f"for.{index}.index", IntType(), context)
-        loop_slot = self._storage(statement.variable, iterable.element_type, context)
-        context.block.instructions.append(IRInitDefault(loop_slot))
+        # Indexable for-in bindings are read-only borrows.  They are values,
+        # not owning storage, so loop setup and teardown do not copy/destroy T.
+        loop_slot = context.temporary(iterable.element_type)
 
         with self._loop_context(
             context,
@@ -1216,6 +1217,7 @@ class IRLowerer:
                 index_slot,
                 loop_slot,
                 iterable,
+                statement,
             )
             self._lower_statements(statement.body, context)
             self._emit_jump_if_open(context.block, blocks.increment.name)
@@ -1313,14 +1315,25 @@ class IRLowerer:
         index_slot: IRValue,
         loop_slot: IRValue,
         iterable: _IndexableIterable,
+        statement: ast.ForInStatement,
     ) -> None:
         body_index = context.temporary(IntType())
         context.block.instructions.append(IRLoad(body_index, index_slot))
-        element = context.temporary(iterable.element_type)
-        context.block.instructions.append(
-            iterable.get_instruction(element, iterable.value, body_index)
-        )
-        context.block.instructions.append(IRAssign(loop_slot, element))
+        if iterable.get_instruction is IRVectorGet:
+            context.block.instructions.append(
+                IRVectorGet(loop_slot, iterable.value, body_index)
+            )
+        else:
+            context.block.instructions.append(
+                iterable.get_instruction(
+                    loop_slot,
+                    iterable.value,
+                    body_index,
+                    True,
+                    context.block.name,
+                    self._source_location(statement),
+                )
+            )
 
     def _lower_for_indexable_increment(
         self,
@@ -1370,6 +1383,8 @@ class IRLowerer:
         if isinstance(expression, ast.Identifier):
             slot = context.locals.get(expression.name)
             if slot is not None:
+                if not isinstance(slot, IRStorage):
+                    return slot
                 result = context.temporary(slot.type)
                 context.block.instructions.append(IRLoad(result, slot))
                 self._copy_aggregate_metadata(slot, result, context)
@@ -2261,6 +2276,19 @@ class IRLowerer:
             self._require_same_type(value.type, slot.type, "struct receiver update")
             context.block.instructions.append(IRAssign(slot, value))
             return True
+        if isinstance(expression, ast.IndexExpression):
+            collection = self._lower_expression(expression.array, context)
+            index = self._lower_expression(expression.index, context)
+            self._require_same_type(index.type, IntType(), "indexed struct receiver")
+            if isinstance(collection.type, ListType):
+                self._require_same_type(value.type, collection.type.element, "indexed struct receiver")
+                context.block.instructions.append(IRListSet(collection, index, value))
+                return True
+            if isinstance(collection.type, ArrayType):
+                self._require_same_type(value.type, collection.type.element, "indexed struct receiver")
+                context.block.instructions.append(IRArraySet(collection, index, value))
+                return True
+            return False
         if not isinstance(expression, ast.FieldAccess):
             return False
         parent = self._lower_expression(expression.target, context)

@@ -1,11 +1,12 @@
 # RFC: semántica, ownership y lifecycle de `Array<T>` y `List<T>`
 
-Estado: **decisión aprobada; Fases 1 (objeto RC) y 2 (copia explícita) implementadas para Aether v1**,
+Estado: **decisión aprobada; Fases 1–5 implementadas para Aether v1**,
 15 de julio de 2026.
 
 La representación RC, el lifecycle del handle, los cleanups de IR, la
-destrucción final native y `Array/List.copy()` están activos. Slicing List,
-iteración borrowed e igualdad native general continúan fuera de este cambio.
+destrucción final native, `copy()`, slicing semiabierto, `const` por alias e
+iteración borrowed están activos. La igualdad native general continúa fuera de
+este cambio.
 
 Esta RFC congela la semántica pública de `Array<T>` y `List<T>` en las áreas
 indicadas. Es documentación de diseño: no afirma que AST, IR, SSA, LLVM, ABI o
@@ -383,12 +384,13 @@ accounts[0] = other; // error: reemplaza el slot
 // La mutabilidad interna de accounts[0] depende del contrato de Account.
 ```
 
-Para una colección anidada, el slot exterior no puede reemplazarse. Obtener la
-referencia interior copia normalmente ese handle; el contenedor interior no se
-congela globalmente:
+Para una colección anidada, la restricción sigue el camino de acceso const. La
+mutación encadenada directa queda prohibida; copiar el handle interior a un
+binding owning normal termina ese camino sin congelar globalmente el objeto:
 
 ```aether
 const List<List<int>> outer = source;
+outer[0].push(4); // error: mutación encadenada por outer
 List<int> inner = outer[0];
 inner.push(4); // permitido; outer[0] observa el cambio
 outer[0] = inner.copy(); // error: reemplaza un slot a través de outer
@@ -470,6 +472,26 @@ El borrow implícito es semánticamente invisible salvo por la prohibición de
 mutación/escape. Por ejemplo, `Transaction local = item` copia el struct por
 valor; `List<int> local = item` copia una referencia si el elemento es una List;
 `string local = item` retiene el string. No se agrega sintaxis nueva.
+
+### 10.1 Representación implementada
+
+El intérprete AST registra el nombre en el environment como borrow no-owning y
+const, no ejecuta la copia especial de structs ni reclama un owner RC, y marca
+la metadata inválida al finalizar la vuelta. IR usa `array_get/list_get` con
+metadata `borrowed`, impresa como `borrow_element`, más origen y bloque de
+lifetime. No se crea un iterator heap.
+
+Lifecycle no clasifica el resultado borrowed como owned. `copy_init` desde ese
+resultado es la única conversión a ownership: retiene handles Array/List/string
+y copia recursivamente structs. SSA conserva la metadata hasta LLVM; el load
+native del slot suprime el retain únicamente en la forma borrowed. IR y SSA
+rechazan mutación por el borrow, scopes inconsistentes, escape directo y phis
+borrowed sin adquisición de ownership. Los optimizers preservan la marca.
+
+La mutación del iterable se rechaza para el receiver directo y para aliases
+locales simples que comparten el origen semántico. No se afirma alias analysis
+general. Set, sort/reverse y cambios de tamaño se consideran incompatibles con
+el borrow activo.
 
 ## 11. Igualdad
 
@@ -813,13 +835,13 @@ Pueden diseñarse después, sin alterar la base v1:
 - rechazar step, rangos abiertos e índices negativos;
 - usar copia lógica y rollback de T.
 
-### Fase 4 — const consistente
+### Fase 4 — const consistente (completa)
 
 - aplicar read-only a través de la referencia en todos los paths;
 - distinguir value paths de objetos reference type alcanzados;
 - unificar diagnósticos AST/native.
 
-### Fase 5 — `for-in` borrowed read-only
+### Fase 5 — `for-in` borrowed read-only (completa)
 
 - bajar el acceso sin copia/retain automático;
 - terminar el borrow por iteración;

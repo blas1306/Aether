@@ -16,6 +16,15 @@ curso.
 
 - Documentación histórica de los hitos del lenguaje y de las decisiones que
   llevaron desde el prototipo matemático hasta el diseño generalista actual.
+- Referencias `const` de Array/List con read-only por camino de acceso y
+  `for-in` con borrow no-owning por elemento en AST, IR, SSA y LLVM/native.
+
+### Changed
+
+- Los mutadores de colecciones se clasifican mediante metadata semántica; la
+  mutación del iterable se rechaza también para aliases locales simples.
+- El perfil de capacidades 12 separa `const-collection-references` y
+  `borrowed-for-in-elements`.
 
 ### Notes
 

@@ -805,7 +805,9 @@ class SSABuilder:
             result = self._define_value(instruction.result, state.value_map)
             array = self._resolve_value(instruction.array, state.value_map)
             index = self._resolve_value(instruction.index, state.value_map)
-            return SSAArrayGet(result, array, index)
+            return SSAArrayGet(
+                result, array, index, instruction.borrowed, instruction.borrow_scope
+            )
 
         if isinstance(instruction, IRArraySlice):
             result = self._define_value(instruction.result, state.value_map)
@@ -825,7 +827,13 @@ class SSABuilder:
             result = self._define_value(instruction.result, state.value_map)
             list_value = self._resolve_value(instruction.list_value, state.value_map)
             index = self._resolve_value(instruction.index, state.value_map)
-            return SSAListGet(result, list_value, index)
+            return SSAListGet(
+                result,
+                list_value,
+                index,
+                instruction.borrowed,
+                instruction.borrow_scope,
+            )
 
         if isinstance(instruction, IRVectorGet):
             result = self._define_value(instruction.result, state.value_map)

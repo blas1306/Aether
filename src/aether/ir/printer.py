@@ -344,7 +344,8 @@ class IRPrinter:
             )
         if isinstance(instruction, IRArrayGet):
             return (
-                f"{self._typed_value(instruction.result)} = array_get "
+                f"{self._typed_value(instruction.result)} = "
+                f"{'borrow_element array' if instruction.borrowed else 'array_get'} "
                 f"{self._value(instruction.array)}, {self._value(instruction.index)}"
             )
         if isinstance(instruction, IRArraySlice):
@@ -361,7 +362,8 @@ class IRPrinter:
             )
         if isinstance(instruction, IRListGet):
             return (
-                f"{self._typed_value(instruction.result)} = list_get "
+                f"{self._typed_value(instruction.result)} = "
+                f"{'borrow_element list' if instruction.borrowed else 'list_get'} "
                 f"{self._value(instruction.list_value)}, {self._value(instruction.index)}"
             )
         if isinstance(instruction, IRVectorGet):

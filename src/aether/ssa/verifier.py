@@ -200,6 +200,7 @@ class SSAVerifier:
         self._verify_block_structure(function, blocks)
         predecessors = self._predecessors(blocks)
         value_types, definition_sites = self._collect_definitions(function)
+        self._verify_borrowed_elements(function)
 
         for block in function.blocks:
             self._verify_phi_placement(function, block)
@@ -210,6 +211,75 @@ class SSAVerifier:
             entry_block=function.entry_block,
         ).compute()
         self._verify_dominance(function, predecessors, definition_sites, dominators)
+
+    def _verify_borrowed_elements(self, function: SSAFunction) -> None:
+        borrowed: dict[str, str] = {}
+        for block in function.blocks:
+            for instruction in block.instructions:
+                if not isinstance(instruction, (SSAArrayGet, SSAListGet)):
+                    continue
+                if instruction.borrowed:
+                    if not instruction.borrow_scope:
+                        self._fail("borrow_element requires an iteration scope")
+                    if instruction.borrow_scope != block.name:
+                        self._fail(
+                            f"borrow_element '%{instruction.result.name}' is defined "
+                            f"outside its declared scope '{instruction.borrow_scope}'"
+                        )
+                    borrowed[instruction.result.name] = instruction.borrow_scope
+                elif instruction.borrow_scope is not None:
+                    self._fail("owned collection get cannot declare a borrow scope")
+
+        if not borrowed:
+            return
+        acquired = {
+            argument.name
+            for block in function.blocks
+            for instruction in block.instructions
+            if isinstance(instruction, SSACall)
+            and instruction.builtin == "__aether_retain"
+            for argument in instruction.arguments
+            if argument.name in borrowed
+        }
+        receiver_fields = {
+            SSAArraySet: "array",
+            SSAListSet: "list_value",
+            SSAListPush: "list_value",
+            SSAListInsert: "list_value",
+            SSAListRemoveAt: "list_value",
+            SSAListPop: "list_value",
+            SSAListClear: "list_value",
+            SSAListReverse: "list_value",
+            SSASequenceSort: "sequence",
+            SSAStructSet: "struct",
+        }
+        for block in function.blocks:
+            for instruction in block.instructions:
+                if (
+                    isinstance(instruction, SSAReturn)
+                    and instruction.value is not None
+                    and instruction.value.name in borrowed
+                    and isinstance(
+                        instruction.value.type,
+                        (ArrayType, ListType, StringType),
+                    )
+                    and instruction.value.name not in acquired
+                ):
+                    self._fail(
+                        "Borrowed iteration value cannot escape its iteration scope without copying"
+                    )
+                if isinstance(instruction, SSAPhi):
+                    if any(
+                        value.name in borrowed and value.name not in acquired
+                        for _predecessor, value in instruction.incoming
+                    ):
+                        self._fail("Borrowed iteration value cannot flow through phi")
+                for instruction_type, field_name in receiver_fields.items():
+                    if isinstance(instruction, instruction_type):
+                        receiver = getattr(instruction, field_name)
+                        if receiver.name in borrowed and receiver.name not in acquired:
+                            self._fail("Cannot mutate through borrowed iteration element")
+                        break
 
     def _verify_parameters(self, function: SSAFunction) -> None:
         seen: set[str] = set()

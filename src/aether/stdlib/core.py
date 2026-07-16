@@ -34,7 +34,15 @@ from ..types import (
     shape_vector_value,
     type_to_string,
 )
-from .registry import BuiltinConstantDefinition, BuiltinDefinition, BuiltinFunction, OutputWriter, RuntimeContext, RuntimeFactory
+from .registry import (
+    BuiltinConstantDefinition,
+    BuiltinDefinition,
+    BuiltinFunction,
+    MutationKind,
+    OutputWriter,
+    RuntimeContext,
+    RuntimeFactory,
+)
 
 
 CAST_BUILTINS = {"int", "float", "double", "string", "boolean"}
@@ -48,15 +56,15 @@ def builtin_definitions() -> list[BuiltinDefinition]:
         BuiltinDefinition("length", _constant_runtime(length_builtin), _length_type, _exactly_one("length")),
         BuiltinDefinition("is_empty", _constant_runtime(is_empty_builtin), _is_empty_type, _exactly_one("is_empty")),
         BuiltinDefinition("copy", _constant_runtime(copy_builtin), _copy_type, _exactly_one("copy")),
-        BuiltinDefinition("push", _constant_runtime(push_builtin), _push_type, _exactly_two("push")),
-        BuiltinDefinition("pop", _constant_runtime(pop_builtin), _pop_type, _exactly_one("pop")),
-        BuiltinDefinition("insert", _constant_runtime(insert_builtin), _insert_type, _exactly_three("insert")),
-        BuiltinDefinition("remove_at", _constant_runtime(remove_at_builtin), _remove_at_type, _exactly_two("remove_at")),
+        BuiltinDefinition("push", _constant_runtime(push_builtin), _push_type, _exactly_two("push"), MutationKind.STRUCTURAL),
+        BuiltinDefinition("pop", _constant_runtime(pop_builtin), _pop_type, _exactly_one("pop"), MutationKind.STRUCTURAL),
+        BuiltinDefinition("insert", _constant_runtime(insert_builtin), _insert_type, _exactly_three("insert"), MutationKind.STRUCTURAL),
+        BuiltinDefinition("remove_at", _constant_runtime(remove_at_builtin), _remove_at_type, _exactly_two("remove_at"), MutationKind.STRUCTURAL),
         BuiltinDefinition("contains", _constant_runtime(contains_builtin), _contains_type, _exactly_two("contains")),
         BuiltinDefinition("index_of", _constant_runtime(index_of_builtin), _index_of_type, _exactly_two("index_of")),
-        BuiltinDefinition("clear", _constant_runtime(clear_builtin), _clear_type, _exactly_one("clear")),
-        BuiltinDefinition("reverse", _constant_runtime(reverse_builtin), _reverse_type, _exactly_one("reverse")),
-        BuiltinDefinition("sort", _constant_runtime(sort_builtin), _sort_type, _exactly_one("sort")),
+        BuiltinDefinition("clear", _constant_runtime(clear_builtin), _clear_type, _exactly_one("clear"), MutationKind.STRUCTURAL),
+        BuiltinDefinition("reverse", _constant_runtime(reverse_builtin), _reverse_type, _exactly_one("reverse"), MutationKind.ELEMENT),
+        BuiltinDefinition("sort", _constant_runtime(sort_builtin), _sort_type, _exactly_one("sort"), MutationKind.ELEMENT),
         BuiltinDefinition("size", _constant_runtime(size_builtin), _size_type, _exactly_one("size")),
         BuiltinDefinition("rows", _constant_runtime(rows_builtin), _rows_type, _exactly_one("rows")),
         BuiltinDefinition("cols", _constant_runtime(cols_builtin), _cols_type, _exactly_one("cols")),

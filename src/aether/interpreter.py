@@ -139,6 +139,8 @@ class Environment:
             self.variable_scope = Scope(parent=parent_scope)
         self.functions: dict[str, Function] = {}
         self.owned_values: set[str] = set()
+        self.borrowed_values: set[str] = set()
+        self.invalid_borrowed_values: set[str] = set()
 
     @property
     def values(self) -> dict[str, AetherValue]:
@@ -152,16 +154,20 @@ class Environment:
         forbid_shadowing: bool = False,
         is_const: bool = False,
         owned: bool = True,
+        borrowed_iteration: bool = False,
     ) -> None:
-        if contains_struct_value(value):
+        if owned and contains_struct_value(value):
             value = copy_value(value)
-        if owned and isinstance(value.value, CollectionObject):
+        if owned and isinstance(value.value, (CollectionObject, StringValue)):
             value.value.claim_owner()
         self.variable_scope.define_local(name, value, forbid_shadowing=forbid_shadowing, is_const=is_const)
-        if owned and isinstance(value.value, CollectionObject):
+        if owned and isinstance(value.value, (CollectionObject, StringValue)):
             self.owned_values.add(name)
         elif isinstance(value.value, StructInstance):
-            self.owned_values.add(name)
+            if owned:
+                self.owned_values.add(name)
+        if borrowed_iteration:
+            self.borrowed_values.add(name)
 
     def assign(self, name: str, value: AetherValue, *, array_literal_context: bool = False) -> None:
         scope = self.variable_scope.resolve_scope(name)
@@ -181,14 +187,14 @@ class Environment:
 
     def _replace_owned(self, scope: Scope[AetherValue], name: str, replacement: AetherValue) -> None:
         owner_env = self._environment_for_scope(scope)
-        if isinstance(replacement.value, CollectionObject):
+        if isinstance(replacement.value, (CollectionObject, StringValue)):
             replacement.value.claim_owner()
         old = scope.symbols[name]
         scope.symbols[name] = replacement
         if owner_env is not None and name in owner_env.owned_values:
             destroy_value(old)
             owner_env.owned_values.discard(name)
-        if owner_env is not None and isinstance(replacement.value, CollectionObject):
+        if owner_env is not None and isinstance(replacement.value, (CollectionObject, StringValue)):
             owner_env.owned_values.add(name)
 
     def _environment_for_scope(self, scope: Scope[AetherValue]) -> "Environment | None":
@@ -204,12 +210,32 @@ class Environment:
             if name in self.owned_values:
                 destroy_value(self.variable_scope.symbols[name])
         self.owned_values.clear()
+        self.invalid_borrowed_values.update(self.borrowed_values)
+        self.borrowed_values.clear()
 
     def get(self, name: str) -> AetherValue:
+        owner = self._environment_defining(name)
+        if owner is not None and name in owner.invalid_borrowed_values:
+            raise AetherRuntimeError(
+                f"Borrowed iteration value '{name}' is no longer valid outside its iteration scope."
+            )
         return self.variable_scope.require(name)
 
     def lookup(self, name: str) -> AetherValue | None:
+        owner = self._environment_defining(name)
+        if owner is not None and name in owner.invalid_borrowed_values:
+            raise AetherRuntimeError(
+                f"Borrowed iteration value '{name}' is no longer valid outside its iteration scope."
+            )
         return self.variable_scope.lookup(name)
+
+    def _environment_defining(self, name: str) -> "Environment | None":
+        cursor: Environment | None = self
+        while cursor is not None:
+            if name in cursor.variable_scope.symbols:
+                return cursor
+            cursor = cursor.parent
+        return None
 
     def define_function(self, function: Function) -> None:
         self.functions[function.declaration.name] = function
@@ -651,7 +677,14 @@ class Interpreter:
             iterable = self._evaluate(statement.iterable, env)
             for item in _iterable_values(iterable):
                 loop_env = Environment(parent=env)
-                loop_env.define(statement.variable, item, forbid_shadowing=True)
+                loop_env.define(
+                    statement.variable,
+                    item,
+                    forbid_shadowing=True,
+                    is_const=True,
+                    owned=False,
+                    borrowed_iteration=True,
+                )
                 try:
                     self._execute_block(statement.body, loop_env)
                 except _ContinueSignal:
@@ -694,7 +727,9 @@ class Interpreter:
             for statement in statements:
                 self._execute(statement, env)
         except _ReturnSignal as signal:
-            if not signal.has_owned_result and isinstance(signal.value.value, CollectionObject):
+            if not signal.has_owned_result and isinstance(
+                signal.value.value, (CollectionObject, StringValue)
+            ):
                 signal.value.value.offer_owner()
                 signal.has_owned_result = True
             raise
@@ -1780,7 +1815,7 @@ class Interpreter:
                     local_env.define(parameter.name, arg, owned=False)
                 try:
                     result = self._evaluate(declaration.expression, local_env)
-                    if isinstance(result.value, CollectionObject):
+                    if isinstance(result.value, (CollectionObject, StringValue)):
                         result.value.offer_owner()
                     return result
                 finally:

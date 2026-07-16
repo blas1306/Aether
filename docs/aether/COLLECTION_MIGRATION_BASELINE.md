@@ -1,6 +1,6 @@
 # Baseline de migración de `Array<T>` y `List<T>`
 
-Estado: **baseline histórica de Fase 0; Fases 1 y 2 completadas el 15 de julio de 2026**.
+Estado: **baseline histórica de Fase 0; Fases 1–5 completadas el 15 de julio de 2026**.
 
 > Actualización Fase 2: las tablas históricas siguientes conservan el punto de
 > partida. El estado vigente implementa `Array.copy()` y `List.copy()` en
@@ -8,6 +8,12 @@ Estado: **baseline histórica de Fase 0; Fases 1 y 2 completadas el 15 de julio 
 > ejecutan `copy_init(T)` elemento a elemento y retornan ownership. List
 > normaliza `capacity = size`; nesting conserva handles interiores compartidos.
 > El diagnóstico transitorio de `Array.copy()` fue retirado en el perfil 10.
+>
+> Actualización Fases 4–5: `const` sigue caminos de value types y colecciones
+> anidadas, pero se detiene en una referencia class. `for-in` de Array/List usa
+> un elemento borrowed no-owning; una copia a local/field/return adquiere
+> ownership mediante `copy_init`. Se detecta mutación del iterable directo y
+> mediante aliases locales simples.
 
 Este documento registra lo que hace el repositorio antes de migrar los
 contenedores a objetos con reference counting. La semántica aprobada está en
@@ -42,8 +48,8 @@ antes de un lowering que no puede garantizar el contrato).
 | `const List view = mutable` | const por alias | binding restringido | chequeado antes de IR | chequeado antes de native | coincide |
 | slice Array | copia `[start,end)` | semiabierto | semiabierto | semiabierto | coincide |
 | slice List | copia `[start,end)` | semiabierto | semiabierto | semiabierto | coincide desde Fase 3 |
-| `for-in` | borrow read-only por iteración | snapshot exterior; binding especial | longitud capturada; get por valor | longitud capturada; get por valor | parcial |
-| mutar iterable/binding en `for-in` | prohibido | diagnóstico tipado | diagnóstico tipado | diagnóstico tipado | coincide para casos directos |
+| `for-in` | borrow read-only por iteración | binding borrowed no-owning | `borrow_element`, índice y length | load de slot sin retain | coincide para Array/List |
+| mutar iterable/binding en `for-in` | prohibido | diagnóstico tipado | verifier + diagnóstico | verifier + diagnóstico | directo y aliases locales simples |
 | `Array/List ==` | contenido ordenado | estructural recursivo | no general | diagnóstico temprano | gap diagnosticado |
 | `contains/indexOf` primitivo/string | `Eq(T)` | contenido | contenido | contenido | coincide en subset |
 | búsqueda de referencias anidadas | `Eq(T)` estructural | identidad | identidad | identidad | gap caracterizado |

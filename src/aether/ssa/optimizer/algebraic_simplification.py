@@ -449,6 +449,8 @@ class SSAAlgebraicSimplifier:
                 instruction.result,
                 self._resolve(instruction.array, replacements),
                 self._resolve(instruction.index, replacements),
+                instruction.borrowed,
+                instruction.borrow_scope,
             )
 
         if isinstance(instruction, SSAArraySlice):
@@ -472,6 +474,8 @@ class SSAAlgebraicSimplifier:
                 instruction.result,
                 self._resolve(instruction.list_value, replacements),
                 self._resolve(instruction.index, replacements),
+                instruction.borrowed,
+                instruction.borrow_scope,
             )
 
         if isinstance(instruction, SSAVectorGet):

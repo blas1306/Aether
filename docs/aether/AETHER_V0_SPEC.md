@@ -181,6 +181,14 @@ push(ys, 4);      // ok
 
 This is not deep immutability. `const` blocks mutation through the constant variable, but it does not freeze a shared object globally. A mutable alias to the same value can still mutate that value.
 
+For Array/List, the restriction follows chained access through value types and
+nested collections. Thus `const List<List<int>> outer; outer[0].push(1);` and
+`const List<Item> items; items[0].field = value;` are errors. Assigning
+`outer[0]` to a normal `List<int>` local performs the normal owning handle copy;
+mutating that local is allowed and is observed by `outer`. A class instance
+reached as a collection element is a separate reference object: the const path
+cannot replace its slot, but does not freeze that instance transitively.
+
 ## Type Aliases
 
 `alias` declares a type synonym:
@@ -2020,6 +2028,25 @@ continue; // error: continue used outside of a loop.
 ```
 
 Labeled breaks and labeled loops are not part of v0.
+
+For Array/List collection loops, the iteration name is a read-only borrow of
+the current element:
+
+```aether
+for Transaction transaction in transactions {
+    println(transaction.amount);
+}
+```
+
+Starting a loop iteration does not logically copy or retain the element. The
+name cannot be reassigned, used to mutate a value-type element, or used to
+mutate a nested collection through that path. A normal declaration such as
+`Transaction saved = transaction` copies the struct; for Array/List/class/string
+elements it copies the handle with its normal lifecycle. Returns and owning
+stores likewise acquire ownership before the per-iteration borrow ends.
+Structurally modifying or setting the iterated collection is rejected for the
+direct receiver and simple local aliases known by the typechecker. There is no
+public borrow syntax, mutable iterator object, or general alias analysis.
 
 Conditions must be `boolean`. Numeric and string values are not accepted as conditions.
 

@@ -14,10 +14,12 @@ from .symbols import EnumSymbol, FunctionSymbol, InterfaceSymbol, StructSymbol, 
 from .stdlib import (
     infer_builtin_constant_type,
     infer_builtin_type,
+    builtin_mutation,
     is_builtin,
     is_builtin_constant,
     is_builtin_namespace,
     validate_builtin_arity,
+    MutationKind,
 )
 from .tokens import AETHER_TYPES, PRIMITIVE_TYPES
 from .types import (
@@ -58,9 +60,6 @@ LINEAR_ALGEBRA_MATMUL = "Math.LinearAlgebra.matmul"
 LINEAR_ALGEBRA_SOLVE = "Math.LinearAlgebra.solve"
 LINEAR_ALGEBRA_CONJTRANSPOSE = "Math.LinearAlgebra.conjtranspose"
 SCALAR_INPUT_TARGET_TYPES = {"int", "float", "string", "boolean"}
-LIST_MUTATING_BUILTINS = {"push", "pop", "insert", "remove_at", "clear", "reverse", "sort"}
-
-
 class TypeChecker:
     def __init__(
         self,
@@ -95,8 +94,9 @@ class TypeChecker:
         # spelling heuristic.  Phase 0 only uses it for mutations that are
         # unambiguously incompatible with the approved read-only borrow.
         self.loop_collection_stack: list[
-            tuple[tuple[str, ...], Scope[VariableSymbol]]
+            tuple[tuple[str, ...], Scope[VariableSymbol], int | None]
         ] = []
+        self._next_collection_origin = 1
         self.imported_modules: set[str] = set()
         self.module_bindings: dict[str, str] = {}
         self.qualified_functions: dict[str, FunctionSymbol] = {}
@@ -1163,7 +1163,7 @@ class TypeChecker:
                 raise AetherTypeError("Cannot infer type of empty matrix literal.")
             scope.define_local(
                 statement.name,
-                VariableSymbol(statement.name, declared_type, statement.is_const, statement.visibility),
+                self._declared_variable_symbol(statement, declared_type, scope),
                 forbid_shadowing=True,
                 is_const=statement.is_const,
             )
@@ -1175,7 +1175,7 @@ class TypeChecker:
             self._input_call_type(statement.initializer, scope, declared_type)
             scope.define_local(
                 statement.name,
-                VariableSymbol(statement.name, declared_type, statement.is_const, statement.visibility),
+                self._declared_variable_symbol(statement, declared_type, scope),
                 forbid_shadowing=True,
                 is_const=statement.is_const,
             )
@@ -1200,10 +1200,60 @@ class TypeChecker:
             self._raise_implicit_conversion_error(value_type, target_type, statement)
         scope.define_local(
             statement.name,
-            VariableSymbol(statement.name, target_type, statement.is_const, statement.visibility),
+            self._declared_variable_symbol(statement, target_type, scope),
             forbid_shadowing=True,
             is_const=statement.is_const,
         )
+
+    def _declared_variable_symbol(
+        self,
+        statement: ast.VarDeclaration,
+        type_name: AetherType,
+        scope: Scope[VariableSymbol],
+    ) -> VariableSymbol:
+        return VariableSymbol(
+            statement.name,
+            type_name,
+            statement.is_const,
+            statement.visibility,
+            collection_origin=self._collection_origin_for_initializer(
+                type_name, statement.initializer, scope
+            ),
+        )
+
+    def _collection_origin_for_initializer(
+        self,
+        type_name: AetherType,
+        initializer: ast.Expression,
+        scope: Scope[VariableSymbol],
+    ) -> int | None:
+        if not isinstance(type_name, (ArrayType, ListType)):
+            return None
+        if isinstance(initializer, ast.Identifier):
+            source = scope.lookup(initializer.name)
+            if source is not None and isinstance(source.type_name, (ArrayType, ListType)):
+                return self._ensure_collection_origin(initializer.name, scope)
+        origin = self._next_collection_origin
+        self._next_collection_origin += 1
+        return origin
+
+    def _ensure_collection_origin(
+        self,
+        name: str,
+        scope: Scope[VariableSymbol],
+    ) -> int | None:
+        owner_scope = scope.resolve_scope(name)
+        if owner_scope is None:
+            return None
+        symbol = owner_scope.symbols[name]
+        if not isinstance(symbol.type_name, (ArrayType, ListType)):
+            return None
+        if symbol.collection_origin is not None:
+            return symbol.collection_origin
+        origin = self._next_collection_origin
+        self._next_collection_origin += 1
+        owner_scope.symbols[name] = replace(symbol, collection_origin=origin)
+        return origin
 
     def _assign_variable(self, statement: ast.Assignment, scope: Scope[VariableSymbol]) -> None:
         if isinstance(statement.name, ast.SliceExpression):
@@ -1323,7 +1373,16 @@ class TypeChecker:
                     column=statement.column,
                 )
             if value_type is not UNKNOWN_TYPE:
-                scope.define_local(statement.name, VariableSymbol(statement.name, value_type))
+                scope.define_local(
+                    statement.name,
+                    VariableSymbol(
+                        statement.name,
+                        value_type,
+                        collection_origin=self._collection_origin_for_initializer(
+                            value_type, statement.expression, scope
+                        ),
+                    ),
+                )
             return
         if value_type is not UNKNOWN_TYPE and not self._can_assign(
             value_type,
@@ -1332,6 +1391,15 @@ class TypeChecker:
             scope=scope,
         ):
             self._raise_implicit_conversion_error(value_type, existing.type_name, statement)
+        if existing is not None and isinstance(existing.type_name, (ArrayType, ListType)):
+            owner_scope = scope.resolve_scope(statement.name)
+            if owner_scope is not None:
+                owner_scope.symbols[statement.name] = replace(
+                    existing,
+                    collection_origin=self._collection_origin_for_initializer(
+                        existing.type_name, statement.expression, scope
+                    ),
+                )
 
     def _assign_destructuring(self, statement: ast.DestructuringAssignment, scope: Scope[VariableSymbol]) -> None:
         value_type = self._expression_type(statement.expression, scope)
@@ -1391,12 +1459,22 @@ class TypeChecker:
     def _assign_index(self, statement: ast.IndexAssignment, scope: Scope[VariableSymbol]) -> None:
         assigned_name = _assignment_root_name(statement.array)
         if assigned_name is not None and self._is_active_loop_variable_assignment(assigned_name, scope):
-            raise AetherTypeError(f"Cannot assign to loop variable '{assigned_name}' inside its own for-loop.")
+            raise AetherTypeError(f"Cannot mutate borrowed iteration element '{assigned_name}'.")
         if isinstance(statement.index, (ast.FullSlice, ast.RangeExpression)):
             raise AetherTypeError("Slice assignment is not supported yet.")
-        if assigned_name is not None and scope.is_const(assigned_name) and not self._is_method_receiver_mutation_target(
-            statement.array,
-            scope,
+        if self._is_active_loop_collection_mutation(statement.array, scope):
+            label = self._loop_mutation_label(statement.array)
+            raise AetherTypeError(
+                f"Cannot structurally mutate collection '{label}' while iterating over it.",
+                line=statement.line,
+                column=statement.column,
+                kind="for-in-borrow",
+            )
+        if (
+            assigned_name is not None
+            and scope.is_const(assigned_name)
+            and not self._is_method_receiver_mutation_target(statement.array, scope)
+            and not self._mutation_crosses_class_reference(statement.array, assigned_name, scope)
         ):
             raise AetherTypeError(
                 f"Cannot mutate constant '{assigned_name}'.",
@@ -1471,10 +1549,14 @@ class TypeChecker:
     def _assign_field(self, statement: ast.FieldAssignment, scope: Scope[VariableSymbol]) -> None:
         assigned_name = _assignment_root_name(statement.target)
         if assigned_name is not None and self._is_active_loop_variable_assignment(assigned_name, scope):
-            raise AetherTypeError(f"Cannot assign to loop variable '{assigned_name}' inside its own for-loop.")
-        if assigned_name is not None and scope.is_const(assigned_name) and not self._is_method_receiver_field_target(
-            statement.target,
-            scope,
+            target_type = self._expression_type(statement.target, scope)
+            if not isinstance(target_type, ClassType):
+                raise AetherTypeError(f"Cannot mutate borrowed iteration element '{assigned_name}'.")
+        if (
+            assigned_name is not None
+            and scope.is_const(assigned_name)
+            and not self._is_method_receiver_field_target(statement.target, scope)
+            and not self._mutation_crosses_class_reference(statement.target, assigned_name, scope)
         ):
             raise AetherTypeError(
                 f"Cannot mutate constant '{assigned_name}'.",
@@ -1513,7 +1595,11 @@ class TypeChecker:
         loop_scope: Scope[VariableSymbol] = Scope(parent=scope)
         loop_scope.define_local(
             statement.variable,
-            VariableSymbol(statement.variable, element_type),
+            VariableSymbol(
+                statement.variable,
+                element_type,
+                is_borrowed_iteration=True,
+            ),
             forbid_shadowing=True,
         )
         self.loop_variable_stack.append((statement.variable, loop_scope))
@@ -1528,7 +1614,15 @@ class TypeChecker:
             else None
         )
         if collection_path is not None and collection_scope is not None:
-            self.loop_collection_stack.append((collection_path, collection_scope))
+            self.loop_collection_stack.append(
+                (
+                    collection_path,
+                    collection_scope,
+                    self._ensure_collection_origin(collection_path[0], scope)
+                    if len(collection_path) == 1
+                    else None,
+                )
+            )
         self.loop_depth += 1
         try:
             self._check_statements(statement.body, loop_scope)
@@ -1551,10 +1645,53 @@ class TypeChecker:
         if path is None:
             return False
         target_scope = scope.resolve_scope(path[0])
-        return any(
-            active_path == path and active_scope is target_scope
-            for active_path, active_scope in self.loop_collection_stack
+        target_origin = (
+            self._ensure_collection_origin(path[0], scope)
+            if len(path) == 1
+            else None
         )
+        return any(
+            (active_path == path and active_scope is target_scope)
+            or (
+                target_origin is not None
+                and active_origin is not None
+                and target_origin == active_origin
+            )
+            for active_path, active_scope, active_origin in self.loop_collection_stack
+        )
+
+    @staticmethod
+    def _loop_mutation_label(expression: ast.Expression) -> str:
+        path = _direct_lvalue_path(expression)
+        return ".".join(path) if path is not None else "collection"
+
+    def _mutation_crosses_class_reference(
+        self,
+        expression: ast.Expression,
+        const_root: str,
+        scope: Scope[VariableSymbol],
+    ) -> bool:
+        """Stop const propagation after dereferencing a contained class handle.
+
+        Collection and struct values remain read-only along a const access path;
+        a class reached through that path is a separate referenced object and is
+        therefore not frozen transitively.
+        """
+
+        if isinstance(expression, ast.Identifier) and expression.name == const_root:
+            return False
+        current: ast.Expression | None = expression
+        while current is not None:
+            if not (isinstance(current, ast.Identifier) and current.name == const_root):
+                if isinstance(self._expression_type(current, scope), ClassType):
+                    return True
+            if isinstance(current, ast.IndexExpression):
+                current = current.array
+            elif isinstance(current, ast.FieldAccess):
+                current = current.target
+            else:
+                break
+        return False
 
     def _lookup_before_global(self, name: str, scope: Scope[VariableSymbol]) -> VariableSymbol | None:
         cursor: Scope[VariableSymbol] | None = scope
@@ -2568,7 +2705,22 @@ class TypeChecker:
             )
         if root_name == "this" and self.current_method_struct is not None:
             return
-        if scope.is_const(root_name):
+        root_symbol = scope.lookup(root_name)
+        if (
+            root_symbol is not None
+            and root_symbol.is_borrowed_iteration
+            and not isinstance(self._expression_type(target, scope), ClassType)
+            and not self._mutation_crosses_class_reference(target, root_name, scope)
+        ):
+            raise AetherTypeError(
+                f"Cannot mutate borrowed iteration element '{root_name}'.",
+                line=getattr(target, "line", getattr(location, "line", None)),
+                column=getattr(target, "column", getattr(location, "column", None)),
+                kind="for-in-borrow",
+            )
+        if scope.is_const(root_name) and not self._mutation_crosses_class_reference(
+            target, root_name, scope
+        ):
             raise AetherTypeError(
                 f"Cannot mutate constant '{root_name}'.",
                 line=getattr(target, "line", getattr(location, "line", None)),
@@ -2625,21 +2777,24 @@ class TypeChecker:
         expression: ast.CallExpression,
         scope: Scope[VariableSymbol],
     ) -> None:
-        if builtin_name not in LIST_MUTATING_BUILTINS or not expression.arguments:
+        mutation = builtin_mutation(builtin_name)
+        if mutation is MutationKind.NONE or not expression.arguments:
             return
         target = expression.arguments[0]
         root_name = _assignment_root_name(target)
         if root_name is not None and self._is_active_loop_variable_assignment(root_name, scope):
             raise AetherTypeError(
-                f"Cannot mutate borrowed loop variable '{root_name}' during for-in iteration.",
+                f"Cannot mutate borrowed iteration element '{root_name}'.",
                 line=getattr(target, "line", expression.line),
                 column=getattr(target, "column", expression.column),
-                hint="Assign the element to a normal variable first; that copy follows the element type's value/reference semantics.",
+                hint=(
+                    f"Cannot mutate borrowed loop variable '{root_name}' during for-in iteration. "
+                    "Assign the element to a normal variable first; that copy follows the element type's value/reference semantics."
+                ),
                 kind="for-in-borrow",
             )
         if self._is_active_loop_collection_mutation(target, scope):
-            path = _direct_lvalue_path(target)
-            label = ".".join(path) if path is not None else root_name or "collection"
+            label = self._loop_mutation_label(target)
             raise AetherTypeError(
                 f"Cannot structurally mutate collection '{label}' while iterating over it.",
                 line=getattr(target, "line", expression.line),
@@ -2647,9 +2802,11 @@ class TypeChecker:
                 hint="Finish the for-in loop before push/pop/insert/removeAt/clear/reverse/sort, or iterate over an explicit copy.",
                 kind="for-in-borrow",
             )
-        if root_name is not None and scope.is_const(root_name) and not self._is_method_receiver_mutation_target(
-            target,
-            scope,
+        if (
+            root_name is not None
+            and scope.is_const(root_name)
+            and not self._is_method_receiver_mutation_target(target, scope)
+            and not self._mutation_crosses_class_reference(target, root_name, scope)
         ):
             raise AetherTypeError(
                 f"Cannot mutate constant '{root_name}'.",

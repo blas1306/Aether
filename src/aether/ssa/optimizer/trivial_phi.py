@@ -512,7 +512,13 @@ class TrivialPhiEliminator:
             if not array_rewritten and not index_rewritten:
                 return instruction, 0
             return (
-                SSAArrayGet(instruction.result, array, index),
+                SSAArrayGet(
+                    instruction.result,
+                    array,
+                    index,
+                    instruction.borrowed,
+                    instruction.borrow_scope,
+                ),
                 int(array_rewritten) + int(index_rewritten),
             )
 
@@ -544,7 +550,13 @@ class TrivialPhiEliminator:
             if not list_rewritten and not index_rewritten:
                 return instruction, 0
             return (
-                SSAListGet(instruction.result, list_value, index),
+                SSAListGet(
+                    instruction.result,
+                    list_value,
+                    index,
+                    instruction.borrowed,
+                    instruction.borrow_scope,
+                ),
                 int(list_rewritten) + int(index_rewritten),
             )
 

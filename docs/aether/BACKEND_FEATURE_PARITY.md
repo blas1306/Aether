@@ -96,7 +96,7 @@ decisión aún no cambia representación ni estados de esta matriz.
 | `complex` / literal `im` | C | C | C | C | C nominal | N desde fuente | P nominal | N | P nominal | P nominal | N | N | AST Python | AST | C v0 | Solo AST | Ya existe como primitivo experimental, en tensión con el diseño futuro de stdlib. |
 | `null` y `T?` | C | C | C | C | P nominal | N | P nominal | N | N | N | N | N | AST | frontend | C v0 | Solo AST | Sin narrowing ni backend. |
 | Variables locales tipadas mutables | C | C | C | C | C | C | C | C | C | C | C | C | — | E2E | C | Completo | Requieren inicializador. |
-| `const` local | C | C | C | C | sin opcode propio | C, se borra tras TC | C | C | C | C | C | C | — | frontend+backend | C | Completo | La garantía es estática; no necesita representación runtime distinta. |
+| `const` local | C | C | C binding+paths | C | metadata AST para borrow | C, restricciones resueltas antes de IR | C | C | C | C | C | C | — | frontend+backend | C | Completo | Array/List propagan read-only por value/nested paths, se detienen en class y no congelan aliases mutables. |
 | Inferencia `x = expr` | C | C | C | C | N para global implícito | N | N | N | N | N | N | N | AST | frontend | C | Solo AST | El compilador exige locales que ya estén declarados. |
 | Alias de tipo | C | C | C | C | se resuelve | P: top-level alias aceptado solo como metadata | C | C | C | C | C | C para usos soportados, incluidos aliases importados | — | AST+struct backend | C | Parcial | El alias conserva identidad semántica separada del nombre interno. |
 | Operadores `+ - * /` escalares | C | C | C | C | C | C int/double | C | C | C | C | C checked | C int/double | C | E2E+safety | P | Parcial | `float`, `complex`, string y agregados amplían la superficie AST. |
@@ -124,7 +124,7 @@ decisión aún no cambia representación ni estados de esta matriz.
 | `if` / `else` | C | C | C boolean | C | CFG | C | C | C | C/phi | C | C | C | — | E2E | C | Completo | Incluye ramas con retorno. |
 | `while` | C | C | C boolean | C | CFG | C | C | C | C loop phi | C | C | C | — | E2E | C | Completo | Control anidado cubierto. |
 | `for` sobre rango | C | C | C | C | CFG | C pasos +/-/dinámicos | C | C | C | C | C | C | — | E2E | C | Completo | Rango es inclusivo según spec actual. |
-| `for-in` sobre colección | C | C | C | C amplio | CFG/get/length | P Array/List/Vector | C subset | C subset | C subset | C subset | P | C subset | bounds helpers | E2E subset | P | Parcial | Matrix y otras colecciones no comparten iterable general. |
+| `for-in` sobre colección | C | C | C borrow read-only | C amplio, borrow no-owning | CFG/`borrow_element`/length | C Array/List; Vector previo | C scope/mutación/escape | C subset | C metadata borrow | C scope/phi/mutación | C preserva borrow | C load sin retain | bounds helpers | E2E Array/List/struct/nesting | C | Parcial | Array/List tienen semántica borrowed completa; Matrix y otras colecciones no comparten iterable general. |
 | `break` / `continue` | C | C | C solo loop | C | jumps | C | C | C | C | C | C | C | — | E2E nested | C | Completo | Se bajan a targets del loop activo. |
 | Entry point y top-level script | C | C | C | C | función `main` | C tras normalización | C | C | C | C | C | C | exit code | E2E | C | Completo en raíz | Solo `main` del módulo raíz conserva ABI; un `main` importado se manglea. Statements top-level importados aún requieren inicialización. |
 | Tuples y destructuring | C | C | C | C | N | N | N | N | N | N | N | N | AST | AST | C | Solo AST | Incluye retornos múltiples en AST. |

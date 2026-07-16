@@ -2867,7 +2867,10 @@ class LLVMPrinter:
             check_bounds=True,
         )
         lines = element_ptr.lines + [f"{result} = load {element_type}, ptr {element_ptr.value}"]
-        if self._layouts.layout(instruction.result.type).needs_retain:
+        if (
+            not instruction.borrowed
+            and self._layouts.layout(instruction.result.type).needs_retain
+        ):
             self._emit_arc_value(lines, result, instruction.result.type, retain=True)
         return lines
 
@@ -2923,7 +2926,10 @@ class LLVMPrinter:
             instruction.result.type,
         )
         lines = element_ptr.lines + [f"{result} = load {element_type}, ptr {element_ptr.value}"]
-        if self._layouts.layout(instruction.result.type).needs_retain:
+        if (
+            not instruction.borrowed
+            and self._layouts.layout(instruction.result.type).needs_retain
+        ):
             self._emit_arc_value(lines, result, instruction.result.type, retain=True)
         return lines
 

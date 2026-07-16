@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any
 
 from ..errors import AetherRuntimeError
@@ -12,6 +13,14 @@ BuiltinFunction = Callable[[list[AetherValue]], AetherValue]
 OutputWriter = Callable[[str], None]
 BuiltinTypeChecker = Callable[[list[AetherType | None]], AetherType | None]
 ArityValidator = Callable[[int], None]
+
+
+class MutationKind(str, Enum):
+    """Semantic mutation effect attached to a typed builtin symbol."""
+
+    NONE = "none"
+    ELEMENT = "element"
+    STRUCTURAL = "structural"
 
 
 @dataclass(frozen=True)
@@ -29,6 +38,7 @@ class BuiltinDefinition:
     make_runtime: RuntimeFactory
     infer_type: BuiltinTypeChecker
     validate_arity: ArityValidator | None = None
+    mutation: MutationKind = MutationKind.NONE
 
 
 @dataclass(frozen=True)
@@ -156,6 +166,11 @@ def validate_builtin_arity(name: str, arg_count: int) -> None:
         raise AetherRuntimeError(f"Undefined builtin '{name}'.")
     if definition.validate_arity is not None:
         definition.validate_arity(arg_count)
+
+
+def builtin_mutation(name: str) -> MutationKind:
+    definition = _definitions().get(name)
+    return MutationKind.NONE if definition is None else definition.mutation
 
 
 def _definitions() -> dict[str, BuiltinDefinition]:

@@ -11,6 +11,8 @@ class VariableSymbol:
     type_name: AetherType | None
     is_const: bool = False
     visibility: str | None = None
+    is_borrowed_iteration: bool = False
+    collection_origin: int | None = None
 
 
 @dataclass(frozen=True)

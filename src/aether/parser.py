@@ -1003,11 +1003,15 @@ class Parser:
             raise self._error(token, f"Expresion de interpolacion invalida {source!r}: {exc}") from exc
 
     def _is_field_assignment_lvalue(self, expression: ast.FieldAccess) -> bool:
-        target = expression.target
+        return self._is_rooted_lvalue(expression.target)
+
+    def _is_rooted_lvalue(self, target: ast.Expression) -> bool:
         if isinstance(target, ast.Identifier):
             return True
         if isinstance(target, ast.FieldAccess):
-            return self._is_field_assignment_lvalue(target)
+            return self._is_rooted_lvalue(target.target)
+        if isinstance(target, ast.IndexExpression):
+            return self._is_rooted_lvalue(target.array)
         return False
 
     def _match(self, *token_types: TokenType) -> bool:

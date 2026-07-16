@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from .pipeline import TypedProgram
 
 
-CAPABILITY_PROFILE_VERSION = "11"
+CAPABILITY_PROFILE_VERSION = "12"
 
 
 class BackendIdentity(str, Enum):
@@ -84,6 +84,8 @@ class Capability(str, Enum):
     ARRAY = "array"
     ARRAY_SLICING = "array-slicing"
     LIST = "list"
+    CONST_COLLECTION_REFERENCES = "const-collection-references"
+    BORROWED_FOR_IN_ELEMENTS = "borrowed-for-in-elements"
     COLLECTION_OBJECT_LIFECYCLE = "collection-object-lifecycle"
     AGGREGATE_COLLECTION_ELEMENTS = "aggregate-collection-elements"
     VECTOR = "vector"
@@ -190,6 +192,14 @@ CAPABILITY_CATALOG: Mapping[Capability, CapabilityDefinition] = MappingProxyType
             _definition(Capability.ARRAY_SLICING, "Array and collection slicing."),
             _definition(Capability.LIST, "List values and operations."),
             _definition(
+                Capability.CONST_COLLECTION_REFERENCES,
+                "Read-only Array/List access paths rooted at a const reference.",
+            ),
+            _definition(
+                Capability.BORROWED_FOR_IN_ELEMENTS,
+                "Read-only non-owning Array/List element bindings in for-in.",
+            ),
+            _definition(
                 Capability.COLLECTION_OBJECT_LIFECYCLE,
                 "Strong RC ownership and final destruction for Array/List objects.",
             ),
@@ -270,6 +280,8 @@ _NATIVE_COMPLETE = {
     Capability.STRING_EQUALITY,
     Capability.DYNAMIC_STRING_OBJECT,
     Capability.COLLECTION_OBJECT_LIFECYCLE,
+    Capability.CONST_COLLECTION_REFERENCES,
+    Capability.BORROWED_FOR_IN_ELEMENTS,
 }
 _NATIVE_UNSUPPORTED = {
     Capability.INPUT,
@@ -333,6 +345,8 @@ E2E_TESTED_CAPABILITIES: Mapping[BackendIdentity, frozenset[Capability]] = Mappi
                 Capability.STRING_EQUALITY,
                 Capability.DYNAMIC_STRING_OBJECT,
                 Capability.COLLECTION_OBJECT_LIFECYCLE,
+                Capability.CONST_COLLECTION_REFERENCES,
+                Capability.BORROWED_FOR_IN_ELEMENTS,
                 Capability.STRING_CONCATENATION,
                 Capability.PRINT,
                 Capability.INPUT,
@@ -371,6 +385,8 @@ E2E_TESTED_CAPABILITIES: Mapping[BackendIdentity, frozenset[Capability]] = Mappi
                 Capability.STRING_EQUALITY,
                 Capability.DYNAMIC_STRING_OBJECT,
                 Capability.COLLECTION_OBJECT_LIFECYCLE,
+                Capability.CONST_COLLECTION_REFERENCES,
+                Capability.BORROWED_FOR_IN_ELEMENTS,
             }
         ),
     }
@@ -549,6 +565,13 @@ class _CapabilityDetector:
                 requires_complete_support=node.type_name is None,
             )
             self._record_type(node.type_name, node)
+            declared_type = self._resolve_alias(node.type_name) if node.type_name is not None else None
+            initializer_type = self.checker.type_of_expression(node.initializer)
+            if node.is_const and isinstance(
+                declared_type or self._resolve_alias(initializer_type),
+                (ArrayType, ListType),
+            ):
+                self._record(Capability.CONST_COLLECTION_REFERENCES, node)
             return
         if isinstance(node, ast.Parameter):
             self._record_type(node.type_name, node)
@@ -592,6 +615,9 @@ class _CapabilityDetector:
         if isinstance(node, ast.ForInStatement):
             capability = Capability.FOR if isinstance(node.iterable, ast.RangeExpression) else Capability.FOR_IN
             self._record(capability, node)
+            iterable_type = self.checker.type_of_expression(node.iterable)
+            if isinstance(self._resolve_alias(iterable_type), (ArrayType, ListType)):
+                self._record(Capability.BORROWED_FOR_IN_ELEMENTS, node)
             return
         if isinstance(node, ast.BreakStatement):
             self._record(Capability.BREAK, node)

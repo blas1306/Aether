@@ -256,6 +256,8 @@ class LifecycleExpander:
                     if self.registry.traits(instruction.result.type).needs_destroy:
                         self._owned_values.add(instruction.result)
                 elif isinstance(instruction, (IRArrayGet, IRListGet, IRListPop, IRListRemoveAt)):
+                    if isinstance(instruction, (IRArrayGet, IRListGet)) and instruction.borrowed:
+                        continue
                     if self.registry.traits(instruction.result.type).needs_destroy:
                         self._owned_values.add(instruction.result)
                 elif isinstance(
@@ -555,4 +557,17 @@ class LifecycleExpander:
 
 
 def expand_lifecycle(module: IRModule) -> IRModule:
+    # Compiler pipelines may receive an already-expanded module (for example
+    # IR optimization followed by SSA construction).  Internal ARC calls are
+    # emitted only by this pass; seeing one makes expansion idempotent and
+    # avoids treating already-transferred collection temporaries as owners a
+    # second time.
+    if any(
+        isinstance(instruction, IRCall)
+        and instruction.builtin in {"__aether_retain", "__aether_release"}
+        for function in module.functions
+        for block in function.blocks
+        for instruction in block.instructions
+    ):
+        return module
     return LifecycleExpander(module).expand()

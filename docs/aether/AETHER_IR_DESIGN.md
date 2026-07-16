@@ -100,6 +100,18 @@ ABI expansion means load/store, semantic default construction, or no-op.
 Consequently no string retain/release runtime, string ABI change, or extra
 primitive LLVM code is introduced by this phase.
 
+### Borrowed collection elements (implemented)
+
+Array/List `for-in` lowering uses indexed access tagged `borrowed` and printed
+as `borrow_element`; it does not allocate an owning loop slot. The instruction
+retains element type, source collection, iteration block and source metadata.
+`IRCopyInit` is the explicit borrow-to-owned boundary. Lifecycle expansion does
+not destroy or retain the borrow itself. SSA preserves the flag (including
+through rewrites), and LLVM performs a checked slot load without the normal
+element retain. Verifiers reject a mismatched scope, mutation through a borrow,
+direct IR return without copying, and a borrowed SSA phi. This intentionally
+models only compiler-produced `for-in` borrows, not a general borrow checker.
+
 ### Multi-module lowering (implemented)
 
 Semantic analysis now exposes a `CheckedProgram` containing the root module,

@@ -36,7 +36,7 @@ arquitectura, no capacidades solicitadas directamente por un programa.
 
 ## Perfiles actuales
 
-La versión actual del perfil es `9`. La versión `2` promovió `modules` e
+La versión actual del perfil es `12`. La versión `2` promovió `modules` e
 `imports` de `UNSUPPORTED` a `PARTIAL`; la versión `3` promovió `scalar-math`
 de `UNSUPPORTED` a `PARTIAL` en LLVM/native; la versión `4` incorpora el
 subconjunto de callables top-level tipados y sin captura en ambos backends. La
@@ -158,6 +158,16 @@ semiabiertos. El resultado owned tiene objeto y buffer propios; List normaliza
 allocation, lectura y posible panic, por lo que los optimizers los preservan.
 Se elimina el diagnóstico transitorio de List slicing native. No se habilitan
 steps, views, rangos abiertos ni índices negativos.
+
+## Actualización de perfil 12: const de colecciones y for-in borrowed
+
+Se agregan `const-collection-references` y `borrowed-for-in-elements`, completas
+en AST y native con evidencia E2E. La primera cubre Array/List, mutadores
+tipados, value paths, nesting y la frontera de referencias class. La segunda
+cubre borrow no-owning, conversión `copy_init` a ownership, Array/List,
+verificadores, optimizers y LLVM sin retain automático. La detección de
+mutación del iterable alcanza receiver directo y aliases locales simples; no
+promete alias analysis general ni iteración mutable.
 
 La CLI no añade por ahora un comando `capabilities`: ejecución AST valida el
 perfil AST, y `--emit-llvm`, ejecución LLVM, `build` y los perfiles LLVM/native

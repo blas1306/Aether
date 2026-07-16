@@ -213,8 +213,74 @@ class IRVerifier:
         value_types = self._collect_value_types(function)
         slot_types = self._collect_slot_types(function)
 
+        self._verify_borrowed_elements(function)
         self._verify_reachable_values(function, blocks, value_types, slot_types)
         self._verify_all_non_void_paths_return(function, blocks)
+
+    def _verify_borrowed_elements(self, function: IRFunction) -> None:
+        borrowed: dict[str, str] = {}
+        for block in function.blocks:
+            for instruction in block.instructions:
+                if not isinstance(instruction, (IRArrayGet, IRListGet)):
+                    continue
+                if instruction.borrowed:
+                    if not instruction.borrow_scope:
+                        self._fail("borrow_element requires an iteration scope")
+                    if instruction.borrow_scope != block.name:
+                        self._fail(
+                            f"borrow_element '{self._value(instruction.result)}' is defined "
+                            f"outside its declared scope '{instruction.borrow_scope}'"
+                        )
+                    borrowed[instruction.result.name] = instruction.borrow_scope
+                elif instruction.borrow_scope is not None:
+                    self._fail("owned collection get cannot declare a borrow scope")
+
+        if not borrowed:
+            return
+        receiver_fields = {
+            IRArraySet: "array",
+            IRListSet: "list_value",
+            IRListPush: "list_value",
+            IRListInsert: "list_value",
+            IRListRemoveAt: "list_value",
+            IRListPop: "list_value",
+            IRListClear: "list_value",
+            IRListReverse: "list_value",
+            IRSequenceSort: "sequence",
+            IRStructSet: "struct",
+        }
+        for block in function.blocks:
+            acquired: set[str] = set()
+            for instruction in block.instructions:
+                if (
+                    isinstance(instruction, IRCall)
+                    and instruction.builtin == "__aether_retain"
+                ):
+                    acquired.update(
+                        argument.name
+                        for argument in instruction.arguments
+                        if argument.name in borrowed
+                    )
+                if (
+                    isinstance(instruction, IRStore)
+                    and instruction.value.name in borrowed
+                    and self._lifecycle_traits(instruction.value.type).needs_destroy
+                    and instruction.value.name not in acquired
+                ):
+                    self._fail(
+                        "Borrowed iteration value cannot be stored as owned without copying"
+                    )
+                if isinstance(instruction, IRReturn):
+                    if instruction.value is not None and instruction.value.name in borrowed:
+                        self._fail(
+                            "Borrowed iteration value cannot escape its iteration scope without copying"
+                        )
+                for instruction_type, field_name in receiver_fields.items():
+                    if isinstance(instruction, instruction_type):
+                        receiver = getattr(instruction, field_name)
+                        if receiver.name in borrowed:
+                            self._fail("Cannot mutate through borrowed iteration element")
+                        break
 
     def _verify_parameters(self, function: IRFunction) -> None:
         seen: set[str] = set()

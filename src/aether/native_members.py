@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from .stdlib.registry import MutationKind
 
 from .types import AetherType, ArrayType, ListType, MatrixType, TransposeVectorType, VectorType
 
@@ -10,6 +11,7 @@ class NativeMember:
     name: str
     builtin_name: str
     kind: str
+    mutation: MutationKind = MutationKind.NONE
 
 
 @dataclass(frozen=True)
@@ -24,17 +26,17 @@ LIST_NATIVE_MEMBERS = NativeMemberSet(
         "is_empty": NativeMember("is_empty", "is_empty", "property"),
     },
     methods={
-        "push": NativeMember("push", "push", "method"),
-        "pop": NativeMember("pop", "pop", "method"),
-        "insert": NativeMember("insert", "insert", "method"),
-        "removeAt": NativeMember("removeAt", "remove_at", "method"),
+        "push": NativeMember("push", "push", "method", MutationKind.STRUCTURAL),
+        "pop": NativeMember("pop", "pop", "method", MutationKind.STRUCTURAL),
+        "insert": NativeMember("insert", "insert", "method", MutationKind.STRUCTURAL),
+        "removeAt": NativeMember("removeAt", "remove_at", "method", MutationKind.STRUCTURAL),
         "contains": NativeMember("contains", "contains", "method"),
         "indexOf": NativeMember("indexOf", "index_of", "method"),
-        "clear": NativeMember("clear", "clear", "method"),
+        "clear": NativeMember("clear", "clear", "method", MutationKind.STRUCTURAL),
         "size": NativeMember("size", "length", "method"),
         "copy": NativeMember("copy", "copy", "method"),
-        "reverse": NativeMember("reverse", "reverse", "method"),
-        "sort": NativeMember("sort", "sort", "method"),
+        "reverse": NativeMember("reverse", "reverse", "method", MutationKind.ELEMENT),
+        "sort": NativeMember("sort", "sort", "method", MutationKind.ELEMENT),
     },
 )
 
@@ -44,7 +46,7 @@ ARRAY_NATIVE_MEMBERS = NativeMemberSet(
     },
     methods={
         "copy": NativeMember("copy", "copy", "method"),
-        "sort": NativeMember("sort", "sort", "method"),
+        "sort": NativeMember("sort", "sort", "method", MutationKind.ELEMENT),
     },
 )
 

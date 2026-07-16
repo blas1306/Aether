@@ -280,6 +280,15 @@ adquirir primero todas las referencias que podrían perderse antes del commit.
 - Destrucción hace `clear` y luego libera el buffer. Capacity nunca determina
   cuántos elementos están vivos.
 
+### Borrow de elemento en `for-in`
+
+Array/List bajan el elemento actual como valor `borrowed` ligado al bloque de
+la vuelta. El borrow no ejecuta `copy_init`, retain ni destroy. Lectura, print y
+calls read-only consumen ese valor directamente. Declararlo en un local normal,
+guardarlo en storage owning o retornarlo pasa por `copy_init`; para handles eso
+retiene y para structs copia recursivamente sus fields. No se permite move,
+destroy, mutación ni phi de un borrow no adquirido.
+
 Para tipos no triviales, `memcpy` no es copy. `memmove` solo es relocation si
 la fuente deja de estar viva. Insert/remove con solapamiento debe elegir el
 orden correcto; ninguna operación destruye dos veces ni destruye un elemento

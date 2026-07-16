@@ -483,6 +483,9 @@ class IRArrayGet(MemoryReadMayTrapMixin, IRInstruction):
     result: IRValue
     array: IRValue
     index: IRValue
+    borrowed: bool = False
+    borrow_scope: str | None = None
+    source_location: IRSourceLocation | None = None
 
     element_lifecycle = "copy_init"
 
@@ -513,6 +516,9 @@ class IRListGet(MemoryReadMayTrapMixin, IRInstruction):
     result: IRValue
     list_value: IRValue
     index: IRValue
+    borrowed: bool = False
+    borrow_scope: str | None = None
+    source_location: IRSourceLocation | None = None
 
     element_lifecycle = "copy_init"
 
