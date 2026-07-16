@@ -63,7 +63,7 @@ La fuente de detalle por etapa es
 | Manejo básico de errores | Parcial | Panics de seguridad y `throw`/`try`/`catch` deben tener una semántica delimitada y coherente. Excepciones avanzadas no son requisito. |
 | Salida | Parcial | `print`/`println` deben cubrir valores v1 con formato documentado y consistente. |
 | Entrada | Solo AST | `input` tipado debe funcionar en ejecución nativa o quedar reemplazado por una API v1 equivalente explícita. |
-| Archivos | No implementado | Proveer una API mínima y testeada para abrir/cerrar, leer y escribir texto/binario, con errores definidos. |
+| Archivos de texto UTF-8 | Estable AST; parcial native por plataforma | `io.readText`/`writeText`/`appendText`, status nominales, NUL y newlines exactos. Native está habilitado en Linux/POSIX; Windows requiere paths UTF-16. No incluye binarios, streams ni directorios. |
 | Argumentos del proceso | Estable AST/native en POSIX | `System.args()` devuelve un snapshot owned `Array<string>`; `main` sigue sin parámetros y `run file -- ...` reenvía sin reinterpretar quoting. Falta validar el camino UTF-16 de Windows. |
 | Matemática escalar | Parcial, mayormente AST | Seleccionar y llevar a native al menos `sin`, `cos`, `tan`, `sqrt`, `exp`, `log`/`ln`, `abs`, `floor`, `ceil` y constantes acordadas. |
 | Módulos matemáticos | Parcial, AST | Formalizar `math` y un núcleo de `math.linalg`; `math.numerics` puede comenzar como código Aether. No todo el catálogo actual es requisito v1. |
@@ -130,9 +130,10 @@ mantener ejemplos automatizados que combinen, no solo aíslen:
 7. resultados equivalentes en AST y native dentro del perfil declarado.
 
 El ejemplo de métodos numéricos satisface 1, 5, 6 y 7 para su perfil. El expense
-tracker satisface 1, 3 y 5 en AST, y revela que archivos, argumentos, strings
-dinámicos y colecciones de structs aún impiden cubrir 4, 6 y 7 para un programa
-generalista completo.
+tracker satisface 1, 3, 4, 5, 6 y 7 dentro del perfil Linux/POSIX: usa
+argumentos, strings dinámicos, colecciones de structs y verifica un resumen de
+texto persistido. La abstracción por referencia/dispatch del punto 2 y la
+portabilidad Windows continúan abiertas.
 
 ## Criterios de estabilidad
 

@@ -45,6 +45,8 @@ imprime `25`.
 - entry point explícito `int main()` o script normalizado a `main`;
 - argumentos de proceso mediante snapshots owned `System.args()` y forwarding
   del CLI después de `--`;
+- archivos de texto UTF-8 con `io.readText`, `io.writeText` e `io.appendText`,
+  resultados nominales y bytes length-aware;
 - structs por valor, constructores, métodos, `this`, copia, igualdad e
   impresión para el subconjunto de campos soportado por backend;
 - núcleo compilado de Array/List con bounds, overflow y allocation checks;
@@ -86,7 +88,7 @@ compilación nativa completa.
 ### Planeado
 
 - globals/inicialización de módulos y tipos de referencia en native;
-- input native, archivos y environment variables;
+- input native, archivos binarios/streams/directorios y environment variables;
 - módulo `testing` y una stdlib Aether distribuible;
 - frontera futura de interoperabilidad por ABI C.
 
@@ -133,6 +135,12 @@ aether run program.ae -- add "Dinner with friends"
 El programa consulta `System.args()` tras `import System;`. El array no incluye
 el ejecutable, `run`, el archivo ni `--`. Sin separador se entregan cero
 argumentos.
+
+La API mínima de archivos requiere `import io;`. Es exclusivamente de texto
+UTF-8: `FileReadResult loaded = io.readText(path)` y
+`FileStatus status = io.writeText(path, content)`/`io.appendText(...)`. No
+normaliza newlines ni agrega terminadores; native está disponible por ahora en
+Linux/POSIX.
 
 Ejecutar la superficie más amplia con el intérprete AST:
 

@@ -181,6 +181,19 @@ class IRCall(IRInstruction):
 
     @property
     def effects(self):
+        if self.builtin == "io.readText":
+            return InstructionEffects(
+                has_side_effects=True,
+                may_trap=True,
+                reads_memory=True,
+                allocates=True,
+            )
+        if self.builtin in {"io.writeText", "io.appendText"}:
+            return InstructionEffects(
+                has_side_effects=True,
+                reads_memory=True,
+                writes_memory=True,
+            )
         if self.builtin == "System.args":
             return READING_ALLOCATION
         if self.builtin == "__aether_string_byte_length":

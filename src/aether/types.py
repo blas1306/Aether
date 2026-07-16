@@ -10,7 +10,7 @@ from .string_value import StringValue, as_string_value
 
 TYPE_NAMES = {
     "int", "float", "double", "complex", "string", "boolean", "Exception",
-    "ParseStatus", "IntParseResult", "DoubleParseResult",
+    "ParseStatus", "IntParseResult", "DoubleParseResult", "FileStatus", "FileReadResult",
 }
 REAL_NUMERIC_TYPES = {"int", "float", "double"}
 NUMERIC_TYPES = REAL_NUMERIC_TYPES | {"complex"}

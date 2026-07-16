@@ -40,6 +40,11 @@ a `--` son E2E en AST/IR/SSA/LLVM/native POSIX. El wrapper nativo valida todo
 `argv` como UTF-8 antes del `main()` Aether interno; cada call produce un
 `Array<string>` owned e independiente. Windows/UTF-16 queda pendiente.
 
+Actualización perfil 18 (16-07-2026): `io.readText`, `io.writeText` e
+`io.appendText` son E2E en AST y native Linux/POSIX. Preservan NUL/newlines,
+validan UTF-8 al leer, normalizan errores y sobreviven O0/O1/O2. Windows y
+otras fronteras POSIX native permanecen diagnosticadas explícitamente.
+
 Última revisión: 15 de julio de 2026, incluyendo enums native y los ejemplos
 dogfood de métodos numéricos y expense tracker. Este documento reemplaza como
 referencia canónica a la auditoría histórica de `docs/compiler/`.
@@ -169,7 +174,7 @@ representación y lifecycle ya están activos en esta matriz.
 | Print Struct/Vector/Matrix | llamada | C | C | C | C subset | C subset | C | C | C | C | C | C subset | helpers | E2E | P | Parcial | Shape/tipos de campos limitan el subconjunto struct. |
 | `input` tipado | C nodo dedicado | C | C por contexto | C | N | N | N | N | N | N | N | N | AST stdin | AST | C | Solo AST | No existe input native. |
 | Argumentos del proceso (`System.args`) | — | C call | C `Array<string>`/arity | C inyectable | C builtin tipado | C | C | C | C | C | C efectos alloc/read/panic | C POSIX | contexto + wrapper `argc/argv` | E2E | C | Completo POSIX | `main` sigue sin parámetros; snapshot nuevo O(argc), UTF-8 estricto y Windows UTF-16 pendiente. |
-| Archivos (API del lenguaje) | N | N | N | N | N | N | N | N | N | N | N | N | N | N | N | No implementado | La lectura de módulos fuente no es file IO para programas Aether. |
+| Archivos texto (`io.readText`/`writeText`/`appendText`) | — | C calls | C firmas/resultados nominales | C binario explícito | C builtin+loc | C | C firma/layout | C bytes | C | C | C efectos IO/alloc | C Linux | helpers incremental/exact-write | E2E+O0/O1/O2 | C | Completo AST, parcial native | Sólo UTF-8; NUL contenido sí, NUL/path vacío no; sin streams/binarios/directorios. |
 
 ## Módulos y tipos definidos por usuario
 
@@ -242,8 +247,8 @@ representación y lifecycle ya están activos en esta matriz.
    un diseño posterior y no bloquean ese caso.
 6. **Errores básicos compilados:** decidir y completar `throw`/`try-catch` o un
    perfil alternativo explícito.
-7. **IO de entrada, archivos y argumentos de proceso:** faltan capacidades
-   generales mínimas.
+7. **IO restante:** argumentos y archivos de texto ya cubren el mínimo
+   Linux/POSIX; faltan input native, Windows/UTF-16, binarios y streams.
 8. **Paridad del perfil:** cerrar `%` double, casts, formato y combinaciones de
    agregados antes de llamar estable al subconjunto.
 

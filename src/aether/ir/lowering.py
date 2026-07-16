@@ -18,6 +18,15 @@ from ..string_parsing import (
 )
 from ..string_value import STRING_TRIM_BUILTIN
 from ..process_arguments import PROCESS_ARGS_BUILTIN
+from ..text_file_io import (
+    APPEND_TEXT_BUILTIN,
+    FILE_READ_RESULT_TYPE,
+    FILE_STATUS_TYPE,
+    FILE_STATUS_VARIANTS,
+    READ_TEXT_BUILTIN,
+    TEXT_FILE_BUILTINS,
+    WRITE_TEXT_BUILTIN,
+)
 from ..types import (
     AetherType,
     ArrayType as AetherArrayType,
@@ -286,8 +295,11 @@ class IRLowerer:
             if isinstance(statement, ast.AliasDeclaration)
         }
         uses_parsing = _program_uses_parsing(program)
+        uses_file_io = _program_uses_file_io(program)
         declarations = (
             _builtin_parse_struct_declarations() if uses_parsing else []
+        ) + (
+            [_builtin_file_read_struct_declaration()] if uses_file_io else []
         ) + [
             statement
             for statement in program.statements
@@ -295,6 +307,8 @@ class IRLowerer:
         ]
         enum_declarations = (
             [_builtin_parse_enum_declaration()] if uses_parsing else []
+        ) + (
+            [_builtin_file_status_enum_declaration()] if uses_file_io else []
         ) + [
             statement
             for statement in program.statements
@@ -1858,6 +1872,8 @@ class IRLowerer:
             return result if result_required else None
         if builtin in PARSE_BUILTINS:
             return self._lower_parse_call(call, builtin, context)
+        if builtin in TEXT_FILE_BUILTINS:
+            return self._lower_text_file_call(call, builtin, context)
         if builtin in NATIVE_SCALAR_MATH_FUNCTIONS:
             return self._lower_scalar_math_call(
                 call,
@@ -2205,6 +2221,38 @@ class IRLowerer:
             INT_PARSE_RESULT_TYPE
             if builtin != PARSE_DOUBLE_BUILTIN
             else DOUBLE_PARSE_RESULT_TYPE
+        )
+        result = context.temporary(result_type)
+        context.block.instructions.append(
+            IRCall(
+                builtin,
+                arguments,
+                result,
+                builtin,
+                self._source_location(call),
+            )
+        )
+        return result
+
+    def _lower_text_file_call(
+        self,
+        call: ast.CallExpression,
+        builtin: str,
+        context: _FunctionContext,
+    ) -> IRValue:
+        arguments = tuple(self._lower_expression(argument, context) for argument in call.arguments)
+        expected_arity = 1 if builtin == READ_TEXT_BUILTIN else 2
+        if len(arguments) != expected_arity or any(
+            not isinstance(argument.type, StringType) for argument in arguments
+        ):
+            self._fail(
+                f"IR builtin '{builtin}' requires {expected_arity} string argument(s).",
+                call,
+            )
+        result_type: IRType = (
+            StructType(FILE_READ_RESULT_TYPE)
+            if builtin == READ_TEXT_BUILTIN
+            else self._enums[FILE_STATUS_TYPE].type
         )
         result = context.temporary(result_type)
         context.block.instructions.append(
@@ -3166,6 +3214,24 @@ def _builtin_parse_struct_declarations() -> list[ast.StructDeclaration]:
     ]
 
 
+def _builtin_file_status_enum_declaration() -> ast.EnumDeclaration:
+    return ast.EnumDeclaration(
+        FILE_STATUS_TYPE,
+        [ast.EnumVariant(name) for name in FILE_STATUS_VARIANTS],
+        display_name=FILE_STATUS_TYPE,
+    )
+
+
+def _builtin_file_read_struct_declaration() -> ast.StructDeclaration:
+    return ast.StructDeclaration(
+        FILE_READ_RESULT_TYPE,
+        [
+            ast.StructField("content", "string"),
+            ast.StructField("status", AetherEnumType(FILE_STATUS_TYPE)),
+        ],
+    )
+
+
 def _program_uses_parsing(program: ast.Program) -> bool:
     parse_names = {
         *PARSE_BUILTINS,
@@ -3208,6 +3274,37 @@ def _program_uses_parsing(program: ast.Program) -> bool:
             if visit(field_value):
                 return True
         return False
+
+    return visit(program)
+
+
+def _program_uses_file_io(program: ast.Program) -> bool:
+    file_names = {
+        *TEXT_FILE_BUILTINS,
+        FILE_STATUS_TYPE,
+        FILE_READ_RESULT_TYPE,
+    }
+
+    def visit(value: object) -> bool:
+        if isinstance(value, str):
+            return value in file_names
+        if isinstance(value, AetherEnumType):
+            return value.name == FILE_STATUS_TYPE
+        if isinstance(value, dict):
+            return any(visit(item) for item in value.values())
+        if isinstance(value, (list, tuple)):
+            return any(visit(item) for item in value)
+        if isinstance(value, (int, float, bool, bytes)) or value is None:
+            return False
+        if isinstance(value, ast.CallExpression):
+            canonical = value.callee
+            if canonical in TEXT_FILE_BUILTINS or canonical.rsplit(".", 1)[-1] in {
+                "readText", "writeText", "appendText"
+            }:
+                return True
+        if not is_dataclass(value):
+            return False
+        return any(visit(getattr(value, item.name)) for item in dataclass_fields(value))
 
     return visit(program)
 

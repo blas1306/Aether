@@ -94,7 +94,15 @@ from .scalar_math_runtime import LLVMScalarMathRuntime
 from .vector_runtime import LLVMVectorRuntime
 from .string_runtime import LLVMStringRuntime
 from .process_runtime import LLVMProcessRuntime
+from .text_file_runtime import LLVMTextFileRuntime
 from aether.process_arguments import PROCESS_ARGS_BUILTIN
+from aether.text_file_io import (
+    APPEND_TEXT_BUILTIN,
+    FILE_READ_RESULT_TYPE,
+    FILE_STATUS_TYPE,
+    READ_TEXT_BUILTIN,
+    WRITE_TEXT_BUILTIN,
+)
 
 
 @dataclass(frozen=True)
@@ -178,6 +186,7 @@ class LLVMPrinter:
         self._uses_process_context = native_entry
         self._uses_process_arguments = False
         self._uses_string_parsing = False
+        self._uses_text_file_io = False
         self._checked_int_operators: set[str] = set()
         self._scalar_math_calls: set[tuple[str, tuple[object, ...], object]] = set()
         self._structs = {definition.name: definition for definition in module.structs}
@@ -347,6 +356,7 @@ class LLVMPrinter:
             enabled=self._uses_string_runtime,
             parsing=self._uses_string_parsing,
         ).append(runtime)
+        LLVMTextFileRuntime(self._uses_text_file_io).append(runtime)
         LLVMProcessRuntime(
             self._uses_process_context or self._uses_process_arguments,
             snapshots=self._uses_process_arguments,
@@ -1190,6 +1200,39 @@ class LLVMPrinter:
             return (
                 f"{result} = call ptr @aether_string_trim("
                 f"ptr {self._operand(instruction.arguments[0])})"
+            )
+        if instruction.builtin == READ_TEXT_BUILTIN:
+            if (
+                instruction.result is None
+                or len(instruction.arguments) != 1
+                or not isinstance(instruction.arguments[0].type, StringType)
+                or instruction.result.type != StructType(FILE_READ_RESULT_TYPE)
+            ):
+                raise LLVMBackendError("LLVM io.readText requires string -> FileReadResult")
+            self._uses_string_runtime = True
+            self._uses_text_file_io = True
+            result = self._new_temp(instruction.result)
+            return (
+                f"{result} = call %struct.{FILE_READ_RESULT_TYPE} "
+                f"@aether_read_text(ptr {self._operand(instruction.arguments[0])})"
+            )
+        if instruction.builtin in {WRITE_TEXT_BUILTIN, APPEND_TEXT_BUILTIN}:
+            if (
+                instruction.result is None
+                or len(instruction.arguments) != 2
+                or any(not isinstance(argument.type, StringType) for argument in instruction.arguments)
+                or not isinstance(instruction.result.type, EnumType)
+                or instruction.result.type.name != FILE_STATUS_TYPE
+            ):
+                raise LLVMBackendError("LLVM text-file write requires (string, string) -> FileStatus")
+            self._uses_string_runtime = True
+            self._uses_text_file_io = True
+            result = self._new_temp(instruction.result)
+            append = "true" if instruction.builtin == APPEND_TEXT_BUILTIN else "false"
+            return (
+                f"{result} = call i32 @aether_write_text("
+                f"ptr {self._operand(instruction.arguments[0])}, "
+                f"ptr {self._operand(instruction.arguments[1])}, i1 {append})"
             )
         if instruction.builtin in {"parseInt", "parseDouble"}:
             expected = "IntParseResult" if instruction.builtin == "parseInt" else "DoubleParseResult"

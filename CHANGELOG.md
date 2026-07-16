@@ -22,6 +22,9 @@ curso.
   preservación de UTF-8/NUL y paridad AST/IR/SSA/LLVM en O0/O1/O2.
 - `System.args()` end-to-end con snapshots owned `Array<string>`, forwarding
   después de `--`, inyección AST/IR y wrapper native `main(argc, argv)` POSIX.
+- `io.readText`, `io.writeText` e `io.appendText` para archivos de texto UTF-8,
+  con resultados nominales, bytes/NUL exactos, errores portables y paridad
+  AST/IR/SSA/LLVM en Linux y clang O0/O1/O2.
 
 ### Changed
 
@@ -33,6 +36,8 @@ curso.
   su gramática estricta y requiere trim explícito.
 - El perfil 17 agrega `process-arguments` y `cli-argument-forwarding`; Expense
   Tracker consume comandos reales sin cambiar la firma pública de `main`.
+- El perfil 18 agrega `text-file-read`, `text-file-write` y `text-file-append`;
+  Expense Tracker dogfoodea persistencia de un resumen textual no-CSV.
 
 ### Notes
 

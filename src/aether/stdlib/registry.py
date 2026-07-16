@@ -196,11 +196,12 @@ def builtin_mutation(name: str) -> MutationKind:
 
 def _definitions() -> dict[str, BuiltinDefinition]:
     from .core import builtin_definitions as core_builtin_definitions
+    from .io import builtin_definitions as io_builtin_definitions
     from .math.linear_algebra import builtin_definitions as linear_algebra_builtin_definitions
     from .plots import builtin_definitions as plot_builtin_definitions
 
     definitions: dict[str, BuiltinDefinition] = {}
-    for definition in [*core_builtin_definitions(), *linear_algebra_builtin_definitions(), *plot_builtin_definitions()]:
+    for definition in [*core_builtin_definitions(), *io_builtin_definitions(), *linear_algebra_builtin_definitions(), *plot_builtin_definitions()]:
         definitions[definition.name] = definition
     return definitions
 

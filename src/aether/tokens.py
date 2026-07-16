@@ -92,6 +92,8 @@ AETHER_TYPES = {
     "ParseStatus",
     "IntParseResult",
     "DoubleParseResult",
+    "FileStatus",
+    "FileReadResult",
 }
 PRIMITIVE_TYPES = {"int", "float", "double", "complex", "string", "boolean"}
 

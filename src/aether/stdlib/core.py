@@ -24,6 +24,7 @@ from ..string_parsing import (
     parse_int_bytes,
 )
 from ..string_value import STRING_TRIM_BUILTIN, StringValue, aether_string_trim
+from ..text_file_io import FILE_STATUS_TYPE, FileStatus
 from ..types import (
     AetherType,
     AetherValue,
@@ -149,6 +150,23 @@ def builtin_constant_definitions() -> list[BuiltinConstantDefinition]:
             ),
         )
         for status in ParseStatus
+    )
+    file_status_type = EnumType(
+        FILE_STATUS_TYPE, EnumIdentity("__builtin__", FILE_STATUS_TYPE)
+    )
+    constants.extend(
+        BuiltinConstantDefinition(
+            f"{FILE_STATUS_TYPE}.{status.name}",
+            file_status_type,
+            EnumValue(
+                FILE_STATUS_TYPE,
+                status.name,
+                file_status_type.identity,
+                int(status),
+                int(status),
+            ),
+        )
+        for status in FileStatus
     )
     return constants
 

@@ -1,12 +1,19 @@
 # Informe de dogfooding generalista: expense tracker
 
+Actualización archivos de texto (perfil 18): el comando
+`persist-check <path>` escribe un resumen textual fijo con `io.writeText`, lo
+relee mediante `io.readText`, valida status e igualdad y agrega `verified\n`
+con `io.appendText`. Usa un path suministrado por el test y funciona en AST y
+native Linux. No pretende persistir la lista de transacciones ni denomina CSV
+al formato: eso espera `split` o un parser con escaping.
+
 Actualización argumentos (perfil 17): `Main.ae` conserva el escenario de
 validación histórico sin argumentos y agrega una CLI mínima basada en
 `System.args()`: `add expense`, `add income`, `list` y `summary`. ID y monto
 usan `trim`, `parseInt` y `parseDouble`; errores esperables retornan `2` con
 diagnósticos de cantidad, comando/tipo, ID o monto. Cada proceso crea su propia
-`List<Transaction>`: no hay persistencia, archivos, environment, stdin, split,
-parser de shell ni framework general de subcomandos.
+`List<Transaction>`: la lista aún no se serializa; no hay environment, stdin,
+split, parser de shell ni framework general de subcomandos.
 
 Actualización 15-07-2026: el ejemplo completo conserva paridad AST/native tras
 la migración de string. `List<Transaction>` atraviesa múltiples `push`, growth,
@@ -107,9 +114,9 @@ en native. No afecta cálculos ni validaciones del tracker.
 
 ## Límites restantes y próxima tarea
 
-Siguen fuera de alcance argumentos, archivos, split, excepciones
-y GC. El tracker es una demostración directa desde
-`main`, no una CLI persistente.
+Siguen fuera de alcance persistencia estructurada, split, excepciones y GC. El
+tracker sólo verifica un resumen textual explícito; no es todavía una base de
+datos ni un formato de intercambio.
 
 El contrato mínimo de string native queda aprobado en
 [`STRING_RUNTIME_DESIGN.md`](STRING_RUNTIME_DESIGN.md), y las reglas de copy,

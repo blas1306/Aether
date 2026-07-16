@@ -89,6 +89,37 @@ def test_expense_tracker_reports_expected_cli_errors() -> None:
         assert result.output.startswith(expected)
 
 
+def test_expense_tracker_persists_and_verifies_explicit_summary(tmp_path: Path) -> None:
+    path = tmp_path / "summary.txt"
+    result = run_aether(
+        _source("Main.ae"),
+        source_root=EXAMPLE,
+        program_arguments=["persist-check", str(path)],
+    )
+
+    assert result.exit_code == 0
+    assert result.output == "summary persisted and verified: true\n"
+    assert path.read_bytes() == (
+        b"income=1500.0\nexpenses=250.0\nbalance=1250.0\nverified\n"
+    )
+
+
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang is required")
+def test_expense_tracker_native_persistence_check(tmp_path: Path) -> None:
+    path = tmp_path / "native-summary.txt"
+    stdout = StringIO()
+    stderr = StringIO()
+    assert LLVMRunner().run(
+        _typed("Main.ae"),
+        stdout=stdout,
+        stderr=stderr,
+        program_arguments=["persist-check", str(path)],
+    ) == 0
+    assert stdout.getvalue() == "summary persisted and verified: true\n"
+    assert stderr.getvalue() == ""
+    assert path.read_bytes().endswith(b"verified\n")
+
+
 def test_expense_tracker_for_in_transaction_is_read_only() -> None:
     source = """
 from Transaction import Transaction;

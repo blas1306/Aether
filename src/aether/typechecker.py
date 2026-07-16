@@ -28,6 +28,7 @@ from .string_parsing import (
     INT_PARSE_RESULT_TYPE,
     PARSE_STATUS_TYPE,
 )
+from .text_file_io import FILE_READ_RESULT_TYPE, FILE_STATUS_TYPE
 from .types import (
     AetherType,
     ArrayType,
@@ -2919,7 +2920,20 @@ class TypeChecker:
         location: object | None = None,
     ) -> AetherType:
         resolved = self._resolve_type_aliases(target_type, location)
-        if resolved in {INT_PARSE_RESULT_TYPE, DOUBLE_PARSE_RESULT_TYPE}:
+        if resolved in {INT_PARSE_RESULT_TYPE, DOUBLE_PARSE_RESULT_TYPE, FILE_READ_RESULT_TYPE}:
+            if resolved == FILE_READ_RESULT_TYPE:
+                if field_name == "content":
+                    return "string"
+                if field_name == "status":
+                    return EnumType(
+                        FILE_STATUS_TYPE,
+                        EnumIdentity("__builtin__", FILE_STATUS_TYPE),
+                    )
+                raise AetherTypeError(
+                    f"Struct '{resolved}' has no field '{field_name}'.",
+                    line=getattr(location, "line", None),
+                    column=getattr(location, "column", None),
+                )
             if field_name == "value":
                 return "int" if resolved == INT_PARSE_RESULT_TYPE else "double"
             if field_name == "status":
@@ -3259,10 +3273,10 @@ class TypeChecker:
                 column=getattr(location, "column", None),
             )
         if isinstance(type_name, str):
-            if type_name == PARSE_STATUS_TYPE:
+            if type_name in {PARSE_STATUS_TYPE, FILE_STATUS_TYPE}:
                 return EnumType(
-                    PARSE_STATUS_TYPE,
-                    EnumIdentity("__builtin__", PARSE_STATUS_TYPE),
+                    type_name,
+                    EnumIdentity("__builtin__", type_name),
                 )
             if type_name in self.type_aliases:
                 if type_name in resolving:

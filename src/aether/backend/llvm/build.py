@@ -14,6 +14,7 @@ from aether.pipeline import DEFAULT_SSA_BUILDER, lower_to_verified_ssa
 from aether.capabilities import BackendIdentity, validate_backend_capabilities
 from aether.ssa.optimizer import SSAOptimizerPipeline
 from aether.ssa import SSACall
+from aether.text_file_io import TEXT_FILE_BUILTINS
 
 from .backend import LLVMBackend
 
@@ -46,17 +47,36 @@ class LLVMBuilder:
         validate_backend_capabilities(typed_program, BackendIdentity.NATIVE)
         module = lower_to_verified_ssa(typed_program, builder=DEFAULT_SSA_BUILDER)
         module = SSAOptimizerPipeline(verify_after_each=True).run(module)
-        if sys.platform == "win32" and any(
-            isinstance(instruction, SSACall)
-            and instruction.builtin == "System.args"
+        instructions = (
+            instruction
             for function in module.functions
             for block in function.blocks
             for instruction in block.instructions
+        )
+        calls = [
+            instruction
+            for instruction in instructions
+            if isinstance(instruction, SSACall)
+        ]
+        if sys.platform == "win32" and any(
+            instruction.builtin == "System.args"
+            for instruction in calls
         ):
             raise LLVMBuildError(
                 "native System.args() is not supported on Windows yet; "
                 "explicit UTF-16 argv conversion is pending."
             )
+        if any(instruction.builtin in TEXT_FILE_BUILTINS for instruction in calls):
+            if sys.platform == "win32":
+                raise LLVMBuildError(
+                    "native UTF-8 text-file I/O is not supported on Windows yet; "
+                    "explicit UTF-16 path conversion is pending."
+                )
+            if not sys.platform.startswith("linux"):
+                raise LLVMBuildError(
+                    "native UTF-8 text-file I/O currently requires the Linux/POSIX runtime; "
+                    "this platform needs an explicit errno and path-boundary implementation."
+                )
         return self._backend.emit(module, native_entry=True)
 
     def build(

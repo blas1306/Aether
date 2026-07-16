@@ -2297,6 +2297,8 @@ Aether v0 recognizes these builtins:
 - `Math.LinearAlgebra.R(A)`
 - `Math.LinearAlgebra.rank(A)`
 - `System.args()` (requiere `import System;`)
+- `io.readText(path)`, `io.writeText(path, content)` e
+  `io.appendText(path, content)` (requieren `import io;`)
 
 Side-effect builtins such as `print(...)`, `println(...)`, and plotting commands return `void`, except `savefig(...)`, which returns the output path as a `string`.
 - `int(...)`
@@ -2397,6 +2399,15 @@ mutable Array and independently owned string objects, in `O(argc)` time.
 Arguments are UTF-8 and never include the executable name. Process transports
 cannot represent embedded NUL; this is an operating-system boundary, not a
 restriction on ordinary Aether strings.
+
+Text files use the explicit UTF-8-only `io` API. `readText` returns
+`FileReadResult { string content; FileStatus status; }`; failures carry empty
+content and callers must inspect status. `writeText` creates/truncates and
+`appendText` creates/appends exact `byteLength` bytes without adding newlines.
+Empty paths and paths containing NUL return `InvalidPath`. No operation expands
+or normalizes paths, and this surface does not include binary files, streams or
+directories. Native support is currently limited to Linux/POSIX; Windows paths
+require a future explicit UTF-16 conversion.
 
 ## Script and Session Execution
 

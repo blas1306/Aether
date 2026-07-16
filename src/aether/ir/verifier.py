@@ -90,6 +90,12 @@ from aether.string_parsing import (
 )
 from aether.string_value import STRING_TRIM_BUILTIN
 from aether.process_arguments import PROCESS_ARGS_BUILTIN
+from aether.text_file_io import (
+    FILE_READ_RESULT_TYPE,
+    FILE_STATUS_TYPE,
+    READ_TEXT_BUILTIN,
+    TEXT_FILE_BUILTINS,
+)
 from .types import (
     ArrayType,
     BoolType,
@@ -1068,6 +1074,38 @@ class IRVerifier:
                     definition.fields[1][1], EnumType
                 ):
                     self._fail(f"String parsing result '{expected_name}' has an invalid status field")
+                return
+            if instruction.builtin in TEXT_FILE_BUILTINS:
+                if instruction.function != instruction.builtin:
+                    self._fail("Text-file builtin must retain its canonical semantic name")
+                expected_arity = 1 if instruction.builtin == READ_TEXT_BUILTIN else 2
+                if (
+                    instruction.result is None
+                    or len(instruction.arguments) != expected_arity
+                    or any(not isinstance(argument.type, StringType) for argument in instruction.arguments)
+                ):
+                    self._fail(
+                        f"Text-file builtin '{instruction.builtin}' requires "
+                        f"{expected_arity} string argument(s) and a result"
+                    )
+                if instruction.builtin == READ_TEXT_BUILTIN:
+                    if instruction.result.type != StructType(FILE_READ_RESULT_TYPE):
+                        self._fail("io.readText result must be FileReadResult")
+                    definition = self._structs.get(FILE_READ_RESULT_TYPE)
+                    if (
+                        definition is None
+                        or len(definition.fields) != 2
+                        or definition.fields[0] != ("content", StringType())
+                        or definition.fields[1][0] != "status"
+                        or not isinstance(definition.fields[1][1], EnumType)
+                        or definition.fields[1][1].name != FILE_STATUS_TYPE
+                    ):
+                        self._fail("FileReadResult requires canonical {string, FileStatus} layout")
+                elif (
+                    not isinstance(instruction.result.type, EnumType)
+                    or instruction.result.type.name != FILE_STATUS_TYPE
+                ):
+                    self._fail("Text-file write result must be FileStatus")
                 return
             if instruction.builtin in {"__aether_retain", "__aether_release"}:
                 if instruction.function != instruction.builtin:

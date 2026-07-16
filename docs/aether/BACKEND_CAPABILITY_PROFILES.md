@@ -36,7 +36,7 @@ arquitectura, no capacidades solicitadas directamente por un programa.
 
 ## Perfiles actuales
 
-La versión actual del perfil es `17`. La versión `2` promovió `modules` e
+La versión actual del perfil es `18`. La versión `2` promovió `modules` e
 `imports` de `UNSUPPORTED` a `PARTIAL`; la versión `3` promovió `scalar-math`
 de `UNSUPPORTED` a `PARTIAL` en LLVM/native; la versión `4` incorpora el
 subconjunto de callables top-level tipados y sin captura en ambos backends. La
@@ -84,10 +84,11 @@ structs, colecciones compatibles, imports/aliases y se imprimen como
 `EnumName.VariantName`; LLVM los representa como `i32`. Classes, interfaces,
 input y errores siguen no soportados. Strings, primitivos,
 arithmetic, structs y colecciones quedan parciales porque sus subconjuntos
-compilables son reales pero no cubren toda la superficie AST.
-Archivos permanecen no soportados. Los argumentos del proceso son completos en
-AST y native POSIX mediante `System.args()`; el camino native de Windows queda
-limitado hasta incorporar conversión explícita desde UTF-16.
+compilables son reales pero no cubren toda la superficie AST. Los archivos de
+texto son completos en AST y parciales en native por plataforma. Los argumentos
+del proceso son completos en AST y native POSIX mediante `System.args()`; el
+camino native de Windows queda limitado hasta incorporar conversión explícita
+desde UTF-16.
 
 La versión `15` marca completas en AST y native las capacidades
 `string-parsing`, `integer-string-parsing` y `double-string-parsing`. El
@@ -107,6 +108,14 @@ AST recibe una lista inyectada explícitamente y native POSIX usa un wrapper C
 Cada call crea un Array owned independiente; sus efectos de
 lectura/asignación/panic impiden DCE, folding o CSE. Windows no se promociona:
 requiere una frontera wide-char con conversión explícita desde UTF-16.
+
+La versión `18` agrega `text-file-read`, `text-file-write` y
+`text-file-append`. Son completas en AST y parciales en native por plataforma:
+el camino E2E Linux/POSIX usa bytes length-aware, resultados nominales y
+cleanup explícito; Windows espera conversión UTF-16 y las demás plataformas
+POSIX todavía no fijan el acceso portable a `errno`. La capability amplia
+`files` refiere sólo a este subconjunto de texto, no a binarios, streams o
+directorios.
 
 Para `strings`, el subset native distingue la operación semántica concreta:
 

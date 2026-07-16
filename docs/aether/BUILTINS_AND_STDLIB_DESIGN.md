@@ -53,6 +53,13 @@ nivel intrínseco aunque no introduce un nodo AST ni opcode dedicado. Recorta
 exclusivamente los seis whitespace ASCII de Aether v1; conserva NUL, UTF-8 y
 whitespace Unicode. No habilita `split`, substring, views ni un módulo `text`.
 
+El perfil 18 implementa el núcleo de archivos de texto del módulo estándar
+`io`: `readText`, `writeText` y `appendText`. Sus helpers son intrínsecos por la
+frontera de filesystem, los bytes length-aware, los efectos y el ownership;
+los nombres públicos no sugieren soporte binario. `FileStatus` y
+`FileReadResult` normalizan errores esperables sin excepciones. El contrato
+completo está en [`TEXT_FILE_IO_DESIGN.md`](TEXT_FILE_IO_DESIGN.md).
+
 ## Nivel 1: builtins e intrínsecos
 
 ### Candidatos legítimos

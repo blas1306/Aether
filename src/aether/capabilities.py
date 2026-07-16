@@ -27,12 +27,18 @@ from .scalar_math import (
     SCALAR_MATH_OPERATIONS,
 )
 from .string_parsing import DOUBLE_PARSE_RESULT_TYPE, INT_PARSE_RESULT_TYPE
+from .text_file_io import (
+    APPEND_TEXT_BUILTIN,
+    FILE_READ_RESULT_TYPE,
+    READ_TEXT_BUILTIN,
+    WRITE_TEXT_BUILTIN,
+)
 
 if TYPE_CHECKING:
     from .pipeline import TypedProgram
 
 
-CAPABILITY_PROFILE_VERSION = "17"
+CAPABILITY_PROFILE_VERSION = "18"
 
 
 class BackendIdentity(str, Enum):
@@ -102,6 +108,9 @@ class Capability(str, Enum):
     GENERICS = "generics"
     ERROR_HANDLING = "error-handling"
     FILES = "files"
+    TEXT_FILE_READ = "text-file-read"
+    TEXT_FILE_WRITE = "text-file-write"
+    TEXT_FILE_APPEND = "text-file-append"
     OPTIMIZATION_PROFILES = "optimization-profiles"
 
 
@@ -237,6 +246,9 @@ CAPABILITY_CATALOG: Mapping[Capability, CapabilityDefinition] = MappingProxyType
             _definition(Capability.GENERICS, "User-defined generic declarations."),
             _definition(Capability.ERROR_HANDLING, "throw and try/catch error handling."),
             _definition(Capability.FILES, "Language-level file input and output."),
+            _definition(Capability.TEXT_FILE_READ, "Complete UTF-8 text-file reads."),
+            _definition(Capability.TEXT_FILE_WRITE, "Complete UTF-8 text-file writes."),
+            _definition(Capability.TEXT_FILE_APPEND, "Complete UTF-8 text-file appends."),
             _definition(Capability.OPTIMIZATION_PROFILES, "Selectable compiler optimization profiles."),
         )
     }
@@ -265,7 +277,6 @@ def _profile(
 
 _AST_UNSUPPORTED = {
     Capability.GENERICS,
-    Capability.FILES,
     Capability.OPTIMIZATION_PROFILES,
     Capability.STRING_SPLIT_TRIM,
 }
@@ -322,7 +333,6 @@ _NATIVE_UNSUPPORTED = {
     Capability.INTERFACES,
     Capability.GENERICS,
     Capability.ERROR_HANDLING,
-    Capability.FILES,
     Capability.STRING_SPLIT_TRIM,
 }
 NATIVE_CAPABILITY_PROFILE = _profile(
@@ -405,6 +415,10 @@ E2E_TESTED_CAPABILITIES: Mapping[BackendIdentity, frozenset[Capability]] = Mappi
                 Capability.MATRIX,
                 Capability.SCALAR_MATH,
                 Capability.ERROR_HANDLING,
+                Capability.FILES,
+                Capability.TEXT_FILE_READ,
+                Capability.TEXT_FILE_WRITE,
+                Capability.TEXT_FILE_APPEND,
             }
         ),
         BackendIdentity.NATIVE: frozenset(
@@ -434,6 +448,10 @@ E2E_TESTED_CAPABILITIES: Mapping[BackendIdentity, frozenset[Capability]] = Mappi
                 Capability.BORROWED_FOR_IN_ELEMENTS,
                 Capability.STRUCTURAL_EQUALITY,
                 Capability.EQ_COLLECTION_SEARCH,
+                Capability.FILES,
+                Capability.TEXT_FILE_READ,
+                Capability.TEXT_FILE_WRITE,
+                Capability.TEXT_FILE_APPEND,
             }
         ),
     }
@@ -838,6 +856,21 @@ class _CapabilityDetector:
                 call,
                 detail="owned Array<string> process snapshot",
             )
+        text_file_capability = {
+            READ_TEXT_BUILTIN: Capability.TEXT_FILE_READ,
+            WRITE_TEXT_BUILTIN: Capability.TEXT_FILE_WRITE,
+            APPEND_TEXT_BUILTIN: Capability.TEXT_FILE_APPEND,
+        }.get(canonical)
+        if text_file_capability is not None:
+            self._record(
+                Capability.FILES,
+                call,
+                detail="UTF-8 text-only file I/O",
+            )
+            self._record(
+                text_file_capability,
+                call,
+            )
         if canonical in {"copy", "contains", "index_of"} and call.arguments:
             self._record_collection_operation(
                 call.arguments[0],
@@ -1015,7 +1048,7 @@ class _CapabilityDetector:
         is_struct = isinstance(resolved, str) and (
             (symbol := self.checker.structs.get(resolved)) is not None
             and symbol.kind == "struct"
-            or resolved in {INT_PARSE_RESULT_TYPE, DOUBLE_PARSE_RESULT_TYPE}
+            or resolved in {INT_PARSE_RESULT_TYPE, DOUBLE_PARSE_RESULT_TYPE, FILE_READ_RESULT_TYPE}
         )
         reason = self._collection_element_reason(resolved, ())
         if not is_struct and reason is None:
@@ -1045,7 +1078,7 @@ class _CapabilityDetector:
         active: tuple[str, ...],
     ) -> str | None:
         type_name = self._resolve_alias(type_name)
-        if type_name in {INT_PARSE_RESULT_TYPE, DOUBLE_PARSE_RESULT_TYPE}:
+        if type_name in {INT_PARSE_RESULT_TYPE, DOUBLE_PARSE_RESULT_TYPE, FILE_READ_RESULT_TYPE}:
             return None
         if type_name in {"int", "float", "double", "boolean", "string"}:
             return None

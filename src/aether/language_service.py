@@ -71,6 +71,7 @@ _ENUM_RE = re.compile(
     re.DOTALL,
 )
 _NATIVE_TYPE_MEMBERS: dict[str, tuple[tuple[str, str], ...]] = {
+    "FileReadResult": (("content", "property"), ("status", "property")),
     "string": (("byteLength", "property"), ("trim", "method")),
     "List": (
         ("length", "property"),
@@ -154,6 +155,13 @@ def completion_items(source: str, line: int, column: int) -> list[CompletionItem
         enum_name, variants = enum_context
         for variant in variants:
             add(variant, "enum", enum_name)
+        return items
+
+    module_context = _builtin_module_member_context(source, line, column)
+    if module_context is not None:
+        module_name, members = module_context
+        for member in members:
+            add(member, "function", module_name)
         return items
 
     native_context = _native_member_context(source, line, column)
@@ -378,7 +386,16 @@ def _source_prefix(source: str, line: int, column: int) -> str:
 
 
 def _enum_variants(source: str) -> dict[str, list[str]]:
-    enums: dict[str, list[str]] = {}
+    enums: dict[str, list[str]] = {
+        "FileStatus": [
+            "Success",
+            "NotFound",
+            "PermissionDenied",
+            "InvalidPath",
+            "InvalidUtf8",
+            "IoError",
+        ]
+    }
     for match in _ENUM_RE.finditer(source):
         body = re.sub(r"//.*|#.*", "", match.group("body"))
         variants = [
@@ -417,3 +434,35 @@ def _imported_module_bindings(source: str) -> set[str]:
     for match in pattern.finditer(source):
         bindings.add(match.group("alias") or match.group("module"))
     return bindings
+
+
+def _builtin_module_member_context(
+    source: str, line: int, column: int
+) -> tuple[str, tuple[str, ...]] | None:
+    prefix = _source_prefix(source, line, column)
+    match = re.search(r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)\.\s*$", prefix)
+    if match is None:
+        return None
+    binding = match.group("name")
+    pattern = re.compile(
+        r"^\s*import\s+(?P<module>[A-Za-z_][A-Za-z0-9_.]*)"
+        r"(?:\s+as\s+(?P<alias>[A-Za-z_][A-Za-z0-9_]*))?\b",
+        re.MULTILINE,
+    )
+    canonical: str | None = None
+    for imported in pattern.finditer(source):
+        visible = imported.group("alias") or imported.group("module")
+        if visible == binding:
+            canonical = imported.group("module")
+            break
+    if canonical is None:
+        return None
+    prefix_name = canonical + "."
+    members = tuple(
+        sorted(
+            name[len(prefix_name) :]
+            for name in builtin_names()
+            if name.startswith(prefix_name) and "." not in name[len(prefix_name) :]
+        )
+    )
+    return (canonical, members) if members else None

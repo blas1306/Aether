@@ -23,6 +23,7 @@ aether run examples/expense_tracker/Main.ae -- add expense 3 19.95 food "Lunch w
 aether run examples/expense_tracker/Main.ae -- add income 4 100.0 work "Side project"
 aether run examples/expense_tracker/Main.ae -- list
 aether run examples/expense_tracker/Main.ae -- summary
+aether run examples/expense_tracker/Main.ae -- persist-check /tmp/aether-summary.txt
 ```
 
 Sin argumentos se ejecuta el dogfood histórico completo. Con argumentos,
@@ -65,11 +66,16 @@ Cada proceso parte de una lista nueva. `add` demuestra validación y construcci�
 de la transacción, pero no persiste el alta; `list` y `summary` operan sobre dos
 transacciones de demostración creadas en esa ejecución.
 
+`persist-check <path>` es un dogfood mínimo de archivos de texto: escribe un
+resumen fijo y explícito, lo relee y compara, y hace append de `verified\n`.
+El formato no se llama CSV y no persiste transacciones estructuradas porque aún
+no existe `split` ni un parser con escaping.
+
 ## Límites deliberados
 
 - `main` continúa siendo `int main()`; los argumentos se consultan con
   `System.args()`.
-- No hay archivos, CSV ni `split`.
+- No hay archivos binarios, CSV, persistencia estructurada ni `split`.
 - No hay conversiones implícitas ni otras APIs generales de texto.
 - Las fechas no se validan ni se ordenan.
 - No se agregaron excepciones, GC ni destructores.

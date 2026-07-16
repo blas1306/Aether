@@ -29,6 +29,15 @@ from aether.string_parsing import (
     parse_double_bytes,
     parse_int_bytes,
 )
+from aether.text_file_io import (
+    APPEND_TEXT_BUILTIN,
+    FILE_STATUS_TYPE,
+    READ_TEXT_BUILTIN,
+    WRITE_TEXT_BUILTIN,
+    append_text,
+    read_text,
+    write_text,
+)
 from aether.types import AetherValue
 from aether.vector_matrix_safety import (
     MATRIX_INDEX_OUT_OF_BOUNDS,
@@ -478,6 +487,43 @@ class IRInterpreter:
                             status,
                             status,
                         ),
+                    )
+                    return False, None, None
+                if instruction.builtin == READ_TEXT_BUILTIN:
+                    if len(arguments) != 1 or instruction.result is None:
+                        raise IRExecutionError("IR io.readText requires one argument and a result")
+                    path = arguments[0]
+                    if not isinstance(path, StringValue):
+                        raise IRExecutionError("IR io.readText path must be string")
+                    read = read_text(path)
+                    status = int(read.status)
+                    frame.values[instruction.result] = (
+                        read.content,
+                        IREnumConstant(
+                            FILE_STATUS_TYPE,
+                            read.status.name,
+                            status,
+                            status,
+                        ),
+                    )
+                    return False, None, None
+                if instruction.builtin in {WRITE_TEXT_BUILTIN, APPEND_TEXT_BUILTIN}:
+                    if len(arguments) != 2 or instruction.result is None:
+                        raise IRExecutionError("IR text-file write requires two arguments and a result")
+                    path, content = arguments
+                    if not isinstance(path, StringValue) or not isinstance(content, StringValue):
+                        raise IRExecutionError("IR text-file write arguments must be string")
+                    status_value = (
+                        write_text(path, content)
+                        if instruction.builtin == WRITE_TEXT_BUILTIN
+                        else append_text(path, content)
+                    )
+                    status = int(status_value)
+                    frame.values[instruction.result] = IREnumConstant(
+                        FILE_STATUS_TYPE,
+                        status_value.name,
+                        status,
+                        status,
                     )
                     return False, None, None
                 if instruction.builtin == "__aether_retain":

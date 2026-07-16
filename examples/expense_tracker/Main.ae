@@ -8,6 +8,7 @@ from Ledger import addTransaction;
 from Transaction import Transaction;
 from Transaction import TransactionType;
 import System;
+import io;
 
 void runDemo() {
 List<Transaction> transactions = {};
@@ -117,6 +118,30 @@ List<Transaction> demoTransactions() {
 }
 
 int runCommand(Array<string> args) {
+    if args[0] == "persist-check" {
+        if args.length < 2 {
+            println("insufficient arguments: persist-check <path>");
+            return 2;
+        }
+        string summary = "income=1500.0\nexpenses=250.0\nbalance=1250.0\n";
+        FileStatus written = io.writeText(args[1], summary);
+        if written != FileStatus.Success {
+            println("summary write failed: ", written);
+            return 2;
+        }
+        FileReadResult loaded = io.readText(args[1]);
+        if loaded.status != FileStatus.Success || loaded.content != summary {
+            println("summary verification failed: ", loaded.status);
+            return 2;
+        }
+        FileStatus appended = io.appendText(args[1], "verified\n");
+        if appended != FileStatus.Success {
+            println("summary append failed: ", appended);
+            return 2;
+        }
+        println("summary persisted and verified: true");
+        return 0;
+    }
     if args[0] == "list" {
         printTransactions(demoTransactions());
         return 0;
