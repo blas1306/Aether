@@ -8,6 +8,7 @@ import subprocess
 import pytest
 
 from aether.backend.llvm import LLVMBackend, LLVMRunner
+from aether.capabilities import BackendCapabilityError, Capability
 from aether.equality import aether_values_equal
 from aether.errors import AetherTypeError
 from aether.ir import IRCompareOp, IRInterpreter, IRVerifier
@@ -96,7 +97,7 @@ int main() {
     assert _all_outputs(source) == (expected, expected, expected)
 
 
-def test_ieee_equality_nan_and_signed_zero_match_all_backends() -> None:
+def test_ieee_equality_nan_and_signed_zero_float_is_rejected_by_native_profile() -> None:
     source = """
 int main() {
     double nan = 0.0 / 0.0;
@@ -117,7 +118,20 @@ int main() {
 }
 """
     expected = "false\ntrue\ntrue\nfalse\n1\ntrue\ntrue\n"
-    assert _all_outputs(source) == (expected, expected, expected)
+    assert run_aether(source).output == expected
+    interpreter = IRInterpreter(IRBackend().lower_verified(_typed(source)))
+    assert interpreter.call("main") == 0
+    assert interpreter.output == expected
+
+    with pytest.raises(BackendCapabilityError) as captured:
+        LLVMRunner().run(_typed(source), stdout=StringIO())
+
+    issue = next(
+        issue
+        for issue in captured.value.issues
+        if issue.requirement.capability is Capability.PRIMITIVE_TYPES
+    )
+    assert "type 'float' has no stable LLVM/native ABI" in (issue.requirement.detail or "")
 
 
 def test_string_eq_dispatcher_is_handle_fast_and_embedded_nul_safe() -> None:

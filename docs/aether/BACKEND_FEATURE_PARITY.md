@@ -64,8 +64,18 @@ asignación final, los doubles usan `%.17g` bajo locale C y el parser staged
 rechaza corrupción sin publicar resultados parciales. `loadLedger`/`saveLedger`
 envuelven `io.readText` y, desde perfil 21, `io.writeTextAtomic`.
 
-Última revisión: 15 de julio de 2026, incluyendo enums native y los ejemplos
-dogfood de métodos numéricos y expense tracker. Este documento reemplaza como
+Actualización perfil 22 (16-07-2026): el capability gate native pasa a ser la
+frontera exhaustiva previa al lowering. Los tipos chequeados, conversions,
+bindings, firmas, operadores, builtins, layouts y límites de plataforma
+delimitan el subset; `float` queda excluido y `for` pasa a `PARTIAL` por el caso
+de paso cero. Las formas fuera del subset terminan en diagnósticos
+`AE-BACKEND-*` con ubicación, nunca en lowering/verifier/LLVM/clang. Los módulos
+sin `main` pueden emitirse como LLVM de librería; sólo `build` exige entry point.
+El corpus aceptado por native compila con clang en O0/O1/O2.
+
+Última revisión: 16 de julio de 2026, incluyendo el cierre del capability gate
+native y los dogfoods Numerical Methods, Expense Tracker y Aggregate
+Collections. Este documento reemplaza como
 referencia canónica a la auditoría histórica de `docs/compiler/`.
 
 ## Criterio
@@ -94,7 +104,8 @@ paridad end-to-end.
 La ruta nativa real es:
 
 ```text
-lexer -> parser -> typechecker -> EntryPointNormalizer -> IR lowering
+lexer -> parser -> typechecker -> native capability gate
+      -> EntryPointNormalizer -> IR lowering
       -> IR verifier -> GeneralSSABuilder -> SSA verifier
       -> SSAOptimizerPipeline -> LLVM printer/runtime -> clang
 ```
@@ -141,7 +152,7 @@ representación y lifecycle ya están activos en esta matriz.
 | `int` i32 | C | C | C | C | C | C | C | C | C | C | C | C | C | paridad E2E | P | Parcial | Semántica checked i32 ya coincide; la spec aún contiene pasajes históricos. |
 | `double` | C | C | C | C | C | C | C | C | C | C | C | C | C | E2E | C | Completo | División sigue IEEE-754, incluidos inf/NaN. |
 | `boolean` | C | C | C | C | C | C | C | C | C | C | C | C | C | E2E | C | Completo | `bool` no es spelling público; se usa `boolean`. |
-| `float` | C | C | C | C por coerción | C nominal | P | P | P | P | P | P | N | N | frontend | P | Solo AST | Literales decimales nacen `double`; falta mapping LLVM estable. |
+| `float` | C | C | C | C por coerción | C nominal | P | P | P | P | P | P | N: gate temprano | N | frontend+gate | P | Solo AST | El perfil 22 lo excluye explícitamente del subset native estable. |
 | `complex` / literal `im` | C | C | C | C | C nominal | N desde fuente | P nominal | N | P nominal | P nominal | N | N | AST Python | AST | C v0 | Solo AST | Ya existe como primitivo experimental, en tensión con el diseño futuro de stdlib. |
 | `null` y `T?` | C | C | C | C | P nominal | N | P nominal | N | N | N | N | N | AST | frontend | C v0 | Solo AST | Sin narrowing ni backend. |
 | Variables locales tipadas mutables | C | C | C | C | C | C | C | C | C | C | C | C | — | E2E | C | Completo | Requieren inicializador. |
@@ -151,14 +162,14 @@ representación y lifecycle ya están activos en esta matriz.
 | Operadores `+ - * /` escalares | C | C | C | C | C | C int/double | C | C | C | C | C checked | C int/double | C | E2E+safety | P | Parcial | `float`, `complex`, string y agregados amplían la superficie AST. |
 | Overflow entero y negación mínima | — | — | permite runtime | C: panic i32 | C `may_trap` | C | C | C | C | C | C preserva traps | C intrinsics checked | C | E2E AST/IR/native | P | Completo | Contrato implementado después de la auditoría histórica. |
 | División por cero | — | — | permite runtime | C | C | C | C | C | C | C | C | C | C | E2E | P | Completo | Int hace panic; double usa IEEE-754 en los tres backends. |
-| `%` truncante | C | C | C | C int/double | C `rem` | C | C | C int/double | C | C | C | P: solo int | P | AST+int native | C | Parcial | LLVM no emite `frem`; divisor cero double difiere en mensaje/camino. |
+| `%` truncante | C | C | C | C int/double | C `rem` | C | C | C int/double | C | C | C | C solo int; double rechazado por gate | P | AST+int native+gate | C | Parcial | El subset native declarado es entero; `% double` recibe `AE-BACKEND-ARITHMETIC` antes del lowering. |
 | `Math.mod` floor-mod | llamada normal | C | C | C | C call builtin | C | C | C | C | C | C checked | C helper tipado | runtime mínimo | AST/IR/native | C | Completo int/double | Es builtin de namespace, no operador. |
 | Comparaciones ordenadas | C | C | C | C | C | C int/double | C | C | C | C | C | C int/double | — | E2E | C | Parcial | Otros numéricos/agregados tienen cobertura distinta. |
 | Igualdad escalar | C | C | C | C | C | C | C | C | C | C | C | C Eq tipado | `aether_string_equal`/helpers Eq | amplia | C | Completa para tipos Eq | Primitivas, string, enums, structs y Array/List; classes/callables sin Eq. |
 | Igualdad agregada | C | C | C | C | P | P Struct/Vector/Matrix | C subset | C subset | C subset | C subset | P | P | helpers | amplia por tipo | P | Parcial | Array/List generales son AST-only; structs tienen límites de tipos de campo. |
 | `&&` / <code>&#124;&#124;</code> short-circuit | C | C | C boolean | C | CFG | C por branches/merge | C | C | C con phi | C | C SCCP | C | — | E2E | P desactualizada | Implementado pero sin documentación | Código y tests son completos; spec/matrices aún dicen AST-only. |
 | `!` prefijo | C | C | C boolean | C | C | C | C | C | C | C | C | C `xor` | — | E2E | C | Completo | No existe factorial postfix. |
-| Casts explícitos | C | C | C amplio | C amplio | P | P int↔double | C subset | C subset | C subset | C subset | P | P int↔double | P | frontend+par | C | Parcial | `string`, `boolean`, `float`, `complex` exceden backend. |
+| Casts explícitos | C | C | C amplio | C amplio | P | P int↔double | C subset | C subset | C subset | C subset | P | C int↔double; resto rechazado por gate | P | frontend+par+gate | C | Parcial | `string`, `boolean`, `float` y `complex` quedan fuera del subset native declarado. |
 
 ## Funciones y control de flujo
 
@@ -242,7 +253,7 @@ representación y lifecycle ya están activos en esta matriz.
 | `PI` y `E` | import/member | C | C para `Math.pi` | C para `Math.pi` | C const double | C directa | C | C | C | C | C | C inmediata | sin global/init | AST/IR/native | P | Parcial | Solo `Math.pi`; `PI` global y `E` no existen. |
 | `throw` / `try-catch` | C | C | C | C | N | N | N | N | N | N | N | N | AST exceptions | AST | C | Solo AST | Sin finally, jerarquías ni stack traces. |
 | Panics de safety | — | — | tipos preventivos | C | efectos/traps | C | C | C | C | C | C preserva | C | C `puts/exit` | E2E | P dispersa | Completo | Array/List/Vector/Matrix, overflow int y allocation. |
-| CLI run/build/inspect/bench | — | — | usa frontend | AST seleccionable | usa IR | C subset | C | C subset | export/build | C | perfiles parciales | default/build C subset | clang | tests CLI | P desactualizada | Parcial | Perfil LLVM default es mucho menor que superficie aceptada. |
+| CLI run/build/inspect/bench | — | — | usa frontend | AST seleccionable | usa IR | C subset | C | C subset | export/build | C | perfiles parciales | default/build C subset con gate previo | clang | tests CLI | P desactualizada | Parcial | La superficie native es menor que AST, pero el perfil 22 la delimita antes del lowering. |
 | REPL persistente | C por entrada | C | C incremental | C rollback | N | N | N | N | N | N | N | N | AST session | tests | C | Solo AST | `--backend=ast` obligatorio. |
 | LSP | lexer/parser | AST | C diagnósticos frontend | — | N | N | N | N | N | N | N | N | proceso LSP | tests | P | Parcial | Completion/hover/symbols parciales; sin formatter/rename semántico completo. |
 | Optimización `-O0` | — | — | — | — | C | C | C | — | no usada por emit-ir | — | sin pases | — | — | CLI/optimizer | C | Completo | Solo `--emit-ir`; no controla build native. |
@@ -269,8 +280,9 @@ representación y lifecycle ya están activos en esta matriz.
    perfil alternativo explícito.
 7. **IO restante:** argumentos y archivos de texto ya cubren el mínimo
    Linux/POSIX; faltan input native, Windows/UTF-16, binarios y streams.
-8. **Paridad del perfil:** cerrar `%` double, casts, formato y combinaciones de
-   agregados antes de llamar estable al subconjunto.
+8. **Paridad del perfil:** el perfil 22 cierra `%` double, casts y combinaciones
+   de agregados mediante rechazo temprano; formato observable sigue siendo una
+   cuestión separada de paridad AST/native.
 
 La deuda anterior del **SSA verifier** queda cerrada: el verificador comprueba
 dominancia y orden de todos los usos, trata operandos `phi` sobre su arista,
@@ -283,15 +295,14 @@ dejan SSA inválido.
 
 ## Inconsistencias semánticas confirmadas
 
-- `%` admite reales en frontend/IR interpreter, pero LLVM solo implementa
-  remainder entero.
-- `float` y `complex` son tipos aceptados en frontend sin representación native
-  completa.
+- `%` admite reales en frontend/IR interpreter; el perfil native 22 declara y
+  acepta únicamente remainder entero.
+- `float` y `complex` siguen siendo tipos frontend sin representación native
+  completa y el gate los rechaza antes del lowering.
 - String equality general usa `aether_string_equal` en AST/native y se reutiliza
   dentro de Eq de structs y colecciones.
-- `Array/List<Struct>` atraviesa frontend, IR y SSA, pero el emisor LLVM filtra
-  un error interno al necesitar el tamaño del elemento, en vez de rechazarlo
-  según el perfil antes del lowering.
+- `Array/List<Struct>` con layout acíclico representable es E2E; elementos sin
+  layout/copia native definida se rechazan según el perfil antes del lowering.
 - El CLI elige LLVM por defecto aunque la mayor parte de módulos, UDT de
   referencia, errores y builtins matemáticos sean AST-only.
 - `Plots` conserva un hook AST legado, separado del callable tipado general;

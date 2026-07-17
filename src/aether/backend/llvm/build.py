@@ -77,7 +77,10 @@ class LLVMBuilder:
                     "native UTF-8 text-file I/O currently requires the Linux/POSIX runtime; "
                     "this platform needs an explicit errno and path-boundary implementation."
                 )
-        return self._backend.emit(module, native_entry=True)
+        return self._backend.emit(
+            module,
+            native_entry=_has_native_entry_point(typed_program),
+        )
 
     def build(
         self,
@@ -86,8 +89,9 @@ class LLVMBuilder:
         output_path: Path,
         keep_llvm: bool = False,
     ) -> LLVMBuildResult:
-        llvm_ir = self.emit_llvm(typed_program)
+        validate_backend_capabilities(typed_program, BackendIdentity.NATIVE)
         _validate_native_entry_point(typed_program)
+        llvm_ir = self.emit_llvm(typed_program)
         output_path = output_path.resolve()
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -170,14 +174,18 @@ class LLVMBuilder:
 
 
 def _validate_native_entry_point(typed_program: object) -> None:
-    program = getattr(typed_program, "program", None)
-    functions = getattr(program, "statements", ())
-    if any(
-        isinstance(statement, ast.FunctionDeclaration) and statement.name == "main"
-        for statement in functions
-    ):
+    if _has_native_entry_point(typed_program):
         return
     raise AetherTypeError(
         "Native executable requires one entry point in the root module: int main().",
         kind="entry-point",
+    )
+
+
+def _has_native_entry_point(typed_program: object) -> bool:
+    program = getattr(typed_program, "program", None)
+    functions = getattr(program, "statements", ())
+    return any(
+        isinstance(statement, ast.FunctionDeclaration) and statement.name == "main"
+        for statement in functions
     )

@@ -23,6 +23,7 @@ from aether.capabilities import (
     validate_backend_capabilities,
 )
 from aether.pipeline import prepare_typed_program
+from aether.errors import AetherTypeError
 from aether.runner import run_aether
 from aether.typechecker import TypeChecker
 
@@ -44,7 +45,7 @@ def _required(source: str, *, source_root: Path | None = None):
 
 
 def test_profiles_are_versioned_identified_and_cover_the_canonical_catalog() -> None:
-    assert CAPABILITY_PROFILE_VERSION == "21"
+    assert CAPABILITY_PROFILE_VERSION == "22"
     assert AST_CAPABILITY_PROFILE.backend is BackendIdentity.AST
     assert NATIVE_CAPABILITY_PROFILE.backend is BackendIdentity.NATIVE
     assert AST_CAPABILITY_PROFILE.version == CAPABILITY_PROFILE_VERSION
@@ -69,6 +70,10 @@ def test_profiles_are_versioned_identified_and_cover_the_canonical_catalog() -> 
     )
     assert (
         NATIVE_CAPABILITY_PROFILE.support_for(Capability.PROCESS_ARGUMENTS).state
+        is CapabilityState.PARTIAL
+    )
+    assert (
+        NATIVE_CAPABILITY_PROFILE.support_for(Capability.FOR).state
         is CapabilityState.PARTIAL
     )
     for capability in (
@@ -203,8 +208,13 @@ def test_native_rejects_unsupported_feature_before_ir_lowering(monkeypatch: pyte
     with pytest.raises(BackendCapabilityError) as captured:
         LLVMBuilder().emit_llvm(typed)
 
-    assert captured.value.issues[0].diagnostic_code == "AE-BACKEND-CLASSES"
-    assert "valid Aether" in captured.value.issues[0].hint
+    issue = next(
+        issue
+        for issue in captured.value.issues
+        if issue.requirement.capability is Capability.CLASSES
+    )
+    assert issue.diagnostic_code == "AE-BACKEND-CLASSES"
+    assert "valid Aether" in issue.hint
 
 
 def test_native_still_emits_supported_program_and_runs_ssa_verifier(
@@ -342,3 +352,219 @@ def test_native_scalar_math_profile_accepts_consolidated_and_rejects_experimenta
     )
     assert issue.requirement.requires_complete_support is True
     assert issue.requirement.detail == "experimental scalar builtin 'real'"
+
+
+@pytest.mark.parametrize(
+    ("source", "capability", "detail"),
+    [
+        (
+            "double rem(double a, double b) { return a % b; } int main() { return 0; }",
+            Capability.ARITHMETIC,
+            "remainder requires int operands",
+        ),
+        (
+            "int main() { boolean value = boolean(1); return 0; }",
+            Capability.PRIMITIVE_TYPES,
+            "cast from 'int' to 'boolean'",
+        ),
+        (
+            "int main() { value = 1; return value; }",
+            Capability.VARIABLES_AND_CONST,
+            "implicit declaration by assignment",
+        ),
+        (
+            "float identity(float value) { return value; } int main() { float value = float(16777217); println(identity(value)); return 0; }",
+            Capability.PRIMITIVE_TYPES,
+            "type 'float' has no stable LLVM/native ABI",
+        ),
+        (
+            "double sum(double left, int right) { return left + right; } int main() { return 0; }",
+            Capability.ARITHMETIC,
+            "mixed operand types",
+        ),
+        (
+            "double value() { return 1; } int main() { return 0; }",
+            Capability.PRIMITIVE_TYPES,
+            "implicit conversion from 'int' to 'double'",
+        ),
+        (
+            "struct Scale { double apply(double value) { return value; } } int main() { Scale scale = Scale(); println(scale.apply(1)); return 0; }",
+            Capability.PRIMITIVE_TYPES,
+            "argument 1 to 'scale.apply'",
+        ),
+        (
+            "int main() { return int(2 ^ 3); }",
+            Capability.ARITHMETIC,
+            "operator '^' has no native lowering",
+        ),
+        (
+            "(int, int) pair() { return (1, 2); } int main() { return 0; }",
+            Capability.PRIMITIVE_TYPES,
+            "tuple type",
+        ),
+        (
+            "int main() { List<int> values = {1}; return values.size(); }",
+            Capability.LIST,
+            "List.size() has no LLVM/native lowering",
+        ),
+        (
+            'import Plots; int main() { Plots.title("sound gate"); return 0; }',
+            Capability.MODULES,
+            "has no LLVM/native lowering",
+        ),
+        (
+            "Vector<int, Row> pass(Vector<int, Row> value) { return value; } int main() { return 0; }",
+            Capability.VECTOR,
+            "carries shape metadata across a function boundary",
+        ),
+        (
+            "int main() { Array<Vector<int, Row>> values = {[1, 2]}; return 0; }",
+            Capability.AGGREGATE_COLLECTION_ELEMENTS,
+            "shape metadata is not preserved",
+        ),
+        (
+            "int main() { println(); return 0; }",
+            Capability.PRINT,
+            "zero-argument println()",
+        ),
+        (
+            "int main() { Array<int> inner = {1}; Array<Array<int>> outer = {inner}; println(outer); return 0; }",
+            Capability.PRINT,
+            "unsupported element type 'Array<int>'",
+        ),
+        (
+            "int main() { for i in 1:0:3 { println(i); } return 0; }",
+            Capability.FOR,
+            "statically zero step",
+        ),
+        (
+            'int main() { Exception error = Exception("bad"); return 0; }',
+            Capability.ERROR_HANDLING,
+            "Exception",
+        ),
+    ],
+    ids=(
+        "double-remainder",
+        "boolean-cast",
+        "implicit-declaration",
+        "float",
+        "mixed-arithmetic",
+        "implicit-return-conversion",
+        "implicit-method-argument-conversion",
+        "power",
+        "tuple",
+        "list-size",
+        "unsupported-builtin",
+        "shape-bearing-signature",
+        "shape-bearing-collection",
+        "empty-print",
+        "nested-collection-print",
+        "zero-range-step",
+        "exception-value",
+    ),
+)
+def test_native_soundness_regressions_reject_before_lowering(
+    source: str,
+    capability: Capability,
+    detail: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    typed = _typed(source)
+    issue = next(
+        issue
+        for issue in backend_capability_issues(typed, BackendIdentity.NATIVE)
+        if issue.requirement.capability is capability
+    )
+
+    assert detail in (issue.requirement.detail or "")
+    assert issue.diagnostic_code == CAPABILITY_CATALOG[capability].diagnostic_code
+    assert issue.requirement.line >= 1
+    assert issue.requirement.column >= 1
+
+    def fail_if_lowered(*_args, **_kwargs):
+        raise AssertionError("IR lowering must not run")
+
+    monkeypatch.setattr(
+        "aether.ir.lowering.IRLowerer.lower_checked_program",
+        fail_if_lowered,
+    )
+    with pytest.raises(BackendCapabilityError):
+        LLVMBuilder().emit_llvm(typed)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "int main() { return 7 % 3; }",
+        "int main() { double value = double(1); println(value); return 0; }",
+        "int main() { int value = 1; value = 2; return value; }",
+        "double sum(double left, double right) { return left + right; } int main() { return 0; }",
+        "int main() { List<int> values = {2, 1}; values.sort(); return values.length; }",
+        "int main() { Vector<int, Row> value = [1, 2]; return value.length; }",
+        'int main() { println("ok"); return 0; }',
+        "int main() { for i in 1:2:3 { println(i); } return 0; }",
+    ],
+    ids=(
+        "int-remainder",
+        "explicit-double-cast",
+        "declared-assignment",
+        "homogeneous-arithmetic",
+        "supported-sort-and-length",
+        "local-vector-shape",
+        "print-value",
+        "nonzero-range-step",
+    ),
+)
+def test_native_soundness_positive_subsets_emit_llvm(source: str) -> None:
+    typed = _typed(source)
+
+    assert backend_capability_issues(typed, BackendIdentity.NATIVE) == ()
+    assert "define i32 @main(i32 %argc, ptr %argv)" in LLVMBuilder().emit_llvm(typed)
+
+
+def test_declaration_only_module_emits_valid_library_llvm_and_build_rejects_before_lowering(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    typed = _typed("int helper() { return 1; }")
+    llvm = LLVMBuilder().emit_llvm(typed)
+
+    assert "define i32 @helper()" in llvm
+    assert "define i32 @main(i32 %argc, ptr %argv)" not in llvm
+    assert "@__aether_program_main" not in llvm
+
+    def fail_if_lowered(*_args, **_kwargs):
+        raise AssertionError("IR lowering must not run")
+
+    monkeypatch.setattr(
+        "aether.ir.lowering.IRLowerer.lower_checked_program",
+        fail_if_lowered,
+    )
+    with pytest.raises(AetherTypeError, match="requires one entry point"):
+        LLVMBuilder().build(typed, output_path=tmp_path / "program")
+
+
+def test_platform_partial_process_arguments_reject_before_lowering(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    typed = _typed(
+        "import System; int main() { Array<string> arguments = System.args(); return arguments.length; }"
+    )
+    monkeypatch.setattr("aether.capabilities.sys.platform", "win32")
+
+    issue = next(
+        issue
+        for issue in backend_capability_issues(typed, BackendIdentity.NATIVE)
+        if issue.requirement.capability is Capability.PROCESS_ARGUMENTS
+    )
+    assert issue.requirement.requires_complete_support is True
+
+    def fail_if_lowered(*_args, **_kwargs):
+        raise AssertionError("IR lowering must not run")
+
+    monkeypatch.setattr(
+        "aether.ir.lowering.IRLowerer.lower_checked_program",
+        fail_if_lowered,
+    )
+    with pytest.raises(BackendCapabilityError):
+        LLVMBuilder().emit_llvm(typed)

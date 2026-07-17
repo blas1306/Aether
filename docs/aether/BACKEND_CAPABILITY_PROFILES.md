@@ -36,7 +36,7 @@ arquitectura, no capacidades solicitadas directamente por un programa.
 
 ## Perfiles actuales
 
-La versión actual del perfil es `21`. La versión `2` promovió `modules` e
+La versión actual del perfil es `22`. La versión `2` promovió `modules` e
 `imports` de `UNSUPPORTED` a `PARTIAL`; la versión `3` promovió `scalar-math`
 de `UNSUPPORTED` a `PARTIAL` en LLVM/native; la versión `4` incorpora el
 subconjunto de callables top-level tipados y sin captura en ambos backends. La
@@ -137,6 +137,24 @@ temp + fsync + rename + fsync del directorio; Windows y POSIX no-Linux reciben
 diagnóstico temprano. No declaran locking, backups, metadata cloning,
 transacciones multiarchivo ni cleanup de huérfanos tras una caída.
 
+La versión `22` cierra la frontera native: el detector usa los tipos chequeados
+y los bindings léxicos para delimitar exactamente el subset que puede recorrer
+AST→IR→SSA→LLVM. `for` pasa de `COMPLETE` a `PARTIAL` porque un rango con paso
+estáticamente cero se rechaza antes del lowering. `float` queda fuera del
+subset native estable; también se rechazan temprano conversiones implícitas,
+operadores y builtins sin lowering, tuplas/destructuring, formas de impresión
+sin layout, y valores Vector/Matrix cuando la frontera de función, struct o
+colección perdería su metadata de shape. Las restricciones de plataforma para
+argv y archivos se aplican en el mismo gate. Cada rechazo conserva capability,
+código `AE-BACKEND-*`, ubicación fuente y detalle tipado.
+
+La emisión LLVM de un módulo de declaraciones sin `main` produce ahora una
+librería válida, sin inventar un wrapper ejecutable. `build` valida primero el
+perfil y después exige el entry point, ambos antes del lowering. La evidencia
+del perfil 22 incluye regresiones negativas que sustituyen fallos tardíos de
+lowering/verifier/printer/clang y compilación con clang O0/O1/O2 de todo el
+corpus de ejemplos aceptado por native.
+
 Para `strings`, el subset native distingue la operación semántica concreta:
 
 - transporte de literales, variables, parámetros, returns, fields y elementos
@@ -230,8 +248,9 @@ comparan por identidad. `contains/indexOf` requieren Eq del elemento.
 
 IR/SSA verifican el tipo nominal de cada `eq/ne` y búsqueda. LLVM emite helpers
 deterministas `__ae_eq_*`, con fast path de handle, length, recorrido ordenado y
-salida temprana; los mismos helpers sirven a operadores y búsqueda. `float` y
-`double` conservan IEEE-754 y string delega en `aether_string_equal`. El perfil
+salida temprana; los mismos helpers sirven a operadores y búsqueda. `double`
+conserva IEEE-754, `float` queda fuera de native desde el perfil 22 y string
+delega en `aether_string_equal`. El perfil
 no incorpora hashing, Map/Set ni comparadores configurables.
 
 ## Actualización de perfil 14: concat y byte length

@@ -8,7 +8,7 @@ import pytest
 
 from aether.backend.llvm import LLVMBuilder, LLVMRunner
 from aether.backend.llvm.layout import LLVMTypeLayouts
-from aether.capabilities import BackendCapabilityError
+from aether.errors import AetherTypeError
 from aether.ir import (
     ArrayType,
     BoolType,
@@ -208,7 +208,7 @@ def test_struct_collection_search_is_native_but_sort_remains_rejected() -> None:
     assert _native_output(source) == "true\n"
 
     source = "struct Item { int value; } int main() { List<Item> values = {Item(1)}; values.sort(); return 0; }"
-    with pytest.raises(Exception, match="only supports sequences"):
+    with pytest.raises(AetherTypeError, match="only supports sequences"):
         LLVMBuilder().emit_llvm(_typed(source))
 
 

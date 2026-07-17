@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, fields, is_dataclass
 from enum import Enum
+import sys
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Mapping
 
@@ -18,15 +19,23 @@ from .types import (
     MatrixType,
     NullType,
     NullableType,
+    RangeType,
     TransposeVectorType,
     TupleType,
     VectorType,
 )
 from .scalar_math import (
     EXPERIMENTAL_SCALAR_MATH_FUNCTIONS,
+    NATIVE_SCALAR_MATH_FUNCTIONS,
     SCALAR_MATH_OPERATIONS,
 )
-from .string_parsing import DOUBLE_PARSE_RESULT_TYPE, INT_PARSE_RESULT_TYPE
+from .stdlib import is_builtin
+from .string_parsing import (
+    DOUBLE_PARSE_RESULT_TYPE,
+    INT_PARSE_RESULT_TYPE,
+    PARSE_BUILTINS,
+)
+from .text_codec import TEXT_CODEC_BUILTINS
 from .text_file_io import (
     APPEND_TEXT_BUILTIN,
     FILE_READ_RESULT_TYPE,
@@ -39,7 +48,7 @@ if TYPE_CHECKING:
     from .pipeline import TypedProgram
 
 
-CAPABILITY_PROFILE_VERSION = "21"
+CAPABILITY_PROFILE_VERSION = "22"
 
 
 class BackendIdentity(str, Enum):
@@ -325,7 +334,6 @@ _NATIVE_COMPLETE = {
     Capability.RETURN,
     Capability.IF,
     Capability.WHILE,
-    Capability.FOR,
     Capability.BREAK,
     Capability.CONTINUE,
     Capability.ENUMS,
@@ -551,6 +559,41 @@ class BackendCapabilityError(AetherError):
 
 _SCALAR_MATH_FUNCTIONS = frozenset(SCALAR_MATH_OPERATIONS)
 _FUNCTION_PLOT_BUILTINS = {"Plots.plot", "Plots.plot!"}
+_NATIVE_COLLECTION_BUILTINS = frozenset(
+    {
+        "copy",
+        "contains",
+        "index_of",
+        "pop",
+        "remove_at",
+        "push",
+        "insert",
+        "clear",
+        "sort",
+        "reverse",
+    }
+)
+_NATIVE_CAST_BUILTINS = frozenset({"int", "double"})
+_ALL_CAST_BUILTINS = frozenset({"int", "float", "double", "string", "boolean"})
+_NATIVE_LOWERED_BUILTINS = frozenset(
+    {
+        "print",
+        "println",
+        "System.args",
+        *_ALL_CAST_BUILTINS,
+        *_NATIVE_COLLECTION_BUILTINS,
+        *NATIVE_SCALAR_MATH_FUNCTIONS,
+        *PARSE_BUILTINS,
+        *TEXT_CODEC_BUILTINS,
+        READ_TEXT_BUILTIN,
+        WRITE_TEXT_BUILTIN,
+        WRITE_TEXT_ATOMIC_BUILTIN,
+        APPEND_TEXT_BUILTIN,
+    }
+)
+_NATIVE_BINARY_OPERATORS = frozenset(
+    {"+", "-", "*", "/", "%", "==", "!=", "<", "<=", ">", ">=", "&&", "||"}
+)
 
 
 class _CapabilityDetector:
@@ -559,12 +602,16 @@ class _CapabilityDetector:
         self.checker = typed_program.checker
         self._requirements: dict[Capability, CapabilityRequirement] = {}
         self._function_depth = 0
+        self._return_type: AetherType | None = None
+        self._assignment_target_types: dict[int, AetherType | None] = {}
+        self._indirect_call_types: dict[int, FunctionType] = {}
 
     def detect(self) -> tuple[CapabilityRequirement, ...]:
         checked = self.typed_program.checked_program
         for module_id in checked.dependency_order():
             module = checked.modules[module_id]
             self.checker = module.checker
+            self._analyze_lexical_bindings(module.program)
             self._visit(module.program)
             if module_id != checked.root_module:
                 self._record_imported_initialization_requirements(module.program)
@@ -641,9 +688,12 @@ class _CapabilityDetector:
         self._record_node(node)
         if isinstance(node, ast.FunctionDeclaration):
             self._function_depth += 1
+            previous_return_type = self._return_type
+            self._return_type = node.return_type
             try:
                 self._visit_dataclass(node)
             finally:
+                self._return_type = previous_return_type
                 self._function_depth -= 1
             return
         self._visit_dataclass(node)
@@ -653,6 +703,197 @@ class _CapabilityDetector:
             return
         for field in fields(node):
             self._visit(getattr(node, field.name))
+
+    def _analyze_lexical_bindings(self, program: ast.Program) -> None:
+        """Retain checked lexical facts that are not attached to assignment AST nodes."""
+
+        def lookup(scopes: list[dict[str, AetherType | None]], name: str) -> AetherType | None:
+            for scope in reversed(scopes):
+                if name in scope:
+                    return scope[name]
+            return None
+
+        def scan_expression(
+            expression: object,
+            scopes: list[dict[str, AetherType | None]],
+        ) -> None:
+            if isinstance(expression, ast.CallExpression) and "." not in expression.callee:
+                callee_type = lookup(scopes, expression.callee)
+                resolved = self._resolve_alias(callee_type) if callee_type is not None else None
+                if isinstance(resolved, FunctionType):
+                    self._indirect_call_types[id(expression)] = resolved
+            if not is_dataclass(expression):
+                return
+            for field in fields(expression):
+                value = getattr(expression, field.name)
+                if isinstance(value, list):
+                    for item in value:
+                        scan_expression(item, scopes)
+                elif isinstance(value, dict):
+                    for item in value.values():
+                        scan_expression(item, scopes)
+                else:
+                    scan_expression(value, scopes)
+
+        def scan_statements(
+            statements: list[ast.Statement],
+            scopes: list[dict[str, AetherType | None]],
+            fields_by_name: Mapping[str, AetherType] | None = None,
+        ) -> None:
+            for statement in statements:
+                if isinstance(statement, ast.VarDeclaration):
+                    scan_expression(statement.initializer, scopes)
+                    scopes[-1][statement.name] = (
+                        statement.type_name
+                        if statement.type_name is not None
+                        else self.checker.type_of_expression(statement.initializer)
+                    )
+                    continue
+                if isinstance(statement, ast.Assignment):
+                    scan_expression(statement.expression, scopes)
+                    if isinstance(statement.name, str):
+                        target_type = lookup(scopes, statement.name)
+                        if target_type is None and fields_by_name is not None:
+                            target_type = fields_by_name.get(statement.name)
+                        self._assignment_target_types[id(statement)] = target_type
+                        if target_type is None:
+                            scopes[-1][statement.name] = self.checker.type_of_expression(
+                                statement.expression
+                            )
+                    else:
+                        scan_expression(statement.name, scopes)
+                    continue
+                if isinstance(statement, ast.DestructuringAssignment):
+                    scan_expression(statement.expression, scopes)
+                    value_type = self._resolve_alias(
+                        self.checker.type_of_expression(statement.expression)
+                    )
+                    element_types: tuple[AetherType, ...] = ()
+                    if isinstance(value_type, TupleType):
+                        element_types = value_type.element_types
+                    elif isinstance(value_type, (VectorType, TransposeVectorType)):
+                        element_types = (value_type.element_type,) * len(statement.names)
+                    elif isinstance(value_type, MatrixType):
+                        element_types = (value_type.element_type,) * len(statement.names)
+                    for index, name in enumerate(statement.names):
+                        scopes[-1][name] = (
+                            element_types[index] if index < len(element_types) else None
+                        )
+                    continue
+                if isinstance(statement, ast.IfStatement):
+                    scan_expression(statement.condition, scopes)
+                    scan_statements(statement.body, [*scopes, {}], fields_by_name)
+                    if statement.else_body is not None:
+                        scan_statements(statement.else_body, [*scopes, {}], fields_by_name)
+                    continue
+                if isinstance(statement, ast.WhileStatement):
+                    scan_expression(statement.condition, scopes)
+                    scan_statements(statement.body, [*scopes, {}], fields_by_name)
+                    continue
+                if isinstance(statement, ast.ForInStatement):
+                    scan_expression(statement.iterable, scopes)
+                    iterable_type = self._resolve_alias(
+                        self.checker.type_of_expression(statement.iterable)
+                    )
+                    if isinstance(iterable_type, (ArrayType, ListType, VectorType, TransposeVectorType)):
+                        element_type: AetherType | None = iterable_type.element_type
+                    elif isinstance(iterable_type, RangeType):
+                        element_type = "int"
+                    else:
+                        element_type = statement.variable_type
+                    scan_statements(
+                        statement.body,
+                        [*scopes, {statement.variable: element_type}],
+                        fields_by_name,
+                    )
+                    continue
+                if isinstance(statement, ast.FunctionDeclaration):
+                    function_scope = {
+                        parameter.name: parameter.type_name
+                        for parameter in statement.parameters
+                    }
+                    scan_statements(statement.body, [function_scope], fields_by_name)
+                    continue
+                scan_expression(statement, scopes)
+
+        for statement in program.statements:
+            if isinstance(statement, ast.FunctionDeclaration):
+                scan_statements([statement], [{}])
+            elif isinstance(statement, ast.StructDeclaration):
+                field_types = {field.name: field.type_name for field in statement.fields}
+                if statement.constructor is not None:
+                    constructor_scope = {
+                        parameter.name: parameter.type_name
+                        for parameter in statement.constructor.parameters
+                    }
+                    constructor_scope["this"] = statement.name
+                    scan_statements(
+                        statement.constructor.body,
+                        [constructor_scope],
+                        field_types,
+                    )
+                for method in statement.methods:
+                    method_scope = {
+                        parameter.name: parameter.type_name
+                        for parameter in method.parameters
+                    }
+                    method_scope["this"] = statement.name
+                    scan_statements(method.body, [method_scope], field_types)
+            elif isinstance(statement, ast.ClassDeclaration):
+                # Classes are rejected as a capability before lowering, but
+                # scanning their expressions keeps diagnostics deterministic.
+                scan_expression(statement, [{}])
+
+    def _record_conversion(
+        self,
+        expression: ast.Expression | None,
+        target_type: AetherType | None,
+        node: object,
+        context: str,
+    ) -> None:
+        if expression is None or target_type is None:
+            return
+        source_type = self.checker.type_of_expression(expression)
+        source = self._resolve_alias(source_type) if source_type is not None else None
+        target = self._resolve_alias(target_type)
+        if source is None or source == target:
+            return
+        if (
+            isinstance(target, ArrayType)
+            and isinstance(expression, (ast.ArrayLiteral, ast.ListLiteral))
+            and isinstance(source, (ArrayType, ListType))
+            and self._resolve_alias(source.element_type) == self._resolve_alias(target.element_type)
+        ):
+            return
+        if (
+            isinstance(target, (VectorType, MatrixType))
+            and isinstance(expression, ast.MatrixLiteral)
+            and isinstance(source, type(target))
+            and self._resolve_alias(source.element_type) == self._resolve_alias(target.element_type)
+        ):
+            return
+        self._record(
+            Capability.PRIMITIVE_TYPES,
+            node,
+            detail=f"implicit conversion from '{source}' to '{target}' in {context}",
+            requires_complete_support=True,
+        )
+
+    def _record_signature_conversion(
+        self,
+        call: ast.CallExpression,
+        parameter_types: tuple[AetherType | None, ...],
+    ) -> None:
+        for index, (argument, parameter_type) in enumerate(
+            zip(call.arguments, parameter_types),
+            start=1,
+        ):
+            self._record_conversion(
+                argument,
+                parameter_type,
+                argument,
+                f"argument {index} to '{call.callee}'",
+            )
 
     def _record_node(self, node: object) -> None:
         if isinstance(node, ast.Program):
@@ -678,6 +919,90 @@ class _CapabilityDetector:
                 (ArrayType, ListType),
             ):
                 self._record(Capability.CONST_COLLECTION_REFERENCES, node)
+            if node.type_name is not None:
+                self._record_conversion(
+                    node.initializer,
+                    node.type_name,
+                    node,
+                    f"initializer for '{node.name}'",
+                )
+            return
+        if isinstance(node, ast.Assignment):
+            if isinstance(node.name, str):
+                target_type = self._assignment_target_types.get(id(node))
+                if target_type is None:
+                    self._record(
+                        Capability.VARIABLES_AND_CONST,
+                        node,
+                        detail=f"implicit declaration by assignment to '{node.name}'",
+                        requires_complete_support=True,
+                    )
+                else:
+                    self._record_conversion(
+                        node.expression,
+                        target_type,
+                        node,
+                        f"assignment to '{node.name}'",
+                    )
+            elif isinstance(node.name, ast.IndexExpression):
+                self._record_index_value_conversion(
+                    node.name.array,
+                    node.expression,
+                    node,
+                )
+            elif isinstance(node.name, ast.MatrixIndexExpression):
+                self._record_matrix_value_conversion(
+                    node.name.matrix,
+                    node.expression,
+                    node,
+                )
+            return
+        if isinstance(node, ast.DestructuringAssignment):
+            self._record(
+                Capability.VARIABLES_AND_CONST,
+                node,
+                detail="destructuring assignment",
+                requires_complete_support=True,
+            )
+            return
+        if isinstance(node, ast.IndexAssignment):
+            self._record_index_value_conversion(
+                node.array,
+                node.expression,
+                node,
+            )
+            return
+        if isinstance(node, ast.MatrixIndexAssignment):
+            self._record_matrix_value_conversion(
+                node.matrix,
+                node.expression,
+                node,
+            )
+            return
+        if isinstance(node, ast.FieldAssignment):
+            target_type = self._resolve_alias(
+                self.checker.type_of_expression(node.target)
+            )
+            struct_name = (
+                target_type.name
+                if isinstance(target_type, ClassType)
+                else target_type
+                if isinstance(target_type, str)
+                else None
+            )
+            symbol = self.checker.structs.get(struct_name) if isinstance(struct_name, str) else None
+            if symbol is not None:
+                field = next(
+                    (candidate for candidate in symbol.fields if candidate.name == node.field_name),
+                    None,
+                )
+                if field is not None:
+                    self._record_conversion(
+                        node.expression,
+                        field.type_name,
+                        node,
+                        f"assignment to field '{node.field_name}'",
+                    )
             return
         if isinstance(node, ast.Parameter):
             self._record_type(node.type_name, node)
@@ -698,8 +1023,18 @@ class _CapabilityDetector:
             if node.return_type == "void":
                 self._record(Capability.VOID_FUNCTIONS, node)
             self._record_type(node.return_type, node)
+            self._record_shape_bearing_signature_type(
+                node.return_type,
+                node,
+                f"return type of function '{node.name}'",
+            )
             for parameter in node.parameters:
                 self._record_type(parameter.type_name, node)
+                self._record_shape_bearing_signature_type(
+                    parameter.type_name,
+                    parameter,
+                    f"parameter '{parameter.name}' of function '{node.name}'",
+                )
             return
         if isinstance(node, ast.ExpressionFunctionDeclaration):
             self._record(
@@ -711,6 +1046,12 @@ class _CapabilityDetector:
             return
         if isinstance(node, ast.ReturnStatement):
             self._record(Capability.RETURN, node)
+            self._record_conversion(
+                node.expression,
+                self._return_type,
+                node,
+                "return",
+            )
             return
         if isinstance(node, ast.IfStatement):
             self._record(Capability.IF, node)
@@ -722,8 +1063,29 @@ class _CapabilityDetector:
             capability = Capability.FOR if isinstance(node.iterable, ast.RangeExpression) else Capability.FOR_IN
             self._record(capability, node)
             iterable_type = self.checker.type_of_expression(node.iterable)
+            if (
+                isinstance(node.iterable, ast.RangeExpression)
+                and node.iterable.step is not None
+                and _constant_int_expression(node.iterable.step) == 0
+            ):
+                self._record(
+                    Capability.FOR,
+                    node,
+                    detail="range with a statically zero step",
+                    requires_complete_support=True,
+                )
             if isinstance(self._resolve_alias(iterable_type), (ArrayType, ListType)):
                 self._record(Capability.BORROWED_FOR_IN_ELEMENTS, node)
+            if not isinstance(node.iterable, ast.RangeExpression) and not isinstance(
+                self._resolve_alias(iterable_type),
+                (ArrayType, ListType, VectorType, TransposeVectorType),
+            ):
+                self._record(
+                    Capability.FOR_IN,
+                    node,
+                    detail=f"iteration over '{self._resolve_alias(iterable_type)}'",
+                    requires_complete_support=True,
+                )
             return
         if isinstance(node, ast.BreakStatement):
             self._record(Capability.BREAK, node)
@@ -739,6 +1101,20 @@ class _CapabilityDetector:
                 self._record(Capability.STRUCT_METHODS, node.methods[0])
             for field in node.fields:
                 self._record_type(field.type_name, field)
+                resolved_field = self._resolve_alias(field.type_name)
+                if isinstance(
+                    resolved_field,
+                    (VectorType, TransposeVectorType, MatrixType),
+                ):
+                    self._record(
+                        Capability.STRUCTS,
+                        field,
+                        detail=(
+                            f"shape-bearing field '{field.name}' of type "
+                            f"'{resolved_field}'"
+                        ),
+                        requires_complete_support=True,
+                    )
             return
         if isinstance(node, ast.ClassDeclaration):
             self._record(Capability.CLASSES, node)
@@ -795,15 +1171,44 @@ class _CapabilityDetector:
             self._record(Capability.ARITHMETIC, node)
             if _contains_int_literal(node):
                 self._record(Capability.INTEGER_SAFETY, node)
-            if node.operator == "%" and _contains_double_literal(node):
+            left_type = self.checker.type_of_expression(node.left)
+            right_type = self.checker.type_of_expression(node.right)
+            left_resolved = self._resolve_alias(left_type) if left_type is not None else None
+            right_resolved = self._resolve_alias(right_type) if right_type is not None else None
+            if node.operator not in _NATIVE_BINARY_OPERATORS:
                 self._record(
                     Capability.ARITHMETIC,
                     node,
-                    detail="double remainder",
+                    detail=f"operator '{node.operator}' has no native lowering",
                     requires_complete_support=True,
                 )
-            left_type = self.checker.type_of_expression(node.left)
-            right_type = self.checker.type_of_expression(node.right)
+            elif node.operator == "%" and not (
+                left_resolved == "int" and right_resolved == "int"
+            ):
+                self._record(
+                    Capability.ARITHMETIC,
+                    node,
+                    detail=(
+                        "remainder requires int operands in LLVM/native, got "
+                        f"'{left_resolved}' and '{right_resolved}'"
+                    ),
+                    requires_complete_support=True,
+                )
+            elif (
+                left_resolved != right_resolved
+                and node.operator not in {"&&", "||"}
+                and left_resolved in {"int", "float", "double"}
+                and right_resolved in {"int", "float", "double"}
+            ):
+                self._record(
+                    Capability.ARITHMETIC,
+                    node,
+                    detail=(
+                        f"mixed operand types '{left_resolved}' and "
+                        f"'{right_resolved}' for '{node.operator}'"
+                    ),
+                    requires_complete_support=True,
+                )
             if (
                 left_type == "string"
                 and right_type == "string"
@@ -823,8 +1228,6 @@ class _CapabilityDetector:
                     requires_complete_support=True,
                 )
             if node.operator in {"==", "!="}:
-                left_resolved = self._resolve_alias(left_type) if left_type is not None else None
-                right_resolved = self._resolve_alias(right_type) if right_type is not None else None
                 if isinstance(left_resolved, ArrayType) and isinstance(right_resolved, ArrayType):
                     self._record(
                         Capability.STRUCTURAL_EQUALITY,
@@ -842,6 +1245,28 @@ class _CapabilityDetector:
             return
         if isinstance(node, ast.UnaryExpression):
             self._record(Capability.ARITHMETIC, node)
+            operand_type = self._resolve_alias(self.checker.type_of_expression(node.operand))
+            if node.operator == "'":
+                self._record(
+                    Capability.VECTOR
+                    if isinstance(operand_type, (VectorType, TransposeVectorType))
+                    else Capability.MATRIX,
+                    node,
+                    detail="transpose/conjugate-transpose operator",
+                    requires_complete_support=True,
+                )
+            elif node.operator == "-" and isinstance(
+                operand_type,
+                (VectorType, TransposeVectorType, MatrixType),
+            ):
+                self._record(
+                    Capability.VECTOR
+                    if isinstance(operand_type, (VectorType, TransposeVectorType))
+                    else Capability.MATRIX,
+                    node,
+                    detail="aggregate unary negation",
+                    requires_complete_support=True,
+                )
             return
         if isinstance(node, ast.InputCall):
             self._record(Capability.INPUT, node)
@@ -855,6 +1280,27 @@ class _CapabilityDetector:
                 node.method_name,
                 node,
             )
+            target_type = self._resolve_alias(
+                self.checker.type_of_expression(node.target)
+            )
+            struct_name = target_type if isinstance(target_type, str) else None
+            symbol = self.checker.structs.get(struct_name) if struct_name is not None else None
+            if symbol is not None:
+                method = next(
+                    (candidate for candidate in symbol.methods if candidate.name == node.method_name),
+                    None,
+                )
+                if method is not None:
+                    for index, (argument, parameter) in enumerate(
+                        zip(node.arguments, method.parameters),
+                        start=1,
+                    ):
+                        self._record_conversion(
+                            argument,
+                            parameter.type_name,
+                            argument,
+                            f"argument {index} to method '{node.method_name}'",
+                        )
             return
         if isinstance(node, ast.ArrayLiteral):
             self._record(Capability.ARRAY, node)
@@ -862,11 +1308,73 @@ class _CapabilityDetector:
         if isinstance(node, ast.ListLiteral):
             self._record(Capability.LIST, node)
             return
+        if isinstance(node, ast.TupleLiteral):
+            tuple_type = self.checker.type_of_expression(node)
+            self._record(
+                Capability.PRIMITIVE_TYPES,
+                node,
+                detail=f"tuple value '{tuple_type}'",
+                requires_complete_support=True,
+            )
+            return
+        if isinstance(node, ast.IndexExpression):
+            index_type = self.checker.type_of_expression(node.index)
+            collection_type = self._resolve_alias(
+                self.checker.type_of_expression(node.array)
+            )
+            if isinstance(index_type, RangeType) and isinstance(
+                collection_type,
+                (VectorType, TransposeVectorType),
+            ):
+                self._record(
+                    Capability.VECTOR,
+                    node,
+                    detail="Vector range indexing/slicing",
+                    requires_complete_support=True,
+                )
+            return
         if isinstance(node, ast.MatrixLiteral):
             self._record(Capability.VECTOR if node.vector else Capability.MATRIX, node)
+            if any(
+                isinstance(
+                    self._resolve_alias(self.checker.type_of_expression(element)),
+                    (VectorType, TransposeVectorType, MatrixType),
+                )
+                for row in node.rows
+                for element in row
+            ):
+                self._record(
+                    Capability.VECTOR if node.vector else Capability.MATRIX,
+                    node,
+                    detail="block/concatenated Vector or Matrix literal",
+                    requires_complete_support=True,
+                )
             return
         if isinstance(node, ast.SliceExpression):
             self._record(Capability.ARRAY_SLICING, node)
+            collection_type = self._resolve_alias(
+                self.checker.type_of_expression(node.collection)
+            )
+            if isinstance(collection_type, (VectorType, TransposeVectorType, MatrixType)):
+                self._record(
+                    Capability.VECTOR
+                    if isinstance(collection_type, (VectorType, TransposeVectorType))
+                    else Capability.MATRIX,
+                    node,
+                    detail="Vector/Matrix slicing",
+                    requires_complete_support=True,
+                )
+            return
+        if isinstance(node, ast.MatrixIndexExpression) and (
+            isinstance(node.row, (ast.FullSlice, ast.RangeExpression))
+            or isinstance(node.column, (ast.FullSlice, ast.RangeExpression))
+        ):
+            self._record(
+                Capability.MATRIX,
+                node,
+                detail="Matrix row/column slicing",
+                requires_complete_support=True,
+            )
 
     def _record_call(self, call: ast.CallExpression) -> None:
         desugared = self.checker.desugared_method_call(call)
@@ -876,7 +1384,85 @@ class _CapabilityDetector:
                 desugared.method_name,
                 call,
             )
+            target_type = self._resolve_alias(
+                self.checker.type_of_expression(desugared.target)
+            )
+            struct_name = target_type if isinstance(target_type, str) else None
+            symbol = (
+                self.checker.structs.get(struct_name)
+                if struct_name is not None
+                else None
+            )
+            if symbol is not None:
+                method = next(
+                    (
+                        candidate
+                        for candidate in symbol.methods
+                        if candidate.name == desugared.method_name
+                    ),
+                    None,
+                )
+                if method is not None:
+                    self._record_signature_conversion(
+                        call,
+                        tuple(parameter.type_name for parameter in method.parameters),
+                    )
         canonical = self._canonical_name(call.callee)
+        if canonical == "Exception":
+            self._record(
+                Capability.ERROR_HANDLING,
+                call,
+                detail="Exception construction",
+                requires_complete_support=True,
+            )
+        if canonical in {"int", "float", "double", "string", "boolean"}:
+            argument_type = (
+                self._resolve_alias(self.checker.type_of_expression(call.arguments[0]))
+                if call.arguments
+                else None
+            )
+            if canonical not in _NATIVE_CAST_BUILTINS or not (
+                argument_type in {"int", "double"} and argument_type != canonical
+            ):
+                self._record(
+                    Capability.PRIMITIVE_TYPES,
+                    call,
+                    detail=f"cast from '{argument_type}' to '{canonical}'",
+                    requires_complete_support=True,
+                )
+        indirect_type = self._indirect_call_types.get(id(call))
+        if indirect_type is not None:
+            self._record_signature_conversion(call, indirect_type.parameter_types)
+        else:
+            function = self.checker.functions.get(call.callee)
+            if function is None:
+                function = self.checker.qualified_functions.get(canonical)
+            if function is not None:
+                self._record_signature_conversion(
+                    call,
+                    tuple(parameter.type_name for parameter in function.parameters),
+                )
+            struct = self.checker.structs.get(call.callee)
+            if struct is None:
+                struct = self.checker.qualified_structs.get(canonical)
+            if struct is not None:
+                parameters = (
+                    struct.constructor.parameters
+                    if struct.constructor is not None
+                    else struct.fields
+                )
+                self._record_signature_conversion(
+                    call,
+                    tuple(parameter.type_name for parameter in parameters),
+                )
+        if is_builtin(canonical) and canonical not in _NATIVE_LOWERED_BUILTINS:
+            capability = self._unsupported_builtin_capability(call, canonical)
+            self._record(
+                capability,
+                call,
+                detail=f"builtin '{canonical}' has no LLVM/native lowering",
+                requires_complete_support=True,
+            )
         persistence_capability = {
             "encodeLedger": Capability.ALPT1_ENCODE,
             "decodeLedger": Capability.ALPT1_DECODE,
@@ -915,6 +1501,7 @@ class _CapabilityDetector:
                 Capability.PROCESS_ARGUMENTS,
                 call,
                 detail="owned Array<string> process snapshot",
+                requires_complete_support=sys.platform == "win32",
             )
         text_file_capability = {
             READ_TEXT_BUILTIN: Capability.TEXT_FILE_READ,
@@ -927,6 +1514,9 @@ class _CapabilityDetector:
                 Capability.FILES,
                 call,
                 detail="UTF-8 text-only file I/O",
+                requires_complete_support=(
+                    sys.platform == "win32" or not sys.platform.startswith("linux")
+                ),
             )
             self._record(
                 text_file_capability,
@@ -934,7 +1524,15 @@ class _CapabilityDetector:
             )
             if canonical == WRITE_TEXT_ATOMIC_BUILTIN:
                 self._record(Capability.DURABLE_TEXT_FILE_WRITE, call)
-        if canonical in {"copy", "contains", "index_of"} and call.arguments:
+        if canonical in {
+            *_NATIVE_COLLECTION_BUILTINS,
+            "length",
+            "is_empty",
+            "size",
+            "rows",
+            "cols",
+            "columns",
+        } and call.arguments:
             self._record_collection_operation(
                 call.arguments[0],
                 canonical,
@@ -942,6 +1540,25 @@ class _CapabilityDetector:
             )
         if canonical in {"print", "println"}:
             self._record(Capability.PRINT, call)
+            if not call.arguments:
+                self._record(
+                    Capability.PRINT,
+                    call,
+                    detail=f"zero-argument {canonical}()",
+                    requires_complete_support=True,
+                )
+            for argument in call.arguments:
+                argument_type = self._resolve_alias(
+                    self.checker.type_of_expression(argument)
+                )
+                reason = self._native_print_reason(argument_type, ())
+                if reason is not None:
+                    self._record(
+                        Capability.PRINT,
+                        argument,
+                        detail=reason,
+                        requires_complete_support=True,
+                    )
         if canonical in _SCALAR_MATH_FUNCTIONS:
             experimental = canonical in EXPERIMENTAL_SCALAR_MATH_FUNCTIONS
             self._record(
@@ -984,6 +1601,24 @@ class _CapabilityDetector:
             return
         resolved = self._resolve_alias(target_type)
         canonical_operation = "indexOf" if operation == "index_of" else operation
+        if isinstance(resolved, ListType) and canonical_operation in {
+            "push",
+            "insert",
+            "contains",
+            "indexOf",
+        }:
+            arguments = (
+                node.arguments
+                if isinstance(node, (ast.CallExpression, ast.MethodCall))
+                else []
+            )
+            if arguments:
+                self._record_conversion(
+                    arguments[-1],
+                    resolved.element_type,
+                    arguments[-1],
+                    f"List.{canonical_operation} value",
+                )
         if resolved == "string" and canonical_operation in {"trim", "split"}:
             self._record(
                 (
@@ -1000,6 +1635,43 @@ class _CapabilityDetector:
                 requires_complete_support=True,
             )
             return
+        if isinstance(resolved, ListType) and canonical_operation == "size":
+            self._record(
+                Capability.LIST,
+                node,
+                detail="List.size() has no LLVM/native lowering; use the .length property",
+                requires_complete_support=True,
+            )
+            return
+        if (
+            isinstance(resolved, (VectorType, TransposeVectorType))
+            and canonical_operation == "norm"
+        ):
+            self._record(
+                Capability.VECTOR,
+                node,
+                detail="Vector.norm() has no LLVM/native lowering",
+                requires_complete_support=True,
+            )
+            return
+        if isinstance(resolved, MatrixType) and canonical_operation == "transpose":
+            self._record(
+                Capability.MATRIX,
+                node,
+                detail="Matrix.transpose() has no LLVM/native lowering",
+                requires_complete_support=True,
+            )
+            return
+        if isinstance(resolved, (ArrayType, ListType)) and canonical_operation == "sort":
+            element_type = self._resolve_alias(resolved.element_type)
+            if element_type not in {"int", "double", "string"}:
+                self._record(
+                    Capability.ARRAY if isinstance(resolved, ArrayType) else Capability.LIST,
+                    node,
+                    detail=f"sort for element type '{element_type}'",
+                    requires_complete_support=True,
+                )
+            return
         if not isinstance(resolved, ListType) or canonical_operation not in {"contains", "indexOf"}:
             return
         self._record(
@@ -1014,6 +1686,41 @@ class _CapabilityDetector:
             return
         # Storage support remains tracked independently; Eq-based search is a
         # complete capability even when other aggregate element APIs are not.
+
+    def _record_index_value_conversion(
+        self,
+        collection: ast.Expression,
+        value: ast.Expression,
+        node: object,
+    ) -> None:
+        collection_type = self._resolve_alias(
+            self.checker.type_of_expression(collection)
+        )
+        if isinstance(
+            collection_type,
+            (ArrayType, ListType, VectorType, TransposeVectorType),
+        ):
+            self._record_conversion(
+                value,
+                collection_type.element_type,
+                node,
+                "indexed assignment",
+            )
+
+    def _record_matrix_value_conversion(
+        self,
+        matrix: ast.Expression,
+        value: ast.Expression,
+        node: object,
+    ) -> None:
+        matrix_type = self._resolve_alias(self.checker.type_of_expression(matrix))
+        if isinstance(matrix_type, MatrixType):
+            self._record_conversion(
+                value,
+                matrix_type.element_type,
+                node,
+                "matrix assignment",
+            )
 
     def _canonical_name(self, visible_name: str, *, constants: bool = False) -> str:
         aliases = (
@@ -1030,7 +1737,122 @@ class _CapabilityDetector:
             return f"{module}.{remainder}"
         return visible_name
 
+    def _unsupported_builtin_capability(
+        self,
+        call: ast.CallExpression,
+        canonical: str,
+    ) -> Capability:
+        if canonical.startswith("Plots."):
+            return Capability.MODULES
+        types = [
+            self._resolve_alias(self.checker.type_of_expression(argument))
+            for argument in call.arguments
+        ]
+        result_type = self._resolve_alias(self.checker.type_of_expression(call))
+        types.append(result_type)
+        if any(isinstance(type_, MatrixType) for type_ in types):
+            return Capability.MATRIX
+        if any(
+            isinstance(type_, (VectorType, TransposeVectorType))
+            for type_ in types
+        ):
+            return Capability.VECTOR
+        if any(isinstance(type_, ListType) for type_ in types):
+            return Capability.LIST
+        if any(isinstance(type_, ArrayType) for type_ in types):
+            return Capability.ARRAY
+        if canonical.startswith("Math.LinearAlgebra."):
+            return Capability.MATRIX
+        return Capability.MODULES
+
+    def _native_print_reason(
+        self,
+        type_name: AetherType | None,
+        active: tuple[str, ...],
+    ) -> str | None:
+        type_name = self._resolve_alias(type_name)
+        if type_name in {"int", "double", "boolean", "string"} or isinstance(
+            type_name,
+            EnumType,
+        ):
+            return None
+        if isinstance(type_name, (VectorType, TransposeVectorType, MatrixType)):
+            return None
+        if isinstance(type_name, (ArrayType, ListType)):
+            element_type = self._resolve_alias(type_name.element_type)
+            if isinstance(
+                element_type,
+                (
+                    ArrayType,
+                    ListType,
+                    FunctionType,
+                    VectorType,
+                    TransposeVectorType,
+                    MatrixType,
+                ),
+            ):
+                return f"printing {type_name} with unsupported element type '{element_type}'"
+            if isinstance(element_type, str) and element_type in self.checker.structs:
+                return self._native_print_reason(element_type, active)
+            return None
+        if isinstance(type_name, str) and type_name in self.checker.structs:
+            if type_name in active:
+                return f"printing recursive struct '{type_name}'"
+            symbol = self.checker.structs[type_name]
+            for field in symbol.fields:
+                reason = self._native_print_reason(
+                    field.type_name,
+                    (*active, type_name),
+                )
+                if reason is not None:
+                    return (
+                        f"printing struct '{type_name}' field '{field.name}': "
+                        f"{reason}"
+                    )
+            return None
+        return f"printing value of type '{type_name}'"
+
+    def _record_shape_bearing_signature_type(
+        self,
+        type_name: AetherType,
+        node: object,
+        context: str,
+    ) -> None:
+        resolved = self._resolve_alias(type_name)
+        if isinstance(resolved, FunctionType):
+            for parameter_type in resolved.parameter_types:
+                self._record_shape_bearing_signature_type(
+                    parameter_type,
+                    node,
+                    f"callable parameter in {context}",
+                )
+            self._record_shape_bearing_signature_type(
+                resolved.return_type,
+                node,
+                f"callable return in {context}",
+            )
+            return
+        if isinstance(resolved, (VectorType, TransposeVectorType)):
+            self._record(
+                Capability.VECTOR,
+                node,
+                detail=f"{context} carries shape metadata across a function boundary",
+                requires_complete_support=True,
+            )
+        elif isinstance(resolved, MatrixType):
+            self._record(
+                Capability.MATRIX,
+                node,
+                detail=f"{context} carries shape metadata across a function boundary",
+                requires_complete_support=True,
+            )
+
     def _record_type(self, type_name: AetherType | None, node: object) -> None:
+        if type_name is not None:
+            resolved_type = self._resolve_alias(type_name)
+            if resolved_type != type_name:
+                self._record_type(resolved_type, node)
+                return
         if isinstance(type_name, FunctionType):
             self._record(
                 Capability.FUNCTION_VALUES,
@@ -1064,6 +1886,12 @@ class _CapabilityDetector:
             self._record_type(type_name.element_type, node)
             return
         if isinstance(type_name, TupleType):
+            self._record(
+                Capability.PRIMITIVE_TYPES,
+                node,
+                detail=f"tuple type '{type_name}'",
+                requires_complete_support=True,
+            )
             for element_type in type_name.element_types:
                 self._record_type(element_type, node)
             return
@@ -1093,14 +1921,28 @@ class _CapabilityDetector:
                 requires_complete_support=True,
             )
             return
+        if type_name == "float":
+            self._record(
+                Capability.PRIMITIVE_TYPES,
+                node,
+                detail="type 'float' has no stable LLVM/native ABI",
+                requires_complete_support=True,
+            )
+            return
+        if type_name == "Exception":
+            self._record(
+                Capability.ERROR_HANDLING,
+                node,
+                detail="Exception values",
+                requires_complete_support=True,
+            )
+            return
         if isinstance(type_name, str) and type_name in {
             "int",
-            "float",
             "double",
             "boolean",
             "string",
             "void",
-            "Exception",
         }:
             self._record(Capability.PRIMITIVE_TYPES, node)
             if type_name == "string":
@@ -1141,6 +1983,42 @@ class _CapabilityDetector:
                 return type_name
             seen.add(type_name)
             type_name = self.checker.type_aliases[type_name]
+        if isinstance(type_name, str) and type_name in self.checker.enums:
+            symbol = self.checker.enums[type_name]
+            return EnumType(symbol.name, symbol.identity)
+        if isinstance(type_name, ArrayType):
+            return ArrayType(self._resolve_alias(type_name.element_type))
+        if isinstance(type_name, ListType):
+            return ListType(self._resolve_alias(type_name.element_type))
+        if isinstance(type_name, VectorType):
+            return VectorType(
+                self._resolve_alias(type_name.element_type),
+                type_name.length,
+                type_name.orientation,
+            )
+        if isinstance(type_name, TransposeVectorType):
+            return TransposeVectorType(
+                self._resolve_alias(type_name.element_type),
+                type_name.length,
+            )
+        if isinstance(type_name, MatrixType):
+            return MatrixType(
+                self._resolve_alias(type_name.element_type),
+                type_name.rows,
+                type_name.cols,
+                type_name.vector,
+            )
+        if isinstance(type_name, FunctionType):
+            return FunctionType(
+                tuple(self._resolve_alias(item) for item in type_name.parameter_types),
+                self._resolve_alias(type_name.return_type),
+            )
+        if isinstance(type_name, TupleType):
+            return TupleType(
+                tuple(self._resolve_alias(item) for item in type_name.element_types)
+            )
+        if isinstance(type_name, NullableType):
+            return NullableType(self._resolve_alias(type_name.base_type))
         return type_name
 
     def _collection_element_reason(
@@ -1155,13 +2033,15 @@ class _CapabilityDetector:
             return None
         if isinstance(type_name, EnumType):
             return None
-        if isinstance(
-            type_name,
-            (ArrayType, ListType, VectorType, MatrixType, TransposeVectorType),
-        ):
+        if isinstance(type_name, (ArrayType, ListType)):
             # These are existing reference/descriptor values. Copying their
             # current representation preserves the language's alias semantics.
             return None
+        if isinstance(type_name, (VectorType, MatrixType, TransposeVectorType)):
+            return (
+                "shape metadata is not preserved when a Vector/Matrix value is "
+                "loaded from Array/List storage"
+            )
         if isinstance(type_name, FunctionType):
             return None
         if isinstance(type_name, ClassType):
@@ -1312,16 +2192,6 @@ def _ast_hint(
     )
 
 
-def _contains_double_literal(node: object) -> bool:
-    if isinstance(node, ast.Literal):
-        return node.type_name == "double"
-    if isinstance(node, ast.UnaryExpression):
-        return _contains_double_literal(node.operand)
-    if isinstance(node, ast.BinaryExpression):
-        return _contains_double_literal(node.left) or _contains_double_literal(node.right)
-    return False
-
-
 def _contains_int_literal(node: object) -> bool:
     if isinstance(node, ast.Literal):
         return node.type_name == "int"
@@ -1330,6 +2200,15 @@ def _contains_int_literal(node: object) -> bool:
     if isinstance(node, ast.BinaryExpression):
         return _contains_int_literal(node.left) or _contains_int_literal(node.right)
     return False
+
+
+def _constant_int_expression(node: object) -> int | None:
+    if isinstance(node, ast.Literal) and node.type_name == "int":
+        return node.value if isinstance(node.value, int) and not isinstance(node.value, bool) else None
+    if isinstance(node, ast.UnaryExpression) and node.operator == "-":
+        value = _constant_int_expression(node.operand)
+        return -value if value is not None else None
+    return None
 
 
 def _dotted_name(node: object) -> str | None:

@@ -11,10 +11,11 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from aether.backend.llvm import LLVMBuildError, LLVMBuilder, LLVMRunner
+from aether.backend.llvm import LLVMBuilder, LLVMRunner
 from aether.errors import AetherTypeError
 from aether.capabilities import (
     AST_CAPABILITY_PROFILE,
+    BackendCapabilityError,
     NATIVE_CAPABILITY_PROFILE,
     Capability,
     CapabilityState,
@@ -625,7 +626,7 @@ def test_native_windows_reports_pending_utf16_path_boundary(
 ) -> None:
     typed = _typed('import io; int main() { io.writeTextAtomic("x", "y"); return 0; }')
     monkeypatch.setattr("aether.backend.llvm.build.sys.platform", "win32")
-    with pytest.raises(LLVMBuildError, match="UTF-16 path conversion is pending"):
+    with pytest.raises(BackendCapabilityError, match="capability 'files'"):
         LLVMBuilder().emit_llvm(typed)
 
 

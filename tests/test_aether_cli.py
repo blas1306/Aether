@@ -1463,7 +1463,8 @@ int bad(boolean flag) {
 
     assert exit_code == EXIT_LANGUAGE_ERROR
     assert stdout == ""
-    assert "IR backend does not support cast from 'bool' to 'int' yet" in stderr
+    assert "AE-BACKEND-PRIMITIVE_TYPES" in stderr
+    assert "cast from 'boolean' to 'int'" in stderr
 
 
 def test_emit_llvm_prints_branch_with_comparison(tmp_path: Path) -> None:
