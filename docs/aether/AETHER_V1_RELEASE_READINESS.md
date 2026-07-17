@@ -4,6 +4,11 @@
 > Los contratos vigentes están en [la spec v1](AETHER_LANGUAGE_SPEC_V1.md) y
 > [el perfil native v1](AETHER_NATIVE_PROFILE_V1.md).
 
+> Auditoría relacionada posterior al corte: [control de flujo e
+> iteración](CONTROL_FLOW_AND_ITERATION_AUDIT.md). Ese documento caracteriza la
+> implementación rc.1 y diseña la transición rc.2; no modifica este dictamen ni
+> la spec congelada.
+
 Fecha de corte: **16 de julio de 2026**
 
 Repositorio auditado: commit `634a404`

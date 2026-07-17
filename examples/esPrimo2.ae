@@ -1,0 +1,23 @@
+boolean esPrimo2(int p) {
+	if (p == 2 || p == 3) {
+		return true;
+	}
+
+	int cota = int(sqrt(p));
+	List<int> primosMenores = {};
+
+	if (p % 2 == 0) {
+		return false;
+	}
+
+	for (int i in 5:2:cota) {
+		primosMenores.push(i);
+	}
+
+	return true;
+}
+
+int main() {
+	println(esPrimo2(17));
+	return 0;
+}

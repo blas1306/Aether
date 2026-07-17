@@ -35,6 +35,7 @@ or future work. They do not expand the release profile.
 
 - [Aether v1 Release Readiness](AETHER_V1_RELEASE_READINESS.md)
 - [Backend Feature Parity](BACKEND_FEATURE_PARITY.md)
+- [Control Flow and Iteration Audit](CONTROL_FLOW_AND_ITERATION_AUDIT.md)
 
 Audit documents are dated snapshots. A closed finding remains useful history
 but is not a normative language rule.
