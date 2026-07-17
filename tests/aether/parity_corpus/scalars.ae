@@ -1,0 +1,16 @@
+int main() {
+    println(0);
+    println(-2147483648);
+    println(2147483647);
+    println(-5 % 2);
+    println(5 / 2);
+    println(1500.0);
+    println(-0.0);
+    println(1.0e20);
+    println(1.0 / 0.0);
+    println(-1.0 / 0.0);
+    println(0.0 / 0.0);
+    Array<double> values = {1500.0, -0.0, 2.5};
+    println(values);
+    return 0;
+}

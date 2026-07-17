@@ -92,9 +92,9 @@ def test_invalid_array_indices_panic_in_ast_ir_and_native(
     ast_source = f"Array<int> xs = {{{values}}}; {statement}"
     native_source = f"int main() {{ Array<int> xs = {{{values}}}; {statement} return 0; }}"
 
-    with pytest.raises(AetherRuntimeError, match=rf"Array index {index} out of bounds for length {length}"):
+    with pytest.raises(AetherRuntimeError, match="Aether panic: Array index out of bounds"):
         run_aether(ast_source)
-    with pytest.raises(IRExecutionError, match=rf"array index {index} out of bounds for length {length}"):
+    with pytest.raises(IRExecutionError, match="Aether panic: Array index out of bounds"):
         IRInterpreter(_lower(native_source)).call("main")
 
     if shutil.which("clang") is not None:
@@ -111,13 +111,13 @@ def test_invalid_array_set_does_not_modify_ast_or_ir_storage() -> None:
         type_checker=checker,
         interpreter=interpreter,
     )
-    with pytest.raises(AetherRuntimeError, match="Array index 3 out of bounds"):
+    with pytest.raises(AetherRuntimeError, match="Aether panic: Array index out of bounds"):
         execute_pipeline("xs[3] = 9;", type_checker=checker, interpreter=interpreter)
     assert [element.value for element in interpreter.global_env.get("xs").value] == [1, 2, 3]
 
     module = _lower("int set(Array<int> xs) { xs[3] = 9; return 0; }")
     values = [1, 2, 3]
-    with pytest.raises(IRExecutionError, match="array index 3 out of bounds"):
+    with pytest.raises(IRExecutionError, match="Aether panic: Array index out of bounds"):
         IRInterpreter(module).call("set", [values])
     assert values == [1, 2, 3]
 

@@ -299,9 +299,12 @@ class SCCPAnalyzer:
             return Unknown()
         if (
             not isinstance(operand, Constant)
-            or instruction.operator != "not"
-            or not isinstance(operand.value, bool)
+            or instruction.operator not in {"not", "neg"}
         ):
+            return Overdefined()
+        if instruction.operator == "neg" and isinstance(operand.value, (int, float)):
+            return Constant(-operand.value)
+        if not isinstance(operand.value, bool):
             return Overdefined()
         return Constant(not operand.value)
 

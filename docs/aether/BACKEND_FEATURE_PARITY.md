@@ -73,6 +73,14 @@ de paso cero. Las formas fuera del subset terminan en diagnósticos
 sin `main` pueden emitirse como LLVM de librería; sólo `build` exige entry point.
 El corpus aceptado por native compila con clang en O0/O1/O2.
 
+Cierre de paridad observable P0.2 sobre perfil 22 (16-07-2026): un runner
+diferencial compara stdout/stderr bytes, exit code y archivos finales entre AST
+y clang O0/O1/O2. `print/println(double)` usa un formatter público común de 15
+dígitos, conserva `.0`/signed zero y normaliza no finitos; ALPT1 conserva
+`%.17g` como codec canónico separado. Strings en agregados mantienen quotes y
+escapes length-aware. Panics públicos del corpus coinciden en mensaje/canal/code.
+Doce programas y 36 comparaciones quedan integrados al gate local de CI.
+
 Última revisión: 16 de julio de 2026, incluyendo el cierre del capability gate
 native y los dogfoods Numerical Methods, Expense Tracker y Aggregate
 Collections. Este documento reemplaza como
@@ -200,8 +208,8 @@ representación y lifecycle ya están activos en esta matriz.
 | `string.split(string)` | C método | C | C read-only, un arg, `Array<string>` owned | C bytes | call builtin tipada+loc | C | C firma/efectos | C `StringValue`+Array | C | C | C effect-aware | C lifecycle Array/string | `aether_string_split` dos pasadas | E2E+O0/O1/O2 | C | Completo | Matching exacto no solapado; conserva vacíos/NUL/UTF-8; separator vacío hace panic. |
 | `parseInt` / `parseDouble` | C llamada | C | C resultados nominales | C bytes compartidos | C calls tipadas+loc | C | C firma/layout | C | C | C | C effect-aware | C ABI struct | parser i32 + DFA/`strtod_l` locale C | E2E+O0/O1/O2 | C | Completo | Sin trim/locale implícito; defaults 0 no son sentinels; NaN/infinito rechazados. |
 | Interpolación/formatting string | C | C | C | C | N | N | N | N | N | N | N | N | N | AST | C | Solo AST | No se habilitó conversión ni formatting native. |
-| `print` / `println` escalares | llamada | C | C variádico | C | C `IRPrint` | C | C | C | C | C | C efecto | C | `printf`/helpers | E2E | C | Completo | Formato double general aún usa contratos host distintos en casos extremos. |
-| Print Array/List | llamada | C | C | C | P tipos | N general | N | N | N | N | N | N | AST | AST | P | Solo AST | Struct con campos Array/List escalares tiene helper específico, no print general de la colección. |
+| `print` / `println` escalares | llamada | C | C variádico | C | C `IRPrint` | C | C | C | C | C | C efecto | C | helper público double + IO length-aware | diferencial O0/O1/O2 | C | Completo | Double público: 15 dígitos, `.0` visible, signed zero y `NaN`/`Infinity`; no reutiliza el codec ALPT1. |
+| Print Array/List | llamada | C | C | C | C subset tipado | C subset | C | C | C | C | C | C subset | helpers tipados | diferencial+E2E | P | Parcial | Strings se quotean/escapan igual en AST/IR/native; layouts fuera del subset siguen rechazados por profile 22. |
 | Print Struct/Vector/Matrix | llamada | C | C | C | C subset | C subset | C | C | C | C | C | C subset | helpers | E2E | P | Parcial | Shape/tipos de campos limitan el subconjunto struct. |
 | `input` tipado | C nodo dedicado | C | C por contexto | C | N | N | N | N | N | N | N | N | AST stdin | AST | C | Solo AST | No existe input native. |
 | Argumentos del proceso (`System.args`) | — | C call | C `Array<string>`/arity | C inyectable | C builtin tipado | C | C | C | C | C | C efectos alloc/read/panic | C POSIX | contexto + wrapper `argc/argv` | E2E | C | Completo POSIX | `main` sigue sin parámetros; snapshot nuevo O(argc), UTF-8 estricto y Windows UTF-16 pendiente. |

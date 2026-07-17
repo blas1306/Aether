@@ -705,6 +705,14 @@ class LLVMPrinter:
 
     def _print_unary_op(self, instruction: SSAUnaryOp) -> str:
         if (
+            instruction.operator == "neg"
+            and isinstance(instruction.operand.type, DoubleType)
+            and isinstance(instruction.result.type, DoubleType)
+        ):
+            result = self._new_temp(instruction.result)
+            operand = self._operand(instruction.operand)
+            return f"{result} = fneg double {operand}"
+        if (
             instruction.operator != "not"
             or not isinstance(instruction.operand.type, BoolType)
             or not isinstance(instruction.result.type, BoolType)
@@ -1723,7 +1731,6 @@ class LLVMPrinter:
 
     def _print_print(self, instruction: SSAPrint) -> str:
         self._uses_print = True
-        suffix = "ln" if instruction.newline else ""
         value = self._operand(instruction.value)
         call_result = self._synthetic_temp("print.result")
 
@@ -1787,15 +1794,14 @@ class LLVMPrinter:
             )
 
         if isinstance(instruction.value.type, IntType):
+            suffix = "ln" if instruction.newline else ""
             return (
                 f"{call_result} = call i32 (ptr, ...) @printf("
                 f"ptr @.aether.io.int{suffix}, i32 {value})"
             )
         if isinstance(instruction.value.type, DoubleType):
-            return (
-                f"{call_result} = call i32 (ptr, ...) @printf("
-                f"ptr @.aether.io.double{suffix}, double {value})"
-            )
+            newline = "true" if instruction.newline else "false"
+            return f"call void @aether_print_double(double {value}, i1 {newline})"
         if isinstance(instruction.value.type, StringType):
             self._uses_string_runtime = True
             lines = [f"call void @aether_string_print(ptr {value})"]
@@ -1854,7 +1860,7 @@ class LLVMPrinter:
             lines.append(f"{result} = call i32 (ptr, ...) @printf(ptr @.aether.io.int, i32 {value})")
             return
         if isinstance(type_, DoubleType):
-            lines.append(f"{result} = call i32 (ptr, ...) @printf(ptr @.aether.io.double, double {value})")
+            lines.append(f"call void @aether_print_double(double {value}, i1 false)")
             return
         if isinstance(type_, StringType):
             self._uses_string_runtime = True
@@ -1904,12 +1910,14 @@ class LLVMPrinter:
             ]
         elif isinstance(element_type, DoubleType):
             print_lines = [
-                "  %printed = call i32 (ptr, ...) @printf(ptr @.aether.io.double, double %value)"
+                "  call void @aether_print_double(double %value, i1 false)"
             ]
         elif isinstance(element_type, StringType):
             self._uses_string_runtime = True
             print_lines = [
-                "  call void @aether_string_print(ptr %value)"
+                "  %quote.open = call i32 @putchar(i32 34)",
+                "  call void @aether_string_print_escaped(ptr %value)",
+                "  %quote.close = call i32 @putchar(i32 34)",
             ]
         elif isinstance(element_type, BoolType):
             print_lines = [

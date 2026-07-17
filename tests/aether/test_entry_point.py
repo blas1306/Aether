@@ -157,7 +157,11 @@ def test_script_panic_has_exit_code_one_for_every_backend(
     exit_code, stdout, stderr = _run_cli([f"--backend={backend}", str(program)])
 
     assert exit_code == 1
-    assert "out of bounds" in stdout + stderr
+    if backend in {"ast", "llvm"}:
+        assert stdout == "Aether panic: Array index out of bounds\n"
+        assert stderr == ""
+    else:
+        assert "out of bounds" in stdout + stderr
 
 
 @pytest.mark.parametrize(

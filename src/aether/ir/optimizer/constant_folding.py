@@ -144,9 +144,13 @@ class ConstantFolder:
         instruction: IRUnaryOp,
         constants: dict[IRValue, Any],
     ) -> IRConst | None:
-        if instruction.operator != "not" or instruction.operand not in constants:
+        if instruction.operand not in constants:
             return None
         value = constants[instruction.operand]
+        if instruction.operator == "neg" and isinstance(value, (int, float)):
+            return IRConst(instruction.result, -value)
+        if instruction.operator != "not":
+            return None
         if not isinstance(value, bool):
             return None
         return IRConst(instruction.result, not value)

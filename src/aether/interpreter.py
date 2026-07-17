@@ -1437,9 +1437,7 @@ class Interpreter:
         index = index_value.value - base
         if index < 0 or index >= length:
             label = _indexable_label(array_value.type_name)
-            raise AetherRuntimeError(
-                f"{label} index {index_value.value} out of bounds for length {length} ({_base_label(base)})."
-            )
+            raise AetherRuntimeError(f"Aether panic: {label} index out of bounds")
         return index
 
     def _require_matrix_indices(

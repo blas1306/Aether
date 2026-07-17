@@ -329,10 +329,10 @@ def test_const_array_blocks_index_assignment() -> None:
 
 
 def test_array_index_bounds_match_list_bounds() -> None:
-    with pytest.raises(AetherRuntimeError, match="Array index 3 out of bounds for length 3"):
+    with pytest.raises(AetherRuntimeError, match="Aether panic: Array index out of bounds"):
         run_aether("Array<int> a = {1, 2, 3}; println(a[3]);")
 
-    with pytest.raises(AetherRuntimeError, match="Array index 3 out of bounds for length 3"):
+    with pytest.raises(AetherRuntimeError, match="Aether panic: Array index out of bounds"):
         run_aether("Array<int> a = {1, 2, 3}; a[3] = 9;")
 
 
@@ -744,7 +744,7 @@ println(xs);
 
 
 def test_insert_out_of_bounds_is_runtime_error() -> None:
-    with pytest.raises(AetherRuntimeError, match="insert\\(\\) index must be between 0 and length\\(xs\\)"):
+    with pytest.raises(AetherRuntimeError, match="Aether panic: insert\\(\\) index is out of bounds"):
         run_aether("List<int> xs = {1, 2}; insert(xs, 3, 99);")
 
 
@@ -763,7 +763,7 @@ println(xs);
 
 
 def test_remove_at_out_of_bounds_is_runtime_error() -> None:
-    with pytest.raises(AetherRuntimeError, match="remove_at\\(\\) index 5 out of bounds for List of length 3"):
+    with pytest.raises(AetherRuntimeError, match="Aether panic: removeAt\\(\\) index is out of bounds"):
         run_aether("List<int> xs = {1, 2, 3}; remove_at(xs, 5);")
 
 

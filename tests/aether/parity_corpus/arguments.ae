@@ -1,0 +1,8 @@
+import System;
+
+int main() {
+    Array<string> args = System.args();
+    println(args);
+    println(args.length);
+    return args.length;
+}

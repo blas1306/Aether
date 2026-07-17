@@ -121,7 +121,7 @@ def aggregate_print_helper(prefix: str, element_type: object, *, matrix: bool) -
     if suffix == "i32":
         print_element = "  %element_result = call i32 (ptr, ...) @printf(ptr @.aether.io.int, i32 %element)"
     elif suffix == "f64":
-        print_element = "  %element_result = call i32 (ptr, ...) @printf(ptr @.aether.io.double, double %element)"
+        print_element = "  call void @aether_print_double(double %element, i1 false)"
     elif suffix == "i1":
         print_element = "\n".join(
             [
@@ -135,7 +135,7 @@ def aggregate_print_helper(prefix: str, element_type: object, *, matrix: bool) -
             [
                 "  %quote_stream = load ptr, ptr @stdout",
                 f"  %quote_open = call i32 @fputs(ptr @.aether.{prefix}.quote, ptr %quote_stream)",
-                "  call void @aether_string_print(ptr %element)",
+                "  call void @aether_string_print_escaped(ptr %element)",
                 f"  %quote_close = call i32 @fputs(ptr @.aether.{prefix}.quote, ptr %quote_stream)",
             ]
         )

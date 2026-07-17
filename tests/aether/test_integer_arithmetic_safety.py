@@ -93,11 +93,11 @@ println(-5 % 2);
 def test_float_division_by_zero_keeps_ieee_754_semantics() -> None:
     body = "println(1.0 / 0.0); println(0.0 / 0.0);"
 
-    assert run_aether(body).output == "inf\nnan\n"
+    assert run_aether(body).output == "Infinity\nNaN\n"
 
     interpreter = IRInterpreter(IRBackend().lower_verified(_typed(_compiled_source(body))))
     assert interpreter.call("main") == 0
-    assert interpreter.output == "inf\nnan\n"
+    assert interpreter.output == "Infinity\nNaN\n"
 
 
 def test_int_binary_effect_is_derived_from_operand_types() -> None:

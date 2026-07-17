@@ -16,6 +16,7 @@ from aether.ir import (
     IRLowerer,
     IRReturn,
     IRStore,
+    IRUnaryOp,
     IRVectorNew,
     IntType,
     StringType,
@@ -90,13 +91,11 @@ double negativeRatio(int a, int b) {
 """
     )
 
-    divide, zero, negate, terminator = module.functions[0].blocks[0].instructions
+    divide, negate, terminator = module.functions[0].blocks[0].instructions
 
     assert divide.operator == "div"
     assert str(divide.result.type) == "double"
-    assert zero == IRConst(zero.result, 0)
-    assert zero.result.type == divide.result.type
-    assert negate == IRBinaryOp(negate.result, "sub", zero.result, divide.result)
+    assert negate == IRUnaryOp(negate.result, "neg", divide.result)
     assert terminator == IRReturn(negate.result)
 
 

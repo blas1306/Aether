@@ -44,7 +44,10 @@ def process_args_snapshot(arguments: Sequence[bytes]) -> AetherValue:
     finally:
         # CollectionObject copy-in retained each dynamic string. Drop the
         # temporary construction owners so the new Array owns exactly one.
+        # Claim the pending temporary token first; otherwise it can be
+        # mistaken for a movable owner by a later read such as args[0].
         for element in reversed(elements):
+            element.value.claim_owner()
             destroy_value(element)
     return AetherValue(PROCESS_ARGS_TYPE, snapshot)
 
@@ -57,4 +60,5 @@ def process_args_ir_snapshot(arguments: Sequence[bytes]) -> CollectionObject:
         return CollectionObject("Array", "string", elements)
     finally:
         for element in reversed(elements):
+            element.claim_owner()
             destroy_value(element)

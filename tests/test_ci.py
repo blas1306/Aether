@@ -27,6 +27,7 @@ def test_parse_args_supports_all_pipeline_options() -> None:
             "--skip-bench",
             "--skip-llvm",
             "--skip-native",
+            "--skip-parity",
             "--verbose",
         ]
     )
@@ -35,6 +36,7 @@ def test_parse_args_supports_all_pipeline_options() -> None:
     assert args.skip_bench
     assert args.skip_llvm
     assert args.skip_native
+    assert args.skip_parity
     assert args.verbose
 
 
@@ -56,10 +58,12 @@ def test_pipeline_runs_stages_in_declared_order(monkeypatch: pytest.MonkeyPatch)
     assert [command[3] for command in commands[2:5]] == ["bench"] * 3
     llvm_end = 5 + len(ci.LLVM_EXAMPLES)
     assert [command[3] for command in commands[5:llvm_end]] == ["--emit-llvm"] * len(ci.LLVM_EXAMPLES)
-    assert [command[3] for command in commands[llvm_end:]] == ["build"] * len(ci.LLVM_EXAMPLES)
+    assert commands[llvm_end][1].endswith("scripts/differential_parity.py")
+    assert [command[3] for command in commands[llvm_end + 1:]] == ["build"] * len(ci.LLVM_EXAMPLES)
     assert output.getvalue().index("OK tests") < output.getvalue().index("OK benchmarks")
     assert output.getvalue().index("OK benchmarks") < output.getvalue().index("OK llvm")
     assert output.getvalue().index("OK llvm") < output.getvalue().index("OK native")
+    assert output.getvalue().index("OK llvm") < output.getvalue().index("OK differential parity")
 
 
 def test_pipeline_stops_and_propagates_command_failure(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -90,6 +94,6 @@ def test_pipeline_stops_and_propagates_command_failure(monkeypatch: pytest.Monke
     ],
 )
 def test_pipeline_exit_codes(runner, expected: int) -> None:
-    args = ci.parse_args(["--skip-tests", "--skip-bench", "--skip-llvm", "--skip-native"])
+    args = ci.parse_args(["--skip-tests", "--skip-bench", "--skip-llvm", "--skip-native", "--skip-parity"])
 
     assert ci.run_pipeline(args, runner=runner, which=lambda _name: None, stdout=StringIO()) == expected

@@ -12,19 +12,16 @@ Resultado: **NO READY FOR RC**
 
 Aether no está preparado para iniciar una Release Candidate de v1 ni para
 congelar el núcleo completo. El repositorio contiene una implementación mucho
-más sólida que la que sugieren varios documentos históricos: 3055 tests Python
+más sólida que la que sugieren varios documentos históricos: 3058 tests Python
 pasan, el pipeline local construye ejecutables reales con clang, los imports de
 funciones/structs/enums cruzan native, y string más Array/List tienen lifecycle
 coordinado. Sin embargo, esas fortalezas no cierran los contratos que una RC
 debe estabilizar.
 
-El primer bloqueo P0 quedó cerrado por el perfil 22. Permanecen dos bloqueos
-que no son cosméticos:
+Los bloqueos P0.1 y P0.2 quedaron cerrados sobre el perfil 22. Permanece un
+bloqueo que no es cosmético:
 
-1. programas admitidos por ambos backends tienen resultados observables
-   distintos, incluidos el formato de `double` y de strings dentro de
-   colecciones;
-2. no existe todavía una definición coherente y versionada de qué es “Aether
+1. no existe todavía una definición coherente y versionada de qué es “Aether
    v1”: el paquete, la CLI, la especificación normativa y documentación activa
    continúan en v0 o se contradicen con el código y entre sí.
 
@@ -63,7 +60,7 @@ no existir.
 
 | Validación | Resultado | Lectura crítica |
 | --- | --- | --- |
-| `pytest` completo | **3055 passed, 1 skipped**, 137.46 s | Base amplia; el único skip es Newton system experimental. No hay medición de cobertura. |
+| `pytest` completo | **3058 passed, 1 skipped**, 148.76 s | Base amplia; el único skip es Newton system experimental. No hay medición de cobertura. |
 | `scripts/ci.py --skip-tests` | **PASS**, 8.69 s | Pasaron whitespace, 3 benchmarks, 7 emisiones LLVM y 7 builds native. Es un pipeline local pequeño, no una matriz CI. |
 | Regression general SSA del repositorio | 112 programas; 84 bajaron a IR; 60 comparables; 28 no comparables | La comparación es estructural. Las excepciones de programas no comparables no prueban equivalencia de ejecución. |
 | Build de wheel | **PASS**: `aether_language-0-py3-none-any.whl` | El artefacto sigue versionado `0`; no valida una distribución v1. |
@@ -74,8 +71,9 @@ no existir.
 | Sondeo de local inferido `x = 1` | **PASS**: `AE-BACKEND-VARIABLES_AND_CONST` antes del lowering | La declaración por asignación sigue siendo válida en AST, no en native. |
 | Sondeo `float(16777217)` pasado a función | **PASS**: `AE-BACKEND-PRIMITIVE_TYPES` antes del lowering | `float` queda fuera del subset native estable. |
 | Corpus de ejemplos aceptado por native | **PASS**: 84/84 emitieron LLVM; 84/84 compilaron con clang en O0/O1/O2 | Ningún programa aceptado llegó a un fallo de lowering, verifier, printer o clang. |
-| `println(1500.0)` | AST: `1500.0`; native: `1500` | Divergencia observable en feature aceptada. |
-| `println(Array<string>{"a", "b"})` | AST: `{"a", "b"}`; native: `{a, b}` | Divergencia observable ya admitida por el dogfood report. |
+| Corpus diferencial profile 22 | **PASS**: 12 programas; 36 comparaciones AST/native; clang O0/O1/O2 | stdout/stderr por bytes, exit code y archivos finales idénticos en sandbox controlado. |
+| `println(1500.0)` | AST/native: `1500.0` | El formato público conserva `.0`; ALPT1 mantiene su codec canónico separado. |
+| `println(Array<string>{"a", "b"})` | AST/native: `{"a", "b"}` | Quotes y escapes públicos unificados, con escritura native length-aware. |
 
 El cierre P0.1 modificó únicamente el gate, la frontera de build y sus tests;
 no agregó sintaxis, tipos, stdlib ni features. La prueba de leaks con LeakSanitizer no
@@ -88,7 +86,7 @@ sustituye una matriz sanitizer automatizada.
 | Área | Estado | Evidencia y límite determinante |
 | --- | --- | --- |
 | Core language | **PARTIAL / DESIGN ISSUE** | El núcleo AST es amplio, pero v0 sigue siendo la especificación normativa y la frontera v1 no coincide con native. |
-| Tipos | **PARTIAL** | `int/double/boolean/string` tienen camino native fuerte; `float`, `complex` y nullable son frontend-only y reciben diagnóstico temprano. Overflow entero difiere entre Python e i32. |
+| Tipos | **PARTIAL** | `int/double/boolean/string` tienen camino native fuerte; `float`, `complex` y nullable son frontend-only y reciben diagnóstico temprano. El `int` aceptado usa checked i32 en AST/IR/native. |
 | Structs | **PARTIAL** | Value semantics, métodos, nesting, equality y colecciones cruzan native para un subset real. Faltan layouts de otros tipos y ABI documentada/estable. |
 | Classes | **UNSUPPORTED native / DESIGN ISSUE** | AST/typechecker/intérprete sí; no IR/SSA/LLVM. Lifecycle, layout y dispatch de referencia siguen abiertos. |
 | Interfaces | **UNSUPPORTED native / DESIGN ISSUE** | Conformidad y dispatch AST; sin representación ni lowering native. |
@@ -153,25 +151,31 @@ comprueban que no se invoca; todos los casos positivos atraviesan el pipeline.
 Los 84 ejemplos aceptados por el perfil emitieron LLVM y compilaron con clang
 O0/O1/O2. No queda un caso conocido que impida considerar sound el gate native.
 
-### P0.2 — La paridad observable falla dentro del perfil aceptado
+### P0.2 — CERRADO: paridad observable dentro del perfil aceptado
 
-El scope v1 declara la paridad AST/native “parcial y bloqueante”
-(`AETHER_V1_SCOPE.md:73`). Sigue siendo bloqueante:
+El perfil 22 conserva su frontera; no se añadió ninguna capability. El contrato
+público de `print/println(double)` usa 15 dígitos significativos, locale C,
+`NaN`, `Infinity`/`-Infinity`, conserva `-0.0` y agrega `.0` cuando una salida
+finita no contiene punto ni exponente. El codec ALPT1 continúa separado y usa
+su representación canónica `%.17g`.
 
-- `println(1500.0)` imprime `1500.0` en AST y `1500` en native;
-- strings en Array/List conservan comillas en AST y las pierden en native;
-- `int` usa enteros Python en AST y `i32` con wrap en native;
-- la superficie `float` queda fuera de native en el perfil 22; su semántica
-  host sigue siendo una cuestión AST si alguna vez se reconsidera;
-- errores y panics no tienen un contrato único en todas las capas.
+La impresión native de strings dentro de agregados ahora conserva comillas y
+escapa `\\`, `\"`, newline y tab como AST, sin tratar NUL como terminador. La
+negación double baja a `fneg`, preservando signed zero. Los panics de bounds,
+overflow, división, split y métodos List del corpus tienen el mismo prefijo,
+mensaje, stdout y exit 1. La CLI AST imprime panic público sin traceback host.
 
-Las dos primeras divergencias están además admitidas en
-`EXPENSE_TRACKER_DOGFOOD_REPORT.md:134-136`. Que el ejemplo las tolere no las
-convierte en semántica estable.
+El runner `scripts/differential_parity.py` descubre el corpus aceptado, valida
+el capability gate antes del lowering, ejecuta AST y compila el mismo LLVM con
+clang O0/O1/O2. Cada ejecución usa locale, timezone y hash seed controlados;
+compara stdout/stderr como bytes, exit code y snapshot de archivos. Los 12
+programas producen 36 comparaciones exactas e incluyen escalares, doubles IEEE,
+UTF-8/NUL, strings escapados, Array/List, structs/enums, copia/aliasing, argv,
+archivos y panics. El runner forma parte de `scripts/ci.py` como gate repetible.
 
-**Cierre exigido antes de RC:** definir outputs, overflow, conversiones y panics
-observables del subset candidato; obtener comparación AST/native exacta o
-rechazo temprano para todo lo que quede fuera.
+Durante el cierre también se corrigió un owner pendiente de strings de
+`System.args()`, que podía causar double-release y traceback Python al copiar
+`args[i]` a un local. No quedan divergencias conocidas dentro de este corpus.
 
 ### P0.3 — No existe todavía un artefacto ni contrato identificable como v1 RC
 
@@ -270,7 +274,7 @@ release.
 
 ### P2.1 — Trazabilidad de tests insuficiente pese al volumen
 
-Los 3055 tests son una fortaleza. Los huecos son de calidad de evidencia:
+Los 3058 tests son una fortaleza. Los huecos son de calidad de evidencia:
 
 - no hay umbral ni informe de coverage;
 - no hay property-based/fuzzing para parser, codecs, UTF-8, RC o verificadores;
@@ -414,7 +418,7 @@ source -> lexer/parser -> typechecker -> capability profile
 
 | Superficie | AST | IR/SSA | Native | Evaluación |
 | --- | --- | --- | --- | --- |
-| `int`, `double`, bool, control, funciones | Amplio | Amplio subset | Amplio subset | **PARTIAL** por overflow/format/error. |
+| `int`, `double`, bool, control, funciones | Amplio | Amplio subset | Amplio subset | **Paridad observable cerrada para profile 22**; la superficie global sigue parcial. |
 | `% double` | Ejecuta | No entra al pipeline native | Rechazo temprano `AE-BACKEND-ARITHMETIC` | **AST-only declarado**. |
 | `float` | Coerción host | No entra al pipeline native | Rechazo temprano `AE-BACKEND-PRIMITIVE_TYPES` | **AST-only declarado**. |
 | Casts | Amplios | int↔double efectivo | int↔double; resto rechazado temprano | **PARTIAL delimitado**. |
@@ -551,8 +555,8 @@ text IO, tests y ejemplos.
 
 **"Aether todavía necesita cerrar los siguientes bloques antes de una RC."**
 
-Los bloques son: una frontera native que rechace temprano y nunca produzca IR
-inválido, paridad observable del subset candidato, y un contrato/artefacto v1
+Los dos primeros bloques, frontera native sound y paridad observable del subset
+candidato, están cerrados. El bloqueo P0 restante es un contrato/artefacto v1
 normativo y versionado. Después deberán cerrarse para v1 final ownership general,
 errores, módulos, stdlib, portabilidad y release gates enumerados como P1.
 

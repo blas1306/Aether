@@ -149,9 +149,9 @@ int main() {
 def test_taken_array_access_panics_in_ast_and_ir(expression: str) -> None:
     source = f"int main() {{ Array<int> values = {{1}}; println({expression}); return 0; }}"
 
-    with pytest.raises(AetherRuntimeError, match="Array index 100 out of bounds"):
+    with pytest.raises(AetherRuntimeError, match="Aether panic: Array index out of bounds"):
         run_aether(source)
-    with pytest.raises(IRExecutionError, match="array index 100 out of bounds"):
+    with pytest.raises(IRExecutionError, match="Aether panic: Array index out of bounds"):
         IRInterpreter(_ir(source)).call("main")
 
 

@@ -80,6 +80,22 @@ int main() {
     assert result.output.splitlines() == ["true", "true", "true", "41", "2.5"]
 
 
+def test_string_copied_from_args_retains_independent_local_owner() -> None:
+    result = run_aether(
+        """
+import System;
+int main() {
+    Array<string> args = System.args();
+    string first = args[0];
+    println(first);
+    return 0;
+}
+""",
+        program_arguments=["owned"],
+    )
+    assert result.output == "owned\n"
+
+
 def test_programmatic_ast_rejects_non_utf8_surrogate_at_startup() -> None:
     with pytest.raises(
         AetherRuntimeError,

@@ -168,9 +168,13 @@ class SSAConstantFolder:
         instruction: SSAUnaryOp,
         constants: dict[SSAValue, Any],
     ) -> SSAConst | None:
-        if instruction.operator != "not" or instruction.operand not in constants:
+        if instruction.operand not in constants:
             return None
         value = constants[instruction.operand]
+        if instruction.operator == "neg" and isinstance(value, (int, float)):
+            return SSAConst(instruction.result, -value)
+        if instruction.operator != "not":
+            return None
         if not isinstance(value, bool):
             return None
         return SSAConst(instruction.result, not value)

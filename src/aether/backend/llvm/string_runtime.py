@@ -30,6 +30,7 @@ class LLVMStringRuntime:
         declare(sections, "declare noalias ptr @malloc(i64)")
         declare(sections, "declare void @free(ptr)")
         declare(sections, "declare i32 @puts(ptr)")
+        declare(sections, "declare i32 @putchar(i32)")
         declare(sections, "declare void @exit(i32) noreturn")
         declare(sections, "declare i32 @memcmp(ptr, ptr, i64)")
         declare(sections, "declare i64 @fwrite(ptr, i64, i64, ptr)")
@@ -51,6 +52,7 @@ class LLVMStringRuntime:
                 self._trim(),
                 self._compare(),
                 self._print(),
+                self._print_escaped(),
                 self._utf8_validator(),
                 self._from_utf8(),
             ]
@@ -946,6 +948,48 @@ class LLVMStringRuntime:
             "  %written = call i64 @fwrite(ptr %data, i64 1, i64 %length, ptr %stream)",
             "  br label %done",
             "done:",
+            "  ret void",
+            "}",
+        ])
+
+    @staticmethod
+    def _print_escaped() -> str:
+        return "\n".join([
+            "define private void @aether_string_print_escaped(ptr %value) {",
+            "entry:",
+            "  %length = call i64 @aether_string_byte_length(ptr %value)",
+            "  %data = call ptr @aether_string_data(ptr %value)",
+            "  %stream = load ptr, ptr @stdout",
+            "  br label %loop",
+            "loop:",
+            "  %index = phi i64 [ 0, %entry ], [ %next, %advance ]",
+            "  %done = icmp eq i64 %index, %length",
+            "  br i1 %done, label %finish, label %inspect",
+            "inspect:",
+            "  %byte_ptr = getelementptr i8, ptr %data, i64 %index",
+            "  %byte = load i8, ptr %byte_ptr",
+            "  %is_slash = icmp eq i8 %byte, 92",
+            "  %is_quote = icmp eq i8 %byte, 34",
+            "  %is_newline = icmp eq i8 %byte, 10",
+            "  %is_tab = icmp eq i8 %byte, 9",
+            "  %quote_or_slash = or i1 %is_slash, %is_quote",
+            "  %newline_or_tab = or i1 %is_newline, %is_tab",
+            "  %escaped = or i1 %quote_or_slash, %newline_or_tab",
+            "  br i1 %escaped, label %escape, label %raw",
+            "escape:",
+            "  %slash_result = call i32 @putchar(i32 92)",
+            "  %escaped_byte = select i1 %is_newline, i32 110, i32 116",
+            "  %literal_byte = zext i8 %byte to i32",
+            "  %rendered_byte = select i1 %newline_or_tab, i32 %escaped_byte, i32 %literal_byte",
+            "  %escape_result = call i32 @putchar(i32 %rendered_byte)",
+            "  br label %advance",
+            "raw:",
+            "  %raw_result = call i64 @fwrite(ptr %byte_ptr, i64 1, i64 1, ptr %stream)",
+            "  br label %advance",
+            "advance:",
+            "  %next = add i64 %index, 1",
+            "  br label %loop",
+            "finish:",
             "  ret void",
             "}",
         ])

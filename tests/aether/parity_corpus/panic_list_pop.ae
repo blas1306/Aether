@@ -1,0 +1,6 @@
+int main() {
+    println("before");
+    List<int> values = {};
+    values.pop();
+    return 0;
+}

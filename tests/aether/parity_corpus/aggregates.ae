@@ -1,0 +1,26 @@
+enum Tone { Light, Dark }
+
+struct Label { string text; boolean active; }
+struct Item { Label label; int count; Tone tone; }
+
+void mutate(Item item) { item.count = 99; }
+
+int main() {
+    Item first = Item(Label("same", true), 2, Tone.Light);
+    Item copy = first;
+    mutate(copy);
+    copy.count = 3;
+    println(first);
+    println(copy);
+    println(first == Item(Label("same", true), 2, Tone.Light));
+    List<Item> items = {first};
+    items.push(copy);
+    println(items);
+    println(items.contains(first));
+    println(items.indexOf(copy));
+    List<Item> sliced = items[0:1];
+    sliced[0].count = 8;
+    println(items[0].count);
+    println(sliced[0].count);
+    return 0;
+}

@@ -1,0 +1,6 @@
+int main() {
+    println("before");
+    int zero = 0;
+    println(1 % zero);
+    return 0;
+}

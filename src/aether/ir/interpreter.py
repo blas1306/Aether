@@ -8,6 +8,7 @@ from typing import Any, Callable, NoReturn, Sequence
 from aether.array_safety import checked_array_length_to_int
 from aether.collection_value import CollectionObject, copy_init_value, destroy_value
 from aether.errors import AetherRuntimeError
+from aether.formatting import format_public_double
 from aether.process_arguments import (
     PROCESS_ARGS_BUILTIN,
     normalize_program_arguments,
@@ -223,6 +224,8 @@ class IRInterpreter:
     ) -> str:
         if isinstance(value, bool):
             return "true" if value else "false"
+        if isinstance(value_type, DoubleType):
+            return format_public_double(float(value))
         if isinstance(value_type, EnumType):
             if not isinstance(value, IREnumConstant) or value.enum_name != value_type.name:
                 raise IRExecutionError("IR Enum print requires a matching nominal enum value")
@@ -275,6 +278,8 @@ class IRInterpreter:
             return f'"{escaped}"'
         if isinstance(value, bool):
             return "true" if value else "false"
+        if isinstance(value_type, DoubleType):
+            return format_public_double(float(value))
         if isinstance(value_type, EnumType):
             return self._format_print_value(value, value_type, None)
         if isinstance(value_type, StructType):
@@ -410,12 +415,15 @@ class IRInterpreter:
 
         if isinstance(instruction, IRUnaryOp):
             operand = self._value(instruction.operand, frame)
-            if instruction.operator != "not" or not isinstance(operand, bool):
-                raise IRExecutionError(
-                    f"Unsupported IR unary operation '{instruction.operator}'"
-                )
-            frame.values[instruction.result] = not operand
-            return False, None, None
+            if instruction.operator == "not" and isinstance(operand, bool):
+                frame.values[instruction.result] = not operand
+                return False, None, None
+            if instruction.operator == "neg" and isinstance(operand, (int, float)):
+                frame.values[instruction.result] = -operand
+                return False, None, None
+            raise IRExecutionError(
+                f"Unsupported IR unary operation '{instruction.operator}'"
+            )
 
         if isinstance(instruction, IRCompareOp):
             left = self._value(instruction.left, frame)
@@ -766,10 +774,7 @@ class IRInterpreter:
             if not isinstance(index, int) or isinstance(index, bool):
                 raise IRExecutionError("IR list_insert requires an int index")
             if index < 0 or index > len(list_value):
-                raise IRExecutionError(
-                    f"insert() index must be between 0 and length(xs); got {index} "
-                    f"for List of length {len(list_value)}"
-                )
+                raise IRExecutionError("Aether panic: insert() index is out of bounds")
             list_value.insert(index, self._value(instruction.value, frame))
             return False, None, None
 
@@ -778,7 +783,7 @@ class IRInterpreter:
             if not isinstance(list_value, list):
                 raise IRExecutionError("IR list_pop requires a list value")
             if not list_value:
-                raise IRExecutionError("pop() cannot be used on an empty List")
+                raise IRExecutionError("Aether panic: pop() cannot be used on an empty List")
             frame.values[instruction.result] = list_value.pop()
             return False, None, None
 
@@ -790,9 +795,7 @@ class IRInterpreter:
             if not isinstance(index, int) or isinstance(index, bool):
                 raise IRExecutionError("IR list_remove_at requires an int index")
             if index < 0 or index >= len(list_value):
-                raise IRExecutionError(
-                    f"index {index} out of bounds for List of length {len(list_value)}"
-                )
+                raise IRExecutionError("Aether panic: removeAt() index is out of bounds")
             frame.values[instruction.result] = list_value.pop(index)
             return False, None, None
 
@@ -1337,9 +1340,7 @@ class IRInterpreter:
         if type(index) is not int:
             raise IRExecutionError("IR array index must be int")
         if index < 0 or index >= len(array):
-            raise IRExecutionError(
-                f"IR array index {index} out of bounds for length {len(array)}"
-            )
+            raise IRExecutionError("Aether panic: Array index out of bounds")
 
     @staticmethod
     def _check_list_index(list_value: Any, index: Any) -> None:
@@ -1348,9 +1349,7 @@ class IRInterpreter:
         if type(index) is not int:
             raise IRExecutionError("IR List index must be int")
         if index < 0 or index >= len(list_value):
-            raise IRExecutionError(
-                f"List index {index} out of bounds for length {len(list_value)}"
-            )
+            raise IRExecutionError("Aether panic: List index out of bounds")
 
     @staticmethod
     def _check_vector_index(vector: Any, index: Any) -> int:

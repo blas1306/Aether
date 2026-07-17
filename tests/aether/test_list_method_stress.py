@@ -144,26 +144,13 @@ def test_list_pop_on_empty_list_has_clear_runtime_error() -> None:
         run_aether("List<int> xs = {}; xs.pop();")
 
 
-@pytest.mark.parametrize(
-    ("index", "expected"),
-    [
-        ("-1", "index -1 out of bounds for List of length 3"),
-        ("xs.size()", "index 3 out of bounds for List of length 3"),
-    ],
-)
-def test_list_remove_at_rejects_boundary_indices(index: str, expected: str) -> None:
-    with pytest.raises(AetherRuntimeError, match=expected):
+@pytest.mark.parametrize("index", ["-1", "xs.size()"])
+def test_list_remove_at_rejects_boundary_indices(index: str) -> None:
+    with pytest.raises(AetherRuntimeError, match=r"Aether panic: removeAt\(\) index is out of bounds"):
         run_aether(f"List<int> xs = {{1, 2, 3}}; xs.removeAt({index});")
 
 
-@pytest.mark.parametrize(
-    ("index", "value"),
-    [
-        ("-1", "-1"),
-        ("xs.size() + 1", "4"),
-    ],
-)
-def test_list_insert_rejects_out_of_range_indices(index: str, value: str) -> None:
-    message = rf"insert\(\) index must be between 0 and length\(xs\); got {value} for List of length 3"
-    with pytest.raises(AetherRuntimeError, match=message):
+@pytest.mark.parametrize("index", ["-1", "xs.size() + 1"])
+def test_list_insert_rejects_out_of_range_indices(index: str) -> None:
+    with pytest.raises(AetherRuntimeError, match=r"Aether panic: insert\(\) index is out of bounds"):
         run_aether(f"List<int> xs = {{1, 2, 3}}; xs.insert({index}, 9);")

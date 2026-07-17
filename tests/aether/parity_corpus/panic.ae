@@ -1,0 +1,6 @@
+int main() {
+    println("before");
+    Array<int> values = {1};
+    println(values[2]);
+    return 0;
+}

@@ -155,6 +155,15 @@ del perfil 22 incluye regresiones negativas que sustituyen fallos tardíos de
 lowering/verifier/printer/clang y compilación con clang O0/O1/O2 de todo el
 corpus de ejemplos aceptado por native.
 
+El cierre P0.2 no cambia estados ni versión del perfil: corrige semántica dentro
+de capacidades ya aceptadas. `scripts/differential_parity.py` descubre 12
+programas del corpus, valida profile 22 y compara AST contra clang O0/O1/O2 en
+36 ejecuciones. El contrato compara stdout/stderr como bytes, exit code y
+archivos finales bajo environment/locale controlados. El formato público double
+es distinto del codec ALPT1; panics públicos conservan mensaje, canal y code.
+Este runner se ejecuta desde `scripts/ci.py` y evita que un uso aceptado vuelva
+a divergir silenciosamente entre backends.
+
 Para `strings`, el subset native distingue la operación semántica concreta:
 
 - transporte de literales, variables, parámetros, returns, fields y elementos

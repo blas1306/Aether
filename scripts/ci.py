@@ -55,6 +55,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--skip-native", action="store_true", help="Skip native clang builds."
     )
     parser.add_argument(
+        "--skip-parity", action="store_true", help="Skip AST/native differential parity."
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="Show commands and their output while they run.",
@@ -116,6 +119,15 @@ def build_stages(
         )
         stages.append(Stage("llvm", commands, env))
 
+    if not args.skip_parity:
+        stages.append(
+            Stage(
+                "differential parity",
+                ((python, str(ROOT / "scripts" / "differential_parity.py")),),
+                env,
+            )
+        )
+
     if not args.skip_native:
         commands = tuple(
             (
@@ -157,14 +169,14 @@ def run_pipeline(
     started = time.perf_counter()
     clang_available = which("clang") is not None
 
-    if not clang_available and not args.skip_native:
+    if not clang_available and (not args.skip_native or not args.skip_parity):
         print("WARNING: clang was not found; native checks will be skipped.", file=stdout)
 
     with tempfile.TemporaryDirectory(prefix="aether-ci-") as temporary_dir:
         stages = build_stages(args, native_output_dir=Path(temporary_dir))
         for stage in stages:
-            if stage.name == "native" and not clang_available:
-                print("- native (skipped: clang not found)", file=stdout)
+            if stage.name in {"native", "differential parity"} and not clang_available:
+                print(f"- {stage.name} (skipped: clang not found)", file=stdout)
                 continue
 
             for command in stage.commands:

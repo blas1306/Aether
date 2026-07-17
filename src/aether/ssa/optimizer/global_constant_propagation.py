@@ -213,9 +213,13 @@ class SSAGlobalConstantPropagator:
         instruction: SSAUnaryOp,
         constants: dict[SSAValue, Any],
     ) -> Any | _Unknown:
-        if instruction.operator != "not" or instruction.operand not in constants:
+        if instruction.operand not in constants:
             return UNKNOWN
         value = constants[instruction.operand]
+        if instruction.operator == "neg" and isinstance(value, (int, float)):
+            return -value
+        if instruction.operator != "not":
+            return UNKNOWN
         return not value if isinstance(value, bool) else UNKNOWN
 
     def _compare_constant(

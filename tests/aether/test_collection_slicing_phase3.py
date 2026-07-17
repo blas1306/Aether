@@ -293,7 +293,7 @@ int main() {
 '''
     stdout = StringIO()
     assert LLVMRunner().run(_typed(source), stdout=stdout) == 0
-    assert stdout.getvalue() == "a\n{x, y}\n9\n3\n7\n"
+    assert stdout.getvalue() == 'a\n{"x", "y"}\n9\n3\n7\n'
 
 
 @pytest.mark.skipif(shutil.which("clang") is None, reason="clang is required")

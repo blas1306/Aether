@@ -1579,9 +1579,12 @@ class IRLowerer:
             operand = self._lower_expression(expression.operand, context)
             if not isinstance(operand.type, _NUMERIC_IR_TYPES):
                 self._unsupported(expression, f"operand type '{operand.type}'")
+            if isinstance(operand.type, (FloatType, DoubleType)):
+                result = context.temporary(operand.type)
+                context.block.instructions.append(IRUnaryOp(result, "neg", operand))
+                return result
             zero = context.temporary(operand.type)
-            zero_value: object = 0.0 if isinstance(operand.type, (FloatType, DoubleType)) else 0
-            context.block.instructions.append(IRConst(zero, zero_value))
+            context.block.instructions.append(IRConst(zero, 0))
             result = context.temporary(operand.type)
             context.block.instructions.append(IRBinaryOp(result, "sub", zero, operand))
             return result

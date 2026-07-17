@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from .types import AetherExceptionValue, AetherRange, AetherValue, ArrayType, ClassInstance, EnumValue, ListType, MatrixType, NullableType, RangeType, StructInstance, TransposeVectorType, TupleType, VectorType
 
 
@@ -98,9 +100,24 @@ def format_scalar(value: AetherValue) -> str:
         return "null"
     if value.type_name == "boolean":
         return "true" if value.value else "false"
+    if value.type_name == "double":
+        return format_public_double(float(value.value))
     if value.type_name == "complex":
         return _format_complex(value.value)
     return str(value.value)
+
+
+def format_public_double(value: float) -> str:
+    """Format binary64 for public output, separately from the ALPT1 codec."""
+
+    if math.isnan(value):
+        return "NaN"
+    if math.isinf(value):
+        return "-Infinity" if value < 0.0 else "Infinity"
+    rendered = format(value, ".15g")
+    if not any(marker in rendered for marker in (".", "e", "E")):
+        rendered += ".0"
+    return rendered
 
 
 def format_matrix_element(value: AetherValue) -> str:

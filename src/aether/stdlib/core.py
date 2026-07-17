@@ -452,7 +452,7 @@ def push_builtin(args: list[AetherValue]) -> AetherValue:
 def pop_builtin(args: list[AetherValue]) -> AetherValue:
     xs = _require_list_arg(args, "pop")
     if not xs.value:
-        raise AetherRuntimeError("pop() cannot be used on an empty List")
+        raise AetherRuntimeError("Aether panic: pop() cannot be used on an empty List")
     return xs.value.pop()
 
 
@@ -461,9 +461,7 @@ def insert_builtin(args: list[AetherValue]) -> AetherValue:
     index = _require_int_arg(args[1], "insert() index")
     length = len(xs.value)
     if index < 0 or index > length:
-        raise AetherRuntimeError(
-            f"insert() index must be between 0 and length(xs); got {index} for List of length {length}"
-        )
+        raise AetherRuntimeError("Aether panic: insert() index is out of bounds")
     value = _coerce_list_element_arg(xs, args[2], "insert")
     xs.value.insert(index, value)
     return AetherValue("void", VOID_VALUE)
@@ -474,7 +472,7 @@ def remove_at_builtin(args: list[AetherValue]) -> AetherValue:
     index = _require_int_arg(args[1], "remove_at() index")
     length = len(xs.value)
     if index < 0 or index >= length:
-        raise AetherRuntimeError(f"remove_at() index {index} out of bounds for List of length {length}")
+        raise AetherRuntimeError("Aether panic: removeAt() index is out of bounds")
     return xs.value.pop(index)
 
 

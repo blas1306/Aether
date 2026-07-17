@@ -319,6 +319,7 @@ def main(
             stderr=stderr,
             program_arguments=program_arguments,
         ),
+        stdout=stdout,
         stderr=stderr,
     )
 
@@ -758,10 +759,18 @@ def _run_language_action(action: Callable[[], None], *, stderr: TextIO) -> int:
     return EXIT_SUCCESS
 
 
-def _run_execution_action(action: Callable[[], int], *, stderr: TextIO) -> int:
+def _run_execution_action(
+    action: Callable[[], int],
+    *,
+    stdout: TextIO,
+    stderr: TextIO,
+) -> int:
     try:
         return action()
     except AetherError as exc:
+        if exc.message.startswith("Aether panic:"):
+            print(exc.message, file=stdout)
+            return EXIT_LANGUAGE_ERROR
         print(_format_language_error(exc), file=stderr)
         return EXIT_LANGUAGE_ERROR
 

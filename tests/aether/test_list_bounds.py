@@ -74,7 +74,7 @@ def test_invalid_list_indices_panic_in_ast_ir_and_native(
     statement = f"int ignored = xs[{index}];" if operation == "get" else f"xs[{index}] = 9;"
     ast_source = f"List<int> xs = {{{values}}}; {statement}"
     native_source = f"int main() {{ List<int> xs = {{{values}}}; {statement} return 0; }}"
-    expected = rf"List index {index} out of bounds for length {length}"
+    expected = "Aether panic: List index out of bounds"
 
     with pytest.raises(AetherRuntimeError, match=expected):
         run_aether(ast_source)
@@ -96,7 +96,7 @@ def test_invalid_ast_list_set_does_not_modify_the_list() -> None:
         interpreter=interpreter,
     )
 
-    with pytest.raises(AetherRuntimeError, match="List index 3 out of bounds"):
+    with pytest.raises(AetherRuntimeError, match="Aether panic: List index out of bounds"):
         execute_pipeline(
             "xs[3] = 9;",
             type_checker=checker,
@@ -110,7 +110,7 @@ def test_invalid_ir_list_set_does_not_modify_the_list() -> None:
     module = _lower("int set(List<int> xs) { xs[3] = 9; return 0; }")
     values = [1, 2, 3]
 
-    with pytest.raises(IRExecutionError, match="List index 3 out of bounds"):
+    with pytest.raises(IRExecutionError, match="Aether panic: List index out of bounds"):
         IRInterpreter(module).call("set", [values])
 
     assert values == [1, 2, 3]
@@ -150,7 +150,7 @@ def test_dce_preserves_unused_list_get_because_it_may_trap() -> None:
 
     assert any(isinstance(item, IRListGet) for item in _instructions(optimized_ir))
     assert any(isinstance(item, SSAListGet) for item in _instructions(optimized_ssa))
-    with pytest.raises(IRExecutionError, match="List index 1 out of bounds"):
+    with pytest.raises(IRExecutionError, match="Aether panic: List index out of bounds"):
         IRInterpreter(optimized_ir).call("main")
 
 

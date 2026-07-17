@@ -1,0 +1,5 @@
+int main() {
+    println("before");
+    println("value".split(""));
+    return 0;
+}

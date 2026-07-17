@@ -192,7 +192,7 @@ def test_list_pop_method_rejects_empty_list_at_runtime() -> None:
 
 
 def test_list_remove_at_method_rejects_out_of_range_index_at_runtime() -> None:
-    with pytest.raises(AetherRuntimeError, match="index 3 out of bounds for List of length 2"):
+    with pytest.raises(AetherRuntimeError, match=r"Aether panic: removeAt\(\) index is out of bounds"):
         run_aether("List<int> xs = {1, 2}; xs.removeAt(3);")
 
 

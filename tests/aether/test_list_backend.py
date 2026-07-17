@@ -827,7 +827,7 @@ def test_optimizers_preserve_insert_and_reads_around_it() -> None:
 @pytest.mark.parametrize("index", [-1, 3])
 def test_list_insert_invalid_index_panics_before_mutation(index: int) -> None:
     source = f"int main(){{ List<int> xs={{1,2}}; xs.insert({index},9); return xs.length; }}"
-    with pytest.raises(IRExecutionError, match=r"insert\(\) index must be between 0 and length"):
+    with pytest.raises(IRExecutionError, match=r"Aether panic: insert\(\) index is out of bounds"):
         IRInterpreter(_lower(source)).call("main")
 
     if shutil.which("clang") is not None:
@@ -940,7 +940,7 @@ def test_optimizers_preserve_remove_at_when_result_is_unused() -> None:
 def test_list_remove_at_invalid_index_panics(index: int) -> None:
     values = "" if index == 0 else "1,2"
     source = f"int main(){{ List<int> xs={{{values}}}; xs.removeAt({index}); return xs.length; }}"
-    with pytest.raises(IRExecutionError, match=r"index .* out of bounds for List of length"):
+    with pytest.raises(IRExecutionError, match=r"Aether panic: removeAt\(\) index is out of bounds"):
         IRInterpreter(_lower(source)).call("main")
 
     if shutil.which("clang") is not None:

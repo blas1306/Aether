@@ -2212,9 +2212,18 @@ class IRVerifier:
         self._fail(f"Unsupported binary operator '{operator}'")
 
     def _verify_unary(self, instruction: IRUnaryOp) -> None:
-        if instruction.operator != "not":
-            self._fail(f"Unsupported unary operator '{instruction.operator}'")
-        if not isinstance(instruction.operand.type, BoolType):
+        if instruction.operator == "neg":
+            if not isinstance(instruction.operand.type, (FloatType, DoubleType)):
+                self._fail(
+                    f"Unary op 'neg' requires float/double operand, got {instruction.operand.type}"
+                )
+            self._require_type(
+                instruction.result.type,
+                instruction.operand.type,
+                "Unary op 'neg' result type mismatch",
+            )
+            return
+        if instruction.operator != "not" or not isinstance(instruction.operand.type, BoolType):
             self._fail(
                 f"Unary op 'not' requires bool operand, got {instruction.operand.type}"
             )

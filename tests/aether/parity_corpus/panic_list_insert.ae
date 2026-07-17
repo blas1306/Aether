@@ -1,0 +1,6 @@
+int main() {
+    println("before");
+    List<int> values = {1};
+    values.insert(2, 9);
+    return 0;
+}
