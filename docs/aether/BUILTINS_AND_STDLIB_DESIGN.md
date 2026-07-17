@@ -1,5 +1,9 @@
 # Frontera entre builtins, stdlib y paquetes oficiales
 
+> Clasificación: **Design/RFC**. Las decisiones y APIs planeadas no constituyen
+> soporte de release. La superficie base comprometida está en la sección 13 de
+> [Aether Language Specification v1](AETHER_LANGUAGE_SPEC_V1.md).
+
 Estado: diseño para consolidación de v1, 14 de julio de 2026. Este documento
 clasifica responsabilidades; no migra masivamente la librería
 actual.

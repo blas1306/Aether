@@ -4,7 +4,12 @@ plugins {
 }
 
 group = "com.aetherstudio"
-version = "0.1.0"
+val aetherPackageVersion = rootProject.file("src/aether/version.py")
+    .readLines()
+    .first { it.startsWith("PACKAGE_VERSION = ") }
+    .substringAfter('"')
+    .substringBeforeLast('"')
+version = aetherPackageVersion.replace(Regex("rc([0-9]+)$"), "-rc.$1")
 
 repositories {
     mavenCentral()

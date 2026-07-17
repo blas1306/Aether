@@ -6,7 +6,7 @@ from .result import AetherRunResult
 from .runner import run_aether
 from .session import AetherSession
 from .types import AetherValue
-from .version import LANGUAGE_VERSION, __version__
+from .version import LANGUAGE_VERSION, PACKAGE_VERSION, __version__
 
 __all__ = [
     "AetherError",
@@ -20,6 +20,7 @@ __all__ = [
     "CompletionItem",
     "Diagnostic",
     "LANGUAGE_VERSION",
+    "PACKAGE_VERSION",
     "RunResult",
     "analyze_source",
     "completion_items",

@@ -1,5 +1,9 @@
 # Lifecycle de valores de Aether
 
+> Clasificación: **Design/RFC**. Define invariantes internos del compilador; la
+> semántica observable de release está en
+> [Aether Language Specification v1](../aether/AETHER_LANGUAGE_SPEC_V1.md).
+
 Estado: **contrato, ARC string y RC de objetos Array/List implementados para
 Aether v1**, 15 de julio de 2026. El lowering AST→IR emite lifecycle y cleanup
 estructural, el verifier comprueba el estado antes de SSA y la expansión genera

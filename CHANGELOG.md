@@ -5,10 +5,55 @@ exhaustiva de features. Los estados describen lo que existía al cerrar cada
 etapa; cuando el intérprete AST y el backend LLVM/native tienen coberturas
 distintas, esa diferencia se indica de forma explícita.
 
-Aether sigue siendo un prototipo en desarrollo y todavía no tiene una release
-estable. La especificación v0 conserva valor histórico y sintáctico, mientras
-que el alcance v1 y los perfiles de capacidades describen la consolidación en
-curso.
+Aether sigue en desarrollo y no tiene una release estable. La especificación
+v0 se conserva como historia; desde el primer candidato v1, el contrato vigente
+es la spec v1 junto con el perfil native normativo.
+
+## 1.0.0-rc.1 — 2026-07-16
+
+Primer candidato identificable del contrato Aether v1. No es production-ready
+y no declara ABI estable.
+
+### Alcance
+
+- Especificación normativa v1 y perfil native normativo generado/verificado
+  contra capability profile 22.
+- Identidad canónica `1.0.0rc1` en metadata Python, expuesta como
+  `1.0.0-rc.1` por CLI, REPL, LSP y metadata del plugin IntelliJ.
+- Wheel, source distribution, manifest JSON y checksums SHA-256 construidos por
+  un gate local que no publica artefactos.
+- Instalación limpia del wheel con stdlib, runtime LLVM generado, documentos
+  normativos, entry point `aether` y smokes AST/native.
+
+### Capacidades principales
+
+- Frontend estático con funciones, control de flujo, módulos, tipos nominales,
+  strings UTF-8, Array/List y matemática privilegiada.
+- Native Linux x86_64 para el subset delimitado por profile 22, con rechazo
+  temprano `AE-BACKEND-*` y paridad observable AST/native.
+- Arguments, IO texto UTF-8, save atómico/durable Linux y codec dogfood ALPT1
+  revision 1 sin cambios de formato.
+
+### Cambios incompatibles respecto del prototipo
+
+- `AETHER_V0_SPEC.md` deja de ser normativa.
+- El backend predeterminado sigue siendo native, pero su aceptación se define
+  exclusivamente mediante profile 22; no existe fallback AST.
+- Array/List usan reference assignment; `copy()` y slicing crean storage
+  exterior independiente. `int` es i32 checked y los panics públicos terminan
+  con exit 1.
+
+### Plataformas y limitaciones conocidas
+
+- Native validado únicamente en Linux x86_64 con clang en `PATH`; Windows,
+  macOS y POSIX genérico no están declarados soportados.
+- Classes, interfaces, input, exceptions, `float`, `complex`, nullable,
+  tuples/destructuring, interpolación y álgebra lineal avanzada permanecen
+  fuera de native profile 22 aunque parte de esa superficie exista en AST.
+- Imports native no incluyen storage/globales ni inicialización top-level de
+  módulos. `-O2` de inspección sigue siendo alias de `-O1`.
+- No hay unwind native, ABI/FFI estable, garantía sanitizer completa, CI
+  multi-plataforma ni reproducibilidad bit por bit demostrada.
 
 ## Unreleased
 

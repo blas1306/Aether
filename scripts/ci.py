@@ -90,7 +90,19 @@ def build_stages(
 ) -> tuple[Stage, ...]:
     python = sys.executable
     env = _python_env()
-    stages = [Stage("whitespace", (("git", "diff", "--check"),))]
+    stages = [
+        Stage("whitespace", (("git", "diff", "--check"),)),
+        Stage(
+            "documentation",
+            ((python, str(ROOT / "scripts" / "check_release_docs.py")),),
+            env,
+        ),
+        Stage(
+            "compileall",
+            ((python, "-m", "compileall", "-q", str(ROOT / "src"), str(ROOT / "scripts")),),
+            env,
+        ),
+    ]
 
     if not args.skip_tests:
         stages.append(Stage("tests", (_pytest_command(),), env))

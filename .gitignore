@@ -67,3 +67,6 @@ CON
 
 # LLVM build artifacts
 *.ll
+
+# Local, unpublished release artifacts
+dist/

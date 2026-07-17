@@ -1,5 +1,9 @@
 # Evolución de Aether
 
+> Clasificación: **Historical / informative**. Explica la evolución del
+> proyecto y no es un contrato de release. Consulte
+> [la especificación v1](aether/AETHER_LANGUAGE_SPEC_V1.md).
+
 Este documento explica por qué Aether tomó su forma actual. No define la
 gramática, no reemplaza la especificación y no promete que una capacidad de
 diseño esté disponible en todos los backends. Para el estado detallado

@@ -10,10 +10,12 @@ de lenguaje y sin relegar módulos, tipos, errores o IO a soluciones
 improvisadas. Aether no intenta reemplazar a Python, Julia, C++, Rust, Java o
 C# en todos los escenarios.
 
-El proyecto está en desarrollo activo y **no está listo para producción**. El
-frontend/intérprete AST cubre una superficie mayor que el compilador native;
-las diferencias se documentan explícitamente en la
-[auditoría de paridad](docs/aether/BACKEND_FEATURE_PARITY.md).
+Aether está preparando **`1.0.0-rc.1`**. Es un candidato para validar el
+contrato v1 y el perfil native 22, no una release final ni una declaración de
+production-readiness. El frontend/intérprete AST cubre una superficie mayor
+que el compilador native; la frontera aceptada está definida por la
+[especificación normativa v1](docs/aether/AETHER_LANGUAGE_SPEC_V1.md) y el
+[perfil native normativo](docs/aether/AETHER_NATIVE_PROFILE_V1.md).
 
 ```aether
 struct Point {
@@ -37,7 +39,7 @@ imprime `25`.
 
 ## Estado real
 
-### Estable dentro del prototipo actual
+### Comprometido dentro del candidato actual
 
 - lexer, parser, AST y typechecker con diagnósticos de ubicación;
 - `int` checked de 32 bits, `double`, `boolean`, funciones tipadas y `void`;
@@ -57,8 +59,8 @@ imprime `25`.
   públicos 1-based;
 - `print`/`println` escalares y ejecución/build native con clang.
 
-“Estable” aquí significa cubierto y coherente para ese alcance; no implica API
-congelada, seguridad para producción ni v1 terminada.
+“Comprometido” aquí significa cubierto y coherente para el contrato RC; no
+implica ABI estable, seguridad para producción ni v1 final terminada.
 
 ### Parcial
 
@@ -101,13 +103,16 @@ reimplementaciones de NumPy/SciPy/BLAS/LAPACK.
 
 ## Documentos de consolidación v1
 
+- [Especificación normativa Aether v1](docs/aether/AETHER_LANGUAGE_SPEC_V1.md)
+- [Perfil native normativo v1 / capability profile 22](docs/aether/AETHER_NATIVE_PROFILE_V1.md)
+- [Índice y clasificación documental](docs/aether/README.md)
 - [Alcance formal de Aether v1](docs/aether/AETHER_V1_SCOPE.md)
 - [Auditoría completa de paridad](docs/aether/BACKEND_FEATURE_PARITY.md)
 - [Diseño de builtins, stdlib y paquetes oficiales](docs/aether/BUILTINS_AND_STDLIB_DESIGN.md)
 - [Ejemplo modular de métodos numéricos](examples/numerical_methods/README.md)
 - [Informe de fricciones del ejemplo](docs/aether/NUMERICAL_METHODS_DOGFOOD_REPORT.md)
-- [Especificación Aether v0](docs/aether/AETHER_V0_SPEC.md), aún normativa para
-  sintaxis pero con pasajes históricos identificados en la auditoría
+- [Especificación Aether v0](docs/aether/AETHER_V0_SPEC.md), conservada como
+  documento histórico y no como contrato vigente
 
 La sintaxis está temporalmente congelada durante esta consolidación. Los
 cambios requieren una ambigüedad, inconsistencia, bloqueo evolutivo, problema
@@ -116,7 +121,22 @@ preferencia estética.
 
 ## Instalación y primer uso
 
-Desde un entorno Python de desarrollo:
+Desde un wheel RC construido localmente (no se publica automáticamente):
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install dist/aether_language-1.0.0rc1-py3-none-any.whl
+.venv/bin/aether --version
+```
+
+El resultado esperado identifica por separado lenguaje y perfil:
+
+```text
+Aether 1.0.0-rc.1
+Native capability profile 22
+```
+
+Para un checkout de desarrollo:
 
 ```bash
 python3 -m pip install -r requirements.txt
@@ -170,9 +190,10 @@ aether build examples/llvm/gcd_iterative.ae -o build/gcd
 ./build/gcd
 ```
 
-El backend native y `build` requieren `clang` en `PATH`. No existe fallback
-silencioso a AST: si una feature válida solo en AST llega al compilador, el CLI
-falla con un diagnóstico.
+El backend native y `build` están validados para **Linux x86_64** y requieren
+`clang` en `PATH` (clang no se incluye en el wheel). Windows y POSIX genérico
+no se declaran soportados. No existe fallback silencioso a AST: si una feature
+válida solo en AST llega al compilador, el CLI falla con un diagnóstico.
 
 ## Backends y pipeline
 
@@ -289,8 +310,9 @@ aether --backend=ast examples/numerical_methods/main.ae
 
 ## Módulos y imports
 
-El backend AST resuelve un módulo `A.B` como `A/B.ae` desde el directorio del
-archivo de entrada. Soporta:
+El frontend resuelve un módulo `A.B` como `A/B.ae` desde el directorio del
+archivo de entrada. AST soporta inicialización de módulo y native profile 22
+compila el subconjunto de declaraciones sin storage/import-time execution:
 
 - `package A.B;`
 - `import A.B;` e `import A.B as Alias;`
@@ -298,8 +320,10 @@ archivo de entrada. Soporta:
 - exports públicos, colisiones y detección de ciclos;
 - inicialización de módulo una vez por sesión.
 
-El compilador native rechaza imports: todavía no existe unidad multi-módulo,
-link ni contrato de inicialización compilada.
+Native soporta funciones, structs, enums, métodos, callables y firmas
+cross-module compatibles con el perfil. Rechaza globals, constantes que
+requieren storage y statements ejecutables importados porque todavía no existe
+inicialización compilada de módulos.
 
 ## REPL, LSP y editor
 
@@ -354,7 +378,8 @@ Véase [benchmarks/README.md](benchmarks/README.md).
 - `docs/compiler/`: implementación y auditorías históricas del compilador.
 - `legacy/`: MathTeX Studio aislado.
 
-El empaquetado activo descubre código bajo `src/` y pytest recoge `tests/`.
+El empaquetado activo descubre código bajo `src/`, incluye stdlib, runtime LLVM
+generado y los dos documentos normativos, y pytest recoge `tests/`.
 `src/aether/` y el CLI no importan `legacy/`.
 
 ## Desarrollo y validación
@@ -369,12 +394,26 @@ git diff --check
 Pipeline local completo:
 
 ```bash
-python scripts/ci.py
+.venv/bin/python scripts/ci.py
 ```
 
-Incluye whitespace, pytest, benchmarks rápidos, smoke LLVM y builds clang. Los
-tests de integración native se omiten cuando clang no está disponible. Detalle:
+Incluye integridad documental, compileall, whitespace, pytest, benchmarks,
+corpus diferencial en clang O0/O1/O2, smoke LLVM y builds native. Los tests de
+integración native se omiten cuando clang no está disponible. Detalle:
 [docs/compiler/CI.md](docs/compiler/CI.md).
+
+El gate de release no publica ni crea tags:
+
+```bash
+.venv/bin/python scripts/release.py --version 1.0.0-rc.1
+```
+
+Exige worktree limpio. Para validar cambios locales antes de commit se requiere
+el flag explícito `--allow-dirty`; el manifest deja `dirty_worktree: true` y el
+artefacto no debe publicarse. El comando construye wheel/sdist, instala el wheel
+en un venv limpio, ejecuta smokes AST/native/imports/strings/collections/argv/
+files/capability-gate y genera manifest más `SHA256SUMS` en `dist/`. No se
+afirma reproducibilidad bit por bit.
 
 Documentación técnica adicional:
 

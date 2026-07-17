@@ -1,5 +1,9 @@
 # Alcance formal de Aether v1
 
+> Clasificación: **Design/RFC**. Conserva los objetivos de consolidación; no es
+> la especificación de la release. El contrato vigente está en
+> [Aether Language Specification v1](AETHER_LANGUAGE_SPEC_V1.md).
+
 Estado del documento: propuesta normativa de alcance, revisada contra el
 repositorio el 15 de julio de 2026. Describe qué debe significar **v1**; no
 declara que el estado actual ya sea v1.

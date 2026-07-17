@@ -1,29 +1,28 @@
 # Aether v1 — auditoría de preparación para Release Candidate
 
+> Clasificación: **Audit**. Es una auditoría fechada, no una especificación.
+> Los contratos vigentes están en [la spec v1](AETHER_LANGUAGE_SPEC_V1.md) y
+> [el perfil native v1](AETHER_NATIVE_PROFILE_V1.md).
+
 Fecha de corte: **16 de julio de 2026**
 
 Repositorio auditado: commit `634a404`
 
 Perfil de capacidades auditado: `22`
 
-Resultado: **NO READY FOR RC**
+Resultado actualizado tras P0.3: **READY TO BEGIN RC; NOT READY FOR v1 FINAL**
 
 ## 1. Dictamen ejecutivo
 
-Aether no está preparado para iniciar una Release Candidate de v1 ni para
-congelar el núcleo completo. El repositorio contiene una implementación mucho
-más sólida que la que sugieren varios documentos históricos: 3058 tests Python
-pasan, el pipeline local construye ejecutables reales con clang, los imports de
-funciones/structs/enums cruzan native, y string más Array/List tienen lifecycle
-coordinado. Sin embargo, esas fortalezas no cierran los contratos que una RC
-debe estabilizar.
+Aether está preparado para **comenzar** una Release Candidate de v1 dentro del
+contrato y del perfil publicados, pero no para declarar v1 final ni congelar su
+ABI interno. El cierre P0.3 añadió contrato, identidad y artefactos sin ampliar
+features ni el subset native. Los hallazgos P1, P2 y P3 de esta auditoría
+permanecen abiertos con su prioridad original.
 
-Los bloqueos P0.1 y P0.2 quedaron cerrados sobre el perfil 22. Permanece un
-bloqueo que no es cosmético:
-
-1. no existe todavía una definición coherente y versionada de qué es “Aether
-   v1”: el paquete, la CLI, la especificación normativa y documentación activa
-   continúan en v0 o se contradicen con el código y entre sí.
+Los tres bloqueos P0 están cerrados sobre el mismo alcance: P0.1 delimita
+tempranamente profile 22, P0.2 asegura paridad observable dentro de lo aceptado
+y P0.3 identifica y verifica `Aether 1.0.0-rc.1`.
 
 El gate native ya no promete `float` ni otras formas sin camino completo:
 rechaza esas construcciones después del typechecker y antes del lowering con un
@@ -32,8 +31,8 @@ perfil 22 acepta alcanzó LLVM y clang O0/O1/O2 sin errores internos.
 
 Una suite verde demuestra una base de ingeniería considerable. No demuestra
 por sí sola paridad semántica, seguridad de ownership, portabilidad ni un
-contrato de release. En el estado actual, congelar convertiría divergencias y
-fronteras accidentales en compatibilidad prometida.
+contrato de release. La RC congela sólo la spec y el perfil publicados; no
+convierte los P1 ni las fronteras excluidas en compatibilidad prometida.
 
 ## 2. Alcance, método y criterio
 
@@ -177,25 +176,37 @@ Durante el cierre también se corrigió un owner pendiente de strings de
 `System.args()`, que podía causar double-release y traceback Python al copiar
 `args[i]` a un local. No quedan divergencias conocidas dentro de este corpus.
 
-### P0.3 — No existe todavía un artefacto ni contrato identificable como v1 RC
+### P0.3 — CERRADO: contrato y artefacto identificable como v1 RC
 
-- `pyproject.toml:7` tiene `version = "0"`.
-- `src/aether/version.py:3` define `LANGUAGE_VERSION = "0"`; CLI y REPL anuncian
-  Aether v0.
-- No hay tags en el repositorio auditado.
-- README mantiene la “Especificación Aether v0” como normativa
-  (`README.md:109`).
-- `AETHER_V1_SCOPE.md` es una propuesta de alcance y reconoce que la abstracción
-  reference/dispatch y Windows siguen abiertos (`:136-137`).
-- La documentación activa no ofrece una única tabla que vincule sintaxis,
-  semántica, backend, pruebas y condición de estabilidad.
+- `AETHER_LANGUAGE_SPEC_V1.md` es la especificación normativa y separa
+  semántica de lenguaje de disponibilidad por backend.
+- `AETHER_NATIVE_PROFILE_V1.md` es normativo y su tabla se genera/verifica
+  directamente contra capability profile 22.
+- `src/aether/version.py` contiene la única identidad mantenida:
+  `1.0.0rc1` PEP 440, derivada públicamente como `1.0.0-rc.1`. Alimenta
+  setuptools, wheel/sdist, CLI, REPL, LSP, plugin, tests y manifest.
+- `aether --version` informa `Aether 1.0.0-rc.1` y
+  `Native capability profile 22` desde un wheel, sin depender del checkout.
+- Wheel y sdist incluyen licencia, stdlib, runtime LLVM generado y documentos
+  esenciales; el wheel se instala con dependencias en un venv limpio.
+- `scripts/release.py --version 1.0.0-rc.1` comprueba limpieza salvo
+  `--allow-dirty`, ejecuta `scripts/ci.py`, construye, inspecciona, instala y
+  prueba los artefactos, y genera manifest más `SHA256SUMS` sin publicar.
+- Los smokes externos al checkout cubren version, AST/native, módulo/import,
+  string, colección, argv, archivo y rechazo `AE-BACKEND-*`.
+- El manifest distingue language version, package version y capability profile;
+  registra commit, timestamp policy, Python/plataforma, dirty flag, resumen de
+  gates, artefactos y SHA-256. Declara explícitamente que no se demostró
+  reproducibilidad bit por bit.
+- El gate completo pasó con 3065 tests, documentación, compileall, dogfoods,
+  corpus diferencial (12 programas, 36 comparaciones, clang O0/O1/O2),
+  benchmarks, emisiones LLVM, builds native y `git diff --check`.
 
-Una RC necesita poder responder qué contrato se está candidateando. Hoy “v1”
-es simultáneamente un scope propuesto, varios diseños aprobados por fases, un
-perfil 22 y un paquete v0. Congelar en esas condiciones fijaría contradicciones.
-
-**Cierre exigido antes de RC:** una fuente normativa v1 coherente con el código,
-un alcance explícitamente cerrado y un artefacto/versionado reproducible.
+El soporte declarado es AST validado en Linux y native **Linux x86_64 con
+clang**. No se declara Windows, macOS, POSIX genérico, ABI estable ni clang
+empaquetado. Los artefactos producidos con `--allow-dirty` son sólo evidencia
+local y no se deben publicar; un candidato publicable debe regenerarse desde
+un commit limpio. Este cierre no cambia ni cierra ningún hallazgo P1.
 
 ## 6. Hallazgos P1 — bloquean v1 final
 
@@ -551,15 +562,11 @@ text IO, tests y ejemplos.
 
 ## 14. Decisión final
 
-**B)**
+**A, para comenzar RC; B, para v1 final.**
 
-**"Aether todavía necesita cerrar los siguientes bloques antes de una RC."**
+**"Aether puede comenzar una Release Candidate `1.0.0-rc.1` dentro de la spec
+v1 y native profile 22, pero todavía debe cerrar los P1 antes de v1 final."**
 
-Los dos primeros bloques, frontera native sound y paridad observable del subset
-candidato, están cerrados. El bloqueo P0 restante es un contrato/artefacto v1
-normativo y versionado. Después deberán cerrarse para v1 final ownership general,
-errores, módulos, stdlib, portabilidad y release gates enumerados como P1.
-
-Esta conclusión no se basa en ausencia de cantidad de tests. Se basa en fallos
-reproducibles de contrato exactamente en las fronteras que una Release Candidate
-pretende congelar.
+P0.1, P0.2 y P0.3 están cerrados. Ownership general, errores, módulos con
+storage/init, stdlib futura, portabilidad, sanitizers y los demás hallazgos P1
+siguen abiertos; este dictamen no los rebaja ni los declara resueltos.

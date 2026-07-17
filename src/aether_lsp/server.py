@@ -12,6 +12,7 @@ from typing import Any, BinaryIO
 from urllib.parse import unquote, urlparse
 
 from aether import analyze_source
+from aether.version import LANGUAGE_VERSION
 from aether.stdlib.registry import builtin_aliases_for_import, builtin_names, is_builtin_namespace
 from autocomplete_engine import (
     AutocompleteRequest,
@@ -115,6 +116,10 @@ class AetherLanguageServer:
 
     def _initialize_result(self) -> JsonObject:
         return {
+            "serverInfo": {
+                "name": "Aether Language Server",
+                "version": LANGUAGE_VERSION,
+            },
             "capabilities": {
                 "textDocumentSync": {
                     "openClose": True,

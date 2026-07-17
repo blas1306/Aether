@@ -1,5 +1,9 @@
 # Perfiles de capacidades de backend
 
+> Clasificación: **Design/RFC**. Explica la evolución del gate programático.
+> La tabla normativa y sincronizada para la release está en
+> [Aether Native Profile v1](AETHER_NATIVE_PROFILE_V1.md).
+
 Los perfiles de capacidades son la fuente programática que usa Aether para
 distinguir una feature válida del lenguaje de una feature ejecutable por un
 backend concreto. El catálogo, los estados y los perfiles versionados viven en

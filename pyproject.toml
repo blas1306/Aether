@@ -1,14 +1,15 @@
 [build-system]
-requires = ["setuptools>=69"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "aether-language"
-version = "0"
+dynamic = ["version"]
 description = "The Aether language runtime and command-line interface"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { file = "LICENSE" }
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
 dependencies = [
     "numpy==2.4.2",
     "scipy==1.17.1",
@@ -21,12 +22,16 @@ studio = [
     "PySide6==6.10.2",
     "platformdirs==4.4.0",
 ]
+release = [
+    "build>=1.2,<2",
+]
 
 [project.scripts]
 aether = "aether.cli:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
+include-package-data = true
 py-modules = [
     "app_preferences",
     "autocomplete_engine",
@@ -41,3 +46,12 @@ py-modules = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.dynamic]
+version = { attr = "aether.version.PACKAGE_VERSION" }
+
+[tool.setuptools.data-files]
+"share/doc/aether" = [
+    "docs/aether/AETHER_LANGUAGE_SPEC_V1.md",
+    "docs/aether/AETHER_NATIVE_PROFILE_V1.md",
+]

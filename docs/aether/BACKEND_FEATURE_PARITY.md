@@ -1,5 +1,9 @@
 # Auditoría completa de paridad de backends
 
+> Clasificación: **Audit**. La matriz conserva evidencia y deuda por etapa; no
+> reemplaza [la spec v1](AETHER_LANGUAGE_SPEC_V1.md) ni
+> [el perfil native normativo](AETHER_NATIVE_PROFILE_V1.md).
+
 Actualización perfil 7 (15-07-2026): native completó transporte de handles al
 objeto UTF-8, igualdad por contenido, literales/vacío inmortales, ARC oculto,
 impresión length-aware y hooks de elementos string/struct para Array/List. Las

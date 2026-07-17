@@ -25,6 +25,7 @@ from .session import AetherSession
 from .ssa import print_ssa
 from .tokens import Token
 from .typechecker import TypeChecker
+from .capabilities import CAPABILITY_PROFILE_VERSION
 from .version import LANGUAGE_VERSION
 
 if TYPE_CHECKING:
@@ -121,7 +122,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--version",
         action="version",
-        version=f"Aether v{LANGUAGE_VERSION}",
+        version=(
+            f"Aether {LANGUAGE_VERSION}\n"
+            f"Native capability profile {CAPABILITY_PROFILE_VERSION}"
+        ),
     )
     return parser
 
@@ -410,7 +414,7 @@ def run_repl(*, stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:
         output_writer=stdout.write,
         input_reader=stdin.readline,
     )
-    stdout.write(f"Aether v{LANGUAGE_VERSION} REPL\n")
+    stdout.write(f"Aether {LANGUAGE_VERSION} REPL\n")
     stdout.write("Type \\exit or \\quit to leave.\n")
 
     while True:

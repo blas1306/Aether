@@ -1,5 +1,9 @@
 # RFC: semántica, ownership y lifecycle de `Array<T>` y `List<T>`
 
+> Clasificación: **Design/RFC**. Fundamenta el contrato, pero la formulación
+> normativa de release está en
+> [Aether Language Specification v1](AETHER_LANGUAGE_SPEC_V1.md).
+
 Estado: **decisión aprobada; Fases 1–6 implementadas para Aether v1**,
 15 de julio de 2026.
 

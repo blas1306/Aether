@@ -1,5 +1,9 @@
 # Decisión de diseño: modelo de strings y runtime de texto de Aether
 
+> Clasificación: **Design/RFC**. Describe decisiones internas e historia de
+> implementación. La semántica pública vigente está en
+> [Aether Language Specification v1](AETHER_LANGUAGE_SPEC_V1.md).
+
 Estado: **núcleo de representación y lifecycle implementado para Aether v1**,
 16 de julio de 2026. La ABI interna usa un handle `ptr` al objeto descrito aquí;
 ya no existe un camino native que interprete ese handle como `char *`.

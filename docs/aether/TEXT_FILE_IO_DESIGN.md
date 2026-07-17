@@ -1,5 +1,9 @@
 # I/O mínimo de archivos de texto UTF-8
 
+> Clasificación: **Design/RFC**. Registra decisiones y evidencia. La API y sus
+> garantías públicas de release están en
+> [Aether Language Specification v1](AETHER_LANGUAGE_SPEC_V1.md).
+
 Estado: núcleo implementado en perfil 18; escritura atómica/durable añadida en
 perfil 21, 16 de julio de 2026.
 
