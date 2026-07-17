@@ -196,7 +196,7 @@ por ello sería un alias: su mutación directa se rechaza como borrow read-only.
 Este patrón sí es válido y conserva la semántica normal de referencia:
 
 ```aether
-for List<int> inner in nestedLists {
+for (List<int> inner in nestedLists) {
     List<int> saved = inner;
     saved.push(1);
 }

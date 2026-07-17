@@ -447,7 +447,7 @@ La variable de iteración es un acceso **borrowed read-only** al elemento actual
 no una copia lógica automática:
 
 ```aether
-for item in transactions {
+for (item in transactions) {
     println(item);
 }
 ```
@@ -463,7 +463,7 @@ Contrato:
 - cualquier reallocation durante el loop está prohibida.
 
 ```aether
-for item in transactions {
+for (item in transactions) {
     item.amount = 0.0;
 }
 ```

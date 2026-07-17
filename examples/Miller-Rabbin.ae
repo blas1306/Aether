@@ -8,8 +8,8 @@ int powMod(int base, int exp, int m) {
     int result = 1;
     base = base % m;
 
-    while exp > 0 {
-        if exp % 2 == 1 {
+    while (exp > 0) {
+        if (exp % 2 == 1) {
             result = (result * base) % m;
         }
 
@@ -23,14 +23,14 @@ int powMod(int base, int exp, int m) {
 boolean millerRabinBase(int p, int a, int d, int s) {
     int x = powMod(a, d, p);
 
-    if x == 1 || x == p - 1 {
+    if (x == 1 || x == p - 1) {
         return true;
     }
 
-    for r in 1:(s - 1) {
+    for (r in 1:(s - 1)) {
         x = (x * x) % p;
 
-        if x == p - 1 {
+        if (x == p - 1) {
             return true;
         }
     }
@@ -39,7 +39,7 @@ boolean millerRabinBase(int p, int a, int d, int s) {
 }
 
 boolean MillerRabbin(int p) {
-    if p == 2 || p == 3 {
+    if (p == 2 || p == 3) {
         return true;
     }
 
@@ -51,30 +51,30 @@ boolean MillerRabbin(int p) {
         s += 1;
     }
 
-    for i in 1:4 {
+    for (i in 1:4) {
         int a = 2;
 
-        if i == 1 {
+        if (i == 1) {
             a = 2;
         }
 
-        if i == 2 {
+        if (i == 2) {
             a = 3;
         }
 
-        if i == 3 {
+        if (i == 3) {
             a = 5;
         }
 
-        if i == 4 {
+        if (i == 4) {
             a = 7;
         }
 
-        if a >= p {
+        if (a >= p) {
             continue;
         }
 
-        if millerRabinBase(p, a, d, s) == false {
+        if (millerRabinBase(p, a, d, s) == false) {
             return false;
         }
     }
@@ -82,10 +82,10 @@ boolean MillerRabbin(int p) {
     return true;
 }
 
-while true {
+while (true) {
     int p = input("Ingrese un numero: ");
 
-    if MillerRabbin(p) {
+    if (MillerRabbin(p)) {
         println("El numero $p$ es probablemente primo");
     } else {
         println("El numero $p$ no es primo");

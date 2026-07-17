@@ -28,7 +28,7 @@ def test_interpolates_function_call():
     result = run_aether(
         """
 int fib(int k) {
-    if k <= 1 {
+    if (k <= 1) {
         return k;
     }
     return fib(k - 1) + fib(k - 2);
@@ -45,7 +45,7 @@ def test_interpolates_multiple_expressions():
     result = run_aether(
         """
 int fib(int k) {
-    if k <= 1 {
+    if (k <= 1) {
         return k;
     }
     return fib(k - 1) + fib(k - 2);

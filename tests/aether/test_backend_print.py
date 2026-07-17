@@ -17,7 +17,7 @@ from aether.typechecker import TypeChecker
 
 SOURCE = """
 boolean esMayor(int x) {
-    if x >= 18 {
+    if (x >= 18) {
         return true;
     } else {
         return false;

@@ -211,25 +211,25 @@ def test_enter_on_keyword_autocomplete_expands_block_immediately(editor: CodeEdi
     editor._accept_autocomplete_and_maybe_expand_block(current)
     qapp.processEvents()
 
-    assert editor.toPlainText() == "for x in iterable {\n    \n}"
+    assert editor.toPlainText() == "for (x in iterable) {\n    \n}"
     cursor = editor.textCursor()
     assert cursor.blockNumber() == 0
-    assert cursor.selectionStart() == len("for ")
-    assert cursor.selectionEnd() == len("for x")
+    assert cursor.selectionStart() == len("for (")
+    assert cursor.selectionEnd() == len("for (x")
 
 
 @pytest.mark.parametrize(
     ("prefix", "key", "expected_text", "selection_start", "selection_end"),
     [
         ("fn", QtCore.Qt.Key.Key_Tab, "f(x) = expression;", len("f(x) = "), len("f(x) = expression")),
-        ("for", QtCore.Qt.Key.Key_Return, "for x in iterable {\n    \n}", len("for "), len("for x")),
-        ("if", QtCore.Qt.Key.Key_Tab, "if condition {\n    \n}", len("if "), len("if condition")),
+        ("for", QtCore.Qt.Key.Key_Return, "for (x in iterable) {\n    \n}", len("for ("), len("for (x")),
+        ("if", QtCore.Qt.Key.Key_Tab, "if (condition) {\n    \n}", len("if ("), len("if (condition")),
         (
             "while",
             QtCore.Qt.Key.Key_Return,
-            "while condition {\n    \n}",
-            len("while "),
-            len("while condition"),
+            "while (condition) {\n    \n}",
+            len("while ("),
+            len("while (condition"),
         ),
         ("func", QtCore.Qt.Key.Key_Tab, "int name() {\n    \n}", len("int "), len("int name")),
     ],
@@ -266,7 +266,7 @@ def test_ife_snippet_inserts_else_branch(editor: CodeEditor, qapp) -> None:
     _press_key(editor, QtCore.Qt.Key.Key_Return)
     qapp.processEvents()
 
-    assert editor.toPlainText() == "if condition {\n    \n} else {\n    \n}"
+    assert editor.toPlainText() == "if (condition) {\n    \n} else {\n    \n}"
     assert editor.textCursor().selectedText() == "condition"
 
 

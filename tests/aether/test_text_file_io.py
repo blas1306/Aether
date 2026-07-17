@@ -565,7 +565,7 @@ def test_generated_text_file_runtime_compiles_at_clang_profiles(
         io.writeTextAtomic("{_quoted_path(data_path)}", "a");
         io.appendText("{_quoted_path(data_path)}", "b");
         FileReadResult result = io.readText("{_quoted_path(data_path)}");
-        if result.status != FileStatus.Success {{ return 1; }}
+        if (result.status != FileStatus.Success) {{ return 1; }}
         return 0;
         }}'''
     )

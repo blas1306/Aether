@@ -53,12 +53,12 @@ def test_mutually_recursive_functions_are_order_independent() -> None:
     result = run_aether(
         """
 boolean even(int n) {
-    if n == 0 { return true; }
+    if (n == 0) { return true; }
     return odd(n - 1);
 }
 
 boolean odd(int n) {
-    if n == 0 { return false; }
+    if (n == 0) { return false; }
     return even(n - 1);
 }
 
@@ -206,12 +206,12 @@ def test_llvm_emits_forward_calls_and_mutual_recursion() -> None:
 int main() { return even(8); }
 
 int even(int n) {
-    if n == 0 { return 1; }
+    if (n == 0) { return 1; }
     return odd(n - 1);
 }
 
 int odd(int n) {
-    if n == 0 { return 0; }
+    if (n == 0) { return 0; }
     return even(n - 1);
 }
 """,

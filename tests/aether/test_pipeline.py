@@ -200,8 +200,8 @@ def test_lower_to_verified_ssa_accepts_general_builder() -> None:
         """
 int nested(int x, int y) {
     int z = 0;
-    if x > 0 {
-        if y > 0 {
+    if (x > 0) {
+        if (y > 0) {
             z = 1;
         } else {
             z = 2;
@@ -226,8 +226,8 @@ def test_lower_to_verified_ssa_defaults_to_general_builder() -> None:
         """
 int nested(int x, int y) {
     int z = 0;
-    if x > 0 {
-        if y > 0 {
+    if (x > 0) {
+        if (y > 0) {
             z = 1;
         } else {
             z = 2;
@@ -277,7 +277,7 @@ def test_ssa_pipeline_builds_if_else_phi() -> None:
         """
 int choose(int x) {
     int y = 0;
-    if x > 0 {
+    if (x > 0) {
         y = 1;
     } else {
         y = 2;
@@ -307,7 +307,7 @@ def test_ssa_pipeline_builds_simple_while_sum_to_phi() -> None:
 int sumTo(int n) {
     int i = 0;
     int sum = 0;
-    while i <= n {
+    while (i <= n) {
         sum = sum + i;
         i = i + 1;
     }
@@ -334,7 +334,7 @@ def test_ssa_pipeline_lowers_break() -> None:
     typed_program = prepare_typed_program(
         """
 int first(int n) {
-    while n > 0 {
+    while (n > 0) {
         break;
     }
     return n;
@@ -352,7 +352,7 @@ def test_ssa_pipeline_lowers_continue() -> None:
     typed_program = prepare_typed_program(
         """
 int skip(int n) {
-    while n > 0 {
+    while (n > 0) {
         n = n - 1;
         continue;
     }
@@ -459,7 +459,7 @@ int main() {
             """
 int main() {
     int x = -4;
-    if x < 0 {
+    if (x < 0) {
         return 0 - x;
     } else {
         return x;
@@ -473,7 +473,7 @@ int main() {
 int sumTo(int n) {
     int i = 0;
     int sum = 0;
-    while i <= n {
+    while (i <= n) {
         sum = sum + i;
         i = i + 1;
     }

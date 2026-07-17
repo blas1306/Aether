@@ -2,7 +2,7 @@ int countdown(int start) {
     int current = start;
     int ticks = 0;
 
-    while current > 0 {
+    while (current > 0) {
         ticks = ticks + 1;
         current = current - 1;
     }
@@ -11,7 +11,7 @@ int countdown(int start) {
 }
 
 int main() {
-    if countdown(10000) == 10000 {
+    if (countdown(10000) == 10000) {
         return 0;
     } else {
         return 1;

@@ -68,7 +68,7 @@ def test_session_failed_run_does_not_partially_commit_new_variable() -> None:
 def test_session_block_scope_still_does_not_escape() -> None:
     session = AetherSession()
 
-    session.run("if true { y = 3; }")
+    session.run("if (true) { y = 3; }")
 
     with pytest.raises(AetherTypeError, match="Undefined variable 'y'"):
         session.run("println(y);")

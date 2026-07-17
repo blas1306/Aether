@@ -218,6 +218,8 @@ class IRCall(IRInstruction):
                 reads_memory=True,
                 writes_memory=True,
             )
+        if self.builtin == "__aether_range_step_nonzero":
+            return InstructionEffects(has_side_effects=True, may_trap=True)
         if self.builtin is None:
             return UnknownCallMixin.effects
         if scalar_math_may_trap(

@@ -54,7 +54,7 @@ int add(int a, int b) {
 int main() {
     int x = add(2, 3);
     x = x + 1;
-    if x == 6 {
+    if (x == 6) {
         println("ok");
     }
     return 0;
@@ -73,7 +73,7 @@ int main() {
 def test_backend_parity_characterization_while_output_matches_when_entry_is_adapted() -> None:
     body = """
 int i = 0;
-while i < 3 {
+while (i < 3) {
     println(i);
     i = i + 1;
 }
@@ -86,7 +86,7 @@ while i < 3 {
 def test_backend_parity_characterization_recursion_matches_with_adapted_entry() -> None:
     function = """
 int factorial(int n) {
-    if n <= 1 { return 1; }
+    if (n <= 1) { return 1; }
     return n * factorial(n - 1);
 }
 """

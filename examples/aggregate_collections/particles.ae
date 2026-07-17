@@ -16,7 +16,7 @@ int main() {
     };
 
     double totalMass = 0.0;
-    for Particle particle in particles {
+    for (Particle particle in particles) {
         totalMass = totalMass + particle.mass;
     }
     println(totalMass == 5.0);

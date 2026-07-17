@@ -1,5 +1,5 @@
 public boolean validarArray(Array<int>? arr) {
-    if arr == null {
+    if (arr == null) {
         return false;
     }
 
@@ -18,11 +18,11 @@ public Array<int> bubbleSort(Array<int> arr) {
     int n = length(nuevoArray);
     boolean huboIntercambio = true;
 
-    for pasada in 0:(n-2) {
+    for (pasada in 0:(n-2)) {
         huboIntercambio = false;
 
-        for j in 0:(n-2-pasada) {
-            if nuevoArray[j] > nuevoArray[j+1] {
+        for (j in 0:(n-2-pasada)) {
+            if (nuevoArray[j] > nuevoArray[j+1]) {
                 swap(nuevoArray, j, j + 1);
                 huboIntercambio = true;
             }
@@ -36,16 +36,16 @@ public Array<int> bubbleSort(Array<int> arr) {
 public Array<int> selectionSort(Array<int> arr) {
     Array<int> nuevoArray = copy(arr);
     int n = nuevoArray.length;
-    for i in 0:(n-2) {
+    for (i in 0:(n-2)) {
         int indiceMinimo = i;
 
-        for j in (i+1):(n-1) {
-            if nuevoArray[j] < nuevoArray[indiceMinimo] {
+        for (j in (i+1):(n-1)) {
+            if (nuevoArray[j] < nuevoArray[indiceMinimo]) {
                 indiceMinimo = j;
             }
         }
 
-        if indiceMinimo != i {
+        if (indiceMinimo != i) {
             swap(nuevoArray, i, indiceMinimo);
         }
     }
@@ -58,7 +58,7 @@ public Array<int> insertionSort(Array<int> arr) {
     Array<int> nuevoArray = copy(arr);
     int n = length(nuevoArray);
 
-    for i in 1:(n-1) {
+    for (i in 1:(n-1)) {
         int actual = nuevoArray[i];
         int j = i - 1;
 

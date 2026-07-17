@@ -18,6 +18,7 @@ from ..string_parsing import (
 )
 from ..string_value import STRING_SPLIT_BUILTIN, STRING_TRIM_BUILTIN
 from ..process_arguments import PROCESS_ARGS_BUILTIN
+from ..range_safety import RANGE_STEP_NONZERO_BUILTIN, RANGE_STEP_ZERO_DIAGNOSTIC
 from ..text_file_io import (
     APPEND_TEXT_BUILTIN,
     FILE_READ_RESULT_TYPE,
@@ -1101,9 +1102,18 @@ class IRLowerer:
         for label, value in (("start", start), ("end", end), ("step", step)):
             self._require_same_type(value.type, IntType(), f"for range {label} must be int")
         if step_value == 0:
-            self._fail("IR backend does not support for ranges with a zero step yet.", statement)
+            self._fail(RANGE_STEP_ZERO_DIAGNOSTIC, statement)
+        if step_value is None:
+            context.block.instructions.append(
+                IRCall(
+                    RANGE_STEP_NONZERO_BUILTIN,
+                    (step,),
+                    builtin=RANGE_STEP_NONZERO_BUILTIN,
+                )
+            )
 
         loop_slot = self._storage(statement.variable, IntType(), context)
+        advance_block = self._new_block(f"for.advance{index}")
 
         with self._loop_context(
             context,
@@ -1133,12 +1143,25 @@ class IRLowerer:
             self._append_and_enter(context, blocks.increment)
             current_for_increment = context.temporary(IntType())
             blocks.increment.instructions.append(IRLoad(current_for_increment, loop_slot))
-            next_value = context.temporary(IntType())
+            reached_end = context.temporary(BoolType())
             blocks.increment.instructions.append(
+                IRCompareOp(reached_end, "eq", current_for_increment, end)
+            )
+            self._emit_branch(
+                blocks.increment,
+                reached_end,
+                blocks.exit.name,
+                advance_block.name,
+                "for range terminal condition must be bool",
+            )
+
+            self._append_and_enter(context, advance_block)
+            next_value = context.temporary(IntType())
+            advance_block.instructions.append(
                 IRBinaryOp(next_value, "add", current_for_increment, step)
             )
-            blocks.increment.instructions.append(IRAssign(loop_slot, next_value))
-            self._emit_jump_if_open(blocks.increment, blocks.condition.name)
+            advance_block.instructions.append(IRAssign(loop_slot, next_value))
+            self._emit_jump_if_open(advance_block, blocks.condition.name)
 
             self._append_and_enter(context, blocks.exit)
 
@@ -1200,15 +1223,10 @@ class IRLowerer:
         )
 
         self._append_block(context, negative_check_block)
-        step_negative = context.temporary(BoolType())
-        negative_check_block.instructions.append(IRCompareOp(step_negative, "lt", step, zero))
-        self._emit_branch(
-            negative_check_block,
-            step_negative,
-            negative_bound_block.name,
-            blocks.exit.name,
-            "for range negative step condition must be bool",
-        )
+        # The dynamic non-zero guard dominates this block.  A step that is not
+        # positive is therefore necessarily negative; keeping a synthetic
+        # zero edge here would make optimizers reason about an infeasible exit.
+        negative_check_block.instructions.append(IRJump(negative_bound_block.name))
 
         self._append_block(context, negative_bound_block)
         negative_condition = context.temporary(BoolType())

@@ -43,6 +43,15 @@ def _completion_items_for(source: str, *, line: int, character: int) -> list[dic
     return result["items"]
 
 
+def _formatting_edits_for(source: str) -> list[dict]:
+    from aether_lsp.server import AetherLanguageServer
+
+    uri = "file:///tmp/formatting.ae"
+    language_server = AetherLanguageServer(reader=BytesIO(), writer=BytesIO())
+    language_server.documents[uri] = source
+    return language_server._formatting_result({"textDocument": {"uri": uri}})
+
+
 def _document_symbols_for(source: str) -> list[dict]:
     from aether_lsp.server import AetherLanguageServer
 
@@ -96,6 +105,14 @@ def _item_by_label(items: list[dict], label: str) -> dict:
         if item["label"] == label:
             return item
     raise AssertionError(f"Missing completion item {label!r} in {[item['label'] for item in items]}")
+
+
+def test_lsp_formats_control_flow_headers_idempotently() -> None:
+    source = "if ready {\n} else if( false ){\n}\n"
+    edits = _formatting_edits_for(source)
+    assert len(edits) == 1
+    assert edits[0]["newText"] == "if (ready) {\n} else if (false) {\n}\n"
+    assert _formatting_edits_for(edits[0]["newText"]) == []
 
 
 def test_lsp_server_keeps_running_when_analyzer_raises(monkeypatch) -> None:
@@ -279,7 +296,7 @@ def test_lsp_completion_returns_snippet_placeholders_for_language_snippets() -> 
     assert fn["textEdit"]["newText"] == "f(x) = ${1:expression};"
     assert if_snippet["kind"] == 15
     assert if_snippet["insertTextFormat"] == 2
-    assert if_snippet["textEdit"]["newText"].startswith("if ${1:condition} {")
+    assert if_snippet["textEdit"]["newText"].startswith("if (${1:condition}) {")
 
 
 def test_lsp_completion_includes_only_document_symbols_before_cursor() -> None:
@@ -468,6 +485,7 @@ def test_lsp_server_initializes_publishes_diagnostics_and_completes() -> None:
         assert "\\" in completion_provider["triggerCharacters"]
         assert initialized["result"]["capabilities"]["documentSymbolProvider"] is True
         assert initialized["result"]["capabilities"]["hoverProvider"] is True
+        assert initialized["result"]["capabilities"]["documentFormattingProvider"] is True
 
         uri = "file:///tmp/demo.ae"
         process.stdin.write(

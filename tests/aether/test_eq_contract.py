@@ -81,7 +81,7 @@ int main() {
     println(copied.indexOf(Transaction(2, "bus", Kind.Travel)));
     copied[1] = Transaction(3, "train", Kind.Travel);
     println(original != copied);
-    for Transaction item in original {
+    for (Transaction item in original) {
         println(sliced.contains(item));
     }
     List<List<int>> nestedA = {{1}, {2}};

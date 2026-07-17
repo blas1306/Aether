@@ -192,7 +192,7 @@ def test_expense_tracker_for_in_transaction_is_read_only() -> None:
     source = """
 from Transaction import Transaction;
 void invalidReport(List<Transaction> transactions) {
-    for Transaction transaction in transactions {
+    for (Transaction transaction in transactions) {
         transaction.amount = 0.0;
     }
 }

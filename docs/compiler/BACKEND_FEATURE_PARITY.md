@@ -77,7 +77,7 @@ Referencias centrales:
 | LLVM printer | Partial | Cubre escalares seleccionados, control, Array/List y álgebra lineal contigua; no UDT, módulos, nullable, excepciones ni runtime string completo. |
 | LLVM runtime | Partial | IO y safety de Array/List/Vector/Matrix; sin ownership/free/GC ni runtime string completo. |
 | CLI | Implemented | LLVM default; selección `llvm|ast|ir`; inspección tokens/AST/IR/CFG/SSA/LLVM; build y bench. |
-| IntelliJ | Partial | Highlighting, LSP, run config y typing helpers; sin formatter ni PSI semántico propio. |
+| IntelliJ | Partial | Highlighting, LSP, run config y typing helpers; formatting rc.2 vía LSP, sin PSI semántico propio. |
 | REPL | Implemented, AST-only | Estado persistente y rollback transaccional; solo acepta `--backend=ast`. |
 
 ## Matriz principal
@@ -219,7 +219,7 @@ plugin ejecute ese backend.
 | CLI backend predeterminado | N/A | N/A | explícito `--backend=ast` | explícito `ir` | export SSA | default `llvm` | default file run | N/A | CLI | Implemented |
 | Selección explícita backend | N/A | N/A | `ast` | `ir` | no ejecución SSA | `llvm` | build/run | IntelliJ sin selector | CLI | Partial |
 | REPL | Parser por línea | checker persistente | session + rollback | no | no | no | no | Studio/CLI | tests | AST-only |
-| Formatter | N/A | N/A | solo formato de valores | N/A | N/A | N/A | N/A | no formatter/reformat | No | Not implemented |
+| Formatter | tokens | N/A | control-flow source formatter | N/A | N/A | N/A | N/A | LSP document formatting | tests idempotentes | Partial |
 | Syntax highlighting | N/A | N/A | N/A | N/A | N/A | N/A | N/A | lexer IntelliJ básico | Kotlin tests | Partial |
 | Completions | N/A | TypeChecker no alimenta todas | N/A | N/A | N/A | N/A | N/A | keywords/builtins/símbolos y members, parte regex | Python/LSP | Partial |
 | Symbols/outline/hover | N/A | N/A | N/A | N/A | N/A | N/A | N/A | LSP documentSymbol + hover; PSI es archivo plano | tests parciales | Partial |

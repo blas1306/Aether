@@ -96,7 +96,7 @@ boolean a = true;
 boolean b = false;
 println(!a && b);
 println(!(a && b));
-if !b { println("not ready"); }
+if (!b) { println("not ready"); }
 println(1 != 2);
 println(true != false);
 """

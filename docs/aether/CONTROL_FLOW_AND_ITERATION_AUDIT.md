@@ -7,6 +7,14 @@ Fecha de corte: **17 de julio de 2026**
 Repositorio auditado: commit `bee88b8`  
 Versión de lenguaje al corte: **1.0.0-rc.1**
 
+> Estado posterior a la auditoría: los P0 de control-flow identificados aquí
+> quedaron implementados para rc.2. El parser exige headers parentizados,
+> `else if` usa nesting AST, existe formatter/migrador token-aware y el LSP
+> publica formatting/snippets canónicos. Paso dinámico cero y extremos
+> `INT_MAX`/`INT_MIN` tienen paridad AST/IR/native. Las descripciones de rc.1
+> que siguen se conservan como evidencia histórica del hallazgo, no como
+> gramática vigente. Véase [la guía de migración](RC2_CONTROL_FLOW_MIGRATION.md).
+
 ## 1. Resumen ejecutivo
 
 La sintaxis implementada hoy es la sintaxis sin paréntesis de rc.1. `if` y

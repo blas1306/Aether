@@ -17,7 +17,7 @@ def test_visual_indent_width_expands_tabs_to_tab_stops() -> None:
 
 
 def test_guide_columns_follow_visual_indentation() -> None:
-    assert guide_columns_for_line("    if x {", indent_width=4, tab_size=4) == (0,)
+    assert guide_columns_for_line("    if (x) {", indent_width=4, tab_size=4) == (0,)
     assert guide_columns_for_line("\t    println(x)", indent_width=4, tab_size=4) == (0, 4)
 
 
@@ -29,8 +29,8 @@ def test_closing_only_line_uses_its_real_indent() -> None:
 def test_calculate_indent_guides_builds_contiguous_ranges_and_active_guide() -> None:
     lines = [
         "function test() {",
-        "    if x > 0 {",
-        "        while y > 0 {",
+        "    if (x > 0) {",
+        "        while (y > 0) {",
         "            println(y);",
         "        }",
         "    }",
@@ -47,7 +47,7 @@ def test_calculate_indent_guides_builds_contiguous_ranges_and_active_guide() -> 
 
 def test_blank_lines_inherit_surrounding_indent_for_stability() -> None:
     lines = [
-        "if x {",
+        "if (x) {",
         "    println(x)",
         "",
         "    println(x + 1)",
@@ -61,7 +61,7 @@ def test_blank_lines_inherit_surrounding_indent_for_stability() -> None:
 
 def test_qt_editor_indent_guides_paint_stability(qapp) -> None:
     editor = CodeEditor()
-    editor.setPlainText("function test() {\n    if x {\n        println(x)\n    }\n}\n")
+    editor.setPlainText("function test() {\n    if (x) {\n        println(x)\n    }\n}\n")
     editor.resize(420, 220)
     editor.show()
     qapp.processEvents()

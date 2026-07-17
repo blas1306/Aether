@@ -54,7 +54,7 @@ La fuente de detalle por etapa es
 | Compilación nativa | Parcial | El CLI debe compilar y ejecutar el conjunto v1 mediante LLVM/clang con diagnósticos claros y sin fallback silencioso a AST. |
 | Funciones tipadas, `void`, retorno y recursión | Estable para tipos backend | Llamadas, argumentos, retornos y recursión deben mantener paridad AST/native. |
 | Funciones como parámetros o valores | Parcial: top-level tipadas sin captura | Mantener `R(P1, ...)` con compatibilidad exacta y paridad AST/native; closures, lambdas, captura, métodos enlazados, builtins como valores y retorno de callables quedan fuera hasta un diseño posterior. |
-| Control de flujo (`if`, `while`, `for`, `for-in`, `break`, `continue`) | Estable en el subconjunto compilable | Mantener short-circuit, alcance y saltos idénticos en AST, IR y native. |
+| Control de flujo (`if`, `while`, `for`, `for-in`, `break`, `continue`) | Estable en el subconjunto compilable; headers parentizados desde rc.2 | Mantener short-circuit, alcance, saltos, rango inclusivo y panics idénticos en AST, IR y native. |
 | Módulos e imports | Parcial native | Funciones y structs soportados compilan con imports completos/selectivos, aliases, transitividad, privacidad y ciclos. Falta storage/inicialización native para globals, constantes y statements top-level importados. |
 | Structs por valor | Estable en el núcleo | Mantener construcción, métodos, copia, parámetros, retorno, igualdad e impresión para campos soportados; documentar el ABI. |
 | Classes por referencia | Solo AST | Bajar layout, construcción, aliasing, visibilidad, métodos y ownership al backend sin convertirlas accidentalmente en valores. |

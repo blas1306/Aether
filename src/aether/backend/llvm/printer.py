@@ -96,6 +96,10 @@ from .string_runtime import LLVMStringRuntime
 from .process_runtime import LLVMProcessRuntime
 from .text_file_runtime import LLVMTextFileRuntime
 from aether.process_arguments import PROCESS_ARGS_BUILTIN
+from aether.range_safety import (
+    RANGE_STEP_NONZERO_BUILTIN,
+    RANGE_STEP_ZERO_MESSAGE,
+)
 from aether.text_file_io import (
     APPEND_TEXT_BUILTIN,
     FILE_READ_RESULT_TYPE,
@@ -194,6 +198,7 @@ class LLVMPrinter:
         self._uses_string_runtime = native_entry
         self._uses_process_context = native_entry
         self._uses_process_arguments = False
+        self._uses_range_step_guard = False
         self._uses_string_parsing = False
         self._uses_string_split = False
         self._uses_text_codec = False
@@ -293,6 +298,35 @@ class LLVMPrinter:
             sequence_sort_types=frozenset(self._sequence_sort_types),
         )
         runtime = list_runtime.declarations(common_runtime, array_runtime)
+        if self._uses_range_step_guard:
+            message_length = len(RANGE_STEP_ZERO_MESSAGE.encode("utf-8")) + 1
+            runtime.append(
+                f'@.aether.range.step.zero = private unnamed_addr constant [{message_length} x i8] '
+                f'c"{RANGE_STEP_ZERO_MESSAGE}\\00"'
+            )
+            runtime.append(
+                common_runtime.panic_helper(
+                    "aether_range_step_zero_panic",
+                    ".aether.range.step.zero",
+                    message_length,
+                )
+            )
+            runtime.append(
+                "\n".join(
+                    [
+                        "define private void @aether_range_step_nonzero(i32 %step) {",
+                        "entry:",
+                        "  %is_zero = icmp eq i32 %step, 0",
+                        "  br i1 %is_zero, label %panic, label %ok",
+                        "panic:",
+                        "  call void @aether_range_step_zero_panic()",
+                        "  unreachable",
+                        "ok:",
+                        "  ret void",
+                        "}",
+                    ]
+                )
+            )
         for kind, element_type in sorted(
             self._collection_copy_helpers,
             key=lambda item: (item[0], str(item[1])),
@@ -1195,6 +1229,18 @@ class LLVMPrinter:
         return f"br {self._label_operand(instruction.target)}"
 
     def _print_call(self, instruction: SSACall) -> str:
+        if instruction.builtin == RANGE_STEP_NONZERO_BUILTIN:
+            if (
+                instruction.result is not None
+                or len(instruction.arguments) != 1
+                or not isinstance(instruction.arguments[0].type, IntType)
+            ):
+                raise LLVMBackendError("LLVM range-step guard requires int -> void")
+            self._uses_range_step_guard = True
+            return (
+                "call void @aether_range_step_nonzero(i32 "
+                f"{self._operand(instruction.arguments[0])})"
+            )
         if instruction.builtin == PROCESS_ARGS_BUILTIN:
             if (
                 instruction.result is None

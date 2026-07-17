@@ -35,12 +35,12 @@ def test_println_output():
 
 
 def test_if_block():
-    result = run_aether("x = 5; if x > 0 { println(x); }")
+    result = run_aether("x = 5; if (x > 0) { println(x); }")
     assert result.output == "5\n"
 
 
 def test_while_block():
-    result = run_aether("x = 0; while x < 3 { println(x); x = x + 1; }")
+    result = run_aether("x = 0; while (x < 3) { println(x); x = x + 1; }")
     assert result.output == "0\n1\n2\n"
 
 
@@ -167,7 +167,7 @@ def test_nullable_null_equality() -> None:
         """
 string? name = null;
 
-if name == null {
+if (name == null) {
     println("empty");
 }
 """
@@ -181,7 +181,7 @@ def test_nullable_null_inequality() -> None:
         """
 string? name = "Aether";
 
-if name != null {
+if (name != null) {
     println(name);
 }
 """
@@ -215,12 +215,12 @@ def test_const_nullable_rejects_reassignment() -> None:
 
 def test_if_condition_must_be_boolean():
     with pytest.raises(AetherTypeError, match="condition of 'if' must be boolean"):
-        run_aether('if 1 { println("bad"); }')
+        run_aether('if (1) { println("bad"); }')
 
 
 def test_while_condition_must_be_boolean():
     with pytest.raises(AetherTypeError, match="condition of 'while' must be boolean"):
-        run_aether('while 1 { println("bad"); }')
+        run_aether('while (1) { println("bad"); }')
 
 
 def test_print_multiple_arguments():
@@ -251,7 +251,7 @@ def test_recursive_function_without_function_keyword():
     result = run_aether(
         """
 int fib(int n) {
-    if n <= 1 {
+    if (n <= 1) {
         return n;
     }
 
@@ -277,23 +277,23 @@ def test_function_typed_return_error():
 
 def test_block_variable_does_not_escape():
     with pytest.raises(AetherTypeError, match="Undefined variable 'y'"):
-        run_aether("if true { int y = 3; } println(y);")
+        run_aether("if (true) { int y = 3; } println(y);")
 
 
 def test_outer_variable_can_be_updated_inside_block():
-    result = run_aether("x = 1; if true { x = 2; } println(x);")
+    result = run_aether("x = 1; if (true) { x = 2; } println(x);")
     assert result.output == "2\n"
     assert result.env["x"].value == 2
 
 
 def test_inner_inferred_variable_does_not_escape():
     with pytest.raises(AetherTypeError, match="Undefined variable 'y'"):
-        run_aether("if true { y = 3; } println(y);")
+        run_aether("if (true) { y = 3; } println(y);")
 
 
 def test_shadowing_is_not_allowed():
     with pytest.raises(AetherTypeError, match="shadowing is not allowed"):
-        run_aether("int x = 1; if true { double x = 2.5; }")
+        run_aether("int x = 1; if (true) { double x = 2.5; }")
 
 
 def test_function_local_variable_does_not_escape():
@@ -322,12 +322,12 @@ println(f(10));
 
 def test_block_assignment_respects_outer_type():
     with pytest.raises(AetherTypeError, match="Cannot implicitly convert 'double' to 'int'"):
-        run_aether("int x = 1; if true { x = 2.5; }")
+        run_aether("int x = 1; if (true) { x = 2.5; }")
 
 
 def test_while_inner_variable_does_not_escape():
     with pytest.raises(AetherTypeError, match="Undefined variable 'y'"):
-        run_aether("x = 0; while x < 1 { y = 5; x = x + 1; } println(y);")
+        run_aether("x = 0; while (x < 1) { y = 5; x = x + 1; } println(y);")
 
 
 def test_undefined_variable_detected_by_typechecker():
@@ -352,14 +352,14 @@ def test_function_without_return_is_error():
 
 def test_function_if_without_else_may_not_return_is_error():
     with pytest.raises(AetherTypeError, match="may not return"):
-        run_aether("int f(int x) { if x > 0 { return x; } }")
+        run_aether("int f(int x) { if (x > 0) { return x; } }")
 
 
 def test_function_if_else_both_return_is_valid():
     result = run_aether(
         """
 int f(int x) {
-    if x > 0 {
+    if (x > 0) {
         return x;
     } else {
         return 0;
@@ -677,7 +677,7 @@ def test_matrix_out_of_bounds_runtime_error():
 
 def test_matrix_cannot_be_if_condition():
     with pytest.raises(AetherTypeError):
-        run_aether('if [true] { println("bad"); }')
+        run_aether('if ([true]) { println("bad"); }')
 
 
 def test_matrix_single_index_is_rejected():

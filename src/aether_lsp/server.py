@@ -12,6 +12,7 @@ from typing import Any, BinaryIO
 from urllib.parse import unquote, urlparse
 
 from aether import analyze_source
+from aether.source_formatter import format_source
 from aether.version import LANGUAGE_VERSION
 from aether.stdlib.registry import builtin_aliases_for_import, builtin_names, is_builtin_namespace
 from autocomplete_engine import (
@@ -102,6 +103,8 @@ class AetherLanguageServer:
             return None
         if method == "textDocument/completion":
             return self._response(message, self._completion_result(message.get("params") or {}))
+        if method == "textDocument/formatting":
+            return self._response(message, self._formatting_result(message.get("params") or {}))
         if method == "textDocument/documentSymbol":
             return self._response(message, self._document_symbol_result(message.get("params") or {}))
         if method == "textDocument/hover":
@@ -130,6 +133,7 @@ class AetherLanguageServer:
                     "triggerCharacters": _completion_trigger_characters(),
                     "resolveProvider": False,
                 },
+                "documentFormattingProvider": True,
                 "documentSymbolProvider": True,
                 "hoverProvider": True,
                 "definitionProvider": True,
@@ -273,6 +277,24 @@ class AetherLanguageServer:
         except Exception:
             items = []
         return {"isIncomplete": False, "items": items}
+
+    def _formatting_result(self, params: JsonObject) -> list[JsonObject]:
+        document = params.get("textDocument") or {}
+        uri = document.get("uri", "")
+        source = self.documents.get(uri, "")
+        formatted = format_source(source)
+        if formatted == source:
+            return []
+        end_line, end_character = _offset_to_position(_line_start_offsets(source), len(source))
+        return [
+            {
+                "range": {
+                    "start": {"line": 0, "character": 0},
+                    "end": {"line": end_line, "character": end_character},
+                },
+                "newText": formatted,
+            }
+        ]
 
     def _document_symbol_result(self, params: JsonObject) -> list[JsonObject]:
         document = params.get("textDocument") or {}

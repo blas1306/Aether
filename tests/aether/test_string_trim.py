@@ -100,7 +100,7 @@ int main() {
     List<string> copied = values.copy();
     List<string> sliced = copied[0:3];
     List<string> borrowed = {};
-    for string item in sliced { borrowed.push(item.trim()); }
+    for (string item in sliced) { borrowed.push(item.trim()); }
     consume(("  temp" + "orary  ").trim());
     println(cleaned(local) == "hello");
     println(constant.trim() == "const");

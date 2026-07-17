@@ -81,7 +81,7 @@ def test_lowers_list_literals_length_is_empty_and_for_to_ir() -> None:
 int main() {
     List<int> xs = {1, 2, 3};
     int sum = 0;
-    for int x in xs {
+    for (int x in xs) {
         sum = sum + x;
     }
     if (xs.is_empty) {
@@ -153,7 +153,7 @@ def test_for_over_empty_list_executes_zero_iterations() -> None:
 int main() {
     List<int> xs = {};
     int sum = 5;
-    for int x in xs {
+    for (int x in xs) {
         sum = sum + x;
     }
     return sum;
@@ -244,7 +244,7 @@ def test_emit_llvm_prints_list_ir(tmp_path) -> None:
 int main() {
     List<int> xs = {1, 2, 3};
     int sum = 0;
-    for int x in xs {
+    for (int x in xs) {
         sum = sum + x;
     }
     return sum + xs.length;
@@ -571,7 +571,7 @@ def test_phase_3a_llvm_text_and_emit_llvm(tmp_path) -> None:
         ("int main(){ List<int> xs={1,2,3}; xs.clear(); return xs.length; }", 0),
         ("int main(){ List<int> xs={1}; xs.clear(); xs.clear(); if(xs.is_empty){return 7;} return 0; }", 7),
         ("int main(){ List<int> xs={3,1,2}; xs[0]=9; xs.reverse(); xs.sort(); xs.clear(); return xs.length; }", 0),
-        ("int main(){ List<int> xs={1,2}; xs.clear(); int count=0; for int x in xs { count=count+1; } return count; }", 0),
+        ("int main(){ List<int> xs={1,2}; xs.clear(); int count=0; for (int x in xs) { count=count+1; } return count; }", 0),
     ],
 )
 def test_list_clear_runtime_semantics(source: str, expected: int) -> None:
@@ -663,7 +663,7 @@ def test_list_clear_emit_llvm_and_clang(tmp_path) -> None:
         ("int main(){ List<int> xs={}; xs.push(1); xs.push(2); xs.push(3); xs.push(4); xs.push(5); return xs[0]+xs[4]; }", 6),
         ("int main(){ List<int> xs={1,2,3}; xs.clear(); xs.push(9); return xs.length*10+xs[0]; }", 19),
         ("int main(){ List<int> xs={3,1,2}; xs.sort(); xs.push(4); xs.reverse(); xs.push(5); return xs[0]*10+xs[4]; }", 45),
-        ("int main(){ List<int> xs={1}; xs.push(2); xs.push(3); int sum=0; for int x in xs { sum=sum+x; } return sum; }", 6),
+        ("int main(){ List<int> xs={1}; xs.push(2); xs.push(3); int sum=0; for (int x in xs) { sum=sum+x; } return sum; }", 6),
         ("int main(){ List<List<int>> refs={}; List<int> inner={}; refs.push(inner); inner.push(7); return refs[0][0]; }", 7),
     ],
 )
@@ -752,7 +752,7 @@ def test_list_push_llvm_contains_checked_growth_and_reloads_data() -> None:
         ("int main(){ List<int> xs={20,30}; xs.insert(0,10); return xs[0]+xs[1]+xs[2]; }", 60),
         ("int main(){ List<int> xs={10,30}; insert(xs,1,20); return xs.length*10+xs[1]; }", 50),
         ("int main(){ List<int> xs={10,20}; xs.insert(xs.length,30); return xs[2]; }", 30),
-        ("int main(){ List<int> xs={}; xs.insert(0,2); xs.insert(0,1); xs.insert(2,4); xs.insert(2,3); int sum=0; for int x in xs {sum=sum*10+x;} return sum; }", 1234),
+        ("int main(){ List<int> xs={}; xs.insert(0,2); xs.insert(0,1); xs.insert(2,4); xs.insert(2,3); int sum=0; for (int x in xs) {sum=sum*10+x;} return sum; }", 1234),
         ("int main(){ List<int> xs={1,2}; xs.push(3); xs.pop(); xs.insert(1,9); return xs[0]*100+xs[1]*10+xs[2]; }", 192),
         ("int main(){ List<int> xs={3,1,2}; xs.sort(); xs.reverse(); xs.insert(1,9); return xs[0]*10+xs[1]; }", 39),
         ("int main(){ List<int> xs={1,2}; xs.clear(); xs.insert(0,8); return xs.length*10+xs[0]; }", 18),
@@ -972,7 +972,7 @@ def test_list_remove_at_llvm_validates_moves_and_updates_length_last() -> None:
         ("int main(){ List<int> xs={1,2,3}; return xs.pop()*100+xs.pop()*10+xs.pop(); }", 321),
         ("int main(){ List<int> xs={}; xs.push(8); int x=xs.pop(); return x+xs.length; }", 8),
         ("int main(){ List<int> xs={3,1,2}; xs.sort(); xs.reverse(); int x=xs.pop(); return x*10+xs.length; }", 12),
-        ("int main(){ List<int> xs={1,2,3}; int ignored=xs.pop(); int sum=0; for int x in xs {sum=sum+x;} return sum; }", 3),
+        ("int main(){ List<int> xs={1,2,3}; int ignored=xs.pop(); int sum=0; for (int x in xs) {sum=sum+x;} return sum; }", 3),
         ("int main(){ List<double> xs={1.5,2.5}; double x=xs.pop(); return int(x*10.0)+xs.length; }", 26),
         ("int main(){ List<boolean> xs={false,true}; boolean x=xs.pop(); if(x){return xs.length+5;} return 0; }", 6),
         ('int main(){ List<string> xs={"a","last"}; string x=xs.pop(); return xs.length; }', 1),

@@ -154,7 +154,7 @@ def test_callable_type_errors_are_specific(source: str, message: str) -> None:
 def test_ast_callable_values_can_be_passed_stored_shadow_names_and_recurse() -> None:
     source = """
 int factorial(int value) {
-    if value <= 1 { return 1; }
+    if (value <= 1) { return 1; }
     return value * factorial(value - 1);
 }
 int apply(int(int) operation, int value) { return operation(value); }
@@ -185,7 +185,7 @@ double plusOne(double value) { return value + 1.0; }
 double timesTwo(double value) { return value * 2.0; }
 double chooseAndApply(boolean chooseSecond, double value) {
     double(double) operation = plusOne;
-    if chooseSecond { operation = timesTwo; }
+    if (chooseSecond) { operation = timesTwo; }
     return operation(value);
 }
 int main() { return int(chooseAndApply(true, 4.0)); }

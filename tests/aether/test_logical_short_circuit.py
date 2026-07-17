@@ -87,11 +87,11 @@ int main() {
     boolean enabled = true;
     boolean selected = enabled && true;
     int i = 0;
-    while i < 2 && selected {
+    while (i < 2 && selected) {
         println(i);
         i = i + 1;
     }
-    if selected && i == 2 {
+    if (selected && i == 2) {
         println("ok");
     }
     return 0;

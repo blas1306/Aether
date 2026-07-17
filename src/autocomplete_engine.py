@@ -72,9 +72,9 @@ def _keyword_entry(
 
 
 KEYWORD_SUGGESTIONS: tuple[CommandSuggestion, ...] = (
-    _keyword_entry("for", "Start a for-in loop.", insert_text="for ", signature="for x in iterable { ... }", category="control"),
-    _keyword_entry("while", "Start a while block.", insert_text="while ", signature="while condition { ... }", category="control"),
-    _keyword_entry("if", "Start a conditional block.", insert_text="if ", signature="if condition { ... }", category="control"),
+    _keyword_entry("for", "Start a for-in loop.", insert_text="for (", signature="for (x in iterable) { ... }", category="control"),
+    _keyword_entry("while", "Start a while block.", insert_text="while (", signature="while (condition) { ... }", category="control"),
+    _keyword_entry("if", "Start a conditional block.", insert_text="if (", signature="if (condition) { ... }", category="control"),
     _keyword_entry("else", "Add an else branch.", category="control"),
     _keyword_entry("in", "Separate a for-loop variable from its iterable.", category="control", priority=95),
     _keyword_entry("function", "Start a user function definition.", insert_text="function ", signature="function int name() { ... }", category="definitions"),
@@ -138,15 +138,15 @@ def _snippet_entry(
 
 SNIPPET_SUGGESTIONS: tuple[CommandSuggestion, ...] = (
     _snippet_entry("fn", "f(x) = expression;", len("f(x) = "), len("expression"), "Expression function snippet.", priority=430),
-    _snippet_entry("for", "for x in iterable {\n    \n}", len("for "), len("x"), "For loop snippet."),
-    _snippet_entry("if", "if condition {\n    \n}", len("if "), len("condition"), "If block snippet."),
-    _snippet_entry("while", "while condition {\n    \n}", len("while "), len("condition"), "While loop snippet."),
+    _snippet_entry("for", "for (x in iterable) {\n    \n}", len("for ("), len("x"), "For loop snippet."),
+    _snippet_entry("if", "if (condition) {\n    \n}", len("if ("), len("condition"), "If block snippet."),
+    _snippet_entry("while", "while (condition) {\n    \n}", len("while ("), len("condition"), "While loop snippet."),
     _snippet_entry("try", "try {\n    \n} catch (e) {\n    \n}", len("try {\n    "), 0, "Try/catch snippet."),
     _snippet_entry("func", "int name() {\n    \n}", len("int "), len("name"), "Block function snippet."),
     _snippet_entry("struct", "struct Name {\n    double field;\n}", len("struct "), len("Name"), "Data struct snippet."),
     _snippet_entry("interface", "interface Name {\n    double method();\n}", len("interface "), len("Name"), "Interface snippet."),
     _snippet_entry("enum", "enum Name {\n    Variant\n}", len("enum "), len("Name"), "Enum snippet."),
-    _snippet_entry("ife", "if condition {\n    \n} else {\n    \n}", len("if "), len("condition"), "If/else block snippet."),
+    _snippet_entry("ife", "if (condition) {\n    \n} else {\n    \n}", len("if ("), len("condition"), "If/else block snippet."),
 )
 
 

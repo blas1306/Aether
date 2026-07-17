@@ -6,7 +6,7 @@ from Sortings import insertionSort
 int main() {
     Array<int> arr = {5, 2, 3, 8, 1, 10, 9};
 
-    if validarArray(arr) != true {
+    if (validarArray(arr) != true) {
         return 1;
     } else {
         arrayBubble = bubbleSort(arr);

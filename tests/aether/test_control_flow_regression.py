@@ -74,7 +74,7 @@ def _assert_full_main_pipeline(source: str, expected: int) -> None:
 def test_empty_for_range_verifies_ssa_and_executes_full_pipeline() -> None:
     source = """
 int main() {
-    for i in 0:2 {
+    for (i in 0:2) {
     }
     return 11;
 }
@@ -93,7 +93,7 @@ def test_continue_as_last_for_statement_emits_single_body_jump() -> None:
         """
 int main() {
     int hits = 0;
-    for i in 0:2 {
+    for (i in 0:2) {
         hits = hits + 1;
         continue;
     }
@@ -115,7 +115,7 @@ def test_unconditional_break_as_for_body_targets_loop_exit() -> None:
     module = _lower(
         """
 int main() {
-    for i in 0:9 {
+    for (i in 0:9) {
         break;
     }
     return 5;
@@ -136,7 +136,7 @@ def test_early_return_inside_for_survives_full_pipeline() -> None:
     _assert_full_main_pipeline(
         """
 int f() {
-    for i in 0:9 {
+    for (i in 0:9) {
         return i;
     }
     return -1;
@@ -155,7 +155,7 @@ def test_early_return_inside_while_survives_full_pipeline() -> None:
         """
 int f() {
     int i = 0;
-    while i < 10 {
+    while (i < 10) {
         return i;
     }
     return -1;
@@ -173,9 +173,9 @@ def test_nested_break_only_exits_inner_loop() -> None:
     source = """
 int main() {
     int count = 0;
-    for i in 0:2 {
-        for j in 0:4 {
-            if j == 2 {
+    for (i in 0:2) {
+        for (j in 0:4) {
+            if (j == 2) {
                 break;
             }
             count = count + 1;
@@ -197,9 +197,9 @@ def test_nested_continue_targets_inner_loop_increment() -> None:
     source = """
 int main() {
     int total = 0;
-    for i in 0:2 {
-        for j in 0:2 {
-            if j == 1 {
+    for (i in 0:2) {
+        for (j in 0:2) {
+            if (j == 1) {
                 continue;
             }
             total = total + i * 10 + j;
@@ -220,8 +220,8 @@ def test_outer_loop_carried_variable_modified_by_inner_loop_gets_nested_phis() -
     source = """
 int main() {
     int sum = 0;
-    for i in 0:2 {
-        for j in 0:1 {
+    for (i in 0:2) {
+        for (j in 0:1) {
             sum = sum + i + j;
         }
     }
@@ -243,7 +243,7 @@ def test_variable_declared_inside_loop_and_used_only_inside_compiles() -> None:
         """
 int main() {
     int sum = 0;
-    for i in 0:2 {
+    for (i in 0:2) {
         int tmp = i + 1;
         sum = sum + tmp;
     }
@@ -260,7 +260,7 @@ def test_variable_declared_inside_loop_used_after_is_rejected_by_typechecker() -
         _typed(
             """
 int main() {
-    for i in 0:2 {
+    for (i in 0:2) {
         int tmp = i;
     }
     return tmp;
@@ -273,7 +273,7 @@ def test_variable_modified_inside_loop_and_used_after_gets_phi() -> None:
     source = """
 int main() {
     int x = 1;
-    for i in 0:2 {
+    for (i in 0:2) {
         x = x + i;
     }
     return x;
@@ -297,7 +297,7 @@ def test_while_constant_false_body_is_removed_by_sccp() -> None:
     source = """
 int main() {
     int x = 7;
-    while false {
+    while (false) {
         x = 1;
     }
     return x;
@@ -319,7 +319,7 @@ def test_while_constant_true_with_break_preserves_exit() -> None:
         """
 int main() {
     int x = 0;
-    while true {
+    while (true) {
         x = 9;
         break;
     }
@@ -333,7 +333,7 @@ int main() {
         """
 int main() {
     int x = 0;
-    while true {
+    while (true) {
         x = 9;
         break;
     }
@@ -353,11 +353,11 @@ int main() {
 int main() {
     Array<int> xs = {1, 2, 3, 4, 5};
     int sum = 0;
-    for x in xs {
-        if x == 4 {
+    for (x in xs) {
+        if (x == 4) {
             break;
         }
-        if x == 2 {
+        if (x == 2) {
             continue;
         }
         sum = sum + x;
@@ -373,11 +373,11 @@ int main() {
 int main() {
     Vector<int, Row> xs = [1, 2, 3, 4, 5];
     int sum = 0;
-    for x in xs {
-        if x == 4 {
+    for (x in xs) {
+        if (x == 4) {
             break;
         }
-        if x == 2 {
+        if (x == 2) {
             continue;
         }
         sum = sum + x;
@@ -410,8 +410,8 @@ def test_for_dynamic_negative_step_with_continue() -> None:
 int main() {
     int step = -1;
     int sum = 0;
-    for i in 5:step:1 {
-        if i == 3 {
+    for (i in 5:step:1) {
+        if (i == 3) {
             continue;
         }
         sum = sum + i;

@@ -3,15 +3,15 @@ int main() {
     Matrix<int> right = [5, 6; 7, 8];
     int repeat = 0;
     int total = 0;
-    while repeat < 200 {
+    while (repeat < 200) {
         Matrix<int> result = left * right;
         total = total + result[1, 1];
         repeat = repeat + 1;
     }
-    if total == 3800 {
+    if (total == 3800) {
         return 0;
     } else {
-        if total == 10000 {
+        if (total == 10000) {
             return 0;
         } else {
             return 1;

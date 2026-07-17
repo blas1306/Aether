@@ -17,7 +17,7 @@ public AddTransactionStatus addTransaction(
     string category,
     string date
 ) {
-    if amount <= 0.0 {
+    if (amount <= 0.0) {
         return AddTransactionStatus.NonPositiveAmount;
     }
 

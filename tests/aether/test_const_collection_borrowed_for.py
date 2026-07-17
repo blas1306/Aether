@@ -108,7 +108,7 @@ def test_for_in_rejects_direct_and_simple_alias_mutation() -> None:
     for mutation in ("xs[0] = 2;", "other[0] = 2;", "other.push(2);"):
         source = (
             "int main() { List<int> xs = {1}; List<int> other = xs; "
-            f"for int value in xs {{ {mutation} }} return 0; }}"
+            f"for (int value in xs) {{ {mutation} }} return 0; }}"
         )
         with pytest.raises(AetherTypeError, match="while iterating over it"):
             _typed(source)
@@ -118,25 +118,25 @@ def test_for_in_read_only_depth_and_class_reference_barrier() -> None:
     with pytest.raises(AetherTypeError, match="Cannot mutate borrowed iteration element 'item'"):
         _typed(
             "struct Item { int value; } int main() { List<Item> xs = {Item(1)}; "
-            "for Item item in xs { item.value = 2; } return 0; }"
+            "for (Item item in xs) { item.value = 2; } return 0; }"
         )
     with pytest.raises(AetherTypeError, match="Cannot mutate borrowed iteration element 'inner'"):
         _typed(
             "int main() { List<List<int>> xs = {{1}}; "
-            "for List<int> inner in xs { inner.push(2); } return 0; }"
+            "for (List<int> inner in xs) { inner.push(2); } return 0; }"
         )
     _typed(
         "class Account { int amount; public constructor(int x) { amount = x; } "
         "public void deposit(int x) { amount = amount + x; } } "
         "int main() { List<Account> xs = {Account(1)}; "
-        "for Account item in xs { item.deposit(2); } return 0; }"
+        "for (Account item in xs) { item.deposit(2); } return 0; }"
     )
 
 
 def test_borrow_to_owned_local_and_return_survive_iteration_and_container_clear() -> None:
     source = """
 List<int> first(List<List<int>> values) {
-    for List<int> item in values { return item; }
+    for (List<int> item in values) { return item; }
     return {};
 }
 int main() {
@@ -154,7 +154,7 @@ int main() {
 def test_ir_marks_for_in_element_borrow_without_owning_loop_storage() -> None:
     source = (
         "int main() { List<List<int>> xs = {{1}}; "
-        "for List<int> item in xs { println(item.length); } return 0; }"
+        "for (List<int> item in xs) { println(item.length); } return 0; }"
     )
     printed = IRPrinter().print_module(IRBackend().lower_verified(_typed(source)))
     assert "borrow_element list" in printed
@@ -168,13 +168,13 @@ def test_native_for_in_borrow_adds_no_element_retain_until_copy_init() -> None:
     borrowed = LLVMBuilder().emit_llvm(
         _typed(
             "int main() { List<List<int>> xs = {{1}, {2}}; "
-            "for List<int> item in xs { println(item.length); } return 0; }"
+            "for (List<int> item in xs) { println(item.length); } return 0; }"
         )
     )
     copied = LLVMBuilder().emit_llvm(
         _typed(
             "int main() { List<List<int>> xs = {{1}, {2}}; "
-            "for List<int> item in xs { List<int> saved = item; println(saved.length); } return 0; }"
+            "for (List<int> item in xs) { List<int> saved = item; println(saved.length); } return 0; }"
         )
     )
     borrowed_retains = sum("call void @" in line and "retain" in line for line in borrowed.splitlines())
@@ -271,7 +271,7 @@ def test_borrowed_for_in_survives_optimization_profiles_and_clang(
 int main() {
     List<List<int>> values = {{1}, {2}};
     int total = 0;
-    for List<int> item in values { total = total + item[0]; }
+    for (List<int> item in values) { total = total + item[0]; }
     println(total);
     return 0;
 }

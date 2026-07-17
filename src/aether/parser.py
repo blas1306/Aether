@@ -540,14 +540,16 @@ class Parser:
 
     def _statement(self) -> ast.Statement:
         if self._match(TokenType.IF):
-            if_token = self._previous()
-            condition = self._expression()
-            body = self._block()
-            else_body = self._block() if self._match(TokenType.ELSE) else None
-            return ast.IfStatement(condition, body, else_body, if_token.line, if_token.column)
+            return self._if_statement(self._previous())
         if self._match(TokenType.WHILE):
             while_token = self._previous()
-            return ast.WhileStatement(self._expression(), self._block(), while_token.line, while_token.column)
+            self._consume_control_left_paren(
+                "while",
+                "Control-flow conditions require parentheses in Aether 1.0.",
+            )
+            condition = self._expression()
+            self._consume(TokenType.RIGHT_PAREN, "Expected ')' after while condition.")
+            return ast.WhileStatement(condition, self._block(), while_token.line, while_token.column)
         if self._match(TokenType.IMPORT):
             import_token = self._previous()
             module_path = self._qualified_module_path("Expected module name after 'import'.")
@@ -587,6 +589,10 @@ class Parser:
             )
         if self._match(TokenType.FOR):
             for_token = self._previous()
+            self._consume_control_left_paren(
+                "for",
+                "For-loop headers require parentheses in Aether 1.0.",
+            )
             variable_type: AetherType | None = None
             type_end = self._type_annotation_end_cursor(self.current)
             if (
@@ -602,6 +608,7 @@ class Parser:
             variable = self._consume(TokenType.IDENTIFIER, "Expected loop variable after 'for'.").lexeme
             self._consume(TokenType.IN, "Expected 'in' after loop variable.")
             iterable = self._expression()
+            self._consume(TokenType.RIGHT_PAREN, "Expected ')' after for header.")
             return ast.ForInStatement(
                 variable,
                 iterable,
@@ -680,6 +687,31 @@ class Parser:
             raise self._error(self._previous(), "Invalid assignment target.")
         self._consume(TokenType.SEMICOLON, "Expected ';' after expression.")
         return ast.ExpressionStatement(expression)
+
+    def _if_statement(self, if_token: Token) -> ast.IfStatement:
+        self._consume_control_left_paren(
+            "if",
+            "Control-flow conditions require parentheses in Aether 1.0.",
+        )
+        condition = self._expression()
+        self._consume(TokenType.RIGHT_PAREN, "Expected ')' after if condition.")
+        body = self._block()
+        else_body: list[ast.Statement] | None = None
+        if self._match(TokenType.ELSE):
+            if self._match(TokenType.IF):
+                else_body = [self._if_statement(self._previous())]
+            else:
+                else_body = self._block()
+        return ast.IfStatement(condition, body, else_body, if_token.line, if_token.column)
+
+    def _consume_control_left_paren(self, keyword: str, hint: str) -> Token:
+        if self._check(TokenType.LEFT_PAREN):
+            return self._advance()
+        raise self._error(
+            self._peek(),
+            f"Expected '(' after '{keyword}'.",
+            hint=hint,
+        )
 
     def _destructuring_assignment(self) -> ast.DestructuringAssignment:
         first = self._consume(TokenType.IDENTIFIER, "Expected variable name in destructuring assignment.")
@@ -1461,7 +1493,17 @@ class Parser:
     def _previous(self) -> Token:
         return self.tokens[self.current - 1]
 
-    def _error(self, token: Token, message: str) -> AetherSyntaxError:
+    def _error(self, token: Token, message: str, *, hint: str | None = None) -> AetherSyntaxError:
         if token.type == TokenType.EOF:
-            return AetherSyntaxError(f"{message} at end of file.", line=token.line, column=token.column)
-        return AetherSyntaxError(f"{message} near {token.lexeme!r}.", line=token.line, column=token.column)
+            return AetherSyntaxError(
+                f"{message} at end of file.",
+                line=token.line,
+                column=token.column,
+                hint=hint,
+            )
+        return AetherSyntaxError(
+            f"{message} near {token.lexeme!r}.",
+            line=token.line,
+            column=token.column,
+            hint=hint,
+        )

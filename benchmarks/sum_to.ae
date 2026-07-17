@@ -2,7 +2,7 @@ int sumTo(int n) {
     int i = 0;
     int total = 0;
 
-    while i <= n {
+    while (i <= n) {
         total = total + i;
         i = i + 1;
     }
@@ -11,7 +11,7 @@ int sumTo(int n) {
 }
 
 int main() {
-    if sumTo(1000) == 500500 {
+    if (sumTo(1000) == 500500) {
         return 0;
     } else {
         return 1;

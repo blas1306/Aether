@@ -83,7 +83,7 @@ def test_enum_is_not_boolean_condition() -> None:
             """
 enum SolverStatus { Converged }
 
-if SolverStatus.Converged {
+if (SolverStatus.Converged) {
     println("ok");
 }
 """

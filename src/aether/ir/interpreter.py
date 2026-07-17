@@ -14,6 +14,7 @@ from aether.process_arguments import (
     normalize_program_arguments,
     process_args_ir_snapshot,
 )
+from aether.range_safety import RANGE_STEP_NONZERO_BUILTIN, RANGE_STEP_ZERO_MESSAGE
 from aether.integer_arithmetic import checked_int_binary, ieee_divide
 from aether.list_safety import checked_list_index_to_int, checked_list_length_to_int
 from aether.stdlib.registry import call_builtin
@@ -465,6 +466,12 @@ class IRInterpreter:
                 self._value(argument, frame) for argument in instruction.arguments
             ]
             if instruction.builtin is not None:
+                if instruction.builtin == RANGE_STEP_NONZERO_BUILTIN:
+                    if len(arguments) != 1 or instruction.result is not None:
+                        raise IRExecutionError("IR range-step guard requires one argument and no result")
+                    if arguments[0] == 0:
+                        raise IRExecutionError(RANGE_STEP_ZERO_MESSAGE)
+                    return False, None, None
                 if instruction.builtin == PROCESS_ARGS_BUILTIN:
                     if arguments or instruction.result is None:
                         raise IRExecutionError("System.args requires zero arguments and a result")

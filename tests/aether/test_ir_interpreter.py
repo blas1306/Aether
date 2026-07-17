@@ -239,7 +239,7 @@ def test_execute_lowered_if_else_returning_from_both_branches() -> None:
     module = _lower(
         """
 int sign(int x) {
-    if x > 0 {
+    if (x > 0) {
         return 1;
     } else {
         return -1;
@@ -257,7 +257,7 @@ def test_execute_lowered_if_without_else_continuation() -> None:
     module = _lower(
         """
 int absLike(int x) {
-    if x < 0 {
+    if (x < 0) {
         x = 0 - x;
     }
     return x;
@@ -275,7 +275,7 @@ def test_execute_lowered_if_else_assigning_before_return() -> None:
         """
 int f(int x) {
     int y = 0;
-    if x > 0 {
+    if (x > 0) {
         y = 1;
     } else {
         y = 2;
@@ -297,7 +297,7 @@ int sumTo(int n) {
     int i = 0;
     int sum = 0;
 
-    while i < n {
+    while (i < n) {
         sum = sum + i;
         i = i + 1;
     }
@@ -316,7 +316,7 @@ def test_execute_lowered_countdown_loop() -> None:
     module = _lower(
         """
 int countdown(int n) {
-    while n > 0 {
+    while (n > 0) {
         n = n - 1;
     }
 
@@ -332,7 +332,7 @@ def test_execute_lowered_while_without_iterations() -> None:
     module = _lower(
         """
 int skip(int n) {
-    while n < 0 {
+    while (n < 0) {
         n = n + 1;
     }
 
@@ -348,7 +348,7 @@ def test_execute_lowered_while_with_empty_body() -> None:
     module = _lower(
         """
 int emptyLoop(int n) {
-    while n < 0 {
+    while (n < 0) {
     }
 
     return n;
@@ -397,7 +397,7 @@ int twiceIncrement(int value) {
         (
             """
 int sign(int x) {
-    if x > 0 {
+    if (x > 0) {
         return 1;
     } else {
         return -1;
@@ -411,7 +411,7 @@ int sign(int x) {
         (
             """
 int absLike(int x) {
-    if x < 0 {
+    if (x < 0) {
         x = 0 - x;
     }
     return x;
@@ -425,7 +425,7 @@ int absLike(int x) {
             """
 int f(int x) {
     int y = 0;
-    if x > 0 {
+    if (x > 0) {
         y = 1;
     } else {
         y = 2;
@@ -443,7 +443,7 @@ int sumTo(int n) {
     int i = 0;
     int sum = 0;
 
-    while i < n {
+    while (i < n) {
         sum = sum + i;
         i = i + 1;
     }
@@ -458,7 +458,7 @@ int sumTo(int n) {
         (
             """
 int countdown(int n) {
-    while n > 0 {
+    while (n > 0) {
         n = n - 1;
     }
 
@@ -472,7 +472,7 @@ int countdown(int n) {
         (
             """
 int skip(int n) {
-    while n < 0 {
+    while (n < 0) {
         n = n + 1;
     }
 

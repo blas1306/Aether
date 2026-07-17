@@ -101,7 +101,7 @@ def test_return_inside_catch_works() -> None:
         """
 int f() {
     try {
-        if true {
+        if (true) {
             throw "boom";
         }
         return 0;
@@ -120,12 +120,12 @@ println(f());
 def test_break_and_continue_inside_try_still_work_in_loops() -> None:
     result = run_aether(
         """
-for i in 1:5 {
+for (i in 1:5) {
     try {
-        if i == 2 {
+        if (i == 2) {
             continue;
         }
-        if i == 4 {
+        if (i == 4) {
             break;
         }
         println(i);

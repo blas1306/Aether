@@ -4,20 +4,28 @@ boolean esPrimo2(int p) {
 	}
 
 	int cota = int(sqrt(p));
-	List<int> primosMenores = {};
+	List<int> primosMenores = {2};
 
 	if (p % 2 == 0) {
 		return false;
 	}
 
-	for (int i in 5:2:cota) {
+	for (int i in 3:2:cota) {
 		primosMenores.push(i);
+	}
+
+	println(primosMenores);
+
+	for (int primo in primosMenores) {
+		if (p % primo == 0) {
+			return false;
+		}
 	}
 
 	return true;
 }
 
 int main() {
-	println(esPrimo2(17));
+	println(esPrimo2(97));
 	return 0;
 }

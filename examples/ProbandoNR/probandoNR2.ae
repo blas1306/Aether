@@ -12,7 +12,7 @@ NewtonResultado NR2(double x0, double tol, int maxiter) {
     double res = abs(f(x));
     int iter = 0;
 
-    while (res > tol) && (iter < maxiter) {
+    while ((res > tol) && (iter < maxiter)) {
         x = x - f(x)/df(x);
         res = abs(f(x));
         iter += 1;

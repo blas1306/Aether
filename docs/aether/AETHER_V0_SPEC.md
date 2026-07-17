@@ -26,7 +26,7 @@ Only `.ae` scripts are recognized at a basic level in v0. Notebooks and computat
 Aether uses braces for blocks:
 
 ```aether
-if x > 0 {
+if (x > 0) {
     println(x);
 }
 ```
@@ -136,7 +136,7 @@ Comparisons with `null` are supported:
 ```aether
 string? name = null;
 
-if name == null {
+if (name == null) {
     println("empty");
 }
 ```
@@ -801,7 +801,7 @@ class Person {
         }
 
         set {
-            if value < 0 {
+            if (value < 0) {
                 throw Exception("age cannot be negative");
             }
 
@@ -952,7 +952,7 @@ Enum values are written with qualified variant access:
 ```aether
 SolverStatus s = SolverStatus.Converged;
 
-if s == SolverStatus.Converged {
+if (s == SolverStatus.Converged) {
     println("ok");
 }
 ```
@@ -972,7 +972,7 @@ SolverStatus t = OtherStatus.Converged;  // error
 Enum values are not booleans:
 
 ```aether
-if SolverStatus.Converged { // error
+if (SolverStatus.Converged) { // error
     println("ok");
 }
 ```
@@ -1311,7 +1311,7 @@ Numeric parsing is explicit and structured:
 ```aether
 IntParseResult identifier = parseInt("+42");
 DoubleParseResult amount = parseDouble("-2.5e-3");
-if amount.status == ParseStatus.Success {
+if (amount.status == ParseStatus.Success) {
     println(amount.value);
 }
 ```
@@ -1991,7 +1991,7 @@ Variables created inside a block do not escape that block. Variables from outer 
 ```aether
 x = 1;
 
-if true {
+if (true) {
     x = 2;
     y = 3;
 }
@@ -2005,7 +2005,7 @@ Redeclaring a visible variable in an inner scope is an error:
 ```aether
 int x = 1;
 
-if true {
+if (true) {
     double x = 2.5; // error: shadowing is not allowed
 }
 ```
@@ -2031,7 +2031,7 @@ sequential evaluation rules; only their already-declared bindings are visible.
 `if`:
 
 ```aether
-if condition {
+if (condition) {
     println("yes");
 }
 ```
@@ -2039,7 +2039,7 @@ if condition {
 `if` / `else`:
 
 ```aether
-if condition {
+if (condition) {
     println("yes");
 } else {
     println("no");
@@ -2049,7 +2049,7 @@ if condition {
 `while`:
 
 ```aether
-while x < 10 {
+while (x < 10) {
     x = x + 1;
 }
 ```
@@ -2057,14 +2057,14 @@ while x < 10 {
 `break` and `continue` are supported inside `for` and `while` loops:
 
 ```aether
-for i in 1:10 {
-    if i == 5 {
+for (i in 1:10) {
+    if (i == 5) {
         break;
     }
     println(i);
 }
 
-while true {
+while (true) {
     continue;
 }
 ```
@@ -2082,7 +2082,7 @@ For Array/List collection loops, the iteration name is a read-only borrow of
 the current element:
 
 ```aether
-for Transaction transaction in transactions {
+for (Transaction transaction in transactions) {
     println(transaction.amount);
 }
 ```
@@ -2100,7 +2100,7 @@ public borrow syntax, mutable iterator object, or general alias analysis.
 Conditions must be `boolean`. Numeric and string values are not accepted as conditions.
 
 ```aether
-if 1 {
+if (1) {
     println("bad");
 } // error
 ```
@@ -2239,7 +2239,7 @@ Invalid missing return:
 
 ```aether
 int f(int x) {
-    if x > 0 {
+    if (x > 0) {
         return x;
     }
 } // error: may not return on all paths
@@ -2249,7 +2249,7 @@ Valid `void` procedure:
 
 ```aether
 void emit(int x) {
-    if x < 0 {
+    if (x < 0) {
         return;
     }
     println(x);
@@ -2262,7 +2262,7 @@ Valid evident return:
 
 ```aether
 int f(int x) {
-    if x > 0 {
+    if (x > 0) {
         return x;
     } else {
         return 0;

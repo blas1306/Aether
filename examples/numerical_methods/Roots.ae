@@ -11,33 +11,33 @@ public RootResult bisection(
     double tolerance,
     int maxIterations
 ) {
-    if tolerance <= 0.0 || maxIterations <= 0 || left >= right {
+    if (tolerance <= 0.0 || maxIterations <= 0 || left >= right) {
         return RootResult((left + right) / 2.0, 0, RootStatus.InvalidInterval);
     }
 
     double fLeft = target(left);
     double fRight = target(right);
-    if abs(fLeft) <= tolerance {
+    if (abs(fLeft) <= tolerance) {
         return RootResult(left, 0, RootStatus.Converged);
     }
-    if abs(fRight) <= tolerance {
+    if (abs(fRight) <= tolerance) {
         return RootResult(right, 0, RootStatus.Converged);
     }
-    if fLeft * fRight > 0.0 {
+    if (fLeft * fRight > 0.0) {
         return RootResult((left + right) / 2.0, 0, RootStatus.InvalidInterval);
     }
 
     int iterations = 0;
     double middle = (left + right) / 2.0;
-    while iterations < maxIterations {
+    while (iterations < maxIterations) {
         middle = (left + right) / 2.0;
         double fMiddle = target(middle);
         iterations = iterations + 1;
 
-        if abs(fMiddle) <= tolerance || abs(right - left) / 2.0 <= tolerance {
+        if (abs(fMiddle) <= tolerance || abs(right - left) / 2.0 <= tolerance) {
             return RootResult(middle, iterations, RootStatus.Converged);
         }
-        if fLeft * fMiddle < 0.0 {
+        if (fLeft * fMiddle < 0.0) {
             right = middle;
         } else {
             left = middle;
@@ -54,27 +54,27 @@ public RootResult newton(
     double tolerance,
     int maxIterations
 ) {
-    if tolerance <= 0.0 || maxIterations <= 0 {
+    if (tolerance <= 0.0 || maxIterations <= 0) {
         return RootResult(initial, 0, RootStatus.InvalidInterval);
     }
 
     double x = initial;
     int iterations = 0;
-    while iterations < maxIterations {
+    while (iterations < maxIterations) {
         double fx = target(x);
-        if abs(fx) <= tolerance {
+        if (abs(fx) <= tolerance) {
             return RootResult(x, iterations, RootStatus.Converged);
         }
 
         double slope = derivative(x);
-        if abs(slope) <= tolerance {
+        if (abs(slope) <= tolerance) {
             return RootResult(x, iterations, RootStatus.ZeroDerivative);
         }
 
         x = x - fx / slope;
         iterations = iterations + 1;
     }
-    if abs(target(x)) <= tolerance {
+    if (abs(target(x)) <= tolerance) {
         return RootResult(x, iterations, RootStatus.Converged);
     }
     return RootResult(x, iterations, RootStatus.MaxIterations);
@@ -87,20 +87,20 @@ public RootResult secant(
     double tolerance,
     int maxIterations
 ) {
-    if tolerance <= 0.0 || maxIterations <= 0 {
+    if (tolerance <= 0.0 || maxIterations <= 0) {
         return RootResult(current, 0, RootStatus.InvalidInterval);
     }
 
     double fPrevious = target(previous);
     double fCurrent = target(current);
     int iterations = 0;
-    while iterations < maxIterations {
-        if abs(fCurrent) <= tolerance {
+    while (iterations < maxIterations) {
+        if (abs(fCurrent) <= tolerance) {
             return RootResult(current, iterations, RootStatus.Converged);
         }
 
         double denominator = fCurrent - fPrevious;
-        if abs(denominator) <= tolerance {
+        if (abs(denominator) <= tolerance) {
             return RootResult(current, iterations, RootStatus.ZeroDerivative);
         }
 
@@ -111,7 +111,7 @@ public RootResult secant(
         fCurrent = target(current);
         iterations = iterations + 1;
     }
-    if abs(fCurrent) <= tolerance {
+    if (abs(fCurrent) <= tolerance) {
         return RootResult(current, iterations, RootStatus.Converged);
     }
     return RootResult(current, iterations, RootStatus.MaxIterations);

@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import NoReturn
 
+from aether.range_safety import RANGE_STEP_NONZERO_BUILTIN
+
 from .model import (
     IRAssign,
     IRArrayCopy,
@@ -1031,6 +1033,16 @@ class IRVerifier:
                     or instruction.result.type != ArrayType(StringType())
                 ):
                     self._fail("System.args builtin requires () -> owned array<string>")
+                return
+            if instruction.builtin == RANGE_STEP_NONZERO_BUILTIN:
+                if instruction.function != RANGE_STEP_NONZERO_BUILTIN:
+                    self._fail("Range-step guard must retain its canonical semantic name")
+                if (
+                    instruction.result is not None
+                    or len(instruction.arguments) != 1
+                    or not isinstance(instruction.arguments[0].type, IntType)
+                ):
+                    self._fail("Range-step guard requires int -> void")
                 return
             if instruction.builtin == "__aether_string_byte_length":
                 if instruction.function != instruction.builtin:

@@ -1,5 +1,9 @@
 # Aether IntelliJ Plugin
 
+Control-flow syntax follows the rc.2 language grammar: `if (condition)`,
+`while (condition)`, and `for (binding in iterable)`. Diagnostics, completion
+snippets, and document formatting are supplied by the bundled Aether LSP.
+
 Primer corte del plugin Aether para IDEs IntelliJ.
 
 Compatibilidad declarada: lenguaje Aether `1.0.0-rc.1`. La versión del plugin

@@ -11,7 +11,7 @@ Vector<double> MinCuad() {
     mt = st[0];
     my = sy[0];
 
-    if mt != my {
+    if (mt != my) {
         println("Los vectores no tienen la mismas dimensiones. Intente nuevamente");
     }
 

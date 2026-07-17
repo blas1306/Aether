@@ -208,7 +208,7 @@ def test_verifies_lowered_if_else_function() -> None:
         """
 int f(int x) {
     int y = 0;
-    if x > 0 {
+    if (x > 0) {
         y = 1;
     } else {
         y = 2;
@@ -228,7 +228,7 @@ int sumTo(int n) {
     int i = 0;
     int sum = 0;
 
-    while i < n {
+    while (i < n) {
         sum = sum + i;
         i = i + 1;
     }

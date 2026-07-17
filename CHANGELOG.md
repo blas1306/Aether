@@ -59,6 +59,12 @@ y no declara ABI estable.
 
 ### Added
 
+- Sintaxis de control rc.2: paréntesis obligatorios en `if`, `while` y `for`,
+  soporte real de cadenas `else if`, diagnósticos de migración, formatter/LSP
+  idempotente y migrador token-aware para fuentes rc.1.
+- Paridad AST/IR/native para pasos de rango dinámicos iguales a cero y para
+  extremos inclusivos `INT_MAX`/`INT_MIN`, preservando overflow checked real.
+
 - `io.writeTextAtomic(path, content) -> FileStatus` en AST y native Linux:
   temporal seguro en el mismo directorio, escritura exacta, fsync de archivo,
   rename atómico, fsync de directorio y cleanup best-effort con fault injection.

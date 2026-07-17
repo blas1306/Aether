@@ -13,8 +13,8 @@ public Summary summarize(List<Transaction> transactions) {
     double income = 0.0;
     double expenses = 0.0;
 
-    for Transaction transaction in transactions {
-        if transaction.type == TransactionType.Income {
+    for (Transaction transaction in transactions) {
+        if (transaction.type == TransactionType.Income) {
             income = income + transaction.amount;
         } else {
             expenses = expenses + transaction.amount;
@@ -29,8 +29,8 @@ public List<Transaction> filterByType(
     TransactionType type
 ) {
     List<Transaction> matches = {};
-    for Transaction transaction in transactions {
-        if transaction.type == type {
+    for (Transaction transaction in transactions) {
+        if (transaction.type == type) {
             matches.push(transaction);
         }
     }
@@ -42,7 +42,7 @@ public string transactionLabel(Transaction transaction) {
 }
 
 public void printTransactions(List<Transaction> transactions) {
-    for Transaction transaction in transactions {
+    for (Transaction transaction in transactions) {
         println(
             "#", transaction.id,
             " | ", transaction.type,

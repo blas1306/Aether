@@ -101,7 +101,7 @@ struct Counter {
     int value;
 
     constructor(int initial) {
-        if initial < 0 {
+        if (initial < 0) {
             value = 0;
         } else {
             value = initial;

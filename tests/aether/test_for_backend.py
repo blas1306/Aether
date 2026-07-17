@@ -46,7 +46,7 @@ def test_lowers_simple_for_range_to_ir_cfg() -> None:
         """
 int main() {
     int sum = 0;
-    for i in 1:5 {
+    for (i in 1:5) {
         sum = sum + i;
     }
     return sum;
@@ -70,8 +70,8 @@ def test_lowers_nested_for_ranges_and_executes_ir() -> None:
         """
 int main() {
     int sum = 0;
-    for i in 1:2 {
-        for j in 1:3 {
+    for (i in 1:2) {
+        for (j in 1:3) {
             sum = sum + i * j;
         }
     }
@@ -90,7 +90,7 @@ def test_lowers_for_range_with_dynamic_step() -> None:
         """
 int sumStep(int step) {
     int sum = 0;
-    for i in 1:step:5 {
+    for (i in 1:step:5) {
         sum = sum + i;
     }
     return sum;
@@ -111,11 +111,11 @@ def test_lowers_break_and_continue_inside_if() -> None:
         """
 int main() {
     int sum = 0;
-    for i in 1:10 {
-        if i == 7 {
+    for (i in 1:10) {
+        if (i == 7) {
             break;
         }
-        if i % 2 == 0 {
+        if (i % 2 == 0) {
             continue;
         }
         sum = sum + i;
@@ -143,12 +143,12 @@ def test_break_and_continue_work_for_while_lowering_too() -> None:
 int main() {
     int i = 0;
     int sum = 0;
-    while i < 6 {
+    while (i < 6) {
         i = i + 1;
-        if i == 5 {
+        if (i == 5) {
             break;
         }
-        if i == 3 {
+        if (i == 3) {
             continue;
         }
         sum = sum + i;
@@ -175,9 +175,9 @@ def test_for_builds_verified_ssa_with_liveness_pruned_nested_loop_phis() -> None
         """
 int main() {
     int sum = 0;
-    for i in 1:2 {
-        for j in 1:4 {
-            if j == 3 {
+    for (i in 1:2) {
+        for (j in 1:4) {
+            if (j == 3) {
                 break;
             }
             sum = sum + i * j;
@@ -201,8 +201,8 @@ def test_for_survives_ir_and_ssa_optimizers() -> None:
         """
 int main() {
     int sum = 0;
-    for i in 1:5 {
-        if i == 3 {
+    for (i in 1:5) {
+        if (i == 3) {
             continue;
         }
         sum = sum + i;
@@ -226,7 +226,7 @@ def test_for_emits_textual_llvm_control_flow() -> None:
             """
 int main() {
     int sum = 0;
-    for i in 1:5 {
+    for (i in 1:5) {
         sum = sum + i;
     }
     return sum;
@@ -249,11 +249,11 @@ def test_emit_llvm_cli_supports_for_break_continue(tmp_path: Path) -> None:
         """
 int main() {
     int sum = 0;
-    for i in 1:10 {
-        if i == 7 {
+    for (i in 1:10) {
+        if (i == 7) {
             break;
         }
-        if i % 2 == 0 {
+        if (i % 2 == 0) {
             continue;
         }
         sum = sum + i;
@@ -282,7 +282,7 @@ def test_default_llvm_run_and_build_support_for(tmp_path: Path) -> None:
         """
 int main() {
     int sum = 0;
-    for i in 1:5 {
+    for (i in 1:5) {
         sum = sum + i;
     }
     return sum;

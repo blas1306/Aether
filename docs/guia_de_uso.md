@@ -39,7 +39,7 @@ Aether usa bloques con llaves y las sentencias simples terminan con `;`.
 
 ```aether
 int abs_int(int x) {
-    if x < 0 {
+    if (x < 0) {
         return -x;
     }
     return x;

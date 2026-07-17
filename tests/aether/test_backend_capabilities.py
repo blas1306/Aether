@@ -252,7 +252,7 @@ def test_partial_string_capability_accepts_transport_but_rejects_interpolation()
 
 
 def test_string_literal_transport_is_not_mistaken_for_a_dynamic_operation() -> None:
-    typed = _typed('string choose(boolean flag) { if flag { return "yes"; } return "no"; }')
+    typed = _typed('string choose(boolean flag) { if (flag) { return "yes"; } return "no"; }')
 
     issues = backend_capability_issues(typed, BackendIdentity.NATIVE)
 
@@ -433,11 +433,6 @@ def test_native_scalar_math_profile_accepts_consolidated_and_rejects_experimenta
             "unsupported element type 'Array<int>'",
         ),
         (
-            "int main() { for i in 1:0:3 { println(i); } return 0; }",
-            Capability.FOR,
-            "statically zero step",
-        ),
-        (
             'int main() { Exception error = Exception("bad"); return 0; }',
             Capability.ERROR_HANDLING,
             "Exception",
@@ -459,7 +454,6 @@ def test_native_scalar_math_profile_accepts_consolidated_and_rejects_experimenta
         "shape-bearing-collection",
         "empty-print",
         "nested-collection-print",
-        "zero-range-step",
         "exception-value",
     ),
 )
@@ -502,7 +496,7 @@ def test_native_soundness_regressions_reject_before_lowering(
         "int main() { List<int> values = {2, 1}; values.sort(); return values.length; }",
         "int main() { Vector<int, Row> value = [1, 2]; return value.length; }",
         'int main() { println("ok"); return 0; }',
-        "int main() { for i in 1:2:3 { println(i); } return 0; }",
+        "int main() { for (i in 1:2:3) { println(i); } return 0; }",
     ],
     ids=(
         "int-remainder",

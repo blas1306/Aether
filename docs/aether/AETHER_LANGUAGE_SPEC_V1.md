@@ -270,15 +270,35 @@ are not assignment targets.
 
 ## 7. Control flow
 
-`if condition { ... } else { ... }` and `while condition { ... }` require a
-`boolean` condition. `else` is optional. A block is mandatory.
+Control-flow headers require parentheses. The normative grammar is:
 
-`for name in iterable { ... }` or `for T name in iterable { ... }` binds one
-loop variable. For ranges, iteration follows inclusive range semantics. For
+```text
+if_statement    := "if" "(" expression ")" block
+                   ("else" (if_statement | block))?
+while_statement := "while" "(" expression ")" block
+for_statement   := "for" "(" iterator_binding "in" expression ")" block
+iterator_binding := type identifier | identifier
+```
+
+`if (condition) { ... } else { ... }` and `while (condition) { ... }` require
+a `boolean` condition. `else` is optional. `else if` is exactly an `if`
+nested in the else branch and does not introduce different scope, evaluation,
+return or lifecycle rules. A block is mandatory.
+
+`for (name in iterable) { ... }` or `for (T name in iterable) { ... }` binds
+one loop variable. For ranges, iteration follows inclusive range semantics.
+A zero step detected as a constant is a compile-time error; a dynamic step
+that evaluates to zero panics before iteration. The terminal range value is
+processed without a subsequent increment, including `INT_MAX`/`INT_MIN`, while
+a genuine checked overflow before reaching the endpoint remains a panic. For
 Array/List, each element binding is a borrowed read-only value for that
 iteration. The loop variable **MUST NOT** be assigned or used to mutate the
 borrowed element through a value path. Mutating the iterated collection's
 structure during its loop is invalid.
+
+Aether 1.0.0-rc.2 requires parentheses around `if`, `while`, and `for`
+headers. Source written for rc.1 must be migrated; the rc.1 forms are not an
+alternative grammar.
 
 `break;` and `continue;` are valid only inside a loop and target the innermost
 loop. `return expression;` is valid in a non-void function and must match its

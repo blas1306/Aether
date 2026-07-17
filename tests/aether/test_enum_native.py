@@ -61,7 +61,7 @@ struct RootResult {
 
 RootStatus selectStatus(boolean converged) {
     RootStatus status = RootStatus.MaxIterations;
-    if converged {
+    if (converged) {
         status = RootStatus.Converged;
     }
     return status;

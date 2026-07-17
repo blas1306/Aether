@@ -4,7 +4,9 @@ from dataclasses import dataclass
 from math import trunc
 from typing import Any
 
-from .errors import AetherTypeError
+from .errors import AetherRuntimeError, AetherTypeError
+from .integer_arithmetic import checked_int_binary
+from .range_safety import RANGE_STEP_ZERO_MESSAGE
 from .string_value import StringValue, as_string_value
 
 
@@ -465,16 +467,26 @@ class AetherRange:
 
     def __iter__(self):
         if self.step == 0:
-            raise AetherTypeError("Range step cannot be zero.")
+            raise AetherTypeError(RANGE_STEP_ZERO_MESSAGE)
         current = self.start
         if self.step > 0:
             while current <= self.end:
                 yield AetherValue("int", current)
-                current += self.step
+                if current == self.end:
+                    return
+                try:
+                    current = int(checked_int_binary("add", current, self.step))
+                except OverflowError as exc:
+                    raise AetherRuntimeError(str(exc)) from exc
             return
         while current >= self.end:
             yield AetherValue("int", current)
-            current += self.step
+            if current == self.end:
+                return
+            try:
+                current = int(checked_int_binary("add", current, self.step))
+            except OverflowError as exc:
+                raise AetherRuntimeError(str(exc)) from exc
 
 
 def default_text(value: AetherValue) -> str:

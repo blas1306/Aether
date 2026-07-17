@@ -6,12 +6,12 @@ double nr(double x0, double tol, int maxiter) {
     double res = abs(f(x));
     int iter = 0;
     
-    for i in 1:maxiter {
+    for (i in 1:maxiter) {
         x = x - f(x)/df(x);
         res = abs(f(x));
         iter += 1;
         
-        if res < tol {
+        if (res < tol) {
             break;
         }
     }

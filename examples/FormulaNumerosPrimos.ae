@@ -3,11 +3,11 @@ import Math as M
 int GenPrimos(int n) {
     int suma1 = 0;
 
-    for i in 1:int(2^n) {
+    for (i in 1:int(2^n)) {
         int suma2 = 0;
 
-        for j in 1:i {
-            if ((M.factorial(j - 1) + 1) % j) == 0 {
+        for (j in 1:i) {
+            if (((M.factorial(j - 1) + 1) % j) == 0) {
                 suma2 = suma2 + 1;
             }
         }
@@ -19,6 +19,6 @@ int GenPrimos(int n) {
     return p;
 }
 
-for i in 1:3 {
+for (i in 1:3) {
     println(GenPrimos(i));
 }

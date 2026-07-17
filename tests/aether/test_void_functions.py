@@ -38,7 +38,7 @@ def test_void_function_accepts_bare_return() -> None:
     result = run_aether(
         """
 void maybeLog(int x) {
-    if x > 0 {
+    if (x > 0) {
         println("positive");
         return;
     }
@@ -56,7 +56,7 @@ def test_void_function_does_not_require_return_on_all_paths() -> None:
     result = run_aether(
         """
 void maybePrint(boolean flag) {
-    if flag {
+    if (flag) {
         println("yes");
     }
 }

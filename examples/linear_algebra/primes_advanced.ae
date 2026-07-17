@@ -2,20 +2,20 @@ import Math.LinearAlgebra
 import Plots
 
 public boolean EsPrimo2(int pp) {
-    if pp <= 1 {
+    if (pp <= 1) {
         println("No existen numeros primos menores que 2");
     }
 
-    if pp == 2 || pp == 3 {
+    if (pp == 2 || pp == 3) {
         return true;
     }
 
-    if (pp^2 - 1) % 24 != 0 {
+    if ((pp^2 - 1) % 24 != 0) {
         return false;
     }
 
-    for i in 2:int(sqrt(pp)) {
-        if pp % i == 0 {
+    for (i in 2:int(sqrt(pp))) {
+        if (pp % i == 0) {
             return false;
         }
     }
@@ -32,7 +32,7 @@ p = [2; 3; 5; 7; 11; 13; 17; 19; 23; 29; 31; 37];
 
 A = Math.LinearAlgebra.ones(12, 2);
 
-for i in 0:11 {
+for (i in 0:11) {
     A[i, 1] = n[i]*ln(n[i]);
 }
 
@@ -54,7 +54,7 @@ println("err2 = ", err2);
 
 public int p_n(int x) {
     pp_n = int(f(x));
-    if EsPrimo2(pp_n) == false {
+    if (EsPrimo2(pp_n) == false) {
         return pp_n + int(ln(x)/z[0]);
     }
 

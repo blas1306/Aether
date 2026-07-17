@@ -446,7 +446,7 @@ def test_emit_ssa_prints_simple_if_else_with_phi(tmp_path: Path) -> None:
         """
 int f(int x) {
     int y = 0;
-    if x > 0 {
+    if (x > 0) {
         y = 1;
     } else {
         y = 2;
@@ -491,7 +491,7 @@ def test_emit_ssa_prints_simple_while_with_phi(tmp_path: Path) -> None:
 int sumTo(int n) {
     int i = 0;
     int sum = 0;
-    while i <= n {
+    while (i <= n) {
         sum = sum + i;
         i = i + 1;
     }
@@ -536,8 +536,8 @@ def test_emit_ssa_without_selector_uses_general_builder(tmp_path: Path) -> None:
         """
 int nested(int x, int y) {
     int z = 0;
-    if x > 0 {
-        if y > 0 {
+    if (x > 0) {
+        if (y > 0) {
             z = 1;
         } else {
             z = 2;
@@ -606,7 +606,7 @@ int add(int a, int b) {
             """
 int f(int x) {
     int y = 0;
-    if x > 0 {
+    if (x > 0) {
         y = 1;
     } else {
         y = 2;
@@ -622,7 +622,7 @@ int f(int x) {
 int sumTo(int n) {
     int i = 0;
     int sum = 0;
-    while i <= n {
+    while (i <= n) {
         sum = sum + i;
         i = i + 1;
     }
@@ -636,8 +636,8 @@ int sumTo(int n) {
             """
 int nested(int x, int y) {
     int z = 0;
-    if x > 0 {
-        if y > 0 {
+    if (x > 0) {
+        if (y > 0) {
             z = 1;
         } else {
             z = 2;
@@ -680,8 +680,8 @@ def test_emit_ssa_pattern_rejects_nested_if_that_general_supports(
         """
 int nested(int x, int y) {
     int z = 0;
-    if x > 0 {
-        if y > 0 {
+    if (x > 0) {
+        if (y > 0) {
             z = 1;
         } else {
             z = 2;
@@ -800,8 +800,8 @@ def test_emit_ssa_pattern_unsupported_program_reports_builder_error_without_trac
     program.write_text(
         """
 int nested(int n) {
-    while n > 0 {
-        while n > 1 {
+    while (n > 0) {
+        while (n > 1) {
             n = n - 1;
         }
         n = n - 1;
@@ -1191,7 +1191,7 @@ def test_emit_llvm_prints_string_phi_for_if_else(tmp_path: Path) -> None:
         """
 string choose(boolean flag) {
     string result = "hello";
-    if flag {
+    if (flag) {
         result = "world";
     } else {
         result = "hello";
@@ -1472,7 +1472,7 @@ def test_emit_llvm_prints_branch_with_comparison(tmp_path: Path) -> None:
     program.write_text(
         """
 int choose(int x) {
-    if x > 0 {
+    if (x > 0) {
         return 1;
     } else {
         return 2;
@@ -1498,7 +1498,7 @@ def test_emit_llvm_prints_branch_with_boolean_parameter(tmp_path: Path) -> None:
     program.write_text(
         """
 int choose(boolean flag) {
-    if flag {
+    if (flag) {
         return 1;
     } else {
         return 2;
@@ -1520,7 +1520,7 @@ def test_emit_llvm_prints_jump_for_constant_branch(tmp_path: Path) -> None:
     program.write_text(
         """
 int main() {
-    if true {
+    if (true) {
         return 1;
     } else {
         return 2;
@@ -1556,7 +1556,7 @@ def test_emit_llvm_prints_if_else_merge_phi(
         """
 int choose(int x) {
     int y = 0;
-    if x > 0 {
+    if (x > 0) {
         y = 1;
     } else {
         y = 2;
@@ -1583,7 +1583,7 @@ def test_emit_llvm_prints_loop_carried_phi_with_defined_incoming(
     program.write_text(
         """
 int countdown(int n) {
-    while n > 0 {
+    while (n > 0) {
         n = n - 1;
     }
     return n;
@@ -2140,7 +2140,7 @@ string identity(string value) {
 
 string choose(boolean flag) {
     string result = "hello";
-    if flag {
+    if (flag) {
         result = identity("world");
     } else {
         result = identity("hello");
@@ -2176,7 +2176,7 @@ def test_build_countdown_smoke_compiles_and_runs_with_clang_if_available(
     program.write_text(
         """
 int countdown(int n) {
-    while n > 0 {
+    while (n > 0) {
         n = n - 1;
     }
     return n;
@@ -2246,7 +2246,7 @@ int sumTo(int n) {
     int i = 0;
     int sum = 0;
 
-    while i < n {
+    while (i < n) {
         sum = sum + i;
         i = i + 1;
     }
@@ -2282,7 +2282,7 @@ int first() {
 }
 
 int second(int x) {
-    if x > 0 {
+    if (x > 0) {
         return 1;
     } else {
         return 0;

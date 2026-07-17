@@ -3,7 +3,7 @@ double add(double a, double b) {
 }
 
 int main() {
-    if add(1.25, 2.75) == 4.0 {
+    if (add(1.25, 2.75) == 4.0) {
         return 17;
     }
 

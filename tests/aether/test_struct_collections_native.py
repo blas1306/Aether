@@ -136,7 +136,7 @@ List<Entry> passThrough(List<Entry> values) { return values; }
 int main() {
     List<Entry> values = {};
     int i = 0;
-    while i < 20 {
+    while (i < 20) {
         values.push(Entry(i, Kind.Even, "item"));
         i = i + 1;
     }
@@ -161,7 +161,7 @@ int main() {
     println(values[0].value == 18);
 
     int total = 0;
-    for Entry entry in passThrough(values) { total = total + entry.value; }
+    for (Entry entry in passThrough(values)) { total = total + entry.value; }
     println(total == 248);
     List<Entry> printable = {Entry(1, Kind.Even, "a"), Entry(2, Kind.Odd, "b")};
     println(printable);

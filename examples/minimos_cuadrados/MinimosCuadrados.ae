@@ -18,8 +18,8 @@ mbase = sbase[0];
 
 A = Math.LinearAlgebra.zeros(mt, mbase);
 
-for i in 0:(mt - 1) {
-    for j in 0:(mbase - 1) {
+for (i in 0:(mt - 1)) {
+    for (j in 0:(mbase - 1)) {
         A[i, j] = base(t[i])[j];
     }
 }
@@ -29,7 +29,7 @@ z = A \ y;
 double modelo(double x) {
     double acc = 0;
 
-    for j in 0:(mbase - 1) {
+    for (j in 0:(mbase - 1)) {
         acc = acc + z[j]*base(x)[j];
     }
 

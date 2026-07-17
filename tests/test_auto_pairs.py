@@ -55,7 +55,7 @@ def test_empty_pair_and_skip_over_helpers() -> None:
 
 
 def test_smart_enter_helper_indents_nested_empty_braces() -> None:
-    insertion = smart_enter_in_empty_braces("    for y in v {}", len("    for y in v {"))
+    insertion = smart_enter_in_empty_braces("    for (y in v) {}", len("    for (y in v) {"))
 
     assert insertion is not None
     assert insertion.text == "\n        \n    "
@@ -135,22 +135,22 @@ def test_backspace_between_empty_braces_removes_both(qapp) -> None:
 
 def test_enter_between_empty_braces_creates_indented_block(qapp) -> None:
     editor = CodeEditor()
-    editor.setPlainText("for x in v {}")
-    _set_cursor(editor, len("for x in v {"))
+    editor.setPlainText("for (x in v) {}")
+    _set_cursor(editor, len("for (x in v) {"))
 
     _press_key(editor, QtCore.Qt.Key.Key_Return)
 
-    assert editor.toPlainText() == "for x in v {\n    \n}"
-    assert editor.textCursor().position() == len("for x in v {\n    ")
+    assert editor.toPlainText() == "for (x in v) {\n    \n}"
+    assert editor.textCursor().position() == len("for (x in v) {\n    ")
 
 
 def test_enter_between_nested_empty_braces_preserves_current_indent(qapp) -> None:
     editor = CodeEditor()
-    text = "if x {\n    for y in v {}\n}"
+    text = "if (x) {\n    for (y in v) {}\n}"
     editor.setPlainText(text)
     _set_cursor(editor, text.index("{}") + 1)
 
     _press_key(editor, QtCore.Qt.Key.Key_Return)
 
-    assert editor.toPlainText() == "if x {\n    for y in v {\n        \n    }\n}"
-    assert editor.textCursor().position() == len("if x {\n    for y in v {\n        ")
+    assert editor.toPlainText() == "if (x) {\n    for (y in v) {\n        \n    }\n}"
+    assert editor.textCursor().position() == len("if (x) {\n    for (y in v) {\n        ")

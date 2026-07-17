@@ -197,7 +197,7 @@ class AetherCommandLineTest {
 
     @Test
     fun `enter between braces inserts inner indent and places caret inside block`() {
-        val insertion = AetherTypingSupport.enterBetweenBracesInsertion("    if ok {}", "    if ok {".length)
+        val insertion = AetherTypingSupport.enterBetweenBracesInsertion("    if (ok) {}", "    if (ok) {".length)
 
         assertNotNull(insertion)
         assertEquals("\n        \n    ", insertion.text)
@@ -206,7 +206,7 @@ class AetherCommandLineTest {
 
     @Test
     fun `enter support ignores offsets that are not between braces`() {
-        assertEquals(null, AetherTypingSupport.enterBetweenBracesInsertion("if ok { value }", "if ok { ".length))
+        assertEquals(null, AetherTypingSupport.enterBetweenBracesInsertion("if (ok) { value }", "if (ok) { ".length))
     }
 
     @Test

@@ -26,7 +26,7 @@ DoubleParseResult parsedExpenseAmount = parseDouble(rawExpenseAmount.trim());
 DoubleParseResult invalidParsedAmount = parseDouble(rawExpenseAmount);
 int expenseId = 0;
 double expenseAmount = 0.0;
-if parsedExpenseId.status == ParseStatus.Success && parsedExpenseAmount.status == ParseStatus.Success {
+if (parsedExpenseId.status == ParseStatus.Success && parsedExpenseAmount.status == ParseStatus.Success) {
     expenseId = parsedExpenseId.value;
     expenseAmount = parsedExpenseAmount.value;
 }
@@ -122,36 +122,36 @@ List<Transaction> demoTransactions() {
 }
 
 int runUtilityCommand(Array<string> args) {
-    if args[0] == "split-check" {
-        if args.length < 3 {
+    if (args[0] == "split-check") {
+        if (args.length < 3) {
             println("insufficient arguments: split-check <separator> <text>");
             return 2;
         }
         Array<string> parts = args[2].split(args[1]);
         println("split parts: ", parts.length);
-        for string part in parts {
+        for (string part in parts) {
             println(part);
         }
         return 0;
     }
-    if args[0] == "persist-check" {
-        if args.length < 2 {
+    if (args[0] == "persist-check") {
+        if (args.length < 2) {
             println("insufficient arguments: persist-check <path>");
             return 2;
         }
         string summary = "income=1500.0\nexpenses=250.0\nbalance=1250.0\n";
         FileStatus written = io.writeText(args[1], summary);
-        if written != FileStatus.Success {
+        if (written != FileStatus.Success) {
             println("summary write failed: ", written);
             return 2;
         }
         FileReadResult loaded = io.readText(args[1]);
-        if loaded.status != FileStatus.Success || loaded.content != summary {
+        if (loaded.status != FileStatus.Success || loaded.content != summary) {
             println("summary verification failed: ", loaded.status);
             return 2;
         }
         FileStatus appended = io.appendText(args[1], "verified\n");
-        if appended != FileStatus.Success {
+        if (appended != FileStatus.Success) {
             println("summary append failed: ", appended);
             return 2;
         }
@@ -164,7 +164,7 @@ int runUtilityCommand(Array<string> args) {
 
 LedgerLoadResult loadForCommand(string path) {
     LedgerLoadResult loaded = loadLedger(path);
-    if loaded.status == LedgerStatus.FileNotFound {
+    if (loaded.status == LedgerStatus.FileNotFound) {
         List<Transaction> empty = {};
         return LedgerLoadResult(empty, LedgerStatus.Success, 0);
     }
@@ -177,25 +177,25 @@ int reportLoadFailure(LedgerLoadResult loaded) {
 }
 
 int runPersistentCommand(Array<string> args) {
-    if args.length < 2 {
+    if (args.length < 2) {
         println("usage: <ledger.alpt> <add|list|summary> ...");
         return 2;
     }
     LedgerLoadResult loaded = loadForCommand(args[0]);
-    if loaded.status != LedgerStatus.Success {
+    if (loaded.status != LedgerStatus.Success) {
         return reportLoadFailure(loaded);
     }
 
-    if args[1] == "list" {
-        if args.length != 2 {
+    if (args[1] == "list") {
+        if (args.length != 2) {
             println("invalid arguments: <ledger.alpt> list");
             return 2;
         }
         printTransactions(loaded.transactions);
         return 0;
     }
-    if args[1] == "summary" {
-        if args.length != 2 {
+    if (args[1] == "summary") {
+        if (args.length != 2) {
             println("invalid arguments: <ledger.alpt> summary");
             return 2;
         }
@@ -205,27 +205,27 @@ int runPersistentCommand(Array<string> args) {
         println("balance: ", totals.balance);
         return 0;
     }
-    if args[1] == "add" {
-        if args.length < 8 {
+    if (args[1] == "add") {
+        if (args.length < 8) {
             println("insufficient arguments: <ledger.alpt> add <expense|income> <id> <amount> <category> <description> <date>");
             return 2;
         }
         IntParseResult parsedId = parseInt(args[3].trim());
-        if parsedId.status != ParseStatus.Success {
+        if (parsedId.status != ParseStatus.Success) {
             println("invalid ID: ", args[3]);
             return 2;
         }
         DoubleParseResult parsedAmount = parseDouble(args[4].trim());
-        if parsedAmount.status != ParseStatus.Success || parsedAmount.value <= 0.0 ||
-            parsedAmount.value - parsedAmount.value != 0.0 {
+        if (parsedAmount.status != ParseStatus.Success || parsedAmount.value <= 0.0 ||
+            parsedAmount.value - parsedAmount.value != 0.0) {
             println("invalid amount: ", args[4]);
             return 2;
         }
         TransactionType type = TransactionType.Expense;
-        if args[2] == "income" {
+        if (args[2] == "income") {
             type = TransactionType.Income;
         } else {
-            if args[2] != "expense" {
+            if (args[2] != "expense") {
                 println("unknown transaction type: ", args[2]);
                 return 2;
             }
@@ -234,12 +234,12 @@ int runPersistentCommand(Array<string> args) {
             loaded.transactions, parsedId.value, type, args[6], parsedAmount.value,
             args[5], args[7]
         );
-        if status != AddTransactionStatus.Added {
+        if (status != AddTransactionStatus.Added) {
             println("invalid amount: ", args[4]);
             return 2;
         }
         LedgerStatus saved = saveLedger(args[0], loaded.transactions);
-        if saved != LedgerStatus.Success {
+        if (saved != LedgerStatus.Success) {
             println("ledger save failed: ", saved);
             return 4;
         }
@@ -254,11 +254,11 @@ int runPersistentCommand(Array<string> args) {
 
 int main() {
     Array<string> args = System.args();
-    if args.length == 0 {
+    if (args.length == 0) {
         runDemo();
         return 0;
     }
-    if args[0] == "split-check" || args[0] == "persist-check" {
+    if (args[0] == "split-check" || args[0] == "persist-check") {
         return runUtilityCommand(args);
     }
     return runPersistentCommand(args);

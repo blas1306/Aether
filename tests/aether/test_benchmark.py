@@ -14,11 +14,11 @@ SOURCE = """
 int main() {
     int total = 0;
     int i = 0;
-    while i < 10 {
+    while (i < 10) {
         total = total + i;
         i = i + 1;
     }
-    if total == 45 {
+    if (total == 45) {
         return 0;
     } else {
         return 1;

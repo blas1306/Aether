@@ -506,6 +506,19 @@ Los tres ejemplos son complementarios y útiles. Juntos aún no cubren:
 Por ello el dogfood actual prueba que varios subsistemas funcionan; no prueba
 que el núcleo v1 esté listo para congelarse.
 
+### Cierre de control-flow previsto para rc.2
+
+La implementación de rc.2 exige `if (condition)`, `while (condition)` y
+`for (binding in iterable)`, representa `else if` mediante nesting AST y
+rechaza las formas rc.1 con diagnósticos dedicados. El formatter y el LSP
+publican la forma canónica y existe un migrador token-aware con modo `--check`.
+
+También quedaron cerradas las divergencias críticas auditadas: un paso
+dinámico cero produce el mismo fallo en AST/IR/native y los rangos singleton en
+`INT_MAX`/`INT_MIN` terminan sin incremento posterior. El overflow real antes
+del extremo continúa chequeado. Estos cierres no autorizan por sí solos el
+cambio de versión ni la publicación de artefactos rc.2.
+
 ## 11. Decisiones de congelamiento
 
 | Frontera | ¿Congelar hoy? | Motivo |

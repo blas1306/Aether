@@ -361,7 +361,7 @@ def test_lower_if_else_with_return_in_both_branches() -> None:
     module = _lower(
         """
 int sign(int x) {
-    if x > 0 {
+    if (x > 0) {
         return 1;
     } else {
         return -1;
@@ -390,7 +390,7 @@ def test_lower_if_without_else_continues_after_merge() -> None:
     module = _lower(
         """
 int absLike(int x) {
-    if x < 0 {
+    if (x < 0) {
         x = 0 - x;
     }
     return x;
@@ -421,7 +421,7 @@ def test_lower_if_else_assigns_local_and_returns_after_merge() -> None:
         """
 int f(int x) {
     int y = 0;
-    if x > 0 {
+    if (x > 0) {
         y = 1;
     } else {
         y = 2;
@@ -454,7 +454,7 @@ def test_pretty_print_lowered_if_else_with_jumps() -> None:
         """
 int f(int x) {
     int y = 0;
-    if x > 0 {
+    if (x > 0) {
         y = 1;
     } else {
         y = 2;
@@ -497,7 +497,7 @@ int sumTo(int n) {
     int i = 0;
     int sum = 0;
 
-    while i < n {
+    while (i < n) {
         sum = sum + i;
         i = i + 1;
     }
@@ -527,7 +527,7 @@ def test_lower_while_with_empty_body() -> None:
     module = _lower(
         """
 int emptyLoop(int n) {
-    while n < 0 {
+    while (n < 0) {
     }
 
     return n;
@@ -554,7 +554,7 @@ int sumTo(int n) {
     int i = 0;
     int sum = 0;
 
-    while i < n {
+    while (i < n) {
         sum = sum + i;
         i = i + 1;
     }

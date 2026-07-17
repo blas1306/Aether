@@ -18,7 +18,7 @@ def _parse_expression(source: str) -> BinaryExpression:
 
 
 def test_parser_logical_precedence_matches_c_style_rules() -> None:
-    condition = _parse_expression("if a > 0 && b < 10 || c == 5 { }")
+    condition = _parse_expression("if (a > 0 && b < 10 || c == 5) { }")
 
     assert condition.operator == "||"
     assert isinstance(condition.left, BinaryExpression)
@@ -28,7 +28,7 @@ def test_parser_logical_precedence_matches_c_style_rules() -> None:
 
 
 def test_parser_parentheses_group_logical_expressions() -> None:
-    condition = _parse_expression("if (a > 0 && b < 10) || c == 5 { }")
+    condition = _parse_expression("if ((a > 0 && b < 10) || c == 5) { }")
 
     assert condition.operator == "||"
     assert isinstance(condition.left, BinaryExpression)
@@ -36,7 +36,7 @@ def test_parser_parentheses_group_logical_expressions() -> None:
 
 
 def test_parser_while_accepts_complex_logical_condition() -> None:
-    program = Parser(lex("while x > 0 && y != 0 { x = x - 1; }")).parse()
+    program = Parser(lex("while (x > 0 && y != 0) { x = x - 1; }")).parse()
 
     statement = program.statements[0]
     assert isinstance(statement, WhileStatement)
@@ -102,12 +102,12 @@ def test_if_and_while_use_complex_logical_conditions() -> None:
 a = 1;
 b = 9;
 c = 0;
-if a > 0 && b < 10 {
+if (a > 0 && b < 10) {
     println("if");
 }
 x = 2;
 y = 1;
-while x > 0 && y != 0 {
+while (x > 0 && y != 0) {
     println(x);
     x = x - 1;
 }
@@ -124,7 +124,7 @@ def test_parenthesized_or_condition_runs_expected_branch() -> None:
 a = -1;
 b = 20;
 c = 5;
-if (a > 0 && b < 10) || c == 5 {
+if ((a > 0 && b < 10) || c == 5) {
     println("ok");
 }
 """

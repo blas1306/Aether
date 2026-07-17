@@ -161,7 +161,7 @@ int main() {
     PartsBox partsBox = PartsBox(local.split(separator));
     Array<Array<string>> nested = {partsBox.values, "x|y".split("|")};
     List<string> borrowed = {};
-    for string item in sliced { borrowed.push(item); }
+    for (string item in sliced) { borrowed.push(item); }
     consume(("temp:" + "temporary").split(":"));
     println(localParts.length == 4 && localParts[0] == "a" && localParts[1] == "" && localParts[3] == "");
     println(parts("ababa", "aba")[1] == "ba");

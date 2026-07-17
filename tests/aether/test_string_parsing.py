@@ -106,8 +106,8 @@ int main() {
     List<IntParseResult> copied = ids.copy();
     List<IntParseResult> sliced = copied[0:2];
     int successes = 0;
-    for IntParseResult item in sliced {
-        if item.status == ParseStatus.Success { successes = successes + 1; }
+    for (IntParseResult item in sliced) {
+        if (item.status == ParseStatus.Success) { successes = successes + 1; }
     }
     println(max.value);
     println(min.value);

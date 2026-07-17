@@ -984,7 +984,7 @@ Aether source:
 
 ```aether
 int absValue(int x) {
-    if x < 0 {
+    if (x < 0) {
         return -x;
     } else {
         return x;
@@ -1041,7 +1041,7 @@ int sumTo(int n) {
     int i = 1;
     int total = 0;
 
-    while i <= n {
+    while (i <= n) {
         total = total + i;
         i = i + 1;
     }

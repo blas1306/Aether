@@ -23,7 +23,7 @@ import System;
 int main() {
     Array<string> args = System.args();
     println(args.length);
-    for string arg in args {
+    for (string arg in args) {
         println(arg);
     }
     return 0;

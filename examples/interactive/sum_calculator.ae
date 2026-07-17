@@ -2,7 +2,7 @@ public int sumar(int a, int b) {
     return a + b;
 }
 
-while true {
+while (true) {
     int a = input("Ingrese el primer numero: ");
     int b = input("Ingrese el segundo numero: ");
 

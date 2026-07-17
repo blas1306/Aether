@@ -122,11 +122,11 @@ int main() {
     ("source", "message"),
     [
         (
-            "int main() { List<int> xs = {1}; for int x in xs { xs.push(2); } return 0; }",
+            "int main() { List<int> xs = {1}; for (int x in xs) { xs.push(2); } return 0; }",
             "Cannot structurally mutate collection 'xs'",
         ),
         (
-            "int main() { List<List<int>> xs = {{1}}; for List<int> x in xs { x.push(2); } return 0; }",
+            "int main() { List<List<int>> xs = {{1}}; for (List<int> x in xs) { x.push(2); } return 0; }",
             "Cannot mutate borrowed loop variable 'x'",
         ),
     ],
@@ -143,7 +143,7 @@ def test_migration_baseline_for_in_explicit_alias_uses_normal_reference_semantic
     source = """
 int main() {
     List<List<int>> values = {{1}, {2}};
-    for List<int> borrowed in values {
+    for (List<int> borrowed in values) {
         List<int> saved = borrowed;
         saved.push(9);
     }

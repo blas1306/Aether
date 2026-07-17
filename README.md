@@ -17,6 +17,12 @@ que el compilador native; la frontera aceptada está definida por la
 [especificación normativa v1](docs/aether/AETHER_LANGUAGE_SPEC_V1.md) y el
 [perfil native normativo](docs/aether/AETHER_NATIVE_PROFILE_V1.md).
 
+La sintaxis de control definitiva para `1.0.0-rc.2` usa headers parentizados:
+`if (condition)`, `while (condition)` y `for (binding in iterable)`. El código
+escrito para rc.1 debe migrarse; las formas sin paréntesis se rechazan con un
+diagnóstico dedicado. Esta implementación no cambia todavía la versión del
+paquete ni publica artefactos rc.2.
+
 ```aether
 struct Point {
     double x;

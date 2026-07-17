@@ -2,13 +2,13 @@ int main() {
     List<int> values = {1, 2, 3, 4, 5};
     int repeat = 0;
     int total = 0;
-    while repeat < 200 {
-        for int value in values {
+    while (repeat < 200) {
+        for (int value in values) {
             total = total + value;
         }
         repeat = repeat + 1;
     }
-    if total == 3000 {
+    if (total == 3000) {
         return 0;
     } else {
         return 1;

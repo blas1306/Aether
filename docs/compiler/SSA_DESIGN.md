@@ -205,7 +205,7 @@ Consider:
 int main() {
     int x = 0;
 
-    if x == 0 {
+    if (x == 0) {
         x = 1;
     } else {
         x = 2;
@@ -249,7 +249,7 @@ Source:
 int main() {
     int x = 10;
 
-    if x > 0 {
+    if (x > 0) {
         x = x + 1;
     } else {
         x = x - 1;
@@ -325,7 +325,7 @@ int sumTo(int n) {
     int i = 0;
     int acc = 0;
 
-    while i <= n {
+    while (i <= n) {
         acc = acc + i;
         i = i + 1;
     }

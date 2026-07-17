@@ -1,12 +1,12 @@
 public int fibo(int n) {
-    if n <= 1 {
+    if (n <= 1) {
         return n;
     }
 
     int a = 0;
     int b = 1;
 
-    for i in 2:n {
+    for (i in 2:n) {
         int c = a + b;
         a = b;
         b = c;
@@ -15,10 +15,10 @@ public int fibo(int n) {
     return b;
 }
 
-while true {
+while (true) {
     int n = input("Ingrese un numero natural: ");
 
-    if n <= 0 {
+    if (n <= 0) {
         println("Numero ingresado menor que 0. Intente nuevamente");
     } else {
         println("F_{$n$} = ", fibo(n));

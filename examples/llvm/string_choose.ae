@@ -1,6 +1,6 @@
 string choose(boolean flag) {
     string result = "hello";
-    if flag {
+    if (flag) {
         result = "world";
     } else {
         result = "hello";

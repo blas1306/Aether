@@ -10,6 +10,7 @@ from .lexer import lex
 from .modules import is_public_export, private_top_level_names, resolve_file_module_path
 from .native_members import native_member_set, native_method, native_property
 from .parser import Parser
+from .range_safety import RANGE_STEP_ZERO_DIAGNOSTIC
 from .scope import Scope
 from .symbols import EnumSymbol, FunctionSymbol, InterfaceSymbol, StructSymbol, VariableSymbol
 from .stdlib import (
@@ -67,6 +68,17 @@ LINEAR_ALGEBRA_MATMUL = "Math.LinearAlgebra.matmul"
 LINEAR_ALGEBRA_SOLVE = "Math.LinearAlgebra.solve"
 LINEAR_ALGEBRA_CONJTRANSPOSE = "Math.LinearAlgebra.conjtranspose"
 SCALAR_INPUT_TARGET_TYPES = {"int", "float", "string", "boolean"}
+
+
+def _constant_range_int(expression: ast.Expression) -> int | None:
+    if isinstance(expression, ast.Literal) and expression.type_name == "int":
+        return expression.value if isinstance(expression.value, int) and not isinstance(expression.value, bool) else None
+    if isinstance(expression, ast.UnaryExpression) and expression.operator == "-":
+        operand = _constant_range_int(expression.operand)
+        return -operand if operand is not None else None
+    return None
+
+
 class TypeChecker:
     def __init__(
         self,
@@ -1586,6 +1598,16 @@ class TypeChecker:
         iterable_type = self._expression_type(statement.iterable, scope)
         if iterable_type is UNKNOWN_TYPE:
             return
+        if (
+            isinstance(statement.iterable, ast.RangeExpression)
+            and statement.iterable.step is not None
+            and _constant_range_int(statement.iterable.step) == 0
+        ):
+            raise AetherTypeError(
+                RANGE_STEP_ZERO_DIAGNOSTIC,
+                line=statement.line,
+                column=statement.column,
+            )
         element_type = _iterable_element_type(iterable_type)
         if element_type is None:
             raise AetherTypeError(f"Cannot iterate over value of type '{type_to_string(iterable_type)}'.")

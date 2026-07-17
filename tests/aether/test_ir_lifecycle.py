@@ -319,12 +319,12 @@ def test_nested_scope_and_loop_exits_emit_reverse_cleanup() -> None:
         """
 int f(int n) {
     int i = 0;
-    while i < n {
+    while (i < n) {
         int first = i;
         int second = first;
         i = i + 1;
-        if i == 2 { continue; }
-        if i == 4 { break; }
+        if (i == 2) { continue; }
+        if (i == 4) { break; }
     }
     return i;
 }
@@ -349,7 +349,7 @@ def test_early_return_cleans_outer_and_inner_scopes() -> None:
         """
 int f(int n) {
     int outer = n;
-    if n > 0 {
+    if (n > 0) {
         int inner = outer;
         return inner + outer;
     }

@@ -10,14 +10,14 @@ public IntegrationResult trapezoid(
     double right,
     int intervals
 ) {
-    if intervals <= 0 {
+    if (intervals <= 0) {
         return IntegrationResult(0.0, IntegrationStatus.NonPositiveSubintervalCount);
     }
 
     double step = (right - left) / double(intervals);
     double total = (target(left) + target(right)) / 2.0;
     int index = 1;
-    while index < intervals {
+    while (index < intervals) {
         total = total + target(left + double(index) * step);
         index = index + 1;
     }
@@ -30,19 +30,19 @@ public IntegrationResult simpson(
     double right,
     int intervals
 ) {
-    if intervals <= 0 {
+    if (intervals <= 0) {
         return IntegrationResult(0.0, IntegrationStatus.NonPositiveSubintervalCount);
     }
-    if intervals % 2 != 0 {
+    if (intervals % 2 != 0) {
         return IntegrationResult(0.0, IntegrationStatus.SimpsonRequiresEvenSubintervals);
     }
 
     double step = (right - left) / double(intervals);
     double total = target(left) + target(right);
     int index = 1;
-    while index < intervals {
+    while (index < intervals) {
         double weight = 2.0;
-        if index % 2 != 0 {
+        if (index % 2 != 0) {
             weight = 4.0;
         }
         total = total + weight * target(left + double(index) * step);
