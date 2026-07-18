@@ -1,6 +1,6 @@
 # Aether Native Profile v1
 
-> Classification: **Normative**. Language release `1.0.0-rc.1`; native
+> Classification: **Normative**. Language release `1.0.0-rc.2`; native
 > capability profile schema/version `22`. The language version and profile
 > version are independent identifiers.
 
@@ -214,5 +214,5 @@ NOT** remove or reorder observable traps, allocation, IO, or lifecycle effects.
 
 Profile 22 is a feature-contract version, not the Aether language version and
 not an ABI version. Increasing it records a changed capability boundary. It
-does not by itself change `1.0.0-rc.1`, Python package metadata, or plugin
+does not by itself change `1.0.0-rc.2`, Python package metadata, or plugin
 compatibility.

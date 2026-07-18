@@ -9,6 +9,53 @@ Aether sigue en desarrollo y no tiene una release estable. La especificación
 v0 se conserva como historia; desde el primer candidato v1, el contrato vigente
 es la spec v1 junto con el perfil native normativo.
 
+## 1.0.0-rc.2 — 2026-07-18
+
+Segundo candidato del contrato Aether v1. No añade funcionalidades al runtime
+ni amplía el perfil native 22.
+
+### Breaking syntax change
+
+Los headers de control requieren paréntesis:
+
+```aether
+if (condition) {
+}
+
+while (condition) {
+}
+
+for (int i in values) {
+}
+```
+
+La sintaxis rc.1 sin paréntesis ya no es válida.
+
+### Nuevas capacidades
+
+- Cadenas `else if` con nesting AST explícito.
+- Formatting canónico e idempotente expuesto vía LSP.
+- Migrador rc.1 → rc.2 token-aware, idempotente y con modo `--check` que no
+  altera strings ni comentarios.
+
+### Correcciones
+
+- Un paso de rango dinámico igual a cero produce el mismo error en AST, IR y
+  native.
+- Los rangos inclusivos terminan de forma segura en `INT_MAX` y `INT_MIN` sin
+  incrementar accidentalmente después del extremo.
+- Los literales fuera de signed i32 se rechazan en compile time, con la regla
+  estructural necesaria para representar `-2147483648`.
+- Las defensas AST/IR/SSA/LLVM impiden constantes fuera de rango y eliminan el
+  wrapping accidental del backend native.
+
+### Compatibilidad
+
+No se garantiza compatibilidad fuente entre rc.1 y rc.2. Se distribuye un
+migrador para actualizar fuentes rc.1; las formas antiguas sólo se conservan
+en pruebas negativas, documentación histórica y ejemplos explícitos de
+migración.
+
 ## 1.0.0-rc.1 — 2026-07-16
 
 Primer candidato identificable del contrato Aether v1. No es production-ready
@@ -58,16 +105,6 @@ y no declara ABI estable.
 ## Unreleased
 
 ### Added
-
-- Validación semántica signed-i32 para todo literal `int`, con diagnóstico
-  localizado, regla estructural de `INT_MIN`, defensas IR/SSA/LLVM y cobertura
-  diferencial AST/IR/native. Los enteros arbitrarios de Python ya no pueden
-  definir ni filtrar la semántica de un literal Aether.
-- Sintaxis de control rc.2: paréntesis obligatorios en `if`, `while` y `for`,
-  soporte real de cadenas `else if`, diagnósticos de migración, formatter/LSP
-  idempotente y migrador token-aware para fuentes rc.1.
-- Paridad AST/IR/native para pasos de rango dinámicos iguales a cero y para
-  extremos inclusivos `INT_MAX`/`INT_MIN`, preservando overflow checked real.
 
 - `io.writeTextAtomic(path, content) -> FileStatus` en AST y native Linux:
   temporal seguro en el mismo directorio, escritura exacta, fsync de archivo,

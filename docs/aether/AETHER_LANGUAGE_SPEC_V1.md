@@ -1,7 +1,7 @@
 # Aether Language Specification v1
 
-> Classification: **Normative**. Release: `1.0.0-rc.1` (Python package
-> version `1.0.0rc1`). This specification defines the language; backend
+> Classification: **Normative**. Release: `1.0.0-rc.2` (Python package
+> version `1.0.0rc2`). This specification defines the language; backend
 > availability is defined separately by
 > [Aether Native Profile v1](AETHER_NATIVE_PROFILE_V1.md).
 
@@ -557,4 +557,4 @@ The current normative documents are this specification and the native profile.
 Design/RFC documents explain implementation decisions. `AETHER_V0_SPEC.md` is
 historical, `AETHER_V1_RELEASE_READINESS.md` is an audit snapshot, and
 `BACKEND_FEATURE_PARITY.md` is an engineering audit. Where they conflict with
-this specification for release `1.0.0-rc.1`, this specification prevails.
+this specification for release `1.0.0-rc.2`, this specification prevails.

@@ -46,7 +46,11 @@ class ReleaseError(RuntimeError):
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--version", required=True, help="Public Aether version.")
+    parser.add_argument(
+        "--version",
+        default=LANGUAGE_VERSION,
+        help="Public Aether version (defaults to the canonical package version).",
+    )
     parser.add_argument(
         "--allow-dirty",
         action="store_true",

@@ -24,9 +24,15 @@ def _load_script(name: str):
 
 
 def test_canonical_version_maps_public_and_python_metadata() -> None:
-    assert PACKAGE_VERSION == "1.0.0rc1"
-    assert LANGUAGE_VERSION == "1.0.0-rc.1"
+    assert PACKAGE_VERSION == "1.0.0rc2"
+    assert LANGUAGE_VERSION == "1.0.0-rc.2"
     assert __version__ == PACKAGE_VERSION
+
+
+def test_release_script_defaults_to_the_canonical_version() -> None:
+    release = _load_script("release.py")
+
+    assert release.build_parser().parse_args([]).version == LANGUAGE_VERSION
 
 
 def test_cli_version_uses_language_and_capability_identities() -> None:

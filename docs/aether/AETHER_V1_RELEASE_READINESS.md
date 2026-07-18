@@ -9,6 +9,12 @@
 > implementación rc.1 y diseña la transición rc.2; no modifica este dictamen ni
 > la spec congelada.
 
+> Preparación de release posterior, 18 de julio de 2026: Aether
+> `1.0.0-rc.2` incorpora exclusivamente los cambios de sintaxis, migración,
+> formatting y seguridad de rangos/literales ya cerrados después de esta
+> auditoría. No amplía el perfil 22 ni añade capacidades de runtime. Las cifras
+> y referencias a rc.1 que siguen pertenecen al corte histórico original.
+
 Fecha de corte: **16 de julio de 2026**
 
 Repositorio auditado: commit `634a404`

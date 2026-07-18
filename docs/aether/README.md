@@ -8,7 +8,7 @@ the release contract.
 - [Aether Language Specification v1](AETHER_LANGUAGE_SPEC_V1.md)
 - [Aether Native Profile v1](AETHER_NATIVE_PROFILE_V1.md)
 
-These two documents define Aether `1.0.0-rc.1`. The ALPT1 byte contract in
+These two documents define Aether `1.0.0-rc.2`. The ALPT1 byte contract in
 [Persistence Format Design](PERSISTENCE_FORMAT_DESIGN.md) remains normative for
 that format only; it is not a second language specification.
 
