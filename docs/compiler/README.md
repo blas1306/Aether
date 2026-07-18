@@ -55,6 +55,15 @@ comparison.
 
 Current compiler-design documents:
 
+- [BACKEND_ARCHITECTURE_AUDIT.md](BACKEND_ARCHITECTURE_AUDIT.md): dated
+  inventory of the real backend pipeline, mixed responsibilities, semantic
+  duplication, Python coupling, migration blockers, and finding catalog.
+- [AETHER_NATIVE_ABI.md](AETHER_NATIVE_ABI.md): descriptive contract for the
+  current internal native layouts, calling conventions, ownership, runtime
+  dependencies, and explicitly non-stable ABI areas.
+- [BACKEND_MIGRATION_ROADMAP.md](BACKEND_MIGRATION_ROADMAP.md): phased
+  Python/Rust coexistence plan with entry/exit criteria, rollback, metrics,
+  sanitizers, and recommended language ownership by component.
 - [BACKEND_FEATURE_PARITY.md](BACKEND_FEATURE_PARITY.md): evidence-based
   parity audit across frontend, AST, IR, SSA, LLVM/native, CLI, REPL and the
   IntelliJ tool, including characterization probes and optimizer safety gaps.
