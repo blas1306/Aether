@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from math import copysign, nan
+from math import copysign, nan, pow as math_pow
 
 
 INT_MIN = -(2**31)
@@ -8,7 +8,10 @@ INT_MAX = 2**31 - 1
 
 DIVISION_BY_ZERO_MESSAGE = "Aether panic: Division by zero"
 INTEGER_OVERFLOW_MESSAGE = "Aether panic: Integer overflow"
-CHECKED_INT_OPERATORS = frozenset({"add", "sub", "mul", "div", "mod", "rem"})
+CHECKED_INT_OPERATORS = frozenset({"add", "sub", "mul", "div", "mod", "rem", "pow"})
+NEGATIVE_INTEGER_EXPONENT_MESSAGE = (
+    "Aether panic: Integer exponent must be non-negative"
+)
 
 
 def is_aether_int(value: object) -> bool:
@@ -33,6 +36,8 @@ def int_operator_may_trap(operator: str) -> bool:
 
 def checked_int_binary(operator: str, left: int, right: int) -> int | float:
     """Evaluate one Aether int operation without host-language overflow semantics."""
+    if operator == "pow":
+        return checked_int_power(left, right)
     if operator in {"div", "mod", "rem"} and right == 0:
         raise ZeroDivisionError(DIVISION_BY_ZERO_MESSAGE)
     if operator == "div" and left == INT_MIN and right == -1:
@@ -59,6 +64,28 @@ def checked_int_binary(operator: str, left: int, right: int) -> int | float:
     return result
 
 
+def checked_int_power(base: int, exponent: int) -> int:
+    """Evaluate ``base ** exponent`` in i32 using exponentiation by squaring.
+
+    Aether's integer power is deliberately closed over ``int``: a negative
+    exponent is a checked runtime error instead of changing the expression's
+    statically known result type at runtime.
+    """
+    if exponent < 0:
+        raise ValueError(NEGATIVE_INTEGER_EXPONENT_MESSAGE)
+
+    result = 1
+    factor = base
+    remaining = exponent
+    while remaining:
+        if remaining & 1:
+            result = int(checked_int_binary("mul", result, factor))
+        remaining >>= 1
+        if remaining:
+            factor = int(checked_int_binary("mul", factor, factor))
+    return result
+
+
 def checked_int_negate(value: int) -> int:
     result = -value
     if result < INT_MIN or result > INT_MAX:
@@ -74,3 +101,25 @@ def ieee_divide(left: float, right: float) -> float:
         return nan
     sign = copysign(1.0, left) * copysign(1.0, right)
     return copysign(float("inf"), sign)
+
+
+def ieee_power(base: float, exponent: float) -> float:
+    """Mirror libm/LLVM power results for domain, pole, and overflow cases."""
+    try:
+        return math_pow(base, exponent)
+    except ValueError:
+        if base == 0.0 and exponent < 0.0:
+            negative = (
+                copysign(1.0, base) < 0.0
+                and exponent.is_integer()
+                and int(exponent) % 2 != 0
+            )
+            return copysign(float("inf"), -1.0 if negative else 1.0)
+        return nan
+    except OverflowError:
+        negative = (
+            base < 0.0
+            and exponent.is_integer()
+            and int(exponent) % 2 != 0
+        )
+        return copysign(float("inf"), -1.0 if negative else 1.0)

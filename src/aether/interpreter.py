@@ -19,6 +19,7 @@ from .integer_arithmetic import (
     checked_int_binary,
     checked_int_negate,
     ieee_divide,
+    ieee_power,
     integer_literal_range_message,
     is_aether_int,
 )
@@ -2199,9 +2200,15 @@ class Interpreter:
             else:
                 value = left.value - trunc(left.value / right.value) * right.value
         elif operator == "^":
-            if left.type_name == "int" and right.type_name == "int" and right.value < 0:
-                result_type = "double"
-            value = left.value**right.value
+            if left.type_name == "int" and right.type_name == "int":
+                try:
+                    value = checked_int_binary("pow", left.value, right.value)
+                except (OverflowError, ValueError) as exc:
+                    raise AetherRuntimeError(str(exc), kind="arithmetic") from exc
+            elif result_type == "complex":
+                value = left.value**right.value
+            else:
+                value = ieee_power(float(left.value), float(right.value))
         else:
             raise AetherRuntimeError(f"Unsupported numeric operator '{operator}'.")
         return _coerced_numeric_result(value, result_type)

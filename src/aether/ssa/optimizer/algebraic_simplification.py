@@ -157,6 +157,9 @@ class SSAAlgebraicSimplifier:
         constants: dict[SSAValue, Any],
         replacements: dict[SSAValue, SSAValue],
     ) -> tuple[SSAInstruction | None, bool]:
+        if isinstance(instruction, SSACast) and instruction.result.type == instruction.value.type:
+            replacements[instruction.result] = instruction.value
+            return None, True
         if not isinstance(instruction, SSABinaryOp):
             return instruction, False
         if not self._is_integer_operation(instruction):
@@ -204,6 +207,13 @@ class SSAAlgebraicSimplifier:
         if operator in {"mod", "rem"}:
             if self._is_one(right, constants, replacements):
                 return SSAConst(instruction.result, 0), True
+
+        if operator == "pow":
+            if self._is_zero(right, constants, replacements):
+                return SSAConst(instruction.result, 1), True
+            if self._is_one(right, constants, replacements):
+                replacements[instruction.result] = left
+                return None, True
 
         return instruction, False
 

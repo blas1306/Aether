@@ -483,6 +483,24 @@ def test_prints_double_to_int_cast() -> None:
     )
 
 
+def test_prints_surviving_identity_cast_as_typed_noop() -> None:
+    int_type = IntType()
+    parameter = SSAParameter("x", int_type)
+    result = SSAValue("0", int_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "identity",
+                [parameter],
+                int_type,
+                [SSABasicBlock("entry", [SSACast(result, parameter), SSAReturn(result)])],
+            )
+        ]
+    )
+
+    assert "select i1 true, i32 %x, i32 %x" in print_llvm(module)
+
+
 def test_rejects_unsupported_cast() -> None:
     bool_type = BoolType()
     int_type = IntType()
@@ -1419,14 +1437,14 @@ def test_unknown_binary_operator_has_clear_error() -> None:
                 "main",
                 [left, right],
                 int_type,
-                [SSABasicBlock("entry", [SSABinaryOp(result, "pow", left, right)])],
+                [SSABasicBlock("entry", [SSABinaryOp(result, "mystery", left, right)])],
             )
         ]
     )
 
     with pytest.raises(
         LLVMBackendError,
-        match="LLVM backend does not support binary operator 'pow'",
+        match="LLVM backend does not support binary operator 'mystery'",
     ):
         print_llvm(module)
 

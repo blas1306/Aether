@@ -5,7 +5,7 @@ from math import trunc
 from typing import Any
 
 from aether.ir.types import DoubleType, FloatType, IntType
-from aether.integer_arithmetic import checked_int_binary, checked_int_negate
+from aether.integer_arithmetic import checked_int_binary, checked_int_negate, ieee_power
 from aether.ir.model import (
     IRBasicBlock,
     IRBinaryOp,
@@ -25,7 +25,7 @@ from .result import OptimizationResult
 class ConstantFolder:
     """Fold simple IR operations whose operands are both known constants."""
 
-    _BINARY_OPERATORS = {"add", "sub", "mul", "div", "mod", "rem"}
+    _BINARY_OPERATORS = {"add", "sub", "mul", "div", "mod", "rem", "pow"}
     _COMPARE_OPERATORS = {"lt", "le", "gt", "ge", "eq", "ne"}
 
     def run(self, module: IRModule) -> OptimizationResult:
@@ -131,7 +131,7 @@ class ConstantFolder:
         if isinstance(instruction.left.type, IntType) and isinstance(instruction.right.type, IntType):
             try:
                 value = checked_int_binary(operator, left, right)
-            except (OverflowError, ZeroDivisionError):
+            except (OverflowError, ZeroDivisionError, ValueError):
                 return None
         else:
             if operator in {"div", "mod", "rem"} and right == 0:
@@ -206,6 +206,8 @@ class ConstantFolder:
             return left / right
         if operator in {"mod", "rem"}:
             return left - trunc(left / right) * right
+        if operator == "pow":
+            return ieee_power(float(left), float(right))
         raise AssertionError(f"Unsupported foldable binary operator: {operator}")
 
     @staticmethod

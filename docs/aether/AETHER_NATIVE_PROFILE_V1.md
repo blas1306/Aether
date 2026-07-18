@@ -128,8 +128,12 @@ negative corpus is part of this profile.
 - Primitive types, variables, arithmetic, functions, calls and comparisons
   support `int`, `double`, and `boolean`, plus the explicitly complete string,
   enum, struct and collection cases below. Native **MUST reject** `float`,
-  `complex`, nullable values, tuples/destructuring and any implicit conversion,
-  cast, operator, builtin, print shape or ABI position without native lowering.
+  `complex`, nullable values, tuples/destructuring and any conversion, cast,
+  operator, builtin, print shape or ABI position without native lowering.
+  The supported numeric subset includes contextual `int -> double`, mixed
+  `int`/`double` arithmetic and comparisons, identity `int`/`double` casts,
+  checked `int ^ int`, and libm-backed power whenever either operand is
+  `double`. `double -> int` remains explicit.
 - `for` supports inclusive integer ranges with positive, negative or dynamic
   nonzero steps. A statically zero step **MUST** be rejected by the gate; a
   runtime zero step **MUST** panic.

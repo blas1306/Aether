@@ -1204,6 +1204,9 @@ Numeric casts to `int` truncate toward zero:
 int x = int(3.9); // x = 3
 ```
 
+An explicit cast to the value's existing scalar type, such as `int(i)` or
+`double(d)`, is a valid identity operation and may be optimized away.
+
 `string(value)` converts a value to its textual representation.
 
 `complex(value)` converts a numeric value to complex, and `complex(real, imag)` constructs `real + imag*im`.
@@ -1219,6 +1222,7 @@ Arithmetic operators:
 - `*`
 - `/`
 - `%`
+- `^`
 
 `/` is always real division. Integer division is not implemented with `/`.
 
@@ -1265,6 +1269,14 @@ Promotion rules follow the wider numeric type. Important cases:
 - `complex + complex -> complex`
 
 The same numeric promotion model applies to `-`, `*`, and `/`, except that `/` is real division.
+
+`^` is right-associative. `int ^ int` returns `int`, requires a non-negative
+exponent, uses exponentiation by squaring and checks every signed-i32
+multiplication. Thus `0 ^ 0 == 1`, `2 ^ 30` is valid, `2 ^ 31` overflows, and
+`(-2) ^ 31 == -2147483648`. A statically visible negative integer exponent is
+rejected; a dynamic negative integer exponent panics. If either operand is
+`double`, both operands are promoted to `double` and IEEE/libm power semantics
+apply, including NaN, infinity and signed-zero pole cases.
 
 Complex values use `im` as the imaginary unit:
 

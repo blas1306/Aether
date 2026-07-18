@@ -37,6 +37,11 @@ La sintaxis rc.1 sin paréntesis ya no es válida.
 - Formatting canónico e idempotente expuesto vía LSP.
 - Migrador rc.1 → rc.2 token-aware, idempotente y con modo `--check` que no
   altera strings ni comentarios.
+- Paridad numérica AST/IR/native para promoción contextual `int -> double`,
+  operaciones mixtas `int`/`double`, casts identidad y `%` real.
+- Potencia `^` nativa: `int ^ int` usa exponenciación por cuadrados con
+  overflow signed-i32 checked; las combinaciones con `double` usan `pow` de
+  libm y conservan resultados IEEE-754.
 
 ### Correcciones
 
@@ -48,6 +53,9 @@ La sintaxis rc.1 sin paréntesis ya no es válida.
   estructural necesaria para representar `-2147483648`.
 - Las defensas AST/IR/SSA/LLVM impiden constantes fuera de rango y eliminan el
   wrapping accidental del backend native.
+- El capability gate ya no confunde funciones abreviadas desazucaradas con
+  function values ni rechaza promociones, casts identidad o potencia que el
+  perfil native puede bajar de forma tipada.
 
 ### Compatibilidad
 

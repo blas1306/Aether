@@ -49,7 +49,9 @@ The initial scalar lowering subset includes:
 - Typed parameters.
 - Explicitly declared local variables with simple initializers.
 - `int`, `boolean`, and `string` literals.
-- Arithmetic `+`, `-`, `*`, `/`, and `%`.
+- Arithmetic `+`, `-`, `*`, `/`, `%`, and `^`. Mixed `int`/`double`
+  operands are normalized by an explicit `IRCast` before `IRBinaryOp` or
+  `IRCompareOp`; verifiers require homogeneous operand types.
 - Comparisons lowered to `IRCompareOp`: ordered integer comparisons
   `<`, `<=`, `>`, and `>=`; equality comparisons `==` and `!=` for `int`,
   `boolean`, `float`, `double`, `string`, nominal enums, comparable structs,
@@ -62,8 +64,8 @@ The initial scalar lowering subset includes:
 - Basic `while` loops using cyclic control flow and deterministic block names
   such as `cond0`, `body0`, and `exit0`.
 - Direct `return`, including bare return in `void` functions.
-- Positional calls to user-defined functions in the same program when no
-  implicit conversion is required.
+- Positional calls to user-defined functions in the same program, including
+  contextual `int -> double` conversion.
 
 Functions lower to one or more basic blocks. Parameters are direct IR values
 until assigned; assigned parameters are copied into same-named mutable slots at
@@ -1089,12 +1091,14 @@ The first instruction set may contain:
 
 - Constants and typed literal values.
 - `local`, `load`, and `store`.
-- Numeric operations such as `add`, `sub`, `mul`, `div`, `neg`.
+- Numeric operations such as `add`, `sub`, `mul`, `div`, `rem`, `pow`, `neg`.
 - Comparisons such as `eq`, `ne`, `lt`, `le`, `gt`, `ge`.
 - Boolean operations such as `not`, `and`, and `or`, with short-circuiting
   lowered to control flow when required.
 - Conversion instructions for conversions already approved by the
-  typechecker.
+  typechecker. In the stable native scalar subset, `IRCast`/`SSACast` carry
+  `int -> double`, explicit `double -> int`, and verifiable identity casts;
+  algebraic simplification eliminates identities.
 - `call` for Aether functions.
 - `call_builtin` or resolved builtin calls.
 - `make_struct`, `get_field`, and `set_field` or equivalent aggregate

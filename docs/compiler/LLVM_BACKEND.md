@@ -129,6 +129,7 @@ are skipped.
   - `mul` -> `mul`
   - `div` -> `sdiv`
   - `mod` and `rem` -> `srem`
+  - `pow` -> `aether_checked_pow_i32`, exponentiation by squaring with negative-exponent and signed-i32 overflow checks
 - `SSACompareOp` integer comparisons over `i32`, producing `i1`:
   - `lt` -> `icmp slt`
   - `le` -> `icmp sle`
@@ -141,6 +142,8 @@ are skipped.
   - `sub` -> `fsub`
   - `mul` -> `fmul`
   - `div` -> `fdiv`
+  - `rem` -> `frem`
+  - `pow` -> `pow(double, double)` from libm
 - `SSACompareOp` ordered/equality comparisons over `double`, producing `i1`:
   - `lt` -> `fcmp olt`
   - `le` -> `fcmp ole`
@@ -151,6 +154,7 @@ are skipped.
 - `SSACast` explicit numeric casts:
   - `int -> double` -> `sitofp i32 %x to double`
   - `double -> int` -> `fptosi double %x to i32`
+  - identity numeric casts are normally removed; a surviving verified identity is emitted as a typed no-op
 - `SSABranch` with a `bool`/`i1` condition:
   - `branch %cond, then0, else0` -> `br i1 %cond, label %then0, label %else0`
 - `SSAJump`:
@@ -377,7 +381,7 @@ The backend deliberately does not support these yet:
   container-specific panics. General Vector and Matrix bounds checks remain
   outside this backend increment.
 
-- implicit casts
+- implicit conversions other than the lowering-owned `int -> double` subset
 - bool casts or string casts
 - structs, classes, full List API, or complex numbers
 - string concatenation, comparison, printing, length, indexing, mutation,

@@ -268,6 +268,50 @@ conversion it cannot preserve. Explicit scalar conversion uses a type call,
 for example `double(x)` or `int(x)`. Native profile 22 accepts only the
 conversion subset it enumerates.
 
+The stable numeric widening used by the v1 native core is:
+
+| Source | Expected/result type | Rule |
+| --- | --- | --- |
+| `int` | `double` | implicit, exact widening |
+| `double` | `int` | explicit `int(value)` only; truncates toward zero |
+| `int op double` | `double` | the `int` operand is explicitly widened before the operation |
+| `double op int` | `double` | the `int` operand is explicitly widened before the operation |
+
+The expected `double` type may come from an initializer, assignment, argument,
+return, struct/class constructor field or field write. Collection literals use
+the same rule only where their existing target-typed element semantics apply.
+An integer literal remains an `int`; contextual conversion does not retag its
+syntax:
+
+```aether
+double x = 1;       // valid: contextual int -> double
+double y = 2.5 - 1; // valid: the right operand is widened
+int z = 2.5;        // invalid
+int w = int(2.5);   // valid explicit narrowing
+```
+
+Identity casts such as `int(i)` and `double(d)` are valid no-ops. They may be
+removed during lowering or algebraic simplification. Casts between unrelated
+types remain invalid. Mixed `int`/`double` promotion applies to `+`, `-`, `*`,
+`/`, `%`, ordered comparisons, equality and `^`. `int / int` retains Aether's
+existing real-division result (`double`); this change does not alter it.
+
+Power has the following normative v1 table:
+
+| Base | Exponent | Result | Semantics |
+| --- | --- | --- | --- |
+| `int` | `int` | `int` | non-negative exponent, exponentiation by squaring, checked signed-i32 overflow |
+| `double` | `double` | `double` | libm/IEEE-754 `pow` semantics |
+| `double` | `int` | `double` | widen exponent, then floating power |
+| `int` | `double` | `double` | widen base, then floating power |
+
+For integer power, `x ^ 0 == 1`, including `0 ^ 0`. A statically visible
+negative integer exponent is a type error; a negative dynamic integer exponent
+panics before multiplication. Use a `double` operand when a reciprocal result
+is intended. Floating power preserves NaN, infinity, signed-zero pole and
+negative-base domain behavior from libm rather than introducing an Aether
+panic.
+
 `value[index]` indexes a collection or mathematical container. Array/List
 indexes are zero-based; Vector/Matrix indexes are one-based. Bounds are checked
 before access. `value[start:end]` is a two-bound slice only for supported

@@ -149,6 +149,9 @@ class AlgebraicSimplifier:
         constants: dict[str, Any],
         replacements: dict[str, IRValue],
     ) -> tuple[IRInstruction | None, bool]:
+        if isinstance(instruction, IRCast) and instruction.result.type == instruction.value.type:
+            replacements[instruction.result.name] = instruction.value
+            return None, True
         if not isinstance(instruction, IRBinaryOp):
             return instruction, False
         if not self._is_integer_operation(instruction):
@@ -196,6 +199,13 @@ class AlgebraicSimplifier:
         if operator in {"mod", "rem"}:
             if self._is_one(right, constants, replacements):
                 return IRConst(instruction.result, 0), True
+
+        if operator == "pow":
+            if self._is_zero(right, constants, replacements):
+                return IRConst(instruction.result, 1), True
+            if self._is_one(right, constants, replacements):
+                replacements[instruction.result.name] = left
+                return None, True
 
         return instruction, False
 

@@ -162,6 +162,7 @@ class LLVMBuilder:
         llvm = llvm_path.read_text(encoding="utf-8")
         return re.search(
             r"(?:declare double @(?:sin|cos|tan|exp|log|log10)\(double\)|"
+            r"declare double @pow\(double, double\)|"
             r"@llvm\.(?:sqrt|fabs|floor|ceil)\.f64)",
             llvm,
         ) is not None

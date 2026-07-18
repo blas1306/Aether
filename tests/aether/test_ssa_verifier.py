@@ -384,6 +384,31 @@ def test_verifies_double_to_int_cast() -> None:
     assert SSAVerifier(module).verify() is module
 
 
+def test_verifies_identity_cast_and_integer_power() -> None:
+    int_type = IntType()
+    base = SSAParameter("base", int_type)
+    exponent = SSAParameter("exponent", int_type)
+    identity = SSAValue("identity", int_type)
+    result = SSAValue("result", int_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "power",
+                [base, exponent],
+                int_type,
+                [
+                    SSABasicBlock(
+                        "entry",
+                        [SSACast(identity, base), SSABinaryOp(result, "pow", identity, exponent), SSAReturn(result)],
+                    )
+                ],
+            )
+        ]
+    )
+
+    assert SSAVerifier(module).verify() is module
+
+
 def test_unsupported_cast_error() -> None:
     parameter = SSAParameter("value", BoolType())
     result = SSAValue("0", IntType())

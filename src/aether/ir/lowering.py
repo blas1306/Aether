@@ -153,6 +153,7 @@ _BINARY_OPERATORS = {
     "*": "mul",
     "/": "div",
     "%": "rem",
+    "^": "pow",
 }
 _COMPARE_OPERATORS = {
     "<": "lt",
@@ -1427,6 +1428,20 @@ class IRLowerer:
         *,
         target_type: IRType | None = None,
     ) -> IRValue:
+        value = self._lower_expression_uncoerced(
+            expression,
+            context,
+            target_type=target_type,
+        )
+        return self._coerce_to_expected_type(value, target_type, context)
+
+    def _lower_expression_uncoerced(
+        self,
+        expression: ast.Expression,
+        context: _FunctionContext,
+        *,
+        target_type: IRType | None = None,
+    ) -> IRValue:
         if isinstance(expression, ast.Literal):
             return self._lower_literal(expression, context)
 
@@ -1486,6 +1501,7 @@ class IRLowerer:
                 self._unsupported(expression, f"operator '{expression.operator}'")
             left = self._lower_expression(expression.left, context)
             right = self._lower_expression(expression.right, context)
+            left, right = self._coerce_numeric_operands(left, right, context)
             if compare_operator is not None:
                 aggregate_shape: tuple[int, ...] | None = None
                 if isinstance(left.type, VectorType) and left.type == right.type:
@@ -3118,6 +3134,32 @@ class IRLowerer:
         self._require_same_type(scalar.type, element_type, operation)
         return scalar
 
+    def _coerce_to_expected_type(
+        self,
+        value: IRValue,
+        target_type: IRType | None,
+        context: _FunctionContext,
+    ) -> IRValue:
+        if target_type is None or value.type == target_type:
+            return value
+        if isinstance(value.type, IntType) and isinstance(target_type, DoubleType):
+            result = context.temporary(target_type)
+            context.block.instructions.append(IRCast(result, value))
+            return result
+        return value
+
+    def _coerce_numeric_operands(
+        self,
+        left: IRValue,
+        right: IRValue,
+        context: _FunctionContext,
+    ) -> tuple[IRValue, IRValue]:
+        if isinstance(left.type, IntType) and isinstance(right.type, DoubleType):
+            left = self._coerce_to_expected_type(left, right.type, context)
+        elif isinstance(left.type, DoubleType) and isinstance(right.type, IntType):
+            right = self._coerce_to_expected_type(right, left.type, context)
+        return left, right
+
     def _lower_cast(self, call: ast.CallExpression, context: _FunctionContext) -> IRValue:
         if len(call.arguments) != 1:
             raise ValueError(
@@ -3126,6 +3168,8 @@ class IRLowerer:
 
         value = self._lower_expression(call.arguments[0], context)
         target_type = self._lower_type(call.callee)
+        if value.type == target_type:
+            return value
         if not self._is_supported_numeric_cast(value.type, target_type):
             self._fail(
                 f"IR backend does not support cast from '{value.type}' to '{target_type}' yet.",
@@ -3234,6 +3278,9 @@ class IRLowerer:
     @staticmethod
     def _is_supported_numeric_cast(source: IRType, target: IRType) -> bool:
         return (
+            source == target
+            and isinstance(source, (IntType, FloatType, DoubleType))
+            or
             isinstance(source, IntType)
             and isinstance(target, (FloatType, DoubleType))
             or isinstance(source, (FloatType, DoubleType))

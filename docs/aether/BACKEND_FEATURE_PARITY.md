@@ -174,14 +174,15 @@ representación y lifecycle ya están activos en esta matriz.
 | Operadores `+ - * /` escalares | C | C | C | C | C | C int/double | C | C | C | C | C checked | C int/double | C | E2E+safety | P | Parcial | `float`, `complex`, string y agregados amplían la superficie AST. |
 | Overflow entero y negación mínima | — | — | permite runtime | C: panic i32 | C `may_trap` | C | C | C | C | C | C preserva traps | C intrinsics checked | C | E2E AST/IR/native | P | Completo | Contrato implementado después de la auditoría histórica. |
 | División por cero | — | — | permite runtime | C | C | C | C | C | C | C | C | C | C | E2E | P | Completo | Int hace panic; double usa IEEE-754 en los tres backends. |
-| `%` truncante | C | C | C | C int/double | C `rem` | C | C | C int/double | C | C | C | C solo int; double rechazado por gate | P | AST+int native+gate | C | Parcial | El subset native declarado es entero; `% double` recibe `AE-BACKEND-ARITHMETIC` antes del lowering. |
+| `%` truncante | C | C | C | C int/double | C `rem` | C, con promoción explícita | C homogéneo | C int/double | C | C | C | C `srem`/`frem` | P | AST/IR/native | C | Completo para int/double | Los operandos mixtos se homogeneizan en IR; divisor cero int conserva panic. |
+| Potencia `^` | C | C | C tabla int/double | C checked/IEEE | C `pow` | C, con casts explícitos | C homogéneo | C | C | C | C folding checked/SCCP/GCP | C helper i32/libm `pow` | helper checked + libm | E2E+límites+IEEE | C | Completo para int/double | `int^int` exige exponente no negativo y overflow i32 checked; cualquier double produce double. |
 | `Math.mod` floor-mod | llamada normal | C | C | C | C call builtin | C | C | C | C | C | C checked | C helper tipado | runtime mínimo | AST/IR/native | C | Completo int/double | Es builtin de namespace, no operador. |
 | Comparaciones ordenadas | C | C | C | C | C | C int/double | C | C | C | C | C | C int/double | — | E2E | C | Parcial | Otros numéricos/agregados tienen cobertura distinta. |
 | Igualdad escalar | C | C | C | C | C | C | C | C | C | C | C | C Eq tipado | `aether_string_equal`/helpers Eq | amplia | C | Completa para tipos Eq | Primitivas, string, enums, structs y Array/List; classes/callables sin Eq. |
 | Igualdad agregada | C | C | C | C | P | P Struct/Vector/Matrix | C subset | C subset | C subset | C subset | P | P | helpers | amplia por tipo | P | Parcial | Array/List generales son AST-only; structs tienen límites de tipos de campo. |
 | `&&` / <code>&#124;&#124;</code> short-circuit | C | C | C boolean | C | CFG | C por branches/merge | C | C | C con phi | C | C SCCP | C | — | E2E | P desactualizada | Implementado pero sin documentación | Código y tests son completos; spec/matrices aún dicen AST-only. |
 | `!` prefijo | C | C | C boolean | C | C | C | C | C | C | C | C | C `xor` | — | E2E | C | Completo | No existe factorial postfix. |
-| Casts explícitos | C | C | C amplio | C amplio | P | P int↔double | C subset | C subset | C subset | C subset | P | C int↔double; resto rechazado por gate | P | frontend+par+gate | C | Parcial | `string`, `boolean`, `float` y `complex` quedan fuera del subset native declarado. |
+| Casts explícitos | C | C | C amplio | C amplio | P | C int↔double e identidad | C subset + identidad | C subset + identidad | C subset | C subset + identidad | C elimina identidad | C int↔double e identidad; resto rechazado por gate | P | frontend+par+gate | C | Parcial | `string`, `boolean`, `float` y `complex` quedan fuera del subset native declarado. |
 
 ## Funciones y control de flujo
 
@@ -292,9 +293,9 @@ representación y lifecycle ya están activos en esta matriz.
    perfil alternativo explícito.
 7. **IO restante:** argumentos y archivos de texto ya cubren el mínimo
    Linux/POSIX; faltan input native, Windows/UTF-16, binarios y streams.
-8. **Paridad del perfil:** el perfil 22 cierra `%` double, casts y combinaciones
-   de agregados mediante rechazo temprano; formato observable sigue siendo una
-   cuestión separada de paridad AST/native.
+8. **Paridad del perfil:** el núcleo `int`/`double` cierra `%`, promociones
+   contextuales, operaciones mixtas, casts identidad y potencia mediante IR
+   tipado; combinaciones fuera del perfil siguen usando rechazo temprano.
 
 La deuda anterior del **SSA verifier** queda cerrada: el verificador comprueba
 dominancia y orden de todos los usos, trata operandos `phi` sobre su arista,

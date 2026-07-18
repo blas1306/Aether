@@ -74,8 +74,9 @@ implica ABI estable, seguridad para producción ni v1 final terminada.
   y parsing están en AST/native; interpolación y formatting siguen parciales;
 - Vector/Matrix: el núcleo es native, la mayor parte de `Math.LinearAlgebra`
   sigue en AST;
-- casts y `%`: native cubre `int <-> double` y remainder entero, no toda la
-  superficie aceptada por el frontend;
+- numéricos: native cubre promoción contextual `int -> double`, operaciones
+  mixtas `int`/`double`, casts identidad/int↔double, `%` real y potencia
+  checked/IEEE; `float` y `complex` siguen fuera del perfil native estable;
 - callables: AST/native cubren referencias a funciones top-level de usuario
   sin captura con firma exacta; faltan closures, lambdas, métodos enlazados,
   builtins como valores y retorno de callables;

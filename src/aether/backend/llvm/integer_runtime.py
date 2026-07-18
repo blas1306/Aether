@@ -32,7 +32,19 @@ class LLVMIntegerRuntime:
                     31,
                 )
             )
-        if self.operators & {"add", "sub", "mul", "div"}:
+        if "pow" in self.operators:
+            sections.append(
+                '@.aether.integer.exponent.negative = private unnamed_addr constant [52 x i8] '
+                'c"Aether panic: Integer exponent must be non-negative\\00"'
+            )
+            sections.append(
+                common.panic_helper(
+                    "aether_integer_negative_exponent_panic",
+                    ".aether.integer.exponent.negative",
+                    52,
+                )
+            )
+        if self.operators & {"add", "sub", "mul", "div", "pow"}:
             sections.append(
                 '@.aether.integer.overflow = private unnamed_addr constant [31 x i8] '
                 'c"Aether panic: Integer overflow\\00"'
@@ -52,6 +64,12 @@ class LLVMIntegerRuntime:
             sections.append(self._division_helper())
         if self.operators & {"mod", "rem"}:
             sections.append(self._remainder_helper())
+        if "pow" in self.operators:
+            LLVMRuntimeCommon.declare(
+                sections,
+                "declare { i32, i1 } @llvm.smul.with.overflow.i32(i32, i32)",
+            )
+            sections.append(self._power_helper())
 
     @classmethod
     def _append_overflow_helper(cls, sections: list[str], operator: str) -> None:
@@ -128,6 +146,58 @@ class LLVMIntegerRuntime:
                 "remainder:",
                 "  %result = srem i32 %left, %right",
                 "  ret i32 %result",
+                "}",
+            ]
+        )
+
+    @classmethod
+    def _power_helper(cls) -> str:
+        return "\n".join(
+            [
+                f"define private i32 @{cls.helper_name('pow')}(i32 %base, i32 %exponent) {{",
+                "entry:",
+                "  %negative = icmp slt i32 %exponent, 0",
+                "  br i1 %negative, label %domain, label %loop",
+                "domain:",
+                "  call void @aether_integer_negative_exponent_panic()",
+                "  unreachable",
+                "loop:",
+                "  %remaining = phi i32 [ %exponent, %entry ], [ %next_remaining, %squared ]",
+                "  %factor = phi i32 [ %base, %entry ], [ %next_factor, %squared ]",
+                "  %acc = phi i32 [ 1, %entry ], [ %next_acc, %squared ]",
+                "  %done = icmp eq i32 %remaining, 0",
+                "  br i1 %done, label %return, label %bit",
+                "bit:",
+                "  %low_bit = and i32 %remaining, 1",
+                "  %odd = icmp ne i32 %low_bit, 0",
+                "  br i1 %odd, label %multiply_acc, label %advance",
+                "multiply_acc:",
+                "  %acc_pair = call { i32, i1 } @llvm.smul.with.overflow.i32(i32 %acc, i32 %factor)",
+                "  %acc_product = extractvalue { i32, i1 } %acc_pair, 0",
+                "  %acc_overflow = extractvalue { i32, i1 } %acc_pair, 1",
+                "  br i1 %acc_overflow, label %overflow, label %advance",
+                "advance:",
+                "  %advanced_acc = phi i32 [ %acc, %bit ], [ %acc_product, %multiply_acc ]",
+                "  %shifted = lshr i32 %remaining, 1",
+                "  %needs_square = icmp ne i32 %shifted, 0",
+                "  br i1 %needs_square, label %square, label %return_advanced",
+                "square:",
+                "  %factor_pair = call { i32, i1 } @llvm.smul.with.overflow.i32(i32 %factor, i32 %factor)",
+                "  %factor_product = extractvalue { i32, i1 } %factor_pair, 0",
+                "  %factor_overflow = extractvalue { i32, i1 } %factor_pair, 1",
+                "  br i1 %factor_overflow, label %overflow, label %squared",
+                "squared:",
+                "  %next_remaining = phi i32 [ %shifted, %square ]",
+                "  %next_factor = phi i32 [ %factor_product, %square ]",
+                "  %next_acc = phi i32 [ %advanced_acc, %square ]",
+                "  br label %loop",
+                "overflow:",
+                "  call void @aether_integer_overflow_panic()",
+                "  unreachable",
+                "return_advanced:",
+                "  ret i32 %advanced_acc",
+                "return:",
+                "  ret i32 %acc",
                 "}",
             ]
         )

@@ -2359,6 +2359,17 @@ class TypeChecker:
                 raise AetherTypeError(f"Operator '{operator}' cannot be applied to boolean values.")
             if is_array_type(left_type) or is_array_type(right_type) or is_matrix_type(left_type) or is_matrix_type(right_type):
                 raise AetherTypeError(f"Operator '{operator}' requires numeric operands.")
+            if (
+                operator == "^"
+                and left_type == "int"
+                and right_type == "int"
+                and (constant_exponent := _constant_int_value(expression.right)) is not None
+                and constant_exponent < 0
+            ):
+                raise AetherTypeError(
+                    "Integer exponent must be non-negative; use a double operand for reciprocal powers.",
+                    hint="Write double(base) ^ exponent or base ^ double(exponent).",
+                )
             return promote_numeric(left_type, right_type, operator)
         if operator == "\\":
             if LINEAR_ALGEBRA_MODULE not in self.imported_modules:
@@ -2720,7 +2731,7 @@ class TypeChecker:
         ):
             argument_type = self._expression_type(argument, scope)
             self._reject_void_value(argument_type, f"argument {index} to {expression.callee}(...)")
-            if argument_type is not UNKNOWN_TYPE and argument_type != parameter_type:
+            if argument_type is not UNKNOWN_TYPE and not self._can_convert_type(argument_type, parameter_type):
                 raise AetherTypeError(
                     f"Argument {index} to callable '{expression.callee}' expects "
                     f"'{type_to_string(parameter_type)}', got '{type_to_string(argument_type)}'.",
@@ -4589,6 +4600,15 @@ def _numeric_transpose_vector_scalar_type(vector_type: TransposeVectorType) -> s
     if vector_type.element_type not in NUMERIC_TYPES:
         raise AetherTypeError("Vector operations require numeric elements.")
     return vector_type.element_type
+
+
+def _constant_int_value(expression: ast.Expression) -> int | None:
+    if isinstance(expression, ast.Literal) and expression.type_name == "int":
+        return expression.value if type(expression.value) is int else None
+    if isinstance(expression, ast.UnaryExpression) and expression.operator == "-":
+        value = _constant_int_value(expression.operand)
+        return -value if value is not None else None
+    return None
 
 
 def check_program(program: ast.Program) -> None:

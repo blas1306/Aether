@@ -20,6 +20,7 @@ from aether.integer_arithmetic import (
     INT_MIN,
     checked_int_binary,
     ieee_divide,
+    ieee_power,
     is_aether_int,
 )
 from aether.list_safety import checked_list_index_to_int, checked_list_length_to_int
@@ -1303,7 +1304,7 @@ class IRInterpreter:
         if checked_int:
             try:
                 return checked_int_binary(operator, left, right)
-            except (OverflowError, ZeroDivisionError) as exc:
+            except (OverflowError, ZeroDivisionError, ValueError) as exc:
                 raise IRExecutionError(str(exc)) from exc
         if operator == "add":
             return left + right
@@ -1317,6 +1318,8 @@ class IRInterpreter:
             if right == 0:
                 raise IRExecutionError("IR division by zero")
             return left - trunc(left / right) * right
+        if operator == "pow":
+            return ieee_power(float(left), float(right))
         IRInterpreter._unsupported_binary(operator)
 
     @staticmethod

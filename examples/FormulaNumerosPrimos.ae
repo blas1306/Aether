@@ -21,6 +21,9 @@ int GenPrimos(int n) {
     return 1 + suma1;
 }
 
-for (int i in 1:3) {
-    println(GenPrimos(i));
+int main() {
+    for (int i in 1:3) {
+        println(GenPrimos(i));
+    }
+    return 0;
 }

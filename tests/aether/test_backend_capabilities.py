@@ -357,11 +357,6 @@ def test_native_scalar_math_profile_accepts_consolidated_and_rejects_experimenta
     ("source", "capability", "detail"),
     [
         (
-            "double rem(double a, double b) { return a % b; } int main() { return 0; }",
-            Capability.ARITHMETIC,
-            "remainder requires int operands",
-        ),
-        (
             "int main() { boolean value = boolean(1); return 0; }",
             Capability.PRIMITIVE_TYPES,
             "cast from 'int' to 'boolean'",
@@ -375,26 +370,6 @@ def test_native_scalar_math_profile_accepts_consolidated_and_rejects_experimenta
             "float identity(float value) { return value; } int main() { float value = float(16777217); println(identity(value)); return 0; }",
             Capability.PRIMITIVE_TYPES,
             "type 'float' has no stable LLVM/native ABI",
-        ),
-        (
-            "double sum(double left, int right) { return left + right; } int main() { return 0; }",
-            Capability.ARITHMETIC,
-            "mixed operand types",
-        ),
-        (
-            "double value() { return 1; } int main() { return 0; }",
-            Capability.PRIMITIVE_TYPES,
-            "implicit conversion from 'int' to 'double'",
-        ),
-        (
-            "struct Scale { double apply(double value) { return value; } } int main() { Scale scale = Scale(); println(scale.apply(1)); return 0; }",
-            Capability.PRIMITIVE_TYPES,
-            "argument 1 to 'scale.apply'",
-        ),
-        (
-            "int main() { return int(2 ^ 3); }",
-            Capability.ARITHMETIC,
-            "operator '^' has no native lowering",
         ),
         (
             "(int, int) pair() { return (1, 2); } int main() { return 0; }",
@@ -438,14 +413,9 @@ def test_native_scalar_math_profile_accepts_consolidated_and_rejects_experimenta
         ),
     ],
     ids=(
-        "double-remainder",
         "boolean-cast",
         "implicit-declaration",
         "float",
-        "mixed-arithmetic",
-        "implicit-return-conversion",
-        "implicit-method-argument-conversion",
-        "power",
         "tuple",
         "list-size",
         "unsupported-builtin",

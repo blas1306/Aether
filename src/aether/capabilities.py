@@ -592,7 +592,7 @@ _NATIVE_LOWERED_BUILTINS = frozenset(
     }
 )
 _NATIVE_BINARY_OPERATORS = frozenset(
-    {"+", "-", "*", "/", "%", "==", "!=", "<", "<=", ">", ">=", "&&", "||"}
+    {"+", "-", "*", "/", "%", "^", "==", "!=", "<", "<=", ">", ">=", "&&", "||"}
 )
 
 
@@ -858,18 +858,36 @@ class _CapabilityDetector:
         target = self._resolve_alias(target_type)
         if source is None or source == target:
             return
+        if source == "int" and target == "double":
+            return
         if (
             isinstance(target, ArrayType)
             and isinstance(expression, (ast.ArrayLiteral, ast.ListLiteral))
             and isinstance(source, (ArrayType, ListType))
-            and self._resolve_alias(source.element_type) == self._resolve_alias(target.element_type)
+            and _native_contextual_scalar_conversion(
+                self._resolve_alias(source.element_type),
+                self._resolve_alias(target.element_type),
+            )
+        ):
+            return
+        if (
+            isinstance(target, ListType)
+            and isinstance(expression, ast.ListLiteral)
+            and isinstance(source, ListType)
+            and _native_contextual_scalar_conversion(
+                self._resolve_alias(source.element_type),
+                self._resolve_alias(target.element_type),
+            )
         ):
             return
         if (
             isinstance(target, (VectorType, MatrixType))
             and isinstance(expression, ast.MatrixLiteral)
             and isinstance(source, type(target))
-            and self._resolve_alias(source.element_type) == self._resolve_alias(target.element_type)
+            and _native_contextual_scalar_conversion(
+                self._resolve_alias(source.element_type),
+                self._resolve_alias(target.element_type),
+            )
         ):
             return
         self._record(
@@ -1182,33 +1200,6 @@ class _CapabilityDetector:
                     detail=f"operator '{node.operator}' has no native lowering",
                     requires_complete_support=True,
                 )
-            elif node.operator == "%" and not (
-                left_resolved == "int" and right_resolved == "int"
-            ):
-                self._record(
-                    Capability.ARITHMETIC,
-                    node,
-                    detail=(
-                        "remainder requires int operands in LLVM/native, got "
-                        f"'{left_resolved}' and '{right_resolved}'"
-                    ),
-                    requires_complete_support=True,
-                )
-            elif (
-                left_resolved != right_resolved
-                and node.operator not in {"&&", "||"}
-                and left_resolved in {"int", "float", "double"}
-                and right_resolved in {"int", "float", "double"}
-            ):
-                self._record(
-                    Capability.ARITHMETIC,
-                    node,
-                    detail=(
-                        f"mixed operand types '{left_resolved}' and "
-                        f"'{right_resolved}' for '{node.operator}'"
-                    ),
-                    requires_complete_support=True,
-                )
             if (
                 left_type == "string"
                 and right_type == "string"
@@ -1421,9 +1412,7 @@ class _CapabilityDetector:
                 if call.arguments
                 else None
             )
-            if canonical not in _NATIVE_CAST_BUILTINS or not (
-                argument_type in {"int", "double"} and argument_type != canonical
-            ):
+            if canonical not in _NATIVE_CAST_BUILTINS or argument_type not in {"int", "double"}:
                 self._record(
                     Capability.PRIMITIVE_TYPES,
                     call,
@@ -2200,6 +2189,10 @@ def _contains_int_literal(node: object) -> bool:
     if isinstance(node, ast.BinaryExpression):
         return _contains_int_literal(node.left) or _contains_int_literal(node.right)
     return False
+
+
+def _native_contextual_scalar_conversion(source: object, target: object) -> bool:
+    return source == target or (source == "int" and target == "double")
 
 
 def _constant_int_expression(node: object) -> int | None:

@@ -5,7 +5,7 @@ from math import trunc
 from typing import Any
 
 from aether.ir.types import DoubleType, FloatType, IntType, StringType
-from aether.integer_arithmetic import checked_int_binary, checked_int_negate
+from aether.integer_arithmetic import checked_int_binary, checked_int_negate, ieee_power
 from aether.ssa.analysis import Constant, LatticeState, Overdefined, Unknown, Worklist
 from aether.ssa.model import (
     SSAArrayCopy,
@@ -97,7 +97,7 @@ class SCCPResult:
 class SCCPAnalyzer:
     """Analysis-only Sparse Conditional Constant Propagation for SSA."""
 
-    _BINARY_OPERATORS = {"add", "sub", "mul", "div", "mod", "rem"}
+    _BINARY_OPERATORS = {"add", "sub", "mul", "div", "mod", "rem", "pow"}
     _COMPARE_OPERATORS = {"lt", "le", "gt", "ge", "eq", "ne"}
 
     def __init__(self, function_or_module: SSAFunction | SSAModule) -> None:
@@ -558,6 +558,8 @@ class SCCPAnalyzer:
             return left / right
         if operator in {"mod", "rem"}:
             return left - trunc(left / right) * right
+        if operator == "pow":
+            return ieee_power(float(left), float(right))
         raise AssertionError(f"Unsupported foldable SSA binary operator: {operator}")
 
     @staticmethod

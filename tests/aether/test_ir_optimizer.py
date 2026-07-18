@@ -9,6 +9,7 @@ from aether.ir import (
     IRBasicBlock,
     IRBinaryOp,
     IRBranch,
+    IRCast,
     IRCall,
     IRCompareOp,
     IRConst,
@@ -68,6 +69,27 @@ def _single_block_module(instructions: list[object], return_value: IRValue) -> I
             )
         ]
     )
+
+
+def test_algebraic_simplification_eliminates_identity_cast() -> None:
+    int_type = IntType()
+    parameter = IRParameter("value", int_type)
+    cast_result = IRValue("cast", int_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "identity",
+                [parameter],
+                int_type,
+                [IRBasicBlock("entry", [IRCast(cast_result, parameter), IRReturn(cast_result)])],
+            )
+        ]
+    )
+
+    result = AlgebraicSimplifier().run(module)
+
+    assert result.stats == {"simplified": 1}
+    assert result.module.functions[0].blocks[0].instructions == [IRReturn(parameter)]
 
 
 class _NoOpPass:

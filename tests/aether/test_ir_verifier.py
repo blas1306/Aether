@@ -422,6 +422,31 @@ def test_verifies_int_to_double_cast() -> None:
     assert IRVerifier(module).verify() is module
 
 
+def test_verifies_identity_cast_and_integer_power() -> None:
+    int_type = IntType()
+    base = IRParameter("base", int_type)
+    exponent = IRParameter("exponent", int_type)
+    identity = IRValue("identity", int_type)
+    result = IRValue("result", int_type)
+    module = IRModule(
+        [
+            IRFunction(
+                "power",
+                [base, exponent],
+                int_type,
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [IRCast(identity, base), IRBinaryOp(result, "pow", identity, exponent), IRReturn(result)],
+                    )
+                ],
+            )
+        ]
+    )
+
+    assert IRVerifier(module).verify() is module
+
+
 def test_unsupported_cast_error() -> None:
     parameter = IRParameter("value", BoolType())
     result = IRValue("0", IntType())

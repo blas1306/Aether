@@ -2006,7 +2006,7 @@ class SSAVerifier:
         if operator == "add" and isinstance(left, StringType) and isinstance(right, StringType):
             return StringType()
 
-        if operator in {"add", "sub", "mul", "div", "rem", "mod"}:
+        if operator in {"add", "sub", "mul", "div", "rem", "mod", "pow"}:
             if not isinstance(left, self._NUMERIC_TYPES) or not isinstance(
                 right,
                 self._NUMERIC_TYPES,
@@ -2021,6 +2021,11 @@ class SSAVerifier:
             ):
                 self._fail(
                     f"Binary op '{operator}' requires compatible operands, "
+                    f"got {left} and {right}"
+                )
+            if left != right:
+                self._fail(
+                    f"Binary op '{operator}' requires explicitly coerced operands, "
                     f"got {left} and {right}"
                 )
             if operator == "div" and isinstance(left, IntType) and isinstance(right, IntType):
@@ -2135,6 +2140,9 @@ class SSAVerifier:
         source = instruction.value.type
         target = instruction.result.type
         if (
+            source == target
+            and isinstance(source, (IntType, FloatType, DoubleType))
+            or
             isinstance(source, IntType)
             and isinstance(target, (FloatType, DoubleType))
             or isinstance(source, (FloatType, DoubleType))

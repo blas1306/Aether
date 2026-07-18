@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import re
+import struct
 from typing import Any, Callable
 
 from aether.ir.model import IREnumConstant
@@ -137,12 +138,14 @@ class LLVMPrinter:
         "div": "sdiv",
         "mod": "srem",
         "rem": "srem",
+        "pow": None,
     }
     _DOUBLE_BINARY_OPERATORS = {
         "add": "fadd",
         "sub": "fsub",
         "mul": "fmul",
         "div": "fdiv",
+        "rem": "frem",
     }
     _INT_COMPARE_OPERATORS = {
         "lt": "slt",
@@ -205,6 +208,7 @@ class LLVMPrinter:
         self._uses_text_codec = False
         self._uses_text_file_io = False
         self._checked_int_operators: set[str] = set()
+        self._uses_double_pow = False
         self._scalar_math_calls: set[tuple[str, tuple[object, ...], object]] = set()
         self._structs = {definition.name: definition for definition in module.structs}
         self._layouts = LLVMTypeLayouts(module.structs)
@@ -395,6 +399,8 @@ class LLVMPrinter:
             frozenset(self._matrix_equality_types),
             frozenset(self._matrix_print_types),
         ).append(runtime, common_runtime)
+        if self._uses_double_pow:
+            common_runtime.declare(runtime, "declare double @pow(double, double)")
         LLVMIntegerRuntime(frozenset(self._checked_int_operators)).append(runtime, common_runtime)
         LLVMScalarMathRuntime(frozenset(self._scalar_math_calls)).append(runtime, common_runtime)
         LLVMRuntimeIO(enabled=self._uses_print).append(runtime)
@@ -714,6 +720,12 @@ class LLVMPrinter:
             and isinstance(instruction.left.type, DoubleType)
             and isinstance(instruction.right.type, DoubleType)
         ):
+            if instruction.operator == "pow":
+                self._uses_double_pow = True
+                result = self._new_temp(instruction.result)
+                left = self._operand(instruction.left)
+                right = self._operand(instruction.right)
+                return f"{result} = call double @pow(double {left}, double {right})"
             operator = self._DOUBLE_BINARY_OPERATORS.get(instruction.operator)
             result_type = "double"
         elif (
@@ -1144,6 +1156,11 @@ class LLVMPrinter:
         ])
 
     def _print_cast(self, instruction: SSACast) -> str:
+        if instruction.value.type == instruction.result.type:
+            result = self._new_temp(instruction.result)
+            type_name = llvm_type(instruction.result.type)
+            value = self._operand(instruction.value)
+            return f"{result} = select i1 true, {type_name} {value}, {type_name} {value}"
         if isinstance(instruction.value.type, IntType) and isinstance(
             instruction.result.type,
             DoubleType,
@@ -4047,6 +4064,9 @@ class LLVMPrinter:
 
     @staticmethod
     def _double_literal(value: float) -> str:
+        if value != value or value in {float("inf"), float("-inf")}:
+            bits = struct.unpack(">Q", struct.pack(">d", value))[0]
+            return f"0x{bits:016X}"
         literal = repr(value)
         if "e" in literal or "E" in literal:
             return format(value, ".17e")

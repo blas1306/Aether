@@ -7,6 +7,7 @@ from aether.ssa import (
     SSABasicBlock,
     SSABinaryOp,
     SSABranch,
+    SSACast,
     SSACall,
     SSACompareOp,
     SSAConst,
@@ -49,6 +50,27 @@ def _function(name: str) -> SSAFunction:
 
 def _module_with_function(name: str = "main") -> SSAModule:
     return SSAModule([_function(name)])
+
+
+def test_ssa_algebraic_simplifier_eliminates_identity_cast() -> None:
+    int_type = IntType()
+    parameter = SSAParameter("value", int_type)
+    cast_result = SSAValue("cast", int_type)
+    module = SSAModule(
+        [
+            SSAFunction(
+                "identity",
+                [parameter],
+                int_type,
+                [SSABasicBlock("entry", [SSACast(cast_result, parameter), SSAReturn(cast_result)])],
+            )
+        ]
+    )
+
+    result = SSAAlgebraicSimplifier().run(module)
+
+    assert result.stats == {"simplified": 1}
+    assert result.module.functions[0].blocks[0].instructions == [SSAReturn(parameter)]
 
 
 def _verify(module: SSAModule) -> SSAModule:
