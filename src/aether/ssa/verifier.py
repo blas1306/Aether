@@ -38,6 +38,7 @@ from aether.string_parsing import (
 from aether.string_value import STRING_SPLIT_BUILTIN, STRING_TRIM_BUILTIN
 from aether.process_arguments import PROCESS_ARGS_BUILTIN
 from aether.range_safety import RANGE_STEP_NONZERO_BUILTIN
+from aether.integer_arithmetic import INT_MAX, INT_MIN, is_aether_int
 from aether.text_file_io import (
     FILE_READ_RESULT_TYPE,
     FILE_STATUS_TYPE,
@@ -1980,6 +1981,11 @@ class SSAVerifier:
             return
         else:
             return
+
+        if isinstance(result_type, IntType) and not is_aether_int(value):
+            self._fail(
+                f"Int const {value!r} is outside signed i32 range [{INT_MIN}, {INT_MAX}]"
+            )
 
         if isinstance(expected, tuple):
             if not isinstance(result_type, expected):

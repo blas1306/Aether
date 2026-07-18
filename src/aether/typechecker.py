@@ -6,6 +6,12 @@ from pathlib import Path
 from . import ast
 from .errors import AetherError, AetherRuntimeError, AetherTypeError
 from .equality import eq_capability, types_support_equality
+from .integer_arithmetic import (
+    INT_MAX,
+    INT_MIN,
+    integer_literal_range_message,
+    is_aether_int,
+)
 from .lexer import lex
 from .modules import is_public_export, private_top_level_names, resolve_file_module_path
 from .native_members import native_member_set, native_method, native_property
@@ -2022,6 +2028,15 @@ class TypeChecker:
 
     def _infer_expression_type(self, expression: ast.Expression, scope: Scope[VariableSymbol]) -> AetherType | None:
         if isinstance(expression, ast.Literal):
+            if expression.type_name == "int" and not is_aether_int(expression.value):
+                value = expression.value
+                if isinstance(value, int) and not isinstance(value, bool):
+                    raise AetherTypeError(
+                        integer_literal_range_message(value),
+                        line=expression.line,
+                        column=expression.column,
+                        kind="integer-literal",
+                    )
             return expression.type_name
         if isinstance(expression, ast.InterpolatedString):
             for part in expression.parts:
@@ -2058,6 +2073,26 @@ class TypeChecker:
                 )
             return symbol.type_name
         if isinstance(expression, ast.UnaryExpression):
+            if (
+                expression.operator == "-"
+                and isinstance(expression.operand, ast.Literal)
+                and expression.operand.type_name == "int"
+                and isinstance(expression.operand.value, int)
+                and not isinstance(expression.operand.value, bool)
+            ):
+                magnitude = expression.operand.value
+                if magnitude == -INT_MIN:
+                    # The lexer keeps the unsigned magnitude so INT_MIN can be
+                    # represented without first constructing an invalid i32.
+                    self._expression_types[id(expression.operand)] = "int"
+                    return "int"
+                if magnitude > INT_MAX:
+                    raise AetherTypeError(
+                        integer_literal_range_message(-magnitude),
+                        line=expression.line,
+                        column=expression.column,
+                        kind="integer-literal",
+                    )
             operand_type = self._expression_type(expression.operand, scope)
             if operand_type is UNKNOWN_TYPE:
                 return UNKNOWN_TYPE

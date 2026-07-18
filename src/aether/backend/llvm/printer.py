@@ -5,6 +5,7 @@ import re
 from typing import Any, Callable
 
 from aether.ir.model import IREnumConstant
+from aether.integer_arithmetic import INT_MAX, INT_MIN, is_aether_int
 from aether.string_value import STRING_SPLIT_BUILTIN, STRING_TRIM_BUILTIN
 from aether.ir.types import ArrayType, BoolType, DoubleType, EnumType, FloatType, FunctionType, IntType, ListType, MatrixType, MethodResultType, StringType, StructType, VectorType, VoidType
 from aether.ssa.model import (
@@ -3946,6 +3947,11 @@ class LLVMPrinter:
             if isinstance(value, bool) or not isinstance(value, int):
                 raise LLVMBackendError(
                     "LLVM backend does not support non-int SSAConst values"
+                )
+            if not is_aether_int(value):
+                raise LLVMBackendError(
+                    f"LLVM backend refuses out-of-range i32 constant {value!r}; "
+                    f"expected [{INT_MIN}, {INT_MAX}]"
                 )
             return str(value)
         if isinstance(result.type, BoolType):

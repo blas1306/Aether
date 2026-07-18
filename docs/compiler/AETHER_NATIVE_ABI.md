@@ -94,6 +94,12 @@ linkage LLVM; eso es un detalle accidental, no una exportación FFI.
 calcule tamaños de punteros y structs. No calcula padding de structs en Python.
 Los tamaños fijos de int/enum/bool/float/double sí se registran en Python.
 
+Una constante `int` sólo puede llegar a esta ABI si está en
+`[-2147483648, 2147483647]`. El frontend valida los literales antes del
+lowering, incluidos argumentos, retornos, fields y elementos; los verificadores
+IR/SSA y el printer LLVM rechazan además cualquier constante i32 interna fuera
+de rango. LLVM nunca es responsable de truncar o normalizar un literal source.
+
 ## 5. String
 
 El handle `string` es no nulo dentro del subset native y apunta al inicio de:
@@ -292,7 +298,7 @@ manifest de imports runtime, son detectados a partir del LLVM textual.
 
 | Área | Estable semánticamente | Provisional/interna | Pendiente antes de versionar |
 | --- | --- | --- | --- |
-| int | signed checked i32 | LLVM `i32` | rechazo de literal fuera de rango |
+| int | signed checked i32; literales fuera de rango rechazados en frontend | LLVM `i32` | target matrix |
 | bool/double | valores públicos | reglas exactas de paso target | target matrix |
 | strings | UTF-8, equality, ARC observable indirecto | header, flags, helper names | handle ABI/accessors/threading |
 | Array/List | aliasing, copy/slice, Eq, lifecycle | headers, counters, helpers | ABI version + alloc/error policy |

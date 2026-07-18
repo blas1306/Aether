@@ -17,6 +17,13 @@ Perfil de capacidades auditado: `22`
 
 Resultado actualizado tras P0.3: **READY TO BEGIN RC; NOT READY FOR v1 FINAL**
 
+Actualización posterior, 18 de julio de 2026: el P0 BA-001 descubierto por la
+auditoría de arquitectura del backend está **CERRADO**. Los literales `int`
+fuera de signed i32 reciben un diagnóstico frontend localizado; la magnitud
+`2147483648` sólo se admite bajo una negación inmediata para construir
+`INT_MIN`; IR, SSA y LLVM rechazan constantes internas fuera de rango. Esto no
+cambia el dictamen, el capability profile ni la versión `1.0.0rc1`.
+
 ## 1. Dictamen ejecutivo
 
 Aether está preparado para **comenzar** una Release Candidate de v1 dentro del
@@ -90,7 +97,7 @@ sustituye una matriz sanitizer automatizada.
 | Área | Estado | Evidencia y límite determinante |
 | --- | --- | --- |
 | Core language | **PARTIAL / DESIGN ISSUE** | El núcleo AST es amplio, pero v0 sigue siendo la especificación normativa y la frontera v1 no coincide con native. |
-| Tipos | **PARTIAL** | `int/double/boolean/string` tienen camino native fuerte; `float`, `complex` y nullable son frontend-only y reciben diagnóstico temprano. El `int` aceptado usa checked i32 en AST/IR/native. |
+| Tipos | **PARTIAL** | `int/double/boolean/string` tienen camino native fuerte; `float`, `complex` y nullable son frontend-only y reciben diagnóstico temprano. El `int` aceptado usa checked i32 en AST/IR/native y sus literales se validan en frontend con defensas internas IR/SSA/LLVM. |
 | Structs | **PARTIAL** | Value semantics, métodos, nesting, equality y colecciones cruzan native para un subset real. Faltan layouts de otros tipos y ABI documentada/estable. |
 | Classes | **UNSUPPORTED native / DESIGN ISSUE** | AST/typechecker/intérprete sí; no IR/SSA/LLVM. Lifecycle, layout y dispatch de referencia siguen abiertos. |
 | Interfaces | **UNSUPPORTED native / DESIGN ISSUE** | Conformidad y dispatch AST; sin representación ni lowering native. |

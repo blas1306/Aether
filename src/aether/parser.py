@@ -881,15 +881,20 @@ class Parser:
 
     def _primary(self) -> ast.Expression:
         if self._match(TokenType.BOOLEAN_LITERAL):
-            return ast.Literal(self._previous().literal, "boolean")
+            token = self._previous()
+            return ast.Literal(token.literal, "boolean", token.line, token.column)
         if self._match(TokenType.NULL_LITERAL):
-            return ast.Literal(None, NULL_TYPE)
+            token = self._previous()
+            return ast.Literal(None, NULL_TYPE, token.line, token.column)
         if self._match(TokenType.INT_LITERAL):
-            return ast.Literal(self._previous().literal, "int")
+            token = self._previous()
+            return ast.Literal(token.literal, "int", token.line, token.column)
         if self._match(TokenType.FLOAT_LITERAL):
-            return ast.Literal(self._previous().literal, "double")
+            token = self._previous()
+            return ast.Literal(token.literal, "double", token.line, token.column)
         if self._match(TokenType.IMAG_LITERAL):
-            return ast.Literal(self._previous().literal, "complex")
+            token = self._previous()
+            return ast.Literal(token.literal, "complex", token.line, token.column)
         if self._match(TokenType.STRING_LITERAL):
             return self._string_literal_expression(self._previous())
         if self._match(TokenType.IDENTIFIER, TokenType.TYPE):
@@ -962,7 +967,7 @@ class Parser:
 
     def _string_literal_expression(self, token: Token) -> ast.Expression:
         if not self._has_interpolation_start(token.lexeme):
-            return ast.Literal(token.literal, "string")
+            return ast.Literal(token.literal, "string", token.line, token.column)
         return ast.InterpolatedString(self._parse_interpolated_string_parts(token), token.line, token.column)
 
     def _has_interpolation_start(self, lexeme: str) -> bool:

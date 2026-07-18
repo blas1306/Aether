@@ -60,7 +60,19 @@ program **MUST NOT** use a reserved word as an identifier.
 
 Integer literals are nonempty decimal digits without separators or a sign. A
 leading `-` is the unary negation operator. An `int` value is a checked signed
-32-bit integer in `[-2147483648, 2147483647]`.
+32-bit integer in `[-2147483648, 2147483647]`. A positive literal magnitude
+MUST NOT exceed `2147483647`, with one structural exception: the magnitude
+`2147483648` MAY appear as the immediate operand of unary `-`, producing
+exactly `-2147483648`. It is invalid by itself, and any larger negative or
+positive literal is a compile-time error. The magnitude is validated before
+conversion to i32; truncation and wrapping are not permitted.
+
+This rule applies uniformly in variables and constants, arguments, returns,
+fields and collection literals. Overflow in a calculated expression such as
+`2147483647 + 1` remains a checked operation overflow; it is not an invalid
+literal. Arbitrary-precision integers used by a compiler host, including
+Python integers in the reference implementation, do not define Aether numeric
+semantics.
 
 Real literals contain a decimal point, a decimal exponent, or both. Exponents
 use `e` or `E`, an optional sign, and at least one digit. Real literals infer

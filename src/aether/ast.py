@@ -309,6 +309,8 @@ class TryCatchStatement:
 class Literal:
     value: object
     type_name: AetherType
+    line: int = field(default=1, compare=False)
+    column: int = field(default=1, compare=False)
 
 
 @dataclass(frozen=True)

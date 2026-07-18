@@ -13,7 +13,15 @@ from . import ast
 from .errors import AetherError, AetherInputError, AetherRuntimeError, AetherSyntaxError, AetherTypeError
 from .equality import aether_values_equal, types_support_equality
 from .formatting import format_value
-from .integer_arithmetic import checked_int_binary, checked_int_negate, ieee_divide
+from .integer_arithmetic import (
+    INT_MAX,
+    INT_MIN,
+    checked_int_binary,
+    checked_int_negate,
+    ieee_divide,
+    integer_literal_range_message,
+    is_aether_int,
+)
 from .lexer import lex
 from .modules import is_public_export, private_top_level_names, resolve_file_module_path
 from .native_members import native_member_set, native_method, native_property
@@ -829,6 +837,19 @@ class Interpreter:
         if isinstance(expression, ast.Literal):
             if expression.type_name == "string":
                 return AetherValue("string", StringValue.literal(expression.value))
+            if expression.type_name == "int" and not is_aether_int(expression.value):
+                value = expression.value
+                detail = (
+                    integer_literal_range_message(value)
+                    if isinstance(value, int) and not isinstance(value, bool)
+                    else "Invalid internal Aether int literal."
+                )
+                raise AetherRuntimeError(
+                    detail,
+                    line=expression.line,
+                    column=expression.column,
+                    kind="integer-literal",
+                )
             return AetherValue(expression.type_name, expression.value)
         if isinstance(expression, ast.InterpolatedString):
             return AetherValue("string", self._interpolate_string(expression, env))
@@ -850,6 +871,13 @@ class Interpreter:
                     return builtin_constant
                 raise _with_source_location(exc, expression) from exc
         if isinstance(expression, ast.UnaryExpression):
+            if (
+                expression.operator == "-"
+                and isinstance(expression.operand, ast.Literal)
+                and expression.operand.type_name == "int"
+                and expression.operand.value == INT_MAX + 1
+            ):
+                return AetherValue("int", INT_MIN)
             operand = self._evaluate(expression.operand, env)
             try:
                 if expression.operator == "-":

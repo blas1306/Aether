@@ -5,7 +5,7 @@ from math import trunc
 from typing import Any
 
 from aether.ir.types import DoubleType, FloatType, IntType, StringType
-from aether.integer_arithmetic import checked_int_binary
+from aether.integer_arithmetic import checked_int_binary, checked_int_negate
 from aether.ssa.analysis import Constant, LatticeState, Overdefined, Unknown, Worklist
 from aether.ssa.model import (
     SSAArrayCopy,
@@ -303,6 +303,11 @@ class SCCPAnalyzer:
         ):
             return Overdefined()
         if instruction.operator == "neg" and isinstance(operand.value, (int, float)):
+            if isinstance(instruction.operand.type, IntType):
+                try:
+                    return Constant(checked_int_negate(operand.value))
+                except OverflowError:
+                    return Overdefined()
             return Constant(-operand.value)
         if not isinstance(operand.value, bool):
             return Overdefined()

@@ -4,7 +4,7 @@ from math import trunc
 from typing import Any
 
 from aether.ir.types import DoubleType, FloatType, IntType, StringType
-from aether.integer_arithmetic import checked_int_binary
+from aether.integer_arithmetic import checked_int_binary, checked_int_negate
 from aether.ssa.model import (
     SSABasicBlock,
     SSABinaryOp,
@@ -172,6 +172,11 @@ class SSAConstantFolder:
             return None
         value = constants[instruction.operand]
         if instruction.operator == "neg" and isinstance(value, (int, float)):
+            if isinstance(instruction.operand.type, IntType):
+                try:
+                    return SSAConst(instruction.result, checked_int_negate(value))
+                except OverflowError:
+                    return None
             return SSAConst(instruction.result, -value)
         if instruction.operator != "not":
             return None

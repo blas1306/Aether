@@ -15,7 +15,13 @@ from aether.process_arguments import (
     process_args_ir_snapshot,
 )
 from aether.range_safety import RANGE_STEP_NONZERO_BUILTIN, RANGE_STEP_ZERO_MESSAGE
-from aether.integer_arithmetic import checked_int_binary, ieee_divide
+from aether.integer_arithmetic import (
+    INT_MAX,
+    INT_MIN,
+    checked_int_binary,
+    ieee_divide,
+    is_aether_int,
+)
 from aether.list_safety import checked_list_index_to_int, checked_list_length_to_int
 from aether.stdlib.registry import call_builtin
 from aether.string_value import (
@@ -318,6 +324,13 @@ class IRInterpreter:
         frame: _Frame,
     ) -> tuple[bool, Any, str | None]:
         if isinstance(instruction, IRConst):
+            if isinstance(instruction.result.type, IntType) and not is_aether_int(
+                instruction.value
+            ):
+                raise IRExecutionError(
+                    f"Invalid internal int constant {instruction.value!r}; "
+                    f"expected [{INT_MIN}, {INT_MAX}]"
+                )
             frame.values[instruction.result] = (
                 as_string_value(instruction.value)
                 if isinstance(instruction.result.type, StringType)

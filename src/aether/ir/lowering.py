@@ -7,6 +7,7 @@ from typing import NoReturn
 
 from .. import ast
 from ..errors import IRBackendUnsupportedFeatureError
+from ..integer_arithmetic import INT_MAX, INT_MIN, is_aether_int
 from ..scalar_math import NATIVE_SCALAR_MATH_FUNCTIONS, SCALAR_MATH_CONSTANTS
 from ..string_parsing import (
     DOUBLE_PARSE_RESULT_TYPE,
@@ -1589,10 +1590,10 @@ class IRLowerer:
             if (
                 isinstance(expression.operand, ast.Literal)
                 and expression.operand.type_name == "int"
-                and expression.operand.value == 2**31
+                and expression.operand.value == INT_MAX + 1
             ):
                 result = context.temporary(IntType())
-                context.block.instructions.append(IRConst(result, -(2**31)))
+                context.block.instructions.append(IRConst(result, INT_MIN))
                 return result
             operand = self._lower_expression(expression.operand, context)
             if not isinstance(operand.type, _NUMERIC_IR_TYPES):
@@ -1859,6 +1860,11 @@ class IRLowerer:
         type_ = self._lower_type(literal.type_name)
         if not isinstance(type_, (IntType, DoubleType, BoolType, StringType)):
             self._unsupported(literal, f"literal type '{type_}'")
+        if isinstance(type_, IntType) and not is_aether_int(literal.value):
+            self._fail(
+                f"Invalid internal int literal {literal.value!r}; expected [{INT_MIN}, {INT_MAX}].",
+                literal,
+            )
         result = context.temporary(type_)
         context.block.instructions.append(IRConst(result, literal.value))
         return result

@@ -59,6 +59,10 @@ y no declara ABI estable.
 
 ### Added
 
+- Validación semántica signed-i32 para todo literal `int`, con diagnóstico
+  localizado, regla estructural de `INT_MIN`, defensas IR/SSA/LLVM y cobertura
+  diferencial AST/IR/native. Los enteros arbitrarios de Python ya no pueden
+  definir ni filtrar la semántica de un literal Aether.
 - Sintaxis de control rc.2: paréntesis obligatorios en `if`, `while` y `for`,
   soporte real de cadenas `else if`, diagnósticos de migración, formatter/LSP
   idempotente y migrador token-aware para fuentes rc.1.

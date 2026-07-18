@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import NoReturn
 
 from aether.range_safety import RANGE_STEP_NONZERO_BUILTIN
+from aether.integer_arithmetic import INT_MAX, INT_MIN, is_aether_int
 
 from .model import (
     IRAssign,
@@ -2147,6 +2148,11 @@ class IRVerifier:
             return
         else:
             return
+
+        if isinstance(result_type, IntType) and not is_aether_int(value):
+            self._fail(
+                f"Int const {value!r} is outside signed i32 range [{INT_MIN}, {INT_MAX}]"
+            )
 
         if isinstance(expected, tuple):
             if not isinstance(result_type, expected):

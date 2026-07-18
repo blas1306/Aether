@@ -11,6 +11,22 @@ INTEGER_OVERFLOW_MESSAGE = "Aether panic: Integer overflow"
 CHECKED_INT_OPERATORS = frozenset({"add", "sub", "mul", "div", "mod", "rem"})
 
 
+def is_aether_int(value: object) -> bool:
+    """Return whether ``value`` is a valid Aether signed i32 value."""
+    return (
+        isinstance(value, int)
+        and not isinstance(value, bool)
+        and INT_MIN <= value <= INT_MAX
+    )
+
+
+def integer_literal_range_message(value: int) -> str:
+    return (
+        f"Integer literal {value} is outside the range of Aether int "
+        f"[{INT_MIN}, {INT_MAX}]."
+    )
+
+
 def int_operator_may_trap(operator: str) -> bool:
     return operator in CHECKED_INT_OPERATORS
 

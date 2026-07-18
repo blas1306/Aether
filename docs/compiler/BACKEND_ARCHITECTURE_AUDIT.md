@@ -28,11 +28,12 @@ dataclasses Python. No existe esquema, versión, parser ni serialización
 canónica. El backend LLVM recibe esos objetos directamente y reconstruye
 layouts, lifecycle, nombres de helpers y runtime mediante strings LLVM.
 
-La auditoría registra **18 hallazgos: 1 P0, 7 P1, 8 P2 y 2 P3**. Los
-bloqueantes principales son:
+La auditoría registra **18 hallazgos: 1 P0 resuelto, 7 P1, 8 P2 y 2 P3**. Los
+hallazgos principales son:
 
-1. literales `int` fuera de i32 dependen del entero arbitrario de Python y
-   divergen en native;
+1. ~~literales `int` fuera de i32 dependían del entero arbitrario de Python y
+   divergían en native~~ — **resuelto el 18 de julio de 2026** por validación
+   frontend y defensas IR/SSA/LLVM;
 2. el runtime se genera y enlaza dentro de cada módulo LLVM, sin artefacto ni
    ABI C separada;
 3. IR/SSA no tienen contrato versionado independiente de Python;
@@ -151,7 +152,7 @@ contratos, constantes, tablas de tipos/efectos y tests diferenciales.
 
 | Regla | AST | IR | SSA | LLVM | Runtime | Fuente canónica actual | Riesgo / decisión |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| int i32 y overflow | `integer_arithmetic.py` | mismo helper | efecto `may_trap` | intrinsics/helpers i32 | `integer_runtime.py` textual | spec + helper Python | **alto**: literal no validado; compartir límites y test diferencial |
+| int i32 y overflow | `integer_arithmetic.py` | mismo helper | efecto `may_trap` | intrinsics/helpers i32 | `integer_runtime.py` textual | spec + helper Python | **alto/cerrado para literales**: límites compartidos, diagnóstico frontend y test diferencial |
 | división/módulo cero | helper/interpreter | helper/interpreter | preserva efecto | checks explícitos | helpers integer/math | spec/tests | mantener implementaciones independientes + corpus |
 | rango inclusivo/paso cero | `AetherRange` | lowering/interpreter | CFG | helper guard | panic textual | `range_safety.py` + spec | duplicación aceptable; generar contrato del builtin |
 | igualdad | `equality.py` | `ir/equality.py` | verifier | helpers por tipo | string/aggregate helpers | Eq(T) de spec + typechecker | compartir capability/layout; ejecutar diferencial |
@@ -174,7 +175,7 @@ contratos, constantes, tablas de tipos/efectos y tests diferenciales.
 
 | Dependencia | Dónde | Tooling o semántica | Riesgo | Desacoplamiento / caracterización |
 | --- | --- | --- | --- | --- |
-| enteros arbitrarios | `lexer._number()` usa `int(text)`; literal llega a AST/IR | semántica | **P0**: `2147483648` imprime ese valor en AST y `-2147483648` native | validar literal signed i32 en frontend con regla especial para `-2147483648`; negativos y corpus AST/IR/native |
+| enteros arbitrarios | `lexer._number()` conserva magnitud con `int(text)` hasta análisis semántico | semántica | **P0 resuelto**: frontend rechaza fuera de rango; `-2147483648` usa regla estructural; IR/SSA/LLVM tienen defensas | mantener corpus de bordes AST/IR/native; el entero Python no define semántica |
 | floats/conversión Python | lexer, `types._coerce_python_value`, IR interpreter | semántica | diferencias de parsing/format/narrowing | mantener gramática byte-level y fixtures C/Python; contrato IEEE explícito |
 | `str`/Unicode Python | source, lexer/parser, interpolación; `StringValue` mitiga runtime | ambas | code points y errores host pueden filtrarse | boundary UTF-8 bytes; diagnóstico de decode; strings runtime siempre `StringValue` |
 | `list` mutable | AST y parte del IR interpreter; `CollectionObject` hereda `list` | semántica/oráculo | métodos/slices/índices negativos host podrían filtrarse | todas las operaciones públicas pasan por helpers checked; property tests contra contrato |
@@ -202,7 +203,7 @@ tipo con `llvm_type()` y su storage con `LLVMTypeLayouts`.
 
 | Source/Semantic | IR | LLVM | Runtime/layout | Estado |
 | --- | --- | --- | --- | --- |
-| `int` | `IntType` | `i32` | valor signed checked | total salvo literal fuera de rango (**P0**) |
+| `int` | `IntType` | `i32` | valor signed checked | total; literal fuera de rango rechazado antes de IR |
 | `boolean` | `BoolType` | `i1` | valor | total |
 | `double` | `DoubleType` | `double` | IEEE binary64 | total en subset |
 | `float` | `FloatType` | `float` en mapper | profile lo rechaza por ABI no estable | parcial/contradictorio deliberadamente gated |
@@ -325,7 +326,7 @@ reproducible y no una promesa de número de línea estable.
 
 | ID | Componente | Sev. | Tipo | Descripción | Evidencia | Riesgo | Bloquea migración | Recomendación | Fase |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| BA-001 | lexer/tipos/native | **P0** | Python coupling / semántica | literal int fuera de signed i32 se conserva como bigint AST y se trunca/interpreta como i32 native | `lexer._number`; `llvm_type(IntType)=i32`; reproducción `2147483648` -> AST `2147483648`, native `-2147483648` | compilación incorrecta y paridad rota | sí, toda migración | diagnóstico frontend i32 con caso `-2147483648`; corpus de bordes | 0 inmediata |
+| BA-001 | lexer/tipos/native | **P0 CERRADO** | Python coupling / semántica | literal int fuera de signed i32 se rechaza semánticamente; sólo la magnitud `2147483648` bajo `-` produce `INT_MIN` | spans en `ast.Literal`; typechecker; defensas AST/lowering/IR/SSA/LLVM; corpus focalizado | sin divergencia conocida; IR inválido falla cerrado | no | mantener límites y corpus AST/IR/native | cerrado en fase 0 |
 | BA-002 | runtime native | **P1** | runtime / ABI | runtime LLVM textual se inserta en cada módulo y todos sus helpers son privados | `LLVMPrinter.print_module`, `*_runtime.py` | no se puede sustituir/ensanchar/versionar independientemente | sí, runtime | manifest ABI + runtime artefacto separado | 0-1 |
 | BA-003 | IR/SSA | **P1** | arquitectura | frontera son dataclasses Python sin schema/version/parser | `ir/model.py`, `ssa/model.py`, `CheckedProgram` | Rust requeriría importar Python o reimplementar ad hoc | sí | JSON canónico experimental + golden/reader | 0-2 |
 | BA-004 | tipos/layout | **P1** | ABI | layout se reconstruye y fields/offsets se hardcodean en printer/runtimes | `layout.py`, `types.py`, Array/List/String runtime, `_emit_arc_value` | drift, corrupción al cambiar headers | sí | descriptor único generado y tests de layout | 0 |
@@ -346,8 +347,9 @@ reproducible y no una promesa de número de línea estable.
 
 ## 12. Riesgos y bloqueantes ordenados
 
-1. **Corregir BA-001 antes de medir o serializar IR.** De lo contrario se
-   congelaría un contrato inválido de constantes.
+1. **BA-001 está cerrado antes de medir o serializar IR.** Ninguna constante
+   source fuera de signed i32 alcanza IR y las fronteras internas fallan
+   cerrado ante módulos construidos manualmente.
 2. Definir qué parte del runtime ABI se exportará sin declarar estable el
    header interno de string/colecciones.
 3. Crear un descriptor canónico de tipos/layout/lifecycle antes de duplicarlo
