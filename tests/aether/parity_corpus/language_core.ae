@@ -1,0 +1,71 @@
+enum Mode { Add, Skip }
+
+struct Box {
+    int value;
+
+    constructor(int seed) {
+        value = seed;
+    }
+
+    int bumped(int amount) {
+        return value + amount;
+    }
+}
+
+int factorial(int value) {
+    if (value <= 1) {
+        return 1;
+    }
+    return value * factorial(value - 1);
+}
+
+int forward(int value) {
+    return declaredLater(value);
+}
+
+int declaredLater(int value) = value ^ 2;
+
+int firstPositive(Array<int> values) {
+    for (int value in values) {
+        if (value > 0) {
+            return value;
+        }
+    }
+    return 0;
+}
+
+int main() {
+    int total = 0;
+    for (int index in 1:6) {
+        if (index == 2) {
+            continue;
+        } else if (index == 5) {
+            break;
+        }
+        total += index;
+    }
+
+    int countdown = 2;
+    while (countdown > 0) {
+        total += countdown;
+        countdown = countdown - 1;
+    }
+
+    Array<int> values = {-1, 0, 7};
+    List<string> labels = {"ae", "ther"};
+    List<string> copied = labels[0:2];
+    Box box = Box(4);
+    Mode mode = Mode.Add;
+    double promoted = 2 + 0.5;
+
+    println(total);
+    println(factorial(5));
+    println(forward(3));
+    println(firstPositive(values));
+    println(box.bumped(2));
+    println(mode == Mode.Add);
+    println(copied[0] + copied[1]);
+    println(promoted);
+    println(sqrt(16.0));
+    return 0;
+}

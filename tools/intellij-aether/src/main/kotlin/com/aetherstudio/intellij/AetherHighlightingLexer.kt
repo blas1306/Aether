@@ -40,14 +40,7 @@ class AetherHighlightingLexer : LexerBase() {
             char.isWhitespace() -> consumeWhitespace()
             char == '#' -> consumeLineComment()
             char == '/' && tokenStart + 1 < endOffset && buffer[tokenStart + 1] == '/' -> consumeLineComment()
-            char == '"' || char == '\'' -> {
-                if (char == '\'' && isApostropheOperatorPosition(tokenStart)) {
-                    tokenEnd = tokenStart + 1
-                    tokenType = AetherTokenTypes.OPERATOR
-                } else {
-                    consumeString()
-                }
-            }
+            char == '"' -> consumeString()
             char.isDigit() -> consumeNumber()
             char.isIdentifierStart() -> consumeIdentifier()
             char in "&|" && tokenStart + 1 < endOffset && buffer[tokenStart + 1] == char -> consumeLogicalOperator()
@@ -94,20 +87,6 @@ class AetherHighlightingLexer : LexerBase() {
             }
         }
         tokenType = AetherTokenTypes.STRING
-    }
-
-    private fun isApostropheOperatorPosition(index: Int): Boolean {
-        if (index <= startOffset) {
-            return false
-        }
-        var previous = index - 1
-        while (previous >= startOffset && buffer[previous].isWhitespace()) {
-            previous--
-        }
-        if (previous < startOffset) {
-            return false
-        }
-        return buffer[previous].isLetterOrDigit() || buffer[previous] in ")]}_."
     }
 
     private fun consumeNumber() {

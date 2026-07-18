@@ -15,6 +15,12 @@ def main(argv: list[str] | None = None) -> int:
     path = Path(args.path)
     try:
         source = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        print(
+            f"Could not read {path}: source is not valid UTF-8 (byte {exc.start})",
+            file=sys.stderr,
+        )
+        return 2
     except OSError as exc:
         print(f"Could not read {path}: {exc}", file=sys.stderr)
         return 2

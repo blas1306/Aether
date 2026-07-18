@@ -15,6 +15,11 @@
 > auditoría. No amplía el perfil 22 ni añade capacidades de runtime. Las cifras
 > y referencias a rc.1 que siguen pertenecen al corte histórico original.
 
+> Esta fotografía fue reemplazada para decisiones de cierre por la
+> [auditoría final del perfil](AETHER_V1_PROFILE_AUDIT.md) y su
+> [decisión cerrada](AETHER_V1_PROFILE_DECISION.md). Sus cifras históricas no
+> deben usarse como estado actual de rc.2.
+
 Fecha de corte: **16 de julio de 2026**
 
 Repositorio auditado: commit `634a404`

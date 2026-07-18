@@ -1,0 +1,8 @@
+from Helper import ImportedValue;
+from Helper import doubled;
+
+int main() {
+    ImportedValue value = ImportedValue(doubled(4));
+    println(value.value);
+    return 0;
+}

@@ -33,6 +33,9 @@ or future work. They do not expand the release profile.
 
 ## Audit
 
+- [Final Aether v1 Profile Audit](AETHER_V1_PROFILE_AUDIT.md)
+- [Aether v1 Profile Decision](AETHER_V1_PROFILE_DECISION.md)
+- [Aether v1 Closure Roadmap](AETHER_V1_CLOSURE_ROADMAP.md)
 - [Aether v1 Release Readiness](AETHER_V1_RELEASE_READINESS.md)
 - [Backend Feature Parity](BACKEND_FEATURE_PARITY.md)
 - [Control Flow and Iteration Audit](CONTROL_FLOW_AND_ITERATION_AUDIT.md)

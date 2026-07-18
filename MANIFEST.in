@@ -3,6 +3,6 @@ include LICENSE
 include README.md
 include pyproject.toml
 recursive-include docs *.md
-recursive-include examples *.ae *.md
+recursive-include examples *.ae *.json *.md
 recursive-include scripts *.py
 recursive-include tests *.py *.ae *.json *.md

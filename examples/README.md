@@ -12,6 +12,13 @@ The same file can be inspected with `aether --tokens examples/hello.ae` or
 
 This directory contains example Aether programs organized by topic.
 
+The executable source of truth is
+[`v1_examples_manifest.json`](v1_examples_manifest.json). At the 2026-07-18
+rc.2 audit it classifies all 103 `.ae` files as 78 `V1_NATIVE`, 21
+`AST_ONLY_EXPERIMENTAL`, and 4 `BROKEN`. Only `V1_NATIVE` entries are official
+Aether 1.0 examples. Keeping another file under `examples/` does not make its
+feature part of the stable profile.
+
 ## Non-Interactive Examples
 
 Examples that run to completion without user input are suitable for automated testing.
@@ -30,7 +37,7 @@ python3 src/main.py --cli < /dev/null
 # println(p.x);
 ```
 
-### Classes
+### Classes (AST-only experimental)
 
 - **counter_basic.ae** - Basic private state with public instance methods
 - **custom_constructor.ae** - Initialize private class state with an explicit constructor
@@ -42,14 +49,16 @@ python3 src/main.py --cli < /dev/null
 
 ### Lists
 
-- **list_api.ae** - Native `List<T>` methods, const behavior, and common invalid operations
+- **list_api.ae** - Historical broad List API exercise; the manifest records
+  the currently unsupported native combination. Native List examples live in
+  `llvm/list_*.ae`.
 
 ### Aggregate collections
 
 - **aggregate_collections/particles.ae** - Native `Array<Particle>` with nested
   `Vec2` structs, explicit by-value get/set semantics, and independent `copy()`.
 
-### Linear Algebra
+### Linear Algebra (mixed profile)
 
 - **basic_operations.ae** - Basic matrix/vector operations: creation, transposition, matrix multiplication, and iteration
 - **primes_check.ae** - Check if a number is prime using simple primality test
@@ -85,13 +94,15 @@ Examples that require user input are marked as **interactive** and should not be
 
 ## Current Status
 
-- `structs/`: ✅ Non-interactive, tested
-- `classes/`: ✅ Non-interactive, tested
-- `lists/`: ✅ Non-interactive, tested
-- `linear_algebra/`: ✅ Non-interactive, tested  
-- `nonlinear_systems/`: ⚠️ Experimental (incomplete implementation)
-- `interactive/`: 👤 Interactive examples (not for automation)
-- `minimos_cuadrados/`: 👤 Interactive example with plotting
+- `llvm/`, the numerical-methods dogfood, Expense Tracker, the struct core,
+  FormulaNumerosPrimos and the two NR programs contain the native-v1 set;
+- `classes/`, `interactive/`, broad linear algebra, exceptions and plotting are
+  AST-only experimental or outside v1;
+- `linear_algebra/primes_advanced.ae`, both checked-in
+  `minimos_cuadrados/*.ae` files and `pruebaListas.ae` are currently `BROKEN`
+  and are retained as explicit audit/migration evidence, not official samples;
+- consult the manifest for each path, expected backend, exit code or success
+  condition, timeout and exclusion reason.
 
 ## Notes
 
@@ -104,7 +115,7 @@ The following examples are experimental or incomplete:
 
 ### Testing
 
-Run non-interactive examples with smoke tests:
+Validate the complete profile manifest and native observations with:
 ```bash
-python3 -m pytest tests/test_example_smoke.py -v
+python3 -m pytest tests/aether/test_v1_profile_audit.py -v
 ```

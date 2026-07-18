@@ -904,7 +904,22 @@ class TypeChecker:
                 hint="check the module name or the source root used to run Aether.",
                 kind="import",
             )
-        source = module_path.read_text(encoding="utf-8")
+        try:
+            source = module_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            raise AetherTypeError(
+                f"Module '{module_name}' is not valid UTF-8 (byte {exc.start}).",
+                line=getattr(location, "line", None),
+                column=getattr(location, "column", None),
+                kind="import",
+            ) from exc
+        except OSError as exc:
+            raise AetherTypeError(
+                f"Could not read module '{module_name}': {exc}.",
+                line=getattr(location, "line", None),
+                column=getattr(location, "column", None),
+                kind="import",
+            ) from exc
         tokens = lex(source)
         program = Parser(tokens).parse()
         if program.package_name is not None and program.package_name != module_name:

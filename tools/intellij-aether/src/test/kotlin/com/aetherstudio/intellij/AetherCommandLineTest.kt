@@ -190,7 +190,7 @@ class AetherCommandLineTest {
     }
 
     @Test
-    fun `highlighting lexer treats single quoted string as string`() {
+    fun `highlighting lexer treats single quotes as apostrophe operators`() {
         val lexer = AetherHighlightingLexer()
 
         lexer.start("'hola'", 0, 6, 0)
@@ -200,7 +200,8 @@ class AetherCommandLineTest {
             lexer.advance()
         }
 
-        assertTrue(tokenTypes.contains(AetherTokenTypes.STRING.toString()))
+        assertTrue(!tokenTypes.contains(AetherTokenTypes.STRING.toString()))
+        assertEquals(2, tokenTypes.count { it == AetherTokenTypes.OPERATOR.toString() })
         assertTrue(!tokenTypes.contains(AetherTokenTypes.BAD_CHARACTER.toString()))
     }
 

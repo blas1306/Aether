@@ -749,6 +749,13 @@ def _positive_int(value: str) -> int:
 def _read_source(path: Path, *, stderr: TextIO) -> str | None:
     try:
         return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        print(
+            f"aether: cannot read '{path}': source is not valid UTF-8 "
+            f"(byte {exc.start})",
+            file=stderr,
+        )
+        return None
     except OSError as exc:
         print(f"aether: cannot read '{path}': {exc}", file=stderr)
         return None

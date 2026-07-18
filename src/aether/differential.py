@@ -60,6 +60,8 @@ def discover_cases(corpus_root: Path = DEFAULT_CORPUS_ROOT) -> tuple[Differentia
             if metadata_path.exists()
             else {}
         )
+        if metadata.get("enabled") is False:
+            continue
         arguments = tuple(str(value) for value in metadata.get("arguments", ()))
         fixture_files = {
             str(relative): _fixture_bytes(value)

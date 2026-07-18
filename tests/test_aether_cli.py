@@ -334,6 +334,18 @@ def test_missing_file_reports_read_error(tmp_path: Path) -> None:
     assert str(missing) in stderr
 
 
+def test_invalid_utf8_source_reports_read_error_without_traceback(tmp_path: Path) -> None:
+    source = tmp_path / "invalid.ae"
+    source.write_bytes(b'println("ok");\n\xff')
+
+    exit_code, stdout, stderr = run_cli([str(source)])
+
+    assert exit_code == EXIT_USAGE_ERROR
+    assert stdout == ""
+    assert "source is not valid UTF-8" in stderr
+    assert "Traceback" not in stderr
+
+
 def test_help_describes_direct_execution_and_tools() -> None:
     exit_code, stdout, stderr = run_cli(["--help"])
 

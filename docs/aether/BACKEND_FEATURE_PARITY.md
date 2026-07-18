@@ -83,7 +83,10 @@ y clang O0/O1/O2. `print/println(double)` usa un formatter público común de 15
 dígitos, conserva `.0`/signed zero y normaliza no finitos; ALPT1 conserva
 `%.17g` como codec canónico separado. Strings en agregados mantienen quotes y
 escapes length-aware. Panics públicos del corpus coinciden en mensaje/canal/code.
-Doce programas y 36 comparaciones quedan integrados al gate local de CI.
+Catorce programas y 42 comparaciones quedan integrados al gate local de CI.
+El corpus incluye ahora control de flujo, recursión, llamadas adelantadas,
+structs, métodos, colecciones, math scalar e imports de módulos, además de los
+casos anteriores de strings, archivos, argumentos y panics.
 
 Última revisión: 16 de julio de 2026, incluyendo el cierre del capability gate
 native y los dogfoods Numerical Methods, Expense Tracker y Aggregate
