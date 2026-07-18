@@ -1,17 +1,20 @@
 # Aether Native Profile v1
 
-> Classification: **Normative**. Language release `1.0.0-rc.2`; native
-> capability profile schema/version `22`. The language version and profile
-> version are independent identifiers.
+> Classification: **Normative**. Language contract **Aether 1.0 stable
+> profile**; native capability profile schema/version `22`. This profile is
+> frozen for the `1.0.0-rc.3` candidate; the language and capability profile
+> versions are independent identifiers.
 
 ## 1. Conformance language
 
 The terms **MUST**, **MUST NOT**, **SHOULD**, and **MAY** are normative. Text
 explicitly labelled informative is not a conformance requirement.
 
-This document defines the LLVM/native implementation profile of the language
-specified by [Aether Language Specification v1](AETHER_LANGUAGE_SPEC_V1.md).
-It does not widen that language and does not make AST-only features native.
+This document gives the executable LLVM/native capability refinement of the
+language specified by
+[Aether 1.0 Language Specification](AETHER_LANGUAGE_SPEC_V1.md). It neither
+widens nor narrows the 75-row stable language inventory. Frontend-only
+experiments are outside Aether 1.0.
 
 ## 2. Conforming implementation
 
@@ -176,12 +179,13 @@ negative corpus is part of this profile.
   not promise different optimization strength: the current public `-O2`
   inspection profile aliases `-O1`.
 
-## 5. Unsupported capabilities
+## 5. Excluded capabilities
 
 Profile 22 rejects `input`, classes and their constructors/methods,
 interfaces, user generics, `throw`/`try`/`catch`, and the historical combined
-`string-split-trim` capability. This does not prevent the language frontend or
-AST implementation from defining those features.
+`string-split-trim` capability. These and every other `OUTSIDE_V1` audit row
+are not Aether 1.0 features even when an experimental frontend or AST path
+recognizes them.
 
 ## 6. Platform and toolchain
 
@@ -196,8 +200,9 @@ supported native platform: process arguments and file paths still require an
 explicit UTF-16 boundary. POSIX in general is not claimed because errno, path,
 atomic replacement and durability behavior have only been validated on Linux.
 
-The AST profile is validated for the release on Linux x86_64 with CPython
-3.10 or newer. Other Python-host platforms may work but are not release-validated.
+The auxiliary AST differential reference is exercised on Linux x86_64 with
+CPython 3.10 or newer. That host configuration is test infrastructure, not a
+second language or release platform.
 
 ## 7. Observable parity guarantee
 
@@ -218,5 +223,4 @@ NOT** remove or reorder observable traps, allocation, IO, or lifecycle effects.
 
 Profile 22 is a feature-contract version, not the Aether language version and
 not an ABI version. Increasing it records a changed capability boundary. It
-does not by itself change `1.0.0-rc.2`, Python package metadata, or plugin
-compatibility.
+does not by itself change package metadata or plugin compatibility.

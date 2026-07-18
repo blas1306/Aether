@@ -1,5 +1,10 @@
 # Aether Intermediate Representation: Initial Design
 
+> Classification: **Design/RFC**. This document records the initial evolution
+> of the IR and contains historical implementation snapshots. It does not
+> override the current backend contract in the
+> [Aether 1.0 Language Specification](AETHER_LANGUAGE_SPEC_V1.md).
+
 ## String lifecycle update (profile 7)
 
 `StringType` remains nominal in IR even though LLVM spells its handle `ptr`.
@@ -18,22 +23,21 @@ adding lowering, an IR interpreter, optimizations, or backend work
 incrementally. Exact instruction names, type spellings, serialization details,
 and phase boundaries may change as the design is validated.
 
-The current AST interpreter remains the executable semantic reference for
-Aether throughout this work.
+The AST interpreter remains an auxiliary semantic reference. LLVM/native is
+the official and default Aether 1.0 execution backend; the IR interpreter is
+internal infrastructure.
 
 ### Initial Python infrastructure
 
-The `aether.ir` package now contains the initial typed IR data model, a
+The `aether.ir` package introduced the initial typed IR data model, a
 deterministic debug printer, an IR verifier, and a minimal IR interpreter in
-Python. The default public execution path still uses the AST interpreter, but the
-internal pipeline now has an explicit frontend/backend boundary: source is
-tokenized, parsed, and typechecked into a checked program before a backend runs
-it. The production and default backend is the AST backend. An experimental IR
-backend is available for file execution through `aether --backend=ir`, but it
-is intentionally narrow and is not the default. Initial IR optimization
-infrastructure exists as an explicit developer API, but it is not connected to
-the public IR backend path. There is no SSA, JIT, Rust backend, or full-language
-IR execution path yet.
+Python. The current pipeline has an explicit frontend/backend boundary: source
+is tokenized, parsed, typechecked, and checked against native capability
+profile 22 before stable lowering. LLVM/native is the production and default
+backend. `aether --backend=ast` explicitly selects the auxiliary interpreter;
+`aether --backend=ir` explicitly selects narrow internal infrastructure.
+There is no silent fallback between them. Later sections retain historical
+milestone wording and should be read as design history, not current status.
 
 ### Initial lowering implementation
 

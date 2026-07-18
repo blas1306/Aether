@@ -7,6 +7,12 @@ lenguaje.
 
 ### R1 — Congelar el contrato normativo (P1, docs)
 
+**Estado: CERRADO (2026-07-18).** La spec normativa ahora define únicamente
+las 75 filas `SUPPORTED`; la superficie reconocida sólo por frontend/AST quedó
+en un anexo experimental no normativo. El gate compara ambos bloques de IDs
+contra la matriz de auditoría, busca las contradicciones conocidas, valida
+links/clasificaciones y regenera el perfil native antes de aprobar.
+
 - actualizar `AETHER_LANGUAGE_SPEC_V1.md` para que v1 estable sea el perfil
   native cerrado;
 - mover la superficie AST-only a un anexo experimental;
@@ -16,6 +22,10 @@ lenguaje.
 
 **Gate:** script de docs, búsqueda de contradicciones conocidas y
 `git diff --check`.
+
+**Evidencia de cierre:** `.venv/bin/python scripts/check_release_docs.py`,
+`git diff --check` y `tests/test_release_contract.py`. Este cierre resuelve R1
+y la parte documental de B12; no altera el estado de B13 ni sustituye R2.
 
 ### R2 — Cerrar el catálogo oficial de ejemplos (P1)
 

@@ -54,4 +54,5 @@ version = { attr = "aether.version.PACKAGE_VERSION" }
 "share/doc/aether" = [
     "docs/aether/AETHER_LANGUAGE_SPEC_V1.md",
     "docs/aether/AETHER_NATIVE_PROFILE_V1.md",
+    "docs/aether/AETHER_FRONTEND_EXPERIMENTS.md",
 ]

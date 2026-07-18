@@ -1,546 +1,478 @@
-# Aether Language Specification v1
+# Aether 1.0 Language Specification
 
-> Classification: **Normative**. Release: `1.0.0-rc.2` (Python package
-> version `1.0.0rc2`). This specification defines the language; backend
-> availability is defined separately by
-> [Aether Native Profile v1](AETHER_NATIVE_PROFILE_V1.md).
+> Classification: **Normative**. Contract: **Aether 1.0 stable profile**.
+> Native capability profile: **22**. This is the profile frozen for the
+> `1.0.0-rc.3` release candidate; publishing this document does not by itself
+> change the package version.
 
-## 1. Status and conformance
+## 1. Scope and conformance
 
 The terms **MUST**, **MUST NOT**, **SHOULD**, and **MAY** express normative
-requirements. Sections explicitly labelled informative are not requirements.
-Examples illustrate rules but do not replace them.
+requirements. Text explicitly labelled informative is not a requirement.
 
-An Aether v1 implementation **MUST** accept every well-formed program within
-the profile it claims, **MUST** reject ill-formed programs with a diagnostic,
-and **MUST NOT** silently substitute a different backend. The AST profile is
-the semantic reference for the full frontend surface. The native profile is a
-normative, deliberately smaller implementation subset.
+Aether 1.0 is the single language profile defined by this document and refined
+by [Aether Native Profile v1](AETHER_NATIVE_PROFILE_V1.md). It is not the union
+of every construction recognized by the parser, type checker, AST interpreter,
+or internal compiler layers. The authoritative freeze contains exactly the 75
+`SUPPORTED` rows in the
+[Aether v1 Profile Audit](AETHER_V1_PROFILE_AUDIT.md); the row identifiers are
+listed in section 15.
 
-This document is not a tutorial and does not define a stable C ABI, LLVM IR
-format, package registry, binary-module format, FFI, thread model, or bitwise
-reproducible build format.
+A conforming Aether 1.0 implementation:
+
+- **MUST** accept every well-formed program in this stable profile on its
+  declared platform;
+- **MUST** reject a program outside the profile before backend lowering, with
+  a syntax, type, or `AE-BACKEND-*` capability diagnostic as applicable;
+- **MUST NOT** infer language support from frontend or AST acceptance;
+- **MUST NOT** silently fall back to another backend;
+- **MUST** preserve the observable semantics in this document.
+
+LLVM/native is the official execution backend. The AST interpreter is an
+auxiliary interpreter, the REPL backend, and the differential semantic
+reference for programs already admitted by the stable profile. The IR
+interpreter is internal infrastructure. Extra AST behavior is experimental and
+does not extend Aether 1.0.
+
+The validated platform is **Linux x86_64** with `clang` on `PATH`. Aether 1.0
+does not define a stable C ABI, LLVM IR format, FFI, thread model, package
+registry, binary-module format, or bit-for-bit reproducible build format.
 
 ## 2. Lexical structure
 
-### 2.1 Source text
+### 2.1 Source text and tokens
 
-An `.ae` source file **MUST** be decoded as UTF-8. A byte stream that is not
-valid UTF-8 **MUST NOT** be accepted as Aether source. After decoding, source
-locations are one-based line and column positions in decoded source text.
+An `.ae` source file **MUST** be valid UTF-8. Source locations use one-based
+line and column positions in decoded text. Space, horizontal tab, carriage
+return, and line feed separate tokens except inside string literals. Newlines
+do not terminate statements. Simple statements end in `;`; blocks use `{` and
+`}`.
 
-Space, horizontal tab, carriage return, and line feed separate tokens except
-inside string literals. Newlines have no statement-termination meaning.
-Simple statements end in `;`; blocks are delimited by `{` and `}`.
-
-`#` and `//` begin a line comment outside a string. The comment continues to
-the next line feed or end of file. Aether v1 has no block comment syntax.
-
-### 2.2 Identifiers and keywords
+`#` and `//` start a line comment outside a string. Aether 1.0 has no block
+comment syntax.
 
 An identifier starts with `_` or a Unicode alphabetic character and continues
-with `_` or Unicode alphanumeric characters. Identifiers are case-sensitive.
-The implementation **MUST NOT** normalize Unicode identifiers implicitly.
+with `_` or Unicode alphanumeric characters. Identifiers are case-sensitive
+and are not normalized implicitly.
 
-The reserved words are:
+The stable grammar uses these reserved words:
 
 ```text
-alias as boolean break catch class complex const constructor continue double
-else enum Exception false float for from function if implements import in int
-interface List Matrix null package private public return static string struct
-throw true try Vector void while Array ParseStatus IntParseResult
+alias as boolean break const constructor continue double else enum false for
+from function if import in int List Matrix package private public return string
+struct true Vector void while Array ParseStatus IntParseResult
 DoubleParseResult FileStatus FileReadResult
 ```
 
-Some reserved type names denote privileged generic or bootstrap nominal types.
-`static` is reserved but static declarations are not part of v1. A source
-program **MUST NOT** use a reserved word as an identifier.
+The implementation also reserves the experimental spellings `catch`, `class`,
+`complex`, `Exception`, `float`, `implements`, `interface`, `null`, `static`,
+`throw`, and `try`. Reservation prevents their use as identifiers; it does not
+make their associated constructions part of Aether 1.0.
 
-### 2.3 Literals
+### 2.2 Literals
 
-Integer literals are nonempty decimal digits without separators or a sign. A
-leading `-` is the unary negation operator. An `int` value is a checked signed
-32-bit integer in `[-2147483648, 2147483647]`. A positive literal magnitude
-MUST NOT exceed `2147483647`, with one structural exception: the magnitude
-`2147483648` MAY appear as the immediate operand of unary `-`, producing
-exactly `-2147483648`. It is invalid by itself, and any larger negative or
-positive literal is a compile-time error. The magnitude is validated before
-conversion to i32; truncation and wrapping are not permitted.
-
-This rule applies uniformly in variables and constants, arguments, returns,
-fields and collection literals. Overflow in a calculated expression such as
-`2147483647 + 1` remains a checked operation overflow; it is not an invalid
-literal. Arbitrary-precision integers used by a compiler host, including
-Python integers in the reference implementation, do not define Aether numeric
-semantics.
+Integer literals are nonempty decimal digits without separators or a sign.
+`int` is checked signed i32 in `[-2147483648, 2147483647]`. The magnitude
+`2147483648` is valid only as the immediate operand of unary `-`, producing
+`-2147483648`; every larger magnitude is a compile-time error. Host integer
+width never changes Aether semantics.
 
 Real literals contain a decimal point, a decimal exponent, or both. Exponents
-use `e` or `E`, an optional sign, and at least one digit. Real literals infer
-`double`; `float` requires an explicit typed context or conversion. Hexadecimal,
-octal, binary, digit separators and suffixes are not v1 syntax.
+use `e` or `E`, an optional sign, and at least one digit. They have type
+`double`. Hexadecimal, octal, binary, digit separators, and numeric suffixes
+are not Aether 1.0 syntax.
 
-`im`, or a numeric literal immediately followed by `im`, is a `complex`
-literal. Complex is language-defined but outside the native profile.
+The boolean literals are `true` and `false`.
 
-The boolean literals are `true` and `false`. `null` is the sole null literal
-and has no inferable variable type without a nullable target type.
+A string literal is delimited by `"`, denotes valid UTF-8 text, and may contain
+a source newline. The only escapes are `\"`, `\\`, `\$`, `\n`, `\t`, and
+`\r`; any other escape is a syntax error. String interpolation is not part of
+Aether 1.0. A dollar sign that could start the frontend's experimental
+interpolation form **MUST** be written as `\$` in a stable string literal.
 
-A string literal is delimited by `"`. It denotes valid UTF-8 text and may
-contain a source newline. The only escapes are `\"`, `\\`, `\$`, `\n`, `\t`,
-and `\r`; any other escape is a syntax error. `${expression}` interpolation is
-part of the language frontend and produces a string using public value
-formatting. It is not in native profile 22.
+### 2.3 Collection and mathematical literals
 
-## 3. Program and module structure
+Brace literals initialize `Array<T>` or `List<T>` according to their declared
+target type:
 
-### 3.1 Files and declarations
+```aether
+Array<int> fixed = {1, 2, 3};
+List<string> names = {"Ada", "Lin"};
+```
 
-One `.ae` file is one source module. A file MAY start with exactly one
-`package dotted.name;` declaration, and that declaration **MUST** precede all
-other items. A package name identifies the file module for imports; v1 does not
-define multi-file package merging.
+Bracket literals create local shaped mathematical values. Commas separate
+columns and semicolons separate rows:
 
-Top-level items MAY be aliases, structs, classes, interfaces, enums, typed
-functions, abbreviated single-expression functions, variables/constants, imports, or executable
-statements. Struct, class, interface and enum declarations **MUST** be
-top-level. Visibility modifiers apply only to top-level declarations and to
-members where their grammar permits them.
+```aether
+Vector<int, Row> row = [1, 2, 3];
+Vector<int, Column> column = [1; 2; 3];
+Matrix<double> matrix = [1.0, 2.0; 3.0, 4.0];
+```
 
-In a module with a package declaration, only `public` top-level declarations
-are exported. Unmarked and `private` declarations are not importable. In an
-unpackaged entry script, top-level declarations are visible within that file.
-Visibility does not change access between declarations in the same file.
+All rows in a matrix literal **MUST** have equal length. Element type and shape
+are checked statically.
+
+## 3. Programs and modules
+
+### 3.1 Top-level declarations
+
+One source file is one module. It MAY start with one
+`package dotted.name;` declaration, which **MUST** precede every other item.
+Aether 1.0 does not define multi-file package merging.
+
+Stable top-level items are imports, type aliases, payload-free enums, structs,
+typed functions, abbreviated expression functions, and executable statements
+for a synthetic entry point. Structs and enums **MUST** be top-level. Nested
+functions are not permitted by the stable profile.
+
+In a packaged module, only `public` top-level declarations are exported.
+Unmarked and `private` declarations remain module-private. Visibility does not
+change access within the declaring file.
+
+`alias Name = T;` introduces another spelling for a supported Aether 1.0 type.
+Aliases MAY be forward-referenced, **MUST NOT** form cycles, and do not create a
+new runtime representation or admit an otherwise excluded type.
 
 ### 3.2 Imports
 
-The supported forms are:
+The stable import forms are:
 
 ```aether
-import Math;
+import Geometry;
 import Geometry as G;
 from Geometry import Point;
 from Geometry import Point as P;
 ```
 
-A dotted file-module name maps to the corresponding relative `.ae` path under
-the source root. Imports **MUST** be resolved, type-checked, cached, and checked
-for cycles before execution. Wildcard imports are not supported. An import
-alias introduces only its local binding. A selective import **MUST** respect
-the target declaration's visibility.
+A dotted module name maps to a relative `.ae` file beneath the source root.
+Imports **MUST** be resolved, type-checked, cached, and checked for cycles before
+execution. Wildcard imports are not supported. Selective imports **MUST**
+respect visibility.
 
-Builtin namespaces such as `Math`, `System`, `io`, and `text` do not require a
-source file. A backend MAY support fewer imported declaration kinds, but it
-**MUST** reject the excluded kind according to its profile.
+Functions, supported structs, enums, type aliases, and capture-free callable
+signatures may cross a module boundary. Imported mutable globals, constants
+requiring storage, and executable module initialization are outside Aether
+1.0. Builtin namespaces such as `Math`, `System`, `io`, and `text` do not
+require source files.
 
-### 3.3 Entry point and top-level execution
+### 3.3 Entry point
 
-An explicit program entry point has the exact signature `int main()` and
-declares no parameters. Falling off its end returns zero. Its returned `int`
-is the process exit code.
+An explicit entry point has the exact signature `int main()` and no
+parameters. Falling off its end returns zero; an explicit returned `int` is the
+process exit code.
 
-If the entry file has executable top-level statements and no explicit `main`,
-the implementation **MUST** preserve their source order in a synthetic
+If the entry file contains executable top-level statements and no explicit
+`main`, the implementation **MUST** preserve their source order in a synthetic
 `int main()` and append `return 0;`. An entry file **MUST NOT** combine an
-explicit `main` with executable top-level statements. Top-level constants are
-available to explicit `main`; backend profiles may restrict imported module
-storage and initialization.
-
-An imported function named `main` is an ordinary qualified function and is
-not the process entry point. Native executable construction **MUST** require
-one normalized root entry point.
+explicit `main` with executable top-level statements. Imported `main`
+functions are ordinary qualified functions and never become the root entry.
 
 ## 4. Types
 
 ### 4.1 Scalar and special types
 
 - `int` is checked signed i32.
-- `boolean` contains only `true` and `false`; `bool` is not a spelling.
 - `double` is IEEE-754 binary64.
-- `float` is a distinct real type supported by the frontend/AST profile; a
-  decimal literal does not infer it.
-- `complex` is a frontend/AST complex value type.
-- `string` is an immutable, non-null UTF-8 value described in section 10.
-- `void` denotes no value and is valid only where a return type is expected.
-- `Exception` is the bootstrap nominal value caught by language exceptions.
-- `T?` is nullable `T`; `void?`, `null?`, and nested nullable types are invalid.
-- `null` is a literal type assignable only to a compatible nullable target.
+- `boolean` contains only `true` and `false`; `bool` is not a spelling.
+- `string` is an immutable, non-null UTF-8 value.
+- `void` denotes no value and is valid only as a function return type.
 
-`float`, `complex`, nullable types and exceptions are language-defined even
-when a backend profile marks them unsupported. Host-language representations
-are not part of their public contract.
+There are no other primitive or nullable types in Aether 1.0.
 
-### 4.2 Nominal declarations
+### 4.2 Enums and structs
 
-An `enum` defines a nominal type and an ordered list of distinct, payload-free
-variants. Variant identity includes the declaring module and enum. Source
-order assigns deterministic discriminants; numeric conversion, bit flags,
-payloads and pattern matching are not v1 enum features.
+An `enum` defines a nominal type with an ordered list of distinct,
+payload-free variants. Variant identity includes its declaring module and enum.
+Source order assigns deterministic discriminants, but Aether 1.0 defines no
+numeric conversion, bit flags, payloads, or pattern matching for enums.
 
-A `struct` defines a nominal value type. Its fields have declared types.
-Assignment, parameter binding and return copy or move the value according to
-section 9; a struct does not acquire reference identity because a field is a
-reference type. Acyclic by-value layout is required.
+A `struct` is a nominal value type with declared fields whose transitive layout
+is supported by profile 22. Recursive by-value layouts are invalid. Struct
+assignment, parameter passing, and return use value semantics while applying
+the lifecycle rules of every field.
 
-A `class` defines a nominal mutable reference type. Class assignment and
-parameter binding alias the same instance. Constructors initialize instances;
-methods access the receiver through `this`. Classes are defined by the
-language but unsupported by native profile 22.
+A struct receives an automatic positional constructor when it has no explicit
+constructor. It MAY declare one explicit `constructor(...) { ... }` and typed
+methods. Within a constructor or method, fields may be referenced directly;
+`this.field` is the explicit equivalent. Construction **MUST** initialize every
+field before use.
 
-An `interface` defines a nominal set of method signatures. A struct or class
-declaring `implements I` **MUST** provide compatible methods. Dispatch exists
-in the AST profile and is unsupported by native profile 22.
+### 4.3 Callable values
 
-An alias declaration `alias Name = T;` introduces another spelling for `T`.
-Aliases may be forward-referenced but **MUST NOT** form a cycle. Aliases do not
-create a new runtime representation.
+The structural callable spelling is `R(P1, P2, ...)`. A callable value is only
+a capture-free reference to a top-level user function with the exact signature.
+Callable assignment, parameters, local selection, imports, and indirect calls
+are supported. Section 8 gives the remaining restrictions.
 
-### 4.3 Collections and mathematical containers
+### 4.4 Collections
 
-`Array<T>` is a mutable, fixed-length reference collection. `List<T>` is a
-mutable, variable-length reference collection. Both use zero-based element
-indexes. Their ownership, aliasing, copy, slicing and equality rules are in
-sections 9 and 10.
+`Array<T>` is a mutable fixed-length reference collection. `List<T>` is a
+mutable variable-length reference collection. Both use zero-based indexing.
+Their stable element types are `int`, `double`, `boolean`, `string`,
+payload-free enums, and registered acyclic structs when profile 22 provides
+every required layout and lifecycle hook.
 
-`Vector<T>` and `Matrix<T>` are shaped mathematical values with public
-one-based indexes. They are not aliases for Array/List. Their element type,
-shape and vector orientation participate in type checking. The privileged
-transpose-vector and range forms are inferred types rather than source type
-keywords.
+Nested Array/List element layouts, shaped Vector/Matrix elements, and every
+unregistered aggregate layout are outside Aether 1.0. An operation requiring
+printing, ordering, or `Eq(T)` is available only when `T` has that capability.
 
-A range expression is `start:end` or `start:step:end`, is inclusive at the
-end when reached, and contains `int` values. A zero step panics or is rejected
-early when statically known.
+`Vector<int>`, `Vector<double>`, `Matrix<int>`, and `Matrix<double>` are local,
+shaped mathematical values with one-based indexes. A vector orientation is
+`Row` or `Column`; omitted orientation is inferred from its literal. Shape is
+not source-level genericity and **MUST NOT** cross a function, struct,
+collection, or callable ABI boundary.
 
-Tuple values and destructuring are defined in the AST profile, with source
-type syntax `(T1, T2, ...)`; native profile 22 excludes them. User-defined
-generic declarations are not implemented. The generic spellings above are
-privileged language types, not evidence of general generics.
+### 4.5 Bootstrap result types
 
-### 4.4 Bootstrap result types
+The base library exposes the nominal types `ParseStatus`, `IntParseResult`,
+`DoubleParseResult`, `FileStatus`, and `FileReadResult` defined in section 12.
+They are ordinary public enum/struct values, not sentinel conventions.
 
-The base library exposes nominal `ParseStatus`, `IntParseResult`,
-`DoubleParseResult`, `FileStatus`, and `FileReadResult`. Their definitions are
-specified in section 13. They are real public types, not sentinel conventions.
+## 5. Variables, constants, and scope
 
-## 5. Variables, constants and scope
+A mutable declaration is `T name = expression;`. A constant declaration is
+`const T name = expression;`. The explicit type and initializer are mandatory,
+and the initializer **MUST** be assignable to `T`. Assignment to an unknown
+identifier does not declare a stable variable.
 
-A typed declaration has `T name = expression;`. The initializer is mandatory
-and **MUST** be assignable to `T`. `const T name = expression;` creates a
-non-reassignable binding. `const name = expression;` may infer `T` when it is
-unambiguous.
+Simple assignment updates an existing mutable variable, field, or supported
+index and preserves its type. `name += expression;` is the only stable
+compound assignment; its target is a mutable variable binding, and it is valid
+exactly when `name + expression` is valid and assignable back to the binding.
+No other compound assignment belongs to Aether 1.0.
 
-At statement position, assignment to an unknown identifier (`name = expr;`)
-declares an inferred mutable variable in the AST profile. Assignment to a
-known identifier updates that binding and **MUST** preserve its type. Native
-profile 22 requires the declaration forms accepted by its capability gate.
-An empty collection literal and `null` cannot infer a type without a target.
+Every block creates a lexical scope. Parameters, loop variables, and locals
+belong to their block. A declaration **MUST NOT** shadow a visible outer
+binding; duplicates in one scope are invalid. A local is visible only after
+its declaration. Top-level type and function signatures are collected before
+bodies, allowing forward calls, mutual recursion, later aliases, and later
+nominal types.
 
-Every block creates a lexical scope. Parameters, loop variables, catch
-variables and locals belong to their scope. A local declaration **MUST NOT**
-shadow a visible outer binding, and duplicate declarations in one scope are
-invalid. A local is visible only after its declaration. Top-level type and
-function signatures are collected before bodies, so forward calls, mutual
-recursion, later aliases and later nominal types are permitted.
-
-Assignment to a `const` binding is invalid. For structs and collections,
-read-only access propagates through value fields and nested collection paths.
-It stops after dereferencing a contained class handle: `const` restricts an
-access path and does not globally freeze aliased objects.
+A `const` binding cannot be reassigned. Read-only access propagates through
+struct fields and nested access paths. For Array/List it makes that reference
+path read-only; another mutable alias may still mutate the shared collection.
 
 ## 6. Expressions and conversions
 
-Postfix calls, indexing, slicing, field access and method calls bind most
-tightly. Then come unary `-` and `!`, right-associative `^`, multiplicative
-`*`, `.*`, `/`, `\`, `%`, additive `+`, `-`, `.+`, `.-`, comparisons,
-equality, `&&`, `||`, and finally range `:`. Parentheses override precedence.
+### 6.1 Precedence and evaluation
 
-Arithmetic is statically typed. Checked `int` addition, subtraction,
-multiplication, negation, division and remainder panic on overflow or invalid
-integer division. Integer remainder uses a quotient truncated toward zero.
-`double` division is IEEE-754, including infinities, signed zero and NaN.
-`&&` and `||` require booleans and **MUST** short-circuit. `!` requires a
-boolean.
+Postfix calls, indexing, slicing, field access, and method calls bind most
+tightly. They are followed by unary `-` and `!`, right-associative `^`,
+multiplicative `*`, `/`, `%`, additive `+`, `-`, ordered comparisons, equality,
+`&&`, `||`, and finally range `:`. Parentheses override precedence.
 
-Ordered comparisons require a supported ordered numeric type. Equality is
-governed exclusively by `Eq(T)` in section 11. Assignment, argument and return
-conversion use the declared widening rules; a backend **MUST NOT** perform a
-conversion it cannot preserve. Explicit scalar conversion uses a type call,
-for example `double(x)` or `int(x)`. Native profile 22 accepts only the
-conversion subset it enumerates.
+Operands and call arguments evaluate left to right. `&&` and `||` require
+booleans and **MUST** short-circuit. `!` requires a boolean.
 
-The stable numeric widening used by the v1 native core is:
+### 6.2 Numeric semantics
 
-| Source | Expected/result type | Rule |
+Checked `int` addition, subtraction, multiplication, negation, division,
+remainder, and integer power panic on overflow. Integer remainder uses a
+quotient truncated toward zero. `int / int` produces `double`. `double`
+arithmetic follows IEEE-754, including NaN, infinity, and signed zero.
+
+The stable conversions are:
+
+| Source | Target/result | Rule |
 | --- | --- | --- |
-| `int` | `double` | implicit, exact widening |
-| `double` | `int` | explicit `int(value)` only; truncates toward zero |
-| `int op double` | `double` | the `int` operand is explicitly widened before the operation |
-| `double op int` | `double` | the `int` operand is explicitly widened before the operation |
+| `int` | `double` | implicit exact widening |
+| `double` | `int` | explicit `int(value)`, truncating toward zero |
+| `int op double` | `double` | widen the `int` before the operation |
+| `double op int` | `double` | widen the `int` before the operation |
+| `int` to `int`, `double` to `double` | same type | explicit identity cast is a no-op |
 
 The expected `double` type may come from an initializer, assignment, argument,
-return, struct/class constructor field or field write. Collection literals use
-the same rule only where their existing target-typed element semantics apply.
-An integer literal remains an `int`; contextual conversion does not retag its
-syntax:
+return, supported struct field, field write, or target-typed literal. No
+implicit `double -> int` conversion exists. No boolean/string or other scalar
+cast belongs to Aether 1.0.
 
-```aether
-double x = 1;       // valid: contextual int -> double
-double y = 2.5 - 1; // valid: the right operand is widened
-int z = 2.5;        // invalid
-int w = int(2.5);   // valid explicit narrowing
-```
-
-Identity casts such as `int(i)` and `double(d)` are valid no-ops. They may be
-removed during lowering or algebraic simplification. Casts between unrelated
-types remain invalid. Mixed `int`/`double` promotion applies to `+`, `-`, `*`,
-`/`, `%`, ordered comparisons, equality and `^`. `int / int` retains Aether's
-existing real-division result (`double`); this change does not alter it.
-
-Power has the following normative v1 table:
+Power has this stable table:
 
 | Base | Exponent | Result | Semantics |
 | --- | --- | --- | --- |
-| `int` | `int` | `int` | non-negative exponent, exponentiation by squaring, checked signed-i32 overflow |
+| `int` | `int` | `int` | non-negative exponent; checked exponentiation by squaring |
 | `double` | `double` | `double` | libm/IEEE-754 `pow` semantics |
 | `double` | `int` | `double` | widen exponent, then floating power |
 | `int` | `double` | `double` | widen base, then floating power |
 
 For integer power, `x ^ 0 == 1`, including `0 ^ 0`. A statically visible
-negative integer exponent is a type error; a negative dynamic integer exponent
-panics before multiplication. Use a `double` operand when a reciprocal result
-is intended. Floating power preserves NaN, infinity, signed-zero pole and
-negative-base domain behavior from libm rather than introducing an Aether
-panic.
+negative integer exponent is a type error; a dynamic negative exponent panics
+before multiplication.
 
-`value[index]` indexes a collection or mathematical container. Array/List
-indexes are zero-based; Vector/Matrix indexes are one-based. Bounds are checked
-before access. `value[start:end]` is a two-bound slice only for supported
-collections: it is zero-based, half-open `[start,end)`, checks
-`0 <= start <= end <= length`, and creates independent outer storage. Slice
-assignment is not supported.
+### 6.3 Equality
 
-Field access is `value.name`; method call is `value.name(args...)`. Assignment
-through an lvalue may target a variable, element or field rooted in a variable,
-subject to mutability, const and borrowed-loop rules. Fields of temporaries
-are not assignment targets.
+`Eq(T)` is the single compile-time capability required by `==`, `!=`,
+Array/List structural equality, `contains`, and `indexOf`. It is defined for
+`int`, `double`, `boolean`, `string`, same-identity enums, structs whose fields
+all define `Eq`, and supported Array/List values whose elements define `Eq`.
 
-## 7. Control flow
+Floating equality is IEEE: NaN is unequal to itself and signed zeroes compare
+equal. Strings compare UTF-8 content. Structs compare fields in declaration
+order. Array/List compare kind, length, order, and elements structurally, not
+object identity or capacity. Callable, Vector, Matrix, range, and `void` values
+do not define stable equality.
 
-Control-flow headers require parentheses. The normative grammar is:
+## 7. Control flow and iteration
+
+Control-flow headers require parentheses and blocks:
 
 ```text
-if_statement    := "if" "(" expression ")" block
-                   ("else" (if_statement | block))?
-while_statement := "while" "(" expression ")" block
-for_statement   := "for" "(" iterator_binding "in" expression ")" block
+if_statement     := "if" "(" expression ")" block
+                    ("else" (if_statement | block))?
+while_statement  := "while" "(" expression ")" block
+for_statement    := "for" "(" iterator_binding "in" iterable ")" block
 iterator_binding := type identifier | identifier
 ```
 
-`if (condition) { ... } else { ... }` and `while (condition) { ... }` require
-a `boolean` condition. `else` is optional. `else if` is exactly an `if`
-nested in the else branch and does not introduce different scope, evaluation,
-return or lifecycle rules. A block is mandatory.
+`if` and `while` conditions **MUST** be boolean. `else if` is an `if` nested in
+the else branch. `break;` and `continue;` are valid only inside a loop and
+target the innermost loop.
 
-`for (name in iterable) { ... }` or `for (T name in iterable) { ... }` binds
-one loop variable. For ranges, iteration follows inclusive range semantics.
-A zero step detected as a constant is a compile-time error; a dynamic step
-that evaluates to zero panics before iteration. The terminal range value is
-processed without a subsequent increment, including `INT_MAX`/`INT_MIN`, while
-a genuine checked overflow before reaching the endpoint remains a panic. For
-Array/List, each element binding is a borrowed read-only value for that
-iteration. The loop variable **MUST NOT** be assigned or used to mutate the
-borrowed element through a value path. Mutating the iterated collection's
-structure during its loop is invalid.
+A stable range exists only as the direct iterable expression of a `for`:
+`start:end` or `start:step:end`. Its operands are `int`; the endpoint is
+inclusive when reached. Positive, negative, and dynamic nonzero steps are
+supported. A statically zero step is rejected; a dynamic zero step panics
+before iteration. The terminal `INT_MAX`/`INT_MIN` value is processed without
+a subsequent increment. A range cannot be stored, passed, or returned.
 
-Aether 1.0.0-rc.2 requires parentheses around `if`, `while`, and `for`
-headers. Source written for rc.1 must be migrated; the rc.1 forms are not an
-alternative grammar.
+`for-in` also accepts supported Array, List, and Vector expressions. Array/List
+elements are borrowed and read-only for the iteration. The binding cannot be
+assigned, used to mutate a borrowed value path, or escape the iteration, and
+the collection structure cannot be changed by that loop. Matrix and string
+iteration are not part of Aether 1.0.
 
-`break;` and `continue;` are valid only inside a loop and target the innermost
-loop. `return expression;` is valid in a non-void function and must match its
-return type. `return;` is valid in a void function. Every reachable path in a
-non-void function other than normalized `main` **MUST** return a value.
+`return expression;` must match a non-void function's return type. `return;`
+is valid in a void function. Every reachable path in a non-void function other
+than normalized `main` **MUST** return a value. Early return is supported.
 
-## 8. Functions and callables
+## 8. Functions
 
 A typed function is `R name(P1 a, P2 b) { ... }`; the optional `function`
-keyword is accepted for compatibility. Parameters require explicit types and
-are passed left to right. Calls check arity and parameter types. Direct
-recursion, mutual recursion and calls before declaration are permitted.
+keyword is an equivalent stable spelling. Parameters have explicit types,
+evaluate left to right, and are borrowed for lifecycle purposes. Calls enforce
+arity and exact assignability. Forward calls, direct recursion, and mutual
+recursion are supported.
 
-A single-expression declaration MAY replace its block with `= expression;`:
+A single-expression function replaces its block with `= expression;`:
 
 ```aether
-double f(double x) = x * exp(x) - 1.0;
-f(double x) = x * exp(x) - 1.0;
+double square(double x) = x * x;
+square(double x) = x * x;
 ```
 
-The second form infers the return type from the expression. Parameter types
-remain mandatory. The parser desugars both forms to an ordinary
-`FunctionDeclaration` whose body contains one `return`, before type checking;
-there is no abbreviated-function node in the semantic or backend pipeline.
-The syntax does not define lambdas, closures, anonymous functions, or new
-function-value semantics, and a block or statement sequence is not valid
-after `=`.
+The first form declares its return type; the second infers only the return
+type. Parameter types remain mandatory. Both forms desugar to an ordinary
+function with one return before backend selection. They do not create a
+function value or an anonymous function.
 
-The callable type spelling is `R(P1, P2, ...)`. A callable value contains a
-capture-free reference to a top-level user function with the exact structural
-signature. v1 does not define closures, lambdas, captured environments, bound
-methods, builtin values, covariant callable conversion, or returned callables.
+A callable value may reference, store, select, pass, import, and invoke only a
+top-level capture-free user function whose structural signature matches
+exactly. Aether 1.0 has no nested functions, lambdas, closures, captures, bound
+methods as values, builtin functions as values, callable covariance, or
+callable return types.
 
-Parameters are borrowed for lifecycle purposes. A function must not destroy a
-borrowed argument. A returned nontrivial value is owned by the caller. These
-rules do not change source-level mutability: Array/List and class parameters
-alias their object, while struct parameters are values.
+A returned nontrivial value is owned by the caller. Parameters remain borrowed
+and **MUST NOT** be destroyed by the callee.
 
-## 9. Ownership and lifecycle
+## 9. Struct and collection lifecycle
 
-### 9.1 General rules
+`int`, `double`, `boolean`, payload-free enums, and callable references are
+copied as scalar values. Struct copy recursively applies each field's copy
+rule. An implementation **MUST NOT** use raw byte copying for a value that owns
+references.
 
-`int`, `boolean`, `float`, `double`, `complex`, payload-free enums and callable
-references are copied as scalar values when their backend supports them.
-Struct assignment copies the struct logically, recursively applying each
-field's copy rule. Class assignment copies a reference and aliases the same
-instance.
-
-`string` is immutable and may share storage. Copying a string creates a valid
-logical owner (normally retain); moving transfers ownership without changing
-the text. A returned string is owned. A string parameter is borrowed.
+`string` is immutable and may share storage. Copy creates a valid logical
+owner, normally by retain; move transfers ownership. A returned string is
+owned and a parameter is borrowed.
 
 Array/List assignment is O(1) reference assignment and aliases the same
-mutable collection object. Parameter binding uses the same reference; mutation
-is visible to the caller, while rebinding the parameter is local. Return
-transfers an owned reference and never performs an implicit deep copy.
+mutable collection object. Parameter binding aliases the object; rebinding the
+parameter is local. Return transfers an owned reference and never performs an
+implicit deep copy.
 
-The implementation lifecycle operations are initialization, copy
-initialization, move initialization, assignment, destruction and relocation.
-Each live owning slot **MUST** be destroyed exactly once on normal structured
-control flow. A move consumes or resets its source according to the type.
-These operations are semantic; an implementation **MUST NOT** substitute raw
-byte copying for a type that owns references.
+Each owning slot **MUST** be destroyed exactly once on normal structured
+control flow, including block exit, early return, `break`, and `continue`.
+Native v1 panics do not unwind Aether frames.
 
-### 9.2 Explicit collection copy and slicing
-
-`array.copy()` and `list.copy()` create a new collection descriptor and buffer.
-They logically copy each element. This is a shallow structural copy with
-respect to nested reference values: nested Array/List/class objects remain
-aliased; strings may share immutable storage; structs are copied by value.
-
-Array/List slicing has the same element-copy rule and creates independent outer
-storage. Mutating the outer source does not resize or replace elements in the
-slice, but a nested reference reachable from both may still be shared. There
-is no implicit copy-on-write, deep copy, view type, or public identity operator.
-
-### 9.3 Const and borrowed iteration
-
-A const Array/List binding is a read-only reference path, not a frozen object.
-A mutable alias may still mutate the shared container, and the const alias
-observes that mutation. A `for-in` Array/List element is borrowed and read-only;
-the loop does not copy it and the binding must not escape its iteration.
-
-No broader ownership promise is made for currently unsupported native classes,
-interfaces, nullable aggregates, Vector/Matrix or future types beyond the
-rules stated here and their backend profile.
+`copy()` and slicing create independent outer storage and logically copy each
+element. This is a shallow structural copy for contained reference values:
+strings may share immutable storage and structs copy by value. Aether 1.0 has
+no copy-on-write, deep-copy operator, public identity operator, or view type.
 
 ## 10. Strings and collections
 
-A string is immutable valid UTF-8 with an explicit byte length. Equality uses
-bytes/content; no normalization, locale collation or grapheme segmentation is
-implicit. `s.byteLength` returns the byte count as checked `int`. v1 has no
-`s[i]` operation.
+### 10.1 Strings
 
-`a + b` concatenates two strings without implicit scalar conversion.
-`s.trim()` removes only ASCII bytes space, tab, LF, CR, form feed and vertical
-tab at both ends. `s.split(separator)` performs exact, left-to-right,
-non-overlapping UTF-8 byte matching, preserves all empty fields, returns an
-owned `Array<string>`, and panics for an empty separator.
+A string is immutable valid UTF-8 with an explicit byte length. Equality is by
+content bytes; no normalization, locale collation, grapheme segmentation, or
+indexing is implicit.
 
-Array/List expose `.length`; List also exposes `.is_empty`. Array exposes
-`copy()` and `sort()`. List exposes `push`, `pop`, `insert`, `removeAt`,
-`contains`, `indexOf`, `clear`, `size`, `copy`, `reverse`, and `sort` with the
-typed arities enforced by the implementation. `pop`, removal and indexing
-perform bounds checks. Allocation and length conversion are checked. Sort is
-defined only for its registered ordered element types.
+- `a + b` concatenates strings without implicit scalar conversion.
+- `s.byteLength` returns the byte count as checked `int`.
+- `s.trim()` removes ASCII space, tab, LF, CR, form feed, and vertical tab from
+  both ends.
+- `s.split(separator)` performs exact, left-to-right, non-overlapping UTF-8
+  byte matching, preserves empty fields, returns an owned `Array<string>`, and
+  panics for an empty separator.
 
-Array is fixed length: element assignment is permitted but structural growth
-is not. List growth provides the strong guarantee for checked allocation and
-element-copy failures: either the operation completes or the prior logical
-list remains valid. No shrinking policy, capacity value, iterator object or
-concurrent mutation contract is public v1 API.
+### 10.2 Array and List
 
-Vector/Matrix literals and operators preserve type, shape and orientation.
-Vector/Matrix public indexes are one-based even though Array/List indexes are
-zero-based. A backend **MUST** diagnose a shape or metadata boundary it cannot
-represent rather than silently flatten it.
+Array/List indexing is zero-based and checked. A slice `value[start:end]` is
+zero-based, half-open `[start,end)`, checks
+`0 <= start <= end <= length`, and creates independent outer storage. Slice
+assignment is not supported.
 
-## 11. Equality
+Both kinds expose `.length` and `copy()`. `Array` additionally exposes
+`sort()`. `List` exposes `.is_empty`, `push`, `pop`, `insert`, `removeAt`,
+`contains`, `indexOf`, `clear`, `copy`, `reverse`, and `sort`. Their registered
+arities and result types are enforced statically. `pop`, removal, insertion,
+and indexing check bounds. Sort is available only for `int`, `double`, and
+`string` elements. Array length is fixed; List growth is checked and either
+completes or preserves the prior logical list.
 
-`Eq(T)` is the single compile-time capability required by `==`, `!=`,
-Array/List structural equality, `contains`, and `indexOf`. It is defined for:
+No public capacity, shrink policy, iterator object, or concurrent mutation
+contract exists.
 
-- `int`, `boolean`, `float`, `double`, `complex`, `string`, and `null` in a
-  compatible nullable comparison;
-- enums of the same nominal identity;
-- structs only when every field defines `Eq`;
-- nullable `T?`, Array/List, Vector/Matrix and tuples only when their element
-  or component types define `Eq`.
+## 11. Vector and Matrix core
 
-Numeric operands may use the normal numeric promotion before exact equality.
-Floating equality is IEEE: NaN is unequal to itself and signed zeroes compare
-equal. No tolerance or approximate comparison is implicit. Strings compare
-content. Structs compare fields in declaration order. Collections compare
-kind, length, order and elements structurally, not object identity or capacity.
+The stable local core is limited to shaped `int`/`double` values admitted by
+profile 22:
 
-Classes, interfaces, callables, ranges, `void`, `Exception`, and a struct or
-collection containing a non-`Eq` component do not define equality. Applying
-equality to them is a type error; an implementation **MUST NOT** fall back to
-host identity.
+- construction from rectangular literals;
+- one-based checked element read and write;
+- `Vector.length`, `Matrix.rows`, and `Matrix.columns`;
+- same-shape `Vector + Vector`, `Vector - Vector`, `Matrix + Matrix`, and
+  `Matrix - Matrix`;
+- scalar multiplication on either side;
+- row-vector × column-vector dot product;
+- column-vector × row-vector outer product;
+- compatible Matrix × Matrix, row-Vector × Matrix, and Matrix × column-Vector
+  multiplication;
+- `for-in` over Vector values.
 
-## 12. Errors and panic
+Result shape and vector orientation are checked statically and preserved.
+Vector/Matrix slicing, Matrix iteration, transpose, elementwise dotted
+operators, solve, norm, eigen/SVD/LU operations, and any boundary that loses
+shape metadata are not Aether 1.0.
 
-A static syntax, name, type, capability or backend error prevents execution.
-Expected operational failures SHOULD use structured result/status values where
-the base library defines them.
+## 12. Base standard library
 
-A panic is an unrecoverable language safety failure. Public panic output is
-`Aether panic: <message>` followed by a newline on stdout, and the process exit
-code is 1. Checked integer overflow, integer division by zero, invalid bounds,
-zero range step, empty split separator, allocation/length overflow and other
-registered safety checks panic. Native v1 panics do not unwind Aether frames.
+Only this section is a stable base-library commitment. A registry entry or AST
+implementation not listed here is not a portable Aether 1.0 API.
 
-`throw expression;` and `try { ... } catch (name) { ... }` define basic AST
-exception handling with an `Exception` catch value. There is no `finally`,
-stack trace contract, exception hierarchy or native unwind in v1. Native
-profile 22 rejects language exception handling before lowering.
+### 12.1 Output and scalar math
 
-## 13. Base standard library
+`print(values...)` writes supported layouts without a trailing newline;
+`println(values...)` appends one newline. Booleans print as `true`/`false`.
+Doubles use 15 significant digits, retain visible `.0` for integral finite
+values, and spell special values `NaN`, `Infinity`, and `-Infinity`.
 
-Only this section is a v1 base-library commitment. APIs present in the Python
-registry but not listed here (notably plotting and advanced linear algebra)
-are implementation extensions and do not establish portable v1 conformance.
+The stable real math surface is `sin`, `cos`, `tan`, `exp`, `ln`, `log`,
+`sqrt`, `abs`, `Math.mod`, `Math.factorial`, `Math.floor`, `Math.ceil`, and
+`Math.pi`, subject to their registered `int`/`double` overloads. `log` is base
+10 and `ln` is natural logarithm.
 
-### 13.1 Output and scalar conversion
-
-`print(values...)` writes values to stdout without a trailing newline;
-`println(values...)` appends one newline. Public booleans are `true`/`false`.
-Public double formatting uses 15 significant digits, preserves a visible `.0`
-for integral finite values, and spells special values `NaN`, `Infinity`, and
-`-Infinity`. It is deliberately distinct from ALPT1 round-trip formatting.
-
-The explicit scalar conversions are `int`, `float`, `double`, `string`, and
-`boolean` for the typed combinations supported by the selected backend. There
-is no implicit stringify operation.
-
-### 13.2 Scalar math
-
-The consolidated real scalar surface is `sin`, `cos`, `tan`, `exp`, `ln`,
-`log`, `sqrt`, `abs`, `Math.mod`, `Math.factorial`, `Math.floor`,
-`Math.ceil`, and constant `Math.pi`. `log` is base 10 and `ln` is natural log.
-The exact overloads and native subset are enforced by the typechecker/profile.
-Complex helpers (`complex`, `real`, `imag`, `conj`, `angle`) are AST
-extensions, not native v1 commitments.
-
-### 13.3 Parsing
+### 12.2 Parsing
 
 ```aether
 enum ParseStatus { Success, Empty, InvalidFormat, OutOfRange }
@@ -548,21 +480,20 @@ struct IntParseResult { int value; ParseStatus status; }
 struct DoubleParseResult { double value; ParseStatus status; }
 ```
 
-`parseInt(string)` and `parseDouble(string)` are strict, length-aware and
-locale-independent. They do not trim implicitly; callers use `trim()`
-explicitly. The value field is zero on failure but is not a sentinel; callers
-**MUST** inspect `status`. Integer parsing enforces i32 range. Double parsing
-accepts only the finite decimal grammar implemented by the language and
+`parseInt(string)` and `parseDouble(string)` are strict, length-aware, and
+locale-independent. They do not trim. The value field is zero on failure but
+is not a sentinel; callers **MUST** inspect `status`. Integer parsing enforces
+i32 range. Double parsing accepts the stable finite decimal grammar and
 rejects NaN/infinity spellings.
 
-### 13.4 Process arguments
+### 12.3 Process arguments
 
-`System.args() -> Array<string>` returns a fresh owned snapshot of the program
-arguments after the CLI's first `--`. It does not include the executable or
-source path. Every call returns an independent outer Array and all arguments
-must cross the platform boundary as valid UTF-8. `main` remains parameterless.
+`System.args() -> Array<string>` returns a fresh owned snapshot of arguments
+after the CLI's first `--`. It excludes the executable and source path. Every
+call returns independent outer storage and every argument **MUST** be valid
+UTF-8 at the platform boundary.
 
-### 13.5 UTF-8 text files
+### 12.4 UTF-8 text files
 
 ```aether
 enum FileStatus {
@@ -574,44 +505,112 @@ struct FileReadResult { string content; FileStatus status; }
 `io.readText(path) -> FileReadResult`, `io.writeText(path, content) ->
 FileStatus`, `io.writeTextAtomic(path, content) -> FileStatus`, and
 `io.appendText(path, content) -> FileStatus` operate on exact UTF-8 bytes,
-preserve embedded NUL and newlines, and do not add a terminator or newline.
-On read failure, `content` is empty and the status is authoritative.
+preserve embedded NUL and newlines, and add neither terminator nor newline. On
+read failure `content` is empty and `status` is authoritative.
 
-Paths are nonempty UTF-8 strings without NUL; the API performs no `~`,
-environment-variable or URL expansion. On validated Linux,
-`writeTextAtomic` writes a unique same-directory temporary, fsyncs it,
-renames it, and fsyncs the parent directory. A post-rename durability failure
-may return failure after the new content became visible. The API does not
-promise sandboxing, locking, backups, metadata preservation, binary IO,
-streaming or multi-file transactions.
+Paths are nonempty UTF-8 strings without NUL. The API performs no `~`,
+environment-variable, or URL expansion. On Linux, atomic write uses a unique
+same-directory temporary, fsyncs it, renames it, and fsyncs the parent. A
+post-rename durability failure may report failure after new content is
+visible. There is no promise of sandboxing, locking, backups, metadata
+preservation, binary IO, streaming, or multi-file transactions.
 
-### 13.6 Bootstrap text helpers and ALPT1
+### 12.5 Bootstrap text helpers and ALPT1
 
-The `text.byteAt`, `text.byteSlice`, `text.formatInt`, `text.formatDouble`, and
-`text.concatFragments` functions are a checked bootstrap surface used by the
-revision-1 ALPT1 Expense Tracker codec. They do not imply arbitrary byte
-strings, Unicode slicing, reflection or generic serialization. The normative
-ALPT1 byte format remains defined in
-[Persistence Format Design](PERSISTENCE_FORMAT_DESIGN.md); this language
-release does not change ALPT1.
+`text.byteAt`, `text.byteSlice`, `text.formatInt`, `text.formatDouble`, and
+`text.concatFragments` are the checked bootstrap surface for the revision-1
+ALPT1 Expense Tracker codec. They do not imply byte strings, Unicode slicing,
+reflection, or generic serialization. The normative byte format is defined in
+[Persistence Format Design](PERSISTENCE_FORMAT_DESIGN.md).
 
-## 14. Backend model
+## 13. Panics and diagnostics
 
-Language semantics and backend support are separate. Acceptance by the parser
-and typechecker does not imply acceptance by every backend. The AST backend is
-the reference for frontend-defined features. The LLVM/native backend **MUST**
-apply [profile 22](AETHER_NATIVE_PROFILE_V1.md) before lowering and reject
-excluded programs without fallback.
+A static syntax, name, type, capability, or verification error prevents
+execution. Excluded frontend constructions **MUST** fail before native
+lowering. A capability diagnostic uses its stable `AE-BACKEND-*` category,
+source location, and reason. A conforming implementation **MUST NOT** expose an
+unexpected host traceback as a user-language diagnostic.
 
-For a program accepted by native profile 22, stdout, stderr, exit status,
-panic behavior and selected file effects **MUST** match AST execution as
-defined by the profile's observable parity guarantee. Internal layouts,
-reference counts, helper names and LLVM text are not observable language API.
+A panic is an unrecoverable safety failure. Public panic output is
+`Aether panic: <message>` plus newline on stdout and process exit code 1.
+Checked integer overflow, invalid integer division/remainder, bounds failure,
+zero range step, empty split separator, allocation/length overflow, and other
+registered safety checks panic. Panic aborts native execution and performs no
+stack unwind.
 
-## Appendix A — Informative document map
+Allocation failure and stack overflow are platform failures, not controlled
+Aether panics. Exception handling and cleanup during panic are not part of the
+stable contract.
 
-The current normative documents are this specification and the native profile.
-Design/RFC documents explain implementation decisions. `AETHER_V0_SPEC.md` is
-historical, `AETHER_V1_RELEASE_READINESS.md` is an audit snapshot, and
-`BACKEND_FEATURE_PARITY.md` is an engineering audit. Where they conflict with
-this specification for release `1.0.0-rc.2`, this specification prevails.
+## 14. Compiler and tooling contract
+
+`aether FILE` and `aether run FILE` select native execution by default.
+`aether build FILE -o OUTPUT` creates a native executable. Backend selection is
+explicit through `--backend=llvm`, `--backend=ast`, or `--backend=ir`; only
+native is the stable execution frontier. The REPL uses AST and identifies
+itself as such.
+
+Native compilation **MUST** run the profile gate, verified IR, verified SSA,
+and post-pass verification before LLVM emission. O0 and O1 are the stable
+validation profiles. O2 currently aliases O1 and does not define a distinct
+Aether 1.0 optimization promise. Inspection outputs such as `--emit-ir`,
+`--emit-cfg`, `--emit-ssa`, and `--emit-llvm` expose no stable internal ABI.
+
+For every admitted program, native and the AST differential reference **MUST**
+agree on stdout bytes, stderr bytes, process exit code, panic output/status,
+and selected final file bytes under controlled environment and locale.
+
+The release tooling surface includes a formatter for stable syntax,
+lexer/parser/type diagnostics from the LSP, and an IntelliJ lexer/highlighter
+consistent with stable strings and operators. Tooling recognition never
+widens the language profile.
+
+Windows and macOS are not supported native platforms. Missing `clang` is a
+release-gate failure and **MUST** be diagnosed rather than converted to an AST
+fallback.
+
+## 15. Closed profile inventory and exclusions
+
+The stable inventory is exactly these 75 audit rows:
+
+```text
+C01 C03-C05 C07-C12 C14 C16-C23 C25
+T01 T03-T08 T14 T16 T19 T21 T23 T25 T29
+E01 E03-E11 E13-E14 E16 E18 E20 E22-E24 E26
+R01 R04-R06 R08 R10-R11 R13 R16 R19 R21 R23
+B01-B05 B07-B11
+```
+
+Ranges in this list are inclusive. The following 46 rows are explicitly
+outside Aether 1.0 and **MUST NOT** be inferred from frontend/AST acceptance:
+
+```text
+C02 C06 C13 C15 C24 C26
+T02 T09-T13 T15 T17-T18 T20 T22 T24 T26-T28
+E02 E12 E15 E17 E19 E21 E25 E27-E29
+R02-R03 R07 R09 R12 R14-R15 R17-R18 R20 R22 R24
+B06 B14-B15
+```
+
+They include inferred local declarations, non-`+=` compounds, stored or
+non-int ranges, nested functions, imported storage/initialization, `float`,
+`complex`, classes, interfaces, tuples, nullable/null, `Any`, user generics,
+lambdas/closures, nested or unregistered collections, advanced Vector/Matrix,
+string interpolation/general formatting, input, general persistence/DB,
+plotting, binary/stream/process IO, exceptions, GC, panic unwind, controlled
+stack overflow, a distinct O2, cross-platform native support, `long`,
+do-while, and match.
+
+The expected rejection categories are specified by
+[Aether Native Profile v1](AETHER_NATIVE_PROFILE_V1.md) and the negative corpus.
+The [non-normative frontend experiments annex](AETHER_FRONTEND_EXPERIMENTS.md)
+records recognized implementation experiments without assigning them Aether
+1.0 semantics.
+
+## Appendix A — Document authority (informative)
+
+This specification and the native profile are the normative release contract.
+The profile audit and profile decision are dated closure evidence. Design/RFC,
+readiness, parity, and v0 documents are historical or informative and do not
+expand Aether 1.0. Where such a document conflicts with this specification,
+this specification prevails.

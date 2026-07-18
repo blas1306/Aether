@@ -4,7 +4,13 @@ Fecha: **2026-07-18**. Esta decisión interpreta “Aether 1.0” como un perfil
 estable único y verificable, no como la unión de todo lo que alguna capa puede
 reconocer.
 
-## Decisión normativa propuesta
+> Seguimiento de cierre: R1 quedó cerrado el **2026-07-18** con la publicación
+> de la spec normativa limitada a las 75 filas `SUPPORTED`, el anexo
+> experimental separado y un gate que compara el inventario documental con
+> esta auditoría. El catálogo de ejemplos (R2/B13) continúa como bloqueador
+> independiente.
+
+## Decisión normativa
 
 El perfil estable de Aether 1.0 es el subconjunto aceptado por **native
 capability profile 22** en **Linux x86_64 con clang**, refinado por las filas
@@ -102,10 +108,9 @@ interfaces, float, complex, Vector/Matrix avanzado, rangos almacenados y
 function values avanzados no necesitan una decisión ambigua: quedan fuera de
 1.0 y pueden reabrirse después con un RFC y evidencia E2E.
 
-El trabajo pendiente antes de RC3 es de coherencia del producto, no de decidir
-features nuevas:
+El trabajo de coherencia identificado antes de RC3 no decide features nuevas:
 
-1. hacer que la spec normativa exprese esta frontera;
+1. **cerrado en R1:** hacer que la spec normativa exprese esta frontera;
 2. separar/rotular los 21 ejemplos AST-only y resolver los 4 rotos;
 3. normalizar documentación histórica y ejecutar todos los gates finales.
 
@@ -118,8 +123,8 @@ verde. Tampoco se debe eliminar el gate para hacer pasar ejemplos.
 ## Recomendación de RC3
 
 **Aether no está todavía lista para preparar una RC3 publicable.** No hay un
-P0 del pipeline native aceptado, y la implementación está cerca de un candidato
-interno, pero F01 y F02 son P1 de contrato: una RC no debe llamarse 1.0 mientras
-la spec y los ejemplos presentan una superficie distinta a la que native
-garantiza. Una vez cerrados esos dos puntos y repetida la validación completa,
-el perfil pequeño de esta decisión sí es candidato razonable para RC3.
+P0 del pipeline native aceptado y F02/R1 ya quedó cerrado, pero F01/R2 sigue
+siendo un P1 de contrato: una RC no debe llamarse 1.0 mientras el catálogo de
+ejemplos presente una superficie distinta a la que native garantiza. Una vez
+cerrado ese punto y repetida la validación completa, el perfil pequeño de esta
+decisión sí es candidato razonable para RC3.

@@ -5,12 +5,20 @@ the release contract.
 
 ## Normative
 
-- [Aether Language Specification v1](AETHER_LANGUAGE_SPEC_V1.md)
+- [Aether 1.0 Language Specification](AETHER_LANGUAGE_SPEC_V1.md)
 - [Aether Native Profile v1](AETHER_NATIVE_PROFILE_V1.md)
 
-These two documents define Aether `1.0.0-rc.2`. The ALPT1 byte contract in
+These two documents define the single stable Aether 1.0 profile frozen for the
+`1.0.0-rc.3` candidate. Frontend or AST acceptance does not widen it. The ALPT1
+byte contract in
 [Persistence Format Design](PERSISTENCE_FORMAT_DESIGN.md) remains normative for
 that format only; it is not a second language specification.
+
+The [native profile](AETHER_NATIVE_PROFILE_V1.md) is the executable capability
+refinement. The [profile audit](AETHER_V1_PROFILE_AUDIT.md) and
+[closed decision](AETHER_V1_PROFILE_DECISION.md) provide the 123-row closure
+evidence. The reproducible example classification is in the
+[v1 examples manifest](../../examples/v1_examples_manifest.json).
 
 ## Design / RFC
 
@@ -22,6 +30,8 @@ that format only; it is not a second language specification.
 - [Value Lifecycle Design](../compiler/VALUE_LIFECYCLE_DESIGN.md)
 - [Text File IO Design](TEXT_FILE_IO_DESIGN.md)
 - [Persistence Format Design / ALPT1](PERSISTENCE_FORMAT_DESIGN.md)
+- [Aether frontend experiments outside 1.0](AETHER_FRONTEND_EXPERIMENTS.md)
+- [Aether IR initial design](AETHER_IR_DESIGN.md)
 
 Design/RFC documents may contain implementation history, rejected alternatives
 or future work. They do not expand the release profile.

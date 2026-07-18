@@ -37,6 +37,7 @@ REQUIRED_WHEEL_PATHS = (
 REQUIRED_WHEEL_SUFFIXES = (
     "share/doc/aether/AETHER_LANGUAGE_SPEC_V1.md",
     "share/doc/aether/AETHER_NATIVE_PROFILE_V1.md",
+    "share/doc/aether/AETHER_FRONTEND_EXPERIMENTS.md",
 )
 
 
@@ -149,6 +150,7 @@ def verify_sdist(sdist: Path) -> None:
         "/README.md",
         "/docs/aether/AETHER_LANGUAGE_SPEC_V1.md",
         "/docs/aether/AETHER_NATIVE_PROFILE_V1.md",
+        "/docs/aether/AETHER_FRONTEND_EXPERIMENTS.md",
         "/scripts/release.py",
         "/scripts/ci.py",
         "/scripts/differential_parity.py",
