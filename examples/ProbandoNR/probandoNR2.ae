@@ -1,5 +1,5 @@
-f(x) = x*exp(x) - 1;
-df(x) = exp(x) + x*exp(x);
+f(double x) = x*exp(x) - 1;
+df(double x) = exp(x) + x*exp(x);
 
 struct NewtonResultado {
     double raiz;

@@ -137,7 +137,14 @@ def _snippet_entry(
 
 
 SNIPPET_SUGGESTIONS: tuple[CommandSuggestion, ...] = (
-    _snippet_entry("fn", "f(x) = expression;", len("f(x) = "), len("expression"), "Expression function snippet.", priority=430),
+    _snippet_entry(
+        "fn",
+        "f(double x) = expression;",
+        len("f(double x) = "),
+        len("expression"),
+        "Single-expression function snippet with inferred return type.",
+        priority=430,
+    ),
     _snippet_entry("for", "for (x in iterable) {\n    \n}", len("for ("), len("x"), "For loop snippet."),
     _snippet_entry("if", "if (condition) {\n    \n}", len("if ("), len("condition"), "If block snippet."),
     _snippet_entry("while", "while (condition) {\n    \n}", len("while ("), len("condition"), "While loop snippet."),

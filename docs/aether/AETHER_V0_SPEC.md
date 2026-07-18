@@ -2140,7 +2140,8 @@ int add(int a, int b) {
 
 Rules:
 
-- The return type is required.
+- The return type is required for block-bodied functions. A single-expression
+  declaration may infer it as described below.
 - Parameters must be typed.
 - The official declaration form is `<return_type> <name>(params) { ... }`.
 - The old `function <return_type> ...` form is legacy/deprecated and kept only for temporary compatibility.
@@ -2195,29 +2196,37 @@ parameter/return ABI, including `void` and supported structs by value.
 
 The following remain unsupported: callable return types, closures, lambdas,
 anonymous or nested function values, capture, bound instance methods,
-expression functions as values, builtin functions as values, partial
+builtin functions as values, partial
 application, variadic callables, and unspecialized generic functions. A
 top-level typed wrapper may be used when a builtin needs to be passed.
 
-Expression functions are available for compact mathematical definitions:
+Functions with a single expression may abbreviate their body with `=`:
 
 ```aether
-f(x) = x^2 + 1;
-g(x, y) = x^2 + y^2;
+double f(double x) = x^2 + 1.0;
+g(double x, double y) = x^2 + y^2;
 ```
 
-Expression function parameters are untyped. The implementation infers the return type from the expression at call sites when possible, and otherwise treats it dynamically until runtime evaluation. Expression functions can call builtins and can read existing globals according to the same global-scope rules as block functions:
+Parameters always require explicit types. The return type may be written before
+the name or omitted and inferred from the expression. Before type checking, the
+parser desugars the declaration to a normal `FunctionDeclaration` with one
+`return`; AST consumers, IR, SSA, and LLVM require no separate representation.
+The expression may call builtins and read globals under the same scope rules as
+a block function:
 
 ```aether
-a = 2;
-f(x) = sin(x)^2 + cos(x)^2;
-g(x) = a*x + 1;
+int a = 2;
+f(double x) = sin(x)^2 + cos(x)^2;
+g(int x) = a*x + 1;
 
 println(f(0.0)); // 1.0
 println(g(3));   // 7
 ```
 
-Expression functions and block functions share the same global function namespace. Redefining a function name is an `AetherTypeError`.
+The `=` form admits exactly one expression followed by `;`. It is declaration
+sugar, not a lambda, closure, anonymous function, or new function-value form.
+Abbreviated and block functions share the same global function namespace;
+redefining a function name is an `AetherTypeError`.
 
 Valid widening:
 

@@ -1,6 +1,6 @@
 import Math.LinearAlgebra
 
-f(x) = x^2 + 1;
+int f(int x) = x^2 + 1;
 println("f(4) = ", f(4));
 
 public boolean EsPrimo(int p) {

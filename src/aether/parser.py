@@ -14,7 +14,7 @@ class Parser:
     def __init__(self, tokens: list[Token]) -> None:
         self.tokens = tokens
         self.current = 0
-        self.expression_function_name: str | None = None
+        self.abbreviated_function_name: str | None = None
         self.matrix_literal_depth = 0
         self.block_depth = 0
         self.type_aliases: set[str] = set()
@@ -80,8 +80,8 @@ class Parser:
                 return self._enum_declaration(visibility)
             if self._looks_like_function_declaration():
                 return self._function_declaration(visibility)
-            if self._looks_like_expression_function_declaration():
-                return self._expression_function_declaration(visibility)
+            if self._looks_like_abbreviated_function_declaration():
+                return self._abbreviated_function_declaration(visibility)
             if self._looks_like_var_declaration():
                 return self._var_declaration(visibility=visibility)
             raise self._error(self._peek(), "Expected declaration after visibility modifier.")
@@ -113,8 +113,8 @@ class Parser:
             return self._function_declaration()
         if self._looks_like_function_declaration():
             return self._function_declaration()
-        if self._looks_like_expression_function_declaration():
-            return self._expression_function_declaration()
+        if self._looks_like_abbreviated_function_declaration():
+            return self._abbreviated_function_declaration()
         return self._statement()
 
     def _visibility_modifier(self) -> ast.Visibility:
@@ -147,7 +147,7 @@ class Parser:
                 if not self._match(TokenType.COMMA):
                     break
         self._consume(TokenType.RIGHT_PAREN, "Expected ')' after parameters.")
-        body = self._block()
+        body = self._function_body(name)
         return ast.FunctionDeclaration(
             return_type,
             name,
@@ -158,53 +158,64 @@ class Parser:
             name_token.column,
         )
 
-    def _expression_function_declaration(self, visibility: ast.Visibility = None) -> ast.ExpressionFunctionDeclaration:
+    def _abbreviated_function_declaration(self, visibility: ast.Visibility = None) -> ast.FunctionDeclaration:
         name_token = self._consume(TokenType.IDENTIFIER, "Expected function name.")
         name = name_token.lexeme
         self._consume(TokenType.LEFT_PAREN, "Expected '(' after function name.")
-        parameters: list[ast.ExpressionParameter] = []
+        parameters: list[ast.Parameter] = []
         parameter_names: set[str] = set()
         if not self._check(TokenType.RIGHT_PAREN):
             while True:
+                parameter_type = self._parse_type_annotation(
+                    f"Parameters in abbreviated function '{name}' require explicit types."
+                )
                 if not self._check(TokenType.IDENTIFIER):
-                    token = self._peek()
-                    if token.type == TokenType.EOF:
-                        raise self._error(token, f"Expected parameter name in expression function '{name}'.")
-                    raise self._error(token, f"Invalid parameter name '{token.lexeme}' in expression function '{name}'.")
-                param_name = self._advance().lexeme
-                if param_name in parameter_names:
                     raise self._error(
-                        self._previous(),
-                        f"Duplicate parameter '{param_name}' in expression function '{name}'.",
+                        self._peek(),
+                        f"Parameters in abbreviated function '{name}' require explicit types and names.",
                     )
-                parameter_names.add(param_name)
-                parameters.append(ast.ExpressionParameter(param_name))
+                parameter_token = self._advance()
+                if parameter_token.lexeme in parameter_names:
+                    raise self._error(
+                        parameter_token,
+                        f"Duplicate parameter '{parameter_token.lexeme}' in abbreviated function '{name}'.",
+                    )
+                parameter_names.add(parameter_token.lexeme)
+                parameters.append(ast.Parameter(parameter_type, parameter_token.lexeme))
                 if not self._match(TokenType.COMMA):
                     if not self._check(TokenType.RIGHT_PAREN):
                         raise self._error(
                             self._peek(),
-                            f"Expected ',' or ')' in parameter list for expression function '{name}'.",
+                            f"Expected ',' or ')' in parameter list for abbreviated function '{name}'.",
                         )
                     break
         self._consume(TokenType.RIGHT_PAREN, "Expected ')' after parameters.")
-        self._consume(TokenType.EQUAL, "Expected '=' before expression function body.")
-        if not self._can_start_expression(self._peek()):
-            raise self._error(self._peek(), f"Expected expression after '=' in expression function '{name}'.")
-        previous_expression_function_name = self.expression_function_name
-        self.expression_function_name = name
-        try:
-            expression = self._expression()
-        finally:
-            self.expression_function_name = previous_expression_function_name
-        self._consume(TokenType.SEMICOLON, "Expected ';' after expression function declaration.")
-        return ast.ExpressionFunctionDeclaration(
+        body = self._function_body(name, require_abbreviated=True)
+        return ast.FunctionDeclaration(
+            None,
             name,
             parameters,
-            expression,
+            body,
             visibility,
             name_token.line,
             name_token.column,
         )
+
+    def _function_body(self, name: str, *, require_abbreviated: bool = False) -> list[ast.Statement]:
+        if not require_abbreviated and not self._match(TokenType.EQUAL):
+            return self._block()
+        if require_abbreviated:
+            self._consume(TokenType.EQUAL, "Expected '=' before abbreviated function body.")
+        if not self._can_start_expression(self._peek()):
+            raise self._error(self._peek(), f"Expected expression after '=' in abbreviated function '{name}'.")
+        previous_abbreviated_function_name = self.abbreviated_function_name
+        self.abbreviated_function_name = name
+        try:
+            expression = self._expression()
+        finally:
+            self.abbreviated_function_name = previous_abbreviated_function_name
+        self._consume(TokenType.SEMICOLON, "Expected ';' after abbreviated function declaration.")
+        return [ast.ReturnStatement(expression, expression.line, expression.column)]
 
     def _alias_declaration(self, visibility: ast.Visibility = None) -> ast.AliasDeclaration:
         alias_token = self._consume(TokenType.IDENTIFIER, "Expected alias name.")
@@ -1245,13 +1256,16 @@ class Parser:
             elif token_type == TokenType.RIGHT_PAREN:
                 depth -= 1
                 if depth == 0:
-                    return cursor + 1 < len(self.tokens) and self.tokens[cursor + 1].type == TokenType.LEFT_BRACE
+                    return cursor + 1 < len(self.tokens) and self.tokens[cursor + 1].type in {
+                        TokenType.LEFT_BRACE,
+                        TokenType.EQUAL,
+                    }
             elif token_type == TokenType.LEFT_BRACE:
                 return False
             cursor += 1
         return False
 
-    def _looks_like_expression_function_declaration(self) -> bool:
+    def _looks_like_abbreviated_function_declaration(self) -> bool:
         if self.current + 2 >= len(self.tokens):
             return False
         if self.tokens[self.current].type != TokenType.IDENTIFIER:
@@ -1274,13 +1288,13 @@ class Parser:
         return False
 
     def _require_expression_after_operator(self, operator: Token) -> None:
-        if self.expression_function_name is None:
+        if self.abbreviated_function_name is None:
             return
         if self._can_start_expression(self._peek()):
             return
         raise self._error(
             self._peek(),
-            f"Expected expression after '{operator.lexeme}' in expression function '{self.expression_function_name}'.",
+            f"Expected expression after '{operator.lexeme}' in abbreviated function '{self.abbreviated_function_name}'.",
         )
 
     def _type_annotation_end_cursor(self, start: int) -> int | None:

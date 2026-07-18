@@ -50,7 +50,7 @@ La fuente de detalle por etapa es
 
 | Objetivo v1 | Estado actual | Criterio de salida de v1 |
 | --- | --- | --- |
-| Tipado estático | Parcial | Todo programa aceptado por el camino compilado debe estar chequeado; no debe depender de tipos dinámicos ocultos. Las funciones de expresión con parámetros desconocidos deben quedar delimitadas o tipadas formalmente. |
+| Tipado estático | Parcial | Todo programa aceptado por el camino compilado debe estar chequeado; no debe depender de tipos dinámicos ocultos. Las funciones abreviadas exigen parámetros tipados y desazucaran a funciones normales antes del chequeo. |
 | Compilación nativa | Parcial | El CLI debe compilar y ejecutar el conjunto v1 mediante LLVM/clang con diagnósticos claros y sin fallback silencioso a AST. |
 | Funciones tipadas, `void`, retorno y recursión | Estable para tipos backend | Llamadas, argumentos, retornos y recursión deben mantener paridad AST/native. |
 | Funciones como parámetros o valores | Parcial: top-level tipadas sin captura | Mantener `R(P1, ...)` con compatibilidad exacta y paridad AST/native; closures, lambdas, captura, métodos enlazados, builtins como valores y retorno de callables quedan fuera hasta un diseño posterior. |

@@ -190,7 +190,7 @@ representación y lifecycle ya están activos en esta matriz.
 | Funciones tipadas y parámetros | C | C | C | C | C | C para tipos backend | C | C | C | C | C conservador | C | stack nativo | E2E | C | Parcial | La fila es parcial por tipos de parámetros que solo existen en AST. |
 | Funciones `void` | C | C | C | C | C | C | C | C | C | C | C | C | — | E2E | C | Completo | Calls void solo como statement. |
 | Funciones como parámetros/valores | C `R(P...)` | C `FunctionType` | C exacto, símbolos/imports | C valor explícito sin entorno | C `FunctionType`/`function_ref`/`call_indirect` | C local e imports | C firma/símbolo/void | C | C refs/calls/phi | C tipos/dominancia | C conservador, calls con efectos | C `ptr` y call indirecta | sin heap/environment | E2E AST/IR/SSA/clang | C | Parcial | Solo funciones block top-level de usuario sin captura; no closures, lambdas, bound methods, builtins/expresión como valor ni retorno callable. |
-| Expression functions `f(x)=...` | C | C | P tipo `unknown` por callsite | C | N | N | N | N | N | N | N | N | AST | AST | C | Solo AST | Útiles para exploración, no para callbacks ni compilación. |
+| Funciones abreviadas `f(double x)=...` | C desazucarado | `FunctionDeclaration` + `return` | C retorno inferido o explícito | C | sin cambio | C como función normal | C | C | C | C | C | C subset de tipos | normal | E2E frontend/backend | C | Completo para firmas backend | No introduce lambdas ni un nodo/IR nuevo. |
 | Calls directas y recursión | C | C | C; firmas multifase | C | C | C | C | C | C | C | C conservador | C | — | E2E directa/mutua | P | Completo | Orden de declaración resuelto recientemente. |
 | `return` | C | C | C paths/tipo | C | C | C | C | C | C | C | C | C | exit `main` | E2E | C | Completo | `main` retorna int y no recibe parámetros. |
 | `if` / `else` | C | C | C boolean | C | CFG | C | C | C | C/phi | C | C | C | — | E2E | C | Completo | Incluye ramas con retorno. |
@@ -318,7 +318,7 @@ dejan SSA inválido.
 - El CLI elige LLVM por defecto aunque la mayor parte de módulos, UDT de
   referencia, errores y builtins matemáticos sean AST-only.
 - `Plots` conserva un hook AST legado, separado del callable tipado general;
-  los builtins y funciones de expresión tampoco son valores callable.
+  los builtins tampoco son valores callable.
 - El runtime AST de álgebra avanzada usa NumPy/SciPy del host; esa es una
   implementación prototipo, no un contrato aceptable de runtime native.
 

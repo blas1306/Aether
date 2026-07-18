@@ -250,7 +250,7 @@ class ForInStatement:
 
 @dataclass(frozen=True)
 class FunctionDeclaration:
-    return_type: AetherType
+    return_type: AetherType | None
     name: str
     parameters: list[Parameter]
     body: list[Statement]

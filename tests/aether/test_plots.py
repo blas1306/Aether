@@ -156,11 +156,11 @@ path = Plots.savefig("styled");
     assert Path(result.env["path"].value).exists()
 
 
-def test_plots_v2_plot_function_samples_expression_function(tmp_path: Path) -> None:
+def test_plots_v2_plot_function_samples_abbreviated_function(tmp_path: Path) -> None:
     result = run_aether(
         """
 import Plots
-f(x) = x^2 + 1;
+double f(double x) = x^2 + 1.0;
 Plots.plot(f, 0, 3, n=12, label="f", color="green");
 path = Plots.savefig("function_plot");
 """,
@@ -176,7 +176,7 @@ def test_plots_v2_plot_function_rejects_wrong_arity() -> None:
         run_aether(
             """
 import Plots
-f(x, y) = x + y;
+double f(double x, double y) = x + y;
 Plots.plot(f, 0, 1);
 """,
             plot_mode="document",

@@ -29,7 +29,9 @@ _STRUCT_RE = re.compile(rf"^{_VISIBILITY_RE}struct\s+(?P<name>[A-Za-z_]\w*)\s*\{
 _CLASS_RE = re.compile(rf"^{_VISIBILITY_RE}class\s+(?P<name>[A-Za-z_]\w*)\s*\{{?", re.IGNORECASE)
 _INTERFACE_RE = re.compile(rf"^{_VISIBILITY_RE}interface\s+(?P<name>[A-Za-z_]\w*)\s*\{{?", re.IGNORECASE)
 _ENUM_RE = re.compile(rf"^{_VISIBILITY_RE}enum\s+(?P<name>[A-Za-z_]\w*)\s*\{{?", re.IGNORECASE)
-_INLINE_FUNCTION_RE = re.compile(r"^(?P<name>[A-Za-z_]\w*)\s*\((?P<params>[^()]*)\)\s*=\s*(?!=)")
+_INLINE_FUNCTION_RE = re.compile(
+    rf"^{_VISIBILITY_RE}(?P<name>[A-Za-z_]\w*)\s*\((?P<params>[^()]*)\)\s*=\s*(?!=)"
+)
 _AETHER_FUNCTION_RE = re.compile(
     rf"^{_VISIBILITY_RE}(?:function\s+)?(?P<return_type>{_TYPE_RE})\s+"
     r"(?P<name>[A-Za-z_]\w*)\s*\((?P<params>[^()]*)\)\s*\{?",
@@ -515,10 +517,12 @@ def _extract_inline_function_symbol(
     name = match.group("name")
     if len(name) == 1 and name.isupper():
         return None
-    params = _parse_identifier_list(match.group("params"))
-    if params is None:
+    parsed_params = _parse_aether_parameters(match.group("params"))
+    if parsed_params is None:
         return None
-    signature = _build_function_signature(name, params)
+    param_names, param_details = parsed_params
+    signature = _build_function_signature(name, param_names)
+    detail = f"{_build_function_signature(name, param_details)} -> inferred"
     return _document_symbol(
         statement_span,
         line_starts,
@@ -528,7 +532,7 @@ def _extract_inline_function_symbol(
         kind="function",
         origin="function_definition",
         signature=signature,
-        detail=signature,
+        detail=detail,
     )
 
 

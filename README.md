@@ -88,7 +88,7 @@ implica ABI estable, seguridad para producción ni v1 final terminada.
 - módulos de archivo, packages, imports/aliases y visibilidad son parciales en native;
 - classes por referencia e interfaces siguen solo AST;
 - enums nominales sin payload son completos en AST/native (`i32` interno en LLVM);
-- expression functions `f(x) = ...`, tuples y destructuring;
+- funciones abreviadas tipadas `f(double x) = ...`, tuples y destructuring;
 - `input`, `throw`/`try`/`catch`, nullable y `complex`;
 - builtins matemáticos escalares y álgebra lineal avanzada;
 - REPL persistente y plotting.

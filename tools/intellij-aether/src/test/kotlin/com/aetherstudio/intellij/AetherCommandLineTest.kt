@@ -159,6 +159,22 @@ class AetherCommandLineTest {
     }
 
     @Test
+    fun `highlighting lexer accepts abbreviated function equals syntax`() {
+        val source = "f(double x) = x * exp(x) - 1.0;"
+        val lexer = AetherHighlightingLexer()
+
+        lexer.start(source, 0, source.length, 0)
+        val tokenTypes = mutableListOf<String>()
+        while (lexer.tokenType != null) {
+            tokenTypes.add(lexer.tokenType.toString())
+            lexer.advance()
+        }
+
+        assertTrue(tokenTypes.contains(AetherTokenTypes.OPERATOR.toString()))
+        assertTrue(!tokenTypes.contains(AetherTokenTypes.BAD_CHARACTER.toString()))
+    }
+
+    @Test
     fun `highlighting lexer treats apostrophe operator as operator`() {
         val lexer = AetherHighlightingLexer()
 

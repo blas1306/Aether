@@ -115,6 +115,14 @@ def test_lsp_formats_control_flow_headers_idempotently() -> None:
     assert _formatting_edits_for(edits[0]["newText"]) == []
 
 
+def test_lsp_formats_abbreviated_function_syntax_idempotently() -> None:
+    source = "f(double x)=x * exp(x) - 1.0;\n"
+    edits = _formatting_edits_for(source)
+
+    assert edits[0]["newText"] == "f(double x) = x * exp(x) - 1.0;\n"
+    assert _formatting_edits_for(edits[0]["newText"]) == []
+
+
 def test_lsp_server_keeps_running_when_analyzer_raises(monkeypatch) -> None:
     from aether_lsp import server as lsp_server
 
@@ -293,7 +301,7 @@ def test_lsp_completion_returns_snippet_placeholders_for_language_snippets() -> 
 
     assert fn["kind"] == 15
     assert fn["insertTextFormat"] == 2
-    assert fn["textEdit"]["newText"] == "f(x) = ${1:expression};"
+    assert fn["textEdit"]["newText"] == "f(double x) = ${1:expression};"
     assert if_snippet["kind"] == 15
     assert if_snippet["insertTextFormat"] == 2
     assert if_snippet["textEdit"]["newText"].startswith("if (${1:condition}) {")
@@ -394,6 +402,19 @@ def test_lsp_document_symbols_include_functions_variables_and_imports() -> None:
         "end": {"line": 1, "character": len("double square")},
     }
     assert by_name["value"]["kind"] == 13
+
+
+def test_lsp_document_symbol_and_hover_support_inferred_abbreviated_function() -> None:
+    source = "f(double x) = x * exp(x) - 1.0;\nvalue = f(1.0);\n"
+
+    symbols = _document_symbols_for(source)
+    by_name = {item["name"]: item for item in symbols}
+    hover = _hover_for(source, line=1, character=len("value = f"))
+
+    assert by_name["f"]["kind"] == 12
+    assert by_name["f"]["detail"] == "f(double x) -> inferred"
+    assert hover is not None
+    assert "f(double x) -> inferred" in hover["contents"]["value"]
 
 
 def test_lsp_document_symbols_use_visible_import_aliases() -> None:

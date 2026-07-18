@@ -1,7 +1,7 @@
 import Math
 import Plots as pl
 
-f(x) = sin(x);
+double f(double x) = sin(x);
 
 pl.grid(true);
 pl.plot(f, 0, 6);

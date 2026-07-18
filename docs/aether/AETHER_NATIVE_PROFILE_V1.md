@@ -135,7 +135,7 @@ negative corpus is part of this profile.
   runtime zero step **MUST** panic.
 - Function values are capture-free top-level user functions with an exact
   structural `R(P1, ...)` signature. Closures, lambdas, bound methods, builtins
-  or expression functions as values, returned callables, and unspecialized
+  or builtins as values, returned callables, and unspecialized
   generic functions are excluded.
 - Strings support UTF-8 transport, ARC lifecycle, content equality,
   concatenation, `byteLength`, `trim`, `split`, `parseInt`, and `parseDouble`.

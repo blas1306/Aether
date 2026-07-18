@@ -221,7 +221,13 @@ def test_enter_on_keyword_autocomplete_expands_block_immediately(editor: CodeEdi
 @pytest.mark.parametrize(
     ("prefix", "key", "expected_text", "selection_start", "selection_end"),
     [
-        ("fn", QtCore.Qt.Key.Key_Tab, "f(x) = expression;", len("f(x) = "), len("f(x) = expression")),
+        (
+            "fn",
+            QtCore.Qt.Key.Key_Tab,
+            "f(double x) = expression;",
+            len("f(double x) = "),
+            len("f(double x) = expression"),
+        ),
         ("for", QtCore.Qt.Key.Key_Return, "for (x in iterable) {\n    \n}", len("for ("), len("for (x")),
         ("if", QtCore.Qt.Key.Key_Tab, "if (condition) {\n    \n}", len("if ("), len("if (condition")),
         (
@@ -321,8 +327,8 @@ def test_snippet_acceptance_keeps_auto_pairs_working(editor: CodeEditor, qapp) -
     _press_text(editor, "(")
     qapp.processEvents()
 
-    assert editor.toPlainText() == "f(x) = expression;()"
-    assert editor.textCursor().position() == len("f(x) = expression;(")
+    assert editor.toPlainText() == "f(double x) = expression;()"
+    assert editor.textCursor().position() == len("f(double x) = expression;(")
 
 
 def test_enter_before_existing_for_line_does_not_expand_block(editor: CodeEditor, qapp) -> None:

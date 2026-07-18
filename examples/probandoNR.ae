@@ -1,5 +1,5 @@
-f(x) = x*exp(x) - 1;
-df(x) = exp(x) + x*exp(x);
+double f(double x) = x*exp(x) - 1.0;
+double df(double x) = exp(x) + x*exp(x);
 
 double nr(double x0, double tol, int maxiter) {
     double x = x0;

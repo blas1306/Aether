@@ -33,6 +33,15 @@ def test_formatter_is_idempotent() -> None:
     assert format_source(formatted) == formatted
 
 
+def test_formatter_canonicalizes_abbreviated_function_equals_spacing() -> None:
+    source = "double f(double x)=x * exp(x) - 1.0;\ng(double x)  =  x + 1.0;\n"
+
+    formatted = format_source(source)
+
+    assert formatted == "double f(double x) = x * exp(x) - 1.0;\ng(double x) = x + 1.0;\n"
+    assert format_source(formatted) == formatted
+
+
 def test_token_aware_migrator_preserves_comments_and_strings() -> None:
     source = 'println("if old { }");\n# while old { }\nif ready {\n}\n'
     migrated, count = migrate_control_flow_headers(source)

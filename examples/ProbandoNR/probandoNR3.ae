@@ -1,3 +1,30 @@
-float f = input("Ingrese la funcion: ");
+double f(double x) = x*exp(x) - 1.0;
+df(double x) = exp(x) + x*exp(x);
 
-println("f(x) = ", f);
+struct NewtonResultado {
+    double raiz;
+    double res;
+    int iter;
+}
+
+NewtonResultado NR2(double x0, double tol, int maxiter) {
+    double x = x0;
+    double res = abs(f(x));
+    int iter = 0;
+
+    while ((res > tol) && (iter < maxiter)) {
+        x = x - f(x)/df(x);
+        res = abs(f(x));
+        iter += 1;
+    }
+
+    return NewtonResultado(x, res, iter);
+}
+
+int main() {
+    NewtonResultado nr = NR2(0.0, 1e-8, 100);
+
+    println("x = ", nr.raiz);
+    println("res = ", nr.res);
+    println("iter = ", nr.iter);
+}

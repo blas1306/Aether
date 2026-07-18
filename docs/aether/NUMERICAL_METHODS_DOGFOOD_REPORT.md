@@ -25,7 +25,7 @@ funciones importadas como valores y ya no depende de una interfaz
 - **ABI:** conserva el ABI directo existente; soporta `void`, primitivas y
   structs por valor ya compatibles. No asigna heap.
 - **Límites:** sin closures, lambdas, captura, métodos enlazados, builtins o
-  expression functions como valores, callables variádicos, genéricos no
+  lambdas/closures como valores, callables variádicos, genéricos no
   especializados ni retorno de callables.
 
 La inspección previa confirmó que no existía una producción callable parcial

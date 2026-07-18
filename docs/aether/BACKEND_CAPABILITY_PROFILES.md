@@ -64,8 +64,8 @@ imports, classes, interfaces, enums, input, errores y matemática escalar. Las
 funciones como valores son `PARTIAL`: el tipo estructural `R(P1, P2, ...)`
 cubre referencias a funciones top-level de usuario sin captura, variables,
 parámetros, `phi` y llamadas indirectas con compatibilidad exacta. Las
-funciones de expresión y el hook legado de `Plots` siguen siendo subconjuntos
-solo AST y no se confunden con el callable tipado.
+funciones abreviadas ya desazucaran a declaraciones tipadas normales; el hook
+legado de `Plots` sigue siendo un subconjunto solo AST.
 
 El perfil LLVM/native representa el recorrido completo
 AST→IR→SSA→LLVM→clang. Módulos e imports están en `PARTIAL`: compilan funciones,
@@ -80,7 +80,7 @@ rechazan, por lo que `scalar-math` es `PARTIAL`. `function-values` también es
 bajan a punteros LLVM tipados y las llamadas indirectas conservan efectos
 desconocidos. Funciona con imports, aliases, parámetros primitivos, `void` y
 structs por valor compatibles con el ABI actual. No incluye closures, lambdas,
-captura, métodos enlazados, builtins como valores, funciones de expresión,
+captura, métodos enlazados, builtins como valores,
 retorno de callables ni funciones genéricas no especializadas. Los enums sin
 payload son `COMPLETE`: conservan identidad módulo/declaración en frontend,
 IR y SSA, usan discriminantes deterministas por orden fuente, cruzan firmas,

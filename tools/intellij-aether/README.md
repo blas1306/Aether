@@ -3,6 +3,8 @@
 Control-flow syntax follows the rc.2 language grammar: `if (condition)`,
 `while (condition)`, and `for (binding in iterable)`. Diagnostics, completion
 snippets, and document formatting are supplied by the bundled Aether LSP.
+Single-expression functions use `double f(double x) = expression;` or
+`f(double x) = expression;`; parameter types remain mandatory.
 
 Primer corte del plugin Aether para IDEs IntelliJ.
 

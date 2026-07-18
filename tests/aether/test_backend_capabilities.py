@@ -193,9 +193,8 @@ def test_ast_accepts_feature_marked_complete() -> None:
     assert run_aether('string name = input("Name: "); println(name);', input_reader=lambda: "Ada\n").output == "Name: Ada\n"
 
 
-def test_ast_accepts_its_partial_expression_function_subset() -> None:
-    assert AST_CAPABILITY_PROFILE.support_for(Capability.FUNCTION_VALUES).state is CapabilityState.PARTIAL
-    assert run_aether("square(x) = x * x; println(square(3));").output == "9\n"
+def test_ast_accepts_abbreviated_function_as_normal_typed_function() -> None:
+    assert run_aether("square(int x) = x * x; println(square(3));").output == "9\n"
 
 
 def test_native_rejects_unsupported_feature_before_ir_lowering(monkeypatch: pytest.MonkeyPatch) -> None:

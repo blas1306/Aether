@@ -69,10 +69,9 @@ public int sumaCuadrados(int n) {
     return suma;
 }
 
-f(x) = sin(x);
+double f(double x) = sin(x);
 
 println("Prueba 1: ", sumatoria(5));
 println("Prueba 2: ", sumatoriav2(5));
 println("Prueba 3: ", sumaCuadrados(6));
 println("Prueba 4: ", f(0));
-

@@ -104,6 +104,7 @@ class TypeChecker:
         ] = {}
         self._module_function_declaration_ids: set[int] = set()
         self.expression_function_call_stack: set[str] = set()
+        self._functions_needing_recheck: set[str] = set()
         # Semantic facts retained after checking for consumers such as backend
         # capability validation.  AST nodes are not universally hashable, so
         # identity is the stable key for the lifetime of the checked program.
@@ -155,6 +156,7 @@ class TypeChecker:
     def check(self, program: ast.Program) -> None:
         self._expression_types.clear()
         self._desugared_method_calls.clear()
+        self._functions_needing_recheck.clear()
         self._module_identity = program.package_name or (self.import_stack[-1] if self.import_stack else "__entry__")
         self._validate_import_bindings(program.statements)
         self._prepare_imports(program.statements)
@@ -168,11 +170,13 @@ class TypeChecker:
         self._declare_function_signatures(program.statements)
         self._infer_struct_method_mutability(program.statements)
         self._check_statements(program.statements, self.global_scope)
+        self._finalize_inferred_function_returns(program.statements)
         self._validate_type_aliases()
 
     def check_collecting_errors(self, program: ast.Program) -> list[AetherTypeError]:
         self._expression_types.clear()
         self._desugared_method_calls.clear()
+        self._functions_needing_recheck.clear()
         self._module_identity = program.package_name or (self.import_stack[-1] if self.import_stack else "__entry__")
         previous_errors = self._diagnostic_errors
         self._diagnostic_errors = []
@@ -190,6 +194,7 @@ class TypeChecker:
                 lambda: self._declare_function_signatures(program.statements),
                 lambda: self._infer_struct_method_mutability(program.statements),
                 lambda: self._check_statements(program.statements, self.global_scope),
+                lambda: self._finalize_inferred_function_returns(program.statements),
                 self._validate_type_aliases,
             ):
                 try:
@@ -759,7 +764,10 @@ class TypeChecker:
             self._check_for_in(statement, scope)
             return
         if isinstance(statement, ast.FunctionDeclaration):
-            if id(statement) not in self._module_function_declaration_ids:
+            if (
+                id(statement) not in self._module_function_declaration_ids
+                and self._local_function_declarations.get(statement.name) is not statement
+            ):
                 self._declare_function_signature(statement)
             self._check_function_body(statement)
             return
@@ -1804,7 +1812,11 @@ class TypeChecker:
             raise AetherTypeError(f"Name '{statement.name}' is already defined as a variable.")
         if self.global_scope.lookup(statement.name) is not None:
             raise AetherTypeError(f"Name '{statement.name}' is already defined as a variable.")
-        return_type = self._resolve_type_aliases(statement.return_type, statement)
+        return_type = (
+            UNKNOWN_TYPE
+            if statement.return_type is None
+            else self._resolve_type_aliases(statement.return_type, statement)
+        )
         if isinstance(return_type, FunctionType):
             raise AetherTypeError(
                 "Returning callable values is not supported yet.",
@@ -1812,6 +1824,13 @@ class TypeChecker:
                 column=statement.column,
             )
         if statement.name == "main":
+            if statement.return_type is None:
+                raise AetherTypeError(
+                    "main must use the explicit signature int main()",
+                    line=statement.line,
+                    column=statement.column,
+                    kind="entry-point",
+                )
             if return_type != "int":
                 raise AetherTypeError(
                     "main must return int",
@@ -1844,6 +1863,17 @@ class TypeChecker:
         function_scope: Scope[VariableSymbol] = Scope(parent=self.global_scope)
         for parameter in symbol.parameters:
             function_scope.define_local(parameter.name, parameter)
+        if statement.return_type is None:
+            inferred_return_type = self._infer_abbreviated_function_return_type(statement, function_scope)
+            if inferred_return_type is UNKNOWN_TYPE:
+                self._functions_needing_recheck.add(statement.name)
+                return
+            symbol = replace(symbol, return_type=inferred_return_type)
+            self.functions[statement.name] = symbol
+            # FunctionDeclaration is frozen so parsed trees remain immutable to
+            # ordinary consumers. This one semantic slot is materialized here,
+            # before any backend sees the declaration.
+            object.__setattr__(statement, "return_type", inferred_return_type)
         previous_return_type = self.current_return_type
         previous_function_name = self.current_function_name
         self.current_return_type = symbol.return_type
@@ -1859,6 +1889,67 @@ class TypeChecker:
             and not self._statements_always_return(statement.body)
         ):
             raise AetherTypeError(f"Function '{statement.name}' may not return a value on all paths.")
+
+    def _infer_abbreviated_function_return_type(
+        self,
+        statement: ast.FunctionDeclaration,
+        function_scope: Scope[VariableSymbol],
+    ) -> AetherType | None:
+        if len(statement.body) != 1 or not isinstance(statement.body[0], ast.ReturnStatement):
+            raise AetherTypeError(
+                f"Abbreviated function '{statement.name}' must contain exactly one expression.",
+                line=statement.line,
+                column=statement.column,
+            )
+        expression = statement.body[0].expression
+        if expression is None:
+            raise AetherTypeError(
+                f"Cannot infer return type of abbreviated function '{statement.name}'.",
+                line=statement.line,
+                column=statement.column,
+            )
+        return_type = self._expression_type(expression, function_scope)
+        if return_type is UNKNOWN_TYPE:
+            return UNKNOWN_TYPE
+        self._reject_void_value(return_type, f"abbreviated function '{statement.name}' body", expression)
+        return return_type
+
+    def _finalize_inferred_function_returns(self, statements: list[ast.Statement]) -> None:
+        pending = [
+            statement
+            for statement in statements
+            if isinstance(statement, ast.FunctionDeclaration) and statement.return_type is None
+        ]
+        while pending:
+            unresolved: list[ast.FunctionDeclaration] = []
+            for statement in pending:
+                symbol = self.functions.get(statement.name)
+                if symbol is None:
+                    continue
+                function_scope: Scope[VariableSymbol] = Scope(parent=self.global_scope)
+                for parameter in symbol.parameters:
+                    function_scope.define_local(parameter.name, parameter)
+                inferred_return_type = self._infer_abbreviated_function_return_type(statement, function_scope)
+                if inferred_return_type is UNKNOWN_TYPE:
+                    unresolved.append(statement)
+                    continue
+                self.functions[statement.name] = replace(symbol, return_type=inferred_return_type)
+                object.__setattr__(statement, "return_type", inferred_return_type)
+            if len(unresolved) == len(pending):
+                statement = unresolved[0]
+                raise AetherTypeError(
+                    f"Cannot infer return type of abbreviated function '{statement.name}'.",
+                    line=statement.line,
+                    column=statement.column,
+                    hint="add an explicit return type before the function name.",
+                )
+            pending = unresolved
+
+        for name in tuple(self._functions_needing_recheck):
+            declaration = self._local_function_declarations.get(name)
+            if isinstance(declaration, ast.FunctionDeclaration) and declaration.return_type is not None:
+                self._check_function_body(declaration)
+        self._functions_needing_recheck.clear()
 
     def _check_struct_methods(self, declaration: ast.StructDeclaration | ast.ClassDeclaration) -> None:
         struct = self.structs[declaration.name]
@@ -2024,6 +2115,8 @@ class TypeChecker:
     def _expression_type(self, expression: ast.Expression, scope: Scope[VariableSymbol]) -> AetherType | None:
         result = self._infer_expression_type(expression, scope)
         self._expression_types[id(expression)] = result
+        if result is UNKNOWN_TYPE and self.current_function_name is not None:
+            self._functions_needing_recheck.add(self.current_function_name)
         return result
 
     def _infer_expression_type(self, expression: ast.Expression, scope: Scope[VariableSymbol]) -> AetherType | None:

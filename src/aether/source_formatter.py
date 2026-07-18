@@ -19,8 +19,57 @@ _BRACED_EXPRESSION_PREDECESSORS = {
 
 
 def format_source(source: str) -> str:
-    """Canonicalize control-flow headers while preserving all other source text."""
-    return migrate_control_flow_headers(source)[0]
+    """Canonicalize supported headers while preserving all other source text."""
+    migrated = migrate_control_flow_headers(source)[0]
+    return format_abbreviated_function_bodies(migrated)
+
+
+def format_abbreviated_function_bodies(source: str) -> str:
+    """Canonicalize spacing around ``=`` in single-expression functions."""
+    tokens = lex(source)
+    line_offsets = _line_offsets(source)
+    replacements: list[tuple[int, int, str]] = []
+    for index, token in enumerate(tokens[1:-1], start=1):
+        if token.type != TokenType.EQUAL:
+            continue
+        if tokens[index - 1].type != TokenType.RIGHT_PAREN:
+            continue
+        if not _closes_function_parameter_list(tokens, index - 1):
+            continue
+        _replace_whitespace(
+            source,
+            replacements,
+            _token_end(tokens[index - 1], line_offsets),
+            _offset(token, line_offsets),
+            " ",
+        )
+        _replace_whitespace(
+            source,
+            replacements,
+            _token_end(token, line_offsets),
+            _offset(tokens[index + 1], line_offsets),
+            " ",
+        )
+    for start, end, replacement in sorted(set(replacements), reverse=True):
+        source = source[:start] + replacement + source[end:]
+    return source
+
+
+def _closes_function_parameter_list(tokens: list[Token], close_index: int) -> bool:
+    depth = 1
+    cursor = close_index - 1
+    while cursor >= 0:
+        token_type = tokens[cursor].type
+        if token_type == TokenType.RIGHT_PAREN:
+            depth += 1
+        elif token_type == TokenType.LEFT_PAREN:
+            depth -= 1
+            if depth == 0:
+                return cursor > 0 and tokens[cursor - 1].type == TokenType.IDENTIFIER
+        elif token_type in {TokenType.SEMICOLON, TokenType.LEFT_BRACE, TokenType.RIGHT_BRACE} and depth == 1:
+            return False
+        cursor -= 1
+    return False
 
 
 def migrate_control_flow_headers(source: str) -> tuple[str, int]:

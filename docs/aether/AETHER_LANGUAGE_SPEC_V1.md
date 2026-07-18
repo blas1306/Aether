@@ -101,7 +101,7 @@ other items. A package name identifies the file module for imports; v1 does not
 define multi-file package merging.
 
 Top-level items MAY be aliases, structs, classes, interfaces, enums, typed
-functions, expression functions, variables/constants, imports, or executable
+functions, abbreviated single-expression functions, variables/constants, imports, or executable
 statements. Struct, class, interface and enum declarations **MUST** be
 top-level. Visibility modifiers apply only to top-level declarations and to
 members where their grammar permits them.
@@ -324,12 +324,25 @@ keyword is accepted for compatibility. Parameters require explicit types and
 are passed left to right. Calls check arity and parameter types. Direct
 recursion, mutual recursion and calls before declaration are permitted.
 
+A single-expression declaration MAY replace its block with `= expression;`:
+
+```aether
+double f(double x) = x * exp(x) - 1.0;
+f(double x) = x * exp(x) - 1.0;
+```
+
+The second form infers the return type from the expression. Parameter types
+remain mandatory. The parser desugars both forms to an ordinary
+`FunctionDeclaration` whose body contains one `return`, before type checking;
+there is no abbreviated-function node in the semantic or backend pipeline.
+The syntax does not define lambdas, closures, anonymous functions, or new
+function-value semantics, and a block or statement sequence is not valid
+after `=`.
+
 The callable type spelling is `R(P1, P2, ...)`. A callable value contains a
 capture-free reference to a top-level user function with the exact structural
 signature. v1 does not define closures, lambdas, captured environments, bound
 methods, builtin values, covariant callable conversion, or returned callables.
-Expression functions (`f(x) = expression;`) remain an AST exploration feature
-and are not typed callables or part of the native profile.
 
 Parameters are borrowed for lifecycle purposes. A function must not destroy a
 borrowed argument. A returned nontrivial value is owned by the caller. These

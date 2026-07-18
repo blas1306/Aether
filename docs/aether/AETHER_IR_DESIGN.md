@@ -144,7 +144,8 @@ the supported subset. Current limitations include:
 - Nullable values remain unsupported; lists/arrays and modules/packages have
   explicitly documented compiled subsets.
 - No SSA conversion, phi nodes, or execution-time optimizations.
-- No builtin calls, keyword arguments, or expression functions.
+- No builtin calls or keyword arguments. Abbreviated functions reach IR as
+  ordinary typed functions after frontend desugaring.
 - No implicit conversion instructions.
 - No optimizer integration with the backend, SSA, JIT, Rust backend, or full
   public IR execution path.
