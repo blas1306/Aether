@@ -15,8 +15,8 @@ from aether.capabilities import (
     Capability,
     backend_capability_issues,
 )
-from aether.errors import AetherError
-from aether.pipeline import prepare_typed_program
+from aether.cli import main as cli_main
+from aether.pipeline import IRBackend, SSAPipeline, prepare_typed_program
 from aether.typechecker import TypeChecker
 
 
@@ -41,25 +41,30 @@ def test_example_manifest_is_complete_authoritative_and_uses_closed_states() -> 
     }
     manifest_paths = [str(entry["path"]) for entry in ENTRIES]
 
+    assert MANIFEST["schema_version"] == 2
     assert MANIFEST["language_version"] == "1.0.0-rc.2"
     assert MANIFEST["native_capability_profile"] == "22"
     assert len(manifest_paths) == len(set(manifest_paths))
     assert set(manifest_paths) == actual_paths
-    assert {entry["profile"] for entry in ENTRIES} <= {
+    assert {entry["classification"] for entry in ENTRIES} == {
         "V1_NATIVE",
         "AST_ONLY_EXPERIMENTAL",
-        "OUTDATED",
-        "BROKEN",
     }
-    assert sum(entry["profile"] == "V1_NATIVE" for entry in ENTRIES) == 78
-    assert sum(entry["profile"] == "AST_ONLY_EXPERIMENTAL" for entry in ENTRIES) == 21
-    assert sum(entry["profile"] == "BROKEN" for entry in ENTRIES) == 4
+    assert sum(entry["classification"] == "V1_NATIVE" for entry in ENTRIES) == 78
+    assert sum(entry["classification"] == "AST_ONLY_EXPERIMENTAL" for entry in ENTRIES) == 23
+    assert not any(entry.get("classification") == "BROKEN" for entry in ENTRIES)
+    assert all(
+        {"path", "classification", "backends", "run", "expected_exit_code", "timeout_seconds"}
+        <= entry.keys()
+        for entry in ENTRIES
+    )
     assert all(entry["timeout_seconds"] > 0 for entry in ENTRIES)
     assert all(
-        entry["reason"]
+        entry["outside_v1_features"]
         for entry in ENTRIES
-        if entry["profile"] != "V1_NATIVE"
+        if entry["classification"] == "AST_ONLY_EXPERIMENTAL"
     )
+    assert not any(str(entry["path"]).startswith("tests/fixtures/") for entry in ENTRIES)
 
 
 @pytest.mark.parametrize(
@@ -68,34 +73,35 @@ def test_example_manifest_is_complete_authoritative_and_uses_closed_states() -> 
     ids=[str(entry["path"]) for entry in ENTRIES],
 )
 def test_every_example_matches_its_manifest_classification(entry: dict[str, object]) -> None:
-    profile = entry["profile"]
-    if profile == "BROKEN":
-        with pytest.raises(AetherError):
-            _typed(entry)
-        return
-
+    classification = entry["classification"]
     typed = _typed(entry)
     issues = backend_capability_issues(typed, BackendIdentity.NATIVE)
-    if profile == "AST_ONLY_EXPERIMENTAL":
+    if classification == "AST_ONLY_EXPERIMENTAL":
         assert issues
-        assert {issue.diagnostic_code for issue in issues} <= set(
-            str(entry["reason"]).removeprefix("Outside native/v1: ").split(", ")
+        assert {issue.diagnostic_code for issue in issues} == set(
+            entry["outside_v1_features"]
         )
         return
 
-    assert profile == "V1_NATIVE"
+    assert classification == "V1_NATIVE"
     assert issues == ()
+    IRBackend().lower_verified(typed)
+    SSAPipeline().run(typed)
     LLVMBuilder().emit_llvm(typed)
 
 
 @pytest.mark.skipif(shutil.which("clang") is None, reason="clang is required")
 @pytest.mark.parametrize(
     "entry",
-    [entry for entry in ENTRIES if entry["condition"] == "native_execution"],
+    [
+        entry
+        for entry in ENTRIES
+        if entry["classification"] == "V1_NATIVE" and entry["run"]
+    ],
     ids=[
         str(entry["path"])
         for entry in ENTRIES
-        if entry["condition"] == "native_execution"
+        if entry["classification"] == "V1_NATIVE" and entry["run"]
     ],
 )
 def test_v1_native_example_observations_match_manifest(entry: dict[str, object]) -> None:
@@ -106,6 +112,64 @@ def test_v1_native_example_observations_match_manifest(entry: dict[str, object])
     assert exit_code == entry["expected_exit_code"]
     assert hashlib.sha256(stdout.getvalue().encode()).hexdigest() == entry["stdout_sha256"]
     assert hashlib.sha256(stderr.getvalue().encode()).hexdigest() == entry["stderr_sha256"]
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        entry
+        for entry in ENTRIES
+        if entry["classification"] == "AST_ONLY_EXPERIMENTAL" and entry["run"]
+    ],
+    ids=[
+        str(entry["path"])
+        for entry in ENTRIES
+        if entry["classification"] == "AST_ONLY_EXPERIMENTAL" and entry["run"]
+    ],
+)
+def test_runnable_ast_experimental_observations_match_manifest(
+    entry: dict[str, object],
+) -> None:
+    stdout = StringIO()
+    stderr = StringIO()
+
+    exit_code = cli_main(
+        ["--backend", "ast", str(ROOT / str(entry["path"]))],
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    assert exit_code == entry["expected_exit_code"]
+    assert hashlib.sha256(stdout.getvalue().encode()).hexdigest() == entry["stdout_sha256"]
+    assert hashlib.sha256(stderr.getvalue().encode()).hexdigest() == entry["stderr_sha256"]
+    assert "Traceback" not in stderr.getvalue()
+
+
+def test_list_slice_assignment_is_a_structured_invalid_fixture() -> None:
+    fixture = ROOT / "tests" / "fixtures" / "invalid" / "list_slice_assignment.ae"
+    expectation = json.loads(fixture.with_suffix(".json").read_text(encoding="utf-8"))
+    stdout = StringIO()
+    stderr = StringIO()
+
+    exit_code = cli_main([str(fixture)], stdout=stdout, stderr=stderr)
+
+    assert exit_code == expectation["expected_exit_code"]
+    assert expectation["diagnostic"] in stderr.getvalue()
+    assert f"line {expectation['line']}, column {expectation['column']}" in stderr.getvalue()
+    assert expectation["fragment"] in stderr.getvalue()
+    assert "Traceback" not in stderr.getvalue()
+    assert stdout.getvalue() == ""
+
+
+def test_removed_broken_examples_are_not_public_or_manifested() -> None:
+    removed = {
+        "examples/minimos_cuadrados/interactive.ae",
+        "examples/pruebaListas.ae",
+    }
+
+    assert removed.isdisjoint({str(entry["path"]) for entry in ENTRIES})
+    assert all(not (ROOT / path).exists() for path in removed)
+    assert (ROOT / "docs" / "aether" / "AETHER_EXAMPLES_CATALOG_AUDIT.md").is_file()
 
 
 @pytest.mark.parametrize(

@@ -1,1345 +1,1446 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "language_version": "1.0.0-rc.2",
   "native_capability_profile": "22",
   "audit_date": "2026-07-18",
   "profile_definitions": {
-    "V1_NATIVE": "Accepted by profile 22; executable entries compile and run natively, library modules emit verified LLVM.",
-    "AST_ONLY_EXPERIMENTAL": "Accepted by the frontend/AST surface but deliberately outside stable native/v1.",
-    "OUTDATED": "Historical syntax or API retained only as migration material.",
-    "BROKEN": "Checked-in example currently fails its declared frontend contract."
+    "V1_NATIVE": "Normative Aether 1.0 example accepted by native capability profile 22.",
+    "AST_ONLY_EXPERIMENTAL": "Non-normative frontend/AST experiment with an explicit native capability exclusion."
   },
   "entries": [
     {
       "path": "examples/FormulaNumerosPrimos.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 0,
       "stdout_sha256": "47919faa811c0fb6b9de1df114c464bac01749a6dfa3ccb8b3cba73ca126e0e0",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/Miller-Rabbin.ae",
-      "profile": "AST_ONLY_EXPERIMENTAL",
-      "expected_backends": [
-        "ast"
-      ],
       "condition": "frontend_acceptance",
       "expected_exit_code": null,
       "stdout_sha256": null,
       "stderr_sha256": null,
       "timeout_seconds": 20,
-      "reason": "Outside native/v1: AE-BACKEND-ERROR_HANDLING, AE-BACKEND-INPUT, AE-BACKEND-STRINGS"
+      "classification": "AST_ONLY_EXPERIMENTAL",
+      "backends": [
+        "ast"
+      ],
+      "run": false,
+      "outside_v1_features": [
+        "AE-BACKEND-ERROR_HANDLING",
+        "AE-BACKEND-INPUT",
+        "AE-BACKEND-STRINGS"
+      ]
     },
     {
       "path": "examples/ProbandoNR/probandoNR2.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 0,
       "stdout_sha256": "9823912019a7bf08e629b87e5bfb5d6e7074999f0eaa01593fb933222045e788",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/ProbandoNR/probandoNR3.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 0,
       "stdout_sha256": "9823912019a7bf08e629b87e5bfb5d6e7074999f0eaa01593fb933222045e788",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/Sorts/IllegalArgumentException.ae",
-      "profile": "AST_ONLY_EXPERIMENTAL",
-      "expected_backends": [
-        "ast"
-      ],
       "condition": "frontend_acceptance",
       "expected_exit_code": null,
       "stdout_sha256": null,
       "stderr_sha256": null,
       "timeout_seconds": 20,
-      "reason": "Outside native/v1: AE-BACKEND-ERROR_HANDLING"
+      "classification": "AST_ONLY_EXPERIMENTAL",
+      "backends": [
+        "ast"
+      ],
+      "run": false,
+      "outside_v1_features": [
+        "AE-BACKEND-ERROR_HANDLING"
+      ]
     },
     {
       "path": "examples/Sorts/Main.ae",
-      "profile": "AST_ONLY_EXPERIMENTAL",
-      "expected_backends": [
+      "condition": "ast_execution",
+      "expected_exit_code": 0,
+      "stdout_sha256": "0fa8c62f61e2586983e7f142dcb69977218f68746d3fc13841bf5ceaa48f1502",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "timeout_seconds": 20,
+      "classification": "AST_ONLY_EXPERIMENTAL",
+      "backends": [
         "ast"
       ],
-      "condition": "frontend_acceptance",
-      "expected_exit_code": null,
-      "stdout_sha256": null,
-      "stderr_sha256": null,
-      "timeout_seconds": 20,
-      "reason": "Outside native/v1: AE-BACKEND-ARRAY, AE-BACKEND-PRIMITIVE_TYPES, AE-BACKEND-VARIABLES_AND_CONST"
+      "run": true,
+      "outside_v1_features": [
+        "AE-BACKEND-ARRAY",
+        "AE-BACKEND-PRIMITIVE_TYPES",
+        "AE-BACKEND-VARIABLES_AND_CONST"
+      ]
     },
     {
       "path": "examples/Sorts/Sortings.ae",
-      "profile": "AST_ONLY_EXPERIMENTAL",
-      "expected_backends": [
-        "ast"
-      ],
       "condition": "frontend_acceptance",
       "expected_exit_code": null,
       "stdout_sha256": null,
       "stderr_sha256": null,
       "timeout_seconds": 20,
-      "reason": "Outside native/v1: AE-BACKEND-ARRAY, AE-BACKEND-PRIMITIVE_TYPES"
+      "classification": "AST_ONLY_EXPERIMENTAL",
+      "backends": [
+        "ast"
+      ],
+      "run": false,
+      "outside_v1_features": [
+        "AE-BACKEND-ARRAY",
+        "AE-BACKEND-PRIMITIVE_TYPES"
+      ]
     },
     {
       "path": "examples/aggregate_collections/particles.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 0,
       "stdout_sha256": "a0dc92061fb04ef7187aff5a8af4947f7fad83ebc808c7d69a74e97fe68ef282",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/classes/const_with_mutable_alias.ae",
-      "profile": "AST_ONLY_EXPERIMENTAL",
-      "expected_backends": [
+      "condition": "ast_execution",
+      "expected_exit_code": 0,
+      "stdout_sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "timeout_seconds": 20,
+      "classification": "AST_ONLY_EXPERIMENTAL",
+      "backends": [
         "ast"
       ],
-      "condition": "frontend_acceptance",
-      "expected_exit_code": null,
-      "stdout_sha256": null,
-      "stderr_sha256": null,
-      "timeout_seconds": 20,
-      "reason": "Outside native/v1: AE-BACKEND-CLASSES, AE-BACKEND-CLASS_CONSTRUCTORS, AE-BACKEND-CLASS_METHODS, AE-BACKEND-VARIABLES_AND_CONST"
+      "run": true,
+      "outside_v1_features": [
+        "AE-BACKEND-CLASSES",
+        "AE-BACKEND-CLASS_CONSTRUCTORS",
+        "AE-BACKEND-CLASS_METHODS",
+        "AE-BACKEND-VARIABLES_AND_CONST"
+      ]
     },
     {
       "path": "examples/classes/counter_basic.ae",
-      "profile": "AST_ONLY_EXPERIMENTAL",
-      "expected_backends": [
+      "condition": "ast_execution",
+      "expected_exit_code": 0,
+      "stdout_sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "timeout_seconds": 20,
+      "classification": "AST_ONLY_EXPERIMENTAL",
+      "backends": [
         "ast"
       ],
-      "condition": "frontend_acceptance",
-      "expected_exit_code": null,
-      "stdout_sha256": null,
-      "stderr_sha256": null,
-      "timeout_seconds": 20,
-      "reason": "Outside native/v1: AE-BACKEND-CLASSES, AE-BACKEND-CLASS_CONSTRUCTORS, AE-BACKEND-CLASS_METHODS, AE-BACKEND-VARIABLES_AND_CONST"
+      "run": true,
+      "outside_v1_features": [
+        "AE-BACKEND-CLASSES",
+        "AE-BACKEND-CLASS_CONSTRUCTORS",
+        "AE-BACKEND-CLASS_METHODS",
+        "AE-BACKEND-VARIABLES_AND_CONST"
+      ]
     },
     {
       "path": "examples/classes/custom_constructor.ae",
-      "profile": "AST_ONLY_EXPERIMENTAL",
-      "expected_backends": [
+      "condition": "ast_execution",
+      "expected_exit_code": 0,
+      "stdout_sha256": "06e9d52c1720fca412803e3b07c4b228ff113e303f4c7ab94665319d832bbfb7",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "timeout_seconds": 20,
+      "classification": "AST_ONLY_EXPERIMENTAL",
+      "backends": [
         "ast"
       ],
-      "condition": "frontend_acceptance",
-      "expected_exit_code": null,
-      "stdout_sha256": null,
-      "stderr_sha256": null,
-      "timeout_seconds": 20,
-      "reason": "Outside native/v1: AE-BACKEND-CLASSES, AE-BACKEND-CLASS_CONSTRUCTORS, AE-BACKEND-CLASS_METHODS, AE-BACKEND-VARIABLES_AND_CONST"
+      "run": true,
+      "outside_v1_features": [
+        "AE-BACKEND-CLASSES",
+        "AE-BACKEND-CLASS_CONSTRUCTORS",
+        "AE-BACKEND-CLASS_METHODS",
+        "AE-BACKEND-VARIABLES_AND_CONST"
+      ]
     },
     {
       "path": "examples/classes/implements_interface.ae",
-      "profile": "AST_ONLY_EXPERIMENTAL",
-      "expected_backends": [
+      "condition": "ast_execution",
+      "expected_exit_code": 0,
+      "stdout_sha256": "52f96c26a39ed25108a6db43d6e11c6051eba8a498a5baab1891adfa7ac7c262",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "timeout_seconds": 20,
+      "classification": "AST_ONLY_EXPERIMENTAL",
+      "backends": [
         "ast"
       ],
-      "condition": "frontend_acceptance",
-      "expected_exit_code": null,
-      "stdout_sha256": null,
-      "stderr_sha256": null,
-      "timeout_seconds": 20,
-      "reason": "Outside native/v1: AE-BACKEND-CLASSES, AE-BACKEND-CLASS_CONSTRUCTORS, AE-BACKEND-CLASS_METHODS, AE-BACKEND-INTERFACES, AE-BACKEND-PRIMITIVE_TYPES, AE-BACKEND-VARIABLES_AND_CONST"
+      "run": true,
+      "outside_v1_features": [
+        "AE-BACKEND-CLASSES",
+        "AE-BACKEND-CLASS_CONSTRUCTORS",
+        "AE-BACKEND-CLASS_METHODS",
+        "AE-BACKEND-INTERFACES",
+        "AE-BACKEND-PRIMITIVE_TYPES",
+        "AE-BACKEND-VARIABLES_AND_CONST"
+      ]
     },
     {
       "path": "examples/classes/invalid_cases.ae",
-      "profile": "AST_ONLY_EXPERIMENTAL",
-      "expected_backends": [
+      "condition": "ast_execution",
+      "expected_exit_code": 0,
+      "stdout_sha256": "1121cfccd5913f0a63fec40a6ffd44ea64f9dc135c66634ba001d10bcf4302a2",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "timeout_seconds": 20,
+      "classification": "AST_ONLY_EXPERIMENTAL",
+      "backends": [
         "ast"
       ],
-      "condition": "frontend_acceptance",
-      "expected_exit_code": null,
-      "stdout_sha256": null,
-      "stderr_sha256": null,
-      "timeout_seconds": 20,
-      "reason": "Outside native/v1: AE-BACKEND-CLASSES, AE-BACKEND-CLASS_CONSTRUCTORS, AE-BACKEND-CLASS_METHODS, AE-BACKEND-VARIABLES_AND_CONST"
+      "run": true,
+      "outside_v1_features": [
+        "AE-BACKEND-CLASSES",
+        "AE-BACKEND-CLASS_CONSTRUCTORS",
+        "AE-BACKEND-CLASS_METHODS",
+        "AE-BACKEND-VARIABLES_AND_CONST"
+      ]
     },
     {
       "path": "examples/classes/private_field_public_methods.ae",
-      "profile": "AST_ONLY_EXPERIMENTAL",
-      "expected_backends": [
+      "condition": "ast_execution",
+      "expected_exit_code": 0,
+      "stdout_sha256": "c93ac6ed67738e8c6cefa08855e65a897b09741df0d7cd913171f4a2a706cdad",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "timeout_seconds": 20,
+      "classification": "AST_ONLY_EXPERIMENTAL",
+      "backends": [
         "ast"
       ],
-      "condition": "frontend_acceptance",
-      "expected_exit_code": null,
-      "stdout_sha256": null,
-      "stderr_sha256": null,
-      "timeout_seconds": 20,
-      "reason": "Outside native/v1: AE-BACKEND-CLASSES, AE-BACKEND-CLASS_CONSTRUCTORS, AE-BACKEND-CLASS_METHODS, AE-BACKEND-VARIABLES_AND_CONST"
+      "run": true,
+      "outside_v1_features": [
+        "AE-BACKEND-CLASSES",
+        "AE-BACKEND-CLASS_CONSTRUCTORS",
+        "AE-BACKEND-CLASS_METHODS",
+        "AE-BACKEND-VARIABLES_AND_CONST"
+      ]
     },
     {
       "path": "examples/classes/reference_aliasing.ae",
-      "profile": "AST_ONLY_EXPERIMENTAL",
-      "expected_backends": [
+      "condition": "ast_execution",
+      "expected_exit_code": 0,
+      "stdout_sha256": "133f46e9df9c594a4bd844a0ad79a12dfa578d0d86f881d0b0d4c016068a4b90",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "timeout_seconds": 20,
+      "classification": "AST_ONLY_EXPERIMENTAL",
+      "backends": [
         "ast"
       ],
-      "condition": "frontend_acceptance",
-      "expected_exit_code": null,
-      "stdout_sha256": null,
-      "stderr_sha256": null,
-      "timeout_seconds": 20,
-      "reason": "Outside native/v1: AE-BACKEND-CLASSES, AE-BACKEND-CLASS_CONSTRUCTORS, AE-BACKEND-CLASS_METHODS, AE-BACKEND-VARIABLES_AND_CONST"
+      "run": true,
+      "outside_v1_features": [
+        "AE-BACKEND-CLASSES",
+        "AE-BACKEND-CLASS_CONSTRUCTORS",
+        "AE-BACKEND-CLASS_METHODS",
+        "AE-BACKEND-VARIABLES_AND_CONST"
+      ]
     },
     {
       "path": "examples/esPrimo2.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 0,
       "stdout_sha256": "90cc9255ef901898c6334d5d2202dbfe8c78ac7e45571f0171d8e95c12076efe",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/expense_tracker/Ledger.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_module_emission",
       "expected_exit_code": null,
       "stdout_sha256": null,
       "stderr_sha256": null,
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": false
     },
     {
       "path": "examples/expense_tracker/Main.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 0,
       "stdout_sha256": "b459d611c61f41fe97762a17e852f352f153fc9a83d08d8ae49d2a90feb332d5",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/expense_tracker/Persistence.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_module_emission",
       "expected_exit_code": null,
       "stdout_sha256": null,
       "stderr_sha256": null,
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": false
     },
     {
       "path": "examples/expense_tracker/Reports.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_module_emission",
       "expected_exit_code": null,
       "stdout_sha256": null,
       "stderr_sha256": null,
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": false
     },
     {
       "path": "examples/expense_tracker/Transaction.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_module_emission",
       "expected_exit_code": null,
       "stdout_sha256": null,
       "stderr_sha256": null,
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": false
     },
     {
       "path": "examples/hello.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 0,
       "stdout_sha256": "3e73336d709d5fda01052caf7ae2fb3590ea0172c4ee5f63afcdec5200f7598c",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/interactive/fibonacci.ae",
-      "profile": "AST_ONLY_EXPERIMENTAL",
-      "expected_backends": [
-        "ast"
-      ],
       "condition": "frontend_acceptance",
       "expected_exit_code": null,
       "stdout_sha256": null,
       "stderr_sha256": null,
       "timeout_seconds": 20,
-      "reason": "Outside native/v1: AE-BACKEND-INPUT, AE-BACKEND-STRINGS"
+      "classification": "AST_ONLY_EXPERIMENTAL",
+      "backends": [
+        "ast"
+      ],
+      "run": false,
+      "outside_v1_features": [
+        "AE-BACKEND-INPUT",
+        "AE-BACKEND-STRINGS"
+      ]
     },
     {
       "path": "examples/interactive/primes_interactive.ae",
-      "profile": "AST_ONLY_EXPERIMENTAL",
-      "expected_backends": [
-        "ast"
-      ],
       "condition": "frontend_acceptance",
       "expected_exit_code": null,
       "stdout_sha256": null,
       "stderr_sha256": null,
       "timeout_seconds": 20,
-      "reason": "Outside native/v1: AE-BACKEND-INPUT, AE-BACKEND-STRINGS, AE-BACKEND-VARIABLES_AND_CONST"
+      "classification": "AST_ONLY_EXPERIMENTAL",
+      "backends": [
+        "ast"
+      ],
+      "run": false,
+      "outside_v1_features": [
+        "AE-BACKEND-INPUT",
+        "AE-BACKEND-STRINGS",
+        "AE-BACKEND-VARIABLES_AND_CONST"
+      ]
     },
     {
       "path": "examples/interactive/sum_calculator.ae",
-      "profile": "AST_ONLY_EXPERIMENTAL",
-      "expected_backends": [
-        "ast"
-      ],
       "condition": "frontend_acceptance",
       "expected_exit_code": null,
       "stdout_sha256": null,
       "stderr_sha256": null,
       "timeout_seconds": 20,
-      "reason": "Outside native/v1: AE-BACKEND-INPUT, AE-BACKEND-STRINGS, AE-BACKEND-VARIABLES_AND_CONST"
+      "classification": "AST_ONLY_EXPERIMENTAL",
+      "backends": [
+        "ast"
+      ],
+      "run": false,
+      "outside_v1_features": [
+        "AE-BACKEND-INPUT",
+        "AE-BACKEND-STRINGS",
+        "AE-BACKEND-VARIABLES_AND_CONST"
+      ]
     },
     {
       "path": "examples/ir/constant_fold.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 14,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/ir/local_const.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 8,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/ir/sumTo.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 10,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/linear_algebra/basic_operations.ae",
-      "profile": "AST_ONLY_EXPERIMENTAL",
-      "expected_backends": [
+      "condition": "ast_execution",
+      "expected_exit_code": 0,
+      "stdout_sha256": "fde241bc3de85b67b0d5378341004fa5ee3a6ff533f971d021f478419c1b0dad",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "timeout_seconds": 20,
+      "classification": "AST_ONLY_EXPERIMENTAL",
+      "backends": [
         "ast"
       ],
-      "condition": "frontend_acceptance",
-      "expected_exit_code": null,
-      "stdout_sha256": null,
-      "stderr_sha256": null,
-      "timeout_seconds": 20,
-      "reason": "Outside native/v1: AE-BACKEND-MATRIX, AE-BACKEND-STRINGS, AE-BACKEND-VARIABLES_AND_CONST, AE-BACKEND-VECTOR"
+      "run": true,
+      "outside_v1_features": [
+        "AE-BACKEND-MATRIX",
+        "AE-BACKEND-STRINGS",
+        "AE-BACKEND-VARIABLES_AND_CONST",
+        "AE-BACKEND-VECTOR"
+      ]
     },
     {
       "path": "examples/linear_algebra/primes_advanced.ae",
-      "profile": "BROKEN",
-      "expected_backends": [],
-      "condition": "frontend_rejection",
+      "condition": "frontend_acceptance",
       "expected_exit_code": null,
       "stdout_sha256": null,
       "stderr_sha256": null,
       "timeout_seconds": 20,
-      "reason": "AetherTypeError: AetherTypeError at line 52, column 37 [operator]:"
+      "classification": "AST_ONLY_EXPERIMENTAL",
+      "backends": [
+        "ast"
+      ],
+      "run": false,
+      "outside_v1_features": [
+        "AE-BACKEND-ARITHMETIC",
+        "AE-BACKEND-FUNCTION_VALUES",
+        "AE-BACKEND-MATRIX",
+        "AE-BACKEND-MODULES",
+        "AE-BACKEND-VARIABLES_AND_CONST"
+      ]
     },
     {
       "path": "examples/linear_algebra/primes_check.ae",
-      "profile": "AST_ONLY_EXPERIMENTAL",
-      "expected_backends": [
+      "condition": "ast_execution",
+      "expected_exit_code": 0,
+      "stdout_sha256": "3d12f6e2defb15a55cb4e8cb4e41c66851827b49b0aed11ef538e860267b81f0",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "timeout_seconds": 20,
+      "classification": "AST_ONLY_EXPERIMENTAL",
+      "backends": [
         "ast"
       ],
-      "condition": "frontend_acceptance",
-      "expected_exit_code": null,
-      "stdout_sha256": null,
-      "stderr_sha256": null,
-      "timeout_seconds": 20,
-      "reason": "Outside native/v1: AE-BACKEND-ARITHMETIC, AE-BACKEND-MATRIX, AE-BACKEND-VARIABLES_AND_CONST"
+      "run": true,
+      "outside_v1_features": [
+        "AE-BACKEND-ARITHMETIC",
+        "AE-BACKEND-MATRIX",
+        "AE-BACKEND-VARIABLES_AND_CONST"
+      ]
     },
     {
       "path": "examples/lists/list_api.ae",
-      "profile": "AST_ONLY_EXPERIMENTAL",
-      "expected_backends": [
+      "condition": "ast_execution",
+      "expected_exit_code": 0,
+      "stdout_sha256": "78fb013d7ec50f9a99f20d694183e21a190cf653bda7d1ac6129ca26f5f96e97",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "timeout_seconds": 20,
+      "classification": "AST_ONLY_EXPERIMENTAL",
+      "backends": [
         "ast"
       ],
-      "condition": "frontend_acceptance",
-      "expected_exit_code": null,
-      "stdout_sha256": null,
-      "stderr_sha256": null,
-      "timeout_seconds": 20,
-      "reason": "Outside native/v1: AE-BACKEND-LIST"
+      "run": true,
+      "outside_v1_features": [
+        "AE-BACKEND-LIST"
+      ]
     },
     {
       "path": "examples/llvm/arithmetic.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 23,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/array_sort.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 124,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/array_sum.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 6,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/countdown.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 0,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/double_add.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 17,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/double_compare.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 19,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/double_to_int.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 14,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/for_break_continue.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 9,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/for_sum.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 15,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/gcd_iterative.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 6,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/identity_call.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 23,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/int_to_double.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 12,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/list_clear.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 0,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/list_contains.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 1,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/list_copy.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 19,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/list_for_sum.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 6,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/list_index.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 2,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/list_index_of.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 12,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/list_insert.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 60,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/list_literal.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 3,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/list_pop.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 51,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/list_pop_alias.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 32,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/list_push.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 20,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/list_push_alias.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 3,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/list_remove_at.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 70,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/list_reverse.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 41,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/list_set_alias.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 9,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/list_sort.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 123,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/matrix_add.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 36,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/matrix_column_mul.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 56,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/matrix_index.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 4,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/matrix_literal.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 0,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/matrix_matmul.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 154,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/matrix_rows_columns.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 5,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/matrix_scalar_mul.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 50,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/matrix_set.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 9,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/matrix_sub.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 20,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/max.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 12,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/outer_product.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 54,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/return_5.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 5,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/string_choose.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 0,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/string_identity.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 0,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/sum_to_n.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 15,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/vector_add.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 21,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/vector_column_inferred.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 0,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/vector_column_literal.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 0,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/vector_dot.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 32,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/vector_index.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 5,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/vector_length.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 3,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/vector_literal.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 0,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/vector_matrix_mul.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 29,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/vector_scalar_mul.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 30,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/vector_set.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 9,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/llvm/vector_sub.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 18,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/minimos_cuadrados/MinimosCuadrados.ae",
-      "profile": "BROKEN",
-      "expected_backends": [],
-      "condition": "frontend_rejection",
-      "expected_exit_code": null,
-      "stdout_sha256": null,
-      "stderr_sha256": null,
-      "timeout_seconds": 20,
-      "reason": "AetherTypeError: AetherTypeError at line 41, column 37 [operator]:"
-    },
-    {
-      "path": "examples/minimos_cuadrados/interactive.ae",
-      "profile": "BROKEN",
-      "expected_backends": [],
-      "condition": "frontend_rejection",
-      "expected_exit_code": null,
-      "stdout_sha256": null,
-      "stderr_sha256": null,
-      "timeout_seconds": 20,
-      "reason": "AetherTypeError: AetherTypeError at line 22, column 26 [name]:"
-    },
-    {
-      "path": "examples/nonlinear_systems/newton_system.ae",
-      "profile": "AST_ONLY_EXPERIMENTAL",
-      "expected_backends": [
-        "ast"
-      ],
       "condition": "frontend_acceptance",
       "expected_exit_code": null,
       "stdout_sha256": null,
       "stderr_sha256": null,
       "timeout_seconds": 20,
-      "reason": "Outside native/v1: AE-BACKEND-ARITHMETIC, AE-BACKEND-MATRIX, AE-BACKEND-VARIABLES_AND_CONST, AE-BACKEND-VECTOR"
+      "classification": "AST_ONLY_EXPERIMENTAL",
+      "backends": [
+        "ast"
+      ],
+      "run": false,
+      "outside_v1_features": [
+        "AE-BACKEND-ARITHMETIC",
+        "AE-BACKEND-FUNCTION_VALUES",
+        "AE-BACKEND-MATRIX",
+        "AE-BACKEND-MODULES",
+        "AE-BACKEND-PRIMITIVE_TYPES",
+        "AE-BACKEND-VARIABLES_AND_CONST",
+        "AE-BACKEND-VECTOR"
+      ]
+    },
+    {
+      "path": "examples/nonlinear_systems/newton_system.ae",
+      "condition": "ast_execution",
+      "expected_exit_code": 0,
+      "stdout_sha256": "aea58ea9793f7b4398d241695f97ae67731f17e50c3c33650ff1e8c4ef4bf51f",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "timeout_seconds": 20,
+      "classification": "AST_ONLY_EXPERIMENTAL",
+      "backends": [
+        "ast"
+      ],
+      "run": true,
+      "outside_v1_features": [
+        "AE-BACKEND-ARITHMETIC",
+        "AE-BACKEND-MATRIX",
+        "AE-BACKEND-VARIABLES_AND_CONST",
+        "AE-BACKEND-VECTOR"
+      ]
     },
     {
       "path": "examples/nose.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 0,
       "stdout_sha256": "8060aa0ac20a3e5db2b67325c98a0122f2d09a612574458225dcb9a086f87cc3",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/numerical_methods/Functions.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_module_emission",
       "expected_exit_code": null,
       "stdout_sha256": null,
       "stderr_sha256": null,
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": false
     },
     {
       "path": "examples/numerical_methods/Integration.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_module_emission",
       "expected_exit_code": null,
       "stdout_sha256": null,
       "stderr_sha256": null,
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": false
     },
     {
       "path": "examples/numerical_methods/Problems.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_module_emission",
       "expected_exit_code": null,
       "stdout_sha256": null,
       "stderr_sha256": null,
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": false
     },
     {
       "path": "examples/numerical_methods/Results.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_module_emission",
       "expected_exit_code": null,
       "stdout_sha256": null,
       "stderr_sha256": null,
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": false
     },
     {
       "path": "examples/numerical_methods/Roots.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_module_emission",
       "expected_exit_code": null,
       "stdout_sha256": null,
       "stderr_sha256": null,
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": false
     },
     {
       "path": "examples/numerical_methods/main.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 0,
       "stdout_sha256": "560634d7ffcb17d324d9fdb2587f62db21d8d613768c1cc9d3bb966ec25ddd83",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/probando.ae",
-      "profile": "AST_ONLY_EXPERIMENTAL",
-      "expected_backends": [
-        "ast"
-      ],
       "condition": "frontend_acceptance",
       "expected_exit_code": null,
       "stdout_sha256": null,
       "stderr_sha256": null,
       "timeout_seconds": 20,
-      "reason": "Outside native/v1: AE-BACKEND-FUNCTION_VALUES, AE-BACKEND-MODULES"
+      "classification": "AST_ONLY_EXPERIMENTAL",
+      "backends": [
+        "ast"
+      ],
+      "run": false,
+      "outside_v1_features": [
+        "AE-BACKEND-FUNCTION_VALUES",
+        "AE-BACKEND-MODULES"
+      ]
     },
     {
       "path": "examples/probandoNR.ae",
-      "profile": "AST_ONLY_EXPERIMENTAL",
-      "expected_backends": [
+      "condition": "ast_execution",
+      "expected_exit_code": 0,
+      "stdout_sha256": "db3edbe8c18ea1ba8a03fcca4eb69b11cfb344be40b24c01c1f006bb4bb272df",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "timeout_seconds": 20,
+      "classification": "AST_ONLY_EXPERIMENTAL",
+      "backends": [
         "ast"
       ],
-      "condition": "frontend_acceptance",
-      "expected_exit_code": null,
-      "stdout_sha256": null,
-      "stderr_sha256": null,
-      "timeout_seconds": 20,
-      "reason": "Outside native/v1: AE-BACKEND-VARIABLES_AND_CONST"
+      "run": true,
+      "outside_v1_features": [
+        "AE-BACKEND-VARIABLES_AND_CONST"
+      ]
     },
     {
       "path": "examples/pruebaException.ae",
-      "profile": "AST_ONLY_EXPERIMENTAL",
-      "expected_backends": [
+      "condition": "ast_execution",
+      "expected_exit_code": 1,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "de7dbf386f80ee003bc2307287d22b9b9ee79291d9ab2d686c3b78a7bb71e702",
+      "timeout_seconds": 20,
+      "classification": "AST_ONLY_EXPERIMENTAL",
+      "backends": [
         "ast"
       ],
-      "condition": "frontend_acceptance",
-      "expected_exit_code": null,
-      "stdout_sha256": null,
-      "stderr_sha256": null,
-      "timeout_seconds": 20,
-      "reason": "Outside native/v1: AE-BACKEND-ERROR_HANDLING"
-    },
-    {
-      "path": "examples/pruebaListas.ae",
-      "profile": "BROKEN",
-      "expected_backends": [],
-      "condition": "frontend_rejection",
-      "expected_exit_code": null,
-      "stdout_sha256": null,
-      "stderr_sha256": null,
-      "timeout_seconds": 20,
-      "reason": "AetherTypeError: AetherTypeError at line 2, column 9:"
+      "run": true,
+      "outside_v1_features": [
+        "AE-BACKEND-ERROR_HANDLING"
+      ]
     },
     {
       "path": "examples/structs/Geometry.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_module_emission",
       "expected_exit_code": null,
       "stdout_sha256": null,
       "stderr_sha256": null,
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": false
     },
     {
       "path": "examples/structs/custom_constructor_and_equality.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 0,
       "stdout_sha256": "5edd902c185651f7b4435906b451b6434ceafa3679a4350947659b55f173eb6e",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     },
     {
       "path": "examples/structs/main.ae",
-      "profile": "V1_NATIVE",
-      "expected_backends": [
-        "native"
-      ],
       "condition": "native_execution",
       "expected_exit_code": 0,
       "stdout_sha256": "5717e7c840171019a4eeab5b79a7f894a4986eaff93d04ec5b12c9a189f594bf",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "reason": null
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
     }
   ]
 }

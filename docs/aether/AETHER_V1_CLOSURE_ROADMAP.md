@@ -29,16 +29,26 @@ y la parte documental de B12; no altera el estado de B13 ni sustituye R2.
 
 ### R2 — Cerrar el catálogo oficial de ejemplos (P1)
 
-- conservar los 78 `V1_NATIVE` como catálogo oficial;
-- mover o rotular claramente los 21 `AST_ONLY_EXPERIMENTAL`;
-- decidir explícitamente si los 4 `BROKEN` se corrigen o pasan a fixtures de
-  migración; no migrarlos silenciosamente;
-- regenerar hashes/exit codes del manifest sólo después de revisión.
+**Estado: CERRADO (2026-07-18).** Se conservaron los 78 `V1_NATIVE`, los dos
+ejemplos reparables de álgebra pasaron a `AST_ONLY_EXPERIMENTAL`, el experimento
+de asignación a slice pasó a fixture inválido estructurado y el duplicado
+interactivo incompleto fue eliminado con decisión auditada. El catálogo público
+queda en 101 rutas: 78 native, 23 AST-only y cero `BROKEN`.
 
-**Gate:** `tests/aether/test_v1_profile_audit.py`: cobertura 1:1 de 103 rutas,
-emisión de los 78 native y observación de los 68 entry points.
+**Gate:** `scripts/check_examples_catalog.py` y
+`tests/aether/test_v1_profile_audit.py`: esquema y cobertura 1:1 de 101 rutas,
+typecheck/capability de todos los experimentales, pipeline verificado de los 78
+native, observación de los 68 entry points y ejecución AST observada para 14 de
+los 23 experimentales (los demás son input, plotting o módulos). El wheel distribuye README,
+manifiesto y ejemplos, sin fixtures; el sdist conserva el corpus de tests.
+
+**Evidencia de cierre:** `AETHER_EXAMPLES_CATALOG_AUDIT.md` registra ruta,
+historia, sintaxis, fase, referencias, valor y decisión de los cuatro casos.
+R2/B13 queda cerrado sin promover ninguna feature experimental a Aether 1.0.
 
 ### R3 — Normalizar diagnostics de pipeline (P2 relevante)
+
+**Estado: SIGUIENTE BLOQUEADOR DE RC3.**
 
 - conservar `AE-BACKEND-*` para capability;
 - mapear rechazo de verifier a categoría pública `verification` manteniendo
@@ -53,7 +63,7 @@ emisión de los 78 native y observación de los 68 entry points.
 
 - suite Python completa;
 - corpus diferencial (14 programas × O0/O1/O2);
-- los 103 casos del manifest;
+- los 101 casos del manifest;
 - Gradle/IntelliJ tests;
 - `scripts/ci.py`, build de wheel/sdist e instalación limpia;
 - `git diff --check` y release manifest desde un commit limpio.

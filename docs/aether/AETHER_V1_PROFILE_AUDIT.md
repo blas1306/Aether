@@ -17,6 +17,12 @@ encontraron **2 P1, 6 P2 y 3 P3**. Los dos estados `BROKEN` son superficies de
 producto —coherencia documental y catálogo de ejemplos—, no construcciones
 que el gate native acepte y luego miscompile.
 
+> Seguimiento del 2026-07-18: esta tabla conserva el snapshot que abrió B12 y
+> B13. Los planes R1/F02 y R2/F01 se cerraron después mediante gates dedicados.
+> El catálogo actual tiene 78 `V1_NATIVE`, 23 `AST_ONLY_EXPERIMENTAL` y cero
+> `BROKEN`; véase `AETHER_EXAMPLES_CATALOG_AUDIT.md`. El siguiente bloqueador de
+> RC3 es la normalización pública de verification/ICE.
+
 La evidencia ejecutada en este corte fue:
 
 - 103 archivos en `examples/`: 78 `V1_NATIVE`, 21
@@ -250,6 +256,10 @@ con `verification`/`internal compiler error`; se registra como F05.
 ## 7. Hallazgos
 
 ### F01 — P1 — El directorio de ejemplos no es todavía un catálogo v1 honesto
+
+**Resolución posterior: CERRADO en R2/B13 (2026-07-18).** Se preserva debajo la
+observación original como evidencia histórica; el manifiesto schema 2 y el gate
+actual ya no contienen entradas `BROKEN`.
 
 - **Feature/backend:** ejemplos / frontend y native.
 - **Reproducción:** ejecutar `tests/aether/test_v1_profile_audit.py` o leer el

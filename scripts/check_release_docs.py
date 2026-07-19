@@ -29,6 +29,7 @@ CLASSIFIED = {
     ROOT / "docs" / "aether" / "PERSISTENCE_FORMAT_DESIGN.md": "Design/RFC",
     ROOT / "docs" / "aether" / "AETHER_IR_DESIGN.md": "Design/RFC",
     ROOT / "docs" / "aether" / "AETHER_FRONTEND_EXPERIMENTS.md": "Non-normative",
+    ROOT / "docs" / "aether" / "AETHER_EXAMPLES_CATALOG_AUDIT.md": "Audit",
 }
 
 
@@ -174,6 +175,7 @@ def check() -> list[str]:
         "AETHER_V1_PROFILE_AUDIT.md",
         "AETHER_V1_PROFILE_DECISION.md",
         "../../examples/v1_examples_manifest.json",
+        "AETHER_EXAMPLES_CATALOG_AUDIT.md",
     )
     for target in required_index_links:
         if target not in readme:

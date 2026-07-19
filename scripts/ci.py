@@ -98,6 +98,11 @@ def build_stages(
             env,
         ),
         Stage(
+            "examples catalog",
+            ((python, str(ROOT / "scripts" / "check_examples_catalog.py")),),
+            env,
+        ),
+        Stage(
             "compileall",
             ((python, "-m", "compileall", "-q", str(ROOT / "src"), str(ROOT / "scripts")),),
             env,

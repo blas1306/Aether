@@ -27,35 +27,39 @@ EsPrimo2(1);
 println(EsPrimo2(2));
 println(EsPrimo2(25));
 
-n = [1; 2; 3; 4; 5; 6; 7; 8; 9; 10; 11; 12];
-p = [2; 3; 5; 7; 11; 13; 17; 19; 23; 29; 31; 37];
+Vector<int, Column> n = [1; 2; 3; 4; 5; 6; 7; 8; 9; 10; 11; 12];
+Vector<int, Column> p = [2; 3; 5; 7; 11; 13; 17; 19; 23; 29; 31; 37];
 
-A = Math.LinearAlgebra.ones(12, 2);
+Matrix<double> A = Math.LinearAlgebra.ones(12, 2);
 
-for (i in 0:11) {
-    A[i, 1] = n[i]*ln(n[i]);
+for (i in 1:12) {
+    A[i, 2] = n[i]*ln(n[i]);
 }
 
-z = A \ p;
+Vector<double, Column> z = A \ p;
 
 println("z = ", z);
 
-double f(double x) = z[0] + z[1] * x * ln(x);
+double f(double x) = z[1] + z[2] * x * ln(x);
 
 Plots.grid(true);
 Plots.title("Numeros primos y ajuste");
 Plots.xlabel("n");
 Plots.ylabel("p_n");
 Plots.plot(n, p, ".", label="p_n", color="red");
-Plots.plot!(f, 1, 13, label="ajuste");
+Plots.plot!(f, 1, 13, label="ajuste", n=50);
 
-err2 = Math.LinearAlgebra.norm(p - A*z)^2;
+double err2 = 0.0;
+for (i in 1:12) {
+    double residual = p[i] - f(n[i]);
+    err2 = err2 + residual^2;
+}
 println("err2 = ", err2);
 
 public int p_n(int x) {
     pp_n = int(f(x));
     if (EsPrimo2(pp_n) == false) {
-        return pp_n + int(ln(x)/z[0]);
+        return pp_n + int(ln(x)/z[1]);
     }
 
     return pp_n;

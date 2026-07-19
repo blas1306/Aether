@@ -18,7 +18,9 @@ The [native profile](AETHER_NATIVE_PROFILE_V1.md) is the executable capability
 refinement. The [profile audit](AETHER_V1_PROFILE_AUDIT.md) and
 [closed decision](AETHER_V1_PROFILE_DECISION.md) provide the 123-row closure
 evidence. The reproducible example classification is in the
-[v1 examples manifest](../../examples/v1_examples_manifest.json).
+[v1 examples manifest](../../examples/v1_examples_manifest.json), with the
+four formerly broken cases resolved in the
+[RC3 catalog audit](AETHER_EXAMPLES_CATALOG_AUDIT.md).
 
 ## Design / RFC
 
@@ -46,6 +48,7 @@ or future work. They do not expand the release profile.
 - [Final Aether v1 Profile Audit](AETHER_V1_PROFILE_AUDIT.md)
 - [Aether v1 Profile Decision](AETHER_V1_PROFILE_DECISION.md)
 - [Aether v1 Closure Roadmap](AETHER_V1_CLOSURE_ROADMAP.md)
+- [RC3 Examples Catalog Audit](AETHER_EXAMPLES_CATALOG_AUDIT.md)
 - [Aether v1 Release Readiness](AETHER_V1_RELEASE_READINESS.md)
 - [Backend Feature Parity](BACKEND_FEATURE_PARITY.md)
 - [Control Flow and Iteration Audit](CONTROL_FLOW_AND_ITERATION_AUDIT.md)

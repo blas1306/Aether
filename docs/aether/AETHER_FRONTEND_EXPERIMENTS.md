@@ -35,6 +35,15 @@ change without migration support. The AST interpreter is the REPL backend and
 differential reference for stable programs, but its additional behavior does
 not form an “AST profile” of Aether 1.0.
 
+The checked-in demonstrations are the entries classified
+`AST_ONLY_EXPERIMENTAL` in the
+[examples manifest](../../examples/v1_examples_manifest.json). Every such entry
+declares its concrete `outside_v1_features`; native must reject those features
+at the capability gate rather than reaching LLVM lowering. Interactive,
+plotting, module-only, and frontend-demonstration entries may declare
+`run: false`, while still being required to parse, typecheck, and match their
+native exclusion.
+
 ## Re-entry rule
 
 An experimental surface can enter a later language version only through an

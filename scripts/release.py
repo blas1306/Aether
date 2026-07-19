@@ -38,6 +38,9 @@ REQUIRED_WHEEL_SUFFIXES = (
     "share/doc/aether/AETHER_LANGUAGE_SPEC_V1.md",
     "share/doc/aether/AETHER_NATIVE_PROFILE_V1.md",
     "share/doc/aether/AETHER_FRONTEND_EXPERIMENTS.md",
+    "share/aether/examples/README.md",
+    "share/aether/examples/v1_examples_manifest.json",
+    "share/aether/examples/hello.ae",
 )
 
 
@@ -140,6 +143,9 @@ def verify_wheel(wheel: Path) -> None:
             raise ReleaseError(
                 "wheel embeds the source checkout path in: " + ", ".join(leaked)
             )
+        fixture_files = [name for name in names if "/tests/fixtures/" in name]
+        if fixture_files:
+            raise ReleaseError("wheel must not contain test fixtures: " + ", ".join(fixture_files))
 
 
 def verify_sdist(sdist: Path) -> None:
@@ -151,11 +157,17 @@ def verify_sdist(sdist: Path) -> None:
         "/docs/aether/AETHER_LANGUAGE_SPEC_V1.md",
         "/docs/aether/AETHER_NATIVE_PROFILE_V1.md",
         "/docs/aether/AETHER_FRONTEND_EXPERIMENTS.md",
+        "/docs/aether/AETHER_EXAMPLES_CATALOG_AUDIT.md",
+        "/examples/README.md",
+        "/examples/v1_examples_manifest.json",
         "/scripts/release.py",
         "/scripts/ci.py",
+        "/scripts/check_examples_catalog.py",
         "/scripts/differential_parity.py",
         "/src/aether/backend/llvm/runtime.py",
         "/src/aether/stdlib/core.py",
+        "/tests/fixtures/invalid/list_slice_assignment.ae",
+        "/tests/fixtures/invalid/list_slice_assignment.json",
     )
     for suffix in required_suffixes:
         if not any(name.endswith(suffix) for name in names):

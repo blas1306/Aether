@@ -1,121 +1,78 @@
-# Aether Examples
+# Aether examples
 
-After installing the local CLI with `python3 -m pip install -e .`, run the
-smallest example with:
+This directory contains two deliberately separate catalogs. The machine-readable
+source of truth is [`v1_examples_manifest.json`](v1_examples_manifest.json);
+this README explains the policy but does not duplicate its path list.
+
+Catalog count: **101 total = 78 V1_NATIVE + 23 AST_ONLY_EXPERIMENTAL; BROKEN = 0**.
+
+## Official Aether 1.0 examples
+
+Entries classified as `V1_NATIVE` belong to the normative Aether 1.0 profile.
+They pass the native capability gate, verified IR and SSA lowering, LLVM
+emission, and the release-gate observations declared in the manifest. Runnable
+entries declare their exit code, stdout/stderr hashes, and timeout; module-only
+entries declare `native_module_emission` and are compiled without execution.
+
+Run the smallest official example with:
 
 ```bash
 aether examples/hello.ae
 ```
 
-The same file can be inspected with `aether --tokens examples/hello.ae` or
-`aether --ast examples/hello.ae`.
+The repository keeps its existing topic directories to avoid a disruptive
+route migration. A file's directory is not its stability promise: only its
+manifest `classification` determines whether it is official.
 
-This directory contains example Aether programs organized by topic.
+## Frontend and AST experiments
 
-The executable source of truth is
-[`v1_examples_manifest.json`](v1_examples_manifest.json). At the 2026-07-18
-rc.2 audit it classifies all 103 `.ae` files as 78 `V1_NATIVE`, 21
-`AST_ONLY_EXPERIMENTAL`, and 4 `BROKEN`. Only `V1_NATIVE` entries are official
-Aether 1.0 examples. Keeping another file under `examples/` does not make its
-feature part of the stable profile.
+Entries classified as `AST_ONLY_EXPERIMENTAL` are non-normative experiments.
+They exercise real parser, typechecker, AST-interpreter, plotting, input,
+classes, exceptions, advanced algebra, or other surfaces outside Aether 1.0.
+Each entry declares `outside_v1_features` and must be rejected by native at the
+capability gate, before IR/LLVM lowering.
 
-## Non-Interactive Examples
+Use the AST backend explicitly when an entry is runnable:
 
-Examples that run to completion without user input are suitable for automated testing.
-
-### Structs
-
-- **Geometry.ae** - Define struct `Point` with fields `x` and `y`
-- **main.ae** - Create and access a `Point` instance using alias `P`
-- **custom_constructor_and_equality.ae** - Use an explicit struct constructor and compare struct values with structural equality
-
-Run both together as a module to demonstrate struct usage:
 ```bash
-python3 src/main.py --cli < /dev/null
-# import Geometry;
-# P p = P(1.0, 2.0);
-# println(p.x);
+aether --backend=ast examples/linear_algebra/basic_operations.ae
 ```
 
-### Classes (AST-only experimental)
+Some experimental entries have `run: false` because they are modules,
+interactive programs, plotting sessions, or frontend demonstrations. The gate
+still parses and typechecks them and verifies their exact native exclusion.
+They may change without Aether 1.0 compatibility guarantees. See the
+[frontend experiments annex](../docs/aether/AETHER_FRONTEND_EXPERIMENTS.md).
 
-- **counter_basic.ae** - Basic private state with public instance methods
-- **custom_constructor.ae** - Initialize private class state with an explicit constructor
-- **private_field_public_methods.ae** - Encapsulation with explicit getter and mutating method
-- **reference_aliasing.ae** - Assignment preserves a shared class reference
-- **const_with_mutable_alias.ae** - A `const` reference cannot mutate, while a mutable alias can
-- **implements_interface.ae** - Interface dispatch over a class preserves reference semantics
-- **invalid_cases.ae** - Invalid class operations kept as commented examples
+The corrected `linear_algebra/primes_advanced.ae` and
+`minimos_cuadrados/MinimosCuadrados.ae` remain in this experimental group: they
+now use current vector orientation and indexing, but their host algebra,
+plotting, inferred globals, and function-value behavior are outside v1.
 
-### Lists
+## Fixtures are not examples
 
-- **list_api.ae** - Historical broad List API exercise; the manifest records
-  the currently unsupported native combination. Native List examples live in
-  `llvm/list_*.ae`.
+Historical migration inputs and intentionally invalid programs live under
+`tests/fixtures/`, never under `examples/`, and never in this manifest. The
+slice-assignment experiment formerly presented as a list example is now a
+structured invalid fixture. The incomplete interactive least-squares duplicate
+was removed; the catalog audit records why it was not preserved as a fixture.
 
-### Aggregate collections
+## Validation
 
-- **aggregate_collections/particles.ae** - Native `Array<Particle>` with nested
-  `Vec2` structs, explicit by-value get/set semantics, and independent `copy()`.
+Fast catalog structure check:
 
-### Linear Algebra (mixed profile)
-
-- **basic_operations.ae** - Basic matrix/vector operations: creation, transposition, matrix multiplication, and iteration
-- **primes_check.ae** - Check if a number is prime using simple primality test
-- **primes_advanced.ae** - Check if a number is prime using optimized primality test with modular arithmetic
-
-### Non-Linear Systems
-
-- **newton_system.ae** - Solve a 2x2 non-linear system using Newton's method
-
-## Interactive Examples
-
-Examples that require user input are marked as **interactive** and should not be included in automated smoke tests.
-
-### Interactive
-
-- **sum_calculator.ae** - Interactive calculator that reads two numbers and prints their sum
-- **primes_interactive.ae** - Interactive primality checker
-- **fibonacci.ae** - Interactive Fibonacci sequence generator
-
-### Minimos Cuadrados (Least Squares)
-
-- **MinimosCuadrados.ae** - Least-squares polynomial fitting helpers
-- **interactive.ae** - Interactive least-squares polynomial fitting with plot visualization
-
-## Additional Examples
-
-- **Sorts/** - Sorting algorithms and their supporting exception/module example
-- **FormulaNumerosPrimos.ae** - Prime-number formula experiment
-- **Miller-Rabbin.ae** - Miller-Rabin primality experiment
-- **probando.ae**, **probandoNR.ae** - General language experiments
-- **pruebaException.ae** - Exception handling experiment
-- **pruebaListas.ae** - List operations experiment
-
-## Current Status
-
-- `llvm/`, the numerical-methods dogfood, Expense Tracker, the struct core,
-  FormulaNumerosPrimos and the two NR programs contain the native-v1 set;
-- `classes/`, `interactive/`, broad linear algebra, exceptions and plotting are
-  AST-only experimental or outside v1;
-- `linear_algebra/primes_advanced.ae`, both checked-in
-  `minimos_cuadrados/*.ae` files and `pruebaListas.ae` are currently `BROKEN`
-  and are retained as explicit audit/migration evidence, not official samples;
-- consult the manifest for each path, expected backend, exit code or success
-  condition, timeout and exclusion reason.
-
-## Notes
-
-### Experimental Examples
-
-The following examples are experimental or incomplete:
-
-- **nonlinear_systems/newton_system.ae** - Solver implementation may need verification
-- **minimos_cuadrados/interactive.ae** - Depends on plot support which may have limitations
-
-### Testing
-
-Validate the complete profile manifest and native observations with:
 ```bash
-python3 -m pytest tests/aether/test_v1_profile_audit.py -v
+.venv/bin/python scripts/check_examples_catalog.py --structure-only
+```
+
+Frontend, capability, IR, SSA, and LLVM gate:
+
+```bash
+.venv/bin/python scripts/check_examples_catalog.py
+```
+
+Full native observations (requires clang):
+
+```bash
+.venv/bin/python scripts/check_examples_catalog.py --run-native
 ```

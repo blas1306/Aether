@@ -56,3 +56,22 @@ version = { attr = "aether.version.PACKAGE_VERSION" }
     "docs/aether/AETHER_NATIVE_PROFILE_V1.md",
     "docs/aether/AETHER_FRONTEND_EXPERIMENTS.md",
 ]
+"share/aether/examples" = [
+    "examples/*.ae",
+    "examples/README.md",
+    "examples/v1_examples_manifest.json",
+]
+"share/aether/examples/ProbandoNR" = ["examples/ProbandoNR/*.ae"]
+"share/aether/examples/Sorts" = ["examples/Sorts/*.ae"]
+"share/aether/examples/aggregate_collections" = ["examples/aggregate_collections/*.ae"]
+"share/aether/examples/classes" = ["examples/classes/*.ae"]
+"share/aether/examples/expense_tracker" = ["examples/expense_tracker/*.ae", "examples/expense_tracker/*.md"]
+"share/aether/examples/interactive" = ["examples/interactive/*.ae"]
+"share/aether/examples/ir" = ["examples/ir/*.ae"]
+"share/aether/examples/linear_algebra" = ["examples/linear_algebra/*.ae"]
+"share/aether/examples/lists" = ["examples/lists/*.ae"]
+"share/aether/examples/llvm" = ["examples/llvm/*.ae"]
+"share/aether/examples/minimos_cuadrados" = ["examples/minimos_cuadrados/*.ae"]
+"share/aether/examples/nonlinear_systems" = ["examples/nonlinear_systems/*.ae"]
+"share/aether/examples/numerical_methods" = ["examples/numerical_methods/*.ae", "examples/numerical_methods/*.md"]
+"share/aether/examples/structs" = ["examples/structs/*.ae"]

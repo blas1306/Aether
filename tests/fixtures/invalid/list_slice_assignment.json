@@ -1,0 +1,8 @@
+{
+  "category": "type",
+  "diagnostic": "AetherTypeError",
+  "line": 2,
+  "column": 9,
+  "fragment": "Slice assignment is not supported yet.",
+  "expected_exit_code": 1
+}

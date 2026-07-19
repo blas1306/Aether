@@ -55,11 +55,12 @@ def test_pipeline_runs_stages_in_declared_order(monkeypatch: pytest.MonkeyPatch)
     assert exit_code == 0
     assert commands[0] == ["git", "diff", "--check"]
     assert commands[1][1].endswith("scripts/check_release_docs.py")
-    assert commands[2][1:4] == ["-m", "compileall", "-q"]
-    assert commands[3] == [str(ci.ROOT / ".venv" / "bin" / "pytest")]
-    assert [command[3] for command in commands[4:7]] == ["bench"] * 3
-    llvm_end = 7 + len(ci.LLVM_EXAMPLES)
-    assert [command[3] for command in commands[7:llvm_end]] == ["--emit-llvm"] * len(ci.LLVM_EXAMPLES)
+    assert commands[2][1].endswith("scripts/check_examples_catalog.py")
+    assert commands[3][1:4] == ["-m", "compileall", "-q"]
+    assert commands[4] == [str(ci.ROOT / ".venv" / "bin" / "pytest")]
+    assert [command[3] for command in commands[5:8]] == ["bench"] * 3
+    llvm_end = 8 + len(ci.LLVM_EXAMPLES)
+    assert [command[3] for command in commands[8:llvm_end]] == ["--emit-llvm"] * len(ci.LLVM_EXAMPLES)
     assert commands[llvm_end][1].endswith("scripts/differential_parity.py")
     assert [command[3] for command in commands[llvm_end + 1:]] == ["build"] * len(ci.LLVM_EXAMPLES)
     assert output.getvalue().index("OK tests") < output.getvalue().index("OK benchmarks")
@@ -73,7 +74,7 @@ def test_pipeline_stops_and_propagates_command_failure(monkeypatch: pytest.Monke
 
     def fake_run(command: list[str], **_kwargs) -> subprocess.CompletedProcess[str]:
         commands.append(command)
-        if len(commands) == 4:
+        if len(commands) == 5:
             return subprocess.CompletedProcess(command, 7, stdout="", stderr="pytest failed")
         return completed()
 
@@ -83,7 +84,7 @@ def test_pipeline_stops_and_propagates_command_failure(monkeypatch: pytest.Monke
     exit_code = ci.run_pipeline(ci.parse_args([]), which=lambda _name: "/usr/bin/clang", stdout=output)
 
     assert exit_code == 7
-    assert len(commands) == 4
+    assert len(commands) == 5
     assert "pytest failed" in output.getvalue()
     assert "CI failed at stage: tests" in output.getvalue()
 

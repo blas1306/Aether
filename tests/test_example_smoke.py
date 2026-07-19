@@ -233,10 +233,8 @@ class TestInteractiveExamplesNotIncluded:
             filepath = interactive_dir / filename
             assert filepath.exists(), f"Expected interactive example not found: {filename}"
     
-    def test_minimos_cuadrados_interactive_exists(self):
-        """Verify interactive minimos_cuadrados example is in right location."""
+    def test_removed_incomplete_minimos_cuadrados_is_not_a_public_example(self):
+        """The unsupported closure-based duplicate must stay out of examples."""
         examples_dir = get_examples_dir()
-        mc_dir = examples_dir / "minimos_cuadrados"
-        interactive_file = mc_dir / "interactive.ae"
-        
-        assert interactive_file.exists(), "Interactive minimos_cuadrados example not found"
+
+        assert not (examples_dir / "minimos_cuadrados" / "interactive.ae").exists()

@@ -1,8 +1,8 @@
 import Math.LinearAlgebra
 import Plots
 
-Vector<double> t = [2, 3, 4, 5, 6];
-Vector<double> y = [3, 5, 7, 11, 13];
+Vector<double, Column> t = [2; 3; 4; 5; 6];
+Vector<double, Column> y = [3; 5; 7; 11; 13];
 Vector<double> base(double x) {
     yt = [1, x*ln(x)];
     return yt;
@@ -12,24 +12,24 @@ st = size(t);
 sy = size(y);
 sbase = size(base(1));
 
-mt = st[0];
-my = sy[0];
-mbase = sbase[0];
+mt = st[1];
+my = sy[1];
+mbase = sbase[1];
 
-A = Math.LinearAlgebra.zeros(mt, mbase);
+Matrix<double> A = Math.LinearAlgebra.zeros(mt, mbase);
 
-for (i in 0:(mt - 1)) {
-    for (j in 0:(mbase - 1)) {
+for (i in 1:mt) {
+    for (j in 1:mbase) {
         A[i, j] = base(t[i])[j];
     }
 }
 
-z = A \ y;
+Vector<double, Column> z = A \ y;
 
 double modelo(double x) {
     double acc = 0;
 
-    for (j in 0:(mbase - 1)) {
+    for (j in 1:mbase) {
         acc = acc + z[j]*base(x)[j];
     }
 
@@ -38,7 +38,11 @@ double modelo(double x) {
 
 println("z = ", z);
 
-err2 = Math.LinearAlgebra.norm(y - A*z)^2;
+double err2 = 0.0;
+for (i in 1:mt) {
+    double residual = y[i] - modelo(t[i]);
+    err2 = err2 + residual^2;
+}
 println("err2 = ", err2);
 
 Plots.grid(true);
@@ -46,6 +50,6 @@ Plots.title("Minimos Cuadrados");
 Plots.xlabel("t");
 Plots.ylabel("y");
 Plots.plot(t, y, ".", label="Datos", color="red");
-Plots.plot!(modelo, t[0]-1, t[mt-1]+1, label="Ajuste");
+Plots.plot!(modelo, t[1]-1, t[mt]+1, label="Ajuste", n=50);
 
 println(modelo(8));
