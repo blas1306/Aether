@@ -42,6 +42,10 @@ node_modules/
 # =========================
 *.pdf
 *.png
+!vscode-extension/resources/icon.png
+*.vsix
+!vscode-extension/.vscode/
+!vscode-extension/.vscode/**
 
 # =========================
 # Test / debug outputs

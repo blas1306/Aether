@@ -1,0 +1,226 @@
+{
+  "name": "aether-vscode",
+  "displayName": "Aether",
+  "description": "Official development extension for the Aether language, backed by aether-lsp and the Aether CLI.",
+  "version": "0.1.0",
+  "publisher": "aether-dev",
+  "license": "GPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/blas1306/Aether.git",
+    "directory": "vscode-extension"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Formatters"
+  ],
+  "keywords": [
+    "aether",
+    "language",
+    "lsp",
+    "llvm"
+  ],
+  "icon": "resources/icon.png",
+  "main": "./out/src/extension.js",
+  "activationEvents": [
+    "onLanguage:aether",
+    "onCommand:aether.run",
+    "onCommand:aether.check",
+    "onCommand:aether.runAst",
+    "onCommand:aether.emitIr",
+    "onCommand:aether.emitSsa",
+    "onCommand:aether.emitLlvm",
+    "onCommand:aether.restartLanguageServer",
+    "onCommand:aether.showOutput"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "aether",
+        "aliases": [
+          "Aether",
+          "aether"
+        ],
+        "extensions": [
+          ".ae"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "aether",
+        "scopeName": "source.aether",
+        "path": "./syntaxes/aether.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "aether.run",
+        "title": "Aether: Run",
+        "icon": "$(play)"
+      },
+      {
+        "command": "aether.check",
+        "title": "Aether: Check"
+      },
+      {
+        "command": "aether.runAst",
+        "title": "Aether: Run with AST Backend"
+      },
+      {
+        "command": "aether.emitIr",
+        "title": "Aether: Emit IR"
+      },
+      {
+        "command": "aether.emitSsa",
+        "title": "Aether: Emit SSA"
+      },
+      {
+        "command": "aether.emitLlvm",
+        "title": "Aether: Emit LLVM"
+      },
+      {
+        "command": "aether.restartLanguageServer",
+        "title": "Aether: Restart Language Server"
+      },
+      {
+        "command": "aether.showOutput",
+        "title": "Aether: Show Output"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "aether.run",
+          "when": "editorLangId == aether",
+          "group": "navigation@1"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "aether.run",
+          "when": "editorLangId == aether",
+          "group": "aether@1"
+        },
+        {
+          "command": "aether.check",
+          "when": "editorLangId == aether",
+          "group": "aether@2"
+        },
+        {
+          "command": "aether.runAst",
+          "when": "editorLangId == aether",
+          "group": "aether@3"
+        },
+        {
+          "command": "aether.emitIr",
+          "when": "editorLangId == aether",
+          "group": "aether@4"
+        },
+        {
+          "command": "aether.emitSsa",
+          "when": "editorLangId == aether",
+          "group": "aether@5"
+        },
+        {
+          "command": "aether.emitLlvm",
+          "when": "editorLangId == aether",
+          "group": "aether@6"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "aether.run",
+          "when": "editorLangId == aether"
+        },
+        {
+          "command": "aether.check",
+          "when": "editorLangId == aether"
+        },
+        {
+          "command": "aether.runAst",
+          "when": "editorLangId == aether"
+        },
+        {
+          "command": "aether.emitIr",
+          "when": "editorLangId == aether"
+        },
+        {
+          "command": "aether.emitSsa",
+          "when": "editorLangId == aether"
+        },
+        {
+          "command": "aether.emitLlvm",
+          "when": "editorLangId == aether"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Aether",
+      "properties": {
+        "aether.executable": {
+          "type": "string",
+          "default": "aether",
+          "scope": "machine-overridable",
+          "description": "Aether CLI executable name or path."
+        },
+        "aether.lsp.executable": {
+          "type": "string",
+          "default": "aether-lsp",
+          "scope": "machine-overridable",
+          "description": "Aether language server executable name or path."
+        },
+        "aether.defaultBackend": {
+          "type": "string",
+          "enum": [
+            "native",
+            "ast"
+          ],
+          "default": "native",
+          "description": "Backend used by Aether: Run. Native is the primary backend; AST is auxiliary."
+        },
+        "aether.optimizationLevel": {
+          "type": "string",
+          "enum": [
+            "O0",
+            "O1",
+            "O2"
+          ],
+          "default": "O0",
+          "description": "Optimization level passed to Aether: Emit IR. The CLI currently limits -O flags to IR emission."
+        },
+        "aether.revealOutput": {
+          "type": "string",
+          "enum": [
+            "always",
+            "onError",
+            "never"
+          ],
+          "default": "onError",
+          "description": "Controls when the Aether output channel is revealed."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "tsc --noEmit -p ./",
+    "test": "npm run compile && node --test out/test/*.test.js",
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "vscode-languageclient": "9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "22.15.3",
+    "@types/vscode": "1.85.0",
+    "@vscode/vsce": "3.9.2",
+    "typescript": "5.9.3"
+  }
+}

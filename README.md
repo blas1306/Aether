@@ -344,9 +344,12 @@ aether --repl
 El REPL usa `AetherSession`, conserva variables/funciones y revierte una entrada
 fallida sin destruir el estado confirmado. Solo admite AST.
 
-El paquete `src/aether_lsp/` ofrece diagnósticos y soporte incremental de
+El paquete `src/aether_lsp/` ofrece el servidor compartido de diagnósticos,
 completion, hover y símbolos. El plugin IntelliJ vive en
-`tools/intellij-aether/`; la aplicación de escritorio opcional se inicia con:
+`tools/intellij-aether/`. La extensión oficial de VS Code, todavía en
+desarrollo y no publicada, vive en `vscode-extension/`; ambos editores usan el
+mismo LSP y mantienen la semántica en Aether. La aplicación de escritorio
+opcional se inicia con:
 
 ```bash
 python3 src/main.py
@@ -380,6 +383,9 @@ Véase [benchmarks/README.md](benchmarks/README.md).
 - `src/aether/`: frontend, intérprete, IR, SSA, backend LLVM, runtime, CLI y
   builtins actuales.
 - `src/aether_lsp/`: servidor de lenguaje.
+- `vscode-extension/`: extensión oficial de VS Code en desarrollo, cliente del
+  LSP y del CLI externos.
+- `tools/intellij-aether/`: plugin IntelliJ, también cliente del LSP compartido.
 - `src/`: aplicación/editor activos.
 - `tests/`: tests del lenguaje, compiler, CLI, LSP y UI.
 - `examples/`: programas Aether activos.
