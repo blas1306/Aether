@@ -6,8 +6,8 @@ compiler remains entirely on its existing Python path.
 
 ## Crates
 
-- `aether-ir` will own the language-independent Rust representation of Aether
-  IR. It does not contain an IR model or DTO implementation yet.
+- `aether-ir` owns the language-independent Rust representation of Aether IR.
+  It contains no verifier, parser, serializer, DTO, or compiler integration.
 - `aether-verifier` will verify owned Aether IR. It does not contain verifier
   rules yet.
 - `aether-python` will provide the eventual Python integration boundary. It does
