@@ -1,0 +1,28 @@
+List<int> twoSum(List<int> nums, int target) {
+    int n = nums.length;
+
+    for (int i in 0:n-1) {
+        for (int j in (i+1):(n-1)) {
+            if (nums[i] + nums[j] == target) {
+                return {i, j};
+            }
+        }
+    }
+
+    return {};
+}
+
+int main() {
+    List<int> nums = {2, 7, 11, 15};
+    int target = 9;
+
+    List<int> result = twoSum(nums, target);
+
+    if (result.length == 2) {
+        println("Indices: ", result[0], ", ", result[1]);
+    } else {
+        println("No solution found.");
+    }
+
+    return 0;
+}

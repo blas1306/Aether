@@ -28,6 +28,7 @@ release = [
 
 [project.scripts]
 aether = "aether.cli:main"
+aether-lsp = "aether_lsp.server:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
