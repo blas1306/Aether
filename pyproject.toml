@@ -52,10 +52,14 @@ version = { attr = "aether.version.PACKAGE_VERSION" }
 
 [tool.setuptools.data-files]
 "share/doc/aether" = [
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
     "docs/aether/AETHER_LANGUAGE_SPEC_V1.md",
     "docs/aether/AETHER_NATIVE_PROFILE_V1.md",
     "docs/aether/AETHER_FRONTEND_EXPERIMENTS.md",
     "docs/aether/AETHER_DIAGNOSTICS.md",
+    "docs/aether/AETHER_1_0_0_RC3_RELEASE_NOTES.md",
 ]
 "share/aether/examples" = [
     "examples/*.ae",

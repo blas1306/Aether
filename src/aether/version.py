@@ -3,7 +3,7 @@ from __future__ import annotations
 # This PEP 440 value is the only hand-maintained Aether release identity.
 # Setuptools can read the literal without importing the package in an isolated
 # build. User-facing tools derive the hyphenated language spelling below.
-PACKAGE_VERSION = "1.0.0rc2"
+PACKAGE_VERSION = "1.0.0rc3"
 
 
 def _language_version(package_version: str) -> str:
@@ -17,4 +17,5 @@ def _language_version(package_version: str) -> str:
 
 
 LANGUAGE_VERSION = _language_version(PACKAGE_VERSION)
+RELEASE_TAG = f"v{LANGUAGE_VERSION}"
 __version__ = PACKAGE_VERSION

@@ -7,7 +7,7 @@ import sys
 
 from aether.capabilities import CAPABILITY_PROFILE_VERSION
 from aether.cli import main as cli_main
-from aether.version import LANGUAGE_VERSION, PACKAGE_VERSION, __version__
+from aether.version import LANGUAGE_VERSION, PACKAGE_VERSION, RELEASE_TAG, __version__
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,8 +24,9 @@ def _load_script(name: str):
 
 
 def test_canonical_version_maps_public_and_python_metadata() -> None:
-    assert PACKAGE_VERSION == "1.0.0rc2"
-    assert LANGUAGE_VERSION == "1.0.0-rc.2"
+    assert PACKAGE_VERSION == "1.0.0rc3"
+    assert LANGUAGE_VERSION == "1.0.0-rc.3"
+    assert RELEASE_TAG == "v1.0.0-rc.3"
     assert __version__ == PACKAGE_VERSION
 
 
@@ -64,6 +65,7 @@ def test_release_manifest_uses_canonical_versions_and_platform(tmp_path: Path) -
     release = _load_script("release.py")
     assert release.LANGUAGE_VERSION == LANGUAGE_VERSION
     assert release.PACKAGE_VERSION == PACKAGE_VERSION
+    assert release.RELEASE_TAG == RELEASE_TAG
     assert release.CAPABILITY_PROFILE_VERSION == CAPABILITY_PROFILE_VERSION
     assert release.SUPPORTED_NATIVE_PLATFORMS == ("Linux x86_64",)
     wheel = tmp_path / "candidate.whl"
@@ -83,6 +85,7 @@ def test_release_manifest_uses_canonical_versions_and_platform(tmp_path: Path) -
 
     assert manifest["language_version"] == LANGUAGE_VERSION
     assert manifest["package_version"] == PACKAGE_VERSION
+    assert manifest["release_tag"] == RELEASE_TAG
     assert manifest["capability_profile_version"] == CAPABILITY_PROFILE_VERSION
     assert manifest["dirty_worktree"] is True
     assert manifest["reproducibility"]["bit_for_bit_claimed"] is False
@@ -96,6 +99,10 @@ def test_packaging_declares_dynamic_canonical_version_and_essential_docs() -> No
     assert '"docs/aether/AETHER_NATIVE_PROFILE_V1.md"' in metadata
     assert '"docs/aether/AETHER_FRONTEND_EXPERIMENTS.md"' in metadata
     assert '"docs/aether/AETHER_DIAGNOSTICS.md"' in metadata
+    assert '"docs/aether/AETHER_1_0_0_RC3_RELEASE_NOTES.md"' in metadata
+    assert '"CHANGELOG.md"' in metadata
+    assert '"LICENSE"' in metadata
+    assert '"README.md"' in metadata
     assert '"examples/v1_examples_manifest.json"' in metadata
     assert '"examples/README.md"' in metadata
     assert '"share/aether/examples/llvm"' in metadata

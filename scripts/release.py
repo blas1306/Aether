@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from pathlib import PurePosixPath
 import platform
 import shutil
 import subprocess
@@ -23,26 +24,62 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from aether.capabilities import CAPABILITY_PROFILE_VERSION  # noqa: E402
-from aether.version import LANGUAGE_VERSION, PACKAGE_VERSION  # noqa: E402
+from aether.version import LANGUAGE_VERSION, PACKAGE_VERSION, RELEASE_TAG  # noqa: E402
 
 
 DIST = ROOT / "dist"
 SUPPORTED_NATIVE_PLATFORMS = ("Linux x86_64",)
 REQUIRED_WHEEL_PATHS = (
+    "aether/cli.py",
+    "aether/pipeline.py",
+    "aether/typechecker.py",
+    "aether/interpreter.py",
     "aether/stdlib/core.py",
     "aether/stdlib/io.py",
     "aether/backend/llvm/runtime.py",
     "aether/backend/llvm/string_runtime.py",
+    "aether_lsp/server.py",
 )
 REQUIRED_WHEEL_SUFFIXES = (
+    "share/doc/aether/README.md",
+    "share/doc/aether/CHANGELOG.md",
+    "share/doc/aether/LICENSE",
     "share/doc/aether/AETHER_LANGUAGE_SPEC_V1.md",
     "share/doc/aether/AETHER_NATIVE_PROFILE_V1.md",
     "share/doc/aether/AETHER_FRONTEND_EXPERIMENTS.md",
     "share/doc/aether/AETHER_DIAGNOSTICS.md",
+    "share/doc/aether/AETHER_1_0_0_RC3_RELEASE_NOTES.md",
     "share/aether/examples/README.md",
     "share/aether/examples/v1_examples_manifest.json",
     "share/aether/examples/hello.ae",
 )
+FORBIDDEN_ARCHIVE_PARTS = frozenset(
+    {
+        ".git",
+        ".venv",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        "__pycache__",
+        "build",
+        "dist",
+    }
+)
+FORBIDDEN_CREDENTIAL_NAMES = frozenset(
+    {".env", ".pypirc", "credentials.json", "id_rsa", "id_ed25519"}
+)
+FORBIDDEN_BINARY_SUFFIXES = (
+    ".a",
+    ".bc",
+    ".dll",
+    ".dylib",
+    ".exe",
+    ".ll",
+    ".o",
+    ".obj",
+    ".so",
+)
+FORBIDDEN_TEMP_SUFFIXES = (".bak", ".swp", ".temp", ".tmp", "~")
 
 
 class ReleaseError(RuntimeError):
@@ -125,40 +162,103 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _public_example_paths() -> tuple[str, ...]:
+    manifest = json.loads(
+        (ROOT / "examples" / "v1_examples_manifest.json").read_text(encoding="utf-8")
+    )
+    return tuple(str(entry["path"]) for entry in manifest["entries"])
+
+
+def _unsafe_archive_names(names: set[str], *, wheel: bool) -> list[str]:
+    unsafe: list[str] = []
+    for name in names:
+        path = PurePosixPath(name.rstrip("/"))
+        parts = tuple(part.lower() for part in path.parts)
+        basename = parts[-1] if parts else ""
+        if path.is_absolute() or ".." in parts:
+            unsafe.append(name)
+            continue
+        if FORBIDDEN_ARCHIVE_PARTS.intersection(parts):
+            unsafe.append(name)
+            continue
+        if wheel and ({"tests", "fixtures"}.intersection(parts)):
+            unsafe.append(name)
+            continue
+        if basename in FORBIDDEN_CREDENTIAL_NAMES:
+            unsafe.append(name)
+            continue
+        if basename.endswith(FORBIDDEN_BINARY_SUFFIXES + FORBIDDEN_TEMP_SUFFIXES):
+            unsafe.append(name)
+    return sorted(unsafe)
+
+
 def verify_wheel(wheel: Path) -> None:
     checkout_bytes = str(ROOT.resolve()).encode()
     with zipfile.ZipFile(wheel) as archive:
         names = set(archive.namelist())
+        unsafe = _unsafe_archive_names(names, wheel=True)
+        if unsafe:
+            raise ReleaseError("wheel contains forbidden paths: " + ", ".join(unsafe))
         for required in REQUIRED_WHEEL_PATHS:
             if required not in names:
                 raise ReleaseError(f"wheel is missing required runtime file: {required}")
         for suffix in REQUIRED_WHEEL_SUFFIXES:
             if not any(name.endswith(suffix) for name in names):
                 raise ReleaseError(f"wheel is missing essential documentation: {suffix}")
+        for example in _public_example_paths():
+            installed = "share/aether/" + example
+            if not any(name.endswith(installed) for name in names):
+                raise ReleaseError(f"wheel is missing public example: {example}")
+        metadata_names = [name for name in names if name.endswith(".dist-info/METADATA")]
+        if len(metadata_names) != 1:
+            raise ReleaseError("wheel must contain exactly one METADATA file")
+        metadata = archive.read(metadata_names[0]).decode("utf-8")
+        if f"Version: {PACKAGE_VERSION}\n" not in metadata:
+            raise ReleaseError("wheel metadata does not contain the canonical package version")
+        entry_points = [name for name in names if name.endswith(".dist-info/entry_points.txt")]
+        if len(entry_points) != 1 or b"aether = aether.cli:main" not in archive.read(entry_points[0]):
+            raise ReleaseError("wheel is missing the canonical aether CLI entry point")
         leaked = [
             name
             for name in names
-            if not name.endswith(".pyc") and checkout_bytes in archive.read(name)
+            if not name.endswith("/")
+            and not name.endswith(".pyc")
+            and checkout_bytes in archive.read(name)
         ]
         if leaked:
             raise ReleaseError(
                 "wheel embeds the source checkout path in: " + ", ".join(leaked)
             )
-        fixture_files = [name for name in names if "/tests/fixtures/" in name]
-        if fixture_files:
-            raise ReleaseError("wheel must not contain test fixtures: " + ", ".join(fixture_files))
 
 
 def verify_sdist(sdist: Path) -> None:
     with tarfile.open(sdist, "r:gz") as archive:
-        names = archive.getnames()
+        members = archive.getmembers()
+        names = {member.name for member in members}
+        unsafe = _unsafe_archive_names(names, wheel=False)
+        if unsafe:
+            raise ReleaseError("sdist contains forbidden paths: " + ", ".join(unsafe))
+        checkout_bytes = str(ROOT.resolve()).encode()
+        leaked: list[str] = []
+        for member in members:
+            if not member.isfile():
+                continue
+            stream = archive.extractfile(member)
+            if stream is not None and checkout_bytes in stream.read():
+                leaked.append(member.name)
+        if leaked:
+            raise ReleaseError(
+                "sdist embeds the source checkout path in: " + ", ".join(leaked)
+            )
     required_suffixes = (
         "/LICENSE",
         "/README.md",
+        "/CHANGELOG.md",
         "/docs/aether/AETHER_LANGUAGE_SPEC_V1.md",
         "/docs/aether/AETHER_NATIVE_PROFILE_V1.md",
         "/docs/aether/AETHER_FRONTEND_EXPERIMENTS.md",
         "/docs/aether/AETHER_DIAGNOSTICS.md",
+        "/docs/aether/AETHER_1_0_0_RC3_RELEASE_NOTES.md",
         "/docs/aether/AETHER_EXAMPLES_CATALOG_AUDIT.md",
         "/examples/README.md",
         "/examples/v1_examples_manifest.json",
@@ -167,14 +267,20 @@ def verify_sdist(sdist: Path) -> None:
         "/scripts/check_examples_catalog.py",
         "/scripts/check_diagnostics_contract.py",
         "/scripts/differential_parity.py",
+        "/src/aether/cli.py",
+        "/src/aether/pipeline.py",
         "/src/aether/backend/llvm/runtime.py",
         "/src/aether/stdlib/core.py",
+        "/src/aether_lsp/server.py",
         "/tests/fixtures/invalid/list_slice_assignment.ae",
         "/tests/fixtures/invalid/list_slice_assignment.json",
     )
     for suffix in required_suffixes:
         if not any(name.endswith(suffix) for name in names):
             raise ReleaseError(f"sdist is missing required file: {suffix}")
+    for example in _public_example_paths():
+        if not any(name.endswith("/" + example) for name in names):
+            raise ReleaseError(f"sdist is missing public example: {example}")
 
 
 def _venv_commands(environment: Path) -> tuple[Path, Path]:
@@ -370,6 +476,7 @@ def manifest_payload(
         "schema_version": 1,
         "language_version": LANGUAGE_VERSION,
         "package_version": PACKAGE_VERSION,
+        "release_tag": RELEASE_TAG,
         "capability_profile_version": CAPABILITY_PROFILE_VERSION,
         "git_commit": commit,
         "dirty_worktree": dirty,

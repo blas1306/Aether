@@ -8,7 +8,7 @@ Single-expression functions use `double f(double x) = expression;` or
 
 Primer corte del plugin Aether para IDEs IntelliJ.
 
-Compatibilidad declarada: lenguaje Aether `1.0.0-rc.2`. La versión del plugin
+Compatibilidad declarada: lenguaje Aether `1.0.0-rc.3`. La versión del plugin
 se deriva de la fuente canónica de versión del lenguaje al construir con
 Gradle. El plugin es un artefacto separado y no se incluye en el wheel Python.
 Esta metadata no afirma validación de Gradle/IDE para la RC si esos tests no se

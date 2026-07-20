@@ -9,6 +9,31 @@ Aether sigue en desarrollo y no tiene una release estable. La especificación
 v0 se conserva como historia; desde el primer candidato v1, el contrato vigente
 es la spec v1 junto con el perfil native normativo.
 
+## 1.0.0-rc.3 — 2026-07-19
+
+Tercer candidato para validar el perfil Aether 1.0 antes de la versión final.
+No se presenta como una release estable.
+
+### Contrato y alcance
+
+- Publicación de la especificación normativa v1 y delimitación exacta del
+  perfil estable frente a los experimentos disponibles únicamente en AST.
+- Catálogo schema 2 con 78 ejemplos native, 23 experimentos AST-only y ninguna
+  entrada `BROKEN`.
+- Contrato público de diagnósticos estructurados, frontera de errores internos
+  del compilador (ICE) sin traceback por defecto, `--debug`, `--check` y exit
+  codes documentados.
+
+### Correcciones y verificación
+
+- Mejoras de paridad AST/native y correcciones del backend numérico, incluidas
+  promociones, operaciones mixtas, potencia y límites de enteros/rangos.
+- Funciones abreviadas tipadas alineadas con el capability gate y paréntesis
+  obligatorios en los headers de control.
+- Release gates ampliados para documentación, catálogo de ejemplos,
+  diagnósticos, paridad diferencial, construcción native y contenido de los
+  artefactos.
+
 ## 1.0.0-rc.2 — 2026-07-18
 
 Segundo candidato del contrato Aether v1. No añade funcionalidades al runtime

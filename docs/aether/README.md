@@ -7,6 +7,7 @@ the release contract.
 
 - [Aether 1.0 Language Specification](AETHER_LANGUAGE_SPEC_V1.md)
 - [Aether Native Profile v1](AETHER_NATIVE_PROFILE_V1.md)
+- [Aether 1.0.0-rc.3 release notes](AETHER_1_0_0_RC3_RELEASE_NOTES.md)
 
 These two documents define the single stable Aether 1.0 profile frozen for the
 `1.0.0-rc.3` candidate. Frontend or AST acceptance does not widen it. The ALPT1

@@ -42,7 +42,7 @@ def test_example_manifest_is_complete_authoritative_and_uses_closed_states() -> 
     manifest_paths = [str(entry["path"]) for entry in ENTRIES]
 
     assert MANIFEST["schema_version"] == 2
-    assert MANIFEST["language_version"] == "1.0.0-rc.2"
+    assert MANIFEST["language_version"] == "1.0.0-rc.3"
     assert MANIFEST["native_capability_profile"] == "22"
     assert len(manifest_paths) == len(set(manifest_paths))
     assert set(manifest_paths) == actual_paths

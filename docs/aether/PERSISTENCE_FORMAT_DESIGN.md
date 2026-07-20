@@ -2,7 +2,7 @@
 
 > Clasificación: **Design/RFC with a normative ALPT1 byte contract**. Es
 > normativa sólo para el formato ALPT1; no amplía el lenguaje ni el perfil
-> native de [Aether `1.0.0-rc.2`](AETHER_LANGUAGE_SPEC_V1.md).
+> native de [Aether `1.0.0-rc.3`](AETHER_LANGUAGE_SPEC_V1.md).
 
 Estado: RFC aprobada; ALPT1 y guardado atómico/durable POSIX disponibles en
 perfil 21.

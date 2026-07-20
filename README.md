@@ -10,18 +10,19 @@ de lenguaje y sin relegar módulos, tipos, errores o IO a soluciones
 improvisadas. Aether no intenta reemplazar a Python, Julia, C++, Rust, Java o
 C# en todos los escenarios.
 
-Aether está preparando **`1.0.0-rc.2`**. Es un candidato para validar el
+Aether está preparando **`1.0.0-rc.3`**. Es un candidato para validar el
 contrato v1 y el perfil native 22, no una release final ni una declaración de
 production-readiness. El frontend/intérprete AST cubre una superficie mayor
 que el compilador native; la frontera aceptada está definida por la
 [especificación normativa v1](docs/aether/AETHER_LANGUAGE_SPEC_V1.md) y el
 [perfil native normativo](docs/aether/AETHER_NATIVE_PROFILE_V1.md).
 
-La sintaxis de control de `1.0.0-rc.2` usa headers parentizados:
-`if (condition)`, `while (condition)` y `for (binding in iterable)`. El código
-escrito para rc.1 debe migrarse; las formas sin paréntesis se rechazan con un
-diagnóstico dedicado. La compatibilidad fuente con rc.1 no está garantizada;
-el migrador token-aware actualiza fuentes sin alterar strings ni comentarios.
+La sintaxis de control vigente, introducida en `1.0.0-rc.2`, usa headers
+parentizados: `if (condition)`, `while (condition)` y
+`for (binding in iterable)`. El código escrito para rc.1 debe migrarse; las
+formas sin paréntesis se rechazan con un diagnóstico dedicado. La
+compatibilidad fuente con rc.1 no está garantizada; el migrador token-aware
+actualiza fuentes sin alterar strings ni comentarios.
 
 ```aether
 struct Point {
@@ -132,14 +133,14 @@ Desde un wheel RC construido localmente (no se publica automáticamente):
 
 ```bash
 python3 -m venv .venv
-.venv/bin/python -m pip install dist/aether_language-1.0.0rc2-py3-none-any.whl
+.venv/bin/python -m pip install dist/aether_language-1.0.0rc3-py3-none-any.whl
 .venv/bin/aether --version
 ```
 
 El resultado esperado identifica por separado lenguaje y perfil:
 
 ```text
-Aether 1.0.0-rc.2
+Aether 1.0.0-rc.3
 Native capability profile 22
 ```
 
