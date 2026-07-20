@@ -29,5 +29,7 @@ private class AetherRunConfigurationFactory(type: AetherRunConfigurationType) : 
     override fun getId(): String = "AetherFile"
 
     override fun createTemplateConfiguration(project: Project): AetherRunConfiguration =
-        AetherRunConfiguration(project, this, "Aether File")
+        AetherRunConfiguration(project, this, "Aether File").apply {
+            backend = AetherSettingsState.getInstance().state.backend()
+        }
 }

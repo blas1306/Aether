@@ -24,6 +24,8 @@ class AetherRunConfiguration(
     name: String,
 ) : RunConfigurationBase<RunProfileState>(project, factory, name) {
     var filePath: String = ""
+    var backend: AetherBackend = AetherBackend.NATIVE
+    internal var commandMode: AetherCommandMode = AetherCommandMode.RUN_NATIVE
 
     override fun getConfigurationEditor(): SettingsEditor<out RunConfiguration> = AetherRunSettingsEditor()
 
@@ -31,31 +33,59 @@ class AetherRunConfiguration(
         if (filePath.isBlank()) {
             throw RuntimeConfigurationError("Choose an Aether .ae file.")
         }
-        val file = File(filePath)
-        if (!file.isFile || file.extension != AetherFileType.defaultExtension) {
+        val normalizedPath = AetherCommandLine.normalizedFilePath(project.basePath, filePath)
+        val file = File(normalizedPath)
+        if (!file.isFile || !file.extension.equals(AetherFileType.defaultExtension, ignoreCase = true)) {
             throw RuntimeConfigurationError("Aether run configurations require an existing .ae file: $filePath")
         }
-        val resolution = AetherCommandLine.resolvePython(project.basePath, AetherSettingsState.getInstance().state.pythonPath)
-        if (resolution.warning != null) {
-            throw RuntimeConfigurationWarning(resolution.warning)
-        }
+        val settings = AetherSettingsState.getInstance().state
+        val resolution = AetherCommandLine.resolveExecutable(
+            project.basePath,
+            settings.aetherExecutable,
+            AetherCommandLine.Executable.AETHER,
+        )
+        resolution.warning?.let { throw RuntimeConfigurationWarning(it) }
     }
 
-    override fun getState(executor: Executor, environment: ExecutionEnvironment): RunProfileState =
-        AetherRunProfileState(project, environment, filePath)
+    override fun getState(executor: Executor, environment: ExecutionEnvironment): RunProfileState {
+        val effectiveMode = when (commandMode) {
+            AetherCommandMode.RUN_NATIVE, AetherCommandMode.RUN_AST -> when (backend) {
+                AetherBackend.NATIVE -> AetherCommandMode.RUN_NATIVE
+                AetherBackend.AST -> AetherCommandMode.RUN_AST
+            }
+            else -> commandMode
+        }
+        return AetherRunProfileState(project, environment, filePath, effectiveMode)
+    }
 
     override fun readExternal(element: Element) {
         super.readExternal(element)
-        filePath = JDOMExternalizerUtil.readField(element, FILE_PATH_FIELD).orEmpty()
+        val persisted = AetherRunConfigurationPersistence.read(element)
+        filePath = persisted.filePath
+        backend = persisted.backend
+        commandMode = AetherCommandMode.RUN_NATIVE
     }
 
     override fun writeExternal(element: Element) {
         super.writeExternal(element)
-        JDOMExternalizerUtil.writeField(element, FILE_PATH_FIELD, filePath)
+        AetherRunConfigurationPersistence.write(element, filePath, backend)
     }
+}
 
-    companion object {
-        private const val FILE_PATH_FIELD = "filePath"
+internal object AetherRunConfigurationPersistence {
+    private const val FILE_PATH_FIELD = "filePath"
+    private const val BACKEND_FIELD = "backend"
+
+    data class Persisted(val filePath: String, val backend: AetherBackend)
+
+    fun read(element: Element): Persisted = Persisted(
+        JDOMExternalizerUtil.readField(element, FILE_PATH_FIELD).orEmpty(),
+        AetherBackend.fromPersistentValue(JDOMExternalizerUtil.readField(element, BACKEND_FIELD)),
+    )
+
+    fun write(element: Element, filePath: String, backend: AetherBackend) {
+        JDOMExternalizerUtil.writeField(element, FILE_PATH_FIELD, filePath)
+        JDOMExternalizerUtil.writeField(element, BACKEND_FIELD, backend.persistentValue)
     }
 }
 
@@ -63,8 +93,9 @@ private class AetherRunProfileState(
     private val project: Project,
     environment: ExecutionEnvironment,
     private val filePath: String,
+    private val mode: AetherCommandMode,
 ) : CommandLineState(environment) {
     @Throws(ExecutionException::class)
     override fun startProcess(): ProcessHandler =
-        OSProcessHandler(AetherCommandLine.runFileCommandLine(project, filePath))
+        OSProcessHandler(AetherCommandLine.commandLine(project, filePath, mode))
 }

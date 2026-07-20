@@ -1,4 +1,4 @@
-double f(double x) = x*exp(x) - 1.0;
+f(double x) = x*exp(x) - 1.0;
 df(double x) = exp(x) + x*exp(x);
 
 struct NewtonResultado {

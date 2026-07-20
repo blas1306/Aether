@@ -17,7 +17,9 @@ class AetherRunLineMarkerContributor : RunLineMarkerContributor() {
         }
 
         val action = ActionManager.getInstance().getAction("Aether.RunFile") ?: return null
-        return Info(AllIcons.Actions.Execute, arrayOf(action)) { "Run ${virtualFile.name}" }
+        return Info(AllIcons.Actions.Execute, arrayOf(action)) {
+            "Run ${virtualFile.name} with the native backend"
+        }
     }
 
     private fun firstRunnableOffset(text: String): Int {

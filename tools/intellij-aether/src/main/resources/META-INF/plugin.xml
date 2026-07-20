@@ -46,5 +46,37 @@
       <add-to-group group-id="EditorPopupMenu" anchor="first"/>
       <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
     </action>
+    <group id="Aether.CommandActions" text="Aether" popup="true" icon="/icons/aether.svg">
+      <action id="Aether.RunFileAst"
+              class="com.aetherstudio.intellij.RunAetherFileAstAction"
+              text="Run Aether File with AST Backend"
+              description="Run the current Aether file with the auxiliary AST backend"/>
+      <separator/>
+      <action id="Aether.CheckFile"
+              class="com.aetherstudio.intellij.CheckAetherFileAction"
+              text="Check Aether File"
+              description="Check the current Aether file without running it"/>
+      <action id="Aether.EmitIr"
+              class="com.aetherstudio.intellij.EmitAetherIrAction"
+              text="Emit Aether IR"
+              description="Print the Aether intermediate representation for the current file"/>
+      <action id="Aether.EmitSsa"
+              class="com.aetherstudio.intellij.EmitAetherSsaAction"
+              text="Emit Aether SSA"
+              description="Print the Aether SSA representation for the current file"/>
+      <action id="Aether.EmitLlvm"
+              class="com.aetherstudio.intellij.EmitAetherLlvmAction"
+              text="Emit Aether LLVM"
+              description="Print the LLVM IR for the current Aether file"/>
+      <separator/>
+      <action id="Aether.RestartLanguageServer"
+              class="com.aetherstudio.intellij.RestartAetherLanguageServerAction"
+              text="Restart Aether Language Server"
+              description="Restart the Aether language server using the IntelliJ LSP manager"/>
+      <add-to-group group-id="RunMenu" anchor="last"/>
+      <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+      <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+      <add-to-group group-id="ToolsMenu" anchor="last"/>
+    </group>
   </actions>
 </idea-plugin>

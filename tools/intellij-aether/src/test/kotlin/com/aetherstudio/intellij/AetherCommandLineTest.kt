@@ -1,6 +1,9 @@
 package com.aetherstudio.intellij
 
 import com.intellij.openapi.actionSystem.ActionUpdateThread
+import com.intellij.openapi.util.JDOMExternalizerUtil
+import org.jdom.Element
+import java.io.File
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertContains
@@ -19,77 +22,182 @@ class AetherCommandLineTest {
     }
 
     @Test
-    fun `configured command wins`() {
+    fun `configured command name wins`() {
         assertEquals(
-            "python3.14",
-            AetherCommandLine.pythonExecutable("/tmp/project", " python3.14 "),
+            "custom-aether",
+            AetherCommandLine.resolveExecutable(
+                "/tmp/project",
+                " custom-aether ",
+                AetherCommandLine.Executable.AETHER,
+            ).executable,
         )
     }
 
     @Test
-    fun `configured python path wins when executable exists`() {
+    fun `configured relative aether path wins when executable exists`() {
         val projectDir = createTempDirectory("aether-plugin-test").toFile()
-        val python = projectDir.resolve("bin/python")
-        python.parentFile.mkdirs()
-        python.writeText("")
-        python.setExecutable(true)
+        val executable = projectDir.resolve("bin/aether")
+        executable.parentFile.mkdirs()
+        executable.writeText("")
+        executable.setExecutable(true)
 
         assertEquals(
-            python.path,
-            AetherCommandLine.pythonExecutable(projectDir.path, " bin/python "),
+            executable.path,
+            AetherCommandLine.resolveExecutable(
+                projectDir.path,
+                " bin/aether ",
+                AetherCommandLine.Executable.AETHER,
+            ).executable,
         )
     }
 
     @Test
-    fun `broken configured python path falls back to project venv`() {
+    fun `configured absolute aether path wins`() {
         val projectDir = createTempDirectory("aether-plugin-test").toFile()
-        val python = projectDir.resolve(".venv/bin/python")
-        python.parentFile.mkdirs()
-        python.writeText("")
-        python.setExecutable(true)
+        val executable = projectDir.resolve("tools/aether")
+        executable.parentFile.mkdirs()
+        executable.writeText("")
+        executable.setExecutable(true)
 
         assertEquals(
-            python.path,
-            AetherCommandLine.pythonExecutable(projectDir.path, " /missing/aether/python "),
+            executable.path,
+            AetherCommandLine.resolveExecutable(
+                projectDir.path,
+                executable.absolutePath,
+                AetherCommandLine.Executable.AETHER,
+            ).executable,
         )
     }
 
     @Test
-    fun `repo venv python is preferred`() {
+    fun `broken configured path falls back to project venv`() {
         val projectDir = createTempDirectory("aether-plugin-test").toFile()
-        val python = projectDir.resolve(".venv/bin/python")
-        python.parentFile.mkdirs()
-        python.writeText("")
-        python.setExecutable(true)
+        val executable = projectDir.resolve(".venv/bin/aether")
+        executable.parentFile.mkdirs()
+        executable.writeText("")
+        executable.setExecutable(true)
 
-        assertEquals(python.path, AetherCommandLine.pythonExecutable(projectDir.path, ""))
-    }
-
-    @Test
-    fun `fallback python is python3`() {
-        assertEquals("python3", AetherCommandLine.pythonExecutable(null, ""))
-    }
-
-    @Test
-    fun `broken configured python path falls back to python3 with warning when no venv exists`() {
-        val resolution = AetherCommandLine.resolvePython("/tmp/project-without-venv", " /missing/aether/python ")
-
-        assertEquals("python3", resolution.executable)
+        val resolution = AetherCommandLine.resolveExecutable(
+            projectDir.path,
+            "/missing/aether",
+            AetherCommandLine.Executable.AETHER,
+            isWindows = false,
+        )
+        assertEquals(executable.path, resolution.executable)
         assertContains(resolution.warning.orEmpty(), "not executable")
-        assertContains(resolution.warning.orEmpty(), "falling back to python3")
     }
 
     @Test
-    fun `lsp command arguments target python language server`() {
-        assertEquals(listOf("-m", "aether_lsp.server", "--stdio"), AetherCommandLine.lspArguments())
+    fun `project venv resolves aether and lsp separately`() {
+        val projectDir = createTempDirectory("aether-plugin-test").toFile()
+        val aether = executableFile(projectDir, ".venv/bin/aether")
+        val lsp = executableFile(projectDir, ".venv/bin/aether-lsp")
+
+        assertEquals(aether.path, resolve(projectDir, AetherCommandLine.Executable.AETHER).executable)
+        assertEquals(lsp.path, resolve(projectDir, AetherCommandLine.Executable.LANGUAGE_SERVER).executable)
     }
 
     @Test
-    fun `run file arguments target aether runner bridge`() {
-        assertEquals(
-            listOf("-m", "aether_lsp.run_file", "/tmp/example.ae"),
-            AetherCommandLine.runFileArguments("/tmp/example.ae"),
+    fun `windows project venv resolves exe wrappers`() {
+        val projectDir = createTempDirectory("aether-plugin-test").toFile()
+        val aether = executableFile(projectDir, ".venv/Scripts/aether.exe")
+        val lsp = executableFile(projectDir, ".venv/Scripts/aether-lsp.exe")
+
+        assertEquals(aether.path, resolve(projectDir, AetherCommandLine.Executable.AETHER, true).executable)
+        assertEquals(lsp.path, resolve(projectDir, AetherCommandLine.Executable.LANGUAGE_SERVER, true).executable)
+    }
+
+    @Test
+    fun `fallback commands use PATH names`() {
+        assertEquals("aether", resolve(null, AetherCommandLine.Executable.AETHER).executable)
+        assertEquals("aether-lsp", resolve(null, AetherCommandLine.Executable.LANGUAGE_SERVER).executable)
+    }
+
+    @Test
+    fun `broken configured path falls back to PATH with warning`() {
+        val resolution = AetherCommandLine.resolveExecutable(
+            "/tmp/project-without-venv",
+            "/missing/aether",
+            AetherCommandLine.Executable.AETHER,
+            isWindows = false,
         )
+
+        assertEquals("aether", resolution.executable)
+        assertContains(resolution.warning.orEmpty(), "not executable")
+        assertContains(resolution.warning.orEmpty(), "using 'aether'")
+    }
+
+    @Test
+    fun `lsp arguments use stdio without python module`() {
+        assertEquals(listOf("--stdio"), AetherCommandLine.lspArguments())
+    }
+
+    @Test
+    fun `native and ast arguments are separate tokens`() {
+        val path = "/tmp/project with spaces/example file.ae"
+        assertEquals(
+            listOf(path),
+            AetherCommandLine.runFileArguments(path, AetherBackend.NATIVE),
+        )
+        assertEquals(listOf("--backend=ast", path), AetherCommandLine.runFileArguments(path, AetherBackend.AST))
+    }
+
+    @Test
+    fun `check and emit arguments are exact separate tokens`() {
+        val path = "/tmp/example.ae"
+        assertEquals(listOf("--check", path), AetherCommandLine.checkFileArguments(path))
+        assertEquals(listOf("--emit-ir", path), AetherCommandLine.emitIrArguments(path))
+        assertEquals(listOf("--emit-ssa", path), AetherCommandLine.emitSsaArguments(path))
+        assertEquals(listOf("--emit-llvm", path), AetherCommandLine.emitLlvmArguments(path))
+    }
+
+    @Test
+    fun `working directory uses content root then project then external parent`() {
+        val project = createTempDirectory("aether project").toFile()
+        val module = project.resolve("module with spaces").apply { mkdirs() }
+        val nestedFile = module.resolve("examples/demo file.ae").apply { parentFile.mkdirs(); writeText("") }
+        val projectFile = project.resolve("root.ae").apply { writeText("") }
+        val external = createTempDirectory("aether external").resolve("outside file.ae").toFile().apply { writeText("") }
+
+        assertEquals(module.path, AetherCommandLine.workingDirectory(project.path, nestedFile.path, module.path))
+        assertEquals(project.path, AetherCommandLine.workingDirectory(project.path, projectFile.path))
+        assertEquals(external.parentFile.path, AetherCommandLine.workingDirectory(project.path, external.path))
+    }
+
+    @Test
+    fun `backend defaults to native and rejects unknown persisted values`() {
+        assertEquals(AetherBackend.NATIVE, AetherSettingsState.State().backend())
+        assertEquals(AetherBackend.NATIVE, AetherBackend.fromPersistentValue(null))
+        assertEquals(AetherBackend.NATIVE, AetherBackend.fromPersistentValue("legacy"))
+        assertEquals(AetherBackend.AST, AetherBackend.fromPersistentValue("ast"))
+    }
+
+    @Test
+    fun `legacy settings keep loading while python is ignored`() {
+        @Suppress("DEPRECATION")
+        val oldState = AetherSettingsState.State(pythonPath = "/old/python")
+        val service = AetherSettingsState()
+        service.loadState(oldState)
+
+        assertEquals("", service.state.aetherExecutable)
+        assertEquals("", service.state.languageServerExecutable)
+        assertEquals(AetherBackend.NATIVE, service.state.backend())
+    }
+
+    @Test
+    fun `run configuration serializes file and backend and legacy configuration is native`() {
+        val serialized = Element("configuration")
+        AetherRunConfigurationPersistence.write(serialized, "/tmp/example.ae", AetherBackend.AST)
+        val restored = AetherRunConfigurationPersistence.read(serialized)
+
+        assertEquals("/tmp/example.ae", restored.filePath)
+        assertEquals(AetherBackend.AST, restored.backend)
+
+        val legacy = Element("configuration")
+        JDOMExternalizerUtil.writeField(legacy, "filePath", "/tmp/legacy.ae")
+        val restoredLegacy = AetherRunConfigurationPersistence.read(legacy)
+        assertEquals("/tmp/legacy.ae", restoredLegacy.filePath)
+        assertEquals(AetherBackend.NATIVE, restoredLegacy.backend)
     }
 
     @Test
@@ -289,6 +397,13 @@ class AetherCommandLineTest {
         assertContains(xml, "NewAetherFileAction")
         assertContains(xml, "NewGroup")
         assertContains(xml, "Aether.RunFile")
+        assertContains(xml, "Aether.RunFileAst")
+        assertContains(xml, "Aether.CheckFile")
+        assertContains(xml, "Aether.EmitIr")
+        assertContains(xml, "Aether.EmitSsa")
+        assertContains(xml, "Aether.EmitLlvm")
+        assertContains(xml, "Aether.RestartLanguageServer")
+        assertContains(xml, "Aether.CommandActions")
         assertContains(xml, "lang.parserDefinition")
         assertContains(xml, "runLineMarkerContributor")
         assertContains(xml, "AetherTypedHandler")
@@ -300,5 +415,25 @@ class AetherCommandLineTest {
         assertFalse(xml.contains("toolWindow id=\"Aether\""))
         assertFalse(xml.contains("AetherConsoleService"))
         assertFalse(xml.contains("AetherToolWindowFactory"))
+        assertFalse(xml.contains("aether_lsp.run_file"))
+        assertFalse(xml.contains("python -m"))
     }
+
+    private fun executableFile(projectDir: File, relativePath: String): File =
+        projectDir.resolve(relativePath).apply {
+            parentFile.mkdirs()
+            writeText("")
+            setExecutable(true)
+        }
+
+    private fun resolve(
+        projectDir: File?,
+        executable: AetherCommandLine.Executable,
+        isWindows: Boolean = false,
+    ): AetherCommandLine.ExecutableResolution = AetherCommandLine.resolveExecutable(
+        projectDir?.path,
+        "",
+        executable,
+        isWindows,
+    )
 }

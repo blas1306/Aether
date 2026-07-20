@@ -16,6 +16,7 @@ class AetherRunConfigurationProducer :
     ): Boolean {
         val file = context.aetherFile() ?: return false
         configuration.filePath = file.path
+        configuration.backend = AetherSettingsState.getInstance().state.backend()
         configuration.name = "Run ${file.name}"
         return true
     }
