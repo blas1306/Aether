@@ -113,6 +113,17 @@ from .types import (
     VoidType,
 )
 from .verifier import IRVerificationError, IRVerifier
+from .verification_result import (
+    VerifierCategory,
+    VerifierFailure,
+    VerifierLocation,
+    VerifierResult,
+    VerifierSeverity,
+    accepted_verifier_result,
+    normalize_ir_verification_error,
+    rejected_verifier_result,
+    verify_module_normalized,
+)
 
 __all__ = [
     "ArrayType",
@@ -213,6 +224,11 @@ __all__ = [
     "IRVectorSet",
     "IRVerificationError",
     "IRVerifier",
+    "VerifierCategory",
+    "VerifierFailure",
+    "VerifierLocation",
+    "VerifierResult",
+    "VerifierSeverity",
     "IntType",
     "InterfaceType",
     "ListType",
@@ -227,7 +243,11 @@ __all__ = [
     "LifecycleFieldStep",
     "LifecycleTraits",
     "LifecycleTypeRegistry",
+    "accepted_verifier_result",
     "expand_lifecycle",
     "lower_to_ir",
+    "normalize_ir_verification_error",
     "print_ir",
+    "rejected_verifier_result",
+    "verify_module_normalized",
 ]

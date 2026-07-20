@@ -129,10 +129,25 @@ from .types import (
     VoidType,
 )
 from .scalar_math import scalar_math_result_type
+from .verification_result import (
+    VerifierCategory,
+    VerifierFailure,
+    VerifierLocation,
+    VerifierSeverity,
+)
 
 
 class IRVerificationError(ValueError):
     """Raised when an IR module is internally inconsistent."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        normalized_failure: VerifierFailure | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.normalized_failure = normalized_failure
 
 
 @dataclass(frozen=True)
@@ -163,12 +178,18 @@ class IRVerifier:
         self._functions: dict[str, IRFunction] = {}
         self._structs = {}
         self._lifecycle: LifecycleTypeRegistry | None = None
+        self._active_rule: tuple[str, VerifierCategory] | None = None
+        self._active_location: VerifierLocation | None = None
+        self._active_instruction: IRInstruction | None = None
 
     def verify(self) -> IRModule:
         """Verify the module and return it unchanged on success."""
         self._functions = {}
         self._structs = {definition.name: definition for definition in self.module.structs}
         self._lifecycle = LifecycleTypeRegistry(self.module.structs)
+        self._active_rule = None
+        self._active_location = None
+        self._active_instruction = None
         self._verify_module()
         return self.module
 
@@ -177,7 +198,10 @@ class IRVerifier:
         seen: set[str] = set()
         for function in self.module.functions:
             if function.name in seen:
-                self._fail(f"Duplicate function '{function.name}'")
+                self._fail(
+                    f"Duplicate function '{function.name}'",
+                    rule=("IRV-006", VerifierCategory.DEFINITIONS),
+                )
             seen.add(function.name)
             self._functions[function.name] = function
 
@@ -186,18 +210,28 @@ class IRVerifier:
 
     def _verify_struct_definitions(self) -> None:
         if len(self._structs) != len(self.module.structs):
-            self._fail("Duplicate nominal struct definition")
+            self._fail(
+                "Duplicate nominal struct definition",
+                rule=("IRV-001", VerifierCategory.DEFINITIONS),
+            )
         edges: dict[str, tuple[str, ...]] = {}
         for definition in self.module.structs:
             if not definition.name:
-                self._fail("Struct definition name must not be empty")
+                self._fail(
+                    "Struct definition name must not be empty",
+                    rule=("IRV-002", VerifierCategory.DEFINITIONS),
+                )
             field_names = [name for name, _type in definition.fields]
             if len(field_names) != len(set(field_names)):
-                self._fail(f"Struct '{definition.name}' has duplicate fields")
+                self._fail(
+                    f"Struct '{definition.name}' has duplicate fields",
+                    rule=("IRV-003", VerifierCategory.DEFINITIONS),
+                )
             for field_name, field_type in definition.fields:
                 if isinstance(field_type, VoidType) or not self._is_valid_type(field_type):
                     self._fail(
-                        f"Struct '{definition.name}' field '{field_name}' has invalid or incomplete type {field_type}"
+                        f"Struct '{definition.name}' field '{field_name}' has invalid or incomplete type {field_type}",
+                        rule=("IRV-004", VerifierCategory.TYPES),
                     )
             edges[definition.name] = tuple(
                 field_type.name
@@ -213,7 +247,10 @@ class IRVerifier:
                 return
             if name in active:
                 cycle = " -> ".join((*active[active.index(name):], name))
-                self._fail(f"Recursive by-value struct layout has infinite size: {cycle}")
+                self._fail(
+                    f"Recursive by-value struct layout has infinite size: {cycle}",
+                    rule=("IRV-005", VerifierCategory.TYPES),
+                )
             active.append(name)
             for target in edges.get(name, ()):
                 visit(target)
@@ -228,11 +265,17 @@ class IRVerifier:
         self._verify_type(function.return_type, f"return type of function '{function.name}'")
 
         if not function.blocks:
-            self._fail(f"Function '{function.name}' has no blocks")
+            self._fail(
+                f"Function '{function.name}' has no blocks",
+                rule=("IRV-016", VerifierCategory.CFG),
+            )
 
         blocks = self._collect_blocks(function)
         if "entry" not in blocks:
-            self._fail(f"Function '{function.name}' has no entry block")
+            self._fail(
+                f"Function '{function.name}' has no entry block",
+                rule=("IRV-017", VerifierCategory.CFG),
+            )
 
         self._verify_block_structure(function, blocks)
 
@@ -251,15 +294,25 @@ class IRVerifier:
                     continue
                 if instruction.borrowed:
                     if not instruction.borrow_scope:
-                        self._fail("borrow_element requires an iteration scope")
+                        self._fail(
+                            "borrow_element requires an iteration scope",
+                            rule=("IRV-037", VerifierCategory.BORROWING),
+                            primary_location=self._instruction_location(instruction),
+                        )
                     if instruction.borrow_scope != block.name:
                         self._fail(
                             f"borrow_element '{self._value(instruction.result)}' is defined "
-                            f"outside its declared scope '{instruction.borrow_scope}'"
+                            f"outside its declared scope '{instruction.borrow_scope}'",
+                            rule=("IRV-038", VerifierCategory.BORROWING),
+                            primary_location=self._instruction_location(instruction),
                         )
                     borrowed[instruction.result.name] = instruction.borrow_scope
                 elif instruction.borrow_scope is not None:
-                    self._fail("owned collection get cannot declare a borrow scope")
+                    self._fail(
+                        "owned collection get cannot declare a borrow scope",
+                        rule=("IRV-039", VerifierCategory.BORROWING),
+                        primary_location=self._instruction_location(instruction),
+                    )
 
         if not borrowed:
             return
@@ -294,18 +347,23 @@ class IRVerifier:
                     and instruction.value.name not in acquired
                 ):
                     self._fail(
-                        "Borrowed iteration value cannot be stored as owned without copying"
+                        "Borrowed iteration value cannot be stored as owned without copying",
+                        rule=("IRV-040", VerifierCategory.BORROWING),
                     )
                 if isinstance(instruction, IRReturn):
                     if instruction.value is not None and instruction.value.name in borrowed:
                         self._fail(
-                            "Borrowed iteration value cannot escape its iteration scope without copying"
+                            "Borrowed iteration value cannot escape its iteration scope without copying",
+                            rule=("IRV-041", VerifierCategory.BORROWING),
                         )
                 for instruction_type, field_name in receiver_fields.items():
                     if isinstance(instruction, instruction_type):
                         receiver = getattr(instruction, field_name)
                         if receiver.name in borrowed:
-                            self._fail("Cannot mutate through borrowed iteration element")
+                            self._fail(
+                                "Cannot mutate through borrowed iteration element",
+                                rule=("IRV-042", VerifierCategory.BORROWING),
+                            )
                         break
 
     def _verify_parameters(self, function: IRFunction) -> None:
@@ -313,7 +371,8 @@ class IRVerifier:
         for parameter in function.parameters:
             if parameter.name in seen:
                 self._fail(
-                    f"Duplicate parameter '{parameter.name}' in function '{function.name}'"
+                    f"Duplicate parameter '{parameter.name}' in function '{function.name}'",
+                    rule=("IRV-007", VerifierCategory.DEFINITIONS),
                 )
             seen.add(parameter.name)
             self._verify_type(
@@ -325,7 +384,10 @@ class IRVerifier:
         blocks: dict[str, IRBasicBlock] = {}
         for block in function.blocks:
             if block.name in blocks:
-                self._fail(f"Duplicate block '{block.name}' in function '{function.name}'")
+                self._fail(
+                    f"Duplicate block '{block.name}' in function '{function.name}'",
+                    rule=("IRV-008", VerifierCategory.DEFINITIONS),
+                )
             blocks[block.name] = block
         return blocks
 
@@ -337,18 +399,23 @@ class IRVerifier:
         for block in function.blocks:
             if not block.instructions:
                 self._fail(
-                    f"Block '{block.name}' in function '{function.name}' has no terminator"
+                    f"Block '{block.name}' in function '{function.name}' has no terminator",
+                    rule=("IRV-018", VerifierCategory.CFG),
                 )
 
             for index, instruction in enumerate(block.instructions):
                 if isinstance(instruction, self._TERMINATORS):
                     if index != len(block.instructions) - 1:
-                        self._fail(f"Instruction after terminator in block '{block.name}'")
+                        self._fail(
+                            f"Instruction after terminator in block '{block.name}'",
+                            rule=("IRV-019", VerifierCategory.CFG),
+                        )
                     self._verify_terminator_targets(function, instruction, blocks)
                     break
             else:
                 self._fail(
-                    f"Block '{block.name}' in function '{function.name}' has no terminator"
+                    f"Block '{block.name}' in function '{function.name}' has no terminator",
+                    rule=("IRV-018", VerifierCategory.CFG),
                 )
 
     def _verify_terminator_targets(
@@ -360,7 +427,8 @@ class IRVerifier:
         if isinstance(instruction, IRJump):
             if instruction.target not in blocks:
                 self._fail(
-                    f"Unknown jump target '{instruction.target}' in function '{function.name}'"
+                    f"Unknown jump target '{instruction.target}' in function '{function.name}'",
+                    rule=("IRV-020", VerifierCategory.CFG),
                 )
             return
 
@@ -368,7 +436,8 @@ class IRVerifier:
             for target in (instruction.true_target, instruction.false_target):
                 if target not in blocks:
                     self._fail(
-                        f"Unknown branch target '{target}' in function '{function.name}'"
+                        f"Unknown branch target '{target}' in function '{function.name}'",
+                        rule=("IRV-020", VerifierCategory.CFG),
                     )
 
     def _collect_value_types(self, function: IRFunction) -> dict[str, IRType]:
@@ -381,8 +450,18 @@ class IRVerifier:
                 result = self._instruction_result(instruction)
                 if result is None:
                     continue
-                self._verify_type(result.type, f"value '{self._value(result)}'")
-                self._define_value_type(value_types, result, function)
+                location = self._instruction_location(instruction)
+                self._verify_type(
+                    result.type,
+                    f"value '{self._value(result)}'",
+                    primary_location=location,
+                )
+                self._define_value_type(
+                    value_types,
+                    result,
+                    function,
+                    primary_location=location,
+                )
 
         return value_types
 
@@ -391,10 +470,15 @@ class IRVerifier:
         value_types: dict[str, IRType],
         value: IRValue,
         function: IRFunction,
+        primary_location: VerifierLocation | None = None,
     ) -> None:
         existing = value_types.get(value.name)
         if existing is not None:
-            self._fail(f"Duplicate value '{self._value(value)}' in function '{function.name}'")
+            self._fail(
+                f"Duplicate value '{self._value(value)}' in function '{function.name}'",
+                rule=("IRV-009", VerifierCategory.DEFINITIONS),
+                primary_location=primary_location,
+            )
         value_types[value.name] = value.type
 
     def _collect_slot_types(self, function: IRFunction) -> dict[str, IRType]:
@@ -402,12 +486,19 @@ class IRVerifier:
         for block in function.blocks:
             for instruction in block.instructions:
                 for slot in self._instruction_storages(instruction):
-                    self._verify_type(slot.type, f"slot '{self._value(slot)}'")
+                    location = self._instruction_location(instruction)
+                    self._verify_type(
+                        slot.type,
+                        f"slot '{self._value(slot)}'",
+                        primary_location=location,
+                    )
                     existing = slot_types.get(slot.name)
                     if existing is not None and existing != slot.type:
                         self._fail(
                             f"Slot '{self._value(slot)}' type mismatch: "
-                            f"expected {existing}, got {slot.type}"
+                            f"expected {existing}, got {slot.type}",
+                            rule=("IRV-010", VerifierCategory.TYPES),
+                            primary_location=location,
                         )
                     slot_types[slot.name] = slot.type
         return slot_types
@@ -472,7 +563,8 @@ class IRVerifier:
                         )[0]
                         self._fail(
                             f"Lifecycle state for storage '%{inconsistent}' is inconsistent "
-                            f"across control-flow paths entering block '{successor}'"
+                            f"across control-flow paths entering block '{successor}'",
+                            rule=("IRV-036", VerifierCategory.LIFECYCLE),
                         )
                 updated = output if existing is None else existing.intersect(output)
                 if updated != existing:
@@ -521,14 +613,139 @@ class IRVerifier:
     ) -> _State:
         current = state
         for instruction in block.instructions:
-            current = self._transfer_instruction(
-                function,
-                instruction,
-                current,
-                value_types,
-                slot_types,
-            )
+            previous_rule = self._active_rule
+            previous_location = self._active_location
+            previous_instruction = self._active_instruction
+            self._active_rule = self._rule_for_instruction(instruction)
+            self._active_instruction = instruction
+            self._active_location = self._instruction_location(instruction)
+            try:
+                current = self._transfer_instruction(
+                    function,
+                    instruction,
+                    current,
+                    value_types,
+                    slot_types,
+                )
+            finally:
+                self._active_rule = previous_rule
+                self._active_location = previous_location
+                self._active_instruction = previous_instruction
         return current
+
+    @staticmethod
+    def _rule_for_instruction(
+        instruction: IRInstruction,
+    ) -> tuple[str, VerifierCategory]:
+        if isinstance(instruction, IRConst):
+            invariant_id = "IRV-068" if isinstance(instruction.value, IREnumConstant) else "IRV-069"
+            return invariant_id, VerifierCategory.CONSTANTS
+        if isinstance(instruction, IRBinaryOp):
+            if instruction.operator in {"add", "sub", "mul", "div", "rem", "mod", "pow"}:
+                invariant_id = "IRV-070"
+            elif instruction.operator in {"eq", "ne"}:
+                invariant_id = "IRV-071"
+            elif instruction.operator in {"lt", "le", "gt", "ge"}:
+                invariant_id = "IRV-072"
+            else:
+                invariant_id = "IRV-073"
+            return invariant_id, VerifierCategory.OPERATORS
+        if isinstance(instruction, IRCompareOp):
+            invariant_id = "IRV-075" if instruction.aggregate_shape is not None else "IRV-076"
+            return invariant_id, VerifierCategory.OPERATORS
+        if isinstance(instruction, IRCall):
+            if instruction.builtin is None:
+                return "IRV-052", VerifierCategory.CALLS
+            builtin_rules = {
+                PROCESS_ARGS_BUILTIN: "IRV-055",
+                RANGE_STEP_NONZERO_BUILTIN: "IRV-056",
+                "__aether_string_byte_length": "IRV-057",
+                STRING_TRIM_BUILTIN: "IRV-058",
+                STRING_SPLIT_BUILTIN: "IRV-059",
+                PARSE_INT_BUILTIN: "IRV-060",
+                PARSE_DOUBLE_BUILTIN: "IRV-060",
+                READ_TEXT_BUILTIN: "IRV-062",
+                "io.writeText": "IRV-062",
+                "io.writeTextAtomic": "IRV-062",
+                "io.appendText": "IRV-062",
+                "__aether_retain": "IRV-066",
+                "__aether_release": "IRV-066",
+            }
+            invariant_id = builtin_rules.get(instruction.builtin, "IRV-067")
+            if instruction.builtin in TEXT_CODEC_BUILTINS:
+                invariant_id = "IRV-065"
+            return invariant_id, VerifierCategory.BUILTINS
+
+        rules: tuple[tuple[type[IRInstruction], str, VerifierCategory], ...] = (
+            (IRLoad, "IRV-033", VerifierCategory.TYPES),
+            (IRStore, "IRV-034", VerifierCategory.DATA_FLOW),
+            (IRInitDefault, "IRV-044", VerifierCategory.LIFECYCLE),
+            (IRCopyInit, "IRV-045", VerifierCategory.LIFECYCLE),
+            (IRMoveInit, "IRV-046", VerifierCategory.LIFECYCLE),
+            (IRAssign, "IRV-047", VerifierCategory.LIFECYCLE),
+            (IRDestroy, "IRV-048", VerifierCategory.LIFECYCLE),
+            (IRRelocate, "IRV-049", VerifierCategory.LIFECYCLE),
+            (IRUnaryOp, "IRV-074", VerifierCategory.OPERATORS),
+            (IRCast, "IRV-077", VerifierCategory.TYPES),
+            (IRPrint, "IRV-078", VerifierCategory.INSTRUCTIONS),
+            (IRStructNew, "IRV-079", VerifierCategory.STRUCTS),
+            (IRStructGet, "IRV-080", VerifierCategory.STRUCTS),
+            (IRStructSet, "IRV-081", VerifierCategory.STRUCTS),
+            (IRMethodResultNew, "IRV-082", VerifierCategory.METHOD_RESULTS),
+            (IRMethodResultReceiver, "IRV-083", VerifierCategory.METHOD_RESULTS),
+            (IRMethodResultValue, "IRV-084", VerifierCategory.METHOD_RESULTS),
+            (IRArrayNew, "IRV-085", VerifierCategory.COLLECTIONS),
+            (IRListNew, "IRV-086", VerifierCategory.COLLECTIONS),
+            (IRArrayGet, "IRV-087", VerifierCategory.COLLECTIONS),
+            (IRArraySet, "IRV-088", VerifierCategory.COLLECTIONS),
+            (IRArraySlice, "IRV-089", VerifierCategory.COLLECTIONS),
+            (IRArrayLength, "IRV-090", VerifierCategory.COLLECTIONS),
+            (IRArrayCopy, "IRV-091", VerifierCategory.COLLECTIONS),
+            (IRListGet, "IRV-092", VerifierCategory.COLLECTIONS),
+            (IRListSet, "IRV-093", VerifierCategory.COLLECTIONS),
+            (IRListSlice, "IRV-094", VerifierCategory.COLLECTIONS),
+            (IRListLength, "IRV-095", VerifierCategory.COLLECTIONS),
+            (IRListIsEmpty, "IRV-096", VerifierCategory.COLLECTIONS),
+            (IRListCopy, "IRV-097", VerifierCategory.COLLECTIONS),
+            (IRListContains, "IRV-098", VerifierCategory.COLLECTIONS),
+            (IRListIndexOf, "IRV-099", VerifierCategory.COLLECTIONS),
+            (IRListClear, "IRV-100", VerifierCategory.COLLECTIONS),
+            (IRListReverse, "IRV-101", VerifierCategory.COLLECTIONS),
+            (IRListPush, "IRV-102", VerifierCategory.COLLECTIONS),
+            (IRListInsert, "IRV-103", VerifierCategory.COLLECTIONS),
+            (IRListPop, "IRV-104", VerifierCategory.COLLECTIONS),
+            (IRListRemoveAt, "IRV-105", VerifierCategory.COLLECTIONS),
+            (IRSequenceSort, "IRV-106", VerifierCategory.COLLECTIONS),
+            (IRVectorNew, "IRV-107", VerifierCategory.LINEAR_ALGEBRA),
+            (IRMatrixNew, "IRV-108", VerifierCategory.LINEAR_ALGEBRA),
+            (IRVectorAdd, "IRV-109", VerifierCategory.LINEAR_ALGEBRA),
+            (IRVectorSub, "IRV-109", VerifierCategory.LINEAR_ALGEBRA),
+            (IRVectorScale, "IRV-110", VerifierCategory.LINEAR_ALGEBRA),
+            (IRVectorDot, "IRV-111", VerifierCategory.LINEAR_ALGEBRA),
+            (IROuterProduct, "IRV-112", VerifierCategory.LINEAR_ALGEBRA),
+            (IRMatrixAdd, "IRV-113", VerifierCategory.LINEAR_ALGEBRA),
+            (IRMatrixSub, "IRV-113", VerifierCategory.LINEAR_ALGEBRA),
+            (IRMatrixScale, "IRV-114", VerifierCategory.LINEAR_ALGEBRA),
+            (IRMatrixMatMul, "IRV-115", VerifierCategory.LINEAR_ALGEBRA),
+            (IRMatrixVectorMul, "IRV-116", VerifierCategory.LINEAR_ALGEBRA),
+            (IRVectorMatrixMul, "IRV-117", VerifierCategory.LINEAR_ALGEBRA),
+            (IRVectorGet, "IRV-118", VerifierCategory.LINEAR_ALGEBRA),
+            (IRVectorSet, "IRV-119", VerifierCategory.LINEAR_ALGEBRA),
+            (IRMatrixGet, "IRV-120", VerifierCategory.LINEAR_ALGEBRA),
+            (IRMatrixSet, "IRV-121", VerifierCategory.LINEAR_ALGEBRA),
+            (IRVectorLength, "IRV-122", VerifierCategory.LINEAR_ALGEBRA),
+            (IRMatrixRows, "IRV-123", VerifierCategory.LINEAR_ALGEBRA),
+            (IRMatrixColumns, "IRV-124", VerifierCategory.LINEAR_ALGEBRA),
+            (IRFunctionRef, "IRV-051", VerifierCategory.CALLS),
+            (IRCallIndirect, "IRV-053", VerifierCategory.CALLS),
+            (IRBranch, "IRV-021", VerifierCategory.CFG),
+            (IRJump, "IRV-020", VerifierCategory.CFG),
+            (IRReturn, "IRV-025", VerifierCategory.RETURNS),
+        )
+        for instruction_type, invariant_id, category in rules:
+            if isinstance(instruction, instruction_type):
+                return invariant_id, category
+        return "IRV-023", VerifierCategory.INSTRUCTIONS
 
     def _transfer_instruction(
         self,
@@ -1005,16 +1222,23 @@ class IRVerifier:
                     "return transfer",
                 )
                 if instruction.value is None or instruction.value.type != instruction.transferred_storage.type:
-                    self._fail("return transfer storage must match the returned value type")
+                    self._fail(
+                        "return transfer storage must match the returned value type",
+                        rule=("IRV-027", VerifierCategory.LIFECYCLE),
+                    )
             missing = sorted(lifecycle_live - transferred)
             if missing:
                 self._fail(
                     "Return exits with live owning storage lacking cleanup: "
-                    + ", ".join(f"%{name}" for name in missing)
+                    + ", ".join(f"%{name}" for name in missing),
+                    rule=("IRV-028", VerifierCategory.LIFECYCLE),
                 )
             return state
 
-        self._fail(f"Unsupported IR instruction '{type(instruction).__name__}'")
+        self._fail(
+            f"Unsupported IR instruction '{type(instruction).__name__}'",
+            rule=("IRV-023", VerifierCategory.INSTRUCTIONS),
+        )
 
     def _verify_call(
         self,
@@ -1099,13 +1323,22 @@ class IRVerifier:
                 definition = self._structs.get(expected_name)
                 expected_value = IntType() if instruction.builtin == PARSE_INT_BUILTIN else DoubleType()
                 if definition is None or len(definition.fields) != 2:
-                    self._fail(f"String parsing result '{expected_name}' requires its canonical layout")
+                    self._fail(
+                        f"String parsing result '{expected_name}' requires its canonical layout",
+                        rule=("IRV-061", VerifierCategory.BUILTINS),
+                    )
                 if definition.fields[0] != ("value", expected_value):
-                    self._fail(f"String parsing result '{expected_name}' has an invalid value field")
+                    self._fail(
+                        f"String parsing result '{expected_name}' has an invalid value field",
+                        rule=("IRV-061", VerifierCategory.BUILTINS),
+                    )
                 if definition.fields[1][0] != "status" or not isinstance(
                     definition.fields[1][1], EnumType
                 ):
-                    self._fail(f"String parsing result '{expected_name}' has an invalid status field")
+                    self._fail(
+                        f"String parsing result '{expected_name}' has an invalid status field",
+                        rule=("IRV-061", VerifierCategory.BUILTINS),
+                    )
                 return
             if instruction.builtin in TEXT_FILE_BUILTINS:
                 if instruction.function != instruction.builtin:
@@ -1122,7 +1355,10 @@ class IRVerifier:
                     )
                 if instruction.builtin == READ_TEXT_BUILTIN:
                     if instruction.result.type != StructType(FILE_READ_RESULT_TYPE):
-                        self._fail("io.readText result must be FileReadResult")
+                        self._fail(
+                            "io.readText result must be FileReadResult",
+                            rule=("IRV-063", VerifierCategory.BUILTINS),
+                        )
                     definition = self._structs.get(FILE_READ_RESULT_TYPE)
                     if (
                         definition is None
@@ -1132,12 +1368,18 @@ class IRVerifier:
                         or not isinstance(definition.fields[1][1], EnumType)
                         or definition.fields[1][1].name != FILE_STATUS_TYPE
                     ):
-                        self._fail("FileReadResult requires canonical {string, FileStatus} layout")
+                        self._fail(
+                            "FileReadResult requires canonical {string, FileStatus} layout",
+                            rule=("IRV-063", VerifierCategory.BUILTINS),
+                        )
                 elif (
                     not isinstance(instruction.result.type, EnumType)
                     or instruction.result.type.name != FILE_STATUS_TYPE
                 ):
-                    self._fail("Text-file write result must be FileStatus")
+                    self._fail(
+                        "Text-file write result must be FileStatus",
+                        rule=("IRV-064", VerifierCategory.BUILTINS),
+                    )
                 return
             if instruction.builtin in TEXT_CODEC_BUILTINS:
                 if instruction.function != instruction.builtin or instruction.result is None:
@@ -2047,7 +2289,8 @@ class IRVerifier:
             )
             self._fail(
                 f"Return operand '{self._value(instruction.value)}' is storage; "
-                "load or explicitly transfer it as a value"
+                "load or explicitly transfer it as a value",
+                rule=("IRV-026", VerifierCategory.RETURNS),
             )
         self._require_defined(instruction.value, state, value_types)
         if instruction.value.type != function.return_type:
@@ -2066,7 +2309,10 @@ class IRVerifier:
 
         memo: dict[str, bool] = {}
         if not self._block_returns("entry", blocks, memo, set()):
-            self._fail(f"Function '{function.name}' may exit without returning a value")
+            self._fail(
+                f"Function '{function.name}' may exit without returning a value",
+                rule=("IRV-024", VerifierCategory.RETURNS),
+            )
 
     def _block_returns(
         self,
@@ -2325,14 +2571,30 @@ class IRVerifier:
         state: _State,
         value_types: dict[str, IRType],
     ) -> None:
+        builtin_argument = (
+            isinstance(self._active_instruction, IRCall)
+            and self._active_instruction.builtin is not None
+        )
         if value.name not in state.values:
-            self._fail(f"Undefined value '{self._value(value)}'")
+            self._fail(
+                f"Undefined value '{self._value(value)}'",
+                rule=(
+                    ("IRV-054", VerifierCategory.CALLS)
+                    if builtin_argument
+                    else ("IRV-029", VerifierCategory.DATA_FLOW)
+                ),
+            )
 
         expected_type = value_types.get(value.name)
         if expected_type is not None and expected_type != value.type:
             self._fail(
                 f"Value '{self._value(value)}' type mismatch: "
-                f"expected {expected_type}, got {value.type}"
+                f"expected {expected_type}, got {value.type}",
+                rule=(
+                    ("IRV-054", VerifierCategory.CALLS)
+                    if builtin_argument
+                    else ("IRV-030", VerifierCategory.DATA_FLOW)
+                ),
             )
 
     def _require_slot_exists(
@@ -2342,22 +2604,38 @@ class IRVerifier:
     ) -> None:
         expected_type = slot_types.get(slot.name)
         if expected_type is None:
-            self._fail(f"Undefined slot '{self._value(slot)}'")
+            self._fail(
+                f"Undefined slot '{self._value(slot)}'",
+                rule=("IRV-031", VerifierCategory.DATA_FLOW),
+            )
         if expected_type != slot.type:
             self._fail(
                 f"Slot '{self._value(slot)}' type mismatch: "
-                f"expected {expected_type}, got {slot.type}"
+                f"expected {expected_type}, got {slot.type}",
+                rule=("IRV-031", VerifierCategory.DATA_FLOW),
             )
 
     def _require_slot_stored(self, slot: IRValue, state: _State) -> None:
         if slot.name not in state.slots:
             if slot.name in state.moved:
-                self._fail(f"Use of slot '{self._value(slot)}' after move")
+                self._fail(
+                    f"Use of slot '{self._value(slot)}' after move",
+                    rule=("IRV-032", VerifierCategory.DATA_FLOW),
+                )
             if slot.name in state.destroyed:
-                self._fail(f"Use of slot '{self._value(slot)}' after destroy")
+                self._fail(
+                    f"Use of slot '{self._value(slot)}' after destroy",
+                    rule=("IRV-032", VerifierCategory.DATA_FLOW),
+                )
             if isinstance(slot, IRStorage):
-                self._fail(f"Slot '{self._value(slot)}' loaded before initialization")
-            self._fail(f"Slot '{self._value(slot)}' loaded before store")
+                self._fail(
+                    f"Slot '{self._value(slot)}' loaded before initialization",
+                    rule=("IRV-032", VerifierCategory.DATA_FLOW),
+                )
+            self._fail(
+                f"Slot '{self._value(slot)}' loaded before store",
+                rule=("IRV-032", VerifierCategory.DATA_FLOW),
+            )
 
     def _verify_lifecycle_destination(
         self,
@@ -2367,11 +2645,15 @@ class IRVerifier:
         if not isinstance(storage, IRStorage):
             self._fail(
                 f"Lifecycle destination '{self._value(storage)}' must be IRStorage, "
-                f"not a computed value"
+                f"not a computed value",
+                rule=("IRV-043", VerifierCategory.LIFECYCLE),
             )
         self._require_slot_exists(storage, slot_types)
         if isinstance(storage.type, VoidType):
-            self._fail("Lifecycle operations cannot target void storage")
+            self._fail(
+                "Lifecycle operations cannot target void storage",
+                rule=("IRV-043", VerifierCategory.LIFECYCLE),
+            )
 
     def _require_uninitialized(
         self,
@@ -2381,7 +2663,8 @@ class IRVerifier:
     ) -> None:
         if storage.name in state.slots:
             self._fail(
-                f"{operation} destination '{self._value(storage)}' is already alive"
+                f"{operation} destination '{self._value(storage)}' is already alive",
+                rule=("IRV-050", VerifierCategory.LIFECYCLE),
             )
 
     def _require_live_storage(
@@ -2393,10 +2676,19 @@ class IRVerifier:
         if storage.name in state.slots:
             return
         if storage.name in state.moved:
-            self._fail(f"{operation} '{self._value(storage)}' is used after move")
+            self._fail(
+                f"{operation} '{self._value(storage)}' is used after move",
+                rule=("IRV-050", VerifierCategory.LIFECYCLE),
+            )
         if storage.name in state.destroyed:
-            self._fail(f"{operation} '{self._value(storage)}' is used after destroy")
-        self._fail(f"{operation} '{self._value(storage)}' is used before initialization")
+            self._fail(
+                f"{operation} '{self._value(storage)}' is used after destroy",
+                rule=("IRV-050", VerifierCategory.LIFECYCLE),
+            )
+        self._fail(
+            f"{operation} '{self._value(storage)}' is used before initialization",
+            rule=("IRV-050", VerifierCategory.LIFECYCLE),
+        )
 
     def _require_lifecycle_source(
         self,
@@ -2506,9 +2798,19 @@ class IRVerifier:
             return (terminator.true_target, terminator.false_target)
         return ()
 
-    def _verify_type(self, type_: IRType, context: str) -> None:
+    def _verify_type(
+        self,
+        type_: IRType,
+        context: str,
+        *,
+        primary_location: VerifierLocation | None = None,
+    ) -> None:
         if not self._is_valid_type(type_):
-            self._fail(f"Invalid IR type for {context}: {type_!r}")
+            self._fail(
+                f"Invalid IR type for {context}: {type_!r}",
+                rule=("IRV-011", VerifierCategory.TYPES),
+                primary_location=primary_location,
+            )
 
     def _is_valid_type(self, type_: IRType) -> bool:
         if isinstance(type_, EnumType):
@@ -2543,6 +2845,36 @@ class IRVerifier:
     def _value(value: IRValue) -> str:
         return value.name if value.name.startswith("%") else f"%{value.name}"
 
+    def _fail(
+        self,
+        message: str,
+        *,
+        rule: tuple[str, VerifierCategory] | None = None,
+        primary_location: VerifierLocation | None = None,
+    ) -> NoReturn:
+        rule = rule or self._active_rule
+        if rule is None:
+            raise AssertionError(f"Missing normalized verifier rule for: {message}")
+        invariant_id, category = rule
+        raise IRVerificationError(
+            message,
+            normalized_failure=VerifierFailure(
+                invariant_id=invariant_id,
+                severity=VerifierSeverity.ERROR,
+                category=category,
+                primary_location=primary_location or self._active_location,
+            ),
+        )
+
     @staticmethod
-    def _fail(message: str) -> NoReturn:
-        raise IRVerificationError(message)
+    def _instruction_location(
+        instruction: IRInstruction,
+    ) -> VerifierLocation | None:
+        source_location = getattr(instruction, "source_location", None)
+        if source_location is None:
+            return None
+        return VerifierLocation(
+            line=source_location.line,
+            column=source_location.column,
+            path=source_location.path,
+        )
