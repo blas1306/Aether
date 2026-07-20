@@ -225,6 +225,12 @@ IR validity condition. Phi completeness, single SSA definitions, and dominance
 of uses are SSA-verifier rules in `src/aether/ssa/verifier.py`, not IR-verifier
 rules, and must not be attributed to this first component.
 
+The complete Phase 0, Step 1 rule inventory, including the canonical stable
+`IRV-NNN` identifiers, categories, and current Python locations, is maintained
+in [IR_VERIFIER_INVARIANTS.md](IR_VERIFIER_INVARIANTS.md). Those identifiers are
+metadata for future differential verification; the Python verifier does not
+emit them yet.
+
 ## 6. Integration mechanism
 
 | Alternative | Strengths | Costs and risks | Decision |
