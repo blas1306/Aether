@@ -1,0 +1,611 @@
+schema_version: 1
+corpus: aether-ir-verifier
+invariant_catalog: docs/compiler/IR_VERIFIER_INVARIANTS.md
+
+valid_modules:
+  - id: lowered-add
+    test: tests/aether/test_ir_verifier.py::test_verifies_lowered_add_function
+    covers: [IRV-070]
+
+  - id: lowered-local-store-load
+    test: tests/aether/test_ir_verifier.py::test_verifies_function_with_local_store_and_load
+    covers: [IRV-031, IRV-032, IRV-033, IRV-034]
+
+  - id: lowered-direct-call
+    test: tests/aether/test_ir_verifier.py::test_verifies_function_calling_another_function
+    covers: [IRV-052]
+
+  - id: compare-int-lt
+    test: tests/aether/test_ir_verifier.py::test_verifies_lowered_comparison_function
+    parameter_case: 1
+    covers: [IRV-076]
+
+  - id: compare-int-le
+    test: tests/aether/test_ir_verifier.py::test_verifies_lowered_comparison_function
+    parameter_case: 2
+    covers: [IRV-076]
+
+  - id: compare-int-gt
+    test: tests/aether/test_ir_verifier.py::test_verifies_lowered_comparison_function
+    parameter_case: 3
+    covers: [IRV-076]
+
+  - id: compare-int-ge
+    test: tests/aether/test_ir_verifier.py::test_verifies_lowered_comparison_function
+    parameter_case: 4
+    covers: [IRV-076]
+
+  - id: compare-int-eq
+    test: tests/aether/test_ir_verifier.py::test_verifies_lowered_comparison_function
+    parameter_case: 5
+    covers: [IRV-076]
+
+  - id: compare-int-ne
+    test: tests/aether/test_ir_verifier.py::test_verifies_lowered_comparison_function
+    parameter_case: 6
+    covers: [IRV-076]
+
+  - id: compare-bool-eq
+    test: tests/aether/test_ir_verifier.py::test_verifies_lowered_comparison_function
+    parameter_case: 7
+    covers: [IRV-076]
+
+  - id: compare-bool-ne
+    test: tests/aether/test_ir_verifier.py::test_verifies_lowered_comparison_function
+    parameter_case: 8
+    covers: [IRV-076]
+
+  - id: compare-string-eq
+    test: tests/aether/test_ir_verifier.py::test_verifies_lowered_comparison_function
+    parameter_case: 9
+    covers: [IRV-076]
+
+  - id: compare-string-ne
+    test: tests/aether/test_ir_verifier.py::test_verifies_lowered_comparison_function
+    parameter_case: 10
+    covers: [IRV-076]
+
+  - id: lowered-if-else
+    test: tests/aether/test_ir_verifier.py::test_verifies_lowered_if_else_function
+    covers: [IRV-020, IRV-021, IRV-035]
+
+  - id: lowered-while
+    test: tests/aether/test_ir_verifier.py::test_verifies_lowered_while_function
+    covers: [IRV-018, IRV-020, IRV-021, IRV-024, IRV-035]
+
+  - id: row-vector-construction
+    test: tests/aether/test_ir_verifier.py::test_verifies_row_vector_new
+    covers: [IRV-107]
+
+  - id: column-vector-construction
+    test: tests/aether/test_ir_verifier.py::test_verifies_column_vector_new
+    covers: [IRV-107]
+
+  - id: matrix-construction
+    test: tests/aether/test_ir_verifier.py::test_verifies_matrix_new
+    covers: [IRV-108]
+
+  - id: void-return
+    test: tests/aether/test_ir_verifier.py::test_verifies_void_function_with_bare_return
+    covers: [IRV-025]
+
+  - id: multiple-functions
+    test: tests/aether/test_ir_verifier.py::test_verifies_module_with_multiple_functions
+    covers: [IRV-006]
+
+  - id: int-to-double-cast
+    test: tests/aether/test_ir_verifier.py::test_verifies_int_to_double_cast
+    covers: [IRV-077]
+
+  - id: identity-cast-integer-power
+    test: tests/aether/test_ir_verifier.py::test_verifies_identity_cast_and_integer_power
+    covers: [IRV-070, IRV-077]
+
+  - id: lifecycle-operations
+    test: tests/aether/test_ir_lifecycle.py::test_all_lifecycle_operations_verify_and_expand_before_ssa
+    covers: [IRV-043, IRV-044, IRV-045, IRV-047, IRV-048, IRV-049, IRV-050]
+
+  - id: lifecycle-through-ir-optimizer
+    test: tests/aether/test_ir_lifecycle.py::test_ir_optimizers_preserve_unexpanded_lifecycle_effects
+    covers: [IRV-044, IRV-048]
+
+  - id: move-init-return-transfer
+    test: tests/aether/test_ir_lifecycle.py::test_move_init_transfers_return_storage
+    covers: [IRV-027, IRV-046]
+
+  - id: struct-default-init-destroy
+    test: tests/aether/test_ir_lifecycle.py::test_struct_init_default_and_destroy_execute_recursively
+    covers: [IRV-004, IRV-013, IRV-044, IRV-048]
+
+  - id: lifecycle-self-assignment
+    test: tests/aether/test_ir_lifecycle.py::test_self_assignment_is_valid_and_safe
+    covers: [IRV-047]
+
+  - id: lowering-moves-return-storage
+    test: tests/aether/test_ir_lifecycle.py::test_ast_lowering_moves_a_local_into_return_storage
+    covers: [IRV-027, IRV-028, IRV-046]
+
+  - id: lowering-loop-cleanup
+    test: tests/aether/test_ir_lifecycle.py::test_nested_scope_and_loop_exits_emit_reverse_cleanup
+    covers: [IRV-028]
+
+  - id: lowering-early-return-cleanup
+    test: tests/aether/test_ir_lifecycle.py::test_early_return_cleans_outer_and_inner_scopes
+    covers: [IRV-028]
+
+  - id: lowered-borrowed-iteration
+    test: tests/aether/test_const_collection_borrowed_for.py::test_ir_marks_for_in_element_borrow_without_owning_loop_storage
+    covers: [IRV-037, IRV-038, IRV-039]
+
+  - id: collection-copy
+    test: tests/aether/test_collection_copy_phase2.py::test_array_and_list_copy_are_explicit_typed_ir_and_ssa_allocations
+    verifier_invocation: 1
+    covers: [IRV-091, IRV-097]
+
+  - id: enum-lowering
+    test: tests/aether/test_enum_native.py::test_enum_lowering_preserves_nominal_type_constant_and_phi
+    verifier_invocation: 1
+    covers: [IRV-012, IRV-068]
+
+  - id: string-split-builtin
+    test: tests/aether/test_string_split.py::test_ir_ssa_split_signature_effects_source_location_capability_and_verifiers
+    verifier_invocation: 1
+    covers: [IRV-054, IRV-059]
+
+  - id: string-trim-builtin
+    test: tests/aether/test_string_trim.py::test_ir_ssa_trim_identity_signature_effects_location_and_capability
+    verifier_invocation: 1
+    covers: [IRV-054, IRV-058]
+
+  - id: string-parse-builtin
+    test: tests/aether/test_string_parsing.py::test_ir_ssa_builtin_identity_effects_layout_and_source_location
+    verifier_invocation: 1
+    covers: [IRV-054, IRV-060, IRV-061]
+
+  - id: typed-callable
+    test: tests/aether/test_typed_callables.py::test_ir_ssa_and_optimizers_preserve_refs_indirect_calls_and_callable_phi
+    verifier_invocation: 1
+    covers: [IRV-051, IRV-053]
+
+  - id: outer-product
+    test: tests/aether/test_outer_product.py::test_outer_product_lowers_to_ir_instruction_and_interprets
+    covers: [IRV-112]
+
+  - id: vector-dot
+    test: tests/aether/test_vector_dot.py::test_vector_dot_lowers_to_ir_instruction_and_interprets
+    covers: [IRV-111]
+
+  - id: matrix-vector-product
+    test: tests/aether/test_matrix_column_mul.py::test_matrix_column_product_lowers_to_ir_instruction_and_interprets
+    covers: [IRV-116]
+
+  - id: vector-matrix-product
+    test: tests/aether/test_matrix_column_mul.py::test_vector_matrix_product_lowers_to_ir_instruction_and_interprets
+    covers: [IRV-117]
+
+  - id: vector-index-read
+    test: tests/aether/test_vector_matrix_indexing.py::test_lowering_and_ir_interpreter_execute_vector_index_read
+    covers: [IRV-118]
+
+  - id: matrix-index-read
+    test: tests/aether/test_vector_matrix_indexing.py::test_lowering_and_ir_interpreter_execute_matrix_index_read
+    covers: [IRV-120]
+
+  - id: aggregate-dimensions
+    test: tests/aether/test_vector_matrix_indexing.py::test_lowering_and_ir_interpreter_execute_dimension_properties
+    covers: [IRV-122, IRV-123, IRV-124]
+
+  - id: aggregate-index-writes
+    test: tests/aether/test_vector_matrix_indexing.py::test_lowering_and_ir_interpreter_execute_vector_and_matrix_index_writes
+    covers: [IRV-119, IRV-121]
+
+  - id: vector-add
+    test: tests/aether/test_vector_matrix_indexing.py::test_lowering_and_ir_interpreter_execute_vector_addition
+    covers: [IRV-109]
+
+  - id: vector-subtract
+    test: tests/aether/test_vector_matrix_indexing.py::test_lowering_and_ir_interpreter_execute_vector_subtraction
+    covers: [IRV-109]
+
+  - id: matrix-add
+    test: tests/aether/test_vector_matrix_indexing.py::test_lowering_and_ir_interpreter_execute_matrix_addition
+    covers: [IRV-113]
+
+  - id: matrix-multiply
+    test: tests/aether/test_vector_matrix_indexing.py::test_lowering_and_ir_interpreter_execute_matrix_matmul
+    covers: [IRV-115]
+
+  - id: matrix-subtract
+    test: tests/aether/test_vector_matrix_indexing.py::test_lowering_and_ir_interpreter_execute_matrix_subtraction
+    covers: [IRV-113]
+
+  - id: aggregate-scale
+    test: tests/aether/test_vector_matrix_indexing.py::test_lowering_and_ir_interpreter_execute_scalar_multiplication
+    covers: [IRV-110, IRV-114]
+
+  - id: list-construction-read-properties
+    test: tests/aether/test_list_backend.py::test_lowers_list_literals_length_is_empty_and_for_to_ir
+    covers: [IRV-086, IRV-092, IRV-095, IRV-096]
+
+  - id: list-copy-contains-reverse
+    test: tests/aether/test_list_backend.py::test_phase_3a_lowers_prints_and_verifies_explicit_ir_and_ssa
+    verifier_invocation: 1
+    covers: [IRV-097, IRV-098, IRV-101]
+
+  - id: list-index-of
+    test: tests/aether/test_list_backend.py::test_list_index_of_lowers_prints_and_verifies_ir_and_ssa
+    verifier_invocation: 1
+    covers: [IRV-099]
+
+  - id: list-clear
+    test: tests/aether/test_list_backend.py::test_list_clear_lowers_prints_and_verifies_ir_and_ssa
+    verifier_invocation: 1
+    covers: [IRV-100]
+
+  - id: list-push
+    test: tests/aether/test_list_backend.py::test_list_push_lowers_prints_and_verifies_ir_and_ssa
+    verifier_invocation: 1
+    covers: [IRV-102]
+
+  - id: list-insert
+    test: tests/aether/test_list_backend.py::test_list_insert_lowers_prints_interprets_and_verifies_ir_and_ssa
+    verifier_invocation: 1
+    covers: [IRV-103]
+
+  - id: list-remove-at
+    test: tests/aether/test_list_backend.py::test_list_remove_at_lowers_prints_interprets_and_verifies_ir_and_ssa
+    verifier_invocation: 1
+    covers: [IRV-105]
+
+  - id: list-pop
+    test: tests/aether/test_list_backend.py::test_list_pop_lowers_prints_interprets_and_verifies_ir_and_ssa
+    verifier_invocation: 1
+    covers: [IRV-104]
+
+  - id: collection-slices
+    test: tests/aether/test_collection_slicing_phase3.py::test_array_and_list_slices_are_explicit_effectful_ir_and_ssa_operations
+    verifier_invocation: 1
+    covers: [IRV-089, IRV-094]
+
+  - id: sequence-sort
+    test: tests/aether/test_sequence_sort.py::test_sort_lowers_to_one_common_side_effecting_ir_and_ssa_instruction
+    verifier_invocation: 1
+    covers: [IRV-106]
+
+invalid_modules:
+  - id: list-set-value-type
+    test: tests/aether/test_ir_verifier.py::test_rejects_list_set_with_incompatible_value_type
+    expected_invariant: IRV-093
+    covers: [IRV-093]
+
+  - id: list-clear-receiver
+    test: tests/aether/test_ir_verifier.py::test_rejects_list_clear_with_non_list_operand
+    expected_invariant: IRV-100
+    covers: [IRV-100]
+
+  - id: list-push-value-type
+    test: tests/aether/test_ir_verifier.py::test_rejects_list_push_with_incompatible_value_type
+    expected_invariant: IRV-102
+    covers: [IRV-102]
+
+  - id: list-insert-index-type
+    test: tests/aether/test_ir_verifier.py::test_rejects_list_insert_with_non_int_index
+    expected_invariant: IRV-103
+    covers: [IRV-103]
+
+  - id: list-pop-result-type
+    test: tests/aether/test_ir_verifier.py::test_rejects_list_pop_with_incompatible_result_type
+    expected_invariant: IRV-104
+    covers: [IRV-104]
+
+  - id: list-remove-at-index-type
+    test: tests/aether/test_ir_verifier.py::test_rejects_list_remove_at_with_non_int_index
+    expected_invariant: IRV-105
+    covers: [IRV-105]
+
+  - id: vector-new-orientation
+    test: tests/aether/test_ir_verifier.py::test_rejects_vector_new_orientation_mismatch
+    expected_invariant: IRV-107
+    covers: [IRV-107]
+
+  - id: unsupported-cast
+    test: tests/aether/test_ir_verifier.py::test_unsupported_cast_error
+    expected_invariant: IRV-077
+    covers: [IRV-077]
+
+  - id: duplicate-function
+    test: tests/aether/test_ir_verifier.py::test_duplicate_function_error
+    expected_invariant: IRV-006
+    covers: [IRV-006]
+
+  - id: missing-entry-block
+    test: tests/aether/test_ir_verifier.py::test_missing_entry_block_error
+    expected_invariant: IRV-017
+    covers: [IRV-017]
+
+  - id: duplicate-parameter
+    test: tests/aether/test_ir_verifier.py::test_duplicate_parameter_error
+    expected_invariant: IRV-007
+    covers: [IRV-007]
+
+  - id: duplicate-block
+    test: tests/aether/test_ir_verifier.py::test_duplicate_block_error
+    expected_invariant: IRV-008
+    covers: [IRV-008]
+
+  - id: instruction-after-terminator
+    test: tests/aether/test_ir_verifier.py::test_instruction_after_return_error
+    expected_invariant: IRV-019
+    covers: [IRV-019]
+
+  - id: undefined-value
+    test: tests/aether/test_ir_verifier.py::test_undefined_value_error
+    expected_invariant: IRV-029
+    covers: [IRV-029]
+
+  - id: undefined-slot
+    test: tests/aether/test_ir_verifier.py::test_undefined_slot_error
+    expected_invariant: IRV-031
+    covers: [IRV-031]
+
+  - id: load-before-store
+    test: tests/aether/test_ir_verifier.py::test_load_before_store_error
+    expected_invariant: IRV-032
+    covers: [IRV-032]
+
+  - id: call-missing-function
+    test: tests/aether/test_ir_verifier.py::test_call_to_missing_function_error
+    expected_invariant: IRV-052
+    covers: [IRV-052]
+
+  - id: call-wrong-arity
+    test: tests/aether/test_ir_verifier.py::test_call_wrong_arity_error
+    expected_invariant: IRV-052
+    covers: [IRV-052]
+
+  - id: call-wrong-argument-type
+    test: tests/aether/test_ir_verifier.py::test_call_wrong_argument_type_error
+    expected_invariant: IRV-052
+    covers: [IRV-052]
+
+  - id: return-type-mismatch
+    test: tests/aether/test_ir_verifier.py::test_return_type_mismatch_error
+    expected_invariant: IRV-025
+    covers: [IRV-025]
+
+  - id: binary-incompatible-operands
+    test: tests/aether/test_ir_verifier.py::test_binary_op_incompatible_operand_error
+    expected_invariant: IRV-070
+    covers: [IRV-070]
+
+  - id: compare-int-string
+    test: tests/aether/test_ir_verifier.py::test_compare_op_int_less_than_string_error
+    expected_invariant: IRV-076
+    covers: [IRV-076]
+
+  - id: ordered-compare-bool
+    test: tests/aether/test_ir_verifier.py::test_compare_op_bool_less_than_bool_error
+    expected_invariant: IRV-076
+    covers: [IRV-076]
+
+  - id: ordered-compare-string
+    test: tests/aether/test_ir_verifier.py::test_compare_op_string_less_than_string_error
+    expected_invariant: IRV-076
+    covers: [IRV-076]
+
+  - id: compare-result-type
+    test: tests/aether/test_ir_verifier.py::test_compare_op_result_type_must_be_bool_error
+    expected_invariant: IRV-076
+    covers: [IRV-076]
+
+  - id: compare-unknown-operator
+    test: tests/aether/test_ir_verifier.py::test_compare_op_unknown_operator_error
+    expected_invariant: IRV-076
+    covers: [IRV-076]
+
+  - id: branch-condition-type
+    test: tests/aether/test_ir_verifier.py::test_branch_condition_must_be_bool_error
+    expected_invariant: IRV-021
+    covers: [IRV-021]
+
+  - id: loop-branch-condition-type
+    test: tests/aether/test_ir_verifier.py::test_loop_branch_condition_must_be_bool_error
+    expected_invariant: IRV-021
+    covers: [IRV-021]
+
+  - id: missing-jump-target
+    test: tests/aether/test_ir_verifier.py::test_jump_target_must_exist_error
+    expected_invariant: IRV-020
+    covers: [IRV-020]
+
+  - id: missing-branch-target
+    test: tests/aether/test_ir_verifier.py::test_branch_target_must_exist_error
+    expected_invariant: IRV-020
+    covers: [IRV-020]
+
+  - id: missing-loop-target
+    test: tests/aether/test_ir_verifier.py::test_loop_branch_target_must_exist_error
+    expected_invariant: IRV-020
+    covers: [IRV-020]
+
+  - id: merge-load-not-definitely-stored
+    test: tests/aether/test_ir_verifier.py::test_load_after_merge_requires_store_on_all_incoming_paths
+    expected_invariant: IRV-032
+    covers: [IRV-032, IRV-035]
+
+  - id: loop-load-not-definitely-stored
+    test: tests/aether/test_ir_verifier.py::test_load_after_loop_requires_store_before_loop
+    expected_invariant: IRV-032
+    covers: [IRV-032, IRV-035]
+
+  - id: unterminated-loop-body
+    test: tests/aether/test_ir_verifier.py::test_loop_body_must_have_terminator_error
+    expected_invariant: IRV-018
+    covers: [IRV-018]
+
+  - id: non-void-path-without-return
+    test: tests/aether/test_ir_verifier.py::test_non_void_function_must_return_on_all_paths_error
+    expected_invariant: IRV-024
+    covers: [IRV-024]
+
+  - id: division-result-type
+    test: tests/aether/test_ir_verifier.py::test_division_result_type_must_match_error
+    expected_invariant: IRV-070
+    covers: [IRV-070]
+
+  - id: call-result-type
+    test: tests/aether/test_ir_verifier.py::test_call_result_type_must_match_error
+    expected_invariant: IRV-052
+    covers: [IRV-052]
+
+  - id: copy-init-live-destination
+    test: tests/aether/test_ir_lifecycle.py::test_copy_init_rejects_live_destination
+    expected_invariant: IRV-045
+    covers: [IRV-045, IRV-050]
+
+  - id: assign-uninitialized-destination
+    test: tests/aether/test_ir_lifecycle.py::test_assign_rejects_uninitialized_destination
+    expected_invariant: IRV-047
+    covers: [IRV-047, IRV-050]
+
+  - id: double-destroy
+    test: tests/aether/test_ir_lifecycle.py::test_double_destroy_is_rejected
+    expected_invariant: IRV-048
+    covers: [IRV-048, IRV-050]
+
+  - id: load-after-destroy
+    test: tests/aether/test_ir_lifecycle.py::test_load_after_destroy_is_rejected
+    expected_invariant: IRV-032
+    covers: [IRV-032, IRV-050]
+
+  - id: load-after-move
+    test: tests/aether/test_ir_lifecycle.py::test_load_and_destroy_after_move_are_rejected
+    verifier_invocation: 1
+    expected_invariant: IRV-032
+    covers: [IRV-032, IRV-050]
+
+  - id: return-storage-after-move
+    test: tests/aether/test_ir_lifecycle.py::test_load_and_destroy_after_move_are_rejected
+    verifier_invocation: 2
+    expected_invariant: IRV-050
+    covers: [IRV-050]
+
+  - id: destroy-after-move
+    test: tests/aether/test_ir_lifecycle.py::test_load_and_destroy_after_move_are_rejected
+    verifier_invocation: 3
+    expected_invariant: IRV-048
+    covers: [IRV-048, IRV-050]
+
+  - id: missing-lifecycle-cleanup
+    test: tests/aether/test_ir_lifecycle.py::test_missing_cleanup_is_rejected
+    expected_invariant: IRV-028
+    covers: [IRV-028]
+
+  - id: inconsistent-branch-initialization
+    test: tests/aether/test_ir_lifecycle.py::test_inconsistent_branch_initialization_is_rejected
+    expected_invariant: IRV-036
+    covers: [IRV-036]
+
+  - id: relocate-non-relocatable
+    test: tests/aether/test_ir_lifecycle.py::test_relocation_rejects_non_relocatable_type_and_invalid_count
+    verifier_invocation: 1
+    expected_invariant: IRV-049
+    covers: [IRV-049]
+
+  - id: relocate-invalid-count
+    test: tests/aether/test_ir_lifecycle.py::test_relocation_rejects_non_relocatable_type_and_invalid_count
+    verifier_invocation: 2
+    expected_invariant: IRV-049
+    covers: [IRV-049]
+
+  - id: copy-init-type-mismatch
+    test: tests/aether/test_ir_lifecycle.py::test_lifecycle_requires_exact_types_and_real_storage
+    verifier_invocation: 1
+    expected_invariant: IRV-045
+    covers: [IRV-045]
+
+  - id: lifecycle-non-storage-destination
+    test: tests/aether/test_ir_lifecycle.py::test_lifecycle_requires_exact_types_and_real_storage
+    verifier_invocation: 2
+    expected_invariant: IRV-043
+    covers: [IRV-043]
+
+  - id: borrowed-value-return
+    test: tests/aether/test_const_collection_borrowed_for.py::test_ir_verifier_rejects_direct_borrow_escape
+    expected_invariant: IRV-041
+    covers: [IRV-041]
+
+  - id: array-copy-result-type
+    test: tests/aether/test_collection_copy_phase2.py::test_ir_and_ssa_verifiers_reject_invalid_array_copy_receiver_and_result
+    verifier_invocation: 1
+    expected_invariant: IRV-091
+    covers: [IRV-091]
+
+  - id: enum-constant-discriminant
+    test: tests/aether/test_enum_native.py::test_ir_verifier_rejects_invalid_enum_constant_and_cross_enum_comparison
+    verifier_invocation: 1
+    expected_invariant: IRV-068
+    covers: [IRV-068]
+
+  - id: cross-enum-comparison
+    test: tests/aether/test_enum_native.py::test_ir_verifier_rejects_invalid_enum_constant_and_cross_enum_comparison
+    verifier_invocation: 2
+    expected_invariant: IRV-076
+    covers: [IRV-076]
+
+  - id: integer-constant-out-of-range
+    test: tests/aether/test_integer_literals_i32.py::test_ir_and_ssa_verifiers_reject_out_of_range_int_constants
+    verifier_invocation: 1
+    expected_invariant: IRV-069
+    covers: [IRV-069]
+
+  - id: unary-not-non-bool
+    test: tests/aether/test_logical_not.py::test_ir_and_ssa_verifiers_reject_non_boolean_not
+    verifier_invocation: 1
+    expected_invariant: IRV-074
+    covers: [IRV-074]
+
+  - id: string-split-arity
+    test: tests/aether/test_string_split.py::test_ir_ssa_split_signature_effects_source_location_capability_and_verifiers
+    verifier_invocation: 2
+    expected_invariant: IRV-059
+    covers: [IRV-059]
+
+  - id: string-trim-arity
+    test: tests/aether/test_string_trim.py::test_ir_and_ssa_verifiers_reject_malformed_trim_signature
+    verifier_invocation: 2
+    expected_invariant: IRV-058
+    covers: [IRV-058]
+
+  - id: unresolved-struct-in-collection
+    test: tests/aether/test_struct_collections_native.py::test_ir_verifier_rejects_incomplete_and_recursive_collection_layouts
+    verifier_invocation: 1
+    expected_invariant: IRV-004
+    covers: [IRV-004, IRV-013, IRV-014]
+
+  - id: recursive-by-value-struct
+    test: tests/aether/test_struct_collections_native.py::test_ir_verifier_rejects_incomplete_and_recursive_collection_layouts
+    verifier_invocation: 2
+    expected_invariant: IRV-005
+    covers: [IRV-005]
+
+  - id: indirect-call-wrong-arity
+    test: tests/aether/test_typed_callables.py::test_ir_and_ssa_verifiers_reject_invalid_indirect_callable_operands
+    verifier_invocation: 2
+    expected_invariant: IRV-053
+    covers: [IRV-053]
+
+  - id: vector-get-index-type
+    test: tests/aether/test_vector_matrix_indexing.py::test_ir_verifier_rejects_bad_vector_get_index_type
+    expected_invariant: IRV-118
+    covers: [IRV-118]
+
+  - id: vector-set-value-type
+    test: tests/aether/test_vector_matrix_indexing.py::test_ir_verifier_rejects_bad_vector_set_value_type
+    expected_invariant: IRV-119
+    covers: [IRV-119]
+
+  - id: vector-length-receiver
+    test: tests/aether/test_vector_matrix_indexing.py::test_ir_verifier_rejects_bad_vector_length_source
+    expected_invariant: IRV-122
+    covers: [IRV-122]
