@@ -23,6 +23,18 @@ class LLVMBuildError(Exception):
     """Raised when native LLVM/clang build orchestration fails."""
 
 
+class ToolchainUnavailableError(LLVMBuildError):
+    """Raised when the configured native toolchain cannot be found."""
+
+
+class ToolchainInvocationError(LLVMBuildError):
+    """Raised when an external tool cannot be launched."""
+
+
+class ClangRejectedLLVMError(LLVMBuildError):
+    """Raised when Clang rejects LLVM emitted from accepted Aether source."""
+
+
 @dataclass(frozen=True)
 class LLVMBuildResult:
     output_path: Path
@@ -125,7 +137,9 @@ class LLVMBuilder:
     ) -> LLVMBuildResult:
         clang_path = shutil.which(self._clang)
         if clang_path is None:
-            raise LLVMBuildError("clang is required to build native executables.")
+            raise ToolchainUnavailableError(
+                "clang is required to build native executables."
+            )
 
         try:
             command = [clang_path, str(llvm_path), "-o", str(output_path)]
@@ -138,15 +152,17 @@ class LLVMBuilder:
                 text=True,
             )
         except FileNotFoundError as exc:
-            raise LLVMBuildError(
+            raise ToolchainUnavailableError(
                 "clang is required to build native executables."
             ) from exc
+        except OSError as exc:
+            raise ToolchainInvocationError("could not invoke clang.") from exc
 
         if completed.returncode != 0:
             detail = completed.stderr.strip() or completed.stdout.strip()
             if detail:
-                raise LLVMBuildError(detail)
-            raise LLVMBuildError(
+                raise ClangRejectedLLVMError(detail)
+            raise ClangRejectedLLVMError(
                 f"clang failed with exit code {completed.returncode}."
             )
 

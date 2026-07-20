@@ -95,6 +95,7 @@ def test_packaging_declares_dynamic_canonical_version_and_essential_docs() -> No
     assert '"docs/aether/AETHER_LANGUAGE_SPEC_V1.md"' in metadata
     assert '"docs/aether/AETHER_NATIVE_PROFILE_V1.md"' in metadata
     assert '"docs/aether/AETHER_FRONTEND_EXPERIMENTS.md"' in metadata
+    assert '"docs/aether/AETHER_DIAGNOSTICS.md"' in metadata
     assert '"examples/v1_examples_manifest.json"' in metadata
     assert '"examples/README.md"' in metadata
     assert '"share/aether/examples/llvm"' in metadata

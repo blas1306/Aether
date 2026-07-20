@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import re
 import sys
 import threading
@@ -31,6 +32,7 @@ from document_symbols import (
 
 
 JsonObject = dict[str, Any]
+LOGGER = logging.getLogger(__name__)
 DIAGNOSTIC_DEBOUNCE_SECONDS = 0.35
 FALLBACK_BUILTIN_NAMES = {
     "abs",
@@ -750,11 +752,16 @@ def _escape_lsp_snippet(text: str) -> str:
 
 
 def _internal_error_diagnostic(exc: Exception, source: str = "") -> JsonObject:
+    LOGGER.debug("Aether analyzer internal error", exc_info=exc)
     return {
         "range": _safe_lsp_range(source, 1, 1, 1, 2),
         "severity": 2,
         "source": "aether",
-        "message": f"Aether analyzer internal error: {type(exc).__name__}: {exc}",
+        "code": "ICE-UNEXPECTED-001",
+        "message": (
+            "Aether analyzer internal compiler error [ICE-UNEXPECTED-001]. "
+            "This is a compiler bug; internal details were not published as a source diagnostic."
+        ),
     }
 
 

@@ -48,16 +48,19 @@ R2/B13 queda cerrado sin promover ninguna feature experimental a Aether 1.0.
 
 ### R3 — Normalizar diagnostics de pipeline (P2 relevante)
 
-**Estado: SIGUIENTE BLOQUEADOR DE RC3.**
+**Estado: CERRADO (2026-07-19).**
 
 - conservar `AE-BACKEND-*` para capability;
-- mapear rechazo de verifier a categoría pública `verification` manteniendo
-  `ir`/`ssa` como detalle;
+- mapear rechazo de verifier a `internal_compiler_error` manteniendo
+  `ir`/`ssa` como fase técnica;
 - añadir una frontera `internal compiler error` para excepciones inesperadas,
   sin convertirlas en errores de usuario;
-- probar stderr, exit code 1 y ausencia de traceback.
+- probar stderr, exit codes estables y ausencia de traceback.
 
-**Gate:** tests CLI/LSP de syntax, type, capability, verification, runtime e ICE.
+**Gate:** `scripts/check_diagnostics_contract.py` y tests CLI/LSP de syntax,
+type, capability, runtime, toolchain e ICE; los detalles internos sólo aparecen
+con `--debug`. El contrato completo está en
+[AETHER_DIAGNOSTICS.md](AETHER_DIAGNOSTICS.md).
 
 ### R4 — Validación RC3 limpia
 

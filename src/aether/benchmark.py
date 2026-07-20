@@ -35,7 +35,7 @@ class BenchTiming:
 class BenchFailure:
     name: str
     category: str
-    error: AetherError
+    error: Exception
     unsupported: bool = False
 
 
@@ -359,10 +359,12 @@ def _typed_program(source: str, path: Path) -> TypedProgram:
     )
 
 
-def _benchmark_error(exc: Exception, profile: str) -> AetherError:
-    if isinstance(exc, AetherError):
-        return exc
-    return AetherRuntimeError(f"{profile} failed: {exc}", kind="bench")
+def _benchmark_error(exc: Exception, profile: str) -> Exception:
+    del profile
+    # Preserve the original exception and cause chain.  The public CLI boundary
+    # owns classification and sanitization; wrapping here used to turn compiler
+    # bugs into user-visible runtime strings.
+    return exc
 
 
 def _is_missing_clang(exc: Exception) -> bool:

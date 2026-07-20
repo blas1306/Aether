@@ -5,10 +5,17 @@ from collections.abc import Callable, Sequence
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from pprint import pformat
+from io import StringIO
 import sys
 from typing import TYPE_CHECKING, TextIO
 
 from .errors import AetherError
+from .diagnostics import (
+    DiagnosticCategory,
+    EXIT_BY_CATEGORY,
+    diagnostic_from_exception,
+    render_diagnostic,
+)
 from .benchmark import BenchReport, run_benchmark
 from .ir import print_ir
 from .pipeline import (
@@ -34,6 +41,9 @@ if TYPE_CHECKING:
 EXIT_SUCCESS = 0
 EXIT_LANGUAGE_ERROR = 1
 EXIT_USAGE_ERROR = 2
+EXIT_TOOLCHAIN_ERROR = 3
+EXIT_INTERNAL_COMPILER_ERROR = 70
+EXIT_INTERRUPTED = 130
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -80,6 +90,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--emit-llvm",
         action="store_true",
         help="Lower the file through optimized SSA and print textual LLVM IR.",
+    )
+    modes.add_argument(
+        "--check",
+        action="store_true",
+        help="Check syntax, types, and native capabilities without generating code.",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Show internal details and tracebacks for compiler errors.",
     )
     parser.add_argument(
         "--ssa-builder",
@@ -137,6 +157,11 @@ def build_bench_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("file", help="Aether source file to benchmark.")
     parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Show internal details and tracebacks for compiler errors.",
+    )
+    parser.add_argument(
         "--iterations",
         type=_positive_int,
         default=10,
@@ -169,6 +194,11 @@ def build_native_parser() -> argparse.ArgumentParser:
         description="Build an Aether source file to a native executable with clang.",
     )
     parser.add_argument("file", help="Aether source file to build.")
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Show internal details and tracebacks for compiler errors.",
+    )
     parser.add_argument(
         "-o",
         "--output",
@@ -258,7 +288,12 @@ def main(
         if args.file is not None:
             print("aether: error: --repl does not accept a file.", file=stderr)
             return EXIT_USAGE_ERROR
-        return run_repl(stdin=stdin, stdout=stdout, stderr=stderr)
+        return run_repl(
+            stdin=stdin,
+            stdout=stdout,
+            stderr=stderr,
+            debug=args.debug,
+        )
 
     if args.file is None:
         parser.print_help(file=stdout)
@@ -273,11 +308,17 @@ def main(
         return _run_language_action(
             lambda: _print_tokens(source, stdout=stdout),
             stderr=stderr,
+            path=path,
+            phase="lexing",
+            debug=args.debug,
         )
     if args.ast:
         return _run_language_action(
             lambda: _print_ast(source, stdout=stdout),
             stderr=stderr,
+            path=path,
+            phase="parsing",
+            debug=args.debug,
         )
     if args.emit_ir:
         return _run_language_action(
@@ -292,11 +333,21 @@ def main(
                 show_passes=args.show_passes,
             ),
             stderr=stderr,
+            path=path,
+            phase=(
+                "optimization"
+                if args.opt or args.opt_level not in (None, "0")
+                else "IR lowering"
+            ),
+            debug=args.debug,
         )
     if args.emit_cfg:
         return _run_language_action(
             lambda: _emit_cfg(source, path=path, stdout=stdout),
             stderr=stderr,
+            path=path,
+            phase="IR lowering",
+            debug=args.debug,
         )
     if args.emit_ssa:
         return _run_language_action(
@@ -307,11 +358,25 @@ def main(
                 builder=args.ssa_builder or DEFAULT_SSA_BUILDER,
             ),
             stderr=stderr,
+            path=path,
+            phase="SSA construction",
+            debug=args.debug,
         )
     if args.emit_llvm:
         return _run_language_action(
             lambda: _emit_llvm(source, path=path, stdout=stdout),
             stderr=stderr,
+            path=path,
+            phase="LLVM emission",
+            debug=args.debug,
+        )
+    if args.check:
+        return _run_language_action(
+            lambda: _check_source(source, path=path),
+            stderr=stderr,
+            path=path,
+            phase="checking",
+            debug=args.debug,
         )
     return _run_execution_action(
         lambda: _execute_file(
@@ -325,6 +390,9 @@ def main(
         ),
         stdout=stdout,
         stderr=stderr,
+        path=path,
+        phase="execution",
+        debug=args.debug,
     )
 
 
@@ -352,19 +420,52 @@ def _main_bench(argv: Sequence[str], *, stdout: TextIO, stderr: TextIO) -> int:
             backend=args.backend,
             expected_exit_code=None if args.ignore_exit_code else args.expected_exit_code,
         )
-    except AetherError as exc:
-        print(_format_language_error(exc), file=stderr)
-        return EXIT_LANGUAGE_ERROR
+    except KeyboardInterrupt:
+        return _render_interrupted(stderr)
+    except Exception as exc:
+        return _render_exception(
+            exc,
+            stderr=stderr,
+            path=path,
+            phase="benchmark",
+            debug=args.debug,
+        )
 
-    _print_benchmark_report(report, stdout=stdout)
+    diagnostics = [
+        diagnostic_from_exception(
+            failure.error,
+            source_path=path,
+            phase=f"benchmark: {failure.name}",
+        )
+        for failure in report.failures
+    ]
+    has_ice = any(
+        item.category is DiagnosticCategory.INTERNAL_COMPILER_ERROR
+        for item in diagnostics
+    )
+    _print_benchmark_report(
+        report,
+        stdout=stdout,
+        include_failures=not has_ice,
+    )
+    if has_ice:
+        for failure, diagnostic in zip(report.failures, diagnostics):
+            if diagnostic.category is DiagnosticCategory.INTERNAL_COMPILER_ERROR:
+                render_diagnostic(
+                    diagnostic,
+                    stderr=stderr,
+                    exception=failure.error,
+                    debug=args.debug,
+                )
+        return EXIT_INTERNAL_COMPILER_ERROR
     if args.backend in {"ir", "ssa", "llvm", "native"} and report.failures:
+        if any(item.category is DiagnosticCategory.TOOLCHAIN for item in diagnostics):
+            return EXIT_TOOLCHAIN_ERROR
         return EXIT_LANGUAGE_ERROR
     return EXIT_SUCCESS
 
 
 def _main_build(argv: Sequence[str], *, stdout: TextIO, stderr: TextIO) -> int:
-    from .backend.llvm import LLVMBuildError
-
     parser = build_native_parser()
     if stdout is sys.stdout and stderr is sys.stderr:
         args = parser.parse_args(argv)
@@ -392,12 +493,16 @@ def _main_build(argv: Sequence[str], *, stdout: TextIO, stderr: TextIO) -> int:
             output_path=output_path,
             keep_llvm=args.keep_llvm,
         )
-    except LLVMBuildError as exc:
-        print(f"aether build: {exc}", file=stderr)
-        return EXIT_LANGUAGE_ERROR
-    except AetherError as exc:
-        print(_format_language_error(exc), file=stderr)
-        return EXIT_LANGUAGE_ERROR
+    except KeyboardInterrupt:
+        return _render_interrupted(stderr)
+    except Exception as exc:
+        return _render_exception(
+            exc,
+            stderr=stderr,
+            path=path,
+            phase="native build",
+            debug=args.debug,
+        )
 
     print(f"Built executable: {result.output_path}", file=stdout)
     if result.llvm_path is not None:
@@ -409,7 +514,13 @@ def _default_native_output_path(source_path: Path) -> Path:
     return Path("build") / source_path.stem
 
 
-def run_repl(*, stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:
+def run_repl(
+    *,
+    stdin: TextIO,
+    stdout: TextIO,
+    stderr: TextIO,
+    debug: bool = False,
+) -> int:
     session = AetherSession(
         output_writer=stdout.write,
         input_reader=stdin.readline,
@@ -420,7 +531,11 @@ def run_repl(*, stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:
     while True:
         stdout.write("aether> ")
         stdout.flush()
-        line = stdin.readline()
+        try:
+            line = stdin.readline()
+        except KeyboardInterrupt:
+            print(file=stdout)
+            return _render_interrupted(stderr)
         if line == "":
             stdout.write("\n")
             return EXIT_SUCCESS
@@ -434,7 +549,23 @@ def run_repl(*, stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:
         try:
             session.run(source)
         except AetherError as exc:
-            print(_format_language_error(exc), file=stderr)
+            _render_exception(
+                exc,
+                stderr=stderr,
+                phase="REPL evaluation",
+                debug=debug,
+            )
+        except KeyboardInterrupt:
+            return _render_interrupted(stderr)
+        except Exception as exc:
+            # The session restores its snapshot before propagating.  An ICE
+            # still ends the REPL because other compiler state may be unsafe.
+            return _render_exception(
+                exc,
+                stderr=stderr,
+                phase="REPL evaluation",
+                debug=debug,
+            )
 
 
 def _execute_file(
@@ -545,6 +676,16 @@ def _emit_cfg(source: str, *, path: Path, stdout: TextIO) -> None:
         ),
         file=stdout,
     )
+
+
+def _check_source(source: str, *, path: Path) -> None:
+    from .capabilities import BackendIdentity, validate_backend_capabilities
+
+    typed_program = prepare_typed_program(
+        source,
+        TypeChecker(source_root=path.parent, entry_path=path),
+    )
+    validate_backend_capabilities(typed_program, BackendIdentity.NATIVE)
 
 
 def _emit_ssa(
@@ -716,7 +857,12 @@ def _format_trace_title(step: OptimizationTraceStep) -> str:
     return f"{title} [{status}]"
 
 
-def _print_benchmark_report(report: BenchReport, *, stdout: TextIO) -> None:
+def _print_benchmark_report(
+    report: BenchReport,
+    *,
+    stdout: TextIO,
+    include_failures: bool = True,
+) -> None:
     print(f"Benchmark: {report.path}", file=stdout)
     print(f"Iterations: {report.iterations}", file=stdout)
     print(f"Failures: {len(report.failures)}", file=stdout)
@@ -727,11 +873,20 @@ def _print_benchmark_report(report: BenchReport, *, stdout: TextIO) -> None:
         print(f"  total: {_format_seconds(timing.total_seconds)}", file=stdout)
         print(f"  avg: {_format_seconds(timing.average_seconds)}", file=stdout)
     for failure in report.failures:
+        if not include_failures:
+            continue
         print(file=stdout)
         print(f"{failure.name}:", file=stdout)
         print(f"  category: {failure.category}", file=stdout)
         print("  unsupported:" if failure.unsupported else "  error:", file=stdout)
-        for line in _format_language_error(failure.error).splitlines():
+        diagnostic = diagnostic_from_exception(
+            failure.error,
+            source_path=report.path,
+            phase=f"benchmark: {failure.name}",
+        )
+        rendered = StringIO()
+        render_diagnostic(diagnostic, stderr=rendered)
+        for line in rendered.getvalue().rstrip().splitlines():
             print(f"    {line}", file=stdout)
 
 
@@ -761,12 +916,28 @@ def _read_source(path: Path, *, stderr: TextIO) -> str | None:
         return None
 
 
-def _run_language_action(action: Callable[[], None], *, stderr: TextIO) -> int:
+def _run_language_action(
+    action: Callable[[], None],
+    *,
+    stderr: TextIO,
+    path: Path | None = None,
+    phase: str | None = None,
+    debug: bool = False,
+) -> int:
     try:
         action()
-    except AetherError as exc:
-        print(_format_language_error(exc), file=stderr)
+    except KeyboardInterrupt:
+        return _render_interrupted(stderr)
+    except BrokenPipeError:
         return EXIT_LANGUAGE_ERROR
+    except Exception as exc:
+        return _render_exception(
+            exc,
+            stderr=stderr,
+            path=path,
+            phase=phase,
+            debug=debug,
+        )
     return EXIT_SUCCESS
 
 
@@ -775,6 +946,9 @@ def _run_execution_action(
     *,
     stdout: TextIO,
     stderr: TextIO,
+    path: Path | None = None,
+    phase: str | None = None,
+    debug: bool = False,
 ) -> int:
     try:
         return action()
@@ -782,14 +956,48 @@ def _run_execution_action(
         if exc.message.startswith("Aether panic:"):
             print(exc.message, file=stdout)
             return EXIT_LANGUAGE_ERROR
-        print(_format_language_error(exc), file=stderr)
+        return _render_exception(
+            exc,
+            stderr=stderr,
+            path=path,
+            phase=phase,
+            debug=debug,
+        )
+    except KeyboardInterrupt:
+        return _render_interrupted(stderr)
+    except BrokenPipeError:
         return EXIT_LANGUAGE_ERROR
+    except Exception as exc:
+        return _render_exception(
+            exc,
+            stderr=stderr,
+            path=path,
+            phase=phase,
+            debug=debug,
+        )
 
 
-def _format_language_error(exc: AetherError) -> str:
-    if exc.has_details:
-        return exc.format()
-    return f"{type(exc).__name__}: {exc.message}"
+def _render_exception(
+    exc: Exception,
+    *,
+    stderr: TextIO,
+    path: Path | None = None,
+    phase: str | None = None,
+    debug: bool = False,
+) -> int:
+    diagnostic = diagnostic_from_exception(exc, source_path=path, phase=phase)
+    render_diagnostic(
+        diagnostic,
+        stderr=stderr,
+        exception=exc,
+        debug=debug,
+    )
+    return EXIT_BY_CATEGORY[diagnostic.category]
+
+
+def _render_interrupted(stderr: TextIO) -> int:
+    print("Aether interrupted.", file=stderr)
+    return EXIT_INTERRUPTED
 
 
 if __name__ == "__main__":

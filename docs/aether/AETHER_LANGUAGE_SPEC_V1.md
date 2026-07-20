@@ -525,11 +525,16 @@ reflection, or generic serialization. The normative byte format is defined in
 
 ## 13. Panics and diagnostics
 
-A static syntax, name, type, capability, or verification error prevents
+A static syntax, name, type, or capability error prevents
 execution. Excluded frontend constructions **MUST** fail before native
 lowering. A capability diagnostic uses its stable `AE-BACKEND-*` category,
 source location, and reason. A conforming implementation **MUST NOT** expose an
 unexpected host traceback as a user-language diagnostic.
+
+IR, SSA, or LLVM verification failure after the frontend accepts source is an
+internal compiler error, not a source diagnostic. The public categories, stable
+codes, debug behavior, and exit codes are defined by
+[AETHER_DIAGNOSTICS.md](AETHER_DIAGNOSTICS.md).
 
 A panic is an unrecoverable safety failure. Public panic output is
 `Aether panic: <message>` plus newline on stdout and process exit code 1.

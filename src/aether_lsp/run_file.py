@@ -4,7 +4,8 @@ import argparse
 import sys
 from pathlib import Path
 
-from aether import run_source
+from aether import run_aether
+from aether.diagnostics import EXIT_BY_CATEGORY, diagnostic_from_exception, render_diagnostic
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -25,10 +26,23 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Could not read {path}: {exc}", file=sys.stderr)
         return 2
 
-    result = run_source(source, source_root=path.parent, output_writer=_write_stdout)
-    if not result.success:
-        print(result.error or "Aether execution failed.", file=sys.stderr)
-        return 1
+    try:
+        result = run_aether(
+            source,
+            source_root=path.parent,
+            output_writer=_write_stdout,
+        )
+    except KeyboardInterrupt:
+        print("Aether interrupted.", file=sys.stderr)
+        return 130
+    except Exception as exc:
+        diagnostic = diagnostic_from_exception(
+            exc,
+            source_path=path,
+            phase="LSP run action",
+        )
+        render_diagnostic(diagnostic, stderr=sys.stderr, exception=exc)
+        return EXIT_BY_CATEGORY[diagnostic.category]
     return result.exit_code
 
 

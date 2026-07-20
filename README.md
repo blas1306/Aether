@@ -263,6 +263,8 @@ aether --emit-ssa program.ae
 aether --emit-ssa --ssa-builder=pattern program.ae
 aether --emit-ssa --ssa-builder=general program.ae
 aether --emit-llvm program.ae
+aether --check program.ae
+aether --debug --emit-llvm program.ae
 ```
 
 `GeneralSSABuilder` es el builder predeterminado. Usa CFG, dominadores y
@@ -404,10 +406,16 @@ Pipeline local completo:
 .venv/bin/python scripts/ci.py
 ```
 
-Incluye integridad documental, compileall, whitespace, pytest, benchmarks,
+Incluye integridad documental, contrato público de diagnósticos/ICE, compileall,
+whitespace, pytest, benchmarks,
 corpus diferencial en clang O0/O1/O2, smoke LLVM y builds native. Los tests de
 integración native se omiten cuando clang no está disponible. Detalle:
 [docs/compiler/CI.md](docs/compiler/CI.md).
+
+Los errores públicos se dividen en `syntax`, `type`, `capability`, `runtime`,
+`toolchain` e `internal_compiler_error`. Los ICE no muestran traceback salvo
+con `--debug`; códigos y exit codes están documentados en el
+[contrato de diagnósticos](docs/aether/AETHER_DIAGNOSTICS.md).
 
 El gate de release no publica ni crea tags:
 

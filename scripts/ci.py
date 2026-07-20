@@ -103,6 +103,11 @@ def build_stages(
             env,
         ),
         Stage(
+            "diagnostics contract",
+            ((python, str(ROOT / "scripts" / "check_diagnostics_contract.py")),),
+            env,
+        ),
+        Stage(
             "compileall",
             ((python, "-m", "compileall", "-q", str(ROOT / "src"), str(ROOT / "scripts")),),
             env,

@@ -48,6 +48,7 @@ or future work. They do not expand the release profile.
 - [Final Aether v1 Profile Audit](AETHER_V1_PROFILE_AUDIT.md)
 - [Aether v1 Profile Decision](AETHER_V1_PROFILE_DECISION.md)
 - [Aether v1 Closure Roadmap](AETHER_V1_CLOSURE_ROADMAP.md)
+- [Public diagnostics contract](AETHER_DIAGNOSTICS.md)
 - [RC3 Examples Catalog Audit](AETHER_EXAMPLES_CATALOG_AUDIT.md)
 - [Aether v1 Release Readiness](AETHER_V1_RELEASE_READINESS.md)
 - [Backend Feature Parity](BACKEND_FEATURE_PARITY.md)

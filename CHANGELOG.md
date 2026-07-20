@@ -114,6 +114,13 @@ y no declara ABI estable.
 
 ### Added
 
+- Contrato público estructurado para diagnósticos `syntax`, `type`,
+  `capability`, `runtime`, `toolchain` e `internal_compiler_error`, con códigos
+  estables, exit codes documentados, `--debug`, `--check` y release gate.
+- Los rechazos de IR/SSA/LLVM generados desde fuente aceptada se presentan como
+  ICE sin traceback por defecto; Clang ausente permanece como fallo externo de
+  toolchain.
+
 - `io.writeTextAtomic(path, content) -> FileStatus` en AST y native Linux:
   temporal seguro en el mismo directorio, escritura exacta, fsync de archivo,
   rename atómico, fsync de directorio y cleanup best-effort con fault injection.

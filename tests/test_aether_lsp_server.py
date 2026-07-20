@@ -140,7 +140,9 @@ def test_lsp_server_keeps_running_when_analyzer_raises(monkeypatch) -> None:
     assert diagnostics["method"] == "textDocument/publishDiagnostics"
     diagnostic = diagnostics["params"]["diagnostics"][0]
     assert diagnostic["severity"] == 2
-    assert "Aether analyzer internal error" in diagnostic["message"]
+    assert "Aether analyzer internal compiler error [ICE-UNEXPECTED-001]" in diagnostic["message"]
+    assert "boom while reading" not in diagnostic["message"]
+    assert diagnostic["code"] == "ICE-UNEXPECTED-001"
 
 
 def test_lsp_diagnostics_include_document_versions() -> None:

@@ -7,7 +7,14 @@ import subprocess
 
 import pytest
 
-from aether.cli import EXIT_LANGUAGE_ERROR, EXIT_SUCCESS, EXIT_USAGE_ERROR, main
+from aether.cli import (
+    EXIT_INTERNAL_COMPILER_ERROR,
+    EXIT_LANGUAGE_ERROR,
+    EXIT_SUCCESS,
+    EXIT_TOOLCHAIN_ERROR,
+    EXIT_USAGE_ERROR,
+    main,
+)
 
 
 DEFAULT_OPTIMIZER_PASSES = [
@@ -239,9 +246,10 @@ def test_default_llvm_execution_reports_missing_clang_without_traceback(
 
     exit_code, stdout, stderr = run_cli([str(program)])
 
-    assert exit_code == EXIT_LANGUAGE_ERROR
+    assert exit_code == EXIT_TOOLCHAIN_ERROR
     assert stdout == ""
-    assert "clang is required to build native executables." in stderr
+    assert "TOOLCHAIN-CLANG-001" in stderr
+    assert "Clang was not found" in stderr
     assert "Traceback" not in stderr
 
 
@@ -361,6 +369,8 @@ def test_help_describes_direct_execution_and_tools() -> None:
     assert "--emit-cfg" in stdout
     assert "--emit-ssa" in stdout
     assert "--emit-llvm" in stdout
+    assert "--check" in stdout
+    assert "--debug" in stdout
     assert "--ssa-builder" in stdout
     assert "general (default)" in stdout
     assert "--opt" in stdout
@@ -765,9 +775,10 @@ def test_emit_ssa_general_builder_error_reports_without_traceback(
         ["--emit-ssa", "--ssa-builder=general", str(program)]
     )
 
-    assert exit_code == EXIT_LANGUAGE_ERROR
+    assert exit_code == EXIT_INTERNAL_COMPILER_ERROR
     assert stdout == ""
-    assert "General SSA builder failed: original construction detail" in stderr
+    assert "ICE-SSA-BUILD-001" in stderr
+    assert "original construction detail" not in stderr
     assert "Traceback" not in stderr
 
 
@@ -1810,9 +1821,10 @@ def test_build_reports_clear_error_when_clang_is_unavailable(
 
     exit_code, stdout, stderr = run_cli(["build", str(program)])
 
-    assert exit_code == EXIT_LANGUAGE_ERROR
+    assert exit_code == EXIT_TOOLCHAIN_ERROR
     assert stdout == ""
-    assert "clang is required to build native executables." in stderr
+    assert "TOOLCHAIN-CLANG-001" in stderr
+    assert "Clang was not found" in stderr
     assert "Traceback" not in stderr
 
 
@@ -1870,9 +1882,10 @@ def test_build_reports_clang_stderr_without_traceback(
 
     exit_code, stdout, stderr = run_cli(["build", str(program)])
 
-    assert exit_code == EXIT_LANGUAGE_ERROR
+    assert exit_code == EXIT_INTERNAL_COMPILER_ERROR
     assert stdout == ""
-    assert "clang failed loudly" in stderr
+    assert "ICE-LLVM-EMIT-001" in stderr
+    assert "clang failed loudly" not in stderr
     assert "Traceback" not in stderr
 
 
@@ -3043,7 +3056,8 @@ def test_bench_all_keeps_non_native_timings_when_clang_is_missing(
     assert "Native build:" in stdout
     assert "Native run:" in stdout
     assert stdout.count("  unsupported:") == 2
-    assert "clang is required" in stdout
+    assert "TOOLCHAIN-CLANG-001" in stdout
+    assert "Clang was not found" in stdout
     assert "Traceback" not in stdout
     assert stderr == ""
 
@@ -3057,7 +3071,7 @@ def test_bench_native_missing_clang_is_a_clean_failure(
         ["bench", "benchmarks/sum_to.ae", "--iterations", "1", "--backend", "native"]
     )
 
-    assert exit_code == EXIT_LANGUAGE_ERROR
+    assert exit_code == EXIT_TOOLCHAIN_ERROR
     assert "Native build:" in stdout
     assert "Native run:" in stdout
     assert "unsupported:" in stdout
