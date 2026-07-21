@@ -2,6 +2,7 @@
 
 use std::collections::BTreeSet;
 
+use aether_ir::import_instruction;
 use aether_ir::wire::{
     IRConstantDTO, IRFloatDTO, IRInstructionDTO, IRModuleDTO, IRParameterDTO, IRSourceLocationDTO,
     IRStorageDTO, IRTypeDTO, IRValueDTO,
@@ -509,7 +510,7 @@ fn golden_python_fixture_round_trips_deterministically() {
 }
 
 #[test]
-fn every_instruction_tag_deserializes_and_round_trips() {
+fn every_instruction_tag_deserializes_imports_and_round_trips() {
     let cases = instruction_cases();
     let tags = cases
         .iter()
@@ -522,6 +523,7 @@ fn every_instruction_tag_deserializes_and_round_trips() {
         let tag = case["kind"].as_str().expect("kind is a string");
         let dto: IRInstructionDTO = serde_json::from_value(case.clone())
             .unwrap_or_else(|error| panic!("{tag} must deserialize: {error}"));
+        import_instruction(&dto).unwrap_or_else(|error| panic!("{tag} must import: {error}"));
         assert_eq!(
             serde_json::to_value(dto).expect("instruction must serialize"),
             case,

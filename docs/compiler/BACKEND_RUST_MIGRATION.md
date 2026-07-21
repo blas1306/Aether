@@ -901,6 +901,46 @@ combinations; and contextual nested importer errors. A coverage audit asserts
 exactly 20 additions and confirms that exactly the three control-flow variants
 remain unsupported.
 
+### Step 4B.3G Rust control-flow instruction importer
+
+The existing `import_instruction()` dispatch and its borrowed and consuming
+`TryFrom<IRInstructionDTO>` implementations now reconstruct all three
+control-flow instructions. This completes conversion coverage for all 68 / 68
+frozen schema-v1 instruction variants. The defensive
+`IRImportError::UnsupportedInstruction` type remains available for future
+wire/importer divergence, but no current `IRInstructionDTO` variant can reach
+it. Phase 2 Step 4B.3H is the final instruction importer completeness audit.
+
+The actual control-flow fields are
+`branch(condition, true_target, false_target)`, `jump(target)`, and
+`return(value, transferred_storage)`. The return `value` is a nullable
+`IRValueDTO`, and `transferred_storage` is a nullable `IRStorageDTO`. Wire and
+owned layouts match directly, so no wire-schema or owned-IR change was needed.
+Conditions and return values reuse the existing value and optional-value
+importers; transferred storage reuses the storage importer; and nested failures
+retain the instruction kind and exact field through
+`IRImportError::InstructionField`. Destination strings, including empty,
+unusual, unresolved, and identical branch targets, are copied exactly.
+
+Import remains a structural adapter rather than a verifier. It does not check
+that destination blocks exist, require branch targets to differ, require a
+boolean condition, compare return values with a function return type, enforce
+terminator placement or uniqueness, determine reachability, construct or
+validate a CFG, or check dominance. Structurally representable invalid
+control-flow instructions therefore import successfully. Basic-block,
+function, and module importing remain unimplemented, and verifier, CFG, and
+compiler-pipeline behavior are unchanged.
+
+Focused tests cover branches, jumps, valued and empty returns, exact and
+identical targets, empty and unusual unresolved destinations, primitive and
+recursively nested condition and return types, nullable transferred storage,
+borrowed and consuming conversions, deterministic JSON-to-wire-to-owned
+reconstruction, repeated conversion, DTO immutability,
+invalid-but-representable semantics, and contextual nested value and storage
+errors. The existing authoritative 68-case wire inventory now also asserts that
+every frozen instruction variant reaches a successful import path without
+duplicating that inventory.
+
 ## 8. Ownership and memory
 
 Python creates the DTO snapshot and owns it for the duration of the extension

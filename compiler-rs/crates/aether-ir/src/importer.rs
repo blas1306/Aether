@@ -20,7 +20,10 @@ use crate::{
 /// responsibility of the IR verifier.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IRImportError {
-    /// The incremental importer has not implemented this instruction kind yet.
+    /// A wire instruction kind has no corresponding importer implementation.
+    ///
+    /// All frozen schema-v1 kinds are currently implemented; this remains a
+    /// defensive error for future wire/importer divergence.
     UnsupportedInstruction {
         /// Stable schema-v1 instruction kind.
         kind: &'static str,
@@ -166,10 +169,8 @@ pub fn import_optional_source_location(
 
 /// Reconstruct an owned Rust IR instruction from a borrowed wire DTO.
 ///
-/// The incremental importer currently supports the sixty-five lifecycle/core,
-/// operator/cast, call-family, struct-family, collection, and linear-algebra
-/// instruction kinds. Every other schema-v1 kind returns
-/// [`IRImportError::UnsupportedInstruction`].
+/// All sixty-eight frozen schema-v1 instruction kinds are supported. Semantic
+/// validity remains the responsibility of the IR verifier.
 pub fn import_instruction(instruction: &IRInstructionDTO) -> Result<IRInstruction, IRImportError> {
     instruction.try_into()
 }
@@ -756,7 +757,33 @@ impl TryFrom<&IRInstructionDTO> for IRInstruction {
                 value: import_instruction_value(kind, "value", value)?,
                 cols: *cols,
             }),
-            _ => Err(IRImportError::UnsupportedInstruction { kind }),
+            IRInstructionDTO::Branch {
+                condition,
+                true_target,
+                false_target,
+            } => Ok(Self::IRBranch {
+                condition: import_instruction_value(kind, "condition", condition)?,
+                true_target: true_target.clone(),
+                false_target: false_target.clone(),
+            }),
+            IRInstructionDTO::Jump { target } => Ok(Self::IRJump {
+                target: target.clone(),
+            }),
+            IRInstructionDTO::Return {
+                value,
+                transferred_storage,
+            } => Ok(Self::IRReturn {
+                value: import_optional_instruction_value(kind, "value", value)?,
+                transferred_storage: import_instruction_field(
+                    kind,
+                    "transferred_storage",
+                    transferred_storage
+                        .0
+                        .as_ref()
+                        .map(import_storage)
+                        .transpose(),
+                )?,
+            }),
         }
     }
 }

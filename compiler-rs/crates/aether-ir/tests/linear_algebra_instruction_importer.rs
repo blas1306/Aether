@@ -1,6 +1,6 @@
 //! Focused coverage for schema-v1 linear-algebra instruction import.
 
-use aether_ir::wire::{IRInstructionDTO, IRTypeDTO, IRValueDTO, NullableDTO};
+use aether_ir::wire::IRInstructionDTO;
 use aether_ir::{
     BoolType, DoubleType, IRImportError, IRInstruction, IRType, IRValue, IntType, ListType,
     MatrixType, StringType, StructType, VectorType, import_instruction,
@@ -514,46 +514,4 @@ fn gives_linear_algebra_instruction_and_field_context_for_nested_errors() {
             }),
         })
     );
-}
-
-fn plain_wire_value(name: &str) -> IRValueDTO {
-    IRValueDTO::Value {
-        name: name.to_owned(),
-        r#type: IRTypeDTO::Int {},
-    }
-}
-
-#[test]
-fn exactly_three_control_flow_variants_remain_explicitly_unsupported() {
-    let unsupported = [
-        (
-            IRInstructionDTO::Branch {
-                condition: plain_wire_value("condition"),
-                true_target: "missing::true".to_owned(),
-                false_target: "missing::false".to_owned(),
-            },
-            "branch",
-        ),
-        (
-            IRInstructionDTO::Jump {
-                target: "missing::target".to_owned(),
-            },
-            "jump",
-        ),
-        (
-            IRInstructionDTO::Return {
-                value: NullableDTO(None),
-                transferred_storage: NullableDTO(None),
-            },
-            "return",
-        ),
-    ];
-
-    assert_eq!(unsupported.len(), 3, "68 total - 65 supported = 3 kinds");
-    for (wire, kind) in unsupported {
-        assert_eq!(
-            import_instruction(&wire),
-            Err(IRImportError::UnsupportedInstruction { kind })
-        );
-    }
 }
