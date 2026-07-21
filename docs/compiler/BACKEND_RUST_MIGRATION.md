@@ -1,9 +1,9 @@
 # Gradual Python-to-Rust compiler migration
 
-> Status: Phase 1 implementation in progress. The isolated Rust workspace,
-> owned IR model, and schema-v1 Python DTO slices through `IRFunction` now
-> exist; `IRModule` is the next container level and there is still no production
-> integration. This document defines
+> Status: Phase 1 DTO implementation complete through the root `IRModule`.
+> The isolated Rust workspace, owned IR model, and schema-v1 Python DTO tree now
+> cover the complete current Python IR; there is still no production Rust
+> importer or integration. This document defines
 > sequencing and promotion gates and does not declare the Python IR or SSA model
 > a stable public format.
 
@@ -271,7 +271,7 @@ unit.
 | Printed Aether IR | Excellent for humans and existing snapshots. | `src/aether/ir/printer.py` has no matching canonical parser and text may omit internal distinctions. | Diagnostic/golden aid only. |
 | Protobuf/FlatBuffers | Strong generated schema and cross-language support. | Toolchain/code generation and evolution policy are disproportionate for one in-process consumer. | Reconsider only if multiple external consumers emerge. |
 
-The DTO schema has an explicit `ir_schema_version` field and tagged variants
+The root DTO schema has an explicit `schema_version` field and tagged variants
 for every type, constant, instruction, and terminator. A version mismatch or
 unknown tag is a boundary error, never interpreted approximately. Collections
 use deterministic ordered sequences unless lookup semantics require a map;
@@ -382,8 +382,83 @@ the test process, and compares exact field names, order, and compatible type
 shapes with field-specific drift diagnostics. Production Python code does not
 read or depend on Rust source files.
 
-The next planned DTO container level is `IRModule`, which will compose ordered
-functions and struct definitions. Module DTO conversion is not part of Step 3E.
+### Module DTO
+
+Phase 1, Step 3F completes the schema-v1 Python DTO tree at its root. Inspection
+of the actual Python dataclass and Rust struct found exactly the same two fields
+in the same order:
+
+- `functions`: an ordered `list[IRFunction]` in Python and
+  `Vec<IRFunction>` in Rust;
+- `structs`: an ordered `list[IRStructDefinition]` in Python and
+  `Vec<IRStructDefinition>` in Rust.
+
+The current module model has no module identity or name, enum definitions,
+imports, external declarations, separate type-layout table, source-file or path
+table, metadata, or attributes. Step 3F does not manufacture any of those
+conventional compiler-module fields. Enums remain represented where they
+actually occur today: `EnumType` and `IREnumConstant` nested in existing IR
+entities. Source paths remain nested in instruction `IRSourceLocation` values.
+Nominal layout information consists solely of ordered `IRStructDefinition`
+values, each containing a string `name` and ordered `(field name, IRType)`
+pairs.
+
+The complete stable root envelope is:
+
+```text
+{
+  "schema_version": 1,
+  "functions": [<FunctionDTO>, ...],
+  "structs": [
+    {
+      "name": <string>,
+      "fields": [
+        {"name": <string>, "type": <TypeDTO>},
+        ...
+      ]
+    },
+    ...
+  ]
+}
+```
+
+`schema_version` occurs exactly once, on this root envelope. The single schema
+constant remains `IR_SCHEMA_VERSION = 1`; functions, struct definitions,
+fields, blocks, instructions, values, constants, types, and source locations do
+not repeat it. Encoding with an unsupported requested version and decoding an
+envelope whose version is unsupported or not an integer both raise
+`IRDTOSchemaVersionError`. Missing or unexpected envelope fields remain ordinary
+structural `IRDTOError` failures.
+
+`ir_module_to_dto()` and `ir_module_from_dto()` compose the existing nested
+function mappings and the nominal struct-definition mapping. Function, struct,
+and struct-field order is preserved exactly. Encoding does not sort,
+deduplicate, resolve, or normalize any module entity, and repeated encoding of
+the same module produces equal primitive DTO trees.
+
+The module boundary validates only interchange structure: the exact root and
+nested fields, primitive kinds, ordered sequence shape, nested DTO structure,
+the root schema version, and existing integer-width rules. It intentionally
+accepts duplicate function or struct names, duplicate fields, unresolved or
+recursive nominal references, missing entry functions or blocks, inconsistent
+types or layouts, and invalid CFG, instruction, ownership, or function
+semantics whenever they are structurally representable. Those remain
+`IRVerifier` responsibilities so stable `IRV-*` diagnostics survive the DTO
+round trip.
+
+The Python/Rust synchronization check remains test-only. It resolves Python
+dataclass type hints and reads the Rust `IRModule` and `IRStructDefinition`
+declarations during tests, comparing exact field names, field order, and
+compatible collection and element shapes. Drift reports identify the affected
+model and each missing, unexpected, reordered, or type-mismatched field.
+Production Python never parses or depends on Rust source files.
+
+Phase 1 DTO coverage is now complete for the current root model, including all
+current types, values, storage, parameters, source locations, 68 instructions,
+basic blocks, functions, nominal struct definitions, and modules. The next
+planned step is full Python module DTO round-trip and Rust importer preparation;
+the Rust DTO importer, PyO3 boundary, and compiler behavior changes are not part
+of Step 3F.
 
 ## 8. Ownership and memory
 

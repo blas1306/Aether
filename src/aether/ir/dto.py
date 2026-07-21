@@ -58,6 +58,7 @@ from .model import (
     IRMethodResultNew,
     IRMethodResultReceiver,
     IRMethodResultValue,
+    IRModule,
     IRMoveInit,
     IROuterProduct,
     IRParameter,
@@ -68,6 +69,7 @@ from .model import (
     IRSourceLocation,
     IRStorage,
     IRStore,
+    IRStructDefinition,
     IRStructGet,
     IRStructNew,
     IRStructSet,
@@ -127,6 +129,10 @@ IRBasicBlockDTO: TypeAlias = dict[str, object]
 """Named, ordered basic-block representation in the IR interchange schema."""
 IRFunctionDTO: TypeAlias = dict[str, object]
 """Named function representation with ordered parameters and basic blocks."""
+IRStructDefinitionDTO: TypeAlias = dict[str, object]
+"""Nominal struct definition with fields retained in declaration order."""
+IRModuleDTO: TypeAlias = dict[str, object]
+"""Complete schema-versioned root representation of an :class:`IRModule`."""
 
 
 class IRDTOError(ValueError):
@@ -2612,6 +2618,148 @@ def ir_function_from_dto(
     )
 
 
+def ir_struct_definition_to_dto(
+    definition: IRStructDefinition,
+    *,
+    schema_version: int = IR_SCHEMA_VERSION,
+) -> IRStructDefinitionDTO:
+    """Convert one exact nominal struct definition to its ordered DTO."""
+
+    _require_schema_version(schema_version)
+    if type(definition) is not IRStructDefinition:
+        raise TypeError(
+            f"Unsupported IR struct definition for schema v{IR_SCHEMA_VERSION}: "
+            f"{type(definition).__name__}"
+        )
+    struct_fields = _expect_sequence(
+        definition.fields,
+        "IR struct definition fields",
+    )
+    encoded_fields: list[dict[str, object]] = []
+    for index, field_value in enumerate(struct_fields):
+        field = _expect_sequence(
+            field_value,
+            f"IR struct definition fields[{index}]",
+        )
+        if len(field) != 2:
+            raise IRDTOError(
+                f"IR struct definition fields[{index}] must contain exactly "
+                "a name and type"
+            )
+        encoded_fields.append(
+            {
+                "name": _expect_string(
+                    field[0],
+                    f"IR struct definition fields[{index}].name",
+                ),
+                "type": ir_type_to_dto(
+                    field[1],  # type: ignore[arg-type]
+                    schema_version=schema_version,
+                ),
+            }
+        )
+    return {
+        "name": _expect_string(definition.name, "IR struct definition name"),
+        "fields": encoded_fields,
+    }
+
+
+def ir_struct_definition_from_dto(
+    dto: Mapping[str, object],
+    *,
+    schema_version: int = IR_SCHEMA_VERSION,
+) -> IRStructDefinition:
+    """Decode one strictly shaped nominal struct definition."""
+
+    _require_schema_version(schema_version)
+    mapping = _expect_mapping(dto, "IR struct definition")
+    _expect_fields(mapping, {"name", "fields"}, "IR struct definition")
+    raw_fields = _expect_sequence(
+        mapping["fields"],
+        "IR struct definition.fields",
+    )
+    decoded_fields: list[tuple[str, IRType]] = []
+    for index, field_value in enumerate(raw_fields):
+        field = _expect_mapping(field_value, "IR struct field")
+        _expect_fields(field, {"name", "type"}, "IR struct field")
+        decoded_fields.append(
+            (
+                _expect_string(
+                    field["name"],
+                    f"IR struct definition.fields[{index}].name",
+                ),
+                ir_type_from_dto(
+                    field["type"],  # type: ignore[arg-type]
+                    schema_version=schema_version,
+                ),
+            )
+        )
+    return IRStructDefinition(
+        _expect_string(mapping["name"], "IR struct definition.name"),
+        tuple(decoded_fields),
+    )
+
+
+def ir_module_to_dto(
+    module: IRModule,
+    *,
+    schema_version: int = IR_SCHEMA_VERSION,
+) -> IRModuleDTO:
+    """Convert one exact Python IR module to the complete root DTO envelope."""
+
+    _require_schema_version(schema_version)
+    if type(module) is not IRModule:
+        raise TypeError(
+            f"Unsupported IR module for schema v{IR_SCHEMA_VERSION}: "
+            f"{type(module).__name__}"
+        )
+    functions = _expect_sequence(module.functions, "IR module functions")
+    structs = _expect_sequence(module.structs, "IR module structs")
+    return {
+        "schema_version": schema_version,
+        "functions": [
+            ir_function_to_dto(function, schema_version=schema_version)
+            for function in functions
+        ],
+        "structs": [
+            ir_struct_definition_to_dto(definition, schema_version=schema_version)
+            for definition in structs
+        ],
+    }
+
+
+def ir_module_from_dto(dto: Mapping[str, object]) -> IRModule:
+    """Decode the complete root DTO after strict interchange validation.
+
+    This boundary deliberately does not enforce module semantics such as unique
+    names, resolvable nominal types, valid layouts, or function correctness.
+    """
+
+    mapping = _expect_mapping(dto, "IR module")
+    _expect_fields(
+        mapping,
+        {"schema_version", "functions", "structs"},
+        "IR module",
+    )
+    schema_version = mapping["schema_version"]
+    _require_schema_version(schema_version)
+    functions = _expect_sequence(mapping["functions"], "IR module.functions")
+    structs = _expect_sequence(mapping["structs"], "IR module.structs")
+    return IRModule(
+        [
+            ir_function_from_dto(function, schema_version=schema_version)
+            for function in functions
+        ],
+        [
+            ir_struct_definition_from_dto(
+                definition,
+                schema_version=schema_version,
+            )
+            for definition in structs
+        ],
+    )
+
+
 def _value_from_dto(
     dto: Mapping[str, object],
     *,
@@ -2766,6 +2914,8 @@ __all__ = [
     "IRConstantDTO",
     "IRBasicBlockDTO",
     "IRFunctionDTO",
+    "IRModuleDTO",
+    "IRStructDefinitionDTO",
     "IRDTOError",
     "IRDTOSchemaVersionError",
     "IREnumConstantDTO",
@@ -2786,12 +2936,16 @@ __all__ = [
     "ir_instruction_to_dto",
     "ir_function_from_dto",
     "ir_function_to_dto",
+    "ir_module_from_dto",
+    "ir_module_to_dto",
     "ir_parameter_from_dto",
     "ir_parameter_to_dto",
     "ir_source_location_from_dto",
     "ir_source_location_to_dto",
     "ir_storage_from_dto",
     "ir_storage_to_dto",
+    "ir_struct_definition_from_dto",
+    "ir_struct_definition_to_dto",
     "ir_type_from_dto",
     "ir_type_to_dto",
     "ir_value_from_dto",
