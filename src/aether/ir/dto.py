@@ -7,17 +7,21 @@ from typing import NoReturn, TypeAlias
 from .model import (
     IRAssign,
     IRBinaryOp,
+    IRCall,
+    IRCallIndirect,
     IRCast,
     IRCompareOp,
     IRConst,
     IRCopyInit,
     IRDestroy,
     IREnumConstant,
+    IRFunctionRef,
     IRInitDefault,
     IRInstruction,
     IRLoad,
     IRMoveInit,
     IRParameter,
+    IRPrint,
     IRRelocate,
     IRSourceLocation,
     IRStorage,
@@ -114,6 +118,10 @@ IR_INSTRUCTION_TAGS: Mapping[type[IRInstruction], str] = MappingProxyType(
         IRUnaryOp: "unary_op",
         IRCompareOp: "compare_op",
         IRCast: "cast",
+        IRCall: "call",
+        IRFunctionRef: "function_ref",
+        IRCallIndirect: "call_indirect",
+        IRPrint: "print",
     }
 )
 """Exact supported instruction class to stable schema tag mapping."""
@@ -635,6 +643,72 @@ def ir_instruction_to_dto(
             "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
             "value": ir_value_to_dto(instruction.value, schema_version=schema_version),
         }
+    if type(instruction) is IRCall:
+        return {
+            "kind": kind,
+            "function": _expect_string(
+                instruction.function,
+                "IR instruction 'call'.function",
+            ),
+            "arguments": [
+                ir_value_to_dto(argument, schema_version=schema_version)
+                for argument in instruction.arguments
+            ],
+            "result": (
+                None
+                if instruction.result is None
+                else ir_value_to_dto(instruction.result, schema_version=schema_version)
+            ),
+            "builtin": _expect_optional_string(
+                instruction.builtin,
+                "IR instruction 'call'.builtin",
+            ),
+            "source_location": ir_source_location_to_dto(
+                instruction.source_location,
+                schema_version=schema_version,
+            ),
+        }
+    if type(instruction) is IRFunctionRef:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "function": _expect_string(
+                instruction.function,
+                "IR instruction 'function_ref'.function",
+            ),
+        }
+    if type(instruction) is IRCallIndirect:
+        return {
+            "kind": kind,
+            "callee": ir_value_to_dto(instruction.callee, schema_version=schema_version),
+            "arguments": [
+                ir_value_to_dto(argument, schema_version=schema_version)
+                for argument in instruction.arguments
+            ],
+            "result": (
+                None
+                if instruction.result is None
+                else ir_value_to_dto(instruction.result, schema_version=schema_version)
+            ),
+        }
+    if type(instruction) is IRPrint:
+        aggregate_shape = instruction.aggregate_shape
+        return {
+            "kind": kind,
+            "value": ir_value_to_dto(instruction.value, schema_version=schema_version),
+            "newline": _expect_bool(
+                instruction.newline,
+                "IR instruction 'print'.newline",
+            ),
+            "aggregate_shape": (
+                None
+                if aggregate_shape is None
+                else [
+                    _expect_i64(size, f"IR instruction 'print'.aggregate_shape[{index}]")
+                    for index, size in enumerate(aggregate_shape)
+                ]
+            ),
+        }
     raise AssertionError(f"Missing encoder for registered IR instruction kind {kind!r}")
 
 
@@ -643,7 +717,13 @@ def ir_instruction_from_dto(
     *,
     schema_version: int = IR_SCHEMA_VERSION,
 ) -> IRInstruction:
-    """Decode one strictly validated supported instruction DTO."""
+    """Decode one strictly validated supported instruction DTO.
+
+    This boundary validates only the versioned interchange shape.  Semantic
+    facts such as whether function names exist or call signatures agree stay
+    verbatim here and remain the responsibility of the Python IR verifier,
+    which assigns the corresponding ``IRV-*`` diagnostics.
+    """
 
     _require_schema_version(schema_version)
     mapping = _expect_mapping(dto, "IR instruction")
@@ -785,6 +865,86 @@ def ir_instruction_from_dto(
         return IRCast(
             ir_value_from_dto(mapping["result"], schema_version=schema_version),
             ir_value_from_dto(mapping["value"], schema_version=schema_version),
+        )
+    if kind == "call":
+        _expect_fields(
+            mapping,
+            {"kind", "function", "arguments", "result", "builtin", "source_location"},
+            "IR instruction 'call'",
+        )
+        arguments = _expect_sequence(mapping["arguments"], "IR instruction 'call'.arguments")
+        raw_result = mapping["result"]
+        return IRCall(
+            _expect_string(mapping["function"], "IR instruction 'call'.function"),
+            tuple(
+                ir_value_from_dto(argument, schema_version=schema_version)
+                for argument in arguments
+            ),
+            (
+                None
+                if raw_result is None
+                else ir_value_from_dto(raw_result, schema_version=schema_version)
+            ),
+            _expect_optional_string(mapping["builtin"], "IR instruction 'call'.builtin"),
+            ir_source_location_from_dto(mapping["source_location"], schema_version=schema_version),
+        )
+    if kind == "function_ref":
+        _expect_fields(
+            mapping,
+            {"kind", "result", "function"},
+            "IR instruction 'function_ref'",
+        )
+        return IRFunctionRef(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            _expect_string(
+                mapping["function"],
+                "IR instruction 'function_ref'.function",
+            ),
+        )
+    if kind == "call_indirect":
+        _expect_fields(
+            mapping,
+            {"kind", "callee", "arguments", "result"},
+            "IR instruction 'call_indirect'",
+        )
+        arguments = _expect_sequence(
+            mapping["arguments"],
+            "IR instruction 'call_indirect'.arguments",
+        )
+        raw_result = mapping["result"]
+        return IRCallIndirect(
+            ir_value_from_dto(mapping["callee"], schema_version=schema_version),
+            tuple(
+                ir_value_from_dto(argument, schema_version=schema_version)
+                for argument in arguments
+            ),
+            (
+                None
+                if raw_result is None
+                else ir_value_from_dto(raw_result, schema_version=schema_version)
+            ),
+        )
+    if kind == "print":
+        _expect_fields(
+            mapping,
+            {"kind", "value", "newline", "aggregate_shape"},
+            "IR instruction 'print'",
+        )
+        raw_shape = mapping["aggregate_shape"]
+        aggregate_shape = (
+            None
+            if raw_shape is None
+            else tuple(
+                _expect_i64(size, f"IR instruction 'print'.aggregate_shape[{index}]")
+                for index, size in enumerate(
+                    _expect_sequence(raw_shape, "IR instruction 'print'.aggregate_shape")
+                )
+            )
+        )
+        return IRPrint(
+            ir_value_from_dto(mapping["value"], schema_version=schema_version),
+            _expect_bool(mapping["newline"], "IR instruction 'print'.newline"),
+            aggregate_shape,
         )
     _unknown_tag("IR instruction", kind)
 

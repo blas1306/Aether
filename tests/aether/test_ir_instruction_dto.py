@@ -17,20 +17,24 @@ from aether.ir.model import (
     IRAssign,
     IRBinaryOp,
     IRCall,
+    IRCallIndirect,
     IRCast,
     IRCompareOp,
     IRConst,
     IRCopyInit,
     IRDestroy,
     IREnumConstant,
+    IRFunctionRef,
     IRInitDefault,
     IRInstruction,
     IRLoad,
     IRMoveInit,
+    IRPrint,
     IRRelocate,
     IRSourceLocation,
     IRStorage,
     IRStore,
+    IRStructNew,
     IRUnaryOp,
     IRValue,
 )
@@ -243,6 +247,10 @@ def test_supported_instruction_tags_are_explicit_and_stable() -> None:
         IRUnaryOp: "unary_op",
         IRCompareOp: "compare_op",
         IRCast: "cast",
+        IRCall: "call",
+        IRFunctionRef: "function_ref",
+        IRCallIndirect: "call_indirect",
+        IRPrint: "print",
     }
 
 
@@ -386,8 +394,8 @@ def test_semantically_distinct_lifecycle_instructions_have_distinct_dtos() -> No
 
 
 def test_unsupported_instruction_families_and_subclasses_are_rejected() -> None:
-    with pytest.raises(TypeError, match=r"Unsupported IR instruction for schema v1: IRCall"):
-        ir_instruction_to_dto(IRCall("future"))
+    with pytest.raises(TypeError, match=r"Unsupported IR instruction for schema v1: IRStructNew"):
+        ir_instruction_to_dto(IRStructNew(RESULT))
 
     class FutureConst(IRConst):
         pass
