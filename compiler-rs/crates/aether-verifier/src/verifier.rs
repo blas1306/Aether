@@ -2134,7 +2134,7 @@ fn instruction_result(instruction: &IRInstruction) -> Option<&IRValue> {
 }
 
 #[allow(clippy::too_many_lines)]
-fn instruction_kind(instruction: &IRInstruction) -> InstructionKind {
+pub(crate) fn instruction_kind(instruction: &IRInstruction) -> InstructionKind {
     match instruction {
         IRInstruction::IRConst { .. } => InstructionKind::IRConst,
         IRInstruction::IRLoad { .. } => InstructionKind::IRLoad,

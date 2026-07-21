@@ -1,16 +1,12 @@
 # Gradual Python-to-Rust compiler migration
 
-> Status: Phase 2, Step 4F full Python-JSON-to-Rust-owned-IR integration audit
-> complete. The isolated
-> Rust workspace, owned IR model, frozen schema-v1 Python DTO tree, and separate
-> serde wire model cover the complete current Python IR. The importer now
-> reconstructs all 18 owned Rust type variants plus constants, enum-constant
-> metadata, values, storage, parameters, source locations, and all 68 / 68
-> frozen instruction variants, basic blocks with exact names and ordered
-> instruction contents, functions, struct definitions, and complete modules.
-> The strict JSON entry point rejects duplicate keys at every object depth and
-> retains distinct JSON, wire-schema, schema-version, and structural-import
-> failures. PyO3, verification, CFG analysis, and production integration remain
+> Status: Phase 3, Step 3B Rust IR structural and basic-CFG verification
+> complete. The isolated Rust workspace now has independently callable type and
+> structural verifier passes over the complete owned IR. Structural verification
+> covers declaration-name uniqueness, the literal `entry` convention, block
+> termination, and function-local branch/jump target resolution. Reachability
+> rejection, SSA definition/use and dominance, ownership/lifecycle, PyO3,
+> compiler-pipeline integration, LLVM, and production integration remain
 > unimplemented. This document defines sequencing and promotion gates and does
 > not declare the Python IR or SSA model a stable public format.
 
@@ -1293,6 +1289,73 @@ migrated type checks, acceptance/rejection follows the Python verifier; no
 Python-verifier bug or intentional type-semantic deviation was discovered.
 Importer behavior, the wire schema, canonical JSON, compiler pipeline, LLVM
 backend, and owned IR semantics are unchanged.
+
+### Phase 3 Step 3B Rust IR structural and basic-CFG verifier — complete
+
+Phase 3 Step 3B is complete. The `aether-verifier` crate now also exposes
+`verify_module_structure(&IRModule)` and
+`verify_function_structure(&IRModule, &IRFunction)`. These APIs borrow and do
+not mutate the owned IR. They remain fully independent of
+`verify_module_types`, `verify_function_types`, and `verify_block_types`; no
+mandatory combined verifier or compiler-pipeline integration was introduced.
+
+The pass was derived from the structural subset of
+`src/aether/ir/verifier.py`. It enforces these rules:
+
+- nominal struct names and function names are unique at module level; nominal
+  struct names are non-empty; struct field names are unique; parameter names
+  and block names are unique within their function. Duplicate detection retains
+  both the later and earlier source indices and completes before CFG target
+  lookup can become ambiguous;
+- every function contains at least one block and contains a block named exactly
+  `entry`. This is the actual Python IR convention, not a first-block alias.
+  `entry` may occur at any position in the retained block vector;
+- the complete and only terminator set is `IRBranch`, `IRJump`, and `IRReturn`.
+  Every block, including an otherwise empty block, must contain exactly one of
+  these instructions in final position. A non-terminator in final position is
+  not inferred to terminate the block, and no instruction may follow a
+  terminator; and
+- `IRBranch.true_target`, `IRBranch.false_target`, and `IRJump.target` are
+  resolved by exact, case-sensitive raw-name equality against the unique blocks
+  of the same function. True targets are checked before false targets, and
+  `IRReturn` contributes no successor edge. Self-loops and back edges are valid.
+
+The Python IR verifier does not reject unreachable blocks. It performs local
+instruction checks in those blocks with a separate unreachable state, so this
+Rust pass likewise accepts unreachable trailing blocks and unreachable cycles.
+Reachability rejection is explicitly deferred rather than invented here.
+
+Diagnostics preserve source/vector order at every level: structs, fields,
+functions, parameters, blocks, instructions, branch true/false targets, and
+unreachable acceptance are independent of hash-table iteration. The typed
+hierarchy consists of `ModuleStructureVerificationError`,
+`FunctionStructureVerificationError`, `BlockStructureVerificationError`, and
+`ControlFlowRuleError`; it retains function/block names and indices, relevant
+instruction indices and exact `InstructionKind`, raw target names, earlier
+conflicting declaration indices, and expected/actual block termination shapes.
+Every nested wrapper exposes its typed cause through `Error::source()`.
+
+Acceptance and rejection match the inspected Python structural checks. One
+diagnostic refinement is deliberate: when a block contains two terminators,
+Rust reports the typed `MultipleTerminators` cause with both indices and kinds;
+Python currently reports the broader "instruction after terminator" failure.
+Both reject the same input. No Python structural bug was discovered.
+
+The Step 3A type verifier remains independently callable and unchanged in
+scope. In particular, branch-condition boolean validation and return-value type
+validation remain type rules and are not duplicated here. Conversely, a
+type-invalid but structurally well-formed function can pass Step 3B, and a
+type-correct function with a missing terminator can fail Step 3B.
+
+The following invariants remain intentionally deferred: CFG reachability and
+connectivity requirements; all-path return analysis; value/slot uniqueness and
+definition-before-use; SSA single-definition, phi, predecessor, renaming, and
+dominance rules; ownership, borrowing, storage initialization, transfer,
+cleanup, and lifecycle rules; aggregate/layout and optimizer invariants; and
+all importer, wire-schema, canonical-JSON, owned-IR, compiler-pipeline, LLVM,
+PyO3, and production-integration changes. The next isolated verifier step is
+Phase 3 Step 3C, focused on SSA definition/use and dominance verification; later
+phases are not complete.
 
 ## 8. Ownership and memory
 

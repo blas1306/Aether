@@ -8,9 +8,11 @@ compiler remains entirely on its existing Python path.
 
 - `aether-ir` owns the language-independent Rust representation of Aether IR.
   It contains no verifier, parser, serializer, DTO, or compiler integration.
-- `aether-verifier` verifies declaration and instruction-local type consistency
-  in owned Aether IR. CFG, dominance, ownership/lifecycle, and optimization
-  verification remain separate later passes.
+- `aether-verifier` provides independently callable passes for declaration and
+  instruction-local type consistency, plus function/block structure and basic
+  local CFG validity in owned Aether IR. Reachability rejection, dominance,
+  SSA use/definition rules, ownership/lifecycle, and optimization verification
+  remain separate later passes.
 - `aether-python` will provide the eventual Python integration boundary. It does
   not contain PyO3 bindings or compiler integration yet.
 
