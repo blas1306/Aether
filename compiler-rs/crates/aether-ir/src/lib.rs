@@ -13,6 +13,7 @@ mod source;
 mod structure;
 mod types;
 mod value;
+pub mod wire;
 
 pub use block::IRBasicBlock;
 pub use constant::{IRConstant, IREnumConstant};

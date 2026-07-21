@@ -1,10 +1,11 @@
 # Gradual Python-to-Rust compiler migration
 
-> Status: Phase 1, Step 3G contract audit complete. The isolated Rust workspace,
-> owned IR model, and schema-v1 Python DTO tree cover the complete current Python
-> IR, and root round-trip, canonical JSON, golden-fixture, and completeness audits
-> lock that contract. There is still no Rust wire DTO importer or production
-> integration. This document defines
+> Status: Phase 2, Step 4A Rust wire DTO layer complete. The isolated Rust
+> workspace, owned IR model, frozen schema-v1 Python DTO tree, and separate serde
+> wire model cover the complete current Python IR. Root round-trip, canonical
+> JSON, shared golden-fixture, and 68-instruction completeness tests lock that
+> contract. DTO-to-Rust-IR import, PyO3, verification, and production integration
+> remain unimplemented. This document defines
 > sequencing and promotion gates and does not declare the Python IR or SSA model
 > a stable public format.
 
@@ -525,10 +526,38 @@ bytes and validation behavior unchanged does not require a bump. Additive fields
 also require a bump under the current exact-field policy because v1 readers
 reject unknown fields.
 
-The next migration step is to define the equivalent owned Rust wire DTO model
-for this version-1 contract and prove fixture compatibility. Rust importer logic,
-PyO3, a Rust verifier, and compiler pipeline behavior changes remain out of
-scope for Step 3G.
+### Step 4A Rust wire DTO layer
+
+The Rust wire representation now lives in
+`compiler-rs/crates/aether-ir/src/wire.rs`. It uses serde-derived, exact-field
+structs and internally tagged enums for the module, struct definitions and
+fields, functions, blocks, all 18 type tags, values, storage, parameters,
+constants, source locations, and all 68 instruction `kind` tags. Required
+nullable fields use a transparent wrapper so an explicit JSON `null` remains
+distinct from an omitted field. Fixed-rank shape arrays retain their schema-v1
+wire lengths, unknown tags and fields are rejected, and the root preserves and
+checks `schema_version` 1.
+
+The three migration layers remain deliberately distinct:
+
+- **Wire DTO:** the serde model is only the versioned interchange tree. It
+  decodes and encodes the frozen Python JSON shape and performs structural
+  schema rejection, but does not verify CFG, types, ownership, dominance,
+  layouts, or references.
+- **Rust IR:** the existing owned model in `aether-ir` is the representation
+  intended for Rust compiler components. It is not the serialization format and
+  has no serde coupling.
+- **Importer:** DTO-to-Rust-IR conversion is the remaining adapter work. It will
+  rebuild the owned model and establish any conversion-specific checks without
+  changing either frozen wire shape.
+
+Rust tests deserialize the existing Python golden fixture directly, compare its
+JSON value with Rust re-serialization, require deterministic typed and textual
+round trips, exercise every instruction and type tag, and reject malformed JSON,
+unknown tags, missing required fields, and unexpected fields. No second golden
+fixture is generated or maintained. DTO-to-Rust-IR import, the Rust verifier,
+PyO3, pipeline integration, lowering, optimization, and interpretation remain
+out of scope after Step 4A.
 
 ## 8. Ownership and memory
 
