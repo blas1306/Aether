@@ -6,6 +6,9 @@ from typing import NoReturn, TypeAlias
 
 from .model import (
     IRAssign,
+    IRBinaryOp,
+    IRCast,
+    IRCompareOp,
     IRConst,
     IRCopyInit,
     IRDestroy,
@@ -19,6 +22,7 @@ from .model import (
     IRSourceLocation,
     IRStorage,
     IRStore,
+    IRUnaryOp,
     IRValue,
 )
 from .types import (
@@ -106,9 +110,13 @@ IR_INSTRUCTION_TAGS: Mapping[type[IRInstruction], str] = MappingProxyType(
         IRAssign: "assign",
         IRDestroy: "destroy",
         IRRelocate: "relocate",
+        IRBinaryOp: "binary_op",
+        IRUnaryOp: "unary_op",
+        IRCompareOp: "compare_op",
+        IRCast: "cast",
     }
 )
-"""Exact core/lifecycle instruction class to stable schema tag mapping."""
+"""Exact supported instruction class to stable schema tag mapping."""
 
 
 def ir_type_to_dto(
@@ -473,7 +481,7 @@ def ir_instruction_to_dto(
     *,
     schema_version: int = IR_SCHEMA_VERSION,
 ) -> IRInstructionDTO:
-    """Convert one supported core/lifecycle instruction to a primitive DTO."""
+    """Convert one supported instruction to a primitive DTO."""
 
     _require_schema_version(schema_version)
     try:
@@ -576,6 +584,57 @@ def ir_instruction_to_dto(
                 schema_version=schema_version,
             ),
         }
+    if type(instruction) is IRBinaryOp:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "operator": _expect_string(
+                instruction.operator,
+                "IR instruction 'binary_op'.operator",
+            ),
+            "left": ir_value_to_dto(instruction.left, schema_version=schema_version),
+            "right": ir_value_to_dto(instruction.right, schema_version=schema_version),
+            "source_location": ir_source_location_to_dto(
+                instruction.source_location,
+                schema_version=schema_version,
+            ),
+        }
+    if type(instruction) is IRUnaryOp:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "operator": _expect_string(
+                instruction.operator,
+                "IR instruction 'unary_op'.operator",
+            ),
+            "operand": ir_value_to_dto(instruction.operand, schema_version=schema_version),
+        }
+    if type(instruction) is IRCompareOp:
+        aggregate_shape = instruction.aggregate_shape
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "operator": _expect_string(
+                instruction.operator,
+                "IR instruction 'compare_op'.operator",
+            ),
+            "left": ir_value_to_dto(instruction.left, schema_version=schema_version),
+            "right": ir_value_to_dto(instruction.right, schema_version=schema_version),
+            "aggregate_shape": (
+                None
+                if aggregate_shape is None
+                else [
+                    _expect_i64(size, f"IR instruction 'compare_op'.aggregate_shape[{index}]")
+                    for index, size in enumerate(aggregate_shape)
+                ]
+            ),
+        }
+    if type(instruction) is IRCast:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "value": ir_value_to_dto(instruction.value, schema_version=schema_version),
+        }
     raise AssertionError(f"Missing encoder for registered IR instruction kind {kind!r}")
 
 
@@ -584,7 +643,7 @@ def ir_instruction_from_dto(
     *,
     schema_version: int = IR_SCHEMA_VERSION,
 ) -> IRInstruction:
-    """Decode one strictly validated core/lifecycle instruction DTO."""
+    """Decode one strictly validated supported instruction DTO."""
 
     _require_schema_version(schema_version)
     mapping = _expect_mapping(dto, "IR instruction")
@@ -672,6 +731,60 @@ def ir_instruction_from_dto(
             ir_storage_from_dto(mapping["source"], schema_version=schema_version),
             _expect_i64(mapping["count"], "IR instruction 'relocate'.count"),
             ir_source_location_from_dto(mapping["source_location"], schema_version=schema_version),
+        )
+    if kind == "binary_op":
+        _expect_fields(
+            mapping,
+            {"kind", "result", "operator", "left", "right", "source_location"},
+            "IR instruction 'binary_op'",
+        )
+        return IRBinaryOp(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            _expect_string(mapping["operator"], "IR instruction 'binary_op'.operator"),
+            ir_value_from_dto(mapping["left"], schema_version=schema_version),
+            ir_value_from_dto(mapping["right"], schema_version=schema_version),
+            ir_source_location_from_dto(mapping["source_location"], schema_version=schema_version),
+        )
+    if kind == "unary_op":
+        _expect_fields(
+            mapping,
+            {"kind", "result", "operator", "operand"},
+            "IR instruction 'unary_op'",
+        )
+        return IRUnaryOp(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            _expect_string(mapping["operator"], "IR instruction 'unary_op'.operator"),
+            ir_value_from_dto(mapping["operand"], schema_version=schema_version),
+        )
+    if kind == "compare_op":
+        _expect_fields(
+            mapping,
+            {"kind", "result", "operator", "left", "right", "aggregate_shape"},
+            "IR instruction 'compare_op'",
+        )
+        raw_shape = mapping["aggregate_shape"]
+        aggregate_shape = (
+            None
+            if raw_shape is None
+            else tuple(
+                _expect_i64(size, f"IR instruction 'compare_op'.aggregate_shape[{index}]")
+                for index, size in enumerate(
+                    _expect_sequence(raw_shape, "IR instruction 'compare_op'.aggregate_shape")
+                )
+            )
+        )
+        return IRCompareOp(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            _expect_string(mapping["operator"], "IR instruction 'compare_op'.operator"),
+            ir_value_from_dto(mapping["left"], schema_version=schema_version),
+            ir_value_from_dto(mapping["right"], schema_version=schema_version),
+            aggregate_shape,
+        )
+    if kind == "cast":
+        _expect_fields(mapping, {"kind", "result", "value"}, "IR instruction 'cast'")
+        return IRCast(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_value_from_dto(mapping["value"], schema_version=schema_version),
         )
     _unknown_tag("IR instruction", kind)
 

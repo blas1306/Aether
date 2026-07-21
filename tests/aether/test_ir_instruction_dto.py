@@ -16,6 +16,9 @@ from aether.ir.dto import (
 from aether.ir.model import (
     IRAssign,
     IRBinaryOp,
+    IRCall,
+    IRCast,
+    IRCompareOp,
     IRConst,
     IRCopyInit,
     IRDestroy,
@@ -28,6 +31,7 @@ from aether.ir.model import (
     IRSourceLocation,
     IRStorage,
     IRStore,
+    IRUnaryOp,
     IRValue,
 )
 from aether.ir.types import EnumType, IntType, ListType, StringType
@@ -224,7 +228,7 @@ ROUND_TRIP_CASES: tuple[tuple[IRInstruction, dict[str, object]], ...] = (
 )
 
 
-def test_core_and_lifecycle_instruction_tags_are_explicit_and_stable() -> None:
+def test_supported_instruction_tags_are_explicit_and_stable() -> None:
     assert dict(IR_INSTRUCTION_TAGS) == {
         IRConst: "const",
         IRLoad: "load",
@@ -235,6 +239,10 @@ def test_core_and_lifecycle_instruction_tags_are_explicit_and_stable() -> None:
         IRAssign: "assign",
         IRDestroy: "destroy",
         IRRelocate: "relocate",
+        IRBinaryOp: "binary_op",
+        IRUnaryOp: "unary_op",
+        IRCompareOp: "compare_op",
+        IRCast: "cast",
     }
 
 
@@ -378,8 +386,8 @@ def test_semantically_distinct_lifecycle_instructions_have_distinct_dtos() -> No
 
 
 def test_unsupported_instruction_families_and_subclasses_are_rejected() -> None:
-    with pytest.raises(TypeError, match=r"Unsupported IR instruction for schema v1: IRBinaryOp"):
-        ir_instruction_to_dto(IRBinaryOp(RESULT, "+", VALUE, VALUE))
+    with pytest.raises(TypeError, match=r"Unsupported IR instruction for schema v1: IRCall"):
+        ir_instruction_to_dto(IRCall("future"))
 
     class FutureConst(IRConst):
         pass
