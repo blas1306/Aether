@@ -19,7 +19,10 @@ pub mod wire;
 pub use block::IRBasicBlock;
 pub use constant::{IRConstant, IREnumConstant};
 pub use function::IRFunction;
-pub use importer::{IRImportError, import_type};
+pub use importer::{
+    IRImportError, import_constant, import_enum_constant, import_optional_source_location,
+    import_parameter, import_source_location, import_storage, import_type, import_value,
+};
 pub use instruction::IRInstruction;
 pub use module::IRModule;
 pub use source::IRSourceLocation;

@@ -1,15 +1,14 @@
 # Gradual Python-to-Rust compiler migration
 
-> Status: Phase 2, Step 4B.1 Rust wire DTO-to-IR type importer complete. The
+> Status: Phase 2, Step 4B.2 Rust foundational DTO-to-IR importer complete. The
 > isolated Rust workspace, owned IR model, frozen schema-v1 Python DTO tree, and
 > separate serde wire model cover the complete current Python IR. The importer
-> now reconstructs all 18 owned Rust type variants recursively and rejects the
-> wire-only non-struct method-result receiver shape with a dedicated structural
-> error. Value, instruction, block, function, and module import, PyO3,
-> verification, and production integration remain unimplemented. This document
-> defines
-> sequencing and promotion gates and does not declare the Python IR or SSA model
-> a stable public format.
+> now reconstructs all 18 owned Rust type variants plus constants, enum-constant
+> metadata, values, storage, parameters, and source locations. Instruction,
+> block, function, struct-definition, and module import, PyO3, verification, and
+> production integration remain unimplemented. This document defines sequencing
+> and promotion gates and does not declare the Python IR or SSA model a stable
+> public format.
 
 ## 1. Decision summary
 
@@ -589,6 +588,43 @@ deterministic reconstruction, exact optional and ordered-field preservation,
 and directly and recursively embedded structurally impossible method-result
 receivers. Step 4B.1 does not import values, constants, instructions, blocks,
 functions, struct definitions, or modules and adds no PyO3 or verifier behavior.
+
+### Step 4B.2 Rust foundational DTO-to-IR importer
+
+The importer now also reconstructs the foundational owned entities consumed by
+instructions and function declarations. Public consuming and borrowed
+`TryFrom` implementations cover all six constant variants, enum-constant
+metadata, all three value tags, the single storage tag, the single parameter
+tag, and source locations. Named helpers provide the same entry points for
+constants, enum constants, values, storage, parameters, source locations, and
+nullable source-location fields. Every nested `type` field delegates to the
+Step 4B.1 type importer.
+
+Names, identifiers, strings, booleans, enum member metadata, `i32` constant and
+enum integers, `i64` source coordinates, optional paths, and finite `f64` bit
+patterns are copied without normalization or narrowing. The wire DTO already
+uses the owned integer widths, so JSON outside those widths fails structural DTO
+decoding before import. Programmatically constructed non-finite floating-point
+DTOs are rejected by `IRImportError::NonFiniteConstantFloat`; the serde wire
+contract also rejects NaN and infinity. Nested incompatible type shapes retain
+value/storage/parameter field context through dedicated importer error variants.
+
+The three wire value tags intentionally converge on the current owned
+`IRValue`, whose model stores only name and type; dedicated storage and parameter
+DTOs reconstruct `IRStorage` and `IRParameter`. Import does not resolve those
+names or check storage existence, instruction type agreement, duplicate
+parameters, ownership, symbols, or source-coordinate meaning. Those semantic
+rules remain exclusively verifier responsibilities, and verifier behavior is
+unchanged.
+
+Focused tests deserialize foundational entities from JSON where applicable and
+cover every constant and value variant, storage, primitive and recursively
+nested parameters, present and absent source locations, explicit null paths,
+exact strings and identifiers, integer boundaries, finite floating-point bit
+preservation, consuming and borrowed conversions, deterministic repeated
+reconstruction, structural importer errors, and successful import of unresolved
+references. The next importer slice is the instruction importer; block,
+function, struct-definition, and module import remain later steps.
 
 ## 8. Ownership and memory
 
