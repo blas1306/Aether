@@ -166,9 +166,9 @@ pub fn import_optional_source_location(
 
 /// Reconstruct an owned Rust IR instruction from a borrowed wire DTO.
 ///
-/// The incremental importer currently supports the twenty-three lifecycle/core,
-/// operator/cast, call-family, and struct-family instruction kinds. Every other schema-v1
-/// kind returns [`IRImportError::UnsupportedInstruction`].
+/// The incremental importer currently supports the forty-five lifecycle/core,
+/// operator/cast, call-family, struct-family, and collection instruction kinds. Every
+/// other schema-v1 kind returns [`IRImportError::UnsupportedInstruction`].
 pub fn import_instruction(instruction: &IRInstructionDTO) -> Result<IRInstruction, IRImportError> {
     instruction.try_into()
 }
@@ -369,6 +369,171 @@ impl TryFrom<&IRInstructionDTO> for IRInstruction {
             } => Ok(Self::IRMethodResultValue {
                 result: import_instruction_value(kind, "result", result)?,
                 method_result: import_instruction_value(kind, "method_result", method_result)?,
+            }),
+            IRInstructionDTO::ArrayNew { result, elements } => Ok(Self::IRArrayNew {
+                result: import_instruction_value(kind, "result", result)?,
+                elements: import_instruction_values(kind, "elements", elements)?,
+            }),
+            IRInstructionDTO::ListNew { result, elements } => Ok(Self::IRListNew {
+                result: import_instruction_value(kind, "result", result)?,
+                elements: import_instruction_values(kind, "elements", elements)?,
+            }),
+            IRInstructionDTO::ArrayCopy {
+                result,
+                array,
+                source_location,
+            } => Ok(Self::IRArrayCopy {
+                result: import_instruction_value(kind, "result", result)?,
+                array: import_instruction_value(kind, "array", array)?,
+                source_location: import_instruction_source_location(kind, source_location)?,
+            }),
+            IRInstructionDTO::ListCopy {
+                result,
+                list_value,
+                source_location,
+            } => Ok(Self::IRListCopy {
+                result: import_instruction_value(kind, "result", result)?,
+                list_value: import_instruction_value(kind, "list_value", list_value)?,
+                source_location: import_instruction_source_location(kind, source_location)?,
+            }),
+            IRInstructionDTO::ListContains {
+                result,
+                list_value,
+                value,
+            } => Ok(Self::IRListContains {
+                result: import_instruction_value(kind, "result", result)?,
+                list_value: import_instruction_value(kind, "list_value", list_value)?,
+                value: import_instruction_value(kind, "value", value)?,
+            }),
+            IRInstructionDTO::ListIndexOf {
+                result,
+                list_value,
+                value,
+            } => Ok(Self::IRListIndexOf {
+                result: import_instruction_value(kind, "result", result)?,
+                list_value: import_instruction_value(kind, "list_value", list_value)?,
+                value: import_instruction_value(kind, "value", value)?,
+            }),
+            IRInstructionDTO::ListClear { list_value } => Ok(Self::IRListClear {
+                list_value: import_instruction_value(kind, "list_value", list_value)?,
+            }),
+            IRInstructionDTO::ListPush { list_value, value } => Ok(Self::IRListPush {
+                list_value: import_instruction_value(kind, "list_value", list_value)?,
+                value: import_instruction_value(kind, "value", value)?,
+            }),
+            IRInstructionDTO::ListInsert {
+                list_value,
+                index,
+                value,
+            } => Ok(Self::IRListInsert {
+                list_value: import_instruction_value(kind, "list_value", list_value)?,
+                index: import_instruction_value(kind, "index", index)?,
+                value: import_instruction_value(kind, "value", value)?,
+            }),
+            IRInstructionDTO::ListRemoveAt {
+                result,
+                list_value,
+                index,
+            } => Ok(Self::IRListRemoveAt {
+                result: import_instruction_value(kind, "result", result)?,
+                list_value: import_instruction_value(kind, "list_value", list_value)?,
+                index: import_instruction_value(kind, "index", index)?,
+            }),
+            IRInstructionDTO::ListPop { result, list_value } => Ok(Self::IRListPop {
+                result: import_instruction_value(kind, "result", result)?,
+                list_value: import_instruction_value(kind, "list_value", list_value)?,
+            }),
+            IRInstructionDTO::ListReverse { list_value } => Ok(Self::IRListReverse {
+                list_value: import_instruction_value(kind, "list_value", list_value)?,
+            }),
+            IRInstructionDTO::SequenceSort { sequence } => Ok(Self::IRSequenceSort {
+                sequence: import_instruction_value(kind, "sequence", sequence)?,
+            }),
+            IRInstructionDTO::ArrayGet {
+                result,
+                array,
+                index,
+                borrowed,
+                borrow_scope,
+                source_location,
+            } => Ok(Self::IRArrayGet {
+                result: import_instruction_value(kind, "result", result)?,
+                array: import_instruction_value(kind, "array", array)?,
+                index: import_instruction_value(kind, "index", index)?,
+                borrowed: *borrowed,
+                borrow_scope: borrow_scope.0.clone(),
+                source_location: import_instruction_source_location(kind, source_location)?,
+            }),
+            IRInstructionDTO::ArraySlice {
+                result,
+                array,
+                start,
+                end,
+                source_location,
+            } => Ok(Self::IRArraySlice {
+                result: import_instruction_value(kind, "result", result)?,
+                array: import_instruction_value(kind, "array", array)?,
+                start: import_instruction_value(kind, "start", start)?,
+                end: import_instruction_value(kind, "end", end)?,
+                source_location: import_instruction_source_location(kind, source_location)?,
+            }),
+            IRInstructionDTO::ListSlice {
+                result,
+                list_value,
+                start,
+                end,
+                source_location,
+            } => Ok(Self::IRListSlice {
+                result: import_instruction_value(kind, "result", result)?,
+                list_value: import_instruction_value(kind, "list_value", list_value)?,
+                start: import_instruction_value(kind, "start", start)?,
+                end: import_instruction_value(kind, "end", end)?,
+                source_location: import_instruction_source_location(kind, source_location)?,
+            }),
+            IRInstructionDTO::ListGet {
+                result,
+                list_value,
+                index,
+                borrowed,
+                borrow_scope,
+                source_location,
+            } => Ok(Self::IRListGet {
+                result: import_instruction_value(kind, "result", result)?,
+                list_value: import_instruction_value(kind, "list_value", list_value)?,
+                index: import_instruction_value(kind, "index", index)?,
+                borrowed: *borrowed,
+                borrow_scope: borrow_scope.0.clone(),
+                source_location: import_instruction_source_location(kind, source_location)?,
+            }),
+            IRInstructionDTO::ArraySet {
+                array,
+                index,
+                value,
+            } => Ok(Self::IRArraySet {
+                array: import_instruction_value(kind, "array", array)?,
+                index: import_instruction_value(kind, "index", index)?,
+                value: import_instruction_value(kind, "value", value)?,
+            }),
+            IRInstructionDTO::ListSet {
+                list_value,
+                index,
+                value,
+            } => Ok(Self::IRListSet {
+                list_value: import_instruction_value(kind, "list_value", list_value)?,
+                index: import_instruction_value(kind, "index", index)?,
+                value: import_instruction_value(kind, "value", value)?,
+            }),
+            IRInstructionDTO::ArrayLength { result, array } => Ok(Self::IRArrayLength {
+                result: import_instruction_value(kind, "result", result)?,
+                array: import_instruction_value(kind, "array", array)?,
+            }),
+            IRInstructionDTO::ListLength { result, list_value } => Ok(Self::IRListLength {
+                result: import_instruction_value(kind, "result", result)?,
+                list_value: import_instruction_value(kind, "list_value", list_value)?,
+            }),
+            IRInstructionDTO::ListIsEmpty { result, list_value } => Ok(Self::IRListIsEmpty {
+                result: import_instruction_value(kind, "result", result)?,
+                list_value: import_instruction_value(kind, "list_value", list_value)?,
             }),
             _ => Err(IRImportError::UnsupportedInstruction { kind }),
         }

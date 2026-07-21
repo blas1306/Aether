@@ -1,12 +1,12 @@
 # Gradual Python-to-Rust compiler migration
 
-> Status: Phase 2, Step 4B.3D Rust struct-family instruction importer
+> Status: Phase 2, Step 4B.3E Rust collection instruction importer
 > complete. The isolated Rust workspace, owned IR model, frozen schema-v1
 > Python DTO tree, and separate serde wire model cover the complete current
 > Python IR. The importer
 > now reconstructs all 18 owned Rust type variants plus constants, enum-constant
-> metadata, values, storage, parameters, source locations, and 23 lifecycle,
-> core, operator, cast, call-family, and struct-family instructions. The other 45 instructions plus block,
+> metadata, values, storage, parameters, source locations, and 45 lifecycle,
+> core, operator, cast, call-family, struct-family, and collection instructions. The other 23 instructions plus block,
 > function, struct-definition, and module import, PyO3, verification, and production
 > integration remain unimplemented. This document defines sequencing and
 > promotion gates and does not declare the Python IR or SSA model a stable public
@@ -784,6 +784,61 @@ nested contextual failures, and continued `UnsupportedInstruction` rejection
 for collection instructions. Collections, linear algebra, control flow, blocks,
 functions, modules, verifier logic, PyO3, and pipeline integration remain later
 work.
+
+### Step 4B.3E Rust collection instruction importer
+
+The existing `import_instruction()` dispatch and its borrowed and consuming
+`TryFrom<IRInstructionDTO>` implementations now reconstruct all 22 collection
+instructions in the frozen schema-v1 contract. Together with the earlier
+families, the importer supports 45 / 68 instruction variants. The remaining 23
+linear-algebra and control-flow kinds still return
+`IRImportError::UnsupportedInstruction`; no collection-specific dispatcher or
+second conversion architecture was added. The next importer family is linear
+algebra.
+
+The actual array fields are: `array_new(result, elements)`,
+`array_copy(result, array, source_location)`,
+`array_get(result, array, index, borrowed, borrow_scope, source_location)`,
+`array_slice(result, array, start, end, source_location)`,
+`array_set(array, index, value)`, and `array_length(result, array)`. The actual
+list fields are: `list_new(result, elements)`,
+`list_copy(result, list_value, source_location)`,
+`list_contains(result, list_value, value)`,
+`list_index_of(result, list_value, value)`, `list_clear(list_value)`,
+`list_push(list_value, value)`, `list_insert(list_value, index, value)`,
+`list_remove_at(result, list_value, index)`,
+`list_pop(result, list_value)`, `list_reverse(list_value)`,
+`list_slice(result, list_value, start, end, source_location)`,
+`list_get(result, list_value, index, borrowed, borrow_scope, source_location)`,
+`list_set(list_value, index, value)`, `list_length(result, list_value)`, and
+`list_is_empty(result, list_value)`. The shared operation is
+`sequence_sort(sequence)`.
+
+The frozen collection DTOs carry no separate element-type, length, capacity,
+slice-step, comparator, ordering, or sort-direction fields. Indices and slice
+bounds are typed `IRValueDTO` operands rather than integer metadata. Wire and
+owned layouts match directly, including nullable `borrow_scope`, nullable
+source locations, booleans, ordered constructor elements, and all nested value
+types, so no owned-model change, integer conversion, or new importer error was
+needed. The implementation reuses the existing value, ordered-value-vector,
+optional-source-location, and contextual `InstructionField` helpers.
+
+Import remains a structural boundary rather than a verifier. It deliberately
+does not resolve names; require arrays, lists, or mutable operands; validate
+element/result/index types; check bounds or slice coherence; prove non-empty
+lists before `pop`; or validate whether a sequence can be sorted. Every
+structurally representable mismatch is retained for verifier or runtime-safety
+diagnosis. Verifier and compiler-pipeline behavior are unchanged.
+
+Focused tests cover every collection variant through JSON-to-wire-to-owned,
+borrowed, and consuming paths; empty, singleton, and ordered multi-element
+constructors; primitive, nominal struct, and nested collection types; copies,
+queries, mutation operations, slices, sorting, nullable borrow scopes, present
+and absent source locations, deterministic reconstruction, DTO immutability,
+unresolved names, invalid-but-representable semantics, and contextual nested
+errors. A coverage audit asserts exactly 22 collection additions and confirms
+all 23 later linear-algebra and control-flow variants remain explicitly
+unsupported.
 
 ## 8. Ownership and memory
 
