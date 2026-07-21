@@ -1,14 +1,15 @@
 # Gradual Python-to-Rust compiler migration
 
-> Status: Phase 2, Step 4B.2 Rust foundational DTO-to-IR importer complete. The
+> Status: Phase 2, Step 4B.3A Rust lifecycle instruction importer complete. The
 > isolated Rust workspace, owned IR model, frozen schema-v1 Python DTO tree, and
 > separate serde wire model cover the complete current Python IR. The importer
 > now reconstructs all 18 owned Rust type variants plus constants, enum-constant
-> metadata, values, storage, parameters, and source locations. Instruction,
-> block, function, struct-definition, and module import, PyO3, verification, and
-> production integration remain unimplemented. This document defines sequencing
-> and promotion gates and does not declare the Python IR or SSA model a stable
-> public format.
+> metadata, values, storage, parameters, source locations, and the nine
+> lifecycle/core instructions. The other 59 instructions plus block, function,
+> struct-definition, and module import, PyO3, verification, and production
+> integration remain unimplemented. This document defines sequencing and
+> promotion gates and does not declare the Python IR or SSA model a stable public
+> format.
 
 ## 1. Decision summary
 
@@ -623,8 +624,45 @@ nested parameters, present and absent source locations, explicit null paths,
 exact strings and identifiers, integer boundaries, finite floating-point bit
 preservation, consuming and borrowed conversions, deterministic repeated
 reconstruction, structural importer errors, and successful import of unresolved
-references. The next importer slice is the instruction importer; block,
-function, struct-definition, and module import remain later steps.
+references. Step 4B.3A begins the instruction importer; block, function,
+struct-definition, and module import remain later steps.
+
+### Step 4B.3A Rust lifecycle instruction importer
+
+The instruction importer now exposes `import_instruction()` plus consuming and
+borrowed `TryFrom<IRInstructionDTO>` implementations. It reconstructs 9 of the
+68 schema-v1 instruction variants: `const`, `load`, `store`, `init_default`,
+`copy_init`, `move_init`, `assign`, `destroy`, and `relocate`. The remaining 59
+kinds fail explicitly with `IRImportError::UnsupportedInstruction`; they are
+never dropped or approximated during this incremental implementation.
+
+Each supported field delegates to the existing constant, value, storage, type,
+and optional-source-location importers. Result and operand identities,
+destination and source storage, constants, recursively nested types, signed
+relocation counts, optional locations, and retained declaration ordering are
+copied exactly. Nested structural failures are wrapped by
+`IRImportError::InstructionField`, which reports both the instruction kind and
+the exact offending field while preserving the typed source error. The existing
+non-struct method-result receiver error remains the focused failure for an owned
+type shape that cannot represent its wire input; no owned IR or wire schema
+change was needed.
+
+Import remains a structural adapter, not a verifier. It does not resolve value
+or storage names, compare source and destination types, require a load slot to
+be initialized, model later use after moves, enforce lifecycle or ownership
+correctness, check dominance, or validate instruction placement. Consequently,
+semantically invalid but structurally representable lifecycle instructions are
+accepted for the verifier to diagnose later. Neither verifier nor compiler
+pipeline behavior changes in this step.
+
+Focused tests cover all nine variants through borrowed and consuming paths,
+JSON-to-wire-to-owned conversion, present and absent source locations, primitive
+and nested types, ordered enum metadata, exact constant/value/storage retention,
+repeatable reconstruction, unresolved names, representable type mismatches,
+nested field context, unsupported-kind rejection, and source DTO immutability.
+The next planned instruction-importer family is operators and casts. Basic
+blocks, functions, struct definitions, modules, PyO3, verifier rules, and
+pipeline integration remain later work.
 
 ## 8. Ownership and memory
 

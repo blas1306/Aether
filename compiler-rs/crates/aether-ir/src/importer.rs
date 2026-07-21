@@ -4,14 +4,14 @@ use std::error::Error;
 use std::fmt;
 
 use crate::wire::{
-    IRConstantDTO, IREnumConstantDTO, IRParameterDTO, IRSourceLocationDTO, IRStorageDTO, IRTypeDTO,
-    IRValueDTO, NullableDTO,
+    IRConstantDTO, IREnumConstantDTO, IRInstructionDTO, IRParameterDTO, IRSourceLocationDTO,
+    IRStorageDTO, IRTypeDTO, IRValueDTO, NullableDTO,
 };
 use crate::{
     ArrayType, BoolType, ClassRefType, ComplexType, DoubleType, EnumType, FloatType, FunctionType,
-    IRConstant, IREnumConstant, IRParameter, IRSourceLocation, IRStorage, IRType, IRValue, IntType,
-    InterfaceType, ListType, MatrixType, MethodResultType, NullableType, StringType, StructType,
-    VectorType, VoidType,
+    IRConstant, IREnumConstant, IRInstruction, IRParameter, IRSourceLocation, IRStorage, IRType,
+    IRValue, IntType, InterfaceType, ListType, MatrixType, MethodResultType, NullableType,
+    StringType, StructType, VectorType, VoidType,
 };
 
 /// A structural failure while importing a wire DTO into the owned Rust IR.
@@ -20,6 +20,20 @@ use crate::{
 /// responsibility of the IR verifier.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IRImportError {
+    /// The incremental importer has not implemented this instruction kind yet.
+    UnsupportedInstruction {
+        /// Stable schema-v1 instruction kind.
+        kind: &'static str,
+    },
+    /// A nested instruction field could not be represented by the owned IR.
+    InstructionField {
+        /// Stable schema-v1 instruction kind.
+        instruction: &'static str,
+        /// Exact field containing the incompatible nested DTO.
+        field: &'static str,
+        /// Focused nested conversion failure.
+        source: Box<Self>,
+    },
     /// A method-result receiver used a wire type that the owned IR cannot store.
     MethodResultReceiverNotStruct {
         /// Stable wire tag of the incompatible receiver type.
@@ -52,6 +66,18 @@ pub enum IRImportError {
 impl fmt::Display for IRImportError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::UnsupportedInstruction { kind } => write!(
+                formatter,
+                "instruction DTO kind '{kind}' is not supported by the incremental importer"
+            ),
+            Self::InstructionField {
+                instruction,
+                field,
+                source,
+            } => write!(
+                formatter,
+                "instruction DTO kind '{instruction}' field '{field}' could not be imported: {source}"
+            ),
             Self::MethodResultReceiverNotStruct { actual } => write!(
                 formatter,
                 "method-result receiver must be a struct type, found wire type '{actual}'"
@@ -79,12 +105,13 @@ impl fmt::Display for IRImportError {
 impl Error for IRImportError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::ValueType { source, .. }
+            Self::InstructionField { source, .. }
+            | Self::ValueType { source, .. }
             | Self::StorageType { source }
             | Self::ParameterType { source } => Some(source),
-            Self::MethodResultReceiverNotStruct { .. } | Self::NonFiniteConstantFloat { .. } => {
-                None
-            }
+            Self::UnsupportedInstruction { .. }
+            | Self::MethodResultReceiverNotStruct { .. }
+            | Self::NonFiniteConstantFloat { .. } => None,
         }
     }
 }
@@ -135,6 +162,99 @@ pub fn import_optional_source_location(
         .as_ref()
         .map(IRSourceLocation::try_from)
         .transpose()
+}
+
+/// Reconstruct an owned Rust IR instruction from a borrowed wire DTO.
+///
+/// The incremental importer currently supports the nine lifecycle/core
+/// instruction kinds. Every other schema-v1 kind returns
+/// [`IRImportError::UnsupportedInstruction`].
+pub fn import_instruction(instruction: &IRInstructionDTO) -> Result<IRInstruction, IRImportError> {
+    instruction.try_into()
+}
+
+impl TryFrom<&IRInstructionDTO> for IRInstruction {
+    type Error = IRImportError;
+
+    fn try_from(instruction: &IRInstructionDTO) -> Result<Self, Self::Error> {
+        let kind = wire_instruction_kind(instruction);
+
+        match instruction {
+            IRInstructionDTO::Const { result, value } => Ok(Self::IRConst {
+                result: import_instruction_value(kind, "result", result)?,
+                value: import_instruction_constant(kind, "value", value)?,
+            }),
+            IRInstructionDTO::Load { result, slot } => Ok(Self::IRLoad {
+                result: import_instruction_value(kind, "result", result)?,
+                slot: import_instruction_value(kind, "slot", slot)?,
+            }),
+            IRInstructionDTO::Store { slot, value } => Ok(Self::IRStore {
+                slot: import_instruction_value(kind, "slot", slot)?,
+                value: import_instruction_value(kind, "value", value)?,
+            }),
+            IRInstructionDTO::InitDefault {
+                destination,
+                source_location,
+            } => Ok(Self::IRInitDefault {
+                destination: import_instruction_storage(kind, "destination", destination)?,
+                source_location: import_instruction_source_location(kind, source_location)?,
+            }),
+            IRInstructionDTO::CopyInit {
+                destination,
+                source,
+                source_location,
+            } => Ok(Self::IRCopyInit {
+                destination: import_instruction_storage(kind, "destination", destination)?,
+                source: import_instruction_value(kind, "source", source)?,
+                source_location: import_instruction_source_location(kind, source_location)?,
+            }),
+            IRInstructionDTO::MoveInit {
+                destination,
+                source,
+                source_location,
+            } => Ok(Self::IRMoveInit {
+                destination: import_instruction_storage(kind, "destination", destination)?,
+                source: import_instruction_storage(kind, "source", source)?,
+                source_location: import_instruction_source_location(kind, source_location)?,
+            }),
+            IRInstructionDTO::Assign {
+                destination,
+                source,
+                source_location,
+            } => Ok(Self::IRAssign {
+                destination: import_instruction_storage(kind, "destination", destination)?,
+                source: import_instruction_value(kind, "source", source)?,
+                source_location: import_instruction_source_location(kind, source_location)?,
+            }),
+            IRInstructionDTO::Destroy {
+                value,
+                source_location,
+            } => Ok(Self::IRDestroy {
+                value: import_instruction_storage(kind, "value", value)?,
+                source_location: import_instruction_source_location(kind, source_location)?,
+            }),
+            IRInstructionDTO::Relocate {
+                destination,
+                source,
+                count,
+                source_location,
+            } => Ok(Self::IRRelocate {
+                destination: import_instruction_storage(kind, "destination", destination)?,
+                source: import_instruction_storage(kind, "source", source)?,
+                count: *count,
+                source_location: import_instruction_source_location(kind, source_location)?,
+            }),
+            _ => Err(IRImportError::UnsupportedInstruction { kind }),
+        }
+    }
+}
+
+impl TryFrom<IRInstructionDTO> for IRInstruction {
+    type Error = IRImportError;
+
+    fn try_from(instruction: IRInstructionDTO) -> Result<Self, Self::Error> {
+        Self::try_from(&instruction)
+    }
 }
 
 impl TryFrom<IRTypeDTO> for IRType {
@@ -378,6 +498,53 @@ fn import_finite_constant_float(value: f64, field: &'static str) -> Result<f64, 
     }
 }
 
+fn import_instruction_field<T>(
+    instruction: &'static str,
+    field: &'static str,
+    result: Result<T, IRImportError>,
+) -> Result<T, IRImportError> {
+    result.map_err(|source| IRImportError::InstructionField {
+        instruction,
+        field,
+        source: Box::new(source),
+    })
+}
+
+fn import_instruction_value(
+    instruction: &'static str,
+    field: &'static str,
+    value: &IRValueDTO,
+) -> Result<IRValue, IRImportError> {
+    import_instruction_field(instruction, field, import_value(value))
+}
+
+fn import_instruction_constant(
+    instruction: &'static str,
+    field: &'static str,
+    constant: &IRConstantDTO,
+) -> Result<IRConstant, IRImportError> {
+    import_instruction_field(instruction, field, import_constant(constant))
+}
+
+fn import_instruction_storage(
+    instruction: &'static str,
+    field: &'static str,
+    storage: &IRStorageDTO,
+) -> Result<IRStorage, IRImportError> {
+    import_instruction_field(instruction, field, import_storage(storage))
+}
+
+fn import_instruction_source_location(
+    instruction: &'static str,
+    source_location: &NullableDTO<IRSourceLocationDTO>,
+) -> Result<Option<IRSourceLocation>, IRImportError> {
+    import_instruction_field(
+        instruction,
+        "source_location",
+        import_optional_source_location(source_location),
+    )
+}
+
 const fn wire_type_tag(type_: &IRTypeDTO) -> &'static str {
     match type_ {
         IRTypeDTO::Int {} => "int",
@@ -398,5 +565,78 @@ const fn wire_type_tag(type_: &IRTypeDTO) -> &'static str {
         IRTypeDTO::ClassRef { .. } => "class_ref",
         IRTypeDTO::Interface { .. } => "interface",
         IRTypeDTO::Enum { .. } => "enum",
+    }
+}
+
+const fn wire_instruction_kind(instruction: &IRInstructionDTO) -> &'static str {
+    match instruction {
+        IRInstructionDTO::Const { .. } => "const",
+        IRInstructionDTO::Load { .. } => "load",
+        IRInstructionDTO::Store { .. } => "store",
+        IRInstructionDTO::InitDefault { .. } => "init_default",
+        IRInstructionDTO::CopyInit { .. } => "copy_init",
+        IRInstructionDTO::MoveInit { .. } => "move_init",
+        IRInstructionDTO::Assign { .. } => "assign",
+        IRInstructionDTO::Destroy { .. } => "destroy",
+        IRInstructionDTO::Relocate { .. } => "relocate",
+        IRInstructionDTO::BinaryOp { .. } => "binary_op",
+        IRInstructionDTO::UnaryOp { .. } => "unary_op",
+        IRInstructionDTO::CompareOp { .. } => "compare_op",
+        IRInstructionDTO::Cast { .. } => "cast",
+        IRInstructionDTO::Call { .. } => "call",
+        IRInstructionDTO::FunctionRef { .. } => "function_ref",
+        IRInstructionDTO::CallIndirect { .. } => "call_indirect",
+        IRInstructionDTO::Print { .. } => "print",
+        IRInstructionDTO::StructNew { .. } => "struct_new",
+        IRInstructionDTO::StructGet { .. } => "struct_get",
+        IRInstructionDTO::StructSet { .. } => "struct_set",
+        IRInstructionDTO::MethodResultNew { .. } => "method_result_new",
+        IRInstructionDTO::MethodResultReceiver { .. } => "method_result_receiver",
+        IRInstructionDTO::MethodResultValue { .. } => "method_result_value",
+        IRInstructionDTO::ArrayNew { .. } => "array_new",
+        IRInstructionDTO::ListNew { .. } => "list_new",
+        IRInstructionDTO::ArrayCopy { .. } => "array_copy",
+        IRInstructionDTO::ListCopy { .. } => "list_copy",
+        IRInstructionDTO::ListContains { .. } => "list_contains",
+        IRInstructionDTO::ListIndexOf { .. } => "list_index_of",
+        IRInstructionDTO::ListClear { .. } => "list_clear",
+        IRInstructionDTO::ListPush { .. } => "list_push",
+        IRInstructionDTO::ListInsert { .. } => "list_insert",
+        IRInstructionDTO::ListRemoveAt { .. } => "list_remove_at",
+        IRInstructionDTO::ListPop { .. } => "list_pop",
+        IRInstructionDTO::ListReverse { .. } => "list_reverse",
+        IRInstructionDTO::SequenceSort { .. } => "sequence_sort",
+        IRInstructionDTO::ArrayGet { .. } => "array_get",
+        IRInstructionDTO::ArraySlice { .. } => "array_slice",
+        IRInstructionDTO::ListSlice { .. } => "list_slice",
+        IRInstructionDTO::ListGet { .. } => "list_get",
+        IRInstructionDTO::ArraySet { .. } => "array_set",
+        IRInstructionDTO::ListSet { .. } => "list_set",
+        IRInstructionDTO::ArrayLength { .. } => "array_length",
+        IRInstructionDTO::ListLength { .. } => "list_length",
+        IRInstructionDTO::ListIsEmpty { .. } => "list_is_empty",
+        IRInstructionDTO::VectorNew { .. } => "vector_new",
+        IRInstructionDTO::MatrixNew { .. } => "matrix_new",
+        IRInstructionDTO::VectorAdd { .. } => "vector_add",
+        IRInstructionDTO::VectorSub { .. } => "vector_sub",
+        IRInstructionDTO::VectorScale { .. } => "vector_scale",
+        IRInstructionDTO::VectorDot { .. } => "vector_dot",
+        IRInstructionDTO::OuterProduct { .. } => "outer_product",
+        IRInstructionDTO::MatrixAdd { .. } => "matrix_add",
+        IRInstructionDTO::MatrixSub { .. } => "matrix_sub",
+        IRInstructionDTO::MatrixScale { .. } => "matrix_scale",
+        IRInstructionDTO::MatrixMatMul { .. } => "matrix_mat_mul",
+        IRInstructionDTO::MatrixVectorMul { .. } => "matrix_vector_mul",
+        IRInstructionDTO::VectorMatrixMul { .. } => "vector_matrix_mul",
+        IRInstructionDTO::VectorGet { .. } => "vector_get",
+        IRInstructionDTO::MatrixGet { .. } => "matrix_get",
+        IRInstructionDTO::VectorLength { .. } => "vector_length",
+        IRInstructionDTO::MatrixRows { .. } => "matrix_rows",
+        IRInstructionDTO::MatrixColumns { .. } => "matrix_columns",
+        IRInstructionDTO::VectorSet { .. } => "vector_set",
+        IRInstructionDTO::MatrixSet { .. } => "matrix_set",
+        IRInstructionDTO::Branch { .. } => "branch",
+        IRInstructionDTO::Jump { .. } => "jump",
+        IRInstructionDTO::Return { .. } => "return",
     }
 }
