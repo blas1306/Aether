@@ -3,7 +3,14 @@ from __future__ import annotations
 import aether.ir as public_ir
 import pytest
 
-from aether.ir.dto import IR_SCHEMA_VERSION, IR_TYPE_TAGS, ir_type_to_dto
+from aether.ir.dto import (
+    IR_SCHEMA_VERSION,
+    IR_TYPE_TAGS,
+    IRDTOError,
+    IRDTOSchemaVersionError,
+    ir_type_from_dto,
+    ir_type_to_dto,
+)
 from aether.ir.types import (
     ArrayType,
     BoolType,
@@ -93,6 +100,7 @@ def test_every_public_ir_type_has_an_explicit_schema_mapping() -> None:
 )
 def test_ir_type_mapping(type_: IRType, expected: dict[str, object]) -> None:
     assert ir_type_to_dto(type_) == expected
+    assert ir_type_from_dto(expected) == type_
 
 
 def test_vector_without_orientation_preserves_absence() -> None:
@@ -109,3 +117,36 @@ def test_unknown_ir_type_is_rejected() -> None:
 
     with pytest.raises(TypeError, match=r"Unsupported IR type for schema v1: FutureType"):
         ir_type_to_dto(FutureType())
+
+
+def test_unknown_ir_type_dto_tag_is_rejected() -> None:
+    with pytest.raises(IRDTOError, match=r"Unknown IR type DTO tag: 'future'"):
+        ir_type_from_dto({"tag": "future"})
+
+
+@pytest.mark.parametrize(
+    "dto",
+    [
+        {},
+        {"tag": "int", "unexpected": True},
+        {"tag": "function", "parameter_types": "int", "return_type": {"tag": "void"}},
+        {"tag": "vector", "element": {"tag": "int"}},
+        {"tag": "enum", "name": "Color", "variants": ["RED"], "display_name": 1},
+        {
+            "tag": "method_result",
+            "receiver": {"tag": "int"},
+            "value": {"tag": "void"},
+        },
+    ],
+)
+def test_malformed_ir_type_dtos_are_rejected(dto: dict[str, object]) -> None:
+    with pytest.raises(IRDTOError):
+        ir_type_from_dto(dto)
+
+
+def test_ir_type_dto_rejects_incompatible_schema_versions() -> None:
+    with pytest.raises(IRDTOSchemaVersionError, match=r"schema version 2; expected 1"):
+        ir_type_from_dto({"tag": "int"}, schema_version=2)
+
+    with pytest.raises(IRDTOSchemaVersionError, match=r"schema version 2; expected 1"):
+        ir_type_to_dto(IntType(), schema_version=2)
