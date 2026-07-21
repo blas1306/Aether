@@ -1,12 +1,12 @@
-//! Independent type, structural, SSA, dominance, and local lifecycle passes for owned Aether IR.
+//! Independent type, structural, SSA, dominance, and lifecycle passes for owned Aether IR.
 //!
 //! Type verification checks declaration and instruction-local type contracts.
 //! Structural verification checks declarations, block termination, and local
 //! branch/jump targets. SSA verification checks function-local immutable value
 //! definitions, references, and same-block ordering. Dominance verification
-//! checks cross-block availability. Local lifecycle verification tracks certain
-//! source-ordered slot transitions without predecessor-state propagation. No
-//! pass performs phi, complete ownership/cleanup, or optimization verification.
+//! checks cross-block availability. Lifecycle verification offers both focused
+//! block-local checks and deterministic CFG state propagation. No pass performs
+//! phi, complete ownership/cleanup, or optimization verification.
 
 mod cfg;
 mod dominance_error;
@@ -30,10 +30,14 @@ pub use error::{
     InstructionTypeVerificationError, ModuleTypeVerificationError, TypeExpectation, TypeRuleError,
 };
 pub use lifecycle_error::{
-    BlockLifecycleError, FunctionLifecycleError, LifecycleInstructionLocation, LifecycleOperation,
-    LifecycleRuleError, LifecycleStorageRole, LocalSlotState, ModuleLifecycleError,
+    BlockLifecycleError, FunctionLifecycleError, FunctionLifecycleVerificationError,
+    LifecycleInstructionLocation, LifecycleOperation, LifecycleRuleError, LifecycleStorageRole,
+    LocalSlotState, ModuleLifecycleError, ModuleLifecycleVerificationError, PossibleSlotStates,
 };
-pub use lifecycle_verifier::{verify_function_local_lifecycle, verify_module_local_lifecycle};
+pub use lifecycle_verifier::{
+    verify_function_lifecycle, verify_function_local_lifecycle, verify_module_lifecycle,
+    verify_module_local_lifecycle,
+};
 pub use ssa_error::{
     BlockSSAError, FunctionSSAError, ModuleSSAError, SSADefinitionError, SSADefinitionLocation,
     SSAInstructionLocation, SSAUseLocation,

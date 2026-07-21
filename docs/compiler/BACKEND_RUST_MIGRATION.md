@@ -1,11 +1,11 @@
 # Gradual Python-to-Rust compiler migration
 
-> Status: Phase 3, Step 3D.1 Rust IR local slot-state/lifecycle verification
-> complete. The isolated Rust workspace now has independently callable type,
-> structure, SSA, dominance, and block-local lifecycle verifier passes over the
-> complete owned IR. Step 3D.1 covers canonical lifecycle semantics and certain
-> source-ordered storage transitions. CFG lifecycle propagation, predecessor
-> merging, loops, exit cleanup, PyO3, compiler-pipeline integration, LLVM, and
+> Status: Phase 3, Step 3D.2 Rust IR inter-block lifecycle data flow complete.
+> The isolated Rust workspace now has independently callable type, structure,
+> SSA, dominance, local lifecycle, and CFG-propagated lifecycle verifier passes
+> over the complete owned IR. Step 3D.2 covers deterministic predecessor
+> merging, loops, unreachable-code policy, and post-convergence diagnostics.
+> Exit cleanup, PyO3, compiler-pipeline integration, LLVM, and
 > production integration remain unimplemented. This document defines sequencing
 > and promotion gates and does not declare the Python IR or SSA model a stable
 > public format.
@@ -1650,6 +1650,83 @@ merging, loop-carried state, complete move/return ownership, cleanup/leak
 guarantees, borrowing, alias analysis, optimizer invariants, pipeline
 integration, LLVM behavior, PyO3, wire schema, canonical JSON, and DTO contract
 remain unchanged.
+
+### Phase 3 Step 3D.2 Rust IR inter-block lifecycle data flow — complete
+
+Step 3D.2 adds `verify_module_lifecycle(&IRModule)` and
+`verify_function_lifecycle(&IRModule, &IRFunction)` while preserving both
+3D.1 local APIs. The complete pass invokes only function structural
+verification: a validated CFG is required, while immutable SSA definitions and
+dominance are separate namespaces and remain independently callable. Typed
+`FunctionLifecycleVerificationError` and `ModuleLifecycleVerificationError`
+wrappers preserve structural-prerequisite and block-rule `Error::source()`
+chains.
+
+Inspection covered Python `src/aether/ir/verifier.py` (`_State`,
+`_verify_reachable_values`, lifecycle instruction transfer, storage-source
+checks, return transfer and unreachable handling), Python lifecycle expansion,
+CFG/SSA tests and utilities, and the owned Rust CFG, lifecycle verifier,
+instruction model, importer and lowering sites. Python represents live, moved,
+and destroyed as separate definite sets, intersects incoming states, starts
+entry storage absent/uninitialized, and deliberately gives each unreachable
+block one all-slots-live non-propagated IRV-022 state. It also reports IRV-036
+while edges are still being
+processed. That early report is order-sensitive and rejects a join block whose
+first instruction is an unconditional raw `store`, even though the transfer
+overwrites every incoming state. Rust treats this as a confirmed analysis-timing
+bug: it converges first and validates once, allowing total transfers to repair
+uncertainty while still rejecting path-sensitive reads.
+
+The Rust domain is the finite powerset of `Uninitialized`, `Initialized`,
+`Moved`, and `Destroyed`; the empty set is fixed-point bottom. `Unknown` remains
+reserved for focused local verification. Join is set union, so it is
+deterministic, commutative, idempotent, and monotone.
+Function entry contributes `Uninitialized` for every implicitly indexed slot.
+SSA parameters are not storage and do not affect this state. Each block exit is
+computed by the same canonical 3D.1 transition table used for final validation:
+`store` is a total `Initialized` transfer; init/copy initialize destinations;
+move/relocate initialize destinations and move storage sources; assign leaves a
+valid destination initialized; destroy produces `Destroyed`; loads and return
+transfers do not change slot state. For managed storage the total raw-store rule
+proves slot state only. A hand-authored raw store can still leak an overwritten
+owner or omit an input retain; lifecycle expansion supplies retain/release for
+the managed copy/assign stores it emits, while complete ownership and leak
+guarantees remain deferred.
+
+A stable FIFO worklist starts with reachable blocks in retained order. The
+entry is found by exact name and need not be stored first. Predecessors and
+successors come from shared `cfg.rs`; duplicate branch edges are deduplicated
+for predecessor merging and cannot destabilize convergence. Entry state is
+also joined on back-edges, which correctly models self-loops and repeated entry
+execution. The finite domain needs no widening. After convergence, blocks and
+instructions are replayed in function/block/instruction/field order. Merged
+precondition failures use `LifecycleRuleError::InvalidMergedState` with the
+complete `PossibleSlotStates` set and required state; worklist order never
+selects the user-visible error.
+
+Only entry-reachable components participate in the fixed point. Python IRV-022
+deliberately checks every retained unreachable block independently with all
+collected values and slots available. Rust now reproduces the storage half of
+that policy exactly: every slot starts `Initialized`, and unreachable edges,
+cycles, and self-loops do not propagate facts between blocks. This can reject a
+first initialization in dead code, but it is an explicit local-checking policy,
+not a statement that an executable path initialized the slot. The 3D.1 local
+API continues to use `Unknown` for non-entry blocks because it has no CFG
+reachability information.
+
+Trivial and managed types use identical state-flow rules. Lifecycle traits are
+still consulted only for operations that need them, and tagged
+`LifecycleSource::Storage` sources participate in slot state while immutable
+value sources do not. Tests cover all-predecessor and partial initialization,
+moved/destroyed storage sources, raw-store repair, independent unreachable
+components, entry-not-first, duplicate targets, stable diagnostics, loop-carried
+live state, zero-iteration exits, move on a back-edge, and self-loop convergence.
+
+Complete cleanup on every return, leak detection, destruction insertion,
+lifecycle expansion, ARC optimization, ownership inference, borrowing, new
+alias analysis, importer/schema changes, pipeline integration, LLVM and PyO3
+remain intentionally unchanged. The next recommended step is **Phase 3 Step
+3D.3: function-exit cleanup and complete lifecycle guarantees**.
 
 ## 8. Ownership and memory
 

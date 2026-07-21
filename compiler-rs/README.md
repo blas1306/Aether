@@ -14,8 +14,8 @@ compiler remains entirely on its existing Python path.
   IR. The SSA pass checks unique parameter/result definitions, exact named
   references, and same-block definition-before-use. The dominance pass then
   checks cross-block uses against an entry-rooted dominator relation. The local
-  lifecycle pass checks certain source-ordered storage transitions inside each
-  block. Phi semantics, inter-block lifecycle merging, cleanup completeness,
+  lifecycle passes provide focused local checks and deterministic inter-block
+  CFG state merging. Phi semantics, cleanup completeness,
   and optimization verification remain outside these passes.
 - `aether-python` will provide the eventual Python integration boundary. It does
   not contain PyO3 bindings or compiler integration yet.
@@ -150,3 +150,46 @@ full move/return ownership, and cleanup on every exit remain deferred. In
 particular, loads at merges and loops are accepted from `Unknown`, whether all,
 some, or no predecessors initialize the slot. The next step is **Phase 3 Step
 3D.2: inter-block lifecycle data flow and CFG state merging**.
+
+## Phase 3 Step 3D.2: inter-block lifecycle data flow
+
+Step 3D.2 is complete. `verify_module_lifecycle(&IRModule)` and
+`verify_function_lifecycle(&IRModule, &IRFunction)` preserve the 3D.1 local
+APIs and add a forward fixed point over the shared validated CFG. Structure is
+the only prerequisite. SSA definitions and dominance remain separate because
+the lifecycle domain tracks explicit storage only.
+
+Reachable entry storage starts `Uninitialized`. Block entries join predecessor
+exits with a finite powerset of `Uninitialized`, `Initialized`, `Moved`, and
+`Destroyed`; union is deterministic, commutative, idempotent, and monotone.
+The FIFO worklist is seeded in retained block order, supports entry-not-first,
+self-loops, multiple back-edges and duplicate branch targets, and terminates
+without widening. Matching Python IRV-022, every retained unreachable block is
+checked independently with all collected slots `Initialized`; unreachable
+edges do not propagate state between blocks or components.
+
+Propagation and validation share the 3D.1 operation table. The analysis first
+converges without diagnostics, then replays blocks in source order. A path-
+sensitive precondition must hold for every possible incoming state;
+`InvalidMergedState` reports the stable set. Total `store` overwrites any
+incoming state, so it can repair a divergent join. Storage-tagged copy/assign
+sources are checked; immutable SSA sources and same-spelled storage remain
+separate. Managed and trivial types follow the same state flow. For managed
+storage this proves only the slot-state transition: a hand-authored raw store
+can still leak an overwritten owner or lack the retain required for its input.
+Normal lifecycle expansion discharges copy/assign ownership around the raw
+stores it emits; complete ownership and leak guarantees remain deferred.
+
+Python's initial-IR verifier was inspected. Its early IRV-036 edge check occurs
+during convergence and rejects even join blocks beginning with total `store`;
+the Rust pass deliberately fixes this order-sensitive conflict with IRV-034 by
+validating after convergence. Python's all-slots-live unreachable seed is a
+documented IRV-022 policy, not an inferred executable fact, and Rust reproduces
+it exactly in the complete pass. The focused 3D.1 local pass still uses
+`Unknown` outside `entry` because it performs no reachability analysis.
+
+Function-exit cleanup/leak guarantees, lifecycle expansion, destruction
+insertion, ownership/borrow inference, ARC optimization, importer/schema and
+owned-IR changes, pipeline integration, LLVM, and PyO3 remain out of scope.
+The next verifier step is **Phase 3 Step 3D.3: function-exit cleanup and
+complete lifecycle guarantees**.

@@ -7,7 +7,7 @@ use std::fmt;
 
 use aether_ir::IRType;
 
-use crate::InstructionKind;
+use crate::{FunctionStructureVerificationError, InstructionKind};
 
 /// A storage state known from the current block's ordered instruction stream.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -33,6 +33,100 @@ impl fmt::Display for LocalSlotState {
             Self::Moved => "moved",
             Self::Destroyed => "destroyed",
         })
+    }
+}
+
+/// Finite powerset used when predecessor paths carry different slot states.
+///
+/// The empty set is data-flow bottom. Reachable block entries contain one or
+/// more of the four concrete states; `Unknown` is reserved for the local pass
+/// and retained unreachable blocks.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct PossibleSlotStates {
+    pub may_be_unknown: bool,
+    pub may_be_uninitialized: bool,
+    pub may_be_initialized: bool,
+    pub may_be_moved: bool,
+    pub may_be_destroyed: bool,
+}
+
+impl PossibleSlotStates {
+    pub(crate) const fn singleton(state: LocalSlotState) -> Self {
+        let mut states = Self {
+            may_be_unknown: false,
+            may_be_uninitialized: false,
+            may_be_initialized: false,
+            may_be_moved: false,
+            may_be_destroyed: false,
+        };
+        match state {
+            LocalSlotState::Unknown => states.may_be_unknown = true,
+            LocalSlotState::Uninitialized => states.may_be_uninitialized = true,
+            LocalSlotState::Initialized => states.may_be_initialized = true,
+            LocalSlotState::Moved => states.may_be_moved = true,
+            LocalSlotState::Destroyed => states.may_be_destroyed = true,
+        }
+        states
+    }
+
+    pub(crate) fn join(&mut self, other: Self) {
+        self.may_be_unknown |= other.may_be_unknown;
+        self.may_be_uninitialized |= other.may_be_uninitialized;
+        self.may_be_initialized |= other.may_be_initialized;
+        self.may_be_moved |= other.may_be_moved;
+        self.may_be_destroyed |= other.may_be_destroyed;
+    }
+
+    pub(crate) fn is_singleton(self, state: LocalSlotState) -> bool {
+        self == Self::singleton(state)
+    }
+
+    pub(crate) const fn contains(self, state: LocalSlotState) -> bool {
+        match state {
+            LocalSlotState::Unknown => self.may_be_unknown,
+            LocalSlotState::Uninitialized => self.may_be_uninitialized,
+            LocalSlotState::Initialized => self.may_be_initialized,
+            LocalSlotState::Moved => self.may_be_moved,
+            LocalSlotState::Destroyed => self.may_be_destroyed,
+        }
+    }
+
+    pub(crate) fn concrete_singleton(self) -> Option<LocalSlotState> {
+        if self.is_singleton(LocalSlotState::Unknown) {
+            Some(LocalSlotState::Unknown)
+        } else if self.is_singleton(LocalSlotState::Uninitialized) {
+            Some(LocalSlotState::Uninitialized)
+        } else if self.is_singleton(LocalSlotState::Initialized) {
+            Some(LocalSlotState::Initialized)
+        } else if self.is_singleton(LocalSlotState::Moved) {
+            Some(LocalSlotState::Moved)
+        } else if self.is_singleton(LocalSlotState::Destroyed) {
+            Some(LocalSlotState::Destroyed)
+        } else {
+            None
+        }
+    }
+}
+
+impl fmt::Display for PossibleSlotStates {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut separator = "";
+        formatter.write_str("{")?;
+        for (present, name) in [
+            (self.may_be_unknown, "unknown"),
+            (self.may_be_uninitialized, "uninitialized"),
+            (self.may_be_initialized, "initialized"),
+            (self.may_be_moved, "moved"),
+            (self.may_be_destroyed, "destroyed"),
+        ] {
+            if present {
+                formatter.write_str(separator)?;
+                formatter.write_str(name)?;
+                separator = ", ";
+            }
+        }
+        formatter.write_str("}")
     }
 }
 
@@ -198,6 +292,15 @@ pub enum LifecycleRuleError {
         previous_transition: LifecycleInstructionLocation,
         current_transition: LifecycleInstructionLocation,
     },
+    InvalidMergedState {
+        operation: LifecycleOperation,
+        role: LifecycleStorageRole,
+        storage_identifier: String,
+        storage_type: IRType,
+        possible_states: PossibleSlotStates,
+        required_state: LocalSlotState,
+        current_transition: LifecycleInstructionLocation,
+    },
 }
 
 impl fmt::Display for LifecycleRuleError {
@@ -331,6 +434,18 @@ impl fmt::Display for LifecycleRuleError {
                 formatter,
                 "storage '%{storage_identifier}' is destroyed again at {current_transition}; it became {previous_state} at {previous_transition} and cannot transition to {attempted_state}"
             ),
+            Self::InvalidMergedState {
+                operation,
+                role,
+                storage_identifier,
+                possible_states,
+                required_state,
+                current_transition,
+                ..
+            } => write!(
+                formatter,
+                "{operation} {role} '%{storage_identifier}' has merged incoming states {possible_states} at {current_transition}; every incoming path must permit state {required_state}"
+            ),
         }
     }
 }
@@ -421,5 +536,99 @@ impl fmt::Display for ModuleLifecycleError {
 impl Error for ModuleLifecycleError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         Some(self.source.as_ref())
+    }
+}
+
+/// Complete lifecycle verifier failure, including its structural prerequisite.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FunctionLifecycleVerificationError {
+    StructurePrerequisite {
+        function_name: String,
+        source: Box<FunctionStructureVerificationError>,
+    },
+    Block {
+        function_name: String,
+        block_index: usize,
+        block_name: String,
+        source: Box<BlockLifecycleError>,
+    },
+}
+
+impl fmt::Display for FunctionLifecycleVerificationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::StructurePrerequisite {
+                function_name,
+                source,
+            } => write!(
+                formatter,
+                "function '{function_name}' failed the lifecycle CFG prerequisite: {source}"
+            ),
+            Self::Block {
+                function_name,
+                block_index,
+                block_name,
+                source,
+            } => write!(
+                formatter,
+                "block {block_index} ('{block_name}') of function '{function_name}' failed lifecycle verification: {source}"
+            ),
+        }
+    }
+}
+
+impl Error for FunctionLifecycleVerificationError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::StructurePrerequisite { source, .. } => Some(source.as_ref()),
+            Self::Block { source, .. } => Some(source.as_ref()),
+        }
+    }
+}
+
+/// Module wrapper retaining the first complete lifecycle failure in function order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ModuleLifecycleVerificationError {
+    pub function_index: usize,
+    pub function_name: String,
+    pub source: Box<FunctionLifecycleVerificationError>,
+}
+
+impl fmt::Display for ModuleLifecycleVerificationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "function {} ('{}') failed lifecycle verification: {}",
+            self.function_index, self.function_name, self.source
+        )
+    }
+}
+
+impl Error for ModuleLifecycleVerificationError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(self.source.as_ref())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{LocalSlotState, PossibleSlotStates};
+
+    #[test]
+    fn possible_state_join_is_commutative_idempotent_and_monotone() {
+        let initialized = PossibleSlotStates::singleton(LocalSlotState::Initialized);
+        let moved = PossibleSlotStates::singleton(LocalSlotState::Moved);
+
+        let mut left_then_right = initialized;
+        left_then_right.join(moved);
+        let mut right_then_left = moved;
+        right_then_left.join(initialized);
+        assert_eq!(left_then_right, right_then_left);
+        assert!(left_then_right.may_be_initialized);
+        assert!(left_then_right.may_be_moved);
+
+        let previous = left_then_right;
+        left_then_right.join(left_then_right);
+        assert_eq!(left_then_right, previous);
     }
 }

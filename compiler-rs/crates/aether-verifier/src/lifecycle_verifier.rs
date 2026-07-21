@@ -1,19 +1,20 @@
-//! Source-ordered, block-local lifecycle verification for owning storage.
+//! Local and CFG-propagated lifecycle verification for owning storage.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use aether_ir::{
     IRBasicBlock, IRFunction, IRInstruction, IRModule, IRStorage, IRStructDefinition, IRType,
     IRValue, LifecycleSource,
 };
 
+use crate::cfg::{ENTRY_BLOCK_NAME, FunctionCfg};
 use crate::lifecycle_error::{
-    BlockLifecycleError, FunctionLifecycleError, LifecycleInstructionLocation, LifecycleOperation,
-    LifecycleRuleError, LifecycleStorageRole, LocalSlotState, ModuleLifecycleError,
+    BlockLifecycleError, FunctionLifecycleError, FunctionLifecycleVerificationError,
+    LifecycleInstructionLocation, LifecycleOperation, LifecycleRuleError, LifecycleStorageRole,
+    LocalSlotState, ModuleLifecycleError, ModuleLifecycleVerificationError, PossibleSlotStates,
 };
+use crate::structure_verifier::verify_function_structure_prerequisite;
 use crate::verifier::instruction_kind;
-
-const ENTRY_BLOCK_NAME: &str = "entry";
 
 #[derive(Clone, Copy)]
 struct StorageRef<'value> {
@@ -83,10 +84,44 @@ struct StorageIndex {
     order: Vec<String>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct StateFact {
-    state: LocalSlotState,
+    states: PossibleSlotStates,
     transition: Option<LifecycleInstructionLocation>,
+}
+
+impl StateFact {
+    fn singleton(state: LocalSlotState) -> Self {
+        Self {
+            states: PossibleSlotStates::singleton(state),
+            transition: None,
+        }
+    }
+
+    fn concrete_state(&self) -> Option<LocalSlotState> {
+        self.states.concrete_singleton()
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TransferMode {
+    Validate,
+    Propagate,
+}
+
+impl TransferMode {
+    const fn validates(self) -> bool {
+        matches!(self, Self::Validate)
+    }
+}
+
+type SlotStateMap = HashMap<String, StateFact>;
+
+/// Immutable fixed-point result indexed by retained block order.
+struct LifecycleDataFlow {
+    reachable: Vec<bool>,
+    entry_states: Vec<Option<SlotStateMap>>,
+    exit_states: Vec<Option<SlotStateMap>>,
 }
 
 /// Verifies local lifecycle transitions in every retained function and block.
@@ -128,6 +163,190 @@ pub fn verify_function_local_lifecycle(
     Ok(())
 }
 
+/// Verifies function-wide storage lifecycle state in every retained function.
+///
+/// Structural verification is the sole prerequisite: this pass needs a safe,
+/// unambiguous CFG. SSA value validity and dominance remain independently
+/// callable passes because lifecycle state tracks only `IRStorage`.
+pub fn verify_module_lifecycle(module: &IRModule) -> Result<(), ModuleLifecycleVerificationError> {
+    for (function_index, function) in module.functions.iter().enumerate() {
+        verify_function_lifecycle(module, function).map_err(|source| {
+            ModuleLifecycleVerificationError {
+                function_index,
+                function_name: function.name.clone(),
+                source: Box::new(source),
+            }
+        })?;
+    }
+    Ok(())
+}
+
+/// Verifies function-wide lifecycle state after deterministic CFG convergence.
+pub fn verify_function_lifecycle(
+    module: &IRModule,
+    function: &IRFunction,
+) -> Result<(), FunctionLifecycleVerificationError> {
+    let blocks = verify_function_structure_prerequisite(function).map_err(|source| {
+        FunctionLifecycleVerificationError::StructurePrerequisite {
+            function_name: function.name.clone(),
+            source: Box::new(source),
+        }
+    })?;
+    let Some(cfg) = FunctionCfg::from_validated(function, &blocks) else {
+        // Structural verification owns this invariant, so reaching this branch
+        // would require the model to mutate through an immutable borrow.
+        return Ok(());
+    };
+    let storage_index = collect_storage_index(function);
+    let registry = LifecycleTypeRegistry::new(&module.structs);
+    let data_flow = LifecycleDataFlow::compute(function, &cfg, &storage_index, &registry);
+    debug_assert_eq!(data_flow.exit_states.len(), function.blocks.len());
+
+    // Emit diagnostics only after convergence and in retained source order.
+    for (block_index, block) in function.blocks.iter().enumerate() {
+        let entry_states = if data_flow.reachable[block_index] {
+            data_flow.entry_states[block_index]
+                .clone()
+                .unwrap_or_else(|| initial_states(&storage_index, LocalSlotState::Uninitialized))
+        } else {
+            // IRV-022 deliberately checks each unreachable block in isolation
+            // with every collected slot available. No edge in an unreachable
+            // component propagates lifecycle facts into another block.
+            initial_states(&storage_index, LocalSlotState::Initialized)
+        };
+        verify_block_from_states(
+            function,
+            block_index,
+            block,
+            &storage_index,
+            &registry,
+            entry_states,
+        )
+        .map_err(|source| FunctionLifecycleVerificationError::Block {
+            function_name: function.name.clone(),
+            block_index,
+            block_name: block.name.clone(),
+            source: Box::new(source),
+        })?;
+    }
+    Ok(())
+}
+
+impl LifecycleDataFlow {
+    fn compute(
+        function: &IRFunction,
+        cfg: &FunctionCfg,
+        storage_index: &StorageIndex,
+        registry: &LifecycleTypeRegistry<'_>,
+    ) -> Self {
+        let block_count = cfg.block_count();
+        let mut reachable = vec![false; block_count];
+        let mut reachability_worklist = VecDeque::from([cfg.entry_index()]);
+        while let Some(block_index) = reachability_worklist.pop_front() {
+            if reachable[block_index] {
+                continue;
+            }
+            reachable[block_index] = true;
+            for &successor in cfg.successors(block_index) {
+                if !reachable[successor] {
+                    reachability_worklist.push_back(successor);
+                }
+            }
+        }
+
+        let mut entry_states = vec![None; block_count];
+        let mut exit_states = vec![None; block_count];
+        let mut queued = vec![false; block_count];
+        let mut worklist = VecDeque::new();
+        for (block_index, is_reachable) in reachable.iter().copied().enumerate() {
+            if is_reachable {
+                worklist.push_back(block_index);
+                queued[block_index] = true;
+            }
+        }
+
+        while let Some(block_index) = worklist.pop_front() {
+            queued[block_index] = false;
+            let mut incoming = if block_index == cfg.entry_index() {
+                Some(initial_states(storage_index, LocalSlotState::Uninitialized))
+            } else {
+                None
+            };
+            for &predecessor in cfg.predecessors(block_index) {
+                if !reachable[predecessor] {
+                    continue;
+                }
+                let Some(predecessor_exit) = &exit_states[predecessor] else {
+                    continue;
+                };
+                match &mut incoming {
+                    Some(existing) => join_state_maps(existing, predecessor_exit, storage_index),
+                    None => incoming = Some(predecessor_exit.clone()),
+                }
+            }
+            let Some(incoming) = incoming else {
+                continue;
+            };
+            if entry_states[block_index].as_ref() != Some(&incoming) {
+                entry_states[block_index] = Some(incoming.clone());
+            }
+            let output = transfer_block(
+                function,
+                block_index,
+                &function.blocks[block_index],
+                incoming,
+                registry,
+                TransferMode::Propagate,
+            );
+            if exit_states[block_index].as_ref() == Some(&output) {
+                continue;
+            }
+            exit_states[block_index] = Some(output);
+            for &successor in cfg.successors(block_index) {
+                if reachable[successor] && !queued[successor] {
+                    queued[successor] = true;
+                    worklist.push_back(successor);
+                }
+            }
+        }
+
+        Self {
+            reachable,
+            entry_states,
+            exit_states,
+        }
+    }
+}
+
+fn initial_states(storage_index: &StorageIndex, state: LocalSlotState) -> SlotStateMap {
+    storage_index
+        .order
+        .iter()
+        .map(|name| (name.clone(), StateFact::singleton(state)))
+        .collect()
+}
+
+fn join_state_maps(
+    destination: &mut SlotStateMap,
+    source: &SlotStateMap,
+    storage_index: &StorageIndex,
+) {
+    for name in &storage_index.order {
+        let (Some(source_fact), Some(destination_fact)) =
+            (source.get(name), destination.get_mut(name))
+        else {
+            continue;
+        };
+        let previous_states = destination_fact.states;
+        destination_fact.states.join(source_fact.states);
+        if destination_fact.states != previous_states
+            || destination_fact.transition != source_fact.transition
+        {
+            destination_fact.transition = None;
+        }
+    }
+}
+
 fn collect_storage_index(function: &IRFunction) -> StorageIndex {
     let mut declarations = HashMap::new();
     let mut order = Vec::new();
@@ -167,17 +386,25 @@ fn verify_block(
     } else {
         LocalSlotState::Unknown
     };
-    let mut states = HashMap::new();
-    for name in &storage_index.order {
-        states.insert(
-            name.clone(),
-            StateFact {
-                state: entry_state,
-                transition: None,
-            },
-        );
-    }
+    let states = initial_states(storage_index, entry_state);
+    verify_block_from_states(
+        function,
+        block_index,
+        block,
+        storage_index,
+        registry,
+        states,
+    )
+}
 
+fn verify_block_from_states(
+    function: &IRFunction,
+    block_index: usize,
+    block: &IRBasicBlock,
+    storage_index: &StorageIndex,
+    registry: &LifecycleTypeRegistry<'_>,
+    mut states: SlotStateMap,
+) -> Result<(), BlockLifecycleError> {
     for (instruction_index, instruction) in block.instructions.iter().enumerate() {
         let location = instruction_location(block_index, block, instruction_index, instruction);
         for operand in storage_operands(instruction) {
@@ -212,9 +439,39 @@ fn verify_block(
             &location,
             &mut states,
             registry,
+            TransferMode::Validate,
         )?;
     }
     Ok(())
+}
+
+fn transfer_block(
+    function: &IRFunction,
+    block_index: usize,
+    block: &IRBasicBlock,
+    mut states: SlotStateMap,
+    registry: &LifecycleTypeRegistry<'_>,
+    mode: TransferMode,
+) -> SlotStateMap {
+    for (instruction_index, instruction) in block.instructions.iter().enumerate() {
+        let location = instruction_location(block_index, block, instruction_index, instruction);
+        // Propagation deliberately suppresses diagnostics. Every transfer is a
+        // total monotone function; validation replays it after convergence.
+        let result = apply_effect(
+            function,
+            block_index,
+            block,
+            instruction_index,
+            instruction,
+            lifecycle_effect(instruction),
+            &location,
+            &mut states,
+            registry,
+            mode,
+        );
+        debug_assert!(result.is_ok() || mode.validates());
+    }
+    states
 }
 
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
@@ -228,67 +485,75 @@ fn apply_effect(
     location: &LifecycleInstructionLocation,
     states: &mut HashMap<String, StateFact>,
     registry: &LifecycleTypeRegistry<'_>,
+    mode: TransferMode,
 ) -> Result<(), BlockLifecycleError> {
     match effect {
         LifecycleEffect::None => Ok(()),
-        LifecycleEffect::Load(storage) => require_live(
-            function,
-            block_index,
-            block,
-            instruction_index,
-            instruction,
-            LifecycleOperation::Load,
-            LifecycleStorageRole::Slot,
-            storage,
-            location,
-            states,
-        ),
-        LifecycleEffect::Store(storage) => {
-            set_state(states, storage, LocalSlotState::Initialized, location);
-            Ok(())
-        }
-        LifecycleEffect::InitDefault(destination) => {
-            require_non_void(
-                function,
-                block_index,
-                block,
-                instruction_index,
-                instruction,
-                LifecycleOperation::InitDefault,
-                LifecycleStorageRole::Destination,
-                destination,
-                location,
-            )?;
-            require_uninitialized_destination(
-                function,
-                block_index,
-                block,
-                instruction_index,
-                instruction,
-                LifecycleOperation::InitDefault,
-                destination,
-                location,
-                states,
-            )?;
-            let traits = registry.traits(destination.r#type);
-            if !traits.supports_default {
-                return Err(rule_error(
+        LifecycleEffect::Load(storage) => {
+            if mode.validates() {
+                require_live(
                     function,
                     block_index,
                     block,
                     instruction_index,
                     instruction,
+                    LifecycleOperation::Load,
+                    LifecycleStorageRole::Slot,
+                    storage,
+                    location,
+                    states,
+                )?;
+            }
+            Ok(())
+        }
+        LifecycleEffect::Store(storage) => {
+            set_state(states, storage, LocalSlotState::Initialized, location);
+            Ok(())
+        }
+        LifecycleEffect::InitDefault(destination) => {
+            if mode.validates() {
+                require_non_void(
+                    function,
+                    block_index,
+                    block,
+                    instruction_index,
+                    instruction,
+                    LifecycleOperation::InitDefault,
                     LifecycleStorageRole::Destination,
                     destination,
-                    LifecycleRuleError::InvalidLifecycleType {
-                        operation: LifecycleOperation::InitDefault,
-                        role: LifecycleStorageRole::Destination,
-                        storage_identifier: destination.name.to_owned(),
-                        storage_type: destination.r#type.clone(),
-                        reason: traits.reason,
-                        location: location.clone(),
-                    },
-                ));
+                    location,
+                )?;
+                require_uninitialized_destination(
+                    function,
+                    block_index,
+                    block,
+                    instruction_index,
+                    instruction,
+                    LifecycleOperation::InitDefault,
+                    destination,
+                    location,
+                    states,
+                )?;
+                let traits = registry.traits(destination.r#type);
+                if !traits.supports_default {
+                    return Err(rule_error(
+                        function,
+                        block_index,
+                        block,
+                        instruction_index,
+                        instruction,
+                        LifecycleStorageRole::Destination,
+                        destination,
+                        LifecycleRuleError::InvalidLifecycleType {
+                            operation: LifecycleOperation::InitDefault,
+                            role: LifecycleStorageRole::Destination,
+                            storage_identifier: destination.name.to_owned(),
+                            storage_type: destination.r#type.clone(),
+                            reason: traits.reason,
+                            location: location.clone(),
+                        },
+                    ));
+                }
             }
             set_state(states, destination, LocalSlotState::Initialized, location);
             Ok(())
@@ -297,53 +562,55 @@ fn apply_effect(
             destination,
             source,
         } => {
-            require_non_void(
-                function,
-                block_index,
-                block,
-                instruction_index,
-                instruction,
-                LifecycleOperation::CopyInit,
-                LifecycleStorageRole::Destination,
-                destination,
-                location,
-            )?;
-            require_uninitialized_destination(
-                function,
-                block_index,
-                block,
-                instruction_index,
-                instruction,
-                LifecycleOperation::CopyInit,
-                destination,
-                location,
-                states,
-            )?;
-            if let LifecycleSource::Storage(source) = source {
-                require_live(
+            if mode.validates() {
+                require_non_void(
                     function,
                     block_index,
                     block,
                     instruction_index,
                     instruction,
                     LifecycleOperation::CopyInit,
-                    LifecycleStorageRole::Source,
-                    source.into(),
+                    LifecycleStorageRole::Destination,
+                    destination,
+                    location,
+                )?;
+                require_uninitialized_destination(
+                    function,
+                    block_index,
+                    block,
+                    instruction_index,
+                    instruction,
+                    LifecycleOperation::CopyInit,
+                    destination,
                     location,
                     states,
                 )?;
+                if let LifecycleSource::Storage(source) = source {
+                    require_live(
+                        function,
+                        block_index,
+                        block,
+                        instruction_index,
+                        instruction,
+                        LifecycleOperation::CopyInit,
+                        LifecycleStorageRole::Source,
+                        source.into(),
+                        location,
+                        states,
+                    )?;
+                }
+                require_matching_types(
+                    function,
+                    block_index,
+                    block,
+                    instruction_index,
+                    instruction,
+                    LifecycleOperation::CopyInit,
+                    destination,
+                    source.r#type(),
+                    location,
+                )?;
             }
-            require_matching_types(
-                function,
-                block_index,
-                block,
-                instruction_index,
-                instruction,
-                LifecycleOperation::CopyInit,
-                destination,
-                source.r#type(),
-                location,
-            )?;
             set_state(states, destination, LocalSlotState::Initialized, location);
             Ok(())
         }
@@ -363,82 +630,87 @@ fn apply_effect(
             states,
             None,
             registry,
+            mode,
         ),
         LifecycleEffect::Assign {
             destination,
             source,
         } => {
-            require_non_void(
-                function,
-                block_index,
-                block,
-                instruction_index,
-                instruction,
-                LifecycleOperation::Assign,
-                LifecycleStorageRole::Destination,
-                destination,
-                location,
-            )?;
-            require_assignment_destination(
-                function,
-                block_index,
-                block,
-                instruction_index,
-                instruction,
-                destination,
-                location,
-                states,
-            )?;
-            if let LifecycleSource::Storage(source) = source {
-                require_live(
+            if mode.validates() {
+                require_non_void(
                     function,
                     block_index,
                     block,
                     instruction_index,
                     instruction,
                     LifecycleOperation::Assign,
-                    LifecycleStorageRole::Source,
-                    source.into(),
+                    LifecycleStorageRole::Destination,
+                    destination,
+                    location,
+                )?;
+                require_assignment_destination(
+                    function,
+                    block_index,
+                    block,
+                    instruction_index,
+                    instruction,
+                    destination,
                     location,
                     states,
                 )?;
+                if let LifecycleSource::Storage(source) = source {
+                    require_live(
+                        function,
+                        block_index,
+                        block,
+                        instruction_index,
+                        instruction,
+                        LifecycleOperation::Assign,
+                        LifecycleStorageRole::Source,
+                        source.into(),
+                        location,
+                        states,
+                    )?;
+                }
+                require_matching_types(
+                    function,
+                    block_index,
+                    block,
+                    instruction_index,
+                    instruction,
+                    LifecycleOperation::Assign,
+                    destination,
+                    source.r#type(),
+                    location,
+                )?;
             }
-            require_matching_types(
-                function,
-                block_index,
-                block,
-                instruction_index,
-                instruction,
-                LifecycleOperation::Assign,
-                destination,
-                source.r#type(),
-                location,
-            )?;
             set_state(states, destination, LocalSlotState::Initialized, location);
             Ok(())
         }
         LifecycleEffect::Destroy(storage) => {
-            require_non_void(
-                function,
-                block_index,
-                block,
-                instruction_index,
-                instruction,
-                LifecycleOperation::Destroy,
-                LifecycleStorageRole::Value,
-                storage,
-                location,
-            )?;
-            require_destroyable_state(
-                function,
-                block_index,
-                block,
-                instruction_index,
-                instruction,
-                storage,
-                location,
-                states,
-            )?;
+            if mode.validates() {
+                require_non_void(
+                    function,
+                    block_index,
+                    block,
+                    instruction_index,
+                    instruction,
+                    LifecycleOperation::Destroy,
+                    LifecycleStorageRole::Value,
+                    storage,
+                    location,
+                )?;
+                require_destroyable_state(
+                    function,
+                    block_index,
+                    block,
+                    instruction_index,
+                    instruction,
+                    storage,
+                    location,
+                    states,
+                )?;
+            }
             set_state(states, storage, LocalSlotState::Destroyed, location);
             Ok(())
         }
@@ -459,53 +731,56 @@ fn apply_effect(
             states,
             Some(count),
             registry,
+            mode,
         ),
         LifecycleEffect::ReturnTransfer(storage) => {
-            require_non_void(
-                function,
-                block_index,
-                block,
-                instruction_index,
-                instruction,
-                LifecycleOperation::ReturnTransfer,
-                LifecycleStorageRole::TransferredStorage,
-                storage,
-                location,
-            )?;
-            require_live(
-                function,
-                block_index,
-                block,
-                instruction_index,
-                instruction,
-                LifecycleOperation::ReturnTransfer,
-                LifecycleStorageRole::TransferredStorage,
-                storage,
-                location,
-                states,
-            )?;
-            let IRInstruction::IRReturn { value, .. } = instruction else {
-                return Ok(());
-            };
-            if value
-                .as_ref()
-                .is_none_or(|value| value.r#type != *storage.r#type)
-            {
-                return Err(rule_error(
+            if mode.validates() {
+                require_non_void(
                     function,
                     block_index,
                     block,
                     instruction_index,
                     instruction,
+                    LifecycleOperation::ReturnTransfer,
                     LifecycleStorageRole::TransferredStorage,
                     storage,
-                    LifecycleRuleError::ReturnTransferTypeMismatch {
-                        storage_identifier: storage.name.to_owned(),
-                        storage_type: storage.r#type.clone(),
-                        returned_type: value.as_ref().map(|value| value.r#type.clone()),
-                        location: location.clone(),
-                    },
-                ));
+                    location,
+                )?;
+                require_live(
+                    function,
+                    block_index,
+                    block,
+                    instruction_index,
+                    instruction,
+                    LifecycleOperation::ReturnTransfer,
+                    LifecycleStorageRole::TransferredStorage,
+                    storage,
+                    location,
+                    states,
+                )?;
+                let IRInstruction::IRReturn { value, .. } = instruction else {
+                    return Ok(());
+                };
+                if value
+                    .as_ref()
+                    .is_none_or(|value| value.r#type != *storage.r#type)
+                {
+                    return Err(rule_error(
+                        function,
+                        block_index,
+                        block,
+                        instruction_index,
+                        instruction,
+                        LifecycleStorageRole::TransferredStorage,
+                        storage,
+                        LifecycleRuleError::ReturnTransferTypeMismatch {
+                            storage_identifier: storage.name.to_owned(),
+                            storage_type: storage.r#type.clone(),
+                            returned_type: value.as_ref().map(|value| value.r#type.clone()),
+                            location: location.clone(),
+                        },
+                    ));
+                }
             }
             Ok(())
         }
@@ -526,31 +801,32 @@ fn apply_move_like(
     states: &mut HashMap<String, StateFact>,
     relocate_count: Option<i64>,
     registry: &LifecycleTypeRegistry<'_>,
+    mode: TransferMode,
 ) -> Result<(), BlockLifecycleError> {
-    require_non_void(
-        function,
-        block_index,
-        block,
-        instruction_index,
-        instruction,
-        operation,
-        LifecycleStorageRole::Destination,
-        destination,
-        location,
-    )?;
-    require_non_void(
-        function,
-        block_index,
-        block,
-        instruction_index,
-        instruction,
-        operation,
-        LifecycleStorageRole::Source,
-        source,
-        location,
-    )?;
-    if let Some(count) = relocate_count {
-        if count <= 0 {
+    if mode.validates() {
+        require_non_void(
+            function,
+            block_index,
+            block,
+            instruction_index,
+            instruction,
+            operation,
+            LifecycleStorageRole::Destination,
+            destination,
+            location,
+        )?;
+        require_non_void(
+            function,
+            block_index,
+            block,
+            instruction_index,
+            instruction,
+            operation,
+            LifecycleStorageRole::Source,
+            source,
+            location,
+        )?;
+        if relocate_count.is_some_and(|count| count <= 0) {
             return Err(rule_error(
                 function,
                 block_index,
@@ -560,66 +836,12 @@ fn apply_move_like(
                 LifecycleStorageRole::Source,
                 source,
                 LifecycleRuleError::InvalidRelocateCount {
-                    count,
+                    count: relocate_count.unwrap_or_default(),
                     location: location.clone(),
                 },
             ));
         }
-    }
-    if destination.name == source.name {
-        return Err(rule_error(
-            function,
-            block_index,
-            block,
-            instruction_index,
-            instruction,
-            LifecycleStorageRole::Source,
-            source,
-            LifecycleRuleError::ForbiddenSourceDestinationAlias {
-                operation,
-                storage_identifier: source.name.to_owned(),
-                storage_type: source.r#type.clone(),
-                location: location.clone(),
-            },
-        ));
-    }
-    require_uninitialized_destination(
-        function,
-        block_index,
-        block,
-        instruction_index,
-        instruction,
-        operation,
-        destination,
-        location,
-        states,
-    )?;
-    require_live(
-        function,
-        block_index,
-        block,
-        instruction_index,
-        instruction,
-        operation,
-        LifecycleStorageRole::Source,
-        source,
-        location,
-        states,
-    )?;
-    require_matching_types(
-        function,
-        block_index,
-        block,
-        instruction_index,
-        instruction,
-        operation,
-        destination,
-        source.r#type,
-        location,
-    )?;
-    if operation == LifecycleOperation::Relocate {
-        let traits = registry.traits(source.r#type);
-        if !traits.trivially_relocatable {
+        if destination.name == source.name {
             return Err(rule_error(
                 function,
                 block_index,
@@ -628,15 +850,69 @@ fn apply_move_like(
                 instruction,
                 LifecycleStorageRole::Source,
                 source,
-                LifecycleRuleError::InvalidLifecycleType {
+                LifecycleRuleError::ForbiddenSourceDestinationAlias {
                     operation,
-                    role: LifecycleStorageRole::Source,
                     storage_identifier: source.name.to_owned(),
                     storage_type: source.r#type.clone(),
-                    reason: traits.reason,
                     location: location.clone(),
                 },
             ));
+        }
+        require_uninitialized_destination(
+            function,
+            block_index,
+            block,
+            instruction_index,
+            instruction,
+            operation,
+            destination,
+            location,
+            states,
+        )?;
+        require_live(
+            function,
+            block_index,
+            block,
+            instruction_index,
+            instruction,
+            operation,
+            LifecycleStorageRole::Source,
+            source,
+            location,
+            states,
+        )?;
+        require_matching_types(
+            function,
+            block_index,
+            block,
+            instruction_index,
+            instruction,
+            operation,
+            destination,
+            source.r#type,
+            location,
+        )?;
+        if operation == LifecycleOperation::Relocate {
+            let traits = registry.traits(source.r#type);
+            if !traits.trivially_relocatable {
+                return Err(rule_error(
+                    function,
+                    block_index,
+                    block,
+                    instruction_index,
+                    instruction,
+                    LifecycleStorageRole::Source,
+                    source,
+                    LifecycleRuleError::InvalidLifecycleType {
+                        operation,
+                        role: LifecycleStorageRole::Source,
+                        storage_identifier: source.name.to_owned(),
+                        storage_type: source.r#type.clone(),
+                        reason: traits.reason,
+                        location: location.clone(),
+                    },
+                ));
+            }
         }
     }
     set_state(states, destination, LocalSlotState::Initialized, location);
@@ -723,7 +999,7 @@ fn require_uninitialized_destination(
     states: &HashMap<String, StateFact>,
 ) -> Result<(), BlockLifecycleError> {
     let fact = &states[storage.name];
-    if fact.state == LocalSlotState::Initialized {
+    if fact.states.is_singleton(LocalSlotState::Initialized) {
         return Err(rule_error(
             function,
             block_index,
@@ -736,11 +1012,26 @@ fn require_uninitialized_destination(
                 operation,
                 storage_identifier: storage.name.to_owned(),
                 storage_type: storage.r#type.clone(),
-                previous_state: fact.state,
+                previous_state: LocalSlotState::Initialized,
                 attempted_state: LocalSlotState::Initialized,
                 previous_transition: fact.transition.clone().unwrap_or_else(|| location.clone()),
                 current_transition: location.clone(),
             },
+        ));
+    }
+    if fact.states.contains(LocalSlotState::Initialized) {
+        return Err(merged_state_error(
+            function,
+            block_index,
+            block,
+            instruction_index,
+            instruction,
+            operation,
+            LifecycleStorageRole::Destination,
+            storage,
+            fact.states,
+            LocalSlotState::Uninitialized,
+            location,
         ));
     }
     Ok(())
@@ -760,9 +1051,9 @@ fn require_live(
     states: &HashMap<String, StateFact>,
 ) -> Result<(), BlockLifecycleError> {
     let fact = &states[storage.name];
-    match fact.state {
-        LocalSlotState::Unknown | LocalSlotState::Initialized => Ok(()),
-        LocalSlotState::Uninitialized => Err(rule_error(
+    match fact.concrete_state() {
+        Some(LocalSlotState::Unknown | LocalSlotState::Initialized) => Ok(()),
+        Some(LocalSlotState::Uninitialized) => Err(rule_error(
             function,
             block_index,
             block,
@@ -775,29 +1066,47 @@ fn require_live(
                 role,
                 storage_identifier: storage.name.to_owned(),
                 storage_type: storage.r#type.clone(),
-                previous_state: fact.state,
+                previous_state: LocalSlotState::Uninitialized,
                 attempted_state: LocalSlotState::Initialized,
                 current_use: location.clone(),
             },
         )),
-        LocalSlotState::Moved | LocalSlotState::Destroyed => Err(rule_error(
+        Some(previous_state @ (LocalSlotState::Moved | LocalSlotState::Destroyed)) => {
+            Err(rule_error(
+                function,
+                block_index,
+                block,
+                instruction_index,
+                instruction,
+                role,
+                storage,
+                LifecycleRuleError::UseAfterLocalInvalidation {
+                    operation,
+                    role,
+                    storage_identifier: storage.name.to_owned(),
+                    storage_type: storage.r#type.clone(),
+                    previous_state,
+                    attempted_state: LocalSlotState::Initialized,
+                    previous_transition: fact
+                        .transition
+                        .clone()
+                        .unwrap_or_else(|| location.clone()),
+                    current_use: location.clone(),
+                },
+            ))
+        }
+        None => Err(merged_state_error(
             function,
             block_index,
             block,
             instruction_index,
             instruction,
+            operation,
             role,
             storage,
-            LifecycleRuleError::UseAfterLocalInvalidation {
-                operation,
-                role,
-                storage_identifier: storage.name.to_owned(),
-                storage_type: storage.r#type.clone(),
-                previous_state: fact.state,
-                attempted_state: LocalSlotState::Initialized,
-                previous_transition: fact.transition.clone().unwrap_or_else(|| location.clone()),
-                current_use: location.clone(),
-            },
+            fact.states,
+            LocalSlotState::Initialized,
+            location,
         )),
     }
 }
@@ -814,9 +1123,9 @@ fn require_assignment_destination(
     states: &HashMap<String, StateFact>,
 ) -> Result<(), BlockLifecycleError> {
     let fact = &states[storage.name];
-    match fact.state {
-        LocalSlotState::Unknown | LocalSlotState::Initialized => Ok(()),
-        LocalSlotState::Uninitialized => Err(rule_error(
+    match fact.concrete_state() {
+        Some(LocalSlotState::Unknown | LocalSlotState::Initialized) => Ok(()),
+        Some(LocalSlotState::Uninitialized) => Err(rule_error(
             function,
             block_index,
             block,
@@ -827,12 +1136,12 @@ fn require_assignment_destination(
             LifecycleRuleError::AssignmentToUninitialized {
                 storage_identifier: storage.name.to_owned(),
                 storage_type: storage.r#type.clone(),
-                previous_state: fact.state,
+                previous_state: LocalSlotState::Uninitialized,
                 attempted_state: LocalSlotState::Initialized,
                 current_transition: location.clone(),
             },
         )),
-        LocalSlotState::Moved | LocalSlotState::Destroyed => require_live(
+        Some(LocalSlotState::Moved | LocalSlotState::Destroyed) => require_live(
             function,
             block_index,
             block,
@@ -844,6 +1153,19 @@ fn require_assignment_destination(
             location,
             states,
         ),
+        None => Err(merged_state_error(
+            function,
+            block_index,
+            block,
+            instruction_index,
+            instruction,
+            LifecycleOperation::Assign,
+            LifecycleStorageRole::Destination,
+            storage,
+            fact.states,
+            LocalSlotState::Initialized,
+            location,
+        )),
     }
 }
 
@@ -859,9 +1181,9 @@ fn require_destroyable_state(
     states: &HashMap<String, StateFact>,
 ) -> Result<(), BlockLifecycleError> {
     let fact = &states[storage.name];
-    match fact.state {
-        LocalSlotState::Unknown | LocalSlotState::Initialized => Ok(()),
-        LocalSlotState::Uninitialized => Err(rule_error(
+    match fact.concrete_state() {
+        Some(LocalSlotState::Unknown | LocalSlotState::Initialized) => Ok(()),
+        Some(LocalSlotState::Uninitialized) => Err(rule_error(
             function,
             block_index,
             block,
@@ -872,12 +1194,12 @@ fn require_destroyable_state(
             LifecycleRuleError::DestroyOfUninitialized {
                 storage_identifier: storage.name.to_owned(),
                 storage_type: storage.r#type.clone(),
-                previous_state: fact.state,
+                previous_state: LocalSlotState::Uninitialized,
                 attempted_state: LocalSlotState::Destroyed,
                 current_transition: location.clone(),
             },
         )),
-        LocalSlotState::Destroyed => Err(rule_error(
+        Some(LocalSlotState::Destroyed) => Err(rule_error(
             function,
             block_index,
             block,
@@ -888,13 +1210,13 @@ fn require_destroyable_state(
             LifecycleRuleError::DoubleDestroy {
                 storage_identifier: storage.name.to_owned(),
                 storage_type: storage.r#type.clone(),
-                previous_state: fact.state,
+                previous_state: LocalSlotState::Destroyed,
                 attempted_state: LocalSlotState::Destroyed,
                 previous_transition: fact.transition.clone().unwrap_or_else(|| location.clone()),
                 current_transition: location.clone(),
             },
         )),
-        LocalSlotState::Moved => require_live(
+        Some(LocalSlotState::Moved) => require_live(
             function,
             block_index,
             block,
@@ -906,6 +1228,19 @@ fn require_destroyable_state(
             location,
             states,
         ),
+        None => Err(merged_state_error(
+            function,
+            block_index,
+            block,
+            instruction_index,
+            instruction,
+            LifecycleOperation::Destroy,
+            LifecycleStorageRole::Value,
+            storage,
+            fact.states,
+            LocalSlotState::Initialized,
+            location,
+        )),
     }
 }
 
@@ -918,10 +1253,44 @@ fn set_state(
     states.insert(
         storage.name.to_owned(),
         StateFact {
-            state,
+            states: PossibleSlotStates::singleton(state),
             transition: Some(location.clone()),
         },
     );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn merged_state_error(
+    function: &IRFunction,
+    block_index: usize,
+    block: &IRBasicBlock,
+    instruction_index: usize,
+    instruction: &IRInstruction,
+    operation: LifecycleOperation,
+    role: LifecycleStorageRole,
+    storage: StorageRef<'_>,
+    possible_states: PossibleSlotStates,
+    required_state: LocalSlotState,
+    location: &LifecycleInstructionLocation,
+) -> BlockLifecycleError {
+    rule_error(
+        function,
+        block_index,
+        block,
+        instruction_index,
+        instruction,
+        role,
+        storage,
+        LifecycleRuleError::InvalidMergedState {
+            operation,
+            role,
+            storage_identifier: storage.name.to_owned(),
+            storage_type: storage.r#type.clone(),
+            possible_states,
+            required_state,
+            current_transition: location.clone(),
+        },
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
