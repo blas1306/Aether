@@ -1,12 +1,13 @@
 //! Owned intermediate representation for the Aether compiler.
 //!
-//! This crate contains only the data model shared by later compiler phases. It
-//! intentionally performs no verification, parsing, optimization, conversion,
-//! or compiler integration.
+//! This crate contains the data model and schema boundary shared by later
+//! compiler phases. It intentionally performs no semantic verification,
+//! parsing, optimization, or compiler integration.
 
 mod block;
 mod constant;
 mod function;
+mod importer;
 mod instruction;
 mod module;
 mod source;
@@ -18,6 +19,7 @@ pub mod wire;
 pub use block::IRBasicBlock;
 pub use constant::{IRConstant, IREnumConstant};
 pub use function::IRFunction;
+pub use importer::{IRImportError, import_type};
 pub use instruction::IRInstruction;
 pub use module::IRModule;
 pub use source::IRSourceLocation;

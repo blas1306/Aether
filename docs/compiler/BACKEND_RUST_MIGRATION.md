@@ -1,11 +1,13 @@
 # Gradual Python-to-Rust compiler migration
 
-> Status: Phase 2, Step 4A Rust wire DTO layer complete. The isolated Rust
-> workspace, owned IR model, frozen schema-v1 Python DTO tree, and separate serde
-> wire model cover the complete current Python IR. Root round-trip, canonical
-> JSON, shared golden-fixture, and 68-instruction completeness tests lock that
-> contract. DTO-to-Rust-IR import, PyO3, verification, and production integration
-> remain unimplemented. This document defines
+> Status: Phase 2, Step 4B.1 Rust wire DTO-to-IR type importer complete. The
+> isolated Rust workspace, owned IR model, frozen schema-v1 Python DTO tree, and
+> separate serde wire model cover the complete current Python IR. The importer
+> now reconstructs all 18 owned Rust type variants recursively and rejects the
+> wire-only non-struct method-result receiver shape with a dedicated structural
+> error. Value, instruction, block, function, and module import, PyO3,
+> verification, and production integration remain unimplemented. This document
+> defines
 > sequencing and promotion gates and does not declare the Python IR or SSA model
 > a stable public format.
 
@@ -547,17 +549,46 @@ The three migration layers remain deliberately distinct:
 - **Rust IR:** the existing owned model in `aether-ir` is the representation
   intended for Rust compiler components. It is not the serialization format and
   has no serde coupling.
-- **Importer:** DTO-to-Rust-IR conversion is the remaining adapter work. It will
-  rebuild the owned model and establish any conversion-specific checks without
-  changing either frozen wire shape.
+- **Importer:** DTO-to-Rust-IR conversion is a separate adapter. Step 4B.1
+  implements its type-only slice; later slices will rebuild the remaining owned
+  model without changing either frozen wire shape.
 
 Rust tests deserialize the existing Python golden fixture directly, compare its
 JSON value with Rust re-serialization, require deterministic typed and textual
 round trips, exercise every instruction and type tag, and reject malformed JSON,
 unknown tags, missing required fields, and unexpected fields. No second golden
-fixture is generated or maintained. DTO-to-Rust-IR import, the Rust verifier,
-PyO3, pipeline integration, lowering, optimization, and interpretation remain
-out of scope after Step 4A.
+fixture is generated or maintained. At the Step 4A boundary, DTO-to-Rust-IR
+import, the Rust verifier, PyO3, pipeline integration, lowering, optimization,
+and interpretation remained out of scope.
+
+### Step 4B.1 Rust wire DTO-to-IR type importer
+
+The type-only importer now lives in
+`compiler-rs/crates/aether-ir/src/importer.rs`, separate from both the serde wire
+model and the owned type declarations. `TryFrom<IRTypeDTO>` and
+`TryFrom<&IRTypeDTO>` support consuming and borrowed callers, while the public
+`import_type()` helper gives later adapter layers a named entry point. Both
+forms are fallible because schema-v1 can structurally carry a `method_result`
+whose receiver is not a struct, but the owned `MethodResultType` cannot
+represent that combination.
+
+All 18 current wire variants are reconstructed deterministically. Function
+parameter order, enum variant order, nominal names, enum display names, vector
+orientation, and every recursively nested element, inner, parameter, return,
+receiver, and result type are retained exactly in owned `String`, `Vec`, and
+`Box` storage. A non-struct method-result receiver produces
+`IRImportError::MethodResultReceiverNotStruct`, including when reached inside a
+nested type. No other type rule is imposed here: empty or unknown nominal
+names, duplicate enum variants, unusual vector orientations, void aggregate
+elements, missing struct definitions, and layout validity remain verifier
+concerns.
+
+Focused Rust tests cover every individual variant, deeply nested recursive
+shapes, borrowed and consuming conversion, a serde wire round trip, repeated
+deterministic reconstruction, exact optional and ordered-field preservation,
+and directly and recursively embedded structurally impossible method-result
+receivers. Step 4B.1 does not import values, constants, instructions, blocks,
+functions, struct definitions, or modules and adds no PyO3 or verifier behavior.
 
 ## 8. Ownership and memory
 
