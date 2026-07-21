@@ -4,14 +4,14 @@ use std::error::Error;
 use std::fmt;
 
 use crate::wire::{
-    IRConstantDTO, IREnumConstantDTO, IRInstructionDTO, IRParameterDTO, IRSourceLocationDTO,
-    IRStorageDTO, IRTypeDTO, IRValueDTO, NullableDTO,
+    IRBasicBlockDTO, IRConstantDTO, IREnumConstantDTO, IRInstructionDTO, IRParameterDTO,
+    IRSourceLocationDTO, IRStorageDTO, IRTypeDTO, IRValueDTO, NullableDTO,
 };
 use crate::{
     ArrayType, BoolType, ClassRefType, ComplexType, DoubleType, EnumType, FloatType, FunctionType,
-    IRConstant, IREnumConstant, IRInstruction, IRParameter, IRSourceLocation, IRStorage, IRType,
-    IRValue, IntType, InterfaceType, ListType, MatrixType, MethodResultType, NullableType,
-    StringType, StructType, VectorType, VoidType,
+    IRBasicBlock, IRConstant, IREnumConstant, IRInstruction, IRParameter, IRSourceLocation,
+    IRStorage, IRType, IRValue, IntType, InterfaceType, ListType, MatrixType, MethodResultType,
+    NullableType, StringType, StructType, VectorType, VoidType,
 };
 
 /// A structural failure while importing a wire DTO into the owned Rust IR.
@@ -20,6 +20,15 @@ use crate::{
 /// responsibility of the IR verifier.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IRImportError {
+    /// An instruction nested in a basic block could not be imported.
+    BasicBlockInstruction {
+        /// Exact, unnormalized block name from the wire DTO.
+        block: String,
+        /// Zero-based position in the block's instruction vector.
+        index: usize,
+        /// Contextual instruction-import failure.
+        source: Box<Self>,
+    },
     /// A nested instruction field could not be represented by the owned IR.
     InstructionField {
         /// Stable schema-v1 instruction kind.
@@ -61,6 +70,14 @@ pub enum IRImportError {
 impl fmt::Display for IRImportError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::BasicBlockInstruction {
+                block,
+                index,
+                source,
+            } => write!(
+                formatter,
+                "basic-block DTO '{block}' instruction at index {index} could not be imported: {source}"
+            ),
             Self::InstructionField {
                 instruction,
                 field,
@@ -96,7 +113,8 @@ impl fmt::Display for IRImportError {
 impl Error for IRImportError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::InstructionField { source, .. }
+            Self::BasicBlockInstruction { source, .. }
+            | Self::InstructionField { source, .. }
             | Self::ValueType { source, .. }
             | Self::StorageType { source }
             | Self::ParameterType { source } => Some(source.as_ref()),
@@ -161,6 +179,48 @@ pub fn import_optional_source_location(
 /// validity remains the responsibility of the IR verifier.
 pub fn import_instruction(instruction: &IRInstructionDTO) -> Result<IRInstruction, IRImportError> {
     instruction.try_into()
+}
+
+/// Reconstruct an owned Rust basic block from a borrowed wire DTO.
+///
+/// Instruction order and duplicates are retained exactly. Control-flow and
+/// terminator validity remain the responsibility of the IR verifier.
+pub fn import_basic_block(block: &IRBasicBlockDTO) -> Result<IRBasicBlock, IRImportError> {
+    block.try_into()
+}
+
+impl TryFrom<&IRBasicBlockDTO> for IRBasicBlock {
+    type Error = IRImportError;
+
+    fn try_from(block: &IRBasicBlockDTO) -> Result<Self, Self::Error> {
+        let instructions = block
+            .instructions
+            .iter()
+            .enumerate()
+            .map(|(index, instruction)| {
+                import_instruction(instruction).map_err(|source| {
+                    IRImportError::BasicBlockInstruction {
+                        block: block.name.clone(),
+                        index,
+                        source: Box::new(source),
+                    }
+                })
+            })
+            .collect::<Result<_, _>>()?;
+
+        Ok(Self {
+            name: block.name.clone(),
+            instructions,
+        })
+    }
+}
+
+impl TryFrom<IRBasicBlockDTO> for IRBasicBlock {
+    type Error = IRImportError;
+
+    fn try_from(block: IRBasicBlockDTO) -> Result<Self, Self::Error> {
+        Self::try_from(&block)
+    }
 }
 
 impl TryFrom<&IRInstructionDTO> for IRInstruction {

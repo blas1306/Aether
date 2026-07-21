@@ -1,14 +1,15 @@
 # Gradual Python-to-Rust compiler migration
 
-> Status: Phase 2, Step 4B.3 Rust instruction importing complete. The isolated
+> Status: Phase 2, Step 4C Rust basic-block importing complete. The isolated
 > Rust workspace, owned IR model, frozen schema-v1 Python DTO tree, and separate
 > serde wire model cover the complete current Python IR. The importer now
 > reconstructs all 18 owned Rust type variants plus constants, enum-constant
 > metadata, values, storage, parameters, source locations, and all 68 / 68
-> frozen instruction variants. Basic-block, function, struct-definition, and
-> module import, PyO3, verification, and production integration remain
-> unimplemented. This document defines sequencing and promotion gates and does
-> not declare the Python IR or SSA model a stable public format.
+> frozen instruction variants, and basic blocks with exact names and ordered
+> instruction contents. Function, struct-definition, and module import, PyO3,
+> verification, and production integration remain unimplemented. This document
+> defines sequencing and promotion gates and does not declare the Python IR or
+> SSA model a stable public format.
 
 ## 1. Decision summary
 
@@ -978,6 +979,39 @@ dimensions, and non-boolean branch conditions. Those are verifier
 responsibilities; this audit adds no verifier, CFG, or compiler-pipeline
 behavior and changes neither the frozen schema nor owned IR semantics. The next
 step is basic-block importing.
+
+### Step 4C Rust basic-block importer
+
+The first hierarchical importer reconstructs an owned `IRBasicBlock` from an
+`IRBasicBlockDTO` through the public `import_basic_block()` helper and borrowed
+and consuming `TryFrom` implementations. Inspection confirmed that both models
+have exactly two fields: `name: String` and an ordered instruction vector. The
+importer copies the block name byte-for-byte and delegates every vector element
+to the completed `import_instruction()` path without sorting, deduplicating,
+normalizing, inserting instructions, or otherwise changing the sequence. Empty
+and duplicate instruction sequences therefore remain exactly representable.
+There is no nullable field or additional block metadata in the frozen DTO, so
+neither the wire schema nor the owned block model changed.
+
+An instruction conversion failure is wrapped in
+`IRImportError::BasicBlockInstruction`, retaining the exact block name, the
+zero-based instruction index, and the underlying typed importer error. Nested
+field failures consequently preserve the complete block/index,
+instruction-kind/field, and focused source-error chain without panics or
+string-only errors.
+
+Basic-block import remains structural reconstruction rather than verification.
+It accepts empty blocks, missing or multiple terminators, instructions after a
+terminator, unusual instruction ordering, unresolved targets, and independently
+imported blocks with duplicate names. It does not check terminator placement,
+reachability, CFG correctness, dominance, block uniqueness, or naming rules,
+and it does not infer entry blocks or construct a CFG. Those remain verifier
+responsibilities. Focused tests cover exact names, empty/single/multiple and
+duplicate instruction vectors, ordering, invalid-but-representable control
+flow, owned and borrowed conversion, deterministic JSON-to-wire-to-owned
+conversion, DTO immutability, wire round trips, and contextual nested failures.
+Function importing is the next step; module importing, verifier logic, CFG
+construction, compiler-pipeline integration, and PyO3 remain out of scope.
 
 ## 8. Ownership and memory
 

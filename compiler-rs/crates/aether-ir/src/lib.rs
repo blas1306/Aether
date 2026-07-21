@@ -20,7 +20,7 @@ pub use block::IRBasicBlock;
 pub use constant::{IRConstant, IREnumConstant};
 pub use function::IRFunction;
 pub use importer::{
-    IRImportError, import_constant, import_enum_constant, import_instruction,
+    IRImportError, import_basic_block, import_constant, import_enum_constant, import_instruction,
     import_optional_source_location, import_parameter, import_source_location, import_storage,
     import_type, import_value,
 };
