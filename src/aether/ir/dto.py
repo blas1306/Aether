@@ -4,7 +4,23 @@ from collections.abc import Mapping, Sequence
 from types import MappingProxyType
 from typing import NoReturn, TypeAlias
 
-from .model import IREnumConstant, IRParameter, IRSourceLocation, IRStorage, IRValue
+from .model import (
+    IRAssign,
+    IRConst,
+    IRCopyInit,
+    IRDestroy,
+    IREnumConstant,
+    IRInitDefault,
+    IRInstruction,
+    IRLoad,
+    IRMoveInit,
+    IRParameter,
+    IRRelocate,
+    IRSourceLocation,
+    IRStorage,
+    IRStore,
+    IRValue,
+)
 from .types import (
     ArrayType,
     BoolType,
@@ -43,6 +59,8 @@ IRValueDTO: TypeAlias = dict[str, object]
 IRStorageDTO: TypeAlias = dict[str, object]
 IRParameterDTO: TypeAlias = dict[str, object]
 IRSourceLocationDTO: TypeAlias = dict[str, object]
+IRInstructionDTO: TypeAlias = dict[str, object]
+"""Primitive ``kind``-tagged representation of a supported instruction."""
 
 
 class IRDTOError(ValueError):
@@ -76,6 +94,21 @@ IR_TYPE_TAGS: Mapping[type[IRType], str] = MappingProxyType(
     }
 )
 """Exact Python IR type class to schema tag mapping."""
+
+IR_INSTRUCTION_TAGS: Mapping[type[IRInstruction], str] = MappingProxyType(
+    {
+        IRConst: "const",
+        IRLoad: "load",
+        IRStore: "store",
+        IRInitDefault: "init_default",
+        IRCopyInit: "copy_init",
+        IRMoveInit: "move_init",
+        IRAssign: "assign",
+        IRDestroy: "destroy",
+        IRRelocate: "relocate",
+    }
+)
+"""Exact core/lifecycle instruction class to stable schema tag mapping."""
 
 
 def ir_type_to_dto(
@@ -435,6 +468,214 @@ def ir_source_location_from_dto(
     )
 
 
+def ir_instruction_to_dto(
+    instruction: IRInstruction,
+    *,
+    schema_version: int = IR_SCHEMA_VERSION,
+) -> IRInstructionDTO:
+    """Convert one supported core/lifecycle instruction to a primitive DTO."""
+
+    _require_schema_version(schema_version)
+    try:
+        kind = IR_INSTRUCTION_TAGS[type(instruction)]
+    except KeyError:
+        raise TypeError(
+            f"Unsupported IR instruction for schema v{IR_SCHEMA_VERSION}: "
+            f"{type(instruction).__name__}"
+        ) from None
+
+    if type(instruction) is IRConst:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "value": ir_constant_to_dto(instruction.value, schema_version=schema_version),
+        }
+    if type(instruction) is IRLoad:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "slot": ir_value_to_dto(instruction.slot, schema_version=schema_version),
+        }
+    if type(instruction) is IRStore:
+        return {
+            "kind": kind,
+            "slot": ir_value_to_dto(instruction.slot, schema_version=schema_version),
+            "value": ir_value_to_dto(instruction.value, schema_version=schema_version),
+        }
+    if type(instruction) is IRInitDefault:
+        return {
+            "kind": kind,
+            "destination": ir_storage_to_dto(
+                instruction.destination,
+                schema_version=schema_version,
+            ),
+            "source_location": ir_source_location_to_dto(
+                instruction.source_location,
+                schema_version=schema_version,
+            ),
+        }
+    if type(instruction) is IRCopyInit:
+        return {
+            "kind": kind,
+            "destination": ir_storage_to_dto(
+                instruction.destination,
+                schema_version=schema_version,
+            ),
+            "source": ir_value_to_dto(instruction.source, schema_version=schema_version),
+            "source_location": ir_source_location_to_dto(
+                instruction.source_location,
+                schema_version=schema_version,
+            ),
+        }
+    if type(instruction) is IRMoveInit:
+        return {
+            "kind": kind,
+            "destination": ir_storage_to_dto(
+                instruction.destination,
+                schema_version=schema_version,
+            ),
+            "source": ir_storage_to_dto(instruction.source, schema_version=schema_version),
+            "source_location": ir_source_location_to_dto(
+                instruction.source_location,
+                schema_version=schema_version,
+            ),
+        }
+    if type(instruction) is IRAssign:
+        return {
+            "kind": kind,
+            "destination": ir_storage_to_dto(
+                instruction.destination,
+                schema_version=schema_version,
+            ),
+            "source": ir_value_to_dto(instruction.source, schema_version=schema_version),
+            "source_location": ir_source_location_to_dto(
+                instruction.source_location,
+                schema_version=schema_version,
+            ),
+        }
+    if type(instruction) is IRDestroy:
+        return {
+            "kind": kind,
+            "value": ir_storage_to_dto(instruction.value, schema_version=schema_version),
+            "source_location": ir_source_location_to_dto(
+                instruction.source_location,
+                schema_version=schema_version,
+            ),
+        }
+    if type(instruction) is IRRelocate:
+        return {
+            "kind": kind,
+            "destination": ir_storage_to_dto(
+                instruction.destination,
+                schema_version=schema_version,
+            ),
+            "source": ir_storage_to_dto(instruction.source, schema_version=schema_version),
+            "count": _expect_i64(instruction.count, "IR instruction 'relocate'.count"),
+            "source_location": ir_source_location_to_dto(
+                instruction.source_location,
+                schema_version=schema_version,
+            ),
+        }
+    raise AssertionError(f"Missing encoder for registered IR instruction kind {kind!r}")
+
+
+def ir_instruction_from_dto(
+    dto: Mapping[str, object],
+    *,
+    schema_version: int = IR_SCHEMA_VERSION,
+) -> IRInstruction:
+    """Decode one strictly validated core/lifecycle instruction DTO."""
+
+    _require_schema_version(schema_version)
+    mapping = _expect_mapping(dto, "IR instruction")
+    kind = _expect_kind(mapping, "IR instruction")
+
+    if kind == "const":
+        _expect_fields(mapping, {"kind", "result", "value"}, "IR instruction 'const'")
+        return IRConst(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_constant_from_dto(mapping["value"], schema_version=schema_version),
+        )
+    if kind == "load":
+        _expect_fields(mapping, {"kind", "result", "slot"}, "IR instruction 'load'")
+        return IRLoad(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_value_from_dto(mapping["slot"], schema_version=schema_version),
+        )
+    if kind == "store":
+        _expect_fields(mapping, {"kind", "slot", "value"}, "IR instruction 'store'")
+        return IRStore(
+            ir_value_from_dto(mapping["slot"], schema_version=schema_version),
+            ir_value_from_dto(mapping["value"], schema_version=schema_version),
+        )
+    if kind == "init_default":
+        _expect_fields(
+            mapping,
+            {"kind", "destination", "source_location"},
+            "IR instruction 'init_default'",
+        )
+        return IRInitDefault(
+            ir_storage_from_dto(mapping["destination"], schema_version=schema_version),
+            ir_source_location_from_dto(mapping["source_location"], schema_version=schema_version),
+        )
+    if kind == "copy_init":
+        _expect_fields(
+            mapping,
+            {"kind", "destination", "source", "source_location"},
+            "IR instruction 'copy_init'",
+        )
+        return IRCopyInit(
+            ir_storage_from_dto(mapping["destination"], schema_version=schema_version),
+            ir_value_from_dto(mapping["source"], schema_version=schema_version),
+            ir_source_location_from_dto(mapping["source_location"], schema_version=schema_version),
+        )
+    if kind == "move_init":
+        _expect_fields(
+            mapping,
+            {"kind", "destination", "source", "source_location"},
+            "IR instruction 'move_init'",
+        )
+        return IRMoveInit(
+            ir_storage_from_dto(mapping["destination"], schema_version=schema_version),
+            ir_storage_from_dto(mapping["source"], schema_version=schema_version),
+            ir_source_location_from_dto(mapping["source_location"], schema_version=schema_version),
+        )
+    if kind == "assign":
+        _expect_fields(
+            mapping,
+            {"kind", "destination", "source", "source_location"},
+            "IR instruction 'assign'",
+        )
+        return IRAssign(
+            ir_storage_from_dto(mapping["destination"], schema_version=schema_version),
+            ir_value_from_dto(mapping["source"], schema_version=schema_version),
+            ir_source_location_from_dto(mapping["source_location"], schema_version=schema_version),
+        )
+    if kind == "destroy":
+        _expect_fields(
+            mapping,
+            {"kind", "value", "source_location"},
+            "IR instruction 'destroy'",
+        )
+        return IRDestroy(
+            ir_storage_from_dto(mapping["value"], schema_version=schema_version),
+            ir_source_location_from_dto(mapping["source_location"], schema_version=schema_version),
+        )
+    if kind == "relocate":
+        _expect_fields(
+            mapping,
+            {"kind", "destination", "source", "count", "source_location"},
+            "IR instruction 'relocate'",
+        )
+        return IRRelocate(
+            ir_storage_from_dto(mapping["destination"], schema_version=schema_version),
+            ir_storage_from_dto(mapping["source"], schema_version=schema_version),
+            _expect_i64(mapping["count"], "IR instruction 'relocate'.count"),
+            ir_source_location_from_dto(mapping["source_location"], schema_version=schema_version),
+        )
+    _unknown_tag("IR instruction", kind)
+
+
 def _value_from_dto(
     dto: Mapping[str, object],
     *,
@@ -498,6 +739,12 @@ def _expect_tag(mapping: Mapping[str, object], entity: str) -> str:
     return _expect_string(mapping["tag"], f"{entity}.tag")
 
 
+def _expect_kind(mapping: Mapping[str, object], entity: str) -> str:
+    if "kind" not in mapping:
+        raise IRDTOError(f"Malformed {entity} DTO (missing fields: kind)")
+    return _expect_string(mapping["kind"], f"{entity}.kind")
+
+
 def _unknown_tag(entity: str, tag: str) -> NoReturn:
     raise IRDTOError(f"Unknown {entity} DTO tag: {tag!r}")
 
@@ -554,12 +801,14 @@ def _require_i64(value: object, field: str) -> None:
 
 __all__ = [
     "IR_SCHEMA_VERSION",
+    "IR_INSTRUCTION_TAGS",
     "IR_TYPE_TAGS",
     "IRConstant",
     "IRConstantDTO",
     "IRDTOError",
     "IRDTOSchemaVersionError",
     "IREnumConstantDTO",
+    "IRInstructionDTO",
     "IRParameterDTO",
     "IRSourceLocationDTO",
     "IRStorageDTO",
@@ -569,6 +818,8 @@ __all__ = [
     "ir_constant_to_dto",
     "ir_enum_constant_from_dto",
     "ir_enum_constant_to_dto",
+    "ir_instruction_from_dto",
+    "ir_instruction_to_dto",
     "ir_parameter_from_dto",
     "ir_parameter_to_dto",
     "ir_source_location_from_dto",
