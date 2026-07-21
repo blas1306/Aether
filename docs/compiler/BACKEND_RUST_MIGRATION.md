@@ -1,16 +1,14 @@
 # Gradual Python-to-Rust compiler migration
 
-> Status: Phase 2, Step 4B.3E Rust collection instruction importer
-> complete. The isolated Rust workspace, owned IR model, frozen schema-v1
-> Python DTO tree, and separate serde wire model cover the complete current
-> Python IR. The importer
-> now reconstructs all 18 owned Rust type variants plus constants, enum-constant
-> metadata, values, storage, parameters, source locations, and 45 lifecycle,
-> core, operator, cast, call-family, struct-family, and collection instructions. The other 23 instructions plus block,
-> function, struct-definition, and module import, PyO3, verification, and production
-> integration remain unimplemented. This document defines sequencing and
-> promotion gates and does not declare the Python IR or SSA model a stable public
-> format.
+> Status: Phase 2, Step 4B.3 Rust instruction importing complete. The isolated
+> Rust workspace, owned IR model, frozen schema-v1 Python DTO tree, and separate
+> serde wire model cover the complete current Python IR. The importer now
+> reconstructs all 18 owned Rust type variants plus constants, enum-constant
+> metadata, values, storage, parameters, source locations, and all 68 / 68
+> frozen instruction variants. Basic-block, function, struct-definition, and
+> module import, PyO3, verification, and production integration remain
+> unimplemented. This document defines sequencing and promotion gates and does
+> not declare the Python IR or SSA model a stable public format.
 
 ## 1. Decision summary
 
@@ -906,10 +904,10 @@ remain unsupported.
 The existing `import_instruction()` dispatch and its borrowed and consuming
 `TryFrom<IRInstructionDTO>` implementations now reconstruct all three
 control-flow instructions. This completes conversion coverage for all 68 / 68
-frozen schema-v1 instruction variants. The defensive
-`IRImportError::UnsupportedInstruction` type remains available for future
-wire/importer divergence, but no current `IRInstructionDTO` variant can reach
-it. Phase 2 Step 4B.3H is the final instruction importer completeness audit.
+frozen schema-v1 instruction variants. At this step the defensive
+`IRImportError::UnsupportedInstruction` type still existed, although no current
+`IRInstructionDTO` variant could reach it. Phase 2 Step 4B.3H performs the final
+instruction importer completeness audit and resolves that dead path.
 
 The actual control-flow fields are
 `branch(condition, true_target, false_target)`, `jump(target)`, and
@@ -940,6 +938,46 @@ invalid-but-representable semantics, and contextual nested value and storage
 errors. The existing authoritative 68-case wire inventory now also asserts that
 every frozen instruction variant reaches a successful import path without
 duplicating that inventory.
+
+### Step 4B.3H Rust instruction importer completeness audit
+
+Phase 2 Step 4B.3 is complete at an authoritative 68 / 68 frozen schema-v1
+instruction variants. Completeness is enforced in layers: the conversion and
+wire-kind matches are compile-time exhaustive and contain no wildcard arm; the
+existing 68-case wire inventory remains the single authoritative list of wire
+tags and checks exact tag uniqueness, deserialization, deterministic wire
+round-trip, and successful borrowed and consuming import; and an exhaustive
+wire-to-owned identity map asserts that every inventory case reaches its
+intended owned `IRInstruction` variant. The identity map derives its own count
+and is intentionally a variant mapping rather than a duplicated list of wire
+tags. Consequently a wire-enum addition requires explicit importer and identity
+mapping changes before compilation succeeds, while omitted or duplicate tags,
+wrong owned variants, failed conversions, and any count other than 68 fail the
+audit clearly.
+
+`IRImportError::UnsupportedInstruction` was removed. Once every closed wire
+enum variant had an exhaustive conversion arm, the error had no constructor,
+caller, or concrete future-facing use; retaining it would have advertised an
+unreachable public outcome. Future wire variants must add an explicit conversion
+arm instead of falling through a wildcard. `import_instruction()` and the
+borrowed and consuming `TryFrom<IRInstructionDTO>` APIs remain unchanged, as do
+the remaining typed importer errors.
+
+Cross-family audit tests preserve ordered vectors; present and absent nullable
+values, storage, and source locations; booleans and signed integer metadata;
+strings and names byte-for-byte; positional and aggregate shapes; borrow flags
+and scopes; and return transferred storage. Nested failures across scalar,
+ordered-vector, nested-signature/type, and control-flow instructions retain the
+instruction kind, field name, and typed source-error chain. The importer has no
+panic or string-only error path.
+
+The importer remains only a structural adapter. It deliberately accepts
+representable unresolved names and targets, incompatible operand and return
+types, invalid collection indices, invalid linear-algebra shapes and
+dimensions, and non-boolean branch conditions. Those are verifier
+responsibilities; this audit adds no verifier, CFG, or compiler-pipeline
+behavior and changes neither the frozen schema nor owned IR semantics. The next
+step is basic-block importing.
 
 ## 8. Ownership and memory
 

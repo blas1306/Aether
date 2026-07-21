@@ -20,14 +20,6 @@ use crate::{
 /// responsibility of the IR verifier.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IRImportError {
-    /// A wire instruction kind has no corresponding importer implementation.
-    ///
-    /// All frozen schema-v1 kinds are currently implemented; this remains a
-    /// defensive error for future wire/importer divergence.
-    UnsupportedInstruction {
-        /// Stable schema-v1 instruction kind.
-        kind: &'static str,
-    },
     /// A nested instruction field could not be represented by the owned IR.
     InstructionField {
         /// Stable schema-v1 instruction kind.
@@ -69,10 +61,6 @@ pub enum IRImportError {
 impl fmt::Display for IRImportError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::UnsupportedInstruction { kind } => write!(
-                formatter,
-                "instruction DTO kind '{kind}' is not supported by the incremental importer"
-            ),
             Self::InstructionField {
                 instruction,
                 field,
@@ -111,10 +99,10 @@ impl Error for IRImportError {
             Self::InstructionField { source, .. }
             | Self::ValueType { source, .. }
             | Self::StorageType { source }
-            | Self::ParameterType { source } => Some(source),
-            Self::UnsupportedInstruction { .. }
-            | Self::MethodResultReceiverNotStruct { .. }
-            | Self::NonFiniteConstantFloat { .. } => None,
+            | Self::ParameterType { source } => Some(source.as_ref()),
+            Self::MethodResultReceiverNotStruct { .. } | Self::NonFiniteConstantFloat { .. } => {
+                None
+            }
         }
     }
 }

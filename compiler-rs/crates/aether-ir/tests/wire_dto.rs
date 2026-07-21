@@ -2,11 +2,11 @@
 
 use std::collections::BTreeSet;
 
-use aether_ir::import_instruction;
 use aether_ir::wire::{
     IRConstantDTO, IRFloatDTO, IRInstructionDTO, IRModuleDTO, IRParameterDTO, IRSourceLocationDTO,
     IRStorageDTO, IRTypeDTO, IRValueDTO,
 };
+use aether_ir::{IRInstruction, import_instruction};
 use serde_json::{Map, Value, json};
 
 const GOLDEN: &str =
@@ -492,6 +492,99 @@ fn instruction_cases() -> Vec<Value> {
     ]
 }
 
+macro_rules! instruction_variant_mapping {
+    ($($wire:ident => $owned:ident),+ $(,)?) => {
+        const INSTRUCTION_VARIANT_MAPPING_COUNT: usize = [$(stringify!($wire)),+].len();
+
+        fn has_corresponding_owned_variant(
+            wire: &IRInstructionDTO,
+            owned: &IRInstruction,
+        ) -> bool {
+            match wire {
+                $(
+                    IRInstructionDTO::$wire { .. } => {
+                        matches!(owned, IRInstruction::$owned { .. })
+                    }
+                ),+
+            }
+        }
+    };
+}
+
+// This is the importer identity map, not a second tag inventory. The outer
+// match is intentionally exhaustive so a new wire variant cannot compile
+// without an explicit owned-variant decision here and in the importer.
+instruction_variant_mapping! {
+    Const => IRConst,
+    Load => IRLoad,
+    Store => IRStore,
+    InitDefault => IRInitDefault,
+    CopyInit => IRCopyInit,
+    MoveInit => IRMoveInit,
+    Assign => IRAssign,
+    Destroy => IRDestroy,
+    Relocate => IRRelocate,
+    BinaryOp => IRBinaryOp,
+    UnaryOp => IRUnaryOp,
+    CompareOp => IRCompareOp,
+    Cast => IRCast,
+    Call => IRCall,
+    FunctionRef => IRFunctionRef,
+    CallIndirect => IRCallIndirect,
+    Print => IRPrint,
+    StructNew => IRStructNew,
+    StructGet => IRStructGet,
+    StructSet => IRStructSet,
+    MethodResultNew => IRMethodResultNew,
+    MethodResultReceiver => IRMethodResultReceiver,
+    MethodResultValue => IRMethodResultValue,
+    ArrayNew => IRArrayNew,
+    ListNew => IRListNew,
+    ArrayCopy => IRArrayCopy,
+    ListCopy => IRListCopy,
+    ListContains => IRListContains,
+    ListIndexOf => IRListIndexOf,
+    ListClear => IRListClear,
+    ListPush => IRListPush,
+    ListInsert => IRListInsert,
+    ListRemoveAt => IRListRemoveAt,
+    ListPop => IRListPop,
+    ListReverse => IRListReverse,
+    SequenceSort => IRSequenceSort,
+    ArrayGet => IRArrayGet,
+    ArraySlice => IRArraySlice,
+    ListSlice => IRListSlice,
+    ListGet => IRListGet,
+    ArraySet => IRArraySet,
+    ListSet => IRListSet,
+    ArrayLength => IRArrayLength,
+    ListLength => IRListLength,
+    ListIsEmpty => IRListIsEmpty,
+    VectorNew => IRVectorNew,
+    MatrixNew => IRMatrixNew,
+    VectorAdd => IRVectorAdd,
+    VectorSub => IRVectorSub,
+    VectorScale => IRVectorScale,
+    VectorDot => IRVectorDot,
+    OuterProduct => IROuterProduct,
+    MatrixAdd => IRMatrixAdd,
+    MatrixSub => IRMatrixSub,
+    MatrixScale => IRMatrixScale,
+    MatrixMatMul => IRMatrixMatMul,
+    MatrixVectorMul => IRMatrixVectorMul,
+    VectorMatrixMul => IRVectorMatrixMul,
+    VectorGet => IRVectorGet,
+    MatrixGet => IRMatrixGet,
+    VectorLength => IRVectorLength,
+    MatrixRows => IRMatrixRows,
+    MatrixColumns => IRMatrixColumns,
+    VectorSet => IRVectorSet,
+    MatrixSet => IRMatrixSet,
+    Branch => IRBranch,
+    Jump => IRJump,
+    Return => IRReturn,
+}
+
 #[test]
 fn golden_python_fixture_round_trips_deterministically() {
     let dto: IRModuleDTO = serde_json::from_str(GOLDEN).expect("golden DTO must deserialize");
@@ -519,11 +612,19 @@ fn every_instruction_tag_deserializes_imports_and_round_trips() {
 
     assert_eq!(cases.len(), 68);
     assert_eq!(tags.len(), 68);
+    assert_eq!(INSTRUCTION_VARIANT_MAPPING_COUNT, 68);
     for case in cases {
         let tag = case["kind"].as_str().expect("kind is a string");
         let dto: IRInstructionDTO = serde_json::from_value(case.clone())
             .unwrap_or_else(|error| panic!("{tag} must deserialize: {error}"));
-        import_instruction(&dto).unwrap_or_else(|error| panic!("{tag} must import: {error}"));
+        let imported =
+            import_instruction(&dto).unwrap_or_else(|error| panic!("{tag} must import: {error}"));
+        assert!(
+            has_corresponding_owned_variant(&dto, &imported),
+            "{tag} imported into the wrong owned instruction variant: {imported:?}"
+        );
+        assert_eq!(IRInstruction::try_from(&dto), Ok(imported.clone()));
+        assert_eq!(IRInstruction::try_from(dto.clone()), Ok(imported));
         assert_eq!(
             serde_json::to_value(dto).expect("instruction must serialize"),
             case,
