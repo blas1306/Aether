@@ -1,14 +1,14 @@
 # Gradual Python-to-Rust compiler migration
 
-> Status: Phase 3, Step 3B Rust IR structural and basic-CFG verification
-> complete. The isolated Rust workspace now has independently callable type and
-> structural verifier passes over the complete owned IR. Structural verification
-> covers declaration-name uniqueness, the literal `entry` convention, block
-> termination, and function-local branch/jump target resolution. Reachability
-> rejection, SSA definition/use and dominance, ownership/lifecycle, PyO3,
-> compiler-pipeline integration, LLVM, and production integration remain
-> unimplemented. This document defines sequencing and promotion gates and does
-> not declare the Python IR or SSA model a stable public format.
+> Status: Phase 3, Step 3C.1 Rust IR SSA definition-before-use verification
+> complete. The isolated Rust workspace now has independently callable type,
+> structural, and SSA definition/use verifier passes over the complete owned IR.
+> Step 3C.1 covers function-local SSA definition uniqueness, name/type reference
+> validity, and same-block definition-before-use. Dominance, phi semantics,
+> ownership/lifecycle, PyO3, compiler-pipeline integration, LLVM, and production
+> integration remain unimplemented. This document defines sequencing and
+> promotion gates and does not declare the Python IR or SSA model a stable public
+> format.
 
 ## 1. Decision summary
 
@@ -1353,9 +1353,101 @@ definition-before-use; SSA single-definition, phi, predecessor, renaming, and
 dominance rules; ownership, borrowing, storage initialization, transfer,
 cleanup, and lifecycle rules; aggregate/layout and optimizer invariants; and
 all importer, wire-schema, canonical-JSON, owned-IR, compiler-pipeline, LLVM,
-PyO3, and production-integration changes. The next isolated verifier step is
-Phase 3 Step 3C, focused on SSA definition/use and dominance verification; later
-phases are not complete.
+PyO3, and production-integration changes. Phase 3 Step 3C.1, described next,
+is the isolated follow-up that owns SSA definition/use verification.
+
+### Phase 3 Step 3C.1 Rust IR SSA definition-before-use verifier — complete
+
+Phase 3 Step 3C.1 is complete. The `aether-verifier` crate now exposes the
+borrowed, non-mutating APIs `verify_module_ssa(&IRModule)` and
+`verify_function_ssa(&IRFunction)`. Module traversal delegates to function
+verification, function verification collects one definition namespace and then
+delegates source-ordered reference checks to each block and instruction. The
+pass remains independent of the Step 3A type verifier and Step 3B structural
+verifier: it neither invokes those passes nor introduces a combined pipeline.
+
+An SSA **definition** is exactly one of the following in the owned Rust IR:
+
+- an `IRParameter`, available before the function's first instruction; or
+- the `IRValue` in an instruction's structural `result` field, available only
+  after that instruction. `IRCall` and `IRCallIndirect` define a value only when
+  their optional result is `Some`. All other result-bearing variants, including
+  `IRConst`, `IRLoad`, `IRFunctionRef`, collection/aggregate operations, and
+  `IRListPop`/`IRListRemoveAt`, define their retained result. Instructions with
+  no result field and calls with `None` introduce no SSA definition.
+
+The implementation reuses the exhaustive `instruction_result` classifier
+already used by the type verifier, rather than maintaining a second producer
+allowlist. The owned enum has no common operand iterator, so Step 3C.1 uses one
+exhaustive verifier-local operand match. Rust exhaustiveness forces every new
+instruction variant to classify its immutable value operands explicitly.
+
+An SSA **use** is an immutable `IRValue` operand: scalar operands; direct-call
+arguments; an indirect callee and its arguments; print, struct, method-result,
+collection, and linear-algebra inputs; `IRStore.value`; the immutable sources of
+`IRCopyInit` and `IRAssign`; a branch condition; or an optional return value.
+Operand vectors are checked in retained field/vector order. Instruction results
+are definitions, not uses. `IRStorage` destinations/sources, load/store slot
+names, transferred return storage, constant payloads and literal values,
+function and block symbol strings, source locations, and other metadata are not
+SSA uses. In particular, an `IRFunctionRef` result defines a temporary SSA value;
+the referenced function-name string is a module symbol whose resolution remains
+the Step 3A type verifier's responsibility.
+
+Parameters and instruction results share one exact, case-sensitive,
+function-local namespace. The pass reports the first repeated definition in
+parameter/block/instruction source order and retains both definition locations.
+After uniqueness succeeds, it checks uses in block/instruction/operand source
+order. A use must resolve to a parameter or instruction result and must carry
+the definition's exact `IRType`; this name-to-type agreement is reference
+validity, not a repetition of Step 3A's instruction-local type rules. Within one
+block, the defining instruction index must be strictly less than the use index,
+so an instruction cannot use its own result. Results become available to the
+next instruction immediately. Constant payloads do not require definitions.
+
+Step 3C.1 deliberately makes no cross-block availability judgment. A definition
+in any other retained block satisfies name resolution regardless of CFG path,
+reachability, retained block order, or whether it dominates the use. This means
+diamond/sibling uses that require a phi in executable SSA are accepted here.
+The pass does not build a CFG, predecessor map, or dominator tree and does not
+inspect phi nodes; the current owned initial-IR enum has no phi variant. These
+rules belong to **Phase 3 Step 3C.2: Dominance verification**, alongside
+edge-sensitive behavior once an owned phi representation exists.
+
+Typed failures are `ModuleSSAError`, `FunctionSSAError`, `BlockSSAError`, and
+`SSADefinitionError`. They retain function and block names, function/block and
+instruction indices, exact `InstructionKind`, the SSA identifier, ordered
+defining and duplicate-definition locations, and exact use locations including
+operand index. Reference type mismatches retain expected and actual types.
+Every nested wrapper implements `Error::source()`, preserving a downcastable
+module-to-function-to-block-to-leaf chain. Diagnostics use vectors for emission
+order; hash maps are used only for exact keyed lookup, never iteration.
+
+Python inspection separated three behaviors. Both `src/aether/ir/verifier.py`
+and `src/aether/ssa/verifier.py` collect parameters and instruction results into
+a function-wide namespace, reject duplicates and unresolved value names, and
+require a use to carry its definition's type. The SSA verifier also performs
+same-block ordering in its dominance phase; that local rule is implemented here
+without migrating cross-block dominance. The initial-IR verifier instead uses
+CFG state intersection for reachable cross-block availability, while the SSA
+verifier performs full ordinary-use and phi-edge dominance. Those stronger
+cross-block behaviors are intentionally deferred, so Step 3C.1 accepts some
+modules rejected by either complete Python verifier.
+
+One existing Python initial-IR classifier bug was confirmed and is not copied:
+its `_instruction_result` omits `IRListPop` and `IRListRemoveAt` even though its
+instruction transfer treats both results as definitions. As a result, the
+Python initial-IR verifier can miss duplicate definitions involving those two
+results. The Python SSA verifier and the owned Rust result structure both treat
+them as definitions; Step 3C.1 follows that actual semantic model and has a
+focused regression test. No Python source was changed.
+
+Dominance, dominator construction, phi placement/completeness/edge semantics,
+predecessor analysis, reachability/data-flow merging, ownership, borrowing,
+storage initialization/liveness, lifecycle, optimizer assumptions, importer,
+wire schema, canonical JSON, owned IR semantics, compiler pipeline, LLVM, and
+PyO3 are unchanged. The next step is **Phase 3 Step 3C.2: Dominance
+verification**.
 
 ## 8. Ownership and memory
 

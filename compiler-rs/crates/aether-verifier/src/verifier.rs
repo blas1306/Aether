@@ -2078,7 +2078,7 @@ fn list_of(element: IRType) -> IRType {
 }
 
 #[allow(clippy::too_many_lines)]
-fn instruction_result(instruction: &IRInstruction) -> Option<&IRValue> {
+pub(crate) fn instruction_result(instruction: &IRInstruction) -> Option<&IRValue> {
     match instruction {
         IRInstruction::IRConst { result, .. }
         | IRInstruction::IRLoad { result, .. }

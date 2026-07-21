@@ -1,0 +1,348 @@
+//! Function-local SSA definition, ordering, and reference verification.
+
+use std::collections::HashMap;
+
+use aether_ir::{IRBasicBlock, IRFunction, IRInstruction, IRModule, IRType, IRValue};
+
+use crate::ssa_error::{
+    BlockSSAError, FunctionSSAError, ModuleSSAError, SSADefinitionError, SSADefinitionLocation,
+    SSAInstructionLocation, SSAUseLocation,
+};
+use crate::verifier::{instruction_kind, instruction_result};
+
+#[derive(Clone, Debug)]
+struct Definition {
+    r#type: IRType,
+    location: SSADefinitionLocation,
+}
+
+/// Verifies SSA definitions and references in every function of a module.
+///
+/// This pass is independent of type and structural verification. It does not
+/// construct a CFG and deliberately accepts cross-block uses for the later
+/// dominance pass.
+pub fn verify_module_ssa(module: &IRModule) -> Result<(), ModuleSSAError> {
+    for (function_index, function) in module.functions.iter().enumerate() {
+        verify_function_ssa(function).map_err(|source| ModuleSSAError {
+            function_index,
+            function_name: function.name.clone(),
+            source: Box::new(source),
+        })?;
+    }
+    Ok(())
+}
+
+/// Verifies one function's SSA definition namespace and value references.
+///
+/// Parameters are definitions before every instruction. Instruction results
+/// are definitions immediately after their instruction. Cross-block ordering
+/// and availability are intentionally deferred to dominance verification.
+pub fn verify_function_ssa(function: &IRFunction) -> Result<(), FunctionSSAError> {
+    let definitions = collect_definitions(function)?;
+    for (block_index, block) in function.blocks.iter().enumerate() {
+        verify_block(function, block_index, block, &definitions).map_err(|source| {
+            FunctionSSAError::Block {
+                function_name: function.name.clone(),
+                block_index,
+                block_name: block.name.clone(),
+                source: Box::new(source),
+            }
+        })?;
+    }
+    Ok(())
+}
+
+fn collect_definitions(
+    function: &IRFunction,
+) -> Result<HashMap<String, Definition>, FunctionSSAError> {
+    let mut definitions: HashMap<String, Definition> = HashMap::new();
+    for (parameter_index, parameter) in function.parameters.iter().enumerate() {
+        let location = SSADefinitionLocation::Parameter { parameter_index };
+        if let Some(previous) = definitions.get(&parameter.name) {
+            let source = SSADefinitionError::DuplicateDefinition {
+                ssa_identifier: parameter.name.clone(),
+                defining_location: previous.location.clone(),
+                duplicate_definition_location: location,
+            };
+            return Err(FunctionSSAError::Definition {
+                function_name: function.name.clone(),
+                ssa_identifier: parameter.name.clone(),
+                source,
+            });
+        }
+        definitions.insert(
+            parameter.name.clone(),
+            Definition {
+                r#type: parameter.r#type.clone(),
+                location,
+            },
+        );
+    }
+
+    for (block_index, block) in function.blocks.iter().enumerate() {
+        for (instruction_index, instruction) in block.instructions.iter().enumerate() {
+            let Some(result) = instruction_result(instruction) else {
+                continue;
+            };
+            let instruction_location =
+                instruction_location(block_index, block, instruction_index, instruction);
+            let location = SSADefinitionLocation::Instruction(instruction_location.clone());
+            if let Some(previous) = definitions.get(&result.name) {
+                let source = SSADefinitionError::DuplicateDefinition {
+                    ssa_identifier: result.name.clone(),
+                    defining_location: previous.location.clone(),
+                    duplicate_definition_location: location,
+                };
+                return Err(FunctionSSAError::Block {
+                    function_name: function.name.clone(),
+                    block_index,
+                    block_name: block.name.clone(),
+                    source: Box::new(BlockSSAError {
+                        function_name: function.name.clone(),
+                        block_name: block.name.clone(),
+                        instruction_index,
+                        instruction_kind: instruction_kind(instruction),
+                        ssa_identifier: result.name.clone(),
+                        source,
+                    }),
+                });
+            }
+            definitions.insert(
+                result.name.clone(),
+                Definition {
+                    r#type: result.r#type.clone(),
+                    location,
+                },
+            );
+        }
+    }
+    Ok(definitions)
+}
+
+fn verify_block(
+    function: &IRFunction,
+    block_index: usize,
+    block: &IRBasicBlock,
+    definitions: &HashMap<String, Definition>,
+) -> Result<(), BlockSSAError> {
+    for (instruction_index, instruction) in block.instructions.iter().enumerate() {
+        let instruction_location =
+            instruction_location(block_index, block, instruction_index, instruction);
+        for (operand_index, operand) in ssa_operands(instruction).into_iter().enumerate() {
+            let use_location = SSAUseLocation {
+                instruction: instruction_location.clone(),
+                operand_index,
+            };
+            let Some(definition) = definitions.get(&operand.name) else {
+                return Err(block_error(
+                    function,
+                    block,
+                    instruction_index,
+                    instruction,
+                    operand,
+                    SSADefinitionError::UndefinedReference {
+                        ssa_identifier: operand.name.clone(),
+                        use_location,
+                    },
+                ));
+            };
+
+            if operand.r#type != definition.r#type {
+                return Err(block_error(
+                    function,
+                    block,
+                    instruction_index,
+                    instruction,
+                    operand,
+                    SSADefinitionError::ReferenceTypeMismatch {
+                        ssa_identifier: operand.name.clone(),
+                        expected: definition.r#type.clone(),
+                        actual: operand.r#type.clone(),
+                        defining_location: definition.location.clone(),
+                        use_location,
+                    },
+                ));
+            }
+
+            if let SSADefinitionLocation::Instruction(defining_location) = &definition.location {
+                if defining_location.block_index == block_index
+                    && defining_location.instruction_index >= instruction_index
+                {
+                    return Err(block_error(
+                        function,
+                        block,
+                        instruction_index,
+                        instruction,
+                        operand,
+                        SSADefinitionError::UseBeforeDefinition {
+                            ssa_identifier: operand.name.clone(),
+                            defining_location: definition.location.clone(),
+                            use_location,
+                        },
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn instruction_location(
+    block_index: usize,
+    block: &IRBasicBlock,
+    instruction_index: usize,
+    instruction: &IRInstruction,
+) -> SSAInstructionLocation {
+    SSAInstructionLocation {
+        block_index,
+        block_name: block.name.clone(),
+        instruction_index,
+        instruction_kind: instruction_kind(instruction),
+    }
+}
+
+fn block_error(
+    function: &IRFunction,
+    block: &IRBasicBlock,
+    instruction_index: usize,
+    instruction: &IRInstruction,
+    operand: &IRValue,
+    source: SSADefinitionError,
+) -> BlockSSAError {
+    BlockSSAError {
+        function_name: function.name.clone(),
+        block_name: block.name.clone(),
+        instruction_index,
+        instruction_kind: instruction_kind(instruction),
+        ssa_identifier: operand.name.clone(),
+        source,
+    }
+}
+
+// IRInstruction has no common operand iterator. Keep this exhaustive match in
+// the verifier so new variants must explicitly classify immutable SSA values
+// separately from IRStorage operands and literal/metadata fields.
+#[allow(clippy::too_many_lines)]
+fn ssa_operands(instruction: &IRInstruction) -> Vec<&IRValue> {
+    match instruction {
+        IRInstruction::IRConst { .. }
+        | IRInstruction::IRLoad { .. }
+        | IRInstruction::IRInitDefault { .. }
+        | IRInstruction::IRMoveInit { .. }
+        | IRInstruction::IRDestroy { .. }
+        | IRInstruction::IRRelocate { .. }
+        | IRInstruction::IRFunctionRef { .. }
+        | IRInstruction::IRJump { .. } => Vec::new(),
+        IRInstruction::IRStore { value, .. }
+        | IRInstruction::IRCopyInit { source: value, .. }
+        | IRInstruction::IRAssign { source: value, .. }
+        | IRInstruction::IRCast { value, .. }
+        | IRInstruction::IRPrint { value, .. } => vec![value],
+        IRInstruction::IRBinaryOp { left, right, .. }
+        | IRInstruction::IRCompareOp { left, right, .. }
+        | IRInstruction::IRVectorAdd { left, right, .. }
+        | IRInstruction::IRVectorSub { left, right, .. }
+        | IRInstruction::IRVectorDot { left, right, .. }
+        | IRInstruction::IRMatrixAdd { left, right, .. }
+        | IRInstruction::IRMatrixSub { left, right, .. }
+        | IRInstruction::IRMatrixMatMul { left, right, .. } => vec![left, right],
+        IRInstruction::IRUnaryOp { operand, .. } => vec![operand],
+        IRInstruction::IRCall { arguments, .. } => arguments.iter().collect(),
+        IRInstruction::IRCallIndirect {
+            callee, arguments, ..
+        } => std::iter::once(callee).chain(arguments).collect(),
+        IRInstruction::IRStructNew { fields, .. } => fields.iter().collect(),
+        IRInstruction::IRStructGet { r#struct, .. } => vec![r#struct],
+        IRInstruction::IRStructSet {
+            r#struct, value, ..
+        } => vec![r#struct, value],
+        IRInstruction::IRMethodResultNew {
+            receiver, value, ..
+        } => std::iter::once(receiver).chain(value).collect(),
+        IRInstruction::IRMethodResultReceiver { method_result, .. }
+        | IRInstruction::IRMethodResultValue { method_result, .. } => vec![method_result],
+        IRInstruction::IRArrayNew { elements, .. }
+        | IRInstruction::IRListNew { elements, .. }
+        | IRInstruction::IRVectorNew { elements, .. }
+        | IRInstruction::IRMatrixNew { elements, .. } => elements.iter().collect(),
+        IRInstruction::IRArrayCopy { array, .. } | IRInstruction::IRArrayLength { array, .. } => {
+            vec![array]
+        }
+        IRInstruction::IRListCopy { list_value, .. }
+        | IRInstruction::IRListClear { list_value }
+        | IRInstruction::IRListPop { list_value, .. }
+        | IRInstruction::IRListReverse { list_value }
+        | IRInstruction::IRListLength { list_value, .. }
+        | IRInstruction::IRListIsEmpty { list_value, .. } => vec![list_value],
+        IRInstruction::IRListPush { list_value, value }
+        | IRInstruction::IRListContains {
+            list_value, value, ..
+        }
+        | IRInstruction::IRListIndexOf {
+            list_value, value, ..
+        } => vec![list_value, value],
+        IRInstruction::IRListInsert {
+            list_value,
+            index,
+            value,
+        }
+        | IRInstruction::IRListSet {
+            list_value,
+            index,
+            value,
+        } => vec![list_value, index, value],
+        IRInstruction::IRListRemoveAt {
+            list_value, index, ..
+        }
+        | IRInstruction::IRListGet {
+            list_value, index, ..
+        } => vec![list_value, index],
+        IRInstruction::IRSequenceSort { sequence } => vec![sequence],
+        IRInstruction::IRVectorScale { vector, scalar, .. } => vec![vector, scalar],
+        IRInstruction::IROuterProduct { column, row, .. } => vec![column, row],
+        IRInstruction::IRMatrixScale { matrix, scalar, .. } => vec![matrix, scalar],
+        IRInstruction::IRMatrixVectorMul { matrix, vector, .. } => vec![matrix, vector],
+        IRInstruction::IRVectorMatrixMul { vector, matrix, .. } => vec![vector, matrix],
+        IRInstruction::IRArrayGet { array, index, .. } => vec![array, index],
+        IRInstruction::IRArraySet {
+            array,
+            index,
+            value,
+            ..
+        } => vec![array, index, value],
+        IRInstruction::IRArraySlice {
+            array, start, end, ..
+        } => vec![array, start, end],
+        IRInstruction::IRListSlice {
+            list_value,
+            start,
+            end,
+            ..
+        } => vec![list_value, start, end],
+        IRInstruction::IRVectorGet { vector, index, .. } => vec![vector, index],
+        IRInstruction::IRMatrixGet {
+            matrix,
+            row,
+            column,
+            ..
+        } => vec![matrix, row, column],
+        IRInstruction::IRVectorLength { vector, .. } => vec![vector],
+        IRInstruction::IRMatrixRows { matrix, .. }
+        | IRInstruction::IRMatrixColumns { matrix, .. } => vec![matrix],
+        IRInstruction::IRVectorSet {
+            vector,
+            index,
+            value,
+            ..
+        } => vec![vector, index, value],
+        IRInstruction::IRMatrixSet {
+            matrix,
+            row,
+            column,
+            value,
+            ..
+        } => vec![matrix, row, column, value],
+        IRInstruction::IRBranch { condition, .. } => vec![condition],
+        IRInstruction::IRReturn { value, .. } => value.iter().collect(),
+    }
+}
