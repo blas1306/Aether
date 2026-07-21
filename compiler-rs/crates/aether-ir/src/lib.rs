@@ -9,6 +9,7 @@ mod constant;
 mod function;
 mod importer;
 mod instruction;
+mod json;
 mod module;
 mod source;
 mod structure;
@@ -25,6 +26,7 @@ pub use importer::{
     import_source_location, import_storage, import_struct_definition, import_type, import_value,
 };
 pub use instruction::IRInstruction;
+pub use json::{IRModuleJsonImportError, import_module_json};
 pub use module::IRModule;
 pub use source::IRSourceLocation;
 pub use structure::IRStructDefinition;

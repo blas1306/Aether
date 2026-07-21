@@ -1,16 +1,18 @@
 # Gradual Python-to-Rust compiler migration
 
-> Status: Phase 2, Step 4D Rust function importing complete. The isolated
+> Status: Phase 2, Step 4F full Python-JSON-to-Rust-owned-IR integration audit
+> complete. The isolated
 > Rust workspace, owned IR model, frozen schema-v1 Python DTO tree, and separate
 > serde wire model cover the complete current Python IR. The importer now
 > reconstructs all 18 owned Rust type variants plus constants, enum-constant
 > metadata, values, storage, parameters, source locations, and all 68 / 68
 > frozen instruction variants, basic blocks with exact names and ordered
-> instruction contents, and functions with exact names and ordered parameters
-> and blocks. Struct-definition and module import, PyO3, verification, and
-> production integration remain unimplemented. This document defines sequencing
-> and promotion gates and does not declare the Python IR or SSA model a stable
-> public format.
+> instruction contents, functions, struct definitions, and complete modules.
+> The strict JSON entry point rejects duplicate keys at every object depth and
+> retains distinct JSON, wire-schema, schema-version, and structural-import
+> failures. PyO3, verification, CFG analysis, and production integration remain
+> unimplemented. This document defines sequencing and promotion gates and does
+> not declare the Python IR or SSA model a stable public format.
 
 ## 1. Decision summary
 
@@ -1122,6 +1124,86 @@ and deeply nested types and instructions. The next step is the full
 Python-JSON-to-Rust-owned-IR integration audit. Verifier execution, CFG
 construction, layout, linkage, compiler-pipeline integration, PyO3, and an owned
 IR exporter remain out of scope.
+
+### Step 4F complete JSON-to-owned-IR integration audit
+
+Phase 2 Step 4F is complete. `aether-ir` now exposes the small public
+`import_module_json(&str)` convenience boundary. It composes one narrow strict
+JSON decoder, the existing serde `IRModuleDTO`, and the existing
+`import_module()` adapter; it does not introduce a second importer architecture.
+The input is UTF-8 Rust text by construction. Non-standard/non-finite number
+spellings, malformed JSON, and trailing input are rejected before DTO decoding.
+
+The strict decoder exists only for this IR JSON boundary. Unlike a plain
+`serde_json::from_str`, it detects duplicate object keys at every nesting level,
+including duplicates inside fields that the wire DTO would subsequently reject
+as unknown. Direct serde use by unrelated code is unchanged. After strict JSON
+parsing, serde continues to enforce every required root and nested field,
+explicit required nullable fields, exact tagged variants, primitive kinds,
+fixed shapes, unknown-field rejection, and schema v1.
+
+`IRModuleJsonImportError` preserves the boundary layers without string
+flattening:
+
+- `Json` wraps the original `serde_json::Error` for syntax, duplicate-key,
+  trailing-input, and non-finite-number failures;
+- `Wire` wraps the original `serde_json::Error` for a valid JSON tree that does
+  not satisfy the frozen DTO shape, including missing or unknown fields and
+  instruction tags;
+- `SchemaVersion` wraps the typed `IRImportError::UnsupportedSchemaVersion` and
+  retains both received and supported versions;
+- `Import` wraps the complete contextual `IRImportError` chain for a wire DTO
+  that the owned model cannot structurally represent.
+
+Every wrapper implements `Error::source()`. A tested deeply nested failure
+retains module function, function block, block instruction, instruction field,
+value type, and invalid method-result receiver context all the way to the leaf.
+
+The canonical golden
+`tests/aether/rust_migration/fixtures/ir_module_v1_golden.json` is imported
+through the complete boundary. Assertions cover its schema version, exact
+struct and field ordering, nested array/struct and list/string types, function,
+parameter and return types, block ordering, lifecycle initialization and source
+location, branch targets, integer constant, and return value plus transferred
+storage. A second end-to-end constructed document exercises UTF-8 names, nested
+nullable/list/enum types, enum metadata and constants, explicit nullable call
+fields, aggregate shape, borrow flag/scope, optional source path, and absent
+return operands. Repeated imports compare equal using the owned model's existing
+structural equality; no map iteration order participates.
+
+The Phase 0 migration corpus was audited as follows:
+
+- covered JSON module fixture: `ir_module_v1_golden.json` (the only JSON file in
+  `tests/aether/rust_migration/fixtures/`), with a test that discovers and
+  imports every JSON fixture in that directory;
+- excluded `tests/aether/rust_migration/manifest.yaml`: it is a YAML index of
+  pytest materializers and verifier expectations, not an `IRModuleDTO` JSON
+  fixture;
+- excluded source tests referenced by that manifest: they construct Python
+  modules dynamically and no checked-in per-case module DTO JSON snapshots
+  currently exist;
+- excluded JSON elsewhere in `tests/`: those files belong to diagnostics,
+  editor, release, or source-program fixtures and are not canonical migration
+  module DTOs.
+
+The existing cross-language golden generation is already reproducible and does
+not need redesign: `tests/aether/test_ir_module_json.py` constructs a
+representative Python `IRModule`, encodes it with `ir_module_to_json()`, and
+compares it byte-for-byte with the checked-in golden. It also decodes and
+canonically re-encodes the fixture byte-for-byte. Rust consumes that same file;
+there is no Rust-specific golden and no generated fixture update in this step.
+
+Import remains deliberately structural. An end-to-end test imports a module
+with duplicate function names and no blocks, proving that semantic verifier
+rules are not executed. No verifier, CFG, compiler pipeline, PyO3, exporter,
+lowering, or owned-IR semantic behavior is connected or changed.
+
+The complete schema-v1 cross-language contract is now audited, including its
+existing Python byte generator/consumer test, so a separate Step 4G would add
+no meaningful remaining contract work. The next planned migration step is
+**Phase 3 verifier integration**, beginning behind the documented isolated
+selection and differential-testing boundary rather than coupling verification
+to this importer.
 
 ## 8. Ownership and memory
 
