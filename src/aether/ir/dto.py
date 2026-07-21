@@ -13,6 +13,7 @@ from .model import (
     IRArrayNew,
     IRArraySet,
     IRArraySlice,
+    IRBasicBlock,
     IRBinaryOp,
     IRBranch,
     IRCall,
@@ -121,6 +122,8 @@ IRParameterDTO: TypeAlias = dict[str, object]
 IRSourceLocationDTO: TypeAlias = dict[str, object]
 IRInstructionDTO: TypeAlias = dict[str, object]
 """Primitive ``kind``-tagged representation of a supported instruction."""
+IRBasicBlockDTO: TypeAlias = dict[str, object]
+"""Named, ordered basic-block representation in the IR interchange schema."""
 
 
 class IRDTOError(ValueError):
@@ -2489,6 +2492,56 @@ def ir_instruction_from_dto(
     return decoded
 
 
+def ir_basic_block_to_dto(
+    block: IRBasicBlock,
+    *,
+    schema_version: int = IR_SCHEMA_VERSION,
+) -> IRBasicBlockDTO:
+    """Convert one exact Python basic block to its ordered primitive DTO.
+
+    Block structure is preserved without interpreting terminators or control
+    flow.  Those semantic checks remain the responsibility of ``IRVerifier``.
+    """
+
+    _require_schema_version(schema_version)
+    if type(block) is not IRBasicBlock:
+        raise TypeError(
+            f"Unsupported IR basic block for schema v{IR_SCHEMA_VERSION}: "
+            f"{type(block).__name__}"
+        )
+    instructions = _expect_sequence(block.instructions, "IR basic block instructions")
+    return {
+        "name": _expect_string(block.name, "IR basic block name"),
+        "instructions": [
+            ir_instruction_to_dto(instruction, schema_version=schema_version)
+            for instruction in instructions
+        ],
+    }
+
+
+def ir_basic_block_from_dto(
+    dto: Mapping[str, object],
+    *,
+    schema_version: int = IR_SCHEMA_VERSION,
+) -> IRBasicBlock:
+    """Decode one strictly shaped basic block without semantic verification."""
+
+    _require_schema_version(schema_version)
+    mapping = _expect_mapping(dto, "IR basic block")
+    _expect_fields(mapping, {"name", "instructions"}, "IR basic block")
+    instructions = _expect_sequence(
+        mapping["instructions"],
+        "IR basic block.instructions",
+    )
+    return IRBasicBlock(
+        _expect_string(mapping["name"], "IR basic block.name"),
+        [
+            ir_instruction_from_dto(instruction, schema_version=schema_version)
+            for instruction in instructions
+        ],
+    )
+
+
 def _value_from_dto(
     dto: Mapping[str, object],
     *,
@@ -2641,6 +2694,7 @@ __all__ = [
     "IR_TYPE_TAGS",
     "IRConstant",
     "IRConstantDTO",
+    "IRBasicBlockDTO",
     "IRDTOError",
     "IRDTOSchemaVersionError",
     "IREnumConstantDTO",
@@ -2651,6 +2705,8 @@ __all__ = [
     "IRStorageDTO",
     "IRTypeDTO",
     "IRValueDTO",
+    "ir_basic_block_from_dto",
+    "ir_basic_block_to_dto",
     "ir_constant_from_dto",
     "ir_constant_to_dto",
     "ir_enum_constant_from_dto",

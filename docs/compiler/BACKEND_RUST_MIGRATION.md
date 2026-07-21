@@ -1,8 +1,10 @@
 # Gradual Python-to-Rust compiler migration
 
-> Status: proposed migration policy. This document defines sequencing and
-> promotion gates; it does not declare the current Python IR or SSA model a
-> stable public format. No Rust workspace or production integration exists yet.
+> Status: migration implementation in progress. The isolated Rust workspace,
+> owned IR model, and schema-v1 Python DTO slices through `IRBasicBlock` now
+> exist; there is still no production integration. This document defines
+> sequencing and promotion gates and does not declare the Python IR or SSA model
+> a stable public format.
 
 ## 1. Decision summary
 
@@ -301,6 +303,41 @@ The DTO boundary validates schema version, tags, fields, primitive kinds, and
 transport ranges only. It deliberately preserves semantically invalid but
 well-shaped IR so `IRVerifier` remains responsible for operators, types,
 dimensions, control-flow targets, ownership, and other `IRV-*` invariants.
+
+### Basic-block DTO
+
+Phase 1, Step 3D adds complete schema-v1 conversion for the current
+`IRBasicBlock` model. Python and Rust both define exactly two fields: a string
+`name`, which is the block identity used by control-flow targets, and an ordered
+instruction sequence. The stable primitive representation is:
+
+```text
+{
+  "name": <string>,
+  "instructions": [<InstructionDTO>, ...]
+}
+```
+
+The instruction list uses the existing instruction DTO conversion element by
+element and retains its original order. A terminator has no separate block
+field: when present, it remains an ordinary `branch`, `jump`, or `return`
+instruction at its original list position. The current model has no block ID,
+label distinct from `name`, parameters/arguments, source location, or metadata,
+so the DTO does not manufacture any of them. Schema version remains a property
+of the enclosing interchange contract rather than being repeated in each block.
+
+The block boundary validates only the requested schema version, exact required
+fields, unexpected fields, the string name, instruction sequence shape, and
+every nested instruction DTO. It intentionally accepts empty blocks, blocks
+without a terminator, multiple terminators, instructions after a terminator,
+and references to absent successors whenever those values are structurally
+representable. Terminator placement, reachability, dominance, successor
+existence, CFG consistency, and instruction semantics remain `IRVerifier`
+responsibilities so their stable `IRV-*` diagnostics are preserved.
+
+The next planned DTO container level is `IRFunction`, which will compose ordered
+parameters and blocks with the existing type, value, instruction, and block
+converters. Function and module DTO conversion are not part of Step 3D.
 
 ## 8. Ownership and memory
 
