@@ -20,7 +20,6 @@ from aether.ir.model import (
     IRStructNew,
     IRStructSet,
     IRValue,
-    IRVectorNew,
 )
 from aether.ir.types import (
     BoolType,
@@ -28,7 +27,6 @@ from aether.ir.types import (
     MethodResultType,
     StringType,
     StructType,
-    VectorType,
     VoidType,
 )
 
@@ -426,10 +424,6 @@ def test_unsupported_instruction_classes_are_rejected() -> None:
         match=r"Unsupported IR instruction for schema v1: FutureStructNew",
     ):
         ir_instruction_to_dto(FutureStructNew(OUTER))
-
-    with pytest.raises(TypeError, match=r"Unsupported IR instruction for schema v1: IRVectorNew"):
-        ir_instruction_to_dto(IRVectorNew(IRValue("vector", VectorType(IntType()))))
-
 
 def _assert_neutral(value: object) -> None:
     if value is None or type(value) in {str, bool, int, float}:

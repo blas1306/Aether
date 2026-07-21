@@ -37,9 +37,8 @@ from aether.ir.model import (
     IRSequenceSort,
     IRSourceLocation,
     IRValue,
-    IRVectorNew,
 )
-from aether.ir.types import ArrayType, BoolType, IntType, ListType, VectorType
+from aether.ir.types import ArrayType, BoolType, IntType, ListType
 
 
 INT = IntType()
@@ -528,13 +527,6 @@ def test_unsupported_collection_instruction_subclass_is_rejected() -> None:
         match=r"Unsupported IR instruction for schema v1: FutureListResize",
     ):
         ir_instruction_to_dto(FutureListResize(LIST))
-
-
-def test_out_of_scope_vector_instruction_remains_unsupported() -> None:
-    vector = IRValue("vector", VectorType(INT))
-
-    with pytest.raises(TypeError, match=r"Unsupported IR instruction for schema v1: IRVectorNew"):
-        ir_instruction_to_dto(IRVectorNew(vector))
 
 
 @pytest.mark.parametrize("instruction", [case[0] for case in ROUND_TRIP_CASES])

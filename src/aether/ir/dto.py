@@ -40,10 +40,21 @@ from .model import (
     IRListReverse,
     IRListSet,
     IRListSlice,
+    IRMatrixAdd,
+    IRMatrixColumns,
+    IRMatrixGet,
+    IRMatrixMatMul,
+    IRMatrixNew,
+    IRMatrixRows,
+    IRMatrixScale,
+    IRMatrixSet,
+    IRMatrixSub,
+    IRMatrixVectorMul,
     IRMethodResultNew,
     IRMethodResultReceiver,
     IRMethodResultValue,
     IRMoveInit,
+    IROuterProduct,
     IRParameter,
     IRPrint,
     IRRelocate,
@@ -56,6 +67,15 @@ from .model import (
     IRStructSet,
     IRUnaryOp,
     IRValue,
+    IRVectorAdd,
+    IRVectorDot,
+    IRVectorGet,
+    IRVectorLength,
+    IRVectorMatrixMul,
+    IRVectorNew,
+    IRVectorScale,
+    IRVectorSet,
+    IRVectorSub,
 )
 from .types import (
     ArrayType,
@@ -178,6 +198,26 @@ IR_INSTRUCTION_TAGS: Mapping[type[IRInstruction], str] = MappingProxyType(
         IRArrayLength: "array_length",
         IRListLength: "list_length",
         IRListIsEmpty: "list_is_empty",
+        IRVectorNew: "vector_new",
+        IRMatrixNew: "matrix_new",
+        IRVectorAdd: "vector_add",
+        IRVectorSub: "vector_sub",
+        IRVectorScale: "vector_scale",
+        IRVectorDot: "vector_dot",
+        IROuterProduct: "outer_product",
+        IRMatrixAdd: "matrix_add",
+        IRMatrixSub: "matrix_sub",
+        IRMatrixScale: "matrix_scale",
+        IRMatrixMatMul: "matrix_mat_mul",
+        IRMatrixVectorMul: "matrix_vector_mul",
+        IRVectorMatrixMul: "vector_matrix_mul",
+        IRVectorGet: "vector_get",
+        IRMatrixGet: "matrix_get",
+        IRVectorLength: "vector_length",
+        IRMatrixRows: "matrix_rows",
+        IRMatrixColumns: "matrix_columns",
+        IRVectorSet: "vector_set",
+        IRMatrixSet: "matrix_set",
     }
 )
 """Exact supported instruction class to stable schema tag mapping."""
@@ -939,6 +979,203 @@ def ir_instruction_to_dto(
                 schema_version=schema_version,
             ),
         }
+    if type(instruction) is IRVectorNew:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "elements": [
+                ir_value_to_dto(element, schema_version=schema_version)
+                for element in instruction.elements
+            ],
+            "orientation": _expect_optional_string(
+                instruction.orientation,
+                "IR instruction 'vector_new'.orientation",
+            ),
+        }
+    if type(instruction) is IRMatrixNew:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "elements": [
+                ir_value_to_dto(element, schema_version=schema_version)
+                for element in instruction.elements
+            ],
+            "shape": _shape_to_dto(
+                (instruction.rows, instruction.cols),
+                "IR instruction 'matrix_new'.shape",
+            ),
+        }
+    if type(instruction) in {IRVectorAdd, IRVectorSub}:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "left": ir_value_to_dto(instruction.left, schema_version=schema_version),
+            "right": ir_value_to_dto(instruction.right, schema_version=schema_version),
+            "shape": _shape_to_dto(
+                (instruction.length,),
+                f"IR instruction '{kind}'.shape",
+            ),
+            "orientation": _expect_optional_string(
+                instruction.orientation,
+                f"IR instruction '{kind}'.orientation",
+            ),
+        }
+    if type(instruction) is IRVectorScale:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "vector": ir_value_to_dto(instruction.vector, schema_version=schema_version),
+            "scalar": ir_value_to_dto(instruction.scalar, schema_version=schema_version),
+            "shape": _shape_to_dto(
+                (instruction.length,),
+                "IR instruction 'vector_scale'.shape",
+            ),
+            "orientation": _expect_optional_string(
+                instruction.orientation,
+                "IR instruction 'vector_scale'.orientation",
+            ),
+        }
+    if type(instruction) is IRVectorDot:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "left": ir_value_to_dto(instruction.left, schema_version=schema_version),
+            "right": ir_value_to_dto(instruction.right, schema_version=schema_version),
+            "shape": _shape_to_dto(
+                (instruction.length,),
+                "IR instruction 'vector_dot'.shape",
+            ),
+        }
+    if type(instruction) is IROuterProduct:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "column": ir_value_to_dto(instruction.column, schema_version=schema_version),
+            "row": ir_value_to_dto(instruction.row, schema_version=schema_version),
+            "shape": _shape_to_dto(
+                (instruction.rows, instruction.cols),
+                "IR instruction 'outer_product'.shape",
+            ),
+        }
+    if type(instruction) in {IRMatrixAdd, IRMatrixSub}:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "left": ir_value_to_dto(instruction.left, schema_version=schema_version),
+            "right": ir_value_to_dto(instruction.right, schema_version=schema_version),
+            "shape": _shape_to_dto(
+                (instruction.rows, instruction.cols),
+                f"IR instruction '{kind}'.shape",
+            ),
+        }
+    if type(instruction) is IRMatrixScale:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "matrix": ir_value_to_dto(instruction.matrix, schema_version=schema_version),
+            "scalar": ir_value_to_dto(instruction.scalar, schema_version=schema_version),
+            "shape": _shape_to_dto(
+                (instruction.rows, instruction.cols),
+                "IR instruction 'matrix_scale'.shape",
+            ),
+        }
+    if type(instruction) is IRMatrixMatMul:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "left": ir_value_to_dto(instruction.left, schema_version=schema_version),
+            "right": ir_value_to_dto(instruction.right, schema_version=schema_version),
+            "shape": _shape_to_dto(
+                (instruction.rows, instruction.inner, instruction.cols),
+                "IR instruction 'matrix_mat_mul'.shape",
+            ),
+        }
+    if type(instruction) is IRMatrixVectorMul:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "matrix": ir_value_to_dto(instruction.matrix, schema_version=schema_version),
+            "vector": ir_value_to_dto(instruction.vector, schema_version=schema_version),
+            "shape": _shape_to_dto(
+                (instruction.rows, instruction.inner),
+                "IR instruction 'matrix_vector_mul'.shape",
+            ),
+        }
+    if type(instruction) is IRVectorMatrixMul:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "vector": ir_value_to_dto(instruction.vector, schema_version=schema_version),
+            "matrix": ir_value_to_dto(instruction.matrix, schema_version=schema_version),
+            "shape": _shape_to_dto(
+                (instruction.rows, instruction.cols),
+                "IR instruction 'vector_matrix_mul'.shape",
+            ),
+        }
+    if type(instruction) is IRVectorGet:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "vector": ir_value_to_dto(instruction.vector, schema_version=schema_version),
+            "index": ir_value_to_dto(instruction.index, schema_version=schema_version),
+        }
+    if type(instruction) is IRMatrixGet:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "matrix": ir_value_to_dto(instruction.matrix, schema_version=schema_version),
+            "row": ir_value_to_dto(instruction.row, schema_version=schema_version),
+            "column": ir_value_to_dto(instruction.column, schema_version=schema_version),
+            "shape": _shape_to_dto(
+                (instruction.cols,),
+                "IR instruction 'matrix_get'.shape",
+            ),
+        }
+    if type(instruction) is IRVectorLength:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "vector": ir_value_to_dto(instruction.vector, schema_version=schema_version),
+        }
+    if type(instruction) is IRMatrixRows:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "matrix": ir_value_to_dto(instruction.matrix, schema_version=schema_version),
+            "shape": _shape_to_dto(
+                (instruction.rows,),
+                "IR instruction 'matrix_rows'.shape",
+            ),
+        }
+    if type(instruction) is IRMatrixColumns:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "matrix": ir_value_to_dto(instruction.matrix, schema_version=schema_version),
+            "shape": _shape_to_dto(
+                (instruction.columns,),
+                "IR instruction 'matrix_columns'.shape",
+            ),
+        }
+    if type(instruction) is IRVectorSet:
+        return {
+            "kind": kind,
+            "vector": ir_value_to_dto(instruction.vector, schema_version=schema_version),
+            "index": ir_value_to_dto(instruction.index, schema_version=schema_version),
+            "value": ir_value_to_dto(instruction.value, schema_version=schema_version),
+        }
+    if type(instruction) is IRMatrixSet:
+        return {
+            "kind": kind,
+            "matrix": ir_value_to_dto(instruction.matrix, schema_version=schema_version),
+            "row": ir_value_to_dto(instruction.row, schema_version=schema_version),
+            "column": ir_value_to_dto(instruction.column, schema_version=schema_version),
+            "value": ir_value_to_dto(instruction.value, schema_version=schema_version),
+            "shape": _shape_to_dto(
+                (instruction.cols,),
+                "IR instruction 'matrix_set'.shape",
+            ),
+        }
     if type(instruction) is IRArrayGet:
         return {
             "kind": kind,
@@ -1463,6 +1700,321 @@ def ir_instruction_from_dto(
         return IRSequenceSort(
             ir_value_from_dto(mapping["sequence"], schema_version=schema_version)
         )
+    if kind == "vector_new":
+        _expect_fields(
+            mapping,
+            {"kind", "result", "elements", "orientation"},
+            "IR instruction 'vector_new'",
+        )
+        elements = _expect_sequence(
+            mapping["elements"],
+            "IR instruction 'vector_new'.elements",
+        )
+        return IRVectorNew(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            tuple(
+                ir_value_from_dto(element, schema_version=schema_version)
+                for element in elements
+            ),
+            _expect_optional_string(
+                mapping["orientation"],
+                "IR instruction 'vector_new'.orientation",
+            ),
+        )
+    if kind == "matrix_new":
+        _expect_fields(
+            mapping,
+            {"kind", "result", "elements", "shape"},
+            "IR instruction 'matrix_new'",
+        )
+        elements = _expect_sequence(
+            mapping["elements"],
+            "IR instruction 'matrix_new'.elements",
+        )
+        rows, cols = _shape_from_dto(
+            mapping["shape"],
+            2,
+            "IR instruction 'matrix_new'.shape",
+        )
+        return IRMatrixNew(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            tuple(
+                ir_value_from_dto(element, schema_version=schema_version)
+                for element in elements
+            ),
+            rows,
+            cols,
+        )
+    if kind in {"vector_add", "vector_sub"}:
+        _expect_fields(
+            mapping,
+            {"kind", "result", "left", "right", "shape", "orientation"},
+            f"IR instruction '{kind}'",
+        )
+        instruction_type = IRVectorAdd if kind == "vector_add" else IRVectorSub
+        (length,) = _shape_from_dto(
+            mapping["shape"],
+            1,
+            f"IR instruction '{kind}'.shape",
+        )
+        return instruction_type(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_value_from_dto(mapping["left"], schema_version=schema_version),
+            ir_value_from_dto(mapping["right"], schema_version=schema_version),
+            length,
+            _expect_optional_string(
+                mapping["orientation"],
+                f"IR instruction '{kind}'.orientation",
+            ),
+        )
+    if kind == "vector_scale":
+        _expect_fields(
+            mapping,
+            {"kind", "result", "vector", "scalar", "shape", "orientation"},
+            "IR instruction 'vector_scale'",
+        )
+        (length,) = _shape_from_dto(
+            mapping["shape"],
+            1,
+            "IR instruction 'vector_scale'.shape",
+        )
+        return IRVectorScale(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_value_from_dto(mapping["vector"], schema_version=schema_version),
+            ir_value_from_dto(mapping["scalar"], schema_version=schema_version),
+            length,
+            _expect_optional_string(
+                mapping["orientation"],
+                "IR instruction 'vector_scale'.orientation",
+            ),
+        )
+    if kind == "vector_dot":
+        _expect_fields(
+            mapping,
+            {"kind", "result", "left", "right", "shape"},
+            "IR instruction 'vector_dot'",
+        )
+        (length,) = _shape_from_dto(
+            mapping["shape"],
+            1,
+            "IR instruction 'vector_dot'.shape",
+        )
+        return IRVectorDot(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_value_from_dto(mapping["left"], schema_version=schema_version),
+            ir_value_from_dto(mapping["right"], schema_version=schema_version),
+            length,
+        )
+    if kind == "outer_product":
+        _expect_fields(
+            mapping,
+            {"kind", "result", "column", "row", "shape"},
+            "IR instruction 'outer_product'",
+        )
+        rows, cols = _shape_from_dto(
+            mapping["shape"],
+            2,
+            "IR instruction 'outer_product'.shape",
+        )
+        return IROuterProduct(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_value_from_dto(mapping["column"], schema_version=schema_version),
+            ir_value_from_dto(mapping["row"], schema_version=schema_version),
+            rows,
+            cols,
+        )
+    if kind in {"matrix_add", "matrix_sub"}:
+        _expect_fields(
+            mapping,
+            {"kind", "result", "left", "right", "shape"},
+            f"IR instruction '{kind}'",
+        )
+        instruction_type = IRMatrixAdd if kind == "matrix_add" else IRMatrixSub
+        rows, cols = _shape_from_dto(
+            mapping["shape"],
+            2,
+            f"IR instruction '{kind}'.shape",
+        )
+        return instruction_type(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_value_from_dto(mapping["left"], schema_version=schema_version),
+            ir_value_from_dto(mapping["right"], schema_version=schema_version),
+            rows,
+            cols,
+        )
+    if kind == "matrix_scale":
+        _expect_fields(
+            mapping,
+            {"kind", "result", "matrix", "scalar", "shape"},
+            "IR instruction 'matrix_scale'",
+        )
+        rows, cols = _shape_from_dto(
+            mapping["shape"],
+            2,
+            "IR instruction 'matrix_scale'.shape",
+        )
+        return IRMatrixScale(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_value_from_dto(mapping["matrix"], schema_version=schema_version),
+            ir_value_from_dto(mapping["scalar"], schema_version=schema_version),
+            rows,
+            cols,
+        )
+    if kind == "matrix_mat_mul":
+        _expect_fields(
+            mapping,
+            {"kind", "result", "left", "right", "shape"},
+            "IR instruction 'matrix_mat_mul'",
+        )
+        rows, inner, cols = _shape_from_dto(
+            mapping["shape"],
+            3,
+            "IR instruction 'matrix_mat_mul'.shape",
+        )
+        return IRMatrixMatMul(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_value_from_dto(mapping["left"], schema_version=schema_version),
+            ir_value_from_dto(mapping["right"], schema_version=schema_version),
+            rows,
+            inner,
+            cols,
+        )
+    if kind == "matrix_vector_mul":
+        _expect_fields(
+            mapping,
+            {"kind", "result", "matrix", "vector", "shape"},
+            "IR instruction 'matrix_vector_mul'",
+        )
+        rows, inner = _shape_from_dto(
+            mapping["shape"],
+            2,
+            "IR instruction 'matrix_vector_mul'.shape",
+        )
+        return IRMatrixVectorMul(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_value_from_dto(mapping["matrix"], schema_version=schema_version),
+            ir_value_from_dto(mapping["vector"], schema_version=schema_version),
+            rows,
+            inner,
+        )
+    if kind == "vector_matrix_mul":
+        _expect_fields(
+            mapping,
+            {"kind", "result", "vector", "matrix", "shape"},
+            "IR instruction 'vector_matrix_mul'",
+        )
+        rows, cols = _shape_from_dto(
+            mapping["shape"],
+            2,
+            "IR instruction 'vector_matrix_mul'.shape",
+        )
+        return IRVectorMatrixMul(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_value_from_dto(mapping["vector"], schema_version=schema_version),
+            ir_value_from_dto(mapping["matrix"], schema_version=schema_version),
+            rows,
+            cols,
+        )
+    if kind == "vector_get":
+        _expect_fields(
+            mapping,
+            {"kind", "result", "vector", "index"},
+            "IR instruction 'vector_get'",
+        )
+        return IRVectorGet(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_value_from_dto(mapping["vector"], schema_version=schema_version),
+            ir_value_from_dto(mapping["index"], schema_version=schema_version),
+        )
+    if kind == "matrix_get":
+        _expect_fields(
+            mapping,
+            {"kind", "result", "matrix", "row", "column", "shape"},
+            "IR instruction 'matrix_get'",
+        )
+        (cols,) = _shape_from_dto(
+            mapping["shape"],
+            1,
+            "IR instruction 'matrix_get'.shape",
+        )
+        return IRMatrixGet(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_value_from_dto(mapping["matrix"], schema_version=schema_version),
+            ir_value_from_dto(mapping["row"], schema_version=schema_version),
+            ir_value_from_dto(mapping["column"], schema_version=schema_version),
+            cols,
+        )
+    if kind == "vector_length":
+        _expect_fields(
+            mapping,
+            {"kind", "result", "vector"},
+            "IR instruction 'vector_length'",
+        )
+        return IRVectorLength(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_value_from_dto(mapping["vector"], schema_version=schema_version),
+        )
+    if kind == "matrix_rows":
+        _expect_fields(
+            mapping,
+            {"kind", "result", "matrix", "shape"},
+            "IR instruction 'matrix_rows'",
+        )
+        (rows,) = _shape_from_dto(
+            mapping["shape"],
+            1,
+            "IR instruction 'matrix_rows'.shape",
+        )
+        return IRMatrixRows(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_value_from_dto(mapping["matrix"], schema_version=schema_version),
+            rows,
+        )
+    if kind == "matrix_columns":
+        _expect_fields(
+            mapping,
+            {"kind", "result", "matrix", "shape"},
+            "IR instruction 'matrix_columns'",
+        )
+        (columns,) = _shape_from_dto(
+            mapping["shape"],
+            1,
+            "IR instruction 'matrix_columns'.shape",
+        )
+        return IRMatrixColumns(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_value_from_dto(mapping["matrix"], schema_version=schema_version),
+            columns,
+        )
+    if kind == "vector_set":
+        _expect_fields(
+            mapping,
+            {"kind", "vector", "index", "value"},
+            "IR instruction 'vector_set'",
+        )
+        return IRVectorSet(
+            ir_value_from_dto(mapping["vector"], schema_version=schema_version),
+            ir_value_from_dto(mapping["index"], schema_version=schema_version),
+            ir_value_from_dto(mapping["value"], schema_version=schema_version),
+        )
+    if kind == "matrix_set":
+        _expect_fields(
+            mapping,
+            {"kind", "matrix", "row", "column", "value", "shape"},
+            "IR instruction 'matrix_set'",
+        )
+        (cols,) = _shape_from_dto(
+            mapping["shape"],
+            1,
+            "IR instruction 'matrix_set'.shape",
+        )
+        return IRMatrixSet(
+            ir_value_from_dto(mapping["matrix"], schema_version=schema_version),
+            ir_value_from_dto(mapping["row"], schema_version=schema_version),
+            ir_value_from_dto(mapping["column"], schema_version=schema_version),
+            ir_value_from_dto(mapping["value"], schema_version=schema_version),
+            cols,
+        )
     if kind == "array_get":
         _expect_fields(
             mapping,
@@ -1674,6 +2226,27 @@ def _expect_sequence(value: object, field: str) -> Sequence[object]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
         raise IRDTOError(f"{field} must be a sequence")
     return value
+
+
+def _shape_to_dto(dimensions: Sequence[object], field: str) -> list[int]:
+    """Encode retained dimension metadata in canonical row-major order."""
+
+    return [
+        _expect_i64(dimension, f"{field}[{index}]")
+        for index, dimension in enumerate(dimensions)
+    ]
+
+
+def _shape_from_dto(value: object, rank: int, field: str) -> tuple[int, ...]:
+    """Decode one fixed-rank shape without enforcing semantic dimension rules."""
+
+    dimensions = _expect_sequence(value, field)
+    if len(dimensions) != rank:
+        raise IRDTOError(f"{field} must contain exactly {rank} dimensions")
+    return tuple(
+        _expect_i64(dimension, f"{field}[{index}]")
+        for index, dimension in enumerate(dimensions)
+    )
 
 
 def _expect_string(value: object, field: str) -> str:
