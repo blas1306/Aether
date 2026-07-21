@@ -6,6 +6,12 @@ from typing import NoReturn, TypeAlias
 
 from .model import (
     IRAssign,
+    IRArrayCopy,
+    IRArrayGet,
+    IRArrayLength,
+    IRArrayNew,
+    IRArraySet,
+    IRArraySlice,
     IRBinaryOp,
     IRCall,
     IRCallIndirect,
@@ -19,6 +25,21 @@ from .model import (
     IRInitDefault,
     IRInstruction,
     IRLoad,
+    IRListClear,
+    IRListContains,
+    IRListCopy,
+    IRListGet,
+    IRListIndexOf,
+    IRListInsert,
+    IRListIsEmpty,
+    IRListLength,
+    IRListNew,
+    IRListPop,
+    IRListPush,
+    IRListRemoveAt,
+    IRListReverse,
+    IRListSet,
+    IRListSlice,
     IRMethodResultNew,
     IRMethodResultReceiver,
     IRMethodResultValue,
@@ -26,6 +47,7 @@ from .model import (
     IRParameter,
     IRPrint,
     IRRelocate,
+    IRSequenceSort,
     IRSourceLocation,
     IRStorage,
     IRStore,
@@ -134,6 +156,28 @@ IR_INSTRUCTION_TAGS: Mapping[type[IRInstruction], str] = MappingProxyType(
         IRMethodResultNew: "method_result_new",
         IRMethodResultReceiver: "method_result_receiver",
         IRMethodResultValue: "method_result_value",
+        IRArrayNew: "array_new",
+        IRListNew: "list_new",
+        IRArrayCopy: "array_copy",
+        IRListCopy: "list_copy",
+        IRListContains: "list_contains",
+        IRListIndexOf: "list_index_of",
+        IRListClear: "list_clear",
+        IRListPush: "list_push",
+        IRListInsert: "list_insert",
+        IRListRemoveAt: "list_remove_at",
+        IRListPop: "list_pop",
+        IRListReverse: "list_reverse",
+        IRSequenceSort: "sequence_sort",
+        IRArrayGet: "array_get",
+        IRArraySlice: "array_slice",
+        IRListSlice: "list_slice",
+        IRListGet: "list_get",
+        IRArraySet: "array_set",
+        IRListSet: "list_set",
+        IRArrayLength: "array_length",
+        IRListLength: "list_length",
+        IRListIsEmpty: "list_is_empty",
     }
 )
 """Exact supported instruction class to stable schema tag mapping."""
@@ -791,6 +835,199 @@ def ir_instruction_to_dto(
                 schema_version=schema_version,
             ),
         }
+    if type(instruction) in {IRArrayNew, IRListNew}:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "elements": [
+                ir_value_to_dto(element, schema_version=schema_version)
+                for element in instruction.elements
+            ],
+        }
+    if type(instruction) is IRArrayCopy:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "array": ir_value_to_dto(instruction.array, schema_version=schema_version),
+            "source_location": ir_source_location_to_dto(
+                instruction.source_location,
+                schema_version=schema_version,
+            ),
+        }
+    if type(instruction) is IRListCopy:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "list_value": ir_value_to_dto(
+                instruction.list_value,
+                schema_version=schema_version,
+            ),
+            "source_location": ir_source_location_to_dto(
+                instruction.source_location,
+                schema_version=schema_version,
+            ),
+        }
+    if type(instruction) in {IRListContains, IRListIndexOf}:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "list_value": ir_value_to_dto(
+                instruction.list_value,
+                schema_version=schema_version,
+            ),
+            "value": ir_value_to_dto(instruction.value, schema_version=schema_version),
+        }
+    if type(instruction) is IRListClear:
+        return {
+            "kind": kind,
+            "list_value": ir_value_to_dto(
+                instruction.list_value,
+                schema_version=schema_version,
+            ),
+        }
+    if type(instruction) is IRListPush:
+        return {
+            "kind": kind,
+            "list_value": ir_value_to_dto(
+                instruction.list_value,
+                schema_version=schema_version,
+            ),
+            "value": ir_value_to_dto(instruction.value, schema_version=schema_version),
+        }
+    if type(instruction) is IRListInsert:
+        return {
+            "kind": kind,
+            "list_value": ir_value_to_dto(
+                instruction.list_value,
+                schema_version=schema_version,
+            ),
+            "index": ir_value_to_dto(instruction.index, schema_version=schema_version),
+            "value": ir_value_to_dto(instruction.value, schema_version=schema_version),
+        }
+    if type(instruction) is IRListRemoveAt:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "list_value": ir_value_to_dto(
+                instruction.list_value,
+                schema_version=schema_version,
+            ),
+            "index": ir_value_to_dto(instruction.index, schema_version=schema_version),
+        }
+    if type(instruction) is IRListPop:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "list_value": ir_value_to_dto(
+                instruction.list_value,
+                schema_version=schema_version,
+            ),
+        }
+    if type(instruction) is IRListReverse:
+        return {
+            "kind": kind,
+            "list_value": ir_value_to_dto(
+                instruction.list_value,
+                schema_version=schema_version,
+            ),
+        }
+    if type(instruction) is IRSequenceSort:
+        return {
+            "kind": kind,
+            "sequence": ir_value_to_dto(
+                instruction.sequence,
+                schema_version=schema_version,
+            ),
+        }
+    if type(instruction) is IRArrayGet:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "array": ir_value_to_dto(instruction.array, schema_version=schema_version),
+            "index": ir_value_to_dto(instruction.index, schema_version=schema_version),
+            "borrowed": _expect_bool(
+                instruction.borrowed,
+                "IR instruction 'array_get'.borrowed",
+            ),
+            "borrow_scope": _expect_optional_string(
+                instruction.borrow_scope,
+                "IR instruction 'array_get'.borrow_scope",
+            ),
+            "source_location": ir_source_location_to_dto(
+                instruction.source_location,
+                schema_version=schema_version,
+            ),
+        }
+    if type(instruction) in {IRArraySlice, IRListSlice}:
+        collection_field = "array" if type(instruction) is IRArraySlice else "list_value"
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            collection_field: ir_value_to_dto(
+                getattr(instruction, collection_field),
+                schema_version=schema_version,
+            ),
+            "start": ir_value_to_dto(instruction.start, schema_version=schema_version),
+            "end": ir_value_to_dto(instruction.end, schema_version=schema_version),
+            "source_location": ir_source_location_to_dto(
+                instruction.source_location,
+                schema_version=schema_version,
+            ),
+        }
+    if type(instruction) is IRListGet:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "list_value": ir_value_to_dto(
+                instruction.list_value,
+                schema_version=schema_version,
+            ),
+            "index": ir_value_to_dto(instruction.index, schema_version=schema_version),
+            "borrowed": _expect_bool(
+                instruction.borrowed,
+                "IR instruction 'list_get'.borrowed",
+            ),
+            "borrow_scope": _expect_optional_string(
+                instruction.borrow_scope,
+                "IR instruction 'list_get'.borrow_scope",
+            ),
+            "source_location": ir_source_location_to_dto(
+                instruction.source_location,
+                schema_version=schema_version,
+            ),
+        }
+    if type(instruction) is IRArraySet:
+        return {
+            "kind": kind,
+            "array": ir_value_to_dto(instruction.array, schema_version=schema_version),
+            "index": ir_value_to_dto(instruction.index, schema_version=schema_version),
+            "value": ir_value_to_dto(instruction.value, schema_version=schema_version),
+        }
+    if type(instruction) is IRListSet:
+        return {
+            "kind": kind,
+            "list_value": ir_value_to_dto(
+                instruction.list_value,
+                schema_version=schema_version,
+            ),
+            "index": ir_value_to_dto(instruction.index, schema_version=schema_version),
+            "value": ir_value_to_dto(instruction.value, schema_version=schema_version),
+        }
+    if type(instruction) is IRArrayLength:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "array": ir_value_to_dto(instruction.array, schema_version=schema_version),
+        }
+    if type(instruction) in {IRListLength, IRListIsEmpty}:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "list_value": ir_value_to_dto(
+                instruction.list_value,
+                schema_version=schema_version,
+            ),
+        }
     raise AssertionError(f"Missing encoder for registered IR instruction kind {kind!r}")
 
 
@@ -1102,6 +1339,260 @@ def ir_instruction_from_dto(
         return IRMethodResultValue(
             ir_value_from_dto(mapping["result"], schema_version=schema_version),
             ir_value_from_dto(mapping["method_result"], schema_version=schema_version),
+        )
+    if kind in {"array_new", "list_new"}:
+        _expect_fields(
+            mapping,
+            {"kind", "result", "elements"},
+            f"IR instruction '{kind}'",
+        )
+        elements = _expect_sequence(
+            mapping["elements"],
+            f"IR instruction '{kind}'.elements",
+        )
+        instruction_type = IRArrayNew if kind == "array_new" else IRListNew
+        return instruction_type(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            tuple(
+                ir_value_from_dto(element, schema_version=schema_version)
+                for element in elements
+            ),
+        )
+    if kind == "array_copy":
+        _expect_fields(
+            mapping,
+            {"kind", "result", "array", "source_location"},
+            "IR instruction 'array_copy'",
+        )
+        return IRArrayCopy(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_value_from_dto(mapping["array"], schema_version=schema_version),
+            ir_source_location_from_dto(
+                mapping["source_location"],
+                schema_version=schema_version,
+            ),
+        )
+    if kind == "list_copy":
+        _expect_fields(
+            mapping,
+            {"kind", "result", "list_value", "source_location"},
+            "IR instruction 'list_copy'",
+        )
+        return IRListCopy(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_value_from_dto(mapping["list_value"], schema_version=schema_version),
+            ir_source_location_from_dto(
+                mapping["source_location"],
+                schema_version=schema_version,
+            ),
+        )
+    if kind in {"list_contains", "list_index_of"}:
+        _expect_fields(
+            mapping,
+            {"kind", "result", "list_value", "value"},
+            f"IR instruction '{kind}'",
+        )
+        instruction_type = IRListContains if kind == "list_contains" else IRListIndexOf
+        return instruction_type(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_value_from_dto(mapping["list_value"], schema_version=schema_version),
+            ir_value_from_dto(mapping["value"], schema_version=schema_version),
+        )
+    if kind == "list_clear":
+        _expect_fields(mapping, {"kind", "list_value"}, "IR instruction 'list_clear'")
+        return IRListClear(
+            ir_value_from_dto(mapping["list_value"], schema_version=schema_version)
+        )
+    if kind == "list_push":
+        _expect_fields(
+            mapping,
+            {"kind", "list_value", "value"},
+            "IR instruction 'list_push'",
+        )
+        return IRListPush(
+            ir_value_from_dto(mapping["list_value"], schema_version=schema_version),
+            ir_value_from_dto(mapping["value"], schema_version=schema_version),
+        )
+    if kind == "list_insert":
+        _expect_fields(
+            mapping,
+            {"kind", "list_value", "index", "value"},
+            "IR instruction 'list_insert'",
+        )
+        return IRListInsert(
+            ir_value_from_dto(mapping["list_value"], schema_version=schema_version),
+            ir_value_from_dto(mapping["index"], schema_version=schema_version),
+            ir_value_from_dto(mapping["value"], schema_version=schema_version),
+        )
+    if kind == "list_remove_at":
+        _expect_fields(
+            mapping,
+            {"kind", "result", "list_value", "index"},
+            "IR instruction 'list_remove_at'",
+        )
+        return IRListRemoveAt(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_value_from_dto(mapping["list_value"], schema_version=schema_version),
+            ir_value_from_dto(mapping["index"], schema_version=schema_version),
+        )
+    if kind == "list_pop":
+        _expect_fields(
+            mapping,
+            {"kind", "result", "list_value"},
+            "IR instruction 'list_pop'",
+        )
+        return IRListPop(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_value_from_dto(mapping["list_value"], schema_version=schema_version),
+        )
+    if kind == "list_reverse":
+        _expect_fields(
+            mapping,
+            {"kind", "list_value"},
+            "IR instruction 'list_reverse'",
+        )
+        return IRListReverse(
+            ir_value_from_dto(mapping["list_value"], schema_version=schema_version)
+        )
+    if kind == "sequence_sort":
+        _expect_fields(
+            mapping,
+            {"kind", "sequence"},
+            "IR instruction 'sequence_sort'",
+        )
+        return IRSequenceSort(
+            ir_value_from_dto(mapping["sequence"], schema_version=schema_version)
+        )
+    if kind == "array_get":
+        _expect_fields(
+            mapping,
+            {
+                "kind",
+                "result",
+                "array",
+                "index",
+                "borrowed",
+                "borrow_scope",
+                "source_location",
+            },
+            "IR instruction 'array_get'",
+        )
+        return IRArrayGet(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_value_from_dto(mapping["array"], schema_version=schema_version),
+            ir_value_from_dto(mapping["index"], schema_version=schema_version),
+            _expect_bool(mapping["borrowed"], "IR instruction 'array_get'.borrowed"),
+            _expect_optional_string(
+                mapping["borrow_scope"],
+                "IR instruction 'array_get'.borrow_scope",
+            ),
+            ir_source_location_from_dto(
+                mapping["source_location"],
+                schema_version=schema_version,
+            ),
+        )
+    if kind == "array_slice":
+        _expect_fields(
+            mapping,
+            {"kind", "result", "array", "start", "end", "source_location"},
+            "IR instruction 'array_slice'",
+        )
+        return IRArraySlice(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_value_from_dto(mapping["array"], schema_version=schema_version),
+            ir_value_from_dto(mapping["start"], schema_version=schema_version),
+            ir_value_from_dto(mapping["end"], schema_version=schema_version),
+            ir_source_location_from_dto(
+                mapping["source_location"],
+                schema_version=schema_version,
+            ),
+        )
+    if kind == "list_slice":
+        _expect_fields(
+            mapping,
+            {"kind", "result", "list_value", "start", "end", "source_location"},
+            "IR instruction 'list_slice'",
+        )
+        return IRListSlice(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_value_from_dto(mapping["list_value"], schema_version=schema_version),
+            ir_value_from_dto(mapping["start"], schema_version=schema_version),
+            ir_value_from_dto(mapping["end"], schema_version=schema_version),
+            ir_source_location_from_dto(
+                mapping["source_location"],
+                schema_version=schema_version,
+            ),
+        )
+    if kind == "list_get":
+        _expect_fields(
+            mapping,
+            {
+                "kind",
+                "result",
+                "list_value",
+                "index",
+                "borrowed",
+                "borrow_scope",
+                "source_location",
+            },
+            "IR instruction 'list_get'",
+        )
+        return IRListGet(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_value_from_dto(mapping["list_value"], schema_version=schema_version),
+            ir_value_from_dto(mapping["index"], schema_version=schema_version),
+            _expect_bool(mapping["borrowed"], "IR instruction 'list_get'.borrowed"),
+            _expect_optional_string(
+                mapping["borrow_scope"],
+                "IR instruction 'list_get'.borrow_scope",
+            ),
+            ir_source_location_from_dto(
+                mapping["source_location"],
+                schema_version=schema_version,
+            ),
+        )
+    if kind == "array_set":
+        _expect_fields(
+            mapping,
+            {"kind", "array", "index", "value"},
+            "IR instruction 'array_set'",
+        )
+        return IRArraySet(
+            ir_value_from_dto(mapping["array"], schema_version=schema_version),
+            ir_value_from_dto(mapping["index"], schema_version=schema_version),
+            ir_value_from_dto(mapping["value"], schema_version=schema_version),
+        )
+    if kind == "list_set":
+        _expect_fields(
+            mapping,
+            {"kind", "list_value", "index", "value"},
+            "IR instruction 'list_set'",
+        )
+        return IRListSet(
+            ir_value_from_dto(mapping["list_value"], schema_version=schema_version),
+            ir_value_from_dto(mapping["index"], schema_version=schema_version),
+            ir_value_from_dto(mapping["value"], schema_version=schema_version),
+        )
+    if kind == "array_length":
+        _expect_fields(
+            mapping,
+            {"kind", "result", "array"},
+            "IR instruction 'array_length'",
+        )
+        return IRArrayLength(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_value_from_dto(mapping["array"], schema_version=schema_version),
+        )
+    if kind in {"list_length", "list_is_empty"}:
+        _expect_fields(
+            mapping,
+            {"kind", "result", "list_value"},
+            f"IR instruction '{kind}'",
+        )
+        instruction_type = IRListLength if kind == "list_length" else IRListIsEmpty
+        return instruction_type(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_value_from_dto(mapping["list_value"], schema_version=schema_version),
         )
     _unknown_tag("IR instruction", kind)
 
