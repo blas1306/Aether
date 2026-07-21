@@ -1,6 +1,6 @@
 //! Instruction variants in the initial Aether IR.
 
-use crate::{IRConstant, IRSourceLocation, IRStorage, IRValue};
+use crate::{IRConstant, IRSourceLocation, IRStorage, IRValue, LifecycleSource};
 
 /// An instruction in the initial, pre-SSA Aether IR.
 ///
@@ -24,7 +24,7 @@ pub enum IRInstruction {
     /// Copy-initializes owning storage.
     IRCopyInit {
         destination: IRStorage,
-        source: IRValue,
+        source: LifecycleSource,
         source_location: Option<IRSourceLocation>,
     },
     /// Move-initializes owning storage.
@@ -36,7 +36,7 @@ pub enum IRInstruction {
     /// Assigns to live owning storage.
     IRAssign {
         destination: IRStorage,
-        source: IRValue,
+        source: LifecycleSource,
         source_location: Option<IRSourceLocation>,
     },
     /// Destroys a live owning storage location.

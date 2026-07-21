@@ -35,4 +35,4 @@ pub use types::{
     IRType, IntType, InterfaceType, ListType, MatrixType, MethodResultType, NullableType,
     StringType, StructType, VectorType, VoidType,
 };
-pub use value::{IRParameter, IRStorage, IRValue};
+pub use value::{IRParameter, IRStorage, IRValue, LifecycleSource};

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -13,8 +14,10 @@ from aether.ir.dto import (
 )
 from aether.ir.model import (
     IRBasicBlock,
+    IRAssign,
     IRBranch,
     IRConst,
+    IRCopyInit,
     IRFunction,
     IRInitDefault,
     IRModule,
@@ -23,8 +26,9 @@ from aether.ir.model import (
     IRSourceLocation,
     IRStorage,
     IRStructDefinition,
+    IRValue,
 )
-from aether.ir.types import ArrayType, BoolType, IntType, ListType, StringType, StructType
+from aether.ir.types import ArrayType, BoolType, IntType, ListType, StringType, StructType, VoidType
 
 
 GOLDEN_PATH = Path(__file__).parent / "rust_migration" / "fixtures" / "ir_module_v1_golden.json"
@@ -82,6 +86,44 @@ def test_v1_golden_decodes_and_reencodes_byte_for_byte() -> None:
 
     assert module == _golden_module()
     assert ir_module_to_json(module).encode("utf-8") == expected
+
+
+def test_canonical_json_preserves_every_lifecycle_source_tag_and_name_collision() -> None:
+    value = IRValue("shared", IntType())
+    parameter = IRParameter("parameter", IntType())
+    storage = IRStorage("shared", IntType())
+    instructions = [
+        IRCopyInit(IRStorage("copy_value", IntType()), value),
+        IRCopyInit(IRStorage("copy_parameter", IntType()), parameter),
+        IRCopyInit(IRStorage("copy_storage", IntType()), storage),
+        IRAssign(IRStorage("assign_value", IntType()), value),
+        IRAssign(IRStorage("assign_parameter", IntType()), parameter),
+        IRAssign(IRStorage("assign_storage", IntType()), storage),
+    ]
+    module = IRModule(
+        [
+            IRFunction(
+                "sources",
+                [parameter],
+                VoidType(),
+                [IRBasicBlock("entry", instructions)],
+            )
+        ]
+    )
+
+    encoded = ir_module_to_json(module)
+    payload = json.loads(encoded)
+    source_dtos = payload["functions"][0]["blocks"][0]["instructions"]
+    assert [instruction["source"]["tag"] for instruction in source_dtos] == [
+        "value",
+        "parameter",
+        "storage",
+        "value",
+        "parameter",
+        "storage",
+    ]
+    assert source_dtos[0]["source"]["name"] == source_dtos[2]["source"]["name"] == "shared"
+    assert ir_module_from_json(encoded) == module
 
 
 def test_canonical_json_is_deterministic_utf8_sorted_and_preserves_list_order() -> None:

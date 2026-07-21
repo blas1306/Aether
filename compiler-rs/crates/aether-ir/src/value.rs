@@ -58,6 +58,41 @@ impl From<&IRStorage> for IRValue {
     }
 }
 
+/// A source operand accepted by lifecycle copy and assignment operations.
+///
+/// Immutable values and parameters participate in SSA verification, while
+/// storage sources participate in storage lifecycle verification.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum LifecycleSource {
+    /// An immutable SSA value, including a function parameter.
+    Value(IRValue),
+    /// An addressable owning storage location.
+    Storage(IRStorage),
+}
+
+impl LifecycleSource {
+    /// Returns the source's static IR type.
+    #[must_use]
+    pub fn r#type(&self) -> &IRType {
+        match self {
+            Self::Value(value) => &value.r#type,
+            Self::Storage(storage) => &storage.r#type,
+        }
+    }
+}
+
+impl From<IRValue> for LifecycleSource {
+    fn from(value: IRValue) -> Self {
+        Self::Value(value)
+    }
+}
+
+impl From<IRStorage> for LifecycleSource {
+    fn from(storage: IRStorage) -> Self {
+        Self::Storage(storage)
+    }
+}
+
 /// A declared function parameter.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IRParameter {
@@ -92,5 +127,11 @@ impl From<&IRParameter> for IRValue {
             name: parameter.name.clone(),
             r#type: parameter.r#type.clone(),
         }
+    }
+}
+
+impl From<IRParameter> for LifecycleSource {
+    fn from(parameter: IRParameter) -> Self {
+        Self::Value(parameter.into())
     }
 }

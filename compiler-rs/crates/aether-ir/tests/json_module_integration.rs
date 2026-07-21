@@ -7,13 +7,107 @@ use std::path::Path;
 use aether_ir::wire::{IR_SCHEMA_VERSION, IRModuleDTO};
 use aether_ir::{
     ArrayType, BoolType, EnumType, IRConstant, IRImportError, IRInstruction,
-    IRModuleJsonImportError, IRType, IntType, ListType, NullableType, StringType, StructType,
-    import_module_json,
+    IRModuleJsonImportError, IRType, IntType, LifecycleSource, ListType, NullableType, StringType,
+    StructType, import_module_json,
 };
 use serde_json::json;
 
 const GOLDEN: &str =
     include_str!("../../../../tests/aether/rust_migration/fixtures/ir_module_v1_golden.json");
+
+#[test]
+fn lifecycle_source_tags_survive_json_wire_and_owned_import_with_colliding_names() {
+    let source = |tag: &str, name: &str| {
+        json!({
+            "tag": tag,
+            "name": name,
+            "type": {"tag": "int"}
+        })
+    };
+    let destination = |name: &str| source("storage", name);
+    let document = json!({
+        "schema_version": 1,
+        "structs": [],
+        "functions": [{
+            "name": "source_tags",
+            "parameters": [{"tag": "parameter", "name": "parameter", "type": {"tag": "int"}}],
+            "return_type": {"tag": "void"},
+            "blocks": [{
+                "name": "entry",
+                "instructions": [
+                    {"kind": "copy_init", "destination": destination("copy_value"), "source": source("value", "value"), "source_location": null},
+                    {"kind": "copy_init", "destination": destination("copy_parameter"), "source": source("parameter", "parameter"), "source_location": null},
+                    {"kind": "copy_init", "destination": destination("copy_storage"), "source": source("storage", "shared"), "source_location": null},
+                    {"kind": "assign", "destination": destination("assign_value"), "source": source("value", "value"), "source_location": null},
+                    {"kind": "assign", "destination": destination("assign_parameter"), "source": source("parameter", "parameter"), "source_location": null},
+                    {"kind": "assign", "destination": destination("assign_storage"), "source": source("storage", "shared"), "source_location": null},
+                    {"kind": "copy_init", "destination": destination("collision"), "source": source("value", "shared"), "source_location": null}
+                ]
+            }]
+        }]
+    });
+    let json = serde_json::to_string(&document).expect("fixture must serialize");
+
+    let wire: IRModuleDTO = serde_json::from_str(&json).expect("wire DTO must preserve tags");
+    let module = import_module_json(&json).expect("owned import must preserve source kind");
+    let instructions = &module.functions[0].blocks[0].instructions;
+
+    assert!(matches!(
+        instructions[0],
+        IRInstruction::IRCopyInit {
+            source: LifecycleSource::Value(_),
+            ..
+        }
+    ));
+    assert!(matches!(
+        instructions[1],
+        IRInstruction::IRCopyInit {
+            source: LifecycleSource::Value(_),
+            ..
+        }
+    ));
+    assert!(matches!(
+        instructions[2],
+        IRInstruction::IRCopyInit {
+            source: LifecycleSource::Storage(_),
+            ..
+        }
+    ));
+    assert!(matches!(
+        instructions[3],
+        IRInstruction::IRAssign {
+            source: LifecycleSource::Value(_),
+            ..
+        }
+    ));
+    assert!(matches!(
+        instructions[4],
+        IRInstruction::IRAssign {
+            source: LifecycleSource::Value(_),
+            ..
+        }
+    ));
+    assert!(matches!(
+        instructions[5],
+        IRInstruction::IRAssign {
+            source: LifecycleSource::Storage(_),
+            ..
+        }
+    ));
+    let IRInstruction::IRCopyInit { source, .. } = &instructions[6] else {
+        panic!("expected collision copy_init");
+    };
+    assert!(matches!(source, LifecycleSource::Value(value) if value.name == "shared"));
+
+    let aether_ir::wire::IRInstructionDTO::CopyInit { source, .. } =
+        &wire.functions[0].blocks[0].instructions[2]
+    else {
+        panic!("expected wire copy_init");
+    };
+    assert!(
+        matches!(source, aether_ir::wire::IRValueDTO::Storage { name, .. } if name == "shared")
+    );
+}
 
 fn error_chain_len(error: &(dyn std::error::Error + 'static)) -> usize {
     let mut length = 1;

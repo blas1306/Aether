@@ -5,9 +5,9 @@ use std::error::Error as _;
 use aether_ir::wire::{IRFloatDTO, IRInstructionDTO};
 use aether_ir::{
     ArrayType, BoolType, DoubleType, EnumType, FunctionType, IRConstant, IREnumConstant,
-    IRImportError, IRInstruction, IRSourceLocation, IRStorage, IRType, IRValue, IntType, ListType,
-    MethodResultType, NullableType, StringType, StructType, VectorType, VoidType,
-    import_instruction,
+    IRImportError, IRInstruction, IRSourceLocation, IRStorage, IRType, IRValue, IntType,
+    LifecycleSource, ListType, MethodResultType, NullableType, StringType, StructType, VectorType,
+    VoidType, import_instruction,
 };
 use serde_json::{Value, json};
 
@@ -177,7 +177,7 @@ fn imports_all_lifecycle_variants_exactly_through_owned_and_borrowed_paths() {
             }),
             IRInstruction::IRCopyInit {
                 destination: int_storage("copy::destination"),
-                source: string_value("copy::source"),
+                source: string_value("copy::source").into(),
                 source_location: Some(present_location.clone()),
             },
         ),
@@ -196,6 +196,22 @@ fn imports_all_lifecycle_variants_exactly_through_owned_and_borrowed_paths() {
         ),
         (
             json!({
+                "kind": "copy_init",
+                "destination": {"tag": "storage", "name": "copy::storage_destination", "type": {"tag": "string"}},
+                "source": {"tag": "storage", "name": "copy::storage_source", "type": {"tag": "string"}},
+                "source_location": null
+            }),
+            IRInstruction::IRCopyInit {
+                destination: IRStorage::new("copy::storage_destination", StringType.into()),
+                source: LifecycleSource::Storage(IRStorage::new(
+                    "copy::storage_source",
+                    StringType.into(),
+                )),
+                source_location: None,
+            },
+        ),
+        (
+            json!({
                 "kind": "assign",
                 "destination": {"tag": "storage", "name": "assign::destination", "type": {"tag": "bool"}},
                 "source": {"tag": "value", "name": "assign::source", "type": {"tag": "int"}},
@@ -203,7 +219,7 @@ fn imports_all_lifecycle_variants_exactly_through_owned_and_borrowed_paths() {
             }),
             IRInstruction::IRAssign {
                 destination: IRStorage::new("assign::destination", BoolType.into()),
-                source: int_value("assign::source"),
+                source: int_value("assign::source").into(),
                 source_location: Some(location(0, -1, None)),
             },
         ),
@@ -215,6 +231,19 @@ fn imports_all_lifecycle_variants_exactly_through_owned_and_borrowed_paths() {
             }),
             IRInstruction::IRDestroy {
                 value: IRStorage::new("destroy::unresolved", StringType.into()),
+                source_location: None,
+            },
+        ),
+        (
+            json!({
+                "kind": "assign",
+                "destination": {"tag": "storage", "name": "assign::storage_destination", "type": {"tag": "int"}},
+                "source": {"tag": "storage", "name": "assign::storage_source", "type": {"tag": "int"}},
+                "source_location": null
+            }),
+            IRInstruction::IRAssign {
+                destination: int_storage("assign::storage_destination"),
+                source: LifecycleSource::Storage(int_storage("assign::storage_source")),
                 source_location: None,
             },
         ),
@@ -235,7 +264,7 @@ fn imports_all_lifecycle_variants_exactly_through_owned_and_borrowed_paths() {
         ),
     ];
 
-    assert_eq!(cases.len(), 9);
+    assert_eq!(cases.len(), 11);
     for (json, expected) in cases {
         let wire: IRInstructionDTO =
             serde_json::from_value(json).expect("lifecycle instruction JSON must deserialize");

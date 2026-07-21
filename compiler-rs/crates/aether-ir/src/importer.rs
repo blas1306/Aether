@@ -12,8 +12,8 @@ use crate::{
     ArrayType, BoolType, ClassRefType, ComplexType, DoubleType, EnumType, FloatType, FunctionType,
     IRBasicBlock, IRConstant, IREnumConstant, IRFunction, IRInstruction, IRModule, IRParameter,
     IRSourceLocation, IRStorage, IRStructDefinition, IRType, IRValue, IntType, InterfaceType,
-    ListType, MatrixType, MethodResultType, NullableType, StringType, StructType, VectorType,
-    VoidType,
+    LifecycleSource, ListType, MatrixType, MethodResultType, NullableType, StringType, StructType,
+    VectorType, VoidType,
 };
 
 /// A structural failure while importing a wire DTO into the owned Rust IR.
@@ -552,7 +552,7 @@ impl TryFrom<&IRInstructionDTO> for IRInstruction {
                 source_location,
             } => Ok(Self::IRCopyInit {
                 destination: import_instruction_storage(kind, "destination", destination)?,
-                source: import_instruction_value(kind, "source", source)?,
+                source: import_instruction_lifecycle_source(kind, "source", source)?,
                 source_location: import_instruction_source_location(kind, source_location)?,
             }),
             IRInstructionDTO::MoveInit {
@@ -570,7 +570,7 @@ impl TryFrom<&IRInstructionDTO> for IRInstruction {
                 source_location,
             } => Ok(Self::IRAssign {
                 destination: import_instruction_storage(kind, "destination", destination)?,
-                source: import_instruction_value(kind, "source", source)?,
+                source: import_instruction_lifecycle_source(kind, "source", source)?,
                 source_location: import_instruction_source_location(kind, source_location)?,
             }),
             IRInstructionDTO::Destroy {
@@ -1309,6 +1309,32 @@ impl TryFrom<&IRValueDTO> for IRValue {
     }
 }
 
+impl TryFrom<IRValueDTO> for LifecycleSource {
+    type Error = IRImportError;
+
+    fn try_from(value: IRValueDTO) -> Result<Self, Self::Error> {
+        match value {
+            IRValueDTO::Storage { name, r#type } => {
+                let r#type =
+                    IRType::try_from(r#type).map_err(|source| IRImportError::ValueType {
+                        kind: "storage",
+                        source: Box::new(source),
+                    })?;
+                Ok(Self::Storage(IRStorage { name, r#type }))
+            }
+            value => Ok(Self::Value(IRValue::try_from(value)?)),
+        }
+    }
+}
+
+impl TryFrom<&IRValueDTO> for LifecycleSource {
+    type Error = IRImportError;
+
+    fn try_from(value: &IRValueDTO) -> Result<Self, Self::Error> {
+        Self::try_from(value.clone())
+    }
+}
+
 impl TryFrom<IRStorageDTO> for IRStorage {
     type Error = IRImportError;
 
@@ -1399,6 +1425,14 @@ fn import_instruction_value(
     value: &IRValueDTO,
 ) -> Result<IRValue, IRImportError> {
     import_instruction_field(instruction, field, import_value(value))
+}
+
+fn import_instruction_lifecycle_source(
+    instruction: &'static str,
+    field: &'static str,
+    value: &IRValueDTO,
+) -> Result<LifecycleSource, IRImportError> {
+    import_instruction_field(instruction, field, value.try_into())
 }
 
 fn import_instruction_values(

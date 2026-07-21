@@ -453,7 +453,7 @@ fn intentionally_defers_cfg_names_and_lifecycle_contracts() {
     let mut block = IRBasicBlock::new("not_entry");
     block.instructions.push(IRInstruction::IRCopyInit {
         destination: IRStorage::new("slot", IntType.into()),
-        source: value("text", StringType.into()),
+        source: value("text", StringType.into()).into(),
         source_location: None,
     });
     block.instructions.push(IRInstruction::IRBranch {

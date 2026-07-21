@@ -1,14 +1,14 @@
 # Gradual Python-to-Rust compiler migration
 
-> Status: Phase 3, Step 3C.1 Rust IR SSA definition-before-use verification
+> Status: Phase 3, Step 3D.1 Rust IR local slot-state/lifecycle verification
 > complete. The isolated Rust workspace now has independently callable type,
-> structural, and SSA definition/use verifier passes over the complete owned IR.
-> Step 3C.1 covers function-local SSA definition uniqueness, name/type reference
-> validity, and same-block definition-before-use. Dominance, phi semantics,
-> ownership/lifecycle, PyO3, compiler-pipeline integration, LLVM, and production
-> integration remain unimplemented. This document defines sequencing and
-> promotion gates and does not declare the Python IR or SSA model a stable public
-> format.
+> structure, SSA, dominance, and block-local lifecycle verifier passes over the
+> complete owned IR. Step 3D.1 covers canonical lifecycle semantics and certain
+> source-ordered storage transitions. CFG lifecycle propagation, predecessor
+> merging, loops, exit cleanup, PyO3, compiler-pipeline integration, LLVM, and
+> production integration remain unimplemented. This document defines sequencing
+> and promotion gates and does not declare the Python IR or SSA model a stable
+> public format.
 
 ## 1. Decision summary
 
@@ -609,13 +609,14 @@ DTOs are rejected by `IRImportError::NonFiniteConstantFloat`; the serde wire
 contract also rejects NaN and infinity. Nested incompatible type shapes retain
 value/storage/parameter field context through dedicated importer error variants.
 
-The three wire value tags intentionally converge on the current owned
-`IRValue`, whose model stores only name and type; dedicated storage and parameter
-DTOs reconstruct `IRStorage` and `IRParameter`. Import does not resolve those
-names or check storage existence, instruction type agreement, duplicate
-parameters, ownership, symbols, or source-coordinate meaning. Those semantic
-rules remain exclusively verifier responsibilities, and verifier behavior is
-unchanged.
+The generic foundational `import_value` path converges the three wire value
+tags on owned `IRValue`, whose model stores only name and type; dedicated
+storage and parameter DTOs reconstruct `IRStorage` and `IRParameter`.
+Instruction-specific lifecycle sources are the exception added with Step
+3D.1: `copy_init` and `assign` preserve wire `storage` as
+`LifecycleSource::Storage`, while wire `value` and `parameter` become
+`LifecycleSource::Value`. Import does not resolve names or infer kind from
+identifier spelling.
 
 Focused tests deserialize foundational entities from JSON where applicable and
 cover every constant and value variant, storage, primitive and recursively
@@ -1384,7 +1385,7 @@ instruction variant to classify its immutable value operands explicitly.
 
 An SSA **use** is an immutable `IRValue` operand: scalar operands; direct-call
 arguments; an indirect callee and its arguments; print, struct, method-result,
-collection, and linear-algebra inputs; `IRStore.value`; the immutable sources of
+collection, and linear-algebra inputs; `IRStore.value`; the `Value` sources of
 `IRCopyInit` and `IRAssign`; a branch condition; or an optional return value.
 Operand vectors are checked in retained field/vector order. Instruction results
 are definitions, not uses. `IRStorage` destinations/sources, load/store slot
@@ -1530,6 +1531,125 @@ ownership/lifecycle verification**. SSA renaming, dominance frontiers,
 post-dominance, optimizer invariants, importer behavior, DTO/wire schema,
 canonical JSON, owned IR semantics, compiler pipeline, LLVM, and PyO3 remain
 unchanged.
+
+### Phase 3 Step 3D.1 Rust IR local slot-state/lifecycle verifier — complete
+
+Phase 3 Step 3D.1 adds the borrowed, non-mutating APIs
+`verify_module_local_lifecycle(&IRModule)` and
+`verify_function_local_lifecycle(&IRModule, &IRFunction)`. The function API
+accepts the module because nominal struct lifecycle traits require module
+definitions, matching the established shape of `verify_function_types`. The
+pass is independently callable and runs no prerequisite pass: structure, SSA,
+and dominance cannot establish any additional within-block fact, and invoking
+them would make unrelated malformed IR mask a local lifecycle diagnostic.
+
+Inspection covered `src/aether/ir/verifier.py`, `src/aether/ir/lifecycle.py`,
+`src/aether/ir/model.py`, `src/aether/ir/lowering.py`, the lifecycle expansion
+and LLVM layout/emission paths, Python SSA slot promotion, lifecycle tests and
+`VALUE_LIFECYCLE_DESIGN.md`, plus the owned IR importer/value/instruction model
+and all prior Rust verifier helpers. Python emits lifecycle before SSA,
+expands it before LLVM, and performs local transfer plus predecessor
+intersection and exit cleanup in one initial-IR verifier. Rust intentionally
+extracts only the locally provable subset here.
+
+#### Storage model and canonical effects
+
+The owned initial IR has no explicit slot declaration list. Function-local
+storage is implicitly introduced by the storage roles of `load`, `store`, the
+six lifecycle opcodes, and `return.transferred_storage`. A deterministic index
+records first occurrence and type in function/block/instruction/field order;
+map iteration never chooses a diagnostic. A repeated name with another type is
+reported at the conflicting operand with both locations. This representation
+has no module globals, separate address objects, or aggregate-field storage.
+Because every storage-role occurrence introduces the implicit function-local
+slot, `UnknownStorage` and `DuplicateStorage` are not representable rules.
+
+Storage and immutable SSA values are separate namespaces. Parameters begin as
+available SSA values but do not initialize same-named storage. Temporary and
+instruction-result values do not carry slot lifecycle state. Owned
+`copy_init` and `assign` source fields use
+`LifecycleSource::{Value, Storage}`. The importer maps canonical wire `value`
+and `parameter` to `Value` and maps wire `storage` to `Storage`; no namespace is
+inferred from a name.
+
+| operation | reads storage | initializes destination | requires live destination | consumes source | destroys | type policy |
+| --- | --- | --- | --- | --- | --- | --- |
+| `load` | slot | no | no | no | no | lifecycle pass only checks slot state |
+| `store` | no | yes, unconditionally | no | no | no | raw pre-SSA slot initialization/overwrite |
+| `init_default` | no | yes | no | no | no | non-void and `supports_default` |
+| `copy_init` | source only when tagged storage | yes | no | no | no | source storage live when known; exact source/destination type; trivial and managed allowed |
+| `move_init` | source | yes | no | yes, to `Moved` | no | exact non-void type; self alias forbidden |
+| `assign` | source only when tagged storage | no | yes | no | no | source storage live when known; exact source/destination type; self assignment remains valid |
+| `destroy` | target's live value | no | target must be live | no | yes, to `Destroyed` | every non-void type, including trivial types |
+| `relocate` | source | yes | no | yes, to `Moved` | no | positive count, exact trivially-relocatable type, self alias forbidden |
+| return transfer | transferred storage | no | storage must be live | ownership leaves at terminator; no following local state | no | non-void and same type as returned value |
+
+`store` follows actual Python behavior: it is neither lifecycle `assign` nor
+`copy_init`; it makes the raw slot live even after an earlier destroy or move,
+and repeated stores are allowed. `copy_init` leaves its immutable source alive.
+`move_init` and `relocate` invalidate storage sources. `destroy` is valid and
+tracked even when the type's generated destruction hook is a no-op. No
+lifecycle check is restricted solely to managed types.
+
+The local trait registry reproduces Python classification. Int/float/double/
+bool/complex/enum support default and trivial relocation. String and Array/List
+handles support default and relocation while retaining non-trivial copy and
+destroy semantics. Vector supports default only with `row` or `column`
+orientation and remains relocatable; Matrix remains relocatable without a
+dimension-free default; Function is relocatable without a default;
+ClassRef/Interface/Nullable have no current lifecycle layout; Void has no
+storage. Struct and MethodResult traits compose recursively in field order.
+
+#### Block-entry policy and diagnostics
+
+The state lattice is `Unknown`, `Uninitialized`, `Initialized`, `Moved`, and
+`Destroyed`. All indexed storage starts `Uninitialized` in a block named
+exactly `entry`, matching Python's empty entry slot set. Every non-entry block,
+reachable or not, starts `Unknown` because predecessor propagation is Step
+3D.2. `Unknown` is neither assumed valid nor invalid. A precondition on it is
+therefore accepted, while the operation's successful postcondition becomes a
+local fact. For example, a first destroy in a merge block is deferred, but a
+second destroy or load later in that same block is certainly invalid.
+
+Typed diagnostics are `ModuleLifecycleError`, `FunctionLifecycleError`,
+`BlockLifecycleError`, and `LifecycleRuleError`, with public
+`LocalSlotState`, `LifecycleOperation`, `LifecycleStorageRole`, and
+`LifecycleInstructionLocation` context. Implemented leaf rules cover storage
+type conflict, lifecycle source/destination type mismatch, invalid default or
+relocation type, invalid relocation count, forbidden move/relocate self alias,
+double initialization, use before known entry initialization, local use after
+move/destroy, assignment to known-uninitialized storage, destroy of
+known-uninitialized storage, double destroy, and return-transfer type mismatch.
+Errors retain function/block/instruction indices and names, instruction kind,
+field role, identifier, type, previous and attempted states, and exact prior
+and current transition locations where a prior local transition exists. All
+wrapper `Error::source()` chains remain downcastable and repeated runs produce
+equal errors.
+
+#### Fidelity correction and next step
+
+The lifecycle-source audit classified the previous importer collapse as an
+owned-IR fidelity bug. The smallest correction adds `LifecycleSource` only to
+owned `copy_init`/`assign` and their importer/verifier paths. Canonical JSON,
+Python DTOs, and Rust wire DTOs already carried the exact tag and did not
+change. Regression fixtures cover value, parameter, and storage sources;
+uninitialized, moved, and destroyed storage; managed copies; and identical SSA
+and storage spellings. Storage sources no longer become undefined SSA uses,
+and same-named SSA definitions cannot mask invalid storage state.
+
+Python still propagates state through its CFG, intersects predecessor states,
+rejects inconsistent branch lifecycle state, and checks complete cleanup at
+returns. Step 3D.1 deliberately does none of that CFG, loop, or cleanup work.
+Tests show that merge/loop reads and branch-dependent initialization, destroy,
+or move are accepted as `Unknown`, while the same invalid transitions are
+rejected once established in one block.
+
+The next recommended step is **Phase 3 Step 3D.2: inter-block lifecycle data
+flow and CFG state merging**. Predecessor propagation, fixed points, join
+merging, loop-carried state, complete move/return ownership, cleanup/leak
+guarantees, borrowing, alias analysis, optimizer invariants, pipeline
+integration, LLVM behavior, PyO3, wire schema, canonical JSON, and DTO contract
+remain unchanged.
 
 ## 8. Ownership and memory
 

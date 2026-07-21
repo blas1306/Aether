@@ -158,6 +158,110 @@ fn constant_payloads_are_literals_and_storage_operands_are_not_ssa_uses() {
 }
 
 #[test]
+fn lifecycle_value_sources_are_ssa_uses_and_storage_sources_are_not() {
+    let value_source = function(
+        "value_sources",
+        vec![IRParameter::new("input", IntType.into())],
+        VoidType.into(),
+        vec![block(
+            "entry",
+            vec![
+                IRInstruction::IRCopyInit {
+                    destination: IRStorage::new("copy", IntType.into()),
+                    source: int("input").into(),
+                    source_location: None,
+                },
+                IRInstruction::IRAssign {
+                    destination: IRStorage::new("assign", IntType.into()),
+                    source: int("input").into(),
+                    source_location: None,
+                },
+                ret(None),
+            ],
+        )],
+    );
+    assert_eq!(verify_function_ssa(&value_source), Ok(()));
+
+    for instruction in [
+        IRInstruction::IRCopyInit {
+            destination: IRStorage::new("copy", IntType.into()),
+            source: IRStorage::new("not_an_ssa_definition", IntType.into()).into(),
+            source_location: None,
+        },
+        IRInstruction::IRAssign {
+            destination: IRStorage::new("assign", IntType.into()),
+            source: IRStorage::new("not_an_ssa_definition", IntType.into()).into(),
+            source_location: None,
+        },
+    ] {
+        let storage_source = function(
+            "storage_source",
+            Vec::new(),
+            VoidType.into(),
+            vec![block("entry", vec![instruction, ret(None)])],
+        );
+        assert_eq!(verify_function_ssa(&storage_source), Ok(()));
+    }
+}
+
+#[test]
+fn lifecycle_source_kind_is_not_inferred_from_colliding_identifier_spelling() {
+    let storage_source = IRStorage::new("same", IntType.into());
+    let function = function(
+        "separate_namespaces",
+        vec![IRParameter::new("same", IntType.into())],
+        VoidType.into(),
+        vec![block(
+            "entry",
+            vec![
+                IRInstruction::IRCopyInit {
+                    destination: IRStorage::new("from_storage", IntType.into()),
+                    source: storage_source.into(),
+                    source_location: None,
+                },
+                IRInstruction::IRCopyInit {
+                    destination: IRStorage::new("from_value", IntType.into()),
+                    source: int("same").into(),
+                    source_location: None,
+                },
+                ret(None),
+            ],
+        )],
+    );
+
+    assert_eq!(verify_function_ssa(&function), Ok(()));
+}
+
+#[test]
+fn rejects_undefined_lifecycle_value_sources_for_copy_init_and_assign() {
+    for instruction in [
+        IRInstruction::IRCopyInit {
+            destination: IRStorage::new("copy", IntType.into()),
+            source: int("missing").into(),
+            source_location: None,
+        },
+        IRInstruction::IRAssign {
+            destination: IRStorage::new("assign", IntType.into()),
+            source: int("missing").into(),
+            source_location: None,
+        },
+    ] {
+        let function = function(
+            "undefined_lifecycle_value",
+            Vec::new(),
+            VoidType.into(),
+            vec![block("entry", vec![instruction, ret(None)])],
+        );
+        assert!(matches!(
+            verify_function_ssa(&function),
+            Err(FunctionSSAError::Block { source, .. })
+                if source.ssa_identifier == "missing"
+                    && matches!(source.source, SSADefinitionError::UndefinedReference { .. })
+        ));
+    }
+}
+
+#[test]
 fn function_reference_results_are_definitions_available_to_indirect_calls() {
     let signature: IRType = FunctionType {
         parameter_types: Vec::new(),

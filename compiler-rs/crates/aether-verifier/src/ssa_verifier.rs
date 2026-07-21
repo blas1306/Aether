@@ -2,7 +2,9 @@
 
 use std::collections::HashMap;
 
-use aether_ir::{IRBasicBlock, IRFunction, IRInstruction, IRModule, IRType, IRValue};
+use aether_ir::{
+    IRBasicBlock, IRFunction, IRInstruction, IRModule, IRType, IRValue, LifecycleSource,
+};
 
 use crate::ssa_error::{
     BlockSSAError, FunctionSSAError, ModuleSSAError, SSADefinitionError, SSADefinitionLocation,
@@ -247,13 +249,26 @@ pub(crate) fn ssa_operands(instruction: &IRInstruction) -> Vec<SSAOperand<'_>> {
         | IRInstruction::IRDestroy { .. }
         | IRInstruction::IRRelocate { .. }
         | IRInstruction::IRFunctionRef { .. }
-        | IRInstruction::IRJump { .. } => Vec::new(),
+        | IRInstruction::IRJump { .. }
+        | IRInstruction::IRCopyInit {
+            source: LifecycleSource::Storage(_),
+            ..
+        }
+        | IRInstruction::IRAssign {
+            source: LifecycleSource::Storage(_),
+            ..
+        } => Vec::new(),
         IRInstruction::IRStore { value, .. }
         | IRInstruction::IRCast { value, .. }
         | IRInstruction::IRPrint { value, .. } => vec![operand("value", value)],
-        IRInstruction::IRCopyInit { source, .. } | IRInstruction::IRAssign { source, .. } => {
-            vec![operand("source", source)]
+        IRInstruction::IRCopyInit {
+            source: LifecycleSource::Value(source),
+            ..
         }
+        | IRInstruction::IRAssign {
+            source: LifecycleSource::Value(source),
+            ..
+        } => vec![operand("source", source)],
         IRInstruction::IRBinaryOp { left, right, .. }
         | IRInstruction::IRCompareOp { left, right, .. }
         | IRInstruction::IRVectorAdd { left, right, .. }
