@@ -11,9 +11,16 @@ use crate::ssa_error::{
 use crate::verifier::{instruction_kind, instruction_result};
 
 #[derive(Clone, Debug)]
-struct Definition {
-    r#type: IRType,
-    location: SSADefinitionLocation,
+pub(crate) struct Definition {
+    pub(crate) r#type: IRType,
+    pub(crate) location: SSADefinitionLocation,
+}
+
+/// One immutable value operand and its retained instruction field.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SSAOperand<'instruction> {
+    pub(crate) value: &'instruction IRValue,
+    pub(crate) field_name: &'static str,
 }
 
 /// Verifies SSA definitions and references in every function of a module.
@@ -52,7 +59,7 @@ pub fn verify_function_ssa(function: &IRFunction) -> Result<(), FunctionSSAError
     Ok(())
 }
 
-fn collect_definitions(
+pub(crate) fn collect_definitions(
     function: &IRFunction,
 ) -> Result<HashMap<String, Definition>, FunctionSSAError> {
     let mut definitions: HashMap<String, Definition> = HashMap::new();
@@ -129,6 +136,7 @@ fn verify_block(
         let instruction_location =
             instruction_location(block_index, block, instruction_index, instruction);
         for (operand_index, operand) in ssa_operands(instruction).into_iter().enumerate() {
+            let operand = operand.value;
             let use_location = SSAUseLocation {
                 instruction: instruction_location.clone(),
                 operand_index,
@@ -187,7 +195,7 @@ fn verify_block(
     Ok(())
 }
 
-fn instruction_location(
+pub(crate) fn instruction_location(
     block_index: usize,
     block: &IRBasicBlock,
     instruction_index: usize,
@@ -223,7 +231,14 @@ fn block_error(
 // the verifier so new variants must explicitly classify immutable SSA values
 // separately from IRStorage operands and literal/metadata fields.
 #[allow(clippy::too_many_lines)]
-fn ssa_operands(instruction: &IRInstruction) -> Vec<&IRValue> {
+pub(crate) fn ssa_operands(instruction: &IRInstruction) -> Vec<SSAOperand<'_>> {
+    fn operand<'instruction>(
+        field_name: &'static str,
+        value: &'instruction IRValue,
+    ) -> SSAOperand<'instruction> {
+        SSAOperand { value, field_name }
+    }
+
     match instruction {
         IRInstruction::IRConst { .. }
         | IRInstruction::IRLoad { .. }
@@ -234,10 +249,11 @@ fn ssa_operands(instruction: &IRInstruction) -> Vec<&IRValue> {
         | IRInstruction::IRFunctionRef { .. }
         | IRInstruction::IRJump { .. } => Vec::new(),
         IRInstruction::IRStore { value, .. }
-        | IRInstruction::IRCopyInit { source: value, .. }
-        | IRInstruction::IRAssign { source: value, .. }
         | IRInstruction::IRCast { value, .. }
-        | IRInstruction::IRPrint { value, .. } => vec![value],
+        | IRInstruction::IRPrint { value, .. } => vec![operand("value", value)],
+        IRInstruction::IRCopyInit { source, .. } | IRInstruction::IRAssign { source, .. } => {
+            vec![operand("source", source)]
+        }
         IRInstruction::IRBinaryOp { left, right, .. }
         | IRInstruction::IRCompareOp { left, right, .. }
         | IRInstruction::IRVectorAdd { left, right, .. }
@@ -245,42 +261,61 @@ fn ssa_operands(instruction: &IRInstruction) -> Vec<&IRValue> {
         | IRInstruction::IRVectorDot { left, right, .. }
         | IRInstruction::IRMatrixAdd { left, right, .. }
         | IRInstruction::IRMatrixSub { left, right, .. }
-        | IRInstruction::IRMatrixMatMul { left, right, .. } => vec![left, right],
-        IRInstruction::IRUnaryOp { operand, .. } => vec![operand],
-        IRInstruction::IRCall { arguments, .. } => arguments.iter().collect(),
+        | IRInstruction::IRMatrixMatMul { left, right, .. } => {
+            vec![operand("left", left), operand("right", right)]
+        }
+        IRInstruction::IRUnaryOp { operand: value, .. } => vec![operand("operand", value)],
+        IRInstruction::IRCall { arguments, .. } => arguments
+            .iter()
+            .map(|value| operand("arguments", value))
+            .collect(),
         IRInstruction::IRCallIndirect {
             callee, arguments, ..
-        } => std::iter::once(callee).chain(arguments).collect(),
-        IRInstruction::IRStructNew { fields, .. } => fields.iter().collect(),
-        IRInstruction::IRStructGet { r#struct, .. } => vec![r#struct],
+        } => std::iter::once(operand("callee", callee))
+            .chain(arguments.iter().map(|value| operand("arguments", value)))
+            .collect(),
+        IRInstruction::IRStructNew { fields, .. } => fields
+            .iter()
+            .map(|value| operand("fields", value))
+            .collect(),
+        IRInstruction::IRStructGet { r#struct, .. } => vec![operand("struct", r#struct)],
         IRInstruction::IRStructSet {
             r#struct, value, ..
-        } => vec![r#struct, value],
+        } => vec![operand("struct", r#struct), operand("value", value)],
         IRInstruction::IRMethodResultNew {
             receiver, value, ..
-        } => std::iter::once(receiver).chain(value).collect(),
+        } => std::iter::once(operand("receiver", receiver))
+            .chain(value.iter().map(|value| operand("value", value)))
+            .collect(),
         IRInstruction::IRMethodResultReceiver { method_result, .. }
-        | IRInstruction::IRMethodResultValue { method_result, .. } => vec![method_result],
+        | IRInstruction::IRMethodResultValue { method_result, .. } => {
+            vec![operand("method_result", method_result)]
+        }
         IRInstruction::IRArrayNew { elements, .. }
         | IRInstruction::IRListNew { elements, .. }
         | IRInstruction::IRVectorNew { elements, .. }
-        | IRInstruction::IRMatrixNew { elements, .. } => elements.iter().collect(),
+        | IRInstruction::IRMatrixNew { elements, .. } => elements
+            .iter()
+            .map(|value| operand("elements", value))
+            .collect(),
         IRInstruction::IRArrayCopy { array, .. } | IRInstruction::IRArrayLength { array, .. } => {
-            vec![array]
+            vec![operand("array", array)]
         }
         IRInstruction::IRListCopy { list_value, .. }
         | IRInstruction::IRListClear { list_value }
         | IRInstruction::IRListPop { list_value, .. }
         | IRInstruction::IRListReverse { list_value }
         | IRInstruction::IRListLength { list_value, .. }
-        | IRInstruction::IRListIsEmpty { list_value, .. } => vec![list_value],
+        | IRInstruction::IRListIsEmpty { list_value, .. } => {
+            vec![operand("list_value", list_value)]
+        }
         IRInstruction::IRListPush { list_value, value }
         | IRInstruction::IRListContains {
             list_value, value, ..
         }
         | IRInstruction::IRListIndexOf {
             list_value, value, ..
-        } => vec![list_value, value],
+        } => vec![operand("list_value", list_value), operand("value", value)],
         IRInstruction::IRListInsert {
             list_value,
             index,
@@ -290,59 +325,104 @@ fn ssa_operands(instruction: &IRInstruction) -> Vec<&IRValue> {
             list_value,
             index,
             value,
-        } => vec![list_value, index, value],
+        } => vec![
+            operand("list_value", list_value),
+            operand("index", index),
+            operand("value", value),
+        ],
         IRInstruction::IRListRemoveAt {
             list_value, index, ..
         }
         | IRInstruction::IRListGet {
             list_value, index, ..
-        } => vec![list_value, index],
-        IRInstruction::IRSequenceSort { sequence } => vec![sequence],
-        IRInstruction::IRVectorScale { vector, scalar, .. } => vec![vector, scalar],
-        IRInstruction::IROuterProduct { column, row, .. } => vec![column, row],
-        IRInstruction::IRMatrixScale { matrix, scalar, .. } => vec![matrix, scalar],
-        IRInstruction::IRMatrixVectorMul { matrix, vector, .. } => vec![matrix, vector],
-        IRInstruction::IRVectorMatrixMul { vector, matrix, .. } => vec![vector, matrix],
-        IRInstruction::IRArrayGet { array, index, .. } => vec![array, index],
+        } => vec![operand("list_value", list_value), operand("index", index)],
+        IRInstruction::IRSequenceSort { sequence } => vec![operand("sequence", sequence)],
+        IRInstruction::IRVectorScale { vector, scalar, .. } => {
+            vec![operand("vector", vector), operand("scalar", scalar)]
+        }
+        IRInstruction::IROuterProduct { column, row, .. } => {
+            vec![operand("column", column), operand("row", row)]
+        }
+        IRInstruction::IRMatrixScale { matrix, scalar, .. } => {
+            vec![operand("matrix", matrix), operand("scalar", scalar)]
+        }
+        IRInstruction::IRMatrixVectorMul { matrix, vector, .. } => {
+            vec![operand("matrix", matrix), operand("vector", vector)]
+        }
+        IRInstruction::IRVectorMatrixMul { vector, matrix, .. } => {
+            vec![operand("vector", vector), operand("matrix", matrix)]
+        }
+        IRInstruction::IRArrayGet { array, index, .. } => {
+            vec![operand("array", array), operand("index", index)]
+        }
         IRInstruction::IRArraySet {
             array,
             index,
             value,
             ..
-        } => vec![array, index, value],
+        } => vec![
+            operand("array", array),
+            operand("index", index),
+            operand("value", value),
+        ],
         IRInstruction::IRArraySlice {
             array, start, end, ..
-        } => vec![array, start, end],
+        } => vec![
+            operand("array", array),
+            operand("start", start),
+            operand("end", end),
+        ],
         IRInstruction::IRListSlice {
             list_value,
             start,
             end,
             ..
-        } => vec![list_value, start, end],
-        IRInstruction::IRVectorGet { vector, index, .. } => vec![vector, index],
+        } => vec![
+            operand("list_value", list_value),
+            operand("start", start),
+            operand("end", end),
+        ],
+        IRInstruction::IRVectorGet { vector, index, .. } => {
+            vec![operand("vector", vector), operand("index", index)]
+        }
         IRInstruction::IRMatrixGet {
             matrix,
             row,
             column,
             ..
-        } => vec![matrix, row, column],
-        IRInstruction::IRVectorLength { vector, .. } => vec![vector],
+        } => vec![
+            operand("matrix", matrix),
+            operand("row", row),
+            operand("column", column),
+        ],
+        IRInstruction::IRVectorLength { vector, .. } => vec![operand("vector", vector)],
         IRInstruction::IRMatrixRows { matrix, .. }
-        | IRInstruction::IRMatrixColumns { matrix, .. } => vec![matrix],
+        | IRInstruction::IRMatrixColumns { matrix, .. } => vec![operand("matrix", matrix)],
         IRInstruction::IRVectorSet {
             vector,
             index,
             value,
             ..
-        } => vec![vector, index, value],
+        } => vec![
+            operand("vector", vector),
+            operand("index", index),
+            operand("value", value),
+        ],
         IRInstruction::IRMatrixSet {
             matrix,
             row,
             column,
             value,
             ..
-        } => vec![matrix, row, column, value],
-        IRInstruction::IRBranch { condition, .. } => vec![condition],
-        IRInstruction::IRReturn { value, .. } => value.iter().collect(),
+        } => vec![
+            operand("matrix", matrix),
+            operand("row", row),
+            operand("column", column),
+            operand("value", value),
+        ],
+        IRInstruction::IRBranch { condition, .. } => vec![operand("condition", condition)],
+        IRInstruction::IRReturn { value, .. } => {
+            value.iter().map(|value| operand("value", value)).collect()
+        }
     }
 }

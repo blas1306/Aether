@@ -1449,6 +1449,88 @@ wire schema, canonical JSON, owned IR semantics, compiler pipeline, LLVM, and
 PyO3 are unchanged. The next step is **Phase 3 Step 3C.2: Dominance
 verification**.
 
+### Phase 3 Step 3C.2 Rust IR dominance verifier — complete
+
+Phase 3 Step 3C.2 is complete. The `aether-verifier` crate now exposes
+`verify_module_dominance(&IRModule)` and
+`verify_function_dominance(&IRFunction)`. Both borrow their input and do not
+mutate the IR. The pass remains independently callable and no mandatory
+all-verifier pipeline was added. To remain safe when invoked directly, function
+dominance first invokes only the function-local Step 3B structural verification
+needed for an unambiguous CFG and Step 3C.1 SSA verification needed for a
+unique, resolved definition namespace. Failures are wrapped as typed
+prerequisite errors with their original, downcastable `Error::source()` chains.
+The Step 3A type verifier is not invoked, so structurally and SSA-valid IR can be
+dominance-assessed even when an unrelated instruction-local type rule is
+invalid.
+
+Python inspection confirmed that dominance has two different manifestations.
+`src/aether/ir/verifier.py` verifies the initial executable IR using forward CFG
+state and predecessor-state intersection; it has no explicit dominator pass.
+`src/aether/ssa/verifier.py` constructs a CFG, runs
+`aether.analysis.dominators.DominatorAnalysis`, and applies ordinary block
+dominance plus edge-sensitive phi availability to Python SSA IR. Step 3C.2
+copies the ordinary-use SSA behavior. This is appropriate for the owned Rust IR
+because Step 3C.1 already classifies parameters and immutable instruction
+results as one function-local SSA namespace. It does not copy Python phi rules:
+Python SSA contains `SSAPhi`, but the current owned Rust `IRInstruction` enum has
+no phi-like variant or edge-sensitive operand.
+
+The function-local CFG records a block index for each exact name, uses the block
+named exactly `entry` even when it is not first in retained order, preserves
+jump or true/false successor order, and builds unique predecessor vectors in
+retained source-block order. A branch whose two target fields are equal remains
+valid as established by Step 3B; it contributes one effective predecessor. A
+simple fixed-point set algorithm initializes `Dom(entry) = {entry}`, initializes
+other reachable blocks to the reachable set, and repeatedly intersects the
+dominator sets of reachable predecessors. This intentionally favors reviewable,
+deterministic behavior over a more complex dominator-tree algorithm.
+
+Parameters are definitions at function entry and are accepted in every valid
+use, including uses in unreachable blocks. An instruction result used in a
+different block must have a defining block that dominates the use block.
+Same-block ordering remains exclusively Step 3C.1's diagnostic; Step 3C.2 does
+not duplicate or contradict it. SSA operand extraction was narrowly shared with
+Step 3C.1 and now retains each operand's field name while preserving the exact
+existing field/vector traversal order. Constants, literal payloads, storage
+operands, raw function names, and block target names remain outside the SSA-use
+model.
+
+Unreachable behavior exactly follows the ordinary-use logic in the Python SSA
+verifier. Dominator analysis represents each unreachable block as a self-root,
+but the verifier permits cross-block dominance only when the use block is entry
+reachable. Consequently, same-block ordered definition/use in an isolated
+unreachable block is valid; a cross-block use within an unreachable component
+or cycle is invalid; a reachable use of an unreachable definition is invalid;
+and an unreachable use of a reachable instruction definition is invalid.
+Parameters remain the documented exception.
+
+Typed diagnostics are `ModuleDominanceError`, `FunctionDominanceError`,
+`BlockDominanceError`, `DominanceRuleError`, and `DominanceUseLocation`.
+`DefinitionDoesNotDominateUse` preserves function, use block name/index,
+instruction name/index, operand index and field, exact SSA identifier,
+definition and use locations, and the `entry` convention. Traversal selects the
+first failure in function/block/instruction/operand source order; internal graph
+collections do not select diagnostics. Repeated verification therefore yields
+equal typed errors.
+
+Focused tests cover parameters, diamonds, linear CFGs, multiple returns, loops,
+self-loops, multiple back edges, entry definitions, loop-header definitions,
+sibling/merge/ancestor failures, first-error ordering, exact case-sensitive
+names, duplicate branch targets, `entry` outside vector position zero, every
+documented unreachable case, prerequisite wrapping, same-block pass boundaries,
+type-invalid independence, lifecycle deferral, module order, and complete
+downcastable source chains.
+
+No Python verifier bug or unavoidable ordinary-dominance parity difference was
+found. Phi validation and predecessor-to-phi matching were not introduced;
+there is no current owned representation on which a separate Step 3C.3 could
+operate. The next real verifier work is therefore **Phase 3D:
+ownership/lifecycle verification**. SSA renaming, dominance frontiers,
+post-dominance, optimizer invariants, importer behavior, DTO/wire schema,
+canonical JSON, owned IR semantics, compiler pipeline, LLVM, and PyO3 remain
+unchanged.
+
 ## 8. Ownership and memory
 
 Python creates the DTO snapshot and owns it for the duration of the extension

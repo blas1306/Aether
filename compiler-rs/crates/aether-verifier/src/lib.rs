@@ -1,11 +1,15 @@
-//! Independent type, structural, and SSA definition/use passes for owned Aether IR.
+//! Independent type, structural, SSA definition/use, and dominance passes for owned Aether IR.
 //!
 //! Type verification checks declaration and instruction-local type contracts.
 //! Structural verification checks declarations, block termination, and local
 //! branch/jump targets. SSA verification checks function-local immutable value
-//! definitions, references, and same-block ordering. No pass performs dominance,
-//! phi, ownership, lifecycle, or optimization verification.
+//! definitions, references, and same-block ordering. Dominance verification
+//! checks cross-block availability. No pass performs phi, ownership, lifecycle,
+//! or optimization verification.
 
+mod cfg;
+mod dominance_error;
+mod dominance_verifier;
 mod error;
 mod ssa_error;
 mod ssa_verifier;
@@ -13,6 +17,11 @@ mod structure_error;
 mod structure_verifier;
 mod verifier;
 
+pub use dominance_error::{
+    BlockDominanceError, DominanceRuleError, DominanceUseLocation, FunctionDominanceError,
+    ModuleDominanceError,
+};
+pub use dominance_verifier::{verify_function_dominance, verify_module_dominance};
 pub use error::{
     BlockTypeVerificationError, FunctionTypeVerificationError, InstructionKind,
     InstructionTypeVerificationError, ModuleTypeVerificationError, TypeExpectation, TypeRuleError,

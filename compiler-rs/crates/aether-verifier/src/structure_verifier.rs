@@ -4,13 +4,14 @@ use std::collections::HashMap;
 
 use aether_ir::{IRBasicBlock, IRFunction, IRInstruction, IRModule};
 
+use crate::cfg::{
+    ENTRY_BLOCK_NAME, FunctionBlockIndex, TerminatorSuccessors, terminator_successors,
+};
 use crate::structure_error::{
     ActualBlockTermination, BlockStructureVerificationError, BranchTarget, ControlFlowRuleError,
     FunctionStructureVerificationError, ModuleStructureVerificationError, TerminatorExpectation,
 };
 use crate::verifier::instruction_kind;
-
-const ENTRY_BLOCK_NAME: &str = "entry";
 
 /// Verifies declaration structure, block structure, and local CFG targets.
 pub fn verify_module_structure(module: &IRModule) -> Result<(), ModuleStructureVerificationError> {
@@ -34,6 +35,14 @@ pub fn verify_function_structure(
     _module: &IRModule,
     function: &IRFunction,
 ) -> Result<(), FunctionStructureVerificationError> {
+    verify_function_structure_prerequisite(function).map(|_| ())
+}
+
+/// Runs the function-local portion of structural verification for passes that
+/// need an unambiguous CFG but no module declarations.
+pub(crate) fn verify_function_structure_prerequisite(
+    function: &IRFunction,
+) -> Result<FunctionBlockIndex<'_>, FunctionStructureVerificationError> {
     verify_unique_parameter_names(function)?;
     if function.blocks.is_empty() {
         return Err(FunctionStructureVerificationError::EmptyFunction {
@@ -41,8 +50,15 @@ pub fn verify_function_structure(
         });
     }
 
-    let blocks = collect_blocks(function)?;
-    if !blocks.contains_key(ENTRY_BLOCK_NAME) {
+    let blocks = FunctionBlockIndex::build(function).map_err(|duplicate| {
+        FunctionStructureVerificationError::DuplicateBlockName {
+            function_name: function.name.clone(),
+            block_index: duplicate.block_index,
+            block_name: function.blocks[duplicate.block_index].name.clone(),
+            earlier_block_index: duplicate.earlier_block_index,
+        }
+    })?;
+    if blocks.entry_index().is_none() {
         return Err(FunctionStructureVerificationError::MissingEntryBlock {
             function_name: function.name.clone(),
             required_entry_block: ENTRY_BLOCK_NAME.to_owned(),
@@ -59,7 +75,7 @@ pub fn verify_function_structure(
             }
         })?;
     }
-    Ok(())
+    Ok(blocks)
 }
 
 fn verify_struct_declarations(module: &IRModule) -> Result<(), ModuleStructureVerificationError> {
@@ -129,28 +145,10 @@ fn verify_unique_parameter_names(
     Ok(())
 }
 
-fn collect_blocks(
-    function: &IRFunction,
-) -> Result<HashMap<&str, usize>, FunctionStructureVerificationError> {
-    let mut blocks = HashMap::new();
-    for (block_index, block) in function.blocks.iter().enumerate() {
-        if let Some(&earlier_block_index) = blocks.get(block.name.as_str()) {
-            return Err(FunctionStructureVerificationError::DuplicateBlockName {
-                function_name: function.name.clone(),
-                block_index,
-                block_name: block.name.clone(),
-                earlier_block_index,
-            });
-        }
-        blocks.insert(block.name.as_str(), block_index);
-    }
-    Ok(blocks)
-}
-
 fn verify_block(
     function: &IRFunction,
     block: &IRBasicBlock,
-    blocks: &HashMap<&str, usize>,
+    blocks: &FunctionBlockIndex<'_>,
 ) -> Result<(), BlockStructureVerificationError> {
     let terminators: Vec<(usize, &IRInstruction)> = block
         .instructions
@@ -216,45 +214,41 @@ fn verify_block(
 fn verify_targets(
     function: &IRFunction,
     block: &IRBasicBlock,
-    blocks: &HashMap<&str, usize>,
+    blocks: &FunctionBlockIndex<'_>,
     instruction_index: usize,
     terminator: &IRInstruction,
 ) -> Result<(), BlockStructureVerificationError> {
-    match terminator {
-        IRInstruction::IRJump { target } if !blocks.contains_key(target.as_str()) => {
-            Err(block_error(
-                function,
-                block,
-                Some((instruction_index, terminator)),
-                ControlFlowRuleError::UnknownJumpTarget {
-                    target: target.clone(),
-                },
-            ))
-        }
-        IRInstruction::IRBranch {
+    match terminator_successors(terminator) {
+        TerminatorSuccessors::Jump(target) if !blocks.contains(target) => Err(block_error(
+            function,
+            block,
+            Some((instruction_index, terminator)),
+            ControlFlowRuleError::UnknownJumpTarget {
+                target: target.to_owned(),
+            },
+        )),
+        TerminatorSuccessors::Branch {
             true_target,
             false_target: _,
-            ..
-        } if !blocks.contains_key(true_target.as_str()) => Err(block_error(
+        } if !blocks.contains(true_target) => Err(block_error(
             function,
             block,
             Some((instruction_index, terminator)),
             ControlFlowRuleError::UnknownBranchTarget {
                 edge: BranchTarget::True,
-                target: true_target.clone(),
+                target: true_target.to_owned(),
             },
         )),
-        IRInstruction::IRBranch {
+        TerminatorSuccessors::Branch {
             true_target: _,
             false_target,
-            ..
-        } if !blocks.contains_key(false_target.as_str()) => Err(block_error(
+        } if !blocks.contains(false_target) => Err(block_error(
             function,
             block,
             Some((instruction_index, terminator)),
             ControlFlowRuleError::UnknownBranchTarget {
                 edge: BranchTarget::False,
-                target: false_target.clone(),
+                target: false_target.to_owned(),
             },
         )),
         _ => Ok(()),
