@@ -1,8 +1,9 @@
 # Gradual Python-to-Rust compiler migration
 
-> Status: migration implementation in progress. The isolated Rust workspace,
-> owned IR model, and schema-v1 Python DTO slices through `IRBasicBlock` now
-> exist; there is still no production integration. This document defines
+> Status: Phase 1 implementation in progress. The isolated Rust workspace,
+> owned IR model, and schema-v1 Python DTO slices through `IRFunction` now
+> exist; `IRModule` is the next container level and there is still no production
+> integration. This document defines
 > sequencing and promotion gates and does not declare the Python IR or SSA model
 > a stable public format.
 
@@ -335,9 +336,54 @@ representable. Terminator placement, reachability, dominance, successor
 existence, CFG consistency, and instruction semantics remain `IRVerifier`
 responsibilities so their stable `IRV-*` diagnostics are preserved.
 
-The next planned DTO container level is `IRFunction`, which will compose ordered
-parameters and blocks with the existing type, value, instruction, and block
-converters. Function and module DTO conversion are not part of Step 3D.
+### Function DTO
+
+Phase 1, Step 3E adds complete schema-v1 conversion for the current
+`IRFunction` model. Inspection of the Python dataclass and Rust struct found the
+same four fields in the same order: a string `name`, an ordered sequence of
+`IRParameter` values named `parameters`, an `IRType` named `return_type`, and an
+ordered sequence of `IRBasicBlock` values named `blocks`. The stable primitive
+representation is:
+
+```text
+{
+  "name": <string>,
+  "parameters": [<ParameterDTO>, ...],
+  "return_type": <TypeDTO>,
+  "blocks": [<BasicBlockDTO>, ...]
+}
+```
+
+The function conversion composes the existing parameter, type, and basic-block
+converters. Parameter and block order is retained exactly; neither sequence is
+sorted, deduplicated, or normalized. Schema version remains at the enclosing
+interchange-contract level and is not repeated in each function object.
+
+The current function model has no function-level storage/local declarations,
+explicit entry-block field, visibility or linkage, builtin/external/method/
+constructor/mutability flags, receiver information, attributes, metadata, or
+source location. Storage and source locations can still occur inside nested
+instructions and are preserved there by their existing DTO mappings. Entry
+identity remains the existing semantic convention that a block is named
+`entry`; the DTO does not derive or manufacture a separate entry field.
+
+The function boundary validates only the requested schema version, exact
+required fields, unexpected fields, primitive kinds, parameter and block
+sequence shape, and every nested parameter, type, block, and instruction DTO.
+It intentionally accepts structurally representable functions with no blocks,
+no entry block, duplicate parameter or block names, incompatible returns,
+unreachable blocks, malformed control flow, invalid parameter use, and invalid
+ownership or lifecycle behavior. Those are semantic `IRVerifier`
+responsibilities, preserving its stable `IRV-*` diagnostics.
+
+The Python/Rust field synchronization check is test-only: it inspects Python
+dataclass fields and resolved type hints, reads the Rust `IRFunction` source in
+the test process, and compares exact field names, order, and compatible type
+shapes with field-specific drift diagnostics. Production Python code does not
+read or depend on Rust source files.
+
+The next planned DTO container level is `IRModule`, which will compose ordered
+functions and struct definitions. Module DTO conversion is not part of Step 3E.
 
 ## 8. Ownership and memory
 

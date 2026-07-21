@@ -24,6 +24,7 @@ from .model import (
     IRCopyInit,
     IRDestroy,
     IREnumConstant,
+    IRFunction,
     IRFunctionRef,
     IRInitDefault,
     IRInstruction,
@@ -124,6 +125,8 @@ IRInstructionDTO: TypeAlias = dict[str, object]
 """Primitive ``kind``-tagged representation of a supported instruction."""
 IRBasicBlockDTO: TypeAlias = dict[str, object]
 """Named, ordered basic-block representation in the IR interchange schema."""
+IRFunctionDTO: TypeAlias = dict[str, object]
+"""Named function representation with ordered parameters and basic blocks."""
 
 
 class IRDTOError(ValueError):
@@ -2542,6 +2545,73 @@ def ir_basic_block_from_dto(
     )
 
 
+def ir_function_to_dto(
+    function: IRFunction,
+    *,
+    schema_version: int = IR_SCHEMA_VERSION,
+) -> IRFunctionDTO:
+    """Convert one exact Python function to its ordered primitive DTO.
+
+    The conversion preserves the current function container without deriving
+    entry-block identity or interpreting parameters, returns, or control flow.
+    Those semantic checks remain the responsibility of ``IRVerifier``.
+    """
+
+    _require_schema_version(schema_version)
+    if type(function) is not IRFunction:
+        raise TypeError(
+            f"Unsupported IR function for schema v{IR_SCHEMA_VERSION}: "
+            f"{type(function).__name__}"
+        )
+    parameters = _expect_sequence(function.parameters, "IR function parameters")
+    blocks = _expect_sequence(function.blocks, "IR function blocks")
+    return {
+        "name": _expect_string(function.name, "IR function name"),
+        "parameters": [
+            ir_parameter_to_dto(parameter, schema_version=schema_version)
+            for parameter in parameters
+        ],
+        "return_type": ir_type_to_dto(
+            function.return_type,
+            schema_version=schema_version,
+        ),
+        "blocks": [
+            ir_basic_block_to_dto(block, schema_version=schema_version)
+            for block in blocks
+        ],
+    }
+
+
+def ir_function_from_dto(
+    dto: Mapping[str, object],
+    *,
+    schema_version: int = IR_SCHEMA_VERSION,
+) -> IRFunction:
+    """Decode one strictly shaped function without semantic verification."""
+
+    _require_schema_version(schema_version)
+    mapping = _expect_mapping(dto, "IR function")
+    _expect_fields(
+        mapping,
+        {"name", "parameters", "return_type", "blocks"},
+        "IR function",
+    )
+    parameters = _expect_sequence(mapping["parameters"], "IR function.parameters")
+    blocks = _expect_sequence(mapping["blocks"], "IR function.blocks")
+    return IRFunction(
+        _expect_string(mapping["name"], "IR function.name"),
+        [
+            ir_parameter_from_dto(parameter, schema_version=schema_version)
+            for parameter in parameters
+        ],
+        ir_type_from_dto(mapping["return_type"], schema_version=schema_version),
+        [
+            ir_basic_block_from_dto(block, schema_version=schema_version)
+            for block in blocks
+        ],
+    )
+
+
 def _value_from_dto(
     dto: Mapping[str, object],
     *,
@@ -2695,6 +2765,7 @@ __all__ = [
     "IRConstant",
     "IRConstantDTO",
     "IRBasicBlockDTO",
+    "IRFunctionDTO",
     "IRDTOError",
     "IRDTOSchemaVersionError",
     "IREnumConstantDTO",
@@ -2713,6 +2784,8 @@ __all__ = [
     "ir_enum_constant_to_dto",
     "ir_instruction_from_dto",
     "ir_instruction_to_dto",
+    "ir_function_from_dto",
+    "ir_function_to_dto",
     "ir_parameter_from_dto",
     "ir_parameter_to_dto",
     "ir_source_location_from_dto",
