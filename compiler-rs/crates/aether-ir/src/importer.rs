@@ -166,9 +166,10 @@ pub fn import_optional_source_location(
 
 /// Reconstruct an owned Rust IR instruction from a borrowed wire DTO.
 ///
-/// The incremental importer currently supports the forty-five lifecycle/core,
-/// operator/cast, call-family, struct-family, and collection instruction kinds. Every
-/// other schema-v1 kind returns [`IRImportError::UnsupportedInstruction`].
+/// The incremental importer currently supports the sixty-five lifecycle/core,
+/// operator/cast, call-family, struct-family, collection, and linear-algebra
+/// instruction kinds. Every other schema-v1 kind returns
+/// [`IRImportError::UnsupportedInstruction`].
 pub fn import_instruction(instruction: &IRInstructionDTO) -> Result<IRInstruction, IRImportError> {
     instruction.try_into()
 }
@@ -534,6 +535,226 @@ impl TryFrom<&IRInstructionDTO> for IRInstruction {
             IRInstructionDTO::ListIsEmpty { result, list_value } => Ok(Self::IRListIsEmpty {
                 result: import_instruction_value(kind, "result", result)?,
                 list_value: import_instruction_value(kind, "list_value", list_value)?,
+            }),
+            IRInstructionDTO::VectorNew {
+                result,
+                elements,
+                orientation,
+            } => Ok(Self::IRVectorNew {
+                result: import_instruction_value(kind, "result", result)?,
+                elements: import_instruction_values(kind, "elements", elements)?,
+                orientation: orientation.0.clone(),
+            }),
+            IRInstructionDTO::MatrixNew {
+                result,
+                elements,
+                shape: [rows, cols],
+            } => Ok(Self::IRMatrixNew {
+                result: import_instruction_value(kind, "result", result)?,
+                elements: import_instruction_values(kind, "elements", elements)?,
+                rows: *rows,
+                cols: *cols,
+            }),
+            IRInstructionDTO::VectorAdd {
+                result,
+                left,
+                right,
+                shape: [length],
+                orientation,
+            } => Ok(Self::IRVectorAdd {
+                result: import_instruction_value(kind, "result", result)?,
+                left: import_instruction_value(kind, "left", left)?,
+                right: import_instruction_value(kind, "right", right)?,
+                length: *length,
+                orientation: orientation.0.clone(),
+            }),
+            IRInstructionDTO::VectorSub {
+                result,
+                left,
+                right,
+                shape: [length],
+                orientation,
+            } => Ok(Self::IRVectorSub {
+                result: import_instruction_value(kind, "result", result)?,
+                left: import_instruction_value(kind, "left", left)?,
+                right: import_instruction_value(kind, "right", right)?,
+                length: *length,
+                orientation: orientation.0.clone(),
+            }),
+            IRInstructionDTO::VectorScale {
+                result,
+                vector,
+                scalar,
+                shape: [length],
+                orientation,
+            } => Ok(Self::IRVectorScale {
+                result: import_instruction_value(kind, "result", result)?,
+                vector: import_instruction_value(kind, "vector", vector)?,
+                scalar: import_instruction_value(kind, "scalar", scalar)?,
+                length: *length,
+                orientation: orientation.0.clone(),
+            }),
+            IRInstructionDTO::VectorDot {
+                result,
+                left,
+                right,
+                shape: [length],
+            } => Ok(Self::IRVectorDot {
+                result: import_instruction_value(kind, "result", result)?,
+                left: import_instruction_value(kind, "left", left)?,
+                right: import_instruction_value(kind, "right", right)?,
+                length: *length,
+            }),
+            IRInstructionDTO::OuterProduct {
+                result,
+                column,
+                row,
+                shape: [rows, cols],
+            } => Ok(Self::IROuterProduct {
+                result: import_instruction_value(kind, "result", result)?,
+                column: import_instruction_value(kind, "column", column)?,
+                row: import_instruction_value(kind, "row", row)?,
+                rows: *rows,
+                cols: *cols,
+            }),
+            IRInstructionDTO::MatrixAdd {
+                result,
+                left,
+                right,
+                shape: [rows, cols],
+            } => Ok(Self::IRMatrixAdd {
+                result: import_instruction_value(kind, "result", result)?,
+                left: import_instruction_value(kind, "left", left)?,
+                right: import_instruction_value(kind, "right", right)?,
+                rows: *rows,
+                cols: *cols,
+            }),
+            IRInstructionDTO::MatrixSub {
+                result,
+                left,
+                right,
+                shape: [rows, cols],
+            } => Ok(Self::IRMatrixSub {
+                result: import_instruction_value(kind, "result", result)?,
+                left: import_instruction_value(kind, "left", left)?,
+                right: import_instruction_value(kind, "right", right)?,
+                rows: *rows,
+                cols: *cols,
+            }),
+            IRInstructionDTO::MatrixScale {
+                result,
+                matrix,
+                scalar,
+                shape: [rows, cols],
+            } => Ok(Self::IRMatrixScale {
+                result: import_instruction_value(kind, "result", result)?,
+                matrix: import_instruction_value(kind, "matrix", matrix)?,
+                scalar: import_instruction_value(kind, "scalar", scalar)?,
+                rows: *rows,
+                cols: *cols,
+            }),
+            IRInstructionDTO::MatrixMatMul {
+                result,
+                left,
+                right,
+                shape: [rows, inner, cols],
+            } => Ok(Self::IRMatrixMatMul {
+                result: import_instruction_value(kind, "result", result)?,
+                left: import_instruction_value(kind, "left", left)?,
+                right: import_instruction_value(kind, "right", right)?,
+                rows: *rows,
+                inner: *inner,
+                cols: *cols,
+            }),
+            IRInstructionDTO::MatrixVectorMul {
+                result,
+                matrix,
+                vector,
+                shape: [rows, inner],
+            } => Ok(Self::IRMatrixVectorMul {
+                result: import_instruction_value(kind, "result", result)?,
+                matrix: import_instruction_value(kind, "matrix", matrix)?,
+                vector: import_instruction_value(kind, "vector", vector)?,
+                rows: *rows,
+                inner: *inner,
+            }),
+            IRInstructionDTO::VectorMatrixMul {
+                result,
+                vector,
+                matrix,
+                shape: [rows, cols],
+            } => Ok(Self::IRVectorMatrixMul {
+                result: import_instruction_value(kind, "result", result)?,
+                vector: import_instruction_value(kind, "vector", vector)?,
+                matrix: import_instruction_value(kind, "matrix", matrix)?,
+                rows: *rows,
+                cols: *cols,
+            }),
+            IRInstructionDTO::VectorGet {
+                result,
+                vector,
+                index,
+            } => Ok(Self::IRVectorGet {
+                result: import_instruction_value(kind, "result", result)?,
+                vector: import_instruction_value(kind, "vector", vector)?,
+                index: import_instruction_value(kind, "index", index)?,
+            }),
+            IRInstructionDTO::MatrixGet {
+                result,
+                matrix,
+                row,
+                column,
+                shape: [cols],
+            } => Ok(Self::IRMatrixGet {
+                result: import_instruction_value(kind, "result", result)?,
+                matrix: import_instruction_value(kind, "matrix", matrix)?,
+                row: import_instruction_value(kind, "row", row)?,
+                column: import_instruction_value(kind, "column", column)?,
+                cols: *cols,
+            }),
+            IRInstructionDTO::VectorLength { result, vector } => Ok(Self::IRVectorLength {
+                result: import_instruction_value(kind, "result", result)?,
+                vector: import_instruction_value(kind, "vector", vector)?,
+            }),
+            IRInstructionDTO::MatrixRows {
+                result,
+                matrix,
+                shape: [rows],
+            } => Ok(Self::IRMatrixRows {
+                result: import_instruction_value(kind, "result", result)?,
+                matrix: import_instruction_value(kind, "matrix", matrix)?,
+                rows: *rows,
+            }),
+            IRInstructionDTO::MatrixColumns {
+                result,
+                matrix,
+                shape: [columns],
+            } => Ok(Self::IRMatrixColumns {
+                result: import_instruction_value(kind, "result", result)?,
+                matrix: import_instruction_value(kind, "matrix", matrix)?,
+                columns: *columns,
+            }),
+            IRInstructionDTO::VectorSet {
+                vector,
+                index,
+                value,
+            } => Ok(Self::IRVectorSet {
+                vector: import_instruction_value(kind, "vector", vector)?,
+                index: import_instruction_value(kind, "index", index)?,
+                value: import_instruction_value(kind, "value", value)?,
+            }),
+            IRInstructionDTO::MatrixSet {
+                matrix,
+                row,
+                column,
+                value,
+                shape: [cols],
+            } => Ok(Self::IRMatrixSet {
+                matrix: import_instruction_value(kind, "matrix", matrix)?,
+                row: import_instruction_value(kind, "row", row)?,
+                column: import_instruction_value(kind, "column", column)?,
+                value: import_instruction_value(kind, "value", value)?,
+                cols: *cols,
             }),
             _ => Err(IRImportError::UnsupportedInstruction { kind }),
         }

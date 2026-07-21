@@ -840,6 +840,67 @@ errors. A coverage audit asserts exactly 22 collection additions and confirms
 all 23 later linear-algebra and control-flow variants remain explicitly
 unsupported.
 
+### Step 4B.3F Rust linear algebra instruction importer
+
+The existing `import_instruction()` dispatch and its borrowed and consuming
+`TryFrom<IRInstructionDTO>` implementations now reconstruct all 20 linear
+algebra instructions in the frozen schema-v1 contract. Together with the prior
+families, the importer supports 65 / 68 instruction variants. Only `branch`,
+`jump`, and `return` remain explicitly unsupported; control flow is the next
+instruction family.
+
+The actual constructor fields are `vector_new(result, elements, orientation)`
+and `matrix_new(result, elements, shape[rows, cols])`. Vector arithmetic is
+`vector_add(result, left, right, shape[length], orientation)`,
+`vector_sub(result, left, right, shape[length], orientation)`,
+`vector_scale(result, vector, scalar, shape[length], orientation)`, and
+`vector_dot(result, left, right, shape[length])`. The outer product is
+`outer_product(result, column, row, shape[rows, cols])`.
+
+Matrix arithmetic is `matrix_add(result, left, right, shape[rows, cols])`,
+`matrix_sub(result, left, right, shape[rows, cols])`,
+`matrix_scale(result, matrix, scalar, shape[rows, cols])`,
+`matrix_mat_mul(result, left, right, shape[rows, inner, cols])`,
+`matrix_vector_mul(result, matrix, vector, shape[rows, inner])`, and
+`vector_matrix_mul(result, vector, matrix, shape[rows, cols])`. Element and
+dimension operations are `vector_get(result, vector, index)`,
+`matrix_get(result, matrix, row, column, shape[cols])`,
+`vector_length(result, vector)`, `matrix_rows(result, matrix, shape[rows])`,
+`matrix_columns(result, matrix, shape[columns])`,
+`vector_set(vector, index, value)`, and
+`matrix_set(matrix, row, column, value, shape[cols])`.
+
+These instruction DTOs do not contain separate element-type, transpose,
+general-metadata, or source-location fields. Element types remain embedded in
+each typed result or operand. The only nullable instruction metadata is
+`orientation` on vector construction, addition, subtraction, and scaling.
+Fixed-size wire `shape` arrays map positionally to the owned named dimension
+fields without reordering, normalization, or reshaping. Ordered constructor
+elements and all result, operand, index, row, column, and scalar values continue
+through the existing value, ordered-value-vector, recursive-type, nullable, and
+contextual `InstructionField` helpers. Wire and owned layouts can represent the
+same data, so no helper, importer error, wire-schema change, or owned-IR change
+was required.
+
+Import remains a structural adapter rather than a verifier. It does not check
+dimensions, vector lengths, multiplication compatibility, orientations or
+transpose correctness, invertibility, determinant domains, scalar or element
+compatibility, mutability or ownership, dominance, or use-before-definition.
+Negative, zero, extreme, and mutually inconsistent shapes, arbitrary
+orientation spellings, unresolved values, and operand/result type mismatches
+therefore import unchanged for later verifier diagnosis. Verifier and compiler
+pipeline behavior are unchanged.
+
+Focused tests cover every linear algebra variant through deterministic
+JSON-to-wire-to-owned reconstruction and both borrowed and consuming paths;
+representative ordered vectors and matrices; recursively nested element types;
+present and absent orientation metadata; exact positional shape retention;
+scalar and index operands; repeated reconstruction; DTO immutability;
+invalid-but-representable dimensions, shapes, orientations, and type
+combinations; and contextual nested importer errors. A coverage audit asserts
+exactly 20 additions and confirms that exactly the three control-flow variants
+remain unsupported.
+
 ## 8. Ownership and memory
 
 Python creates the DTO snapshot and owns it for the duration of the extension
