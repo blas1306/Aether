@@ -6,7 +6,8 @@ use aether_ir::wire::{IRFloatDTO, IRInstructionDTO};
 use aether_ir::{
     ArrayType, BoolType, DoubleType, EnumType, FunctionType, IRConstant, IREnumConstant,
     IRImportError, IRInstruction, IRSourceLocation, IRStorage, IRType, IRValue, IntType, ListType,
-    NullableType, StringType, VectorType, import_instruction,
+    MethodResultType, NullableType, StringType, StructType, VectorType, VoidType,
+    import_instruction,
 };
 use serde_json::{Value, json};
 
@@ -986,43 +987,422 @@ fn gives_call_instruction_and_field_context_for_nested_errors() {
 }
 
 #[test]
-fn unsupported_struct_instructions_still_return_unsupported_instruction() {
-    let cases = [
+#[allow(clippy::too_many_lines)]
+fn imports_struct_family_exactly_through_owned_and_borrowed_paths() {
+    let outer_type = IRType::from(StructType {
+        name: " Missing::Outer\0raw ".to_owned(),
+    });
+    let inner_type = IRType::from(StructType {
+        name: " Nested::Inner ".to_owned(),
+    });
+    let nested_payload_type = nested_string_list_type();
+    let method_result_type = IRType::from(MethodResultType {
+        receiver: StructType {
+            name: " Missing::Outer\0raw ".to_owned(),
+        },
+        value: Box::new(nested_payload_type.clone()),
+    });
+    let void_method_result_type = IRType::from(MethodResultType {
+        receiver: StructType {
+            name: " Missing::Outer\0raw ".to_owned(),
+        },
+        value: Box::new(VoidType.into()),
+    });
+
+    let cases = vec![
         (
             json!({
                 "kind": "struct_new",
-                "result": {"tag": "value", "name": "later::result", "type": {"tag": "int"}},
-                "fields": []
+                "result": {
+                    "tag": "value",
+                    "name": " constructed::outer ",
+                    "type": {"tag": "struct", "name": " Missing::Outer\0raw "}
+                },
+                "fields": [
+                    {
+                        "tag": "storage",
+                        "name": "third::nested",
+                        "type": {"tag": "struct", "name": " Nested::Inner "}
+                    },
+                    {
+                        "tag": "parameter",
+                        "name": "first::payload",
+                        "type": {
+                            "tag": "list",
+                            "element": {"tag": "nullable", "inner": {"tag": "string"}}
+                        }
+                    },
+                    {"tag": "value", "name": "second::flag", "type": {"tag": "bool"}}
+                ]
             }),
-            "struct_new",
+            IRInstruction::IRStructNew {
+                result: IRValue::new(" constructed::outer ", outer_type.clone()),
+                fields: vec![
+                    IRValue::new("third::nested", inner_type),
+                    IRValue::new("first::payload", nested_payload_type.clone()),
+                    IRValue::new("second::flag", BoolType.into()),
+                ],
+            },
         ),
         (
             json!({
                 "kind": "struct_get",
-                "result": {"tag": "value", "name": "later::result", "type": {"tag": "int"}},
-                "struct": {"tag": "value", "name": "later::struct", "type": {"tag": "int"}},
-                "field_index": 0,
-                "field_name": "field"
+                "result": {"tag": "value", "name": "get::result", "type": {"tag": "string"}},
+                "struct": {
+                    "tag": "parameter",
+                    "name": "get::receiver",
+                    "type": {"tag": "struct", "name": " Missing::Outer\0raw "}
+                },
+                "field_index": i64::MIN,
+                "field_name": " unknown::field\0raw "
             }),
-            "struct_get",
+            IRInstruction::IRStructGet {
+                result: string_value("get::result"),
+                r#struct: IRValue::new("get::receiver", outer_type.clone()),
+                field_index: i64::MIN,
+                field_name: " unknown::field\0raw ".to_owned(),
+            },
         ),
         (
             json!({
                 "kind": "struct_set",
-                "result": {"tag": "value", "name": "later::result", "type": {"tag": "int"}},
-                "struct": {"tag": "value", "name": "later::struct", "type": {"tag": "int"}},
-                "field_index": 0,
-                "field_name": "field",
-                "value": {"tag": "value", "name": "later::value", "type": {"tag": "int"}}
+                "result": {"tag": "storage", "name": "set::result", "type": {"tag": "bool"}},
+                "struct": {"tag": "value", "name": "set::not_a_struct", "type": {"tag": "int"}},
+                "field_index": i64::MAX,
+                "field_name": "missing::replacement",
+                "value": {
+                    "tag": "parameter",
+                    "name": "set::wrong_type",
+                    "type": {
+                        "tag": "vector",
+                        "element": {"tag": "double"},
+                        "orientation": " diagonal::raw "
+                    }
+                }
             }),
-            "struct_set",
+            IRInstruction::IRStructSet {
+                result: IRValue::new("set::result", BoolType.into()),
+                r#struct: int_value("set::not_a_struct"),
+                field_index: i64::MAX,
+                field_name: "missing::replacement".to_owned(),
+                value: IRValue::new(
+                    "set::wrong_type",
+                    VectorType {
+                        element: Box::new(DoubleType.into()),
+                        orientation: Some(" diagonal::raw ".to_owned()),
+                    }
+                    .into(),
+                ),
+            },
+        ),
+        (
+            json!({
+                "kind": "method_result_new",
+                "result": {
+                    "tag": "value",
+                    "name": "method::pair",
+                    "type": {
+                        "tag": "method_result",
+                        "receiver": {"tag": "struct", "name": " Missing::Outer\0raw "},
+                        "value": {
+                            "tag": "list",
+                            "element": {"tag": "nullable", "inner": {"tag": "string"}}
+                        }
+                    }
+                },
+                "receiver": {
+                    "tag": "storage",
+                    "name": "method::receiver",
+                    "type": {"tag": "struct", "name": " Missing::Outer\0raw "}
+                },
+                "value": {
+                    "tag": "parameter",
+                    "name": "method::payload",
+                    "type": {
+                        "tag": "list",
+                        "element": {"tag": "nullable", "inner": {"tag": "string"}}
+                    }
+                }
+            }),
+            IRInstruction::IRMethodResultNew {
+                result: IRValue::new("method::pair", method_result_type.clone()),
+                receiver: IRValue::new("method::receiver", outer_type.clone()),
+                value: Some(IRValue::new("method::payload", nested_payload_type.clone())),
+            },
+        ),
+        (
+            json!({
+                "kind": "method_result_new",
+                "result": {
+                    "tag": "value",
+                    "name": "method::void_pair",
+                    "type": {
+                        "tag": "method_result",
+                        "receiver": {"tag": "struct", "name": " Missing::Outer\0raw "},
+                        "value": {"tag": "void"}
+                    }
+                },
+                "receiver": {
+                    "tag": "value",
+                    "name": "method::void_receiver",
+                    "type": {"tag": "struct", "name": " Missing::Outer\0raw "}
+                },
+                "value": null
+            }),
+            IRInstruction::IRMethodResultNew {
+                result: IRValue::new("method::void_pair", void_method_result_type),
+                receiver: IRValue::new("method::void_receiver", outer_type.clone()),
+                value: None,
+            },
+        ),
+        (
+            json!({
+                "kind": "method_result_receiver",
+                "result": {
+                    "tag": "value",
+                    "name": "extracted::receiver",
+                    "type": {"tag": "struct", "name": " Missing::Outer\0raw "}
+                },
+                "method_result": {
+                    "tag": "parameter",
+                    "name": "extract::pair",
+                    "type": {
+                        "tag": "method_result",
+                        "receiver": {"tag": "struct", "name": " Missing::Outer\0raw "},
+                        "value": {
+                            "tag": "list",
+                            "element": {"tag": "nullable", "inner": {"tag": "string"}}
+                        }
+                    }
+                }
+            }),
+            IRInstruction::IRMethodResultReceiver {
+                result: IRValue::new("extracted::receiver", outer_type.clone()),
+                method_result: IRValue::new("extract::pair", method_result_type.clone()),
+            },
+        ),
+        (
+            json!({
+                "kind": "method_result_value",
+                "result": {
+                    "tag": "storage",
+                    "name": "extracted::payload",
+                    "type": {
+                        "tag": "list",
+                        "element": {"tag": "nullable", "inner": {"tag": "string"}}
+                    }
+                },
+                "method_result": {
+                    "tag": "value",
+                    "name": "extract::pair",
+                    "type": {
+                        "tag": "method_result",
+                        "receiver": {"tag": "struct", "name": " Missing::Outer\0raw "},
+                        "value": {
+                            "tag": "list",
+                            "element": {"tag": "nullable", "inner": {"tag": "string"}}
+                        }
+                    }
+                }
+            }),
+            IRInstruction::IRMethodResultValue {
+                result: IRValue::new("extracted::payload", nested_payload_type),
+                method_result: IRValue::new("extract::pair", method_result_type),
+            },
+        ),
+    ];
+
+    assert_eq!(cases.len(), 7);
+    for (json, expected) in cases {
+        let encoded =
+            serde_json::to_string(&json).expect("struct JSON must encode deterministically");
+        let wire: IRInstructionDTO =
+            serde_json::from_str(&encoded).expect("struct-family JSON must deserialize");
+        let original = wire.clone();
+
+        assert_eq!(import_instruction(&wire), Ok(expected.clone()));
+        assert_eq!(import_instruction(&wire), Ok(expected.clone()));
+        assert_eq!(IRInstruction::try_from(&wire), Ok(expected.clone()));
+        assert_eq!(IRInstruction::try_from(wire.clone()), Ok(expected));
+        assert_eq!(wire, original, "borrowed import must not mutate its DTO");
+    }
+}
+
+#[test]
+fn preserves_struct_constructor_field_order() {
+    let wire: IRInstructionDTO = serde_json::from_value(json!({
+        "kind": "struct_new",
+        "result": {
+            "tag": "value",
+            "name": "ordered",
+            "type": {"tag": "struct", "name": "UnknownOrdered"}
+        },
+        "fields": [
+            {"tag": "value", "name": "third", "type": {"tag": "string"}},
+            {"tag": "value", "name": "first", "type": {"tag": "bool"}},
+            {"tag": "value", "name": "second", "type": {"tag": "int"}},
+            {"tag": "value", "name": "third", "type": {"tag": "string"}}
+        ]
+    }))
+    .expect("ordered constructor fields must deserialize");
+
+    let IRInstruction::IRStructNew { result, fields } =
+        import_instruction(&wire).expect("unknown structs and duplicate fields are representable")
+    else {
+        panic!("expected a struct_new instruction");
+    };
+
+    assert_eq!(
+        result.r#type,
+        StructType {
+            name: "UnknownOrdered".to_owned()
+        }
+        .into()
+    );
+    assert_eq!(
+        fields
+            .iter()
+            .map(|field| field.name.as_str())
+            .collect::<Vec<_>>(),
+        ["third", "first", "second", "third"]
+    );
+}
+
+#[test]
+fn leaves_unknown_struct_fields_and_type_mismatches_to_the_verifier() {
+    let get: IRInstructionDTO = serde_json::from_value(json!({
+        "kind": "struct_get",
+        "result": {"tag": "value", "name": "result", "type": {"tag": "bool"}},
+        "struct": {
+            "tag": "value",
+            "name": "receiver",
+            "type": {"tag": "struct", "name": "DefinitelyMissing"}
+        },
+        "field_index": -91,
+        "field_name": "definitely_missing"
+    }))
+    .expect("invalid-but-representable struct_get must deserialize");
+    let set: IRInstructionDTO = serde_json::from_value(json!({
+        "kind": "struct_set",
+        "result": {"tag": "value", "name": "result", "type": {"tag": "string"}},
+        "struct": {"tag": "value", "name": "receiver", "type": {"tag": "bool"}},
+        "field_index": -1,
+        "field_name": "unknown_field",
+        "value": {"tag": "value", "name": "replacement", "type": {"tag": "int"}}
+    }))
+    .expect("invalid-but-representable struct_set must deserialize");
+
+    assert!(matches!(
+        import_instruction(&get),
+        Ok(IRInstruction::IRStructGet {
+            field_index: -91,
+            ref field_name,
+            ..
+        }) if field_name == "definitely_missing"
+    ));
+    assert!(matches!(
+        import_instruction(&set),
+        Ok(IRInstruction::IRStructSet {
+            field_index: -1,
+            ref field_name,
+            ..
+        }) if field_name == "unknown_field"
+    ));
+}
+
+#[test]
+fn gives_struct_instruction_and_field_context_for_nested_errors() {
+    let cases = [
+        (
+            json!({
+                "kind": "struct_new",
+                "result": {"tag": "value", "name": "result", "type": {"tag": "int"}},
+                "fields": [{
+                    "tag": "storage",
+                    "name": "bad::field",
+                    "type": {
+                        "tag": "method_result",
+                        "receiver": {"tag": "array", "element": {"tag": "int"}},
+                        "value": {"tag": "string"}
+                    }
+                }]
+            }),
+            IRImportError::InstructionField {
+                instruction: "struct_new",
+                field: "fields",
+                source: Box::new(IRImportError::ValueType {
+                    kind: "storage",
+                    source: Box::new(IRImportError::MethodResultReceiverNotStruct {
+                        actual: "array",
+                    }),
+                }),
+            },
+        ),
+        (
+            json!({
+                "kind": "method_result_new",
+                "result": {"tag": "value", "name": "result", "type": {"tag": "int"}},
+                "receiver": {
+                    "tag": "parameter",
+                    "name": "bad::receiver",
+                    "type": {
+                        "tag": "method_result",
+                        "receiver": {"tag": "list", "element": {"tag": "int"}},
+                        "value": {"tag": "bool"}
+                    }
+                },
+                "value": null
+            }),
+            IRImportError::InstructionField {
+                instruction: "method_result_new",
+                field: "receiver",
+                source: Box::new(IRImportError::ValueType {
+                    kind: "parameter",
+                    source: Box::new(IRImportError::MethodResultReceiverNotStruct {
+                        actual: "list",
+                    }),
+                }),
+            },
+        ),
+    ];
+
+    for (json, expected) in cases {
+        let wire: IRInstructionDTO = serde_json::from_value(json)
+            .expect("the wire model permits the unrepresentable nested type");
+
+        assert_eq!(import_instruction(&wire), Err(expected));
+    }
+}
+
+#[test]
+fn unsupported_collection_instructions_still_return_unsupported_instruction() {
+    let cases = [
+        (
+            json!({
+                "kind": "array_new",
+                "result": {"tag": "value", "name": "later::array", "type": {"tag": "int"}},
+                "elements": []
+            }),
+            "array_new",
+        ),
+        (
+            json!({
+                "kind": "list_get",
+                "result": {"tag": "value", "name": "later::result", "type": {"tag": "int"}},
+                "list_value": {"tag": "value", "name": "later::list", "type": {"tag": "int"}},
+                "index": {"tag": "value", "name": "later::index", "type": {"tag": "int"}},
+                "borrowed": true,
+                "borrow_scope": "later::scope",
+                "source_location": null
+            }),
+            "list_get",
         ),
     ];
 
     for (json, kind) in cases {
         let wire: IRInstructionDTO = serde_json::from_value(json)
-            .expect("unsupported instruction JSON must still deserialize");
-        let error = import_instruction(&wire).expect_err("structs are a later importer slice");
+            .expect("unsupported collection instruction JSON must deserialize");
+        let error = import_instruction(&wire).expect_err("collections are a later importer slice");
 
         assert_eq!(error, IRImportError::UnsupportedInstruction { kind });
         assert_eq!(

@@ -166,9 +166,9 @@ pub fn import_optional_source_location(
 
 /// Reconstruct an owned Rust IR instruction from a borrowed wire DTO.
 ///
-/// The incremental importer currently supports the seventeen lifecycle/core,
-/// operator/cast, and call-family instruction kinds. Every other schema-v1 kind returns
-/// [`IRImportError::UnsupportedInstruction`].
+/// The incremental importer currently supports the twenty-three lifecycle/core,
+/// operator/cast, call-family, and struct-family instruction kinds. Every other schema-v1
+/// kind returns [`IRImportError::UnsupportedInstruction`].
 pub fn import_instruction(instruction: &IRInstructionDTO) -> Result<IRInstruction, IRImportError> {
     instruction.try_into()
 }
@@ -318,6 +318,57 @@ impl TryFrom<&IRInstructionDTO> for IRInstruction {
                 value: import_instruction_value(kind, "value", value)?,
                 newline: *newline,
                 aggregate_shape: aggregate_shape.0.clone(),
+            }),
+            IRInstructionDTO::StructNew { result, fields } => Ok(Self::IRStructNew {
+                result: import_instruction_value(kind, "result", result)?,
+                fields: import_instruction_values(kind, "fields", fields)?,
+            }),
+            IRInstructionDTO::StructGet {
+                result,
+                r#struct,
+                field_index,
+                field_name,
+            } => Ok(Self::IRStructGet {
+                result: import_instruction_value(kind, "result", result)?,
+                r#struct: import_instruction_value(kind, "struct", r#struct)?,
+                field_index: *field_index,
+                field_name: field_name.clone(),
+            }),
+            IRInstructionDTO::StructSet {
+                result,
+                r#struct,
+                field_index,
+                field_name,
+                value,
+            } => Ok(Self::IRStructSet {
+                result: import_instruction_value(kind, "result", result)?,
+                r#struct: import_instruction_value(kind, "struct", r#struct)?,
+                field_index: *field_index,
+                field_name: field_name.clone(),
+                value: import_instruction_value(kind, "value", value)?,
+            }),
+            IRInstructionDTO::MethodResultNew {
+                result,
+                receiver,
+                value,
+            } => Ok(Self::IRMethodResultNew {
+                result: import_instruction_value(kind, "result", result)?,
+                receiver: import_instruction_value(kind, "receiver", receiver)?,
+                value: import_optional_instruction_value(kind, "value", value)?,
+            }),
+            IRInstructionDTO::MethodResultReceiver {
+                result,
+                method_result,
+            } => Ok(Self::IRMethodResultReceiver {
+                result: import_instruction_value(kind, "result", result)?,
+                method_result: import_instruction_value(kind, "method_result", method_result)?,
+            }),
+            IRInstructionDTO::MethodResultValue {
+                result,
+                method_result,
+            } => Ok(Self::IRMethodResultValue {
+                result: import_instruction_value(kind, "result", result)?,
+                method_result: import_instruction_value(kind, "method_result", method_result)?,
             }),
             _ => Err(IRImportError::UnsupportedInstruction { kind }),
         }

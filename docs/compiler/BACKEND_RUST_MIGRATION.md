@@ -1,12 +1,12 @@
 # Gradual Python-to-Rust compiler migration
 
-> Status: Phase 2, Step 4B.3C Rust call-family instruction importer
+> Status: Phase 2, Step 4B.3D Rust struct-family instruction importer
 > complete. The isolated Rust workspace, owned IR model, frozen schema-v1
 > Python DTO tree, and separate serde wire model cover the complete current
 > Python IR. The importer
 > now reconstructs all 18 owned Rust type variants plus constants, enum-constant
-> metadata, values, storage, parameters, source locations, and 17 lifecycle,
-> core, operator, cast, and call-family instructions. The other 51 instructions plus block,
+> metadata, values, storage, parameters, source locations, and 23 lifecycle,
+> core, operator, cast, call-family, and struct-family instructions. The other 45 instructions plus block,
 > function, struct-definition, and module import, PyO3, verification, and production
 > integration remain unimplemented. This document defines sequencing and
 > promotion gates and does not declare the Python IR or SSA model a stable public
@@ -739,6 +739,49 @@ immutability, unresolved function names, signature and result mismatches,
 nested contextual failures, and continued `UnsupportedInstruction` rejection
 for struct instructions. The next planned instruction-importer family is
 structs and method results. Collections, linear algebra, control flow, blocks,
+functions, modules, verifier logic, PyO3, and pipeline integration remain later
+work.
+
+### Step 4B.3D Rust struct-family instruction importer
+
+The existing `import_instruction()` dispatch and its borrowed and consuming
+`TryFrom<IRInstructionDTO>` implementations now also reconstruct `struct_new`,
+`struct_get`, `struct_set`, `method_result_new`, `method_result_receiver`, and
+`method_result_value`. The struct importer is complete, bringing support to
+23 / 68 schema-v1 instruction variants. The remaining 45 kinds continue to
+return `IRImportError::UnsupportedInstruction`; no second dispatch mechanism
+was introduced. The next instruction-importer family is collections.
+
+The actual wire and owned layouts align directly. Struct construction preserves
+typed `result` values and ordered `fields`; field reads and functional field
+updates preserve typed `result` and `struct` values, signed `field_index`, exact
+`field_name`, and, for updates, the replacement `value`. Method-result
+construction preserves typed `result` and `receiver` values plus nullable
+`value`; both extraction instructions preserve typed `result` and
+`method_result` values. These variants have no source-location field. All nested
+values and types continue through the existing recursive value and type
+importers, and the nullable method value uses the existing optional-value path.
+
+Nested structural failures retain the instruction kind and exact field through
+`IRImportError::InstructionField`; the owned model can otherwise represent all
+valid wire layouts in this family, so no new importer error was required. Names,
+field spellings, field order, indices, receiver identities, result identities,
+and nullable values are copied without normalization.
+
+Import remains intentionally separate from verification. It does not resolve
+struct definitions or field names, check duplicate or missing constructor
+fields, compare field/value types, validate method receivers, or apply ownership
+rules. Unknown names and structurally representable invalid combinations import
+successfully for later verifier handling. Verifier and compiler behavior are
+unchanged.
+
+Focused tests cover every struct and method-result instruction, ordered and
+duplicate constructor fields, recursively nested field and method-result values,
+present and absent method values, exact field metadata, borrowed and consuming
+conversion, deterministic JSON-to-wire-to-owned reconstruction, repeated import,
+DTO immutability, unknown struct and field names, representable type mismatches,
+nested contextual failures, and continued `UnsupportedInstruction` rejection
+for collection instructions. Collections, linear algebra, control flow, blocks,
 functions, modules, verifier logic, PyO3, and pipeline integration remain later
 work.
 
