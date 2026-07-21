@@ -166,8 +166,8 @@ pub fn import_optional_source_location(
 
 /// Reconstruct an owned Rust IR instruction from a borrowed wire DTO.
 ///
-/// The incremental importer currently supports the thirteen lifecycle/core and
-/// operator/cast instruction kinds. Every other schema-v1 kind returns
+/// The incremental importer currently supports the seventeen lifecycle/core,
+/// operator/cast, and call-family instruction kinds. Every other schema-v1 kind returns
 /// [`IRImportError::UnsupportedInstruction`].
 pub fn import_instruction(instruction: &IRInstructionDTO) -> Result<IRInstruction, IRImportError> {
     instruction.try_into()
@@ -283,6 +283,41 @@ impl TryFrom<&IRInstructionDTO> for IRInstruction {
             IRInstructionDTO::Cast { result, value } => Ok(Self::IRCast {
                 result: import_instruction_value(kind, "result", result)?,
                 value: import_instruction_value(kind, "value", value)?,
+            }),
+            IRInstructionDTO::Call {
+                function,
+                arguments,
+                result,
+                builtin,
+                source_location,
+            } => Ok(Self::IRCall {
+                function: function.clone(),
+                arguments: import_instruction_values(kind, "arguments", arguments)?,
+                result: import_optional_instruction_value(kind, "result", result)?,
+                builtin: builtin.0.clone(),
+                source_location: import_instruction_source_location(kind, source_location)?,
+            }),
+            IRInstructionDTO::FunctionRef { result, function } => Ok(Self::IRFunctionRef {
+                result: import_instruction_value(kind, "result", result)?,
+                function: function.clone(),
+            }),
+            IRInstructionDTO::CallIndirect {
+                callee,
+                arguments,
+                result,
+            } => Ok(Self::IRCallIndirect {
+                callee: import_instruction_value(kind, "callee", callee)?,
+                arguments: import_instruction_values(kind, "arguments", arguments)?,
+                result: import_optional_instruction_value(kind, "result", result)?,
+            }),
+            IRInstructionDTO::Print {
+                value,
+                newline,
+                aggregate_shape,
+            } => Ok(Self::IRPrint {
+                value: import_instruction_value(kind, "value", value)?,
+                newline: *newline,
+                aggregate_shape: aggregate_shape.0.clone(),
             }),
             _ => Err(IRImportError::UnsupportedInstruction { kind }),
         }
@@ -556,6 +591,29 @@ fn import_instruction_value(
     value: &IRValueDTO,
 ) -> Result<IRValue, IRImportError> {
     import_instruction_field(instruction, field, import_value(value))
+}
+
+fn import_instruction_values(
+    instruction: &'static str,
+    field: &'static str,
+    values: &[IRValueDTO],
+) -> Result<Vec<IRValue>, IRImportError> {
+    values
+        .iter()
+        .map(|value| import_instruction_value(instruction, field, value))
+        .collect()
+}
+
+fn import_optional_instruction_value(
+    instruction: &'static str,
+    field: &'static str,
+    value: &NullableDTO<IRValueDTO>,
+) -> Result<Option<IRValue>, IRImportError> {
+    value
+        .0
+        .as_ref()
+        .map(|value| import_instruction_value(instruction, field, value))
+        .transpose()
 }
 
 fn import_instruction_constant(

@@ -1,12 +1,12 @@
 # Gradual Python-to-Rust compiler migration
 
-> Status: Phase 2, Step 4B.3B Rust operator and cast instruction importer
+> Status: Phase 2, Step 4B.3C Rust call-family instruction importer
 > complete. The isolated Rust workspace, owned IR model, frozen schema-v1
 > Python DTO tree, and separate serde wire model cover the complete current
 > Python IR. The importer
 > now reconstructs all 18 owned Rust type variants plus constants, enum-constant
-> metadata, values, storage, parameters, source locations, and 13 lifecycle,
-> core, operator, and cast instructions. The other 55 instructions plus block,
+> metadata, values, storage, parameters, source locations, and 17 lifecycle,
+> core, operator, cast, and call-family instructions. The other 51 instructions plus block,
 > function, struct-definition, and module import, PyO3, verification, and production
 > integration remain unimplemented. This document defines sequencing and
 > promotion gates and does not declare the Python IR or SSA model a stable public
@@ -699,10 +699,48 @@ nested result/operand types, present and absent binary source locations, present
 and absent comparison shapes, borrowed and consuming conversion,
 JSON-to-wire-to-owned reconstruction, deterministic repeated reconstruction, DTO
 immutability, unknown operator spellings, structurally valid type mismatches,
-nested contextual failures, and continued rejection of a call instruction as
-unsupported. The next planned instruction-importer family is calls and output.
-Blocks, functions, modules, verifier logic, PyO3, and compiler-pipeline
-integration remain later work.
+nested contextual failures, and continued rejection of a later instruction as
+unsupported. Step 4B.3C adds calls and output. Blocks, functions, modules,
+verifier logic, PyO3, and compiler-pipeline integration remain later work.
+
+### Step 4B.3C Rust call-family instruction importer
+
+The existing `import_instruction()` dispatch and its borrowed and consuming
+`TryFrom<IRInstructionDTO>` implementations now reconstruct `call`,
+`function_ref`, `call_indirect`, and `print`. The importer therefore supports
+17 / 68 schema-v1 instruction variants; the remaining 51 kinds continue to
+return `IRImportError::UnsupportedInstruction`, with no additional dispatcher.
+
+The actual wire and owned fields align without a representation change. Direct
+calls preserve `function`, ordered `arguments`, nullable `result`, nullable
+`builtin`, and nullable `source_location`. Function references preserve their
+typed `result` and exact `function` name. Indirect calls preserve the typed
+`callee`, ordered `arguments`, and nullable `result`. Print instructions
+preserve their typed `value`, `newline`, and nullable ordered
+`aggregate_shape`. Empty argument lists remain empty, and function signatures
+embedded in value types continue through the existing value and recursive type
+importers unchanged. Optional locations continue through the existing
+source-location importer.
+
+Nested value/type failures retain the instruction kind and exact field through
+`IRImportError::InstructionField`; no new importer error was required. Import
+does not resolve direct function names, require indirect callees to exist or be
+callable, validate signatures or builtins, count arguments, compare argument or
+return types, or otherwise perform verifier work. Structurally representable
+invalid calls import successfully. Verifier and compiler-pipeline behavior are
+unchanged.
+
+Focused tests cover direct calls with and without results, zero, one, and many
+arguments, exact argument ordering, function references, indirect calls, print
+instructions, nested function and collection types, all nullable call-family
+fields, optional source locations, borrowed and consuming conversion,
+JSON-to-wire-to-owned reconstruction, deterministic reconstruction, DTO
+immutability, unresolved function names, signature and result mismatches,
+nested contextual failures, and continued `UnsupportedInstruction` rejection
+for struct instructions. The next planned instruction-importer family is
+structs and method results. Collections, linear algebra, control flow, blocks,
+functions, modules, verifier logic, PyO3, and pipeline integration remain later
+work.
 
 ## 8. Ownership and memory
 

@@ -1,12 +1,12 @@
-//! Focused coverage for schema-v1 lifecycle, operator, and cast instruction import.
+//! Focused coverage for schema-v1 lifecycle, operator, cast, and call-family import.
 
 use std::error::Error as _;
 
 use aether_ir::wire::{IRFloatDTO, IRInstructionDTO};
 use aether_ir::{
-    ArrayType, BoolType, DoubleType, EnumType, IRConstant, IREnumConstant, IRImportError,
-    IRInstruction, IRSourceLocation, IRStorage, IRType, IRValue, IntType, ListType, NullableType,
-    StringType, VectorType, import_instruction,
+    ArrayType, BoolType, DoubleType, EnumType, FunctionType, IRConstant, IREnumConstant,
+    IRImportError, IRInstruction, IRSourceLocation, IRStorage, IRType, IRValue, IntType, ListType,
+    NullableType, StringType, VectorType, import_instruction,
 };
 use serde_json::{Value, json};
 
@@ -690,24 +690,344 @@ fn gives_operator_instruction_and_field_context_for_nested_errors() {
 }
 
 #[test]
-fn explicitly_rejects_a_later_instruction_family() {
+#[allow(clippy::too_many_lines)]
+fn imports_call_family_exactly_through_owned_and_borrowed_paths() {
+    let nested_type = nested_string_list_type();
+    let vector_type = IRType::from(VectorType {
+        element: Box::new(DoubleType.into()),
+        orientation: Some(" row::raw ".to_owned()),
+    });
+    let signature = IRType::from(FunctionType {
+        parameter_types: vec![IntType.into(), nested_type.clone()],
+        return_type: Box::new(vector_type.clone()),
+    });
+    let present_location = location(-31, i64::MAX, Some(" src/calls\0raw.ae "));
+
+    let cases = vec![
+        (
+            json!({
+                "kind": "call",
+                "function": " unresolved::zero ",
+                "arguments": [],
+                "result": null,
+                "builtin": null,
+                "source_location": null
+            }),
+            IRInstruction::IRCall {
+                function: " unresolved::zero ".to_owned(),
+                arguments: vec![],
+                result: None,
+                builtin: None,
+                source_location: None,
+            },
+        ),
+        (
+            json!({
+                "kind": "call",
+                "function": "module::one",
+                "arguments": [{
+                    "tag": "parameter",
+                    "name": "only::argument",
+                    "type": {
+                        "tag": "list",
+                        "element": {"tag": "nullable", "inner": {"tag": "string"}}
+                    }
+                }],
+                "result": {"tag": "value", "name": "call::result", "type": {"tag": "bool"}},
+                "builtin": " builtin::identifier\0raw ",
+                "source_location": location_json(
+                    -31,
+                    i64::MAX,
+                    Some(" src/calls\0raw.ae ")
+                )
+            }),
+            IRInstruction::IRCall {
+                function: "module::one".to_owned(),
+                arguments: vec![IRValue::new("only::argument", nested_type.clone())],
+                result: Some(IRValue::new("call::result", BoolType.into())),
+                builtin: Some(" builtin::identifier\0raw ".to_owned()),
+                source_location: Some(present_location),
+            },
+        ),
+        (
+            json!({
+                "kind": "call",
+                "function": "ordered::many",
+                "arguments": [
+                    {"tag": "value", "name": "first", "type": {"tag": "string"}},
+                    {"tag": "storage", "name": "second", "type": {"tag": "int"}},
+                    {
+                        "tag": "parameter",
+                        "name": "third",
+                        "type": {
+                            "tag": "vector",
+                            "element": {"tag": "double"},
+                            "orientation": " row::raw "
+                        }
+                    }
+                ],
+                "result": null,
+                "builtin": "",
+                "source_location": {
+                    "tag": "source_location",
+                    "line": 0,
+                    "column": -9,
+                    "path": null
+                }
+            }),
+            IRInstruction::IRCall {
+                function: "ordered::many".to_owned(),
+                arguments: vec![
+                    string_value("first"),
+                    int_value("second"),
+                    IRValue::new("third", vector_type.clone()),
+                ],
+                result: None,
+                builtin: Some(String::new()),
+                source_location: Some(location(0, -9, None)),
+            },
+        ),
+        (
+            json!({
+                "kind": "function_ref",
+                "result": {
+                    "tag": "value",
+                    "name": "typed::function_ref",
+                    "type": {
+                        "tag": "function",
+                        "parameter_types": [
+                            {"tag": "int"},
+                            {
+                                "tag": "list",
+                                "element": {"tag": "nullable", "inner": {"tag": "string"}}
+                            }
+                        ],
+                        "return_type": {
+                            "tag": "vector",
+                            "element": {"tag": "double"},
+                            "orientation": " row::raw "
+                        }
+                    }
+                },
+                "function": " unresolved::function_ref\0raw "
+            }),
+            IRInstruction::IRFunctionRef {
+                result: IRValue::new("typed::function_ref", signature.clone()),
+                function: " unresolved::function_ref\0raw ".to_owned(),
+            },
+        ),
+        (
+            json!({
+                "kind": "call_indirect",
+                "callee": {
+                    "tag": "value",
+                    "name": "indirect::target",
+                    "type": {
+                        "tag": "function",
+                        "parameter_types": [
+                            {"tag": "int"},
+                            {
+                                "tag": "list",
+                                "element": {"tag": "nullable", "inner": {"tag": "string"}}
+                            }
+                        ],
+                        "return_type": {
+                            "tag": "vector",
+                            "element": {"tag": "double"},
+                            "orientation": " row::raw "
+                        }
+                    }
+                },
+                "arguments": [
+                    {"tag": "value", "name": "first::indirect", "type": {"tag": "bool"}},
+                    {"tag": "value", "name": "second::indirect", "type": {"tag": "string"}}
+                ],
+                "result": {"tag": "storage", "name": "indirect::result", "type": {"tag": "string"}}
+            }),
+            IRInstruction::IRCallIndirect {
+                callee: IRValue::new("indirect::target", signature),
+                arguments: vec![
+                    IRValue::new("first::indirect", BoolType.into()),
+                    string_value("second::indirect"),
+                ],
+                result: Some(string_value("indirect::result")),
+            },
+        ),
+        (
+            json!({
+                "kind": "call_indirect",
+                "callee": {"tag": "parameter", "name": "empty::target", "type": {"tag": "int"}},
+                "arguments": [],
+                "result": null
+            }),
+            IRInstruction::IRCallIndirect {
+                callee: int_value("empty::target"),
+                arguments: vec![],
+                result: None,
+            },
+        ),
+        (
+            json!({
+                "kind": "print",
+                "value": {
+                    "tag": "value",
+                    "name": "print::nested",
+                    "type": {
+                        "tag": "list",
+                        "element": {"tag": "nullable", "inner": {"tag": "string"}}
+                    }
+                },
+                "newline": true,
+                "aggregate_shape": [i64::MIN, 0, i64::MAX]
+            }),
+            IRInstruction::IRPrint {
+                value: IRValue::new("print::nested", nested_type),
+                newline: true,
+                aggregate_shape: Some(vec![i64::MIN, 0, i64::MAX]),
+            },
+        ),
+        (
+            json!({
+                "kind": "print",
+                "value": {"tag": "parameter", "name": "print::scalar", "type": {"tag": "int"}},
+                "newline": false,
+                "aggregate_shape": null
+            }),
+            IRInstruction::IRPrint {
+                value: int_value("print::scalar"),
+                newline: false,
+                aggregate_shape: None,
+            },
+        ),
+    ];
+
+    assert_eq!(cases.len(), 8);
+    for (json, expected) in cases {
+        let wire: IRInstructionDTO =
+            serde_json::from_value(json).expect("call-family instruction JSON must deserialize");
+        let original = wire.clone();
+
+        assert_eq!(import_instruction(&wire), Ok(expected.clone()));
+        assert_eq!(import_instruction(&wire), Ok(expected.clone()));
+        assert_eq!(IRInstruction::try_from(&wire), Ok(expected.clone()));
+        assert_eq!(IRInstruction::try_from(wire.clone()), Ok(expected));
+        assert_eq!(wire, original, "borrowed import must not mutate its DTO");
+    }
+}
+
+#[test]
+fn imports_unresolved_calls_and_signature_mismatches_for_the_verifier() {
+    let direct: IRInstructionDTO = serde_json::from_value(json!({
+        "kind": "call",
+        "function": "definitely::unresolved",
+        "arguments": [{"tag": "value", "name": "wrong::argument", "type": {"tag": "string"}}],
+        "result": {"tag": "value", "name": "wrong::result", "type": {"tag": "bool"}},
+        "builtin": "not-a-legal-builtin",
+        "source_location": null
+    }))
+    .expect("unresolved and mismatched direct call is structurally valid");
+    let indirect: IRInstructionDTO = serde_json::from_value(json!({
+        "kind": "call_indirect",
+        "callee": {
+            "tag": "value",
+            "name": "not-even-a-function",
+            "type": {
+                "tag": "function",
+                "parameter_types": [{"tag": "int"}],
+                "return_type": {"tag": "double"}
+            }
+        },
+        "arguments": [],
+        "result": {"tag": "value", "name": "mismatched::result", "type": {"tag": "string"}}
+    }))
+    .expect("signature-mismatched indirect call is structurally valid");
+
+    assert!(matches!(
+        import_instruction(&direct),
+        Ok(IRInstruction::IRCall { .. })
+    ));
+    assert!(matches!(
+        import_instruction(&indirect),
+        Ok(IRInstruction::IRCallIndirect { .. })
+    ));
+}
+
+#[test]
+fn gives_call_instruction_and_field_context_for_nested_errors() {
     let wire: IRInstructionDTO = serde_json::from_value(json!({
         "kind": "call",
-        "function": "later::callee",
-        "arguments": [],
+        "function": "callee",
+        "arguments": [{
+            "tag": "parameter",
+            "name": "bad::argument",
+            "type": {
+                "tag": "method_result",
+                "receiver": {"tag": "array", "element": {"tag": "int"}},
+                "value": {"tag": "bool"}
+            }
+        }],
         "result": null,
         "builtin": null,
         "source_location": null
     }))
-    .expect("unsupported instruction JSON must still deserialize");
+    .expect("the wire model permits the unrepresentable nested argument type");
 
-    let error = import_instruction(&wire).expect_err("calls are a later importer slice");
     assert_eq!(
-        error,
-        IRImportError::UnsupportedInstruction { kind: "call" }
+        import_instruction(&wire),
+        Err(IRImportError::InstructionField {
+            instruction: "call",
+            field: "arguments",
+            source: Box::new(IRImportError::ValueType {
+                kind: "parameter",
+                source: Box::new(IRImportError::MethodResultReceiverNotStruct { actual: "array" }),
+            }),
+        })
     );
-    assert_eq!(
-        error.to_string(),
-        "instruction DTO kind 'call' is not supported by the incremental importer"
-    );
+}
+
+#[test]
+fn unsupported_struct_instructions_still_return_unsupported_instruction() {
+    let cases = [
+        (
+            json!({
+                "kind": "struct_new",
+                "result": {"tag": "value", "name": "later::result", "type": {"tag": "int"}},
+                "fields": []
+            }),
+            "struct_new",
+        ),
+        (
+            json!({
+                "kind": "struct_get",
+                "result": {"tag": "value", "name": "later::result", "type": {"tag": "int"}},
+                "struct": {"tag": "value", "name": "later::struct", "type": {"tag": "int"}},
+                "field_index": 0,
+                "field_name": "field"
+            }),
+            "struct_get",
+        ),
+        (
+            json!({
+                "kind": "struct_set",
+                "result": {"tag": "value", "name": "later::result", "type": {"tag": "int"}},
+                "struct": {"tag": "value", "name": "later::struct", "type": {"tag": "int"}},
+                "field_index": 0,
+                "field_name": "field",
+                "value": {"tag": "value", "name": "later::value", "type": {"tag": "int"}}
+            }),
+            "struct_set",
+        ),
+    ];
+
+    for (json, kind) in cases {
+        let wire: IRInstructionDTO = serde_json::from_value(json)
+            .expect("unsupported instruction JSON must still deserialize");
+        let error = import_instruction(&wire).expect_err("structs are a later importer slice");
+
+        assert_eq!(error, IRImportError::UnsupportedInstruction { kind });
+        assert_eq!(
+            error.to_string(),
+            format!("instruction DTO kind '{kind}' is not supported by the incremental importer")
+        );
+    }
 }
