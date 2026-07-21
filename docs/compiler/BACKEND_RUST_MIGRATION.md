@@ -1,9 +1,10 @@
 # Gradual Python-to-Rust compiler migration
 
-> Status: Phase 1 DTO implementation complete through the root `IRModule`.
-> The isolated Rust workspace, owned IR model, and schema-v1 Python DTO tree now
-> cover the complete current Python IR; there is still no production Rust
-> importer or integration. This document defines
+> Status: Phase 1, Step 3G contract audit complete. The isolated Rust workspace,
+> owned IR model, and schema-v1 Python DTO tree cover the complete current Python
+> IR, and root round-trip, canonical JSON, golden-fixture, and completeness audits
+> lock that contract. There is still no Rust wire DTO importer or production
+> integration. This document defines
 > sequencing and promotion gates and does not declare the Python IR or SSA model
 > a stable public format.
 
@@ -74,8 +75,9 @@ The layers relevant to this migration are:
 - **IR model.** `src/aether/ir/model.py` defines mutable module/function/block
   containers and instruction dataclasses. `src/aether/ir/types.py` defines the
   IR types. `IRStorage` distinguishes owning addressable storage from immutable
-  values, and selected instructions carry `IRSourceLocation`. There is no
-  versioned serializer or parser for this object graph.
+  values, and selected instructions carry `IRSourceLocation`. The versioned
+  dictionary DTO and its canonical JSON fixture encoding live in
+  `src/aether/ir/dto.py`; JSON is not the compiler's internal representation.
 - **IR verification and execution.** `src/aether/ir/verifier.py` verifies
   structure, types, data flow, builtin contracts, aggregate metadata, and
   lifecycle rules. `src/aether/ir/interpreter.py` executes verified IR with
@@ -265,7 +267,7 @@ unit.
 | --- | --- | --- | --- |
 | Arbitrary direct Python dataclasses | Preserves current objects but couples Rust to Python class names and constructor details; no independent schema. | No byte serialization, but conversion code becomes reflection-heavy. | Rejected. |
 | **Versioned tagged DTO converted by PyO3** | Explicit enums/tags, exact integer bounds, explicit optional values, layouts and spans; Rust immediately owns validated data. | Inspectable as Python primitives; one tree walk and no encoding/decoding bytes. | **Selected.** |
-| JSON | Portable and easy to debug, but needs conventions for enum tags, non-finite floats, complex values, integer limits, and bytes. | Verbose and slower; excellent corpus artifact. | Useful as a human-readable fixture rendering, not the in-process transport. |
+| JSON | Portable and easy to debug; schema v1 defines canonical ordering, formatting, finite numbers, complex-value tags, integer limits, and strict UTF-8. | Verbose and slower; excellent corpus artifact. | Canonical golden/corpus encoding only, not the DTO tree or in-process transport. |
 | MessagePack | Compact and portable while retaining the schema's tags. | Less inspectable and adds a dependency; useful for a helper process. | Preferred transport if the process contingency is activated. |
 | Custom binary | Maximum control and potential speed. | Highest compatibility, parser, fuzzing, and maintenance burden. | Not justified initially. |
 | Printed Aether IR | Excellent for humans and existing snapshots. | `src/aether/ir/printer.py` has no matching canonical parser and text may omit internal distinctions. | Diagnostic/golden aid only. |
@@ -453,12 +455,80 @@ compatible collection and element shapes. Drift reports identify the affected
 model and each missing, unexpected, reordered, or type-mismatched field.
 Production Python never parses or depends on Rust source files.
 
-Phase 1 DTO coverage is now complete for the current root model, including all
-current types, values, storage, parameters, source locations, 68 instructions,
-basic blocks, functions, nominal struct definitions, and modules. The next
-planned step is full Python module DTO round-trip and Rust importer preparation;
-the Rust DTO importer, PyO3 boundary, and compiler behavior changes are not part
-of Step 3F.
+### Step 3G root contract audit and canonical JSON
+
+Phase 1, Step 3G confirms that schema v1 is complete for the current Python IR
+root: modules, nominal struct definitions, functions, blocks, all 68 registered
+instructions, every nested type and constant variant, values, storage,
+parameters, and supported source locations. Root scenarios cover multiple
+nested struct definitions; multiple void and non-void functions and blocks;
+direct and indirect calls; lifecycle, collection, vector, matrix, method-result,
+and control-flow operations; and return storage transfers. One registry-driven
+module contains all 68 instruction classes. The audit derives that set from
+`IR_INSTRUCTION_DTO_REGISTRY`; it does not maintain a second instruction
+inventory.
+
+Automated component checks walk every DTO category reachable from `IRModule`.
+They require an encoder and decoder, an explicit JSON-primitive dictionary/list
+shape with stable tags or fields, a focused exact round trip, and rejection of a
+malformed tag or shape. Type coverage is checked against `IR_TYPE_TAGS`, and
+instruction coverage against `IR_INSTRUCTION_DTO_REGISTRY`. Root tests continue
+to prove the validation boundary by decoding structurally valid modules that
+`IRVerifier` later rejects.
+
+`ir_module_to_json()` and `ir_module_from_json()` provide the stable wire
+rendering of the existing dictionary DTO. The schema-v1 canonical JSON rules
+are:
+
+- JSON text is UTF-8 and contains only standard JSON values; Python's `NaN`,
+  positive or negative `Infinity`, overflow-to-infinity number spellings, and
+  unpaired non-UTF-8 surrogate text are rejected;
+- object keys are sorted lexicographically at every level;
+- indentation is exactly two spaces, key separators are `": "`, there is no
+  trailing whitespace, and the document ends with one newline;
+- non-ASCII characters are emitted directly rather than ASCII-escaped;
+- arrays retain DTO list order exactly; no function, struct, field, parameter,
+  block, instruction, argument, or element list is sorted or normalized;
+- duplicate object keys are rejected at every depth before DTO decoding;
+- the root object is passed through the existing strict DTO decoder, including
+  its exact fields and `schema_version` check;
+- malformed JSON and UTF-8 failures are reported as `IRDTOJSONError`, a focused
+  `IRDTOError`, rather than leaking `json.JSONDecodeError` or Unicode exceptions.
+
+Input JSON may use other valid whitespace or object-key order; decoding followed
+by encoding produces the canonical form. JSON remains only a fixture and future
+interchange encoding over the dictionary contract. The compiler does not use it
+as its internal DTO representation or pipeline transport.
+
+The checked-in human-readable schema-v1 golden is
+`tests/aether/rust_migration/fixtures/ir_module_v1_golden.json`. It contains a
+struct with nested field types and a function with parameters, storage, a source
+location, two blocks, branch control flow, a constant, and a storage-transferring
+return. Tests independently build the Python model and compare its canonical
+bytes with that file, then decode the file and require byte-identical canonical
+re-encoding. The expected fixture is never generated inside the test.
+
+For a future IR field or instruction, extend the Python model and semantics in
+its owning change, then update the existing DTO encoder and decoder, its exact
+field/tag shape, focused round-trip and malformed-input cases, the root audit
+module, and the golden only when the small fixture benefits from the new shape.
+New instructions must be added to `IR_INSTRUCTION_DTO_REGISTRY`; no parallel
+instruction list is permitted. Run the complete DTO/root audit and verifier
+suites before updating an equivalent Rust consumer.
+
+Keep schema version 1 only when old and new readers agree on the exact meaning
+and required shape of every accepted document. Bump the root `schema_version`
+when a required field or variant is added or removed, a tag or field is renamed,
+a primitive/range/optionality/order rule changes, or an existing value gains a
+different meaning. A purely internal refactor that leaves canonical DTO/JSON
+bytes and validation behavior unchanged does not require a bump. Additive fields
+also require a bump under the current exact-field policy because v1 readers
+reject unknown fields.
+
+The next migration step is to define the equivalent owned Rust wire DTO model
+for this version-1 contract and prove fixture compatibility. Rust importer logic,
+PyO3, a Rust verifier, and compiler pipeline behavior changes remain out of
+scope for Step 3G.
 
 ## 8. Ownership and memory
 

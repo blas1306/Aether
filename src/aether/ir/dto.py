@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+import json
+import math
 from types import MappingProxyType
 from typing import Callable, Iterable, NoReturn, TypeAlias
 
@@ -141,6 +143,10 @@ class IRDTOError(ValueError):
 
 class IRDTOSchemaVersionError(IRDTOError):
     """Raised when an IR DTO conversion requests an unsupported schema."""
+
+
+class IRDTOJSONError(IRDTOError):
+    """Raised when canonical IR DTO JSON is not valid UTF-8 standard JSON."""
 
 
 IR_TYPE_TAGS: Mapping[type[IRType], str] = MappingProxyType(
@@ -2760,6 +2766,114 @@ def ir_module_from_dto(dto: Mapping[str, object]) -> IRModule:
     )
 
 
+def ir_module_to_json(
+    module: IRModule,
+    *,
+    schema_version: int = IR_SCHEMA_VERSION,
+) -> str:
+    """Encode a module as canonical UTF-8 JSON over its root DTO.
+
+    Object keys are sorted, list order is retained, non-ASCII text is emitted
+    directly, and non-standard floating-point values are rejected.
+    """
+
+    dto = ir_module_to_dto(module, schema_version=schema_version)
+    try:
+        encoded = json.dumps(
+            dto,
+            allow_nan=False,
+            ensure_ascii=False,
+            indent=2,
+            separators=(",", ": "),
+            sort_keys=True,
+        ) + "\n"
+        encoded.encode("utf-8", errors="strict")
+    except (TypeError, ValueError, UnicodeError) as error:
+        raise IRDTOJSONError(f"Cannot encode IR module as canonical JSON: {error}") from None
+    return encoded
+
+
+def ir_module_from_json(data: str | bytes | bytearray) -> IRModule:
+    """Decode canonical-compatible UTF-8 JSON through the root DTO boundary.
+
+    Input need not already use canonical key order or spacing. Duplicate object
+    keys and JSON extensions such as ``NaN`` and ``Infinity`` are rejected
+    before the existing DTO shape and schema-version validation runs.
+    """
+
+    if isinstance(data, (bytes, bytearray)):
+        try:
+            text = bytes(data).decode("utf-8", errors="strict")
+        except UnicodeDecodeError as error:
+            raise IRDTOJSONError(f"IR module JSON must be UTF-8: {error}") from None
+    elif type(data) is str:
+        text = data
+        try:
+            text.encode("utf-8", errors="strict")
+        except UnicodeEncodeError as error:
+            raise IRDTOJSONError(f"IR module JSON must be UTF-8: {error}") from None
+    else:
+        raise IRDTOJSONError("IR module JSON input must be str, bytes, or bytearray")
+
+    try:
+        dto = json.loads(
+            text,
+            object_pairs_hook=_json_object_without_duplicates,
+            parse_constant=_reject_nonstandard_json_constant,
+            parse_float=_parse_finite_json_float,
+        )
+    except IRDTOJSONError:
+        raise
+    except json.JSONDecodeError as error:
+        raise IRDTOJSONError(
+            f"Malformed IR module JSON at line {error.lineno}, column {error.colno}: "
+            f"{error.msg}"
+        ) from None
+    except RecursionError:
+        raise IRDTOJSONError("Malformed IR module JSON: nesting is too deep") from None
+    _require_utf8_json_strings(dto)
+    return ir_module_from_dto(dto)
+
+
+def _json_object_without_duplicates(
+    pairs: list[tuple[str, object]],
+) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise IRDTOJSONError(f"Duplicate IR module JSON object key: {key!r}")
+        result[key] = value
+    return result
+
+
+def _reject_nonstandard_json_constant(value: str) -> NoReturn:
+    raise IRDTOJSONError(f"Non-standard JSON numeric value is not allowed: {value}")
+
+
+def _parse_finite_json_float(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise IRDTOJSONError(f"Non-finite JSON number is not allowed: {value}")
+    return parsed
+
+
+def _require_utf8_json_strings(value: object) -> None:
+    if isinstance(value, str):
+        try:
+            value.encode("utf-8", errors="strict")
+        except UnicodeEncodeError as error:
+            raise IRDTOJSONError(f"IR module JSON contains non-UTF-8 text: {error}") from None
+        return
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            _require_utf8_json_strings(key)
+            _require_utf8_json_strings(item)
+        return
+    if isinstance(value, list):
+        for item in value:
+            _require_utf8_json_strings(item)
+
+
 def _value_from_dto(
     dto: Mapping[str, object],
     *,
@@ -2917,6 +3031,7 @@ __all__ = [
     "IRModuleDTO",
     "IRStructDefinitionDTO",
     "IRDTOError",
+    "IRDTOJSONError",
     "IRDTOSchemaVersionError",
     "IREnumConstantDTO",
     "IRInstructionDTO",
@@ -2937,7 +3052,9 @@ __all__ = [
     "ir_function_from_dto",
     "ir_function_to_dto",
     "ir_module_from_dto",
+    "ir_module_from_json",
     "ir_module_to_dto",
+    "ir_module_to_json",
     "ir_parameter_from_dto",
     "ir_parameter_to_dto",
     "ir_source_location_from_dto",

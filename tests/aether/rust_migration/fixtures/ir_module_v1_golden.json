@@ -1,0 +1,117 @@
+{
+  "functions": [
+    {
+      "blocks": [
+        {
+          "instructions": [
+            {
+              "destination": {
+                "name": "answer",
+                "tag": "storage",
+                "type": {
+                  "tag": "int"
+                }
+              },
+              "kind": "init_default",
+              "source_location": {
+                "column": 3,
+                "line": 4,
+                "path": "fixtures/golden.ae",
+                "tag": "source_location"
+              }
+            },
+            {
+              "condition": {
+                "name": "condition",
+                "tag": "parameter",
+                "type": {
+                  "tag": "bool"
+                }
+              },
+              "false_target": "selected",
+              "kind": "branch",
+              "true_target": "selected"
+            }
+          ],
+          "name": "entry"
+        },
+        {
+          "instructions": [
+            {
+              "kind": "const",
+              "result": {
+                "name": "answer",
+                "tag": "storage",
+                "type": {
+                  "tag": "int"
+                }
+              },
+              "value": {
+                "tag": "int",
+                "value": 7
+              }
+            },
+            {
+              "kind": "return",
+              "transferred_storage": {
+                "name": "answer",
+                "tag": "storage",
+                "type": {
+                  "tag": "int"
+                }
+              },
+              "value": {
+                "name": "answer",
+                "tag": "storage",
+                "type": {
+                  "tag": "int"
+                }
+              }
+            }
+          ],
+          "name": "selected"
+        }
+      ],
+      "name": "choose",
+      "parameters": [
+        {
+          "name": "condition",
+          "tag": "parameter",
+          "type": {
+            "tag": "bool"
+          }
+        }
+      ],
+      "return_type": {
+        "tag": "int"
+      }
+    }
+  ],
+  "schema_version": 1,
+  "structs": [
+    {
+      "fields": [
+        {
+          "name": "payload",
+          "type": {
+            "element": {
+              "name": "Point",
+              "tag": "struct"
+            },
+            "tag": "array"
+          }
+        },
+        {
+          "name": "labels",
+          "type": {
+            "element": {
+              "tag": "string"
+            },
+            "tag": "list"
+          }
+        }
+      ],
+      "name": "Envelope"
+    }
+  ]
+}

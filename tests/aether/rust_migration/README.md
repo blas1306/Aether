@@ -33,6 +33,11 @@ This manifest records the current Python test as both module materializer and
 behavioral oracle. It does not make pytest execution itself part of the future
 interchange format.
 
+`fixtures/ir_module_v1_golden.json` is the separate, small canonical schema-v1
+wire fixture. It locks JSON formatting and complete root DTO reconstruction; it
+is not a semantic-verifier corpus case and is therefore not listed in
+`manifest.yaml`.
+
 ## Future differential consumer
 
 Once the versioned ModuleDTO adapter exists, the differential harness will:
