@@ -1,12 +1,13 @@
 # Gradual Python-to-Rust compiler migration
 
-> Status: Phase 2, Step 4B.3A Rust lifecycle instruction importer complete. The
-> isolated Rust workspace, owned IR model, frozen schema-v1 Python DTO tree, and
-> separate serde wire model cover the complete current Python IR. The importer
+> Status: Phase 2, Step 4B.3B Rust operator and cast instruction importer
+> complete. The isolated Rust workspace, owned IR model, frozen schema-v1
+> Python DTO tree, and separate serde wire model cover the complete current
+> Python IR. The importer
 > now reconstructs all 18 owned Rust type variants plus constants, enum-constant
-> metadata, values, storage, parameters, source locations, and the nine
-> lifecycle/core instructions. The other 59 instructions plus block, function,
-> struct-definition, and module import, PyO3, verification, and production
+> metadata, values, storage, parameters, source locations, and 13 lifecycle,
+> core, operator, and cast instructions. The other 55 instructions plus block,
+> function, struct-definition, and module import, PyO3, verification, and production
 > integration remain unimplemented. This document defines sequencing and
 > promotion gates and does not declare the Python IR or SSA model a stable public
 > format.
@@ -660,9 +661,48 @@ JSON-to-wire-to-owned conversion, present and absent source locations, primitive
 and nested types, ordered enum metadata, exact constant/value/storage retention,
 repeatable reconstruction, unresolved names, representable type mismatches,
 nested field context, unsupported-kind rejection, and source DTO immutability.
-The next planned instruction-importer family is operators and casts. Basic
-blocks, functions, struct definitions, modules, PyO3, verifier rules, and
+Basic blocks, functions, struct definitions, modules, PyO3, verifier rules, and
 pipeline integration remain later work.
+
+### Step 4B.3B Rust operator and cast instruction importer
+
+The same `import_instruction()` dispatch and its borrowed and consuming
+`TryFrom<IRInstructionDTO>` paths now also reconstruct `binary_op`, `unary_op`,
+`compare_op`, and `cast`. Together with Step 4B.3A, the importer supports 13 of
+the 68 schema-v1 instruction variants. The other 55 kinds continue to return
+`IRImportError::UnsupportedInstruction`; no parallel dispatch path was added.
+
+The frozen wire fields are retained exactly: binary operations carry `result`,
+`operator`, ordered `left` and `right` operands, and nullable
+`source_location`; unary operations carry `result`, `operator`, and `operand`;
+comparisons carry `result`, `operator`, ordered `left` and `right` operands, and
+nullable `aggregate_shape`; casts carry target-typed `result` and source-typed
+`value`. Every result and operand delegates to the foundational value and type
+importers, and binary locations delegate to the optional source-location
+importer. Nested failures therefore retain the instruction kind, exact field,
+and typed source through the existing `IRImportError::InstructionField`. No new
+import error or owned-model change was required.
+
+The owned binary, unary, and comparison variants already store their operator
+as an unrestricted owned `String`, matching the wire DTO representation.
+Known spellings are copied without normalization, and structurally valid unknown
+spellings are copied unchanged for the verifier to accept or reject. Comparison
+shape entries and their ordering are likewise copied without interpretation.
+The importer does not check operator/type combinations, operand compatibility,
+result types, cast legality, dominance, or definition order. Structurally
+representable mismatches import successfully, and verifier and compiler-pipeline
+behavior remain unchanged.
+
+Focused tests cover the operator inventories exercised by the frozen DTO
+contract, representative casts, exact operand order, primitive and recursively
+nested result/operand types, present and absent binary source locations, present
+and absent comparison shapes, borrowed and consuming conversion,
+JSON-to-wire-to-owned reconstruction, deterministic repeated reconstruction, DTO
+immutability, unknown operator spellings, structurally valid type mismatches,
+nested contextual failures, and continued rejection of a call instruction as
+unsupported. The next planned instruction-importer family is calls and output.
+Blocks, functions, modules, verifier logic, PyO3, and compiler-pipeline
+integration remain later work.
 
 ## 8. Ownership and memory
 

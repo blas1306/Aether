@@ -166,8 +166,8 @@ pub fn import_optional_source_location(
 
 /// Reconstruct an owned Rust IR instruction from a borrowed wire DTO.
 ///
-/// The incremental importer currently supports the nine lifecycle/core
-/// instruction kinds. Every other schema-v1 kind returns
+/// The incremental importer currently supports the thirteen lifecycle/core and
+/// operator/cast instruction kinds. Every other schema-v1 kind returns
 /// [`IRImportError::UnsupportedInstruction`].
 pub fn import_instruction(instruction: &IRInstructionDTO) -> Result<IRInstruction, IRImportError> {
     instruction.try_into()
@@ -176,6 +176,7 @@ pub fn import_instruction(instruction: &IRInstructionDTO) -> Result<IRInstructio
 impl TryFrom<&IRInstructionDTO> for IRInstruction {
     type Error = IRImportError;
 
+    #[allow(clippy::too_many_lines)]
     fn try_from(instruction: &IRInstructionDTO) -> Result<Self, Self::Error> {
         let kind = wire_instruction_kind(instruction);
 
@@ -243,6 +244,45 @@ impl TryFrom<&IRInstructionDTO> for IRInstruction {
                 source: import_instruction_storage(kind, "source", source)?,
                 count: *count,
                 source_location: import_instruction_source_location(kind, source_location)?,
+            }),
+            IRInstructionDTO::BinaryOp {
+                result,
+                operator,
+                left,
+                right,
+                source_location,
+            } => Ok(Self::IRBinaryOp {
+                result: import_instruction_value(kind, "result", result)?,
+                operator: operator.clone(),
+                left: import_instruction_value(kind, "left", left)?,
+                right: import_instruction_value(kind, "right", right)?,
+                source_location: import_instruction_source_location(kind, source_location)?,
+            }),
+            IRInstructionDTO::UnaryOp {
+                result,
+                operator,
+                operand,
+            } => Ok(Self::IRUnaryOp {
+                result: import_instruction_value(kind, "result", result)?,
+                operator: operator.clone(),
+                operand: import_instruction_value(kind, "operand", operand)?,
+            }),
+            IRInstructionDTO::CompareOp {
+                result,
+                operator,
+                left,
+                right,
+                aggregate_shape,
+            } => Ok(Self::IRCompareOp {
+                result: import_instruction_value(kind, "result", result)?,
+                operator: operator.clone(),
+                left: import_instruction_value(kind, "left", left)?,
+                right: import_instruction_value(kind, "right", right)?,
+                aggregate_shape: aggregate_shape.0.clone(),
+            }),
+            IRInstructionDTO::Cast { result, value } => Ok(Self::IRCast {
+                result: import_instruction_value(kind, "result", result)?,
+                value: import_instruction_value(kind, "value", value)?,
             }),
             _ => Err(IRImportError::UnsupportedInstruction { kind }),
         }
