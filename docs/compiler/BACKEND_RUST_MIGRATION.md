@@ -1,15 +1,16 @@
 # Gradual Python-to-Rust compiler migration
 
-> Status: Phase 2, Step 4C Rust basic-block importing complete. The isolated
+> Status: Phase 2, Step 4D Rust function importing complete. The isolated
 > Rust workspace, owned IR model, frozen schema-v1 Python DTO tree, and separate
 > serde wire model cover the complete current Python IR. The importer now
 > reconstructs all 18 owned Rust type variants plus constants, enum-constant
 > metadata, values, storage, parameters, source locations, and all 68 / 68
-> frozen instruction variants, and basic blocks with exact names and ordered
-> instruction contents. Function, struct-definition, and module import, PyO3,
-> verification, and production integration remain unimplemented. This document
-> defines sequencing and promotion gates and does not declare the Python IR or
-> SSA model a stable public format.
+> frozen instruction variants, basic blocks with exact names and ordered
+> instruction contents, and functions with exact names and ordered parameters
+> and blocks. Struct-definition and module import, PyO3, verification, and
+> production integration remain unimplemented. This document defines sequencing
+> and promotion gates and does not declare the Python IR or SSA model a stable
+> public format.
 
 ## 1. Decision summary
 
@@ -1010,8 +1011,54 @@ responsibilities. Focused tests cover exact names, empty/single/multiple and
 duplicate instruction vectors, ordering, invalid-but-representable control
 flow, owned and borrowed conversion, deterministic JSON-to-wire-to-owned
 conversion, DTO immutability, wire round trips, and contextual nested failures.
-Function importing is the next step; module importing, verifier logic, CFG
-construction, compiler-pipeline integration, and PyO3 remain out of scope.
+At completion of Step 4C, function importing was the next hierarchical layer;
+module importing, verifier logic, CFG construction, compiler-pipeline
+integration, and PyO3 remained out of scope.
+
+### Step 4D Rust function importer
+
+Phase 2 Step 4D is complete. Inspection of the actual Rust models found the
+same four function-container fields on both sides of the boundary. The frozen
+wire `IRFunctionDTO` has `name: String`, ordered
+`parameters: Vec<IRParameterDTO>`, `return_type: IRTypeDTO`, and ordered
+`blocks: Vec<IRBasicBlockDTO>`. The owned `IRFunction` has `name: String`,
+ordered `parameters: Vec<IRParameter>`, `return_type: IRType`, and ordered
+`blocks: Vec<IRBasicBlock>`. The sole representational difference is therefore
+the intended conversion from nested wire DTO types to nested owned IR types.
+There is no entry-block field, function metadata, storage summary, or CFG data
+in either function model, and no frozen-contract mismatch required an owned IR
+change.
+
+The public `import_function()` helper and borrowed and consuming
+`TryFrom<IRFunctionDTO>` paths reconstruct those four fields hierarchically
+through the existing parameter, type, and basic-block importers. They retain
+the function name byte-for-byte, preserve parameter and block order, and keep
+empty vectors and duplicate names. They do not select or synthesize an entry
+block, insert returns, normalize names, reorder or deduplicate contents, or
+derive storage and control-flow information.
+
+Nested failures add typed hierarchical context. `FunctionParameter` retains
+the exact function name, zero-based parameter index, and the complete
+parameter/type source chain. `FunctionReturnType` retains the function name,
+the exact `return_type` field name, and the type source. `FunctionBasicBlock`
+retains the function name, zero-based block index, exact block name, and the
+complete basic-block/instruction/field source chain. Every wrapper participates
+in `Error::source()`; no failure is flattened into a string and no importer
+path panics.
+
+Function import is structural reconstruction, not verification. It accepts no
+blocks, no entry block, duplicate parameter or block names, mismatched declared
+and returned types, invalid terminator placement, disconnected or unreachable
+blocks, unresolved targets, and other invalid-but-representable contents. Name
+uniqueness, parameter use, return compatibility, CFG connectivity, terminator
+rules, dominance, reachability, and ownership or lifecycle semantics remain
+verifier responsibilities. Focused tests cover empty, single, multiple,
+duplicate, primitive, and recursively nested contents; exact ordering and raw
+names; invalid-but-representable functions; deterministic JSON-to-wire-to-owned
+conversion; borrowed DTO immutability; all conversion paths; contextual
+failures; and complete typed source downcasting. Module importing is the next
+step. Verifier logic, CFG construction, compiler-pipeline integration, schema
+changes, PyO3, and owned IR semantic changes remain out of scope.
 
 ## 8. Ownership and memory
 

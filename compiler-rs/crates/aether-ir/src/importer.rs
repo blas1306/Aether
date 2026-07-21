@@ -4,14 +4,14 @@ use std::error::Error;
 use std::fmt;
 
 use crate::wire::{
-    IRBasicBlockDTO, IRConstantDTO, IREnumConstantDTO, IRInstructionDTO, IRParameterDTO,
-    IRSourceLocationDTO, IRStorageDTO, IRTypeDTO, IRValueDTO, NullableDTO,
+    IRBasicBlockDTO, IRConstantDTO, IREnumConstantDTO, IRFunctionDTO, IRInstructionDTO,
+    IRParameterDTO, IRSourceLocationDTO, IRStorageDTO, IRTypeDTO, IRValueDTO, NullableDTO,
 };
 use crate::{
     ArrayType, BoolType, ClassRefType, ComplexType, DoubleType, EnumType, FloatType, FunctionType,
-    IRBasicBlock, IRConstant, IREnumConstant, IRInstruction, IRParameter, IRSourceLocation,
-    IRStorage, IRType, IRValue, IntType, InterfaceType, ListType, MatrixType, MethodResultType,
-    NullableType, StringType, StructType, VectorType, VoidType,
+    IRBasicBlock, IRConstant, IREnumConstant, IRFunction, IRInstruction, IRParameter,
+    IRSourceLocation, IRStorage, IRType, IRValue, IntType, InterfaceType, ListType, MatrixType,
+    MethodResultType, NullableType, StringType, StructType, VectorType, VoidType,
 };
 
 /// A structural failure while importing a wire DTO into the owned Rust IR.
@@ -20,6 +20,35 @@ use crate::{
 /// responsibility of the IR verifier.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IRImportError {
+    /// A parameter nested in a function could not be imported.
+    FunctionParameter {
+        /// Exact, unnormalized function name from the wire DTO.
+        function: String,
+        /// Zero-based position in the function's parameter vector.
+        index: usize,
+        /// Contextual parameter-import failure.
+        source: Box<Self>,
+    },
+    /// A function's declared return type could not be imported.
+    FunctionReturnType {
+        /// Exact, unnormalized function name from the wire DTO.
+        function: String,
+        /// Exact function field containing the incompatible type DTO.
+        field: &'static str,
+        /// Structural type-import failure.
+        source: Box<Self>,
+    },
+    /// A basic block nested in a function could not be imported.
+    FunctionBasicBlock {
+        /// Exact, unnormalized function name from the wire DTO.
+        function: String,
+        /// Zero-based position in the function's block vector.
+        index: usize,
+        /// Exact, unnormalized block name from the wire DTO.
+        block: String,
+        /// Contextual basic-block import failure.
+        source: Box<Self>,
+    },
     /// An instruction nested in a basic block could not be imported.
     BasicBlockInstruction {
         /// Exact, unnormalized block name from the wire DTO.
@@ -70,6 +99,31 @@ pub enum IRImportError {
 impl fmt::Display for IRImportError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::FunctionParameter {
+                function,
+                index,
+                source,
+            } => write!(
+                formatter,
+                "function DTO '{function}' parameter at index {index} could not be imported: {source}"
+            ),
+            Self::FunctionReturnType {
+                function,
+                field,
+                source,
+            } => write!(
+                formatter,
+                "function DTO '{function}' field '{field}' could not be imported: {source}"
+            ),
+            Self::FunctionBasicBlock {
+                function,
+                index,
+                block,
+                source,
+            } => write!(
+                formatter,
+                "function DTO '{function}' basic block '{block}' at index {index} could not be imported: {source}"
+            ),
             Self::BasicBlockInstruction {
                 block,
                 index,
@@ -113,7 +167,10 @@ impl fmt::Display for IRImportError {
 impl Error for IRImportError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::BasicBlockInstruction { source, .. }
+            Self::FunctionParameter { source, .. }
+            | Self::FunctionReturnType { source, .. }
+            | Self::FunctionBasicBlock { source, .. }
+            | Self::BasicBlockInstruction { source, .. }
             | Self::InstructionField { source, .. }
             | Self::ValueType { source, .. }
             | Self::StorageType { source }
@@ -187,6 +244,70 @@ pub fn import_instruction(instruction: &IRInstructionDTO) -> Result<IRInstructio
 /// terminator validity remain the responsibility of the IR verifier.
 pub fn import_basic_block(block: &IRBasicBlockDTO) -> Result<IRBasicBlock, IRImportError> {
     block.try_into()
+}
+
+/// Reconstruct an owned Rust IR function from a borrowed wire DTO.
+///
+/// Names and parameter/block order are retained exactly. Function and CFG
+/// validity remain the responsibility of the IR verifier.
+pub fn import_function(function: &IRFunctionDTO) -> Result<IRFunction, IRImportError> {
+    function.try_into()
+}
+
+impl TryFrom<&IRFunctionDTO> for IRFunction {
+    type Error = IRImportError;
+
+    fn try_from(function: &IRFunctionDTO) -> Result<Self, Self::Error> {
+        let parameters = function
+            .parameters
+            .iter()
+            .enumerate()
+            .map(|(index, parameter)| {
+                import_parameter(parameter).map_err(|source| IRImportError::FunctionParameter {
+                    function: function.name.clone(),
+                    index,
+                    source: Box::new(source),
+                })
+            })
+            .collect::<Result<_, _>>()?;
+
+        let return_type = import_type(&function.return_type).map_err(|source| {
+            IRImportError::FunctionReturnType {
+                function: function.name.clone(),
+                field: "return_type",
+                source: Box::new(source),
+            }
+        })?;
+
+        let blocks = function
+            .blocks
+            .iter()
+            .enumerate()
+            .map(|(index, block)| {
+                import_basic_block(block).map_err(|source| IRImportError::FunctionBasicBlock {
+                    function: function.name.clone(),
+                    index,
+                    block: block.name.clone(),
+                    source: Box::new(source),
+                })
+            })
+            .collect::<Result<_, _>>()?;
+
+        Ok(Self {
+            name: function.name.clone(),
+            parameters,
+            return_type,
+            blocks,
+        })
+    }
+}
+
+impl TryFrom<IRFunctionDTO> for IRFunction {
+    type Error = IRImportError;
+
+    fn try_from(function: IRFunctionDTO) -> Result<Self, Self::Error> {
+        Self::try_from(&function)
+    }
 }
 
 impl TryFrom<&IRBasicBlockDTO> for IRBasicBlock {
