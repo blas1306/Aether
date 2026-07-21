@@ -4,14 +4,16 @@ use std::error::Error;
 use std::fmt;
 
 use crate::wire::{
-    IRBasicBlockDTO, IRConstantDTO, IREnumConstantDTO, IRFunctionDTO, IRInstructionDTO,
-    IRParameterDTO, IRSourceLocationDTO, IRStorageDTO, IRTypeDTO, IRValueDTO, NullableDTO,
+    IR_SCHEMA_VERSION, IRBasicBlockDTO, IRConstantDTO, IREnumConstantDTO, IRFunctionDTO,
+    IRInstructionDTO, IRModuleDTO, IRParameterDTO, IRSourceLocationDTO, IRStorageDTO,
+    IRStructDefinitionDTO, IRTypeDTO, IRValueDTO, NullableDTO,
 };
 use crate::{
     ArrayType, BoolType, ClassRefType, ComplexType, DoubleType, EnumType, FloatType, FunctionType,
-    IRBasicBlock, IRConstant, IREnumConstant, IRFunction, IRInstruction, IRParameter,
-    IRSourceLocation, IRStorage, IRType, IRValue, IntType, InterfaceType, ListType, MatrixType,
-    MethodResultType, NullableType, StringType, StructType, VectorType, VoidType,
+    IRBasicBlock, IRConstant, IREnumConstant, IRFunction, IRInstruction, IRModule, IRParameter,
+    IRSourceLocation, IRStorage, IRStructDefinition, IRType, IRValue, IntType, InterfaceType,
+    ListType, MatrixType, MethodResultType, NullableType, StringType, StructType, VectorType,
+    VoidType,
 };
 
 /// A structural failure while importing a wire DTO into the owned Rust IR.
@@ -20,6 +22,42 @@ use crate::{
 /// responsibility of the IR verifier.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IRImportError {
+    /// The module envelope declares a schema version this importer does not support.
+    UnsupportedSchemaVersion {
+        /// Version carried by the directly constructed wire DTO.
+        received: i64,
+        /// Only schema version currently supported by the frozen importer.
+        supported: i64,
+    },
+    /// A struct definition nested in a module could not be imported.
+    ModuleStructDefinition {
+        /// Zero-based position in the module's struct-definition vector.
+        index: usize,
+        /// Exact, unnormalized struct name from the wire DTO.
+        name: String,
+        /// Contextual struct-definition import failure.
+        source: Box<Self>,
+    },
+    /// A field nested in a struct definition could not be imported.
+    StructDefinitionField {
+        /// Exact, unnormalized struct name from the wire DTO.
+        r#struct: String,
+        /// Zero-based position in the struct's field vector.
+        index: usize,
+        /// Exact, unnormalized field name from the wire DTO.
+        field: String,
+        /// Structural type-import failure.
+        source: Box<Self>,
+    },
+    /// A function nested in a module could not be imported.
+    ModuleFunction {
+        /// Zero-based position in the module's function vector.
+        index: usize,
+        /// Exact, unnormalized function name from the wire DTO.
+        function: String,
+        /// Contextual function-import failure.
+        source: Box<Self>,
+    },
     /// A parameter nested in a function could not be imported.
     FunctionParameter {
         /// Exact, unnormalized function name from the wire DTO.
@@ -99,6 +137,38 @@ pub enum IRImportError {
 impl fmt::Display for IRImportError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::UnsupportedSchemaVersion {
+                received,
+                supported,
+            } => write!(
+                formatter,
+                "unsupported IR DTO schema version {received}; expected {supported}"
+            ),
+            Self::ModuleStructDefinition {
+                index,
+                name,
+                source,
+            } => write!(
+                formatter,
+                "module DTO struct definition '{name}' at index {index} could not be imported: {source}"
+            ),
+            Self::StructDefinitionField {
+                r#struct,
+                index,
+                field,
+                source,
+            } => write!(
+                formatter,
+                "struct-definition DTO '{struct}' field '{field}' at index {index} could not be imported: {source}"
+            ),
+            Self::ModuleFunction {
+                index,
+                function,
+                source,
+            } => write!(
+                formatter,
+                "module DTO function '{function}' at index {index} could not be imported: {source}"
+            ),
             Self::FunctionParameter {
                 function,
                 index,
@@ -167,7 +237,10 @@ impl fmt::Display for IRImportError {
 impl Error for IRImportError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::FunctionParameter { source, .. }
+            Self::ModuleStructDefinition { source, .. }
+            | Self::StructDefinitionField { source, .. }
+            | Self::ModuleFunction { source, .. }
+            | Self::FunctionParameter { source, .. }
             | Self::FunctionReturnType { source, .. }
             | Self::FunctionBasicBlock { source, .. }
             | Self::BasicBlockInstruction { source, .. }
@@ -175,10 +248,112 @@ impl Error for IRImportError {
             | Self::ValueType { source, .. }
             | Self::StorageType { source }
             | Self::ParameterType { source } => Some(source.as_ref()),
-            Self::MethodResultReceiverNotStruct { .. } | Self::NonFiniteConstantFloat { .. } => {
-                None
-            }
+            Self::UnsupportedSchemaVersion { .. }
+            | Self::MethodResultReceiverNotStruct { .. }
+            | Self::NonFiniteConstantFloat { .. } => None,
         }
+    }
+}
+
+/// Reconstruct an owned Rust IR module from a borrowed wire DTO.
+///
+/// Struct definitions and functions retain their exact wire order. This is a
+/// structural conversion only; verification, layout, and linkage are separate
+/// pipeline responsibilities.
+pub fn import_module(module: &IRModuleDTO) -> Result<IRModule, IRImportError> {
+    module.try_into()
+}
+
+/// Reconstruct an owned nominal struct definition from a borrowed wire DTO.
+pub fn import_struct_definition(
+    definition: &IRStructDefinitionDTO,
+) -> Result<IRStructDefinition, IRImportError> {
+    definition.try_into()
+}
+
+impl TryFrom<&IRModuleDTO> for IRModule {
+    type Error = IRImportError;
+
+    fn try_from(module: &IRModuleDTO) -> Result<Self, Self::Error> {
+        if module.schema_version != IR_SCHEMA_VERSION {
+            return Err(IRImportError::UnsupportedSchemaVersion {
+                received: module.schema_version,
+                supported: IR_SCHEMA_VERSION,
+            });
+        }
+
+        let functions = module
+            .functions
+            .iter()
+            .enumerate()
+            .map(|(index, function)| {
+                import_function(function).map_err(|source| IRImportError::ModuleFunction {
+                    index,
+                    function: function.name.clone(),
+                    source: Box::new(source),
+                })
+            })
+            .collect::<Result<_, _>>()?;
+
+        let structs = module
+            .structs
+            .iter()
+            .enumerate()
+            .map(|(index, definition)| {
+                import_struct_definition(definition).map_err(|source| {
+                    IRImportError::ModuleStructDefinition {
+                        index,
+                        name: definition.name.clone(),
+                        source: Box::new(source),
+                    }
+                })
+            })
+            .collect::<Result<_, _>>()?;
+
+        Ok(Self { functions, structs })
+    }
+}
+
+impl TryFrom<IRModuleDTO> for IRModule {
+    type Error = IRImportError;
+
+    fn try_from(module: IRModuleDTO) -> Result<Self, Self::Error> {
+        Self::try_from(&module)
+    }
+}
+
+impl TryFrom<&IRStructDefinitionDTO> for IRStructDefinition {
+    type Error = IRImportError;
+
+    fn try_from(definition: &IRStructDefinitionDTO) -> Result<Self, Self::Error> {
+        let fields = definition
+            .fields
+            .iter()
+            .enumerate()
+            .map(|(index, field)| {
+                import_type(&field.r#type)
+                    .map(|r#type| (field.name.clone(), r#type))
+                    .map_err(|source| IRImportError::StructDefinitionField {
+                        r#struct: definition.name.clone(),
+                        index,
+                        field: field.name.clone(),
+                        source: Box::new(source),
+                    })
+            })
+            .collect::<Result<_, _>>()?;
+
+        Ok(Self {
+            name: definition.name.clone(),
+            fields,
+        })
+    }
+}
+
+impl TryFrom<IRStructDefinitionDTO> for IRStructDefinition {
+    type Error = IRImportError;
+
+    fn try_from(definition: IRStructDefinitionDTO) -> Result<Self, Self::Error> {
+        Self::try_from(&definition)
     }
 }
 

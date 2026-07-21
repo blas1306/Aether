@@ -1060,6 +1060,69 @@ failures; and complete typed source downcasting. Module importing is the next
 step. Verifier logic, CFG construction, compiler-pipeline integration, schema
 changes, PyO3, and owned IR semantic changes remain out of scope.
 
+### Step 4E Rust module importer
+
+Phase 2 Step 4E is complete. Inspection of the concrete Rust declarations found
+that the frozen wire root contains `schema_version: i64`, ordered
+`functions: Vec<IRFunctionDTO>`, and ordered
+`structs: Vec<IRStructDefinitionDTO>`, in that order. The owned `IRModule`
+contains ordered `functions: Vec<IRFunction>` and ordered
+`structs: Vec<IRStructDefinition>`. Schema version is deliberately an envelope
+concern and is therefore not stored in the owned compiler model. No module
+name, imports, linkage, entry point, enum table, metadata, or layout data exists
+in either actual model.
+
+The wire `IRStructDefinitionDTO` contains `name: String` and ordered
+`fields: Vec<IRStructFieldDTO>`; each field DTO contains `name: String` and
+`type: IRTypeDTO`. The owned `IRStructDefinition` contains `name: String` and
+ordered `fields: Vec<(String, IRType)>`. Thus the only struct-definition
+representation mismatch is the intentional conversion of each named field DTO
+into an owned `(field name, field type)` pair. Empty field vectors are supported
+by both representations.
+
+`schema_version` is a signed 64-bit integer and the only supported value is the
+existing `IR_SCHEMA_VERSION = 1`. Wire deserialization already rejects any
+other version. Because all `IRModuleDTO` fields are public and callers can
+construct one directly, `import_module()` also rejects a non-v1 value with
+`IRImportError::UnsupportedSchemaVersion`, preserving both the received and
+supported versions. It does not silently normalize the envelope or duplicate
+the wire check for successfully deserialized JSON.
+
+The public `import_module()` and `import_struct_definition()` helpers, plus
+borrowed and consuming `TryFrom` implementations, complete deterministic
+wire-to-owned reconstruction. They reuse the type and function importers and
+retain struct, field, and function order exactly, including empty sequences,
+duplicate names, and raw strings. No declaration is sorted, deduplicated,
+resolved, synthesized, or selected as an entry point.
+
+Nested structural failures retain the complete typed context and
+`Error::source()` chain. `ModuleStructDefinition` records the zero-based struct
+index and exact struct name; `StructDefinitionField` adds the exact struct name,
+zero-based field index, exact field name, and type-import source;
+`ModuleFunction` records the zero-based function index, exact function name,
+and existing function-import source. No module importer path panics or flattens
+a nested error into a string.
+
+Module import remains a structural boundary. Duplicate struct, field, and
+function names; unknown or recursive nominal struct references; missing main
+functions; and invalid-but-representable nested function or CFG contents import
+successfully. Type-name resolution and cross-function/module calls belong to
+symbol resolution and linking; struct legality and layout belong to the layout
+phase; function, instruction, CFG, and other semantic invariants belong to the
+verifier. The importer performs none of those jobs and does not invoke them.
+
+Focused tests cover empty, struct-only, function-only, and mixed modules;
+ordered and duplicate definitions and fields; primitive and recursive types;
+unknown and self-recursive nominal references; invalid-but-representable
+functions; both conversion ownership paths; source DTO immutability;
+deterministic JSON conversion; direct unsupported-version construction; and
+full contextual source-error downcasting. An integration-style test imports the
+unchanged canonical schema-v1 golden JSON and verifies both top-level contents
+and deeply nested types and instructions. The next step is the full
+Python-JSON-to-Rust-owned-IR integration audit. Verifier execution, CFG
+construction, layout, linkage, compiler-pipeline integration, PyO3, and an owned
+IR exporter remain out of scope.
+
 ## 8. Ownership and memory
 
 Python creates the DTO snapshot and owns it for the duration of the extension

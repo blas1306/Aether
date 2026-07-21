@@ -21,8 +21,8 @@ pub use constant::{IRConstant, IREnumConstant};
 pub use function::IRFunction;
 pub use importer::{
     IRImportError, import_basic_block, import_constant, import_enum_constant, import_function,
-    import_instruction, import_optional_source_location, import_parameter, import_source_location,
-    import_storage, import_type, import_value,
+    import_instruction, import_module, import_optional_source_location, import_parameter,
+    import_source_location, import_storage, import_struct_definition, import_type, import_value,
 };
 pub use instruction::IRInstruction;
 pub use module::IRModule;
