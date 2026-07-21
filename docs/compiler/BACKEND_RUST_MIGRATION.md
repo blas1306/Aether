@@ -286,6 +286,22 @@ present on selected instructions. The schema must preserve that absence rather
 than manufacture a location. A future span range may be added as a versioned,
 backward-compatible field after diagnostic ownership is decided.
 
+### Instruction DTO completeness
+
+Schema v1 covers all 68 current concrete Python `IRInstruction` variants.
+`IR_INSTRUCTION_DTO_REGISTRY` is the authoritative, deterministic mapping from
+each exact Python instruction class to its stable DTO tag, encoder/decoder, and
+corresponding Rust `IRInstruction` variant. When an instruction is added, the
+same change must add its registry entry and codec branch and update the explicit
+68-variant contract expectation; the completeness test discovers unregistered
+Python subclasses, and a lightweight Rust source audit reports drift in either
+direction. Subclasses never inherit another instruction's DTO representation.
+
+The DTO boundary validates schema version, tags, fields, primitive kinds, and
+transport ranges only. It deliberately preserves semantically invalid but
+well-shaped IR so `IRVerifier` remains responsible for operators, types,
+dimensions, control-flow targets, ownership, and other `IRV-*` invariants.
+
 ## 8. Ownership and memory
 
 Python creates the DTO snapshot and owns it for the duration of the extension

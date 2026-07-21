@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from types import MappingProxyType
-from typing import NoReturn, TypeAlias
+from typing import Callable, Iterable, NoReturn, TypeAlias
 
 from .model import (
     IRAssign,
@@ -153,81 +154,6 @@ IR_TYPE_TAGS: Mapping[type[IRType], str] = MappingProxyType(
     }
 )
 """Exact Python IR type class to schema tag mapping."""
-
-IR_INSTRUCTION_TAGS: Mapping[type[IRInstruction], str] = MappingProxyType(
-    {
-        IRConst: "const",
-        IRLoad: "load",
-        IRStore: "store",
-        IRInitDefault: "init_default",
-        IRCopyInit: "copy_init",
-        IRMoveInit: "move_init",
-        IRAssign: "assign",
-        IRDestroy: "destroy",
-        IRRelocate: "relocate",
-        IRBinaryOp: "binary_op",
-        IRUnaryOp: "unary_op",
-        IRCompareOp: "compare_op",
-        IRCast: "cast",
-        IRCall: "call",
-        IRFunctionRef: "function_ref",
-        IRCallIndirect: "call_indirect",
-        IRPrint: "print",
-        IRStructNew: "struct_new",
-        IRStructGet: "struct_get",
-        IRStructSet: "struct_set",
-        IRMethodResultNew: "method_result_new",
-        IRMethodResultReceiver: "method_result_receiver",
-        IRMethodResultValue: "method_result_value",
-        IRArrayNew: "array_new",
-        IRListNew: "list_new",
-        IRArrayCopy: "array_copy",
-        IRListCopy: "list_copy",
-        IRListContains: "list_contains",
-        IRListIndexOf: "list_index_of",
-        IRListClear: "list_clear",
-        IRListPush: "list_push",
-        IRListInsert: "list_insert",
-        IRListRemoveAt: "list_remove_at",
-        IRListPop: "list_pop",
-        IRListReverse: "list_reverse",
-        IRSequenceSort: "sequence_sort",
-        IRArrayGet: "array_get",
-        IRArraySlice: "array_slice",
-        IRListSlice: "list_slice",
-        IRListGet: "list_get",
-        IRArraySet: "array_set",
-        IRListSet: "list_set",
-        IRArrayLength: "array_length",
-        IRListLength: "list_length",
-        IRListIsEmpty: "list_is_empty",
-        IRVectorNew: "vector_new",
-        IRMatrixNew: "matrix_new",
-        IRVectorAdd: "vector_add",
-        IRVectorSub: "vector_sub",
-        IRVectorScale: "vector_scale",
-        IRVectorDot: "vector_dot",
-        IROuterProduct: "outer_product",
-        IRMatrixAdd: "matrix_add",
-        IRMatrixSub: "matrix_sub",
-        IRMatrixScale: "matrix_scale",
-        IRMatrixMatMul: "matrix_mat_mul",
-        IRMatrixVectorMul: "matrix_vector_mul",
-        IRVectorMatrixMul: "vector_matrix_mul",
-        IRVectorGet: "vector_get",
-        IRMatrixGet: "matrix_get",
-        IRVectorLength: "vector_length",
-        IRMatrixRows: "matrix_rows",
-        IRMatrixColumns: "matrix_columns",
-        IRVectorSet: "vector_set",
-        IRMatrixSet: "matrix_set",
-        IRBranch: "branch",
-        IRJump: "jump",
-        IRReturn: "return",
-    }
-)
-"""Exact supported instruction class to stable schema tag mapping."""
-
 
 def ir_type_to_dto(
     type_: IRType,
@@ -586,12 +512,12 @@ def ir_source_location_from_dto(
     )
 
 
-def ir_instruction_to_dto(
+def _encode_instruction_to_dto(
     instruction: IRInstruction,
     *,
     schema_version: int = IR_SCHEMA_VERSION,
 ) -> IRInstructionDTO:
-    """Convert one supported instruction to a primitive DTO."""
+    """Encode a registry-approved instruction using its schema-v1 branch."""
 
     _require_schema_version(schema_version)
     try:
@@ -1315,12 +1241,12 @@ def ir_instruction_to_dto(
     raise AssertionError(f"Missing encoder for registered IR instruction kind {kind!r}")
 
 
-def ir_instruction_from_dto(
+def _decode_instruction_from_dto(
     dto: Mapping[str, object],
     *,
     schema_version: int = IR_SCHEMA_VERSION,
 ) -> IRInstruction:
-    """Decode one strictly validated supported instruction DTO.
+    """Decode a registry-approved instruction using its schema-v1 branch.
 
     This boundary validates only the versioned interchange shape.  Semantic
     facts such as whether function names exist or call signatures agree stay
@@ -2238,7 +2164,329 @@ def ir_instruction_from_dto(
                 )
             ),
         )
-    _unknown_tag("IR instruction", kind)
+    raise AssertionError(f"Missing decoder for registered IR instruction kind {kind!r}")
+
+
+InstructionDTOEncoder: TypeAlias = Callable[..., IRInstructionDTO]
+InstructionDTODecoder: TypeAlias = Callable[..., IRInstruction]
+
+
+@dataclass(frozen=True)
+class IRInstructionDTORegistryEntry:
+    """One stable Python DTO/Rust instruction correspondence."""
+
+    instruction_type: type[IRInstruction]
+    tag: str
+    encoder: InstructionDTOEncoder
+    decoder: InstructionDTODecoder
+    rust_variant: str
+
+
+def _instruction_dto_entry(
+    instruction_type: type[IRInstruction],
+    tag: str,
+    rust_variant: str,
+) -> IRInstructionDTORegistryEntry:
+    return IRInstructionDTORegistryEntry(
+        instruction_type,
+        tag,
+        _encode_instruction_to_dto,
+        _decode_instruction_from_dto,
+        rust_variant,
+    )
+
+
+IR_INSTRUCTION_DTO_REGISTRY: tuple[IRInstructionDTORegistryEntry, ...] = (
+    _instruction_dto_entry(IRConst, "const", "IRConst"),
+    _instruction_dto_entry(IRLoad, "load", "IRLoad"),
+    _instruction_dto_entry(IRStore, "store", "IRStore"),
+    _instruction_dto_entry(IRInitDefault, "init_default", "IRInitDefault"),
+    _instruction_dto_entry(IRCopyInit, "copy_init", "IRCopyInit"),
+    _instruction_dto_entry(IRMoveInit, "move_init", "IRMoveInit"),
+    _instruction_dto_entry(IRAssign, "assign", "IRAssign"),
+    _instruction_dto_entry(IRDestroy, "destroy", "IRDestroy"),
+    _instruction_dto_entry(IRRelocate, "relocate", "IRRelocate"),
+    _instruction_dto_entry(IRBinaryOp, "binary_op", "IRBinaryOp"),
+    _instruction_dto_entry(IRUnaryOp, "unary_op", "IRUnaryOp"),
+    _instruction_dto_entry(IRCompareOp, "compare_op", "IRCompareOp"),
+    _instruction_dto_entry(IRCast, "cast", "IRCast"),
+    _instruction_dto_entry(IRCall, "call", "IRCall"),
+    _instruction_dto_entry(IRFunctionRef, "function_ref", "IRFunctionRef"),
+    _instruction_dto_entry(IRCallIndirect, "call_indirect", "IRCallIndirect"),
+    _instruction_dto_entry(IRPrint, "print", "IRPrint"),
+    _instruction_dto_entry(IRStructNew, "struct_new", "IRStructNew"),
+    _instruction_dto_entry(IRStructGet, "struct_get", "IRStructGet"),
+    _instruction_dto_entry(IRStructSet, "struct_set", "IRStructSet"),
+    _instruction_dto_entry(
+        IRMethodResultNew,
+        "method_result_new",
+        "IRMethodResultNew",
+    ),
+    _instruction_dto_entry(
+        IRMethodResultReceiver,
+        "method_result_receiver",
+        "IRMethodResultReceiver",
+    ),
+    _instruction_dto_entry(
+        IRMethodResultValue,
+        "method_result_value",
+        "IRMethodResultValue",
+    ),
+    _instruction_dto_entry(IRArrayNew, "array_new", "IRArrayNew"),
+    _instruction_dto_entry(IRListNew, "list_new", "IRListNew"),
+    _instruction_dto_entry(IRArrayCopy, "array_copy", "IRArrayCopy"),
+    _instruction_dto_entry(IRListCopy, "list_copy", "IRListCopy"),
+    _instruction_dto_entry(IRListContains, "list_contains", "IRListContains"),
+    _instruction_dto_entry(IRListIndexOf, "list_index_of", "IRListIndexOf"),
+    _instruction_dto_entry(IRListClear, "list_clear", "IRListClear"),
+    _instruction_dto_entry(IRListPush, "list_push", "IRListPush"),
+    _instruction_dto_entry(IRListInsert, "list_insert", "IRListInsert"),
+    _instruction_dto_entry(IRListRemoveAt, "list_remove_at", "IRListRemoveAt"),
+    _instruction_dto_entry(IRListPop, "list_pop", "IRListPop"),
+    _instruction_dto_entry(IRListReverse, "list_reverse", "IRListReverse"),
+    _instruction_dto_entry(IRSequenceSort, "sequence_sort", "IRSequenceSort"),
+    _instruction_dto_entry(IRArrayGet, "array_get", "IRArrayGet"),
+    _instruction_dto_entry(IRArraySlice, "array_slice", "IRArraySlice"),
+    _instruction_dto_entry(IRListSlice, "list_slice", "IRListSlice"),
+    _instruction_dto_entry(IRListGet, "list_get", "IRListGet"),
+    _instruction_dto_entry(IRArraySet, "array_set", "IRArraySet"),
+    _instruction_dto_entry(IRListSet, "list_set", "IRListSet"),
+    _instruction_dto_entry(IRArrayLength, "array_length", "IRArrayLength"),
+    _instruction_dto_entry(IRListLength, "list_length", "IRListLength"),
+    _instruction_dto_entry(IRListIsEmpty, "list_is_empty", "IRListIsEmpty"),
+    _instruction_dto_entry(IRVectorNew, "vector_new", "IRVectorNew"),
+    _instruction_dto_entry(IRMatrixNew, "matrix_new", "IRMatrixNew"),
+    _instruction_dto_entry(IRVectorAdd, "vector_add", "IRVectorAdd"),
+    _instruction_dto_entry(IRVectorSub, "vector_sub", "IRVectorSub"),
+    _instruction_dto_entry(IRVectorScale, "vector_scale", "IRVectorScale"),
+    _instruction_dto_entry(IRVectorDot, "vector_dot", "IRVectorDot"),
+    _instruction_dto_entry(IROuterProduct, "outer_product", "IROuterProduct"),
+    _instruction_dto_entry(IRMatrixAdd, "matrix_add", "IRMatrixAdd"),
+    _instruction_dto_entry(IRMatrixSub, "matrix_sub", "IRMatrixSub"),
+    _instruction_dto_entry(IRMatrixScale, "matrix_scale", "IRMatrixScale"),
+    _instruction_dto_entry(
+        IRMatrixMatMul,
+        "matrix_mat_mul",
+        "IRMatrixMatMul",
+    ),
+    _instruction_dto_entry(
+        IRMatrixVectorMul,
+        "matrix_vector_mul",
+        "IRMatrixVectorMul",
+    ),
+    _instruction_dto_entry(
+        IRVectorMatrixMul,
+        "vector_matrix_mul",
+        "IRVectorMatrixMul",
+    ),
+    _instruction_dto_entry(IRVectorGet, "vector_get", "IRVectorGet"),
+    _instruction_dto_entry(IRMatrixGet, "matrix_get", "IRMatrixGet"),
+    _instruction_dto_entry(IRVectorLength, "vector_length", "IRVectorLength"),
+    _instruction_dto_entry(IRMatrixRows, "matrix_rows", "IRMatrixRows"),
+    _instruction_dto_entry(
+        IRMatrixColumns,
+        "matrix_columns",
+        "IRMatrixColumns",
+    ),
+    _instruction_dto_entry(IRVectorSet, "vector_set", "IRVectorSet"),
+    _instruction_dto_entry(IRMatrixSet, "matrix_set", "IRMatrixSet"),
+    _instruction_dto_entry(IRBranch, "branch", "IRBranch"),
+    _instruction_dto_entry(IRJump, "jump", "IRJump"),
+    _instruction_dto_entry(IRReturn, "return", "IRReturn"),
+)
+"""Authoritative, deterministic schema-v1 instruction DTO registry."""
+
+
+def validate_instruction_dto_registry(
+    registry: Iterable[IRInstructionDTORegistryEntry],
+    *,
+    python_instruction_types: Iterable[type[IRInstruction]] | None = None,
+    rust_variants: Iterable[str] | None = None,
+    expected_tags: Iterable[str] | None = None,
+) -> None:
+    """Raise a focused error for an incomplete or inconsistent registry."""
+
+    entries = tuple(registry)
+    problems: list[str] = []
+
+    class_entries: dict[type[IRInstruction], list[IRInstructionDTORegistryEntry]] = {}
+    tag_entries: dict[str, list[IRInstructionDTORegistryEntry]] = {}
+    rust_entries: dict[str, list[IRInstructionDTORegistryEntry]] = {}
+    for entry in entries:
+        class_entries.setdefault(entry.instruction_type, []).append(entry)
+        tag_entries.setdefault(entry.tag, []).append(entry)
+        rust_entries.setdefault(entry.rust_variant, []).append(entry)
+
+    duplicate_classes = {
+        instruction_type: matches
+        for instruction_type, matches in class_entries.items()
+        if len(matches) > 1
+    }
+    if duplicate_classes:
+        details = ", ".join(
+            f"{instruction_type.__name__} ({len(matches)} entries)"
+            for instruction_type, matches in sorted(
+                duplicate_classes.items(), key=lambda item: item[0].__name__
+            )
+        )
+        problems.append(f"duplicate Python instruction classes: {details}")
+
+    duplicate_tags = {tag: matches for tag, matches in tag_entries.items() if len(matches) > 1}
+    if duplicate_tags:
+        details = ", ".join(
+            f"{tag!r} ({', '.join(entry.instruction_type.__name__ for entry in matches)})"
+            for tag, matches in sorted(duplicate_tags.items())
+        )
+        problems.append(f"duplicate stable DTO tags: {details}")
+
+    duplicate_rust_variants = {
+        variant: matches
+        for variant, matches in rust_entries.items()
+        if len(matches) > 1
+    }
+    if duplicate_rust_variants:
+        details = ", ".join(
+            f"{variant} ({', '.join(entry.instruction_type.__name__ for entry in matches)})"
+            for variant, matches in sorted(duplicate_rust_variants.items())
+        )
+        problems.append(f"duplicate registry Rust variants: {details}")
+
+    name_mismatches = sorted(
+        f"{entry.instruction_type.__name__} -> {entry.rust_variant}"
+        for entry in entries
+        if entry.instruction_type.__name__ != entry.rust_variant
+    )
+    if name_mismatches:
+        problems.append(f"mismatched Python/Rust variant names: {', '.join(name_mismatches)}")
+
+    if python_instruction_types is not None:
+        python_types = set(python_instruction_types)
+        registered_types = set(class_entries)
+        missing_python = sorted(
+            instruction_type.__name__ for instruction_type in python_types - registered_types
+        )
+        extra_python = sorted(
+            instruction_type.__name__ for instruction_type in registered_types - python_types
+        )
+        if missing_python:
+            problems.append(
+                "Python instruction variants missing DTO support: "
+                + ", ".join(missing_python)
+            )
+        if extra_python:
+            problems.append(
+                "DTO instruction classes missing from Python model: "
+                + ", ".join(extra_python)
+            )
+
+    if expected_tags is not None:
+        expected_tag_set = set(expected_tags)
+        registered_tags = set(tag_entries)
+        missing_tags = sorted(expected_tag_set - registered_tags)
+        extra_tags = sorted(registered_tags - expected_tag_set)
+        if missing_tags:
+            problems.append(f"stable DTO tags missing from registry: {', '.join(missing_tags)}")
+        if extra_tags:
+            problems.append(f"unexpected stable DTO tags in registry: {', '.join(extra_tags)}")
+
+    if rust_variants is not None:
+        rust_variant_list = tuple(rust_variants)
+        rust_variant_set = set(rust_variant_list)
+        duplicate_source_variants = sorted(
+            variant
+            for variant in rust_variant_set
+            if rust_variant_list.count(variant) > 1
+        )
+        if duplicate_source_variants:
+            problems.append(
+                "duplicate Rust IRInstruction variants: "
+                + ", ".join(duplicate_source_variants)
+            )
+        registered_rust_variants = set(rust_entries)
+        missing_in_python = sorted(rust_variant_set - registered_rust_variants)
+        missing_in_rust = sorted(registered_rust_variants - rust_variant_set)
+        if missing_in_python:
+            problems.append(
+                "Rust variants missing in Python DTO: " + ", ".join(missing_in_python)
+            )
+        if missing_in_rust:
+            problems.append(
+                "Python DTO variants missing in Rust: " + ", ".join(missing_in_rust)
+            )
+
+    if problems:
+        raise ValueError("Invalid IR instruction DTO registry (" + "; ".join(problems) + ")")
+
+
+validate_instruction_dto_registry(IR_INSTRUCTION_DTO_REGISTRY)
+
+IR_INSTRUCTION_TAGS: Mapping[type[IRInstruction], str] = MappingProxyType(
+    {entry.instruction_type: entry.tag for entry in IR_INSTRUCTION_DTO_REGISTRY}
+)
+"""Exact supported instruction class to stable schema tag mapping."""
+
+IR_INSTRUCTION_DTO_BY_TAG: Mapping[str, IRInstructionDTORegistryEntry] = MappingProxyType(
+    {entry.tag: entry for entry in IR_INSTRUCTION_DTO_REGISTRY}
+)
+"""Stable schema tag to its unique instruction DTO registry entry."""
+
+_IR_INSTRUCTION_DTO_BY_CLASS: Mapping[
+    type[IRInstruction], IRInstructionDTORegistryEntry
+] = MappingProxyType(
+    {entry.instruction_type: entry for entry in IR_INSTRUCTION_DTO_REGISTRY}
+)
+
+
+def ir_instruction_to_dto(
+    instruction: IRInstruction,
+    *,
+    schema_version: int = IR_SCHEMA_VERSION,
+) -> IRInstructionDTO:
+    """Convert one exactly registered instruction to a primitive DTO."""
+
+    _require_schema_version(schema_version)
+    try:
+        entry = _IR_INSTRUCTION_DTO_BY_CLASS[type(instruction)]
+    except KeyError:
+        raise TypeError(
+            f"Unsupported IR instruction for schema v{IR_SCHEMA_VERSION}: "
+            f"{type(instruction).__name__}"
+        ) from None
+    encoded = entry.encoder(instruction, schema_version=schema_version)
+    if encoded.get("kind") != entry.tag:
+        raise AssertionError(
+            f"Registered encoder mismatch for {entry.instruction_type.__name__}: "
+            f"expected kind {entry.tag!r}, got {encoded.get('kind')!r}"
+        )
+    return encoded
+
+
+def ir_instruction_from_dto(
+    dto: Mapping[str, object],
+    *,
+    schema_version: int = IR_SCHEMA_VERSION,
+) -> IRInstruction:
+    """Decode one strictly validated, exactly registered instruction DTO.
+
+    This boundary validates only versioned DTO shape and primitive ranges.
+    Semantic facts such as valid operators, dimensions, targets, and call
+    signatures remain the responsibility of :class:`IRVerifier`.
+    """
+
+    _require_schema_version(schema_version)
+    mapping = _expect_mapping(dto, "IR instruction")
+    kind = _expect_kind(mapping, "IR instruction")
+    try:
+        entry = IR_INSTRUCTION_DTO_BY_TAG[kind]
+    except KeyError:
+        _unknown_tag("IR instruction", kind)
+    decoded = entry.decoder(mapping, schema_version=schema_version)
+    if type(decoded) is not entry.instruction_type:
+        raise AssertionError(
+            f"Registered decoder mismatch for kind {kind!r}: expected "
+            f"{entry.instruction_type.__name__}, got {type(decoded).__name__}"
+        )
+    return decoded
 
 
 def _value_from_dto(
@@ -2387,6 +2635,8 @@ def _require_i64(value: object, field: str) -> None:
 
 __all__ = [
     "IR_SCHEMA_VERSION",
+    "IR_INSTRUCTION_DTO_BY_TAG",
+    "IR_INSTRUCTION_DTO_REGISTRY",
     "IR_INSTRUCTION_TAGS",
     "IR_TYPE_TAGS",
     "IRConstant",
@@ -2395,6 +2645,7 @@ __all__ = [
     "IRDTOSchemaVersionError",
     "IREnumConstantDTO",
     "IRInstructionDTO",
+    "IRInstructionDTORegistryEntry",
     "IRParameterDTO",
     "IRSourceLocationDTO",
     "IRStorageDTO",
@@ -2416,4 +2667,5 @@ __all__ = [
     "ir_type_to_dto",
     "ir_value_from_dto",
     "ir_value_to_dto",
+    "validate_instruction_dto_registry",
 ]
