@@ -19,6 +19,9 @@ from .model import (
     IRInitDefault,
     IRInstruction,
     IRLoad,
+    IRMethodResultNew,
+    IRMethodResultReceiver,
+    IRMethodResultValue,
     IRMoveInit,
     IRParameter,
     IRPrint,
@@ -26,6 +29,9 @@ from .model import (
     IRSourceLocation,
     IRStorage,
     IRStore,
+    IRStructGet,
+    IRStructNew,
+    IRStructSet,
     IRUnaryOp,
     IRValue,
 )
@@ -122,6 +128,12 @@ IR_INSTRUCTION_TAGS: Mapping[type[IRInstruction], str] = MappingProxyType(
         IRFunctionRef: "function_ref",
         IRCallIndirect: "call_indirect",
         IRPrint: "print",
+        IRStructNew: "struct_new",
+        IRStructGet: "struct_get",
+        IRStructSet: "struct_set",
+        IRMethodResultNew: "method_result_new",
+        IRMethodResultReceiver: "method_result_receiver",
+        IRMethodResultValue: "method_result_value",
     }
 )
 """Exact supported instruction class to stable schema tag mapping."""
@@ -709,6 +721,76 @@ def ir_instruction_to_dto(
                 ]
             ),
         }
+    if type(instruction) is IRStructNew:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "fields": [
+                ir_value_to_dto(field, schema_version=schema_version)
+                for field in instruction.fields
+            ],
+        }
+    if type(instruction) is IRStructGet:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "struct": ir_value_to_dto(instruction.struct, schema_version=schema_version),
+            "field_index": _expect_i64(
+                instruction.field_index,
+                "IR instruction 'struct_get'.field_index",
+            ),
+            "field_name": _expect_string(
+                instruction.field_name,
+                "IR instruction 'struct_get'.field_name",
+            ),
+        }
+    if type(instruction) is IRStructSet:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "struct": ir_value_to_dto(instruction.struct, schema_version=schema_version),
+            "field_index": _expect_i64(
+                instruction.field_index,
+                "IR instruction 'struct_set'.field_index",
+            ),
+            "field_name": _expect_string(
+                instruction.field_name,
+                "IR instruction 'struct_set'.field_name",
+            ),
+            "value": ir_value_to_dto(instruction.value, schema_version=schema_version),
+        }
+    if type(instruction) is IRMethodResultNew:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "receiver": ir_value_to_dto(
+                instruction.receiver,
+                schema_version=schema_version,
+            ),
+            "value": (
+                None
+                if instruction.value is None
+                else ir_value_to_dto(instruction.value, schema_version=schema_version)
+            ),
+        }
+    if type(instruction) is IRMethodResultReceiver:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "method_result": ir_value_to_dto(
+                instruction.method_result,
+                schema_version=schema_version,
+            ),
+        }
+    if type(instruction) is IRMethodResultValue:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "method_result": ir_value_to_dto(
+                instruction.method_result,
+                schema_version=schema_version,
+            ),
+        }
     raise AssertionError(f"Missing encoder for registered IR instruction kind {kind!r}")
 
 
@@ -945,6 +1027,81 @@ def ir_instruction_from_dto(
             ir_value_from_dto(mapping["value"], schema_version=schema_version),
             _expect_bool(mapping["newline"], "IR instruction 'print'.newline"),
             aggregate_shape,
+        )
+    if kind == "struct_new":
+        _expect_fields(
+            mapping,
+            {"kind", "result", "fields"},
+            "IR instruction 'struct_new'",
+        )
+        fields = _expect_sequence(mapping["fields"], "IR instruction 'struct_new'.fields")
+        return IRStructNew(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            tuple(
+                ir_value_from_dto(field, schema_version=schema_version)
+                for field in fields
+            ),
+        )
+    if kind == "struct_get":
+        _expect_fields(
+            mapping,
+            {"kind", "result", "struct", "field_index", "field_name"},
+            "IR instruction 'struct_get'",
+        )
+        return IRStructGet(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_value_from_dto(mapping["struct"], schema_version=schema_version),
+            _expect_i64(mapping["field_index"], "IR instruction 'struct_get'.field_index"),
+            _expect_string(mapping["field_name"], "IR instruction 'struct_get'.field_name"),
+        )
+    if kind == "struct_set":
+        _expect_fields(
+            mapping,
+            {"kind", "result", "struct", "field_index", "field_name", "value"},
+            "IR instruction 'struct_set'",
+        )
+        return IRStructSet(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_value_from_dto(mapping["struct"], schema_version=schema_version),
+            _expect_i64(mapping["field_index"], "IR instruction 'struct_set'.field_index"),
+            _expect_string(mapping["field_name"], "IR instruction 'struct_set'.field_name"),
+            ir_value_from_dto(mapping["value"], schema_version=schema_version),
+        )
+    if kind == "method_result_new":
+        _expect_fields(
+            mapping,
+            {"kind", "result", "receiver", "value"},
+            "IR instruction 'method_result_new'",
+        )
+        raw_value = mapping["value"]
+        return IRMethodResultNew(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_value_from_dto(mapping["receiver"], schema_version=schema_version),
+            (
+                None
+                if raw_value is None
+                else ir_value_from_dto(raw_value, schema_version=schema_version)
+            ),
+        )
+    if kind == "method_result_receiver":
+        _expect_fields(
+            mapping,
+            {"kind", "result", "method_result"},
+            "IR instruction 'method_result_receiver'",
+        )
+        return IRMethodResultReceiver(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_value_from_dto(mapping["method_result"], schema_version=schema_version),
+        )
+    if kind == "method_result_value":
+        _expect_fields(
+            mapping,
+            {"kind", "result", "method_result"},
+            "IR instruction 'method_result_value'",
+        )
+        return IRMethodResultValue(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_value_from_dto(mapping["method_result"], schema_version=schema_version),
         )
     _unknown_tag("IR instruction", kind)
 

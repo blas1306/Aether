@@ -28,13 +28,18 @@ from aether.ir.model import (
     IRInitDefault,
     IRInstruction,
     IRLoad,
+    IRMethodResultNew,
+    IRMethodResultReceiver,
+    IRMethodResultValue,
     IRMoveInit,
     IRPrint,
     IRRelocate,
     IRSourceLocation,
     IRStorage,
     IRStore,
+    IRStructGet,
     IRStructNew,
+    IRStructSet,
     IRUnaryOp,
     IRValue,
 )
@@ -251,6 +256,12 @@ def test_supported_instruction_tags_are_explicit_and_stable() -> None:
         IRFunctionRef: "function_ref",
         IRCallIndirect: "call_indirect",
         IRPrint: "print",
+        IRStructNew: "struct_new",
+        IRStructGet: "struct_get",
+        IRStructSet: "struct_set",
+        IRMethodResultNew: "method_result_new",
+        IRMethodResultReceiver: "method_result_receiver",
+        IRMethodResultValue: "method_result_value",
     }
 
 
@@ -393,10 +404,7 @@ def test_semantically_distinct_lifecycle_instructions_have_distinct_dtos() -> No
     assert len({json.dumps(dto, separators=(",", ":")) for dto in encoded}) == len(instructions)
 
 
-def test_unsupported_instruction_families_and_subclasses_are_rejected() -> None:
-    with pytest.raises(TypeError, match=r"Unsupported IR instruction for schema v1: IRStructNew"):
-        ir_instruction_to_dto(IRStructNew(RESULT))
-
+def test_unsupported_instruction_subclasses_are_rejected() -> None:
     class FutureConst(IRConst):
         pass
 
