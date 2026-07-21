@@ -17,6 +17,9 @@ version = "0.0.0"
 [[package]]
 name = "aether-verifier"
 version = "0.0.0"
+dependencies = [
+ "aether-ir",
+]
 
 [[package]]
 name = "itoa"

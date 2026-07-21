@@ -1205,6 +1205,95 @@ no meaningful remaining contract work. The next planned migration step is
 selection and differential-testing boundary rather than coupling verification
 to this importer.
 
+### Phase 3 Step 3A Rust IR type verifier — complete
+
+Phase 3 Step 3A is complete. The `aether-verifier` crate now exposes the
+borrowed, layered API `verify_module_types(&IRModule)`,
+`verify_function_types(&IRModule, &IRFunction)`, and
+`verify_block_types(&IRModule, &IRFunction, &IRBasicBlock)`. Module traversal
+delegates to the function API, and function traversal delegates to the block
+API; there is one instruction dispatch and no duplicate hierarchy walk. The
+pass returns `Result<(), ...>` and never mutates the owned IR.
+
+The implemented pass enforces exactly these invariants:
+
+- struct field types use the Python verifier's type grammar, are non-void, and
+  direct by-value struct layouts are finite; function parameter and return
+  types and every instruction result type use that same grammar. As in Python,
+  `FunctionType` signatures are not recursively type-validated;
+- constants agree with their result type, including complete enum identity,
+  member, and discriminant checks;
+- loads and stores have exact slot/value type agreement, without checking slot
+  existence, initialization, or liveness;
+- scalar binary, unary, comparison, and cast operands/results follow the
+  Python operator allowlists, exact-coercion rules, integer-division result,
+  equality capability, numeric promotion, and cast allowlist;
+- direct calls and function references resolve against the module and match
+  parameter count/types and result presence/type; indirect calls require a
+  `FunctionType` callee and exactly match its signature; non-lifecycle builtin
+  calls match the Python verifier's argument and result signatures, including
+  parsing/text-result layouts and scalar-math result rules;
+- print operands belong to the Python verifier's printable type set;
+- struct construction, field read, and field update use a declared nominal
+  struct, canonical field count/index, exact field value/result types, and an
+  exact struct result type; method-result construction and extraction match
+  receiver/value component types and void result presence;
+- array and list construction, get/set, slice, length, copy, membership,
+  index lookup, clear, reverse, push, insert, pop, remove-at, emptiness, and
+  sorting enforce their instruction-local container, index, element, result,
+  equality-capability, and sortable-element type rules. Lifecycle capability
+  portions of copy/slice are excluded;
+- vector and matrix construction, arithmetic, scaling, multiplication,
+  indexing, mutation, and size queries enforce aggregate operand/result kinds,
+  exact or promoted element compatibility, scalar/index types, and vector
+  orientation compatibility. Dimension, element-count, and shape metadata are
+  excluded;
+- `IRBranch` requires an exact `bool` condition type while leaving both target
+  names unresolved, and `IRJump` has no additional type rule; and
+- each `IRReturn` locally agrees with its containing function's declared return
+  type, including value presence for void/non-void returns. Return placement,
+  path coverage, storage transfer, and cleanup are excluded.
+
+Errors are typed rather than rendered early. `ModuleTypeVerificationError`,
+`FunctionTypeVerificationError`, `BlockTypeVerificationError`, and
+`InstructionTypeVerificationError` retain the function name, block name,
+zero-based instruction index, exact `InstructionKind`, and a typed
+`TypeRuleError` containing the offending field plus expected/actual types when
+the rule is a type mismatch. Every wrapper implements `Error::source()`, so a
+nested module failure retains the complete module-to-rule source chain.
+Traversal is deterministic and uses source vector order; duplicate declaration
+lookup deliberately matches the Python verifier's last-definition dictionary
+behavior while duplicate-name rejection remains deferred.
+
+The Python verifier was classified before migration. The following checks are
+intentionally **not** part of Step 3A:
+
+- CFG: block presence, the `entry` block, reachability, block ordering,
+  terminator presence/finality, jump/branch target resolution, CFG
+  connectivity, and all-path return analysis;
+- definitions and data flow: duplicate or empty declaration names, duplicate
+  fields/parameters/blocks/values, undefined values or slots, name-to-type
+  agreement, definition-before-use, slot stores, and merge-state consistency;
+- dominance and SSA: dominance, phi placement/completeness, SSA
+  single-definition rules, and edge-use semantics;
+- ownership/lifecycle: borrowed-element scopes and escapes, lifecycle
+  instructions and retain/release calls, storage initialization/move/destroy
+  state, relocation traits/counts, copy/slice lifecycle traits, transfer
+  storage, and cleanup at returns;
+- non-type metadata and structure: aggregate print/compare shapes, matrix and
+  vector dimension positivity, matrix literal element counts, retained
+  row/column/length metadata, and canonical builtin semantic-name preservation;
+  and
+- every optimization invariant and all optimizer, CFG, LLVM, pipeline, PyO3,
+  and code-generation integration.
+
+Consequently, the Step 3A pass intentionally accepts modules that the complete
+Python `IRVerifier` rejects for one of those deferred reasons. Within the
+migrated type checks, acceptance/rejection follows the Python verifier; no
+Python-verifier bug or intentional type-semantic deviation was discovered.
+Importer behavior, the wire schema, canonical JSON, compiler pipeline, LLVM
+backend, and owned IR semantics are unchanged.
+
 ## 8. Ownership and memory
 
 Python creates the DTO snapshot and owns it for the duration of the extension
