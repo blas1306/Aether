@@ -1,17 +1,14 @@
-from Sortings import validarArray
-from Sortings import bubbleSort
-from Sortings import selectionSort
-from Sortings import insertionSort
+import Sortings;
 
 int main() {
     Array<int> arr = {5, 2, 3, 8, 1, 10, 9};
 
-    if (validarArray(arr) != true) {
+    if (!Sortings.validarArray(arr)) {
         return 1;
     } else {
-        arrayBubble = bubbleSort(arr);
-        arraySelection = selectionSort(arr);
-        arrayInsertion = insertionSort(arr);
+        Array<int> arrayBubble = Sortings.bubbleSort(arr);
+        Array<int> arraySelection = Sortings.selectionSort(arr);
+        Array<int> arrayInsertion = Sortings.insertionSort(arr);
 
         println("BubbleSort: ", arrayBubble);
         println("SelectionSort: ", arraySelection);

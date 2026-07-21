@@ -13,6 +13,7 @@ from .model import (
     IRArraySet,
     IRArraySlice,
     IRBinaryOp,
+    IRBranch,
     IRCall,
     IRCallIndirect,
     IRCast,
@@ -24,6 +25,7 @@ from .model import (
     IRFunctionRef,
     IRInitDefault,
     IRInstruction,
+    IRJump,
     IRLoad,
     IRListClear,
     IRListContains,
@@ -58,6 +60,7 @@ from .model import (
     IRParameter,
     IRPrint,
     IRRelocate,
+    IRReturn,
     IRSequenceSort,
     IRSourceLocation,
     IRStorage,
@@ -218,6 +221,9 @@ IR_INSTRUCTION_TAGS: Mapping[type[IRInstruction], str] = MappingProxyType(
         IRMatrixColumns: "matrix_columns",
         IRVectorSet: "vector_set",
         IRMatrixSet: "matrix_set",
+        IRBranch: "branch",
+        IRJump: "jump",
+        IRReturn: "return",
     }
 )
 """Exact supported instruction class to stable schema tag mapping."""
@@ -1265,6 +1271,47 @@ def ir_instruction_to_dto(
                 schema_version=schema_version,
             ),
         }
+    if type(instruction) is IRBranch:
+        return {
+            "kind": kind,
+            "condition": ir_value_to_dto(
+                instruction.condition,
+                schema_version=schema_version,
+            ),
+            "true_target": _expect_string(
+                instruction.true_target,
+                "IR instruction 'branch'.true_target",
+            ),
+            "false_target": _expect_string(
+                instruction.false_target,
+                "IR instruction 'branch'.false_target",
+            ),
+        }
+    if type(instruction) is IRJump:
+        return {
+            "kind": kind,
+            "target": _expect_string(
+                instruction.target,
+                "IR instruction 'jump'.target",
+            ),
+        }
+    if type(instruction) is IRReturn:
+        return {
+            "kind": kind,
+            "value": (
+                None
+                if instruction.value is None
+                else ir_value_to_dto(instruction.value, schema_version=schema_version)
+            ),
+            "transferred_storage": (
+                None
+                if instruction.transferred_storage is None
+                else ir_storage_to_dto(
+                    instruction.transferred_storage,
+                    schema_version=schema_version,
+                )
+            ),
+        }
     raise AssertionError(f"Missing encoder for registered IR instruction kind {kind!r}")
 
 
@@ -2145,6 +2192,51 @@ def ir_instruction_from_dto(
         return instruction_type(
             ir_value_from_dto(mapping["result"], schema_version=schema_version),
             ir_value_from_dto(mapping["list_value"], schema_version=schema_version),
+        )
+    if kind == "branch":
+        _expect_fields(
+            mapping,
+            {"kind", "condition", "true_target", "false_target"},
+            "IR instruction 'branch'",
+        )
+        return IRBranch(
+            ir_value_from_dto(mapping["condition"], schema_version=schema_version),
+            _expect_string(
+                mapping["true_target"],
+                "IR instruction 'branch'.true_target",
+            ),
+            _expect_string(
+                mapping["false_target"],
+                "IR instruction 'branch'.false_target",
+            ),
+        )
+    if kind == "jump":
+        _expect_fields(mapping, {"kind", "target"}, "IR instruction 'jump'")
+        return IRJump(
+            _expect_string(mapping["target"], "IR instruction 'jump'.target")
+        )
+    if kind == "return":
+        _expect_fields(
+            mapping,
+            {"kind", "value", "transferred_storage"},
+            "IR instruction 'return'",
+        )
+        raw_value = mapping["value"]
+        raw_transferred_storage = mapping["transferred_storage"]
+        return IRReturn(
+            (
+                None
+                if raw_value is None
+                else ir_value_from_dto(raw_value, schema_version=schema_version)
+            ),
+            (
+                None
+                if raw_transferred_storage is None
+                else ir_storage_from_dto(
+                    raw_transferred_storage,
+                    schema_version=schema_version,
+                )
+            ),
         )
     _unknown_tag("IR instruction", kind)
 

@@ -13,7 +13,6 @@ from aether.ir.dto import (
 )
 from aether.ir.model import (
     IRBasicBlock,
-    IRBranch,
     IRConst,
     IRCopyInit,
     IRFunction,
@@ -43,7 +42,7 @@ from aether.ir.model import (
     IRVectorSet,
     IRVectorSub,
 )
-from aether.ir.types import BoolType, IntType, MatrixType, VectorType
+from aether.ir.types import IntType, MatrixType, VectorType
 from aether.ir.verifier import IRVerificationError, IRVerifier
 
 
@@ -558,13 +557,6 @@ def test_unsupported_linear_algebra_subclass_is_rejected() -> None:
         ir_instruction_to_dto(
             FutureVectorAdd(ROW_RESULT, ROW_VECTOR, OTHER_ROW_VECTOR, 4, "row")
         )
-
-
-def test_control_flow_instruction_remains_outside_the_dto_boundary() -> None:
-    condition = IRValue("condition", BoolType())
-
-    with pytest.raises(TypeError, match=r"Unsupported IR instruction for schema v1: IRBranch"):
-        ir_instruction_to_dto(IRBranch(condition, "then", "else"))
 
 
 def _assert_neutral(value: object) -> None:

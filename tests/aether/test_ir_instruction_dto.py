@@ -22,6 +22,7 @@ from aether.ir.model import (
     IRArraySet,
     IRArraySlice,
     IRBinaryOp,
+    IRBranch,
     IRCall,
     IRCallIndirect,
     IRCast,
@@ -33,6 +34,7 @@ from aether.ir.model import (
     IRFunctionRef,
     IRInitDefault,
     IRInstruction,
+    IRJump,
     IRLoad,
     IRListClear,
     IRListContains,
@@ -66,6 +68,7 @@ from aether.ir.model import (
     IROuterProduct,
     IRPrint,
     IRRelocate,
+    IRReturn,
     IRSequenceSort,
     IRSourceLocation,
     IRStorage,
@@ -346,6 +349,9 @@ def test_supported_instruction_tags_are_explicit_and_stable() -> None:
         IRMatrixColumns: "matrix_columns",
         IRVectorSet: "vector_set",
         IRMatrixSet: "matrix_set",
+        IRBranch: "branch",
+        IRJump: "jump",
+        IRReturn: "return",
     }
 
 

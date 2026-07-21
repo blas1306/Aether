@@ -25,7 +25,7 @@ List<int> factoresPrimos(int n) {
     List<int> factores = {};
 
     while (n % 2 == 0) {
-        push(factores, 2);
+        factores.push(2);
         n = int(n/2);
     }
 
@@ -33,14 +33,14 @@ List<int> factoresPrimos(int n) {
 
     while (divisor * divisor <= n) {
         while (n % divisor == 0) {
-            push(factores, divisor);
+            factores.push(divisor);
             n = int(n/divisor);
         }
 
         divisor += 2;
     }
 
-    push(factores, n);
+    factores.push(n);
     return factores;
 }
 
@@ -52,7 +52,7 @@ while (true) {
         continue;
     }
 
-    if (esPrimo3(p) == true) {
+    if (esPrimo3(p)) {
         println("$p$ es primo");
     } else {
         println("$p$ no es primo");
