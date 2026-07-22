@@ -1,6 +1,7 @@
 //! Independent type, structural, SSA, dominance, lifecycle, and return passes for owned Aether IR.
 //!
-//! Type verification checks declaration and instruction-local type contracts.
+//! Type verification checks declaration and instruction-local type contracts,
+//! plus Python-compatible function-wide borrowed collection-element rules.
 //! Structural verification checks declarations, block termination, and local
 //! branch/jump targets. SSA verification checks function-local immutable value
 //! definitions, references, and same-block ordering. Dominance verification
@@ -10,6 +11,7 @@
 //! entry-rooted path in a non-void function returns a value. No pass performs
 //! phi, cleanup insertion, lifecycle expansion, or optimization verification.
 
+mod borrow_error;
 mod cfg;
 mod dominance_error;
 mod dominance_verifier;
@@ -24,6 +26,7 @@ mod structure_error;
 mod structure_verifier;
 mod verifier;
 
+pub use borrow_error::{BorrowRule, BorrowRuleError};
 pub use dominance_error::{
     BlockDominanceError, DominanceRuleError, DominanceUseLocation, FunctionDominanceError,
     ModuleDominanceError,

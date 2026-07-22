@@ -1,6 +1,6 @@
-//! Layered traversal and instruction-local type rules.
+//! Layered traversal, instruction-local type rules, and borrowed-element rules.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use aether_ir::{
     ArrayType, BoolType, ComplexType, DoubleType, FloatType, FunctionType, IRBasicBlock,
@@ -14,8 +14,17 @@ use crate::error::{
     ModuleTypeVerificationError, TypeExpectation, TypeRuleError,
 };
 use crate::lifecycle_verifier::LifecycleTypeRegistry;
+use crate::ssa_error::SSAInstructionLocation;
+use crate::ssa_verifier::instruction_location;
+use crate::{BorrowRule, BorrowRuleError};
 
-/// Verifies declaration types and every instruction-local type contract in a module.
+#[derive(Clone)]
+struct BorrowDefinition {
+    scope: String,
+    location: SSAInstructionLocation,
+}
+
+/// Verifies declarations, instruction-local types, and borrowed elements in a module.
 pub fn verify_module_types(module: &IRModule) -> Result<(), ModuleTypeVerificationError> {
     let verifier = TypeVerifier::new(module);
     verifier.verify_struct_definitions()?;
@@ -31,7 +40,7 @@ pub fn verify_module_types(module: &IRModule) -> Result<(), ModuleTypeVerificati
     Ok(())
 }
 
-/// Verifies one function using module declarations for calls and nominal types.
+/// Verifies one function using module declarations for calls, nominal types, and borrows.
 pub fn verify_function_types(
     module: &IRModule,
     function: &IRFunction,
@@ -136,6 +145,8 @@ impl<'module> TypeVerifier<'module> {
                 source,
             })?;
 
+        self.verify_borrowed_elements(function)?;
+
         for (block_index, block) in function.blocks.iter().enumerate() {
             self.verify_block(function, block).map_err(|source| {
                 FunctionTypeVerificationError::Block {
@@ -146,6 +157,200 @@ impl<'module> TypeVerifier<'module> {
                 }
             })?;
         }
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn verify_borrowed_elements(
+        &self,
+        function: &IRFunction,
+    ) -> Result<(), FunctionTypeVerificationError> {
+        let mut borrowed = HashMap::new();
+        for (block_index, block) in function.blocks.iter().enumerate() {
+            for (instruction_index, instruction) in block.instructions.iter().enumerate() {
+                let (result, is_borrowed, borrow_scope) = match instruction {
+                    IRInstruction::IRArrayGet {
+                        result,
+                        borrowed,
+                        borrow_scope,
+                        ..
+                    }
+                    | IRInstruction::IRListGet {
+                        result,
+                        borrowed,
+                        borrow_scope,
+                        ..
+                    } => (result, *borrowed, borrow_scope.as_deref()),
+                    _ => continue,
+                };
+                let location =
+                    instruction_location(block_index, block, instruction_index, instruction);
+                if is_borrowed {
+                    let Some(scope) = borrow_scope.filter(|scope| !scope.is_empty()) else {
+                        return Err(borrow_function_error(
+                            function,
+                            block_index,
+                            block,
+                            instruction_index,
+                            instruction,
+                            BorrowRuleError::MissingBorrowScope {
+                                rule: BorrowRule::Irv037,
+                                borrowed_value: result.name.clone(),
+                                instruction: location,
+                                defining_scope: block.name.clone(),
+                            },
+                        ));
+                    };
+                    if scope != block.name {
+                        return Err(borrow_function_error(
+                            function,
+                            block_index,
+                            block,
+                            instruction_index,
+                            instruction,
+                            BorrowRuleError::BorrowScopeMismatch {
+                                rule: BorrowRule::Irv038,
+                                borrowed_value: result.name.clone(),
+                                instruction: location,
+                                declared_scope: scope.to_owned(),
+                                defining_scope: block.name.clone(),
+                            },
+                        ));
+                    }
+                    borrowed.insert(
+                        result.name.clone(),
+                        BorrowDefinition {
+                            scope: scope.to_owned(),
+                            location,
+                        },
+                    );
+                } else if let Some(scope) = borrow_scope {
+                    return Err(borrow_function_error(
+                        function,
+                        block_index,
+                        block,
+                        instruction_index,
+                        instruction,
+                        BorrowRuleError::OwnedGetDeclaresBorrowScope {
+                            rule: BorrowRule::Irv039,
+                            value: result.name.clone(),
+                            instruction: location,
+                            declared_scope: scope.to_owned(),
+                        },
+                    ));
+                }
+            }
+        }
+
+        if borrowed.is_empty() {
+            return Ok(());
+        }
+
+        for (block_index, block) in function.blocks.iter().enumerate() {
+            let mut acquired = HashSet::new();
+            for (instruction_index, instruction) in block.instructions.iter().enumerate() {
+                if let IRInstruction::IRCall {
+                    arguments,
+                    builtin: Some(builtin),
+                    ..
+                } = instruction
+                {
+                    if builtin == "__aether_retain" {
+                        acquired.extend(
+                            arguments
+                                .iter()
+                                .filter(|argument| borrowed.contains_key(&argument.name))
+                                .map(|argument| argument.name.clone()),
+                        );
+                    }
+                }
+
+                if let IRInstruction::IRStore { value, .. } = instruction {
+                    if let Some(definition) = borrowed.get(&value.name) {
+                        if self.lifecycle.needs_destroy(&value.r#type)
+                            && !acquired.contains(&value.name)
+                        {
+                            let consumer = instruction_location(
+                                block_index,
+                                block,
+                                instruction_index,
+                                instruction,
+                            );
+                            return Err(borrow_function_error(
+                                function,
+                                block_index,
+                                block,
+                                instruction_index,
+                                instruction,
+                                BorrowRuleError::BorrowedOwningStoreWithoutAcquisition {
+                                    rule: BorrowRule::Irv040,
+                                    borrowed_value: value.name.clone(),
+                                    borrowed_type: value.r#type.clone(),
+                                    borrow_scope: definition.scope.clone(),
+                                    definition: definition.location.clone(),
+                                    consumer,
+                                },
+                            ));
+                        }
+                    }
+                }
+
+                if let IRInstruction::IRReturn {
+                    value: Some(value), ..
+                } = instruction
+                {
+                    if let Some(definition) = borrowed.get(&value.name) {
+                        let consumer = instruction_location(
+                            block_index,
+                            block,
+                            instruction_index,
+                            instruction,
+                        );
+                        return Err(borrow_function_error(
+                            function,
+                            block_index,
+                            block,
+                            instruction_index,
+                            instruction,
+                            BorrowRuleError::BorrowedValueReturned {
+                                rule: BorrowRule::Irv041,
+                                borrowed_value: value.name.clone(),
+                                borrow_scope: definition.scope.clone(),
+                                definition: definition.location.clone(),
+                                consumer,
+                            },
+                        ));
+                    }
+                }
+
+                if let Some(receiver) = borrowed_mutation_receiver(instruction) {
+                    if let Some(definition) = borrowed.get(&receiver.name) {
+                        let consumer = instruction_location(
+                            block_index,
+                            block,
+                            instruction_index,
+                            instruction,
+                        );
+                        return Err(borrow_function_error(
+                            function,
+                            block_index,
+                            block,
+                            instruction_index,
+                            instruction,
+                            BorrowRuleError::MutationThroughBorrow {
+                                rule: BorrowRule::Irv042,
+                                borrowed_value: receiver.name.clone(),
+                                borrow_scope: definition.scope.clone(),
+                                definition: definition.location.clone(),
+                                consumer,
+                                consumer_kind: instruction_kind(instruction),
+                            },
+                        ));
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -2136,6 +2341,48 @@ impl<'module> TypeVerifier<'module> {
                 actual,
             })
         }
+    }
+}
+
+fn borrow_function_error(
+    function: &IRFunction,
+    block_index: usize,
+    block: &IRBasicBlock,
+    instruction_index: usize,
+    instruction: &IRInstruction,
+    source: BorrowRuleError,
+) -> FunctionTypeVerificationError {
+    let instruction_kind = instruction_kind(instruction);
+    FunctionTypeVerificationError::Block {
+        function_name: function.name.clone(),
+        block_index,
+        block_name: block.name.clone(),
+        source: BlockTypeVerificationError {
+            function_name: function.name.clone(),
+            block_name: block.name.clone(),
+            instruction_index,
+            instruction_kind,
+            source: InstructionTypeVerificationError {
+                instruction_kind,
+                source: TypeRuleError::BorrowViolation { source },
+            },
+        },
+    }
+}
+
+fn borrowed_mutation_receiver(instruction: &IRInstruction) -> Option<&IRValue> {
+    match instruction {
+        IRInstruction::IRArraySet { array, .. } => Some(array),
+        IRInstruction::IRListSet { list_value, .. }
+        | IRInstruction::IRListPush { list_value, .. }
+        | IRInstruction::IRListInsert { list_value, .. }
+        | IRInstruction::IRListRemoveAt { list_value, .. }
+        | IRInstruction::IRListPop { list_value, .. }
+        | IRInstruction::IRListClear { list_value }
+        | IRInstruction::IRListReverse { list_value } => Some(list_value),
+        IRInstruction::IRSequenceSort { sequence } => Some(sequence),
+        IRInstruction::IRStructSet { r#struct, .. } => Some(r#struct),
+        _ => None,
     }
 }
 

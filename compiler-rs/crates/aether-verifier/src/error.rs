@@ -5,6 +5,8 @@ use std::fmt;
 
 use aether_ir::IRType;
 
+use crate::BorrowRuleError;
+
 /// Collection family whose element lifecycle is being verified.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CollectionKind {
@@ -112,6 +114,11 @@ impl fmt::Display for TypeExpectation {
 /// The leaf cause of a type-verification failure.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TypeRuleError {
+    /// A Python-compatible borrowed collection-element invariant failed.
+    BorrowViolation {
+        /// Typed borrow-specific leaf cause.
+        source: BorrowRuleError,
+    },
     /// A collection copy-like instruction uses an element type with no lifecycle.
     MissingCollectionLifecycleCapability {
         /// Exact collection instruction requiring lifecycle support.
@@ -286,6 +293,7 @@ impl fmt::Display for TypeRuleError {
     #[allow(clippy::too_many_lines)]
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::BorrowViolation { source } => source.fmt(formatter),
             Self::MissingCollectionLifecycleCapability {
                 instruction,
                 collection_kind,
@@ -444,7 +452,14 @@ fn fmt_invalid_aggregate_shape(
     }
 }
 
-impl Error for TypeRuleError {}
+impl Error for TypeRuleError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::BorrowViolation { source } => Some(source),
+            _ => None,
+        }
+    }
+}
 
 /// The exact owned-IR instruction variant being verified.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

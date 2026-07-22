@@ -1,11 +1,11 @@
 # Gradual Python-to-Rust compiler migration
 
-> Status: Phase 3, Step 3E.4 collection lifecycle capability verification complete.
+> Status: Phase 3, Step 3E.5 borrowed-element scope and escape verification complete.
 > The isolated Rust workspace now has independently callable type, structure,
 > SSA, dominance, local lifecycle, and CFG-propagated lifecycle verifier passes
-> over the complete owned IR. Steps 3E.1–3E.4 close all-path returns, aggregate
-> metadata, canonical builtin/retain-release, and collection lifecycle parity;
-> borrowed-element scope and escape verification remains.
+> over the complete owned IR. Steps 3E.1–3E.5 close all-path returns, aggregate
+> metadata, canonical builtin/retain-release, collection lifecycle, and
+> borrowed-element IRV-037–042 parity. The parity audit is next.
 > Cleanup insertion, PyO3, compiler-pipeline integration, LLVM, and
 > production integration remain unimplemented. This document defines sequencing
 > and promotion gates and does not declare the Python IR or SSA model a stable
@@ -2008,6 +2008,63 @@ initial-IR verifier work is borrowed-element scope/escape verification
 (IRV-037–042). Importer, canonical JSON, DTO/wire models, lifecycle transfer,
 ownership transfer, runtime, optimizer, pipeline integration, LLVM, and PyO3
 remain unchanged.
+
+### Step 3E.5: borrowed-element scope and escape parity
+
+Step 3E.5 completes the final semantic verifier family before the parity audit.
+The existing type-verifier traversal now performs the same two source-order
+scans as Python's `_verify_borrowed_elements`; no standalone borrow data-flow
+engine or combined compiler pipeline was added. The first scan records only
+borrowed `IRArrayGet` and `IRListGet` results. The second applies the narrow
+store, return, and mutation-receiver rules by exact result name. The shared
+lifecycle registry supplies the existing recursive `needs_destroy` fact for
+IRV-040.
+
+The exact Python contract is:
+
+- IRV-037 rejects a missing or empty scope on a borrowed collection get.
+- IRV-038 requires the declared scope to equal the defining block's exact name.
+- IRV-039 rejects any non-`None` scope on an owned get, including `""`.
+- IRV-040 rejects direct `IRStore` of a destruction-requiring borrow unless an
+  `__aether_retain` for that value occurred earlier in the consumer block.
+- IRV-041 rejects direct return of the borrowed value even after retain.
+- IRV-042 rejects borrowed receivers of array set; list set, push, insert,
+  remove-at, pop, clear, and reverse; sequence sort; and struct set.
+
+Borrow scope is definition-block metadata, not a lexical or CFG lifetime.
+Cross-block reads are accepted when the ordinary SSA/dominance rules make the
+value available. Python has no use-after-end, borrow-after-move, unique-consumer,
+alias, generic call-consumer, global-storage, or general aggregate-escape check
+in initial IR. A borrowed collection can be the source of another borrowed get;
+copy-init, repeated reads, aggregate construction, and type-correct calls are
+accepted. `IRStore` of a trivial borrowed value is accepted without retain;
+retain acquisition is block-local; release does not acquire. Invalid non-array/
+list sources and invalid calls remain their existing collection/call rules, not
+new borrow diagnostics. The owned IR contains no global-assignment variant.
+
+`BorrowRuleError` is the typed borrow leaf and `BorrowRule` carries the exact
+IRV identifier. Diagnostics retain the borrow-producing instruction, borrowed
+value and type where relevant, definition/consumer locations, declared and
+defining scopes, and mutation consumer. `TypeRuleError::BorrowViolation`
+preserves the existing downcastable instruction/block/function/module source
+chain. Deterministic selection follows function, block, and instruction source
+order; no diagnostic depends on hash iteration.
+
+Focused Rust tests cover local, nested, cross-block, and dominated uses;
+same-block retain/store acquisition; scope failures; managed versus trivial
+stores; return after retain; all mutation receiver variants; accepted aggregate,
+call, copy-init, and repeated-use boundaries; ordinary invalid sources/calls;
+stable rendering; and downcasting. Added Python characterization tests pin the
+previously under-covered scope, lifecycle, cross-block, aggregate, call, copy,
+and invalid-source behavior. No new Python verifier bug was discovered. Its
+lack of general lifetime and escape analysis is surprising but was already an
+explicit boundary in `IR_VERIFIER_INVARIANTS.md`, so Rust preserves it.
+
+There are no remaining borrow verifier gaps in IRV-037–042 and no remaining
+semantic verifier implementation families from the prior audit. Next is the
+parity audit and differential corpus review. Importer, canonical JSON, Python
+DTOs, Rust wire DTOs, ownership/lifecycle models, optimizer, runtime, pipeline
+integration, LLVM, PyO3, and production integration remain unchanged.
 
 ## 8. Ownership and memory
 

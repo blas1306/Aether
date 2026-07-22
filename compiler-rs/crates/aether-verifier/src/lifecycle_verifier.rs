@@ -1598,6 +1598,10 @@ impl<'module> LifecycleTypeRegistry<'module> {
         self.traits(r#type).collection_unsupported_reason
     }
 
+    pub(crate) fn needs_destroy(&self, r#type: &IRType) -> bool {
+        self.traits(r#type).needs_destroy
+    }
+
     fn traits(&self, r#type: &IRType) -> LifecycleTraits {
         self.compute(r#type, &mut Vec::new())
     }
