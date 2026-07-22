@@ -30,8 +30,9 @@ pub use dominance_error::{
 };
 pub use dominance_verifier::{verify_function_dominance, verify_module_dominance};
 pub use error::{
-    BlockTypeVerificationError, FunctionTypeVerificationError, InstructionKind,
-    InstructionTypeVerificationError, ModuleTypeVerificationError, TypeExpectation, TypeRuleError,
+    BlockTypeVerificationError, CollectionKind, CollectionLifecycleCapability,
+    FunctionTypeVerificationError, InstructionKind, InstructionTypeVerificationError,
+    ModuleTypeVerificationError, TypeExpectation, TypeRuleError,
 };
 pub use lifecycle_error::{
     BlockLifecycleError, FunctionLifecycleError, FunctionLifecycleVerificationError,

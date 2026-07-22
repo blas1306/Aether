@@ -1,11 +1,11 @@
 # Gradual Python-to-Rust compiler migration
 
-> Status: Phase 3, Step 3E.2 aggregate shape, dimension, and cardinality verification complete.
+> Status: Phase 3, Step 3E.4 collection lifecycle capability verification complete.
 > The isolated Rust workspace now has independently callable type, structure,
 > SSA, dominance, local lifecycle, and CFG-propagated lifecycle verifier passes
-> over the complete owned IR. Step 3E.1 closes Python invariant IRV-024, and
-> Step 3E.2 closes aggregate metadata parity for IRV-075–076, IRV-078, and the
-> metadata portions of IRV-107–124 in the existing type verifier.
+> over the complete owned IR. Steps 3E.1–3E.4 close all-path returns, aggregate
+> metadata, canonical builtin/retain-release, and collection lifecycle parity;
+> borrowed-element scope and escape verification remains.
 > Cleanup insertion, PyO3, compiler-pipeline integration, LLVM, and
 > production integration remain unimplemented. This document defines sequencing
 > and promotion gates and does not declare the Python IR or SSA model a stable
@@ -1962,6 +1962,52 @@ Remaining initial-IR verifier families are borrowed-element scope/escape rules
 Importer, canonical JSON, Python DTOs, Rust wire DTOs, lifecycle transfer,
 ownership, borrow verification, optimizer, LLVM, compiler-pipeline integration,
 and PyO3 remain unchanged.
+
+### Phase 3 Step 3E.4 collection lifecycle capability verification — complete
+
+Phase 3 Step 3E.4 closes the lifecycle-trait portions of IRV-091, IRV-094, and
+IRV-097 in the existing instruction-local type verifier. The verifier reuses
+`LifecycleTypeRegistry`; it adds neither a collection-specific pass nor a
+combined pipeline. `IRArrayCopy`, `IRListCopy`, and `IRListSlice` inspect the
+direct element type. `IRArraySlice` performs only its existing operand, bound,
+and result-type checks and deliberately has no lifecycle-capability gate.
+
+Python does not query `copy_init`, `assign`, `destroy`, `move_init`, `relocate`,
+`trivially_copyable`, `trivially_relocatable`, `needs_destroy`, or
+`supports_default` individually for these collection instructions. The exact
+contract is only that `LifecycleTypeRegistry.traits(element).reason` is `None`.
+Rust represents that as the single typed collection capability `Lifecycle` and
+retains the registry's rejection reason in the diagnostic.
+
+This classification is shallow and contains two important Python behaviors.
+Array/List elements advertise lifecycle support at the handle level regardless
+of their own element type, so nested collections containing unsupported types
+are accepted. Defined struct and method-result aggregate traits do not propagate
+child error reasons, so structs containing class/interface/nullable fields are
+also accepted. Function values have no default but their Python lifecycle
+traits have no error reason, so they are accepted. Direct matrix, unoriented
+vector, class, interface, nullable, void, and unresolved-struct elements have a
+reason and are rejected when otherwise valid IR reaches the rule. Rust does not
+strengthen any of these cases recursively.
+
+The deterministic typed leaf
+`TypeRuleError::MissingCollectionLifecycleCapability` exposes the exact
+`InstructionKind`, `CollectionKind`, element `IRType`, required
+`CollectionLifecycleCapability`, and lifecycle reason. The existing instruction,
+block, function, and module errors preserve the full downcastable source chain.
+Focused Rust tests cover supported scalar, managed, struct, function, and nested
+elements; direct unsupported managed, matrix, and nullable elements; the
+array-slice exclusion; stable diagnostics; and downcasting. Added Python
+characterization tests freeze the direct-only rule and instruction set.
+
+No Python verifier bug was discovered. The non-recursive aggregate and nested
+collection behavior is counterintuitive but consistent with the current
+`LifecycleTypeRegistry` implementation and is now explicitly characterized.
+There are no remaining collection lifecycle-capability gaps. Remaining
+initial-IR verifier work is borrowed-element scope/escape verification
+(IRV-037–042). Importer, canonical JSON, DTO/wire models, lifecycle transfer,
+ownership transfer, runtime, optimizer, pipeline integration, LLVM, and PyO3
+remain unchanged.
 
 ## 8. Ownership and memory
 

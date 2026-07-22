@@ -1582,15 +1582,20 @@ struct LifecycleTraits {
     supports_default: bool,
     needs_destroy: bool,
     reason: String,
+    collection_unsupported_reason: Option<String>,
 }
 
-struct LifecycleTypeRegistry<'module> {
+pub(crate) struct LifecycleTypeRegistry<'module> {
     structs: &'module [IRStructDefinition],
 }
 
 impl<'module> LifecycleTypeRegistry<'module> {
-    fn new(structs: &'module [IRStructDefinition]) -> Self {
+    pub(crate) fn new(structs: &'module [IRStructDefinition]) -> Self {
         Self { structs }
+    }
+
+    pub(crate) fn collection_unsupported_reason(&self, r#type: &IRType) -> Option<String> {
+        self.traits(r#type).collection_unsupported_reason
     }
 
     fn traits(&self, r#type: &IRType) -> LifecycleTraits {
@@ -1613,37 +1618,54 @@ impl<'module> LifecycleTypeRegistry<'module> {
                 supports_default: matches!(vector.orientation.as_deref(), Some("row" | "column")),
                 needs_destroy: false,
                 reason: "vector default requires a concrete row or column orientation".to_owned(),
+                collection_unsupported_reason: (!matches!(
+                    vector.orientation.as_deref(),
+                    Some("row" | "column")
+                ))
+                .then(|| "vector default requires a concrete orientation".to_owned()),
             },
             IRType::Matrix(_) => LifecycleTraits {
                 trivially_relocatable: true,
                 supports_default: false,
                 needs_destroy: false,
                 reason: "matrix default requires compile-time dimensions".to_owned(),
+                collection_unsupported_reason: Some(
+                    "matrix default requires compile-time dimensions".to_owned(),
+                ),
             },
             IRType::Function(_) => LifecycleTraits {
                 trivially_relocatable: true,
                 supports_default: false,
                 needs_destroy: false,
                 reason: "function values have no default".to_owned(),
+                collection_unsupported_reason: None,
             },
             IRType::ClassRef(_) | IRType::Interface(_) | IRType::Nullable(_) => {
-                LifecycleTraits::invalid("lifecycle layout is not defined")
+                LifecycleTraits::invalid(
+                    "lifecycle layout is not defined",
+                    format!("lifecycle layout for '{type}' is not defined"),
+                )
             }
-            IRType::Void(_) => LifecycleTraits::invalid("void has no storage"),
+            IRType::Void(_) => {
+                LifecycleTraits::invalid("void has no storage", "void has no storage")
+            }
             IRType::MethodResult(result) => {
                 let receiver = IRType::Struct(result.receiver.clone());
                 self.aggregate_traits([&receiver, result.value.as_ref()], active)
             }
             IRType::Struct(struct_type) => {
                 if active.contains(&struct_type.name) {
-                    return LifecycleTraits::invalid("recursive layout");
+                    return LifecycleTraits::invalid("recursive layout", "recursive layout");
                 }
                 let Some(definition) = self
                     .structs
                     .iter()
                     .find(|definition| definition.name == struct_type.name)
                 else {
-                    return LifecycleTraits::invalid("nominal struct has no definition");
+                    return LifecycleTraits::invalid(
+                        "nominal struct has no definition",
+                        format!("nominal struct '{}' has no definition", struct_type.name),
+                    );
                 };
                 active.push(struct_type.name.clone());
                 let result = self.aggregate_traits(
@@ -1679,6 +1701,10 @@ impl<'module> LifecycleTypeRegistry<'module> {
             supports_default,
             needs_destroy,
             reason,
+            // Python's aggregate trait composition does not propagate child
+            // reasons, so a defined struct or method-result advertises a
+            // collection lifecycle even when a nested field does not.
+            collection_unsupported_reason: None,
         }
     }
 }
@@ -1690,15 +1716,17 @@ impl LifecycleTraits {
             supports_default,
             needs_destroy,
             reason: String::new(),
+            collection_unsupported_reason: None,
         }
     }
 
-    fn invalid(reason: &str) -> Self {
+    fn invalid(reason: &str, collection_reason: impl Into<String>) -> Self {
         Self {
             trivially_relocatable: false,
             supports_default: false,
             needs_destroy: false,
             reason: reason.to_owned(),
+            collection_unsupported_reason: Some(collection_reason.into()),
         }
     }
 }

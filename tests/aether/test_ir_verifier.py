@@ -7,8 +7,12 @@ import pytest
 from aether.ir import (
     ArrayType,
     BoolType,
+    ClassRefType,
     DoubleType,
     EnumType,
+    FunctionType,
+    IRArrayCopy,
+    IRArraySlice,
     IRBasicBlock,
     IRBinaryOp,
     IRBranch,
@@ -20,12 +24,14 @@ from aether.ir import (
     IRJump,
     IRLoad,
     IRListNew,
+    IRListCopy,
     IRListClear,
     IRListPop,
     IRListPush,
     IRListInsert,
     IRListRemoveAt,
     IRListSet,
+    IRListSlice,
     IRLowerer,
     IRMatrixNew,
     IRModule,
@@ -61,6 +67,93 @@ def _lower(source: str) -> IRModule:
 def _assert_verification_error(module: IRModule, message: str) -> None:
     with pytest.raises(IRVerificationError, match=re.escape(message)):
         IRVerifier(module).verify()
+
+
+def _collection_lifecycle_module(
+    operation: str,
+    element_type: IRType,
+    structs: tuple[IRStructDefinition, ...] = (),
+) -> IRModule:
+    collection_type = (
+        ArrayType(element_type)
+        if operation in {"array_copy", "array_slice"}
+        else ListType(element_type)
+    )
+    collection = IRParameter("collection", collection_type)
+    result = IRValue("result", collection_type)
+    start = IRParameter("start", IntType())
+    end = IRParameter("end", IntType())
+    if operation == "array_copy":
+        instruction = IRArrayCopy(result, collection)
+        parameters = [collection]
+    elif operation == "list_copy":
+        instruction = IRListCopy(result, collection)
+        parameters = [collection]
+    elif operation == "array_slice":
+        instruction = IRArraySlice(result, collection, start, end)
+        parameters = [collection, start, end]
+    elif operation == "list_slice":
+        instruction = IRListSlice(result, collection, start, end)
+        parameters = [collection, start, end]
+    else:
+        raise AssertionError(f"unsupported test operation {operation}")
+    return IRModule(
+        [
+            IRFunction(
+                "main",
+                parameters,
+                VoidType(),
+                [IRBasicBlock("entry", [instruction, IRReturn(None)])],
+            )
+        ],
+        list(structs),
+    )
+
+
+@pytest.mark.parametrize(
+    ("operation", "prefix"),
+    [
+        ("array_copy", "Array copy"),
+        ("list_copy", "List copy"),
+        ("list_slice", "List slice"),
+    ],
+)
+def test_collection_copy_like_operations_require_direct_element_lifecycle(
+    operation: str,
+    prefix: str,
+) -> None:
+    module = _collection_lifecycle_module(operation, ClassRefType("Box"))
+
+    _assert_verification_error(
+        module,
+        f"{prefix} element type 'class Box' has no lifecycle: "
+        "lifecycle layout for 'class Box' is not defined",
+    )
+
+
+@pytest.mark.parametrize("operation", ["array_copy", "list_copy", "list_slice"])
+def test_collection_lifecycle_check_is_shallow_and_accepts_reasonless_traits(
+    operation: str,
+) -> None:
+    holder = IRStructDefinition(
+        "Holder",
+        (("member", ClassRefType("Box")),),
+    )
+    supported = (
+        ListType(ClassRefType("Box")),
+        StructType("Holder"),
+        FunctionType((IntType(),), IntType()),
+    )
+
+    for element_type in supported:
+        module = _collection_lifecycle_module(operation, element_type, (holder,))
+        assert IRVerifier(module).verify() is module
+
+
+def test_array_slice_does_not_check_element_lifecycle() -> None:
+    module = _collection_lifecycle_module("array_slice", ClassRefType("Box"))
+
+    assert IRVerifier(module).verify() is module
 
 
 def test_verifies_lowered_add_function() -> None:

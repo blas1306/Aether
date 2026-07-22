@@ -5,6 +5,39 @@ use std::fmt;
 
 use aether_ir::IRType;
 
+/// Collection family whose element lifecycle is being verified.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CollectionKind {
+    /// Dynamically sized array.
+    Array,
+    /// Dynamically sized list.
+    List,
+}
+
+impl fmt::Display for CollectionKind {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Array => formatter.write_str("array"),
+            Self::List => formatter.write_str("list"),
+        }
+    }
+}
+
+/// Lifecycle capability required by collection copy-like operations.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CollectionLifecycleCapability {
+    /// The element type has a lifecycle classification without an error reason.
+    Lifecycle,
+}
+
+impl fmt::Display for CollectionLifecycleCapability {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Lifecycle => formatter.write_str("lifecycle"),
+        }
+    }
+}
+
 /// The expected family of types for an instruction operand or result.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TypeExpectation {
@@ -79,6 +112,19 @@ impl fmt::Display for TypeExpectation {
 /// The leaf cause of a type-verification failure.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TypeRuleError {
+    /// A collection copy-like instruction uses an element type with no lifecycle.
+    MissingCollectionLifecycleCapability {
+        /// Exact collection instruction requiring lifecycle support.
+        instruction: InstructionKind,
+        /// Collection family operated on by the instruction.
+        collection_kind: CollectionKind,
+        /// Element type classified by the lifecycle registry.
+        element_type: IRType,
+        /// Missing capability.
+        capability: CollectionLifecycleCapability,
+        /// Stable lifecycle-registry explanation.
+        reason: String,
+    },
     /// A builtin call's function spelling does not match its semantic builtin tag.
     InvalidBuiltinIdentity {
         /// Canonical semantic builtin retained by the instruction.
@@ -240,6 +286,16 @@ impl fmt::Display for TypeRuleError {
     #[allow(clippy::too_many_lines)]
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::MissingCollectionLifecycleCapability {
+                instruction,
+                collection_kind,
+                element_type,
+                capability,
+                reason,
+            } => write!(
+                formatter,
+                "{instruction} requires {capability} support for {collection_kind} element type '{element_type}': {reason}"
+            ),
             Self::InvalidBuiltinIdentity {
                 builtin,
                 expected,

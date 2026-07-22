@@ -19,9 +19,10 @@ compiler remains entirely on its existing Python path.
   The all-path return pass independently verifies IRV-024 for non-void
   functions. The type pass also verifies retained aggregate compare/print
   shapes, vector/matrix dimensions, matrix literal cardinality, canonical
-  builtin identity, and the retain/release call contract. Phi
-  semantics, cleanup insertion, and optimization verification remain outside
-  these passes.
+  builtin identity, the retain/release call contract, and Python-parity element
+  lifecycle support for collection copy and list-slice operations. Phi
+  semantics, borrow scope/escape checks, cleanup insertion, and optimization
+  verification remain outside these passes.
 - `aether-python` will provide the eventual Python integration boundary. It does
   not contain PyO3 bindings or compiler integration yet.
 
@@ -371,3 +372,45 @@ families are borrowed-element scope/escape rules (IRV-037–042) and the
 lifecycle-trait portions of collection copy/slice rules. This phase changes no
 importer, canonical JSON, Python or Rust wire DTO, ownership/lifecycle transfer,
 borrow verifier, optimizer, compiler pipeline, LLVM backend, or PyO3 behavior.
+
+## Phase 3 Step 3E.4: collection lifecycle capability verification
+
+Step 3E.4 extends the existing instruction-local type verifier and reuses its
+shared lifecycle registry. Matching Python IRV-091, IRV-094, and IRV-097,
+`IRArrayCopy`, `IRListCopy`, and `IRListSlice` require the direct element
+type's lifecycle traits to have no error reason. `IRArraySlice` does not perform
+this check. No separate collection verifier or combined verifier pipeline was
+introduced.
+
+The Python rule does not require a named operation such as copy-init, assign,
+destroy, move-init, or relocate. Its only capability is a defined lifecycle
+classification, represented by `LifecycleTraits.reason is None`. Scalars,
+strings, collection handles, functions, and defined structs/method-results are
+accepted. Matrix elements, unoriented vector elements, class/interface values,
+nullable values, void, and unresolved structs carry an error reason and are
+rejected when they reach this instruction-local rule.
+
+The check is shallow. A nested array/list is accepted without inspecting its
+element, and aggregate composition does not propagate a child lifecycle error
+reason. Consequently a defined struct containing a class, interface, nullable,
+or otherwise unsupported field remains accepted as a collection element. This
+is intentional parity with Python rather than stronger recursive validation.
+
+`TypeRuleError::MissingCollectionLifecycleCapability` retains the exact
+`InstructionKind`, `CollectionKind`, element `IRType`, missing
+`CollectionLifecycleCapability`, and lifecycle-registry reason. Existing
+instruction, block, function, and module wrappers preserve deterministic
+rendering and the complete downcastable `Error::source()` chain.
+
+Focused Rust tests cover scalar, managed string, struct, function, and nested
+collection elements; direct class, matrix, and nullable failures; the
+`IRArraySlice` exclusion; deterministic rendering; and downcasting. Python
+characterization tests freeze the previously uncovered direct-only rule and
+array-slice exclusion. No Python verifier bug was discovered; the shallow
+aggregate and nested-collection behavior is surprising but is the actual
+documented contract. No collection lifecycle-capability gap remains.
+
+Remaining initial-IR verifier work is borrowed-element scope and escape
+verification (IRV-037–042). This phase changes no importer, canonical JSON,
+Python or Rust wire DTO, ownership transfer, runtime, optimizer, compiler
+pipeline, LLVM backend, or PyO3 behavior.

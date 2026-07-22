@@ -9,13 +9,15 @@ use aether_ir::{
 };
 
 use crate::error::{
-    BlockTypeVerificationError, FunctionTypeVerificationError, InstructionKind,
-    InstructionTypeVerificationError, ModuleTypeVerificationError, TypeExpectation, TypeRuleError,
+    BlockTypeVerificationError, CollectionKind, CollectionLifecycleCapability,
+    FunctionTypeVerificationError, InstructionKind, InstructionTypeVerificationError,
+    ModuleTypeVerificationError, TypeExpectation, TypeRuleError,
 };
+use crate::lifecycle_verifier::LifecycleTypeRegistry;
 
 /// Verifies declaration types and every instruction-local type contract in a module.
 pub fn verify_module_types(module: &IRModule) -> Result<(), ModuleTypeVerificationError> {
-    let verifier = TypeVerifier { module };
+    let verifier = TypeVerifier::new(module);
     verifier.verify_struct_definitions()?;
     for (function_index, function) in module.functions.iter().enumerate() {
         verifier.verify_function(function).map_err(|source| {
@@ -34,7 +36,7 @@ pub fn verify_function_types(
     module: &IRModule,
     function: &IRFunction,
 ) -> Result<(), FunctionTypeVerificationError> {
-    TypeVerifier { module }.verify_function(function)
+    TypeVerifier::new(module).verify_function(function)
 }
 
 /// Verifies one block using its containing function and module declarations.
@@ -43,15 +45,23 @@ pub fn verify_block_types(
     function: &IRFunction,
     block: &IRBasicBlock,
 ) -> Result<(), BlockTypeVerificationError> {
-    TypeVerifier { module }.verify_block(function, block)
+    TypeVerifier::new(module).verify_block(function, block)
 }
 
 struct TypeVerifier<'module> {
     module: &'module IRModule,
+    lifecycle: LifecycleTypeRegistry<'module>,
 }
 
 #[allow(clippy::unused_self)]
-impl TypeVerifier<'_> {
+impl<'module> TypeVerifier<'module> {
+    fn new(module: &'module IRModule) -> Self {
+        Self {
+            module,
+            lifecycle: LifecycleTypeRegistry::new(&module.structs),
+        }
+    }
+
     fn verify_struct_definitions(&self) -> Result<(), ModuleTypeVerificationError> {
         for (struct_index, definition) in self.module.structs.iter().enumerate() {
             for (field_index, (field_name, field_type)) in definition.fields.iter().enumerate() {
@@ -290,14 +300,24 @@ impl TypeVerifier<'_> {
                 self.verify_collection_new(result, elements, false)
             }
             IRInstruction::IRArrayCopy { result, array, .. } => {
-                self.expect_array("array", &array.r#type)?;
-                self.require_exact("result", &array.r#type, &result.r#type)
+                let array_type = self.expect_array("array", &array.r#type)?;
+                self.require_exact("result", &array.r#type, &result.r#type)?;
+                self.require_collection_lifecycle(
+                    InstructionKind::IRArrayCopy,
+                    CollectionKind::Array,
+                    &array_type.element,
+                )
             }
             IRInstruction::IRListCopy {
                 result, list_value, ..
             } => {
-                self.expect_list("list_value", &list_value.r#type)?;
-                self.require_exact("result", &list_value.r#type, &result.r#type)
+                let list_type = self.expect_list("list_value", &list_value.r#type)?;
+                self.require_exact("result", &list_value.r#type, &result.r#type)?;
+                self.require_collection_lifecycle(
+                    InstructionKind::IRListCopy,
+                    CollectionKind::List,
+                    &list_type.element,
+                )
             }
             IRInstruction::IRListContains {
                 result,
@@ -483,7 +503,15 @@ impl TypeVerifier<'_> {
                 start,
                 end,
                 ..
-            } => self.verify_slice(result, list_value, start, end, false),
+            } => {
+                self.verify_slice(result, list_value, start, end, false)?;
+                let list_type = self.expect_list("list_value", &list_value.r#type)?;
+                self.require_collection_lifecycle(
+                    InstructionKind::IRListSlice,
+                    CollectionKind::List,
+                    &list_type.element,
+                )
+            }
             IRInstruction::IRListGet {
                 result,
                 list_value,
@@ -1758,6 +1786,24 @@ impl TypeVerifier<'_> {
         self.expect_int("start", &start.r#type)?;
         self.expect_int("end", &end.r#type)?;
         self.require_exact("result", &collection.r#type, &result.r#type)
+    }
+
+    fn require_collection_lifecycle(
+        &self,
+        instruction: InstructionKind,
+        collection_kind: CollectionKind,
+        element_type: &IRType,
+    ) -> Result<(), TypeRuleError> {
+        match self.lifecycle.collection_unsupported_reason(element_type) {
+            Some(reason) => Err(TypeRuleError::MissingCollectionLifecycleCapability {
+                instruction,
+                collection_kind,
+                element_type: element_type.clone(),
+                capability: CollectionLifecycleCapability::Lifecycle,
+                reason,
+            }),
+            None => Ok(()),
+        }
     }
 
     fn verify_indexed_set(
