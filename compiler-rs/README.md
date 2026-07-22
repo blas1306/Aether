@@ -16,8 +16,9 @@ compiler remains entirely on its existing Python path.
   checks cross-block uses against an entry-rooted dominator relation. The local
   lifecycle passes provide focused local checks, deterministic inter-block CFG
   state merging, and ownership-completeness checks at every reachable return.
-  Phi semantics, cleanup insertion, and optimization verification remain
-  outside these passes.
+  The all-path return pass independently verifies IRV-024 for non-void
+  functions. Phi semantics, cleanup insertion, and optimization verification
+  remain outside these passes.
 - `aether-python` will provide the eventual Python integration boundary. It does
   not contain PyO3 bindings or compiler integration yet.
 
@@ -245,3 +246,44 @@ recommended verifier work is borrowing/escape completeness and the remaining
 non-lifecycle IRV rule families, followed by an explicitly scoped differential
 integration phase; cleanup insertion belongs to lowering/lifecycle expansion,
 not this verifier.
+
+## Phase 3 Step 3E.1: non-void all-path return verification
+
+Step 3E.1 is complete. `verify_module_returns(&IRModule)` and
+`verify_function_returns(&IRFunction)` borrow their inputs and independently
+verify IRV-024. Function verification invokes only the Step 3B structural
+prerequisite needed to resolve an unambiguous CFG. It does not invoke type, SSA,
+dominance, or lifecycle verification and does not add a combined verifier
+pipeline.
+
+Void functions are exempt after structural validation. For a non-void
+function, analysis begins at the block named exactly `entry`; unreachable
+blocks impose no all-path return obligation. A valued `IRReturn` proves the
+path, while a valueless `IRReturn` fails it. Jumps follow their target and both
+branch targets must prove a return in true-before-false order. This pass checks
+only value presence: operand definition, type agreement, storage transfer, and
+cleanup remain owned by their existing verifier families.
+
+The pass performs a depth-first reachability walk with a visited-block set.
+Cycles are non-exiting paths regardless of block spelling, so they impose no
+return obligation by themselves. Block labels other than the structurally
+reserved `entry` label are identifiers only; `cond`, `for.cond`, and arbitrary
+bijections of non-entry labels have identical semantics. A LIFO worklist visits
+true before false targets for deterministic diagnostics.
+
+Python's `_block_returns` is a recursive syntactic approximation, not a
+mathematical all-path analysis. On a back-edge it returns true only when the
+revisited block starts with `cond` or `for.cond`, making normal lowered loops
+accepted but isomorphic renamed loops rejected. The Rust pass does not preserve
+that nominal implementation bug because the IR label contract assigns no
+semantics to those prefixes.
+
+Typed failures are `ModuleReturnVerificationError`,
+`FunctionReturnVerificationError`, and `ReturnPathRuleError`. They report a
+reachable valueless return with stable block and instruction context and preserve
+structural prerequisite sources through downcastable
+`Error::source()` chains.
+
+This step changes no canonical JSON, DTO, importer, lifecycle expansion, SSA,
+optimizer, compiler-pipeline, LLVM, or PyO3 behavior. Other remaining verifier
+families stay deferred.

@@ -1,10 +1,10 @@
 # Gradual Python-to-Rust compiler migration
 
-> Status: Phase 3, Step 3D.3 Rust IR function-exit ownership completeness complete.
+> Status: Phase 3, Step 3E.1 Rust IR non-void all-path return verification complete.
 > The isolated Rust workspace now has independently callable type, structure,
 > SSA, dominance, local lifecycle, and CFG-propagated lifecycle verifier passes
-> over the complete owned IR. Step 3D.3 consumes the stabilized lifecycle exit
-> states and verifies cleanup or explicit transfer at every reachable return.
+> over the complete owned IR. Step 3E.1 additionally closes Python invariant
+> IRV-024 with an entry-rooted, non-mutating return-path pass.
 > Cleanup insertion, PyO3, compiler-pipeline integration, LLVM, and
 > production integration remain unimplemented. This document defines sequencing
 > and promotion gates and does not declare the Python IR or SSA model a stable
@@ -1796,6 +1796,65 @@ alter importer/schema contracts, or integrate the production pipeline. The
 next recommended verifier work is borrowing/escape completeness and remaining
 Python IRV rule-family parity, followed by a separately authorized differential
 integration step. Cleanup insertion stays in lowering/lifecycle expansion.
+
+### Phase 3 Step 3E.1 non-void all-path return verification — complete
+
+Step 3E.1 adds the borrowed, non-mutating APIs
+`verify_module_returns(&IRModule)` and
+`verify_function_returns(&IRFunction)`. They implement only IRV-024 and remain
+independently callable; no combined verifier or compiler-pipeline integration
+was added. The function API invokes the Step 3B function-local structural
+prerequisite so block names, final terminators, targets, and `entry` are
+unambiguous. Structural failures retain their complete typed source chains.
+No type, SSA, dominance, or lifecycle pass is invoked.
+
+Void functions are exempt once their structure is valid. Non-void analysis is
+rooted at the block named exactly `entry`, wherever it occurs in the retained
+block vector. A valued `IRReturn` proves a path; a valueless `IRReturn` does
+not. A jump follows its single target, and a branch requires both true and false
+targets to prove a return in retained field order. Unreachable blocks are not
+visited and therefore create no return-path obligation, matching Python
+IRV-024 rather than inventing a reachability requirement.
+
+This family intentionally checks only whether a return value is present. The
+value's declared type, definition, same-block ordering, dominance, and any
+transferred-storage contract remain the independent Step 3A, 3C, and 3D rules.
+Consequently, return verification can accept a valued return whose operand is
+otherwise type- or SSA-invalid, while those dedicated passes reject it.
+
+The Rust pass uses a depth-first entry-reachability walk. A visited set makes
+every cycle a non-exiting path regardless of label spelling; all reachable
+return terminators must carry a value. The LIFO worklist enqueues false before
+true targets so true-target traversal remains first for deterministic failure
+selection. This is linear in blocks plus CFG edges and requires no data-flow
+lattice or fixed point.
+
+Audit found that Python's `_block_returns` is nominally sensitive. Its recursive
+visiting-set check returns true for a revisited block only when the block name
+starts with `cond` or `for.cond`; all other revisited labels return false.
+Consequently Python accepts lowering-shaped `cond0` and `for.cond0` loops but
+rejects bijectively renamed isomorphic graphs. IR v1 defines labels as branch
+and jump identifiers with no runtime meaning, while deterministic loop names
+are only lowering output. Rust therefore follows the structural IR contract
+rather than preserving this Python naming heuristic.
+
+`ReturnPathRuleError::ValuelessReturn` retains the stable block name and index
+plus the return instruction index. `FunctionReturnVerificationError` adds the
+declared non-void type and entry convention or wraps a structural prerequisite;
+`ModuleReturnVerificationError` retains the first failing function in source
+order. Every wrapper exposes a downcastable `Error::source()`.
+
+Focused tests cover single and multiple returns, jumps and branches,
+true-before-false failure ordering, pure and optional-return cycles under
+`cond`, `for.cond`, `loop`, `arbitrary_name`, and `xyz`, bijectively renamed
+while- and for-shaped CFGs, unreachable invalid components, void exemption,
+structural prerequisites, verifier-family independence, module ordering, and
+diagnostic determinism. Separate Python characterization tests record its
+current nominal sensitivity for the same graphs and for actual lowered loops.
+
+Canonical JSON, Python DTOs, Rust wire DTOs, importer semantics, lifecycle
+expansion, SSA construction, optimizer behavior, compiler integration, LLVM,
+and PyO3 are unchanged. No other verifier family is included in this step.
 
 ## 8. Ownership and memory
 
