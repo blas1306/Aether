@@ -118,6 +118,105 @@ def test_move_init_transfers_return_storage() -> None:
     assert IRInterpreter(module).call("main") == 7
 
 
+def test_return_transfer_accepts_same_typed_value_without_storage_provenance() -> None:
+    unrelated = IRValue("unrelated", StringType())
+    transferred = IRStorage("transferred", StringType())
+
+    _verify(
+        [
+            IRConst(unrelated, "not loaded from transferred"),
+            IRInitDefault(transferred),
+            IRReturn(unrelated, transferred),
+        ],
+        StringType(),
+    )
+
+
+def test_return_transfer_exempts_only_the_named_live_owner() -> None:
+    unrelated = IRValue("unrelated", StringType())
+    transferred = IRStorage("transferred", StringType())
+    leaked = IRStorage("leaked", StringType())
+
+    with pytest.raises(
+        IRVerificationError,
+        match="live owning storage lacking cleanup: %leaked",
+    ):
+        _verify(
+            [
+                IRConst(unrelated, "same type, unrelated provenance"),
+                IRInitDefault(transferred),
+                IRInitDefault(leaked),
+                IRReturn(unrelated, transferred),
+            ],
+            StringType(),
+        )
+
+
+def test_return_transfer_rejects_incompatible_returned_value_type() -> None:
+    returned = IRValue("returned", IntType())
+    transferred = IRStorage("transferred", StringType())
+
+    with pytest.raises(
+        IRVerificationError,
+        match="return transfer storage must match the returned value type",
+    ):
+        _verify(
+            [
+                IRConst(returned, 1),
+                IRInitDefault(transferred),
+                IRReturn(returned, transferred),
+            ],
+            IntType(),
+        )
+
+
+@pytest.mark.parametrize("invalidated_by", ["move", "destroy"])
+def test_return_transfer_rejects_moved_or_destroyed_storage(
+    invalidated_by: str,
+) -> None:
+    returned = IRValue("returned", StringType())
+    transferred = IRStorage("transferred", StringType())
+    destination = IRStorage("destination", StringType())
+    invalidation = (
+        IRMoveInit(destination, transferred)
+        if invalidated_by == "move"
+        else IRDestroy(transferred)
+    )
+
+    with pytest.raises(IRVerificationError, match=f"after {invalidated_by}"):
+        _verify(
+            [
+                IRConst(returned, "same type"),
+                IRInitDefault(transferred),
+                invalidation,
+                IRReturn(returned, transferred),
+            ],
+            StringType(),
+        )
+
+
+def test_return_transfer_reports_multiple_non_transferred_owners_sorted() -> None:
+    returned = IRValue("returned", StringType())
+    transferred = IRStorage("transferred", StringType())
+    zeta = IRStorage("zeta", StringType())
+    alpha = IRStorage("alpha", StringType())
+
+    with pytest.raises(
+        IRVerificationError,
+        match="live owning storage lacking cleanup: %alpha, %zeta",
+    ):
+        _verify(
+            [
+                IRConst(returned, "same type"),
+                IRInitDefault(transferred),
+                IRInitDefault(zeta),
+                IRInitDefault(alpha),
+                IRReturn(returned, transferred),
+            ],
+            StringType(),
+        )
+
+
 def test_struct_lifecycle_traits_are_recursive_and_source_ordered() -> None:
     inner = IRStructDefinition("Inner", (("text", StringType()),))
     outer = IRStructDefinition(

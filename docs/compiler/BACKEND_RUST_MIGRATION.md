@@ -1,11 +1,11 @@
 # Gradual Python-to-Rust compiler migration
 
-> Status: Phase 3, Step 3D.2 Rust IR inter-block lifecycle data flow complete.
+> Status: Phase 3, Step 3D.3 Rust IR function-exit ownership completeness complete.
 > The isolated Rust workspace now has independently callable type, structure,
 > SSA, dominance, local lifecycle, and CFG-propagated lifecycle verifier passes
-> over the complete owned IR. Step 3D.2 covers deterministic predecessor
-> merging, loops, unreachable-code policy, and post-convergence diagnostics.
-> Exit cleanup, PyO3, compiler-pipeline integration, LLVM, and
+> over the complete owned IR. Step 3D.3 consumes the stabilized lifecycle exit
+> states and verifies cleanup or explicit transfer at every reachable return.
+> Cleanup insertion, PyO3, compiler-pipeline integration, LLVM, and
 > production integration remain unimplemented. This document defines sequencing
 > and promotion gates and does not declare the Python IR or SSA model a stable
 > public format.
@@ -1722,11 +1722,80 @@ moved/destroyed storage sources, raw-store repair, independent unreachable
 components, entry-not-first, duplicate targets, stable diagnostics, loop-carried
 live state, zero-iteration exits, move on a back-edge, and self-loop convergence.
 
-Complete cleanup on every return, leak detection, destruction insertion,
-lifecycle expansion, ARC optimization, ownership inference, borrowing, new
-alias analysis, importer/schema changes, pipeline integration, LLVM and PyO3
-remain intentionally unchanged. The next recommended step is **Phase 3 Step
-3D.3: function-exit cleanup and complete lifecycle guarantees**.
+Complete cleanup on every return and leak detection were the next 3D.3 slice.
+Destruction insertion, lifecycle expansion, ARC optimization, ownership
+inference, borrowing, new alias analysis, importer/schema changes, pipeline
+integration, LLVM, and PyO3 remained intentionally unchanged in 3D.2.
+
+### Phase 3 Step 3D.3 function-exit ownership completeness — complete
+
+Step 3D.3 extends the existing `verify_module_lifecycle(&IRModule)` and
+`verify_function_lifecycle(&IRModule, &IRFunction)` APIs. No new analysis or
+pipeline API was added. After the 3D.2 fixed point converges and every retained
+block has been replayed for deterministic transition diagnostics, the verifier
+reads the already-stabilized exit-state map for each entry-reachable `return`
+block. Each return is checked independently in retained block order; therefore
+one valid early return cannot hide a leaking later return. Conditional returns,
+loop exits, recursive functions, constructors, and lowered methods need no
+special CFG rule because they are ordinary `IRFunction` returns. Structural
+verification disallows implicit fallthrough, and void functions leave through
+an explicit bare return. Retained unreachable returns still receive Python's
+independent all-slots-live local checks but are excluded from ownership
+completion because no executable path reaches them.
+
+The ownership domain remains the 3D.2 slot domain. A storage name participates
+in the exit contract only after appearing in `init_default`, `copy_init`,
+`move_init`, `assign`, `destroy`, or `relocate`, matching Python's
+`_is_lifecycle_storage`. Raw load/store-only slots are not newly classified as
+generic lifecycle owners, although a raw store to an already-classified slot
+updates its state and can create an exit leak. A covered slot is complete in
+`Uninitialized`, `Moved`, or `Destroyed`. `Initialized` is valid only when the
+same return names that exact live slot as `transferred_storage`; a mixed state
+containing `Initialized`, such as `{Initialized, Destroyed}`, is incomplete.
+This makes branch-dependent partial whole-aggregate destruction observable at
+the exit without rerunning or duplicating transfer analysis.
+
+Return transfer is explicit and intentionally narrow. The marker must refer to
+live non-void storage and its type must equal the returned SSA value type.
+Python and Rust do not prove provenance from the transferred slot to the
+returned SSA value. `move_init` and `relocate` move ownership between storage
+slots, leaving the source `Moved` and destination `Initialized`; they do not
+transfer ownership outside the function until the destination is named by a
+return marker. Copy and assignment do not consume a storage source. There is no
+separate ownership-transfer opcode in the current owned IR. Compiler-generated
+retain/release, defaulting of moved managed values, and temporary-value cleanup
+remain post-verification lifecycle-expansion behavior.
+
+Python `src/aether/ir/verifier.py`, `lifecycle.py`, `lowering.py`, `model.py`,
+`cfg.py`, and `interpreter.py` were inspected together with lifecycle,
+interpreter, verifier, lowering, and control-flow tests. Verification occurs on
+generic lifecycle IR before `expand_lifecycle()`; both SSA builders invoke
+expansion after this boundary. Python requires completion for all lifecycle
+storage, including trivial types. Rust matches that behavior: `String`,
+`Array`, and `List` need destruction; structs and method-result storage inherit
+managed status recursively from nested fields; trivial scalar, enum, vector,
+and matrix slots still need an explicit terminal lifecycle state even though
+their destructor expands to no runtime work. Parameters and ordinary temporary
+results are SSA values rather than storage and are not exit owners unless copied
+into a slot. Destroy completes the aggregate slot as a unit because the current
+IR has no field-path storage state.
+
+The new leaf diagnostic is
+`LifecycleRuleError::IncompleteOwnershipAtExit`. It retains slot identifier and
+type, exit block and return location, actual and expected state sets, an
+`OwnershipCompletionReason`, and the last transition location when 3D.2 could
+preserve it. `LifecycleStorageRole::ExitOwner` identifies the block wrapper.
+All existing module/function/block/rule `Error::source()` links remain
+downcastable. Exit failures use retained block order and lexicographic slot-name
+order, matching Python's sorted missing-cleanup names and remaining independent
+of worklist order.
+
+Step 3D.3 does not insert destruction, rewrite IR, expand lifecycle operations,
+optimize ARC, infer ownership, add borrowing or alias analysis, change LLVM,
+alter importer/schema contracts, or integrate the production pipeline. The
+next recommended verifier work is borrowing/escape completeness and remaining
+Python IRV rule-family parity, followed by a separately authorized differential
+integration step. Cleanup insertion stays in lowering/lifecycle expansion.
 
 ## 8. Ownership and memory
 

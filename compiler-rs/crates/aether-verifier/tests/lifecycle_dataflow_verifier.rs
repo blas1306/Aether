@@ -131,7 +131,7 @@ fn accepts_initialization_on_all_predecessors_and_entry_not_first() {
     let slot = int_storage("slot");
     let module = module(vec![
         block("left", vec![init(&slot), jump("merge")]),
-        block("merge", vec![load("read", &slot), ret()]),
+        block("merge", vec![load("read", &slot), destroy(&slot), ret()]),
         block("entry", vec![branch("left", "right")]),
         block("right", vec![init(&slot), jump("merge")]),
     ]);
@@ -174,7 +174,10 @@ fn raw_store_repairs_divergent_incoming_state() {
         block("entry", vec![branch("left", "right")]),
         block("left", vec![init(&slot), jump("merge")]),
         block("right", vec![jump("merge")]),
-        block("merge", vec![store(&slot), load("read", &slot), ret()]),
+        block(
+            "merge",
+            vec![store(&slot), load("read", &slot), destroy(&slot), ret()],
+        ),
     ]);
 
     assert_eq!(verify_module_lifecycle(&module), Ok(()));
@@ -211,7 +214,10 @@ fn raw_store_repairs_every_divergent_state_for_trivial_and_managed_slots() {
                 block("entry", entry),
                 block("left", left),
                 block("right", right),
-                block("merge", vec![store(&slot), load("read", &slot), ret()]),
+                block(
+                    "merge",
+                    vec![store(&slot), load("read", &slot), destroy(&slot), ret()],
+                ),
             ]);
 
             assert_eq!(verify_module_lifecycle(&module), Ok(()));
@@ -252,7 +258,10 @@ fn read_before_repair_and_unrepaired_successor_remain_invalid() {
             block("left", vec![jump("merge")]),
             block("right", vec![destroy(&slot), jump("merge")]),
             block("merge", vec![branch("repaired", "unrepaired")]),
-            block("repaired", vec![store(&slot), load("safe", &slot), ret()]),
+            block(
+                "repaired",
+                vec![store(&slot), load("safe", &slot), destroy(&slot), ret()],
+            ),
             block("unrepaired", vec![load("unsafe", &slot), ret()]),
         ]);
         let error =
@@ -264,10 +273,22 @@ fn read_before_repair_and_unrepaired_successor_remain_invalid() {
             block("left", vec![jump("merge")]),
             block("right", vec![destroy(&slot), jump("merge")]),
             block("merge", vec![branch("repaired", "unused")]),
-            block("repaired", vec![store(&slot), load("safe", &slot), ret()]),
+            block(
+                "repaired",
+                vec![store(&slot), load("safe", &slot), destroy(&slot), ret()],
+            ),
             block("unused", vec![ret()]),
         ]);
-        assert_eq!(verify_module_lifecycle(&unused_other_successor), Ok(()));
+        let error = verify_function_lifecycle(
+            &unused_other_successor,
+            &unused_other_successor.functions[0],
+        )
+        .unwrap_err();
+        assert_eq!(block_error(&error).block_name, "unused");
+        assert!(matches!(
+            rule(&error),
+            LifecycleRuleError::IncompleteOwnershipAtExit { .. }
+        ));
     }
 }
 
@@ -314,7 +335,10 @@ fn loop_carried_live_state_converges() {
             vec![load("header_read", &slot), branch("body", "exit")],
         ),
         block("body", vec![load("body_read", &slot), jump("header")]),
-        block("exit", vec![load("exit_read", &slot), ret()]),
+        block(
+            "exit",
+            vec![load("exit_read", &slot), destroy(&slot), ret()],
+        ),
     ]);
 
     assert_eq!(verify_module_lifecycle(&module), Ok(()));

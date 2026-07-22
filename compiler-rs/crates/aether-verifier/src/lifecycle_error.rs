@@ -168,6 +168,7 @@ pub enum LifecycleStorageRole {
     Source,
     Value,
     TransferredStorage,
+    ExitOwner,
 }
 
 impl fmt::Display for LifecycleStorageRole {
@@ -178,6 +179,30 @@ impl fmt::Display for LifecycleStorageRole {
             Self::Source => "source",
             Self::Value => "value",
             Self::TransferredStorage => "transferred_storage",
+            Self::ExitOwner => "exit owner",
+        })
+    }
+}
+
+/// Why a live slot violates the ownership-completion contract at a function exit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OwnershipCompletionReason {
+    /// The type recursively contains an owner that requires destruction.
+    ManagedStorageRequiresCleanup,
+    /// Python requires every slot participating in lifecycle IR to be completed,
+    /// including slots whose type has a trivial destructor.
+    TrivialLifecycleStorageRequiresCompletion,
+}
+
+impl fmt::Display for OwnershipCompletionReason {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::ManagedStorageRequiresCleanup => {
+                "managed storage must be destroyed or explicitly transferred"
+            }
+            Self::TrivialLifecycleStorageRequiresCompletion => {
+                "Python lifecycle semantics require trivial lifecycle storage to be completed"
+            }
         })
     }
 }
@@ -300,6 +325,16 @@ pub enum LifecycleRuleError {
         possible_states: PossibleSlotStates,
         required_state: LocalSlotState,
         current_transition: LifecycleInstructionLocation,
+    },
+    IncompleteOwnershipAtExit {
+        storage_identifier: String,
+        storage_type: IRType,
+        exit_block: String,
+        terminal_states: PossibleSlotStates,
+        expected_terminal_states: PossibleSlotStates,
+        ownership_reason: OwnershipCompletionReason,
+        last_transition: Option<LifecycleInstructionLocation>,
+        exit: LifecycleInstructionLocation,
     },
 }
 
@@ -446,6 +481,28 @@ impl fmt::Display for LifecycleRuleError {
                 formatter,
                 "{operation} {role} '%{storage_identifier}' has merged incoming states {possible_states} at {current_transition}; every incoming path must permit state {required_state}"
             ),
+            Self::IncompleteOwnershipAtExit {
+                storage_identifier,
+                storage_type,
+                exit_block,
+                terminal_states,
+                expected_terminal_states,
+                ownership_reason,
+                last_transition,
+                exit,
+            } => {
+                write!(
+                    formatter,
+                    "Return exits with live owning storage lacking cleanup: '%{storage_identifier}: {storage_type}' in block '{exit_block}' has terminal lifecycle state {terminal_states}; expected {expected_terminal_states}: {ownership_reason}; exit is {exit}"
+                )?;
+                if let Some(last_transition) = last_transition {
+                    write!(
+                        formatter,
+                        "; last lifecycle transition was {last_transition}"
+                    )?;
+                }
+                Ok(())
+            }
         }
     }
 }

@@ -5,8 +5,9 @@
 //! branch/jump targets. SSA verification checks function-local immutable value
 //! definitions, references, and same-block ordering. Dominance verification
 //! checks cross-block availability. Lifecycle verification offers both focused
-//! block-local checks and deterministic CFG state propagation. No pass performs
-//! phi, complete ownership/cleanup, or optimization verification.
+//! block-local checks and deterministic CFG state propagation followed by
+//! reachable-exit ownership completion. No pass performs phi, cleanup insertion,
+//! lifecycle expansion, or optimization verification.
 
 mod cfg;
 mod dominance_error;
@@ -32,7 +33,8 @@ pub use error::{
 pub use lifecycle_error::{
     BlockLifecycleError, FunctionLifecycleError, FunctionLifecycleVerificationError,
     LifecycleInstructionLocation, LifecycleOperation, LifecycleRuleError, LifecycleStorageRole,
-    LocalSlotState, ModuleLifecycleError, ModuleLifecycleVerificationError, PossibleSlotStates,
+    LocalSlotState, ModuleLifecycleError, ModuleLifecycleVerificationError,
+    OwnershipCompletionReason, PossibleSlotStates,
 };
 pub use lifecycle_verifier::{
     verify_function_lifecycle, verify_function_local_lifecycle, verify_module_lifecycle,

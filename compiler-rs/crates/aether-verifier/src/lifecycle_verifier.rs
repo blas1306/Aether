@@ -11,7 +11,8 @@ use crate::cfg::{ENTRY_BLOCK_NAME, FunctionCfg};
 use crate::lifecycle_error::{
     BlockLifecycleError, FunctionLifecycleError, FunctionLifecycleVerificationError,
     LifecycleInstructionLocation, LifecycleOperation, LifecycleRuleError, LifecycleStorageRole,
-    LocalSlotState, ModuleLifecycleError, ModuleLifecycleVerificationError, PossibleSlotStates,
+    LocalSlotState, ModuleLifecycleError, ModuleLifecycleVerificationError,
+    OwnershipCompletionReason, PossibleSlotStates,
 };
 use crate::structure_verifier::verify_function_structure_prerequisite;
 use crate::verifier::instruction_kind;
@@ -77,6 +78,7 @@ enum LifecycleEffect<'instruction> {
 struct StorageDeclaration {
     r#type: IRType,
     first_seen: LifecycleInstructionLocation,
+    participates_in_lifecycle: bool,
 }
 
 struct StorageIndex {
@@ -163,7 +165,8 @@ pub fn verify_function_local_lifecycle(
     Ok(())
 }
 
-/// Verifies function-wide storage lifecycle state in every retained function.
+/// Verifies function-wide storage lifecycle state and reachable-exit ownership
+/// completion in every retained function.
 ///
 /// Structural verification is the sole prerequisite: this pass needs a safe,
 /// unambiguous CFG. SSA value validity and dominance remain independently
@@ -181,7 +184,8 @@ pub fn verify_module_lifecycle(module: &IRModule) -> Result<(), ModuleLifecycleV
     Ok(())
 }
 
-/// Verifies function-wide lifecycle state after deterministic CFG convergence.
+/// Verifies function-wide lifecycle state and ownership completion after
+/// deterministic CFG convergence.
 pub fn verify_function_lifecycle(
     module: &IRModule,
     function: &IRFunction,
@@ -229,6 +233,7 @@ pub fn verify_function_lifecycle(
             source: Box::new(source),
         })?;
     }
+    verify_reachable_exits(function, &storage_index, &registry, &data_flow)?;
     Ok(())
 }
 
@@ -348,13 +353,15 @@ fn join_state_maps(
 }
 
 fn collect_storage_index(function: &IRFunction) -> StorageIndex {
-    let mut declarations = HashMap::new();
+    let mut declarations: HashMap<String, StorageDeclaration> = HashMap::new();
     let mut order = Vec::new();
     for (block_index, block) in function.blocks.iter().enumerate() {
         for (instruction_index, instruction) in block.instructions.iter().enumerate() {
             let location = instruction_location(block_index, block, instruction_index, instruction);
+            let participates_in_lifecycle = is_ownership_lifecycle_instruction(instruction);
             for operand in storage_operands(instruction) {
-                if declarations.contains_key(operand.storage.name) {
+                if let Some(declaration) = declarations.get_mut(operand.storage.name) {
+                    declaration.participates_in_lifecycle |= participates_in_lifecycle;
                     continue;
                 }
                 order.push(operand.storage.name.to_owned());
@@ -363,6 +370,7 @@ fn collect_storage_index(function: &IRFunction) -> StorageIndex {
                     StorageDeclaration {
                         r#type: operand.storage.r#type.clone(),
                         first_seen: location.clone(),
+                        participates_in_lifecycle,
                     },
                 );
             }
@@ -372,6 +380,114 @@ fn collect_storage_index(function: &IRFunction) -> StorageIndex {
         declarations,
         order,
     }
+}
+
+fn verify_reachable_exits(
+    function: &IRFunction,
+    storage_index: &StorageIndex,
+    registry: &LifecycleTypeRegistry<'_>,
+    data_flow: &LifecycleDataFlow,
+) -> Result<(), FunctionLifecycleVerificationError> {
+    for (block_index, block) in function.blocks.iter().enumerate() {
+        if !data_flow.reachable[block_index] {
+            continue;
+        }
+        let Some(IRInstruction::IRReturn {
+            transferred_storage,
+            ..
+        }) = block.instructions.last()
+        else {
+            continue;
+        };
+        let Some(exit_states) = &data_flow.exit_states[block_index] else {
+            continue;
+        };
+        let instruction_index = block.instructions.len() - 1;
+        let instruction = &block.instructions[instruction_index];
+        let exit = instruction_location(block_index, block, instruction_index, instruction);
+
+        let mut ownership_slots: Vec<&str> = storage_index
+            .order
+            .iter()
+            .filter_map(|name| {
+                storage_index.declarations[name]
+                    .participates_in_lifecycle
+                    .then_some(name.as_str())
+            })
+            .collect();
+        ownership_slots.sort_unstable();
+        for name in ownership_slots {
+            let declaration = &storage_index.declarations[name];
+            if !declaration.participates_in_lifecycle
+                || transferred_storage
+                    .as_ref()
+                    .is_some_and(|storage| storage.name == name)
+            {
+                continue;
+            }
+            let fact = &exit_states[name];
+            if !fact.states.contains(LocalSlotState::Initialized) {
+                continue;
+            }
+
+            let storage = StorageRef {
+                name,
+                r#type: &declaration.r#type,
+            };
+            let source = LifecycleRuleError::IncompleteOwnershipAtExit {
+                storage_identifier: name.to_owned(),
+                storage_type: declaration.r#type.clone(),
+                exit_block: block.name.clone(),
+                terminal_states: fact.states,
+                expected_terminal_states: completed_terminal_states(),
+                ownership_reason: if registry.traits(&declaration.r#type).needs_destroy {
+                    OwnershipCompletionReason::ManagedStorageRequiresCleanup
+                } else {
+                    OwnershipCompletionReason::TrivialLifecycleStorageRequiresCompletion
+                },
+                last_transition: fact.transition.clone(),
+                exit: exit.clone(),
+            };
+            return Err(FunctionLifecycleVerificationError::Block {
+                function_name: function.name.clone(),
+                block_index,
+                block_name: block.name.clone(),
+                source: Box::new(rule_error(
+                    function,
+                    block_index,
+                    block,
+                    instruction_index,
+                    instruction,
+                    LifecycleStorageRole::ExitOwner,
+                    storage,
+                    source,
+                )),
+            });
+        }
+    }
+    Ok(())
+}
+
+const fn completed_terminal_states() -> PossibleSlotStates {
+    PossibleSlotStates {
+        may_be_unknown: false,
+        may_be_uninitialized: true,
+        may_be_initialized: false,
+        may_be_moved: true,
+        may_be_destroyed: true,
+    }
+}
+
+const fn is_ownership_lifecycle_instruction(instruction: &IRInstruction) -> bool {
+    matches!(
+        instruction,
+        IRInstruction::IRInitDefault { .. }
+            | IRInstruction::IRCopyInit { .. }
+            | IRInstruction::IRMoveInit { .. }
+            | IRInstruction::IRAssign { .. }
+            | IRInstruction::IRDestroy { .. }
+            | IRInstruction::IRRelocate { .. }
+    )
 }
 
 fn verify_block(
@@ -1464,6 +1580,7 @@ fn storage_operands(instruction: &IRInstruction) -> Vec<StorageOperand<'_>> {
 struct LifecycleTraits {
     trivially_relocatable: bool,
     supports_default: bool,
+    needs_destroy: bool,
     reason: String,
 }
 
@@ -1487,23 +1604,26 @@ impl<'module> LifecycleTypeRegistry<'module> {
             | IRType::Double(_)
             | IRType::Bool(_)
             | IRType::Complex(_)
-            | IRType::Enum(_)
-            | IRType::String(_)
-            | IRType::Array(_)
-            | IRType::List(_) => LifecycleTraits::valid(true, true),
+            | IRType::Enum(_) => LifecycleTraits::valid(true, true, false),
+            IRType::String(_) | IRType::Array(_) | IRType::List(_) => {
+                LifecycleTraits::valid(true, true, true)
+            }
             IRType::Vector(vector) => LifecycleTraits {
                 trivially_relocatable: true,
                 supports_default: matches!(vector.orientation.as_deref(), Some("row" | "column")),
+                needs_destroy: false,
                 reason: "vector default requires a concrete row or column orientation".to_owned(),
             },
             IRType::Matrix(_) => LifecycleTraits {
                 trivially_relocatable: true,
                 supports_default: false,
+                needs_destroy: false,
                 reason: "matrix default requires compile-time dimensions".to_owned(),
             },
             IRType::Function(_) => LifecycleTraits {
                 trivially_relocatable: true,
                 supports_default: false,
+                needs_destroy: false,
                 reason: "function values have no default".to_owned(),
             },
             IRType::ClassRef(_) | IRType::Interface(_) | IRType::Nullable(_) => {
@@ -1543,11 +1663,13 @@ impl<'module> LifecycleTypeRegistry<'module> {
     ) -> LifecycleTraits {
         let mut relocatable = true;
         let mut supports_default = true;
+        let mut needs_destroy = false;
         let mut reason = String::new();
         for field in fields {
             let traits = self.compute(field, active);
             relocatable &= traits.trivially_relocatable;
             supports_default &= traits.supports_default;
+            needs_destroy |= traits.needs_destroy;
             if reason.is_empty() && (!traits.trivially_relocatable || !traits.supports_default) {
                 reason = traits.reason;
             }
@@ -1555,16 +1677,18 @@ impl<'module> LifecycleTypeRegistry<'module> {
         LifecycleTraits {
             trivially_relocatable: relocatable,
             supports_default,
+            needs_destroy,
             reason,
         }
     }
 }
 
 impl LifecycleTraits {
-    fn valid(trivially_relocatable: bool, supports_default: bool) -> Self {
+    fn valid(trivially_relocatable: bool, supports_default: bool, needs_destroy: bool) -> Self {
         Self {
             trivially_relocatable,
             supports_default,
+            needs_destroy,
             reason: String::new(),
         }
     }
@@ -1573,6 +1697,7 @@ impl LifecycleTraits {
         Self {
             trivially_relocatable: false,
             supports_default: false,
+            needs_destroy: false,
             reason: reason.to_owned(),
         }
     }
