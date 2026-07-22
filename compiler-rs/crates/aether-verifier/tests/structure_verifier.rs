@@ -517,7 +517,7 @@ fn definition_before_use_and_dominance_remain_deferred() {
         block(
             "merge",
             vec![IRInstruction::IRReturn {
-                value: Some(merge_value),
+                value: Some(merge_value.into()),
                 transferred_storage: None,
             }],
         ),

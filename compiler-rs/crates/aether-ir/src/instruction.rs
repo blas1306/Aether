@@ -403,7 +403,7 @@ pub enum IRInstruction {
     IRJump { target: String },
     /// Returns from the current function.
     IRReturn {
-        value: Option<IRValue>,
+        value: Option<LifecycleSource>,
         transferred_storage: Option<IRStorage>,
     },
 }

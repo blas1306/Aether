@@ -879,7 +879,7 @@ fn apply_effect(
                 };
                 if value
                     .as_ref()
-                    .is_none_or(|value| value.r#type != *storage.r#type)
+                    .is_none_or(|value| value.r#type() != storage.r#type)
                 {
                     return Err(rule_error(
                         function,
@@ -892,7 +892,7 @@ fn apply_effect(
                         LifecycleRuleError::ReturnTransferTypeMismatch {
                             storage_identifier: storage.name.to_owned(),
                             storage_type: storage.r#type.clone(),
-                            returned_type: value.as_ref().map(|value| value.r#type.clone()),
+                            returned_type: value.as_ref().map(|value| value.r#type().clone()),
                             location: location.clone(),
                         },
                     ));

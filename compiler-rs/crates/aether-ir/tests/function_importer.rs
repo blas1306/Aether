@@ -267,7 +267,7 @@ fn accepts_return_instruction_that_mismatches_declared_return_type() {
     assert_eq!(
         imported.blocks[0].instructions,
         vec![IRInstruction::IRReturn {
-            value: Some(IRValue::new("integer_result", IntType.into())),
+            value: Some(IRValue::new("integer_result", IntType.into()).into()),
             transferred_storage: None,
         }]
     );

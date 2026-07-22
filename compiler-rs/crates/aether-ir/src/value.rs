@@ -58,10 +58,10 @@ impl From<&IRStorage> for IRValue {
     }
 }
 
-/// A source operand accepted by lifecycle copy and assignment operations.
+/// A tagged operand that may be an immutable value or an addressable storage location.
 ///
-/// Immutable values and parameters participate in SSA verification, while
-/// storage sources participate in storage lifecycle verification.
+/// Lifecycle copy/assignment sources and return operands use this representation
+/// where their canonical value/storage distinction affects verification.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum LifecycleSource {
     /// An immutable SSA value, including a function parameter.

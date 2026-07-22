@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use aether_ir::{
     ArrayType, BoolType, ComplexType, DoubleType, FloatType, FunctionType, IRBasicBlock,
     IRConstant, IRFunction, IRInstruction, IRModule, IRStructDefinition, IRType, IRValue, IntType,
-    ListType, MatrixType, StringType, StructType, VectorType, VoidType,
+    LifecycleSource, ListType, MatrixType, StringType, StructType, VectorType, VoidType,
 };
 
 use crate::error::{
@@ -296,7 +296,8 @@ impl<'module> TypeVerifier<'module> {
                 }
 
                 if let IRInstruction::IRReturn {
-                    value: Some(value), ..
+                    value: Some(LifecycleSource::Value(value)),
+                    ..
                 } = instruction
                 {
                     if let Some(definition) = borrowed.get(&value.name) {
@@ -795,7 +796,14 @@ impl<'module> TypeVerifier<'module> {
                 self.expect_bool("condition", &condition.r#type)
             }
             IRInstruction::IRReturn { value, .. } => match value {
-                Some(value) => self.require_exact("value", &function.return_type, &value.r#type),
+                Some(LifecycleSource::Value(value)) => {
+                    self.require_exact("value", &function.return_type, &value.r#type)
+                }
+                Some(LifecycleSource::Storage(storage)) => {
+                    Err(TypeRuleError::StorageReturnOperand {
+                        storage: storage.name.clone(),
+                    })
+                }
                 None if matches!(function.return_type, IRType::Void(_)) => Ok(()),
                 None => self.require_exact("value", &function.return_type, &VoidType.into()),
             },
@@ -966,9 +974,14 @@ impl<'module> TypeVerifier<'module> {
                 ("column", column),
                 ("value", value),
             ],
-            IRInstruction::IRReturn { value, .. } => {
-                value.iter().map(|value| ("value", value)).collect()
-            }
+            IRInstruction::IRReturn { value, .. } => match value {
+                Some(LifecycleSource::Value(value)) => vec![("value", value)],
+                Some(LifecycleSource::Storage(storage)) => {
+                    self.require_valid_type("value", &storage.r#type)?;
+                    Vec::new()
+                }
+                None => Vec::new(),
+            },
         };
         for (field, value) in values {
             self.require_valid_type(field, &value.r#type)?;

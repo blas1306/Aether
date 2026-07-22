@@ -58,7 +58,7 @@ fn branch(condition: &str, true_target: &str, false_target: &str) -> IRInstructi
 
 fn ret(value: Option<&str>) -> IRInstruction {
     IRInstruction::IRReturn {
-        value: value.map(int),
+        value: value.map(|name| int(name).into()),
         transferred_storage: None,
     }
 }

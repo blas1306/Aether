@@ -631,7 +631,7 @@ fn validates_return_transfer_state_and_value_type_without_exit_cleanup_analysis(
             vec![
                 init(&return_storage),
                 IRInstruction::IRReturn {
-                    value: Some(int_value("result")),
+                    value: Some(int_value("result").into()),
                     transferred_storage: Some(return_storage.clone()),
                 },
             ],
@@ -647,7 +647,7 @@ fn validates_return_transfer_state_and_value_type_without_exit_cleanup_analysis(
             vec![
                 init(&return_storage),
                 IRInstruction::IRReturn {
-                    value: Some(IRValue::new("result", StringType.into())),
+                    value: Some(IRValue::new("result", StringType.into()).into()),
                     transferred_storage: Some(return_storage),
                 },
             ],

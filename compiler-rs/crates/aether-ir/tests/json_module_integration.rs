@@ -200,7 +200,7 @@ fn canonical_python_golden_reaches_owned_ir_with_exact_hierarchy_data() {
     );
     match &function.blocks[1].instructions[1] {
         IRInstruction::IRReturn {
-            value: Some(value),
+            value: Some(LifecycleSource::Storage(value)),
             transferred_storage: Some(storage),
         } => {
             assert_eq!(

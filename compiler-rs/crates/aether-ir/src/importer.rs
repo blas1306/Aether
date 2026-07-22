@@ -1117,7 +1117,7 @@ impl TryFrom<&IRInstructionDTO> for IRInstruction {
                 value,
                 transferred_storage,
             } => Ok(Self::IRReturn {
-                value: import_optional_instruction_value(kind, "value", value)?,
+                value: import_optional_instruction_lifecycle_source(kind, "value", value)?,
                 transferred_storage: import_instruction_field(
                     kind,
                     "transferred_storage",
@@ -1455,6 +1455,18 @@ fn import_optional_instruction_value(
         .0
         .as_ref()
         .map(|value| import_instruction_value(instruction, field, value))
+        .transpose()
+}
+
+fn import_optional_instruction_lifecycle_source(
+    instruction: &'static str,
+    field: &'static str,
+    value: &NullableDTO<IRValueDTO>,
+) -> Result<Option<LifecycleSource>, IRImportError> {
+    value
+        .0
+        .as_ref()
+        .map(|value| import_instruction_lifecycle_source(instruction, field, value))
         .transpose()
 }
 

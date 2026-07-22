@@ -316,7 +316,7 @@ fn canonical_golden_imports_representative_root_and_deep_contents() {
     );
     match &imported.functions[0].blocks[1].instructions[1] {
         IRInstruction::IRReturn {
-            value: Some(value),
+            value: Some(aether_ir::LifecycleSource::Storage(value)),
             transferred_storage: Some(storage),
         } => {
             assert_eq!(value.name, "answer");

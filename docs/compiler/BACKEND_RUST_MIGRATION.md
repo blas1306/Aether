@@ -619,6 +619,11 @@ Instruction-specific lifecycle sources are the exception added with Step
 `LifecycleSource::Value`. Import does not resolve names or infer kind from
 identifier spelling.
 
+Phase 3E.6 later applies the same tagged representation narrowly to
+`IRReturn.value`, allowing IRV-026 to reject canonical `storage` operands even
+when a same-named SSA value exists. Other ordinary instruction operands retain
+the generic `IRValue` normalization described above.
+
 Focused tests deserialize foundational entities from JSON where applicable and
 cover every constant and value variant, storage, primitive and recursively
 nested parameters, present and absent source locations, explicit null paths,

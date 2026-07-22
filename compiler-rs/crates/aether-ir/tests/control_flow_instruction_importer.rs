@@ -2,8 +2,8 @@
 
 use aether_ir::wire::IRInstructionDTO;
 use aether_ir::{
-    BoolType, IRImportError, IRInstruction, IRStorage, IRType, IRValue, IntType, ListType,
-    NullableType, StringType, StructType, import_instruction,
+    BoolType, IRImportError, IRInstruction, IRStorage, IRType, IRValue, IntType, LifecycleSource,
+    ListType, NullableType, StringType, StructType, import_instruction,
 };
 use serde_json::{Value, json};
 
@@ -111,7 +111,7 @@ fn imports_returns_with_primitive_and_nested_values_and_storage() {
             }
         }),
         IRInstruction::IRReturn {
-            value: Some(IRValue::new("incompatible::return", StringType.into())),
+            value: Some(IRValue::new("incompatible::return", StringType.into()).into()),
             transferred_storage: Some(IRStorage::new("unresolved::transfer", BoolType.into())),
         },
     );
@@ -133,7 +133,10 @@ fn imports_returns_with_primitive_and_nested_values_and_storage() {
             "transferred_storage": null
         }),
         IRInstruction::IRReturn {
-            value: Some(IRValue::new("nested-return", nested_type())),
+            value: Some(LifecycleSource::Storage(IRStorage::new(
+                "nested-return",
+                nested_type(),
+            ))),
             transferred_storage: None,
         },
     );

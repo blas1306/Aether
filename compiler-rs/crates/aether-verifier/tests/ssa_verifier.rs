@@ -29,7 +29,7 @@ fn constant(name: &str, literal: i32) -> IRInstruction {
 
 fn ret(value: Option<IRValue>) -> IRInstruction {
     IRInstruction::IRReturn {
-        value,
+        value: value.map(Into::into),
         transferred_storage: None,
     }
 }

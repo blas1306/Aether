@@ -22,8 +22,9 @@ compiler remains entirely on its existing Python path.
   builtin identity, the retain/release call contract, and Python-parity element
   lifecycle support for collection copy and list-slice operations. The same
   pass now completes borrowed array/list element scope, direct store/return
-  escape, and mutation-receiver parity for IRV-037–042. Phi semantics, cleanup
-  insertion, and optimization verification remain outside these passes.
+  escape, and mutation-receiver parity for IRV-037–042, and rejects storage
+  return operands under IRV-026. Phi semantics, cleanup insertion, and
+  optimization verification remain outside these passes.
 - `aether-python` will provide the eventual Python integration boundary. It does
   not contain PyO3 bindings or compiler integration yet.
 

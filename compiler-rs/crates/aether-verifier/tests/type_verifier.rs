@@ -224,7 +224,7 @@ fn rejects_invalid_return_type_without_requiring_cfg_structure() {
         "answer",
         IntType.into(),
         IRInstruction::IRReturn {
-            value: Some(value("answer", StringType.into())),
+            value: Some(value("answer", StringType.into()).into()),
             transferred_storage: None,
         },
     );

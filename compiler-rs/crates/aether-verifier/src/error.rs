@@ -114,6 +114,11 @@ impl fmt::Display for TypeExpectation {
 /// The leaf cause of a type-verification failure.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TypeRuleError {
+    /// IRV-026: storage cannot be returned directly as a value.
+    StorageReturnOperand {
+        /// Storage identifier without the textual IR `%` prefix.
+        storage: String,
+    },
     /// A Python-compatible borrowed collection-element invariant failed.
     BorrowViolation {
         /// Typed borrow-specific leaf cause.
@@ -293,6 +298,10 @@ impl fmt::Display for TypeRuleError {
     #[allow(clippy::too_many_lines)]
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::StorageReturnOperand { storage } => write!(
+                formatter,
+                "IRV-026 return operand '%{storage}' is storage; load or explicitly transfer it as a value"
+            ),
             Self::BorrowViolation { source } => source.fmt(formatter),
             Self::MissingCollectionLifecycleCapability {
                 instruction,

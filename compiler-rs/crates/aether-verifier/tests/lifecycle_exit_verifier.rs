@@ -79,7 +79,7 @@ fn ret() -> IRInstruction {
 
 fn transferred_ret(value: IRValue, storage: &IRStorage) -> IRInstruction {
     IRInstruction::IRReturn {
-        value: Some(value),
+        value: Some(value.into()),
         transferred_storage: Some(storage.clone()),
     }
 }

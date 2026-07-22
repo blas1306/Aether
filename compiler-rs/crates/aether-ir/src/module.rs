@@ -27,7 +27,7 @@ mod tests {
             value: IRConstant::Int(42),
         });
         block.instructions.push(IRInstruction::IRReturn {
-            value: Some(result),
+            value: Some(result.into()),
             transferred_storage: None,
         });
 

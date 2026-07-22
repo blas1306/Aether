@@ -89,6 +89,18 @@ valid_modules:
     test: tests/aether/test_ir_verifier.py::test_verifies_void_function_with_bare_return
     covers: [IRV-025]
 
+  - id: return-ssa-value
+    test: tests/aether/test_ir_verifier.py::test_verifies_return_ssa_value
+    covers: [IRV-025, IRV-026]
+
+  - id: return-constant-result
+    test: tests/aether/test_ir_verifier.py::test_verifies_return_constant_result
+    covers: [IRV-025, IRV-026]
+
+  - id: return-expression-result
+    test: tests/aether/test_ir_verifier.py::test_verifies_return_expression_result
+    covers: [IRV-025, IRV-026]
+
   - id: multiple-functions
     test: tests/aether/test_ir_verifier.py::test_verifies_module_with_multiple_functions
     covers: [IRV-006]
@@ -372,6 +384,16 @@ invalid_modules:
     test: tests/aether/test_ir_verifier.py::test_return_type_mismatch_error
     expected_invariant: IRV-025
     covers: [IRV-025]
+
+  - id: return-storage-colliding-ssa-name
+    test: tests/aether/test_ir_verifier.py::test_return_storage_is_irv026_even_with_colliding_ssa_name
+    expected_invariant: IRV-026
+    covers: [IRV-026]
+
+  - id: return-storage
+    test: tests/aether/test_ir_verifier.py::test_return_storage_is_irv026
+    expected_invariant: IRV-026
+    covers: [IRV-026]
 
   - id: binary-incompatible-operands
     test: tests/aether/test_ir_verifier.py::test_binary_op_incompatible_operand_error

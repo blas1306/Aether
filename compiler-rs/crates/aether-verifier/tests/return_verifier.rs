@@ -18,7 +18,7 @@ fn value(name: &str, type_: aether_ir::IRType) -> IRValue {
 
 fn valued_return() -> IRInstruction {
     IRInstruction::IRReturn {
-        value: Some(value("result", IntType.into())),
+        value: Some(value("result", IntType.into()).into()),
         transferred_storage: None,
     }
 }
@@ -291,7 +291,7 @@ fn checks_only_value_presence_not_return_operand_type_or_ssa_validity() {
         vec![block(
             "entry",
             IRInstruction::IRReturn {
-                value: Some(value("undefined", StringType.into())),
+                value: Some(value("undefined", StringType.into()).into()),
                 transferred_storage: None,
             },
         )],

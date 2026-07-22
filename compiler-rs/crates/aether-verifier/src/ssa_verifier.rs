@@ -436,8 +436,9 @@ pub(crate) fn ssa_operands(instruction: &IRInstruction) -> Vec<SSAOperand<'_>> {
             operand("value", value),
         ],
         IRInstruction::IRBranch { condition, .. } => vec![operand("condition", condition)],
-        IRInstruction::IRReturn { value, .. } => {
-            value.iter().map(|value| operand("value", value)).collect()
-        }
+        IRInstruction::IRReturn { value, .. } => match value {
+            Some(LifecycleSource::Value(value)) => vec![operand("value", value)],
+            Some(LifecycleSource::Storage(_)) | None => Vec::new(),
+        },
     }
 }

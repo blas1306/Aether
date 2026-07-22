@@ -21,6 +21,7 @@ from aether.ir import (
     IRCompareOp,
     IRConst,
     IRFunction,
+    IRInitDefault,
     IRJump,
     IRLoad,
     IRListNew,
@@ -38,6 +39,7 @@ from aether.ir import (
     IRParameter,
     IRReturn,
     IRStore,
+    IRStorage,
     IRStructDefinition,
     IRType,
     IRValue,
@@ -54,6 +56,7 @@ from aether.ir import (
     VectorType,
     VoidType,
 )
+from aether.ir.dto import ir_module_from_json, ir_module_to_json
 from aether.pipeline import parse_source
 from aether.typechecker import TypeChecker
 
@@ -478,6 +481,107 @@ def test_verifies_void_function_with_bare_return() -> None:
     )
 
     assert IRVerifier(module).verify() is module
+
+
+def test_verifies_return_ssa_value() -> None:
+    parameter = IRParameter("value", IntType())
+    module = IRModule(
+        [
+            IRFunction(
+                "identity",
+                [parameter],
+                IntType(),
+                [IRBasicBlock("entry", [IRReturn(parameter)])],
+            )
+        ]
+    )
+
+    decoded = ir_module_from_json(ir_module_to_json(module))
+    assert IRVerifier(decoded).verify() is decoded
+
+
+def test_verifies_return_constant_result() -> None:
+    result = IRValue("result", IntType())
+    module = IRModule(
+        [
+            IRFunction(
+                "constant",
+                [],
+                IntType(),
+                [IRBasicBlock("entry", [IRConst(result, 1), IRReturn(result)])],
+            )
+        ]
+    )
+
+    decoded = ir_module_from_json(ir_module_to_json(module))
+    assert IRVerifier(decoded).verify() is decoded
+
+
+def test_verifies_return_expression_result() -> None:
+    left = IRParameter("left", IntType())
+    right = IRParameter("right", IntType())
+    result = IRValue("result", IntType())
+    module = IRModule(
+        [
+            IRFunction(
+                "add",
+                [left, right],
+                IntType(),
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [IRBinaryOp(result, "add", left, right), IRReturn(result)],
+                    )
+                ],
+            )
+        ]
+    )
+
+    decoded = ir_module_from_json(ir_module_to_json(module))
+    assert IRVerifier(decoded).verify() is decoded
+
+
+def test_return_storage_is_irv026_even_with_colliding_ssa_name() -> None:
+    parameter = IRParameter("x", IntType())
+    storage = IRStorage("x", IntType())
+    module = IRModule(
+        [
+            IRFunction(
+                "collision",
+                [parameter],
+                IntType(),
+                [IRBasicBlock("entry", [IRInitDefault(storage), IRReturn(storage)])],
+            )
+        ]
+    )
+
+    decoded = ir_module_from_json(ir_module_to_json(module))
+    with pytest.raises(IRVerificationError, match="is storage") as raised:
+        IRVerifier(decoded).verify()
+
+    assert raised.value.normalized_failure is not None
+    assert raised.value.normalized_failure.invariant_id == "IRV-026"
+
+
+def test_return_storage_is_irv026() -> None:
+    storage = IRStorage("slot", IntType())
+    module = IRModule(
+        [
+            IRFunction(
+                "storage_return",
+                [],
+                IntType(),
+                [IRBasicBlock("entry", [IRInitDefault(storage), IRReturn(storage)])],
+            )
+        ]
+    )
+
+    decoded = ir_module_from_json(ir_module_to_json(module))
+    with pytest.raises(IRVerificationError, match="is storage") as raised:
+        IRVerifier(decoded).verify()
+
+    assert raised.value.normalized_failure is not None
+    assert raised.value.normalized_failure.invariant_id == "IRV-026"
 
 
 def test_verifies_module_with_multiple_functions() -> None:

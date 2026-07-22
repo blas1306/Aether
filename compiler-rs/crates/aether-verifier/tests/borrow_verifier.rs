@@ -68,7 +68,7 @@ fn borrowed_array_get(
 
 fn ret(value: Option<IRValue>) -> IRInstruction {
     IRInstruction::IRReturn {
-        value,
+        value: value.map(Into::into),
         transferred_storage: None,
     }
 }
