@@ -18,7 +18,8 @@ compiler remains entirely on its existing Python path.
   state merging, and ownership-completeness checks at every reachable return.
   The all-path return pass independently verifies IRV-024 for non-void
   functions. The type pass also verifies retained aggregate compare/print
-  shapes, vector/matrix dimensions, and matrix literal cardinality. Phi
+  shapes, vector/matrix dimensions, matrix literal cardinality, canonical
+  builtin identity, and the retain/release call contract. Phi
   semantics, cleanup insertion, and optimization verification remain outside
   these passes.
 - `aether-python` will provide the eventual Python integration boundary. It does
@@ -336,3 +337,37 @@ canonical builtin semantic-name checks. This step does not alter canonical JSON,
 Python or Rust wire DTOs, the importer, lifecycle, ownership, the borrow
 verifier, SSA, dominance, optimizer, pipeline integration, LLVM, or PyO3
 behavior.
+
+## Phase 3 Step 3E.3: canonical builtin identity and retain/release
+
+Step 3E.3 extends the existing instruction-local type verifier; it does not add
+a second builtin pass. Every builtin-tagged `IRCall` now requires exact string
+identity between `function` and `builtin` before the existing builtin signature,
+result, and layout rules run. A different builtin with a compatible signature,
+a user function with that signature, an alias, and a renamed function are all
+rejected. The check is name-based: builtin calls do not resolve the module
+function table, so a same-named user declaration neither supplies an alias nor
+shadows a canonical builtin-tagged call. A renamed semantic `builtin` tag is not
+an alias and falls through to the existing unsupported-builtin rule.
+
+`__aether_retain` and `__aether_release` share the same Python initial-IR
+contract: their function name is canonical, they have exactly one argument,
+they produce no result, and the argument's top-level type is `string`, `struct`,
+`method_result`, `array`, or `list`. This is a shallow type-family allowlist,
+not a recursive lifecycle-trait query; arrays/lists of scalar elements and
+structs with only scalar fields are accepted. Primitive scalars, enums, vectors,
+matrices, nullable values, and all other top-level types are rejected. Runtime
+retain/release behavior and lifecycle transfer semantics are unchanged.
+
+Typed leaves are `TypeRuleError::InvalidBuiltinIdentity`,
+`InvalidRetainReleaseSignature`, and `InvalidRetainReleaseType`. They retain the
+semantic builtin, expected and actual function identity, argument/result shape,
+or offending type as applicable. Existing instruction, block, function, and
+module wrappers preserve `IRCall` identity and the complete downcastable
+`Error::source()` chain.
+
+No builtin-verifier gap remains in IRV-055–067. Remaining initial-IR verifier
+families are borrowed-element scope/escape rules (IRV-037–042) and the
+lifecycle-trait portions of collection copy/slice rules. This phase changes no
+importer, canonical JSON, Python or Rust wire DTO, ownership/lifecycle transfer,
+borrow verifier, optimizer, compiler pipeline, LLVM backend, or PyO3 behavior.

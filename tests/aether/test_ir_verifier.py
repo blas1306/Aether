@@ -5,8 +5,10 @@ import re
 import pytest
 
 from aether.ir import (
+    ArrayType,
     BoolType,
     DoubleType,
+    EnumType,
     IRBasicBlock,
     IRBinaryOp,
     IRBranch,
@@ -30,6 +32,8 @@ from aether.ir import (
     IRParameter,
     IRReturn,
     IRStore,
+    IRStructDefinition,
+    IRType,
     IRValue,
     IRVectorNew,
     IRVerificationError,
@@ -37,7 +41,10 @@ from aether.ir import (
     IntType,
     ListType,
     MatrixType,
+    MethodResultType,
+    NullableType,
     StringType,
+    StructType,
     VectorType,
     VoidType,
 )
@@ -684,6 +691,143 @@ def test_call_wrong_argument_type_error() -> None:
         module,
         "Argument 1 to function 'id' type mismatch: expected int, got string",
     )
+
+
+def _builtin_call_module(
+    function: str,
+    builtin: str,
+    argument_types: tuple[IRType, ...],
+    result_type: IRType | None,
+    *,
+    structs: tuple[IRStructDefinition, ...] = (),
+) -> IRModule:
+    parameters = [IRParameter(f"argument{index}", type_) for index, type_ in enumerate(argument_types)]
+    result = IRValue("result", result_type) if result_type is not None else None
+    return IRModule(
+        [
+            IRFunction(
+                "main",
+                parameters,
+                VoidType(),
+                [
+                    IRBasicBlock(
+                        "entry",
+                        [IRCall(function, tuple(parameters), result, builtin), IRReturn()],
+                    )
+                ],
+            )
+        ],
+        list(structs),
+    )
+
+
+def test_builtin_identity_accepts_the_canonical_semantic_name() -> None:
+    module = _builtin_call_module("sin", "sin", (DoubleType(),), DoubleType())
+
+    assert IRVerifier(module).verify() is module
+
+
+@pytest.mark.parametrize("function", ["cos", "user_sin", "sin_alias", "renamed_sin"])
+def test_builtin_identity_rejects_compatible_wrong_alias_and_renamed_functions(function: str) -> None:
+    module = _builtin_call_module(function, "sin", (DoubleType(),), DoubleType())
+
+    _assert_verification_error(module, "Scalar builtin call must retain its canonical semantic name")
+
+
+def test_builtin_identity_rejects_a_user_function_with_the_same_signature() -> None:
+    module = _builtin_call_module("user_sin", "sin", (DoubleType(),), DoubleType())
+    parameter = IRParameter("number", DoubleType())
+    module.functions.insert(
+        0,
+        IRFunction(
+            "user_sin",
+            [parameter],
+            DoubleType(),
+            [IRBasicBlock("entry", [IRReturn(parameter)])],
+        ),
+    )
+
+    _assert_verification_error(module, "Scalar builtin call must retain its canonical semantic name")
+
+
+def test_builtin_identity_is_name_based_even_with_a_same_named_user_declaration() -> None:
+    module = _builtin_call_module("sin", "sin", (DoubleType(),), DoubleType())
+    parameter = IRParameter("number", DoubleType())
+    module.functions.insert(
+        0,
+        IRFunction(
+            "sin",
+            [parameter],
+            DoubleType(),
+            [IRBasicBlock("entry", [IRReturn(parameter)])],
+        ),
+    )
+
+    assert IRVerifier(module).verify() is module
+
+
+def test_renamed_builtin_tag_is_not_treated_as_an_alias() -> None:
+    module = _builtin_call_module("renamed_sin", "renamed_sin", (DoubleType(),), DoubleType())
+
+    _assert_verification_error(module, "unknown scalar math builtin 'renamed_sin'")
+
+
+@pytest.mark.parametrize("builtin", ["__aether_retain", "__aether_release"])
+def test_lifecycle_builtins_accept_the_exact_managed_type_allowlist(builtin: str) -> None:
+    definition = IRStructDefinition("Managed", (("number", IntType()),))
+    managed_types = (
+        StringType(),
+        StructType("Managed"),
+        MethodResultType(StructType("Managed"), IntType()),
+        ArrayType(IntType()),
+        ListType(BoolType()),
+    )
+
+    for managed_type in managed_types:
+        module = _builtin_call_module(
+            builtin,
+            builtin,
+            (managed_type,),
+            None,
+            structs=(definition,),
+        )
+        assert IRVerifier(module).verify() is module
+
+
+@pytest.mark.parametrize(
+    "builtin, argument_type",
+    [
+        ("__aether_retain", IntType()),
+        ("__aether_retain", EnumType("State", ("ready",))),
+        ("__aether_release", BoolType()),
+        ("__aether_release", VectorType(IntType(), "row")),
+        ("__aether_release", MatrixType(DoubleType())),
+        ("__aether_release", NullableType(StringType())),
+    ],
+)
+def test_lifecycle_builtins_reject_types_outside_the_managed_allowlist(
+    builtin: str,
+    argument_type: IRType,
+) -> None:
+    module = _builtin_call_module(builtin, builtin, (argument_type,), None)
+
+    _assert_verification_error(module, f"Lifecycle builtin does not support argument type {argument_type}")
+
+
+@pytest.mark.parametrize("builtin", ["__aether_retain", "__aether_release"])
+def test_lifecycle_builtins_require_one_argument_and_no_result(builtin: str) -> None:
+    wrong_count = _builtin_call_module(builtin, builtin, (), None)
+    unexpected_result = _builtin_call_module(builtin, builtin, (StringType(),), StringType())
+
+    _assert_verification_error(wrong_count, "Lifecycle builtin requires one argument and no result")
+    _assert_verification_error(unexpected_result, "Lifecycle builtin requires one argument and no result")
+
+
+@pytest.mark.parametrize("builtin", ["__aether_retain", "__aether_release"])
+def test_lifecycle_builtins_require_their_canonical_function_name(builtin: str) -> None:
+    module = _builtin_call_module("lifecycle_alias", builtin, (StringType(),), None)
+
+    _assert_verification_error(module, "Lifecycle builtin call must retain its canonical semantic name")
 
 
 def test_return_type_mismatch_error() -> None:

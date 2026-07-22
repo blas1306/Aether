@@ -1062,10 +1062,10 @@ impl TypeVerifier<'_> {
             return self.verify_call_result(result, &callee.return_type);
         };
 
-        // Retain/release are lifecycle operations, even though encoded as
-        // calls. Their complete contract is intentionally deferred.
+        self.require_builtin_identity(function, builtin)?;
+
         if matches!(builtin, "__aether_retain" | "__aether_release") {
-            return Ok(());
+            return self.verify_retain_release_builtin(arguments, result, builtin);
         }
 
         match builtin {
@@ -1128,6 +1128,51 @@ impl TypeVerifier<'_> {
                 let expected_result = scalar_math_result_type(name, arguments)?;
                 self.verify_call_result(result, &expected_result)
             }
+        }
+    }
+
+    fn require_builtin_identity(&self, function: &str, builtin: &str) -> Result<(), TypeRuleError> {
+        if function == builtin {
+            Ok(())
+        } else {
+            Err(TypeRuleError::InvalidBuiltinIdentity {
+                builtin: builtin.to_owned(),
+                expected: builtin.to_owned(),
+                actual: function.to_owned(),
+            })
+        }
+    }
+
+    fn verify_retain_release_builtin(
+        &self,
+        arguments: &[IRValue],
+        result: Option<&IRValue>,
+        builtin: &str,
+    ) -> Result<(), TypeRuleError> {
+        if arguments.len() != 1 || result.is_some() {
+            return Err(TypeRuleError::InvalidRetainReleaseSignature {
+                builtin: builtin.to_owned(),
+                expected_arguments: 1,
+                actual_arguments: arguments.len(),
+                actual_result: result.map(|value| value.r#type.clone()),
+            });
+        }
+
+        let argument_type = &arguments[0].r#type;
+        if matches!(
+            argument_type,
+            IRType::String(_)
+                | IRType::Struct(_)
+                | IRType::MethodResult(_)
+                | IRType::Array(_)
+                | IRType::List(_)
+        ) {
+            Ok(())
+        } else {
+            Err(TypeRuleError::InvalidRetainReleaseType {
+                builtin: builtin.to_owned(),
+                actual: argument_type.clone(),
+            })
         }
     }
 

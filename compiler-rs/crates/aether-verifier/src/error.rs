@@ -79,6 +79,33 @@ impl fmt::Display for TypeExpectation {
 /// The leaf cause of a type-verification failure.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TypeRuleError {
+    /// A builtin call's function spelling does not match its semantic builtin tag.
+    InvalidBuiltinIdentity {
+        /// Canonical semantic builtin retained by the instruction.
+        builtin: String,
+        /// Function spelling required for that semantic builtin.
+        expected: String,
+        /// Function spelling retained by the call.
+        actual: String,
+    },
+    /// A retain/release call does not have exactly one argument and no result.
+    InvalidRetainReleaseSignature {
+        /// Canonical retain/release builtin being checked.
+        builtin: String,
+        /// Required number of arguments.
+        expected_arguments: usize,
+        /// Retained number of arguments.
+        actual_arguments: usize,
+        /// Unexpected retained result type, if any.
+        actual_result: Option<IRType>,
+    },
+    /// A retain/release call uses a type outside Python's managed-type allowlist.
+    InvalidRetainReleaseType {
+        /// Canonical retain/release builtin being checked.
+        builtin: String,
+        /// Unsupported argument type.
+        actual: IRType,
+    },
     /// An operand, result, parameter, or field has the wrong exact type.
     TypeMismatch {
         /// The offending instruction operand or declaration field.
@@ -210,8 +237,30 @@ pub enum TypeRuleError {
 }
 
 impl fmt::Display for TypeRuleError {
+    #[allow(clippy::too_many_lines)]
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::InvalidBuiltinIdentity {
+                builtin,
+                expected,
+                actual,
+            } => write!(
+                formatter,
+                "invalid identity for builtin '{builtin}': expected function '{expected}', got '{actual}'"
+            ),
+            Self::InvalidRetainReleaseSignature {
+                builtin,
+                expected_arguments,
+                actual_arguments,
+                actual_result,
+            } => write!(
+                formatter,
+                "invalid signature for lifecycle builtin '{builtin}': expected {expected_arguments} argument(s) and no result, got {actual_arguments} argument(s) and result {actual_result:?}"
+            ),
+            Self::InvalidRetainReleaseType { builtin, actual } => write!(
+                formatter,
+                "invalid argument type for lifecycle builtin '{builtin}': expected string, struct, method-result, array, or list, got {actual}"
+            ),
             Self::TypeMismatch {
                 field,
                 expected,

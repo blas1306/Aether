@@ -1912,6 +1912,57 @@ canonical builtin semantic-name checks. Importer, canonical JSON, Python DTOs,
 Rust wire DTOs, lifecycle, ownership, borrow-verifier behavior, optimizer, LLVM,
 compiler-pipeline integration, and PyO3 remain unchanged.
 
+### Phase 3 Step 3E.3 canonical builtin identity and retain/release — complete
+
+Step 3E.3 extends the existing borrowed, non-mutating type-verifier APIs and
+their single builtin dispatch. It adds no second builtin verifier and invokes
+no other verifier family.
+
+Python inspection separated three contracts. Existing signature checks validate
+argument/result types, parsing and file-result layouts, and scalar-math result
+selection. Canonical identity is independent: for every builtin family in
+IRV-055–067, the retained `IRCall.function` string must equal
+`IRCall.builtin` exactly. Consequently a different builtin with the same
+signature, a compatible user function, an alias, or a renamed function is
+rejected. The verifier does not resolve a builtin-tagged call through the module
+function dictionary, so a user declaration with the exact canonical spelling
+does not shadow the builtin and does not change acceptance. If both the function
+and semantic builtin tag are renamed, exact identity alone is insufficient: the
+renamed tag is handled by the existing unsupported scalar-builtin path.
+
+Python IRV-066 gives retain and release the same shallow semantic contract.
+`__aether_retain` and `__aether_release` retain canonical identity, take exactly
+one argument, and produce no result. The accepted top-level types are exactly
+`StringType`, `StructType`, `MethodResultType`, `ArrayType`, and `ListType`.
+The verifier does not recursively ask whether a struct field or collection
+element needs runtime destruction; scalar-only structs and collections are
+therefore accepted. Primitive scalars, enums, vectors, matrices, nullable,
+function, class/interface, void, and other top-level types are rejected. This
+phase changes verification only and does not alter runtime ARC or ownership
+transfer.
+
+The new deterministic typed leaves are
+`TypeRuleError::InvalidBuiltinIdentity`,
+`InvalidRetainReleaseSignature`, and `InvalidRetainReleaseType`. They expose the
+semantic builtin, expected/actual function spelling, retained argument/result
+shape, and offending type as applicable. Existing `InstructionKind::IRCall`,
+block, function, and module wrappers preserve the complete downcastable source
+chain.
+
+Focused Rust tests cover every builtin family's identity gate, canonical calls,
+same-signature wrong builtins and user functions, aliases, renaming, the exact
+retain/release allowlist, primitive/enum/aggregate/unsupported types, arity,
+unexpected results, deterministic rendering, and structured downcasting.
+Python characterization tests freeze the previously uncovered name-only lookup
+and shallow retain/release behavior. No Python verifier bug was discovered, and
+no builtin gap remains in IRV-055–067.
+
+Remaining initial-IR verifier families are borrowed-element scope/escape rules
+(IRV-037–042) and the lifecycle-trait portions of collection copy/slice rules.
+Importer, canonical JSON, Python DTOs, Rust wire DTOs, lifecycle transfer,
+ownership, borrow verification, optimizer, LLVM, compiler-pipeline integration,
+and PyO3 remain unchanged.
+
 ## 8. Ownership and memory
 
 Python creates the DTO snapshot and owns it for the duration of the extension
