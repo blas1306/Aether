@@ -157,6 +157,42 @@ pub enum TypeRuleError {
         /// Encountered metadata spelling.
         actual: String,
     },
+    /// Retained aggregate shape metadata has the wrong presence, rank, or positivity.
+    InvalidAggregateShape {
+        /// The offending shape field.
+        field: String,
+        /// Required aggregate rank. Zero means that no shape may be present.
+        expected_rank: usize,
+        /// Whether every retained dimension must be positive.
+        requires_positive_dimensions: bool,
+        /// Encountered shape, preserving absence separately from an empty shape.
+        actual: Option<Vec<i64>>,
+    },
+    /// Retained vector length metadata is not positive.
+    InvalidVectorLength {
+        /// The offending length field.
+        field: String,
+        /// Encountered signed length.
+        actual: i64,
+    },
+    /// One or more retained matrix dimensions are not positive.
+    InvalidMatrixDimensions {
+        /// Ordered names of the offending instruction's dimension fields.
+        fields: Vec<String>,
+        /// Ordered encountered dimension values.
+        actual: Vec<i64>,
+    },
+    /// A matrix literal's retained dimensions disagree with its element count.
+    InvalidMatrixCardinality {
+        /// Retained row count.
+        rows: i64,
+        /// Retained column count.
+        columns: i64,
+        /// Required element count computed without signed 64-bit overflow.
+        expected: i128,
+        /// Encountered literal element count.
+        actual: usize,
+    },
     /// An enum constant does not match its result enum declaration.
     InvalidEnumConstant {
         /// The offending enum-constant component.
@@ -231,6 +267,36 @@ impl fmt::Display for TypeRuleError {
                 formatter,
                 "metadata mismatch for '{field}': expected {expected}, got {actual}"
             ),
+            Self::InvalidAggregateShape {
+                field,
+                expected_rank,
+                requires_positive_dimensions,
+                actual,
+            } => fmt_invalid_aggregate_shape(
+                formatter,
+                field,
+                *expected_rank,
+                *requires_positive_dimensions,
+                actual.as_deref(),
+            ),
+            Self::InvalidVectorLength { field, actual } => write!(
+                formatter,
+                "invalid vector length for '{field}': expected a positive length, got {actual}"
+            ),
+            Self::InvalidMatrixDimensions { fields, actual } => write!(
+                formatter,
+                "invalid matrix dimensions for '{}': expected every dimension to be positive, got {actual:?}",
+                fields.join(", ")
+            ),
+            Self::InvalidMatrixCardinality {
+                rows,
+                columns,
+                expected,
+                actual,
+            } => write!(
+                formatter,
+                "invalid matrix literal cardinality for {rows}x{columns}: expected {expected} elements, got {actual}"
+            ),
             Self::InvalidEnumConstant {
                 field,
                 expected,
@@ -245,6 +311,31 @@ impl fmt::Display for TypeRuleError {
                 cycle.join(" -> ")
             ),
         }
+    }
+}
+
+fn fmt_invalid_aggregate_shape(
+    formatter: &mut fmt::Formatter<'_>,
+    field: &str,
+    expected_rank: usize,
+    requires_positive_dimensions: bool,
+    actual: Option<&[i64]>,
+) -> fmt::Result {
+    if expected_rank == 0 {
+        write!(
+            formatter,
+            "invalid aggregate shape for '{field}': expected no shape, got {actual:?}"
+        )
+    } else if requires_positive_dimensions {
+        write!(
+            formatter,
+            "invalid aggregate shape for '{field}': expected a positive rank-{expected_rank} shape, got {actual:?}"
+        )
+    } else {
+        write!(
+            formatter,
+            "invalid aggregate shape for '{field}': expected a rank-{expected_rank} shape, got {actual:?}"
+        )
     }
 }
 

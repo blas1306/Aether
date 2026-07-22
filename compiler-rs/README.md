@@ -17,8 +17,10 @@ compiler remains entirely on its existing Python path.
   lifecycle passes provide focused local checks, deterministic inter-block CFG
   state merging, and ownership-completeness checks at every reachable return.
   The all-path return pass independently verifies IRV-024 for non-void
-  functions. Phi semantics, cleanup insertion, and optimization verification
-  remain outside these passes.
+  functions. The type pass also verifies retained aggregate compare/print
+  shapes, vector/matrix dimensions, and matrix literal cardinality. Phi
+  semantics, cleanup insertion, and optimization verification remain outside
+  these passes.
 - `aether-python` will provide the eventual Python integration boundary. It does
   not contain PyO3 bindings or compiler integration yet.
 
@@ -287,3 +289,50 @@ structural prerequisite sources through downcastable
 This step changes no canonical JSON, DTO, importer, lifecycle expansion, SSA,
 optimizer, compiler-pipeline, LLVM, or PyO3 behavior. Other remaining verifier
 families stay deferred.
+
+## Phase 3 Step 3E.2: aggregate metadata verification
+
+Step 3E.2 is complete. The existing instruction-local type verifier now closes
+the metadata portions of IRV-075–076, IRV-078, and IRV-107–124 without adding a
+second aggregate pass. Aggregate element types, operand compatibility, numeric
+promotion, and orientation remain in their existing checks; the new logic
+validates only retained shape, dimension, and cardinality fields.
+
+Compare follows the Python initial-IR contract exactly. Scalar operands carry
+no aggregate shape. Vector and matrix equality/inequality comparisons require
+positive rank-one and rank-two shapes respectively. Print differs deliberately:
+vectors require exactly one retained dimension and matrices exactly two, but
+Python does not require those print dimensions to be positive. Every other
+printable type carries no shape.
+
+All signed vector lengths retained by vector add/subtract, scale, and dot must
+be positive. Matrix construction, outer product, matrix add/subtract, scale,
+matrix multiplication, matrix-vector/vector-matrix multiplication, element
+get/set stride metadata, and row/column queries validate each retained matrix
+dimension for positivity. Matrix literals additionally require exactly
+`rows * columns` flat elements; the product is computed as `i128` in diagnostics
+so malformed large signed metadata cannot overflow verification. `IRVectorNew`
+has no signed length metadata, and matching Python, an empty vector literal is
+valid.
+
+Typed leaf failures are `TypeRuleError::InvalidAggregateShape`,
+`InvalidVectorLength`, `InvalidMatrixDimensions`, and
+`InvalidMatrixCardinality`. They retain the offending field/value and expected
+rank, positivity, or element count. Existing instruction, block, function, and
+module wrappers continue to retain the exact `InstructionKind` and complete
+downcastable `Error::source()` chain.
+
+Focused Rust tests cover scalar/vector/matrix compare and print, rank and
+positivity boundaries, every retained vector/matrix dimension field, empty and
+positive vector construction, exact/short/long matrix literals, and `1x1`,
+`1xN`, and `Nx1` matrices. Python characterization tests pin the less-obvious
+print-positivity and empty-vector behavior. No Python aggregate-metadata verifier
+bug was found, and no aggregate metadata gap remains in IRV-075–076, IRV-078, or the
+metadata portions of IRV-107–124.
+
+Remaining initial-IR verifier work includes borrowed-element scope/escape rules
+(IRV-037–042), the lifecycle-trait portions of collection copy/slice rules, and
+canonical builtin semantic-name checks. This step does not alter canonical JSON,
+Python or Rust wire DTOs, the importer, lifecycle, ownership, the borrow
+verifier, SSA, dominance, optimizer, pipeline integration, LLVM, or PyO3
+behavior.

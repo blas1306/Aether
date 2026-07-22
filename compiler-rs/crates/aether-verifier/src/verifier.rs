@@ -208,7 +208,7 @@ impl TypeVerifier<'_> {
                 left,
                 right,
                 aggregate_shape,
-            } => self.verify_compare(result, operator, left, right, aggregate_shape.is_some()),
+            } => self.verify_compare(result, operator, left, right, aggregate_shape.as_deref()),
             IRInstruction::IRCast { result, value } => self.verify_cast(result, value),
             IRInstruction::IRCall {
                 function: callee,
@@ -225,15 +225,35 @@ impl TypeVerifier<'_> {
                 arguments,
                 result,
             } => self.verify_indirect_call(callee, arguments, result.as_ref()),
-            IRInstruction::IRPrint { value, .. } => {
-                if is_printable(&value.r#type) {
-                    Ok(())
-                } else {
-                    Err(constraint(
+            IRInstruction::IRPrint {
+                value,
+                aggregate_shape,
+                ..
+            } => {
+                if !is_printable(&value.r#type) {
+                    return Err(constraint(
                         "value",
                         TypeExpectation::Printable,
                         &value.r#type,
-                    ))
+                    ));
+                }
+                match &value.r#type {
+                    IRType::Vector(_) => self.require_aggregate_shape(
+                        "aggregate_shape",
+                        aggregate_shape.as_deref(),
+                        1,
+                        false,
+                    ),
+                    IRType::Matrix(_) => self.require_aggregate_shape(
+                        "aggregate_shape",
+                        aggregate_shape.as_deref(),
+                        2,
+                        false,
+                    ),
+                    _ => self.require_no_aggregate_shape(
+                        "aggregate_shape",
+                        aggregate_shape.as_deref(),
+                    ),
                 }
             }
             IRInstruction::IRStructNew { result, fields } => self.verify_struct_new(result, fields),
@@ -350,77 +370,100 @@ impl TypeVerifier<'_> {
                 orientation,
             } => self.verify_vector_new(result, elements, orientation.as_deref()),
             IRInstruction::IRMatrixNew {
-                result, elements, ..
-            } => self.verify_matrix_new(result, elements),
+                result,
+                elements,
+                rows,
+                cols,
+            } => self.verify_matrix_new(result, elements, *rows, *cols),
             IRInstruction::IRVectorAdd {
                 result,
                 left,
                 right,
+                length,
                 orientation,
-                ..
             }
             | IRInstruction::IRVectorSub {
                 result,
                 left,
                 right,
+                length,
                 orientation,
-                ..
-            } => self.verify_vector_binary(result, left, right, orientation.as_deref()),
+            } => self.verify_vector_binary(
+                result,
+                left,
+                right,
+                *length,
+                orientation.as_deref(),
+            ),
             IRInstruction::IRVectorScale {
                 result,
                 vector,
                 scalar,
+                length,
                 orientation,
-                ..
-            } => self.verify_vector_scale(result, vector, scalar, orientation.as_deref()),
+            } => self.verify_vector_scale(
+                result,
+                vector,
+                scalar,
+                *length,
+                orientation.as_deref(),
+            ),
             IRInstruction::IRVectorDot {
                 result,
                 left,
                 right,
-                ..
-            } => self.verify_vector_dot(result, left, right),
+                length,
+            } => self.verify_vector_dot(result, left, right, *length),
             IRInstruction::IROuterProduct {
                 result,
                 column,
                 row,
-                ..
-            } => self.verify_outer_product(result, column, row),
+                rows,
+                cols,
+            } => self.verify_outer_product(result, column, row, *rows, *cols),
             IRInstruction::IRMatrixAdd {
                 result,
                 left,
                 right,
-                ..
+                rows,
+                cols,
             }
             | IRInstruction::IRMatrixSub {
                 result,
                 left,
                 right,
-                ..
-            } => self.verify_matrix_binary(result, left, right),
+                rows,
+                cols,
+            } => self.verify_matrix_binary(result, left, right, *rows, *cols),
             IRInstruction::IRMatrixScale {
                 result,
                 matrix,
                 scalar,
-                ..
-            } => self.verify_matrix_scale(result, matrix, scalar),
+                rows,
+                cols,
+            } => self.verify_matrix_scale(result, matrix, scalar, *rows, *cols),
             IRInstruction::IRMatrixMatMul {
                 result,
                 left,
                 right,
-                ..
-            } => self.verify_matrix_matmul(result, left, right),
+                rows,
+                inner,
+                cols,
+            } => self.verify_matrix_matmul(result, left, right, *rows, *inner, *cols),
             IRInstruction::IRMatrixVectorMul {
                 result,
                 matrix,
                 vector,
-                ..
-            } => self.verify_matrix_vector_mul(result, matrix, vector),
+                rows,
+                inner,
+            } => self.verify_matrix_vector_mul(result, matrix, vector, *rows, *inner),
             IRInstruction::IRVectorMatrixMul {
                 result,
                 vector,
                 matrix,
-                ..
-            } => self.verify_vector_matrix_mul(result, vector, matrix),
+                rows,
+                cols,
+            } => self.verify_vector_matrix_mul(result, vector, matrix, *rows, *cols),
             IRInstruction::IRArrayGet {
                 result,
                 array,
@@ -457,15 +500,28 @@ impl TypeVerifier<'_> {
                 matrix,
                 row,
                 column,
-                ..
-            } => self.verify_matrix_get(result, matrix, row, column),
+                cols,
+            } => self.verify_matrix_get(result, matrix, row, column, *cols),
             IRInstruction::IRVectorLength { result, vector } => {
                 self.expect_vector("vector", &vector.r#type)?;
                 self.expect_int("result", &result.r#type)
             }
-            IRInstruction::IRMatrixRows { result, matrix, .. }
-            | IRInstruction::IRMatrixColumns { result, matrix, .. } => {
+            IRInstruction::IRMatrixRows {
+                result,
+                matrix,
+                rows,
+            } => {
                 self.expect_matrix("matrix", &matrix.r#type)?;
+                self.require_positive_matrix_dimensions(&["rows"], &[*rows])?;
+                self.expect_int("result", &result.r#type)
+            }
+            IRInstruction::IRMatrixColumns {
+                result,
+                matrix,
+                columns,
+            } => {
+                self.expect_matrix("matrix", &matrix.r#type)?;
+                self.require_positive_matrix_dimensions(&["columns"], &[*columns])?;
                 self.expect_int("result", &result.r#type)
             }
             IRInstruction::IRArraySet {
@@ -488,8 +544,8 @@ impl TypeVerifier<'_> {
                 row,
                 column,
                 value,
-                ..
-            } => self.verify_matrix_set(matrix, row, column, value),
+                cols,
+            } => self.verify_matrix_set(matrix, row, column, value, *cols),
             IRInstruction::IRArrayLength { result, array } => {
                 self.expect_array("array", &array.r#type)?;
                 self.expect_int("result", &result.r#type)
@@ -846,7 +902,7 @@ impl TypeVerifier<'_> {
         operator: &str,
         left: &IRValue,
         right: &IRValue,
-        has_aggregate_shape: bool,
+        aggregate_shape: Option<&[i64]>,
     ) -> Result<(), TypeRuleError> {
         if matches!(left.r#type, IRType::Vector(_) | IRType::Matrix(_)) {
             if !matches!(operator, "eq" | "ne") {
@@ -856,6 +912,12 @@ impl TypeVerifier<'_> {
                 });
             }
             self.require_exact("right", &left.r#type, &right.r#type)?;
+            let expected_rank = if matches!(left.r#type, IRType::Vector(_)) {
+                1
+            } else {
+                2
+            };
+            self.require_aggregate_shape("aggregate_shape", aggregate_shape, expected_rank, true)?;
             let element = match &left.r#type {
                 IRType::Vector(vector) => &vector.element,
                 IRType::Matrix(matrix) => &matrix.element,
@@ -876,34 +938,33 @@ impl TypeVerifier<'_> {
                     element,
                 ));
             }
-        } else if matches!(operator, "lt" | "le" | "gt" | "ge") {
-            if !matches!(left.r#type, IRType::Int(_) | IRType::Double(_)) {
-                return Err(constraint(
-                    "left",
-                    TypeExpectation::OneOf(vec![IntType.into(), DoubleType.into()]),
-                    &left.r#type,
-                ));
-            }
-            self.require_exact("right", &left.r#type, &right.r#type)?;
-        } else if matches!(operator, "eq" | "ne") {
-            self.require_exact("right", &left.r#type, &right.r#type)?;
-            if !self.is_equality_capable(&left.r#type, &mut HashSet::new()) {
-                return Err(constraint(
-                    "left",
-                    TypeExpectation::EqualityCapable,
-                    &left.r#type,
-                ));
-            }
         } else {
-            return Err(TypeRuleError::UnsupportedOperator {
-                field: "operator".to_owned(),
-                operator: operator.to_owned(),
-            });
+            self.require_no_aggregate_shape("aggregate_shape", aggregate_shape)?;
+            if matches!(operator, "lt" | "le" | "gt" | "ge") {
+                if !matches!(left.r#type, IRType::Int(_) | IRType::Double(_)) {
+                    return Err(constraint(
+                        "left",
+                        TypeExpectation::OneOf(vec![IntType.into(), DoubleType.into()]),
+                        &left.r#type,
+                    ));
+                }
+                self.require_exact("right", &left.r#type, &right.r#type)?;
+            } else if matches!(operator, "eq" | "ne") {
+                self.require_exact("right", &left.r#type, &right.r#type)?;
+                if !self.is_equality_capable(&left.r#type, &mut HashSet::new()) {
+                    return Err(constraint(
+                        "left",
+                        TypeExpectation::EqualityCapable,
+                        &left.r#type,
+                    ));
+                }
+            } else {
+                return Err(TypeRuleError::UnsupportedOperator {
+                    field: "operator".to_owned(),
+                    operator: operator.to_owned(),
+                });
+            }
         }
-
-        // Shape rank/positivity is intentionally a later aggregate-shape
-        // invariant. Preserve only the scalar/aggregate opcode distinction.
-        let _ = has_aggregate_shape;
         self.expect_bool("result", &result.r#type)
     }
 
@@ -1399,8 +1460,20 @@ impl TypeVerifier<'_> {
         &self,
         result: &IRValue,
         elements: &[IRValue],
+        rows: i64,
+        columns: i64,
     ) -> Result<(), TypeRuleError> {
         let matrix = self.expect_matrix("result", &result.r#type)?;
+        self.require_positive_matrix_dimensions(&["rows", "cols"], &[rows, columns])?;
+        let expected = i128::from(rows) * i128::from(columns);
+        if i128::try_from(elements.len()).ok() != Some(expected) {
+            return Err(TypeRuleError::InvalidMatrixCardinality {
+                rows,
+                columns,
+                expected,
+                actual: elements.len(),
+            });
+        }
         for (index, element) in elements.iter().enumerate() {
             self.require_exact(
                 &format!("elements[{index}]"),
@@ -1416,11 +1489,13 @@ impl TypeVerifier<'_> {
         result: &IRValue,
         left: &IRValue,
         right: &IRValue,
+        length: i64,
         orientation: Option<&str>,
     ) -> Result<(), TypeRuleError> {
         let result_type = self.expect_vector("result", &result.r#type)?;
         let left_type = self.expect_vector("left", &left.r#type)?;
         let right_type = self.expect_vector("right", &right.r#type)?;
+        self.require_positive_vector_length("length", length)?;
         if left_type.orientation != right_type.orientation {
             return Err(metadata(
                 "right.orientation",
@@ -1444,10 +1519,12 @@ impl TypeVerifier<'_> {
         result: &IRValue,
         vector: &IRValue,
         scalar: &IRValue,
+        length: i64,
         orientation: Option<&str>,
     ) -> Result<(), TypeRuleError> {
         let result_type = self.expect_vector("result", &result.r#type)?;
         let vector_type = self.expect_vector("vector", &vector.r#type)?;
+        self.require_positive_vector_length("length", length)?;
         if orientation != result_type.orientation.as_deref() {
             return Err(metadata(
                 "orientation",
@@ -1464,6 +1541,7 @@ impl TypeVerifier<'_> {
         result: &IRValue,
         left: &IRValue,
         right: &IRValue,
+        length: i64,
     ) -> Result<(), TypeRuleError> {
         let left_type = self.expect_vector("left", &left.r#type)?;
         let right_type = self.expect_vector("right", &right.r#type)?;
@@ -1473,6 +1551,7 @@ impl TypeVerifier<'_> {
             right_type.orientation.as_deref(),
             "column",
         )?;
+        self.require_positive_vector_length("length", length)?;
         let expected = numeric_result_type(&left_type.element, &right_type.element)?;
         self.require_exact("result", &expected, &result.r#type)
     }
@@ -1482,6 +1561,8 @@ impl TypeVerifier<'_> {
         result: &IRValue,
         column: &IRValue,
         row: &IRValue,
+        rows: i64,
+        columns: i64,
     ) -> Result<(), TypeRuleError> {
         let result_type = self.expect_matrix("result", &result.r#type)?;
         let column_type = self.expect_vector("column", &column.r#type)?;
@@ -1492,6 +1573,7 @@ impl TypeVerifier<'_> {
             "column",
         )?;
         require_exact_orientation("row.orientation", row_type.orientation.as_deref(), "row")?;
+        self.require_positive_matrix_dimensions(&["rows", "cols"], &[rows, columns])?;
         let expected = numeric_result_type(&column_type.element, &row_type.element)?;
         self.require_exact("result.element", &expected, &result_type.element)
     }
@@ -1501,10 +1583,13 @@ impl TypeVerifier<'_> {
         result: &IRValue,
         left: &IRValue,
         right: &IRValue,
+        rows: i64,
+        columns: i64,
     ) -> Result<(), TypeRuleError> {
         self.expect_matrix("result", &result.r#type)?;
         self.expect_matrix("left", &left.r#type)?;
         self.expect_matrix("right", &right.r#type)?;
+        self.require_positive_matrix_dimensions(&["rows", "cols"], &[rows, columns])?;
         self.require_exact("result", &left.r#type, &result.r#type)?;
         self.require_exact("right", &left.r#type, &right.r#type)
     }
@@ -1514,9 +1599,12 @@ impl TypeVerifier<'_> {
         result: &IRValue,
         matrix: &IRValue,
         scalar: &IRValue,
+        rows: i64,
+        columns: i64,
     ) -> Result<(), TypeRuleError> {
         self.expect_matrix("result", &result.r#type)?;
         let matrix_type = self.expect_matrix("matrix", &matrix.r#type)?;
+        self.require_positive_matrix_dimensions(&["rows", "cols"], &[rows, columns])?;
         self.require_exact("result", &matrix.r#type, &result.r#type)?;
         self.require_exact("scalar", &matrix_type.element, &scalar.r#type)
     }
@@ -1526,10 +1614,17 @@ impl TypeVerifier<'_> {
         result: &IRValue,
         left: &IRValue,
         right: &IRValue,
+        rows: i64,
+        inner: i64,
+        columns: i64,
     ) -> Result<(), TypeRuleError> {
         let result_type = self.expect_matrix("result", &result.r#type)?;
         let left_type = self.expect_matrix("left", &left.r#type)?;
         let right_type = self.expect_matrix("right", &right.r#type)?;
+        self.require_positive_matrix_dimensions(
+            &["rows", "inner", "cols"],
+            &[rows, inner, columns],
+        )?;
         let expected = numeric_result_type(&left_type.element, &right_type.element)?;
         self.require_exact("result.element", &expected, &result_type.element)
     }
@@ -1539,6 +1634,8 @@ impl TypeVerifier<'_> {
         result: &IRValue,
         matrix: &IRValue,
         vector: &IRValue,
+        rows: i64,
+        inner: i64,
     ) -> Result<(), TypeRuleError> {
         let result_type = self.expect_vector("result", &result.r#type)?;
         let matrix_type = self.expect_matrix("matrix", &matrix.r#type)?;
@@ -1553,6 +1650,7 @@ impl TypeVerifier<'_> {
             vector_type.orientation.as_deref(),
             "column",
         )?;
+        self.require_positive_matrix_dimensions(&["rows", "inner"], &[rows, inner])?;
         let expected = numeric_result_type(&matrix_type.element, &vector_type.element)?;
         self.require_exact("result.element", &expected, &result_type.element)
     }
@@ -1562,6 +1660,8 @@ impl TypeVerifier<'_> {
         result: &IRValue,
         vector: &IRValue,
         matrix: &IRValue,
+        rows: i64,
+        columns: i64,
     ) -> Result<(), TypeRuleError> {
         let result_type = self.expect_vector("result", &result.r#type)?;
         let vector_type = self.expect_vector("vector", &vector.r#type)?;
@@ -1576,6 +1676,7 @@ impl TypeVerifier<'_> {
             vector_type.orientation.as_deref(),
             "row",
         )?;
+        self.require_positive_matrix_dimensions(&["rows", "cols"], &[rows, columns])?;
         let expected = numeric_result_type(&vector_type.element, &matrix_type.element)?;
         self.require_exact("result.element", &expected, &result_type.element)
     }
@@ -1647,10 +1748,12 @@ impl TypeVerifier<'_> {
         matrix: &IRValue,
         row: &IRValue,
         column: &IRValue,
+        columns: i64,
     ) -> Result<(), TypeRuleError> {
         let matrix = self.expect_matrix("matrix", &matrix.r#type)?;
         self.expect_int("row", &row.r#type)?;
         self.expect_int("column", &column.r#type)?;
+        self.require_positive_matrix_dimensions(&["cols"], &[columns])?;
         self.require_exact("result", &matrix.element, &result.r#type)
     }
 
@@ -1671,10 +1774,12 @@ impl TypeVerifier<'_> {
         row: &IRValue,
         column: &IRValue,
         value: &IRValue,
+        columns: i64,
     ) -> Result<(), TypeRuleError> {
         let matrix = self.expect_matrix("matrix", &matrix.r#type)?;
         self.expect_int("row", &row.r#type)?;
         self.expect_int("column", &column.r#type)?;
+        self.require_positive_matrix_dimensions(&["cols"], &[columns])?;
         self.require_exact("value", &matrix.element, &value.r#type)
     }
 
@@ -1835,6 +1940,77 @@ impl TypeVerifier<'_> {
 
     fn expect_bool(&self, field: &str, actual: &IRType) -> Result<(), TypeRuleError> {
         self.require_exact(field, &BoolType.into(), actual)
+    }
+
+    fn require_aggregate_shape(
+        &self,
+        field: &str,
+        actual: Option<&[i64]>,
+        expected_rank: usize,
+        requires_positive_dimensions: bool,
+    ) -> Result<(), TypeRuleError> {
+        let valid = actual.is_some_and(|shape| {
+            shape.len() == expected_rank
+                && (!requires_positive_dimensions || shape.iter().all(|dimension| *dimension > 0))
+        });
+        if valid {
+            Ok(())
+        } else {
+            Err(TypeRuleError::InvalidAggregateShape {
+                field: field.to_owned(),
+                expected_rank,
+                requires_positive_dimensions,
+                actual: actual.map(<[i64]>::to_vec),
+            })
+        }
+    }
+
+    fn require_no_aggregate_shape(
+        &self,
+        field: &str,
+        actual: Option<&[i64]>,
+    ) -> Result<(), TypeRuleError> {
+        if actual.is_none() {
+            Ok(())
+        } else {
+            Err(TypeRuleError::InvalidAggregateShape {
+                field: field.to_owned(),
+                expected_rank: 0,
+                requires_positive_dimensions: false,
+                actual: actual.map(<[i64]>::to_vec),
+            })
+        }
+    }
+
+    fn require_positive_vector_length(
+        &self,
+        field: &str,
+        actual: i64,
+    ) -> Result<(), TypeRuleError> {
+        if actual > 0 {
+            Ok(())
+        } else {
+            Err(TypeRuleError::InvalidVectorLength {
+                field: field.to_owned(),
+                actual,
+            })
+        }
+    }
+
+    fn require_positive_matrix_dimensions(
+        &self,
+        fields: &[&str],
+        actual: &[i64],
+    ) -> Result<(), TypeRuleError> {
+        debug_assert_eq!(fields.len(), actual.len());
+        if actual.iter().all(|dimension| *dimension > 0) {
+            Ok(())
+        } else {
+            Err(TypeRuleError::InvalidMatrixDimensions {
+                fields: fields.iter().map(|field| (*field).to_owned()).collect(),
+                actual: actual.to_vec(),
+            })
+        }
     }
 
     fn require_exact(

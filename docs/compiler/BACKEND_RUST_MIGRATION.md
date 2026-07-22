@@ -1,10 +1,11 @@
 # Gradual Python-to-Rust compiler migration
 
-> Status: Phase 3, Step 3E.1 Rust IR non-void all-path return verification complete.
+> Status: Phase 3, Step 3E.2 aggregate shape, dimension, and cardinality verification complete.
 > The isolated Rust workspace now has independently callable type, structure,
 > SSA, dominance, local lifecycle, and CFG-propagated lifecycle verifier passes
-> over the complete owned IR. Step 3E.1 additionally closes Python invariant
-> IRV-024 with an entry-rooted, non-mutating return-path pass.
+> over the complete owned IR. Step 3E.1 closes Python invariant IRV-024, and
+> Step 3E.2 closes aggregate metadata parity for IRV-075–076, IRV-078, and the
+> metadata portions of IRV-107–124 in the existing type verifier.
 > Cleanup insertion, PyO3, compiler-pipeline integration, LLVM, and
 > production integration remain unimplemented. This document defines sequencing
 > and promotion gates and does not declare the Python IR or SSA model a stable
@@ -1855,6 +1856,61 @@ current nominal sensitivity for the same graphs and for actual lowered loops.
 Canonical JSON, Python DTOs, Rust wire DTOs, importer semantics, lifecycle
 expansion, SSA construction, optimizer behavior, compiler integration, LLVM,
 and PyO3 are unchanged. No other verifier family is included in this step.
+
+### Phase 3 Step 3E.2 aggregate metadata verification — complete
+
+Step 3E.2 extends the existing borrowed, non-mutating type-verifier APIs; it
+does not introduce a second aggregate verifier or a combined pipeline. Existing
+scalar/vector/matrix type, operand, orientation, equality, and numeric-promotion
+checks remain the sole owners of those rules. This step adds only the retained
+metadata contract from Python's initial-IR verifier.
+
+Python inspection established these exact behaviors:
+
+- scalar compare and scalar/non-vector/non-matrix print carry no aggregate
+  shape, including no present-but-empty shape;
+- vector and matrix compare support their existing equality contract only with
+  positive shapes of exact rank one and two;
+- vector and matrix print require shapes of exact rank one and two, but do not
+  test dimension positivity, so zero and negative print dimensions remain
+  accepted for parity;
+- the signed `length` on vector add/subtract, scale, and dot is positive;
+- every retained row, inner, column, or matrix-stride dimension on matrix
+  construction/arithmetic/multiplication/indexing/query instructions is
+  positive; and
+- a matrix literal is a flat element sequence whose count is exactly
+  `rows * columns`. No other layout consistency is checked. `IRVectorNew` has
+  no retained signed length and Python accepts zero elements.
+
+The Rust dispatcher passes those fields into the existing instruction-specific
+verification helpers. Narrow shared helpers implement shape rank/presence,
+vector-length positivity, and ordered matrix-dimension positivity without
+duplicating element-type rules. Matrix cardinality uses an `i128` product,
+preserving the Python arbitrary-precision comparison boundary for all retained
+`i64` dimensions without verifier overflow.
+
+The new typed leaves are `TypeRuleError::InvalidAggregateShape`,
+`InvalidVectorLength`, `InvalidMatrixDimensions`, and
+`InvalidMatrixCardinality`. They expose actual retained metadata plus the
+required rank, positivity property, or expected/actual element counts. The
+existing `InstructionTypeVerificationError`, block, function, and module
+wrappers retain exact instruction identity and complete downcastable source
+chains.
+
+Rust tests cover scalar, vector, and matrix compare/print; missing, empty,
+wrong-rank, zero, and negative shapes; every vector length and matrix dimension
+field; matrix literal underflow/overflow; empty vector literals; and `1x1`,
+`1xN`, and `Nx1` boundaries. Focused Python characterization tests were added
+where prior coverage did not freeze compare/print shape and empty-vector
+behavior. No Python verifier bug was discovered. There are no remaining
+aggregate metadata gaps in IRV-075–076, IRV-078, or the metadata portions of
+IRV-107–124.
+
+Remaining initial-IR verifier work includes borrowed-element scope/escape rules
+(IRV-037–042), the lifecycle-trait portions of collection copy/slice rules, and
+canonical builtin semantic-name checks. Importer, canonical JSON, Python DTOs,
+Rust wire DTOs, lifecycle, ownership, borrow-verifier behavior, optimizer, LLVM,
+compiler-pipeline integration, and PyO3 remain unchanged.
 
 ## 8. Ownership and memory
 
