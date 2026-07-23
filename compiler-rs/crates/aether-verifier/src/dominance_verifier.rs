@@ -33,6 +33,25 @@ pub fn verify_module_dominance(module: &IRModule) -> Result<(), ModuleDominanceE
     Ok(())
 }
 
+/// Runs only the dominance pass after module structure and SSA have succeeded.
+pub(crate) fn verify_module_dominance_after_prerequisites(
+    module: &IRModule,
+) -> Result<(), ModuleDominanceError> {
+    for (function_index, function) in module.functions.iter().enumerate() {
+        let Ok(blocks) = crate::cfg::FunctionBlockIndex::build(function) else {
+            unreachable!("module structure was verified before dominance")
+        };
+        verify_function_dominance_after_prerequisites(function, &blocks).map_err(|source| {
+            ModuleDominanceError {
+                function_index,
+                function_name: function.name.clone(),
+                source: Box::new(source),
+            }
+        })?;
+    }
+    Ok(())
+}
+
 /// Verifies that every cross-block instruction definition dominates its use.
 ///
 /// Parameters are entry definitions and are therefore available in every
@@ -52,13 +71,20 @@ pub fn verify_function_dominance(function: &IRFunction) -> Result<(), FunctionDo
         source: Box::new(source),
     })?;
 
+    verify_function_dominance_after_prerequisites(function, &blocks)
+}
+
+fn verify_function_dominance_after_prerequisites(
+    function: &IRFunction,
+    blocks: &crate::cfg::FunctionBlockIndex<'_>,
+) -> Result<(), FunctionDominanceError> {
     let definitions = collect_definitions(function).map_err(|source| {
         FunctionDominanceError::SSAPrerequisite {
             function_name: function.name.clone(),
             source: Box::new(source),
         }
     })?;
-    let Some(cfg) = FunctionCfg::from_validated(function, &blocks) else {
+    let Some(cfg) = FunctionCfg::from_validated(function, blocks) else {
         // The structural prerequisite above normally owns this diagnostic.
         // Retain the same typed context if an independently called analysis
         // ever observes the invariant changing underneath it.

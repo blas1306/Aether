@@ -20,6 +20,25 @@ pub fn verify_module_returns(module: &IRModule) -> Result<(), ModuleReturnVerifi
     Ok(())
 }
 
+/// Runs only all-path return analysis after module structure has succeeded.
+pub(crate) fn verify_module_returns_after_structure(
+    module: &IRModule,
+) -> Result<(), ModuleReturnVerificationError> {
+    for (function_index, function) in module.functions.iter().enumerate() {
+        let Ok(blocks) = crate::cfg::FunctionBlockIndex::build(function) else {
+            unreachable!("module structure was verified before return analysis")
+        };
+        verify_function_returns_after_structure(function, &blocks).map_err(|source| {
+            ModuleReturnVerificationError {
+                function_index,
+                function_name: function.name.clone(),
+                source: Box::new(source),
+            }
+        })?;
+    }
+    Ok(())
+}
+
 /// Verifies that every path from `entry` in a non-void function proves a valued return.
 ///
 /// Step 3B structural verification is the sole prerequisite. Return operand
@@ -34,12 +53,18 @@ pub fn verify_function_returns(
             source: Box::new(source),
         }
     })?;
+    verify_function_returns_after_structure(function, &blocks)
+}
 
+fn verify_function_returns_after_structure(
+    function: &IRFunction,
+    blocks: &crate::cfg::FunctionBlockIndex<'_>,
+) -> Result<(), FunctionReturnVerificationError> {
     if matches!(function.return_type, IRType::Void(_)) {
         return Ok(());
     }
 
-    let Some(cfg) = FunctionCfg::from_validated(function, &blocks) else {
+    let Some(cfg) = FunctionCfg::from_validated(function, blocks) else {
         // The structural prerequisite owns every condition that can make CFG
         // construction fail, and immutable borrowing prevents later mutation.
         return Ok(());

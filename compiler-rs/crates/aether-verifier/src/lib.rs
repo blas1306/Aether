@@ -1,4 +1,8 @@
-//! Independent type, structural, SSA, dominance, lifecycle, and return passes for owned Aether IR.
+//! Combined and independently callable verification passes for owned Aether IR.
+//!
+//! [`verify_module`] is the canonical fail-fast module API. It runs structure,
+//! type, SSA, dominance, lifecycle, and return verification in that order and
+//! returns normalized metadata while retaining the original typed error.
 //!
 //! Type verification checks declaration and instruction-local type contracts,
 //! plus Python-compatible function-wide borrowed collection-element rules.
@@ -13,6 +17,7 @@
 
 mod borrow_error;
 mod cfg;
+mod combined_verifier;
 mod dominance_error;
 mod dominance_verifier;
 mod error;
@@ -27,6 +32,10 @@ mod structure_verifier;
 mod verifier;
 
 pub use borrow_error::{BorrowRule, BorrowRuleError};
+pub use combined_verifier::{
+    VerificationContext, VerificationError, VerificationErrorCategory, VerificationFailure,
+    VerificationPhase, VerificationResult, verify_module,
+};
 pub use dominance_error::{
     BlockDominanceError, DominanceRuleError, DominanceUseLocation, FunctionDominanceError,
     ModuleDominanceError,

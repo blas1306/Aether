@@ -8,7 +8,8 @@ compiler remains entirely on its existing Python path.
 
 - `aether-ir` owns the language-independent Rust representation of Aether IR.
   It contains no verifier, parser, serializer, DTO, or compiler integration.
-- `aether-verifier` provides independently callable passes for declaration and
+- `aether-verifier` provides a canonical combined module verifier plus
+  independently callable passes for declaration and
   instruction-local type consistency, function/block structure and basic local
   CFG validity, and function-local SSA definition/use validity in owned Aether
   IR. The SSA pass checks unique parameter/result definitions, exact named
@@ -475,3 +476,46 @@ differential corpus review, followed by separately scoped PyO3 and compiler-
 pipeline integration. This phase changes no importer, canonical JSON, Python or
 Rust wire DTO, ownership/lifecycle model, optimizer, runtime, compiler pipeline,
 or LLVM backend.
+
+## Phase 4.1: combined verifier API and diagnostic normalization
+
+`aether_verifier::verify_module(&IRModule) -> VerificationResult` is now the
+canonical public entry point for complete Rust Initial IR verification.
+`VerificationResult` is `Result<(), VerificationFailure>`: success is `Ok(())`;
+failure exposes the detecting `VerificationPhase`, semantic
+`VerificationErrorCategory`, optional stable `IRV-NNN` identifier,
+`VerificationContext`, deterministic message, and original typed
+`VerificationError`. The original module-level error remains available through
+`VerificationFailure::underlying_error()` and the standard `Error::source()`
+chain.
+
+The fixed fail-fast order is:
+
+1. structure;
+2. types;
+3. SSA;
+4. dominance;
+5. lifecycle;
+6. returns.
+
+This order establishes CFG structure before CFG consumers and establishes the
+SSA namespace before dominance. Each complete semantic pass runs once.
+Dominance, lifecycle, and return analysis use crate-private
+prerequisite-satisfied adapters in the combined path, while their existing
+public APIs retain their defensive prerequisite checks and remain independently
+callable. The focused local-lifecycle API is not a seventh complete pass; its
+rules are included by the complete lifecycle analysis.
+
+Normalization is an adapter over existing typed diagnostics. It does not
+replace pass-specific errors or verification logic. Module-level errors have an
+empty optional context; function, block, and instruction fields are populated
+when the underlying diagnostic identifies them. IRV identifiers and categories
+follow the Initial IR invariant inventory where the typed leaf or retained
+instruction identifies the rule unambiguously. Repeated verification of the
+same immutable module produces equal classification, context, invariant, and
+message values.
+
+No compiler integration or transport is part of Phase 4.1. The API is intended
+to be consumed later by a subprocess protocol, a PyO3 adapter, and shadow-mode
+comparison, but none of those consumers exists yet. Python remains the
+production verifier, and no CLI/configuration behavior changes.

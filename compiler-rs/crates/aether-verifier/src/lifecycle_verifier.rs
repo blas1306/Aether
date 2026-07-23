@@ -184,6 +184,25 @@ pub fn verify_module_lifecycle(module: &IRModule) -> Result<(), ModuleLifecycleV
     Ok(())
 }
 
+/// Runs only complete lifecycle analysis after module structure has succeeded.
+pub(crate) fn verify_module_lifecycle_after_structure(
+    module: &IRModule,
+) -> Result<(), ModuleLifecycleVerificationError> {
+    for (function_index, function) in module.functions.iter().enumerate() {
+        let Ok(blocks) = crate::cfg::FunctionBlockIndex::build(function) else {
+            unreachable!("module structure was verified before lifecycle analysis")
+        };
+        verify_function_lifecycle_after_structure(module, function, &blocks).map_err(|source| {
+            ModuleLifecycleVerificationError {
+                function_index,
+                function_name: function.name.clone(),
+                source: Box::new(source),
+            }
+        })?;
+    }
+    Ok(())
+}
+
 /// Verifies function-wide lifecycle state and ownership completion after
 /// deterministic CFG convergence.
 pub fn verify_function_lifecycle(
@@ -196,7 +215,15 @@ pub fn verify_function_lifecycle(
             source: Box::new(source),
         }
     })?;
-    let Some(cfg) = FunctionCfg::from_validated(function, &blocks) else {
+    verify_function_lifecycle_after_structure(module, function, &blocks)
+}
+
+fn verify_function_lifecycle_after_structure(
+    module: &IRModule,
+    function: &IRFunction,
+    blocks: &crate::cfg::FunctionBlockIndex<'_>,
+) -> Result<(), FunctionLifecycleVerificationError> {
+    let Some(cfg) = FunctionCfg::from_validated(function, blocks) else {
         // Structural verification owns this invariant, so reaching this branch
         // would require the model to mutate through an immutable borrow.
         return Ok(());

@@ -2448,3 +2448,43 @@ promotion and Python retirement criteria, selects the IR verifier as the first
 component, and identifies the next technical commit. Any implementation proposal
 that changes one of those closed directions must update this document and record
 the decision before code makes it costly to reverse.
+
+## 22. Phase 4.1 implementation status
+
+Phase 4.1 adds the Rust-only public API
+`aether_verifier::verify_module(&IRModule) -> VerificationResult`. The result is
+`Result<(), VerificationFailure>` and does not return or mutate the borrowed
+module. A failure carries:
+
+- the pass in `VerificationPhase`;
+- the invariant-inventory category in `VerificationErrorCategory`;
+- an optional stable `IRV-NNN` identifier;
+- optional retained function, block, and instruction fields in
+  `VerificationContext`;
+- a deterministic human-readable message;
+- the original module-level typed error in `VerificationError`, preserved
+  through `underlying_error()` and `Error::source()`.
+
+The canonical fail-fast order is structure, types, SSA, dominance, lifecycle,
+then returns. Structure is required before CFG consumers; SSA is required before
+dominance. The combined path runs each complete semantic pass once and uses
+crate-private prerequisite-satisfied adapters for downstream passes. Existing
+public pass APIs remain independent and keep their defensive prerequisite
+behavior. Focused local lifecycle verification remains an independent diagnostic
+API and is not repeated by the combined entry point because complete lifecycle
+analysis already includes its semantic checks.
+
+Diagnostic normalization is deliberately an adapter rather than a redesign of
+the pass-specific errors. Context comes from the existing typed wrapper chains.
+Invariant IDs and categories come from typed leaves where present and otherwise
+from the retained instruction contract when it is unambiguous. The normalized
+failure derives equality, and tests pin pass selection, invariant/category and
+context propagation, repeated-result determinism, and exact message rendering.
+
+This phase does not add subprocess execution, a wire response protocol, PyO3,
+compiler calls, CLI flags, or shadow mode. The combined API is the future common
+semantic boundary for those consumers. Before subprocess integration, Phase 4.2
+must define and version the request and response protocol, map every
+protocol-exposed failure without an invariant gap, add canonical JSON transport
+fixtures, and test cross-language first-failure behavior for multi-invalid
+modules.
