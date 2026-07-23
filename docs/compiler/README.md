@@ -55,6 +55,11 @@ comparison.
 
 Current compiler-design documents:
 
+- [PHASE_4_0_RUST_BACKEND_INTEGRATION_AUDIT.md](PHASE_4_0_RUST_BACKEND_INTEGRATION_AUDIT.md):
+  current production pipeline map, Rust integration inventory, measured
+  subprocess/PyO3 tradeoffs, shadow semantics, packaging constraints, and the
+  phased execution plan for selecting the Initial IR verifier without changing
+  the Python default.
 - [BACKEND_ARCHITECTURE_AUDIT.md](BACKEND_ARCHITECTURE_AUDIT.md): dated
   inventory of the real backend pipeline, mixed responsibilities, semantic
   duplication, Python coupling, migration blockers, and finding catalog.
