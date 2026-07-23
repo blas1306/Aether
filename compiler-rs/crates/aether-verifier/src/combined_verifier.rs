@@ -26,6 +26,7 @@ pub type VerificationResult = Result<(), VerificationFailure>;
 
 /// The verifier pass that rejected a module.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum VerificationPhase {
     /// Module, declaration, block, terminator, and target structure.
     Structure,
@@ -60,6 +61,7 @@ impl fmt::Display for VerificationPhase {
 /// intentionally independent from the Rust pass that happened to detect the
 /// failure.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum VerificationErrorCategory {
     /// Duplicate or malformed declarations and definitions.
     Definitions,
@@ -123,6 +125,7 @@ impl fmt::Display for VerificationErrorCategory {
 /// A module-level failure has every optional field set to `None`. Nested fields
 /// are populated only when the original typed diagnostic identifies them.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct VerificationContext {
     /// Zero-based function index in retained module order.
     pub function_index: Option<usize>,
@@ -143,6 +146,7 @@ pub struct VerificationContext {
 /// Variants are boxed to keep the public result small. [`Error::source`]
 /// exposes the corresponding existing module-level verifier error.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum VerificationError {
     /// Structural verifier failure.
     Structure(Box<ModuleStructureVerificationError>),
