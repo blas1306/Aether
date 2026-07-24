@@ -1,0 +1,69 @@
+name: Rust verifier operational readiness
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/rust-verifier-operational.yml"
+      - "compiler-rs/**"
+      - "scripts/package_rust_verifier.py"
+      - "scripts/rust_verifier_platform_snapshot.py"
+      - "src/aether/ir/**"
+      - "tests/aether/**"
+
+jobs:
+  platform-snapshot:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.85"
+      - run: python -m pip install -r requirements.txt pytest
+      - run: cargo build --locked --package aether-ir-verifier
+        working-directory: compiler-rs
+      - name: Resolve executable
+        shell: python
+        run: |
+          from pathlib import Path
+          import os
+          import sys
+          executable = "aether-ir-verifier.exe" if sys.platform == "win32" else "aether-ir-verifier"
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as stream:
+              stream.write(f"RUST_VERIFIER={Path('compiler-rs/target/debug') / executable}\n")
+      - run: >-
+          python scripts/rust_verifier_platform_snapshot.py
+          --executable "${{ env.RUST_VERIFIER }}"
+          --output platform-snapshot.json
+      - run: >-
+          python -m pytest -q
+          tests/aether/test_rust_verifier_operational.py
+          tests/aether/test_rust_verifier_adapter.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verifier-snapshot-${{ matrix.os }}
+          path: platform-snapshot.json
+
+  compare-platforms:
+    needs: platform-snapshot
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: verifier-snapshot-*
+          path: snapshots
+      - name: Require byte-identical snapshots
+        shell: python
+        run: |
+          from pathlib import Path
+          paths = sorted(Path("snapshots").rglob("platform-snapshot.json"))
+          assert len(paths) == 3, paths
+          payloads = {path.read_bytes() for path in paths}
+          assert len(payloads) == 1, "Linux, Windows, and macOS snapshots differ"

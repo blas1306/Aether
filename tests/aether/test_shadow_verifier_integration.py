@@ -149,7 +149,8 @@ def test_real_subprocess_failures_remain_observational(
 ) -> None:
     client = SubprocessRustVerifierClient(
         executable=[sys.executable, "-c", script],
-        timeout_seconds=0.05,
+        timeout_seconds=0.2,
+        validate_startup=False,
     )
     module = _accepted_module()
 

@@ -13,6 +13,7 @@ from aether.ir import (
     RustVerifierAccepted,
     RustVerifierExecutableNotFound,
     RustVerifierInvalidResponse,
+    RustVerifierNotExecutable,
     RustVerifierOutputLimitExceeded,
     RustVerifierPhase,
     RustVerifierProcessFailure,
@@ -20,7 +21,6 @@ from aether.ir import (
     RustVerifierProtocolErrorKind,
     RustVerifierRejected,
     RustVerifierRequestTooLarge,
-    RustVerifierSpawnFailure,
     RustVerifierTimeout,
     VerifierCategory,
     discover_rust_verifier_executable,
@@ -253,7 +253,7 @@ def test_missing_executable_and_other_spawn_failures_are_distinct(
             IRModule(), executable=tmp_path / "does-not-exist"
         )
 
-    with pytest.raises(RustVerifierSpawnFailure):
+    with pytest.raises(RustVerifierNotExecutable):
         verify_module_with_rust(IRModule(), executable=tmp_path)
 
 
@@ -268,7 +268,7 @@ def test_timeout_must_be_a_finite_positive_real(timeout: object) -> None:
         )
 
 
-def test_discovery_precedence_is_explicit_then_path_then_requested_repository(
+def test_discovery_precedence_is_explicit_then_repository_then_opt_in_path(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -283,8 +283,6 @@ def test_discovery_precedence_is_explicit_then_path_then_requested_repository(
     path_executable.write_bytes(b"")
     path_executable.chmod(0o755)
     monkeypatch.setenv("PATH", str(path_directory))
-    assert discover_rust_verifier_executable() == path_executable
-
     repository_executable = (
         tmp_path
         / "repository"
@@ -298,11 +296,17 @@ def test_discovery_precedence_is_explicit_then_path_then_requested_repository(
     repository_executable.chmod(0o755)
     assert (
         discover_rust_verifier_executable(
-            search_path=False,
             repository_root=tmp_path / "repository",
+            search_path=True,
         )
         == repository_executable
     )
+    assert (
+        discover_rust_verifier_executable(search_path=True)
+        == path_executable
+    )
+    with pytest.raises(RustVerifierExecutableNotFound):
+        discover_rust_verifier_executable()
 
 
 def test_discovery_failure_does_not_depend_on_current_working_directory(

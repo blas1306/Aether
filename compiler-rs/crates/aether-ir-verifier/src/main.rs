@@ -1,12 +1,22 @@
 //! Standalone stdin/stdout entry point for the versioned verifier protocol.
 
+use std::env;
 use std::io::{self, Read as _, Write as _};
 use std::panic::{self, AssertUnwindSafe};
 use std::process::ExitCode;
 
-use aether_ir_verifier::{ProtocolResponse, encode_response, process_request};
+use aether_ir::wire::IR_SCHEMA_VERSION;
+use aether_ir_verifier::{
+    FEATURE_CAPABILITIES, PROTOCOL_VERSION, ProtocolResponse, encode_executable_identity,
+    encode_response, process_request,
+};
 
 fn main() -> ExitCode {
+    let arguments: Vec<_> = env::args_os().skip(1).collect();
+    if !arguments.is_empty() {
+        return run_metadata_command(&arguments);
+    }
+
     let mut input = Vec::new();
     let response = if io::stdin().read_to_end(&mut input).is_err() {
         ProtocolResponse::input_io_error()
@@ -21,6 +31,35 @@ fn main() -> ExitCode {
     if stdout
         .write_all(&encoded)
         .and_then(|()| stdout.flush())
+        .is_err()
+    {
+        return ExitCode::FAILURE;
+    }
+    ExitCode::SUCCESS
+}
+
+fn run_metadata_command(arguments: &[std::ffi::OsString]) -> ExitCode {
+    let encoded = if arguments.len() == 1 && arguments[0] == "--identity" {
+        encode_executable_identity()
+    } else if arguments.len() == 1 && arguments[0] == "--version" {
+        Ok(format!(
+            "aether-ir-verifier {} (protocol {PROTOCOL_VERSION}, IR schema {}; capabilities: {})\n",
+            env!("CARGO_PKG_VERSION"),
+            IR_SCHEMA_VERSION,
+            FEATURE_CAPABILITIES.join(",")
+        )
+        .into_bytes())
+    } else {
+        let _ = io::stderr()
+            .write_all(b"aether-ir-verifier: expected no arguments, --identity, or --version\n");
+        return ExitCode::from(2);
+    };
+    let Ok(encoded) = encoded else {
+        return ExitCode::FAILURE;
+    };
+    if io::stdout()
+        .write_all(&encoded)
+        .and_then(|()| io::stdout().flush())
         .is_err()
     {
         return ExitCode::FAILURE;

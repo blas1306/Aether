@@ -149,6 +149,11 @@ class ShadowValidationHarness:
         classifications = Counter(
             report.comparison.classification.value for report in reports
         )
+        failure_kinds = Counter(
+            report.metadata.failure_kind
+            for report in reports
+            if report.metadata.failure_kind is not None
+        )
         stages = Counter(report.metadata.stage.value for report in reports)
         classifications_by_stage: dict[str, Counter[str]] = defaultdict(Counter)
         hashes = Counter(
@@ -217,6 +222,7 @@ class ShadowValidationHarness:
                 ),
             },
             "classifications": _sorted_counter(classifications),
+            "failure_kinds": _sorted_counter(failure_kinds),
             "stages": _sorted_counter(stages),
             "classifications_by_stage": {
                 stage: _sorted_counter(classifications_by_stage[stage])

@@ -1,5 +1,12 @@
 # Initial IR Verifier Subprocess Protocol
 
+The executable also exposes metadata-only `--version` and `--identity`
+commands. They do not process an IR request or alter protocol-v1 semantics.
+The strict identity reports the executable release, supported protocol and IR
+schema versions, and feature capabilities so a Python driver can reject an
+incompatible artifact before semantic traffic. See
+[RUST_VERIFIER_OPERATIONAL_READINESS.md](RUST_VERIFIER_OPERATIONAL_READINESS.md).
+
 Phase 4.2A defines protocol version 1 and the standalone
 `aether-ir-verifier` executable. Phase 4.2B adds an explicitly called,
 bounded Python subprocess adapter and Phase 4.2C stabilizes a transport-neutral

@@ -15,8 +15,43 @@ use serde_json::{Map, Value};
 
 /// The only protocol version understood and emitted by this crate.
 pub const PROTOCOL_VERSION: u64 = 1;
+/// Stable machine-readable identity schema emitted by the executable.
+pub const IDENTITY_SCHEMA_VERSION: u64 = 1;
+/// Operations implemented by this executable release.
+pub const FEATURE_CAPABILITIES: &[&str] = &["verify"];
 
 const VERIFY_OPERATION: &str = "verify";
+
+/// Machine-readable executable identity used by startup compatibility checks.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ExecutableIdentity {
+    identity_schema_version: u64,
+    executable: &'static str,
+    version: &'static str,
+    protocol_versions: [u64; 1],
+    ir_schema_versions: [i64; 1],
+    capabilities: &'static [&'static str],
+}
+
+/// Return the stable identity for this exact executable release.
+#[must_use]
+pub const fn executable_identity() -> ExecutableIdentity {
+    ExecutableIdentity {
+        identity_schema_version: IDENTITY_SCHEMA_VERSION,
+        executable: "aether-ir-verifier",
+        version: env!("CARGO_PKG_VERSION"),
+        protocol_versions: [PROTOCOL_VERSION],
+        ir_schema_versions: [IR_SCHEMA_VERSION],
+        capabilities: FEATURE_CAPABILITIES,
+    }
+}
+
+/// Serialize the executable identity as compact deterministic JSON plus newline.
+pub fn encode_executable_identity() -> Result<Vec<u8>, serde_json::Error> {
+    let mut encoded = serde_json::to_vec(&executable_identity())?;
+    encoded.push(b'\n');
+    Ok(encoded)
+}
 
 /// One deterministic protocol response.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

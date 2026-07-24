@@ -32,6 +32,16 @@ fn run(input: &[u8]) -> Output {
     child.wait_with_output().expect("verifier must terminate")
 }
 
+fn run_argument(argument: &str) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_aether-ir-verifier"))
+        .arg(argument)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("verifier binary must start")
+}
+
 fn value(output: &Output) -> Value {
     serde_json::from_slice(&output.stdout).expect("stdout must be one JSON response")
 }
@@ -54,6 +64,37 @@ fn accepted_request_uses_exact_stdin_stdout_contract() {
     assert_eq!(
         output.stdout,
         b"{\"protocol_version\":1,\"status\":\"accepted\"}\n"
+    );
+}
+
+#[test]
+fn executable_reports_explicit_version_and_machine_identity() {
+    let identity = run_argument("--identity");
+    assert_normal_process_result(&identity);
+    assert_eq!(
+        identity.stdout,
+        b"{\"identity_schema_version\":1,\"executable\":\"aether-ir-verifier\",\
+          \"version\":\"0.0.0\",\"protocol_versions\":[1],\"ir_schema_versions\":[1],\
+          \"capabilities\":[\"verify\"]}\n"
+    );
+
+    let version = run_argument("--version");
+    assert_normal_process_result(&version);
+    assert_eq!(
+        version.stdout,
+        b"aether-ir-verifier 0.0.0 (protocol 1, IR schema 1; capabilities: verify)\n"
+    );
+}
+
+#[test]
+fn unknown_arguments_fail_with_one_stable_diagnostic() {
+    let output = run_argument("--unknown");
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        output.stderr,
+        b"aether-ir-verifier: expected no arguments, --identity, or --version\n"
     );
 }
 

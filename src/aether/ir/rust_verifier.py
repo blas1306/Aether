@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
+from hashlib import sha256
 import json
 import math
 import os
@@ -17,11 +18,12 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sysconfig
 import threading
 from time import monotonic
 from typing import NoReturn, TypeAlias
 
-from .dto import IR_INSTRUCTION_DTO_REGISTRY
+from .dto import IR_INSTRUCTION_DTO_REGISTRY, IR_SCHEMA_VERSION
 from .model import IRModule
 from .rust_verifier_client import (
     RUST_VERIFIER_PROTOCOL_VERSION,
@@ -48,6 +50,11 @@ DEFAULT_RUST_VERIFIER_TIMEOUT_SECONDS = 5.0
 DEFAULT_RUST_VERIFIER_REQUEST_LIMIT_BYTES = 16 * 1024 * 1024
 DEFAULT_RUST_VERIFIER_STDOUT_LIMIT_BYTES = 1024 * 1024
 DEFAULT_RUST_VERIFIER_STDERR_LIMIT_BYTES = 256 * 1024
+
+RUST_VERIFIER_IDENTITY_SCHEMA_VERSION = 1
+RUST_VERIFIER_PACKAGE_MANIFEST_SCHEMA_VERSION = 1
+RUST_VERIFIER_PACKAGE_VERSION = "0.0.0"
+RUST_VERIFIER_CAPABILITIES = ("verify",)
 
 _READ_CHUNK_BYTES = 64 * 1024
 _WAIT_SLICE_SECONDS = 0.05
@@ -141,6 +148,29 @@ class RustVerifierExecutableNotFound(RustVerifierAdapterError):
     """Raised when the configured executable cannot be found."""
 
 
+class RustVerifierNotExecutable(RustVerifierAdapterError):
+    """Raised when a configured file cannot be executed."""
+
+
+class RustVerifierInvalidExecutable(RustVerifierAdapterError):
+    """Raised when a process is not a valid verifier executable."""
+
+
+class RustVerifierExecutableIntegrityError(RustVerifierAdapterError):
+    """Raised when package bytes do not match the deployment manifest."""
+
+
+class RustVerifierIncompatibleExecutable(RustVerifierAdapterError):
+    """Raised when executable identity is incompatible with this driver."""
+
+    def __init__(self, field_name: str) -> None:
+        super().__init__(
+            f"Rust verifier identity is incompatible with the Python driver "
+            f"({field_name})"
+        )
+        self.field_name = field_name
+
+
 class RustVerifierSpawnFailure(RustVerifierAdapterError):
     """Raised when the operating system refuses to start the process."""
 
@@ -204,6 +234,27 @@ class RustVerifierProcessFailure(RustVerifierAdapterError):
 
 class RustVerifierInvalidResponse(RustVerifierAdapterError):
     """Raised when exit-zero stdout is not exactly one protocol-v1 response."""
+
+
+@dataclass(frozen=True)
+class RustVerifierExecutableIdentity:
+    """Version and feature identity reported by the selected executable."""
+
+    identity_schema_version: int
+    executable: str
+    version: str
+    protocol_versions: tuple[int, ...]
+    ir_schema_versions: tuple[int, ...]
+    capabilities: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class RustVerifierExecutableSelection:
+    """Stable executable identity after path, bytes, and compatibility checks."""
+
+    path: Path
+    sha256: str
+    identity: RustVerifierExecutableIdentity
 
 
 @dataclass(frozen=True)
@@ -283,6 +334,7 @@ class SubprocessRustVerifierClient:
         request_limit_bytes: int = DEFAULT_RUST_VERIFIER_REQUEST_LIMIT_BYTES,
         stdout_limit_bytes: int = DEFAULT_RUST_VERIFIER_STDOUT_LIMIT_BYTES,
         stderr_limit_bytes: int = DEFAULT_RUST_VERIFIER_STDERR_LIMIT_BYTES,
+        validate_startup: bool = True,
     ) -> None:
         self._command = _normalize_command(executable)
         self._timeout_seconds = _validate_timeout(timeout_seconds)
@@ -298,6 +350,24 @@ class SubprocessRustVerifierClient:
             stderr_limit_bytes,
             "stderr_limit_bytes",
         )
+        if not isinstance(validate_startup, bool):
+            raise TypeError("validate_startup must be a boolean")
+        self._validate_startup = validate_startup
+        self._identity: RustVerifierExecutableIdentity | None = None
+        self._identity_lock = threading.Lock()
+
+    def inspect_identity(self) -> RustVerifierExecutableIdentity:
+        """Return a cached, strictly validated executable identity."""
+
+        with self._identity_lock:
+            if self._identity is None:
+                self._identity = _inspect_executable_identity(
+                    self._command,
+                    timeout_seconds=self._timeout_seconds,
+                    stdout_limit_bytes=self._stdout_limit_bytes,
+                    stderr_limit_bytes=self._stderr_limit_bytes,
+                )
+            return self._identity
 
     def verify(
         self,
@@ -307,6 +377,8 @@ class SubprocessRustVerifierClient:
 
         if not isinstance(request, CanonicalRustVerifierRequest):
             raise TypeError("request must be a CanonicalRustVerifierRequest")
+        if self._validate_startup:
+            self.inspect_identity()
         if len(request.payload) > self._request_limit_bytes:
             raise RustVerifierRequestTooLarge(
                 len(request.payload),
@@ -380,6 +452,7 @@ def verify_module_with_rust(
         request_limit_bytes=request_limit_bytes,
         stdout_limit_bytes=stdout_limit_bytes,
         stderr_limit_bytes=stderr_limit_bytes,
+        validate_startup=False,
     )
     invocation = client.verify(build_canonical_rust_verifier_request(module))
     return _legacy_result_from_invocation(invocation)
@@ -388,16 +461,15 @@ def verify_module_with_rust(
 def discover_rust_verifier_executable(
     *,
     executable: str | os.PathLike[str] | None = None,
-    search_path: bool = True,
+    search_path: bool = False,
     repository_root: str | os.PathLike[str] | None = None,
     build_profile: str = "debug",
 ) -> Path:
     """Resolve a development executable with deterministic opt-in precedence.
 
-    Precedence is an explicit path, then ``PATH`` when ``search_path`` is true,
-    then ``repository_root/compiler-rs/target/<profile>`` when a repository
-    root is supplied.  No environment variable or current working directory is
-    consulted implicitly.
+    Precedence is an explicit path, then a requested repository build, then
+    ``PATH`` only when ``search_path`` is explicitly true. No environment
+    variable or current working directory is consulted implicitly.
     """
 
     if executable is not None:
@@ -408,11 +480,6 @@ def discover_rust_verifier_executable(
         if os.name == "nt"
         else _EXECUTABLE_BASENAME
     )
-    if search_path:
-        discovered = shutil.which(executable_name)
-        if discovered is not None:
-            return Path(discovered).resolve()
-
     if repository_root is not None:
         if build_profile not in {"debug", "release"}:
             raise ValueError("build_profile must be 'debug' or 'release'")
@@ -423,7 +490,13 @@ def discover_rust_verifier_executable(
             / build_profile
             / executable_name
         )
-        return _require_executable_path(candidate)
+        if candidate.is_file():
+            return _require_executable_path(candidate)
+
+    if search_path:
+        discovered = shutil.which(executable_name)
+        if discovered is not None:
+            return _require_executable_path(Path(discovered))
 
     raise RustVerifierExecutableNotFound(
         "Rust verifier executable was not found using the requested discovery sources"
@@ -432,11 +505,160 @@ def discover_rust_verifier_executable(
 
 def _require_executable_path(path: Path) -> Path:
     resolved = path.expanduser().resolve()
-    if not resolved.is_file() or not os.access(resolved, os.X_OK):
+    if not resolved.is_file():
         raise RustVerifierExecutableNotFound(
-            "Configured Rust verifier executable does not exist or is not executable"
+            "Configured Rust verifier executable was not found"
+        )
+    if not os.access(resolved, os.X_OK):
+        raise RustVerifierNotExecutable(
+            "Configured Rust verifier file is not executable"
         )
     return resolved
+
+
+def select_rust_verifier_executable(
+    executable: str | os.PathLike[str],
+    *,
+    expected_sha256: str | None = None,
+    timeout_seconds: float = DEFAULT_RUST_VERIFIER_TIMEOUT_SECONDS,
+) -> RustVerifierExecutableSelection:
+    """Resolve and validate one explicit executable without consulting PATH."""
+
+    path = _require_executable_path(Path(executable))
+    digest = _sha256_file(path)
+    if expected_sha256 is not None:
+        if re.fullmatch(r"[0-9a-f]{64}", expected_sha256) is None:
+            raise ValueError("expected_sha256 must be 64 lowercase hexadecimal digits")
+        if digest != expected_sha256:
+            raise RustVerifierExecutableIntegrityError(
+                "Rust verifier executable does not match the package manifest"
+            )
+    client = SubprocessRustVerifierClient(
+        executable=path,
+        timeout_seconds=timeout_seconds,
+        validate_startup=False,
+    )
+    identity = client.inspect_identity()
+    if _sha256_file(path) != digest:
+        raise RustVerifierExecutableIntegrityError(
+            "Rust verifier executable changed during identity validation"
+        )
+    return RustVerifierExecutableSelection(
+        path=path,
+        sha256=digest,
+        identity=identity,
+    )
+
+
+def rust_verifier_package_manifest(
+    executable: str | os.PathLike[str],
+    *,
+    platform_tag: str | None = None,
+) -> dict[str, object]:
+    """Build the canonical manifest payload for one validated artifact."""
+
+    selection = select_rust_verifier_executable(executable)
+    identity = selection.identity
+    return {
+        "manifest_schema_version": RUST_VERIFIER_PACKAGE_MANIFEST_SCHEMA_VERSION,
+        "platform": platform_tag or sysconfig.get_platform(),
+        "executable": selection.path.name,
+        "sha256": selection.sha256,
+        "identity": {
+            "identity_schema_version": identity.identity_schema_version,
+            "executable": identity.executable,
+            "version": identity.version,
+            "protocol_versions": list(identity.protocol_versions),
+            "ir_schema_versions": list(identity.ir_schema_versions),
+            "capabilities": list(identity.capabilities),
+        },
+    }
+
+
+def discover_packaged_rust_verifier(
+    package_directory: str | os.PathLike[str],
+    *,
+    expected_platform: str | None = None,
+) -> RustVerifierExecutableSelection:
+    """Select the exact versioned artifact declared by a package manifest."""
+
+    directory = Path(package_directory).expanduser().resolve()
+    manifest_path = directory / "manifest.json"
+    try:
+        data = manifest_path.read_bytes()
+    except FileNotFoundError:
+        raise RustVerifierExecutableNotFound(
+            "Rust verifier package manifest was not found"
+        ) from None
+    if len(data) > 64 * 1024:
+        raise RustVerifierInvalidExecutable(
+            "Rust verifier package manifest exceeds 65536 bytes"
+        )
+    try:
+        manifest = _expect_mapping(
+            _decode_one_json_value(data),
+            "package manifest",
+        )
+        _expect_fields(
+            manifest,
+            {
+                "manifest_schema_version",
+                "platform",
+                "executable",
+                "sha256",
+                "identity",
+            },
+            "package manifest",
+        )
+        if (
+            manifest["manifest_schema_version"]
+            != RUST_VERIFIER_PACKAGE_MANIFEST_SCHEMA_VERSION
+        ):
+            raise RustVerifierInvalidResponse("unsupported package manifest schema")
+        platform_tag = _expect_string(manifest["platform"], "package manifest.platform")
+        executable_name = _expect_string(
+            manifest["executable"],
+            "package manifest.executable",
+        )
+        digest = _expect_string(manifest["sha256"], "package manifest.sha256")
+        if re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            raise RustVerifierInvalidResponse(
+                "package manifest.sha256 must be lowercase SHA-256"
+            )
+        declared_identity = _decode_identity_value(manifest["identity"])
+    except (RustVerifierInvalidResponse, TypeError, ValueError) as error:
+        raise RustVerifierInvalidExecutable(
+            "Rust verifier package manifest is invalid"
+        ) from error
+
+    if platform_tag != (expected_platform or sysconfig.get_platform()):
+        raise RustVerifierIncompatibleExecutable("platform")
+    expected_name = (
+        f"{_EXECUTABLE_BASENAME}.exe"
+        if platform_tag.startswith(("win", "mingw"))
+        else _EXECUTABLE_BASENAME
+    )
+    if executable_name != expected_name:
+        raise RustVerifierInvalidExecutable(
+            "Rust verifier package executable name is invalid"
+        )
+    selection = select_rust_verifier_executable(
+        directory / executable_name,
+        expected_sha256=digest,
+    )
+    if selection.identity != declared_identity:
+        raise RustVerifierExecutableIntegrityError(
+            "Rust verifier runtime identity does not match the package manifest"
+        )
+    return selection
+
+
+def _sha256_file(path: Path) -> str:
+    digest = sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _encode_request(module: IRModule) -> bytes:
@@ -555,6 +777,116 @@ def _validate_byte_limit(value: int, name: str) -> int:
     return value
 
 
+def _inspect_executable_identity(
+    command: tuple[str, ...],
+    *,
+    timeout_seconds: float,
+    stdout_limit_bytes: int,
+    stderr_limit_bytes: int,
+) -> RustVerifierExecutableIdentity:
+    result = _run_bounded_process(
+        (*command, "--identity"),
+        b"",
+        timeout_seconds=timeout_seconds,
+        stdout_limit_bytes=stdout_limit_bytes,
+        stderr_limit_bytes=stderr_limit_bytes,
+    )
+    if result.returncode != 0:
+        raise RustVerifierInvalidExecutable(
+            "Rust verifier identity command failed"
+        )
+    if result.stderr:
+        raise RustVerifierInvalidExecutable(
+            "Rust verifier identity command wrote to stderr"
+        )
+    try:
+        identity = _decode_identity_value(_decode_one_json_value(result.stdout))
+    except RustVerifierInvalidResponse as error:
+        raise RustVerifierInvalidExecutable(
+            "Rust verifier identity response is invalid"
+        ) from error
+    _validate_identity_compatibility(identity)
+    return identity
+
+
+def _decode_identity_value(value: object) -> RustVerifierExecutableIdentity:
+    identity = _expect_mapping(value, "identity")
+    _expect_fields(
+        identity,
+        {
+            "identity_schema_version",
+            "executable",
+            "version",
+            "protocol_versions",
+            "ir_schema_versions",
+            "capabilities",
+        },
+        "identity",
+    )
+    identity_schema_version = _expect_nonnegative_integer(
+        identity["identity_schema_version"],
+        "identity.identity_schema_version",
+    )
+    executable = _expect_string(identity["executable"], "identity.executable")
+    version = _expect_string(identity["version"], "identity.version")
+    protocol_versions = _expect_integer_sequence(
+        identity["protocol_versions"],
+        "identity.protocol_versions",
+    )
+    ir_schema_versions = _expect_integer_sequence(
+        identity["ir_schema_versions"],
+        "identity.ir_schema_versions",
+    )
+    capabilities = _expect_string_sequence(
+        identity["capabilities"],
+        "identity.capabilities",
+    )
+    return RustVerifierExecutableIdentity(
+        identity_schema_version=identity_schema_version,
+        executable=executable,
+        version=version,
+        protocol_versions=protocol_versions,
+        ir_schema_versions=ir_schema_versions,
+        capabilities=capabilities,
+    )
+
+
+def _expect_integer_sequence(value: object, path: str) -> tuple[int, ...]:
+    if not isinstance(value, list) or not value:
+        _invalid(f"{path} must be a non-empty array")
+    items = tuple(
+        _expect_nonnegative_integer(item, f"{path}[]") for item in value
+    )
+    if tuple(sorted(set(items))) != items:
+        _invalid(f"{path} must be sorted and unique")
+    return items
+
+
+def _expect_string_sequence(value: object, path: str) -> tuple[str, ...]:
+    if not isinstance(value, list) or not value:
+        _invalid(f"{path} must be a non-empty array")
+    items = tuple(_expect_string(item, f"{path}[]") for item in value)
+    if tuple(sorted(set(items))) != items:
+        _invalid(f"{path} must be sorted and unique")
+    return items
+
+
+def _validate_identity_compatibility(
+    identity: RustVerifierExecutableIdentity,
+) -> None:
+    expected = {
+        "identity_schema_version": RUST_VERIFIER_IDENTITY_SCHEMA_VERSION,
+        "executable": _EXECUTABLE_BASENAME,
+        "version": RUST_VERIFIER_PACKAGE_VERSION,
+        "protocol_versions": (RUST_VERIFIER_PROTOCOL_VERSION,),
+        "ir_schema_versions": (IR_SCHEMA_VERSION,),
+        "capabilities": RUST_VERIFIER_CAPABILITIES,
+    }
+    for field_name, expected_value in expected.items():
+        if getattr(identity, field_name) != expected_value:
+            raise RustVerifierIncompatibleExecutable(field_name)
+
+
 def _run_bounded_process(
     command: tuple[str, ...],
     request: bytes,
@@ -575,7 +907,15 @@ def _run_bounded_process(
         raise RustVerifierExecutableNotFound(
             "Configured Rust verifier executable was not found"
         ) from None
+    except PermissionError:
+        raise RustVerifierNotExecutable(
+            "Configured Rust verifier file is not executable"
+        ) from None
     except OSError as error:
+        if error.errno in {8, 22}:
+            raise RustVerifierInvalidExecutable(
+                "Configured Rust verifier file has an invalid executable format"
+            ) from None
         raise RustVerifierSpawnFailure(
             f"Could not start Rust verifier process ({error.__class__.__name__})"
         ) from None
@@ -912,6 +1252,12 @@ def _expect_optional_index(value: object, label: str) -> int | None:
     return value
 
 
+def _expect_nonnegative_integer(value: object, label: str) -> int:
+    if type(value) is not int or value < 0:
+        _invalid(f"{label} must be a non-negative integer")
+    return value
+
+
 def _expect_enum(value: object, enum_type: type[Enum], label: str) -> Enum:
     spelling = _expect_string(value, label)
     try:
@@ -929,6 +1275,10 @@ __all__ = [
     "DEFAULT_RUST_VERIFIER_STDERR_LIMIT_BYTES",
     "DEFAULT_RUST_VERIFIER_STDOUT_LIMIT_BYTES",
     "DEFAULT_RUST_VERIFIER_TIMEOUT_SECONDS",
+    "RUST_VERIFIER_CAPABILITIES",
+    "RUST_VERIFIER_IDENTITY_SCHEMA_VERSION",
+    "RUST_VERIFIER_PACKAGE_MANIFEST_SCHEMA_VERSION",
+    "RUST_VERIFIER_PACKAGE_VERSION",
     "RUST_VERIFIER_PROTOCOL_VERSION",
     "SubprocessRustVerifierClient",
     "SubprocessRustVerifierInvocationMetadata",
@@ -936,9 +1286,15 @@ __all__ = [
     "RustVerifierAdapterError",
     "RustVerifierCommand",
     "RustVerifierDiagnostic",
+    "RustVerifierExecutableIdentity",
+    "RustVerifierExecutableIntegrityError",
     "RustVerifierExecutableNotFound",
+    "RustVerifierExecutableSelection",
+    "RustVerifierIncompatibleExecutable",
     "RustVerifierIntegrationError",
+    "RustVerifierInvalidExecutable",
     "RustVerifierInvalidResponse",
+    "RustVerifierNotExecutable",
     "RustVerifierOutputLimitExceeded",
     "RustVerifierPhase",
     "RustVerifierProcessFailure",
@@ -951,6 +1307,9 @@ __all__ = [
     "RustVerifierSpawnFailure",
     "RustVerifierTimeout",
     "RustVerifierTransportMetadata",
+    "discover_packaged_rust_verifier",
     "discover_rust_verifier_executable",
+    "rust_verifier_package_manifest",
+    "select_rust_verifier_executable",
     "verify_module_with_rust",
 ]

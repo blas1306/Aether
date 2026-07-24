@@ -214,17 +214,24 @@ and does not depend on the caller's current directory.
 
 ## Executable discovery
 
-The core verification call never performs discovery. The optional development
-helper has explicit deterministic precedence:
+The core verification call never performs discovery. As of Phase 4.5D,
+production uses a versioned platform package containing `manifest.json` and
+one executable. `discover_packaged_rust_verifier()` validates the platform,
+artifact SHA-256, release version, protocol versions, IR schema versions, and
+feature capabilities without consulting `PATH`, environment variables, or the
+current directory.
+
+The optional development helper has explicit deterministic precedence:
 
 1. `executable=...`, validated as an executable file;
-2. `PATH`, only when `search_path=True`;
-3. `<repository_root>/compiler-rs/target/<debug|release>/aether-ir-verifier`,
-   only when `repository_root` is supplied.
+2. `<repository_root>/compiler-rs/target/<debug|release>/aether-ir-verifier`,
+   only when `repository_root` is supplied;
+3. `PATH`, only when `search_path=True`.
 
 The helper does not inspect compiler configuration, a global backend
 environment variable, the current working directory, or a developer-specific
-absolute path. Production packaging/discovery remains future work.
+absolute path. `PATH` lookup defaults to disabled and cannot outrank a
+requested repository artifact.
 
 ## Tests and development workflow
 
@@ -263,17 +270,17 @@ The retained `non-void-path-without-return` case therefore moved from a
 documented Python-rejected/Rust-accepted result to ordinary acceptance parity;
 the adapter, protocol, and authority selection did not change.
 
-## Production boundary and next phase
+## Production boundary
 
 Phase 4.2C adds no verifier backend selector, shadow comparison, CLI option,
 automatic fallback, environment-driven production switch, packaged executable
 resolver, or PyO3 binding. Calling the compatibility function or explicitly
 constructing a client is still the only way to invoke Rust from Python.
 
-`discover_rust_verifier_executable()` remains a development helper. Its
-current explicit/PATH/repository precedence is not the production packaging
-contract. Production must eventually use a separately designed,
-version-matched bundled-artifact resolver.
+Phase 4.5D subsequently added the version-matched package resolver and strict
+startup identity handshake. `discover_rust_verifier_executable()` remains a
+development helper and is not the production packaging contract. See
+[RUST_VERIFIER_OPERATIONAL_READINESS.md](RUST_VERIFIER_OPERATIONAL_READINESS.md).
 
 Phase 4.3 now provides the explicitly injected, Python-authoritative shadow
 mode documented in

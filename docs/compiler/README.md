@@ -55,6 +55,10 @@ comparison.
 
 Current compiler-design documents:
 
+- [RUST_VERIFIER_OPERATIONAL_READINESS.md](RUST_VERIFIER_OPERATIONAL_READINESS.md):
+  Phase 4.5D production packaging, executable identity, strict startup
+  compatibility, three-platform snapshot gate, rollback rehearsal, soak
+  runner, deployment assumptions, and release checklist.
 - [IRV_024_SEMANTIC_ALIGNMENT.md](IRV_024_SEMANTIC_ALIGNMENT.md):
   Phase 4.5C specification decision, Python graph-semantics alignment,
   regression/corpus changes, historical divergence retirement, and validation

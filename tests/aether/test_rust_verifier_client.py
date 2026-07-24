@@ -258,7 +258,8 @@ def test_fake_pyo3_style_client_and_subprocess_return_same_neutral_outcome(
         RustVerifierAcceptedOutcome()
     ).verify(request)
     process_invocation = SubprocessRustVerifierClient(
-        executable=_emit(ACCEPTED_RESPONSE)
+        executable=_emit(ACCEPTED_RESPONSE),
+        validate_startup=False,
     ).verify(request)
 
     assert fake_invocation.outcome == process_invocation.outcome
@@ -327,7 +328,8 @@ def test_comparison_keys_represent_documented_divergence_without_prose() -> None
 def test_subprocess_client_translates_accepted_and_keeps_stderr_in_metadata(
 ) -> None:
     client = SubprocessRustVerifierClient(
-        executable=_emit(ACCEPTED_RESPONSE, stderr=b"debug note\n")
+        executable=_emit(ACCEPTED_RESPONSE, stderr=b"debug note\n"),
+        validate_startup=False,
     )
 
     invocation = client.verify(build_canonical_rust_verifier_request(IRModule()))
@@ -344,7 +346,10 @@ def test_subprocess_client_translates_accepted_and_keeps_stderr_in_metadata(
 
 
 def test_subprocess_client_translates_rejected_to_normalized_diagnostic() -> None:
-    client = SubprocessRustVerifierClient(executable=_emit(REJECTED_RESPONSE))
+    client = SubprocessRustVerifierClient(
+        executable=_emit(REJECTED_RESPONSE),
+        validate_startup=False,
+    )
 
     invocation = client.verify(build_canonical_rust_verifier_request(IRModule()))
 
@@ -411,7 +416,10 @@ def test_every_protocol_error_kind_has_an_explicit_neutral_mapping(
         "status": "error",
         "error": {"kind": protocol_kind.value, "message": "wire prose"},
     }
-    client = SubprocessRustVerifierClient(executable=_emit(response))
+    client = SubprocessRustVerifierClient(
+        executable=_emit(response),
+        validate_startup=False,
+    )
 
     invocation = client.verify(build_canonical_rust_verifier_request(IRModule()))
 
