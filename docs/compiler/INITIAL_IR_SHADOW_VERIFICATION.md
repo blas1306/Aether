@@ -92,12 +92,18 @@ and missing context on one side. A different invariant, category, phase, or
 shared structural value is an unexpected diagnostic divergence unless one
 exact reviewed rule matches.
 
-The current 128 transportable corpus observations split into 64 accepted
-matches, 60 semantic rejection matches, three documented diagnostic
-divergences, and one documented outcome divergence. The rejection matches are
-semantic because Rust reports structural context that the current Python
-exception API does not expose. The two nontransportable DTO-boundary cases are
-represented explicitly by test-harness `SHADOW_SKIPPED` observations.
+The original Phase 4.3 set of 128 transportable corpus observations split into
+64 accepted matches, 60 semantic rejection matches, three documented
+diagnostic divergences, and one documented outcome divergence. The rejection
+matches are semantic because Rust reports structural context that the current
+Python exception API does not expose. The two nontransportable DTO-boundary
+cases are represented explicitly by test-harness `SHADOW_SKIPPED`
+observations.
+
+Phase 4.5C later resolved that sole outcome divergence by aligning Python
+IRV-024 with Rust's graph semantics. The current 141-case baseline is 65
+accepted matches, 73 semantic rejection matches, three documented diagnostic
+divergences, and zero documented outcome divergences.
 
 ## Hash-scoped documented divergences
 
@@ -111,17 +117,21 @@ import the test manifest. Every rule matches all of:
 - IR schema version;
 - documented diagnostic or outcome classification.
 
-The registry contains only the four reviewed schema-v1 cases:
+The registry now contains only the three reviewed schema-v1 diagnostic cases:
 
 | Rule | Canonical request SHA-256 |
 | --- | --- |
 | Python IRV-031 / Rust IRV-032 | `65b64a4021d20766e845fb23e48fd90c4992cf0f23936298e147f8b4eb6c095e` |
 | Python IRV-050 / Rust IRV-026 | `90c0a3fccf6b737179d1feef9c32d11b3874edfccc3914facbd0df1d904803d9` |
 | Python IRV-036 / Rust IRV-028 | `2b1463ad529acf1b86dccd04c89408431826d51d0a0bba8739830c4e46d30d1f` |
-| Python IRV-024 / Rust acceptance | `d635f6fc4c9e933e20442539c12409fcdc3de3da0938927f6b784c3002550baa` |
 
 A matching invariant pair with a different hash, context, version, or outcome
 direction is not documented.
+
+The retired IRV-024 rule used request hash
+`d635f6fc4c9e933e20442539c12409fcdc3de3da0938927f6b784c3002550baa`.
+It remains recorded here as migration history, but is no longer executable
+policy because both verifiers accept that graph.
 
 ## Reports, sinks, stages, and privacy
 

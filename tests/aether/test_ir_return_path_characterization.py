@@ -1,4 +1,4 @@
-"""Characterize the current Python IRV-024 recursive approximation."""
+"""Characterize graph-semantic Python IRV-024 verification."""
 
 from __future__ import annotations
 
@@ -41,32 +41,39 @@ def _cycle_module(header: str, *, optional_return: bool) -> IRModule:
     return IRModule([IRFunction("cycle", [condition, value], IntType(), blocks)])
 
 
-@pytest.mark.parametrize("optional_return", [False, True])
 @pytest.mark.parametrize(
-    ("header", "accepted"),
-    [
-        ("cond", True),
-        ("for.cond", True),
-        ("loop", False),
-        ("arbitrary_name", False),
-        ("xyz", False),
-    ],
+    "header",
+    ["cond", "for.cond", "loop", "arbitrary_name", "xyz"],
 )
-def test_python_irv_024_cycle_result_depends_on_revisited_block_name(
+@pytest.mark.parametrize("optional_return", [False, True])
+def test_python_irv_024_cycle_result_is_independent_of_block_name(
     header: str,
-    accepted: bool,
     optional_return: bool,
 ) -> None:
     module = _cycle_module(header, optional_return=optional_return)
 
-    if accepted:
-        assert IRVerifier(module).verify() is module
-    else:
-        with pytest.raises(
-            IRVerificationError,
-            match="may exit without returning a value",
-        ):
-            IRVerifier(module).verify()
+    assert IRVerifier(module).verify() is module
+
+
+def test_python_irv_024_accepts_entry_self_loop() -> None:
+    module = IRModule(
+        [
+            IRFunction(
+                "spin",
+                [],
+                IntType(),
+                [IRBasicBlock("entry", [IRJump("entry")])],
+            )
+        ]
+    )
+
+    assert IRVerifier(module).verify() is module
+
+
+def test_python_irv_024_accepts_infinite_cycle_plus_valued_exit() -> None:
+    module = _cycle_module("arbitrary_header", optional_return=True)
+
+    assert IRVerifier(module).verify() is module
 
 
 @pytest.mark.parametrize("header", ["cond", "for.cond", "loop", "arbitrary_name", "xyz"])
@@ -122,6 +129,21 @@ def _rename_non_entry_blocks(function: IRFunction) -> IRFunction:
     )
 
 
+def _finite_missing_return_function() -> IRFunction:
+    condition = IRParameter("condition", BoolType())
+    value = IRParameter("value", IntType())
+    return IRFunction(
+        "finite_exit",
+        [condition, value],
+        IntType(),
+        [
+            IRBasicBlock("entry", [IRBranch(condition, "valued", "missing")]),
+            IRBasicBlock("valued", [IRReturn(value)]),
+            IRBasicBlock("missing", [IRReturn()]),
+        ],
+    )
+
+
 @pytest.mark.parametrize(
     ("source", "expected_names"),
     [
@@ -157,7 +179,7 @@ int sumTo(int n) {
         ),
     ],
 )
-def test_python_irv_024_accepts_lowering_names_but_rejects_isomorphic_renaming(
+def test_python_irv_024_graph_isomorphism_preserves_accepted_outcome(
     source: str,
     expected_names: list[str],
 ) -> None:
@@ -167,8 +189,44 @@ def test_python_irv_024_accepts_lowering_names_but_rejects_isomorphic_renaming(
     assert IRVerifier(module).verify() is module
 
     renamed = IRModule([_rename_non_entry_blocks(function)])
+    assert IRVerifier(renamed).verify() is renamed
+
+
+def test_python_irv_024_arbitrary_renaming_preserves_rejected_outcome() -> None:
+    function = _finite_missing_return_function()
+
+    for candidate in (function, _rename_non_entry_blocks(function)):
+        with pytest.raises(
+            IRVerificationError,
+            match="Return type mismatch: expected int, got void",
+        ):
+            IRVerifier(IRModule([candidate])).verify()
+
+
+def test_python_irv_024_rejects_reachable_valueless_return() -> None:
+    module = IRModule(
+        [
+            IRFunction(
+                "missing",
+                [],
+                IntType(),
+                [IRBasicBlock("entry", [IRReturn()])],
+            )
+        ]
+    )
+
     with pytest.raises(
         IRVerificationError,
-        match="may exit without returning a value",
+        match="Return type mismatch: expected int, got void",
     ):
-        IRVerifier(renamed).verify()
+        IRVerifier(module).verify()
+
+
+def test_python_irv_024_rejects_finite_missing_return_path() -> None:
+    module = IRModule([_finite_missing_return_function()])
+
+    with pytest.raises(
+        IRVerificationError,
+        match="Return type mismatch: expected int, got void",
+    ):
+        IRVerifier(module).verify()

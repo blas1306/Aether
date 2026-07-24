@@ -2307,51 +2307,26 @@ class IRVerifier:
         if isinstance(function.return_type, VoidType):
             return
 
-        memo: dict[str, bool] = {}
-        if not self._block_returns("entry", blocks, memo, set()):
-            self._fail(
-                f"Function '{function.name}' may exit without returning a value",
-                rule=("IRV-024", VerifierCategory.RETURNS),
-            )
+        visited: set[str] = set()
+        worklist = ["entry"]
+        while worklist:
+            block_name = worklist.pop()
+            if block_name in visited:
+                continue
+            visited.add(block_name)
 
-    def _block_returns(
-        self,
-        block_name: str,
-        blocks: dict[str, IRBasicBlock],
-        memo: dict[str, bool],
-        visiting: set[str],
-    ) -> bool:
-        if block_name in memo:
-            return memo[block_name]
-        if block_name in visiting:
-            # Lowered loops jump back to their condition block; the cycle
-            # itself is not a path that exits the function without returning.
-            return block_name.startswith("cond") or block_name.startswith("for.cond")
+            block = blocks[block_name]
+            terminator = block.instructions[-1]
+            if isinstance(terminator, IRReturn) and terminator.value is None:
+                self._fail(
+                    f"Function '{function.name}' may exit without returning a value",
+                    rule=("IRV-024", VerifierCategory.RETURNS),
+                )
 
-        visiting.add(block_name)
-        terminator = blocks[block_name].instructions[-1]
-        if isinstance(terminator, IRReturn):
-            result = terminator.value is not None
-        elif isinstance(terminator, IRJump):
-            result = self._block_returns(terminator.target, blocks, memo, visiting)
-        elif isinstance(terminator, IRBranch):
-            result = self._block_returns(
-                terminator.true_target,
-                blocks,
-                memo,
-                visiting,
-            ) and self._block_returns(
-                terminator.false_target,
-                blocks,
-                memo,
-                visiting,
-            )
-        else:
-            result = False
-
-        visiting.remove(block_name)
-        memo[block_name] = result
-        return result
+            # Reverse the stable successor order for a LIFO worklist so branch
+            # true targets are visited before false targets, matching the
+            # verifier's retained deterministic traversal convention.
+            worklist.extend(reversed(self._successors(block)))
 
     def _verify_const(self, instruction: IRConst) -> None:
         value = instruction.value

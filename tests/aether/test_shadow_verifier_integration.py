@@ -183,12 +183,44 @@ def test_full_transportable_corpus_shadow_baseline(
     assert len(sink.reports) == 141
     assert counts == Counter(
         {
-            ShadowClassification.MATCH_ACCEPTED: 64,
+            ShadowClassification.MATCH_ACCEPTED: 65,
             ShadowClassification.MATCH_REJECTED_SEMANTIC: 73,
             ShadowClassification.DOCUMENTED_DIAGNOSTIC_DIVERGENCE: 3,
-            ShadowClassification.DOCUMENTED_OUTCOME_DIVERGENCE: 1,
         }
     )
+
+
+def test_irv_024_transport_and_shadow_snapshot_are_deterministic(
+    rust_verifier_executable: Path,
+) -> None:
+    _, entries = _load_manifest(CORPUS_MANIFEST)
+    entry = next(
+        entry for entry in entries if entry.id == "non-void-path-without-return"
+    )
+    [(materialized_entry, module)] = _materialize_modules([entry])
+    client = SubprocessRustVerifierClient(executable=rust_verifier_executable)
+    first_request = build_canonical_rust_verifier_request(module)
+    second_request = build_canonical_rust_verifier_request(module)
+    request_hash = sha256(first_request.payload).hexdigest()
+    snapshots = []
+
+    assert materialized_entry.accepted
+    assert first_request == second_request
+    assert first_request.protocol_version == 1
+    assert first_request.ir_schema_version == 1
+
+    for _attempt in range(2):
+        result, sink = _run(module, client)
+        report = sink.reports[0]
+        assert result is module
+        assert (
+            report.comparison.classification
+            is ShadowClassification.MATCH_ACCEPTED
+        )
+        assert report.metadata.request_sha256 == request_hash
+        snapshots.append(report.semantic_snapshot())
+
+    assert snapshots[0] == snapshots[1]
 
 
 def test_critical_differential_corpus_is_transportable_semantic_and_deterministic(

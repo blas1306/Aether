@@ -123,7 +123,7 @@ With the default Python-authoritative configuration:
   compiler result;
 - Rust failures remain observational;
 - canonical protocol-v1 bytes and SHA-256 request hashes are unchanged;
-- comparison classifications and divergence registry matching are unchanged;
+- comparison and divergence registry policy remain independent of authority;
 - semantic report snapshots are unchanged; and
 - no manifest, diagnostic, exit-code, IR, SSA, LLVM, or native behavior is
   selected by the new configuration.
@@ -138,9 +138,22 @@ A later, separately approved rollout may provide the production Rust client
 and change only `_AUTHORITY_CONFIGURATION` to
 `RUST_AUTHORITY_PYTHON_SHADOW`. Before that change, the authority proposal must
 retain the full migration corpus, fail-closed integration tests, packaging and
-version matching, supported-platform evidence, the reviewed IRV-024 policy,
-and an operational rollback plan.
+version matching, supported-platform evidence, the resolved IRV-024 graph
+semantics, and an operational rollback plan.
 
 Changing authority must not add fallback. Rollback is an explicit deployment
 or source-policy change back to Python authority, never a per-compilation
 retry.
+
+## Phase 4.5C semantic-alignment note
+
+Phase 4.5C changed the Python implementation of IRV-024, not this authority
+policy. The specification review selected Rust's entry-reachable graph walk as
+the reference because IR v1 gives no semantic meaning to `cond`, `for.cond`, or
+any other non-entry label. Python now implements the same property, and the
+former exact outcome-divergence rule has been retired.
+
+`_AUTHORITY_CONFIGURATION` remains `PYTHON_AUTHORITY_RUST_SHADOW`. Python still
+determines the compiler result, Rust still runs only as the observation, both
+outcomes are still compared and reported, and no fallback or rollout behavior
+was added.

@@ -73,6 +73,10 @@ valid_modules:
     test: tests/aether/test_ir_verifier.py::test_verifies_lowered_while_function
     covers: [IRV-018, IRV-020, IRV-021, IRV-024, IRV-035]
 
+  - id: non-void-path-without-return
+    test: tests/aether/test_ir_verifier.py::test_non_void_function_accepts_infinite_cycle_with_valued_exit
+    covers: [IRV-024]
+
   - id: row-vector-construction
     test: tests/aether/test_ir_verifier.py::test_verifies_row_vector_new
     covers: [IRV-107]
@@ -466,13 +470,6 @@ invalid_modules:
     test: tests/aether/test_ir_verifier.py::test_loop_body_must_have_terminator_error
     expected_invariant: IRV-018
     covers: [IRV-018]
-
-  - id: non-void-path-without-return
-    test: tests/aether/test_ir_verifier.py::test_non_void_function_must_return_on_all_paths_error
-    expected_invariant: IRV-024
-    expected_rust_outcome: accepted
-    outcome_divergence: intentional_irv_024_graph_analysis
-    covers: [IRV-024]
 
   - id: division-result-type
     test: tests/aether/test_ir_verifier.py::test_division_result_type_must_match_error

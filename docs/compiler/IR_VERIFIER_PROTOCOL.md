@@ -200,7 +200,7 @@ signals, or forced termination. Library panic behavior is unchanged.
 ## Fixture and corpus boundary
 
 Small checked-in protocol fixtures cover acceptance, semantic rejection,
-IRV-026 storage return, the intentional IRV-024 loop result, malformed JSON,
+IRV-026 storage return, the graph-semantic IRV-024 loop result, malformed JSON,
 both version failures, import failure, invalid operation, and an out-of-range
 integer case that fails at the canonical schema boundary.
 
@@ -217,12 +217,12 @@ separate operations: a future shadow mode must first compare `accepted` versus
 `rejected`, and only then compare invariant IDs when both sides reject.
 Human-readable `message` values are presentation, not semantic identity.
 
-The outcome report retains one known mismatch:
-`non-void-path-without-return` is rejected by Python with IRV-024 and accepted
-by Rust's intentional graph analysis. Manifest schema version 2 records that
-Rust outcome explicitly; it is not an unexpected difference. Of the remaining
-two-sided rejections, 60 have exact first-invariant matches and three have the
-documented diagnostic divergences below.
+This paragraph records the original Phase 4.2A measurement: the outcome report
+then retained one known mismatch, with `non-void-path-without-return` rejected
+by Python under IRV-024 and accepted by Rust's graph analysis. Phase 4.5C
+formally selected that graph behavior and aligned Python. The current 141-case
+transportable corpus has 65 shared acceptances, 73 exact first-invariant
+matches, three documented diagnostic divergences, and no outcome divergences.
 
 Corpus manifest schema version 2 records three explicit diagnostic
 compatibility expectations:

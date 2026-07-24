@@ -301,6 +301,15 @@ def test_documented_registry_requires_hash_context_versions_and_direction() -> N
     ) is None
 
 
+def test_default_registry_has_no_documented_outcome_divergences() -> None:
+    assert len(DEFAULT_SHADOW_DIVERGENCE_REGISTRY.rules) == 3
+    assert all(
+        rule.classification
+        is ShadowClassification.DOCUMENTED_DIAGNOSTIC_DIVERGENCE
+        for rule in DEFAULT_SHADOW_DIVERGENCE_REGISTRY.rules
+    )
+
+
 def test_coordinator_acceptance_returns_python_identity_and_emits_safe_report() -> None:
     module = _accepted_module()
     client = FakeClient(RustVerifierAcceptedOutcome())

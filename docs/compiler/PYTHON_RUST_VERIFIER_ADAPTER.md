@@ -249,14 +249,19 @@ cd ..
 That suite checks real acceptance, rejection, protocol import error,
 determinism, empty normal stderr, and all 141 schema-v1-transportable manifest
 cases through both the compatibility API and the neutral subprocess client.
-Both paths produce 64 accepted cases, 73 exact diagnostic matches, three
-documented diagnostic divergences, one documented outcome mismatch, and no
+Both paths produce 65 accepted cases, 73 exact diagnostic matches, three
+documented diagnostic divergences, zero documented outcome mismatches, and no
 unexpected divergence, adapter failure, protocol error, or neutral
 infrastructure failure. The two DTO-boundary cases remain explicit and are
 asserted to fail canonical materialization rather than being silently skipped.
 The Phase 4.5A critical subset adds 13 exact first-invariant matches and is
 also checked independently for schema-v1 transport, request-hash determinism,
 semantic-snapshot determinism, and shadow classification.
+
+Phase 4.5C aligned Python IRV-024 with Rust's entry-reachable graph semantics.
+The retained `non-void-path-without-return` case therefore moved from a
+documented Python-rejected/Rust-accepted result to ordinary acceptance parity;
+the adapter, protocol, and authority selection did not change.
 
 ## Production boundary and next phase
 

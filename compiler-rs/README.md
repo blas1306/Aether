@@ -282,12 +282,13 @@ reserved `entry` label are identifiers only; `cond`, `for.cond`, and arbitrary
 bijections of non-entry labels have identical semantics. A LIFO worklist visits
 true before false targets for deterministic diagnostics.
 
-Python's `_block_returns` is a recursive syntactic approximation, not a
-mathematical all-path analysis. On a back-edge it returns true only when the
-revisited block starts with `cond` or `for.cond`, making normal lowered loops
-accepted but isomorphic renamed loops rejected. The Rust pass does not preserve
-that nominal implementation bug because the IR label contract assigns no
-semantics to those prefixes.
+At the time Step 3E.1 was implemented, Python's `_block_returns` was a recursive
+syntactic approximation rather than a mathematical all-path analysis. On a
+back-edge it returned true only when the revisited block started with `cond` or
+`for.cond`, making normal lowered loops accepted but isomorphic renamed loops
+rejected. The Rust pass did not preserve that nominal implementation bug
+because the IR label contract assigns no semantics to those prefixes. Phase
+4.5C subsequently aligned Python to this graph behavior.
 
 Typed failures are `ModuleReturnVerificationError`,
 `FunctionReturnVerificationError`, and `ReturnPathRuleError`. They report a
@@ -558,12 +559,12 @@ The complete wire contract and discovery boundary are documented in
 compiler selection, CLI option, shadow mode, packaging discovery, or PyO3
 binding is implemented in Phase 4.2A.
 
-After the Phase 4.5A corpus extension, the 141 schema-v1-compatible migration
-cases have no unexpected
-acceptance/rejection difference. The outcome report retains the known
-`non-void-path-without-return` Python-IRV-024/Rust-accepted result. Exact
-first-invariant parity is intentionally not universal: the corpus manifest
-records `undefined-slot` as the known
+After the Phase 4.5C IRV-024 alignment, the 141 schema-v1-compatible migration
+cases have no acceptance/rejection differences: 65 are accepted by both.
+The former `non-void-path-without-return` Python-IRV-024/Rust-accepted result
+is retained as an ordinary accepted corpus case and no outcome-divergence rule
+remains. Exact first-invariant parity is intentionally not universal: the
+corpus manifest records `undefined-slot` as the known
 IRV-031/IRV-032 representation/import-model difference,
 `return-storage-after-move` as the valid IRV-050/IRV-026 first-failure ordering
 difference, and `inconsistent-branch-initialization` as the known

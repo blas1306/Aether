@@ -29,15 +29,16 @@ The three explicit compatibility expectations are:
 These cases are not one collective class of fail-fast ordering differences and
 must not be silently ignored.
 
-Outcome expectations are independent. `non-void-path-without-return` explicitly
-records the previously documented IRV-024 graph-analysis result: Python rejects
-with IRV-024 and Rust accepts. It is a known outcome mismatch, not an unexpected
-parity regression.
+Phase 4.5C resolved the former outcome expectation for
+`non-void-path-without-return`. Python now applies the same entry-reachable graph
+semantics as Rust, so the case remains in the corpus as accepted history and is
+classified `MATCH_ACCEPTED`; its old
+`intentional_irv_024_graph_analysis` manifest exception was removed.
 
-The current run over the 141 schema-v1-transportable cases reports 64
-accepted by both, one known outcome mismatch, 73 exact first-invariant matches,
-three documented diagnostic divergences, and zero unexpected diagnostic
-divergences. Acceptance/rejection parity has no unexpected differences.
+The current run over the 141 schema-v1-transportable cases reports 65 accepted
+by both, 73 exact first-invariant matches, three documented diagnostic
+divergences, zero documented outcome divergences, and zero unexpected
+divergences.
 
 Phase 4.5A adds the 13-case critical differential subset documented in
 [`CRITICAL_DIFFERENTIAL_CORPUS.md`](CRITICAL_DIFFERENTIAL_CORPUS.md). Those

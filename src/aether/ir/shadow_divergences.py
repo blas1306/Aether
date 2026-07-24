@@ -190,20 +190,6 @@ DEFAULT_SHADOW_DIVERGENCE_REGISTRY = ExactShadowDivergenceRegistry(
                 ShadowClassification.DOCUMENTED_DIAGNOSTIC_DIVERGENCE
             ),
         ),
-        ShadowDivergenceRule(
-            rule_id="non-void-path-without-return-graph-analysis",
-            request_sha256=(
-                "d635f6fc4c9e933e20442539c12409fc"
-                "dc3de3da0938927f6b784c3002550baa"
-            ),
-            expected_python_key=_python_rejection(
-                "IRV-024", VerifierCategory.RETURNS
-            ),
-            expected_rust_key=("accepted",),
-            protocol_version=1,
-            ir_schema_version=1,
-            classification=ShadowClassification.DOCUMENTED_OUTCOME_DIVERGENCE,
-        ),
     )
 )
 

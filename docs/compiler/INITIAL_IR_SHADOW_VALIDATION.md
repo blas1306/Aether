@@ -1,5 +1,9 @@
 # Initial IR Shadow Validation — Phase 4.4
 
+> Historical baseline: Phase 4.5C subsequently resolved the IRV-024 blocker
+> identified in this report by aligning Python with Rust's graph semantics.
+> The Phase 4.4 measurements below are preserved rather than rewritten.
+
 ## Scope and conclusion
 
 Phase 4.4 was run from repository revision `c52fa68` on 2026-07-24 with
@@ -479,3 +483,7 @@ should not yet make Rust authoritative: first resolve or deliberately retain
 IRV-024 with an authority policy, enrich Python structural context or define a
 reviewed equivalence contract, close priority invariant/feature gaps, and
 collect longer multi-platform real-program evidence.
+
+Phase 4.5C resolution: IRV-024 is now aligned and has zero documented outcome
+divergences. This resolves only that historical blocker; it does not itself
+change authority or satisfy the other operational evidence listed above.

@@ -44,7 +44,7 @@ def test_manifest_has_only_the_three_explicit_diagnostic_divergences() -> None:
     assert documented == KNOWN_PAIRS
 
 
-def test_manifest_keeps_the_intentional_irv_024_outcome_mismatch_explicit() -> None:
+def test_manifest_has_no_documented_outcome_divergences() -> None:
     _, entries = _load_manifest(CORPUS_MANIFEST)
     documented = {
         entry.id: (entry.expected_rust_outcome, entry.outcome_divergence)
@@ -52,12 +52,15 @@ def test_manifest_keeps_the_intentional_irv_024_outcome_mismatch_explicit() -> N
         if entry.outcome_divergence is not None
     }
 
-    assert documented == {
-        "non-void-path-without-return": (
-            "accepted",
-            "intentional_irv_024_graph_analysis",
-        )
-    }
+    assert documented == {}
+    irv_024 = next(
+        entry for entry in entries if entry.id == "non-void-path-without-return"
+    )
+    assert irv_024.accepted
+    assert irv_024.expected_invariant is None
+    assert irv_024.expected_rust_outcome is None
+    assert irv_024.outcome_divergence is None
+    assert "IRV-024" in irv_024.covers
 
 
 def test_manifest_has_exactly_one_critical_case_per_phase_4_5a_blocker() -> None:

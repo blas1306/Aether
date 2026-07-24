@@ -73,7 +73,7 @@ KNOWN_DIAGNOSTIC_DIVERGENCES = frozenset(
         "lifecycle_dataflow_semantics",
     }
 )
-KNOWN_OUTCOME_DIVERGENCES = frozenset({"intentional_irv_024_graph_analysis"})
+KNOWN_OUTCOME_DIVERGENCES: frozenset[str] = frozenset()
 _INVARIANT_ID = re.compile(r"IRV-[0-9]{3}")
 
 

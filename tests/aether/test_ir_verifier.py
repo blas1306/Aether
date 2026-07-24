@@ -1380,7 +1380,7 @@ def test_loop_body_must_have_terminator_error() -> None:
     )
 
 
-def test_non_void_function_must_return_on_all_paths_error() -> None:
+def test_non_void_function_accepts_infinite_cycle_with_valued_exit() -> None:
     condition = IRParameter("condition", BoolType())
     value = IRValue("0", IntType())
     module = IRModule(
@@ -1398,10 +1398,7 @@ def test_non_void_function_must_return_on_all_paths_error() -> None:
         ]
     )
 
-    _assert_verification_error(
-        module,
-        "Function 'choose' may exit without returning a value",
-    )
+    assert IRVerifier(module).verify() is module
 
 
 def test_division_result_type_must_match_error() -> None:

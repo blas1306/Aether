@@ -55,6 +55,10 @@ comparison.
 
 Current compiler-design documents:
 
+- [IRV_024_SEMANTIC_ALIGNMENT.md](IRV_024_SEMANTIC_ALIGNMENT.md):
+  Phase 4.5C specification decision, Python graph-semantics alignment,
+  regression/corpus changes, historical divergence retirement, and validation
+  boundary.
 - [INITIAL_IR_VERIFIER_AUTHORITY.md](INITIAL_IR_VERIFIER_AUTHORITY.md):
   Phase 4.5B closed authority configuration, dual-verifier execution pipeline,
   explicit authority/shadow/comparison results, fail-closed behavior, stable

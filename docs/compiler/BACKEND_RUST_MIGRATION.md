@@ -2544,3 +2544,42 @@ A future shadow mode must compare outcomes before diagnostics, compare stable
 invariant IDs rather than messages, and report exact matches, these exact
 documented pairs, other diagnostic divergences, and outcome mismatches
 separately. The three pairs are explicit expectations, not suppression rules.
+
+## 24. Phase 4.5C: IRV-024 semantic alignment
+
+Phase 4.5C formally resolves the only remaining documented semantic outcome
+divergence. The invariant review confirmed that IR v1 reserves only the
+`entry` block name. Other labels are identifiers used by jumps and branches;
+lowering conventions such as `cond0` and `for.cond0` do not carry language or
+IR semantics. Therefore a verifier result that changes under a bijective
+renaming of non-entry blocks is specification-incorrect.
+
+Rust's IRV-024 pass was selected as the reference implementation because it
+performs the intended entry-rooted graph traversal. It visits each reachable
+block once, treats cycles as non-exiting paths, rejects reachable valueless
+returns, and excludes unreachable regions from the return-path obligation.
+Python's historical recursive visiting-set heuristic instead accepted a
+back-edge only for selected block-name prefixes. That behavior was an
+implementation defect, not compatibility policy.
+
+Python now uses a visited-set worklist over CFG successors. The retained
+true-before-false traversal convention keeps deterministic failure selection,
+while arbitrary block renaming, entry self-loops, pure cycles, and cycles with
+optional valued exits no longer create false missing-return failures. IRV-025
+continues to own return operand presence and type checking, including the
+independent local validation applied to retained unreachable blocks.
+
+The existing `non-void-path-without-return` module remains in the migration
+corpus to preserve history, but it moved from the invalid list to the valid
+list and now classifies `MATCH_ACCEPTED`. The
+`intentional_irv_024_graph_analysis` manifest exception and its exact
+hash-scoped shadow rule were removed. The current 141 transportable cases have
+65 shared acceptances, 73 exact rejection diagnostics, three unchanged
+documented diagnostic divergences, zero documented outcome divergences, and
+zero unexpected divergences.
+
+This is specification alignment, not an authority transition. Python remains
+authoritative through the centralized Phase 4.5B configuration, Rust remains
+the always-executed observation when the dual-verifier pipeline is supplied,
+and no protocol, DTO, fallback, rollout, PyO3, or verifier-selection behavior
+changed.
