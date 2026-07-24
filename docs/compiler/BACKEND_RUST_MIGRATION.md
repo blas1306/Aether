@@ -2488,3 +2488,59 @@ must define and version the request and response protocol, map every
 protocol-exposed failure without an invariant gap, add canonical JSON transport
 fixtures, and test cross-language first-failure behavior for multi-invalid
 modules.
+
+## 23. Phase 4.2A implementation status
+
+Phase 4.2A adds the isolated `aether-ir-verifier` Cargo package and executable.
+Protocol version 1 accepts exactly one strict UTF-8 JSON request on stdin:
+`protocol_version: 1`, `operation: "verify"`, and the existing canonical
+`IRModuleDTO` as `module`. Because that DTO already contains
+`schema_version: 1`, the outer request deliberately does not duplicate the IR
+schema version. The binary imports through `aether_ir::import_module` and calls
+only `aether_verifier::verify_module`; it does not orchestrate passes.
+
+One compact JSON response plus a newline is emitted on stdout. `accepted` and
+`rejected` are semantic outcomes; `error` distinguishes empty/malformed input,
+request shape, protocol version, IR schema version, operation, module schema,
+owned-IR import, diagnostic normalization, stdin I/O, and internal unwind
+failure. All status, phase, category, instruction-kind, and error-kind
+spellings are explicit protocol mappings. Semantic rejection requires an
+invariant ID. An absent invariant or unknown future phase/category becomes a
+normalization error instead of an ordinary rejection.
+
+Exit code 0 means a structured response was emitted, including `rejected` and
+recoverable `error` responses. Nonzero is reserved for failure to serialize or
+write a response. The outer binary catches unwind panics with the default panic
+hook suppressed and emits a stable internal error; aborts and signals retain
+normal process behavior. Tests invoke the real binary, require empty stderr,
+lock exact accepted bytes and wire spellings, cover protocol/schema/import and
+semantic fixtures, and compare repeated stdout byte for byte.
+
+The detailed contract is
+[IR_VERIFIER_PROTOCOL.md](IR_VERIFIER_PROTOCOL.md). Python subprocess
+invocation, compiler/CLI verifier selection, shadow mode, installed-artifact
+discovery, packaging changes, and PyO3 remain explicitly outside Phase 4.2A.
+Phase 4.2B is the Python subprocess adapter consuming this boundary.
+
+The Phase 4.2A corpus follow-up confirms no unexpected acceptance/rejection
+difference across all 128 schema-v1-compatible cases. The outcome report keeps
+the known `non-void-path-without-return` Python-IRV-024/Rust-accepted graph
+analysis result explicit. Exact first-invariant parity is intentionally not
+universal. Manifest schema version 2 records three compatibility pairs rather
+than treating them collectively as fail-fast ordering:
+
+- `return-storage-after-move`: Python IRV-050 / Rust IRV-026 is a
+  first-failure ordering difference; both rules and the shared rejection are
+  valid;
+- `undefined-slot`: Python IRV-031 / Rust IRV-032 is the previously documented
+  representation/import-model difference because the Rust import normalizes
+  the load slot as storage and reports it uninitialized;
+- `inconsistent-branch-initialization`: Python IRV-036 / Rust IRV-028 is the
+  previously documented lifecycle-dataflow improvement: Rust retains possible
+  merge states and permits a later total transfer to repair them, while Python
+  rejects the divergence immediately.
+
+A future shadow mode must compare outcomes before diagnostics, compare stable
+invariant IDs rather than messages, and report exact matches, these exact
+documented pairs, other diagnostic divergences, and outcome mismatches
+separately. The three pairs are explicit expectations, not suppression rules.

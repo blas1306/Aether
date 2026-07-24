@@ -11,6 +11,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "aether-ir-verifier"
+version = "0.0.0"
+dependencies = [
+ "aether-ir",
+ "aether-verifier",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "aether-python"
 version = "0.0.0"
 

@@ -64,7 +64,8 @@ impl Error for IRModuleJsonImportError {
 /// structural ingestion boundary only: it does not run the semantic verifier,
 /// construct a CFG, or enter the compiler pipeline.
 pub fn import_module_json(json: &str) -> Result<IRModule, IRModuleJsonImportError> {
-    let value = parse_strict_json(json)?;
+    let value =
+        parse_strict_json_value(json).map_err(|source| IRModuleJsonImportError::Json { source })?;
 
     if let Some(received) = value
         .as_object()
@@ -85,13 +86,14 @@ pub fn import_module_json(json: &str) -> Result<IRModule, IRModuleJsonImportErro
     import_module(&dto).map_err(|source| IRModuleJsonImportError::Import { source })
 }
 
-fn parse_strict_json(json: &str) -> Result<Value, IRModuleJsonImportError> {
+/// Parse exactly one standard JSON value while rejecting duplicate object keys.
+///
+/// This shared parser is useful for versioned envelopes that contain the
+/// canonical module DTO. It performs no IR schema decoding or importing.
+pub fn parse_strict_json_value(json: &str) -> Result<Value, serde_json::Error> {
     let mut deserializer = serde_json::Deserializer::from_str(json);
-    let value = StrictJsonValue::deserialize(&mut deserializer)
-        .map_err(|source| IRModuleJsonImportError::Json { source })?;
-    deserializer
-        .end()
-        .map_err(|source| IRModuleJsonImportError::Json { source })?;
+    let value = StrictJsonValue::deserialize(&mut deserializer)?;
+    deserializer.end()?;
     Ok(value.0)
 }
 

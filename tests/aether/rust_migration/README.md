@@ -5,7 +5,7 @@ Aether IR modules. It is an index over existing Python tests, not a second set
 of semantic fixtures. The referenced tests remain the owners of their source
 programs and hand-built `IRModule` objects.
 
-`manifest.yaml` has two top-level corpus lists:
+`manifest.yaml` schema version 2 has two top-level corpus lists:
 
 - `valid_modules` identifies modules accepted by the Python `IRVerifier`;
 - `invalid_modules` identifies modules rejected by it and records the expected
@@ -13,8 +13,31 @@ programs and hand-built `IRModule` objects.
 
 The `covers` values name the rules that a case deliberately exercises. They do
 not claim every prerequisite traversed while verifying the module. For an
-invalid entry, `expected_invariant` is the first failure expected after outcome
-normalization and is also present in `covers`.
+invalid entry, `expected_invariant` is the Python first failure after
+normalization and is also present in `covers`. The Rust expectation is the same
+unless the entry explicitly supplies `expected_rust_invariant` and a typed
+`diagnostic_divergence`.
+
+The three explicit compatibility expectations are:
+
+| Case | Python | Rust | Classification | Meaning |
+| --- | --- | --- | --- | --- |
+| `return-storage-after-move` | IRV-050 | IRV-026 | `first_failure_ordering` | Both rules apply and both implementations reject; only the valid first failure differs. |
+| `undefined-slot` | IRV-031 | IRV-032 | `representation_import_model` | Rust imports the load slot into its normalized storage model and reports uninitialized storage. This is the previously documented intentional IRV-031 representation difference. |
+| `inconsistent-branch-initialization` | IRV-036 | IRV-028 | `lifecycle_dataflow_semantics` | Rust preserves possible merge states and permits a later total transfer to repair them, while Python rejects the divergence immediately. This is the previously documented IRV-036 improvement. |
+
+These cases are not one collective class of fail-fast ordering differences and
+must not be silently ignored.
+
+Outcome expectations are independent. `non-void-path-without-return` explicitly
+records the previously documented IRV-024 graph-analysis result: Python rejects
+with IRV-024 and Rust accepts. It is a known outcome mismatch, not an unexpected
+parity regression.
+
+The Phase 4.2A run over the 128 schema-v1-transportable cases reports 64
+accepted by both, one known outcome mismatch, 60 exact first-invariant matches,
+three documented diagnostic divergences, and zero unexpected diagnostic
+divergences. Acceptance/rejection parity has no unexpected differences.
 
 ## Reference contract
 
@@ -48,12 +71,21 @@ Once the versioned ModuleDTO adapter exists, the differential harness will:
    adapter;
 3. run the Python verifier and Rust verifier independently on equivalent owned
    input;
-4. normalize acceptance or ordered invariant IDs, locations, and structured
-   diagnostic fields;
-5. require valid entries to be accepted by both implementations and invalid
-   entries to be rejected first with `expected_invariant`;
-6. report a mismatch with the manifest `id`, schema version, and the smallest
+4. compare acceptance/rejection before inspecting diagnostics;
+5. for two rejections, compare stable invariant IDs against the Python and Rust
+   expectations without using diagnostic messages as semantic identity;
+6. classify each comparison as an outcome mismatch, exact diagnostic match,
+   documented diagnostic divergence, or unexpected diagnostic divergence;
+7. report a mismatch with the manifest `id`, schema version, and the smallest
    available serialized reproduction.
+
+A diagnostic divergence is documented only when the observed ordered pair
+exactly equals `expected_invariant` and `expected_rust_invariant`. A different
+pair is unexpected even for a case that has a documented divergence. When both
+implementations accept, outcome parity is recorded and no rejection diagnostic
+is compared. An outcome mismatch remains visible in the outcome report even
+when `expected_rust_outcome` and `outcome_divergence` make it a known
+compatibility expectation.
 
 The capture step is transitional. When a stable checked-in DTO snapshot is
 useful, an entry may gain a snapshot reference while retaining `test` as its

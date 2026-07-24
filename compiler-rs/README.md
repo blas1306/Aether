@@ -26,6 +26,10 @@ compiler remains entirely on its existing Python path.
   escape, and mutation-receiver parity for IRV-037–042, and rejects storage
   return operands under IRV-026. Phi semantics, cleanup insertion, and
   optimization verification remain outside these passes.
+- `aether-ir-verifier` provides protocol v1 and the standalone
+  `aether-ir-verifier` stdin/stdout executable. It embeds the existing
+  schema-v1 module DTO, imports the owned IR, and calls only the combined
+  verifier API. It is not connected to the Python compiler.
 - `aether-python` will provide the eventual Python integration boundary. It does
   not contain PyO3 bindings or compiler integration yet.
 
@@ -519,3 +523,50 @@ No compiler integration or transport is part of Phase 4.1. The API is intended
 to be consumed later by a subprocess protocol, a PyO3 adapter, and shadow-mode
 comparison, but none of those consumers exists yet. Python remains the
 production verifier, and no CLI/configuration behavior changes.
+
+## Phase 4.2A: versioned protocol and standalone executable
+
+The `aether-ir-verifier` package produces an executable of the same name.
+Protocol version 1 reads exactly one JSON request from stdin and writes exactly
+one compact JSON response plus a newline to stdout. The request fields are
+`protocol_version`, `operation: "verify"`, and `module`. The embedded module is
+the existing `IRModuleDTO` and carries its own `schema_version: 1`; the outer
+envelope does not duplicate the IR schema version.
+
+The response statuses are `accepted`, `rejected`, and `error`. Semantic
+rejections carry explicit phase, category, `IRV-NNN`, deterministic message,
+and nullable function/block/instruction context. Protocol-exposed phases,
+categories, instruction kinds, statuses, and infrastructure error kinds use
+explicit mappings rather than Rust enum formatting. A missing invariant or
+unknown future diagnostic classification becomes a `normalization` error.
+
+Exit code 0 means one valid response was emitted, including semantic rejection
+and recoverable infrastructure errors. Nonzero is reserved for inability to
+serialize or write that response. The outer executable catches unwind panics
+and emits a stable `internal` error without a panic payload; library panic
+behavior is unchanged.
+
+Build with:
+
+```console
+cargo build -p aether-ir-verifier
+cargo build --release -p aether-ir-verifier
+```
+
+The complete wire contract and discovery boundary are documented in
+`../docs/compiler/IR_VERIFIER_PROTOCOL.md`. No Python subprocess invocation,
+compiler selection, CLI option, shadow mode, packaging discovery, or PyO3
+binding is implemented in Phase 4.2A.
+
+The 128 schema-v1-compatible migration cases have no unexpected
+acceptance/rejection difference. The outcome report retains the known
+`non-void-path-without-return` Python-IRV-024/Rust-accepted result. Exact
+first-invariant parity is intentionally not universal: the corpus manifest
+records `undefined-slot` as the known
+IRV-031/IRV-032 representation/import-model difference,
+`return-storage-after-move` as the valid IRV-050/IRV-026 first-failure ordering
+difference, and `inconsistent-branch-initialization` as the known
+IRV-036/IRV-028 lifecycle-dataflow improvement. Future shadow comparison must
+compare outcomes separately from invariant IDs, must not use messages as
+semantic identity, and must surface any pair other than these exact
+expectations as unexpected.

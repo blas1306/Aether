@@ -10,6 +10,7 @@ import statistics
 import sys
 from collections import defaultdict
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from time import perf_counter_ns
 from typing import Callable, Sequence
@@ -34,6 +35,52 @@ class CorpusEntry:
     accepted: bool
     parameter_case: int = 1
     verifier_invocation: int = 1
+    expected_invariant: str | None = None
+    expected_rust_invariant: str | None = None
+    diagnostic_divergence: str | None = None
+    expected_rust_outcome: str | None = None
+    outcome_divergence: str | None = None
+
+
+class CorpusComparison(str, Enum):
+    OUTCOME_MISMATCH = "outcome_mismatch"
+    EXACT_DIAGNOSTIC_MATCH = "exact_diagnostic_match"
+    DOCUMENTED_DIAGNOSTIC_DIVERGENCE = "documented_diagnostic_divergence"
+    UNEXPECTED_DIAGNOSTIC_DIVERGENCE = "unexpected_diagnostic_divergence"
+
+
+KNOWN_DIAGNOSTIC_DIVERGENCES = frozenset(
+    {
+        "first_failure_ordering",
+        "representation_import_model",
+        "lifecycle_dataflow_semantics",
+    }
+)
+KNOWN_OUTCOME_DIVERGENCES = frozenset({"intentional_irv_024_graph_analysis"})
+
+
+def compare_verifier_observations(
+    entry: CorpusEntry,
+    *,
+    python_accepted: bool,
+    python_invariant: str | None,
+    rust_accepted: bool,
+    rust_invariant: str | None,
+) -> CorpusComparison | None:
+    """Compare outcomes first, then stable first-invariant IDs for rejections."""
+    if python_accepted != rust_accepted:
+        return CorpusComparison.OUTCOME_MISMATCH
+    if python_accepted:
+        return None
+    if python_invariant == rust_invariant:
+        return CorpusComparison.EXACT_DIAGNOSTIC_MATCH
+    if (
+        entry.diagnostic_divergence is not None
+        and python_invariant == entry.expected_invariant
+        and rust_invariant == entry.expected_rust_invariant
+    ):
+        return CorpusComparison.DOCUMENTED_DIAGNOSTIC_DIVERGENCE
+    return CorpusComparison.UNEXPECTED_DIAGNOSTIC_DIVERGENCE
 
 
 def _positive_int(value: str) -> int:
@@ -70,11 +117,50 @@ def _load_manifest(path: Path) -> tuple[int, list[CorpusEntry]]:
                 accepted=accepted,
                 parameter_case=int(current.get("parameter_case", "1")),
                 verifier_invocation=int(current.get("verifier_invocation", "1")),
+                expected_invariant=current.get("expected_invariant"),
+                expected_rust_invariant=current.get("expected_rust_invariant"),
+                diagnostic_divergence=current.get("diagnostic_divergence"),
+                expected_rust_outcome=current.get("expected_rust_outcome"),
+                outcome_divergence=current.get("outcome_divergence"),
             )
         except (KeyError, ValueError) as error:
             raise ValueError(f"Malformed corpus entry: {current}") from error
         if entry.parameter_case < 1 or entry.verifier_invocation < 1:
             raise ValueError(f"Corpus ordinals must be positive for {entry.id}")
+        if entry.accepted and entry.expected_invariant is not None:
+            raise ValueError(f"Valid corpus entry {entry.id} has a rejection expectation")
+        if not entry.accepted and entry.expected_invariant is None:
+            raise ValueError(f"Invalid corpus entry {entry.id} has no Python invariant")
+        if (entry.expected_rust_invariant is None) != (entry.diagnostic_divergence is None):
+            raise ValueError(
+                f"Corpus entry {entry.id} must define both Rust invariant and divergence kind"
+            )
+        if entry.diagnostic_divergence not in KNOWN_DIAGNOSTIC_DIVERGENCES | {None}:
+            raise ValueError(
+                f"Corpus entry {entry.id} has unknown diagnostic divergence "
+                f"{entry.diagnostic_divergence!r}"
+            )
+        if (
+            entry.expected_rust_invariant is not None
+            and entry.expected_rust_invariant == entry.expected_invariant
+        ):
+            raise ValueError(f"Corpus entry {entry.id} documents an exact diagnostic as divergent")
+        if (entry.expected_rust_outcome is None) != (entry.outcome_divergence is None):
+            raise ValueError(
+                f"Corpus entry {entry.id} must define both Rust outcome and divergence kind"
+            )
+        if entry.expected_rust_outcome not in {None, "accepted", "rejected"}:
+            raise ValueError(
+                f"Corpus entry {entry.id} has unknown Rust outcome "
+                f"{entry.expected_rust_outcome!r}"
+            )
+        if entry.outcome_divergence not in KNOWN_OUTCOME_DIVERGENCES | {None}:
+            raise ValueError(
+                f"Corpus entry {entry.id} has unknown outcome divergence "
+                f"{entry.outcome_divergence!r}"
+            )
+        if entry.expected_rust_outcome == ("accepted" if entry.accepted else "rejected"):
+            raise ValueError(f"Corpus entry {entry.id} documents matching outcomes as divergent")
         entries.append(entry)
         current = None
 
@@ -99,7 +185,16 @@ def _load_manifest(path: Path) -> tuple[int, list[CorpusEntry]]:
             continue
         if current is not None and raw_line.startswith("    "):
             key, separator, value = line.partition(":")
-            if separator and key in {"test", "parameter_case", "verifier_invocation"}:
+            if separator and key in {
+                "test",
+                "parameter_case",
+                "verifier_invocation",
+                "expected_invariant",
+                "expected_rust_invariant",
+                "diagnostic_divergence",
+                "expected_rust_outcome",
+                "outcome_divergence",
+            }:
                 current[key] = value.strip()
 
     finish_entry()

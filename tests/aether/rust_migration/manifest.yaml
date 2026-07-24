@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 corpus: aether-ir-verifier
 invariant_catalog: docs/compiler/IR_VERIFIER_INVARIANTS.md
 
@@ -358,6 +358,8 @@ invalid_modules:
   - id: undefined-slot
     test: tests/aether/test_ir_verifier.py::test_undefined_slot_error
     expected_invariant: IRV-031
+    expected_rust_invariant: IRV-032
+    diagnostic_divergence: representation_import_model
     covers: [IRV-031]
 
   - id: load-before-store
@@ -468,6 +470,8 @@ invalid_modules:
   - id: non-void-path-without-return
     test: tests/aether/test_ir_verifier.py::test_non_void_function_must_return_on_all_paths_error
     expected_invariant: IRV-024
+    expected_rust_outcome: accepted
+    outcome_divergence: intentional_irv_024_graph_analysis
     covers: [IRV-024]
 
   - id: division-result-type
@@ -482,17 +486,17 @@ invalid_modules:
 
   - id: copy-init-live-destination
     test: tests/aether/test_ir_lifecycle.py::test_copy_init_rejects_live_destination
-    expected_invariant: IRV-045
+    expected_invariant: IRV-050
     covers: [IRV-045, IRV-050]
 
   - id: assign-uninitialized-destination
     test: tests/aether/test_ir_lifecycle.py::test_assign_rejects_uninitialized_destination
-    expected_invariant: IRV-047
+    expected_invariant: IRV-050
     covers: [IRV-047, IRV-050]
 
   - id: double-destroy
     test: tests/aether/test_ir_lifecycle.py::test_double_destroy_is_rejected
-    expected_invariant: IRV-048
+    expected_invariant: IRV-050
     covers: [IRV-048, IRV-050]
 
   - id: load-after-destroy
@@ -510,12 +514,14 @@ invalid_modules:
     test: tests/aether/test_ir_lifecycle.py::test_load_and_destroy_after_move_are_rejected
     verifier_invocation: 2
     expected_invariant: IRV-050
+    expected_rust_invariant: IRV-026
+    diagnostic_divergence: first_failure_ordering
     covers: [IRV-050]
 
   - id: destroy-after-move
     test: tests/aether/test_ir_lifecycle.py::test_load_and_destroy_after_move_are_rejected
     verifier_invocation: 3
-    expected_invariant: IRV-048
+    expected_invariant: IRV-050
     covers: [IRV-048, IRV-050]
 
   - id: missing-lifecycle-cleanup
@@ -526,6 +532,8 @@ invalid_modules:
   - id: inconsistent-branch-initialization
     test: tests/aether/test_ir_lifecycle.py::test_inconsistent_branch_initialization_is_rejected
     expected_invariant: IRV-036
+    expected_rust_invariant: IRV-028
+    diagnostic_divergence: lifecycle_dataflow_semantics
     covers: [IRV-036]
 
   - id: relocate-non-relocatable

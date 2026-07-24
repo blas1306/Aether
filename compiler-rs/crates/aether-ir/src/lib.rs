@@ -26,7 +26,7 @@ pub use importer::{
     import_source_location, import_storage, import_struct_definition, import_type, import_value,
 };
 pub use instruction::IRInstruction;
-pub use json::{IRModuleJsonImportError, import_module_json};
+pub use json::{IRModuleJsonImportError, import_module_json, parse_strict_json_value};
 pub use module::IRModule;
 pub use source::IRSourceLocation;
 pub use structure::IRStructDefinition;

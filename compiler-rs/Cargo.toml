@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/aether-ir",
+    "crates/aether-ir-verifier",
     "crates/aether-python",
     "crates/aether-verifier",
 ]
