@@ -7,8 +7,12 @@ import pytest
 
 from aether.errors import AetherRuntimeError
 from aether.ir import (
+    AuthorityResult,
+    AuthoritativeVerifierRejected,
+    AuthoritativeVerifierUnavailable,
     CanonicalRustVerifierRequest,
     CollectingShadowReportSink,
+    ComparisonResult,
     ExactShadowDivergenceRegistry,
     IRBasicBlock,
     IRFunction,
@@ -25,6 +29,7 @@ from aether.ir import (
     RustVerifierInvocationMetadata,
     RustVerifierNormalizedDiagnostic,
     RustVerifierPhase,
+    RustVerifierProcessFailure,
     RustVerifierRejectedOutcome,
     RustVerifierRequestConstructionError,
     RustVerifierTimeout,
@@ -35,8 +40,13 @@ from aether.ir import (
     ShadowRustIntegrationFailure,
     ShadowRustRejected,
     ShadowRustSkipped,
+    ShadowResult,
     ShadowVerificationStage,
     ShadowVerifierCoordinator,
+    VerifierAuthorityConfiguration,
+    VerifierAuthorityMode,
+    VerifierAuthorityPipeline,
+    VerifierImplementation,
     VerifierCategory,
     VoidType,
     compare_shadow_outcomes,
@@ -310,6 +320,224 @@ def test_coordinator_acceptance_returns_python_identity_and_emits_safe_report() 
     assert "payload" not in repr(report)
     with pytest.raises(FrozenInstanceError):
         report.comparison.reason = "changed"  # type: ignore[misc]
+
+
+def test_default_authority_configuration_is_closed_and_python_authoritative() -> None:
+    pipeline = VerifierAuthorityPipeline(
+        client=FakeClient(RustVerifierAcceptedOutcome())
+    )
+    configuration = pipeline.configuration
+
+    assert configuration.mode is VerifierAuthorityMode.PYTHON_AUTHORITY_RUST_SHADOW
+    assert configuration.authority is VerifierImplementation.PYTHON
+    assert configuration.shadow is VerifierImplementation.RUST
+    with pytest.raises(TypeError, match="VerifierAuthorityMode"):
+        VerifierAuthorityConfiguration("python")  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="Python result"):
+        AuthorityResult(
+            VerifierImplementation.PYTHON,
+            ShadowRustAccepted(),
+        )
+
+
+def test_internal_authority_flag_is_the_pipeline_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import aether.ir.shadow_verifier as shadow_module
+
+    rust_authority = VerifierAuthorityConfiguration(
+        VerifierAuthorityMode.RUST_AUTHORITY_PYTHON_SHADOW
+    )
+    monkeypatch.setattr(
+        shadow_module,
+        "_AUTHORITY_CONFIGURATION",
+        rust_authority,
+    )
+    pipeline = VerifierAuthorityPipeline(
+        client=FakeClient(RustVerifierAcceptedOutcome())
+    )
+
+    assert pipeline.configuration is rust_authority
+
+
+def test_python_authority_routes_results_and_preserves_default_snapshot() -> None:
+    module = _accepted_module()
+    default_sink = CollectingShadowReportSink()
+    explicit_sink = CollectingShadowReportSink()
+    default_pipeline = VerifierAuthorityPipeline(
+        client=FakeClient(RustVerifierAcceptedOutcome()),
+        sink=default_sink,
+    )
+    explicit_pipeline = VerifierAuthorityPipeline(
+        client=FakeClient(RustVerifierAcceptedOutcome()),
+        sink=explicit_sink,
+        configuration=VerifierAuthorityConfiguration(
+            VerifierAuthorityMode.PYTHON_AUTHORITY_RUST_SHADOW
+        ),
+    )
+
+    assert default_pipeline.verify(module) is module
+    assert explicit_pipeline.verify(module) is module
+    default_report = default_sink.reports[0]
+    explicit_report = explicit_sink.reports[0]
+    assert isinstance(default_pipeline, VerifierAuthorityPipeline)
+    assert default_report.authority_result == AuthorityResult(
+        VerifierImplementation.PYTHON,
+        PythonShadowAccepted(),
+    )
+    assert default_report.shadow_result == ShadowResult(
+        VerifierImplementation.RUST,
+        ShadowRustAccepted(),
+    )
+    assert isinstance(default_report.comparison, ComparisonResult)
+    assert (
+        default_report.semantic_snapshot()
+        == explicit_report.semantic_snapshot()
+    )
+
+
+def test_rust_authority_accepts_while_python_rejection_remains_observable() -> None:
+    module = _rejected_module()
+    sink = CollectingShadowReportSink()
+    pipeline = VerifierAuthorityPipeline(
+        client=FakeClient(RustVerifierAcceptedOutcome()),
+        sink=sink,
+        configuration=VerifierAuthorityConfiguration(
+            VerifierAuthorityMode.RUST_AUTHORITY_PYTHON_SHADOW
+        ),
+    )
+
+    assert pipeline.verify(module) is module
+    report = sink.reports[0]
+    assert report.authority_result == AuthorityResult(
+        VerifierImplementation.RUST,
+        ShadowRustAccepted(),
+    )
+    assert report.shadow_result.implementation is VerifierImplementation.PYTHON
+    assert isinstance(report.shadow_result.outcome, PythonShadowRejected)
+    assert (
+        report.comparison.classification
+        is ShadowClassification.UNEXPECTED_OUTCOME_DIVERGENCE
+    )
+
+
+def test_rust_authority_rejection_controls_result_and_keeps_python_shadow() -> None:
+    module = _accepted_module()
+    sink = CollectingShadowReportSink()
+    client = FakeClient(RustVerifierRejectedOutcome(_diagnostic()))
+    pipeline = VerifierAuthorityPipeline(
+        client=client,
+        sink=sink,
+        configuration=VerifierAuthorityConfiguration(
+            VerifierAuthorityMode.RUST_AUTHORITY_PYTHON_SHADOW
+        ),
+    )
+
+    with pytest.raises(AuthoritativeVerifierRejected) as raised:
+        pipeline.verify(module)
+
+    assert raised.value.implementation is VerifierImplementation.RUST
+    assert raised.value.diagnostic.invariant_id == "IRV-018"
+    assert len(client.requests) == 1
+    report = sink.reports[0]
+    assert report.authority_result.implementation is VerifierImplementation.RUST
+    assert isinstance(report.authority_result.outcome, ShadowRustRejected)
+    assert report.shadow_result == ShadowResult(
+        VerifierImplementation.PYTHON,
+        PythonShadowAccepted(),
+    )
+    assert (
+        report.comparison.classification
+        is ShadowClassification.UNEXPECTED_OUTCOME_DIVERGENCE
+    )
+
+
+@pytest.mark.parametrize(
+    ("client", "expected_classification", "expected_kind"),
+    [
+        (
+            FakeClient(
+                RustVerifierInfrastructureFailure(
+                    RustVerifierInfrastructureFailureKind.INVALID_REQUEST,
+                    "safe protocol failure",
+                )
+            ),
+            ShadowClassification.RUST_INFRASTRUCTURE_FAILURE,
+            "invalid_request",
+        ),
+        (
+            RaisingClient(
+                RustVerifierProcessFailure(
+                    7,
+                    stdout_excerpt=b"not retained",
+                    stderr_excerpt=b"not retained",
+                )
+            ),
+            ShadowClassification.RUST_INTEGRATION_FAILURE,
+            "process_failure",
+        ),
+        (
+            RaisingClient(
+                RustVerifierTimeout(
+                    0.01,
+                    stdout_excerpt=b"not retained",
+                    stderr_excerpt=b"not retained",
+                )
+            ),
+            ShadowClassification.RUST_INTEGRATION_FAILURE,
+            "timeout",
+        ),
+    ],
+)
+def test_rust_authority_operational_failures_are_fail_closed_without_fallback(
+    client: object,
+    expected_classification: ShadowClassification,
+    expected_kind: str,
+) -> None:
+    sink = CollectingShadowReportSink()
+    pipeline = VerifierAuthorityPipeline(
+        client=client,  # type: ignore[arg-type]
+        sink=sink,
+        configuration=VerifierAuthorityConfiguration(
+            VerifierAuthorityMode.RUST_AUTHORITY_PYTHON_SHADOW
+        ),
+    )
+
+    with pytest.raises(AuthoritativeVerifierUnavailable) as raised:
+        pipeline.verify(_accepted_module())
+
+    assert raised.value.kind == expected_kind
+    report = sink.reports[0]
+    assert report.authority_result.implementation is VerifierImplementation.RUST
+    assert report.shadow_result == ShadowResult(
+        VerifierImplementation.PYTHON,
+        PythonShadowAccepted(),
+    )
+    assert report.comparison.classification is expected_classification
+
+
+def test_ir_backend_fails_when_rust_authority_is_unavailable() -> None:
+    sink = CollectingShadowReportSink()
+    pipeline = VerifierAuthorityPipeline(
+        client=RaisingClient(
+            RustVerifierTimeout(
+                0.01,
+                stdout_excerpt=b"",
+                stderr_excerpt=b"",
+            )
+        ),
+        sink=sink,
+        configuration=VerifierAuthorityConfiguration(
+            VerifierAuthorityMode.RUST_AUTHORITY_PYTHON_SHADOW
+        ),
+    )
+    backend = IRBackend(shadow_verifier=pipeline)
+
+    with pytest.raises(AetherRuntimeError) as raised:
+        backend.verify(_accepted_module())
+
+    assert isinstance(raised.value.__cause__, AuthoritativeVerifierUnavailable)
+    assert len(sink.reports) == 1
 
 
 def test_rust_rejection_and_request_construction_failure_do_not_change_acceptance(

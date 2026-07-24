@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from .ir.model import IRModule
     from .ir.shadow_verifier import (
         ShadowVerificationStage,
-        ShadowVerifierCoordinator,
+        VerifierAuthorityPipeline,
     )
     from .ir.types import IRType
     from .ssa import SSAModule
@@ -90,10 +90,12 @@ class IRBackend:
         *,
         output_writer: Callable[[str], None] | None = None,
         program_arguments: Sequence[str] = (),
-        shadow_verifier: ShadowVerifierCoordinator | None = None,
+        shadow_verifier: VerifierAuthorityPipeline | None = None,
     ) -> None:
         self.output_writer = output_writer
         self.program_arguments = tuple(program_arguments)
+        self.verification_pipeline = shadow_verifier
+        # Compatibility attribute for the existing explicit shadow harness.
         self.shadow_verifier = shadow_verifier
         self.output = ""
 
@@ -108,17 +110,18 @@ class IRBackend:
         *,
         stage: ShadowVerificationStage | None = None,
     ) -> IRModule:
+        from .ir.shadow_verifier import AuthoritativeVerificationError
         from .ir.verifier import IRVerificationError, IRVerifier
 
         try:
-            if self.shadow_verifier is None:
+            if self.verification_pipeline is None:
                 return IRVerifier(module).verify()
             if stage is None:
                 from .ir.shadow_verifier import ShadowVerificationStage
 
                 stage = ShadowVerificationStage.INITIAL
-            return self.shadow_verifier.verify(module, stage=stage)
-        except IRVerificationError as exc:
+            return self.verification_pipeline.verify(module, stage=stage)
+        except (IRVerificationError, AuthoritativeVerificationError) as exc:
             raise AetherRuntimeError(
                 f"IR verifier rejected module: {exc}",
                 kind="ir",
@@ -145,7 +148,7 @@ class IRBackend:
         # recovers the historical scalar opportunities without teaching the
         # optimizer to rewrite ownership actions.
         optimized = pipeline.run(expand_lifecycle(module))
-        if self.shadow_verifier is None:
+        if self.verification_pipeline is None:
             return self.verify(optimized)
         from .ir.shadow_verifier import ShadowVerificationStage
 

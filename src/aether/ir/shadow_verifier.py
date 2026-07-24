@@ -1,8 +1,10 @@
-"""Python-authoritative Initial IR shadow verification coordination.
+"""Authority-ready Initial IR verification with continuous shadow comparison.
 
-This module deliberately keeps Rust observational.  Its public coordinator runs
-the existing Python verifier exactly once, records a bounded Rust observation,
-and then returns or re-raises the already determined Python result.
+The repository-wide internal feature flag remains Python-authoritative.  The
+pipeline always runs both configured verifier engines, compares their semantic
+outcomes, emits one bounded report, and only then resolves the selected
+authority.  Rust authority is available for focused tests and future rollout;
+it is not enabled by this phase.
 """
 
 from __future__ import annotations
@@ -60,6 +62,52 @@ class ShadowVerificationStage(str, Enum):
     INITIAL = "initial"
     POST_OPTIMIZATION = "post_optimization"
     EXTERNAL = "external"
+
+
+@unique
+class VerifierImplementation(str, Enum):
+    """The two Initial IR verifier implementations."""
+
+    PYTHON = "python"
+    RUST = "rust"
+
+
+@unique
+class VerifierAuthorityMode(str, Enum):
+    """Closed authority/shadow pairings; no partial mode is representable."""
+
+    PYTHON_AUTHORITY_RUST_SHADOW = "python_authority_rust_shadow"
+    RUST_AUTHORITY_PYTHON_SHADOW = "rust_authority_python_shadow"
+
+
+@dataclass(frozen=True)
+class VerifierAuthorityConfiguration:
+    """One immutable authority selection consumed by the verification pipeline."""
+
+    mode: VerifierAuthorityMode
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.mode, VerifierAuthorityMode):
+            raise TypeError("mode must be a VerifierAuthorityMode")
+
+    @property
+    def authority(self) -> VerifierImplementation:
+        if self.mode is VerifierAuthorityMode.PYTHON_AUTHORITY_RUST_SHADOW:
+            return VerifierImplementation.PYTHON
+        return VerifierImplementation.RUST
+
+    @property
+    def shadow(self) -> VerifierImplementation:
+        if self.mode is VerifierAuthorityMode.PYTHON_AUTHORITY_RUST_SHADOW:
+            return VerifierImplementation.RUST
+        return VerifierImplementation.PYTHON
+
+
+# Internal feature flag.  A future authority phase changes this one assignment;
+# no environment variable or user-facing selector participates in the policy.
+_AUTHORITY_CONFIGURATION = VerifierAuthorityConfiguration(
+    VerifierAuthorityMode.PYTHON_AUTHORITY_RUST_SHADOW
+)
 
 
 @dataclass(frozen=True)
@@ -155,6 +203,7 @@ ShadowRustObservation: TypeAlias = (
     | ShadowRustIntegrationFailure
     | ShadowRustSkipped
 )
+VerifierObservation: TypeAlias = PythonShadowOutcome | ShadowRustObservation
 ShadowOutcomeKey: TypeAlias = (
     tuple[str]
     | tuple[str, ShadowDiagnosticKey]
@@ -180,13 +229,70 @@ class ShadowDivergenceRegistry(Protocol):
 
 @dataclass(frozen=True)
 class ShadowComparison:
-    """Pure semantic comparison result."""
+    """Pure Python/Rust comparison, independent of which side is authoritative."""
 
     classification: ShadowClassification
     python_key: ShadowOutcomeKey
     rust_key: ShadowOutcomeKey
     documented_rule_id: str | None = None
     reason: str = ""
+
+
+# Authority-ready name; the existing class identity and representation remain.
+ComparisonResult = ShadowComparison
+
+
+def _validate_result_implementation(
+    implementation: VerifierImplementation,
+    outcome: VerifierObservation,
+) -> None:
+    if not isinstance(implementation, VerifierImplementation):
+        raise TypeError("implementation must be a VerifierImplementation")
+    if implementation is VerifierImplementation.PYTHON:
+        if not isinstance(outcome, (PythonShadowAccepted, PythonShadowRejected)):
+            raise TypeError("Python result must carry a Python verifier outcome")
+        return
+    if not isinstance(
+        outcome,
+        (
+            ShadowRustAccepted,
+            ShadowRustRejected,
+            ShadowRustInfrastructureFailure,
+            ShadowRustIntegrationFailure,
+            ShadowRustSkipped,
+        ),
+    ):
+        raise TypeError("Rust result must carry a Rust verifier observation")
+
+
+def _implementation_for_outcome(
+    outcome: VerifierObservation,
+) -> VerifierImplementation:
+    if isinstance(outcome, (PythonShadowAccepted, PythonShadowRejected)):
+        return VerifierImplementation.PYTHON
+    return VerifierImplementation.RUST
+
+
+@dataclass(frozen=True)
+class AuthorityResult:
+    """The selected verifier result that controls compilation."""
+
+    implementation: VerifierImplementation
+    outcome: VerifierObservation
+
+    def __post_init__(self) -> None:
+        _validate_result_implementation(self.implementation, self.outcome)
+
+
+@dataclass(frozen=True)
+class ShadowResult:
+    """The non-authoritative verifier result retained for observation."""
+
+    implementation: VerifierImplementation
+    outcome: VerifierObservation
+
+    def __post_init__(self) -> None:
+        _validate_result_implementation(self.implementation, self.outcome)
 
 
 @dataclass(frozen=True)
@@ -222,12 +328,30 @@ class ShadowOperationalMetadata:
 
 @dataclass(frozen=True)
 class ShadowVerificationReport:
-    """One immutable Python-authoritative shadow report."""
+    """One immutable authority/shadow verification report."""
 
-    authoritative: PythonShadowOutcome
-    shadow: ShadowRustObservation
-    comparison: ShadowComparison
+    authoritative: VerifierObservation
+    shadow: VerifierObservation
+    comparison: ComparisonResult
     metadata: ShadowOperationalMetadata
+
+    @property
+    def authority_result(self) -> AuthorityResult:
+        """Return the explicit implementation-tagged authority result."""
+
+        return AuthorityResult(
+            _implementation_for_outcome(self.authoritative),
+            self.authoritative,
+        )
+
+    @property
+    def shadow_result(self) -> ShadowResult:
+        """Return the explicit implementation-tagged shadow result."""
+
+        return ShadowResult(
+            _implementation_for_outcome(self.shadow),
+            self.shadow,
+        )
 
     def semantic_snapshot(self) -> dict[str, object]:
         """Return a deterministic, timing-free representation."""
@@ -408,8 +532,111 @@ def compare_shadow_outcomes(
     )
 
 
-class ShadowVerifierCoordinator:
-    """Run Python authoritatively and observe one explicitly configured Rust client."""
+class AuthoritativeVerificationError(RuntimeError):
+    """Base failure raised when the selected authority cannot accept a module."""
+
+
+class AuthoritativeVerifierRejected(AuthoritativeVerificationError):
+    """A non-Python authority rejected the module semantically."""
+
+    def __init__(
+        self,
+        implementation: VerifierImplementation,
+        diagnostic: ShadowDiagnosticKey,
+    ) -> None:
+        self.implementation = implementation
+        self.diagnostic = diagnostic
+        super().__init__(
+            f"{implementation.value} verifier rejected module "
+            f"({diagnostic.invariant_id})"
+        )
+
+
+class AuthoritativeVerifierUnavailable(AuthoritativeVerificationError):
+    """The selected non-Python authority produced no semantic result."""
+
+    def __init__(
+        self,
+        implementation: VerifierImplementation,
+        *,
+        kind: str,
+        summary: str,
+    ) -> None:
+        self.implementation = implementation
+        self.kind = kind
+        self.summary = summary
+        super().__init__(
+            f"{implementation.value} authoritative verifier failed: {kind}"
+        )
+
+
+@dataclass(frozen=True)
+class _PythonVerifierExecution:
+    module: IRModule
+    outcome: PythonShadowOutcome
+    error: IRVerificationError | None = None
+    traceback: TracebackType | None = None
+
+    def resolve(self) -> IRModule:
+        if self.error is not None:
+            raise self.error.with_traceback(self.traceback)
+        return self.module
+
+
+@dataclass(frozen=True)
+class _RustVerifierExecution:
+    module: IRModule
+    outcome: ShadowRustObservation
+    failure_cause: RustVerifierIntegrationError | None = None
+
+    def resolve(self) -> IRModule:
+        if isinstance(self.outcome, ShadowRustAccepted):
+            return self.module
+        if isinstance(self.outcome, ShadowRustRejected):
+            raise AuthoritativeVerifierRejected(
+                VerifierImplementation.RUST,
+                self.outcome.diagnostic,
+            )
+        if isinstance(
+            self.outcome,
+            (
+                ShadowRustInfrastructureFailure,
+                ShadowRustIntegrationFailure,
+            ),
+        ):
+            error = AuthoritativeVerifierUnavailable(
+                VerifierImplementation.RUST,
+                kind=self.outcome.kind,
+                summary=self.outcome.summary,
+            )
+            if self.failure_cause is not None:
+                raise error from self.failure_cause
+            raise error
+        raise AuthoritativeVerifierUnavailable(
+            VerifierImplementation.RUST,
+            kind="shadow_skipped",
+            summary="Rust authority cannot use a skipped observation",
+        )
+
+
+def _execute_python_verifier(module: IRModule) -> _PythonVerifierExecution:
+    try:
+        verified_module = IRVerifier(module).verify()
+    except IRVerificationError as error:
+        return _PythonVerifierExecution(
+            module=module,
+            outcome=normalize_python_rejection(error),
+            error=error,
+            traceback=error.__traceback__,
+        )
+    return _PythonVerifierExecution(
+        module=verified_module,
+        outcome=PythonShadowAccepted(),
+    )
+
+
+class VerifierAuthorityPipeline:
+    """Run both verifiers, compare them, report, then resolve one authority."""
 
     def __init__(
         self,
@@ -419,18 +646,32 @@ class ShadowVerifierCoordinator:
         registry: ShadowDivergenceRegistry | None = None,
         strict_sink_errors: bool = False,
         client_kind: str | None = None,
+        configuration: VerifierAuthorityConfiguration | None = None,
     ) -> None:
         if registry is None:
             from .shadow_divergences import DEFAULT_SHADOW_DIVERGENCE_REGISTRY
 
             registry = DEFAULT_SHADOW_DIVERGENCE_REGISTRY
+        if configuration is None:
+            configuration = _AUTHORITY_CONFIGURATION
+        if not isinstance(configuration, VerifierAuthorityConfiguration):
+            raise TypeError(
+                "configuration must be a VerifierAuthorityConfiguration"
+            )
         self._client = client
         self._sink = sink if sink is not None else NullShadowReportSink()
         self._registry = registry
         self._strict_sink_errors = strict_sink_errors
+        self._configuration = configuration
         self._client_kind = _bounded_summary(
             client_kind if client_kind is not None else type(client).__name__
         )
+
+    @property
+    def configuration(self) -> VerifierAuthorityConfiguration:
+        """Return the single immutable authority policy used by this pipeline."""
+
+        return self._configuration
 
     def verify(
         self,
@@ -438,21 +679,9 @@ class ShadowVerifierCoordinator:
         *,
         stage: ShadowVerificationStage = ShadowVerificationStage.EXTERNAL,
     ) -> IRModule:
-        """Verify once with Python, then perform non-authoritative shadow work."""
+        """Execute both engines once and resolve only the configured authority."""
 
-        python_error: IRVerificationError | None
-        python_traceback: TracebackType | None
-        try:
-            verified_module = IRVerifier(module).verify()
-        except IRVerificationError as error:
-            python_error = error
-            python_traceback = error.__traceback__
-            authoritative: PythonShadowOutcome = normalize_python_rejection(error)
-            verified_module = module
-        else:
-            python_error = None
-            python_traceback = None
-            authoritative = PythonShadowAccepted()
+        python_execution = _execute_python_verifier(module)
 
         started_at = perf_counter()
         serialization_started_at = perf_counter()
@@ -462,11 +691,13 @@ class ShadowVerifierCoordinator:
         serialization_duration: float | None = None
         invocation_duration: float | None = None
         invocation_client_kind = self._client_kind
+        rust_failure_cause: RustVerifierIntegrationError | None = None
         try:
             request = build_canonical_rust_verifier_request(module)
         except RustVerifierIntegrationError as error:
             serialization_duration = perf_counter() - serialization_started_at
-            shadow: ShadowRustObservation = _integration_failure(error)
+            rust_outcome: ShadowRustObservation = _integration_failure(error)
+            rust_failure_cause = error
         else:
             serialization_duration = perf_counter() - serialization_started_at
             request_hash = sha256(request.payload).hexdigest()
@@ -477,24 +708,38 @@ class ShadowVerifierCoordinator:
                 invocation = self._client.verify(request)
             except RustVerifierIntegrationError as error:
                 invocation_duration = perf_counter() - invocation_started_at
-                shadow = _integration_failure(error)
+                rust_outcome = _integration_failure(error)
+                rust_failure_cause = error
             else:
                 invocation_duration = perf_counter() - invocation_started_at
-                shadow = _normalize_rust_invocation(invocation)
+                rust_outcome = _normalize_rust_invocation(invocation)
                 invocation_client_kind = invocation.metadata.client_kind.value
 
         comparison = compare_shadow_outcomes(
-            authoritative,
-            shadow,
+            python_execution.outcome,
+            rust_outcome,
             request_hash=request_hash,
             registry=self._registry,
             protocol_version=protocol_version,
             ir_schema_version=ir_schema_version,
         )
-        failure_kind, failure_summary = _failure_metadata(shadow)
+        rust_execution = _RustVerifierExecution(
+            module=module,
+            outcome=rust_outcome,
+            failure_cause=rust_failure_cause,
+        )
+        executions = {
+            VerifierImplementation.PYTHON: python_execution,
+            VerifierImplementation.RUST: rust_execution,
+        }
+        authority_implementation = self._configuration.authority
+        shadow_implementation = self._configuration.shadow
+        authority_execution = executions[authority_implementation]
+        shadow_execution = executions[shadow_implementation]
+        failure_kind, failure_summary = _failure_metadata(rust_outcome)
         report = ShadowVerificationReport(
-            authoritative=authoritative,
-            shadow=shadow,
+            authoritative=authority_execution.outcome,
+            shadow=shadow_execution.outcome,
             comparison=comparison,
             metadata=ShadowOperationalMetadata(
                 request_sha256=request_hash or None,
@@ -518,11 +763,14 @@ class ShadowVerifierCoordinator:
             if self._strict_sink_errors:
                 sink_error = error
 
-        if python_error is not None:
-            raise python_error.with_traceback(python_traceback)
+        verified_module = authority_execution.resolve()
         if sink_error is not None:
             raise sink_error
         return verified_module
+
+
+class ShadowVerifierCoordinator(VerifierAuthorityPipeline):
+    """Compatibility name for the default Python-authoritative pipeline."""
 
 
 def _normalize_rust_invocation(
@@ -672,7 +920,12 @@ def _snapshot_diagnostic(key: ShadowDiagnosticKey) -> dict[str, object]:
 
 
 __all__ = [
+    "AuthorityResult",
+    "AuthoritativeVerificationError",
+    "AuthoritativeVerifierRejected",
+    "AuthoritativeVerifierUnavailable",
     "CollectingShadowReportSink",
+    "ComparisonResult",
     "NullShadowReportSink",
     "PythonShadowAccepted",
     "PythonShadowOutcome",
@@ -689,9 +942,15 @@ __all__ = [
     "ShadowRustObservation",
     "ShadowRustRejected",
     "ShadowRustSkipped",
+    "ShadowResult",
     "ShadowVerificationReport",
     "ShadowVerificationStage",
     "ShadowVerifierCoordinator",
+    "VerifierAuthorityConfiguration",
+    "VerifierAuthorityMode",
+    "VerifierAuthorityPipeline",
+    "VerifierImplementation",
+    "VerifierObservation",
     "compare_shadow_outcomes",
     "normalize_python_rejection",
     "python_shadow_outcome_key",

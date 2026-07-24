@@ -55,6 +55,10 @@ comparison.
 
 Current compiler-design documents:
 
+- [INITIAL_IR_VERIFIER_AUTHORITY.md](INITIAL_IR_VERIFIER_AUTHORITY.md):
+  Phase 4.5B closed authority configuration, dual-verifier execution pipeline,
+  explicit authority/shadow/comparison results, fail-closed behavior, stable
+  default reporting, and the boundary before a future Rust-authority rollout.
 - [INITIAL_IR_SHADOW_VALIDATION.md](INITIAL_IR_SHADOW_VALIDATION.md):
   Phase 4.4 repository-wide validation audit, opt-in pytest harness, corpus and
   full-suite measurements, feature/invariant/example/native/optimizer
