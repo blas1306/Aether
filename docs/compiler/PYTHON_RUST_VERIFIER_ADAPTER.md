@@ -247,13 +247,16 @@ cd ..
 ```
 
 That suite checks real acceptance, rejection, protocol import error,
-determinism, empty normal stderr, and all 128 schema-v1-transportable manifest
+determinism, empty normal stderr, and all 141 schema-v1-transportable manifest
 cases through both the compatibility API and the neutral subprocess client.
-Both paths produce 64 accepted cases, 60 exact diagnostic matches, three
+Both paths produce 64 accepted cases, 73 exact diagnostic matches, three
 documented diagnostic divergences, one documented outcome mismatch, and no
 unexpected divergence, adapter failure, protocol error, or neutral
 infrastructure failure. The two DTO-boundary cases remain explicit and are
 asserted to fail canonical materialization rather than being silently skipped.
+The Phase 4.5A critical subset adds 13 exact first-invariant matches and is
+also checked independently for schema-v1 transport, request-hash determinism,
+semantic-snapshot determinism, and shadow classification.
 
 ## Production boundary and next phase
 

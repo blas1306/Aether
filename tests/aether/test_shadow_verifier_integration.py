@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from hashlib import sha256
 from pathlib import Path
 import shutil
 import subprocess
@@ -14,6 +15,7 @@ if str(REPOSITORY_ROOT) not in sys.path:
 
 from benchmarks.ir_verifier import (
     CORPUS_MANIFEST,
+    CRITICAL_DIFFERENTIAL_CASES,
     _load_manifest,
     _materialize_modules,
 )
@@ -31,6 +33,7 @@ from aether.ir import (
     ShadowVerifierCoordinator,
     VerifierCategory,
     VoidType,
+    build_canonical_rust_verifier_request,
     compare_shadow_outcomes,
 )
 from aether.ir.rust_verifier import (
@@ -177,15 +180,68 @@ def test_full_transportable_corpus_shadow_baseline(
         report.comparison.classification for report in sink.reports
     )
     assert schema_version == 2
-    assert len(sink.reports) == 128
+    assert len(sink.reports) == 141
     assert counts == Counter(
         {
             ShadowClassification.MATCH_ACCEPTED: 64,
-            ShadowClassification.MATCH_REJECTED_SEMANTIC: 60,
+            ShadowClassification.MATCH_REJECTED_SEMANTIC: 73,
             ShadowClassification.DOCUMENTED_DIAGNOSTIC_DIVERGENCE: 3,
             ShadowClassification.DOCUMENTED_OUTCOME_DIVERGENCE: 1,
         }
     )
+
+
+def test_critical_differential_corpus_is_transportable_semantic_and_deterministic(
+    rust_verifier_executable: Path,
+) -> None:
+    schema_version, entries = _load_manifest(CORPUS_MANIFEST)
+    critical_entries = [
+        entry for entry in entries if entry.id in CRITICAL_DIFFERENTIAL_CASES
+    ]
+    materialized = _materialize_modules(critical_entries)
+    client = SubprocessRustVerifierClient(executable=rust_verifier_executable)
+    request_hashes: set[str] = set()
+
+    assert schema_version == 2
+    assert {entry.id for entry in critical_entries} == set(
+        CRITICAL_DIFFERENTIAL_CASES
+    )
+    for entry, module in materialized:
+        first_request = build_canonical_rust_verifier_request(module)
+        second_request = build_canonical_rust_verifier_request(module)
+        request_hash = sha256(first_request.payload).hexdigest()
+        request_hashes.add(request_hash)
+
+        assert first_request == second_request
+        assert first_request.protocol_version == 1
+        assert first_request.ir_schema_version == 1
+
+        snapshots = []
+        for _attempt in range(2):
+            sink = CollectingShadowReportSink()
+            coordinator = ShadowVerifierCoordinator(client=client, sink=sink)
+            with pytest.raises(IRVerificationError) as raised:
+                coordinator.verify(
+                    module,
+                    stage=ShadowVerificationStage.EXTERNAL,
+                )
+            failure = raised.value.normalized_failure
+            assert failure is not None
+            assert (
+                failure.invariant_id
+                == CRITICAL_DIFFERENTIAL_CASES[entry.id]
+            )
+            report = sink.reports[0]
+            assert (
+                report.comparison.classification
+                is ShadowClassification.MATCH_REJECTED_SEMANTIC
+            )
+            assert report.metadata.request_sha256 == request_hash
+            snapshots.append(report.semantic_snapshot())
+
+        assert snapshots[0] == snapshots[1]
+
+    assert len(request_hashes) == len(CRITICAL_DIFFERENTIAL_CASES)
 
 
 def test_nontransportable_cases_are_explicit_harness_skips() -> None:

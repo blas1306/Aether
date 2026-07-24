@@ -639,3 +639,78 @@ invalid_modules:
     test: tests/aether/test_vector_matrix_indexing.py::test_ir_verifier_rejects_bad_vector_length_source
     expected_invariant: IRV-122
     covers: [IRV-122]
+
+  # Phase 4.5A critical differential corpus: ssa/
+  - id: critical-ssa-duplicate-value
+    test: tests/aether/test_ir_critical_differential_corpus.py::test_critical_ssa_rejects_duplicate_function_wide_value
+    expected_invariant: IRV-009
+    covers: [IRV-009]
+
+  - id: critical-ssa-invalid-declared-type
+    test: tests/aether/test_ir_critical_differential_corpus.py::test_critical_ssa_rejects_invalid_declared_type
+    expected_invariant: IRV-011
+    covers: [IRV-011]
+
+  - id: critical-ssa-aggregate-compare-shape
+    test: tests/aether/test_ir_aggregate_metadata_verifier.py::test_vector_compare_characterization_requires_positive_rank_one_shape
+    parameter_case: 2
+    expected_invariant: IRV-075
+    covers: [IRV-075]
+
+  # Phase 4.5A critical differential corpus: storage/
+  - id: critical-storage-inconsistent-slot-type
+    test: tests/aether/test_ir_critical_differential_corpus.py::test_critical_storage_rejects_inconsistent_slot_type
+    expected_invariant: IRV-010
+    covers: [IRV-010]
+
+  # Phase 4.5A critical differential corpus: borrow/
+  - id: critical-borrow-owning-store-without-retain
+    test: tests/aether/test_ir_borrow_verifier.py::test_python_owning_store_rule_is_managed_and_same_block
+    parameter_case: 2
+    expected_invariant: IRV-040
+    covers: [IRV-037, IRV-038, IRV-040]
+
+  - id: critical-borrow-mutation-receiver
+    test: tests/aether/test_ir_borrow_verifier.py::test_python_rejects_mutation_only_when_borrow_is_receiver
+    expected_invariant: IRV-042
+    covers: [IRV-037, IRV-038, IRV-042]
+
+  # Phase 4.5A critical differential corpus: builtins/
+  - id: critical-builtins-read-result-layout
+    test: tests/aether/test_ir_critical_differential_corpus.py::test_critical_builtins_rejects_noncanonical_read_result_layout
+    expected_invariant: IRV-063
+    covers: [IRV-062, IRV-063]
+
+  - id: critical-builtins-retain-scalar
+    test: tests/aether/test_ir_verifier.py::test_lifecycle_builtins_reject_types_outside_the_managed_allowlist
+    parameter_case: 1
+    expected_invariant: IRV-066
+    covers: [IRV-066]
+
+  - id: critical-builtins-scalar-alias
+    test: tests/aether/test_ir_verifier.py::test_builtin_identity_rejects_compatible_wrong_alias_and_renamed_functions
+    parameter_case: 1
+    expected_invariant: IRV-067
+    covers: [IRV-067]
+
+  # Phase 4.5A critical differential corpus: structs/
+  - id: critical-structs-incomplete-construction
+    test: tests/aether/test_ir_critical_differential_corpus.py::test_critical_structs_rejects_incomplete_construction
+    expected_invariant: IRV-079
+    covers: [IRV-079]
+
+  - id: critical-structs-field-read-result
+    test: tests/aether/test_ir_critical_differential_corpus.py::test_critical_structs_rejects_field_read_result_type
+    expected_invariant: IRV-080
+    covers: [IRV-080]
+
+  - id: critical-structs-field-update-value
+    test: tests/aether/test_ir_critical_differential_corpus.py::test_critical_structs_rejects_field_update_value_type
+    expected_invariant: IRV-081
+    covers: [IRV-081]
+
+  # Phase 4.5A critical differential corpus: method_result/
+  - id: critical-method-result-missing-value
+    test: tests/aether/test_ir_critical_differential_corpus.py::test_critical_method_result_rejects_missing_nonvoid_value
+    expected_invariant: IRV-082
+    covers: [IRV-082]

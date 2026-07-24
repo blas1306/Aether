@@ -34,10 +34,15 @@ records the previously documented IRV-024 graph-analysis result: Python rejects
 with IRV-024 and Rust accepts. It is a known outcome mismatch, not an unexpected
 parity regression.
 
-The Phase 4.2A run over the 128 schema-v1-transportable cases reports 64
-accepted by both, one known outcome mismatch, 60 exact first-invariant matches,
+The current run over the 141 schema-v1-transportable cases reports 64
+accepted by both, one known outcome mismatch, 73 exact first-invariant matches,
 three documented diagnostic divergences, and zero unexpected diagnostic
 divergences. Acceptance/rejection parity has no unexpected differences.
+
+Phase 4.5A adds the 13-case critical differential subset documented in
+[`CRITICAL_DIFFERENTIAL_CORPUS.md`](CRITICAL_DIFFERENTIAL_CORPUS.md). Those
+entries are grouped by semantic family in the manifest and continue to use
+pytest-owned module materializers instead of duplicating canonical DTO JSON.
 
 ## Reference contract
 

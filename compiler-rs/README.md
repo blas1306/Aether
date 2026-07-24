@@ -558,7 +558,8 @@ The complete wire contract and discovery boundary are documented in
 compiler selection, CLI option, shadow mode, packaging discovery, or PyO3
 binding is implemented in Phase 4.2A.
 
-The 128 schema-v1-compatible migration cases have no unexpected
+After the Phase 4.5A corpus extension, the 141 schema-v1-compatible migration
+cases have no unexpected
 acceptance/rejection difference. The outcome report retains the known
 `non-void-path-without-return` Python-IRV-024/Rust-accepted result. Exact
 first-invariant parity is intentionally not universal: the corpus manifest

@@ -1,7 +1,15 @@
 from __future__ import annotations
 
+from pathlib import Path
+import sys
+
+REPOSITORY_ROOT = Path(__file__).parents[1]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
+
 from benchmarks.ir_verifier import (
     CORPUS_MANIFEST,
+    CRITICAL_DIFFERENTIAL_CASES,
     CorpusComparison,
     CorpusEntry,
     _load_manifest,
@@ -50,6 +58,25 @@ def test_manifest_keeps_the_intentional_irv_024_outcome_mismatch_explicit() -> N
             "intentional_irv_024_graph_analysis",
         )
     }
+
+
+def test_manifest_has_exactly_one_critical_case_per_phase_4_5a_blocker() -> None:
+    _, entries = _load_manifest(CORPUS_MANIFEST)
+    critical = {
+        entry.id: entry
+        for entry in entries
+        if entry.id.startswith("critical-")
+    }
+
+    assert set(critical) == set(CRITICAL_DIFFERENTIAL_CASES)
+    assert {
+        entry.expected_invariant for entry in critical.values()
+    } == set(CRITICAL_DIFFERENTIAL_CASES.values())
+    for case_id, expected_invariant in CRITICAL_DIFFERENTIAL_CASES.items():
+        entry = critical[case_id]
+        assert entry.accepted is False
+        assert entry.expected_invariant == expected_invariant
+        assert expected_invariant in entry.covers
 
 
 def test_known_pairs_are_documented_divergences() -> None:

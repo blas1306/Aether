@@ -6,6 +6,7 @@ import argparse
 import copy
 import os
 import platform
+import re
 import statistics
 import sys
 from collections import defaultdict
@@ -21,6 +22,21 @@ import pytest
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_ROOT = REPOSITORY_ROOT / "src"
 CORPUS_MANIFEST = REPOSITORY_ROOT / "tests/aether/rust_migration/manifest.yaml"
+CRITICAL_DIFFERENTIAL_CASES = {
+    "critical-ssa-duplicate-value": "IRV-009",
+    "critical-storage-inconsistent-slot-type": "IRV-010",
+    "critical-ssa-invalid-declared-type": "IRV-011",
+    "critical-borrow-owning-store-without-retain": "IRV-040",
+    "critical-borrow-mutation-receiver": "IRV-042",
+    "critical-builtins-read-result-layout": "IRV-063",
+    "critical-builtins-retain-scalar": "IRV-066",
+    "critical-builtins-scalar-alias": "IRV-067",
+    "critical-ssa-aggregate-compare-shape": "IRV-075",
+    "critical-structs-incomplete-construction": "IRV-079",
+    "critical-structs-field-read-result": "IRV-080",
+    "critical-structs-field-update-value": "IRV-081",
+    "critical-method-result-missing-value": "IRV-082",
+}
 
 if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
@@ -40,6 +56,7 @@ class CorpusEntry:
     diagnostic_divergence: str | None = None
     expected_rust_outcome: str | None = None
     outcome_divergence: str | None = None
+    covers: tuple[str, ...] = ()
 
 
 class CorpusComparison(str, Enum):
@@ -57,6 +74,7 @@ KNOWN_DIAGNOSTIC_DIVERGENCES = frozenset(
     }
 )
 KNOWN_OUTCOME_DIVERGENCES = frozenset({"intentional_irv_024_graph_analysis"})
+_INVARIANT_ID = re.compile(r"IRV-[0-9]{3}")
 
 
 def compare_verifier_observations(
@@ -104,6 +122,20 @@ def _load_manifest(path: Path) -> tuple[int, list[CorpusEntry]]:
     current: dict[str, str] | None = None
     entries: list[CorpusEntry] = []
 
+    def parse_covers(value: str) -> tuple[str, ...]:
+        if not value.startswith("[") or not value.endswith("]"):
+            raise ValueError(f"Corpus covers must be an inline list, got {value!r}")
+        covers = tuple(
+            item.strip() for item in value[1:-1].split(",") if item.strip()
+        )
+        if not covers:
+            raise ValueError("Corpus covers must not be empty")
+        if any(_INVARIANT_ID.fullmatch(item) is None for item in covers):
+            raise ValueError(f"Corpus covers contains an invalid invariant: {value!r}")
+        if len(covers) != len(set(covers)):
+            raise ValueError(f"Corpus covers contains duplicates: {value!r}")
+        return covers
+
     def finish_entry() -> None:
         nonlocal current
         if current is None:
@@ -122,6 +154,7 @@ def _load_manifest(path: Path) -> tuple[int, list[CorpusEntry]]:
                 diagnostic_divergence=current.get("diagnostic_divergence"),
                 expected_rust_outcome=current.get("expected_rust_outcome"),
                 outcome_divergence=current.get("outcome_divergence"),
+                covers=parse_covers(current["covers"]),
             )
         except (KeyError, ValueError) as error:
             raise ValueError(f"Malformed corpus entry: {current}") from error
@@ -131,6 +164,13 @@ def _load_manifest(path: Path) -> tuple[int, list[CorpusEntry]]:
             raise ValueError(f"Valid corpus entry {entry.id} has a rejection expectation")
         if not entry.accepted and entry.expected_invariant is None:
             raise ValueError(f"Invalid corpus entry {entry.id} has no Python invariant")
+        if (
+            entry.expected_invariant is not None
+            and entry.expected_invariant not in entry.covers
+        ):
+            raise ValueError(
+                f"Invalid corpus entry {entry.id} does not cover its expected invariant"
+            )
         if (entry.expected_rust_invariant is None) != (entry.diagnostic_divergence is None):
             raise ValueError(
                 f"Corpus entry {entry.id} must define both Rust invariant and divergence kind"
@@ -194,6 +234,7 @@ def _load_manifest(path: Path) -> tuple[int, list[CorpusEntry]]:
                 "diagnostic_divergence",
                 "expected_rust_outcome",
                 "outcome_divergence",
+                "covers",
             }:
                 current[key] = value.strip()
 

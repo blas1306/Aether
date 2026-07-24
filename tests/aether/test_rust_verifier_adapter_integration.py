@@ -234,11 +234,11 @@ def test_all_transportable_corpus_cases_cross_the_adapter_with_expected_parity(
         ):
             expectation_mismatches.append(entry.id)
 
-    assert len(transportable) == 128
+    assert len(transportable) == 141
     expected_counts = Counter(
         {
             "accepted_by_both": 64,
-            CorpusComparison.EXACT_DIAGNOSTIC_MATCH.value: 60,
+            CorpusComparison.EXACT_DIAGNOSTIC_MATCH.value: 73,
             CorpusComparison.DOCUMENTED_DIAGNOSTIC_DIVERGENCE.value: 3,
             CorpusComparison.OUTCOME_MISMATCH.value: 1,
         }
