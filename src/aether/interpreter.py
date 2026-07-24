@@ -3232,7 +3232,7 @@ def _elementwise_vector_vector(left: AetherValue, operator: str, right: AetherVa
     right_element_type = _numeric_vector_scalar_type(right.type_name)
     result_element_type = promote_numeric(left_element_type, right_element_type, operator)
     return AetherValue(
-        VectorType(result_element_type, len(left.value)),
+        VectorType(result_element_type, len(left.value), left.type_name.orientation or right.type_name.orientation),
         [
             _apply_array_element_operator(left_element, operator, right_element, result_element_type)
             for left_element, right_element in zip(left.value, right.value)

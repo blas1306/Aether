@@ -7,18 +7,20 @@ Matrix<double> A(Vector<double, Column> x) {
 
 Vector<double, Column> c = [69, 45];
 
-Vector<double, Column> x0 = [1, 1];
+Vector<double, Column> x0 = [8, 6];
 double tol = 1e-8;
 int maxiter = 100;
 
 Vector<double, Column> x = x0;
-double res = LA.norm(A(x)*x - c);
+Vector<double, Column> residual = A(x) * x - c;
+double res = LA.norm(residual);
 int iter = 0;
 
 while (res > tol && iter < maxiter) {
-    z = A(x) \ c;
+    Vector<double, Column> z = A(x) \ c;
     x = x + z;
-    res = LA.norm(A(x)*x - c);
+    residual = A(x) * x - c;
+    res = LA.norm(residual);
     iter += 1;
 }
 
