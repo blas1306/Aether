@@ -56,9 +56,9 @@ pub(crate) fn verify_module_dominance_after_prerequisites(
 ///
 /// Parameters are entry definitions and are therefore available in every
 /// block, including unreachable blocks. Same-block ordering remains owned by
-/// Step 3C.1. Matching Python SSA behavior, an ordinary cross-block use in an
-/// unreachable block is rejected rather than proving dominance inside a dead
-/// component.
+/// Step 3C.1. Matching the authoritative Python Initial IR verifier, retained
+/// unreachable blocks are checked locally with every collected value
+/// available; cross-block dominance is therefore only an executable-path rule.
 pub fn verify_function_dominance(function: &IRFunction) -> Result<(), FunctionDominanceError> {
     let blocks = verify_function_structure_prerequisite(function).map_err(|source| {
         FunctionDominanceError::StructurePrerequisite {
@@ -116,8 +116,8 @@ fn verify_function_dominance_after_prerequisites(
                     // Definition-before-use within a block is Step 3C.1's rule.
                     continue;
                 }
-                if dominance.is_reachable(block_index)
-                    && dominance.dominates(defining_location.block_index, block_index)
+                if !dominance.is_reachable(block_index)
+                    || dominance.dominates(defining_location.block_index, block_index)
                 {
                     continue;
                 }

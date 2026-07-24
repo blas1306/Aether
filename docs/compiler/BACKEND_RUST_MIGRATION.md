@@ -1503,14 +1503,14 @@ existing field/vector traversal order. Constants, literal payloads, storage
 operands, raw function names, and block target names remain outside the SSA-use
 model.
 
-Unreachable behavior exactly follows the ordinary-use logic in the Python SSA
-verifier. Dominator analysis represents each unreachable block as a self-root,
-but the verifier permits cross-block dominance only when the use block is entry
-reachable. Consequently, same-block ordered definition/use in an isolated
-unreachable block is valid; a cross-block use within an unreachable component
-or cycle is invalid; a reachable use of an unreachable definition is invalid;
-and an unreachable use of a reachable instruction definition is invalid.
-Parameters remain the documented exception.
+Unreachable behavior follows the authoritative Python Initial IR verifier's
+IRV-022 policy. Dominator analysis represents each unreachable block as a
+self-root, but cross-block dominance is enforced only for entry-reachable use
+blocks. Every collected value is locally available in a retained unreachable
+block, including values defined in another unreachable component or in a
+reachable block. A reachable use of an unreachable definition remains invalid.
+This distinction matters for lowering-created dead loop increment blocks after
+an unconditional return from the loop body.
 
 Typed diagnostics are `ModuleDominanceError`, `FunctionDominanceError`,
 `BlockDominanceError`, `DominanceRuleError`, and `DominanceUseLocation`.

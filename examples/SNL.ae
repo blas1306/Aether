@@ -1,0 +1,27 @@
+import Math.LinearAlgebra as LA
+
+Matrix<double> A(Vector<double, Column> x) {
+    Matrix<double> A = [x[2] + 1, 1; x[1], -x[2]];
+    return A;
+}
+
+Vector<double, Column> c = [69, 45];
+
+Vector<double, Column> x0 = [1, 1];
+double tol = 1e-8;
+int maxiter = 100;
+
+Vector<double, Column> x = x0;
+double res = LA.norm(A(x)*x - c);
+int iter = 0;
+
+while (res > tol && iter < maxiter) {
+    z = A(x) \ c;
+    x = x + z;
+    res = LA.norm(A(x)*x - c);
+    iter += 1;
+}
+
+println("x = ", x);
+println("res = ", res);
+println("iter = ", iter);

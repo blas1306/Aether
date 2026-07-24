@@ -428,7 +428,7 @@ fn preserves_same_block_boundary_owned_by_ssa_pass() {
 }
 
 #[test]
-fn rejects_cross_block_uses_inside_unreachable_cycle() {
+fn accepts_cross_block_uses_inside_unreachable_cycle_as_locally_available() {
     let function = function(
         "dead_cycle",
         Vec::new(),
@@ -442,11 +442,7 @@ fn rejects_cross_block_uses_inside_unreachable_cycle() {
         ],
     );
 
-    assert!(matches!(
-        invalid_rule(&verify_function_dominance(&function).unwrap_err()),
-        DominanceRuleError::DefinitionDoesNotDominateUse { ssa_identifier, use_location, .. }
-            if ssa_identifier == "dead_value" && use_location.instruction.block_name == "dead_b"
-    ));
+    assert_eq!(verify_function_dominance(&function), Ok(()));
 }
 
 #[test]
@@ -471,7 +467,7 @@ fn accepts_isolated_unreachable_same_block_definition_and_use() {
 }
 
 #[test]
-fn rejects_reachable_use_of_unreachable_definition_and_inverse() {
+fn rejects_reachable_use_of_unreachable_definition_but_accepts_inverse() {
     let reachable_use = function(
         "dead_definition",
         Vec::new(),
@@ -493,7 +489,7 @@ fn rejects_reachable_use_of_unreachable_definition_and_inverse() {
             block("dead", vec![ret(Some("live"))]),
         ],
     );
-    assert!(verify_function_dominance(&unreachable_use).is_err());
+    assert_eq!(verify_function_dominance(&unreachable_use), Ok(()));
 }
 
 #[test]

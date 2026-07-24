@@ -55,6 +55,11 @@ comparison.
 
 Current compiler-design documents:
 
+- [INITIAL_IR_SHADOW_VALIDATION.md](INITIAL_IR_SHADOW_VALIDATION.md):
+  Phase 4.4 repository-wide validation audit, opt-in pytest harness, corpus and
+  full-suite measurements, feature/invariant/example/native/optimizer
+  coverage, determinism, failure injection, privacy review, the narrow Rust
+  unreachable-dominance fix, and the evidence still required before authority.
 - [INITIAL_IR_SHADOW_VERIFICATION.md](INITIAL_IR_SHADOW_VERIFICATION.md):
   Phase 4.3 Python-authoritative shadow semantics, explicit programmatic
   enablement, classification and hash-scoped divergence rules, immutable
