@@ -57,8 +57,12 @@ Current compiler-design documents:
 
 - [IR_VERIFIER_PROTOCOL.md](IR_VERIFIER_PROTOCOL.md): protocol-v1 request and
   response contract, stable diagnostic spellings, executable build/invocation,
-  exit codes, panic containment, and the explicit Phase 4.2A boundary before
-  Python integration.
+  exit codes, panic containment, and the Phase 4.2A/4.2B integration boundary.
+- [PYTHON_RUST_VERIFIER_ADAPTER.md](PYTHON_RUST_VERIFIER_ADAPTER.md): opt-in
+  Python API, canonical requests, transport-neutral outcomes and comparison,
+  bounded subprocess compatibility transport, executable discovery, strict
+  protocol decoding, development tests, and the explicit boundary before
+  shadow or production integration.
 - [PHASE_4_0_RUST_BACKEND_INTEGRATION_AUDIT.md](PHASE_4_0_RUST_BACKEND_INTEGRATION_AUDIT.md):
   current production pipeline map, Rust integration inventory, measured
   subprocess/PyO3 tradeoffs, shadow semantics, packaging constraints, and the

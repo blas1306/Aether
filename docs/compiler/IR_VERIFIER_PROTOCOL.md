@@ -1,9 +1,12 @@
 # Initial IR Verifier Subprocess Protocol
 
 Phase 4.2A defines protocol version 1 and the standalone
-`aether-ir-verifier` executable. This is a Rust-only transport boundary:
-the Python compiler does not discover, invoke, select, or shadow this
-executable yet.
+`aether-ir-verifier` executable. Phase 4.2B adds an explicitly called,
+bounded Python subprocess adapter and Phase 4.2C stabilizes a transport-neutral
+client over it, both described in
+[PYTHON_RUST_VERIFIER_ADAPTER.md](PYTHON_RUST_VERIFIER_ADAPTER.md). The normal
+Python compiler pipeline still does not discover, select, invoke, or shadow
+this executable.
 
 ## Package and executable
 
@@ -17,10 +20,11 @@ cargo build --release -p aether-ir-verifier
 
 The development artifacts are produced by Cargo under `target/debug/` and
 `target/release/`. Protocol and library code never contain those
-repository-relative paths. Phase 4.2B should receive an explicitly resolved
-development executable or discover a packaged executable through installed
-package metadata/resources; it must not infer `target/release`, the current
-working directory, or `PATH`.
+repository-relative paths. Phase 4.2B receives an explicitly resolved
+development executable. The Phase 4.2B development helper searches `PATH` only
+when its caller requests that source and searches a Cargo development location
+only when given an explicit repository root. It never infers the current
+working directory or compiler configuration.
 
 ## Stdin and stdout
 
@@ -235,6 +239,7 @@ documented diagnostic divergences, and unexpected diagnostic divergences
 separately. A known case is documented only when its observed Python/Rust pair
 equals the pair in the manifest; any other pair remains unexpected.
 
-Phase 4.2A adds no Python subprocess adapter, compiler integration, shadow
-mode, verifier-selection CLI, packaging discovery implementation, or PyO3
-binding. Those remain later work.
+Phases 4.2B and 4.2C add the isolated Python subprocess adapter and neutral
+client contract, but no compiler integration, shadow mode, verifier-selection
+CLI, production packaging discovery, automatic fallback, or PyO3 binding.
+Those remain later work.
