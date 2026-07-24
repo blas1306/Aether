@@ -55,6 +55,11 @@ comparison.
 
 Current compiler-design documents:
 
+- [INITIAL_IR_SHADOW_VERIFICATION.md](INITIAL_IR_SHADOW_VERIFICATION.md):
+  Phase 4.3 Python-authoritative shadow semantics, explicit programmatic
+  enablement, classification and hash-scoped divergence rules, immutable
+  reports and sinks, pipeline stages, privacy guarantees, corpus baseline, and
+  the boundary before Rust authority.
 - [IR_VERIFIER_PROTOCOL.md](IR_VERIFIER_PROTOCOL.md): protocol-v1 request and
   response contract, stable diagnostic spellings, executable build/invocation,
   exit codes, panic containment, and the Phase 4.2A/4.2B integration boundary.

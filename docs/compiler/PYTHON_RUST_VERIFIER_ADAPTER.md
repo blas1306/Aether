@@ -267,8 +267,10 @@ current explicit/PATH/repository precedence is not the production packaging
 contract. Production must eventually use a separately designed,
 version-matched bundled-artifact resolver.
 
-Phase 4.3 may add an explicitly designed shadow-verification mode. It must keep
-transport failures separate from semantic outcomes, compare outcomes before
-invariant IDs, preserve the manifest's documented divergences, and define
-product policy for reporting, configuration, and performance before touching
-the default compiler path.
+Phase 4.3 now provides the explicitly injected, Python-authoritative shadow
+mode documented in
+[INITIAL_IR_SHADOW_VERIFICATION.md](INITIAL_IR_SHADOW_VERIFICATION.md). It
+keeps transport failures separate from semantic outcomes, uses exact
+canonical-request hashes for reviewed divergences, and leaves the default
+compiler path disabled. This adapter remains the bounded transport underneath
+that coordinator; it does not acquire authority or automatic discovery.

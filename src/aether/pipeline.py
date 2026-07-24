@@ -19,6 +19,10 @@ from .types import AetherType, AetherValue
 if TYPE_CHECKING:
     from .ir.model import IRFunction
     from .ir.model import IRModule
+    from .ir.shadow_verifier import (
+        ShadowVerificationStage,
+        ShadowVerifierCoordinator,
+    )
     from .ir.types import IRType
     from .ssa import SSAModule
 
@@ -86,9 +90,11 @@ class IRBackend:
         *,
         output_writer: Callable[[str], None] | None = None,
         program_arguments: Sequence[str] = (),
+        shadow_verifier: ShadowVerifierCoordinator | None = None,
     ) -> None:
         self.output_writer = output_writer
         self.program_arguments = tuple(program_arguments)
+        self.shadow_verifier = shadow_verifier
         self.output = ""
 
     def lower(self, typed_program: TypedProgram) -> IRModule:
@@ -96,11 +102,22 @@ class IRBackend:
 
         return IRLowerer().lower_checked_program(typed_program.checked_program)
 
-    def verify(self, module: IRModule) -> IRModule:
+    def verify(
+        self,
+        module: IRModule,
+        *,
+        stage: ShadowVerificationStage | None = None,
+    ) -> IRModule:
         from .ir.verifier import IRVerificationError, IRVerifier
 
         try:
-            return IRVerifier(module).verify()
+            if self.shadow_verifier is None:
+                return IRVerifier(module).verify()
+            if stage is None:
+                from .ir.shadow_verifier import ShadowVerificationStage
+
+                stage = ShadowVerificationStage.INITIAL
+            return self.shadow_verifier.verify(module, stage=stage)
         except IRVerificationError as exc:
             raise AetherRuntimeError(
                 f"IR verifier rejected module: {exc}",
@@ -127,7 +144,15 @@ class IRBackend:
         # the current all-trivial representation after structural expansion
         # recovers the historical scalar opportunities without teaching the
         # optimizer to rewrite ownership actions.
-        return self.verify(pipeline.run(expand_lifecycle(module)))
+        optimized = pipeline.run(expand_lifecycle(module))
+        if self.shadow_verifier is None:
+            return self.verify(optimized)
+        from .ir.shadow_verifier import ShadowVerificationStage
+
+        return self.verify(
+            optimized,
+            stage=ShadowVerificationStage.POST_OPTIMIZATION,
+        )
 
     def run(self, typed_program: TypedProgram) -> Environment:
         from .ir.interpreter import IRExecutionError, IRInterpreter
