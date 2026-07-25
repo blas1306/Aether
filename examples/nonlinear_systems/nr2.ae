@@ -1,0 +1,29 @@
+import Math.LinearAlgebra as LA
+import Plots as pl
+
+Vector<double, Column> F(Vector<double, Column> x) {
+    return [x[1]^2 + x[2] - 11, x[1] + x[2]^2 - 7];
+}
+
+Matrix<double> JF(Vector<double, Column> x) {
+    return [2*x[1], 1; 1, 2*x[2]];
+}
+
+Vector<double, Column> x0 = [1, 1];
+double tol = 1e-8;
+int maxiter = 100;
+
+Vector<double, Column> xn = x0;
+double res = LA.norm(F(xn));
+int iter = 0;
+
+while (res > tol && iter < maxiter) {
+    Vector<double, Column> z = LA.solve(JF(xn), -F(xn));
+    xn = xn + z;
+    res = LA.norm(F(xn));
+    iter += 1;
+}
+
+println("xn = ", xn);
+println("res = ", res);
+println("iter = ", iter);

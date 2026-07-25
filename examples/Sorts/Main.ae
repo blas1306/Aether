@@ -3,15 +3,11 @@ import Sortings;
 int main() {
     Array<int> arr = {5, 2, 3, 8, 1, 10, 9};
 
-    if (!Sortings.validarArray(arr)) {
-        return 1;
-    } else {
-        Array<int> arrayBubble = Sortings.bubbleSort(arr);
-        Array<int> arraySelection = Sortings.selectionSort(arr);
-        Array<int> arrayInsertion = Sortings.insertionSort(arr);
+    Array<int> arrayBubble = Sortings.bubbleSort(arr);
+    Array<int> arraySelection = Sortings.selectionSort(arr);
+    Array<int> arrayInsertion = Sortings.insertionSort(arr);
 
-        println("BubbleSort: ", arrayBubble);
-        println("SelectionSort: ", arraySelection);
-        println("InsertionSort: ", arrayInsertion);
-    }
+    println("BubbleSort:    ", arrayBubble);
+    println("SelectionSort: ", arraySelection);
+    println("InsertionSort: ", arrayInsertion);
 }

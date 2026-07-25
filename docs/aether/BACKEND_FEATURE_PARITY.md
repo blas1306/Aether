@@ -4,6 +4,19 @@
 > reemplaza [la spec v1](AETHER_LANGUAGE_SPEC_V1.md) ni
 > [el perfil native normativo](AETHER_NATIVE_PROFILE_V1.md).
 
+Reconciliación Fase 5.0 (25-07-2026, revisión `0ff3d3b`): el perfil de
+capacidades continúa en la versión 22 y no cambió la frontera de lenguaje
+native cerrada el 18-07-2026: las 75 filas `SUPPORTED` de
+[`AETHER_V1_PROFILE_AUDIT.md`](AETHER_V1_PROFILE_AUDIT.md) conservan su
+clasificación, todo programa admitido conserva camino E2E y las 46 filas
+`OUTSIDE_V1` siguen rechazadas antes del lowering. El
+trabajo Rust posterior no añadió features de lenguaje: completó el import de
+IR v1, el verificador combinado, el protocolo/subprocess, shadow validation,
+alineación de IRV-024, packaging operativo y un canary explícito con Rust como
+autoridad. La compilación ordinaria sin pipeline inyectado continúa usando
+`IRVerifier` Python; el pipeline dual configurado usa Python como autoridad y
+Rust como shadow, y sólo el entorno canary invierte esos roles sin fallback.
+
 Actualización perfil 7 (15-07-2026): native completó transporte de handles al
 objeto UTF-8, igualdad por contenido, literales/vacío inmortales, ARC oculto,
 impresión length-aware y hooks de elementos string/struct para Array/List. Las
@@ -88,9 +101,8 @@ El corpus incluye ahora control de flujo, recursión, llamadas adelantadas,
 structs, métodos, colecciones, math scalar e imports de módulos, además de los
 casos anteriores de strings, archivos, argumentos y panics.
 
-Última revisión: 16 de julio de 2026, incluyendo el cierre del capability gate
-native y los dogfoods Numerical Methods, Expense Tracker y Aggregate
-Collections. Este documento reemplaza como
+Última revisión: 25 de julio de 2026, incluyendo el cierre del perfil v1 y la
+reconciliación del verificador Initial IR Python/Rust. Este documento reemplaza como
 referencia canónica a la auditoría histórica de `docs/compiler/`.
 
 ## Criterio
@@ -121,12 +133,19 @@ La ruta nativa real es:
 ```text
 lexer -> parser -> typechecker -> native capability gate
       -> EntryPointNormalizer -> IR lowering
-      -> IR verifier -> GeneralSSABuilder -> SSA verifier
+      -> Initial IR verifier -> GeneralSSABuilder -> SSA verifier
       -> SSAOptimizerPipeline -> LLVM printer/runtime -> clang
 ```
 
 No existe intérprete SSA. AST e IR interpreter son backends alternativos. La
 CLI usa LLVM por defecto; REPL e integración IntelliJ ejecutan AST.
+
+La autoridad Initial IR de producción sigue siendo Python. `IRBackend()` sin
+configuración adicional invoca sólo `IRVerifier`. La infraestructura dual es
+opt-in e inyectada: su configuración normal ejecuta Python-authority/Rust-shadow
+y su canary explícito ejecuta Rust-authority/Python-shadow. Ambos verificadores
+cubren el IR v1 transportable; el selector Rust no interviene en SSA, LLVM ni
+en el capability gate.
 
 ## Perfil programático y validación temprana
 
@@ -164,7 +183,7 @@ representación y lifecycle ya están activos en esta matriz.
 
 | Feature | Lexer/parser | AST | Typechecker | AST interpreter | IR model | IR lowering | IR verifier | IR interpreter | SSA | SSA verifier | Optimizers | LLVM/native | Runtime | Tests | Spec/docs | Estado global | Observaciones |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `int` i32 | C | C | C | C | C | C | C | C | C | C | C | C | C | paridad E2E | P | Parcial | Semántica checked i32 ya coincide; la spec aún contiene pasajes históricos. |
+| `int` i32 | C | C | C | C | C | C | C | C | C | C | C | C | C | paridad E2E | C | Completo | Semántica checked i32 y límites de literal están fijados por la spec v1. |
 | `double` | C | C | C | C | C | C | C | C | C | C | C | C | C | E2E | C | Completo | División sigue IEEE-754, incluidos inf/NaN. |
 | `boolean` | C | C | C | C | C | C | C | C | C | C | C | C | C | E2E | C | Completo | `bool` no es spelling público; se usa `boolean`. |
 | `float` | C | C | C | C por coerción | C nominal | P | P | P | P | P | P | N: gate temprano | N | frontend+gate | P | Solo AST | El perfil 22 lo excluye explícitamente del subset native estable. |
@@ -175,15 +194,15 @@ representación y lifecycle ya están activos en esta matriz.
 | Inferencia `x = expr` | C | C | C | C | N para global implícito | N | N | N | N | N | N | N | AST | frontend | C | Solo AST | El compilador exige locales que ya estén declarados. |
 | Alias de tipo | C | C | C | C | se resuelve | P: top-level alias aceptado solo como metadata | C | C | C | C | C | C para usos soportados, incluidos aliases importados | — | AST+struct backend | C | Parcial | El alias conserva identidad semántica separada del nombre interno. |
 | Operadores `+ - * /` escalares | C | C | C | C | C | C int/double | C | C | C | C | C checked | C int/double | C | E2E+safety | P | Parcial | `float`, `complex`, string y agregados amplían la superficie AST. |
-| Overflow entero y negación mínima | — | — | permite runtime | C: panic i32 | C `may_trap` | C | C | C | C | C | C preserva traps | C intrinsics checked | C | E2E AST/IR/native | P | Completo | Contrato implementado después de la auditoría histórica. |
-| División por cero | — | — | permite runtime | C | C | C | C | C | C | C | C | C | C | E2E | P | Completo | Int hace panic; double usa IEEE-754 en los tres backends. |
+| Overflow entero y negación mínima | — | — | permite runtime | C: panic i32 | C `may_trap` | C | C | C | C | C | C preserva traps | C intrinsics checked | C | E2E AST/IR/native | C | Completo | Contrato implementado y normativo en v1. |
+| División por cero | — | — | permite runtime | C | C | C | C | C | C | C | C | C | C | E2E | C | Completo | Int hace panic; double usa IEEE-754 en los tres backends. |
 | `%` truncante | C | C | C | C int/double | C `rem` | C, con promoción explícita | C homogéneo | C int/double | C | C | C | C `srem`/`frem` | P | AST/IR/native | C | Completo para int/double | Los operandos mixtos se homogeneizan en IR; divisor cero int conserva panic. |
 | Potencia `^` | C | C | C tabla int/double | C checked/IEEE | C `pow` | C, con casts explícitos | C homogéneo | C | C | C | C folding checked/SCCP/GCP | C helper i32/libm `pow` | helper checked + libm | E2E+límites+IEEE | C | Completo para int/double | `int^int` exige exponente no negativo y overflow i32 checked; cualquier double produce double. |
 | `Math.mod` floor-mod | llamada normal | C | C | C | C call builtin | C | C | C | C | C | C checked | C helper tipado | runtime mínimo | AST/IR/native | C | Completo int/double | Es builtin de namespace, no operador. |
 | Comparaciones ordenadas | C | C | C | C | C | C int/double | C | C | C | C | C | C int/double | — | E2E | C | Parcial | Otros numéricos/agregados tienen cobertura distinta. |
 | Igualdad escalar | C | C | C | C | C | C | C | C | C | C | C | C Eq tipado | `aether_string_equal`/helpers Eq | amplia | C | Completa para tipos Eq | Primitivas, string, enums, structs y Array/List; classes/callables sin Eq. |
-| Igualdad agregada | C | C | C | C | P | P Struct/Vector/Matrix | C subset | C subset | C subset | C subset | P | P | helpers | amplia por tipo | P | Parcial | Array/List generales son AST-only; structs tienen límites de tipos de campo. |
-| `&&` / <code>&#124;&#124;</code> short-circuit | C | C | C boolean | C | CFG | C por branches/merge | C | C | C con phi | C | C SCCP | C | — | E2E | P desactualizada | Implementado pero sin documentación | Código y tests son completos; spec/matrices aún dicen AST-only. |
+| Igualdad agregada | C | C | C | C | C subset tipado | C Struct/Array/List/Vector/Matrix representables | C subset | C subset | C subset | C subset | C preserva lecturas | C subset | helpers Eq tipados | amplia por tipo | C para perfil v1 | Parcial | `Eq(T)` es E2E para layouts admitidos, incluidos Array/List recursivos; classes, interfaces, callables y layouts rechazados siguen fuera. |
+| `&&` / <code>&#124;&#124;</code> short-circuit | C | C | C boolean | C | CFG | C por branches/merge | C | C | C con phi | C | C SCCP | C | — | E2E | C | Completo | La spec v1 ya fija short-circuit; `docs/compiler/FEATURE_MATRIX.md` conserva el snapshot AST-only obsoleto. |
 | `!` prefijo | C | C | C boolean | C | C | C | C | C | C | C | C | C `xor` | — | E2E | C | Completo | No existe factorial postfix. |
 | Casts explícitos | C | C | C amplio | C amplio | P | C int↔double e identidad | C subset + identidad | C subset + identidad | C subset | C subset + identidad | C elimina identidad | C int↔double e identidad; resto rechazado por gate | P | frontend+par+gate | C | Parcial | `string`, `boolean`, `float` y `complex` quedan fuera del subset native declarado. |
 
@@ -195,7 +214,7 @@ representación y lifecycle ya están activos en esta matriz.
 | Funciones `void` | C | C | C | C | C | C | C | C | C | C | C | C | — | E2E | C | Completo | Calls void solo como statement. |
 | Funciones como parámetros/valores | C `R(P...)` | C `FunctionType` | C exacto, símbolos/imports | C valor explícito sin entorno | C `FunctionType`/`function_ref`/`call_indirect` | C local e imports | C firma/símbolo/void | C | C refs/calls/phi | C tipos/dominancia | C conservador, calls con efectos | C `ptr` y call indirecta | sin heap/environment | E2E AST/IR/SSA/clang | C | Parcial | Solo funciones block top-level de usuario sin captura; no closures, lambdas, bound methods, builtins/expresión como valor ni retorno callable. |
 | Funciones abreviadas `f(double x)=...` | C desazucarado | `FunctionDeclaration` + `return` | C retorno inferido o explícito | C | sin cambio | C como función normal | C | C | C | C | C | C subset de tipos | normal | E2E frontend/backend | C | Completo para firmas backend | No introduce lambdas ni un nodo/IR nuevo. |
-| Calls directas y recursión | C | C | C; firmas multifase | C | C | C | C | C | C | C | C conservador | C | — | E2E directa/mutua | P | Completo | Orden de declaración resuelto recientemente. |
+| Calls directas y recursión | C | C | C; firmas multifase | C | C | C | C | C | C | C | C conservador | C | — | E2E directa/mutua | C | Completo | La spec v1 y los tests cubren calls adelantadas, recursión y recursión mutua. |
 | `return` | C | C | C paths/tipo | C | C | C | C | C | C | C | C | C | exit `main` | E2E | C | Completo | `main` retorna int y no recibe parámetros. |
 | `if` / `else` | C | C | C boolean | C | CFG | C | C | C | C/phi | C | C | C | — | E2E | C | Completo | Incluye ramas con retorno. |
 | `while` | C | C | C boolean | C | CFG | C | C | C | C loop phi | C | C | C | — | E2E | C | Completo | Control anidado cubierto. |
@@ -229,7 +248,7 @@ representación y lifecycle ya están activos en esta matriz.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Packages, módulos e imports | C | C | C aliases/selectivos/ciclos | C carga/cache | C programa chequeado; IR combinado | C declaraciones soportadas | C | C | C | C | C | C subset | sin runtime nuevo | unit+IR+native E2E | C subset | Parcial | Un package mapea a un archivo. Faltan globals/constantes y statements top-level importados, diagnosticados antes del lowering. |
 | Visibilidad top-level | C | C | C en imports | C | identidad/export metadata | C consume referencias resueltas | C | C | C | C | C | C subset | — | semantic+native | C | Parcial native | Privacidad se valida semánticamente; dentro del mismo archivo no restringe acceso. |
-| Struct fields/constructores | C | C | C nominal | C | C definiciones/new/get/set | C subset | C | C | C | C | C | C subset | helpers print/equality | E2E dedicado | P obsoleta | Parcial | Core int/double/bool/string/nested y Array/List escalares; aún hay límites de campo. |
+| Struct fields/constructores | C | C | C nominal | C | C definiciones/new/get/set | C subset | C | C | C | C | C | C subset | helpers print/equality | E2E dedicado | C para perfil v1 | Parcial | El subset v1 de layouts acíclicos representables es E2E; fields fuera del layout/lifecycle admitido se rechazan por el gate. |
 | Métodos de struct y `this` | C | C | C mutabilidad | C | C funciones + method result | C | C | C | C | C | C | C | — | E2E | P | Completo | Para tipos de firma soportados por backend. |
 | Semántica por valor de struct | — | C | C const | C copia | C reconstrucción | C | C | C | C | C | C | C by-value | — | E2E copia/arg/return | C | Completo | Campos reference mantienen copia shallow deliberada. |
 | Igualdad/print de struct | C | C | C comparabilidad | C | C recursivo subset | C | C | C | C | C | C | C subset | helpers | E2E | P | Parcial | Enum ya está soportado como campo; nullable/Vector/Matrix conservan límites. |
@@ -244,14 +263,14 @@ representación y lifecycle ya están activos en esta matriz.
 | Feature | Lexer/parser | AST | Typechecker | AST interpreter | IR model | IR lowering | IR verifier | IR interpreter | SSA | SSA verifier | Optimizers | LLVM/native | Runtime | Tests | Spec/docs | Estado global | Observaciones |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `Array<T>` literal | C target-typed | C | C | C | C | C | C | C | C | C | C allocation | C layout tipado incluido Struct soportado | C RC y destroy final | E2E escalares/enum/Struct | C | Parcial | Structs acíclicos sized, nested y strings usan TypeLayout y hooks; otros layouts se diagnostican temprano. |
-| Bounds checks Array | — | — | índice int | C | efectos `may_trap` | C | C | C | C | C | C preserva | C | C | safety E2E | P histórico | Completo | Auditorías antiguas aún describen el estado inseguro ya corregido. |
-| Array get/set/length | C | C | C | C | C | C | C | C | C | C | C | C | C narrowing | E2E | P | Completo | Índices 0-based. |
+| Bounds checks Array | — | — | índice int | C | efectos `may_trap` | C | C | C | C | C | C preserva | C | C | safety E2E | C | Completo | `FEATURE_MATRIX.md` y el cuerpo histórico de `ARRAY_SUBSYSTEM_AUDIT.md` aún describen el estado inseguro ya corregido. |
+| Array get/set/length | C | C | C | C | C | C | C | C | C | C | C | C | C narrowing | E2E | C | Completo | Índices 0-based. |
 | Array sort | método/global | C | C tipos | C estable in-place | C sequence sort | C | C | C | C | C | C efecto | C | C temp checked | E2E | C | Completo | int/double/string. |
 | Array slicing | C `a[s:e]` | C | C | C copy | C | C | C | C | C | C | C | C | C bounds | E2E | C | Completo | 0-based, half-open, dos límites explícitos. |
 | Array copy/equality | C | C | C | C | C | C | C | C | C | C | C | C | RC + helper Eq tipado | E2E | C | Completa | `copy` crea storage exterior nuevo; igualdad compara contenido mediante Eq(T). |
 | `List<T>` literal/new/get/set | C target-typed | C | C | C | C | C | C | C | C | C | C | C layout tipado incluido Struct soportado | C RC y destroy final | E2E escalares/enum/Struct + expense tracker | C | Parcial | No hay keyword `new`; layouts no representables se rechazan antes de LLVM. |
 | List length/capacity/core mutation | métodos | C | C | C | C salvo capacity pública | C | C | C | C | C | C | C | C checked growth | E2E | P | Parcial | `capacity` se usa internamente pero no es API pública completa. |
-| List push/pop/insert/removeAt/clear | métodos/global | C | C | C | C | C | C | C | C | C | C efecto/trap | P con Struct soportado | C hooks de elemento; sin destroy final | E2E+safety escalares/Struct/string | C | Parcial | No shrinking deliberado; clear sí destruye elementos vivos, el contenedor final se filtra. |
+| List push/pop/insert/removeAt/clear | métodos/global | C | C | C | C | C | C | C | C | C | C efecto/trap | C para layouts soportados | C hooks de elemento y release final | E2E+safety escalares/Struct/string | C | Parcial | No shrinking es deliberado; `clear` destruye elementos vivos y el último owner destruye buffer y objeto. |
 | List contains/indexOf/reverse/copy/sort | métodos/global | C | C | C | C | C | C | C | C | C | C | C Eq search | helpers Eq compartidos | E2E + baseline | C salvo sort general | Completa para búsqueda Eq | Copy exterior superficial; búsqueda estructural; sort sigue limitado a int/double/string. |
 | List slicing/equality | C | C | C | C | C | C | C | C | C | C | C | C | RC + copy_init + Eq | E2E | C | Completa | Slice `[start,end)` independiente; igualdad ignora capacity e identidad. |
 | Vector literal/get/set/length | C | C | C shape/orientation | C 1-based | C | C | C | C | C | C | C traps | C | C | E2E+safety | C | Completo | Vector matemático, no colección dinámica. |
@@ -277,114 +296,236 @@ representación y lifecycle ya están activos en esta matriz.
 | Optimización `-O2` | — | — | — | — | C | C | C | — | igual | C | alias de O1 | native no usa flag | — | CLI | C como alias | Parcial | No es un nivel más fuerte; debe seguir marcado experimental. |
 | ABI C / FFI | N | N | N | N | N | N | N | N | N | N | N | N | usa libc internamente | N | diseño futuro | No implementado | Usar `printf`/malloc internamente no constituye una FFI pública. |
 
-## Bloqueadores reales para Aether v1
+## Resultado de la reconciliación Fase 5.0
 
-1. **Inicialización y globals de módulos:** declaraciones soportadas ya cruzan
-   imports; falta storage e inicialización single-execution para el resto de la
-   semántica AST.
-2. **Classes e interfaces native:** la promesa generalista sigue partida;
-   structs y enums simples ya no son el bloqueo principal.
-3. **Strings completos:** representación, ownership, concat, igualdad y byte
-   length son E2E; faltan interpolación, formatting y algoritmos de texto.
-4. **Colecciones de datos definidos por usuario:** Eq y búsqueda de
-   `Array/List<Struct>` son E2E; otras operaciones aún pueden estar limitadas
-   por size/layout/copia.
-5. **Callables avanzados:** el subconjunto top-level tipado ya permite una
-   stdlib numérica reusable; closures, lambdas y métodos enlazados quedan para
-   un diseño posterior y no bloquean ese caso.
-6. **Errores básicos compilados:** decidir y completar `throw`/`try-catch` o un
-   perfil alternativo explícito.
-7. **IO restante:** argumentos y archivos de texto ya cubren el mínimo
-   Linux/POSIX; faltan input native, Windows/UTF-16, binarios y streams.
-8. **Paridad del perfil:** el núcleo `int`/`double` cierra `%`, promociones
-   contextuales, operaciones mixtas, casts identidad y potencia mediante IR
-   tipado; combinaciones fuera del perfil siguen usando rechazo temprano.
+Hay dos perímetros distintos y no deben mezclarse:
 
-La deuda anterior del **SSA verifier** queda cerrada: el verificador comprueba
-dominancia y orden de todos los usos, trata operandos `phi` sobre su arista,
-exige un incoming exacto por predecesor, valida inalcanzables con la política
-documentada y se ejecuta tras construcción, tras cada pase SSA en
-desarrollo/tests y obligatoriamente antes del camino LLVM/native. Hay tests
-positivos y negativos directos para diamonds, loops/backedges, loops anidados,
-phis incompletos/sobrantes/duplicados, usos no dominados y productores que
-dejan SSA inválido.
+1. **Perfil estable Aether 1.0:** paridad completa para las 75 filas admitidas.
+   Cada programa aceptado por las filas de lenguaje del perfil 22 alcanza IR
+   verificado, SSA verificado, optimización, LLVM, clang y tests native; el
+   corpus diferencial mantiene el contrato observable. No se encontró un gap
+   P0 ni una feature v1 aceptada que falle después del gate.
+2. **Superficie experimental del frontend/AST:** paridad incompleta. Las 46
+   filas `OUTSIDE_V1` no son promesas de la release, pero varias ya parsean,
+   typecheckean y ejecutan en AST. Alcanzar paridad con toda esa superficie
+   requiere el trabajo listado abajo.
 
-## Inconsistencias semánticas confirmadas
+El trabajo Rust cambia el estado del **subsistema de verificación**, no la
+matriz de lenguaje. El importador owned IR v1 y el verificador Rust cubren el
+IR transportable, IRV-024 quedó semánticamente alineado y existe un canary
+Rust-authority fail-closed. La compilación de producto todavía usa el
+verificador Python directo salvo inyección explícita; Rust no verifica SSA ni
+añade lowering, runtime o codegen de features.
 
-- `%` admite reales en frontend/IR interpreter; el perfil native 22 declara y
-  acepta únicamente remainder entero.
-- `float` y `complex` siguen siendo tipos frontend sin representación native
-  completa y el gate los rechaza antes del lowering.
-- String equality general usa `aether_string_equal` en AST/native y se reutiliza
-  dentro de Eq de structs y colecciones.
-- `Array/List<Struct>` con layout acíclico representable es E2E; elementos sin
-  layout/copia native definida se rechazan según el perfil antes del lowering.
-- El CLI elige LLVM por defecto aunque la mayor parte de módulos, UDT de
-  referencia, errores y builtins matemáticos sean AST-only.
-- `Plots` conserva un hook AST legado, separado del callable tipado general;
-  los builtins tampoco son valores callable.
-- El runtime AST de álgebra avanzada usa NumPy/SciPy del host; esa es una
-  implementación prototipo, no un contrato aceptable de runtime native.
+La deuda anterior del **SSA verifier** permanece cerrada: comprueba dominancia
+y orden de usos, operandos `phi` sobre su arista, un incoming exacto por
+predecesor y la política de inalcanzables. Se ejecuta después de construcción,
+en tests después de cada pase y obligatoriamente antes de LLVM/native. No
+existe un intérprete SSA; esa celda es `—`, no un gap.
 
-## Features aparentemente implementadas pero incompletas
+## Matriz resumida reconciliada
 
-- Tipos nominales `ClassRefType`, `InterfaceType`, `EnumType`, `FloatType` y
-  `ComplexType` en IR no tienen un camino fuente ejecutable completo.
-- La existencia de genéricos privilegiados en Array/List/Vector/Matrix no
-  implica genéricos de usuario.
-- Strings son handles a `AetherStringObject` con ARC interno; concat,
-  `byteLength`, `trim` ASCII y `split` exacto están activos, mientras otras APIs
-  de producción siguen fuera.
-- La API List es amplia para elementos soportados, incluidos structs con layout,
-  con RC/free final y Eq(T) general; capacity pública no está cerrada.
-- `-O2` existe como opción, pero es alias de `-O1` y no afecta native.
-- Builtins de álgebra lineal tienen typechecker e intérprete AST extensos, pero
-  la mayoría no tiene IR.
-- El soporte de struct es real, aunque no cubre todavía todo tipo de campo que
-  acepta el frontend.
+La matriz exhaustiva anterior conserva las celdas por etapa. Este resumen
+agrupa el resultado actual sin convertir un nodo/opcode nominal en soporte:
 
-## Documentación desactualizada
+| Área | Frontend + AST interpreter | IR model/lowering/verifier/interpreter | SSA/verifier/optimizers | LLVM/runtime/native tests | Resultado |
+| --- | --- | --- | --- | --- | --- |
+| Core v1: int/double/boolean, funciones, control-flow | C | C | C | C + diferencial | Completo |
+| Strings v1: transporte, Eq, concat, byteLength, trim, split, parsing | C | C | C | C + lifecycle/O0/O1/O2 | Completo |
+| Structs/enums y métodos representables | C | C para layout v1 | C | C + E2E | Completo para perfil v1 |
+| Array/List representables: RC, copy, slice, Eq, búsqueda, sort y mutación registrada | C | C | C | C + safety/E2E | Completo para perfil v1 |
+| Vector/Matrix core tipado y shaped | C | C subset | C subset | C subset + parity | Completo para perfil v1 |
+| Módulos/imports de declaraciones soportadas | C | C | C | C + multiarchivo | Completo para perfil v1 |
+| Args y archivos de texto | C | C | C | C en Linux; gate de plataforma | Completo en plataforma v1 |
+| Initial IR verifier Rust | — | C para schema/IR v1 transportable; opt-in/canary | — | No cambia codegen | Subsistema completo hasta canary; no autoridad de producto |
+| Superficie `OUTSIDE_V1` detallada abajo | C/P según feature | N o nominal sin E2E | N | gate temprano | Sin paridad |
 
-- `AETHER_V0_SPEC.md` todavía afirma que structs no bajan a IR/JIT y que aliases
-  de imports/selective imports no existen; ambos hechos cambiaron.
-- La misma spec y `FEATURE_MATRIX.md` describen `&&`/`||` como AST-only; ya
-  tienen CFG, SSA, optimización y tests native.
-- `FEATURE_MATRIX.md` y auditorías históricas conservan estados inseguros de
-  Array ya corregidos y contradicciones sobre List insert/removeAt.
-- `docs/compiler/README.md` afirma que LLVM no está conectado al CLI; hoy es el
-  backend predeterminado.
-- `AETHER_IR_DESIGN.md` conserva un subset anterior a for, colecciones,
-  structs y álgebra lineal básica.
-- El hint `IR_BACKEND_SUPPORTED_SUBSET` de `errors.py` omite short-circuit,
-  structs, Array/List, for y Vector/Matrix ya soportados.
-- El README anterior describía el backend native como si no tuviera runtime,
-  println ni agregados; los tests actuales prueban lo contrario.
+## Backend restante antes de paridad con todo el frontend
 
-## Deuda técnica de alto riesgo
+| Feature | Evidencia frontend/AST | Primera frontera incompleta | Estado native comprobado |
+| --- | --- | --- | --- |
+| Local inferida `x = expr` | Parser, checker y AST C | No crea storage local compilable | Gate / Solo AST |
+| Funciones anidadas | Parser, checker y AST C | Lowering de declaración anidada N | Solo AST |
+| Globals/const y statements importados | Módulos/checker/AST C | Falta storage IR e inicialización single-execution | Gate `AE-BACKEND-MODULES` |
+| `float` | Parser/checker/AST C | IR sólo nominal/parcial; sin ABI native estable | Gate `AE-BACKEND-PRIMITIVE_TYPES` |
+| `complex` / `im` | Parser/checker/AST C | Sin lowering fuente ni ABI/runtime native | Gate |
+| `null` y `T?` | Parser/checker/AST C | Sin narrowing, layout/lifecycle ni lowering | Gate |
+| Tuples/destructuring | Parser/checker/AST C | Sin modelo/lowering IR estable | Gate |
+| Classes | Parser/checker/AST C | Sin layout, ownership o lowering de objetos | Gate `AE-BACKEND-CLASSES` |
+| Interfaces/dynamic dispatch | Checker de conformidad y dispatch AST C | Sin representación de interface ni dispatch IR/native | Gate `AE-BACKEND-INTERFACES` |
+| Métodos enlazados, callable retornado, builtin como valor | Subsets reconocidos; callable top-level ya C | Sin environment/ABI/lowering para esas formas | Rechazo de tipo/gate |
+| Interpolación y formatting general | Parser/checker/AST C para el experimento | Sin IR/lowering/runtime native | Gate `AE-BACKEND-STRINGS` |
+| `input` tipado | Nodo/checker/AST C | Sin opcode/runtime native | Gate `AE-BACKEND-INPUT` |
+| `throw` / `try-catch` | Parser/checker/AST C | Sin IR, cleanup excepcional ni runtime native | Gate `AE-BACKEND-ERROR_HANDLING` |
+| Slicing Vector/Matrix y Matrix `for-in` | Frontend/AST C en los subsets registrados | Sin lowering estable | Gate Vector/Matrix |
+| Álgebra lineal avanzada | Checker/AST host con NumPy/SciPy y tests | La mayoría no tiene IR ni ABI/runtime native | Solo AST |
+| `Range` almacenado | AST tiene `Range<int>` | Native baja sólo `RangeExpression` dentro de `for` | Gate `AE-BACKEND-FOR_IN` |
+| Protocolo genérico Iterator/Iterable | Sólo propuesta en la auditoría de iteración | No existe API/nodos/tipos implementados | No implementado |
+| Reflection/serialización genérica | ALPT1 es codec manual, no reflection | No existe superficie de lenguaje o backend | No implementado |
+| Genéricos de usuario | Parser reconoce formas para rechazo | Checker y todas las etapas posteriores N | No implementado |
 
-1. Varias matrices manuales duplican la misma verdad y se desactualizan tras
-   cada bloque de backend.
-2. El perfil compilable no está representado como dato único reutilizable por
-   diagnósticos, docs y CLI.
-3. String tiene ARC y Array/List RC fuerte; classes aún no tienen destrucción final;
-   habilitar frees sin retain/release coordinado produciría dangling/double-free.
-4. El runtime matemático AST mezcla semántica de lenguaje con bibliotecas
-   Python opcionales.
-5. Formato numérico y ciertos mensajes de panic no provienen de un contrato
-   único entre AST, IR y libc.
+Slicing de **Array/List no es un gap**: es E2E, copying, 0-based y semiabierto.
+Tampoco lo son Eq/búsqueda de `Array/List<Struct>`, lifecycle final de List,
+`%` double, short-circuit, bounds de Array, enums o structs del perfil v1.
 
-## Próximas acciones recomendadas
+## Dependencias comprobadas
 
-1. Generar un perfil de capacidades versionado y usarlo en diagnóstico, CLI y
-   documentación; corregir inmediatamente docs contradictorias.
-2. Extender el modelo IR con globals e inicialización explícita de módulos,
-   reutilizando el `CheckedProgram` y los tests multiarchivo existentes.
-3. Cerrar `%` double y las conversiones implícitas restantes; la matemática
-   escalar real ya usa calls conocidas sin inflar el IR.
-4. Mantener el ABI de callables top-level tipados y diseñar closures solo si
-   casos de uso posteriores justifican una representación `{code, environment}`.
-5. Diseñar interfaces/classes con layout, dispatch y ownership documentados.
-6. Ampliar APIs string e
-   IO de entrada/archivos/args.
-7. Promover el ejemplo numérico a `math.numerics` solo después de callables,
-   módulos native y un módulo `testing` mínimo.
+Las aristas siguientes aparecen en los contratos/auditorías existentes; no
+establecen dependencia entre raíces independientes:
+
+```text
+IR global storage + política single-execution
+    -> globals/const importados
+    -> statements inicializadores importados
+
+TypeLayout + lifecycle de referencias
+    -> layout/ownership de class native
+
+TypeLayout/lifecycle de valor borrado + ABI callable de método
+    -> representación de interface
+    -> dynamic dispatch native
+
+Range value IR (fuera del lowering especial de for)
+    -> Range almacenado/pasado
+    -> protocolo interno Iterable/Iterator
+    -> iterables no indexables adicionales
+
+Contrato de shape/orientación por operación avanzada
+    -> opcode/ABI de runtime de álgebra lineal
+    -> lowering LLVM + tests native
+
+Paridad IRV + protocolo/package + IRV-024 alineado (completados)
+    -> canary Rust-authority sostenido
+    -> decisión separada de autoridad Initial IR de producto
+```
+
+No hay evidencia de que nullable sea requisito de classes, ni de que classes
+sean requisito técnico único de interfaces; por eso no se inventa la cadena
+`nullable -> class -> interface`. Nullable necesita su propio layout y
+lifecycle. Interface necesita una representación borrada/dispatch compatible
+con los receivers admitidos. Reflection tampoco entra en el grafo: no existe
+implementación ni contrato aprobado que permita ordenar ese trabajo.
+
+## Prioridad
+
+### P0 — corrección crítica
+
+**Ninguno abierto encontrado.** El gate evita lowering de las formas excluidas;
+los P0 históricos de i32, rangos, bounds, lifecycle, paridad observable e
+IRV-024 están cerrados y tienen regresión.
+
+### P1 — feature visible pero backend incompleto
+
+Para el objetivo amplio de paridad con el frontend: estado importado de
+módulos; classes; interfaces/dispatch; nullable; tuples; `float`/`complex`;
+funciones anidadas y callables avanzados; interpolación/formatting; input;
+excepciones; extensiones Vector/Matrix; y álgebra lineal avanzada. Son
+experimentos explícitamente `OUTSIDE_V1`, no defectos de conformidad del perfil
+estable. Cada uno debe permanecer detrás del gate hasta completar todas las
+etapas y tests de su fila.
+
+### P2 — feature estable, subsystema incompleto
+
+- decisión de promoción o retención de la autoridad Rust después del canary;
+- `-O2`, que continúa como alias de `-O1` y no selecciona optimización native;
+- portabilidad fuera de Linux, no prometida por el perfil v1;
+- consolidación de matrices/documentos históricos duplicados.
+
+Ninguno impide ejecutar correctamente una feature admitida en Linux con la
+autoridad Python actual.
+
+### P3 — expansión futura
+
+Genéricos de usuario, protocolo público Iterator/Iterable, reflection,
+Map/Set/Queue/Stack, FFI pública, binary/stream/process IO general y
+closures/lambdas sin superficie implementada. No son trabajo necesario para
+cerrar el perfil native actual y no se les asigna semántica nueva en esta
+auditoría.
+
+## Reconciliación documental
+
+- `BACKEND_CAPABILITY_PROFILES.md` es coherente con profile 22 y explica la
+  evolución del gate. Duplica historia de perfiles de esta auditoría y contiene
+  una línea repetida de igualdad string. También conserva el conteo “81 filas”
+  aunque esta matriz por etapas tiene hoy 84 filas, y el snapshot diferencial
+  de 12 programas/36 ejecuciones frente al corpus actual de 14/42. El
+  inventario de release de 123 filas usa otra granularidad y no debe mezclarse
+  con ninguno de esos conteos. Conviene conservar allí sólo política y
+  evolución del dato generado.
+- `AETHER_V1_PROFILE_AUDIT.md` y `AETHER_NATIVE_PROFILE_V1.md` son coherentes
+  para el perímetro v1: 75 `SUPPORTED`, 46 `OUTSIDE_V1`, gate 22 y Linux. El
+  primero es cierre de release; esta auditoría sigue siendo la matriz de
+  backend más amplia, no un segundo inventario normativo.
+- `LINEAR_ALGEBRA_AUDIT.md` acierta en que álgebra avanzada sigue AST-only,
+  pero su “Phase 5 LLVM/Runtime Integration” quedó obsoleta para el core
+  Vector/Matrix que ya baja E2E. Debe etiquetar esa fase como histórica y
+  limitar el pendiente a operaciones avanzadas.
+- `CONTROL_FLOW_AND_ITERATION_AUDIT.md` tiene un encabezado correcto que marca
+  cerrado el P0 rc.2, pero el resumen, matrices y prioridades posteriores
+  conservan el snapshot rc.1. Debe tratarse como evidencia histórica; sus
+  propuestas de `Range<T>`/Iterator no son estado implementado ni roadmap
+  aprobado.
+- `docs/compiler/BACKEND_FEATURE_PARITY.md` ya está marcado como ubicación
+  histórica y enlaza esta auditoría: no debe actualizarse como segunda matriz.
+- `docs/compiler/FEATURE_MATRIX.md`, el cuerpo histórico de
+  `ARRAY_SUBSYSTEM_AUDIT.md` y partes de `LLVM_BACKEND.md` todavía afirman
+  short-circuit ausente, Array inseguro, structs/List/string/println/imports
+  ausentes o LLVM desconectado. Son contradictorios con código, tests y perfil.
+  Deben recibir banner de snapshot/superseded o perder las tablas duplicadas.
+- `AETHER_IR_DESIGN.md` mezcla infraestructura actual con una lista
+  “Current limitations” anterior a for, structs, SSA, builtins y optimizer.
+  Debe separar diseño inicial histórico de contrato implementado.
+- `IR_BACKEND_SUPPORTED_SUBSET` en `src/aether/errors.py` sigue siendo un hint
+  manual obsoleto. La fuente reutilizable actual es el detector/profile; no se
+  debe crear otra matriz manual.
+- `BACKEND_RUST_MIGRATION.md` abre todavía con “Phase 3 ... parity audit is
+  next”, aunque el mismo documento agrega resultados 4.x al final. Los
+  documentos `INITIAL_IR_*`, `PYTHON_RUST_VERIFIER_ADAPTER.md`,
+  `RUST_VERIFIER_OPERATIONAL_READINESS.md` y `RUST_VERIFIER_CANARY.md` son la
+  evidencia vigente. Al consolidar, debe distinguirse “producción directa
+  Python” de “configuración dual por defecto Python-authority/Rust-shadow”.
+
+## Roadmap recomendado para Fase 5.x
+
+1. **5.1 — Autoridad documental y baseline:** eliminar o marcar como snapshot
+   las matrices duplicadas anteriores y hacer que resúmenes generables consuman
+   `capabilities.py`. Mantener esta auditoría para evidencia por etapa y el
+   perfil v1 para el contrato de release.
+2. **5.2 — Cierre de autoridad Initial IR:** evaluar los criterios de salida
+   ya definidos del canary. Promover Rust o conservar Python debe ser una
+   decisión separada, fail-closed y sin cambiar features, SSA o LLVM.
+3. **5.3 — Estado de módulos native:** implementar en una fase futura, no en
+   esta auditoría, storage IR y política single-execution antes de admitir
+   globals/const/statements importados.
+4. **5.4 — Referencias native:** fijar TypeLayout/lifecycle/ABI de class antes
+   de habilitar construcción, fields o métodos de class.
+5. **5.5 — Dispatch:** añadir representación de interface y dispatch sólo
+   después de que sus receivers y ABI callable tengan lifecycle verificable.
+
+Nullable, tuples, `float`/`complex`, excepciones, strings adicionales,
+iteración general y álgebra avanzada son raíces o ramas independientes. No
+deben agruparse artificialmente con 5.3–5.5 ni habilitarse por relajar el gate:
+cada promoción exige su propio camino parser→tests y actualización explícita
+del perfil.
+
+## Validación de la reconciliación
+
+| Check | Resultado |
+| --- | --- |
+| `scripts/check_release_docs.py` | PASS |
+| `scripts/render_native_profile.py --check` | PASS; profile 22 sincronizado |
+| Corpus diferencial | PASS; 14 programas, 42 comparaciones O0/O1/O2 |
+| Capabilities/parity/Eq/short-circuit/RC/numeric/Vector-Matrix | 127 passed |
+| IR/SSA verifier, optimizers y regresión de repositorio | 230 passed |
+| Shadow/authority/canary/operational/IRV-024 | 79 passed, 3 skipped opt-in |
+| `cargo test --workspace --all-targets` | PASS |
+| `git diff --check` | PASS |
+
+La suite focalizada que incluye `test_v1_profile_audit.py` produjo 317 passed
+y 7 failures exclusivamente en el catálogo de ejemplos: el manifest no incluye
+archivos trackeados posteriores (`SNL.ae` y dos ejemplos LeetCode), existe
+`nonlinear_systems/nr2.ae` sin trackear y el worktree ya contenía cambios en
+`Sorts/Main.ae`, `Sorts/Sortings.ae` y `nose.ae` que alteran clasificación o
+hashes. Esta auditoría no modificó esos ejemplos ni el manifest. El hallazgo es
+documental/catalogación y no contradice las pruebas backend focalizadas ni el
+corpus diferencial versionado.
