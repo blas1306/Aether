@@ -55,6 +55,10 @@ comparison.
 
 Current compiler-design documents:
 
+- [NATIVE_OBJECT_MODEL_DESIGN.md](NATIVE_OBJECT_MODEL_DESIGN.md):
+  Phase 5.1 architecture for class references, tagged nullable values,
+  interface carriers/witness tables, the internal ABI, dispatch, ARC/GC
+  lifecycle, dependency ordering, and refactor risks; documentation only.
 - [RUST_VERIFIER_CANARY.md](RUST_VERIFIER_CANARY.md):
   Phase 4.6 explicit Rust-authority canary activation, Python shadow retention,
   deterministic monitoring summaries, CI isolation, configuration-only

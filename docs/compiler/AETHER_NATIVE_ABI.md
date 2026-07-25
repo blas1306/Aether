@@ -315,7 +315,10 @@ Decisiones que no deben tomarse implícitamente:
 4. allocator provisto por runtime versus inyectable.
 5. headers públicos versus handles opacos.
 6. versionado de object format y compatibilidad de mangling.
-7. estrategia de nullable/classes/interfaces/closures.
+7. implementación y eventual versionado de la estrategia de
+   nullable/classes/interfaces aprobada en
+   [`NATIVE_OBJECT_MODEL_DESIGN.md`](NATIVE_OBJECT_MODEL_DESIGN.md), y la
+   estrategia todavía separada de closures.
 
 ## 14. Forma recomendada de la ABI runtime futura
 

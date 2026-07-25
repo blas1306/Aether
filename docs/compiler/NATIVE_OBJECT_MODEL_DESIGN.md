@@ -1,0 +1,904 @@
+# Modelo nativo de objetos por referencia
+
+> Clasificación: **Design/RFC — Phase 5.1**. Fecha: **25 de julio de 2026**.
+> Este documento define arquitectura, no una feature habilitada. No modifica
+> parser, AST, typechecker, Initial IR, SSA, LLVM, runtime, perfil native ni
+> semántica observable.
+
+## 1. Alcance y fuentes de verdad
+
+El objetivo es fijar una representación común y composable para `class`,
+interfaces, referencias, `null`, `T?`, dispatch y lifetime antes de implementar
+cualquiera de esas capacidades en native.
+
+El diseño conserva estas fuentes de verdad:
+
+- la semántica frontend/AST histórica de classes, interfaces y nullable descrita
+  por [AETHER_V0_SPEC.md](../aether/AETHER_V0_SPEC.md);
+- la exclusión explícita de esas features del perfil estable en
+  [AETHER_LANGUAGE_SPEC_V1.md](../aether/AETHER_LANGUAGE_SPEC_V1.md) y
+  [AETHER_NATIVE_PROFILE_V1.md](../aether/AETHER_NATIVE_PROFILE_V1.md);
+- el diagnóstico por etapas y el grafo de dependencias de
+  [BACKEND_FEATURE_PARITY.md](../aether/BACKEND_FEATURE_PARITY.md);
+- el ABI descriptivo actual de
+  [AETHER_NATIVE_ABI.md](AETHER_NATIVE_ABI.md);
+- las operaciones canónicas de
+  [VALUE_LIFECYCLE_DESIGN.md](VALUE_LIFECYCLE_DESIGN.md);
+- el objeto string no nulo y su ARC oculto de
+  [STRING_RUNTIME_DESIGN.md](../aether/STRING_RUNTIME_DESIGN.md).
+
+Este RFC no convierte el comportamiento histórico de v0 en parte de Aether
+1.0. Tampoco relaja el capability gate. Una fase posterior deberá promover cada
+feature explícitamente después de completar su camino E2E.
+
+## 2. Decisiones resumidas
+
+| Tema | Decisión |
+| --- | --- |
+| Identidad de class | Una instancia es una allocation lógica única y estable durante su vida. Copiar una referencia no crea otra instancia. |
+| Referencia de class | Handle opaco, no nulo, de una palabra target: `ptr` en LLVM. |
+| Objeto class | Header administrado seguido por fields en orden fuente. El layout es interno y target-dependent. |
+| Dispatch de class | Directo/estático mientras no exista inheritance u override. No se agrega una vtable por objeto. |
+| Valor interface | Existential de dos palabras: `{carrier, witness_table}`. No es un solo puntero. |
+| Dispatch de interface | Indirecto por witness table inmutable, una por par `(tipo concreto, interface)`. |
+| Struct en interface | Se guarda en una caja owned. Copiar el interface clona lógicamente el struct para conservar value semantics. |
+| Class en interface | El carrier es la misma instancia class. Copiar el interface retiene y conserva aliasing. |
+| `null` | No es un objeto ni un puntero genérico. Sólo construye el estado ausente de un `T?`. |
+| `T?` | Tagged value canónico `{present: i1, payload: T}` para todo `T` representable. |
+| Nullable de referencia | También usa tag; no roba el valor `ptr null`. Un `T` no nullable mantiene su invariante no nulo. |
+| Uniformidad | Classes y handles runtime directos son una palabra; interfaces y nullable no. La uniformidad aprobada es de lifecycle/ownership, no de cantidad de palabras. |
+| Ownership inicial | ARC fuerte, intrusivo, no atómico y oculto para classes; compatible con el contrato ya usado por strings y Array/List. |
+| GC futuro | Debe consumir descriptors y trazado tipado sin cambiar la semántica. La primera opción compatible es un collector no moving por proceso/build. |
+| `const` | Califica el acceso/binding, no el objeto. No forma parte del handle, header ni witness table. |
+| ABI pública | Ninguna. Todo el diseño es ABI interna del módulo combinado hasta que exista runtime versionado. |
+
+## 3. Objetivos e invariantes del modelo
+
+### 3.1 Identidad
+
+Cada construcción exitosa de una class crea una identidad distinta, incluso si
+todos sus fields tienen el mismo contenido que otra instancia. La identidad:
+
+- comienza al publicar la instancia construida;
+- se conserva a través de assignment, parámetros, returns e interfaces;
+- no cambia al mutar fields;
+- termina cuando el runtime reclama la instancia;
+- puede reutilizar una dirección sólo después de terminada esa vida.
+
+La dirección estable puede usarse internamente para retain/release,
+self-assignment y cachés, pero no introduce igualdad source. El comportamiento
+actual se conserva: classes e interfaces no implementan `Eq`, y `==`/`!=` no
+se convierten en comparación de punteros.
+
+### 3.2 Semántica de referencia, mutabilidad y aliasing
+
+Un valor de class denota una instancia; no contiene una copia inline de sus
+fields. Para `b = a`, ambos handles designan la misma instancia y cada owning
+slot mantiene su propia participación de ownership. Una mutación mediante `b`
+puede observarse mediante `a`.
+
+Esta regla también se conserva al convertir una class a interface. En cambio,
+un struct sigue siendo un value type. La conversión de un struct a interface
+crea un snapshot owned del valor y una copia posterior del interface crea otro
+snapshot lógico. No se permite que el type erasure convierta accidentalmente un
+struct en un objeto con aliasing observable.
+
+El optimizador debe suponer aliasing entre referencias de class mientras no
+exista un análisis que pruebe lo contrario. Reads y writes de fields, calls
+mutantes e indirect calls son efectos de memoria; no pueden eliminarse o
+reordenarse como operaciones puras.
+
+### 3.3 `const`
+
+`const` sigue siendo una restricción estática sobre un binding o access path:
+
+- impide rebind del local;
+- impide escribir fields o llamar métodos mutantes a través de ese path;
+- no congela globalmente el objeto;
+- no impide mutación mediante otro alias mutable;
+- deja de propagarse al atravesar una referencia class contenida, de acuerdo
+  con el typechecker actual;
+- en interfaces controla si el receiver puede usar un método mutante, pero no
+  selecciona otra witness table.
+
+No existen handles `const`, bits de const en el header ni variantes de vtable.
+Codificar const en runtime duplicaría representaciones sin aportar una
+garantía que el lenguaje no ofrece.
+
+### 3.4 Compatibilidad y seguridad
+
+El modelo debe:
+
+- preservar el ABI y value semantics actuales de structs;
+- admitir fields con lifecycle no trivial, incluidos string, Array/List,
+  structs y referencias class;
+- no confundir null con string vacío, colección vacía o un objeto destruido;
+- mantener nombres nominales independientes de paths locales e import aliases;
+- usar tamaño, alineación y padding calculados por LLVM para el target;
+- conservar retain/release, dispatch y allocation como efectos visibles para
+  verificadores y optimizadores;
+- permitir instrumentación de leaks, overflow/underflow de RC y use-after-free;
+- dejar trazado suficiente para un collector futuro.
+
+## 4. Taxonomía: semántica frente a representación
+
+No todo valor representado internamente por `ptr` tiene semántica de class.
+
+| Familia | Semántica source | Representación propuesta/actual | Identidad source |
+| --- | --- | --- | --- |
+| class | referencia mutable | `ptr` no nulo a objeto class | sí, aunque sin operador público |
+| Array/List | referencia mutable | `ptr` no nulo a objeto runtime | aliasing observable; sin operador público |
+| string | value inmutable con storage compartible | `ptr` no nulo a objeto string | no |
+| callable top-level | valor de código sin capture | `ptr` a función | no Eq |
+| interface | type erasure que preserva la semántica del concreto | `{ptr carrier, ptr witness}` | la del concreto |
+| struct | value type | agregado LLVM inline | no identidad de objeto |
+| `T?` | suma `None | Some(T)` | `{i1, T}` | la del payload sólo cuando está presente |
+
+La uniformidad útil es el protocolo `copy_init/move_init/assign/destroy`, no
+forzar a todos los tipos a ser una palabra ni compartir un único header.
+
+## 5. Representación de class y referencias
+
+### 5.1 Handle
+
+`ClassRefType(C)` se representa como `ptr` opaco de una palabra target. Un
+valor class válido es siempre no nulo. No existe un valor default universal de
+tipo class: si se necesita ausencia debe usarse `C?`.
+
+En pseudotipo LLVM:
+
+```llvm
+; Forma conceptual, no definición que deba emitirse en esta fase.
+%class.<canonical-id> = type {
+    %AetherObjectHeader,
+    <field-0>,
+    <field-1>,
+    ...
+}
+```
+
+El handle apunta al inicio de la allocation. Los fields mantienen orden fuente;
+LLVM decide offsets, padding y alineación. No se hardcodea ancho de puntero ni
+tamaño de header en Python.
+
+### 5.2 Header y descriptor
+
+El header lógico de una class contiene:
+
+```text
+descriptor      # tipo nominal, destroy y trace
+strong_count    # ARC inicial
+flags           # immortal/debug/management; reserva interna
+reserved        # cero o uso versionado futuro
+```
+
+El descriptor inmutable por tipo contiene al menos:
+
+```text
+canonical_type_id
+object_size / object_alignment
+destroy_fields(object)
+trace_references(object, visitor)
+management/version flags
+```
+
+Éste es un contrato lógico, no un layout C público. Compiler y runtime pueden
+materializarlo como globals LLVM privadas. Field access de código generado usa
+el layout nominal completo de la class; retain/release, validación y
+destrucción deben centralizarse en helpers para no duplicar offsets de header.
+
+Strings no se migran a este header. Su layout actual comienza por
+`byte_length` y tiene invariantes propios. Array/List también conservan sus
+headers. Comparten lifecycle y convenciones de ownership, no una representación
+física obligatoria.
+
+### 5.3 Identidad nominal
+
+Class, interface, descriptor, witness table y símbolo de método deben usar un
+ID canónico basado en módulo/package semántico más declaración, nunca el path
+absoluto, el alias de import ni sólo el spelling corto. Esto extiende el
+principio ya usado por enums y mangling de módulos.
+
+La identidad nominal debe resolverse antes de construir layouts. Dos classes
+homónimas de módulos distintos nunca comparten descriptor, layout o witness.
+
+### 5.4 Construcción
+
+La construcción segura sigue esta secuencia lógica:
+
+1. comprobar tamaños y reservar una allocation alineada;
+2. inicializar header en estado no publicado con un owner inicial;
+3. inicializar cada field con el lifecycle de su tipo;
+4. ejecutar el constructor con `this` borrowed;
+5. publicar un handle owned sólo cuando la instancia sea válida.
+
+Una falla antes de la publicación destruye en orden inverso exactamente los
+fields ya vivos y libera la allocation. El panic native actual es abortivo y
+no hace unwind, pero conservar el estado de inicialización evita cerrar la
+puerta a errores recuperables.
+
+No se interpreta un bloque de ceros como una class válida. En particular, un
+field class no nullable requiere inicialización real; `ptr null` sólo puede
+existir como bytes inactivos dentro de un nullable ausente o durante
+construcción interna no publicada.
+
+### 5.5 Deuda de default-initialization detectada
+
+El intérprete AST actual usa `None` como fallback de `_default_field_value`
+para tipos no cubiertos durante un constructor explícito. Para un field
+`ClassType` no nullable, ese estado accidental entra en tensión con las reglas
+frontend que reservan `null` para `T?`.
+
+Este RFC no cambia ese comportamiento. La implementación native no debe
+copiarlo como `ptr null` silencioso. Antes de promover classes será obligatorio
+caracterizar constructores que leen o dejan sin escribir fields class/interface
+y elegir, en la capa de lenguaje correspondiente, entre definite
+initialization o un default válido explícitamente especificado. Mientras esa
+decisión no exista, el capability gate debe mantener esos programas fuera de
+native.
+
+## 6. `null` y nullable
+
+### 6.1 Regla semántica
+
+`null` no tiene representación standalone. Es un literal contextual que sólo
+puede crear el caso ausente del tipo esperado `T?`. No pertenece a toda
+referencia y no cambia la nulabilidad de class, string, interface o colección.
+
+El frontend actual prohíbe nested nullable y `void?`; el backend conserva esas
+reglas y sólo admite `T?` cuando `T` tiene layout y lifecycle native completos.
+
+### 6.2 Layout canónico
+
+Para todo `T` representable:
+
+```llvm
+%nullable.<T> = type { i1, <llvm-type-of-T> }
+; field 0: present
+; field 1: payload
+```
+
+Invariantes:
+
+- `present == false`: el valor es `null`; el payload no es un valor Aether
+  vivo y nunca se copia, lee, compara ni destruye;
+- `present == true`: el payload contiene exactamente un `T` vivo;
+- el caso ausente usa `zeroinitializer` en el payload al cruzar storage/ABI,
+  para evitar `undef`, poison y bytes indeterminados;
+- esos ceros son bytes inactivos, no un valor válido de `T`;
+- padding y tamaño pertenecen al DataLayout del target.
+
+Se rechaza usar `ptr null` como niche ABI para nullable de referencia. El tag
+uniforme:
+
+- soporta `int?`, structs?, interface? y cualquier `T` sized;
+- mantiene no nulos todos los handles no nullable;
+- conserva la distinción entre `null`, `""` y una colección vacía;
+- evita que una optimización de representación cambie firmas entre tipos.
+
+Una optimización local futura puede usar un niche si demuestra equivalencia y
+reconstruye la forma canónica en storage, calls, returns y phis. No forma parte
+del ABI inicial.
+
+### 6.3 Lifecycle de `T?`
+
+Las operaciones se sintetizan recursivamente:
+
+| Operación | Caso ausente | Caso presente |
+| --- | --- | --- |
+| `init_default` | `{false, zeroinitializer}` | — |
+| `copy_init` | copia el tag y canonicaliza payload | `copy_init(T)` |
+| `move_init` | mueve la forma ausente | transfiere `T`, deja source ausente |
+| `assign` | adquiere primero el nuevo estado y destruye payload anterior si existía | usa `assign/copy_init(T)` con commit seguro |
+| `destroy` | no-op | `destroy(T)` |
+| `relocate` | move bitwise del agregado, source deja de estar vivo | igual, sin duplicar owner |
+
+`T?` es trivialmente copiable sólo si `T` lo es, siempre es sized si `T` lo
+es, y necesita destroy/retain exactamente cuando el caso presente de `T` lo
+necesita.
+
+### 6.4 Comparación
+
+El test interno de null sólo lee el tag. La igualdad de dos nullable:
+
+1. dos ausentes son iguales;
+2. ausente y presente son distintos;
+3. dos presentes delegan en `Eq(T)`.
+
+Esto no amplía `Eq`: si `T` no tiene igualdad, `T?` tampoco la obtiene. Por
+ello el layout permite comprobar el tag, pero la disponibilidad de un operador
+source sigue siendo decisión del typechecker actual. En particular, este RFC
+no introduce igualdad de identidad para `Class?` o `Interface?`.
+
+## 7. Representación de interfaces
+
+### 7.1 Existential fat value
+
+Una interface no se representa con un puntero a una vtable dentro de cada
+objeto. El valor erased es:
+
+```llvm
+%interface.<canonical-id> = type {
+    ptr, ; carrier owned/borrowed según posición
+    ptr  ; witness table inmutable y no nula
+}
+```
+
+Para una interface no nullable ambos punteros son válidos y no nulos. Un
+interface nullable envuelve el agregado completo en el tag de la sección 6.
+
+La witness table es una global privada por par
+`(tipo concreto, interface nominal)`:
+
+```text
+concrete_type_descriptor
+copy_owned(carrier) -> owned carrier
+drop_owned(carrier)
+method_slot_0
+method_slot_1
+...
+```
+
+Los slots siguen el orden de declaración de la interface. Como no existe
+interface inheritance, defaults ni overloads, no se necesita resolución
+adicional. El orden es ABI interna y debe regenerarse conjuntamente; no es una
+FFI estable.
+
+### 7.2 Carrier de class
+
+Cuando una class implementa la interface:
+
+- `carrier` es el mismo handle a la instancia class;
+- construir un interface owned desde la class hace retain salvo transferencia
+  probada de un owner;
+- `copy_owned` hace retain y devuelve el mismo carrier;
+- `drop_owned` hace release;
+- los method thunks adaptan el receiver erased al método concreto;
+- una mutación mediante interface cambia la instancia observada por todos los
+  aliases class/interface.
+
+No se reserva una caja adicional en esta conversión. La identidad de la class
+no cambia ni se introduce una segunda capa de objeto.
+
+### 7.3 Carrier de struct
+
+Un puntero a un struct temporal o de stack no puede escapar dentro de una
+interface. La conversión a un interface owned reserva una caja existential:
+
+```text
+struct-interface box:
+    private management/descriptor data
+    concrete struct payload
+```
+
+La caja contiene una copia lógica viva del struct. Sus operaciones son:
+
+- `copy_owned`: reserva otra caja y ejecuta `copy_init` del payload;
+- `drop_owned`: destruye el payload en orden correcto y libera la caja;
+- method thunk read-only: invoca el método sobre el payload;
+- method thunk mutante: actualiza el payload contenido en esa caja.
+
+Así, copiar o retornar un interface cuyo concreto es struct mantiene value
+semantics. Compartir la misma caja por retain sería incorrecto: dos variables
+interface podrían observar mutaciones cruzadas que no existen al copiar el
+struct directamente.
+
+Una optimización puede evitar la caja para un interface estrictamente borrowed,
+no escapable y con lifetime probado, pero la forma owned canónica siempre es la
+caja. La optimización no puede cambiar aliasing, dispatch ni cleanup.
+
+### 7.4 Lifecycle dinámico
+
+El tipo estático interface no conoce si el concreto es class o struct. Por eso:
+
+```text
+copy_init(dst, src):
+    new_carrier = src.witness.copy_owned(src.carrier)
+    dst = {new_carrier, src.witness}
+
+move_init(dst, src):
+    transferir las dos palabras; source deja de estar vivo
+
+assign(dst, src):
+    adquirir new_carrier primero
+    guardar el nuevo par
+    old.witness.drop_owned(old.carrier)
+
+destroy(value):
+    value.witness.drop_owned(value.carrier)
+```
+
+La adquisición anterior al drop hace segura la autoasignación, incluso cuando
+source y destination contienen el mismo carrier. `copy_owned` puede asignar y
+fallar para structs; el destino anterior no cambia antes del commit.
+
+## 8. ABI interna
+
+### 8.1 Regla general de calls
+
+Se conserva la convención de lifecycle actual:
+
+- parámetros normales son borrowed durante la call;
+- el callee adquiere ownership si almacena o retorna el valor;
+- resultados no triviales son owned por el caller;
+- un move/return puede transferir un owner sin retain;
+- fields, locals owning, globals futuros y elementos owning se destruyen una
+  vez;
+- receivers de métodos son borrowed durante la call.
+
+Borrowed/owned es metadata semántica/verificable, no un bit dentro del valor.
+
+### 8.2 Matriz ABI
+
+| Tipo/posición | Parámetro | Return | Copy | Move | Destroy |
+| --- | --- | --- | --- | --- | --- |
+| `struct S` | ABI por valor existente; lifecycle source preserva copia lógica | por valor/aggregate existente | fields recursivos | relocation de valor | fields en orden inverso |
+| `class C` | `ptr` borrowed | `ptr` owned | retain | transferir palabra | release |
+| `interface I` | `{ptr,ptr}` borrowed por valor | `{ptr,ptr}` owned | witness `copy_owned` | transferir dos palabras | witness `drop_owned` |
+| `T?` | `{i1,T}` borrowed recursivo | `{i1,T}` owned si presente | condicionado por tag | transferir agregado | payload sólo si presente |
+| `null` | no existe posición sin tipo esperado | construye `T?` ausente | — | — | — |
+
+El paso de agregados sigue la calling convention LLVM/Clang del target, como
+los structs actuales. No se promete que `{ptr,ptr}` o `{i1,T}` tenga la misma
+ABI C en todos los targets. Al separar el runtime deberán definirse firmas C
+estrechas con handles opacos o out parameters.
+
+### 8.3 ABI de métodos
+
+Los métodos de class no reutilizan `MethodResultType` de struct:
+
+```text
+class method:    R C.method(ptr borrowed_this, P1, ...)
+struct method:   {S [, R]} S.method(S receiver, P1, ...)  # ABI actual
+```
+
+Una class se muta en su objeto compartido y no necesita devolver un receiver
+actualizado. Mantener separados ambos ABIs evita copiar el objeto o confundir
+identidad con value reconstruction.
+
+El slot erased de interface usa conceptualmente:
+
+```text
+R thunk(ptr carrier, P1, ...)
+```
+
+Para class, el thunk llama al método class. Para struct, adapta el payload de
+la caja al ABI existente de método struct y, si corresponde, guarda el receiver
+actualizado que retorna dicho ABI. De este modo interface dispatch no obliga a
+cambiar el contrato actual de structs.
+
+### 8.4 Assignment y fields
+
+Assignment nunca es sólo un store para un valor owning:
+
+```text
+class dst = src:
+    retain(src)
+    old = dst
+    dst = src
+    release(old)
+```
+
+Interface y nullable siguen las variantes de sus secciones. Un field get que
+produce un valor owned copia/retiene; un borrow temporal puede evitarlo sólo si
+no escapa. Un field set usa `assign` del tipo del field y conserva
+self-assignment, aliasing indirecto y strong exception safety.
+
+### 8.5 Comparación ABI
+
+- classes e interfaces no tienen compare source;
+- pointer equality interna sólo puede ser un fast path no observable;
+- null test inspecciona el tag del nullable;
+- igualdad nullable delega en `Eq(T)` cuando esa capability existe;
+- witness/descriptor pointers no son valores comparables del lenguaje.
+
+### 8.6 Ownership observable
+
+El usuario puede observar aliasing y mutaciones, pero no:
+
+- el valor del strong count;
+- el número exacto de retains/releases;
+- si una optimización hizo move o elidió ARC;
+- la dirección del objeto;
+- el momento exacto de reclamación en ausencia de un destructor/API de
+  identidad;
+- la clase concreta almacenada en una interface mediante reflection, porque no
+  existe tal API.
+
+Allocation failure, panic de overflow de RC y agotamiento de memoria siguen
+siendo efectos runtime. Este RFC no agrega destructores de usuario, weak
+references, finalizers ni reflection.
+
+## 9. Dispatch
+
+### 9.1 Despacho estático
+
+Se usa para:
+
+- funciones libres;
+- métodos de struct con tipo concreto;
+- constructores;
+- métodos de class con tipo concreto.
+
+Classes no tienen inheritance, override ni overload. Una vtable de class no
+aportaría semántica y aumentaría todos los objetos. El descriptor de tipo no se
+consulta para una call concreta.
+
+Coste esperado: una call directa, más las operaciones de lifecycle de
+argumentos/resultados que realmente correspondan.
+
+### 9.2 Despacho dinámico
+
+Se usa exclusivamente cuando el tipo estático del receiver es interface:
+
+1. cargar el function pointer del slot conocido de la witness table;
+2. pasar el carrier como receiver erased;
+3. ejecutar una call indirecta con la firma estática de la interface.
+
+Coste esperado en steady state:
+
+- una carga del slot;
+- una indirect call;
+- posiblemente un thunk corto;
+- ninguna allocation por call.
+
+La conversión a interface sí puede tener coste:
+
+- class a interface owned: retain, sin allocation;
+- struct a interface owned: allocation y copia lógica;
+- interface copy: retain o clone decidido dinámicamente por witness.
+
+Calls indirectas deben marcarse conservadoramente como reads/writes, may-trap y
+posible allocation según la firma/efectos del método hasta disponer de effect
+summaries verificadas.
+
+### 9.3 Devirtualización futura
+
+SSA puede reemplazar una interface call por call concreta sólo si prueba la
+witness exacta y conserva:
+
+- el thunk necesario para struct/class;
+- ownership de argumentos/return;
+- efectos y panics;
+- mutación del carrier correcto;
+- lifetime de una caja struct.
+
+La devirtualización no autoriza eliminar la conversión/caja si el interface
+escapa o si hacerlo cambia value semantics.
+
+## 10. Lifetime y administración de memoria
+
+### 10.1 Owners y borrows
+
+Son owners:
+
+- el resultado inicial de una construcción/allocation;
+- cada local owning;
+- fields owning de class/struct;
+- elementos owning de collections;
+- un interface owned respecto de su carrier;
+- el payload presente de un nullable owned;
+- un resultado no trivial entregado al caller;
+- globals futuros.
+
+Son borrows:
+
+- parámetros normales durante la call;
+- `this`/receiver durante un método;
+- reads temporales marcados no escapables;
+- iteración borrowed existente;
+- referencias utilizadas sólo para una operación runtime acotada.
+
+Cada alias class owned cuenta como un strong owner. Un borrow no incrementa RC,
+no se destruye y no puede sobrevivir al owner que garantiza su vida.
+
+### 10.2 ARC inicial
+
+Classes adoptan ARC fuerte, intrusivo y no atómico:
+
+- una instancia dinámica publicada comienza con strong count 1;
+- copy/escape owned hace retain;
+- destroy hace release;
+- retain valida overflow antes de incrementar;
+- release valida underflow;
+- la transición `1 -> 0` destruye fields en orden inverso y libera el objeto;
+- cleanup normal no lanza una excepción recuperable.
+
+Esto coincide con el régimen actual de string y Array/List sin obligarlos a
+compartir header. Los helpers permanecen type-directed: liberar una class
+necesita su descriptor; liberar string o collection usa su runtime existente.
+
+La política no atómica sólo es válida mientras Aether no permita compartir
+objetos entre threads native. Concurrencia exige una decisión previa entre RC
+atómico, transferencia comprobada o GC.
+
+### 10.3 Ciclos
+
+Classes pueden formar ciclos mediante fields de referencia. ARC fuerte por sí
+solo no reclama un ciclo que conserva counts positivos. La primera
+implementación debe ser memory-safe —nunca use-after-free— pero no puede
+prometer reclamación de ciclos sin una de estas extensiones:
+
+1. cycle collector sobre el grafo de objetos;
+2. tracing GC;
+3. weak references con semántica source nueva.
+
+Este RFC reserva `trace_references` en descriptors y recomienda un cycle
+collector/tracing no moving antes de calificar programas cíclicos de larga vida
+como libres de leaks. Weak references no se introducen porque cambiarían la
+superficie del lenguaje.
+
+El límite debe documentarse y medirse con leak tests; no debe ocultarse
+liberando arbitrariamente un objeto con strong owners.
+
+### 10.4 GC opcional futuro
+
+El contrato semántico de lifecycle permanece aunque cambie el proveedor:
+
+- `copy_init`, `assign`, `move`, `destroy` y ownership siguen en IR;
+- un lowering ARC los convierte en retain/release;
+- un lowering GC puede convertirlos en root updates, write barriers o no-ops
+  probados;
+- descriptors de class y cajas struct enumeran referencias transitivas;
+- collections deben exponer trazado de elementos, no sólo liberar buffers;
+- fields string/recursos no GC siguen necesitando cleanup o integración con el
+  collector.
+
+La primera estrategia GC compatible debe ser no moving y seleccionada para el
+proceso/build completo. Así los handles `ptr`, carriers de interface y borrows
+mantienen dirección estable. Un collector moving requiere stack maps, update
+de roots, pinning/handles para ABI y revisión de field access; no queda
+prometido por este RFC.
+
+Un modo híbrido por tipo sólo es válido si el collector recorre todas las
+aristas entre classes, cajas, collections y objetos ARC. Simplemente convertir
+retain/release en no-op produciría roots perdidos y no es una migración válida.
+
+### 10.5 Fin de vida y panic
+
+Un objeto puede destruirse cuando desaparece el último strong owner y no
+existe un borrow válido fuera de esos owners. Bajo ARC esto ocurre de forma
+determinista en la transición a cero; bajo GC futuro puede ocurrir después de
+ser inalcanzable.
+
+El panic native actual termina el proceso y no ejecuta unwind de frames. Los
+exits estructurados normales (`return`, fin de scope, `break`, `continue`)
+mantienen cleanup. Si se implementan excepciones recuperables, cada punto
+fallable necesitará una arista excepcional con el conjunto exacto de objetos y
+payloads parcialmente vivos.
+
+## 11. Integración con LLVM y capas actuales
+
+### 11.1 LLVM
+
+El diseño usa exclusivamente formas que LLVM ya representa:
+
+- opaque `ptr` para class/carriers/descriptors/functions;
+- named structs para objetos, interfaces y nullable;
+- globals constantes para descriptors y witness tables;
+- indirect calls con firma estática conocida;
+- GEP sobre layouts nominales;
+- helpers effectful de allocation/retain/release/drop/trace.
+
+No requiere punteros tipados, cálculo host de padding ni un target fijo. Antes
+de emitir objetos reutilizables debe fijarse triple/DataLayout o continuar con
+la política actual de módulo combinado compilado por Clang host.
+
+### 11.2 Initial IR y SSA
+
+El IR ya admite nominalmente `ClassRefType`, `InterfaceType` y `NullableType`,
+pero no define sus instrucciones, layout o lifecycle. Esa presencia no cuenta
+como implementación.
+
+Una fase futura deberá representar explícitamente:
+
+- definiciones nominales de class/interface y sus IDs canónicos;
+- construcción y acceso/mutación de class;
+- conversión concreta a interface;
+- interface call por slot/firma;
+- construcción/test/extracción de nullable;
+- ownership de resultados, carriers y payloads;
+- efectos de allocation, memory, retain/release e indirect calls.
+
+Lifecycle debe expandirse después de verificar Initial IR y antes de SSA, como
+en el pipeline actual. SSA conserva tipos nominales, dominancia y phis, pero un
+phi owned no crea owners implícitos. El verificador Rust deberá importar y
+validar el mismo schema antes de cualquier promoción de autoridad.
+
+Este RFC no prescribe nombres finales de opcodes ni modifica el schema actual.
+
+### 11.3 Structs
+
+Nada cambia en el layout o ABI de struct:
+
+- fields inline en orden fuente;
+- copy y destroy recursivos;
+- paso/return por valor target-dependent;
+- `MethodResultType` para receiver actualizado;
+- ciclos by-value siguen prohibidos;
+- un field class es sólo un handle de una palabra y por eso no crea ciclo de
+  layout.
+
+La caja de interface es un adaptador externo al valor struct. No cambia el
+layout de `S` ni hace que un `S` ordinario tenga header.
+
+### 11.4 Runtime string y collections
+
+String conserva:
+
+- handle no nulo de una palabra;
+- header propio con byte length;
+- UTF-8 y NUL trailing;
+- ARC no atómico, literales/vacío inmortales;
+- value semantics por contenido.
+
+Array/List conservan sus headers, buffers, aliasing y RC. El modelo nuevo
+reutiliza su clasificación de handle no trivialmente copiable y trivialmente
+relocatable. Cuando puedan contener class/interface/nullable, sus hooks de
+elemento deben delegar en el lifecycle completo del elemento.
+
+## 12. Orden de implementación recomendado
+
+La auditoría del repositorio no respalda una dependencia lineal
+`nullable -> class -> interface`. Nullable es una raíz composable; interfaces
+sí dependen del ABI erased y de receivers con lifecycle válido.
+
+```text
+IDs nominales + TypeLayout + lifecycle/ownership verificable
+                  |
+          +-------+------------------+
+          |                          |
+          v                          v
+  Nullable tagged genérico     Class object/reference ABI
+          |                          |
+          |                          v
+          |                 construcción + fields +
+          |                 métodos directos + ARC
+          |                          |
+          +-------------+------------+
+                        v
+              Interface carrier/witness
+              /                    \
+      caja para struct       carrier de class
+                        |
+                        v
+          dispatch + lifecycle dinámico
+                        |
+                        v
+        hardening de ciclos / GC opcional /
+        optimización ARC y devirtualización
+```
+
+Lifecycle no es una fase final: es criterio de entrada y salida en cada bloque.
+No debe habilitarse construcción de class, nullable no trivial o boxing de
+interface con cleanup pendiente.
+
+### 12.1 Fase siguiente A — fundamentos
+
+1. congelar IDs nominales cross-module;
+2. extender la descripción de TypeLayout sin emitir código nuevo;
+3. fijar traits de class/interface/nullable;
+4. diseñar schema/opcodes y reglas de verifier Python/Rust;
+5. definir helpers runtime privados y matriz de efectos;
+6. preparar tests negativos de gate y wire format.
+
+### 12.2 Fase siguiente B — nullable
+
+1. tag, constructores absent/present y extracción comprobada;
+2. lifecycle recursivo y phis;
+3. null comparison/print sólo según reglas existentes;
+4. structs/collections con nullable cuando `T` sea representable;
+5. paridad AST/IR/SSA/LLVM y capability promotion explícita.
+
+Esta rama puede ejecutarse antes de classes. El registry genérico debe aceptar
+`ClassRefType` e `InterfaceType` automáticamente cuando esas ramas adquieran
+layout/lifecycle, sin rediseñar nullable.
+
+### 12.3 Fase siguiente C — classes
+
+1. descriptor/header/runtime ARC;
+2. layout nominal y allocation checked;
+3. auto/explicit constructors con cleanup parcial;
+4. field get/set y const ya resuelto por frontend;
+5. ABI directo de métodos y `this`;
+6. parámetros, returns, structs y collections con class refs;
+7. aliasing, self-assignment, imports y O0/O1/O2;
+8. leak/lifetime tests, incluidos ciclos documentados.
+
+### 12.4 Fase siguiente D — interfaces
+
+1. ABI `{carrier,witness}`;
+2. witness tables deterministas cross-module;
+3. carrier class sin box;
+4. caja y clone/drop para struct;
+5. thunks que preserven ambos ABIs de método;
+6. dispatch, mutation, const y ownership dinámicos;
+7. interfaces en nullable/structs/collections;
+8. tests de value/reference semantics y devirtualización prohibida.
+
+### 12.5 Fase siguiente E — lifetime avanzado
+
+1. instrumentación RC/leaks y sanitizers;
+2. política de ciclos para workloads de larga vida;
+3. descriptors de trace para todo objeto/container;
+4. prototipo GC no moving detrás de la misma semántica;
+5. ARC optimization y devirtualización sólo con pruebas de equivalencia;
+6. decisión separada de threading y RC atómico.
+
+## 13. Riesgos y decisiones que provocarían refactor
+
+| Decisión prematura | Refactor/riesgo posterior | Mitigación aprobada |
+| --- | --- | --- |
+| Usar `ptr null` para `Class?`/`string?` | ABI nullable distinta por tipo; no soporta `int?`/struct?; rompe el invariante no nulo | tag uniforme `{i1,T}` |
+| Hacer todos los reference-like values de una palabra | obliga a heap-box de interface y nullable, agrega allocations y confunde semántica | aceptar fat/tagged values |
+| Un header universal idéntico a string | migración del runtime textual y offsets duplicados | compartir protocolo, no bytes |
+| Meter vtable en cada class | coste permanente sin inheritance; ABI difícil de cambiar | dispatch class directo, witness externa |
+| Retener una caja struct al copiar interface | convierte value semantics en aliasing | witness clone para struct |
+| Guardar puntero a struct stack en interface owned | dangling al escapar/retornar | caja owned canónica |
+| Boxear class al convertir a interface | segunda identidad/lifetime y allocation innecesaria | carrier apunta a instancia original |
+| Reutilizar `MethodResultType` para class | copia/reconstrucción falsa del receiver | ABI class por `ptr this` |
+| Hacer release antes de retain en assignment | use-after-free en self/indirect alias | acquire-before-commit-before-drop |
+| Codificar `const` en handles/vtables | explosión de variantes y falsa inmutabilidad global | const exclusivamente estático |
+| Tratar interface call como pura | DCE/reordering rompe mutación, allocation y panic | efectos conservadores |
+| Exponer offsets/header/vtable como FFI | bloquea evolución de ARC/GC/layout | ABI privada y helpers opacos |
+| IDs nominales por spelling corto | colisiones cross-module y witness incorrecta | ID canónico module+declaration |
+| Adoptar GC moving sin roots/stack maps | pointers/carriers/borrows dangling | GC inicial no moving; decisión posterior |
+| Convertir retain/release en no-op para “usar GC” | objetos no rooted y aristas invisibles | lowering de roots/barriers + trace tipado |
+| Ignorar ciclos ARC | leaks no acotados en grafos class | instrumentar y añadir cycle collector/GC |
+| RC no atómico después de threads | races, UAF y corrupción de counts | decisión de concurrencia antes de threads |
+| Promover una feature por admitir su IR type nominal | gaps de lowering/verifier/runtime | capability gate E2E por operación |
+| Copiar el fallback AST `None` a un field class no nullable | null implícito, contradicción con `T?` y posibles traps tardíos | caracterizar/decidir initialization antes de promover class |
+
+## 14. Validación arquitectónica
+
+| Restricción del repositorio | Comprobación |
+| --- | --- |
+| Backend LLVM actual | Usa opaque pointers, named aggregates, target layout e indirect calls ya compatibles. No exige cambio inmediato. |
+| IR existente | Conserva los tipos nominales actuales; reconoce que faltan opcodes/lifecycle y no los declara implementados. |
+| SSA/verifiers | Mantiene lifecycle antes de SSA, efectos obligatorios y ownership de phis; exige extensión coordinada Python/Rust futura. |
+| Structs | No cambia layout, paso/return, copy recursivo ni MethodResultType. La caja interface vive fuera del struct. |
+| String ARC | Mantiene handle no nulo, header propio y retain/release. `string?` usa wrapper/tag independiente como requería su RFC. |
+| Array/List | Mantiene aliasing, headers y RC. Nuevos elementos usarán hooks type-directed. |
+| Paridad | Sigue el grafo auditado: reference layout/lifecycle antes de class; erased ABI antes de interface; nullable como rama independiente. |
+| Const | Reproduce la restricción por access path y el corte al atravesar class que aplica el frontend actual. |
+| Igualdad | No agrega Eq a classes/interfaces ni un operador de identidad. |
+| Perfil native | Permanece sin cambios; classes, interfaces y nullable continúan rechazados antes de lowering. |
+
+## 15. Criterios de entrada para implementación
+
+Antes de comenzar código de una de las ramas debe aprobarse:
+
+- el ID nominal y mangling cross-module;
+- la forma exacta del IR y DTO versionado;
+- los traits de lifecycle y reglas de verifier;
+- la tabla de efectos de cada opcode/helper;
+- el boundary compiler/runtime y política de allocation failure;
+- tests de semántica AST que caractericen aliasing de class y copia de struct a
+  través de interface, incluidos métodos mutantes;
+- tests de nullable para cada familia de layout;
+- criterio explícito de capability promotion y rollback.
+
+Hasta entonces, `ClassRefType`, `InterfaceType` y `NullableType` siguen siendo
+tipos nominales admitidos por partes de la infraestructura, no evidencia de
+soporte native.
+
+## 16. Fuera de alcance
+
+No se diseñan ni habilitan:
+
+- inheritance, `extends`, `super` u override de class;
+- interface inheritance, default methods o generic interfaces;
+- destructores/finalizers de usuario;
+- weak/unowned references;
+- reflection, downcast o type tests públicos;
+- class/interface equality u operador público de identidad;
+- concurrency o sharing cross-thread;
+- exceptions/unwind;
+- FFI estable, runtime separado versionado o linking de objetos Aether de
+  releases distintas;
+- generics de usuario, closures o bound methods;
+- GC moving.
+
+Cada una de esas features requiere un RFC separado. El descriptor y los thunks
+de este diseño dejan puntos de extensión, pero no anticipan semántica que el
+lenguaje actual no posee.
