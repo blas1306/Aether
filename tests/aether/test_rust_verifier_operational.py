@@ -22,6 +22,7 @@ from aether.ir import (
     RustVerifierProcessFailure,
     RustVerifierTimeout,
     VerifierAuthorityConfiguration,
+    VerifierAuthorityEnvironment,
     VerifierAuthorityMode,
     VerifierAuthorityPipeline,
     VerifierImplementation,
@@ -261,19 +262,26 @@ def test_authority_rollback_rehearsal_uses_configuration_only(
     rust_verifier_executable: Path,
 ) -> None:
     client = SubprocessRustVerifierClient(executable=rust_verifier_executable)
-    modes = (
-        VerifierAuthorityMode.PYTHON_AUTHORITY_RUST_SHADOW,
-        VerifierAuthorityMode.RUST_AUTHORITY_PYTHON_SHADOW,
-        VerifierAuthorityMode.PYTHON_AUTHORITY_RUST_SHADOW,
+    configurations = (
+        VerifierAuthorityConfiguration(
+            VerifierAuthorityMode.PYTHON_AUTHORITY_RUST_SHADOW
+        ),
+        VerifierAuthorityConfiguration(
+            VerifierAuthorityMode.RUST_AUTHORITY_PYTHON_SHADOW,
+            VerifierAuthorityEnvironment.CANARY,
+        ),
+        VerifierAuthorityConfiguration(
+            VerifierAuthorityMode.PYTHON_AUTHORITY_RUST_SHADOW
+        ),
     )
     observed_roles = []
 
-    for mode in modes:
+    for configuration in configurations:
         sink = CollectingShadowReportSink()
         pipeline = VerifierAuthorityPipeline(
             client=client,
             sink=sink,
-            configuration=VerifierAuthorityConfiguration(mode),
+            configuration=configuration,
         )
         module = IRModule()
 
@@ -290,4 +298,9 @@ def test_authority_rollback_rehearsal_uses_configuration_only(
         (VerifierImplementation.PYTHON, VerifierImplementation.RUST),
         (VerifierImplementation.RUST, VerifierImplementation.PYTHON),
         (VerifierImplementation.PYTHON, VerifierImplementation.RUST),
+    ]
+    assert [configuration.environment for configuration in configurations] == [
+        VerifierAuthorityEnvironment.DEFAULT,
+        VerifierAuthorityEnvironment.CANARY,
+        VerifierAuthorityEnvironment.DEFAULT,
     ]

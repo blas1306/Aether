@@ -1,0 +1,15 @@
+{
+  "authority_mode": "rust_authority_python_shadow",
+  "comparison": "required",
+  "environment": "canary",
+  "python_shadow": "required",
+  "reporting": "required",
+  "schema_version": 1,
+  "suites": [
+    "benchmark_suite",
+    "compiler_examples",
+    "differential_corpus",
+    "migration_corpus"
+  ],
+  "timeout_seconds": 5.0
+}

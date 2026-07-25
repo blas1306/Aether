@@ -132,14 +132,14 @@ The full migration corpus and shadow regression remain the compatibility
 oracles. Rust-authority tests use controlled clients and do not alter the
 repository-wide feature flag.
 
-## Future rollout
+## Phase 4.6 canary boundary
 
-A later, separately approved rollout may provide the production Rust client
-and change only `_AUTHORITY_CONFIGURATION` to
-`RUST_AUTHORITY_PYTHON_SHADOW`. Before that change, the authority proposal must
-retain the full migration corpus, fail-closed integration tests, packaging and
-version matching, supported-platform evidence, the resolved IRV-024 graph
-semantics, and an operational rollback plan.
+Phase 4.6 did not change `_AUTHORITY_CONFIGURATION`. It added a separate,
+explicit canary environment in which controlled executions may select
+`RUST_AUTHORITY_PYTHON_SHADOW`. The canary retains the full migration corpus,
+fail-closed integration tests, packaging and version matching,
+supported-platform evidence, the resolved IRV-024 graph semantics, and an
+operational rollback plan. See `RUST_VERIFIER_CANARY.md`.
 
 Changing authority must not add fallback. Rollback is an explicit deployment
 or source-policy change back to Python authority, never a per-compilation

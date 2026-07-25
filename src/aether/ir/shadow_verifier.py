@@ -1,10 +1,9 @@
-"""Authority-ready Initial IR verification with continuous shadow comparison.
+"""Initial IR authority execution with continuous cross-verifier comparison.
 
-The repository-wide internal feature flag remains Python-authoritative.  The
-pipeline always runs both configured verifier engines, compares their semantic
-outcomes, emits one bounded report, and only then resolves the selected
-authority.  Rust authority is available for focused tests and future rollout;
-it is not enabled by this phase.
+The repository default remains Python-authoritative.  The pipeline always runs
+both verifier engines, compares their semantic outcomes, emits one bounded
+report, and only then resolves the selected authority.  Rust authority is
+representable only by an explicitly canary-scoped configuration.
 """
 
 from __future__ import annotations
@@ -80,15 +79,33 @@ class VerifierAuthorityMode(str, Enum):
     RUST_AUTHORITY_PYTHON_SHADOW = "rust_authority_python_shadow"
 
 
+@unique
+class VerifierAuthorityEnvironment(str, Enum):
+    """Closed environments in which an authority policy may execute."""
+
+    DEFAULT = "default"
+    CANARY = "canary"
+
+
 @dataclass(frozen=True)
 class VerifierAuthorityConfiguration:
     """One immutable authority selection consumed by the verification pipeline."""
 
     mode: VerifierAuthorityMode
+    environment: VerifierAuthorityEnvironment = VerifierAuthorityEnvironment.DEFAULT
 
     def __post_init__(self) -> None:
         if not isinstance(self.mode, VerifierAuthorityMode):
             raise TypeError("mode must be a VerifierAuthorityMode")
+        if not isinstance(self.environment, VerifierAuthorityEnvironment):
+            raise TypeError(
+                "environment must be a VerifierAuthorityEnvironment"
+            )
+        if (
+            self.mode is VerifierAuthorityMode.RUST_AUTHORITY_PYTHON_SHADOW
+            and self.environment is not VerifierAuthorityEnvironment.CANARY
+        ):
+            raise ValueError("Rust authority requires the canary environment")
 
     @property
     def authority(self) -> VerifierImplementation:
@@ -102,9 +119,14 @@ class VerifierAuthorityConfiguration:
             return VerifierImplementation.RUST
         return VerifierImplementation.PYTHON
 
+    @property
+    def is_canary(self) -> bool:
+        return self.environment is VerifierAuthorityEnvironment.CANARY
 
-# Internal feature flag.  A future authority phase changes this one assignment;
-# no environment variable or user-facing selector participates in the policy.
+
+# Production default.  Canary execution must pass a separate, explicit
+# configuration object; no environment variable or user-facing selector
+# participates in this policy.
 _AUTHORITY_CONFIGURATION = VerifierAuthorityConfiguration(
     VerifierAuthorityMode.PYTHON_AUTHORITY_RUST_SHADOW
 )
@@ -947,6 +969,7 @@ __all__ = [
     "ShadowVerificationStage",
     "ShadowVerifierCoordinator",
     "VerifierAuthorityConfiguration",
+    "VerifierAuthorityEnvironment",
     "VerifierAuthorityMode",
     "VerifierAuthorityPipeline",
     "VerifierImplementation",

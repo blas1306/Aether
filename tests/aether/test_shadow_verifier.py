@@ -44,6 +44,7 @@ from aether.ir import (
     ShadowVerificationStage,
     ShadowVerifierCoordinator,
     VerifierAuthorityConfiguration,
+    VerifierAuthorityEnvironment,
     VerifierAuthorityMode,
     VerifierAuthorityPipeline,
     VerifierImplementation,
@@ -338,6 +339,8 @@ def test_default_authority_configuration_is_closed_and_python_authoritative() ->
     configuration = pipeline.configuration
 
     assert configuration.mode is VerifierAuthorityMode.PYTHON_AUTHORITY_RUST_SHADOW
+    assert configuration.environment is VerifierAuthorityEnvironment.DEFAULT
+    assert not configuration.is_canary
     assert configuration.authority is VerifierImplementation.PYTHON
     assert configuration.shadow is VerifierImplementation.RUST
     with pytest.raises(TypeError, match="VerifierAuthorityMode"):
@@ -347,6 +350,33 @@ def test_default_authority_configuration_is_closed_and_python_authoritative() ->
             VerifierImplementation.PYTHON,
             ShadowRustAccepted(),
         )
+    with pytest.raises(
+        ValueError,
+        match="Rust authority requires the canary environment",
+    ):
+        VerifierAuthorityConfiguration(
+            VerifierAuthorityMode.RUST_AUTHORITY_PYTHON_SHADOW
+        )
+
+
+def test_environment_variables_cannot_activate_rust_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AETHER_RUST_VERIFIER_AUTHORITY", "rust")
+    monkeypatch.setenv("AETHER_RUST_AUTHORITY_CANARY", "1")
+
+    pipeline = VerifierAuthorityPipeline(
+        client=FakeClient(RustVerifierAcceptedOutcome())
+    )
+
+    assert (
+        pipeline.configuration.mode
+        is VerifierAuthorityMode.PYTHON_AUTHORITY_RUST_SHADOW
+    )
+    assert (
+        pipeline.configuration.environment
+        is VerifierAuthorityEnvironment.DEFAULT
+    )
 
 
 def test_internal_authority_flag_is_the_pipeline_default(
@@ -355,7 +385,8 @@ def test_internal_authority_flag_is_the_pipeline_default(
     import aether.ir.shadow_verifier as shadow_module
 
     rust_authority = VerifierAuthorityConfiguration(
-        VerifierAuthorityMode.RUST_AUTHORITY_PYTHON_SHADOW
+        VerifierAuthorityMode.RUST_AUTHORITY_PYTHON_SHADOW,
+        VerifierAuthorityEnvironment.CANARY,
     )
     monkeypatch.setattr(
         shadow_module,
@@ -412,7 +443,8 @@ def test_rust_authority_accepts_while_python_rejection_remains_observable() -> N
         client=FakeClient(RustVerifierAcceptedOutcome()),
         sink=sink,
         configuration=VerifierAuthorityConfiguration(
-            VerifierAuthorityMode.RUST_AUTHORITY_PYTHON_SHADOW
+            VerifierAuthorityMode.RUST_AUTHORITY_PYTHON_SHADOW,
+            VerifierAuthorityEnvironment.CANARY,
         ),
     )
 
@@ -438,7 +470,8 @@ def test_rust_authority_rejection_controls_result_and_keeps_python_shadow() -> N
         client=client,
         sink=sink,
         configuration=VerifierAuthorityConfiguration(
-            VerifierAuthorityMode.RUST_AUTHORITY_PYTHON_SHADOW
+            VerifierAuthorityMode.RUST_AUTHORITY_PYTHON_SHADOW,
+            VerifierAuthorityEnvironment.CANARY,
         ),
     )
 
@@ -508,7 +541,8 @@ def test_rust_authority_operational_failures_are_fail_closed_without_fallback(
         client=client,  # type: ignore[arg-type]
         sink=sink,
         configuration=VerifierAuthorityConfiguration(
-            VerifierAuthorityMode.RUST_AUTHORITY_PYTHON_SHADOW
+            VerifierAuthorityMode.RUST_AUTHORITY_PYTHON_SHADOW,
+            VerifierAuthorityEnvironment.CANARY,
         ),
     )
 
@@ -537,7 +571,8 @@ def test_ir_backend_fails_when_rust_authority_is_unavailable() -> None:
         ),
         sink=sink,
         configuration=VerifierAuthorityConfiguration(
-            VerifierAuthorityMode.RUST_AUTHORITY_PYTHON_SHADOW
+            VerifierAuthorityMode.RUST_AUTHORITY_PYTHON_SHADOW,
+            VerifierAuthorityEnvironment.CANARY,
         ),
     )
     backend = IRBackend(shadow_verifier=pipeline)

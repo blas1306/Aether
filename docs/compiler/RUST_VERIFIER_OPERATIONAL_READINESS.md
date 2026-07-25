@@ -9,7 +9,9 @@ authority decision.
 The checked-in default remains
 `PYTHON_AUTHORITY_RUST_SHADOW`. Python controls compilation and Rust is
 observational. `RUST_AUTHORITY_PYTHON_SHADOW` remains an available, fail-closed
-configuration for a future rollout. It is exercised here but is not activated.
+configuration for a future rollout. Phase 4.6 subsequently restricted that
+mode to the explicit canary environment described in
+`RUST_VERIFIER_CANARY.md`; the production default is unchanged.
 
 ## Operational architecture
 
@@ -167,7 +169,8 @@ Activation rehearsal:
 1. Start with `PYTHON_AUTHORITY_RUST_SHADOW`.
 2. Verify package identity and platform snapshot evidence.
 3. Change the deployment configuration object to
-   `RUST_AUTHORITY_PYTHON_SHADOW`.
+   `RUST_AUTHORITY_PYTHON_SHADOW` in
+   `VerifierAuthorityEnvironment.CANARY`.
 4. Observe the existing comparison and failure telemetry.
 5. To roll back, restore `PYTHON_AUTHORITY_RUST_SHADOW`.
 
@@ -230,8 +233,8 @@ python scripts/rust_verifier_soak.py \
 - [ ] Rehearse Python -> Rust -> Python role changes using configuration only.
 - [ ] Retain the known-good Python-authority configuration and previous Rust
       package for immediate explicit rollback.
-- [ ] During a future switch, change only the authority configuration to
-      `RUST_AUTHORITY_PYTHON_SHADOW`.
+- [ ] During the Phase 4.6 canary, change only the authority configuration to
+      `RUST_AUTHORITY_PYTHON_SHADOW` in the explicit canary environment.
 - [ ] After a future switch, monitor comparison classifications, invariant
       distributions, request hashes, startup compatibility, process failures,
       timeouts, latency percentiles, and package SHA-256.

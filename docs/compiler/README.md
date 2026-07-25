@@ -55,6 +55,10 @@ comparison.
 
 Current compiler-design documents:
 
+- [RUST_VERIFIER_CANARY.md](RUST_VERIFIER_CANARY.md):
+  Phase 4.6 explicit Rust-authority canary activation, Python shadow retention,
+  deterministic monitoring summaries, CI isolation, configuration-only
+  rollback, and objective exit criteria.
 - [RUST_VERIFIER_OPERATIONAL_READINESS.md](RUST_VERIFIER_OPERATIONAL_READINESS.md):
   Phase 4.5D production packaging, executable identity, strict startup
   compatibility, three-platform snapshot gate, rollback rehearsal, soak
