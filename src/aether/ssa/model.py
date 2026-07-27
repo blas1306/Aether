@@ -174,6 +174,13 @@ class SSAStructNew(SSAInstruction):
 
 
 @dataclass(frozen=True)
+class SSAClassNew(AllocationMixin, SSAInstruction):
+    """Allocate one nominal Phase 5.3A class object."""
+
+    result: SSAValue
+
+
+@dataclass(frozen=True)
 class SSAStructGet(SSAInstruction):
     result: SSAValue
     struct: SSAValue

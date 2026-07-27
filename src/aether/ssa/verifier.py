@@ -67,6 +67,7 @@ from .model import (
     SSACast,
     SSACall,
     SSACallIndirect,
+    SSAClassNew,
     SSACompareOp,
     SSAConst,
     SSAFunction,
@@ -541,6 +542,13 @@ class SSAVerifier:
                     self._require_type(value.type, field_type, "Struct field type mismatch")
                 continue
 
+            if isinstance(instruction, SSAClassNew):
+                if not isinstance(instruction.result.type, ClassRefType):
+                    self._fail(
+                        f"Class new result must be class reference type, got {instruction.result.type}"
+                    )
+                continue
+
             if isinstance(instruction, SSAStructGet):
                 self._require_defined(instruction.struct, value_types)
                 definition = self._structs.get(instruction.struct.type.name) if isinstance(instruction.struct.type, StructType) else None
@@ -938,6 +946,7 @@ class SSAVerifier:
                         ArrayType,
                         ListType,
                         NullableType,
+                        ClassRefType,
                     ),
                 ):
                     self._fail(
@@ -2225,6 +2234,7 @@ class SSAVerifier:
             instruction,
             (
                 SSAArrayNew,
+                SSAClassNew,
                 SSAArrayCopy,
                 SSAArrayGet,
                 SSAArraySlice,

@@ -249,6 +249,7 @@ pub(crate) fn ssa_operands(instruction: &IRInstruction) -> Vec<SSAOperand<'_>> {
         | IRInstruction::IRDestroy { .. }
         | IRInstruction::IRRelocate { .. }
         | IRInstruction::IRFunctionRef { .. }
+        | IRInstruction::IRClassNew { .. }
         | IRInstruction::IRJump { .. }
         | IRInstruction::IRCopyInit {
             source: LifecycleSource::Storage(_),

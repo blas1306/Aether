@@ -252,7 +252,7 @@ def _complete_module() -> ir_model.IRModule:
     )
 
 
-def test_complete_realistic_module_round_trip_covers_authoritative_68_variants() -> None:
+def test_complete_realistic_module_round_trip_covers_authoritative_69_variants() -> None:
     module = _complete_module()
 
     decoded = ir_module_from_dto(ir_module_to_dto(module))
@@ -268,7 +268,7 @@ def test_complete_realistic_module_round_trip_covers_authoritative_68_variants()
         for instruction in block.instructions
     }
     assert covered == {entry.instruction_type for entry in IR_INSTRUCTION_DTO_REGISTRY}
-    assert len(IR_INSTRUCTION_DTO_REGISTRY) == 68
+    assert len(IR_INSTRUCTION_DTO_REGISTRY) == 69
 
 
 def _type_samples() -> list[IRType]:

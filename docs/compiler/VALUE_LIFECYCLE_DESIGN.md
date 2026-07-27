@@ -153,7 +153,7 @@ elementos de colección.
 | `float` | frontend sí; native no | no definido native | no definido | no | no | no | fijar ABI antes de almacenarlo |
 | enum sin payload | sí | sí | sí | no | no | no | sin cambio |
 | callable top-level | una palabra donde está soportado | sí para transporte directo | sí | no | sí, a código | no | closures requerirán otro layout/lifecycle |
-| class reference | una palabra conceptual; fuera del subset native | no prometido | sí si el modelo conserva handle | por definir | sí | por definir | coordinar con ownership general de objetos |
+| class reference | una palabra `ptr` no nula; subset interno 5.3A | **no** | sí | **sí** | sí | **sí** | payload/constructores y ciclos quedan posteriores |
 | string actual | sí, handle de una palabra | **no** | sí | **sí** | sí | **sí** | objeto UTF-8 ARC; default vacío; copy retain; destroy release |
 | struct | si todos los campos lo son y no hay ciclo by-value | `all(fields)` | `all(fields)` | `any(fields)` | `any(fields)` | `any(fields)` | síntesis recursiva nominal |
 | nested struct | misma regla recursiva | misma regla recursiva | misma regla recursiva | misma regla recursiva | misma regla recursiva | misma regla recursiva | los nombres no cortan el análisis |
@@ -426,7 +426,8 @@ buffer y release final coordinado con aliases, calls, returns y fields.
 
 - metadata para inicialización parcial con unwind (la forma normal de IR ya
   está fijada);
-- lifecycle general de classes y ownership de buffers Vector/Matrix;
+- lifecycle de payload/constructores de class y ownership de buffers
+  Vector/Matrix; el handle/ARC class base está implementado desde 5.3A;
 - optimización ARC, RVO y política de concurrencia posterior;
 - `StringView`, substring y APIs públicas de texto.
 

@@ -43,7 +43,9 @@ está en [`COLLECTION_MIGRATION_BASELINE.md`](COLLECTION_MIGRATION_BASELINE.md).
 
 Actualización perfil 13 (15-07-2026): `Eq(T)` unifica `==`, `!=`, structs,
 Array/List y `contains/indexOf`. AST, IR, SSA y LLVM/native comparan contenido
-recursivo; classes/interfaces/callables se diagnostican y no usan identidad.
+recursivo; interfaces/callables se diagnostican. La fundación IR 5.3A añadió
+posteriormente identidad para `ClassRefType`, aún detrás del gate source de
+classes.
 LLVM reutiliza helpers tipados deterministas y conserva IEEE-754, incluido
 `NaN != NaN`.
 
@@ -209,8 +211,8 @@ representación y lifecycle ya están activos en esta matriz.
 | Potencia `^` | C | C | C tabla int/double | C checked/IEEE | C `pow` | C, con casts explícitos | C homogéneo | C | C | C | C folding checked/SCCP/GCP | C helper i32/libm `pow` | helper checked + libm | E2E+límites+IEEE | C | Completo para int/double | `int^int` exige exponente no negativo y overflow i32 checked; cualquier double produce double. |
 | `Math.mod` floor-mod | llamada normal | C | C | C | C call builtin | C | C | C | C | C | C checked | C helper tipado | runtime mínimo | AST/IR/native | C | Completo int/double | Es builtin de namespace, no operador. |
 | Comparaciones ordenadas | C | C | C | C | C | C int/double | C | C | C | C | C | C int/double | — | E2E | C | Parcial | Otros numéricos/agregados tienen cobertura distinta. |
-| Igualdad escalar | C | C | C | C | C | C | C | C | C | C | C | C Eq tipado | `aether_string_equal`/helpers Eq | amplia | C | Completa para tipos Eq | Primitivas, string, enums, structs y Array/List; classes/callables sin Eq. |
-| Igualdad agregada | C | C | C | C | C subset tipado | C Struct/Array/List/Vector/Matrix representables | C subset | C subset | C subset | C subset | C preserva lecturas | C subset | helpers Eq tipados | amplia por tipo | C para perfil v1 | Parcial | `Eq(T)` es E2E para layouts admitidos, incluidos Array/List recursivos; classes, interfaces, callables y layouts rechazados siguen fuera. |
+| Igualdad escalar | C | C | C | C | C | C | C | C | C | C | C | C Eq tipado | `aether_string_equal`/helpers Eq | amplia | C | Completa para tipos Eq | Primitivas, string, enums, structs y Array/List; `ClassRefType` interno usa identidad; interfaces/callables siguen sin Eq. |
+| Igualdad agregada | C | C | C | C | C subset tipado | C Struct/Array/List/Vector/Matrix representables | C subset | C subset | C subset | C subset | C preserva lecturas | C subset | helpers Eq tipados | amplia por tipo | C para perfil v1 | Parcial | `Eq(T)` es E2E para layouts admitidos, incluidos Array/List recursivos y referencias de clase por identidad; interfaces, callables y layouts rechazados siguen fuera. |
 | `&&` / <code>&#124;&#124;</code> short-circuit | C | C | C boolean | C | CFG | C por branches/merge | C | C | C con phi | C | C SCCP | C | — | E2E | C | Completo | La spec v1 ya fija short-circuit; `docs/compiler/FEATURE_MATRIX.md` conserva el snapshot AST-only obsoleto. |
 | `!` prefijo | C | C | C boolean | C | C | C | C | C | C | C | C | C `xor` | — | E2E | C | Completo | No existe factorial postfix. |
 | Casts explícitos | C | C | C amplio | C amplio | P | C int↔double e identidad | C subset + identidad | C subset + identidad | C subset | C subset + identidad | C elimina identidad | C int↔double e identidad; resto rechazado por gate | P | frontend+par+gate | C | Parcial | `string`, `boolean`, `float` y `complex` quedan fuera del subset native declarado. |
@@ -261,7 +263,7 @@ representación y lifecycle ya están activos en esta matriz.
 | Métodos de struct y `this` | C | C | C mutabilidad | C | C funciones + method result | C | C | C | C | C | C | C | — | E2E | P | Completo | Para tipos de firma soportados por backend. |
 | Semántica por valor de struct | — | C | C const | C copia | C reconstrucción | C | C | C | C | C | C | C by-value | — | E2E copia/arg/return | C | Completo | Campos reference mantienen copia shallow deliberada. |
 | Igualdad/print de struct | C | C | C comparabilidad | C | C recursivo subset | C | C | C | C | C | C | C subset | helpers | E2E | P | Parcial | Enum y nullable representable ya están soportados como fields; Vector/Matrix conservan límites. |
-| Classes por referencia | C | C | C visibilidad/alias | C | P tipo nominal | N | P nominal | N | N | N | N | N | AST objects | amplia AST | C | Solo AST | Sin ownership/layout native. |
+| Classes por referencia | C | C | C visibilidad/alias | C | P tipo nominal + allocation interna | N | P nominal | P refs/phis | P lifecycle effectful | P | P preserva allocation/ARC | P handle/header/ARC | AST + IR object base | amplia AST + 5.3A | C | Fundación native | 5.3A transporta refs, identidad y containment; superficie gated. |
 | Constructores/métodos/`this` de class | C | C | C | C | N | N | N | N | N | N | N | N | AST | amplia AST | C | Solo AST | Public/private funciona en frontend. |
 | Interfaces y dispatch | C | C | C conformidad | C struct/class | P tipo nominal | N | P nominal | N | N | N | N | N | AST dispatch | amplia AST + dogfood | C | Solo AST | Bloquea callables por interfaz en el ejemplo numérico. |
 | Enums sin payload | C | C | C identidad módulo/declaración | C valor nominal+discriminante | C `enum Name` + constante nominal | C | C miembros/discriminantes/tipos | C | C phis/tipos | C nominal/dominancia | C folding preserva tipo | C `i32` ABI interno | metadata de impresión | AST+IR+SSA+clang O0/O1/O2 | C | Completo | Sin payload, ADT, casts implícitos, bit flags ni pattern matching nuevo. Imports, aliases, homónimos, structs, arrays/list compatibles y callables funcionan. |
@@ -360,7 +362,7 @@ agrupa el resultado actual sin convertir un nodo/opcode nominal en soporte:
 | `complex` / `im` | Parser/checker/AST C | Sin lowering fuente ni ABI/runtime native | Gate |
 | `null` y `T?` | Parser/checker/AST C | Sin narrowing, layout/lifecycle ni lowering | Gate |
 | Tuples/destructuring | Parser/checker/AST C | Sin modelo/lowering IR estable | Gate |
-| Classes | Parser/checker/AST C | Sin layout, ownership o lowering de objetos | Gate `AE-BACKEND-CLASSES` |
+| Classes | Parser/checker/AST C + fundación IR/SSA/LLVM 5.3A | Sin constructores, fields, métodos ni lowering source de objetos | Gate `AE-BACKEND-CLASSES` |
 | Interfaces/dynamic dispatch | Checker de conformidad y dispatch AST C | Sin representación de interface ni dispatch IR/native | Gate `AE-BACKEND-INTERFACES` |
 | Métodos enlazados, callable retornado, builtin como valor | Subsets reconocidos; callable top-level ya C | Sin environment/ABI/lowering para esas formas | Rechazo de tipo/gate |
 | Interpolación y formatting general | Parser/checker/AST C para el experimento | Sin IR/lowering/runtime native | Gate `AE-BACKEND-STRINGS` |
@@ -506,9 +508,12 @@ auditoría.
 3. **5.3 — Estado de módulos native:** implementar en una fase futura, no en
    esta auditoría, storage IR y política single-execution antes de admitir
    globals/const/statements importados.
-4. **5.4 — Referencias native:** fijar TypeLayout/lifecycle/ABI de class antes
-   de habilitar construcción, fields o métodos de class.
-5. **5.5 — Dispatch:** añadir representación de interface y dispatch sólo
+4. **5.3A — Referencias native:** TypeLayout/lifecycle/ABI, allocation interna,
+   ARC, identidad y containment completos; mantener gated construcción,
+   fields y métodos source.
+5. **5.3B — Payload class:** definite initialization, constructor lowering,
+   cleanup parcial, fields y destructor recursivo.
+6. **5.5 — Dispatch:** añadir representación de interface y dispatch sólo
    después de que sus receivers y ABI callable tengan lifecycle verificable.
 
 Nullable, tuples, `float`/`complex`, excepciones, strings adicionales,

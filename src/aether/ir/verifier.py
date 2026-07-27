@@ -20,6 +20,7 @@ from .model import (
     IRCast,
     IRCall,
     IRCallIndirect,
+    IRClassNew,
     IRCompareOp,
     IRConst,
     IRCopyInit,
@@ -689,6 +690,7 @@ class IRVerifier:
             (IRCast, "IRV-077", VerifierCategory.TYPES),
             (IRPrint, "IRV-078", VerifierCategory.INSTRUCTIONS),
             (IRStructNew, "IRV-079", VerifierCategory.STRUCTS),
+            (IRClassNew, "IRV-125", VerifierCategory.INSTRUCTIONS),
             (IRStructGet, "IRV-080", VerifierCategory.STRUCTS),
             (IRStructSet, "IRV-081", VerifierCategory.STRUCTS),
             (IRMethodResultNew, "IRV-082", VerifierCategory.METHOD_RESULTS),
@@ -981,6 +983,13 @@ class IRVerifier:
             for value, (_name, field_type) in zip(instruction.fields, definition.fields):
                 self._require_defined(value, state, value_types)
                 self._require_type(value.type, field_type, "Struct field type mismatch")
+            return self._define_value(state, instruction.result)
+
+        if isinstance(instruction, IRClassNew):
+            if not isinstance(instruction.result.type, ClassRefType):
+                self._fail(
+                    f"Class new result must be class reference type, got {instruction.result.type}"
+                )
             return self._define_value(state, instruction.result)
 
         if isinstance(instruction, IRStructGet):
@@ -1420,6 +1429,7 @@ class IRVerifier:
                         ArrayType,
                         ListType,
                         NullableType,
+                        ClassRefType,
                     ),
                 ):
                     self._fail(
@@ -2755,6 +2765,7 @@ class IRVerifier:
             instruction,
             (
                 IRArrayNew,
+                IRClassNew,
                 IRArrayCopy,
                 IRArrayGet,
                 IRArraySlice,

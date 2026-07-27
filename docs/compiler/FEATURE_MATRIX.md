@@ -48,7 +48,7 @@ Leyenda de `Spec`:
 | Vector<Column> | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Completa con optimizer parcial |
 | Matrix | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ✅ documentada | Parcial backend |
 | Optional/Nullable (`T?`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ `{i1,T}` | ✅ parser/type/IR/SSA/ABI/E2E | ✅ documentada | Completa para payloads native representables; sin flow narrowing |
-| Class | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
+| Class | ✅ | ✅ | ✅ | ⚠️ ref nominal + `class_new` interno | ⚠️ refs/phis | ⚠️ lifecycle effectful | ⚠️ handle/layout/ARC interno | ✅ AST + fundación native | ✅ documentada | Fundación 5.3A; superficie native gated |
 | Struct | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
 | Interface | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
 | Enum | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
@@ -62,6 +62,10 @@ Notas:
   `T`. No existe niche `ptr null`, boxing ni allocation nullable.
 - El typechecker no implementa smart casts después de `x != null`: asignar
   `T?` a `T` continúa siendo un error. El narrowing queda como trabajo futuro.
+- Class 5.3A cubre representación nominal no nula, allocation de objeto vacío
+  interna, ARC, transporte, identidad, nullable y containment. No baja
+  constructores, fields, métodos ni interfaces source; el gate native los
+  rechaza explícitamente.
 - `string` baja como valor/literal/call/return/phi, pero LLVM no soporta
   operaciones string (`+`, comparaciones, impresion, length, indexing, runtime).
 - `List<T>` tiene backend fases 1, 2, 3a, `indexOf` de fase 3b, `clear` de fase 4a, `push`/growth de fase 4b, `pop` de fase 4c, `insert` de fase 4d y `removeAt` de fase 4e para literal con tipo esperado,

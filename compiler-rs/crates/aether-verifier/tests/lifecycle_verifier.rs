@@ -4,8 +4,8 @@ use std::error::Error as _;
 
 use aether_ir::{
     BoolType, ClassRefType, IRBasicBlock, IRConstant, IRFunction, IRInstruction, IRModule,
-    IRParameter, IRStorage, IRStructDefinition, IRType, IRValue, IntType, MatrixType, StringType,
-    StructType, VoidType,
+    IRParameter, IRStorage, IRStructDefinition, IRType, IRValue, IntType, InterfaceType,
+    MatrixType, StringType, StructType, VoidType,
 };
 use aether_verifier::{
     BlockLifecycleError, FunctionLifecycleError, InstructionKind, LifecycleOperation,
@@ -547,7 +547,7 @@ fn checks_lifecycle_operation_types_and_python_type_traits() {
         LifecycleRuleError::OperationTypeMismatch { .. }
     ));
 
-    let class_type: IRType = ClassRefType {
+    let class_type: IRType = InterfaceType {
         name: "Object".to_owned(),
     }
     .into();
@@ -570,6 +570,41 @@ fn checks_lifecycle_operation_types_and_python_type_traits() {
         block_error(&function_error(&non_relocatable)).source,
         LifecycleRuleError::InvalidLifecycleType {
             operation: LifecycleOperation::Relocate,
+            ..
+        }
+    ));
+
+    let class_type: IRType = ClassRefType {
+        name: "Object".to_owned(),
+    }
+    .into();
+    let class_source = storage("class_source", class_type.clone());
+    let class_destination = storage("class_destination", class_type.clone());
+    let relocatable = module(function(
+        "class_relocatable",
+        Vec::new(),
+        vec![block(
+            "merge",
+            vec![IRInstruction::IRRelocate {
+                destination: class_destination,
+                source: class_source,
+                count: 1,
+                source_location: None,
+            }],
+        )],
+    ));
+    assert_eq!(verify_module_local_lifecycle(&relocatable), Ok(()));
+
+    let class_slot = storage("class_slot", class_type);
+    let class_has_no_default = module(function(
+        "class_has_no_default",
+        Vec::new(),
+        vec![block("entry", vec![init(&class_slot)])],
+    ));
+    assert!(matches!(
+        block_error(&function_error(&class_has_no_default)).source,
+        LifecycleRuleError::InvalidLifecycleType {
+            operation: LifecycleOperation::InitDefault,
             ..
         }
     ));

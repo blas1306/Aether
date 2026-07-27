@@ -8,7 +8,7 @@ from typing import Any, Callable
 from aether.ir.model import IREnumConstant
 from aether.integer_arithmetic import INT_MAX, INT_MIN, is_aether_int
 from aether.string_value import STRING_SPLIT_BUILTIN, STRING_TRIM_BUILTIN
-from aether.ir.types import ArrayType, BoolType, DoubleType, EnumType, FloatType, FunctionType, IntType, ListType, MatrixType, MethodResultType, NullableType, StringType, StructType, VectorType, VoidType
+from aether.ir.types import ArrayType, BoolType, ClassRefType, DoubleType, EnumType, FloatType, FunctionType, IntType, ListType, MatrixType, MethodResultType, NullableType, StringType, StructType, VectorType, VoidType
 from aether.ssa.model import (
     SSAArrayCopy,
     SSAArrayGet,
@@ -22,6 +22,7 @@ from aether.ssa.model import (
     SSACast,
     SSACall,
     SSACallIndirect,
+    SSAClassNew,
     SSACompareOp,
     SSAConst,
     SSAFunction,
@@ -95,6 +96,7 @@ from .runtime_common import LLVMRuntimeCommon, aggregate_helper_suffix
 from .scalar_math_runtime import LLVMScalarMathRuntime
 from .vector_runtime import LLVMVectorRuntime
 from .string_runtime import LLVMStringRuntime
+from .class_runtime import class_new_helper, class_runtime_sections
 from .process_runtime import LLVMProcessRuntime
 from .text_file_runtime import LLVMTextFileRuntime
 from aether.process_arguments import PROCESS_ARGS_BUILTIN
@@ -220,6 +222,16 @@ class LLVMPrinter:
         self._collection_copy_helpers: set[tuple[str, object]] = set()
         self._nullable_print_types: set[NullableType] = set()
         self._nullable_arc_helpers: set[tuple[NullableType, bool]] = set()
+        # Discover reference layouts before deciding which common runtime
+        # declarations are needed.  Some nested uses surface only while
+        # recursively materializing aggregate helpers later in this method.
+        class_types, embedded_array, embedded_list = (
+            self._collect_embedded_reference_types(module)
+        )
+        self._uses_array_type |= embedded_array
+        self._uses_list_type |= embedded_list
+        self._class_types: set[ClassRefType] = set(class_types)
+        self._class_alloc_types: set[ClassRefType] = set()
 
         functions = [self._print_function(function) for function in module.functions]
         nullable_types = [
@@ -257,6 +269,7 @@ class LLVMPrinter:
         uses_list_growth = self._uses_list_push or self._uses_list_insert
         uses_allocation = bool(
             self._uses_array_allocation
+            or self._class_alloc_types
             or self._uses_list_allocation
             or self._uses_array_slicing
             or self._uses_list_slicing
@@ -274,6 +287,7 @@ class LLVMPrinter:
             ),
             uses_panic=bool(
                 uses_allocation
+                or self._class_types
                 or self._checked_int_operators
                 or self._uses_array_indexing
                 or self._uses_array_slicing
@@ -293,10 +307,12 @@ class LLVMPrinter:
                     for instruction in block.instructions
                     if isinstance(instruction, SSACall) and instruction.builtin is not None
                 )
+                or bool(self._class_types)
                 or bool(self._collection_object_arc_helpers)
             ),
             uses_free_and_memcpy=bool(
-                self._sequence_sort_types
+                self._class_types
+                or self._sequence_sort_types
                 or uses_list_growth
                 or self._uses_array_slicing
                 or self._uses_list_slicing
@@ -517,6 +533,9 @@ class LLVMPrinter:
             self._uses_process_context or self._uses_process_arguments,
             snapshots=self._uses_process_arguments,
         ).append(runtime)
+        runtime.extend(
+            class_runtime_sections(self._class_types, self._class_alloc_types)
+        )
         globals_ = [
             rendered
             for global_ in self._string_globals_by_value.values()
@@ -567,6 +586,49 @@ class LLVMPrinter:
 
         visit(module)
         return sorted(found, key=str)
+
+    @staticmethod
+    def _collect_embedded_reference_types(
+        module: SSAModule,
+    ) -> tuple[list[ClassRefType], bool, bool]:
+        """Collect handles that may be discovered late by aggregate helpers."""
+
+        found: set[ClassRefType] = set()
+        has_array = False
+        has_list = False
+        visited: set[int] = set()
+
+        def visit(value: object) -> None:
+            nonlocal has_array, has_list
+            if isinstance(value, ClassRefType):
+                found.add(value)
+                return
+            if isinstance(value, ArrayType):
+                has_array = True
+            elif isinstance(value, ListType):
+                has_list = True
+            if value is None or isinstance(value, (str, bytes, int, float, bool)):
+                return
+            if isinstance(value, dict):
+                for key, item in value.items():
+                    visit(key)
+                    visit(item)
+                return
+            if isinstance(value, (list, tuple, set, frozenset)):
+                for item in value:
+                    visit(item)
+                return
+            if not is_dataclass(value):
+                return
+            identity = id(value)
+            if identity in visited:
+                return
+            visited.add(identity)
+            for field in fields(value):
+                visit(getattr(value, field.name))
+
+        visit(module)
+        return sorted(found, key=str), has_array, has_list
 
     def _print_function(self, function: SSAFunction) -> str:
         self._constants: dict[str, str] = {}
@@ -656,6 +718,15 @@ class LLVMPrinter:
             return self._print_print(instruction)
         if isinstance(instruction, SSAStructNew):
             return "\n  ".join(self._print_struct_new(instruction))
+        if isinstance(instruction, SSAClassNew):
+            if not isinstance(instruction.result.type, ClassRefType):
+                raise LLVMBackendError(
+                    "LLVM class_new requires a class reference result"
+                )
+            self._class_types.add(instruction.result.type)
+            self._class_alloc_types.add(instruction.result.type)
+            result = self._new_temp(instruction.result)
+            return f"{result} = call ptr @{class_new_helper(instruction.result.type)}()"
         if isinstance(instruction, SSAStructGet):
             return self._print_struct_get(instruction)
         if isinstance(instruction, SSAStructSet):
@@ -773,6 +844,7 @@ class LLVMPrinter:
             instruction,
             (
                 SSAArrayNew,
+                SSAClassNew,
                 SSAArrayCopy,
                 SSAArrayGet,
                 SSAArraySlice,
@@ -931,6 +1003,21 @@ class LLVMPrinter:
                 else f"{result} = xor i1 {equal}, true"
             )
             return "\n  ".join(lines)
+        if isinstance(instruction.left.type, ClassRefType):
+            if (
+                instruction.left.type != instruction.right.type
+                or instruction.operator not in {"eq", "ne"}
+                or not isinstance(instruction.result.type, BoolType)
+            ):
+                raise LLVMBackendError(
+                    "LLVM class identity comparison requires homogeneous eq/ne operands"
+                )
+            result = self._new_temp(instruction.result)
+            predicate = "eq" if instruction.operator == "eq" else "ne"
+            return (
+                f"{result} = icmp {predicate} ptr "
+                f"{self._operand(instruction.left)}, {self._operand(instruction.right)}"
+            )
         if isinstance(instruction.left.type, (ArrayType, ListType, StructType)):
             if instruction.left.type != instruction.right.type or instruction.operator not in {"eq", "ne"}:
                 raise LLVMBackendError("LLVM structural comparison requires homogeneous eq/ne")
@@ -1088,7 +1175,7 @@ class LLVMPrinter:
         right: str,
     ) -> str:
         llvm = llvm_type(type_)
-        if isinstance(type_, (IntType, BoolType, EnumType)):
+        if isinstance(type_, (IntType, BoolType, EnumType, ClassRefType)):
             return f"  {result} = icmp eq {llvm} {left}, {right}"
         if isinstance(type_, (FloatType, DoubleType)):
             return f"  {result} = fcmp oeq {llvm} {left}, {right}"
@@ -1098,7 +1185,7 @@ class LLVMPrinter:
     def _equality_helper(self, type_: object) -> str:
         name = self._require_equality_helper(type_)
         llvm = llvm_type(type_)
-        if isinstance(type_, (IntType, BoolType, EnumType)):
+        if isinstance(type_, (IntType, BoolType, EnumType, ClassRefType)):
             return "\n".join([
                 f"define private i1 @{name}({llvm} %left, {llvm} %right) {{",
                 "entry:",
@@ -1241,7 +1328,9 @@ class LLVMPrinter:
         field_type: object,
     ) -> str:
         result = self._synthetic_temp("struct.compare.field")
-        if isinstance(field_type, (IntType, BoolType, EnumType)):
+        if isinstance(field_type, (IntType, BoolType, EnumType, ClassRefType)):
+            if isinstance(field_type, ClassRefType):
+                self._class_types.add(field_type)
             lines.append(f"{result} = icmp eq {llvm_type(field_type)} {left}, {right}")
             return result
         if isinstance(field_type, DoubleType):
@@ -1293,7 +1382,9 @@ class LLVMPrinter:
         data_index = 1 if kind == "array" else 2
         element_llvm = llvm_type(element_type)
         compare_lines: list[str]
-        if isinstance(element_type, (IntType, BoolType)):
+        if isinstance(element_type, (IntType, BoolType, ClassRefType)):
+            if isinstance(element_type, ClassRefType):
+                self._class_types.add(element_type)
             compare_lines = [f"  %equal = icmp eq {element_llvm} %left.value, %right.value"]
         elif isinstance(element_type, DoubleType):
             compare_lines = ["  %equal = fcmp oeq double %left.value, %right.value"]
@@ -1698,6 +1789,11 @@ class LLVMPrinter:
             self._uses_string_runtime = True
             operation = "retain" if retain else "release"
             lines.append(f"call void @aether_string_{operation}(ptr {operand})")
+            return
+        if isinstance(type_, ClassRefType):
+            self._class_types.add(type_)
+            operation = "retain" if retain else "release"
+            lines.append(f"call void @aether_class_{operation}(ptr {operand})")
             return
         if isinstance(type_, (ArrayType, ListType)):
             kind = "array" if isinstance(type_, ArrayType) else "list"

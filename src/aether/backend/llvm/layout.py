@@ -106,7 +106,9 @@ class LLVMTypeLayouts:
             # Aether callables currently lower to capture-free function
             # pointers.  Copying a callable element copies that handle.
             return self._reference(type_)
-        if isinstance(type_, (ClassRefType, InterfaceType)):
+        if isinstance(type_, ClassRefType):
+            return self._collection_reference(type_)
+        if isinstance(type_, InterfaceType):
             return self._unsupported(
                 type_, "class/interface references are outside the LLVM/native collection subset"
             )

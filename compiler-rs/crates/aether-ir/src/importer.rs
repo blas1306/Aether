@@ -669,6 +669,9 @@ impl TryFrom<&IRInstructionDTO> for IRInstruction {
                 result: import_instruction_value(kind, "result", result)?,
                 fields: import_instruction_values(kind, "fields", fields)?,
             }),
+            IRInstructionDTO::ClassNew { result } => Ok(Self::IRClassNew {
+                result: import_instruction_value(kind, "result", result)?,
+            }),
             IRInstructionDTO::StructGet {
                 result,
                 r#struct,
@@ -1541,6 +1544,7 @@ const fn wire_instruction_kind(instruction: &IRInstructionDTO) -> &'static str {
         IRInstructionDTO::CallIndirect { .. } => "call_indirect",
         IRInstructionDTO::Print { .. } => "print",
         IRInstructionDTO::StructNew { .. } => "struct_new",
+        IRInstructionDTO::ClassNew { .. } => "class_new",
         IRInstructionDTO::StructGet { .. } => "struct_get",
         IRInstructionDTO::StructSet { .. } => "struct_set",
         IRInstructionDTO::MethodResultNew { .. } => "method_result_new",

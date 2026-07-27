@@ -7,6 +7,7 @@ from typing import Any, Callable, NoReturn, Sequence
 
 from aether.array_safety import checked_array_length_to_int
 from aether.collection_value import CollectionObject, copy_init_value, destroy_value
+from aether.class_value import NativeClassObject
 from aether.errors import AetherRuntimeError
 from aether.formatting import format_public_double
 from aether.process_arguments import (
@@ -85,6 +86,7 @@ from .model import (
     IRCast,
     IRCall,
     IRCallIndirect,
+    IRClassNew,
     IRCompareOp,
     IRConst,
     IRCopyInit,
@@ -689,6 +691,14 @@ class IRInterpreter:
             frame.values[instruction.result] = tuple(
                 copy_init_value(self._value(field, frame))
                 for field in instruction.fields
+            )
+            return False, None, None
+
+        if isinstance(instruction, IRClassNew):
+            if not isinstance(instruction.result.type, ClassRefType):
+                raise IRExecutionError("IR class_new requires a class reference result")
+            frame.values[instruction.result] = NativeClassObject(
+                instruction.result.type.name
             )
             return False, None, None
 

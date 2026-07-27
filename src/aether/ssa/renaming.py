@@ -18,6 +18,7 @@ from aether.ir.model import (
     IRCast,
     IRCall,
     IRCallIndirect,
+    IRClassNew,
     IRCompareOp,
     IRConst,
     IRFunction,
@@ -88,6 +89,7 @@ from .model import (
     SSACast,
     SSACall,
     SSACallIndirect,
+    SSAClassNew,
     SSACompareOp,
     SSAConst,
     SSAFunction,
@@ -354,6 +356,10 @@ class SSARenamer:
             fields = tuple(self._resolve_value(value) for value in instruction.fields)
             self._bind_value(result.name, result, bound_values)
             return SSAStructNew(result, fields)
+        if isinstance(instruction, IRClassNew):
+            result = self._define_value(instruction.result)
+            self._bind_value(result.name, result, bound_values)
+            return SSAClassNew(result)
         if isinstance(instruction, IRStructGet):
             result = self._define_value(instruction.result)
             self._bind_value(result.name, result, bound_values)

@@ -84,7 +84,8 @@ linkage LLVM; eso es un detalle accidental, no una exportación FFI.
 | `Vector<T>` | `ptr` | una palabra target | handle por valor | provisional/shape incompleto |
 | `Matrix<T>` | `ptr` | una palabra target | handle por valor | provisional/shape externo |
 | struct | `%struct.Name = type { fields... }` | padding/alignment del target | por valor | layout source-order, no ABI pública |
-| class/interface | sin LLVM ABI | — | — | unsupported native |
+| class | `ptr` no nulo a objeto nominal | una palabra target | handle por valor | fundación 5.3A; superficie gated |
+| interface | sin LLVM ABI | — | — | unsupported native |
 | nullable `T?` | `%nullable.<T> = type { i1, T }` | target-dependent, incluido padding | aggregate por valor | implementado para payload representable |
 | tuple source | sin LLVM ABI general | — | — | unsupported native |
 | method result | `{ %struct.Receiver [, Value] }` | target-dependent | por valor | detalle de lowering |
@@ -274,6 +275,25 @@ Para `T?`, parámetros siguen borrowed y retornos siguen owned cuando el tag
 está presente. Copy/destroy/retain/release inspeccionan primero el tag y
 delegan a `T` únicamente para present; absent no ejecuta lifecycle del payload.
 
+### 10.1 Class references (Phase 5.3A)
+
+Una class cruza calls como el mismo `ptr` opaco; nunca se copia el payload.
+Parámetros son borrowed durante la call. Un callee que almacena el handle hace
+retain. Allocation produce un owner, copy/assignment agregan un owner, move y
+return lo transfieren, y el owning local libera al salir.
+
+El header privado es `{ptr descriptor, i64 strong_count, i32 flags, i32
+reserved}`. El descriptor contiene ID nominal, size/alignment calculados por
+LLVM, callbacks destroy/trace, flags y versión. `class_new` usa allocation
+checked, zero-inicializa el objeto vacío, fija count 1 y publica un handle no
+nulo. El último release llama destroy y `free`; retain/release validan
+overflow, zero y underflow.
+
+`==`/`!=` de `ClassRefType(C)` usan `icmp eq/ne ptr` sólo para el mismo tipo
+nominal. `C?` sigue siendo `{i1, ptr}`; `ptr null` no es un valor `C` ni un
+niche nullable. Esta ABI interna no habilita constructores, fields, métodos o
+interfaces source.
+
 ## 11. Panic, IO y proceso
 
 - Un panic público imprime el mensaje mediante helpers basados en `puts` y
@@ -313,6 +333,7 @@ manifest de imports runtime, son detectados a partir del LLVM textual.
 | bool/double | valores públicos | reglas exactas de paso target | target matrix |
 | strings | UTF-8, equality, ARC observable indirecto | header, flags, helper names | handle ABI/accessors/threading |
 | Array/List | aliasing, copy/slice, Eq, lifecycle | headers, counters, helpers | ABI version + alloc/error policy |
+| class ref | identidad, aliasing, ARC, transporte y Eq identidad | header/descriptor/helpers 5.3A | payload/constructores, ABI version, ciclos |
 | structs/enums | orden de fields/variants y value semantics | concrete target ABI/mangling | object compatibility policy |
 | callables/method results | comportamiento source subset | representación | closure/method ABI |
 | panic | output/code según spec | `puts/exit`, no unwind | error ABI y threading |

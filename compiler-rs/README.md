@@ -145,8 +145,9 @@ types are trivial; string and Array/List handles support default and trivial
 relocation while retaining managed copy/destroy behavior; Vector default needs
 row/column orientation; Matrix is relocatable but has no dimension-free
 default; Function is relocatable without a default; structs and method results
-compose recursively; ClassRef/Interface/Nullable currently have no defined
-lifecycle layout. Copy, move, assign, and destroy remain valid for both trivial
+compose recursively; ClassRef has the Phase 5.3A one-word ARC lifecycle;
+Interface still has no defined lifecycle layout, and Nullable delegates to its
+payload. Copy, move, assign, and destroy remain valid for both trivial
 and managed non-void types. Only default and relocation consult their specific
 traits.
 
@@ -155,8 +156,9 @@ Owned `IRCopyInit.source` and `IRAssign.source` use the tagged
 `parameter` tags import as `Value`; `storage` imports as `Storage`. The SSA pass
 therefore checks only immutable sources, while the lifecycle pass checks only
 storage-source state. Identifier spelling is never used to infer a namespace,
-so same-named SSA and storage entities remain distinct. The canonical JSON and
-wire DTO contracts are unchanged.
+so same-named SSA and storage entities remain distinct. Phase 5.3A extends the
+canonical JSON/wire instruction enum with `class_new`; existing instruction
+shapes remain unchanged.
 
 Predecessor propagation, join merging, loop fixed points, branch consistency,
 full move/return ownership, and cleanup on every exit remain deferred. In
@@ -394,15 +396,17 @@ The Python rule does not require a named operation such as copy-init, assign,
 destroy, move-init, or relocate. Its only capability is a defined lifecycle
 classification, represented by `LifecycleTraits.reason is None`. Scalars,
 strings, collection handles, functions, and defined structs/method-results are
-accepted. Matrix elements, unoriented vector elements, class/interface values,
-nullable values, void, and unresolved structs carry an error reason and are
+accepted. ClassRef elements are accepted. Matrix elements, unoriented vector
+elements, interface values, invalid nullable values, void, and unresolved
+structs carry an error reason and are
 rejected when they reach this instruction-local rule.
 
 The check is shallow. A nested array/list is accepted without inspecting its
 element, and aggregate composition does not propagate a child lifecycle error
-reason. Consequently a defined struct containing a class, interface, nullable,
-or otherwise unsupported field remains accepted as a collection element. This
-is intentional parity with Python rather than stronger recursive validation.
+reason. Consequently a defined struct containing an interface, invalid
+nullable, or otherwise unsupported field remains accepted as a collection
+element. This is intentional parity with Python rather than stronger recursive
+validation.
 
 `TypeRuleError::MissingCollectionLifecycleCapability` retains the exact
 `InstructionKind`, `CollectionKind`, element `IRType`, missing

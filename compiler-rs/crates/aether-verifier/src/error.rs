@@ -69,6 +69,8 @@ pub enum TypeExpectation {
     Matrix,
     /// A nominal struct.
     Struct,
+    /// A nominal class reference.
+    ClassReference,
     /// A method-result pair.
     MethodResult,
     /// A function signature.
@@ -97,6 +99,7 @@ impl fmt::Display for TypeExpectation {
             Self::Vector => formatter.write_str("a vector type"),
             Self::Matrix => formatter.write_str("a matrix type"),
             Self::Struct => formatter.write_str("a declared struct type"),
+            Self::ClassReference => formatter.write_str("a class reference type"),
             Self::MethodResult => formatter.write_str("a method-result type"),
             Self::Function => formatter.write_str("a function type"),
             Self::Enum => formatter.write_str("an enum type"),
@@ -495,6 +498,7 @@ pub enum InstructionKind {
     IRCallIndirect,
     IRPrint,
     IRStructNew,
+    IRClassNew,
     IRStructGet,
     IRStructSet,
     IRMethodResultNew,

@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import re
 
-from aether.ir.types import ArrayType, BoolType, DoubleType, EnumType, FloatType, FunctionType, IntType, IRType, ListType, MatrixType, MethodResultType, NullableType, StringType, StructType, VectorType, VoidType
+from aether.ir.types import ArrayType, BoolType, ClassRefType, DoubleType, EnumType, FloatType, FunctionType, IntType, IRType, ListType, MatrixType, MethodResultType, NullableType, StringType, StructType, VectorType, VoidType
 
 
 class LLVMBackendError(Exception):
@@ -35,6 +35,8 @@ def llvm_type(type_: IRType) -> str:
     if isinstance(type_, StringType):
         return "ptr"
     if isinstance(type_, FunctionType):
+        return "ptr"
+    if isinstance(type_, ClassRefType):
         return "ptr"
     if isinstance(type_, ArrayType):
         return "ptr"

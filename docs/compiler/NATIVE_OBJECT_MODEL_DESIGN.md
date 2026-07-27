@@ -1,9 +1,10 @@
 # Modelo nativo de objetos por referencia
 
-> Clasificación: **Design/RFC — Phase 5.1**. Fecha: **25 de julio de 2026**.
-> Este documento define arquitectura, no una feature habilitada. No modifica
-> parser, AST, typechecker, Initial IR, SSA, LLVM, runtime, perfil native ni
-> semántica observable.
+> Clasificación: **Design/RFC — Phase 5.1, implementación parcial Phase
+> 5.3A**. Actualizado: **27 de julio de 2026**. La representación, allocation,
+> ARC e identidad de referencias class están implementadas en el subset
+> interno native. El capability gate de superficie continúa cerrado para
+> constructores, fields, métodos, `this`, interfaces y dispatch.
 
 ## 1. Alcance y fuentes de verdad
 
@@ -65,10 +66,11 @@ todos sus fields tienen el mismo contenido que otra instancia. La identidad:
 - termina cuando el runtime reclama la instancia;
 - puede reutilizar una dirección sólo después de terminada esa vida.
 
-La dirección estable puede usarse internamente para retain/release,
-self-assignment y cachés, pero no introduce igualdad source. El comportamiento
-actual se conserva: classes e interfaces no implementan `Eq`, y `==`/`!=` no
-se convierten en comparación de punteros.
+La dirección estable se usa para retain/release, self-assignment e identidad.
+Phase 5.3A fija `Eq(ClassRefType(C))` en el subset IR native: `==`/`!=`
+comparan los handles de dos valores del mismo `C`, nunca sus fields. La
+superficie class continúa fuera del perfil native hasta que exista lowering de
+constructores; no se agrega igualdad definida por usuario.
 
 ### 3.2 Semántica de referencia, mutabilidad y aliasing
 
@@ -186,6 +188,32 @@ management/version flags
 materializarlo como globals LLVM privadas. Field access de código generado usa
 el layout nominal completo de la class; retain/release, validación y
 destrucción deben centralizarse en helpers para no duplicar offsets de header.
+
+### 5.2.1 Layout materializado en Phase 5.3A
+
+```llvm
+%AetherObjectHeader = type { ptr, i64, i32, i32 }
+%AetherClassDescriptor = type {
+    ptr, ; canonical_type_id UTF-8/NUL
+    i64, ; object_size
+    i64, ; object_alignment
+    ptr, ; destroy_fields(object)
+    ptr, ; trace_references(object, visitor)
+    i32, ; management flags
+    i32  ; descriptor version (= 1)
+}
+%class.<readable>.<digest> = type { %AetherObjectHeader }
+```
+
+Los índices del header son descriptor, `strong_count`, flags y reserved. El
+objeto 5.3A no tiene payload source. Cada tipo nominal recibe símbolos
+deterministas basados en su ID completo y un digest.
+
+`class_new` calcula size/alignment con expresiones LLVM/DataLayout, usa el
+allocator checked, zero-inicializa el bloque y publica descriptor y strong
+count 1. El último release llama `destroy_fields` por descriptor antes de
+liberar el bloque. Destroy y trace son no-op sólo mientras el payload esté
+vacío; sus slots quedan listos para 5.3B y GC futuro.
 
 Strings no se migran a este header. Su layout actual comienza por
 `byte_length` y tiene invariantes propios. Array/List también conservan sus
@@ -307,8 +335,10 @@ El test interno de null sólo lee el tag. La igualdad de dos nullable:
 
 Esto no amplía `Eq`: si `T` no tiene igualdad, `T?` tampoco la obtiene. Por
 ello el layout permite comprobar el tag, pero la disponibilidad de un operador
-source sigue siendo decisión del typechecker actual. En particular, este RFC
-no introduce igualdad de identidad para `Class?` o `Interface?`.
+source sigue siendo decisión del typechecker actual. La Fase 5.3A define
+`Eq(Class)` por identidad del objeto, así que `Class?` hereda esa igualdad;
+`Interface?` continúa sin `Eq` mientras su representación y witnesses sigan
+fuera del subset native.
 
 ## 7. Representación de interfaces
 
@@ -486,8 +516,11 @@ self-assignment, aliasing indirecto y strong exception safety.
 
 ### 8.5 Comparación ABI
 
-- classes e interfaces no tienen compare source;
-- pointer equality interna sólo puede ser un fast path no observable;
+- `ClassRefType` compara identidad con `icmp eq/ne ptr` en IR/SSA/LLVM;
+- el gate de capability todavía impide que sintaxis source de classes llegue al
+  lowering native hasta implementar constructores, fields y métodos;
+- interfaces no tienen compare source;
+- pointer equality de colecciones sólo puede ser un fast path no observable;
 - null test inspecciona el tag del nullable;
 - igualdad nullable delega en `Eq(T)` cuando esa capability existe;
 - witness/descriptor pointers no son valores comparables del lenguaje.
@@ -794,16 +827,22 @@ Esta rama puede ejecutarse antes de classes. El registry genérico debe aceptar
 `ClassRefType` e `InterfaceType` automáticamente cuando esas ramas adquieran
 layout/lifecycle, sin rediseñar nullable.
 
-### 12.3 Fase siguiente C — classes
+### 12.3 Classes — fundación 5.3A y siguiente 5.3B
 
-1. descriptor/header/runtime ARC;
-2. layout nominal y allocation checked;
-3. auto/explicit constructors con cleanup parcial;
-4. field get/set y const ya resuelto por frontend;
-5. ABI directo de métodos y `this`;
-6. parámetros, returns, structs y collections con class refs;
-7. aliasing, self-assignment, imports y O0/O1/O2;
-8. leak/lifetime tests, incluidos ciclos documentados.
+Fase 5.3A completa descriptor/header, runtime ARC, layout nominal, allocation
+checked, transporte por parámetros/returns/phis, containment, aliasing,
+self-assignment e igualdad por identidad en el subset IR/SSA/LLVM interno.
+
+Fase 5.3B debe implementar, sin reabrir esa representación:
+
+1. lowering source de constructores auto/explicit y cleanup parcial;
+2. layout de payload a partir de fields declarados;
+3. field get/set y reglas `const` ya resueltas por frontend;
+4. destructor recursivo real para cada field y paths de fallo de constructor;
+5. ABI directo de métodos, `this` y mutación de la instancia;
+6. imports y IDs nominales cross-module en objetos source;
+7. diagnósticos/promoción capability E2E para cada operación admitida;
+8. pruebas source/native de fields y constructores bajo O0/O1/O2.
 
 ### 12.4 Fase siguiente D — interfaces
 
@@ -861,8 +900,8 @@ layout/lifecycle, sin rediseñar nullable.
 | Array/List | Mantiene aliasing, headers y RC. Nuevos elementos usarán hooks type-directed. |
 | Paridad | Sigue el grafo auditado: reference layout/lifecycle antes de class; erased ABI antes de interface; nullable como rama independiente. |
 | Const | Reproduce la restricción por access path y el corte al atravesar class que aplica el frontend actual. |
-| Igualdad | No agrega Eq a classes/interfaces ni un operador de identidad. |
-| Perfil native | Fase 5.2 promueve nullable representable; classes e interfaces continúan rechazados antes de lowering. |
+| Igualdad | Phase 5.3A agrega Eq por identidad al tipo IR class; interfaces y equality definida por usuario siguen fuera. |
+| Perfil native | Nullable es E2E; la fundación class 5.3A es interna y la superficie class/interface continúa gated. |
 
 ## 15. Criterios de entrada para implementación
 
@@ -878,9 +917,9 @@ Antes de comenzar código de una de las ramas debe aprobarse:
 - tests de nullable para cada familia de layout;
 - criterio explícito de capability promotion y rollback.
 
-Tras Fase 5.2, `NullableType` tiene soporte native E2E con la representación de
-la sección 6. `ClassRefType` e `InterfaceType` siguen siendo tipos nominales
-admitidos por partes de la infraestructura, no evidencia de soporte native.
+`NullableType` tiene soporte native E2E. `ClassRefType` tiene layout,
+allocation interna, lifecycle y transporte ejecutables desde 5.3A;
+`InterfaceType` sigue sin layout. Esto no habilita construcción class source.
 
 ## 16. Fuera de alcance
 
@@ -891,7 +930,7 @@ No se diseñan ni habilitan:
 - destructores/finalizers de usuario;
 - weak/unowned references;
 - reflection, downcast o type tests públicos;
-- class/interface equality u operador público de identidad;
+- igualdad definida por usuario o equality de interfaces;
 - concurrency o sharing cross-thread;
 - exceptions/unwind;
 - FFI estable, runtime separado versionado o linking de objetos Aether de
@@ -902,3 +941,20 @@ No se diseñan ni habilitan:
 Cada una de esas features requiere un RFC separado. El descriptor y los thunks
 de este diseño dejan puntos de extensión, pero no anticipan semántica que el
 lenguaje actual no posee.
+
+## 17. Estado y frontera de Phase 5.3A
+
+Completado: handle class nominal no nulo; `class_new` de objeto vacío; DTO y
+verificación Python/Rust; locals, assignment, parámetros, returns, temporales,
+CFG/phis; ARC checked; igualdad por identidad; `T?`, structs, Array y List;
+destrucción final por descriptor; LLVM válido en O0/O1/O2.
+
+`class_new` es un opcode interno, no un constructor nuevo del lenguaje. El
+frontend native rechaza claramente declaraciones y operaciones que necesiten
+constructor, fields, métodos o `this`, sin fallback AST.
+
+Phase 5.3B debe implementar definiciones/layouts con fields, definite
+initialization, lowering de constructor, cleanup parcial, acceso/mutación de
+fields y destructores recursivos reales. Interfaces, inheritance, dispatch,
+weak refs, GC y cycle collection siguen posteriores. ARC fuerte puede filtrar
+ciclos cuando existan grafos de objetos.

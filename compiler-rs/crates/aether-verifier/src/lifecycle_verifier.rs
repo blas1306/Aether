@@ -1685,7 +1685,8 @@ impl<'module> LifecycleTypeRegistry<'module> {
                     LifecycleTraits::valid(true, true, inner.needs_destroy)
                 }
             }
-            IRType::ClassRef(_) | IRType::Interface(_) => {
+            IRType::ClassRef(_) => LifecycleTraits::valid(true, false, true),
+            IRType::Interface(_) => {
                 LifecycleTraits::invalid(
                     "lifecycle layout is not defined",
                     format!("lifecycle layout for '{type}' is not defined"),

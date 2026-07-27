@@ -3,10 +3,10 @@
 use std::error::Error as _;
 
 use aether_ir::{
-    ArrayType, BoolType, DoubleType, FloatType, FunctionType, IRBasicBlock, IRConstant,
-    IRFunction, IRInstruction, IRModule, IRParameter, IRStorage, IRStructDefinition, IRType,
-    IRValue, IntType, ListType, MatrixType, NullableType, StringType, StructType, VectorType,
-    VoidType,
+    ArrayType, BoolType, ClassRefType, DoubleType, FloatType, FunctionType, IRBasicBlock,
+    IRConstant, IRFunction, IRInstruction, IRModule, IRParameter, IRStorage,
+    IRStructDefinition, IRType, IRValue, IntType, ListType, MatrixType, NullableType,
+    StringType, StructType, VectorType, VoidType,
 };
 use aether_verifier::{
     BlockTypeVerificationError, FunctionTypeVerificationError, InstructionKind,
@@ -361,6 +361,47 @@ fn rejects_invalid_struct_construction_field_type() {
             actual: IRType::String(_),
         } if field == "fields[0]"
     ));
+}
+
+#[test]
+fn class_new_requires_a_class_reference_result() {
+    let class_type: IRType = ClassRefType {
+        name: "pkg.Widget".to_owned(),
+    }
+    .into();
+    let valid = module_with_instruction(IRInstruction::IRClassNew {
+        result: value("object", class_type),
+    });
+    assert_eq!(verify_module_types(&valid), Ok(()));
+
+    let invalid = module_with_instruction(IRInstruction::IRClassNew {
+        result: value("object", IntType.into()),
+    });
+    assert_eq!(
+        instruction_rule(&verify_module_types(&invalid).unwrap_err()),
+        &TypeRuleError::TypeConstraint {
+            field: "result".to_owned(),
+            expected: aether_verifier::TypeExpectation::ClassReference,
+            actual: IntType.into(),
+        }
+    );
+}
+
+#[test]
+fn class_references_have_identity_equality() {
+    let class_type: IRType = ClassRefType {
+        name: "pkg.Widget".to_owned(),
+    }
+    .into();
+    let module = module_with_instruction(IRInstruction::IRCompareOp {
+        result: value("same", BoolType.into()),
+        operator: "eq".to_owned(),
+        left: value("left", class_type.clone()),
+        right: value("right", class_type),
+        aggregate_shape: None,
+    });
+
+    assert_eq!(verify_module_types(&module), Ok(()));
 }
 
 #[test]

@@ -461,13 +461,13 @@ Production Python never parses or depends on Rust source files.
 ### Step 3G root contract audit and canonical JSON
 
 Phase 1, Step 3G confirms that schema v1 is complete for the current Python IR
-root: modules, nominal struct definitions, functions, blocks, all 68 registered
+root: modules, nominal struct definitions, functions, blocks, all 69 registered
 instructions, every nested type and constant variant, values, storage,
 parameters, and supported source locations. Root scenarios cover multiple
 nested struct definitions; multiple void and non-void functions and blocks;
 direct and indirect calls; lifecycle, collection, vector, matrix, method-result,
 and control-flow operations; and return storage transfers. One registry-driven
-module contains all 68 instruction classes. The audit derives that set from
+module contains all 69 instruction classes. The audit derives that set from
 `IR_INSTRUCTION_DTO_REGISTRY`; it does not maintain a second instruction
 inventory.
 
@@ -534,7 +534,7 @@ The Rust wire representation now lives in
 `compiler-rs/crates/aether-ir/src/wire.rs`. It uses serde-derived, exact-field
 structs and internally tagged enums for the module, struct definitions and
 fields, functions, blocks, all 18 type tags, values, storage, parameters,
-constants, source locations, and all 68 instruction `kind` tags. Required
+constants, source locations, and all 69 instruction `kind` tags. Required
 nullable fields use a transparent wrapper so an explicit JSON `null` remains
 distinct from an omitted field. Fixed-rank shape arrays retain their schema-v1
 wire lengths, unknown tags and fields are rejected, and the root preserves and
@@ -1602,9 +1602,11 @@ bool/complex/enum support default and trivial relocation. String and Array/List
 handles support default and relocation while retaining non-trivial copy and
 destroy semantics. Vector supports default only with `row` or `column`
 orientation and remains relocatable; Matrix remains relocatable without a
-dimension-free default; Function is relocatable without a default;
-ClassRef/Interface/Nullable have no current lifecycle layout; Void has no
-storage. Struct and MethodResult traits compose recursively in field order.
+dimension-free default; Function is relocatable without a default. `ClassRef`
+is relocatable without a default and requires non-trivial copy/destroy;
+`Nullable` composes recursively from its payload. Interface has no current
+lifecycle layout; Void has no storage. Struct and MethodResult traits compose
+recursively in field order.
 
 #### Block-entry policy and diagnostics
 

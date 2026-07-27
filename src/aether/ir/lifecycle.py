@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 
 from .model import (
@@ -14,6 +15,8 @@ from .model import (
     IRConst,
     IRCall,
     IRCallIndirect,
+    IRClassNew,
+    IRCompareOp,
     IRCopyInit,
     IRCast,
     IRDestroy,
@@ -203,7 +206,12 @@ class LifecycleTypeRegistry:
                 inner.needs_destroy,
                 True,
             )
-        if isinstance(type_, (ClassRefType, InterfaceType)):
+        if isinstance(type_, ClassRefType):
+            # A class value is an owning, non-null one-word handle.  Copies
+            # retain, moves relocate the handle, and destruction releases it.
+            # There is deliberately no implicit/default class value.
+            return LifecycleTraits(False, True, True, False)
+        if isinstance(type_, InterfaceType):
             return LifecycleTraits(
                 False,
                 False,
@@ -259,6 +267,7 @@ class LifecycleExpander:
         self._used_names: set[str] = set()
         self._owned_values: set[IRValue] = set()
         self._used_values: set[IRValue] = set()
+        self._remaining_uses: Counter[IRValue] = Counter()
 
     def expand(self) -> IRModule:
         functions = [self._expand_function(function) for function in self.module.functions]
@@ -267,9 +276,13 @@ class LifecycleExpander:
     def _expand_function(self, function: IRFunction) -> IRFunction:
         self._owned_values = set()
         self._used_values = set()
+        self._remaining_uses = Counter()
         for block in function.blocks:
             for instruction in block.instructions:
                 self._used_values.update(self._instruction_operands(instruction))
+                self._remaining_uses.update(
+                    self._instruction_operand_occurrences(instruction)
+                )
                 if isinstance(instruction, (IRCall, IRCallIndirect)) and instruction.result is not None:
                     if self.registry.traits(instruction.result.type).needs_destroy:
                         self._owned_values.add(instruction.result)
@@ -293,6 +306,8 @@ class LifecycleExpander:
                 elif isinstance(instruction, IRStructNew):
                     if self.registry.traits(instruction.result.type).needs_destroy:
                         self._owned_values.add(instruction.result)
+                elif isinstance(instruction, IRClassNew):
+                    self._owned_values.add(instruction.result)
         self._used_names = {parameter.name for parameter in function.parameters}
         for block in function.blocks:
             for instruction in block.instructions:
@@ -306,6 +321,9 @@ class LifecycleExpander:
             instructions: list[IRInstruction] = []
             for instruction in block.instructions:
                 instructions.extend(self._expand_instruction(instruction))
+                self._remaining_uses.subtract(
+                    self._instruction_operand_occurrences(instruction)
+                )
             blocks.append(IRBasicBlock(block.name, self._fold_trivial_return_transfer(instructions)))
         return IRFunction(function.name, list(function.parameters), function.return_type, blocks)
 
@@ -401,6 +419,32 @@ class LifecycleExpander:
                     )
             emitted.append(instruction)
             return self._release_unused_result(instruction, emitted)
+        if isinstance(instruction, IRClassNew):
+            return self._release_unused_result(instruction, [instruction])
+        if (
+            isinstance(instruction, IRCompareOp)
+            and instruction.operator in {"eq", "ne"}
+            and self.registry.traits(instruction.left.type).needs_destroy
+        ):
+            emitted: list[IRInstruction] = [instruction]
+            current_uses = Counter(
+                self._instruction_operand_occurrences(instruction)
+            )
+            for operand in dict.fromkeys((instruction.left, instruction.right)):
+                if (
+                    operand in self._owned_values
+                    and self._remaining_uses[operand] <= current_uses[operand]
+                ):
+                    self._owned_values.remove(operand)
+                    emitted.append(
+                        IRCall(
+                            "__aether_release",
+                            (operand,),
+                            None,
+                            "__aether_release",
+                        )
+                    )
+            return emitted
         if isinstance(instruction, (IRArrayGet, IRListGet)):
             emitted: list[IRInstruction] = [instruction]
             collection = (
@@ -542,11 +586,17 @@ class LifecycleExpander:
 
     @staticmethod
     def _instruction_operands(instruction: IRInstruction) -> set[IRValue]:
-        operands: set[IRValue] = set()
+        return set(LifecycleExpander._instruction_operand_occurrences(instruction))
+
+    @staticmethod
+    def _instruction_operand_occurrences(
+        instruction: IRInstruction,
+    ) -> tuple[IRValue, ...]:
+        operands: list[IRValue] = []
 
         def visit(value: object) -> None:
             if isinstance(value, IRValue):
-                operands.add(value)
+                operands.append(value)
             elif isinstance(value, (tuple, list)):
                 for item in value:
                     visit(item)
@@ -555,7 +605,7 @@ class LifecycleExpander:
             if name in {"result", "destination", "source_location"}:
                 continue
             visit(value)
-        return operands
+        return tuple(operands)
 
     def _loaded(self, source: IRValue) -> tuple[list[IRInstruction], IRValue]:
         if not isinstance(source, IRStorage):

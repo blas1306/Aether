@@ -102,6 +102,8 @@ pub enum IRInstruction {
         result: IRValue,
         fields: Vec<IRValue>,
     },
+    /// Allocates a payload-free nominal class object.
+    IRClassNew { result: IRValue },
     /// Reads a named struct field.
     IRStructGet {
         result: IRValue,

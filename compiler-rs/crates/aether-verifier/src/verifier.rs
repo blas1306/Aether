@@ -473,6 +473,17 @@ impl<'module> TypeVerifier<'module> {
                 }
             }
             IRInstruction::IRStructNew { result, fields } => self.verify_struct_new(result, fields),
+            IRInstruction::IRClassNew { result } => {
+                if matches!(result.r#type, IRType::ClassRef(_)) {
+                    Ok(())
+                } else {
+                    Err(constraint(
+                        "result",
+                        TypeExpectation::ClassReference,
+                        &result.r#type,
+                    ))
+                }
+            }
             IRInstruction::IRStructGet {
                 result,
                 r#struct,
@@ -821,6 +832,7 @@ impl<'module> TypeVerifier<'module> {
             | IRInstruction::IRDestroy { .. }
             | IRInstruction::IRRelocate { .. }
             | IRInstruction::IRFunctionRef { .. }
+            | IRInstruction::IRClassNew { .. }
             | IRInstruction::IRJump { .. } => Vec::new(),
             IRInstruction::IRBranch { condition, .. } => vec![("condition", condition)],
             IRInstruction::IRLoad { slot, .. } => vec![("slot", slot)],
@@ -1439,6 +1451,7 @@ impl<'module> TypeVerifier<'module> {
                 | IRType::Array(_)
                 | IRType::List(_)
                 | IRType::Nullable(_)
+                | IRType::ClassRef(_)
         ) {
             Ok(())
         } else {
@@ -2208,7 +2221,8 @@ impl<'module> TypeVerifier<'module> {
             | IRType::Double(_)
             | IRType::Bool(_)
             | IRType::String(_)
-            | IRType::Enum(_) => true,
+            | IRType::Enum(_)
+            | IRType::ClassRef(_) => true,
             IRType::Array(array) => self.is_equality_capable(&array.element, visiting),
             IRType::List(list) => self.is_equality_capable(&list.element, visiting),
             IRType::Vector(vector) => self.is_equality_capable(&vector.element, visiting),
@@ -2651,6 +2665,7 @@ pub(crate) fn instruction_result(instruction: &IRInstruction) -> Option<&IRValue
         | IRInstruction::IRCast { result, .. }
         | IRInstruction::IRFunctionRef { result, .. }
         | IRInstruction::IRStructNew { result, .. }
+        | IRInstruction::IRClassNew { result, .. }
         | IRInstruction::IRStructGet { result, .. }
         | IRInstruction::IRStructSet { result, .. }
         | IRInstruction::IRMethodResultNew { result, .. }
@@ -2717,6 +2732,7 @@ pub(crate) fn instruction_kind(instruction: &IRInstruction) -> InstructionKind {
         IRInstruction::IRCallIndirect { .. } => InstructionKind::IRCallIndirect,
         IRInstruction::IRPrint { .. } => InstructionKind::IRPrint,
         IRInstruction::IRStructNew { .. } => InstructionKind::IRStructNew,
+        IRInstruction::IRClassNew { .. } => InstructionKind::IRClassNew,
         IRInstruction::IRStructGet { .. } => InstructionKind::IRStructGet,
         IRInstruction::IRStructSet { .. } => InstructionKind::IRStructSet,
         IRInstruction::IRMethodResultNew { .. } => InstructionKind::IRMethodResultNew,

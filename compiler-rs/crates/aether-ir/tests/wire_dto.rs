@@ -154,6 +154,7 @@ fn instruction_cases() -> Vec<Value> {
             "struct_new",
             &[("result", value()), ("fields", json!([value()]))],
         ),
+        instruction("class_new", &[("result", value())]),
         instruction(
             "struct_get",
             &[
@@ -533,6 +534,7 @@ instruction_variant_mapping! {
     CallIndirect => IRCallIndirect,
     Print => IRPrint,
     StructNew => IRStructNew,
+    ClassNew => IRClassNew,
     StructGet => IRStructGet,
     StructSet => IRStructSet,
     MethodResultNew => IRMethodResultNew,

@@ -257,6 +257,13 @@ class IRStructNew(IRInstruction):
 
 
 @dataclass(frozen=True)
+class IRClassNew(AllocationMixin, IRInstruction):
+    """Allocate the payload-free native object admitted by Phase 5.3A."""
+
+    result: IRValue
+
+
+@dataclass(frozen=True)
 class IRStructGet(IRInstruction):
     result: IRValue
     struct: IRValue

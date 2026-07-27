@@ -25,6 +25,7 @@ from aether.ir.model import (
     IRBranch,
     IRCall,
     IRCallIndirect,
+    IRClassNew,
     IRCast,
     IRCompareOp,
     IRConst,
@@ -88,7 +89,7 @@ from aether.ir.model import (
     IRVectorSet,
     IRVectorSub,
 )
-from aether.ir.types import EnumType, IntType, ListType, StringType
+from aether.ir.types import ClassRefType, EnumType, IntType, ListType, StringType
 
 
 LOCATION = IRSourceLocation(14, 9, "src/lifecycle.ae")
@@ -101,6 +102,17 @@ ENUM_CONSTANT = IREnumConstant("Color", "GREEN", 1, 7)
 
 
 ROUND_TRIP_CASES: tuple[tuple[IRInstruction, dict[str, object]], ...] = (
+    (
+        IRClassNew(IRValue("object", ClassRefType("pkg.Widget"))),
+        {
+            "kind": "class_new",
+            "result": {
+                "tag": "value",
+                "name": "object",
+                "type": {"tag": "class_ref", "name": "pkg.Widget"},
+            },
+        },
+    ),
     (
         IRConst(RESULT, ENUM_CONSTANT),
         {
@@ -302,6 +314,7 @@ def test_supported_instruction_tags_are_explicit_and_stable() -> None:
         IRCallIndirect: "call_indirect",
         IRPrint: "print",
         IRStructNew: "struct_new",
+        IRClassNew: "class_new",
         IRStructGet: "struct_get",
         IRStructSet: "struct_set",
         IRMethodResultNew: "method_result_new",

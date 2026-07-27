@@ -9,6 +9,7 @@ from aether.string_value import StringValue, aether_string_equal
 from .types import (
     ArrayType,
     BoolType,
+    ClassRefType,
     DoubleType,
     EnumType,
     FloatType,
@@ -36,7 +37,7 @@ def ir_eq_capability(
     structs: Mapping[str, object],
     visiting: frozenset[str] = frozenset(),
 ) -> IREqCapability | None:
-    if isinstance(type_, (IntType, FloatType, DoubleType, BoolType, StringType, EnumType)):
+    if isinstance(type_, (IntType, FloatType, DoubleType, BoolType, StringType, EnumType, ClassRefType)):
         return IREqCapability(type_)
     if isinstance(type_, (ArrayType, ListType, VectorType, MatrixType)):
         return (
@@ -77,6 +78,8 @@ def ir_values_equal(
         if isinstance(left, StringValue) or isinstance(right, StringValue):
             return aether_string_equal(left, right)
         return left == right
+    if isinstance(type_, ClassRefType):
+        return left is right
     if isinstance(type_, NullableType):
         from aether.types import NullableValue
 

@@ -12,6 +12,7 @@ from aether.ssa.model import (
     SSAArrayGet,
     SSAArrayLength,
     SSAArrayNew,
+    SSAClassNew,
     SSAArraySlice,
     SSAArraySet,
     SSABasicBlock,
@@ -399,6 +400,7 @@ class SCCPAnalyzer:
             instruction,
             (
                 SSAArrayNew,
+                SSAClassNew,
                 SSAArrayCopy,
                 SSAArrayGet,
                 SSAArraySlice,

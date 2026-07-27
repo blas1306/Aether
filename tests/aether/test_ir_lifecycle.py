@@ -29,6 +29,7 @@ from aether.ir import (
     IRVerificationError,
     IRVerifier,
     IntType,
+    InterfaceType,
     LifecycleTypeRegistry,
     StringType,
     StructType,
@@ -367,7 +368,7 @@ def test_inconsistent_branch_initialization_is_rejected() -> None:
 
 
 def test_relocation_rejects_non_relocatable_type_and_invalid_count() -> None:
-    parameter = IRParameter("value", ClassRefType("Object"))
+    parameter = IRParameter("value", InterfaceType("Object"))
     source = IRStorage("source", parameter.type)
     destination = IRStorage("destination", parameter.type)
     _error(

@@ -262,6 +262,10 @@ class CollectionObject(list[Any]):
 def copy_init_value(value: Any) -> Any:
     """Logical element copy used by collection storage hooks."""
 
+    from .class_value import NativeClassObject
+
+    if isinstance(value, NativeClassObject):
+        return value.retain()
     if isinstance(value, CollectionObject):
         return value.retain()
     if isinstance(value, StringValue):
@@ -326,6 +330,11 @@ def copy_init_value(value: Any) -> Any:
 def destroy_value(value: Any) -> None:
     """Destroy an owned element recursively; trivial values are no-ops."""
 
+    from .class_value import NativeClassObject
+
+    if isinstance(value, NativeClassObject):
+        value.release()
+        return
     if isinstance(value, CollectionObject):
         value.release()
         return

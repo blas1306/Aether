@@ -20,6 +20,7 @@ from .model import (
     IRBranch,
     IRCall,
     IRCallIndirect,
+    IRClassNew,
     IRCast,
     IRCompareOp,
     IRConst,
@@ -769,6 +770,13 @@ def _encode_instruction_to_dto(
                 for field in instruction.fields
             ],
         }
+    if type(instruction) is IRClassNew:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(
+                instruction.result, schema_version=schema_version
+            ),
+        }
     if type(instruction) is IRStructGet:
         return {
             "kind": kind,
@@ -1512,6 +1520,15 @@ def _decode_instruction_from_dto(
                 for field in fields
             ),
         )
+    if kind == "class_new":
+        _expect_fields(
+            mapping,
+            {"kind", "result"},
+            "IR instruction 'class_new'",
+        )
+        return IRClassNew(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version)
+        )
     if kind == "struct_get":
         _expect_fields(
             mapping,
@@ -2238,6 +2255,7 @@ IR_INSTRUCTION_DTO_REGISTRY: tuple[IRInstructionDTORegistryEntry, ...] = (
     _instruction_dto_entry(IRCallIndirect, "call_indirect", "IRCallIndirect"),
     _instruction_dto_entry(IRPrint, "print", "IRPrint"),
     _instruction_dto_entry(IRStructNew, "struct_new", "IRStructNew"),
+    _instruction_dto_entry(IRClassNew, "class_new", "IRClassNew"),
     _instruction_dto_entry(IRStructGet, "struct_get", "IRStructGet"),
     _instruction_dto_entry(IRStructSet, "struct_set", "IRStructSet"),
     _instruction_dto_entry(

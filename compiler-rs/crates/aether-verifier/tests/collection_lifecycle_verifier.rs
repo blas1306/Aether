@@ -4,8 +4,8 @@ use std::error::Error as _;
 
 use aether_ir::{
     ArrayType, ClassRefType, FunctionType, IRBasicBlock, IRFunction, IRInstruction, IRModule,
-    IRStructDefinition, IRType, IRValue, IntType, ListType, MatrixType, NullableType, StringType,
-    StructType, VoidType,
+    IRStructDefinition, IRType, IRValue, IntType, InterfaceType, ListType, MatrixType,
+    NullableType, StringType, StructType, VoidType,
 };
 use aether_verifier::{
     BlockTypeVerificationError, CollectionKind, CollectionLifecycleCapability,
@@ -208,7 +208,7 @@ fn rejects_missing_direct_element_lifecycle_capabilities() {
 
 #[test]
 fn collection_lifecycle_diagnostic_is_deterministic_and_downcastable() {
-    let element_type: IRType = ClassRefType {
+    let element_type: IRType = InterfaceType {
         name: "Box".to_owned(),
     }
     .into();
@@ -223,7 +223,7 @@ fn collection_lifecycle_diagnostic_is_deterministic_and_downcastable() {
     assert_eq!(first, second);
     assert_eq!(
         first.to_string(),
-        "function 0 ('main') failed type verification: block 0 ('entry') of function 'main' failed type verification: type verification failed in function 'main' block 'entry' instruction 0 (IRListSlice): IRListSlice failed type verification: IRListSlice requires lifecycle support for list element type 'class Box': lifecycle layout for 'class Box' is not defined"
+        "function 0 ('main') failed type verification: block 0 ('entry') of function 'main' failed type verification: type verification failed in function 'main' block 'entry' instruction 0 (IRListSlice): IRListSlice failed type verification: IRListSlice requires lifecycle support for list element type 'interface Box': lifecycle layout for 'interface Box' is not defined"
     );
 
     let function = (&first as &dyn std::error::Error)

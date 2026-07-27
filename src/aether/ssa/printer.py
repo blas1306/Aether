@@ -16,6 +16,7 @@ from .model import (
     SSACast,
     SSACall,
     SSACallIndirect,
+    SSAClassNew,
     SSACompareOp,
     SSAConst,
     SSAFunction,
@@ -160,6 +161,8 @@ class SSAPrinter:
             return f"{operation} {self._value(instruction.value)}{shape}"
         if isinstance(instruction, SSAStructNew):
             return f"{self._typed_value(instruction.result)} = struct_new [" + ", ".join(self._value(value) for value in instruction.fields) + "]"
+        if isinstance(instruction, SSAClassNew):
+            return f"{self._typed_value(instruction.result)} = class_new"
         if isinstance(instruction, SSAStructGet):
             return f"{self._typed_value(instruction.result)} = struct_get {self._value(instruction.struct)}, {instruction.field_name}#{instruction.field_index}"
         if isinstance(instruction, SSAStructSet):

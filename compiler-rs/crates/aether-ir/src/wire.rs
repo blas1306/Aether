@@ -412,6 +412,9 @@ pub enum IRInstructionDTO {
         result: IRValueDTO,
         fields: Vec<IRValueDTO>,
     },
+    ClassNew {
+        result: IRValueDTO,
+    },
     StructGet {
         result: IRValueDTO,
         #[serde(rename = "struct")]

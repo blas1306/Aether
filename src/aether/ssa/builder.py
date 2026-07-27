@@ -16,6 +16,7 @@ from aether.ir.model import (
     IRCast,
     IRCall,
     IRCallIndirect,
+    IRClassNew,
     IRCompareOp,
     IRConst,
     IRFunction,
@@ -84,6 +85,7 @@ from .model import (
     SSACast,
     SSACall,
     SSACallIndirect,
+    SSAClassNew,
     SSACompareOp,
     SSAConst,
     SSAFunction,
@@ -628,6 +630,10 @@ class SSABuilder:
             return SSAStructNew(
                 result,
                 tuple(self._resolve_value(value, state.value_map) for value in instruction.fields),
+            )
+        if isinstance(instruction, IRClassNew):
+            return SSAClassNew(
+                self._define_value(instruction.result, state.value_map)
             )
         if isinstance(instruction, IRStructGet):
             result = self._define_value(instruction.result, state.value_map)
