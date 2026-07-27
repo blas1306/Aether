@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, is_dataclass
 import re
 import struct
 from typing import Any, Callable
@@ -8,7 +8,7 @@ from typing import Any, Callable
 from aether.ir.model import IREnumConstant
 from aether.integer_arithmetic import INT_MAX, INT_MIN, is_aether_int
 from aether.string_value import STRING_SPLIT_BUILTIN, STRING_TRIM_BUILTIN
-from aether.ir.types import ArrayType, BoolType, DoubleType, EnumType, FloatType, FunctionType, IntType, ListType, MatrixType, MethodResultType, StringType, StructType, VectorType, VoidType
+from aether.ir.types import ArrayType, BoolType, DoubleType, EnumType, FloatType, FunctionType, IntType, ListType, MatrixType, MethodResultType, NullableType, StringType, StructType, VectorType, VoidType
 from aether.ssa.model import (
     SSAArrayCopy,
     SSAArrayGet,
@@ -218,8 +218,14 @@ class LLVMPrinter:
         self._collection_arc_helpers: set[tuple[str, object, bool]] = set()
         self._collection_object_arc_helpers: set[tuple[str, object, bool]] = set()
         self._collection_copy_helpers: set[tuple[str, object]] = set()
+        self._nullable_print_types: set[NullableType] = set()
+        self._nullable_arc_helpers: set[tuple[NullableType, bool]] = set()
 
         functions = [self._print_function(function) for function in module.functions]
+        nullable_types = [
+            f"{llvm_type(type_)} = type {{ i1, {llvm_type(type_.inner)} }}"
+            for type_ in self._collect_nullable_types(module)
+        ]
         struct_types = [
             f"%struct.{definition.name} = type {{ "
             + ", ".join(llvm_type(type_) for _name, type_ in definition.fields)
@@ -342,13 +348,31 @@ class LLVMPrinter:
             for type_ in sorted(pending_eq, key=str):
                 runtime.append(self._equality_helper(type_))
                 emitted_eq_helpers.add(type_)
-        runtime.extend(
-            self._struct_sequence_equality_helper(kind, element_type)
+        emitted_nullable_print: set[NullableType] = set()
+        while pending_nullable_print := self._nullable_print_types - emitted_nullable_print:
+            for type_ in sorted(pending_nullable_print, key=str):
+                runtime.append(self._nullable_print_helper(type_))
+                emitted_nullable_print.add(type_)
+        emitted_nullable_arc: set[tuple[NullableType, bool]] = set()
+        while pending_nullable_arc := self._nullable_arc_helpers - emitted_nullable_arc:
+            for type_, retain in sorted(
+                pending_nullable_arc,
+                key=lambda item: (str(item[0]), item[1]),
+            ):
+                runtime.append(self._nullable_arc_helper(type_, retain=retain))
+                emitted_nullable_arc.add((type_, retain))
+        emitted_sequence_eq_types: set[tuple[str, object]] = set()
+        while pending_sequence_eq := (
+            self._struct_sequence_equality_types - emitted_sequence_eq_types
+        ):
             for kind, element_type in sorted(
-                self._struct_sequence_equality_types,
+                pending_sequence_eq,
                 key=lambda item: (item[0], str(item[1])),
-            )
-        )
+            ):
+                runtime.append(
+                    self._struct_sequence_equality_helper(kind, element_type)
+                )
+                emitted_sequence_eq_types.add((kind, element_type))
         emitted_sequence_print_types: set[tuple[str, object]] = set()
         while pending := self._struct_sequence_print_types - emitted_sequence_print_types:
             for kind, element_type in sorted(
@@ -387,6 +411,84 @@ class LLVMPrinter:
             ):
                 runtime.append(
                     self._collection_object_arc_helper(kind, element_type, retain=retain)
+                )
+                emitted_object_arc.add((kind, element_type, retain))
+        # Aggregate helpers can recursively discover one another.  Reach a
+        # fixed point so, for example, printing List<int?> emits both the
+        # sequence helper and the nullable element helper regardless of which
+        # one was discovered first.
+        while True:
+            pending_eq = self._eq_helper_types - emitted_eq_helpers
+            pending_sequence_eq = (
+                self._struct_sequence_equality_types - emitted_sequence_eq_types
+            )
+            pending_nullable_print = (
+                self._nullable_print_types - emitted_nullable_print
+            )
+            pending_sequence_print = (
+                self._struct_sequence_print_types - emitted_sequence_print_types
+            )
+            pending_nullable_arc = (
+                self._nullable_arc_helpers - emitted_nullable_arc
+            )
+            pending_arc = self._collection_arc_helpers - emitted_arc_helpers
+            pending_object_arc = (
+                self._collection_object_arc_helpers - emitted_object_arc
+            )
+            if not any(
+                (
+                    pending_eq,
+                    pending_sequence_eq,
+                    pending_nullable_print,
+                    pending_sequence_print,
+                    pending_nullable_arc,
+                    pending_arc,
+                    pending_object_arc,
+                )
+            ):
+                break
+            for type_ in sorted(pending_eq, key=str):
+                runtime.append(self._equality_helper(type_))
+                emitted_eq_helpers.add(type_)
+            for kind, element_type in sorted(
+                pending_sequence_eq,
+                key=lambda item: (item[0], str(item[1])),
+            ):
+                runtime.append(
+                    self._struct_sequence_equality_helper(kind, element_type)
+                )
+                emitted_sequence_eq_types.add((kind, element_type))
+            for type_ in sorted(pending_nullable_print, key=str):
+                runtime.append(self._nullable_print_helper(type_))
+                emitted_nullable_print.add(type_)
+            for kind, element_type in sorted(
+                pending_sequence_print,
+                key=lambda item: (item[0], str(item[1])),
+            ):
+                runtime.append(self._struct_sequence_print_helper(kind, element_type))
+                emitted_sequence_print_types.add((kind, element_type))
+            for type_, retain in sorted(
+                pending_nullable_arc,
+                key=lambda item: (str(item[0]), item[1]),
+            ):
+                runtime.append(self._nullable_arc_helper(type_, retain=retain))
+                emitted_nullable_arc.add((type_, retain))
+            for kind, element_type, retain in sorted(
+                pending_arc,
+                key=lambda item: (item[0], str(item[1]), item[2]),
+            ):
+                runtime.append(
+                    self._collection_arc_helper(kind, element_type, retain=retain)
+                )
+                emitted_arc_helpers.add((kind, element_type, retain))
+            for kind, element_type, retain in sorted(
+                pending_object_arc,
+                key=lambda item: (item[0], str(item[1]), item[2]),
+            ):
+                runtime.append(
+                    self._collection_object_arc_helper(
+                        kind, element_type, retain=retain
+                    )
                 )
                 emitted_object_arc.add((kind, element_type, retain))
         LLVMVectorRuntime(
@@ -428,8 +530,43 @@ class LLVMPrinter:
             if native_entry
             else []
         )
-        sections = struct_types + runtime + globals_ + functions + wrappers
+        sections = nullable_types + struct_types + runtime + globals_ + functions + wrappers
         return "\n\n".join(sections)
+
+    @staticmethod
+    def _collect_nullable_types(module: SSAModule) -> list[NullableType]:
+        """Collect every named nullable body required by an SSA module."""
+
+        found: set[NullableType] = set()
+        visited: set[int] = set()
+
+        def visit(value: object) -> None:
+            if isinstance(value, NullableType):
+                found.add(value)
+                visit(value.inner)
+                return
+            if value is None or isinstance(value, (str, bytes, int, float, bool)):
+                return
+            if isinstance(value, dict):
+                for key, item in value.items():
+                    visit(key)
+                    visit(item)
+                return
+            if isinstance(value, (list, tuple, set, frozenset)):
+                for item in value:
+                    visit(item)
+                return
+            if not is_dataclass(value):
+                return
+            identity = id(value)
+            if identity in visited:
+                return
+            visited.add(identity)
+            for field in fields(value):
+                visit(getattr(value, field.name))
+
+        visit(module)
+        return sorted(found, key=str)
 
     def _print_function(self, function: SSAFunction) -> str:
         self._constants: dict[str, str] = {}
@@ -772,6 +909,28 @@ class LLVMPrinter:
         return f"{result} = xor i1 {operand}, true"
 
     def _print_compare_op(self, instruction: SSACompareOp) -> str:
+        if isinstance(instruction.left.type, NullableType):
+            if (
+                instruction.left.type != instruction.right.type
+                or instruction.operator not in {"eq", "ne"}
+            ):
+                raise LLVMBackendError(
+                    "LLVM nullable comparison requires homogeneous eq/ne operands"
+                )
+            helper = self._require_equality_helper(instruction.left.type)
+            llvm = llvm_type(instruction.left.type)
+            equal = self._synthetic_temp("nullable.equal")
+            result = self._new_temp(instruction.result)
+            lines = [
+                f"{equal} = call i1 @{helper}({llvm} {self._operand(instruction.left)}, "
+                f"{llvm} {self._operand(instruction.right)})"
+            ]
+            lines.append(
+                f"{result} = and i1 {equal}, true"
+                if instruction.operator == "eq"
+                else f"{result} = xor i1 {equal}, true"
+            )
+            return "\n  ".join(lines)
         if isinstance(instruction.left.type, (ArrayType, ListType, StructType)):
             if instruction.left.type != instruction.right.type or instruction.operator not in {"eq", "ne"}:
                 raise LLVMBackendError("LLVM structural comparison requires homogeneous eq/ne")
@@ -945,6 +1104,34 @@ class LLVMPrinter:
                 "entry:",
                 f"  %equal = icmp eq {llvm} %left, %right",
                 "  ret i1 %equal",
+                "}",
+            ])
+        if isinstance(type_, NullableType):
+            inner = type_.inner
+            compare = self._equality_compare_line(
+                inner,
+                "%payload.equal",
+                "%left.payload",
+                "%right.payload",
+            )
+            return "\n".join([
+                f"define private i1 @{name}({llvm} %left, {llvm} %right) {{",
+                "entry:",
+                f"  %left.present = extractvalue {llvm} %left, 0",
+                f"  %right.present = extractvalue {llvm} %right, 0",
+                "  %same.tag = icmp eq i1 %left.present, %right.present",
+                "  br i1 %same.tag, label %same_case, label %different",
+                "same_case:",
+                "  br i1 %left.present, label %present, label %equal",
+                "present:",
+                f"  %left.payload = extractvalue {llvm} %left, 1",
+                f"  %right.payload = extractvalue {llvm} %right, 1",
+                compare,
+                "  br i1 %payload.equal, label %equal, label %different",
+                "equal:",
+                "  ret i1 true",
+                "different:",
+                "  ret i1 false",
                 "}",
             ])
         if isinstance(type_, (FloatType, DoubleType)):
@@ -1156,6 +1343,51 @@ class LLVMPrinter:
         ])
 
     def _print_cast(self, instruction: SSACast) -> str:
+        if isinstance(instruction.result.type, NullableType):
+            target = instruction.result.type
+            target_llvm = llvm_type(target)
+            result = self._new_temp(instruction.result)
+            source_operand = self._operand(instruction.value)
+            if isinstance(instruction.value.type, NullableType):
+                source = instruction.value.type
+                source_llvm = llvm_type(source)
+                present = self._synthetic_temp("nullable.cast.present")
+                payload = self._synthetic_temp("nullable.cast.payload")
+                converted = payload
+                lines = [
+                    f"{present} = extractvalue {source_llvm} {source_operand}, 0",
+                    f"{payload} = extractvalue {source_llvm} {source_operand}, 1",
+                ]
+                if source.inner != target.inner:
+                    if isinstance(source.inner, IntType) and isinstance(
+                        target.inner, (FloatType, DoubleType)
+                    ):
+                        converted = self._synthetic_temp("nullable.cast.converted")
+                        lines.append(
+                            f"{converted} = sitofp i32 {payload} to {llvm_type(target.inner)}"
+                        )
+                    else:
+                        raise LLVMBackendError(
+                            f"LLVM nullable cast does not support {source} to {target}"
+                        )
+                tagged = self._synthetic_temp("nullable.cast.tagged")
+                lines.extend([
+                    f"{tagged} = insertvalue {target_llvm} zeroinitializer, i1 {present}, 0",
+                    f"{result} = insertvalue {target_llvm} {tagged}, "
+                    f"{llvm_type(target.inner)} {converted}, 1",
+                ])
+                return "\n  ".join(lines)
+            if instruction.value.type != target.inner:
+                raise LLVMBackendError(
+                    f"LLVM nullable construction requires {target.inner}, "
+                    f"got {instruction.value.type}"
+                )
+            tagged = self._synthetic_temp("nullable.present")
+            return "\n  ".join([
+                f"{tagged} = insertvalue {target_llvm} zeroinitializer, i1 true, 0",
+                f"{result} = insertvalue {target_llvm} {tagged}, "
+                f"{llvm_type(target.inner)} {source_operand}, 1",
+            ])
         if instruction.value.type == instruction.result.type:
             result = self._new_temp(instruction.result)
             type_name = llvm_type(instruction.result.type)
@@ -1454,6 +1686,14 @@ class LLVMPrinter:
         *,
         retain: bool,
     ) -> None:
+        if isinstance(type_, NullableType):
+            self._nullable_arc_helpers.add((type_, retain))
+            operation = "retain" if retain else "release"
+            lines.append(
+                f"call void @__ae_nullable_{operation}_{aggregate_helper_suffix(type_)}("
+                f"{llvm_type(type_)} {operand})"
+            )
+            return
         if isinstance(type_, StringType):
             self._uses_string_runtime = True
             operation = "retain" if retain else "release"
@@ -1497,6 +1737,39 @@ class LLVMPrinter:
                 self._emit_arc_value(lines, field, field_type, retain=retain)
             return
         raise LLVMBackendError(f"LLVM lifecycle builtin does not support type {type_}")
+
+    def _nullable_arc_helper(
+        self,
+        type_: NullableType,
+        *,
+        retain: bool,
+    ) -> str:
+        operation = "retain" if retain else "release"
+        name = f"__ae_nullable_{operation}_{aggregate_helper_suffix(type_)}"
+        llvm = llvm_type(type_)
+        lines = [
+            f"define private void @{name}({llvm} %value) {{",
+            "entry:",
+            f"  %present = extractvalue {llvm} %value, 0",
+            "  br i1 %present, label %payload, label %done",
+            "payload:",
+            f"  %inner = extractvalue {llvm} %value, 1",
+        ]
+        payload_lines: list[str] = []
+        self._emit_arc_value(
+            payload_lines,
+            "%inner",
+            type_.inner,
+            retain=retain,
+        )
+        lines.extend(f"  {line}" for line in payload_lines)
+        lines.extend([
+            "  br label %done",
+            "done:",
+            "  ret void",
+            "}",
+        ])
+        return "\n".join(lines)
 
     def _require_collection_object_arc_helper(
         self,
@@ -1798,6 +2071,15 @@ class LLVMPrinter:
         value = self._operand(instruction.value)
         call_result = self._synthetic_temp("print.result")
 
+        if isinstance(instruction.value.type, NullableType):
+            nullable_type = instruction.value.type
+            self._nullable_print_types.add(nullable_type)
+            newline = "true" if instruction.newline else "false"
+            return (
+                f"call void @{self._nullable_print_helper_name(nullable_type)}("
+                f"{llvm_type(nullable_type)} {value}, i1 {newline})"
+            )
+
         if isinstance(instruction.value.type, StructType):
             return "\n  ".join(
                 self._print_struct_value(
@@ -1939,6 +2221,13 @@ class LLVMPrinter:
                 f"{result} = call i32 @fputs(ptr {selected}, ptr {stream})",
             ])
             return
+        if isinstance(type_, NullableType):
+            self._nullable_print_types.add(type_)
+            lines.append(
+                f"call void @{self._nullable_print_helper_name(type_)}("
+                f"{llvm_type(type_)} {value}, i1 false)"
+            )
+            return
         if isinstance(type_, EnumType):
             enum_lines, selected = self._enum_text_selection(type_, value)
             lines.extend(enum_lines)
@@ -1958,6 +2247,42 @@ class LLVMPrinter:
             lines.append(f"call void @{helper}(ptr {value}, i1 false)")
             return
         raise LLVMBackendError(f"LLVM struct print does not support field type {type_}")
+
+    @staticmethod
+    def _nullable_print_helper_name(type_: NullableType) -> str:
+        return f"__ae_print_{aggregate_helper_suffix(type_)}"
+
+    def _nullable_print_helper(self, type_: NullableType) -> str:
+        name = self._nullable_print_helper_name(type_)
+        llvm = llvm_type(type_)
+        lines = [
+            f"define private void @{name}({llvm} %value, i1 %newline) {{",
+            "entry:",
+            f"  %present = extractvalue {llvm} %value, 0",
+            "  br i1 %present, label %some, label %none",
+            "none:",
+        ]
+        self._emit_text(lines, "null")
+        lines.extend([
+            "  br label %finish",
+            "some:",
+            f"  %payload = extractvalue {llvm} %value, 1",
+        ])
+        payload_lines: list[str] = []
+        self._emit_printed_value(payload_lines, "%payload", type_.inner)
+        lines.extend(f"  {line}" for line in payload_lines)
+        lines.extend([
+            "  br label %finish",
+            "finish:",
+            "  br i1 %newline, label %line, label %done",
+            "line:",
+            "  %newline.result = call i32 @putchar(i32 10)",
+            "  br label %done",
+            "done:",
+            "  ret void",
+            "}",
+        ])
+        return "\n".join(lines)
 
     @staticmethod
     def _struct_sequence_print_helper_name(kind: str, element_type: object) -> str:
@@ -2003,6 +2328,12 @@ class LLVMPrinter:
                     "%value",
                     newline=False,
                 )
+            ]
+        elif isinstance(element_type, NullableType):
+            self._nullable_print_types.add(element_type)
+            print_lines = [
+                f"  call void @{self._nullable_print_helper_name(element_type)}("
+                f"{llvm_type(element_type)} %value, i1 false)"
             ]
         else:
             raise LLVMBackendError(
@@ -3952,6 +4283,12 @@ class LLVMPrinter:
         return name
 
     def _literal(self, value: Any, result: SSAValue) -> str:
+        if isinstance(result.type, NullableType):
+            if value is not None:
+                raise LLVMBackendError(
+                    "LLVM nullable constants only represent the absent state"
+                )
+            return "zeroinitializer"
         if isinstance(result.type, EnumType):
             if not isinstance(value, IREnumConstant):
                 raise LLVMBackendError(

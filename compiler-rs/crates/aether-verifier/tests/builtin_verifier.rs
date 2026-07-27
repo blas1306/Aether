@@ -190,6 +190,10 @@ fn retain_and_release_accept_python_managed_type_allowlist() {
             element: Box::new(BoolType.into()),
         }
         .into(),
+        NullableType {
+            inner: Box::new(StringType.into()),
+        }
+        .into(),
     ];
 
     for builtin in ["__aether_retain", "__aether_release"] {
@@ -234,7 +238,7 @@ fn retain_rejects_primitive_and_enum_arguments() {
 
 #[test]
 fn release_rejects_primitive_aggregate_and_other_unsupported_types() {
-    let unsupported: [IRType; 4] = [
+    let unsupported: [IRType; 3] = [
         BoolType.into(),
         VectorType {
             element: Box::new(IntType.into()),
@@ -243,10 +247,6 @@ fn release_rejects_primitive_aggregate_and_other_unsupported_types() {
         .into(),
         MatrixType {
             element: Box::new(DoubleType.into()),
-        }
-        .into(),
-        NullableType {
-            inner: Box::new(StringType.into()),
         }
         .into(),
     ];

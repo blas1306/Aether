@@ -296,6 +296,7 @@ pub enum IREnumConstantDTO {
 #[serde(tag = "tag", rename_all = "snake_case", deny_unknown_fields)]
 #[allow(missing_docs)]
 pub enum IRConstantDTO {
+    Null,
     Bool {
         value: bool,
     },

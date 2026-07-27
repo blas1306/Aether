@@ -85,7 +85,7 @@ linkage LLVM; eso es un detalle accidental, no una exportación FFI.
 | `Matrix<T>` | `ptr` | una palabra target | handle por valor | provisional/shape externo |
 | struct | `%struct.Name = type { fields... }` | padding/alignment del target | por valor | layout source-order, no ABI pública |
 | class/interface | sin LLVM ABI | — | — | unsupported native |
-| nullable | sin LLVM ABI | — | — | unsupported native |
+| nullable `T?` | `%nullable.<T> = type { i1, T }` | target-dependent, incluido padding | aggregate por valor | implementado para payload representable |
 | tuple source | sin LLVM ABI general | — | — | unsupported native |
 | method result | `{ %struct.Receiver [, Value] }` | target-dependent | por valor | detalle de lowering |
 | parse/file result | struct nominal `{value,status}` | target-dependent | por valor | detalle runtime/compiler |
@@ -93,6 +93,13 @@ linkage LLVM; eso es un detalle accidental, no una exportación FFI.
 `LLVMTypeLayouts` usa expresiones `getelementptr`/`ptrtoint` para que LLVM
 calcule tamaños de punteros y structs. No calcula padding de structs en Python.
 Los tamaños fijos de int/enum/bool/float/double sí se registran en Python.
+
+El primer field nullable es el tag `has_value`. `false` usa payload
+`zeroinitializer` canonical e inactivo; ese payload no se lee, compara, copia
+ni destruye. `true` activa el segundo field. Incluso `string?` y otros handles
+usan este agregado: `ptr null` no es una representación nullable ni un niche
+ABI. El nombre LLVM es determinista y el paso/retorno usa las reglas de
+agregados del target, sin heap allocation.
 
 Una constante `int` sólo puede llegar a esta ABI si está en
 `[-2147483648, 2147483647]`. El frontend valida los literales antes del
@@ -262,6 +269,10 @@ Convención semántica implementada para valores no triviales:
 `transferred_storage` expresan el contrato antes de SSA. `expand_lifecycle()`
 lo baja a primitivas/calls ARC. Native panic termina el proceso y no hace
 unwind; no existe cleanup de stack por panic recuperable.
+
+Para `T?`, parámetros siguen borrowed y retornos siguen owned cuando el tag
+está presente. Copy/destroy/retain/release inspeccionan primero el tag y
+delegan a `T` únicamente para present; absent no ejecuta lifecycle del payload.
 
 ## 11. Panic, IO y proceso
 

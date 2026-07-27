@@ -1260,6 +1260,7 @@ impl TryFrom<IRConstantDTO> for IRConstant {
 
     fn try_from(constant: IRConstantDTO) -> Result<Self, Self::Error> {
         match constant {
+            IRConstantDTO::Null => Ok(Self::Null),
             IRConstantDTO::Bool { value } => Ok(Self::Bool(value)),
             IRConstantDTO::Int { value } => Ok(Self::Int(value)),
             IRConstantDTO::Float { value } => {

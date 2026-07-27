@@ -687,6 +687,7 @@ fn value_constant_and_location_tags_preserve_their_shapes() {
     assert_eq!(serde_json::to_value(location_dto).unwrap(), location());
 
     let constants = [
+        json!({"tag": "null"}),
         json!({"tag": "bool", "value": true}),
         json!({"tag": "int", "value": -7}),
         json!({"tag": "float", "value": 1.25}),

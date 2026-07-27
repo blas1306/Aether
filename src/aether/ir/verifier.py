@@ -951,11 +951,18 @@ class IRVerifier:
                     VectorType,
                     MatrixType,
                     StructType,
+                    NullableType,
                 ),
             ):
                 self._fail(
                     "Print value must be a printable scalar or aggregate, "
                     f"got {instruction.value.type}"
+                )
+            if isinstance(instruction.value.type, NullableType) and not self._is_printable_type(
+                instruction.value.type.inner
+            ):
+                self._fail(
+                    f"Nullable print payload type is not printable: {instruction.value.type.inner}"
                 )
             if isinstance(instruction.value.type, VectorType):
                 if instruction.aggregate_shape is None or len(instruction.aggregate_shape) != 1:
@@ -1406,7 +1413,14 @@ class IRVerifier:
                 argument_type = instruction.arguments[0].type
                 if not isinstance(
                     argument_type,
-                    (StringType, StructType, MethodResultType, ArrayType, ListType),
+                    (
+                        StringType,
+                        StructType,
+                        MethodResultType,
+                        ArrayType,
+                        ListType,
+                        NullableType,
+                    ),
                 ):
                     self._fail(
                         f"Lifecycle builtin does not support argument type {argument_type}"
@@ -2366,6 +2380,10 @@ class IRVerifier:
         elif isinstance(value, str):
             expected = StringType()
         elif value is None:
+            if not isinstance(result_type, NullableType):
+                self._fail(
+                    f"Null const requires nullable result type, got {result_type}"
+                )
             return
         else:
             return
@@ -2527,6 +2545,13 @@ class IRVerifier:
     def _verify_cast(self, instruction: IRCast) -> None:
         source = instruction.value.type
         target = instruction.result.type
+        if isinstance(target, NullableType):
+            source_inner = source.inner if isinstance(source, NullableType) else source
+            if source_inner == target.inner or (
+                isinstance(source_inner, IntType)
+                and isinstance(target.inner, (FloatType, DoubleType))
+            ):
+                return
         if (
             source == target
             and isinstance(source, (IntType, FloatType, DoubleType))
@@ -2539,6 +2564,24 @@ class IRVerifier:
         ):
             return
         self._fail(f"Cast requires int/double operands, got {source} to {target}")
+
+    def _is_printable_type(self, type_: IRType) -> bool:
+        if isinstance(
+            type_,
+            (IntType, BoolType, StringType, DoubleType, EnumType),
+        ):
+            return True
+        if isinstance(type_, NullableType):
+            return self._is_printable_type(type_.inner)
+        if isinstance(type_, (ArrayType, ListType)):
+            return self._is_printable_type(type_.element)
+        if isinstance(type_, StructType):
+            definition = self._structs.get(type_.name)
+            return definition is not None and all(
+                self._is_printable_type(field_type)
+                for _name, field_type in definition.fields
+            )
+        return False
 
     def _require_defined(
         self,
@@ -2809,7 +2852,10 @@ class IRVerifier:
         ):
             return True
         if isinstance(type_, NullableType):
-            return self._is_valid_type(type_.inner)
+            return (
+                not isinstance(type_.inner, (NullableType, VoidType))
+                and self._is_valid_type(type_.inner)
+            )
         if isinstance(type_, (ListType, ArrayType, VectorType, MatrixType)):
             return self._is_valid_type(type_.element)
         if isinstance(type_, MethodResultType):

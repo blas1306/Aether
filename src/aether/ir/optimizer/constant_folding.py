@@ -4,7 +4,7 @@ from dataclasses import replace
 from math import trunc
 from typing import Any
 
-from aether.ir.types import DoubleType, FloatType, IntType
+from aether.ir.types import DoubleType, FloatType, IntType, NullableType
 from aether.integer_arithmetic import checked_int_binary, checked_int_negate, ieee_power
 from aether.ir.model import (
     IRBasicBlock,
@@ -183,6 +183,8 @@ class ConstantFolder:
         instruction: IRCast,
         constants: dict[IRValue, Any],
     ) -> IRConst | None:
+        if isinstance(instruction.result.type, NullableType):
+            return None
         if instruction.value not in constants:
             return None
         try:

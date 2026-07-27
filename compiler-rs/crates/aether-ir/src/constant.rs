@@ -16,6 +16,8 @@ pub struct IREnumConstant {
 /// A scalar or nominal constant payload.
 #[derive(Clone, Debug, PartialEq)]
 pub enum IRConstant {
+    /// The contextual absent value of a nullable result type.
+    Null,
     /// A boolean constant.
     Bool(bool),
     /// A signed 32-bit integer constant.

@@ -45,6 +45,8 @@ from ..types import (
     FunctionType as AetherFunctionType,
     ListType as AetherListType,
     MatrixType as AetherMatrixType,
+    NullType as AetherNullType,
+    NullableType as AetherNullableType,
     VectorType as AetherVectorType,
 )
 from .model import (
@@ -138,6 +140,7 @@ from .types import (
     ListType,
     MatrixType,
     MethodResultType,
+    NullableType,
     StringType,
     StructType,
     VectorType,
@@ -1443,7 +1446,7 @@ class IRLowerer:
         target_type: IRType | None = None,
     ) -> IRValue:
         if isinstance(expression, ast.Literal):
-            return self._lower_literal(expression, context)
+            return self._lower_literal(expression, context, target_type)
 
         if isinstance(expression, (ast.ArrayLiteral, ast.ListLiteral)):
             return self._lower_braced_literal(expression, context, target_type)
@@ -1499,9 +1502,23 @@ class IRLowerer:
             compare_operator = _COMPARE_OPERATORS.get(expression.operator)
             if binary_operator is None and compare_operator is None:
                 self._unsupported(expression, f"operator '{expression.operator}'")
-            left = self._lower_expression(expression.left, context)
-            right = self._lower_expression(expression.right, context)
-            left, right = self._coerce_numeric_operands(left, right, context)
+            if compare_operator in {"eq", "ne"} and self._is_null_literal(expression.left):
+                right = self._lower_expression(expression.right, context)
+                if not isinstance(right.type, NullableType):
+                    self._fail("IR null comparison requires a nullable operand.", expression)
+                left = self._lower_expression(expression.left, context, target_type=right.type)
+            elif compare_operator in {"eq", "ne"} and self._is_null_literal(expression.right):
+                left = self._lower_expression(expression.left, context)
+                if not isinstance(left.type, NullableType):
+                    self._fail("IR null comparison requires a nullable operand.", expression)
+                right = self._lower_expression(expression.right, context, target_type=left.type)
+            else:
+                left = self._lower_expression(expression.left, context)
+                right = self._lower_expression(expression.right, context)
+            if compare_operator in {"eq", "ne"}:
+                left, right = self._coerce_equality_operands(left, right, context)
+            else:
+                left, right = self._coerce_numeric_operands(left, right, context)
             if compare_operator is not None:
                 aggregate_shape: tuple[int, ...] | None = None
                 if isinstance(left.type, VectorType) and left.type == right.type:
@@ -1872,7 +1889,18 @@ class IRLowerer:
         context.block.instructions.append(IRLoad(result, result_slot))
         return result
 
-    def _lower_literal(self, literal: ast.Literal, context: _FunctionContext) -> IRValue:
+    def _lower_literal(
+        self,
+        literal: ast.Literal,
+        context: _FunctionContext,
+        target_type: IRType | None = None,
+    ) -> IRValue:
+        if isinstance(literal.type_name, AetherNullType):
+            if not isinstance(target_type, NullableType):
+                self._fail("IR null literal requires an expected nullable type.", literal)
+            result = context.temporary(target_type)
+            context.block.instructions.append(IRConst(result, None))
+            return result
         type_ = self._lower_type(literal.type_name)
         if not isinstance(type_, (IntType, DoubleType, BoolType, StringType)):
             self._unsupported(literal, f"literal type '{type_}'")
@@ -1959,6 +1987,7 @@ class IRLowerer:
                         VectorType,
                         MatrixType,
                         StructType,
+                        NullableType,
                     ),
                 ):
                     self._fail(
@@ -3142,6 +3171,15 @@ class IRLowerer:
     ) -> IRValue:
         if target_type is None or value.type == target_type:
             return value
+        if isinstance(target_type, NullableType):
+            source_type = value.type.inner if isinstance(value.type, NullableType) else value.type
+            if source_type == target_type.inner or (
+                isinstance(source_type, IntType)
+                and isinstance(target_type.inner, DoubleType)
+            ):
+                result = context.temporary(target_type)
+                context.block.instructions.append(IRCast(result, value))
+                return result
         if isinstance(value.type, IntType) and isinstance(target_type, DoubleType):
             result = context.temporary(target_type)
             context.block.instructions.append(IRCast(result, value))
@@ -3159,6 +3197,28 @@ class IRLowerer:
         elif isinstance(left.type, DoubleType) and isinstance(right.type, IntType):
             right = self._coerce_to_expected_type(right, left.type, context)
         return left, right
+
+    def _coerce_equality_operands(
+        self,
+        left: IRValue,
+        right: IRValue,
+        context: _FunctionContext,
+    ) -> tuple[IRValue, IRValue]:
+        if isinstance(left.type, NullableType) or isinstance(right.type, NullableType):
+            left_inner = left.type.inner if isinstance(left.type, NullableType) else left.type
+            right_inner = right.type.inner if isinstance(right.type, NullableType) else right.type
+            if isinstance(left_inner, IntType) and isinstance(right_inner, DoubleType):
+                target = NullableType(DoubleType())
+            elif isinstance(left_inner, DoubleType) and isinstance(right_inner, IntType):
+                target = NullableType(DoubleType())
+            elif left_inner == right_inner:
+                target = NullableType(left_inner)
+            else:
+                return left, right
+            left = self._coerce_to_expected_type(left, target, context)
+            right = self._coerce_to_expected_type(right, target, context)
+            return left, right
+        return self._coerce_numeric_operands(left, right, context)
 
     def _lower_cast(self, call: ast.CallExpression, context: _FunctionContext) -> IRValue:
         if len(call.arguments) != 1:
@@ -3248,6 +3308,8 @@ class IRLowerer:
             return ArrayType(self._lower_type(type_name.element_type))
         if isinstance(type_name, AetherListType):
             return ListType(self._lower_type(type_name.element_type))
+        if isinstance(type_name, AetherNullableType):
+            return NullableType(self._lower_type(type_name.base_type))
         if isinstance(type_name, AetherFunctionType):
             return FunctionType(
                 tuple(self._lower_type(item) for item in type_name.parameter_types),
@@ -3267,6 +3329,13 @@ class IRLowerer:
         if isinstance(type_name, str) and type_name in self._enums:
             return self._enums[type_name].type
         self._fail(f"IR backend does not support type '{type_name}' yet.")
+
+    @staticmethod
+    def _is_null_literal(expression: ast.Expression) -> bool:
+        return (
+            isinstance(expression, ast.Literal)
+            and isinstance(expression.type_name, AetherNullType)
+        )
 
     def _require_same_type(self, actual: IRType, expected: IRType, operation: str) -> None:
         if actual != expected:

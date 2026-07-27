@@ -16,6 +16,7 @@ from .types import (
     IntType,
     ListType,
     MatrixType,
+    NullableType,
     StringType,
     StructType,
     VectorType,
@@ -41,6 +42,12 @@ def ir_eq_capability(
         return (
             IREqCapability(type_)
             if ir_eq_capability(type_.element, structs, visiting) is not None
+            else None
+        )
+    if isinstance(type_, NullableType):
+        return (
+            IREqCapability(type_)
+            if ir_eq_capability(type_.inner, structs, visiting) is not None
             else None
         )
     if isinstance(type_, StructType):
@@ -70,6 +77,22 @@ def ir_values_equal(
         if isinstance(left, StringValue) or isinstance(right, StringValue):
             return aether_string_equal(left, right)
         return left == right
+    if isinstance(type_, NullableType):
+        from aether.types import NullableValue
+
+        if not isinstance(left, NullableValue) or not isinstance(right, NullableValue):
+            return False
+        if left.has_value != right.has_value:
+            return False
+        if not left.has_value:
+            return True
+        return ir_values_equal(
+            type_.inner,
+            left.value,
+            right.value,
+            structs,
+            visited_pairs,
+        )
     if isinstance(type_, StructType):
         definition = structs.get(type_.name)
         fields = getattr(definition, "fields", None)

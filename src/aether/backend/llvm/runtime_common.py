@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 
-from aether.ir.types import ArrayType, BoolType, DoubleType, EnumType, FloatType, FunctionType, IntType, ListType, StringType, StructType, VoidType
+from aether.ir.types import ArrayType, BoolType, DoubleType, EnumType, FloatType, FunctionType, IntType, ListType, NullableType, StringType, StructType, VoidType
 
 from .runtime import sequence_sort_helper, sequence_sort_helper_name
 
@@ -31,6 +31,8 @@ def aggregate_helper_suffix(element_type: object) -> str:
         return f"array_{aggregate_helper_suffix(element_type.element)}"
     if isinstance(element_type, ListType):
         return f"list_{aggregate_helper_suffix(element_type.element)}"
+    if isinstance(element_type, NullableType):
+        return f"nullable_{aggregate_helper_suffix(element_type.inner)}"
     if isinstance(element_type, FunctionType):
         parameters = "_".join(
             aggregate_helper_suffix(parameter) for parameter in element_type.parameter_types

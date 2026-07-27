@@ -75,6 +75,8 @@ pub enum TypeExpectation {
     Function,
     /// An enum type.
     Enum,
+    /// A nullable aggregate type.
+    Nullable,
     /// One of several exact IR types.
     OneOf(Vec<IRType>),
 }
@@ -98,6 +100,7 @@ impl fmt::Display for TypeExpectation {
             Self::MethodResult => formatter.write_str("a method-result type"),
             Self::Function => formatter.write_str("a function type"),
             Self::Enum => formatter.write_str("an enum type"),
+            Self::Nullable => formatter.write_str("a nullable type"),
             Self::OneOf(types) => {
                 for (index, type_) in types.iter().enumerate() {
                     if index > 0 {

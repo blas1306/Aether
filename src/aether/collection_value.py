@@ -266,6 +266,14 @@ def copy_init_value(value: Any) -> Any:
         return value.retain()
     if isinstance(value, StringValue):
         return value.retain()
+    from .types import NullableValue
+
+    if isinstance(value, NullableValue):
+        return (
+            NullableValue(True, copy_init_value(value.value))
+            if value.has_value
+            else value
+        )
     if isinstance(value, tuple):
         copied_items: list[Any] = []
         try:
@@ -304,9 +312,12 @@ def copy_init_value(value: Any) -> Any:
                 value.value.field_order,
             ),
         )
-    if isinstance(value.type_name, NullableType) and value.value is not None:
-        copied = copy_init_value(AetherValue(value.type_name.base_type, value.value))
-        return AetherValue(value.type_name, copied.value)
+    if isinstance(value.type_name, NullableType):
+        nullable = value.value
+        if not isinstance(nullable, NullableValue) or not nullable.has_value:
+            return value
+        copied = copy_init_value(AetherValue(value.type_name.base_type, nullable.value))
+        return AetherValue(value.type_name, NullableValue(True, copied.value))
     if isinstance(value.type_name, TupleType):
         return AetherValue(value.type_name, tuple(copy_init_value(item) for item in value.value))
     return value
@@ -320,6 +331,12 @@ def destroy_value(value: Any) -> None:
         return
     if isinstance(value, StringValue):
         value.release()
+        return
+    from .types import NullableValue
+
+    if isinstance(value, NullableValue):
+        if value.has_value:
+            destroy_value(value.value)
         return
     if isinstance(value, tuple):
         for item in reversed(value):
@@ -340,8 +357,10 @@ def destroy_value(value: Any) -> None:
         for name in reversed(value.value.field_order):
             destroy_value(value.value.fields[name])
         return
-    if isinstance(value.type_name, NullableType) and value.value is not None:
-        destroy_value(AetherValue(value.type_name.base_type, value.value))
+    if isinstance(value.type_name, NullableType):
+        nullable = value.value
+        if isinstance(nullable, NullableValue) and nullable.has_value:
+            destroy_value(AetherValue(value.type_name.base_type, nullable.value))
         return
     if isinstance(value.type_name, TupleType):
         for item in reversed(value.value):

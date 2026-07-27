@@ -19,6 +19,7 @@ from .types import (
     MatrixType,
     NullType,
     NullableType,
+    NullableValue,
     RangeType,
     StructInstance,
     TransposeVectorType,
@@ -201,13 +202,22 @@ def aether_values_equal(
             f"Type {type_to_string(left.type_name)} does not define equality."
         )
     if isinstance(left.type_name, NullableType):
-        if left.value is None:
-            return right.value is None
-        left = AetherValue(left.type_name.base_type, left.value)
+        nullable = left.value
+        if not isinstance(nullable, NullableValue):
+            raise AetherTypeError("Invalid internal nullable value.")
+        if not nullable.has_value:
+            return (
+                isinstance(right.value, NullableValue)
+                and not right.value.has_value
+            ) or isinstance(right.type_name, NullType)
+        left = AetherValue(left.type_name.base_type, nullable.value)
     if isinstance(right.type_name, NullableType):
-        if right.value is None:
-            return left.value is None
-        right = AetherValue(right.type_name.base_type, right.value)
+        nullable = right.value
+        if not isinstance(nullable, NullableValue):
+            raise AetherTypeError("Invalid internal nullable value.")
+        if not nullable.has_value:
+            return isinstance(left.type_name, NullType)
+        right = AetherValue(right.type_name.base_type, nullable.value)
     if isinstance(left.value, StructInstance) or isinstance(right.value, StructInstance):
         if not isinstance(left.value, StructInstance) or not isinstance(right.value, StructInstance):
             return False

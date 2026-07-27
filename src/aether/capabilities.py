@@ -860,6 +860,15 @@ class _CapabilityDetector:
             return
         if source == "int" and target == "double":
             return
+        if isinstance(target, NullableType):
+            source_payload = source.base_type if isinstance(source, NullableType) else source
+            if (
+                isinstance(source, NullType)
+                or source_payload == target.base_type
+                or source_payload == "int"
+                and target.base_type in {"float", "double"}
+            ):
+                return
         if (
             isinstance(target, ArrayType)
             and isinstance(expression, (ast.ArrayLiteral, ast.ListLiteral))
@@ -1767,6 +1776,8 @@ class _CapabilityDetector:
             return None
         if isinstance(type_name, (VectorType, TransposeVectorType, MatrixType)):
             return None
+        if isinstance(type_name, NullableType):
+            return self._native_print_reason(type_name.base_type, active)
         if isinstance(type_name, (ArrayType, ListType)):
             element_type = self._resolve_alias(type_name.element_type)
             if isinstance(
@@ -1819,6 +1830,13 @@ class _CapabilityDetector:
                 resolved.return_type,
                 node,
                 f"callable return in {context}",
+            )
+            return
+        if isinstance(resolved, NullableType):
+            self._record_shape_bearing_signature_type(
+                resolved.base_type,
+                node,
+                f"nullable payload in {context}",
             )
             return
         if isinstance(resolved, (VectorType, TransposeVectorType)):
@@ -1898,11 +1916,17 @@ class _CapabilityDetector:
                 Capability.PRIMITIVE_TYPES,
                 node,
                 detail="nullable type",
-                requires_complete_support=True,
             )
             self._record_type(type_name.base_type, node)
             return
-        if isinstance(type_name, NullType) or type_name == "complex":
+        if isinstance(type_name, NullType):
+            self._record(
+                Capability.PRIMITIVE_TYPES,
+                node,
+                detail="contextual null literal",
+            )
+            return
+        if type_name == "complex":
             self._record(
                 Capability.PRIMITIVE_TYPES,
                 node,
@@ -2038,7 +2062,10 @@ class _CapabilityDetector:
         if isinstance(type_name, InterfaceType):
             return "interface references are outside the LLVM/native collection subset"
         if isinstance(type_name, NullableType):
-            return "nullable values have no current LLVM/native storage ABI"
+            inner_reason = self._collection_element_reason(type_name.base_type, active)
+            if inner_reason is None:
+                return None
+            return f"nullable payload is unsupported: {inner_reason}"
         if isinstance(type_name, (NullType, TupleType)) or type_name in {
             "complex",
             "void",

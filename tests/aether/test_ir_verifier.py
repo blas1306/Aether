@@ -978,6 +978,7 @@ def test_lifecycle_builtins_accept_the_exact_managed_type_allowlist(builtin: str
         MethodResultType(StructType("Managed"), IntType()),
         ArrayType(IntType()),
         ListType(BoolType()),
+        NullableType(StringType()),
     )
 
     for managed_type in managed_types:
@@ -999,7 +1000,6 @@ def test_lifecycle_builtins_accept_the_exact_managed_type_allowlist(builtin: str
         ("__aether_release", BoolType()),
         ("__aether_release", VectorType(IntType(), "row")),
         ("__aether_release", MatrixType(DoubleType())),
-        ("__aether_release", NullableType(StringType())),
     ],
 )
 def test_lifecycle_builtins_reject_types_outside_the_managed_allowlist(

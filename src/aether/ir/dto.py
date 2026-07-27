@@ -116,7 +116,7 @@ IR_SCHEMA_VERSION = 1
 IRTypeDTO: TypeAlias = dict[str, object]
 """Primitive, tagged representation of an :class:`IRType`."""
 
-IRConstant: TypeAlias = bool | int | float | complex | str | IREnumConstant
+IRConstant: TypeAlias = None | bool | int | float | complex | str | IREnumConstant
 """Python values represented by Rust's ``IRConstant`` enum."""
 
 IRConstantDTO: TypeAlias = dict[str, object]
@@ -350,6 +350,8 @@ def ir_constant_to_dto(
     """Convert a Python IR constant into the Rust-compatible tagged DTO."""
 
     _require_schema_version(schema_version)
+    if value is None:
+        return {"tag": "null"}
     if type(value) is bool:
         return {"tag": "bool", "value": value}
     if type(value) is int:
@@ -379,6 +381,9 @@ def ir_constant_from_dto(
     _require_schema_version(schema_version)
     mapping = _expect_mapping(dto, "IR constant")
     tag = _expect_tag(mapping, "IR constant")
+    if tag == "null":
+        _expect_fields(mapping, {"tag"}, "IR constant 'null'")
+        return None
     if tag == "bool":
         _expect_fields(mapping, {"tag", "value"}, "IR constant 'bool'")
         return _expect_bool(mapping["value"], "IR constant 'bool'.value")

@@ -11,6 +11,14 @@ auditoría del 13 de julio. No debe usarse para decidir el estado actual: no
 incluye correctamente los commits posteriores de short-circuit, resolución
 multifase y backend de structs.
 
+Actualización Fase 5.2 (27-07-2026): `null`/`T?` ya recorren parser,
+typechecker, AST, IR/DTO/verifiers, intérprete IR, SSA/optimizadores y
+LLVM/native. La ABI usa el agregado nombrado `{ i1 has_value, T value }`, con
+lifecycle condicional y sin semántica `ptr null`. El narrowing flow-sensitive
+sigue fuera de alcance. Las filas históricas de abajo que dicen «no nullable»
+o «AST-only» quedan reemplazadas por esta actualización y por la matriz
+canónica enlazada arriba.
+
 ---
 
 Última revisión: 2026-07-13.

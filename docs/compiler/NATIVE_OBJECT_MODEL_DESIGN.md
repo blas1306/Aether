@@ -782,7 +782,7 @@ interface con cleanup pendiente.
 5. definir helpers runtime privados y matriz de efectos;
 6. preparar tests negativos de gate y wire format.
 
-### 12.2 Fase siguiente B — nullable
+### 12.2 Fase B — nullable (implementada en Fase 5.2)
 
 1. tag, constructores absent/present y extracción comprobada;
 2. lifecycle recursivo y phis;
@@ -862,7 +862,7 @@ layout/lifecycle, sin rediseñar nullable.
 | Paridad | Sigue el grafo auditado: reference layout/lifecycle antes de class; erased ABI antes de interface; nullable como rama independiente. |
 | Const | Reproduce la restricción por access path y el corte al atravesar class que aplica el frontend actual. |
 | Igualdad | No agrega Eq a classes/interfaces ni un operador de identidad. |
-| Perfil native | Permanece sin cambios; classes, interfaces y nullable continúan rechazados antes de lowering. |
+| Perfil native | Fase 5.2 promueve nullable representable; classes e interfaces continúan rechazados antes de lowering. |
 
 ## 15. Criterios de entrada para implementación
 
@@ -878,9 +878,9 @@ Antes de comenzar código de una de las ramas debe aprobarse:
 - tests de nullable para cada familia de layout;
 - criterio explícito de capability promotion y rollback.
 
-Hasta entonces, `ClassRefType`, `InterfaceType` y `NullableType` siguen siendo
-tipos nominales admitidos por partes de la infraestructura, no evidencia de
-soporte native.
+Tras Fase 5.2, `NullableType` tiene soporte native E2E con la representación de
+la sección 6. `ClassRefType` e `InterfaceType` siguen siendo tipos nominales
+admitidos por partes de la infraestructura, no evidencia de soporte native.
 
 ## 16. Fuera de alcance
 

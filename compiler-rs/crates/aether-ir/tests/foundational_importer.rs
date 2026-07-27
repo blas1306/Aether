@@ -23,6 +23,10 @@ fn boxed(type_: IRTypeDTO) -> Box<IRTypeDTO> {
 fn imports_every_constant_variant_through_owned_and_borrowed_paths() {
     let cases = vec![
         (
+            json!({"tag": "null"}),
+            IRConstant::Null,
+        ),
+        (
             json!({"tag": "bool", "value": true}),
             IRConstant::Bool(true),
         ),
@@ -65,7 +69,7 @@ fn imports_every_constant_variant_through_owned_and_borrowed_paths() {
         ),
     ];
 
-    assert_eq!(cases.len(), 6);
+    assert_eq!(cases.len(), 7);
     for (json, expected) in cases {
         let wire: IRConstantDTO =
             serde_json::from_value(json).expect("constant JSON must deserialize");

@@ -63,7 +63,7 @@ from aether.text_codec import (
     format_double,
     format_int,
 )
-from aether.types import AetherValue
+from aether.types import AetherValue, NullableValue
 from aether.vector_matrix_safety import (
     MATRIX_INDEX_OUT_OF_BOUNDS,
     VECTOR_INDEX_OUT_OF_BOUNDS,
@@ -160,6 +160,7 @@ from .types import (
     ListType,
     MatrixType,
     MethodResultType,
+    NullableType,
     StringType,
     StructType,
     VectorType,
@@ -232,6 +233,12 @@ class IRInterpreter:
     ) -> str:
         if isinstance(value, bool):
             return "true" if value else "false"
+        if isinstance(value_type, NullableType):
+            if not isinstance(value, NullableValue):
+                raise IRExecutionError("IR Nullable print requires a tagged nullable value")
+            if not value.has_value:
+                return "null"
+            return self._format_print_value(value.value, value_type.inner, aggregate_shape)
         if isinstance(value_type, DoubleType):
             return format_public_double(float(value))
         if isinstance(value_type, EnumType):
@@ -332,12 +339,17 @@ class IRInterpreter:
                     f"Invalid internal int constant {instruction.value!r}; "
                     f"expected [{INT_MIN}, {INT_MAX}]"
                 )
-            frame.values[instruction.result] = (
-                as_string_value(instruction.value)
-                if isinstance(instruction.result.type, StringType)
-                and isinstance(instruction.value, (str, StringValue))
-                else instruction.value
-            )
+            if isinstance(instruction.result.type, NullableType):
+                if instruction.value is not None:
+                    raise IRExecutionError("IR nullable constant must be the absent value")
+                frame.values[instruction.result] = NullableValue(False)
+            else:
+                frame.values[instruction.result] = (
+                    as_string_value(instruction.value)
+                    if isinstance(instruction.result.type, StringType)
+                    and isinstance(instruction.value, (str, StringValue))
+                    else instruction.value
+                )
             return False, None, None
 
         if isinstance(instruction, IRLoad):
@@ -1079,6 +1091,8 @@ class IRInterpreter:
             return CollectionObject("Array", type_.element)
         if isinstance(type_, ListType):
             return CollectionObject("List", type_.element)
+        if isinstance(type_, NullableType):
+            return NullableValue(False)
         if isinstance(type_, (VectorType, MatrixType)):
             return []
         if isinstance(type_, StringType):
@@ -1340,6 +1354,16 @@ class IRInterpreter:
 
     @staticmethod
     def _cast(value: Any, target_type: object) -> Any:
+        if isinstance(target_type, NullableType):
+            if isinstance(value, NullableValue):
+                if not value.has_value:
+                    return NullableValue(False)
+                value = value.value
+            if isinstance(target_type.inner, (FloatType, DoubleType)):
+                value = float(value)
+            elif isinstance(target_type.inner, IntType):
+                value = trunc(value)
+            return NullableValue(True, value)
         if isinstance(target_type, (FloatType, DoubleType)):
             return float(value)
         if isinstance(target_type, IntType):

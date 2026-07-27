@@ -6,7 +6,7 @@ from .language_service import CompletionItem, Diagnostic, RunResult, analyze_sou
 from .result import AetherRunResult
 from .runner import run_aether
 from .session import AetherSession
-from .types import AetherValue
+from .types import AetherValue, NullableValue
 from .version import LANGUAGE_VERSION, PACKAGE_VERSION, RELEASE_TAG, __version__
 
 __all__ = [
@@ -18,6 +18,7 @@ __all__ = [
     "AetherSyntaxError",
     "AetherTypeError",
     "AetherValue",
+    "NullableValue",
     "CompletionItem",
     "CompilerDiagnostic",
     "Diagnostic",

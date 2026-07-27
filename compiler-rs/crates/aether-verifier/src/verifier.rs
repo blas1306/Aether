@@ -991,6 +991,17 @@ impl<'module> TypeVerifier<'module> {
 
     fn verify_const(&self, result: &IRValue, value: &IRConstant) -> Result<(), TypeRuleError> {
         match value {
+            IRConstant::Null => {
+                if matches!(result.r#type, IRType::Nullable(_)) {
+                    Ok(())
+                } else {
+                    Err(constraint(
+                        "result",
+                        TypeExpectation::Nullable,
+                        &result.r#type,
+                    ))
+                }
+            }
             IRConstant::Bool(_) => self.expect_bool("result", &result.r#type),
             IRConstant::Int(_) => self.expect_int("result", &result.r#type),
             IRConstant::Float(_) => {
@@ -1217,7 +1228,22 @@ impl<'module> TypeVerifier<'module> {
     fn verify_cast(&self, result: &IRValue, value: &IRValue) -> Result<(), TypeRuleError> {
         let source = &value.r#type;
         let target = &result.r#type;
-        let legal = source == target && is_real(source)
+        let nullable_legal = if let IRType::Nullable(target_nullable) = target {
+            let source_inner = match source {
+                IRType::Nullable(source_nullable) => source_nullable.inner.as_ref(),
+                _ => source,
+            };
+            source_inner == target_nullable.inner.as_ref()
+                || matches!(source_inner, IRType::Int(_))
+                    && matches!(
+                        target_nullable.inner.as_ref(),
+                        IRType::Float(_) | IRType::Double(_)
+                    )
+        } else {
+            false
+        };
+        let legal = nullable_legal
+            || source == target && is_real(source)
             || matches!(source, IRType::Int(_))
                 && matches!(target, IRType::Float(_) | IRType::Double(_))
             || matches!(source, IRType::Float(_) | IRType::Double(_))
@@ -1412,6 +1438,7 @@ impl<'module> TypeVerifier<'module> {
                 | IRType::MethodResult(_)
                 | IRType::Array(_)
                 | IRType::List(_)
+                | IRType::Nullable(_)
         ) {
             Ok(())
         } else {
@@ -2144,7 +2171,12 @@ impl<'module> TypeVerifier<'module> {
                         == enum_type.variants.len()
             }
             IRType::Struct(struct_type) => self.struct_definition(&struct_type.name).is_some(),
-            IRType::Nullable(nullable) => self.is_valid_type(&nullable.inner),
+            IRType::Nullable(nullable) => {
+                !matches!(
+                    nullable.inner.as_ref(),
+                    IRType::Nullable(_) | IRType::Void(_)
+                ) && self.is_valid_type(&nullable.inner)
+            }
             IRType::List(list) => self.is_valid_type(&list.element),
             IRType::Array(array) => self.is_valid_type(&array.element),
             IRType::Vector(vector) => self.is_valid_type(&vector.element),
@@ -2181,6 +2213,9 @@ impl<'module> TypeVerifier<'module> {
             IRType::List(list) => self.is_equality_capable(&list.element, visiting),
             IRType::Vector(vector) => self.is_equality_capable(&vector.element, visiting),
             IRType::Matrix(matrix) => self.is_equality_capable(&matrix.element, visiting),
+            IRType::Nullable(nullable) => {
+                self.is_equality_capable(&nullable.inner, visiting)
+            }
             IRType::Struct(struct_type) => {
                 let Some(definition) = self.struct_definition(&struct_type.name) else {
                     return false;
@@ -2575,19 +2610,20 @@ fn is_real(type_: &IRType) -> bool {
 }
 
 fn is_printable(type_: &IRType) -> bool {
-    matches!(
-        type_,
+    match type_ {
+        IRType::Nullable(nullable) => is_printable(&nullable.inner),
+        IRType::Array(array) => is_printable(&array.element),
+        IRType::List(list) => is_printable(&list.element),
         IRType::Int(_)
-            | IRType::Bool(_)
-            | IRType::String(_)
-            | IRType::Double(_)
-            | IRType::Enum(_)
-            | IRType::Array(_)
-            | IRType::List(_)
-            | IRType::Vector(_)
-            | IRType::Matrix(_)
-            | IRType::Struct(_)
-    )
+        | IRType::Bool(_)
+        | IRType::String(_)
+        | IRType::Double(_)
+        | IRType::Enum(_)
+        | IRType::Vector(_)
+        | IRType::Matrix(_)
+        | IRType::Struct(_) => true,
+        _ => false,
+    }
 }
 
 fn array_of(element: IRType) -> IRType {

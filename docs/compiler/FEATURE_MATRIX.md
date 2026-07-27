@@ -1,6 +1,6 @@
 # Matriz de cobertura del compilador
 
-Ultima revision: 2026-07-11.
+Ultima revision: 2026-07-27.
 
 Esta matriz es la referencia oficial del estado visible de implementacion del
 compilador de Aether. Resume la cobertura por etapa del pipeline actual:
@@ -47,7 +47,7 @@ Leyenda de `Spec`:
 | Vector<Row> | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Completa con optimizer parcial |
 | Vector<Column> | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Completa con optimizer parcial |
 | Matrix | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ✅ documentada | Parcial backend |
-| Optional/Nullable (`T?`) | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Pendiente IR |
+| Optional/Nullable (`T?`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ `{i1,T}` | ✅ parser/type/IR/SSA/ABI/E2E | ✅ documentada | Completa para payloads native representables; sin flow narrowing |
 | Class | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
 | Struct | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
 | Interface | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
@@ -55,6 +55,13 @@ Leyenda de `Spec`:
 
 Notas:
 
+- `T?` usa en todas las etapas un tag explícito y payload
+  `{ i1 has_value, T value }`. `null` produce el estado absent canonical,
+  `T -> T?` construye present, la igualdad sólo lee/compara el payload cuando
+  ambos tags están presentes y lifecycle/ARC se delega condicionalmente a
+  `T`. No existe niche `ptr null`, boxing ni allocation nullable.
+- El typechecker no implementa smart casts después de `x != null`: asignar
+  `T?` a `T` continúa siendo un error. El narrowing queda como trabajo futuro.
 - `string` baja como valor/literal/call/return/phi, pero LLVM no soporta
   operaciones string (`+`, comparaciones, impresion, length, indexing, runtime).
 - `List<T>` tiene backend fases 1, 2, 3a, `indexOf` de fase 3b, `clear` de fase 4a, `push`/growth de fase 4b, `pop` de fase 4c, `insert` de fase 4d y `removeAt` de fase 4e para literal con tipo esperado,

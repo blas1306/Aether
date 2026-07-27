@@ -1671,7 +1671,21 @@ impl<'module> LifecycleTypeRegistry<'module> {
                 reason: "function values have no default".to_owned(),
                 collection_unsupported_reason: None,
             },
-            IRType::ClassRef(_) | IRType::Interface(_) | IRType::Nullable(_) => {
+            IRType::Nullable(nullable) => {
+                let inner = self.compute(&nullable.inner, active);
+                if !inner.trivially_relocatable {
+                    LifecycleTraits::invalid(
+                        "nullable payload lifecycle is unavailable",
+                        format!(
+                            "nullable payload lifecycle is unavailable: {}",
+                            inner.reason
+                        ),
+                    )
+                } else {
+                    LifecycleTraits::valid(true, true, inner.needs_destroy)
+                }
+            }
+            IRType::ClassRef(_) | IRType::Interface(_) => {
                 LifecycleTraits::invalid(
                     "lifecycle layout is not defined",
                     format!("lifecycle layout for '{type}' is not defined"),

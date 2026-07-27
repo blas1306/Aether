@@ -113,7 +113,26 @@ class LLVMTypeLayouts:
         if isinstance(type_, ComplexType):
             return self._unsupported(type_, "complex is not represented by the current LLVM/native backend")
         if isinstance(type_, NullableType):
-            return self._unsupported(type_, "nullable values have no current LLVM/native storage ABI")
+            inner = self.layout(type_.inner)
+            if not inner.sized or not inner.supported_as_collection_element:
+                return self._unsupported(
+                    type_,
+                    f"nullable payload '{type_.inner}' is unsupported: "
+                    f"{inner.reason or 'payload has no complete native layout'}",
+                )
+            rendered = llvm_type(type_)
+            size = f"ptrtoint (ptr getelementptr ({rendered}, ptr null, i64 1) to i64)"
+            return TypeLayout(
+                rendered,
+                True,
+                size,
+                inner.trivially_copyable,
+                True,
+                inner.needs_destroy,
+                inner.contains_references,
+                inner.needs_retain,
+                True,
+            )
         if isinstance(type_, VoidType):
             return self._unsupported(type_, "void is unsized")
         return self._unsupported(type_, "the backend has no storage layout for this type")

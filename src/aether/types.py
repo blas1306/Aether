@@ -255,6 +255,18 @@ class NullableType:
 
 
 @dataclass(frozen=True)
+class NullableValue:
+    """Canonical in-memory representation of an Aether ``T?`` value."""
+
+    has_value: bool
+    value: Any = None
+
+    def __post_init__(self) -> None:
+        if not self.has_value and self.value is not None:
+            raise AetherTypeError("An absent nullable value cannot contain a live payload.")
+
+
+@dataclass(frozen=True)
 class EnumIdentity:
     """Stable nominal identity for a source enum declaration.
 
@@ -388,28 +400,55 @@ class AetherValue:
     value: Any
 
     def __post_init__(self) -> None:
+        if isinstance(self.type_name, NullableType):
+            nullable = (
+                self.value
+                if isinstance(self.value, NullableValue)
+                else NullableValue(self.value is not None, self.value)
+            )
+            object.__setattr__(self, "value", nullable)
         base_type = (
             self.type_name.base_type
-            if isinstance(self.type_name, NullableType) and self.value is not None
+            if isinstance(self.type_name, NullableType)
+            and isinstance(self.value, NullableValue)
+            and self.value.has_value
             else self.type_name
         )
-        if base_type == "string" and isinstance(self.value, (str, StringValue)):
+        payload = (
+            self.value.value
+            if isinstance(self.type_name, NullableType)
+            and isinstance(self.value, NullableValue)
+            and self.value.has_value
+            else self.value
+        )
+        if base_type == "string" and isinstance(payload, (str, StringValue)):
             # General values come from runtime operations (builtins,
             # interpolation, arguments). Source and IR literal construction
             # opts into immortal storage explicitly.
-            object.__setattr__(self, "value", as_string_value(self.value, literal=False))
-        if isinstance(base_type, (ArrayType, ListType)) and isinstance(self.value, list):
+            converted = as_string_value(payload, literal=False)
+            object.__setattr__(
+                self,
+                "value",
+                NullableValue(True, converted)
+                if isinstance(self.type_name, NullableType)
+                else converted,
+            )
+            payload = converted
+        if isinstance(base_type, (ArrayType, ListType)) and isinstance(payload, list):
             from .collection_value import CollectionObject
 
-            if not isinstance(self.value, CollectionObject):
+            if not isinstance(payload, CollectionObject):
+                converted = CollectionObject(
+                    "Array" if isinstance(base_type, ArrayType) else "List",
+                    base_type.element_type,
+                    payload,
+                )
                 object.__setattr__(
                     self,
                     "value",
-                    CollectionObject(
-                        "Array" if isinstance(base_type, ArrayType) else "List",
-                        base_type.element_type,
-                        self.value,
-                    ),
+                    NullableValue(True, converted)
+                    if isinstance(self.type_name, NullableType)
+                    else converted,
                 )
 
 
@@ -585,9 +624,10 @@ def is_mutable_reference_type(type_name: AetherType) -> bool:
 def shape_dimensions(value: AetherValue) -> list[int]:
     type_name = value.type_name
     if isinstance(type_name, NullableType):
-        if value.value is None:
+        nullable = value.value
+        if not isinstance(nullable, NullableValue) or not nullable.has_value:
             raise AetherTypeError(f"size(...) is not defined for null '{type_to_string(type_name)}'.")
-        return shape_dimensions(AetherValue(type_name.base_type, value.value))
+        return shape_dimensions(AetherValue(type_name.base_type, nullable.value))
     if isinstance(type_name, VectorType):
         return [len(value.value)]
     if isinstance(type_name, TransposeVectorType):
@@ -725,17 +765,20 @@ def can_implicitly_convert(from_type: AetherType, to_type: AetherType) -> bool:
 def coerce_implicit(value: AetherValue, target_type: AetherType) -> AetherValue:
     if value.type_name == target_type:
         return copy_value(value) if contains_struct_value(value) else value
-    if not is_known_type(target_type):
-        raise AetherTypeError(f"Unknown type '{type_to_string(target_type)}'.")
     if isinstance(target_type, NullableType):
         if isinstance(value.type_name, NullType):
-            return AetherValue(target_type, None)
+            return AetherValue(target_type, NullableValue(False))
         if isinstance(value.type_name, NullableType):
-            if value.value is None:
-                return AetherValue(target_type, None)
-            value = AetherValue(value.type_name.base_type, value.value)
+            nullable = value.value
+            if not isinstance(nullable, NullableValue):
+                raise AetherTypeError("Invalid internal nullable value.")
+            if not nullable.has_value:
+                return AetherValue(target_type, NullableValue(False))
+            value = AetherValue(value.type_name.base_type, nullable.value)
         coerced = coerce_implicit(value, target_type.base_type)
-        return AetherValue(target_type, coerced.value)
+        return AetherValue(target_type, NullableValue(True, coerced.value))
+    if not is_known_type(target_type):
+        raise AetherTypeError(f"Unknown type '{type_to_string(target_type)}'.")
     if isinstance(value.type_name, NullType):
         raise AetherTypeError(
             f"Cannot implicitly convert 'null' to '{type_to_string(target_type)}'. "
@@ -808,8 +851,13 @@ def contains_struct_value(value: AetherValue) -> bool:
         return contains_struct_value(value.value)
     if isinstance(value.value, (list, tuple)):
         return any(isinstance(element, AetherValue) and contains_struct_value(element) for element in value.value)
-    if isinstance(value.type_name, NullableType) and value.value is not None:
-        return contains_struct_value(AetherValue(value.type_name.base_type, value.value))
+    if isinstance(value.type_name, NullableType):
+        nullable = value.value
+        return (
+            isinstance(nullable, NullableValue)
+            and nullable.has_value
+            and contains_struct_value(AetherValue(value.type_name.base_type, nullable.value))
+        )
     return False
 
 
@@ -835,10 +883,13 @@ def copy_value(value: AetherValue) -> AetherValue:
             ),
         )
     if isinstance(value.type_name, NullableType):
-        if value.value is None:
+        nullable = value.value
+        if not isinstance(nullable, NullableValue):
+            raise AetherTypeError("Invalid internal nullable value.")
+        if not nullable.has_value:
             return value
-        copied = copy_value(AetherValue(value.type_name.base_type, value.value))
-        return AetherValue(value.type_name, copied.value)
+        copied = copy_value(AetherValue(value.type_name.base_type, nullable.value))
+        return AetherValue(value.type_name, NullableValue(True, copied.value))
     if isinstance(value.type_name, TupleType):
         return AetherValue(value.type_name, tuple(copy_value(element) for element in value.value))
     return value

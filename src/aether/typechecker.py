@@ -1228,7 +1228,14 @@ class TypeChecker:
                 is_const=statement.is_const,
             )
             return
-        value_type = self._expression_type(statement.initializer, scope)
+        value_type = (
+            declared_type
+            if declared_type is not None
+            and self._can_use_expected_collection_type(
+                statement.initializer, declared_type, scope
+            )
+            else self._expression_type(statement.initializer, scope)
+        )
         self._reject_void_value(value_type, "assignment", statement)
         if declared_type is None and isinstance(value_type, NullType):
             raise AetherTypeError(
@@ -1387,7 +1394,14 @@ class TypeChecker:
                 return
             self._input_call_type(statement.expression, scope, existing.type_name)
             return
-        value_type = self._expression_type(statement.expression, scope)
+        value_type = (
+            existing.type_name
+            if existing is not None
+            and self._can_use_expected_collection_type(
+                statement.expression, existing.type_name, scope
+            )
+            else self._expression_type(statement.expression, scope)
+        )
         self._reject_void_value(value_type, "assignment", statement)
         if existing is None:
             if statement.name in self.type_aliases:
@@ -1615,7 +1629,7 @@ class TypeChecker:
         if struct_type is UNKNOWN_TYPE:
             return
         field_type = self._field_type(struct_type, statement.field_name, statement)
-        if self._can_use_expected_collection_type(statement.expression, field_type):
+        if self._can_use_expected_collection_type(statement.expression, field_type, scope):
             return
         value_type = self._expression_type(statement.expression, scope)
         if value_type is UNKNOWN_TYPE:
@@ -2090,7 +2104,13 @@ class TypeChecker:
             and isinstance(self.current_return_type, (ArrayType, ListType))
         ):
             return
-        value_type = self._expression_type(statement.expression, scope)
+        value_type = (
+            self.current_return_type
+            if self._can_use_expected_collection_type(
+                statement.expression, self.current_return_type, scope
+            )
+            else self._expression_type(statement.expression, scope)
+        )
         if value_type is not UNKNOWN_TYPE and not self._can_return(
             value_type,
             self.current_return_type,
@@ -2685,7 +2705,7 @@ class TypeChecker:
                 return UNKNOWN_TYPE
             return self._expression_function_return_type(declaration, argument_types)
         for argument, parameter in zip(expression.arguments, function.parameters):
-            if self._can_use_expected_collection_type(argument, parameter.type_name):
+            if self._can_use_expected_collection_type(argument, parameter.type_name, scope):
                 continue
             argument_type = self._expression_type(argument, scope)
             self._reject_void_value(argument_type, f"argument to {expression.callee}(...)")
@@ -2765,12 +2785,35 @@ class TypeChecker:
                 return self.module_bindings[binding] + visible_name[len(binding) :]
         return None
 
-    def _can_use_expected_collection_type(self, expression: ast.Expression, target_type: AetherType) -> bool:
-        return (
-            isinstance(expression, ast.ListLiteral)
-            and not expression.elements
-            and isinstance(target_type, (ArrayType, ListType))
-        )
+    def _can_use_expected_collection_type(
+        self,
+        expression: ast.Expression,
+        target_type: AetherType,
+        scope: Scope[VariableSymbol],
+    ) -> bool:
+        if isinstance(target_type, ArrayType) and isinstance(
+            expression, (ast.ArrayLiteral, ast.ListLiteral)
+        ):
+            if not expression.elements:
+                return True
+            if not isinstance(
+                self._resolve_type_aliases(target_type.element_type, expression),
+                NullableType,
+            ):
+                return False
+            return self._can_assign_braced_literal_to_array(
+                expression, target_type, scope
+            )
+        if isinstance(target_type, ListType) and isinstance(expression, ast.ListLiteral):
+            if not expression.elements:
+                return True
+            if not isinstance(
+                self._resolve_type_aliases(target_type.element_type, expression),
+                NullableType,
+            ):
+                return False
+            return self._can_assign_list_literal(expression, target_type, scope)
+        return False
 
     def _dotted_native_method_call_type(
         self,
@@ -2980,7 +3023,7 @@ class TypeChecker:
                 kind="arity",
             )
         for argument, parameter in zip(arguments, method.parameters):
-            if self._can_use_expected_collection_type(argument, parameter.type_name):
+            if self._can_use_expected_collection_type(argument, parameter.type_name, scope):
                 continue
             argument_type = self._expression_type(argument, scope)
             self._reject_void_value(argument_type, f"argument to {method.name}(...)")
@@ -3079,7 +3122,7 @@ class TypeChecker:
                 f"but got {len(expression.arguments)}."
             )
         for argument, parameter in zip(expression.arguments, parameters):
-            if self._can_use_expected_collection_type(argument, parameter.type_name):
+            if self._can_use_expected_collection_type(argument, parameter.type_name, scope):
                 continue
             argument_type = self._expression_type(argument, scope)
             argument_label = (

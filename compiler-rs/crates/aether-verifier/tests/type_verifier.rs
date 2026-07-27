@@ -3,9 +3,10 @@
 use std::error::Error as _;
 
 use aether_ir::{
-    ArrayType, BoolType, DoubleType, FloatType, FunctionType, IRBasicBlock, IRFunction,
-    IRInstruction, IRModule, IRParameter, IRStorage, IRStructDefinition, IRType, IRValue, IntType,
-    ListType, MatrixType, StringType, StructType, VectorType, VoidType,
+    ArrayType, BoolType, DoubleType, FloatType, FunctionType, IRBasicBlock, IRConstant,
+    IRFunction, IRInstruction, IRModule, IRParameter, IRStorage, IRStructDefinition, IRType,
+    IRValue, IntType, ListType, MatrixType, NullableType, StringType, StructType, VectorType,
+    VoidType,
 };
 use aether_verifier::{
     BlockTypeVerificationError, FunctionTypeVerificationError, InstructionKind,
@@ -95,6 +96,32 @@ fn accepts_valid_primitive_arithmetic_through_every_public_layer() {
     assert_eq!(verify_module_types(&module), Ok(()));
     assert_eq!(verify_function_types(&module, function), Ok(()));
     assert_eq!(verify_block_types(&module, function, block), Ok(()));
+}
+
+#[test]
+fn null_constant_requires_and_accepts_nullable_result_type() {
+    let nullable: IRType = NullableType {
+        inner: Box::new(IntType.into()),
+    }
+    .into();
+    let valid = module_with_instruction(IRInstruction::IRConst {
+        result: value("absent", nullable),
+        value: IRConstant::Null,
+    });
+    assert_eq!(verify_module_types(&valid), Ok(()));
+
+    let invalid = module_with_instruction(IRInstruction::IRConst {
+        result: value("absent", IntType.into()),
+        value: IRConstant::Null,
+    });
+    assert_eq!(
+        instruction_rule(&verify_module_types(&invalid).unwrap_err()),
+        &TypeRuleError::TypeConstraint {
+            field: "result".to_owned(),
+            expected: aether_verifier::TypeExpectation::Nullable,
+            actual: IntType.into(),
+        }
+    );
 }
 
 #[test]

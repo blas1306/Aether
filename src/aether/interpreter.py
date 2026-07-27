@@ -55,6 +55,7 @@ from .types import (
     REAL_NUMERIC_TYPES,
     NullType,
     NullableType,
+    NullableValue,
     RangeType,
     StructInstance,
     TupleType,
@@ -147,6 +148,14 @@ def _claim_or_copy_struct_value(value: AetherValue) -> AetherValue:
     ``claim_owner`` already used for top-level string/collection slots.
     """
 
+    if isinstance(value.type_name, NullableType):
+        nullable = value.value
+        if not isinstance(nullable, NullableValue) or not nullable.has_value:
+            return value
+        payload = _claim_or_copy_struct_value(
+            AetherValue(value.type_name.base_type, nullable.value)
+        )
+        return AetherValue(value.type_name, NullableValue(True, payload.value))
     if isinstance(value.value, (CollectionObject, StringValue)):
         if value.value.unclaimed_owners:
             value.value.claim_owner()
@@ -190,11 +199,21 @@ def _coerce_owned_return_value(value: AetherValue, target_type: AetherType) -> A
             ),
         )
     if isinstance(target_type, NullableType):
-        if value.value is None:
-            return AetherValue(target_type, None)
-        base = value.type_name.base_type if isinstance(value.type_name, NullableType) else value.type_name
-        coerced = _coerce_owned_return_value(AetherValue(base, value.value), target_type.base_type)
-        return AetherValue(target_type, coerced.value)
+        if isinstance(value.type_name, NullableType):
+            nullable = value.value
+            if not isinstance(nullable, NullableValue):
+                raise AetherTypeError("Invalid internal nullable value.")
+            if not nullable.has_value:
+                return AetherValue(target_type, NullableValue(False))
+            base = value.type_name.base_type
+            payload = nullable.value
+        elif isinstance(value.type_name, NullType):
+            return AetherValue(target_type, NullableValue(False))
+        else:
+            base = value.type_name
+            payload = value.value
+        coerced = _coerce_owned_return_value(AetherValue(base, payload), target_type.base_type)
+        return AetherValue(target_type, NullableValue(True, coerced.value))
     if target_type == "float" and value.type_name == "double":
         return AetherValue("float", float(value.value))
     return value
@@ -1134,7 +1153,7 @@ class Interpreter:
         if target_type is not None and is_list_type(target_type):
             value = (
                 AetherValue(target_type, elements)
-                if not elements
+                if not elements or isinstance(target_type.element_type, NullableType)
                 else AetherValue(_list_type_from_values(elements), elements)
             )
             return coerce_list_value(value, target_type)

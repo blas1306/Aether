@@ -15,6 +15,7 @@ from .model import (
     IRCall,
     IRCallIndirect,
     IRCopyInit,
+    IRCast,
     IRDestroy,
     IREnumConstant,
     IRFunction,
@@ -186,7 +187,23 @@ class LifecycleTypeRegistry:
             )
         if isinstance(type_, FunctionType):
             return LifecycleTraits(True, True, False, False)
-        if isinstance(type_, (ClassRefType, InterfaceType, NullableType)):
+        if isinstance(type_, NullableType):
+            inner = self.traits(type_.inner)
+            if inner.reason is not None and not inner.trivially_relocatable:
+                return LifecycleTraits(
+                    False,
+                    False,
+                    False,
+                    True,
+                    reason=f"nullable payload lifecycle is unavailable: {inner.reason}",
+                )
+            return LifecycleTraits(
+                inner.trivially_copyable,
+                True,
+                inner.needs_destroy,
+                True,
+            )
+        if isinstance(type_, (ClassRefType, InterfaceType)):
             return LifecycleTraits(
                 False,
                 False,
@@ -339,6 +356,25 @@ class LifecycleExpander:
             # would make later IR optimization re-verify a slot that is no
             # longer semantically transferred.
             return [IRReturn(instruction.value)]
+        if (
+            isinstance(instruction, IRCast)
+            and isinstance(instruction.result.type, NullableType)
+            and self.registry.traits(instruction.result.type).needs_destroy
+        ):
+            emitted: list[IRInstruction] = [instruction]
+            if instruction.value in self._owned_values:
+                self._owned_values.remove(instruction.value)
+            else:
+                emitted.append(
+                    IRCall(
+                        "__aether_retain",
+                        (instruction.result,),
+                        None,
+                        "__aether_retain",
+                    )
+                )
+            self._owned_values.add(instruction.result)
+            return self._release_unused_result(instruction, emitted)
         if (
             isinstance(instruction, IRBinaryOp)
             and instruction.operator == "add"
@@ -545,6 +581,9 @@ class LifecycleExpander:
         if isinstance(type_, ListType):
             result = self._temporary(type_)
             return [IRListNew(result, ())], result
+        if isinstance(type_, NullableType):
+            result = self._temporary(type_)
+            return [IRConst(result, None)], result
         if isinstance(type_, VectorType):
             result = self._temporary(type_)
             return [IRVectorNew(result, (), type_.orientation)], result

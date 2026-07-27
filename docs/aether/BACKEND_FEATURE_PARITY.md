@@ -4,6 +4,15 @@
 > reemplaza [la spec v1](AETHER_LANGUAGE_SPEC_V1.md) ni
 > [el perfil native normativo](AETHER_NATIVE_PROFILE_V1.md).
 
+Actualización Fase 5.2 (27-07-2026): nullable es E2E para todo payload con
+layout native representable. Parser/typechecker/AST, IR y DTO, verificadores
+Python/Rust, intérprete IR, SSA/optimizadores y LLVM/native conservan el mismo
+valor `{ i1 has_value, T value }`. `null` es absent canonical; present,
+igualdad, print y lifecycle son type-directed y sólo acceden al payload con tag
+activo. No hay `ptr null`, boxing ni allocation nullable. El typechecker
+mantiene soundness rechazando `T? -> T`; smart casts/flow narrowing siguen
+como trabajo futuro.
+
 Reconciliación Fase 5.0 (25-07-2026, revisión `0ff3d3b`): el perfil de
 capacidades continúa en la versión 22 y no cambió la frontera de lenguaje
 native cerrada el 18-07-2026: las 75 filas `SUPPORTED` de
@@ -188,7 +197,7 @@ representación y lifecycle ya están activos en esta matriz.
 | `boolean` | C | C | C | C | C | C | C | C | C | C | C | C | C | E2E | C | Completo | `bool` no es spelling público; se usa `boolean`. |
 | `float` | C | C | C | C por coerción | C nominal | P | P | P | P | P | P | N: gate temprano | N | frontend+gate | P | Solo AST | El perfil 22 lo excluye explícitamente del subset native estable. |
 | `complex` / literal `im` | C | C | C | C | C nominal | N desde fuente | P nominal | N | P nominal | P nominal | N | N | AST Python | AST | C v0 | Solo AST | Ya existe como primitivo experimental, en tensión con el diseño futuro de stdlib. |
-| `null` y `T?` | C | C | C | C | P nominal | N | P nominal | N | N | N | N | N | AST | frontend | C v0 | Solo AST | Sin narrowing ni backend. |
+| `null` y `T?` | C | C | C assignability/Eq, sin narrowing | C tagged | C `NullableType` + null const/cast/compare | C params/locals/returns/collections | C incluido nested/void inválidos | C tagged | C casts/phis | C | C conservador | C named `{i1,T}` | sin runtime nuevo; ARC condicional | parser/type/IR/SSA/ABI/E2E | C v0 + diseño native | Completo para `T` representable | Sin smart casts; `T? -> T` continúa diagnosticado. |
 | Variables locales tipadas mutables | C | C | C | C | C | C | C | C | C | C | C | C | — | E2E | C | Completo | Requieren inicializador. |
 | `const` local | C | C | C binding+paths | C | metadata AST para borrow | C, restricciones resueltas antes de IR | C | C | C | C | C | C | — | frontend+backend | C | Completo | Array/List propagan read-only por value/nested paths, se detienen en class y no congelan aliases mutables. |
 | Inferencia `x = expr` | C | C | C | C | N para global implícito | N | N | N | N | N | N | N | AST | frontend | C | Solo AST | El compilador exige locales que ya estén declarados. |
@@ -251,7 +260,7 @@ representación y lifecycle ya están activos en esta matriz.
 | Struct fields/constructores | C | C | C nominal | C | C definiciones/new/get/set | C subset | C | C | C | C | C | C subset | helpers print/equality | E2E dedicado | C para perfil v1 | Parcial | El subset v1 de layouts acíclicos representables es E2E; fields fuera del layout/lifecycle admitido se rechazan por el gate. |
 | Métodos de struct y `this` | C | C | C mutabilidad | C | C funciones + method result | C | C | C | C | C | C | C | — | E2E | P | Completo | Para tipos de firma soportados por backend. |
 | Semántica por valor de struct | — | C | C const | C copia | C reconstrucción | C | C | C | C | C | C | C by-value | — | E2E copia/arg/return | C | Completo | Campos reference mantienen copia shallow deliberada. |
-| Igualdad/print de struct | C | C | C comparabilidad | C | C recursivo subset | C | C | C | C | C | C | C subset | helpers | E2E | P | Parcial | Enum ya está soportado como campo; nullable/Vector/Matrix conservan límites. |
+| Igualdad/print de struct | C | C | C comparabilidad | C | C recursivo subset | C | C | C | C | C | C | C subset | helpers | E2E | P | Parcial | Enum y nullable representable ya están soportados como fields; Vector/Matrix conservan límites. |
 | Classes por referencia | C | C | C visibilidad/alias | C | P tipo nominal | N | P nominal | N | N | N | N | N | AST objects | amplia AST | C | Solo AST | Sin ownership/layout native. |
 | Constructores/métodos/`this` de class | C | C | C | C | N | N | N | N | N | N | N | N | AST | amplia AST | C | Solo AST | Public/private funciona en frontend. |
 | Interfaces y dispatch | C | C | C conformidad | C struct/class | P tipo nominal | N | P nominal | N | N | N | N | N | AST dispatch | amplia AST + dogfood | C | Solo AST | Bloquea callables por interfaz en el ejemplo numérico. |
@@ -417,7 +426,7 @@ IRV-024 están cerrados y tienen regresión.
 ### P1 — feature visible pero backend incompleto
 
 Para el objetivo amplio de paridad con el frontend: estado importado de
-módulos; classes; interfaces/dispatch; nullable; tuples; `float`/`complex`;
+módulos; classes; interfaces/dispatch; tuples; `float`/`complex`;
 funciones anidadas y callables avanzados; interpolación/formatting; input;
 excepciones; extensiones Vector/Matrix; y álgebra lineal avanzada. Son
 experimentos explícitamente `OUTSIDE_V1`, no defectos de conformidad del perfil

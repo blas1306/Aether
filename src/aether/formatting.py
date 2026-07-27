@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import math
 
-from .types import AetherExceptionValue, AetherRange, AetherValue, ArrayType, ClassInstance, EnumValue, ListType, MatrixType, NullableType, RangeType, StructInstance, TransposeVectorType, TupleType, VectorType
+from .types import AetherExceptionValue, AetherRange, AetherValue, ArrayType, ClassInstance, EnumValue, ListType, MatrixType, NullableType, NullableValue, RangeType, StructInstance, TransposeVectorType, TupleType, VectorType
 
 
 def format_value(value: AetherValue) -> str:
     if isinstance(value.type_name, NullableType):
-        if value.value is None:
+        nullable = value.value
+        if not isinstance(nullable, NullableValue) or not nullable.has_value:
             return "null"
-        return format_value(AetherValue(value.type_name.base_type, value.value))
+        return format_value(AetherValue(value.type_name.base_type, nullable.value))
     if isinstance(value.type_name, VectorType):
         return format_vector(value)
     if isinstance(value.type_name, TransposeVectorType):

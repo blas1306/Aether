@@ -173,8 +173,7 @@ def test_unknown_tags_are_rejected(converter: object, dto: dict[str, object], en
 
 
 def test_unsupported_constant_values_are_rejected() -> None:
-    with pytest.raises(TypeError, match=r"Unsupported IR constant for schema v1: NoneType"):
-        ir_constant_to_dto(None)  # type: ignore[arg-type]
+    assert ir_constant_to_dto(None) == {"tag": "null"}
 
     with pytest.raises(IRDTOError, match=r"signed 32-bit integer"):
         ir_constant_to_dto(2**31)
