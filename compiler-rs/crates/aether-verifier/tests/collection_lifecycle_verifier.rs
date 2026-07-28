@@ -129,6 +129,10 @@ fn accepts_python_supported_scalar_managed_struct_function_and_nested_elements()
             }
             .into(),
         ),
+        InterfaceType {
+            name: "Readable".to_owned(),
+        }
+        .into(),
     ];
 
     for instruction in [
@@ -164,26 +168,15 @@ fn array_slice_does_not_require_element_lifecycle_support() {
 
 #[test]
 fn rejects_missing_direct_element_lifecycle_capabilities() {
-    let cases: [(InstructionKind, CollectionKind, IRType, &str); 2] = [
-        (
-            InstructionKind::IRArrayCopy,
-            CollectionKind::Array,
-            InterfaceType {
-                name: "Box".to_owned(),
-            }
-            .into(),
-            "lifecycle layout for 'interface Box' is not defined",
-        ),
-        (
-            InstructionKind::IRListCopy,
-            CollectionKind::List,
-            MatrixType {
-                element: Box::new(IntType.into()),
-            }
-            .into(),
-            "matrix default requires compile-time dimensions",
-        ),
-    ];
+    let cases: [(InstructionKind, CollectionKind, IRType, &str); 1] = [(
+        InstructionKind::IRListCopy,
+        CollectionKind::List,
+        MatrixType {
+            element: Box::new(IntType.into()),
+        }
+        .into(),
+        "matrix default requires compile-time dimensions",
+    )];
 
     for (instruction, collection_kind, element_type, reason) in cases {
         let module = collection_module(instruction, element_type.clone(), Vec::new());
@@ -202,8 +195,8 @@ fn rejects_missing_direct_element_lifecycle_capabilities() {
 
 #[test]
 fn collection_lifecycle_diagnostic_is_deterministic_and_downcastable() {
-    let element_type: IRType = InterfaceType {
-        name: "Box".to_owned(),
+    let element_type: IRType = MatrixType {
+        element: Box::new(IntType.into()),
     }
     .into();
     let module = collection_module(
@@ -217,7 +210,7 @@ fn collection_lifecycle_diagnostic_is_deterministic_and_downcastable() {
     assert_eq!(first, second);
     assert_eq!(
         first.to_string(),
-        "function 0 ('main') failed type verification: block 0 ('entry') of function 'main' failed type verification: type verification failed in function 'main' block 'entry' instruction 0 (IRListSlice): IRListSlice failed type verification: IRListSlice requires lifecycle support for list element type 'interface Box': lifecycle layout for 'interface Box' is not defined"
+        "function 0 ('main') failed type verification: block 0 ('entry') of function 'main' failed type verification: type verification failed in function 'main' block 'entry' instruction 0 (IRListSlice): IRListSlice failed type verification: IRListSlice requires lifecycle support for list element type 'matrix<int>': matrix default requires compile-time dimensions"
     );
 
     let function = (&first as &dyn std::error::Error)
@@ -243,6 +236,6 @@ fn collection_lifecycle_diagnostic_is_deterministic_and_downcastable() {
             capability: CollectionLifecycleCapability::Lifecycle,
             reason,
         }) if actual == &element_type
-            && reason == "lifecycle layout for 'interface Box' is not defined"
+            && reason == "matrix default requires compile-time dimensions"
     ));
 }

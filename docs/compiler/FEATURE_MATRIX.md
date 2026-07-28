@@ -48,9 +48,9 @@ Leyenda de `Spec`:
 | Vector<Column> | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Completa con optimizer parcial |
 | Matrix | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ✅ documentada | Parcial backend |
 | Optional/Nullable (`T?`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ `{i1,T}` | ✅ parser/type/IR/SSA/ABI/E2E | ✅ documentada | Completa para payloads native representables; sin flow narrowing |
-| Class | ✅ | ✅ | ✅ definite init/métodos | ✅ new/get/set/calls directas | ✅ refs/phis/recursión | ✅ lifecycle effectful | ✅ payload/header/ARC + ABI métodos | ✅ AST + native O0/O1/O2 | ✅ documentada | Métodos concretos 5.3C; interfaces gated |
+| Class | ✅ | ✅ | ✅ definite init/métodos | ✅ new/get/set/calls directas | ✅ refs/phis/recursión | ✅ lifecycle effectful | ✅ payload/header/ARC + ABI métodos | ✅ AST + native O0/O1/O2 | ✅ documentada | Métodos concretos 5.3C; dispatch interface gated |
 | Struct | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
-| Interface | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
+| Interface ABI | ✅ | ✅ class→interface | ✅ construcción | ✅ `InterfaceType`/witness DTO | ✅ valores/phis | ✅ preserva witness | ✅ `{ptr,ptr}`/metadata | ✅ | ✅ ABI/verifiers | Completa 5.4A; dispatch y boxing no |
 | Enum | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
 
 Notas:
@@ -65,8 +65,9 @@ Notas:
 - Class 5.3C cubre representación nominal no nula, payload en orden fuente,
   constructores auto/explicit, get/set, definite initialization, ARC,
   transporte, identidad, nullable, containment y métodos concretos directos
-  con `this` borrowed. Interfaces y dispatch dinámico siguen rechazados
-  explícitamente.
+  con `this` borrowed. Phase 5.4A agrega valores interface `{carrier,witness}`
+  con carrier class y lifecycle/DTO/SSA/LLVM. Dispatch dinámico (5.4B) y
+  boxing struct (5.4C) siguen rechazados explícitamente.
 - `string` baja como valor/literal/call/return/phi, pero LLVM no soporta
   operaciones string (`+`, comparaciones, impresion, length, indexing, runtime).
 - `List<T>` tiene backend fases 1, 2, 3a, `indexOf` de fase 3b, `clear` de fase 4a, `push`/growth de fase 4b, `pop` de fase 4c, `insert` de fase 4d y `removeAt` de fase 4e para literal con tipo esperado,

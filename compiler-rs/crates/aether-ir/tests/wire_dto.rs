@@ -156,6 +156,43 @@ fn instruction_cases() -> Vec<Value> {
         ),
         instruction("class_new", &[("result", value())]),
         instruction(
+            "interface_construct",
+            &[
+                (
+                    "result",
+                    json!({
+                        "tag": "value",
+                        "name": "interface",
+                        "type": {"tag": "interface", "name": "Readable"}
+                    }),
+                ),
+                (
+                    "carrier",
+                    json!({
+                        "tag": "value",
+                        "name": "box",
+                        "type": {"tag": "class_ref", "name": "Box"}
+                    }),
+                ),
+                (
+                    "witness",
+                    json!({
+                        "symbol": "__aether_witness_5265616461626c65_426f78_8d96f73ea217",
+                        "interface_id": "Readable",
+                        "concrete_type_id": "Box",
+                        "carrier_kind": "class",
+                        "method_slots": [{
+                            "index": 0,
+                            "method_id": "Readable.read",
+                            "parameter_types": [],
+                            "return_type": {"tag": "int"}
+                        }],
+                        "abi_version": 1
+                    }),
+                ),
+            ],
+        ),
+        instruction(
             "class_get",
             &[
                 ("result", value()),
@@ -556,6 +593,7 @@ instruction_variant_mapping! {
     ClassNew => IRClassNew,
     ClassGet => IRClassGet,
     ClassSet => IRClassSet,
+    InterfaceConstruct => IRInterfaceConstruct,
     StructGet => IRStructGet,
     StructSet => IRStructSet,
     MethodResultNew => IRMethodResultNew,
@@ -633,9 +671,9 @@ fn every_instruction_tag_deserializes_imports_and_round_trips() {
         .map(|case| case["kind"].as_str().expect("kind is a string"))
         .collect::<BTreeSet<_>>();
 
-    assert_eq!(cases.len(), 71);
-    assert_eq!(tags.len(), 71);
-    assert_eq!(INSTRUCTION_VARIANT_MAPPING_COUNT, 71);
+    assert_eq!(cases.len(), 72);
+    assert_eq!(tags.len(), 72);
+    assert_eq!(INSTRUCTION_VARIANT_MAPPING_COUNT, 72);
     for case in cases {
         let tag = case["kind"].as_str().expect("kind is a string");
         let dto: IRInstructionDTO = serde_json::from_value(case.clone())

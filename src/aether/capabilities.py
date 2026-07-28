@@ -102,6 +102,7 @@ class Capability(str, Enum):
     CLASSES = "classes"
     CLASS_CONSTRUCTORS = "class-constructors"
     CLASS_METHODS = "class-methods"
+    NATIVE_INTERFACE_ABI = "native-interface-abi"
     INTERFACES = "interfaces"
     ENUMS = "enums"
     ARRAY = "array"
@@ -230,7 +231,14 @@ CAPABILITY_CATALOG: Mapping[Capability, CapabilityDefinition] = MappingProxyType
             _definition(Capability.CLASSES, "Reference-semantics classes."),
             _definition(Capability.CLASS_CONSTRUCTORS, "Class constructors."),
             _definition(Capability.CLASS_METHODS, "Class methods and this."),
-            _definition(Capability.INTERFACES, "Interfaces, conformance, and dispatch."),
+            _definition(
+                Capability.NATIVE_INTERFACE_ABI,
+                "Native interface values, class carriers, and witness metadata.",
+            ),
+            _definition(
+                Capability.INTERFACES,
+                "Interface dispatch, boxing, and adapters beyond the native ABI foundation.",
+            ),
             _definition(Capability.ENUMS, "Enums without payloads."),
             _definition(Capability.ARRAY, "Array values and operations."),
             _definition(Capability.ARRAY_SLICING, "Array and collection slicing."),
@@ -354,6 +362,7 @@ _NATIVE_COMPLETE = {
     Capability.CLASSES,
     Capability.CLASS_CONSTRUCTORS,
     Capability.CLASS_METHODS,
+    Capability.NATIVE_INTERFACE_ABI,
     Capability.STRUCTURAL_EQUALITY,
     Capability.EQ_COLLECTION_SEARCH,
     Capability.ALPT1_ENCODE,
@@ -437,6 +446,7 @@ E2E_TESTED_CAPABILITIES: Mapping[BackendIdentity, frozenset[Capability]] = Mappi
                 Capability.CLASSES,
                 Capability.CLASS_CONSTRUCTORS,
                 Capability.CLASS_METHODS,
+                Capability.NATIVE_INTERFACE_ABI,
                 Capability.INTERFACES,
                 Capability.ENUMS,
                 Capability.ARRAY,
@@ -493,6 +503,7 @@ E2E_TESTED_CAPABILITIES: Mapping[BackendIdentity, frozenset[Capability]] = Mappi
                 Capability.CLASSES,
                 Capability.CLASS_CONSTRUCTORS,
                 Capability.CLASS_METHODS,
+                Capability.NATIVE_INTERFACE_ABI,
                 Capability.FILES,
                 Capability.TEXT_FILE_READ,
                 Capability.TEXT_FILE_WRITE,
@@ -860,10 +871,58 @@ class _CapabilityDetector:
         source_type = self.checker.type_of_expression(expression)
         source = self._resolve_alias(source_type) if source_type is not None else None
         target = self._resolve_alias(target_type)
+        if isinstance(target, str) and target in self.checker.interfaces:
+            target = InterfaceType(target)
         if source is None or source == target:
             return
         if source == "int" and target == "double":
             return
+        interface_target = (
+            target.base_type
+            if isinstance(target, NullableType)
+            and isinstance(target.base_type, InterfaceType)
+            else target
+            if isinstance(target, InterfaceType)
+            else None
+        )
+        if isinstance(interface_target, InterfaceType):
+            if isinstance(source, NullableType):
+                self._record(
+                    Capability.INTERFACES,
+                    node,
+                    detail=(
+                        f"nullable conversion from '{source}' to '{target}' "
+                        "requires payload adaptation in Phase 5.4B"
+                    ),
+                    requires_complete_support=True,
+                )
+                return
+            if isinstance(source, ClassType):
+                concrete = self.checker.structs.get(source.name)
+                if (
+                    concrete is not None
+                    and interface_target.name in concrete.implements
+                ):
+                    return
+            if isinstance(source, str):
+                concrete = self.checker.structs.get(source)
+                if (
+                    concrete is not None
+                    and interface_target.name in concrete.implements
+                ):
+                    if concrete.kind == "class":
+                        return
+                    self._record(
+                        Capability.INTERFACES,
+                        node,
+                        detail=(
+                            f"struct conversion from '{source}' to "
+                            f"'{interface_target}' requires boxing; boxing and "
+                            "struct adapters belong to Phase 5.4C"
+                        ),
+                        requires_complete_support=True,
+                    )
+                    return
         if isinstance(target, NullableType):
             source_payload = source.base_type if isinstance(source, NullableType) else source
             if (
@@ -1157,7 +1216,7 @@ class _CapabilityDetector:
                 self._record_type(field.type_name, field)
             return
         if isinstance(node, ast.InterfaceDeclaration):
-            self._record(Capability.INTERFACES, node)
+            self._record(Capability.NATIVE_INTERFACE_ABI, node)
             return
         if isinstance(node, ast.EnumDeclaration):
             self._record(Capability.ENUMS, node)
@@ -1287,6 +1346,18 @@ class _CapabilityDetector:
             target_type = self._resolve_alias(
                 self.checker.type_of_expression(node.target)
             )
+            if isinstance(target_type, str) and target_type in self.checker.interfaces:
+                target_type = InterfaceType(target_type)
+            if isinstance(target_type, InterfaceType):
+                self._record(
+                    Capability.INTERFACES,
+                    node,
+                    detail=(
+                        "interface dispatch is not implemented in Phase 5.4A; "
+                        "it belongs to Phase 5.4B"
+                    ),
+                    requires_complete_support=True,
+                )
             struct_name = target_type if isinstance(target_type, str) else None
             symbol = self.checker.structs.get(struct_name) if struct_name is not None else None
             if symbol is not None:
@@ -1391,6 +1462,18 @@ class _CapabilityDetector:
             target_type = self._resolve_alias(
                 self.checker.type_of_expression(desugared.target)
             )
+            if isinstance(target_type, str) and target_type in self.checker.interfaces:
+                target_type = InterfaceType(target_type)
+            if isinstance(target_type, InterfaceType):
+                self._record(
+                    Capability.INTERFACES,
+                    call,
+                    detail=(
+                        "interface dispatch is not implemented in Phase 5.4A; "
+                        "it belongs to Phase 5.4B"
+                    ),
+                    requires_complete_support=True,
+                )
             struct_name = target_type if isinstance(target_type, str) else None
             symbol = (
                 self.checker.structs.get(struct_name)
@@ -1910,7 +1993,7 @@ class _CapabilityDetector:
             self._record(Capability.CLASSES, node)
             return
         if isinstance(type_name, InterfaceType):
-            self._record(Capability.INTERFACES, node)
+            self._record(Capability.NATIVE_INTERFACE_ABI, node)
             return
         if isinstance(type_name, EnumType):
             self._record(Capability.ENUMS, node)
@@ -2064,7 +2147,7 @@ class _CapabilityDetector:
         if isinstance(type_name, ClassType):
             return None
         if isinstance(type_name, InterfaceType):
-            return "interface references are outside the LLVM/native collection subset"
+            return None
         if isinstance(type_name, NullableType):
             inner_reason = self._collection_element_reason(type_name.base_type, active)
             if inner_reason is None:
@@ -2078,6 +2161,8 @@ class _CapabilityDetector:
             return f"type '{type_name}' has no sized collection-element ABI in LLVM/native"
         if not isinstance(type_name, str):
             return f"type '{type_name}' has no supported LLVM/native collection layout"
+        if type_name in self.checker.interfaces:
+            return None
 
         symbol = self.checker.structs.get(type_name)
         if symbol is None:
@@ -2164,6 +2249,12 @@ def backend_capability_issues(
                 f"LLVM/native does not yet implement {requirement.detail}; "
                 "the approved operation compares ordered contents, not container identity."
             )
+        elif (
+            backend is BackendIdentity.NATIVE
+            and requirement.capability is Capability.INTERFACES
+            and requirement.detail is not None
+        ):
+            message = f"LLVM/native rejects this interface operation: {requirement.detail}."
         else:
             message = (
                 f"The {backend_label} backend {state_label} capability "

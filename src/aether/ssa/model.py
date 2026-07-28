@@ -24,6 +24,7 @@ from aether.instruction_effects import (
     InstructionEffects,
 )
 from aether.scalar_math import scalar_math_may_trap
+from aether.ir.model import IRWitnessTable
 from aether.ir.types import ArrayType, IRType, ListType, MatrixType, StringType, StructType, VectorType
 
 
@@ -195,6 +196,15 @@ class SSAClassSet(MemoryWriteMixin, SSAInstruction):
     field_name: str
     value: SSAValue
     initialize: bool = False
+
+
+@dataclass(frozen=True)
+class SSAInterfaceConstruct(SideEffectMixin, SSAInstruction):
+    """Construct the non-removable native ``{carrier, witness}`` owner."""
+
+    result: SSAValue
+    carrier: SSAValue
+    witness: IRWitnessTable
 
 
 @dataclass(frozen=True)

@@ -497,6 +497,58 @@ impl<'module> TypeVerifier<'module> {
                 value,
                 ..
             } => self.verify_class_set(object, *field_index, field_name, value),
+            IRInstruction::IRInterfaceConstruct {
+                result,
+                carrier,
+                witness,
+            } => {
+                let (IRType::Interface(interface), IRType::ClassRef(class)) =
+                    (&result.r#type, &carrier.r#type)
+                else {
+                    return Err(constraint(
+                        "carrier",
+                        TypeExpectation::ClassReference,
+                        &carrier.r#type,
+                    ));
+                };
+                let ordered = witness
+                    .method_slots
+                    .iter()
+                    .enumerate()
+                    .all(|(index, slot)| i64::try_from(index) == Ok(slot.index));
+                let unique = witness.method_slots.iter().enumerate().all(
+                    |(index, slot)| {
+                        witness.method_slots[..index]
+                            .iter()
+                            .all(|prior| prior.method_id != slot.method_id)
+                    },
+                );
+                if witness.abi_version != 1
+                    || witness.carrier_kind != "class"
+                    || witness.symbol.is_empty()
+                    || witness.interface_id != interface.name
+                    || witness.concrete_type_id != class.name
+                    || !ordered
+                    || !unique
+                    || witness
+                        .method_slots
+                        .iter()
+                        .any(|slot| slot.method_id.is_empty())
+                {
+                    return Err(constraint(
+                        "witness",
+                        TypeExpectation::Valid,
+                        &result.r#type,
+                    ));
+                }
+                for slot in &witness.method_slots {
+                    for parameter in &slot.parameter_types {
+                        self.require_valid_type("witness.parameter_types", parameter)?;
+                    }
+                    self.require_valid_type("witness.return_type", &slot.return_type)?;
+                }
+                Ok(())
+            }
             IRInstruction::IRStructGet {
                 result,
                 r#struct,
@@ -882,6 +934,9 @@ impl<'module> TypeVerifier<'module> {
             IRInstruction::IRClassGet { object, .. } => vec![("object", object)],
             IRInstruction::IRClassSet { object, value, .. } => {
                 vec![("object", object), ("value", value)]
+            }
+            IRInstruction::IRInterfaceConstruct { carrier, .. } => {
+                vec![("carrier", carrier)]
             }
             IRInstruction::IRStructSet {
                 r#struct, value, ..
@@ -1469,6 +1524,7 @@ impl<'module> TypeVerifier<'module> {
                 | IRType::List(_)
                 | IRType::Nullable(_)
                 | IRType::ClassRef(_)
+                | IRType::Interface(_)
         ) {
             Ok(())
         } else {
@@ -2747,6 +2803,7 @@ pub(crate) fn instruction_result(instruction: &IRInstruction) -> Option<&IRValue
         | IRInstruction::IRStructNew { result, .. }
         | IRInstruction::IRClassNew { result, .. }
         | IRInstruction::IRClassGet { result, .. }
+        | IRInstruction::IRInterfaceConstruct { result, .. }
         | IRInstruction::IRStructGet { result, .. }
         | IRInstruction::IRStructSet { result, .. }
         | IRInstruction::IRMethodResultNew { result, .. }
@@ -2816,6 +2873,7 @@ pub(crate) fn instruction_kind(instruction: &IRInstruction) -> InstructionKind {
         IRInstruction::IRClassNew { .. } => InstructionKind::IRClassNew,
         IRInstruction::IRClassGet { .. } => InstructionKind::IRClassGet,
         IRInstruction::IRClassSet { .. } => InstructionKind::IRClassSet,
+        IRInstruction::IRInterfaceConstruct { .. } => InstructionKind::IRInterfaceConstruct,
         IRInstruction::IRStructGet { .. } => InstructionKind::IRStructGet,
         IRInstruction::IRStructSet { .. } => InstructionKind::IRStructSet,
         IRInstruction::IRMethodResultNew { .. } => InstructionKind::IRMethodResultNew,

@@ -17,6 +17,7 @@ from aether.ssa.model import (
     SSAConst,
     SSAFunction,
     SSAInstruction,
+    SSAInterfaceConstruct,
     SSAJump,
     SSAListGet,
     SSAListCopy,
@@ -244,6 +245,21 @@ class TrivialPhiEliminator:
             if not rewritten:
                 return instruction, 0
             return SSACast(instruction.result, value), 1
+
+        if isinstance(instruction, SSAInterfaceConstruct):
+            carrier, rewritten = self._rewrite_value(
+                instruction.carrier, replacements
+            )
+            if not rewritten:
+                return instruction, 0
+            return (
+                SSAInterfaceConstruct(
+                    instruction.result,
+                    carrier,
+                    instruction.witness,
+                ),
+                1,
+            )
 
         if isinstance(instruction, SSACall):
             arguments = []

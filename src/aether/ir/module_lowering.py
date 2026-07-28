@@ -160,6 +160,23 @@ class _ModuleRewriter:
                 constructor=constructor,
                 implements=[self.type_name(name) for name in node.implements],
             )
+        if isinstance(node, ast.InterfaceDeclaration):
+            symbol = self._own_symbol(node.name, "interface") if top_level else None
+            return replace(
+                node,
+                name=mangle_symbol(symbol.id) if symbol is not None else node.name,
+                methods=[
+                    replace(
+                        method,
+                        return_type=self.type_name(method.return_type),
+                        parameters=[
+                            self.parameter(parameter)
+                            for parameter in method.parameters
+                        ],
+                    )
+                    for method in node.methods
+                ],
+            )
         if isinstance(node, ast.AliasDeclaration):
             symbol = self._own_symbol(node.name, "alias") if top_level else None
             return replace(

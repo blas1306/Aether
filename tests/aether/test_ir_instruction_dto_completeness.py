@@ -39,6 +39,7 @@ EXPECTED_CLASS_TAGS: tuple[tuple[str, str], ...] = (
     ("IRClassNew", "class_new"),
     ("IRClassGet", "class_get"),
     ("IRClassSet", "class_set"),
+    ("IRInterfaceConstruct", "interface_construct"),
     ("IRStructGet", "struct_get"),
     ("IRStructSet", "struct_set"),
     ("IRMethodResultNew", "method_result_new"),
@@ -151,13 +152,13 @@ def _expected_python_types() -> tuple[type[ir_model.IRInstruction], ...]:
     return tuple(getattr(ir_model, name) for name, _ in EXPECTED_CLASS_TAGS)
 
 
-def test_registry_is_the_exact_stable_71_variant_contract() -> None:
+def test_registry_is_the_exact_stable_72_variant_contract() -> None:
     actual = tuple(
         (entry.instruction_type.__name__, entry.tag)
         for entry in IR_INSTRUCTION_DTO_REGISTRY
     )
 
-    assert len(EXPECTED_CLASS_TAGS) == 71
+    assert len(EXPECTED_CLASS_TAGS) == 72
     assert actual == EXPECTED_CLASS_TAGS
     assert tuple(entry.rust_variant for entry in IR_INSTRUCTION_DTO_REGISTRY) == tuple(
         name for name, _ in EXPECTED_CLASS_TAGS
@@ -170,8 +171,8 @@ def test_registry_classes_and_tags_are_unique_and_bidirectional() -> None:
     )
     tags = tuple(entry.tag for entry in IR_INSTRUCTION_DTO_REGISTRY)
 
-    assert len(instruction_types) == len(set(instruction_types)) == 71
-    assert len(tags) == len(set(tags)) == 71
+    assert len(instruction_types) == len(set(instruction_types)) == 72
+    assert len(tags) == len(set(tags)) == 72
     assert set(IR_INSTRUCTION_TAGS.items()) == set(zip(instruction_types, tags))
     assert set(IR_INSTRUCTION_DTO_BY_TAG) == set(tags)
     assert all(
@@ -188,7 +189,7 @@ def test_every_concrete_python_instruction_has_dto_support() -> None:
     model_types = _all_instruction_subclasses()
     expected_types = set(_expected_python_types())
 
-    assert len(model_types) == 71
+    assert len(model_types) == 72
     assert model_types == expected_types
     validate_instruction_dto_registry(
         IR_INSTRUCTION_DTO_REGISTRY,
@@ -202,7 +203,7 @@ def test_registry_is_synchronized_with_rust_instruction_enum() -> None:
         RUST_INSTRUCTION_SOURCE.read_text(encoding="utf-8")
     )
 
-    assert len(rust_variants) == 71
+    assert len(rust_variants) == 72
     validate_instruction_dto_registry(
         IR_INSTRUCTION_DTO_REGISTRY,
         rust_variants=rust_variants,

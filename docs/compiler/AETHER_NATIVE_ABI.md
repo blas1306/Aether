@@ -1,6 +1,6 @@
 # ABI native de Aether
 
-> Estado: **descriptivo y provisional**, 18 de julio de 2026. Documenta el
+> Estado: **descriptivo y provisional**, 28 de julio de 2026. Documenta el
 > contrato observado del profile native 22. No define una ABI pública, una FFI
 > ni compatibilidad binaria entre releases.
 
@@ -85,7 +85,7 @@ linkage LLVM; eso es un detalle accidental, no una exportación FFI.
 | `Matrix<T>` | `ptr` | una palabra target | handle por valor | provisional/shape externo |
 | struct | `%struct.Name = type { fields... }` | padding/alignment del target | por valor | layout source-order, no ABI pública |
 | class | `ptr` no nulo a `{header, fields...}` nominal | una palabra target | handle por valor | state/constructors/methods 5.3C |
-| interface | sin LLVM ABI | — | — | unsupported native |
+| interface `I` | `%interface.<id> = type { ptr, ptr }` | dos palabras target; alineación de `ptr` | aggregate por valor | Native Interface ABI 5.4A; sin dispatch |
 | nullable `T?` | `%nullable.<T> = type { i1, T }` | target-dependent, incluido padding | aggregate por valor | implementado para payload representable |
 | tuple source | sin LLVM ABI general | — | — | unsupported native |
 | method result | `{ %struct.Receiver [, Value] }` | target-dependent | por valor | detalle de lowering |
@@ -314,7 +314,45 @@ importados. Reads y writes reutilizan `class_get`/`class_set`, por lo que una
 mutación es visible a través de todos los aliases. A diferencia de los métodos
 de struct, un método de class retorna `R` directamente y nunca
 `MethodResultType`: el objeto compartido ya contiene el receiver actualizado.
-Interfaces, witness tables y dispatch virtual siguen fuera de esta ABI.
+Interface dispatch, thunks y boxing siguen fuera de esta ABI de métodos
+concretos. La representación y metadata de interfaces se definen en 10.3.
+
+### 10.3 Native Interface ABI (Phase 5.4A)
+
+Un valor `interface I` es exactamente `{ptr carrier, ptr witness}`. Para una
+class, `carrier` es el mismo handle no nulo a la instancia; no hay allocation
+ni caja adicional. `witness` apunta a metadata privada, constante e inmortal.
+El agregado mide dos palabras del target, se alinea como `ptr` y LLVM lo
+pasa/retorna por valor según el DataLayout host. En IR/SSA es un único valor
+nominal y puede vivir en locals, parámetros, returns, phis, nullable,
+`Array<I>` y `List<I>`.
+
+Cada conversión class→interface usa `interface_construct` y una tabla estable
+por `(interface_id, concrete_type_id)`:
+
+```llvm
+%AetherWitnessHeader = type { ptr, ptr, i32, i32, ptr, ptr }
+%AetherWitnessSlot = type { i32, ptr, ptr }
+@witness = private constant {
+    %AetherWitnessHeader,
+    [N x %AetherWitnessSlot]
+}
+```
+
+El header guarda los IDs UTF-8 de interface y concreto, ABI version, cantidad
+de métodos y dos `ptr null` reservados para `copy_owned`/`drop_owned` de Phase
+5.4C. Cada slot guarda índice, ID nominal del método y un `ptr null`
+reservado para dispatch futuro. Los slots conservan el orden de declaración;
+las tablas se emiten en orden determinista y el mangling es path-independent.
+
+Ownership en 5.4A es class-only: retain/copy del interface retiene solamente
+el carrier; release/destroy libera solamente el carrier. El witness nunca se
+retiene ni destruye. `I?` envuelve las dos palabras completas en el nullable
+tagged existente. No se permite usar `ptr null` como interface o nullable.
+
+Conversión de struct, boxing y clone/drop adapters se rechazan como Phase
+5.4C. Calls de métodos interface, carga de slots, calls indirectas y virtuales
+se rechazan como Phase 5.4B. Los placeholders no ejecutan métodos.
 
 ## 11. Panic, IO y proceso
 
@@ -356,6 +394,7 @@ manifest de imports runtime, son detectados a partir del LLVM textual.
 | strings | UTF-8, equality, ARC observable indirecto | header, flags, helper names | handle ABI/accessors/threading |
 | Array/List | aliasing, copy/slice, Eq, lifecycle | headers, counters, helpers | ABI version + alloc/error policy |
 | class ref | identidad, aliasing, ARC, fields, constructores, métodos directos y Eq identidad | header/descriptor/helpers/payload 5.3C | ABI version, dispatch dinámico, ciclos |
+| interface | dos palabras, carrier class, witness identity y ownership carrier-only | símbolos/tablas privadas 5.4A | dispatch 5.4B; boxing/adapters 5.4C |
 | structs/enums | orden de fields/variants y value semantics | concrete target ABI/mangling | object compatibility policy |
 | callables/method results | comportamiento source subset | representación | closure/method ABI |
 | panic | output/code según spec | `puts/exit`, no unwind | error ABI y threading |

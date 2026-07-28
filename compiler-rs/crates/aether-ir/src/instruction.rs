@@ -1,6 +1,36 @@
 //! Instruction variants in the initial Aether IR.
 
-use crate::{IRConstant, IRSourceLocation, IRStorage, IRValue, LifecycleSource};
+use crate::{IRConstant, IRSourceLocation, IRStorage, IRType, IRValue, LifecycleSource};
+
+/// Immutable metadata for one future interface-dispatch slot.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IRWitnessMethodSlot {
+    /// Zero-based declaration-order slot.
+    pub index: i64,
+    /// Stable nominal method identifier.
+    pub method_id: String,
+    /// Erased method parameter types.
+    pub parameter_types: Vec<IRType>,
+    /// Erased method return type.
+    pub return_type: IRType,
+}
+
+/// Canonical metadata for one concrete/interface implementation pair.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IRWitnessTable {
+    /// Stable private LLVM symbol.
+    pub symbol: String,
+    /// Canonical implemented-interface identifier.
+    pub interface_id: String,
+    /// Canonical concrete-type identifier.
+    pub concrete_type_id: String,
+    /// Carrier representation reserved by this table.
+    pub carrier_kind: String,
+    /// Future dispatch slots in declaration order.
+    pub method_slots: Vec<IRWitnessMethodSlot>,
+    /// Native interface ABI version.
+    pub abi_version: i64,
+}
 
 /// An instruction in the initial, pre-SSA Aether IR.
 ///
@@ -118,6 +148,12 @@ pub enum IRInstruction {
         field_name: String,
         value: IRValue,
         initialize: bool,
+    },
+    /// Constructs the native `{carrier, witness}` interface value.
+    IRInterfaceConstruct {
+        result: IRValue,
+        carrier: IRValue,
+        witness: IRWitnessTable,
     },
     /// Reads a named struct field.
     IRStructGet {

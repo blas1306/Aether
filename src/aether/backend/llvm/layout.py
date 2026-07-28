@@ -109,8 +109,21 @@ class LLVMTypeLayouts:
         if isinstance(type_, ClassRefType):
             return self._collection_reference(type_)
         if isinstance(type_, InterfaceType):
-            return self._unsupported(
-                type_, "class/interface references are outside the LLVM/native collection subset"
+            rendered = llvm_type(type_)
+            size = (
+                f"ptrtoint (ptr getelementptr ({rendered}, ptr null, i64 1) "
+                "to i64)"
+            )
+            return TypeLayout(
+                rendered,
+                True,
+                size,
+                False,
+                True,
+                True,
+                True,
+                True,
+                True,
             )
         if isinstance(type_, ComplexType):
             return self._unsupported(type_, "complex is not represented by the current LLVM/native backend")

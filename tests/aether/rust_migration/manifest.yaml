@@ -533,14 +533,8 @@ invalid_modules:
     diagnostic_divergence: lifecycle_dataflow_semantics
     covers: [IRV-036]
 
-  - id: relocate-non-relocatable
-    test: tests/aether/test_ir_lifecycle.py::test_relocation_rejects_non_relocatable_type_and_invalid_count
-    verifier_invocation: 1
-    expected_invariant: IRV-049
-    covers: [IRV-049]
-
   - id: relocate-invalid-count
-    test: tests/aether/test_ir_lifecycle.py::test_relocation_rejects_non_relocatable_type_and_invalid_count
+    test: tests/aether/test_ir_lifecycle.py::test_interface_relocation_is_supported_and_invalid_count_is_rejected
     verifier_invocation: 2
     expected_invariant: IRV-049
     covers: [IRV-049]

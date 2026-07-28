@@ -5,8 +5,8 @@ use std::error::Error as _;
 use aether_ir::{
     ArrayType, BoolType, ClassRefType, DoubleType, FloatType, FunctionType, IRBasicBlock,
     IRConstant, IRFunction, IRInstruction, IRModule, IRParameter, IRStorage, IRStructDefinition,
-    IRType, IRValue, IntType, ListType, MatrixType, NullableType, StringType, StructType,
-    VectorType, VoidType,
+    IRType, IRValue, IRWitnessMethodSlot, IRWitnessTable, IntType, InterfaceType, ListType,
+    MatrixType, NullableType, StringType, StructType, VectorType, VoidType,
 };
 use aether_verifier::{
     BlockTypeVerificationError, FunctionTypeVerificationError, InstructionKind,
@@ -385,6 +385,49 @@ fn class_new_requires_a_class_reference_result() {
             actual: IntType.into(),
         }
     );
+}
+
+#[test]
+fn interface_construct_requires_class_carrier_and_ordered_witness_metadata() {
+    let carrier_type: IRType = ClassRefType {
+        name: "Box".to_owned(),
+    }
+    .into();
+    let interface_type: IRType = InterfaceType {
+        name: "Readable".to_owned(),
+    }
+    .into();
+    let witness = IRWitnessTable {
+        symbol: "__ae_witness_i8_5265616461626c65__c3_426f78__524730a6e96e3203".to_owned(),
+        interface_id: "Readable".to_owned(),
+        concrete_type_id: "Box".to_owned(),
+        carrier_kind: "class".to_owned(),
+        method_slots: vec![IRWitnessMethodSlot {
+            index: 0,
+            method_id: "Readable.read".to_owned(),
+            parameter_types: Vec::new(),
+            return_type: IntType.into(),
+        }],
+        abi_version: 1,
+    };
+    let valid = module_with_instruction(IRInstruction::IRInterfaceConstruct {
+        result: value("interface", interface_type.clone()),
+        carrier: value("box", carrier_type.clone()),
+        witness: witness.clone(),
+    });
+    assert_eq!(verify_module_types(&valid), Ok(()));
+
+    let mut invalid_witness = witness;
+    invalid_witness.method_slots[0].index = 1;
+    let invalid = module_with_instruction(IRInstruction::IRInterfaceConstruct {
+        result: value("interface", interface_type),
+        carrier: value("box", carrier_type),
+        witness: invalid_witness,
+    });
+    assert!(matches!(
+        instruction_rule(&verify_module_types(&invalid).unwrap_err()),
+        TypeRuleError::TypeConstraint { field, .. } if field == "witness"
+    ));
 }
 
 #[test]

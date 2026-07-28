@@ -192,11 +192,11 @@ def test_canary_migration_corpus_uses_real_rust_authority(
         report.comparison.classification for report in reports
     )
     assert schema_version == 2
-    assert len(reports) == 141
+    assert len(reports) == 140
     assert classifications == Counter(
         {
             ShadowClassification.MATCH_ACCEPTED: 65,
-            ShadowClassification.MATCH_REJECTED_SEMANTIC: 73,
+            ShadowClassification.MATCH_REJECTED_SEMANTIC: 72,
             ShadowClassification.DOCUMENTED_DIAGNOSTIC_DIVERGENCE: 3,
         }
     )

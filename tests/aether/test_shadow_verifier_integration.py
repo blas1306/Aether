@@ -181,11 +181,11 @@ def test_full_transportable_corpus_shadow_baseline(
         report.comparison.classification for report in sink.reports
     )
     assert schema_version == 2
-    assert len(sink.reports) == 141
+    assert len(sink.reports) == 140
     assert counts == Counter(
         {
             ShadowClassification.MATCH_ACCEPTED: 65,
-            ShadowClassification.MATCH_REJECTED_SEMANTIC: 73,
+            ShadowClassification.MATCH_REJECTED_SEMANTIC: 72,
             ShadowClassification.DOCUMENTED_DIAGNOSTIC_DIVERGENCE: 3,
         }
     )

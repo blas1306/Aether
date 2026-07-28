@@ -215,7 +215,12 @@ def test_removed_broken_examples_are_not_public_or_manifested() -> None:
     [
         ("int main() { float value = float(1); return int(value); }", "AE-BACKEND-PRIMITIVE_TYPES"),
         ("int main() { complex value = 1im; println(value); return 0; }", "AE-BACKEND-PRIMITIVE_TYPES"),
-        ("interface Value { int get(); } int main() { return 0; }", "AE-BACKEND-INTERFACES"),
+        (
+            "interface Value { int get(); } "
+            "class Box implements Value { public int get() { return 1; } } "
+            "int main() { Box box = Box(); Value value = box; return value.get(); }",
+            "AE-BACKEND-INTERFACES",
+        ),
         ("int main() { (int, int) pair = (1, 2); return 0; }", "AE-BACKEND-PRIMITIVE_TYPES"),
         (
             "int main() { const values = 1:3; for (int value in values) { println(value); } return 0; }",

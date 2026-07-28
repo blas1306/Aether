@@ -49,7 +49,7 @@ The following block is generated from `NATIVE_CAPABILITY_PROFILE` in
 <!-- BEGIN GENERATED CAPABILITY PROFILE -->
 Profile schema/version: `22`.
 
-Inventory: 31 COMPLETE, 31 PARTIAL, 5 UNSUPPORTED.
+Inventory: 32 COMPLETE, 31 PARTIAL, 5 UNSUPPORTED.
 
 | Capability | State | Contract area |
 | --- | --- | --- |
@@ -92,7 +92,8 @@ Inventory: 31 COMPLETE, 31 PARTIAL, 5 UNSUPPORTED.
 | `classes` | **COMPLETE** | Reference-semantics classes. |
 | `class-constructors` | **COMPLETE** | Class constructors. |
 | `class-methods` | **COMPLETE** | Class methods and this. |
-| `interfaces` | **UNSUPPORTED** | Interfaces, conformance, and dispatch. |
+| `native-interface-abi` | **COMPLETE** | Native interface values, class carriers, and witness metadata. |
+| `interfaces` | **UNSUPPORTED** | Interface dispatch, boxing, and adapters beyond the native ABI foundation. |
 | `enums` | **COMPLETE** | Enums without payloads. |
 | `array` | **PARTIAL** | Array values and operations. |
 | `array-slicing` | **PARTIAL** | Array and collection slicing. |

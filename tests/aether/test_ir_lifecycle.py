@@ -367,13 +367,17 @@ def test_inconsistent_branch_initialization_is_rejected() -> None:
         IRVerifier(module).verify()
 
 
-def test_relocation_rejects_non_relocatable_type_and_invalid_count() -> None:
+def test_interface_relocation_is_supported_and_invalid_count_is_rejected() -> None:
     parameter = IRParameter("value", InterfaceType("Object"))
     source = IRStorage("source", parameter.type)
     destination = IRStorage("destination", parameter.type)
-    _error(
-        [IRCopyInit(source, parameter), IRRelocate(destination, source, 1), IRReturn()],
-        "non-relocatable type",
+    _verify(
+        [
+            IRCopyInit(source, parameter),
+            IRRelocate(destination, source, 1),
+            IRDestroy(destination),
+            IRReturn(),
+        ],
         parameters=(parameter,),
     )
 

@@ -17,6 +17,7 @@ from aether.ir.model import (
     IRClassGet,
     IRClassNew,
     IRClassSet,
+    IRInterfaceConstruct,
     IRCompareOp,
     IRConst,
     IRCopyInit,
@@ -211,6 +212,8 @@ class DeadCodeEliminator:
             return (instruction.object,)
         if isinstance(instruction, IRClassSet):
             return (instruction.object, instruction.value)
+        if isinstance(instruction, IRInterfaceConstruct):
+            return (instruction.carrier,)
         if isinstance(instruction, IRStructGet):
             return (instruction.struct,)
         if isinstance(instruction, IRStructSet):

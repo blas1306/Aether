@@ -146,8 +146,8 @@ relocation while retaining managed copy/destroy behavior; Vector default needs
 row/column orientation; Matrix is relocatable but has no dimension-free
 default; Function is relocatable without a default; structs and method results
 compose recursively; ClassRef has the Phase 5.3A one-word ARC lifecycle;
-Interface still has no defined lifecycle layout, and Nullable delegates to its
-payload. Copy, move, assign, and destroy remain valid for both trivial
+Interface has the Phase 5.4A two-word, carrier-owning lifecycle, and Nullable
+delegates to its payload. Copy, move, assign, and destroy remain valid for both trivial
 and managed non-void types. Only default and relocation consult their specific
 traits.
 
@@ -156,8 +156,9 @@ Owned `IRCopyInit.source` and `IRAssign.source` use the tagged
 `parameter` tags import as `Value`; `storage` imports as `Storage`. The SSA pass
 therefore checks only immutable sources, while the lifecycle pass checks only
 storage-source state. Identifier spelling is never used to infer a namespace,
-so same-named SSA and storage entities remain distinct. Phase 5.3A extends the
-canonical JSON/wire instruction enum with `class_new`; existing instruction
+so same-named SSA and storage entities remain distinct. Phase 5.3A adds
+`class_new`; Phase 5.4A adds `interface_construct` plus deterministic witness
+metadata to the canonical JSON/wire instruction enum. Existing instruction
 shapes remain unchanged.
 
 Predecessor propagation, join merging, loop fixed points, branch consistency,
@@ -396,15 +397,15 @@ The Python rule does not require a named operation such as copy-init, assign,
 destroy, move-init, or relocate. Its only capability is a defined lifecycle
 classification, represented by `LifecycleTraits.reason is None`. Scalars,
 strings, collection handles, functions, and defined structs/method-results are
-accepted. ClassRef elements are accepted. Matrix elements, unoriented vector
-elements, interface values, invalid nullable values, void, and unresolved
+accepted. ClassRef and Interface elements are accepted. Matrix elements,
+unoriented vector elements, invalid nullable values, void, and unresolved
 structs carry an error reason and are
 rejected when they reach this instruction-local rule.
 
 The check is shallow. A nested array/list is accepted without inspecting its
 element, and aggregate composition does not propagate a child lifecycle error
-reason. Consequently a defined struct containing an interface, invalid
-nullable, or otherwise unsupported field remains accepted as a collection
+reason. Consequently a defined struct containing an invalid nullable or
+otherwise unsupported field remains accepted as a collection
 element. This is intentional parity with Python rather than stronger recursive
 validation.
 
@@ -563,7 +564,7 @@ The complete wire contract and discovery boundary are documented in
 compiler selection, CLI option, shadow mode, packaging discovery, or PyO3
 binding is implemented in Phase 4.2A.
 
-After the Phase 4.5C IRV-024 alignment, the 141 schema-v1-compatible migration
+After Phase 5.4A made Interface relocatable, the 140 schema-v1-compatible migration
 cases have no acceptance/rejection differences: 65 are accepted by both.
 The former `non-void-path-without-return` Python-IRV-024/Rust-accepted result
 is retained as an ordinary accepted corpus case and no outcome-divergence rule

@@ -144,7 +144,7 @@ def test_detector_reports_import_and_deduplicates_repeated_imports(tmp_path: Pat
     ("source", "capability"),
     [
         ("class Box { int value; }", Capability.CLASSES),
-        ("interface Value { int get(); }", Capability.INTERFACES),
+        ("interface Value { int get(); }", Capability.NATIVE_INTERFACE_ABI),
         ("enum Color { Red, Blue }", Capability.ENUMS),
         ("int main() { double x = sqrt(4.0); return 0; }", Capability.SCALAR_MATH),
         ("import Math; int main() { double x = Math.pi; return 0; }", Capability.SCALAR_MATH),

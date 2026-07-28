@@ -216,8 +216,7 @@
       ],
       "run": true,
       "outside_v1_features": [
-        "AE-BACKEND-INTERFACES",
-        "AE-BACKEND-PRIMITIVE_TYPES"
+        "AE-BACKEND-INTERFACES"
       ]
     },
     {

@@ -15,6 +15,7 @@ from aether.ssa.model import (
     SSACallIndirect,
     SSAClassGet,
     SSAClassSet,
+    SSAInterfaceConstruct,
     SSACompareOp,
     SSAConst,
     SSAFunction,
@@ -184,6 +185,9 @@ class SSADeadCodeEliminator:
         if isinstance(instruction, SSAClassSet):
             used_values.add(instruction.object)
             used_values.add(instruction.value)
+            return
+        if isinstance(instruction, SSAInterfaceConstruct):
+            used_values.add(instruction.carrier)
             return
         if isinstance(instruction, SSAStructGet):
             used_values.add(instruction.struct)

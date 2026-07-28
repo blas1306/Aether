@@ -144,6 +144,38 @@ pub struct IRStructFieldDTO {
     pub r#type: IRTypeDTO,
 }
 
+/// Canonical witness metadata carried by interface construction.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct IRWitnessTableDTO {
+    /// Stable private LLVM symbol.
+    pub symbol: String,
+    /// Canonical implemented-interface identifier.
+    pub interface_id: String,
+    /// Canonical concrete-type identifier.
+    pub concrete_type_id: String,
+    /// Reserved carrier representation.
+    pub carrier_kind: String,
+    /// Future dispatch slots in declaration order.
+    pub method_slots: Vec<IRWitnessMethodSlotDTO>,
+    /// Native interface ABI version.
+    pub abi_version: i64,
+}
+
+/// One declaration-ordered future dispatch slot.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct IRWitnessMethodSlotDTO {
+    /// Zero-based declaration-order slot.
+    pub index: i64,
+    /// Stable nominal method identifier.
+    pub method_id: String,
+    /// Erased parameter types.
+    pub parameter_types: Vec<IRTypeDTO>,
+    /// Erased result type.
+    pub return_type: IRTypeDTO,
+}
+
 /// Function container in the wire schema.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
@@ -427,6 +459,11 @@ pub enum IRInstructionDTO {
         field_name: String,
         value: IRValueDTO,
         initialize: bool,
+    },
+    InterfaceConstruct {
+        result: IRValueDTO,
+        carrier: IRValueDTO,
+        witness: IRWitnessTableDTO,
     },
     StructGet {
         result: IRValueDTO,

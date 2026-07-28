@@ -96,6 +96,7 @@ from .model import (
     IREnumConstant,
     IRFunction,
     IRFunctionRef,
+    IRInterfaceConstruct,
     IRInstruction,
     IRInitDefault,
     IRJump,
@@ -718,6 +719,12 @@ class IRInterpreter:
                 else 0,
             )
             return False, None, None
+
+        if isinstance(instruction, IRInterfaceConstruct):
+            raise IRExecutionError(
+                "Native interface execution is unavailable in Phase 5.4A; "
+                "interface dispatch belongs to Phase 5.4B"
+            )
 
         if isinstance(instruction, IRClassGet):
             object_ = self._value(instruction.object, frame)

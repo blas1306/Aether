@@ -5,10 +5,11 @@ import re
 import struct
 from typing import Any, Callable
 
-from aether.ir.model import IREnumConstant
+from aether.ir.model import IREnumConstant, IRWitnessTable
+from aether.interface_abi import interface_type_symbol
 from aether.integer_arithmetic import INT_MAX, INT_MIN, is_aether_int
 from aether.string_value import STRING_SPLIT_BUILTIN, STRING_TRIM_BUILTIN
-from aether.ir.types import ArrayType, BoolType, ClassRefType, DoubleType, EnumType, FloatType, FunctionType, IntType, ListType, MatrixType, MethodResultType, NullableType, StringType, StructType, VectorType, VoidType
+from aether.ir.types import ArrayType, BoolType, ClassRefType, DoubleType, EnumType, FloatType, FunctionType, IntType, InterfaceType, ListType, MatrixType, MethodResultType, NullableType, StringType, StructType, VectorType, VoidType
 from aether.ssa.model import (
     SSAArrayCopy,
     SSAArrayGet,
@@ -25,6 +26,7 @@ from aether.ssa.model import (
     SSAClassGet,
     SSAClassNew,
     SSAClassSet,
+    SSAInterfaceConstruct,
     SSACompareOp,
     SSAConst,
     SSAFunction,
@@ -224,6 +226,7 @@ class LLVMPrinter:
         self._collection_copy_helpers: set[tuple[str, object]] = set()
         self._nullable_print_types: set[NullableType] = set()
         self._nullable_arc_helpers: set[tuple[NullableType, bool]] = set()
+        self._witnesses: dict[str, IRWitnessTable] = {}
         # Discover reference layouts before deciding which common runtime
         # declarations are needed.  Some nested uses surface only while
         # recursively materializing aggregate helpers later in this method.
@@ -240,6 +243,10 @@ class LLVMPrinter:
         nullable_types = [
             f"{llvm_type(type_)} = type {{ i1, {llvm_type(type_.inner)} }}"
             for type_ in self._collect_nullable_types(module)
+        ]
+        interface_types = [
+            f"{interface_type_symbol(type_.name)} = type {{ ptr, ptr }}"
+            for type_ in self._collect_interface_types(module)
         ]
         struct_types = [
             f"%struct.{definition.name} = type {{ "
@@ -549,6 +556,7 @@ class LLVMPrinter:
             for global_ in self._string_globals_by_value.values()
             if (rendered := self._print_string_global(global_))
         ]
+        witness_globals = self._print_witness_metadata()
         # Named aggregate bodies must precede every helper that performs a
         # typed GEP/load.  This also makes collection layout independent of
         # which user function happened to mention a struct first.
@@ -557,7 +565,16 @@ class LLVMPrinter:
             if native_entry
             else []
         )
-        sections = nullable_types + struct_types + runtime + globals_ + functions + wrappers
+        sections = (
+            interface_types
+            + nullable_types
+            + struct_types
+            + witness_globals
+            + runtime
+            + globals_
+            + functions
+            + wrappers
+        )
         return "\n\n".join(sections)
 
     @staticmethod
@@ -571,6 +588,40 @@ class LLVMPrinter:
             if isinstance(value, NullableType):
                 found.add(value)
                 visit(value.inner)
+                return
+            if value is None or isinstance(value, (str, bytes, int, float, bool)):
+                return
+            if isinstance(value, dict):
+                for key, item in value.items():
+                    visit(key)
+                    visit(item)
+                return
+            if isinstance(value, (list, tuple, set, frozenset)):
+                for item in value:
+                    visit(item)
+                return
+            if not is_dataclass(value):
+                return
+            identity = id(value)
+            if identity in visited:
+                return
+            visited.add(identity)
+            for field in fields(value):
+                visit(getattr(value, field.name))
+
+        visit(module)
+        return sorted(found, key=str)
+
+    @staticmethod
+    def _collect_interface_types(module: SSAModule) -> list[InterfaceType]:
+        """Collect every named two-word interface body required by a module."""
+
+        found: set[InterfaceType] = set()
+        visited: set[int] = set()
+
+        def visit(value: object) -> None:
+            if isinstance(value, InterfaceType):
+                found.add(value)
                 return
             if value is None or isinstance(value, (str, bytes, int, float, bool)):
                 return
@@ -739,6 +790,8 @@ class LLVMPrinter:
             return "\n  ".join(self._print_class_get(instruction))
         if isinstance(instruction, SSAClassSet):
             return "\n  ".join(self._print_class_set(instruction))
+        if isinstance(instruction, SSAInterfaceConstruct):
+            return "\n  ".join(self._print_interface_construct(instruction))
         if isinstance(instruction, SSAStructGet):
             return self._print_struct_get(instruction)
         if isinstance(instruction, SSAStructSet):
@@ -858,6 +911,7 @@ class LLVMPrinter:
                 SSAArrayNew,
                 SSAClassNew,
                 SSAClassGet,
+                SSAInterfaceConstruct,
                 SSAArrayCopy,
                 SSAArrayGet,
                 SSAArraySlice,
@@ -1808,6 +1862,16 @@ class LLVMPrinter:
             operation = "retain" if retain else "release"
             lines.append(f"call void @aether_class_{operation}(ptr {operand})")
             return
+        if isinstance(type_, InterfaceType):
+            operation = "retain" if retain else "release"
+            carrier = self._synthetic_temp(f"interface.{operation}.carrier")
+            lines.append(
+                f"{carrier} = extractvalue {llvm_type(type_)} {operand}, 0"
+            )
+            # Phase 5.4A admits class carriers only.  The witness is immortal
+            # metadata and therefore never retained or released.
+            lines.append(f"call void @aether_class_{operation}(ptr {carrier})")
+            return
         if isinstance(type_, (ArrayType, ListType)):
             kind = "array" if isinstance(type_, ArrayType) else "list"
             helper = self._require_collection_object_arc_helper(
@@ -2584,6 +2648,35 @@ class LLVMPrinter:
         if old is not None:
             self._emit_arc_value(lines, old, field_type, retain=False)
         return lines
+
+    def _print_interface_construct(
+        self,
+        instruction: SSAInterfaceConstruct,
+    ) -> list[str]:
+        if not isinstance(instruction.result.type, InterfaceType):
+            raise LLVMBackendError(
+                "LLVM interface_construct result must be an InterfaceType"
+            )
+        if not isinstance(instruction.carrier.type, ClassRefType):
+            raise LLVMBackendError(
+                "LLVM interface_construct supports class carriers only; "
+                "boxing belongs to Phase 5.4C"
+            )
+        existing = self._witnesses.get(instruction.witness.symbol)
+        if existing is not None and existing != instruction.witness:
+            raise LLVMBackendError(
+                f"LLVM witness symbol collision for {instruction.witness.symbol}"
+            )
+        self._witnesses[instruction.witness.symbol] = instruction.witness
+        result_type = llvm_type(instruction.result.type)
+        carrier_insert = self._synthetic_temp("interface.carrier")
+        result = self._new_temp(instruction.result)
+        return [
+            f"{carrier_insert} = insertvalue {result_type} undef, "
+            f"ptr {self._operand(instruction.carrier)}, 0",
+            f"{result} = insertvalue {result_type} {carrier_insert}, "
+            f"ptr @{instruction.witness.symbol}, 1",
+        ]
 
     def _print_struct_set(self, instruction: SSAStructSet) -> str:
         result = self._new_temp(instruction.result)
@@ -4559,6 +4652,71 @@ class LLVMPrinter:
         self._next_string_global += 1
         self._string_globals_by_value[value] = global_
         return global_
+
+    def _print_witness_metadata(self) -> list[str]:
+        if not self._witnesses:
+            return []
+        sections = [
+            "%AetherWitnessHeader = type { ptr, ptr, i32, i32, ptr, ptr }",
+            "%AetherWitnessSlot = type { i32, ptr, ptr }",
+        ]
+        for witness in sorted(
+            self._witnesses.values(),
+            key=lambda item: (
+                item.interface_id,
+                item.concrete_type_id,
+                item.symbol,
+            ),
+        ):
+            identifiers = [
+                (f"@{witness.symbol}.interface_id", witness.interface_id),
+                (f"@{witness.symbol}.concrete_type_id", witness.concrete_type_id),
+                *[
+                    (f"@{witness.symbol}.method.{slot.index}.id", slot.method_id)
+                    for slot in witness.method_slots
+                ],
+            ]
+            for name, value in identifiers:
+                encoded = value.encode("utf-8") + b"\0"
+                sections.append(
+                    f"{name} = private unnamed_addr constant "
+                    f"[{len(encoded)} x i8] c\"{self._escape_string_initializer(encoded)}\""
+                )
+            interface_size = len(witness.interface_id.encode("utf-8")) + 1
+            concrete_size = len(witness.concrete_type_id.encode("utf-8")) + 1
+            header = (
+                "%AetherWitnessHeader { "
+                f"ptr getelementptr ([{interface_size} x i8], "
+                f"ptr @{witness.symbol}.interface_id, i64 0, i64 0), "
+                f"ptr getelementptr ([{concrete_size} x i8], "
+                f"ptr @{witness.symbol}.concrete_type_id, i64 0, i64 0), "
+                f"i32 {witness.abi_version}, "
+                f"i32 {len(witness.method_slots)}, "
+                "ptr null, ptr null }"
+            )
+            slot_type = (
+                f"[{len(witness.method_slots)} x %AetherWitnessSlot]"
+            )
+            if witness.method_slots:
+                slot_values = []
+                for slot in witness.method_slots:
+                    method_size = len(slot.method_id.encode("utf-8")) + 1
+                    slot_values.append(
+                        "%AetherWitnessSlot { "
+                        f"i32 {slot.index}, "
+                        f"ptr getelementptr ([{method_size} x i8], "
+                        f"ptr @{witness.symbol}.method.{slot.index}.id, "
+                        "i64 0, i64 0), ptr null }"
+                    )
+                slots = f"{slot_type} [ " + ", ".join(slot_values) + " ]"
+            else:
+                slots = f"{slot_type} zeroinitializer"
+            sections.append(
+                f"@{witness.symbol} = private constant "
+                f"{{ %AetherWitnessHeader, {slot_type} }} "
+                f"{{ {header}, {slots} }}"
+            )
+        return sections
 
     @staticmethod
     def _print_string_global(global_: _StringGlobal) -> str:

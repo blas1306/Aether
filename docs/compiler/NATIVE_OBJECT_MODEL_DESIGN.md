@@ -1,9 +1,10 @@
 # Modelo nativo de objetos por referencia
 
-> Clasificación: **Design/RFC — Phase 5.1, implementación Phase 5.3C**.
+> Clasificación: **Design/RFC — Phase 5.1, implementación Phase 5.4A**.
 > Actualizado: **28 de julio de 2026**. Referencias, payload, fields,
 > constructores, métodos concretos y ARC class están implementados en native.
-> Interfaces y dispatch continúan gated.
+> El ABI de interfaces y witness tables está implementado en 5.4A. Dispatch
+> dinámico continúa gated para 5.4B y boxing de structs para 5.4C.
 
 ## 1. Alcance y fuentes de verdad
 
@@ -341,8 +342,8 @@ Esto no amplía `Eq`: si `T` no tiene igualdad, `T?` tampoco la obtiene. Por
 ello el layout permite comprobar el tag, pero la disponibilidad de un operador
 source sigue siendo decisión del typechecker actual. La Fase 5.3A define
 `Eq(Class)` por identidad del objeto, así que `Class?` hereda esa igualdad;
-`Interface?` continúa sin `Eq` mientras su representación y witnesses sigan
-fuera del subset native.
+`Interface?` continúa sin `Eq`: Phase 5.4A incorpora representación y witness
+identity, pero no define igualdad source ni dispatch.
 
 ## 7. Representación de interfaces
 
@@ -360,36 +361,54 @@ objeto. El valor erased es:
 
 Para una interface no nullable ambos punteros son válidos y no nulos. Un
 interface nullable envuelve el agregado completo en el tag de la sección 6.
+El agregado mide dos palabras target y su alineación es la alineación de `ptr`;
+LLVM decide padding/DataLayout. Se pasa y retorna por valor según la ABI de
+agregados del target. En storage, IR y SSA siempre es un único valor tipado, no
+dos SSA values independientes.
 
-La witness table es una global privada por par
-`(tipo concreto, interface nominal)`:
+La witness table es metadata inmortal y una global privada por par
+`(tipo concreto, interface nominal)`. Phase 5.4A materializa exactamente:
 
 ```text
-concrete_type_descriptor
-copy_owned(carrier) -> owned carrier
-drop_owned(carrier)
-method_slot_0
-method_slot_1
-...
+header:
+    interface_id: ptr
+    concrete_type_id: ptr
+    abi_version: i32
+    method_slot_count: i32
+    future_copy_owned: ptr = null
+    future_drop_owned: ptr = null
+method_slots[N]:
+    index: i32
+    method_id: ptr
+    future_dispatch: ptr = null
 ```
 
 Los slots siguen el orden de declaración de la interface. Como no existe
 interface inheritance, defaults ni overloads, no se necesita resolución
 adicional. El orden es ABI interna y debe regenerarse conjuntamente; no es una
-FFI estable.
+FFI estable. El símbolo se deriva únicamente de los IDs UTF-8 canónicos,
+longitudes, bytes hex y un digest estable; no depende del path ni del orden de
+recorrido. Las tablas se imprimen ordenadas por `(interface_id,
+concrete_type_id, symbol)`.
+
+En IR, `interface_construct result, carrier, witness` conserva el par y lleva
+la metadata completa por DTO. En SSA el par sigue siendo un único valor
+agregado nominal; parámetros, returns y phis transportan ese valor sin separar
+ni reconstruir sus componentes. Optimización puede eliminar una construcción
+sólo cuando todo el valor está muerto; si está vivo debe preservar carrier e
+identidad exacta del witness.
 
 ### 7.2 Carrier de class
 
 Cuando una class implementa la interface:
 
 - `carrier` es el mismo handle a la instancia class;
-- construir un interface owned desde la class hace retain salvo transferencia
-  probada de un owner;
-- `copy_owned` hace retain y devuelve el mismo carrier;
-- `drop_owned` hace release;
-- los method thunks adaptan el receiver erased al método concreto;
-- una mutación mediante interface cambia la instancia observada por todos los
-  aliases class/interface.
+- construir un interface consume un owner temporal o retiene un carrier
+  borrowed;
+- copiar/retener el interface retiene solamente el carrier;
+- destruir/liberar el interface libera solamente el carrier;
+- el witness no se retiene ni libera: es metadata inmutable e inmortal;
+- los method thunks y calls indirectas todavía no existen en 5.4A.
 
 No se reserva una caja adicional en esta conversión. La identidad de la class
 no cambia ni se introduce una segunda capa de objeto.
@@ -397,7 +416,9 @@ no cambia ni se introduce una segunda capa de objeto.
 ### 7.3 Carrier de struct
 
 Un puntero a un struct temporal o de stack no puede escapar dentro de una
-interface. La conversión a un interface owned reserva una caja existential:
+interface. Phase 5.4A reserva el carrier como puntero a una futura caja
+existential, pero rechaza toda conversión struct→interface con un diagnóstico
+de Phase 5.4C. El layout `{carrier,witness}` no cambiará cuando se agregue:
 
 ```text
 struct-interface box:
@@ -421,9 +442,10 @@ Una optimización puede evitar la caja para un interface estrictamente borrowed,
 no escapable y con lifetime probado, pero la forma owned canónica siempre es la
 caja. La optimización no puede cambiar aliasing, dispatch ni cleanup.
 
-### 7.4 Lifecycle dinámico
+### 7.4 Lifecycle dinámico futuro (Phase 5.4C)
 
-El tipo estático interface no conoce si el concreto es class o struct. Por eso:
+Cuando se admita carrier struct, el tipo estático interface no conocerá si el
+concreto es class o struct. El contrato futuro será:
 
 ```text
 copy_init(dst, src):
@@ -723,26 +745,25 @@ la política actual de módulo combinado compilado por Clang host.
 
 ### 11.2 Initial IR y SSA
 
-El IR ya admite nominalmente `ClassRefType`, `InterfaceType` y `NullableType`,
-pero no define sus instrucciones, layout o lifecycle. Esa presencia no cuenta
-como implementación.
+El IR y SSA admiten `ClassRefType`, `InterfaceType` y `NullableType`. Phase
+5.4A define para interfaces:
 
-Una fase futura deberá representar explícitamente:
+- tipo nominal `InterfaceType`;
+- `IRInterfaceConstruct`/`SSAInterfaceConstruct`;
+- witness metadata versionada y determinista en DTO Python/Rust;
+- conversión class→interface;
+- lifecycle de carrier class en locals, parameters, returns, phis, nullable,
+  Array y List;
+- representación LLVM nominal `{ptr carrier, ptr witness}` y globals
+  constantes.
 
-- definiciones nominales de class/interface y sus IDs canónicos;
-- construcción y acceso/mutación de class;
-- conversión concreta a interface;
-- interface call por slot/firma;
-- construcción/test/extracción de nullable;
-- ownership de resultados, carriers y payloads;
-- efectos de allocation, memory, retain/release e indirect calls.
+Las calls por slot, function pointers no nulos, boxing y adapters siguen
+ausentes y se diagnostican explícitamente.
 
-Lifecycle debe expandirse después de verificar Initial IR y antes de SSA, como
-en el pipeline actual. SSA conserva tipos nominales, dominancia y phis, pero un
-phi owned no crea owners implícitos. El verificador Rust deberá importar y
-validar el mismo schema antes de cualquier promoción de autoridad.
-
-Este RFC no prescribe nombres finales de opcodes ni modifica el schema actual.
+Lifecycle se expande después de verificar Initial IR y antes de SSA. SSA
+conserva tipos nominales, dominancia y phis, pero un phi owned no crea owners
+implícitos. Los verificadores Python y Rust importan y validan el mismo schema
+DTO v1, incluida la identidad y el orden de slots del witness.
 
 ### 11.3 Structs
 
@@ -855,16 +876,19 @@ resultados owning se transfieren al caller. No reutiliza `MethodResultType`,
 reservado a value receivers struct. Las calls ordinarias conservan efectos de
 memoria y lifecycle a través de IR, SSA, optimizadores y LLVM.
 
-### 12.4 Fase siguiente D — interfaces
+### 12.4 Interfaces
 
-1. ABI `{carrier,witness}`;
-2. witness tables deterministas cross-module;
-3. carrier class sin box;
-4. caja y clone/drop para struct;
-5. thunks que preserven ambos ABIs de método;
-6. dispatch, mutation, const y ownership dinámicos;
-7. interfaces en nullable/structs/collections;
-8. tests de value/reference semantics y devirtualización prohibida.
+**Phase 5.4A completada:** ABI `{carrier,witness}`, witness tables
+deterministas, carrier class sin box, IR/SSA/DTO/verifiers Python y Rust,
+LLVM, lifecycle class-only, nullable y colecciones. El witness conserva slots
+de dispatch nulos como reserva ABI.
+
+**Phase 5.4B pendiente:** poblar slots con thunks, calls indirectas,
+validación de firma/slot, mutación y ownership a través de dispatch. No incluye
+boxing.
+
+**Phase 5.4C pendiente:** caja struct, clone/drop adapters y lifecycle
+dinámico decidido por witness, sin cambiar las dos palabras del valor.
 
 ### 12.5 Fase siguiente E — lifetime avanzado
 
@@ -904,15 +928,15 @@ memoria y lifecycle a través de IR, SSA, optimizadores y LLVM.
 | Restricción del repositorio | Comprobación |
 | --- | --- |
 | Backend LLVM actual | Usa opaque pointers, named aggregates, target layout e indirect calls ya compatibles. No exige cambio inmediato. |
-| IR existente | Conserva los tipos nominales actuales; reconoce que faltan opcodes/lifecycle y no los declara implementados. |
-| SSA/verifiers | Mantiene lifecycle antes de SSA, efectos obligatorios y ownership de phis; exige extensión coordinada Python/Rust futura. |
+| IR existente | `InterfaceType` y `interface_construct` conservan carrier+witness y metadata ABI. Dispatch sigue sin opcode. |
+| SSA/verifiers | Lifecycle antes de SSA, phis agregados y verificación coordinada Python/Rust implementados para carrier class. |
 | Structs | No cambia layout, paso/return, copy recursivo ni MethodResultType. La caja interface vive fuera del struct. |
 | String ARC | Mantiene handle no nulo, header propio y retain/release. `string?` usa wrapper/tag independiente como requería su RFC. |
 | Array/List | Mantiene aliasing, headers y RC. Nuevos elementos usarán hooks type-directed. |
 | Paridad | Sigue el grafo auditado: reference layout/lifecycle antes de class; erased ABI antes de interface; nullable como rama independiente. |
 | Const | Reproduce la restricción por access path y el corte al atravesar class que aplica el frontend actual. |
 | Igualdad | Phase 5.3A agrega Eq por identidad al tipo IR class; interfaces y equality definida por usuario siguen fuera. |
-| Perfil native | Nullable y class state/constructors/methods son E2E; interfaces continúan gated. |
+| Perfil native | Nullable, classes y Native Interface ABI son E2E; interface dispatch y boxing continúan gated. |
 
 ## 15. Criterios de entrada para implementación
 
@@ -930,7 +954,8 @@ Antes de comenzar código de una de las ramas debe aprobarse:
 
 `NullableType` tiene soporte native E2E. `ClassRefType` tiene layout, payload,
 construcción source, métodos directos, lifecycle y transporte ejecutables
-desde 5.3C; `InterfaceType` sigue sin layout.
+desde 5.3C. `InterfaceType` tiene desde 5.4A layout, construcción class-only,
+lifecycle, DTO, SSA, LLVM y verifier; no tiene dispatch ni boxing.
 
 ## 16. Fuera de alcance
 
@@ -953,7 +978,7 @@ Cada una de esas features requiere un RFC separado. El descriptor y los thunks
 de este diseño dejan puntos de extensión, pero no anticipan semántica que el
 lenguaje actual no posee.
 
-## 17. Estado y frontera de Phase 5.3C
+## 17. Estado y frontera de Phase 5.4A
 
 Completado: handle nominal; allocation de objeto completo; layout determinista
 de fields; DTO y verificación Python/Rust; constructor posicional y explícito;
@@ -964,6 +989,8 @@ recursión, calls anidadas, `this` explícito/implícito y alias-visible mutatio
 LLVM válido en O0/O1/O2.
 
 La superficie native admite classes concretas con fields, constructores y
-métodos de dispatch estático. Interfaces, inheritance, dispatch dinámico,
-destructores de usuario, exceptions/unwind, weak refs, GC y cycle collection
-siguen posteriores. ARC fuerte no recolecta ciclos.
+métodos de dispatch estático, y convertir una class a un valor interface
+transportable `{carrier,witness}`. Interface method calls, inheritance,
+dispatch dinámico, boxing/adapters de struct, destructores de usuario,
+exceptions/unwind, weak refs, GC y cycle collection siguen posteriores. ARC
+fuerte no recolecta ciclos.

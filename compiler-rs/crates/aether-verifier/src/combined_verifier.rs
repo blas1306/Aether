@@ -734,6 +734,9 @@ fn classify_instruction(instruction: &IRInstruction, rule: &TypeRuleError) -> Cl
         IRInstruction::IRClassSet { .. } => {
             classified("IRV-127", VerificationErrorCategory::Structs)
         }
+        IRInstruction::IRInterfaceConstruct { .. } => {
+            classified("IRV-128", VerificationErrorCategory::Instructions)
+        }
         IRInstruction::IRStructGet { .. } => {
             classified("IRV-080", VerificationErrorCategory::Structs)
         }

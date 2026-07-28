@@ -35,7 +35,9 @@ def _source(tmp_path: Path, text: str) -> Path:
         ("int main( {\n", "Aether syntax error [AE-SYNTAX-001]"),
         ('int main() { int value = "bad"; return value; }\n', "Aether type error [AE-TYPE-001]"),
         (
-            "interface Counter { int get(); }\n",
+            "interface Counter { int get(); }\n"
+            "class Box implements Counter { public int get() { return 1; } }\n"
+            "int main() { Box box = Box(); Counter value = box; return value.get(); }\n",
             "Aether capability error [AE-BACKEND-INTERFACES]",
         ),
     ],

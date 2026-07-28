@@ -299,6 +299,9 @@ pub(crate) fn ssa_operands(instruction: &IRInstruction) -> Vec<SSAOperand<'_>> {
         IRInstruction::IRClassSet { object, value, .. } => {
             vec![operand("object", object), operand("value", value)]
         }
+        IRInstruction::IRInterfaceConstruct { carrier, .. } => {
+            vec![operand("carrier", carrier)]
+        }
         IRInstruction::IRStructSet {
             r#struct, value, ..
         } => vec![operand("struct", r#struct), operand("value", value)],

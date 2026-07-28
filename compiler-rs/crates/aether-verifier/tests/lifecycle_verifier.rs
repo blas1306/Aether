@@ -547,14 +547,14 @@ fn checks_lifecycle_operation_types_and_python_type_traits() {
         LifecycleRuleError::OperationTypeMismatch { .. }
     ));
 
-    let class_type: IRType = InterfaceType {
+    let interface_type: IRType = InterfaceType {
         name: "Object".to_owned(),
     }
     .into();
-    let source = storage("source", class_type.clone());
-    let destination = storage("destination", class_type);
-    let non_relocatable = module(function(
-        "non_relocatable",
+    let source = storage("source", interface_type.clone());
+    let destination = storage("destination", interface_type);
+    let interface_relocatable = module(function(
+        "interface_relocatable",
         Vec::new(),
         vec![block(
             "merge",
@@ -566,13 +566,10 @@ fn checks_lifecycle_operation_types_and_python_type_traits() {
             }],
         )],
     ));
-    assert!(matches!(
-        block_error(&function_error(&non_relocatable)).source,
-        LifecycleRuleError::InvalidLifecycleType {
-            operation: LifecycleOperation::Relocate,
-            ..
-        }
-    ));
+    assert_eq!(
+        verify_module_local_lifecycle(&interface_relocatable),
+        Ok(())
+    );
 
     let class_type: IRType = ClassRefType {
         name: "Object".to_owned(),

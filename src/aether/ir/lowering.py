@@ -8,6 +8,7 @@ from typing import NoReturn
 from .. import ast
 from ..errors import IRBackendUnsupportedFeatureError
 from ..integer_arithmetic import INT_MAX, INT_MIN, is_aether_int
+from ..interface_abi import INTERFACE_ABI_VERSION, witness_symbol
 from ..scalar_math import NATIVE_SCALAR_MATH_FUNCTIONS, SCALAR_MATH_CONSTANTS
 from ..string_parsing import (
     DOUBLE_PARSE_RESULT_TYPE,
@@ -44,6 +45,7 @@ from ..types import (
     ClassType as AetherClassType,
     EnumType as AetherEnumType,
     FunctionType as AetherFunctionType,
+    InterfaceType as AetherInterfaceType,
     ListType as AetherListType,
     MatrixType as AetherMatrixType,
     NullType as AetherNullType,
@@ -67,6 +69,7 @@ from .model import (
     IRClassGet,
     IRClassNew,
     IRClassSet,
+    IRInterfaceConstruct,
     IRCompareOp,
     IRConst,
     IRCopyInit,
@@ -121,6 +124,8 @@ from .model import (
     IRStore,
     IRUnaryOp,
     IRValue,
+    IRWitnessMethodSlot,
+    IRWitnessTable,
     IRVectorGet,
     IRVectorAdd,
     IRVectorDot,
@@ -140,6 +145,7 @@ from .types import (
     EnumType,
     FloatType,
     FunctionType,
+    InterfaceType,
     IntType,
     IRType,
     ListType,
@@ -294,6 +300,9 @@ class IRLowerer:
         self._structs: dict[str, _StructInfo] = {}
         self._struct_names: set[str] = set()
         self._class_names: set[str] = set()
+        self._interface_names: set[str] = set()
+        self._interfaces: dict[str, ast.InterfaceDeclaration] = {}
+        self._witnesses: dict[tuple[str, str], IRWitnessTable] = {}
         self._enums: dict[str, _EnumInfo] = {}
         self._aliases: dict[str, AetherType] = {}
         self._method_names: dict[tuple[str, str], str] = {}
@@ -356,6 +365,13 @@ class IRLowerer:
             for declaration in declarations
             if isinstance(declaration, ast.ClassDeclaration)
         }
+        self._interfaces = {
+            statement.name: statement
+            for statement in program.statements
+            if isinstance(statement, ast.InterfaceDeclaration)
+        }
+        self._interface_names = set(self._interfaces)
+        self._witnesses = {}
         self._structs = {
             declaration.name: _StructInfo(
                 declaration,
@@ -388,6 +404,8 @@ class IRLowerer:
             elif isinstance(statement, ast.AliasDeclaration):
                 continue
             elif isinstance(statement, ast.EnumDeclaration):
+                continue
+            elif isinstance(statement, ast.InterfaceDeclaration):
                 continue
             else:
                 self._unsupported(statement)
@@ -452,6 +470,8 @@ class IRLowerer:
             elif isinstance(statement, ast.AliasDeclaration):
                 continue
             elif isinstance(statement, ast.EnumDeclaration):
+                continue
+            elif isinstance(statement, ast.InterfaceDeclaration):
                 continue
             else:
                 self._unsupported(statement)
@@ -2768,6 +2788,12 @@ class IRLowerer:
         node: object,
     ) -> IRValue | None:
         receiver = self._lower_expression(target_expression, context)
+        if isinstance(receiver.type, InterfaceType):
+            self._fail(
+                "Native interface dispatch is not implemented in Phase 5.4A; "
+                "interface method calls belong to Phase 5.4B.",
+                node,
+            )
         if method_name == "trim" and isinstance(receiver.type, StringType):
             if argument_expressions:
                 self._fail("IR string.trim() expects zero arguments.", node)
@@ -3545,7 +3571,13 @@ class IRLowerer:
     ) -> IRValue:
         if target_type is None or value.type == target_type:
             return value
+        if isinstance(target_type, InterfaceType):
+            return self._construct_interface(value, target_type, context)
         if isinstance(target_type, NullableType):
+            if isinstance(target_type.inner, InterfaceType) and not isinstance(
+                value.type, NullableType
+            ):
+                value = self._construct_interface(value, target_type.inner, context)
             source_type = value.type.inner if isinstance(value.type, NullableType) else value.type
             if source_type == target_type.inner or (
                 isinstance(source_type, IntType)
@@ -3559,6 +3591,81 @@ class IRLowerer:
             context.block.instructions.append(IRCast(result, value))
             return result
         return value
+
+    def _construct_interface(
+        self,
+        value: IRValue,
+        target_type: InterfaceType,
+        context: _FunctionContext,
+    ) -> IRValue:
+        if isinstance(value.type, InterfaceType):
+            if value.type == target_type:
+                return value
+            self._fail(
+                "Native interface-to-interface casts are unsupported in Phase 5.4A; "
+                "interface adaptation belongs to Phase 5.4B."
+            )
+        if isinstance(value.type, StructType):
+            self._fail(
+                f"Native conversion from struct '{value.type.name}' to interface "
+                f"'{target_type.name}' requires boxing; boxing and struct adapters "
+                "belong to Phase 5.4C."
+            )
+        if not isinstance(value.type, ClassRefType):
+            self._fail(
+                f"Native cast from '{value.type}' to interface '{target_type.name}' "
+                "is unsupported in Phase 5.4A; no fallback conversion is available."
+            )
+        info = self._structs.get(value.type.name)
+        if info is None or target_type.name not in info.declaration.implements:
+            self._fail(
+                f"Native class '{value.type.name}' does not implement interface "
+                f"'{target_type.name}'; unsupported interface casts never fall back."
+            )
+        witness = self._witness_for(value.type, target_type)
+        result = context.temporary(target_type)
+        context.block.instructions.append(
+            IRInterfaceConstruct(result, value, witness)
+        )
+        return result
+
+    def _witness_for(
+        self,
+        concrete_type: ClassRefType,
+        interface_type: InterfaceType,
+    ) -> IRWitnessTable:
+        key = (interface_type.name, concrete_type.name)
+        existing = self._witnesses.get(key)
+        if existing is not None:
+            return existing
+        declaration = self._interfaces.get(interface_type.name)
+        if declaration is None:
+            self._fail(
+                f"IR backend cannot resolve interface '{interface_type.name}' "
+                "while generating witness metadata."
+            )
+        slots = tuple(
+            IRWitnessMethodSlot(
+                index,
+                f"{interface_type.name}.{method.name}",
+                tuple(
+                    self._lower_type(parameter.type_name)
+                    for parameter in method.parameters
+                ),
+                self._lower_type(method.return_type),
+            )
+            for index, method in enumerate(declaration.methods)
+        )
+        witness = IRWitnessTable(
+            witness_symbol(interface_type.name, concrete_type.name),
+            interface_type.name,
+            concrete_type.name,
+            "class",
+            slots,
+            INTERFACE_ABI_VERSION,
+        )
+        self._witnesses[key] = witness
+        return witness
 
     def _coerce_numeric_operands(
         self,
@@ -3690,6 +3797,12 @@ class IRLowerer:
                     f"IR backend cannot resolve class type '{type_name.name}'."
                 )
             return ClassRefType(type_name.name)
+        if isinstance(type_name, AetherInterfaceType):
+            if type_name.name not in self._interface_names:
+                self._fail(
+                    f"IR backend cannot resolve interface type '{type_name.name}'."
+                )
+            return InterfaceType(type_name.name)
         if isinstance(type_name, AetherFunctionType):
             return FunctionType(
                 tuple(self._lower_type(item) for item in type_name.parameter_types),
@@ -3708,6 +3821,8 @@ class IRLowerer:
             return StructType(type_name)
         if isinstance(type_name, str) and type_name in self._class_names:
             return ClassRefType(type_name)
+        if isinstance(type_name, str) and type_name in self._interface_names:
+            return InterfaceType(type_name)
         if isinstance(type_name, str) and type_name in self._enums:
             return self._enums[type_name].type
         self._fail(f"IR backend does not support type '{type_name}' yet.")

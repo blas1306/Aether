@@ -1685,11 +1685,7 @@ impl<'module> LifecycleTypeRegistry<'module> {
                     )
                 }
             }
-            IRType::ClassRef(_) => LifecycleTraits::valid(true, false, true),
-            IRType::Interface(_) => LifecycleTraits::invalid(
-                "lifecycle layout is not defined",
-                format!("lifecycle layout for '{type}' is not defined"),
-            ),
+            IRType::ClassRef(_) | IRType::Interface(_) => LifecycleTraits::valid(true, false, true),
             IRType::Void(_) => {
                 LifecycleTraits::invalid("void has no storage", "void has no storage")
             }

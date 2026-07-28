@@ -196,7 +196,8 @@ plugin ejecute ese backend.
 | Class fields/methods/constructors | Implemented | nominal/visibility/mutabilidad | Implemented | `ClassRefType`, new/get/set y métodos como funciones directas | refs/phis/calls verificadas | `R C.method(ptr this, ...)` | ARC + dispatch concreto estático | symbols/completion | AST/IR/SSA/native O0/O1/O2 | Implemented para classes concretas |
 | Class reference semantics | Implemented | Implemented | alias por assignment/arg/return | handle nominal y lifecycle | referencias preservan identidad | opaque `ptr` borrowed/owned por posición | mutación alias-visible, sin COW | N/A | aliasing + lifecycle | Implemented |
 | Class `this` / visibility | Implemented | public/private; `this` const | Implemented | receiver borrowed sin storage owning | CFG/SSA conserva parámetro | primer parámetro `ptr` | explícito/implícito, sin retain por referencia | completion filtra privados | reads/writes/self-calls/recursión | Implemented |
-| Interfaces y dispatch | Implemented | conformidad nominal | dispatch struct/class | No | No | No | No | completion/symbols | tests | AST-only |
+| Native Interface ABI | Implemented | conformidad nominal | construcción class→interface | `InterfaceType`, `interface_construct`, witness metadata | valores/phis y optimizadores | `{ptr carrier, ptr witness}` + tablas constantes | transporte/ARC carrier-only; sin calls | completion/symbols | ABI/DTO/verifier/LLVM | Implemented 5.4A |
+| Interface dispatch/boxing | Implemented | conformidad nominal | dispatch struct/class | diagnóstico Phase 5.4B/5.4C | No dispatch | slots `ptr null`; no calls | No | completion/symbols | negativos dedicados | AST-only |
 | Enums | variantes sin payload | nominal/equality | Implemented | declaración rechazada | No | No | No | variants completion | tests | AST-only |
 | Enum payloads | Sin sintaxis | No | No | No | No | No | No | No | No | Not implemented |
 | Genéricos de usuario | Formas genéricas se rechazan | No | No | No | No | No | No | No | interfaz negativa | Parsed but rejected |
@@ -408,8 +409,9 @@ están cerrados por P2.
 
 7. Decidir Array copy/equality y List slicing/equality en backend antes de
    ampliar APIs.
-8. Migrar por bloques separados: enums primero; structs value-type; classes e
-   interfaces después, con ABI/ownership explícitos.
+8. Migrar por bloques separados: enums primero; structs value-type; classes;
+   Native Interface ABI 5.4A ya cerrado; dispatch y boxing permanecen fases
+   separadas.
 9. Caracterizar arrays anidados native y cerrar su estado `Unknown`.
 
 ### P3 — tooling

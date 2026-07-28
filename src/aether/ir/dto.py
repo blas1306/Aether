@@ -23,6 +23,7 @@ from .model import (
     IRClassGet,
     IRClassNew,
     IRClassSet,
+    IRInterfaceConstruct,
     IRCast,
     IRCompareOp,
     IRConst,
@@ -80,6 +81,8 @@ from .model import (
     IRStructSet,
     IRUnaryOp,
     IRValue,
+    IRWitnessMethodSlot,
+    IRWitnessTable,
     IRVectorAdd,
     IRVectorDot,
     IRVectorGet,
@@ -318,6 +321,111 @@ def ir_enum_constant_to_dto(
         "member_id": value.member_id,
         "discriminant": value.discriminant,
     }
+
+
+def _witness_to_dto(
+    witness: IRWitnessTable,
+    *,
+    schema_version: int,
+) -> dict[str, object]:
+    if type(witness) is not IRWitnessTable:
+        raise TypeError(
+            f"Unsupported witness metadata for schema v{IR_SCHEMA_VERSION}: "
+            f"{type(witness).__name__}"
+        )
+    return {
+        "symbol": _expect_string(witness.symbol, "IR witness symbol"),
+        "interface_id": _expect_string(
+            witness.interface_id, "IR witness interface_id"
+        ),
+        "concrete_type_id": _expect_string(
+            witness.concrete_type_id, "IR witness concrete_type_id"
+        ),
+        "carrier_kind": _expect_string(
+            witness.carrier_kind, "IR witness carrier_kind"
+        ),
+        "abi_version": _expect_i64(
+            witness.abi_version, "IR witness abi_version"
+        ),
+        "method_slots": [
+            {
+                "index": _expect_i64(slot.index, "IR witness slot index"),
+                "method_id": _expect_string(
+                    slot.method_id, "IR witness slot method_id"
+                ),
+                "parameter_types": [
+                    ir_type_to_dto(type_, schema_version=schema_version)
+                    for type_ in slot.parameter_types
+                ],
+                "return_type": ir_type_to_dto(
+                    slot.return_type, schema_version=schema_version
+                ),
+            }
+            for slot in witness.method_slots
+        ],
+    }
+
+
+def _witness_from_dto(
+    value: object,
+    *,
+    schema_version: int,
+) -> IRWitnessTable:
+    mapping = _expect_mapping(value, "IR witness")
+    _expect_fields(
+        mapping,
+        {
+            "symbol",
+            "interface_id",
+            "concrete_type_id",
+            "carrier_kind",
+            "abi_version",
+            "method_slots",
+        },
+        "IR witness",
+    )
+    raw_slots = _expect_sequence(mapping["method_slots"], "IR witness method_slots")
+    slots: list[IRWitnessMethodSlot] = []
+    for slot_index, raw_slot in enumerate(raw_slots):
+        slot = _expect_mapping(raw_slot, f"IR witness method_slots[{slot_index}]")
+        _expect_fields(
+            slot,
+            {"index", "method_id", "parameter_types", "return_type"},
+            f"IR witness method_slots[{slot_index}]",
+        )
+        raw_parameters = _expect_sequence(
+            slot["parameter_types"],
+            f"IR witness method_slots[{slot_index}].parameter_types",
+        )
+        slots.append(
+            IRWitnessMethodSlot(
+                _expect_i64(
+                    slot["index"],
+                    f"IR witness method_slots[{slot_index}].index",
+                ),
+                _expect_string(
+                    slot["method_id"],
+                    f"IR witness method_slots[{slot_index}].method_id",
+                ),
+                tuple(
+                    ir_type_from_dto(type_, schema_version=schema_version)
+                    for type_ in raw_parameters
+                ),
+                ir_type_from_dto(
+                    slot["return_type"], schema_version=schema_version
+                ),
+            )
+        )
+    return IRWitnessTable(
+        _expect_string(mapping["symbol"], "IR witness symbol"),
+        _expect_string(mapping["interface_id"], "IR witness interface_id"),
+        _expect_string(
+            mapping["concrete_type_id"], "IR witness concrete_type_id"
+        ),
+        _expect_string(mapping["carrier_kind"], "IR witness carrier_kind"),
+        tuple(slots),
+        _expect_i64(mapping["abi_version"], "IR witness abi_version"),
+    )
 
 
 def ir_enum_constant_from_dto(
@@ -809,6 +917,19 @@ def _encode_instruction_to_dto(
             "initialize": _expect_bool(
                 instruction.initialize,
                 "IR instruction 'class_set'.initialize",
+            ),
+        }
+    if type(instruction) is IRInterfaceConstruct:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(
+                instruction.result, schema_version=schema_version
+            ),
+            "carrier": ir_value_to_dto(
+                instruction.carrier, schema_version=schema_version
+            ),
+            "witness": _witness_to_dto(
+                instruction.witness, schema_version=schema_version
             ),
         }
     if type(instruction) is IRStructGet:
@@ -1588,6 +1709,17 @@ def _decode_instruction_from_dto(
             ir_value_from_dto(mapping["value"], schema_version=schema_version),
             _expect_bool(mapping["initialize"], "IR instruction 'class_set'.initialize"),
         )
+    if kind == "interface_construct":
+        _expect_fields(
+            mapping,
+            {"kind", "result", "carrier", "witness"},
+            "IR instruction 'interface_construct'",
+        )
+        return IRInterfaceConstruct(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_value_from_dto(mapping["carrier"], schema_version=schema_version),
+            _witness_from_dto(mapping["witness"], schema_version=schema_version),
+        )
     if kind == "struct_get":
         _expect_fields(
             mapping,
@@ -2317,6 +2449,11 @@ IR_INSTRUCTION_DTO_REGISTRY: tuple[IRInstructionDTORegistryEntry, ...] = (
     _instruction_dto_entry(IRClassNew, "class_new", "IRClassNew"),
     _instruction_dto_entry(IRClassGet, "class_get", "IRClassGet"),
     _instruction_dto_entry(IRClassSet, "class_set", "IRClassSet"),
+    _instruction_dto_entry(
+        IRInterfaceConstruct,
+        "interface_construct",
+        "IRInterfaceConstruct",
+    ),
     _instruction_dto_entry(IRStructGet, "struct_get", "IRStructGet"),
     _instruction_dto_entry(IRStructSet, "struct_set", "IRStructSet"),
     _instruction_dto_entry(

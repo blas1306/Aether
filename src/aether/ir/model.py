@@ -289,6 +289,41 @@ class IRClassSet(MemoryWriteMixin, IRInstruction):
 
 
 @dataclass(frozen=True)
+class IRWitnessMethodSlot:
+    """Immutable metadata for one future interface-dispatch slot."""
+
+    index: int
+    method_id: str
+    parameter_types: tuple[IRType, ...]
+    return_type: IRType
+
+
+@dataclass(frozen=True)
+class IRWitnessTable:
+    """Canonical witness metadata embedded in an interface construction."""
+
+    symbol: str
+    interface_id: str
+    concrete_type_id: str
+    carrier_kind: str
+    method_slots: tuple[IRWitnessMethodSlot, ...]
+    abi_version: int = 1
+
+
+@dataclass(frozen=True)
+class IRInterfaceConstruct(SideEffectMixin, IRInstruction):
+    """Construct the native ``{carrier, witness}`` owner.
+
+    Ownership transfer makes construction non-removable even though assembling
+    the two machine words does not itself write memory.
+    """
+
+    result: IRValue
+    carrier: IRValue
+    witness: IRWitnessTable
+
+
+@dataclass(frozen=True)
 class IRStructGet(IRInstruction):
     result: IRValue
     struct: IRValue

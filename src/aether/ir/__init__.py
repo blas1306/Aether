@@ -34,6 +34,7 @@ from .model import (
     IREnumConstant,
     IRFunction,
     IRFunctionRef,
+    IRInterfaceConstruct,
     IRInstruction,
     IRInitDefault,
     IRJump,
@@ -92,6 +93,8 @@ from .model import (
     IRVectorLength,
     IRVectorNew,
     IRVectorSet,
+    IRWitnessMethodSlot,
+    IRWitnessTable,
 )
 from .printer import IRPrinter, print_ir
 from .types import (
@@ -268,6 +271,7 @@ __all__ = [
     "IRExecutionError",
     "IRFunction",
     "IRFunctionRef",
+    "IRInterfaceConstruct",
     "IRInstruction",
     "IRInitDefault",
     "IRInterpreter",
@@ -330,6 +334,8 @@ __all__ = [
     "IRVectorLength",
     "IRVectorNew",
     "IRVectorSet",
+    "IRWitnessMethodSlot",
+    "IRWitnessTable",
     "IRVerificationError",
     "IRVerifier",
     "VerifierCategory",

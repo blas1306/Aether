@@ -11,9 +11,9 @@ use crate::wire::{
 use crate::{
     ArrayType, BoolType, ClassRefType, ComplexType, DoubleType, EnumType, FloatType, FunctionType,
     IRBasicBlock, IRConstant, IREnumConstant, IRFunction, IRInstruction, IRModule, IRParameter,
-    IRSourceLocation, IRStorage, IRStructDefinition, IRType, IRValue, IntType, InterfaceType,
-    LifecycleSource, ListType, MatrixType, MethodResultType, NullableType, StringType, StructType,
-    VectorType, VoidType,
+    IRSourceLocation, IRStorage, IRStructDefinition, IRType, IRValue, IRWitnessMethodSlot,
+    IRWitnessTable, IntType, InterfaceType, LifecycleSource, ListType, MatrixType,
+    MethodResultType, NullableType, StringType, StructType, VectorType, VoidType,
 };
 
 /// A structural failure while importing a wire DTO into the owned Rust IR.
@@ -695,6 +695,37 @@ impl TryFrom<&IRInstructionDTO> for IRInstruction {
                 field_name: field_name.clone(),
                 value: import_instruction_value(kind, "value", value)?,
                 initialize: *initialize,
+            }),
+            IRInstructionDTO::InterfaceConstruct {
+                result,
+                carrier,
+                witness,
+            } => Ok(Self::IRInterfaceConstruct {
+                result: import_instruction_value(kind, "result", result)?,
+                carrier: import_instruction_value(kind, "carrier", carrier)?,
+                witness: IRWitnessTable {
+                    symbol: witness.symbol.clone(),
+                    interface_id: witness.interface_id.clone(),
+                    concrete_type_id: witness.concrete_type_id.clone(),
+                    carrier_kind: witness.carrier_kind.clone(),
+                    method_slots: witness
+                        .method_slots
+                        .iter()
+                        .map(|slot| {
+                            Ok(IRWitnessMethodSlot {
+                                index: slot.index,
+                                method_id: slot.method_id.clone(),
+                                parameter_types: slot
+                                    .parameter_types
+                                    .iter()
+                                    .map(IRType::try_from)
+                                    .collect::<Result<Vec<_>, _>>()?,
+                                return_type: IRType::try_from(&slot.return_type)?,
+                            })
+                        })
+                        .collect::<Result<Vec<_>, IRImportError>>()?,
+                    abi_version: witness.abi_version,
+                },
             }),
             IRInstructionDTO::StructGet {
                 result,
@@ -1571,6 +1602,7 @@ const fn wire_instruction_kind(instruction: &IRInstructionDTO) -> &'static str {
         IRInstructionDTO::ClassNew { .. } => "class_new",
         IRInstructionDTO::ClassGet { .. } => "class_get",
         IRInstructionDTO::ClassSet { .. } => "class_set",
+        IRInstructionDTO::InterfaceConstruct { .. } => "interface_construct",
         IRInstructionDTO::StructGet { .. } => "struct_get",
         IRInstructionDTO::StructSet { .. } => "struct_set",
         IRInstructionDTO::MethodResultNew { .. } => "method_result_new",

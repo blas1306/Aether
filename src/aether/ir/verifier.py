@@ -5,6 +5,7 @@ from typing import NoReturn
 
 from aether.range_safety import RANGE_STEP_NONZERO_BUILTIN
 from aether.integer_arithmetic import INT_MAX, INT_MIN, is_aether_int
+from aether.interface_abi import INTERFACE_ABI_VERSION, witness_symbol
 
 from .model import (
     IRAssign,
@@ -23,6 +24,7 @@ from .model import (
     IRClassGet,
     IRClassNew,
     IRClassSet,
+    IRInterfaceConstruct,
     IRCompareOp,
     IRConst,
     IRCopyInit,
@@ -695,6 +697,7 @@ class IRVerifier:
             (IRClassNew, "IRV-125", VerifierCategory.INSTRUCTIONS),
             (IRClassGet, "IRV-126", VerifierCategory.STRUCTS),
             (IRClassSet, "IRV-127", VerifierCategory.STRUCTS),
+            (IRInterfaceConstruct, "IRV-128", VerifierCategory.INSTRUCTIONS),
             (IRStructGet, "IRV-080", VerifierCategory.STRUCTS),
             (IRStructSet, "IRV-081", VerifierCategory.STRUCTS),
             (IRMethodResultNew, "IRV-082", VerifierCategory.METHOD_RESULTS),
@@ -1034,6 +1037,49 @@ class IRVerifier:
                 "Class set value type mismatch",
             )
             return state
+
+        if isinstance(instruction, IRInterfaceConstruct):
+            self._require_defined(instruction.carrier, state, value_types)
+            if not isinstance(instruction.result.type, InterfaceType):
+                self._fail("Interface construct result must have interface type")
+            if not isinstance(instruction.carrier.type, ClassRefType):
+                self._fail(
+                    "Interface construct carrier must be a native class reference; "
+                    "struct boxing belongs to Phase 5.4C"
+                )
+            witness = instruction.witness
+            if (
+                witness.abi_version != INTERFACE_ABI_VERSION
+                or witness.carrier_kind != "class"
+                or witness.interface_id != instruction.result.type.name
+                or witness.concrete_type_id != instruction.carrier.type.name
+                or witness.symbol
+                != witness_symbol(witness.interface_id, witness.concrete_type_id)
+            ):
+                self._fail("Interface construct has inconsistent witness identity metadata")
+            if tuple(slot.index for slot in witness.method_slots) != tuple(
+                range(len(witness.method_slots))
+            ):
+                self._fail(
+                    "Interface witness method slots must use deterministic contiguous ordering"
+                )
+            if len({slot.method_id for slot in witness.method_slots}) != len(
+                witness.method_slots
+            ):
+                self._fail("Interface witness method identifiers must be unique")
+            for slot in witness.method_slots:
+                if not slot.method_id:
+                    self._fail("Interface witness method identifier must not be empty")
+                for parameter_type in slot.parameter_types:
+                    self._verify_type(
+                        parameter_type,
+                        f"parameter metadata for witness slot '{slot.method_id}'",
+                    )
+                self._verify_type(
+                    slot.return_type,
+                    f"return metadata for witness slot '{slot.method_id}'",
+                )
+            return self._define_value(state, instruction.result)
 
         if isinstance(instruction, IRStructGet):
             self._require_defined(instruction.struct, state, value_types)
@@ -1473,6 +1519,7 @@ class IRVerifier:
                         ListType,
                         NullableType,
                         ClassRefType,
+                        InterfaceType,
                     ),
                 ):
                     self._fail(
@@ -2810,6 +2857,7 @@ class IRVerifier:
                 IRArrayNew,
                 IRClassNew,
                 IRClassGet,
+                IRInterfaceConstruct,
                 IRArrayCopy,
                 IRArrayGet,
                 IRArraySlice,

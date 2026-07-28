@@ -27,6 +27,7 @@ from .model import (
     IREnumConstant,
     IRFunction,
     IRFunctionRef,
+    IRInterfaceConstruct,
     IRInstruction,
     IRInitDefault,
     IRJump,
@@ -201,6 +202,14 @@ class IRPrinter:
             return f"{self._typed_value(instruction.result)} = struct_new [{fields}]"
         if isinstance(instruction, IRClassNew):
             return f"{self._typed_value(instruction.result)} = class_new"
+        if isinstance(instruction, IRInterfaceConstruct):
+            return (
+                f"{self._typed_value(instruction.result)} = interface_construct "
+                f"{self._value(instruction.carrier)}, "
+                f"witness @{instruction.witness.symbol} "
+                f"[{instruction.witness.interface_id} <- "
+                f"{instruction.witness.concrete_type_id}]"
+            )
         if isinstance(instruction, IRClassGet):
             return (
                 f"{self._typed_value(instruction.result)} = class_get "

@@ -18,6 +18,7 @@ from .model import (
     IRClassGet,
     IRClassSet,
     IRClassNew,
+    IRInterfaceConstruct,
     IRCompareOp,
     IRCopyInit,
     IRCast,
@@ -214,13 +215,9 @@ class LifecycleTypeRegistry:
             # There is deliberately no implicit/default class value.
             return LifecycleTraits(False, True, True, False)
         if isinstance(type_, InterfaceType):
-            return LifecycleTraits(
-                False,
-                False,
-                False,
-                False,
-                reason=f"lifecycle layout for '{type_}' is not defined",
-            )
+            # Phase 5.4A admits class carriers only.  The existential owns that
+            # carrier while its witness pointer is immortal metadata.
+            return LifecycleTraits(False, True, True, False)
         if isinstance(type_, VoidType):
             return LifecycleTraits(False, False, False, False, reason="void has no storage")
         if isinstance(type_, MethodResultType):
@@ -309,6 +306,8 @@ class LifecycleExpander:
                     if self.registry.traits(instruction.result.type).needs_destroy:
                         self._owned_values.add(instruction.result)
                 elif isinstance(instruction, IRClassNew):
+                    self._owned_values.add(instruction.result)
+                elif isinstance(instruction, IRInterfaceConstruct):
                     self._owned_values.add(instruction.result)
                 elif isinstance(instruction, IRClassGet):
                     if self.registry.traits(instruction.result.type).needs_destroy:
@@ -426,6 +425,21 @@ class LifecycleExpander:
             return self._release_unused_result(instruction, emitted)
         if isinstance(instruction, IRClassNew):
             return self._release_unused_result(instruction, [instruction])
+        if isinstance(instruction, IRInterfaceConstruct):
+            emitted: list[IRInstruction] = []
+            if instruction.carrier in self._owned_values:
+                self._owned_values.remove(instruction.carrier)
+            else:
+                emitted.append(
+                    IRCall(
+                        "__aether_retain",
+                        (instruction.carrier,),
+                        None,
+                        "__aether_retain",
+                    )
+                )
+            emitted.append(instruction)
+            return self._release_unused_result(instruction, emitted)
         if isinstance(instruction, IRClassGet):
             emitted: list[IRInstruction] = [instruction]
             if self.registry.traits(instruction.result.type).needs_destroy:
@@ -598,7 +612,8 @@ class LifecycleExpander:
                 IRLoad(temporary, instruction.source),
                 IRStore(instruction.destination, temporary),
             ]
-            if self.registry.traits(instruction.source.type).needs_destroy:
+            traits = self.registry.traits(instruction.source.type)
+            if traits.needs_destroy and traits.supports_default:
                 defaults, empty = self._default_value(instruction.source.type)
                 result.extend((*defaults, IRStore(instruction.source, empty)))
             return result

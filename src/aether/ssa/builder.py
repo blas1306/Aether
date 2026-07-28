@@ -23,6 +23,7 @@ from aether.ir.model import (
     IRConst,
     IRFunction,
     IRFunctionRef,
+    IRInterfaceConstruct,
     IRInstruction,
     IRJump,
     IRListGet,
@@ -94,6 +95,7 @@ from .model import (
     SSAConst,
     SSAFunction,
     SSAFunctionRef,
+    SSAInterfaceConstruct,
     SSAInstruction,
     SSAJump,
     SSAListGet,
@@ -638,6 +640,12 @@ class SSABuilder:
         if isinstance(instruction, IRClassNew):
             return SSAClassNew(
                 self._define_value(instruction.result, state.value_map)
+            )
+        if isinstance(instruction, IRInterfaceConstruct):
+            return SSAInterfaceConstruct(
+                self._define_value(instruction.result, state.value_map),
+                self._resolve_value(instruction.carrier, state.value_map),
+                instruction.witness,
             )
         if isinstance(instruction, IRClassGet):
             result = self._define_value(instruction.result, state.value_map)

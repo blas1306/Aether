@@ -35,8 +35,8 @@ semantics as Rust, so the case remains in the corpus as accepted history and is
 classified `MATCH_ACCEPTED`; its old
 `intentional_irv_024_graph_analysis` manifest exception was removed.
 
-The current run over the 141 schema-v1-transportable cases reports 65 accepted
-by both, 73 exact first-invariant matches, three documented diagnostic
+The current run over the 140 schema-v1-transportable cases reports 65 accepted
+by both, 72 exact first-invariant matches, three documented diagnostic
 divergences, zero documented outcome divergences, and zero unexpected
 divergences.
 
