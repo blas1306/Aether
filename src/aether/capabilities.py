@@ -351,6 +351,8 @@ _NATIVE_COMPLETE = {
     Capability.COLLECTION_OBJECT_LIFECYCLE,
     Capability.CONST_COLLECTION_REFERENCES,
     Capability.BORROWED_FOR_IN_ELEMENTS,
+    Capability.CLASSES,
+    Capability.CLASS_CONSTRUCTORS,
     Capability.STRUCTURAL_EQUALITY,
     Capability.EQ_COLLECTION_SEARCH,
     Capability.ALPT1_ENCODE,
@@ -360,8 +362,6 @@ _NATIVE_COMPLETE = {
 }
 _NATIVE_UNSUPPORTED = {
     Capability.INPUT,
-    Capability.CLASSES,
-    Capability.CLASS_CONSTRUCTORS,
     Capability.CLASS_METHODS,
     Capability.INTERFACES,
     Capability.GENERICS,
@@ -490,6 +490,8 @@ E2E_TESTED_CAPABILITIES: Mapping[BackendIdentity, frozenset[Capability]] = Mappi
                 Capability.BORROWED_FOR_IN_ELEMENTS,
                 Capability.STRUCTURAL_EQUALITY,
                 Capability.EQ_COLLECTION_SEARCH,
+                Capability.CLASSES,
+                Capability.CLASS_CONSTRUCTORS,
                 Capability.FILES,
                 Capability.TEXT_FILE_READ,
                 Capability.TEXT_FILE_WRITE,
@@ -819,14 +821,19 @@ class _CapabilityDetector:
         for statement in program.statements:
             if isinstance(statement, ast.FunctionDeclaration):
                 scan_statements([statement], [{}])
-            elif isinstance(statement, ast.StructDeclaration):
+            elif isinstance(statement, (ast.StructDeclaration, ast.ClassDeclaration)):
                 field_types = {field.name: field.type_name for field in statement.fields}
+                receiver_type: AetherType = (
+                    ClassType(statement.name)
+                    if isinstance(statement, ast.ClassDeclaration)
+                    else statement.name
+                )
                 if statement.constructor is not None:
                     constructor_scope = {
                         parameter.name: parameter.type_name
                         for parameter in statement.constructor.parameters
                     }
-                    constructor_scope["this"] = statement.name
+                    constructor_scope["this"] = receiver_type
                     scan_statements(
                         statement.constructor.body,
                         [constructor_scope],
@@ -837,12 +844,8 @@ class _CapabilityDetector:
                         parameter.name: parameter.type_name
                         for parameter in method.parameters
                     }
-                    method_scope["this"] = statement.name
+                    method_scope["this"] = receiver_type
                     scan_statements(method.body, [method_scope], field_types)
-            elif isinstance(statement, ast.ClassDeclaration):
-                # Classes are rejected as a capability before lowering, but
-                # scanning their expressions keeps diagnostics deterministic.
-                scan_expression(statement, [{}])
 
     def _record_conversion(
         self,
@@ -2058,7 +2061,7 @@ class _CapabilityDetector:
         if isinstance(type_name, FunctionType):
             return None
         if isinstance(type_name, ClassType):
-            return "class references are outside the LLVM/native collection subset"
+            return None
         if isinstance(type_name, InterfaceType):
             return "interface references are outside the LLVM/native collection subset"
         if isinstance(type_name, NullableType):
@@ -2080,6 +2083,8 @@ class _CapabilityDetector:
             if type_name in self.checker.enums:
                 return None
             return f"nominal type '{type_name}' is opaque or incomplete"
+        if symbol.kind == "class":
+            return None
         if symbol.kind != "struct":
             return f"'{type_name}' is a class/reference type, not a by-value struct"
         if type_name in active:

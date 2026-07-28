@@ -263,8 +263,9 @@ representación y lifecycle ya están activos en esta matriz.
 | Métodos de struct y `this` | C | C | C mutabilidad | C | C funciones + method result | C | C | C | C | C | C | C | — | E2E | P | Completo | Para tipos de firma soportados por backend. |
 | Semántica por valor de struct | — | C | C const | C copia | C reconstrucción | C | C | C | C | C | C | C by-value | — | E2E copia/arg/return | C | Completo | Campos reference mantienen copia shallow deliberada. |
 | Igualdad/print de struct | C | C | C comparabilidad | C | C recursivo subset | C | C | C | C | C | C | C subset | helpers | E2E | P | Parcial | Enum y nullable representable ya están soportados como fields; Vector/Matrix conservan límites. |
-| Classes por referencia | C | C | C visibilidad/alias | C | P tipo nominal + allocation interna | N | P nominal | P refs/phis | P lifecycle effectful | P | P preserva allocation/ARC | P handle/header/ARC | AST + IR object base | amplia AST + 5.3A | C | Fundación native | 5.3A transporta refs, identidad y containment; superficie gated. |
-| Constructores/métodos/`this` de class | C | C | C | C | N | N | N | N | N | N | N | N | AST | amplia AST | C | Solo AST | Public/private funciona en frontend. |
+| Classes por referencia | C | C | C visibilidad/alias/definite init | C | C new/get/set | C fields/constructores | C nominal/fields | C aliasing | C refs/phis | C | C preserva writes/ARC | C payload/header/ARC | descriptor destroy | AST+IR+SSA+clang O0/O1/O2 | C | State native | 5.3B completa fields, constructors y containment; ciclos ARC no se recolectan. |
+| Constructores/`this` de class | C | C | C | C | C | C | C | C | C | C | C | C | ARC | E2E | C | Completo subset | `this` sólo dentro del constructor; parámetros borrowed, resultado owned. |
+| Métodos de class | C | C | C | C | N | N | N | N | N | N | N | N | AST | amplia AST | C | Solo AST | Phase 5.3C; diagnóstico `AE-BACKEND-CLASS_METHODS`. |
 | Interfaces y dispatch | C | C | C conformidad | C struct/class | P tipo nominal | N | P nominal | N | N | N | N | N | AST dispatch | amplia AST + dogfood | C | Solo AST | Bloquea callables por interfaz en el ejemplo numérico. |
 | Enums sin payload | C | C | C identidad módulo/declaración | C valor nominal+discriminante | C `enum Name` + constante nominal | C | C miembros/discriminantes/tipos | C | C phis/tipos | C nominal/dominancia | C folding preserva tipo | C `i32` ABI interno | metadata de impresión | AST+IR+SSA+clang O0/O1/O2 | C | Completo | Sin payload, ADT, casts implícitos, bit flags ni pattern matching nuevo. Imports, aliases, homónimos, structs, arrays/list compatibles y callables funcionan. |
 | Genéricos de usuario | P: se reconocen para rechazo | P | N | N | N | N | N | N | N | N | N | N | N | negativos | C como no soportado | No implementado | Array/List/Vector/Matrix son genéricos privilegiados, no evidencia de generics generales. |
@@ -362,7 +363,7 @@ agrupa el resultado actual sin convertir un nodo/opcode nominal en soporte:
 | `complex` / `im` | Parser/checker/AST C | Sin lowering fuente ni ABI/runtime native | Gate |
 | `null` y `T?` | Parser/checker/AST C | Sin narrowing, layout/lifecycle ni lowering | Gate |
 | Tuples/destructuring | Parser/checker/AST C | Sin modelo/lowering IR estable | Gate |
-| Classes | Parser/checker/AST C + fundación IR/SSA/LLVM 5.3A | Sin constructores, fields, métodos ni lowering source de objetos | Gate `AE-BACKEND-CLASSES` |
+| Classes | Parser/checker/AST + IR/SSA/LLVM 5.3B | Métodos generales, interfaces y dispatch pendientes | Gate `AE-BACKEND-CLASS_METHODS` por métodos |
 | Interfaces/dynamic dispatch | Checker de conformidad y dispatch AST C | Sin representación de interface ni dispatch IR/native | Gate `AE-BACKEND-INTERFACES` |
 | Métodos enlazados, callable retornado, builtin como valor | Subsets reconocidos; callable top-level ya C | Sin environment/ABI/lowering para esas formas | Rechazo de tipo/gate |
 | Interpolación y formatting general | Parser/checker/AST C para el experimento | Sin IR/lowering/runtime native | Gate `AE-BACKEND-STRINGS` |

@@ -194,12 +194,15 @@ def test_backend_ast_remains_explicit_file_execution(tmp_path: Path) -> None:
     assert ast_stderr == ""
 
 
-def test_default_native_backend_reports_unsupported_class_before_codegen(
+def test_default_native_backend_reports_unsupported_class_method_before_codegen(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     program = tmp_path / "native_class.ae"
-    program.write_text("class Counter { int value; }\n", encoding="utf-8")
+    program.write_text(
+        "class Counter { int value; int get() { return value; } }\n",
+        encoding="utf-8",
+    )
 
     def fail_if_codegen_runs(*_args, **_kwargs):
         raise AssertionError("native codegen must not run")
@@ -209,10 +212,10 @@ def test_default_native_backend_reports_unsupported_class_before_codegen(
 
     assert exit_code == EXIT_LANGUAGE_ERROR
     assert stdout == ""
-    assert "AE-BACKEND-CLASSES" in stderr
-    assert "LLVM/native backend does not support capability 'classes'" in stderr
+    assert "AE-BACKEND-CLASS_METHODS" in stderr
+    assert "LLVM/native backend does not support capability 'class-methods'" in stderr
     assert "--backend=ast" in stderr
-    assert "line 1, column 7" in stderr
+    assert "line 1, column 32" in stderr
     assert "Traceback" not in stderr
 
 
@@ -312,14 +315,16 @@ def test_invalid_backend_reports_clear_usage_error(tmp_path: Path) -> None:
 
 def test_backend_ir_unsupported_feature_reports_without_traceback(tmp_path: Path) -> None:
     program = tmp_path / "unsupported_ir.ae"
-    program.write_text("class Counter { int value; }\n", encoding="utf-8")
+    program.write_text(
+        "class Counter { int value; int get() { return value; } }\n",
+        encoding="utf-8",
+    )
 
     exit_code, stdout, stderr = run_cli(["--backend=ir", str(program)])
 
     assert exit_code == EXIT_LANGUAGE_ERROR
     assert stdout == ""
-    assert "IR backend does not support class declarations yet." in stderr
-    assert "Supported IR backend subset:" in stderr
+    assert "class methods" in stderr
     assert "Traceback" not in stderr
 
 
@@ -2919,13 +2924,16 @@ int main() {
 
 def test_emit_ir_unsupported_feature_reports_clear_error(tmp_path: Path) -> None:
     program = tmp_path / "emit_ir_unsupported.ae"
-    program.write_text("class Counter { int value; }\n", encoding="utf-8")
+    program.write_text(
+        "class Counter { int value; int get() { return value; } }\n",
+        encoding="utf-8",
+    )
 
     exit_code, stdout, stderr = run_cli(["--emit-ir", str(program)])
 
     assert exit_code == EXIT_LANGUAGE_ERROR
     assert stdout == ""
-    assert "IR backend does not support class declarations yet." in stderr
+    assert "class methods" in stderr
     assert "Traceback" not in stderr
 
 

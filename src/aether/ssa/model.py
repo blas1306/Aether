@@ -175,9 +175,26 @@ class SSAStructNew(SSAInstruction):
 
 @dataclass(frozen=True)
 class SSAClassNew(AllocationMixin, SSAInstruction):
-    """Allocate one nominal Phase 5.3A class object."""
+    """Allocate one nominal class object with uninitialized field payload."""
 
     result: SSAValue
+
+
+@dataclass(frozen=True)
+class SSAClassGet(MemoryReadMixin, SSAInstruction):
+    result: SSAValue
+    object: SSAValue
+    field_index: int
+    field_name: str
+
+
+@dataclass(frozen=True)
+class SSAClassSet(MemoryWriteMixin, SSAInstruction):
+    object: SSAValue
+    field_index: int
+    field_name: str
+    value: SSAValue
+    initialize: bool = False
 
 
 @dataclass(frozen=True)

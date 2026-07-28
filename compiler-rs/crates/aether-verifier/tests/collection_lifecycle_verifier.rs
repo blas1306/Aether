@@ -164,15 +164,15 @@ fn array_slice_does_not_require_element_lifecycle_support() {
 
 #[test]
 fn rejects_missing_direct_element_lifecycle_capabilities() {
-    let cases = [
+    let cases: [(InstructionKind, CollectionKind, IRType, &str); 2] = [
         (
             InstructionKind::IRArrayCopy,
             CollectionKind::Array,
-            ClassRefType {
+            InterfaceType {
                 name: "Box".to_owned(),
             }
             .into(),
-            "lifecycle layout for 'class Box' is not defined",
+            "lifecycle layout for 'interface Box' is not defined",
         ),
         (
             InstructionKind::IRListCopy,
@@ -182,12 +182,6 @@ fn rejects_missing_direct_element_lifecycle_capabilities() {
             }
             .into(),
             "matrix default requires compile-time dimensions",
-        ),
-        (
-            InstructionKind::IRListSlice,
-            CollectionKind::List,
-            nullable(list(StringType.into())),
-            "lifecycle layout for 'nullable<list<string>>' is not defined",
         ),
     ];
 
@@ -249,6 +243,6 @@ fn collection_lifecycle_diagnostic_is_deterministic_and_downcastable() {
             capability: CollectionLifecycleCapability::Lifecycle,
             reason,
         }) if actual == &element_type
-            && reason == "lifecycle layout for 'class Box' is not defined"
+            && reason == "lifecycle layout for 'interface Box' is not defined"
     ));
 }

@@ -20,7 +20,9 @@ from .model import (
     IRCast,
     IRCall,
     IRCallIndirect,
+    IRClassGet,
     IRClassNew,
+    IRClassSet,
     IRCompareOp,
     IRConst,
     IRCopyInit,
@@ -691,6 +693,8 @@ class IRVerifier:
             (IRPrint, "IRV-078", VerifierCategory.INSTRUCTIONS),
             (IRStructNew, "IRV-079", VerifierCategory.STRUCTS),
             (IRClassNew, "IRV-125", VerifierCategory.INSTRUCTIONS),
+            (IRClassGet, "IRV-126", VerifierCategory.STRUCTS),
+            (IRClassSet, "IRV-127", VerifierCategory.STRUCTS),
             (IRStructGet, "IRV-080", VerifierCategory.STRUCTS),
             (IRStructSet, "IRV-081", VerifierCategory.STRUCTS),
             (IRMethodResultNew, "IRV-082", VerifierCategory.METHOD_RESULTS),
@@ -991,6 +995,45 @@ class IRVerifier:
                     f"Class new result must be class reference type, got {instruction.result.type}"
                 )
             return self._define_value(state, instruction.result)
+
+        if isinstance(instruction, IRClassGet):
+            self._require_defined(instruction.object, state, value_types)
+            definition = (
+                self._structs.get(instruction.object.type.name)
+                if isinstance(instruction.object.type, ClassRefType)
+                else None
+            )
+            if definition is None or not 0 <= instruction.field_index < len(definition.fields):
+                self._fail("Class get requires a declared class and valid canonical field")
+            field_name, field_type = definition.fields[instruction.field_index]
+            if instruction.field_name != field_name:
+                self._fail("Class get field name/index mismatch")
+            self._require_type(
+                instruction.result.type,
+                field_type,
+                "Class get result type mismatch",
+            )
+            return self._define_value(state, instruction.result)
+
+        if isinstance(instruction, IRClassSet):
+            self._require_defined(instruction.object, state, value_types)
+            self._require_defined(instruction.value, state, value_types)
+            definition = (
+                self._structs.get(instruction.object.type.name)
+                if isinstance(instruction.object.type, ClassRefType)
+                else None
+            )
+            if definition is None or not 0 <= instruction.field_index < len(definition.fields):
+                self._fail("Class set requires a declared class and valid canonical field")
+            field_name, field_type = definition.fields[instruction.field_index]
+            if instruction.field_name != field_name:
+                self._fail("Class set field name/index mismatch")
+            self._require_type(
+                instruction.value.type,
+                field_type,
+                "Class set value type mismatch",
+            )
+            return state
 
         if isinstance(instruction, IRStructGet):
             self._require_defined(instruction.struct, state, value_types)
@@ -2766,6 +2809,7 @@ class IRVerifier:
             (
                 IRArrayNew,
                 IRClassNew,
+                IRClassGet,
                 IRArrayCopy,
                 IRArrayGet,
                 IRArraySlice,

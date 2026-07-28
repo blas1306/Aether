@@ -15,6 +15,8 @@ from .model import (
     IRConst,
     IRCall,
     IRCallIndirect,
+    IRClassGet,
+    IRClassSet,
     IRClassNew,
     IRCompareOp,
     IRCopyInit,
@@ -308,6 +310,9 @@ class LifecycleExpander:
                         self._owned_values.add(instruction.result)
                 elif isinstance(instruction, IRClassNew):
                     self._owned_values.add(instruction.result)
+                elif isinstance(instruction, IRClassGet):
+                    if self.registry.traits(instruction.result.type).needs_destroy:
+                        self._owned_values.add(instruction.result)
         self._used_names = {parameter.name for parameter in function.parameters}
         for block in function.blocks:
             for instruction in block.instructions:
@@ -421,6 +426,28 @@ class LifecycleExpander:
             return self._release_unused_result(instruction, emitted)
         if isinstance(instruction, IRClassNew):
             return self._release_unused_result(instruction, [instruction])
+        if isinstance(instruction, IRClassGet):
+            emitted: list[IRInstruction] = [instruction]
+            if self.registry.traits(instruction.result.type).needs_destroy:
+                emitted.append(
+                    IRCall(
+                        "__aether_retain",
+                        (instruction.result,),
+                        None,
+                        "__aether_retain",
+                    )
+                )
+            if instruction.object in self._owned_values:
+                self._owned_values.remove(instruction.object)
+                emitted.append(
+                    IRCall(
+                        "__aether_release",
+                        (instruction.object,),
+                        None,
+                        "__aether_release",
+                    )
+                )
+            return self._release_unused_result(instruction, emitted)
         if (
             isinstance(instruction, IRCompareOp)
             and instruction.operator in {"eq", "ne"}
@@ -489,6 +516,19 @@ class LifecycleExpander:
                     IRCall("__aether_release", (value,), None, "__aether_release")
                 )
             return emitted
+        if isinstance(instruction, IRClassSet):
+            emitted = [instruction]
+            if instruction.value in self._owned_values:
+                self._owned_values.remove(instruction.value)
+                emitted.append(
+                    IRCall(
+                        "__aether_release",
+                        (instruction.value,),
+                        None,
+                        "__aether_release",
+                    )
+                )
+            return emitted
         if isinstance(instruction, IRInitDefault):
             emitted, value = self._default_value(instruction.destination.type)
             return [*emitted, IRStore(instruction.destination, value)]
@@ -523,7 +563,16 @@ class LifecycleExpander:
             ]
         if isinstance(instruction, (IRCall, IRCallIndirect)):
             emitted: list[IRInstruction] = [instruction]
-            for argument in instruction.arguments:
+            arguments = instruction.arguments
+            for index, argument in enumerate(arguments):
+                if (
+                    isinstance(instruction, IRCall)
+                    and instruction.function.endswith(".__ctor")
+                    and index == 0
+                ):
+                    # The constructor borrows `this`; the allocation remains
+                    # the owned result of the surrounding construction.
+                    continue
                 if argument in self._owned_values:
                     self._owned_values.remove(argument)
                     emitted.append(

@@ -86,7 +86,9 @@ from .model import (
     IRCast,
     IRCall,
     IRCallIndirect,
+    IRClassGet,
     IRClassNew,
+    IRClassSet,
     IRCompareOp,
     IRConst,
     IRCopyInit,
@@ -647,7 +649,19 @@ class IRInterpreter:
                 except AetherRuntimeError as exc:
                     raise IRExecutionError(str(exc)) from exc
             else:
-                result = self.call(instruction.function, arguments)
+                try:
+                    result = self.call(instruction.function, arguments)
+                except BaseException:
+                    if (
+                        instruction.function.endswith(".__ctor")
+                        and arguments
+                        and isinstance(arguments[0], NativeClassObject)
+                        and arguments[0].alive
+                    ):
+                        # A source constructor has not published its initial
+                        # owner yet.  Roll back exactly its initialized fields.
+                        arguments[0].release()
+                    raise
             if instruction.result is not None:
                 frame.values[instruction.result] = result
             return False, None, None
@@ -698,8 +712,37 @@ class IRInterpreter:
             if not isinstance(instruction.result.type, ClassRefType):
                 raise IRExecutionError("IR class_new requires a class reference result")
             frame.values[instruction.result] = NativeClassObject(
-                instruction.result.type.name
+                instruction.result.type.name,
+                len(self._structs.get(instruction.result.type.name).fields)
+                if self._structs.get(instruction.result.type.name) is not None
+                else 0,
             )
+            return False, None, None
+
+        if isinstance(instruction, IRClassGet):
+            object_ = self._value(instruction.object, frame)
+            if not isinstance(object_, NativeClassObject):
+                raise IRExecutionError("IR class_get requires a class object")
+            try:
+                frame.values[instruction.result] = object_.get_field(
+                    instruction.field_index
+                )
+            except (IndexError, RuntimeError) as exc:
+                raise IRExecutionError(str(exc)) from exc
+            return False, None, None
+
+        if isinstance(instruction, IRClassSet):
+            object_ = self._value(instruction.object, frame)
+            if not isinstance(object_, NativeClassObject):
+                raise IRExecutionError("IR class_set requires a class object")
+            try:
+                object_.set_field(
+                    instruction.field_index,
+                    self._value(instruction.value, frame),
+                    initialize=instruction.initialize,
+                )
+            except (IndexError, RuntimeError) as exc:
+                raise IRExecutionError(str(exc)) from exc
             return False, None, None
 
         if isinstance(instruction, IRStructGet):

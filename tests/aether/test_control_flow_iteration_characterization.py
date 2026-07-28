@@ -8,7 +8,6 @@ import pytest
 from aether import ast
 from aether.backend.llvm import LLVMRunner
 from aether.capabilities import (
-    BackendCapabilityError,
     BackendIdentity,
     validate_backend_capabilities,
 )
@@ -251,7 +250,7 @@ int main() {
         assert stderr.getvalue() == ""
 
 
-def test_class_collection_iteration_is_ast_only() -> None:
+def test_class_collection_iteration_has_native_parity() -> None:
     source = """
 class User { public int id; }
 int main() {
@@ -261,10 +260,15 @@ int main() {
     return 0;
 }
 """
-    assert run_aether(source).output == "1\n2\n1\n2\n"
-
-    with pytest.raises(BackendCapabilityError, match="classes"):
-        validate_backend_capabilities(_typed(source), BackendIdentity.NATIVE)
+    expected = "1\n2\n1\n2\n"
+    assert run_aether(source).output == expected
+    validate_backend_capabilities(_typed(source), BackendIdentity.NATIVE)
+    if _HAS_CLANG:
+        stdout = StringIO()
+        stderr = StringIO()
+        assert LLVMRunner().run(_typed(source), stdout=stdout, stderr=stderr) == 0
+        assert stdout.getvalue() == expected
+        assert stderr.getvalue() == ""
 
 
 def test_incompatible_collection_iteration_type_has_no_implicit_header_conversion() -> None:

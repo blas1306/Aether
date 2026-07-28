@@ -102,8 +102,23 @@ pub enum IRInstruction {
         result: IRValue,
         fields: Vec<IRValue>,
     },
-    /// Allocates a payload-free nominal class object.
+    /// Allocates a nominal class object with uninitialized payload.
     IRClassNew { result: IRValue },
+    /// Reads one statically resolved class field.
+    IRClassGet {
+        result: IRValue,
+        object: IRValue,
+        field_index: i64,
+        field_name: String,
+    },
+    /// Initializes or lifecycle-assigns one statically resolved class field.
+    IRClassSet {
+        object: IRValue,
+        field_index: i64,
+        field_name: String,
+        value: IRValue,
+        initialize: bool,
+    },
     /// Reads a named struct field.
     IRStructGet {
         result: IRValue,

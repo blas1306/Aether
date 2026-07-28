@@ -41,6 +41,7 @@ from ..text_codec import (
 from ..types import (
     AetherType,
     ArrayType as AetherArrayType,
+    ClassType as AetherClassType,
     EnumType as AetherEnumType,
     FunctionType as AetherFunctionType,
     ListType as AetherListType,
@@ -63,6 +64,9 @@ from .model import (
     IRCast,
     IRCall,
     IRCallIndirect,
+    IRClassGet,
+    IRClassNew,
+    IRClassSet,
     IRCompareOp,
     IRConst,
     IRCopyInit,
@@ -130,6 +134,7 @@ from .model import (
 from .types import (
     ArrayType,
     BoolType,
+    ClassRefType,
     ComplexType,
     DoubleType,
     EnumType,
@@ -180,7 +185,7 @@ class _FunctionSignature:
 
 @dataclass(frozen=True)
 class _StructInfo:
-    declaration: ast.StructDeclaration
+    declaration: ast.StructDeclaration | ast.ClassDeclaration
     fields: tuple[tuple[str, IRType], ...]
 
     def field(self, name: str) -> tuple[int, IRType] | None:
@@ -260,6 +265,9 @@ class _FunctionContext:
     next_loop: int = 0
     method_owner: _StructInfo | None = None
     source_return_type: IRType | None = None
+    constructor_class: _StructInfo | None = None
+    initialized_fields: set[str] = field(default_factory=set)
+    maybe_initialized_fields: set[str] = field(default_factory=set)
 
     def temporary(self, type_: IRType) -> IRValue:
         value = IRValue(str(self.next_temporary), type_)
@@ -284,6 +292,7 @@ class IRLowerer:
         self._signatures: dict[str, _FunctionSignature] = {}
         self._structs: dict[str, _StructInfo] = {}
         self._struct_names: set[str] = set()
+        self._class_names: set[str] = set()
         self._enums: dict[str, _EnumInfo] = {}
         self._aliases: dict[str, AetherType] = {}
         self._method_names: dict[tuple[str, str], str] = {}
@@ -318,7 +327,7 @@ class IRLowerer:
         ) + [
             statement
             for statement in program.statements
-            if isinstance(statement, ast.StructDeclaration)
+            if isinstance(statement, (ast.StructDeclaration, ast.ClassDeclaration))
         ]
         enum_declarations = (
             [_builtin_parse_enum_declaration()] if uses_parsing else []
@@ -336,7 +345,16 @@ class IRLowerer:
             )
             for declaration in enum_declarations
         }
-        self._struct_names = {declaration.name for declaration in declarations}
+        self._struct_names = {
+            declaration.name
+            for declaration in declarations
+            if isinstance(declaration, ast.StructDeclaration)
+        }
+        self._class_names = {
+            declaration.name
+            for declaration in declarations
+            if isinstance(declaration, ast.ClassDeclaration)
+        }
         self._structs = {
             declaration.name: _StructInfo(
                 declaration,
@@ -358,6 +376,17 @@ class IRLowerer:
                     functions.append(self._lower_function(method, info))
                 if statement.constructor is not None:
                     functions.append(self._lower_constructor(statement.constructor, info))
+            elif isinstance(statement, ast.ClassDeclaration):
+                if statement.methods:
+                    self._unsupported(
+                        statement.methods[0],
+                        "general class methods (Phase 5.3C)",
+                    )
+                info = self._structs[statement.name]
+                if statement.constructor is not None:
+                    functions.append(
+                        self._lower_class_constructor(statement.constructor, info)
+                    )
             elif isinstance(statement, ast.AliasDeclaration):
                 continue
             elif isinstance(statement, ast.EnumDeclaration):
@@ -392,6 +421,26 @@ class IRLowerer:
                     signatures[name] = _FunctionSignature(
                         (owner, *(self._lower_type(parameter.type_name) for parameter in statement.constructor.parameters)),
                         MethodResultType(owner, VoidType()),
+                    )
+                    self._method_names[(statement.name, "__ctor")] = name
+            elif isinstance(statement, ast.ClassDeclaration):
+                owner = ClassRefType(statement.name)
+                if statement.methods:
+                    self._unsupported(
+                        statement.methods[0],
+                        "general class methods (Phase 5.3C)",
+                    )
+                if statement.constructor is not None:
+                    name = self._method_function_name(statement.name, "__ctor")
+                    signatures[name] = _FunctionSignature(
+                        (
+                            owner,
+                            *(
+                                self._lower_type(parameter.type_name)
+                                for parameter in statement.constructor.parameters
+                            ),
+                        ),
+                        VoidType(),
                     )
                     self._method_names[(statement.name, "__ctor")] = name
             elif isinstance(statement, ast.AliasDeclaration):
@@ -479,6 +528,64 @@ class IRLowerer:
             column=declaration.column,
         )
         return self._lower_function(synthetic, owner)
+
+    def _lower_class_constructor(
+        self,
+        declaration: ast.ConstructorDeclaration,
+        owner: _StructInfo,
+    ) -> IRFunction:
+        function_name = self._method_function_name(owner.declaration.name, "__ctor")
+        signature = self._signatures[function_name]
+        source_parameters = [
+            ast.Parameter(AetherClassType(owner.declaration.name), "this"),
+            *declaration.parameters,
+        ]
+        parameters = [
+            IRParameter(parameter.name, parameter_type)
+            for parameter, parameter_type in zip(source_parameters, signature.parameters)
+        ]
+        block = IRBasicBlock("entry")
+        context = _FunctionContext(
+            block=block,
+            blocks=[block],
+            return_type=VoidType(),
+            parameters={parameter.name: parameter for parameter in parameters},
+            method_owner=owner,
+            source_return_type=VoidType(),
+            constructor_class=owner,
+        )
+        for statement in declaration.body:
+            if self._is_terminated(context.block):
+                self._fail(
+                    "IR backend does not support statements after a terminated block yet.",
+                    statement,
+                )
+            self._lower_statement(statement, context)
+        if not self._is_terminated(context.block):
+            self._require_constructor_complete(context, declaration)
+            self._emit_cleanup(context)
+            context.block.instructions.append(IRReturn())
+        return IRFunction(function_name, parameters, VoidType(), context.blocks)
+
+    def _require_constructor_complete(
+        self,
+        context: _FunctionContext,
+        node: object,
+    ) -> None:
+        owner = context.constructor_class
+        if owner is None:
+            return
+        missing = [
+            name for name, _type in owner.fields
+            if name not in context.initialized_fields
+        ]
+        if missing:
+            self._fail(
+                "Class constructor leaves fields uninitialized: "
+                + ", ".join(f"'{name}'" for name in missing)
+                + ".",
+                node,
+            )
 
     def _lower_statement(self, statement: ast.Statement, context: _FunctionContext) -> None:
         if isinstance(statement, ast.VarDeclaration):
@@ -599,6 +706,16 @@ class IRLowerer:
             return
 
         if isinstance(statement, ast.ReturnStatement):
+            if context.constructor_class is not None:
+                if statement.expression is not None:
+                    self._fail(
+                        "Class constructors cannot return a value.",
+                        statement,
+                    )
+                self._require_constructor_complete(context, statement)
+                self._emit_cleanup(context)
+                context.block.instructions.append(IRReturn())
+                return
             if context.method_owner is not None:
                 if statement.expression is None:
                     if not isinstance(context.source_return_type, VoidType):
@@ -1008,6 +1125,8 @@ class IRLowerer:
 
     def _lower_if(self, statement: ast.IfStatement, context: _FunctionContext) -> None:
         condition = self._lower_expression(statement.condition, context)
+        entry_initialized = set(context.initialized_fields)
+        entry_maybe = set(context.maybe_initialized_fields)
 
         index = context.if_index()
         then_block = self._new_block(f"then{index}")
@@ -1032,12 +1151,44 @@ class IRLowerer:
         self._append_and_enter(context, then_block)
         self._lower_statements(statement.body, context)
         then_end = context.block
+        then_initialized = set(context.initialized_fields)
+        then_maybe = set(context.maybe_initialized_fields)
+        then_open = not self._is_terminated(then_end)
 
         else_end = else_block
         if else_block is not None:
+            context.initialized_fields = set(entry_initialized)
+            context.maybe_initialized_fields = set(entry_maybe)
             self._append_and_enter(context, else_block)
             self._lower_statements(statement.else_body or [], context)
             else_end = context.block
+            else_initialized = set(context.initialized_fields)
+            else_maybe = set(context.maybe_initialized_fields)
+            else_open = not self._is_terminated(else_end)
+        else:
+            else_initialized = entry_initialized
+            else_maybe = entry_maybe
+            else_open = True
+
+        open_initialized = [
+            fields
+            for is_open, fields in (
+                (then_open, then_initialized),
+                (else_open, else_initialized),
+            )
+            if is_open
+        ]
+        open_maybe = [
+            fields
+            for is_open, fields in (
+                (then_open, then_maybe),
+                (else_open, else_maybe),
+            )
+            if is_open
+        ]
+        if open_initialized:
+            context.initialized_fields = set.intersection(*map(set, open_initialized))
+            context.maybe_initialized_fields = set.union(*map(set, open_maybe))
 
         self._finish_if_merge(context, index, then_end, else_end, merge_block)
 
@@ -1046,6 +1197,8 @@ class IRLowerer:
         statement: ast.WhileStatement,
         context: _FunctionContext,
     ) -> None:
+        entry_initialized = set(context.initialized_fields)
+        entry_maybe = set(context.maybe_initialized_fields)
         index = context.loop_index()
         blocks = self._new_while_blocks(index)
 
@@ -1069,21 +1222,28 @@ class IRLowerer:
         ):
             self._lower_statements(statement.body, context)
         body_end = context.block
+        body_maybe = set(context.maybe_initialized_fields)
         self._emit_jump_if_open(body_end, blocks.condition.name)
 
         self._append_and_enter(context, blocks.exit)
+        context.initialized_fields = entry_initialized
+        context.maybe_initialized_fields = entry_maybe | body_maybe
 
     def _lower_for_in(
         self,
         statement: ast.ForInStatement,
         context: _FunctionContext,
     ) -> None:
+        entry_initialized = set(context.initialized_fields)
+        entry_maybe = set(context.maybe_initialized_fields)
         with self._scope(context):
             if isinstance(statement.iterable, ast.RangeExpression):
                 self._lower_for_range(statement, statement.iterable, context)
-                return
-
-            self._lower_for_indexable(statement, context)
+            else:
+                self._lower_for_indexable(statement, context)
+        body_maybe = set(context.maybe_initialized_fields)
+        context.initialized_fields = entry_initialized
+        context.maybe_initialized_fields = entry_maybe | body_maybe
 
     def _lower_for_range(
         self,
@@ -1467,6 +1627,16 @@ class IRLowerer:
                 return result
             parameter = context.parameters.get(expression.name)
             if parameter is not None:
+                if (
+                    expression.name == "this"
+                    and context.constructor_class is not None
+                    and len(context.initialized_fields)
+                    != len(context.constructor_class.fields)
+                ):
+                    self._fail(
+                        "Class constructor cannot expose incompletely initialized 'this'.",
+                        expression,
+                    )
                 return parameter
             signature = self._signatures.get(expression.name)
             if signature is not None and not isinstance(signature.return_type, MethodResultType):
@@ -1477,12 +1647,28 @@ class IRLowerer:
             if context.method_owner is not None:
                 field = context.method_owner.field(expression.name)
                 if field is not None:
-                    receiver = self._lower_expression(ast.Identifier("this"), context)
-                    index, field_type = field
-                    result = context.temporary(field_type)
-                    context.block.instructions.append(
-                        IRStructGet(result, receiver, index, expression.name)
+                    receiver = self._lower_field_receiver(
+                        ast.Identifier("this"),
+                        context,
                     )
+                    index, field_type = field
+                    if (
+                        context.constructor_class is not None
+                        and expression.name not in context.initialized_fields
+                    ):
+                        self._fail(
+                            f"Class field '{expression.name}' is read before initialization.",
+                            expression,
+                        )
+                    result = context.temporary(field_type)
+                    if isinstance(receiver.type, ClassRefType):
+                        context.block.instructions.append(
+                            IRClassGet(result, receiver, index, expression.name)
+                        )
+                    else:
+                        context.block.instructions.append(
+                            IRStructGet(result, receiver, index, expression.name)
+                        )
                     return result
             constant = self._scalar_math_constant(expression.name)
             if constant is not None:
@@ -1767,7 +1953,7 @@ class IRLowerer:
                         )
                     )
                     return result
-            target = self._lower_expression(expression.target, context)
+            target = self._lower_field_receiver(expression.target, context)
             if isinstance(target.type, StructType):
                 info = self._structs.get(target.type.name)
                 field = info.field(expression.field_name) if info is not None else None
@@ -1780,6 +1966,30 @@ class IRLowerer:
                 result = context.temporary(field_type)
                 context.block.instructions.append(
                     IRStructGet(result, target, index, expression.field_name)
+                )
+                return result
+            if isinstance(target.type, ClassRefType):
+                info = self._structs.get(target.type.name)
+                field = info.field(expression.field_name) if info is not None else None
+                if field is None:
+                    self._fail(
+                        f"IR backend cannot resolve class field "
+                        f"'{expression.field_name}' on '{target.type.name}'.",
+                        expression,
+                    )
+                if (
+                    context.constructor_class is info
+                    and self._is_this_expression(expression.target)
+                    and expression.field_name not in context.initialized_fields
+                ):
+                    self._fail(
+                        f"Class field '{expression.field_name}' is read before initialization.",
+                        expression,
+                    )
+                index, field_type = field
+                result = context.temporary(field_type)
+                context.block.instructions.append(
+                    IRClassGet(result, target, index, expression.field_name)
                 )
                 return result
             if expression.field_name == "length" and isinstance(target.type, ArrayType):
@@ -2445,6 +2655,8 @@ class IRLowerer:
         info: _StructInfo,
         context: _FunctionContext,
     ) -> IRValue:
+        if isinstance(info.declaration, ast.ClassDeclaration):
+            return self._lower_class_constructor_call(call, info, context)
         struct_type = StructType(info.declaration.name)
         constructor = info.declaration.constructor
         if constructor is None:
@@ -2471,6 +2683,50 @@ class IRLowerer:
         context.block.instructions.append(IRCall(function_name, (receiver, *arguments), pair))
         result = context.temporary(struct_type)
         context.block.instructions.append(IRMethodResultReceiver(result, pair))
+        return result
+
+    def _lower_class_constructor_call(
+        self,
+        call: ast.CallExpression,
+        info: _StructInfo,
+        context: _FunctionContext,
+    ) -> IRValue:
+        class_type = ClassRefType(info.declaration.name)
+        constructor = info.declaration.constructor
+        parameter_types = (
+            tuple(field_type for _name, field_type in info.fields)
+            if constructor is None
+            else self._signatures[
+                self._method_names[(info.declaration.name, "__ctor")]
+            ].parameters[1:]
+        )
+        if len(call.arguments) != len(parameter_types):
+            self._fail("Checked class constructor has invalid arity.", call)
+        arguments = tuple(
+            self._lower_expression(argument, context, target_type=parameter_type)
+            for argument, parameter_type in zip(call.arguments, parameter_types)
+        )
+        result = context.temporary(class_type)
+        context.block.instructions.append(IRClassNew(result))
+        if constructor is None:
+            for index, ((field_name, field_type), value) in enumerate(
+                zip(info.fields, arguments)
+            ):
+                self._require_same_type(
+                    value.type,
+                    field_type,
+                    "class field initialization",
+                )
+                context.block.instructions.append(
+                    IRClassSet(result, index, field_name, value, True)
+                )
+        else:
+            context.block.instructions.append(
+                IRCall(
+                    self._method_names[(info.declaration.name, "__ctor")],
+                    (result, *arguments),
+                )
+            )
         return result
 
     def _lower_method_call(
@@ -2559,9 +2815,13 @@ class IRLowerer:
         statement: ast.Statement,
         context: _FunctionContext,
     ) -> None:
-        aggregate = self._lower_expression(target, context)
-        if not isinstance(aggregate.type, StructType):
-            self._fail(f"IR backend field assignment expects a struct, got '{aggregate.type}'.", statement)
+        aggregate = self._lower_field_receiver(target, context)
+        if not isinstance(aggregate.type, (StructType, ClassRefType)):
+            self._fail(
+                f"IR backend field assignment expects a struct or class, "
+                f"got '{aggregate.type}'.",
+                statement,
+            )
         info = self._structs.get(aggregate.type.name)
         field = info.field(field_name) if info is not None else None
         if field is None:
@@ -2569,12 +2829,56 @@ class IRLowerer:
         index, field_type = field
         value = self._lower_expression(expression, context, target_type=field_type)
         self._require_same_type(value.type, field_type, "field assignment")
+        if isinstance(aggregate.type, ClassRefType):
+            initialize = False
+            if (
+                context.constructor_class is info
+                and self._is_this_expression(target)
+            ):
+                if field_name in context.initialized_fields:
+                    initialize = False
+                elif field_name in context.maybe_initialized_fields:
+                    self._fail(
+                        f"Class field '{field_name}' is only initialized on "
+                        "some incoming constructor paths.",
+                        statement,
+                    )
+                else:
+                    initialize = True
+                    context.initialized_fields.add(field_name)
+                    context.maybe_initialized_fields.add(field_name)
+            context.block.instructions.append(
+                IRClassSet(
+                    aggregate,
+                    index,
+                    field_name,
+                    value,
+                    initialize,
+                )
+            )
+            return
         updated = context.temporary(aggregate.type)
         context.block.instructions.append(
             IRStructSet(updated, aggregate, index, field_name, value)
         )
         if not self._store_lvalue(target, updated, context):
             self._fail("IR backend requires a mutable struct lvalue for field assignment.", statement)
+
+    @staticmethod
+    def _is_this_expression(expression: ast.Expression) -> bool:
+        return isinstance(expression, ast.Identifier) and expression.name == "this"
+
+    def _lower_field_receiver(
+        self,
+        expression: ast.Expression,
+        context: _FunctionContext,
+    ) -> IRValue:
+        if self._is_this_expression(expression) and context.constructor_class is not None:
+            receiver = context.parameters.get("this")
+            if receiver is None:
+                self._fail("Class constructor receiver is unavailable.", expression)
+            return receiver
+        return self._lower_expression(expression, context)
 
     def _store_lvalue(
         self,
@@ -2672,6 +2976,8 @@ class IRLowerer:
         while isinstance(resolved, str) and resolved in self._aliases and resolved not in seen:
             seen.add(resolved)
             resolved = self._aliases[resolved]
+        if isinstance(resolved, AetherClassType):
+            return self._structs.get(resolved.name)
         return self._structs.get(resolved) if isinstance(resolved, str) else None
 
     @staticmethod
@@ -3310,6 +3616,12 @@ class IRLowerer:
             return ListType(self._lower_type(type_name.element_type))
         if isinstance(type_name, AetherNullableType):
             return NullableType(self._lower_type(type_name.base_type))
+        if isinstance(type_name, AetherClassType):
+            if type_name.name not in self._class_names:
+                self._fail(
+                    f"IR backend cannot resolve class type '{type_name.name}'."
+                )
+            return ClassRefType(type_name.name)
         if isinstance(type_name, AetherFunctionType):
             return FunctionType(
                 tuple(self._lower_type(item) for item in type_name.parameter_types),
@@ -3326,6 +3638,8 @@ class IRLowerer:
             return MatrixType(self._lower_type(type_name.element_type))
         if isinstance(type_name, str) and type_name in self._struct_names:
             return StructType(type_name)
+        if isinstance(type_name, str) and type_name in self._class_names:
+            return ClassRefType(type_name)
         if isinstance(type_name, str) and type_name in self._enums:
             return self._enums[type_name].type
         self._fail(f"IR backend does not support type '{type_name}' yet.")

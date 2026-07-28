@@ -499,6 +499,8 @@ pub enum InstructionKind {
     IRPrint,
     IRStructNew,
     IRClassNew,
+    IRClassGet,
+    IRClassSet,
     IRStructGet,
     IRStructSet,
     IRMethodResultNew,

@@ -513,9 +513,9 @@ def test_ir_backend_matches_ast_for_supported_subset(source: str, call: str) -> 
 
 def test_ir_backend_reports_unsupported_features_clearly() -> None:
     typed_program = prepare_typed_program(
-        "class Counter { int value; }",
+        "class Counter { int value; public int getValue() { return value; } }",
         TypeChecker(),
     )
 
-    with pytest.raises(IRBackendUnsupportedFeatureError, match="class declarations"):
+    with pytest.raises(IRBackendUnsupportedFeatureError, match="general class methods"):
         IRBackend().run(typed_program)

@@ -672,6 +672,30 @@ impl TryFrom<&IRInstructionDTO> for IRInstruction {
             IRInstructionDTO::ClassNew { result } => Ok(Self::IRClassNew {
                 result: import_instruction_value(kind, "result", result)?,
             }),
+            IRInstructionDTO::ClassGet {
+                result,
+                object,
+                field_index,
+                field_name,
+            } => Ok(Self::IRClassGet {
+                result: import_instruction_value(kind, "result", result)?,
+                object: import_instruction_value(kind, "object", object)?,
+                field_index: *field_index,
+                field_name: field_name.clone(),
+            }),
+            IRInstructionDTO::ClassSet {
+                object,
+                field_index,
+                field_name,
+                value,
+                initialize,
+            } => Ok(Self::IRClassSet {
+                object: import_instruction_value(kind, "object", object)?,
+                field_index: *field_index,
+                field_name: field_name.clone(),
+                value: import_instruction_value(kind, "value", value)?,
+                initialize: *initialize,
+            }),
             IRInstructionDTO::StructGet {
                 result,
                 r#struct,
@@ -1545,6 +1569,8 @@ const fn wire_instruction_kind(instruction: &IRInstructionDTO) -> &'static str {
         IRInstructionDTO::Print { .. } => "print",
         IRInstructionDTO::StructNew { .. } => "struct_new",
         IRInstructionDTO::ClassNew { .. } => "class_new",
+        IRInstructionDTO::ClassGet { .. } => "class_get",
+        IRInstructionDTO::ClassSet { .. } => "class_set",
         IRInstructionDTO::StructGet { .. } => "struct_get",
         IRInstructionDTO::StructSet { .. } => "struct_set",
         IRInstructionDTO::MethodResultNew { .. } => "method_result_new",

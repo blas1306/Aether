@@ -415,6 +415,19 @@ pub enum IRInstructionDTO {
     ClassNew {
         result: IRValueDTO,
     },
+    ClassGet {
+        result: IRValueDTO,
+        object: IRValueDTO,
+        field_index: i64,
+        field_name: String,
+    },
+    ClassSet {
+        object: IRValueDTO,
+        field_index: i64,
+        field_name: String,
+        value: IRValueDTO,
+        initialize: bool,
+    },
     StructGet {
         result: IRValueDTO,
         #[serde(rename = "struct")]

@@ -295,6 +295,10 @@ pub(crate) fn ssa_operands(instruction: &IRInstruction) -> Vec<SSAOperand<'_>> {
             .map(|value| operand("fields", value))
             .collect(),
         IRInstruction::IRStructGet { r#struct, .. } => vec![operand("struct", r#struct)],
+        IRInstruction::IRClassGet { object, .. } => vec![operand("object", object)],
+        IRInstruction::IRClassSet { object, value, .. } => {
+            vec![operand("object", object), operand("value", value)]
+        }
         IRInstruction::IRStructSet {
             r#struct, value, ..
         } => vec![operand("struct", r#struct), operand("value", value)],

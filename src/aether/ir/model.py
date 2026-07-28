@@ -258,9 +258,34 @@ class IRStructNew(IRInstruction):
 
 @dataclass(frozen=True)
 class IRClassNew(AllocationMixin, IRInstruction):
-    """Allocate the payload-free native object admitted by Phase 5.3A."""
+    """Allocate one nominal class object with uninitialized field payload."""
 
     result: IRValue
+
+
+@dataclass(frozen=True)
+class IRClassGet(MemoryReadMixin, IRInstruction):
+    """Read a statically resolved field through a class handle."""
+
+    result: IRValue
+    object: IRValue
+    field_index: int
+    field_name: str
+
+
+@dataclass(frozen=True)
+class IRClassSet(MemoryWriteMixin, IRInstruction):
+    """Initialize or assign a statically resolved class field.
+
+    ``initialize`` is true only while lowering a constructor path on which the
+    field is not live yet.  Normal assignments use lifecycle-safe replacement.
+    """
+
+    object: IRValue
+    field_index: int
+    field_name: str
+    value: IRValue
+    initialize: bool = False
 
 
 @dataclass(frozen=True)

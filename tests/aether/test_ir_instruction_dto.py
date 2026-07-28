@@ -26,6 +26,8 @@ from aether.ir.model import (
     IRCall,
     IRCallIndirect,
     IRClassNew,
+    IRClassGet,
+    IRClassSet,
     IRCast,
     IRCompareOp,
     IRConst,
@@ -99,11 +101,13 @@ VALUE = IRValue("value", ListType(StringType()))
 DESTINATION = IRStorage("destination", ListType(StringType()))
 SOURCE = IRStorage("source", ListType(StringType()))
 ENUM_CONSTANT = IREnumConstant("Color", "GREEN", 1, 7)
+CLASS_OBJECT = IRValue("object", ClassRefType("pkg.Widget"))
+CLASS_FIELD = IRValue("field", IntType())
 
 
 ROUND_TRIP_CASES: tuple[tuple[IRInstruction, dict[str, object]], ...] = (
     (
-        IRClassNew(IRValue("object", ClassRefType("pkg.Widget"))),
+        IRClassNew(CLASS_OBJECT),
         {
             "kind": "class_new",
             "result": {
@@ -111,6 +115,43 @@ ROUND_TRIP_CASES: tuple[tuple[IRInstruction, dict[str, object]], ...] = (
                 "name": "object",
                 "type": {"tag": "class_ref", "name": "pkg.Widget"},
             },
+        },
+    ),
+    (
+        IRClassGet(CLASS_FIELD, CLASS_OBJECT, 0, "value"),
+        {
+            "kind": "class_get",
+            "result": {
+                "tag": "value",
+                "name": "field",
+                "type": {"tag": "int"},
+            },
+            "object": {
+                "tag": "value",
+                "name": "object",
+                "type": {"tag": "class_ref", "name": "pkg.Widget"},
+            },
+            "field_index": 0,
+            "field_name": "value",
+        },
+    ),
+    (
+        IRClassSet(CLASS_OBJECT, 0, "value", CLASS_FIELD, True),
+        {
+            "kind": "class_set",
+            "object": {
+                "tag": "value",
+                "name": "object",
+                "type": {"tag": "class_ref", "name": "pkg.Widget"},
+            },
+            "field_index": 0,
+            "field_name": "value",
+            "value": {
+                "tag": "value",
+                "name": "field",
+                "type": {"tag": "int"},
+            },
+            "initialize": True,
         },
     ),
     (
@@ -315,6 +356,8 @@ def test_supported_instruction_tags_are_explicit_and_stable() -> None:
         IRPrint: "print",
         IRStructNew: "struct_new",
         IRClassNew: "class_new",
+        IRClassGet: "class_get",
+        IRClassSet: "class_set",
         IRStructGet: "struct_get",
         IRStructSet: "struct_set",
         IRMethodResultNew: "method_result_new",

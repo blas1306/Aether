@@ -4,9 +4,9 @@ use std::error::Error as _;
 
 use aether_ir::{
     ArrayType, BoolType, ClassRefType, DoubleType, FloatType, FunctionType, IRBasicBlock,
-    IRConstant, IRFunction, IRInstruction, IRModule, IRParameter, IRStorage,
-    IRStructDefinition, IRType, IRValue, IntType, ListType, MatrixType, NullableType,
-    StringType, StructType, VectorType, VoidType,
+    IRConstant, IRFunction, IRInstruction, IRModule, IRParameter, IRStorage, IRStructDefinition,
+    IRType, IRValue, IntType, ListType, MatrixType, NullableType, StringType, StructType,
+    VectorType, VoidType,
 };
 use aether_verifier::{
     BlockTypeVerificationError, FunctionTypeVerificationError, InstructionKind,
@@ -385,6 +385,58 @@ fn class_new_requires_a_class_reference_result() {
             actual: IntType.into(),
         }
     );
+}
+
+#[test]
+fn class_fields_use_the_nominal_definition_and_canonical_field_type() {
+    let class_type: IRType = ClassRefType {
+        name: "pkg.Widget".to_owned(),
+    }
+    .into();
+    let mut valid = module_with_instruction(IRInstruction::IRClassGet {
+        result: value("field", IntType.into()),
+        object: value("object", class_type.clone()),
+        field_index: 0,
+        field_name: "value".to_owned(),
+    });
+    valid.structs.push(IRStructDefinition {
+        name: "pkg.Widget".to_owned(),
+        fields: vec![("value".to_owned(), IntType.into())],
+    });
+    assert_eq!(verify_module_types(&valid), Ok(()));
+
+    let mut wrong_name = module_with_instruction(IRInstruction::IRClassGet {
+        result: value("field", IntType.into()),
+        object: value("object", class_type.clone()),
+        field_index: 0,
+        field_name: "other".to_owned(),
+    });
+    wrong_name.structs = valid.structs.clone();
+    assert!(matches!(
+        instruction_rule(&verify_module_types(&wrong_name).unwrap_err()),
+        TypeRuleError::MetadataMismatch {
+            field,
+            expected,
+            actual,
+        } if field == "field_name" && expected == "value" && actual == "other"
+    ));
+
+    let mut invalid = module_with_instruction(IRInstruction::IRClassSet {
+        object: value("object", class_type),
+        field_index: 0,
+        field_name: "value".to_owned(),
+        value: value("wrong", StringType.into()),
+        initialize: true,
+    });
+    invalid.structs = valid.structs;
+    assert!(matches!(
+        instruction_rule(&verify_module_types(&invalid).unwrap_err()),
+        TypeRuleError::TypeMismatch {
+            field,
+            expected: IRType::Int(_),
+            actual: IRType::String(_),
+        } if field == "value"
+    ));
 }
 
 #[test]

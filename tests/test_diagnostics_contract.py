@@ -34,7 +34,10 @@ def _source(tmp_path: Path, text: str) -> Path:
     [
         ("int main( {\n", "Aether syntax error [AE-SYNTAX-001]"),
         ('int main() { int value = "bad"; return value; }\n', "Aether type error [AE-TYPE-001]"),
-        ("class Counter { int value; }\n", "Aether capability error [AE-BACKEND-CLASSES]"),
+        (
+            "class Counter { int value; int get() { return value; } }\n",
+            "Aether capability error [AE-BACKEND-CLASS_METHODS]",
+        ),
     ],
 )
 def test_source_diagnostics_are_categorized_without_traceback(

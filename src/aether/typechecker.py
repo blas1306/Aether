@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields as dataclass_fields, is_dataclass, replace
 from pathlib import Path
 
 from . import ast
@@ -2031,10 +2031,185 @@ class TypeChecker:
         self.current_method_struct = struct
         try:
             self._check_statements(constructor.body, constructor_scope)
+            if isinstance(declaration, ast.ClassDeclaration):
+                self._check_class_constructor_initialization(
+                    declaration,
+                    constructor,
+                )
         finally:
             self.current_return_type = previous_return_type
             self.current_function_name = previous_function_name
             self.current_method_struct = previous_method_struct
+
+    def _check_class_constructor_initialization(
+        self,
+        declaration: ast.ClassDeclaration,
+        constructor: ast.ConstructorDeclaration,
+    ) -> None:
+        """Prove every class field live on each successful constructor path."""
+
+        field_names = {field.name for field in declaration.fields}
+        required = set(field_names)
+        parameters = {parameter.name for parameter in constructor.parameters}
+
+        def error(message: str, node: object) -> NoReturn:
+            raise AetherTypeError(
+                message,
+                line=getattr(node, "line", constructor.line),
+                column=getattr(node, "column", constructor.column),
+                kind="initialization",
+            )
+
+        def read_expression(
+            expression: object,
+            initialized: set[str],
+            locals_: set[str],
+        ) -> None:
+            if isinstance(expression, ast.Identifier):
+                if expression.name == "this" and initialized != required:
+                    error(
+                        "Class constructor cannot expose incompletely initialized 'this'.",
+                        expression,
+                    )
+                if (
+                    expression.name in field_names
+                    and expression.name not in locals_
+                    and expression.name not in initialized
+                ):
+                    error(
+                        f"Class field '{expression.name}' is read before initialization.",
+                        expression,
+                    )
+                return
+            if isinstance(expression, ast.FieldAccess):
+                if (
+                    isinstance(expression.target, ast.Identifier)
+                    and expression.target.name == "this"
+                    and expression.field_name in field_names
+                ):
+                    if expression.field_name not in initialized:
+                        error(
+                            f"Class field '{expression.field_name}' is read before initialization.",
+                            expression,
+                        )
+                    return
+                read_expression(expression.target, initialized, locals_)
+                return
+            if expression is None or isinstance(
+                expression,
+                (str, bytes, int, float, bool),
+            ):
+                return
+            if isinstance(expression, (list, tuple)):
+                for item in expression:
+                    read_expression(item, initialized, locals_)
+                return
+            if is_dataclass(expression):
+                for item in dataclass_fields(expression):
+                    read_expression(
+                        getattr(expression, item.name),
+                        initialized,
+                        locals_,
+                    )
+
+        def require_complete(initialized: set[str], node: object) -> None:
+            missing = [
+                field.name
+                for field in declaration.fields
+                if field.name not in initialized
+            ]
+            if missing:
+                error(
+                    "Class constructor leaves fields uninitialized: "
+                    + ", ".join(f"'{name}'" for name in missing)
+                    + ".",
+                    node,
+                )
+
+        def statements(
+            body: list[ast.Statement],
+            incoming: set[str],
+            locals_: set[str],
+        ) -> tuple[set[str], bool]:
+            initialized = set(incoming)
+            local_names = set(locals_)
+            for statement in body:
+                if isinstance(statement, ast.VarDeclaration):
+                    read_expression(statement.initializer, initialized, local_names)
+                    local_names.add(statement.name)
+                    continue
+                if isinstance(statement, ast.Assignment):
+                    read_expression(statement.expression, initialized, local_names)
+                    if (
+                        isinstance(statement.name, str)
+                        and statement.name in field_names
+                        and statement.name not in local_names
+                    ):
+                        initialized.add(statement.name)
+                    continue
+                if isinstance(statement, ast.FieldAssignment):
+                    if not (
+                        isinstance(statement.target, ast.Identifier)
+                        and statement.target.name == "this"
+                    ):
+                        read_expression(statement.target, initialized, local_names)
+                    read_expression(statement.expression, initialized, local_names)
+                    if (
+                        isinstance(statement.target, ast.Identifier)
+                        and statement.target.name == "this"
+                        and statement.field_name in field_names
+                    ):
+                        initialized.add(statement.field_name)
+                    continue
+                if isinstance(statement, ast.IfStatement):
+                    read_expression(statement.condition, initialized, local_names)
+                    then_state, then_continues = statements(
+                        statement.body,
+                        initialized,
+                        local_names,
+                    )
+                    if statement.else_body is None:
+                        else_state, else_continues = set(initialized), True
+                    else:
+                        else_state, else_continues = statements(
+                            statement.else_body,
+                            initialized,
+                            local_names,
+                        )
+                    continuing = [
+                        state
+                        for state, continues in (
+                            (then_state, then_continues),
+                            (else_state, else_continues),
+                        )
+                        if continues
+                    ]
+                    if not continuing:
+                        return initialized, False
+                    initialized = set.intersection(*continuing)
+                    continue
+                if isinstance(statement, ast.WhileStatement):
+                    read_expression(statement.condition, initialized, local_names)
+                    statements(statement.body, initialized, local_names)
+                    continue
+                if isinstance(statement, ast.ForInStatement):
+                    read_expression(statement.iterable, initialized, local_names)
+                    statements(
+                        statement.body,
+                        initialized,
+                        local_names | {statement.variable},
+                    )
+                    continue
+                if isinstance(statement, ast.ReturnStatement):
+                    read_expression(statement.expression, initialized, local_names)
+                    require_complete(initialized, statement)
+                    return initialized, False
+                read_expression(statement, initialized, local_names)
+            return initialized, True
+
+        final, continues = statements(constructor.body, set(), parameters)
+        if continues:
+            require_complete(final, constructor)
 
     def _declare_expression_function_signature(
         self,

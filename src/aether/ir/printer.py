@@ -17,6 +17,9 @@ from .model import (
     IRCast,
     IRCall,
     IRCallIndirect,
+    IRClassGet,
+    IRClassNew,
+    IRClassSet,
     IRCompareOp,
     IRConst,
     IRCopyInit,
@@ -196,6 +199,21 @@ class IRPrinter:
         if isinstance(instruction, IRStructNew):
             fields = ", ".join(self._value(value) for value in instruction.fields)
             return f"{self._typed_value(instruction.result)} = struct_new [{fields}]"
+        if isinstance(instruction, IRClassNew):
+            return f"{self._typed_value(instruction.result)} = class_new"
+        if isinstance(instruction, IRClassGet):
+            return (
+                f"{self._typed_value(instruction.result)} = class_get "
+                f"{self._value(instruction.object)}, "
+                f"{instruction.field_name}#{instruction.field_index}"
+            )
+        if isinstance(instruction, IRClassSet):
+            operation = "class_init" if instruction.initialize else "class_set"
+            return (
+                f"{operation} {self._value(instruction.object)}, "
+                f"{instruction.field_name}#{instruction.field_index}, "
+                f"{self._value(instruction.value)}"
+            )
         if isinstance(instruction, IRStructGet):
             return (
                 f"{self._typed_value(instruction.result)} = struct_get "

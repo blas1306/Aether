@@ -172,7 +172,7 @@ int main() { Plots.plot(f, 0.0, 1.0); return 0; }
 def test_multiple_native_issues_are_deduplicated_and_keep_locations() -> None:
     typed = _typed(
         """
-class Box { int value; }
+class Box { int value; int get() { return value; } }
 enum Color { Red, Blue }
 int main() {
     double a = sqrt(4.0);
@@ -184,7 +184,9 @@ int main() {
     issues = backend_capability_issues(typed, BackendIdentity.NATIVE)
 
     assert [issue.requirement.capability for issue in issues].count(Capability.SCALAR_MATH) == 0
-    assert {issue.requirement.capability for issue in issues} >= {Capability.CLASSES}
+    assert {issue.requirement.capability for issue in issues} >= {
+        Capability.CLASS_METHODS
+    }
     assert Capability.ENUMS not in {issue.requirement.capability for issue in issues}
 
 
@@ -202,7 +204,7 @@ def test_native_rejects_unsupported_feature_before_ir_lowering(monkeypatch: pyte
         raise AssertionError("IR lowering must not run")
 
     monkeypatch.setattr("aether.ir.lowering.IRLowerer.lower", fail_if_lowered)
-    typed = _typed("class Box { int value; }")
+    typed = _typed("class Box { int value; int get() { return value; } }")
 
     with pytest.raises(BackendCapabilityError) as captured:
         LLVMBuilder().emit_llvm(typed)
@@ -210,9 +212,9 @@ def test_native_rejects_unsupported_feature_before_ir_lowering(monkeypatch: pyte
     issue = next(
         issue
         for issue in captured.value.issues
-        if issue.requirement.capability is Capability.CLASSES
+        if issue.requirement.capability is Capability.CLASS_METHODS
     )
-    assert issue.diagnostic_code == "AE-BACKEND-CLASSES"
+    assert issue.diagnostic_code == "AE-BACKEND-CLASS_METHODS"
     assert "valid Aether" in issue.hint
 
 

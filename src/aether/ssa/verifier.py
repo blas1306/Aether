@@ -67,7 +67,9 @@ from .model import (
     SSACast,
     SSACall,
     SSACallIndirect,
+    SSAClassGet,
     SSAClassNew,
+    SSAClassSet,
     SSACompareOp,
     SSAConst,
     SSAFunction,
@@ -547,6 +549,45 @@ class SSAVerifier:
                     self._fail(
                         f"Class new result must be class reference type, got {instruction.result.type}"
                     )
+                continue
+
+            if isinstance(instruction, SSAClassGet):
+                self._require_defined(instruction.object, value_types)
+                definition = (
+                    self._structs.get(instruction.object.type.name)
+                    if isinstance(instruction.object.type, ClassRefType)
+                    else None
+                )
+                if definition is None or not 0 <= instruction.field_index < len(definition.fields):
+                    self._fail("Class get requires a declared class and valid canonical field")
+                field_name, field_type = definition.fields[instruction.field_index]
+                if instruction.field_name != field_name:
+                    self._fail("Class get field name/index mismatch")
+                self._require_type(
+                    instruction.result.type,
+                    field_type,
+                    "Class get result type mismatch",
+                )
+                continue
+
+            if isinstance(instruction, SSAClassSet):
+                self._require_defined(instruction.object, value_types)
+                self._require_defined(instruction.value, value_types)
+                definition = (
+                    self._structs.get(instruction.object.type.name)
+                    if isinstance(instruction.object.type, ClassRefType)
+                    else None
+                )
+                if definition is None or not 0 <= instruction.field_index < len(definition.fields):
+                    self._fail("Class set requires a declared class and valid canonical field")
+                field_name, field_type = definition.fields[instruction.field_index]
+                if instruction.field_name != field_name:
+                    self._fail("Class set field name/index mismatch")
+                self._require_type(
+                    instruction.value.type,
+                    field_type,
+                    "Class set value type mismatch",
+                )
                 continue
 
             if isinstance(instruction, SSAStructGet):
@@ -2235,6 +2276,7 @@ class SSAVerifier:
             (
                 SSAArrayNew,
                 SSAClassNew,
+                SSAClassGet,
                 SSAArrayCopy,
                 SSAArrayGet,
                 SSAArraySlice,

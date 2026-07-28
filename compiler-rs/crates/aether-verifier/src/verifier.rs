@@ -484,6 +484,19 @@ impl<'module> TypeVerifier<'module> {
                     ))
                 }
             }
+            IRInstruction::IRClassGet {
+                result,
+                object,
+                field_index,
+                field_name,
+            } => self.verify_class_get(result, object, *field_index, field_name),
+            IRInstruction::IRClassSet {
+                object,
+                field_index,
+                field_name,
+                value,
+                ..
+            } => self.verify_class_set(object, *field_index, field_name, value),
             IRInstruction::IRStructGet {
                 result,
                 r#struct,
@@ -866,6 +879,10 @@ impl<'module> TypeVerifier<'module> {
                 fields.iter().map(|field| ("fields", field)).collect()
             }
             IRInstruction::IRStructGet { r#struct, .. } => vec![("struct", r#struct)],
+            IRInstruction::IRClassGet { object, .. } => vec![("object", object)],
+            IRInstruction::IRClassSet { object, value, .. } => {
+                vec![("object", object), ("value", value)]
+            }
             IRInstruction::IRStructSet {
                 r#struct, value, ..
             } => vec![("struct", r#struct), ("value", value)],
@@ -1640,6 +1657,71 @@ impl<'module> TypeVerifier<'module> {
         self.require_exact("result", &field.1, &result.r#type)
     }
 
+    fn verify_class_get(
+        &self,
+        result: &IRValue,
+        object: &IRValue,
+        field_index: i64,
+        field_name: &str,
+    ) -> Result<(), TypeRuleError> {
+        let IRType::ClassRef(class_type) = &object.r#type else {
+            return Err(constraint(
+                "object",
+                TypeExpectation::ClassReference,
+                &object.r#type,
+            ));
+        };
+        let definition = self.struct_definition(&class_type.name).ok_or_else(|| {
+            TypeRuleError::UnknownStruct {
+                field: "object".to_owned(),
+                struct_name: class_type.name.clone(),
+            }
+        })?;
+        let field = struct_field(definition, field_index)?;
+        self.require_class_field_name(field_name, field)?;
+        self.require_exact("result", &field.1, &result.r#type)
+    }
+
+    fn verify_class_set(
+        &self,
+        object: &IRValue,
+        field_index: i64,
+        field_name: &str,
+        value: &IRValue,
+    ) -> Result<(), TypeRuleError> {
+        let IRType::ClassRef(class_type) = &object.r#type else {
+            return Err(constraint(
+                "object",
+                TypeExpectation::ClassReference,
+                &object.r#type,
+            ));
+        };
+        let definition = self.struct_definition(&class_type.name).ok_or_else(|| {
+            TypeRuleError::UnknownStruct {
+                field: "object".to_owned(),
+                struct_name: class_type.name.clone(),
+            }
+        })?;
+        let field = struct_field(definition, field_index)?;
+        self.require_class_field_name(field_name, field)?;
+        self.require_exact("value", &field.1, &value.r#type)
+    }
+
+    fn require_class_field_name(
+        &self,
+        field_name: &str,
+        field: &(String, IRType),
+    ) -> Result<(), TypeRuleError> {
+        if field_name == field.0 {
+            return Ok(());
+        }
+        Err(TypeRuleError::MetadataMismatch {
+            field: "field_name".to_owned(),
+            expected: field.0.clone(),
+            actual: field_name.to_owned(),
+        })
+    }
+
     fn verify_struct_set(
         &self,
         result: &IRValue,
@@ -2227,9 +2309,7 @@ impl<'module> TypeVerifier<'module> {
             IRType::List(list) => self.is_equality_capable(&list.element, visiting),
             IRType::Vector(vector) => self.is_equality_capable(&vector.element, visiting),
             IRType::Matrix(matrix) => self.is_equality_capable(&matrix.element, visiting),
-            IRType::Nullable(nullable) => {
-                self.is_equality_capable(&nullable.inner, visiting)
-            }
+            IRType::Nullable(nullable) => self.is_equality_capable(&nullable.inner, visiting),
             IRType::Struct(struct_type) => {
                 let Some(definition) = self.struct_definition(&struct_type.name) else {
                     return false;
@@ -2666,6 +2746,7 @@ pub(crate) fn instruction_result(instruction: &IRInstruction) -> Option<&IRValue
         | IRInstruction::IRFunctionRef { result, .. }
         | IRInstruction::IRStructNew { result, .. }
         | IRInstruction::IRClassNew { result, .. }
+        | IRInstruction::IRClassGet { result, .. }
         | IRInstruction::IRStructGet { result, .. }
         | IRInstruction::IRStructSet { result, .. }
         | IRInstruction::IRMethodResultNew { result, .. }
@@ -2733,6 +2814,8 @@ pub(crate) fn instruction_kind(instruction: &IRInstruction) -> InstructionKind {
         IRInstruction::IRPrint { .. } => InstructionKind::IRPrint,
         IRInstruction::IRStructNew { .. } => InstructionKind::IRStructNew,
         IRInstruction::IRClassNew { .. } => InstructionKind::IRClassNew,
+        IRInstruction::IRClassGet { .. } => InstructionKind::IRClassGet,
+        IRInstruction::IRClassSet { .. } => InstructionKind::IRClassSet,
         IRInstruction::IRStructGet { .. } => InstructionKind::IRStructGet,
         IRInstruction::IRStructSet { .. } => InstructionKind::IRStructSet,
         IRInstruction::IRMethodResultNew { .. } => InstructionKind::IRMethodResultNew,

@@ -20,7 +20,9 @@ from .model import (
     IRBranch,
     IRCall,
     IRCallIndirect,
+    IRClassGet,
     IRClassNew,
+    IRClassSet,
     IRCast,
     IRCompareOp,
     IRConst,
@@ -777,6 +779,38 @@ def _encode_instruction_to_dto(
                 instruction.result, schema_version=schema_version
             ),
         }
+    if type(instruction) is IRClassGet:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(instruction.result, schema_version=schema_version),
+            "object": ir_value_to_dto(instruction.object, schema_version=schema_version),
+            "field_index": _expect_i64(
+                instruction.field_index,
+                "IR instruction 'class_get'.field_index",
+            ),
+            "field_name": _expect_string(
+                instruction.field_name,
+                "IR instruction 'class_get'.field_name",
+            ),
+        }
+    if type(instruction) is IRClassSet:
+        return {
+            "kind": kind,
+            "object": ir_value_to_dto(instruction.object, schema_version=schema_version),
+            "field_index": _expect_i64(
+                instruction.field_index,
+                "IR instruction 'class_set'.field_index",
+            ),
+            "field_name": _expect_string(
+                instruction.field_name,
+                "IR instruction 'class_set'.field_name",
+            ),
+            "value": ir_value_to_dto(instruction.value, schema_version=schema_version),
+            "initialize": _expect_bool(
+                instruction.initialize,
+                "IR instruction 'class_set'.initialize",
+            ),
+        }
     if type(instruction) is IRStructGet:
         return {
             "kind": kind,
@@ -1529,6 +1563,31 @@ def _decode_instruction_from_dto(
         return IRClassNew(
             ir_value_from_dto(mapping["result"], schema_version=schema_version)
         )
+    if kind == "class_get":
+        _expect_fields(
+            mapping,
+            {"kind", "result", "object", "field_index", "field_name"},
+            "IR instruction 'class_get'",
+        )
+        return IRClassGet(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_value_from_dto(mapping["object"], schema_version=schema_version),
+            _expect_i64(mapping["field_index"], "IR instruction 'class_get'.field_index"),
+            _expect_string(mapping["field_name"], "IR instruction 'class_get'.field_name"),
+        )
+    if kind == "class_set":
+        _expect_fields(
+            mapping,
+            {"kind", "object", "field_index", "field_name", "value", "initialize"},
+            "IR instruction 'class_set'",
+        )
+        return IRClassSet(
+            ir_value_from_dto(mapping["object"], schema_version=schema_version),
+            _expect_i64(mapping["field_index"], "IR instruction 'class_set'.field_index"),
+            _expect_string(mapping["field_name"], "IR instruction 'class_set'.field_name"),
+            ir_value_from_dto(mapping["value"], schema_version=schema_version),
+            _expect_bool(mapping["initialize"], "IR instruction 'class_set'.initialize"),
+        )
     if kind == "struct_get":
         _expect_fields(
             mapping,
@@ -2256,6 +2315,8 @@ IR_INSTRUCTION_DTO_REGISTRY: tuple[IRInstructionDTORegistryEntry, ...] = (
     _instruction_dto_entry(IRPrint, "print", "IRPrint"),
     _instruction_dto_entry(IRStructNew, "struct_new", "IRStructNew"),
     _instruction_dto_entry(IRClassNew, "class_new", "IRClassNew"),
+    _instruction_dto_entry(IRClassGet, "class_get", "IRClassGet"),
+    _instruction_dto_entry(IRClassSet, "class_set", "IRClassSet"),
     _instruction_dto_entry(IRStructGet, "struct_get", "IRStructGet"),
     _instruction_dto_entry(IRStructSet, "struct_set", "IRStructSet"),
     _instruction_dto_entry(

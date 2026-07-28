@@ -22,7 +22,9 @@ from aether.ssa.model import (
     SSACast,
     SSACall,
     SSACallIndirect,
+    SSAClassGet,
     SSAClassNew,
+    SSAClassSet,
     SSACompareOp,
     SSAConst,
     SSAFunction,
@@ -96,7 +98,7 @@ from .runtime_common import LLVMRuntimeCommon, aggregate_helper_suffix
 from .scalar_math_runtime import LLVMScalarMathRuntime
 from .vector_runtime import LLVMVectorRuntime
 from .string_runtime import LLVMStringRuntime
-from .class_runtime import class_new_helper, class_runtime_sections
+from .class_runtime import class_new_helper, class_object_type, class_runtime_sections
 from .process_runtime import LLVMProcessRuntime
 from .text_file_runtime import LLVMTextFileRuntime
 from aether.process_arguments import PROCESS_ARGS_BUILTIN
@@ -234,6 +236,7 @@ class LLVMPrinter:
         self._class_alloc_types: set[ClassRefType] = set()
 
         functions = [self._print_function(function) for function in module.functions]
+        self._register_class_payload_lifecycle()
         nullable_types = [
             f"{llvm_type(type_)} = type {{ i1, {llvm_type(type_.inner)} }}"
             for type_ in self._collect_nullable_types(module)
@@ -534,7 +537,12 @@ class LLVMPrinter:
             snapshots=self._uses_process_arguments,
         ).append(runtime)
         runtime.extend(
-            class_runtime_sections(self._class_types, self._class_alloc_types)
+            class_runtime_sections(
+                self._class_types,
+                self._class_alloc_types,
+                self._structs,
+                self._emit_class_destroy_value,
+            )
         )
         globals_ = [
             rendered
@@ -727,6 +735,10 @@ class LLVMPrinter:
             self._class_alloc_types.add(instruction.result.type)
             result = self._new_temp(instruction.result)
             return f"{result} = call ptr @{class_new_helper(instruction.result.type)}()"
+        if isinstance(instruction, SSAClassGet):
+            return "\n  ".join(self._print_class_get(instruction))
+        if isinstance(instruction, SSAClassSet):
+            return "\n  ".join(self._print_class_set(instruction))
         if isinstance(instruction, SSAStructGet):
             return self._print_struct_get(instruction)
         if isinstance(instruction, SSAStructSet):
@@ -845,6 +857,7 @@ class LLVMPrinter:
             (
                 SSAArrayNew,
                 SSAClassNew,
+                SSAClassGet,
                 SSAArrayCopy,
                 SSAArrayGet,
                 SSAArraySlice,
@@ -1832,7 +1845,30 @@ class LLVMPrinter:
                 )
                 self._emit_arc_value(lines, field, field_type, retain=retain)
             return
-        raise LLVMBackendError(f"LLVM lifecycle builtin does not support type {type_}")
+        raise LLVMBackendError(
+            f"LLVM lifecycle builtin does not support type {type_}"
+        )
+
+    def _register_class_payload_lifecycle(self) -> None:
+        """Discover helpers needed only by descriptor-driven field teardown."""
+
+        for class_type in sorted(self._class_types, key=lambda item: item.name):
+            definition = self._structs.get(class_type.name)
+            if definition is None:
+                continue
+            for _name, field_type in definition.fields:
+                if not self._layouts.layout(field_type).needs_destroy:
+                    continue
+                self._emit_arc_value([], "undef", field_type, retain=False)
+
+    def _emit_class_destroy_value(
+        self,
+        lines: list[str],
+        operand: str,
+        type_: object,
+    ) -> None:
+        if self._layouts.layout(type_).needs_destroy:
+            self._emit_arc_value(lines, operand, type_, retain=False)
 
     def _nullable_arc_helper(
         self,
@@ -2498,6 +2534,56 @@ class LLVMPrinter:
             f"{result} = extractvalue {llvm_type(instruction.struct.type)} "
             f"{self._operand(instruction.struct)}, {instruction.field_index}"
         )
+
+    def _print_class_get(self, instruction: SSAClassGet) -> list[str]:
+        if not isinstance(instruction.object.type, ClassRefType):
+            raise LLVMBackendError("LLVM class_get requires a class reference")
+        definition = self._structs.get(instruction.object.type.name)
+        if definition is None or not 0 <= instruction.field_index < len(definition.fields):
+            raise LLVMBackendError("LLVM class_get requires a canonical class field")
+        pointer = self._synthetic_temp("class.field.ptr")
+        result = self._new_temp(instruction.result)
+        return [
+            f"{pointer} = getelementptr "
+            f"{class_object_type(instruction.object.type)}, "
+            f"ptr {self._operand(instruction.object)}, i32 0, "
+            f"i32 {instruction.field_index + 1}",
+            f"{result} = load {llvm_type(instruction.result.type)}, ptr {pointer}",
+        ]
+
+    def _print_class_set(self, instruction: SSAClassSet) -> list[str]:
+        if not isinstance(instruction.object.type, ClassRefType):
+            raise LLVMBackendError("LLVM class_set requires a class reference")
+        definition = self._structs.get(instruction.object.type.name)
+        if definition is None or not 0 <= instruction.field_index < len(definition.fields):
+            raise LLVMBackendError("LLVM class_set requires a canonical class field")
+        field_type = definition.fields[instruction.field_index][1]
+        pointer = self._synthetic_temp("class.field.ptr")
+        lines = [
+            f"{pointer} = getelementptr "
+            f"{class_object_type(instruction.object.type)}, "
+            f"ptr {self._operand(instruction.object)}, i32 0, "
+            f"i32 {instruction.field_index + 1}"
+        ]
+        needs_destroy = self._layouts.layout(field_type).needs_destroy
+        if needs_destroy:
+            self._emit_arc_value(
+                lines,
+                self._operand(instruction.value),
+                field_type,
+                retain=True,
+            )
+        old: str | None = None
+        if needs_destroy and not instruction.initialize:
+            old = self._synthetic_temp("class.field.old")
+            lines.append(f"{old} = load {llvm_type(field_type)}, ptr {pointer}")
+        lines.append(
+            f"store {llvm_type(field_type)} {self._operand(instruction.value)}, "
+            f"ptr {pointer}"
+        )
+        if old is not None:
+            self._emit_arc_value(lines, old, field_type, retain=False)
+        return lines
 
     def _print_struct_set(self, instruction: SSAStructSet) -> str:
         result = self._new_temp(instruction.result)

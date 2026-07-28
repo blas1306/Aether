@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Callable
 
+from aether.ir.model import IRStructDefinition
 from aether.ir.types import ClassRefType
+from aether.backend.llvm.types import llvm_type
 
 
 def class_symbol_suffix(type_: ClassRefType) -> str:
@@ -25,14 +28,10 @@ def class_new_helper(type_: ClassRefType) -> str:
 def class_runtime_sections(
     types: set[ClassRefType],
     allocated_types: set[ClassRefType],
+    definitions: dict[str, IRStructDefinition] | None = None,
+    destroy_value: Callable[[list[str], str, object], None] | None = None,
 ) -> list[str]:
-    """Materialize the payload-free Phase 5.3A object model.
-
-    Descriptor callbacks make final release independent of the static handle
-    type.  The callbacks are no-ops while class fields remain deferred, but
-    their ABI is the foundation used by the later recursive field destructor
-    and tracing implementation.
-    """
+    """Materialize the descriptor-driven class header and inline payload."""
 
     if not types:
         return []
@@ -106,24 +105,44 @@ def class_runtime_sections(
         ),
     ]
 
+    definitions = definitions or {}
     for type_ in sorted(types, key=lambda item: item.name):
         suffix = class_symbol_suffix(type_)
         object_type = class_object_type(type_)
+        definition = definitions.get(type_.name)
+        fields = definition.fields if definition is not None else ()
         encoded_id = type_.name.encode("utf-8")
         escaped_id = "".join(
             chr(byte) if 32 <= byte <= 126 and byte not in {34, 92} else f"\\{byte:02X}"
             for byte in encoded_id
         )
         id_size = len(encoded_id) + 1
+        payload = "".join(f", {llvm_type(field_type)}" for _name, field_type in fields)
+        destroy_lines: list[str] = []
+        for index, (_field_name, field_type) in reversed(tuple(enumerate(fields))):
+            field_ptr = f"%field.{index}.ptr"
+            field_value = f"%field.{index}"
+            destroy_lines.extend(
+                [
+                    f"  {field_ptr} = getelementptr {object_type}, ptr %object, "
+                    f"i32 0, i32 {index + 1}",
+                    f"  {field_value} = load {llvm_type(field_type)}, ptr {field_ptr}",
+                ]
+            )
+            if destroy_value is not None:
+                nested: list[str] = []
+                destroy_value(nested, field_value, field_type)
+                destroy_lines.extend(f"  {line}" for line in nested)
         sections.extend(
             [
-                f"{object_type} = type {{ %AetherObjectHeader }}",
+                f"{object_type} = type {{ %AetherObjectHeader{payload} }}",
                 f"@__ae_class_id_{suffix} = private unnamed_addr constant "
                 f"[{id_size} x i8] c\"{escaped_id}\\00\"",
                 "\n".join(
                     [
                         f"define private void @__ae_class_destroy_fields_{suffix}(ptr %object) {{",
                         "entry:",
+                        *destroy_lines,
                         "  ret void",
                         "}",
                     ]

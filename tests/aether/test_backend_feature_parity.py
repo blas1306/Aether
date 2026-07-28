@@ -200,7 +200,7 @@ Counter c = Counter(7);
 println(c.getValue());
 """,
             "7\n",
-            "class declarations",
+            "general class methods",
         ),
     ],
     ids=("class",),

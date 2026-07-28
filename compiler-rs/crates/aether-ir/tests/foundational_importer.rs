@@ -22,10 +22,7 @@ fn boxed(type_: IRTypeDTO) -> Box<IRTypeDTO> {
 #[test]
 fn imports_every_constant_variant_through_owned_and_borrowed_paths() {
     let cases = vec![
-        (
-            json!({"tag": "null"}),
-            IRConstant::Null,
-        ),
+        (json!({"tag": "null"}), IRConstant::Null),
         (
             json!({"tag": "bool", "value": true}),
             IRConstant::Bool(true),

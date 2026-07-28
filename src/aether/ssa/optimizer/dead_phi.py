@@ -13,6 +13,8 @@ from aether.ssa.model import (
     SSACast,
     SSACall,
     SSACallIndirect,
+    SSAClassGet,
+    SSAClassSet,
     SSACompareOp,
     SSAConst,
     SSAFunction,
@@ -178,6 +180,15 @@ class DeadPhiEliminator:
 
         if isinstance(instruction, SSAStructNew):
             used_values.update(instruction.fields)
+            return
+
+        if isinstance(instruction, SSAClassGet):
+            used_values.add(instruction.object)
+            return
+
+        if isinstance(instruction, SSAClassSet):
+            used_values.add(instruction.object)
+            used_values.add(instruction.value)
             return
 
         if isinstance(instruction, SSAStructGet):

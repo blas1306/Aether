@@ -68,6 +68,8 @@ MATRIX = MatrixType(FLOAT)
 
 
 def _result_type(tag: str) -> IRType:
+    if tag == "class_new":
+        return ClassRefType("Document")
     if tag == "function_ref":
         return FunctionType((INT,), INT)
     if tag == "method_result_new":
@@ -116,8 +118,10 @@ def _instruction_sample(entry_index: int) -> ir_model.IRInstruction:
         "newline": True,
         "aggregate_shape": (2, 3),
         "struct": _value(f"{tag}.struct", PROFILE),
+        "object": _value(f"{tag}.object", ClassRefType("Document")),
         "field_index": 1,
         "field_name": "name",
+        "initialize": True,
         "receiver": _value(f"{tag}.receiver", PROFILE),
         "method_result": _value(
             f"{tag}.method_result",
@@ -230,8 +234,8 @@ def _complete_module() -> ir_model.IRModule:
                 INT,
                 [
                     ir_model.IRBasicBlock("entry", [instructions[65]]),
-                    ir_model.IRBasicBlock("then", [instructions[66]]),
-                    ir_model.IRBasicBlock("else", [instructions[67]]),
+                    ir_model.IRBasicBlock("then", instructions[66:70]),
+                    ir_model.IRBasicBlock("else", [instructions[70]]),
                 ],
             ),
         ],
@@ -252,7 +256,7 @@ def _complete_module() -> ir_model.IRModule:
     )
 
 
-def test_complete_realistic_module_round_trip_covers_authoritative_69_variants() -> None:
+def test_complete_realistic_module_round_trip_covers_authoritative_71_variants() -> None:
     module = _complete_module()
 
     decoded = ir_module_from_dto(ir_module_to_dto(module))
@@ -268,7 +272,7 @@ def test_complete_realistic_module_round_trip_covers_authoritative_69_variants()
         for instruction in block.instructions
     }
     assert covered == {entry.instruction_type for entry in IR_INSTRUCTION_DTO_REGISTRY}
-    assert len(IR_INSTRUCTION_DTO_REGISTRY) == 69
+    assert len(IR_INSTRUCTION_DTO_REGISTRY) == 71
 
 
 def _type_samples() -> list[IRType]:

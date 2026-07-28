@@ -1,10 +1,9 @@
 # Modelo nativo de objetos por referencia
 
-> Clasificación: **Design/RFC — Phase 5.1, implementación parcial Phase
-> 5.3A**. Actualizado: **27 de julio de 2026**. La representación, allocation,
-> ARC e identidad de referencias class están implementadas en el subset
-> interno native. El capability gate de superficie continúa cerrado para
-> constructores, fields, métodos, `this`, interfaces y dispatch.
+> Clasificación: **Design/RFC — Phase 5.1, implementación Phase 5.3B**.
+> Actualizado: **28 de julio de 2026**. Referencias, payload, fields,
+> constructores y ARC class están implementados en native. Métodos generales,
+> interfaces y dispatch continúan gated.
 
 ## 1. Alcance y fuentes de verdad
 
@@ -189,7 +188,7 @@ materializarlo como globals LLVM privadas. Field access de código generado usa
 el layout nominal completo de la class; retain/release, validación y
 destrucción deben centralizarse en helpers para no duplicar offsets de header.
 
-### 5.2.1 Layout materializado en Phase 5.3A
+### 5.2.1 Layout materializado en Phase 5.3A/5.3B
 
 ```llvm
 %AetherObjectHeader = type { ptr, i64, i32, i32 }
@@ -202,18 +201,24 @@ destrucción deben centralizarse en helpers para no duplicar offsets de header.
     i32, ; management flags
     i32  ; descriptor version (= 1)
 }
-%class.<readable>.<digest> = type { %AetherObjectHeader }
+%class.<readable>.<digest> = type {
+    %AetherObjectHeader,
+    <field-0>,
+    <field-1>,
+    ...
+}
 ```
 
-Los índices del header son descriptor, `strong_count`, flags y reserved. El
-objeto 5.3A no tiene payload source. Cada tipo nominal recibe símbolos
-deterministas basados en su ID completo y un digest.
+Los índices del header son descriptor, `strong_count`, flags y reserved. Desde
+5.3B los fields siguen al header en orden fuente y LLVM decide padding,
+offsets y alineación. Cada tipo nominal recibe símbolos deterministas basados
+en su ID completo y un digest.
 
-`class_new` calcula size/alignment con expresiones LLVM/DataLayout, usa el
+`class_new` calcula size/alignment del objeto completo con expresiones LLVM/DataLayout, usa el
 allocator checked, zero-inicializa el bloque y publica descriptor y strong
 count 1. El último release llama `destroy_fields` por descriptor antes de
-liberar el bloque. Destroy y trace son no-op sólo mientras el payload esté
-vacío; sus slots quedan listos para 5.3B y GC futuro.
+liberar el bloque. `destroy_fields` destruye el payload en orden fuente inverso;
+`trace` permanece reservado para un collector futuro.
 
 Strings no se migran a este header. Su layout actual comienza por
 `byte_length` y tiene invariantes propios. Array/List también conservan sus
@@ -250,20 +255,19 @@ field class no nullable requiere inicialización real; `ptr null` sólo puede
 existir como bytes inactivos dentro de un nullable ausente o durante
 construcción interna no publicada.
 
-### 5.5 Deuda de default-initialization detectada
+### 5.5 Definite initialization y defaults
 
-El intérprete AST actual usa `None` como fallback de `_default_field_value`
-para tipos no cubiertos durante un constructor explícito. Para un field
-`ClassType` no nullable, ese estado accidental entra en tensión con las reglas
-frontend que reservan `null` para `T?`.
+Un constructor explícito no recibe defaults implícitos: todos sus fields,
+incluidos scalar, string, nullable, struct, class, Array y List, deben
+inicializarse en cada path exitoso. Se rechazan reads previos, returns
+incompletos, exposición de `this` incompleto y asignaciones sólo probables
+después de merges. Un loop no prueba inicialización porque puede ejecutar cero
+veces. La gramática actual no admite initializers en la declaración del field;
+los ceros de la allocation son sólo una medida de seguridad interna.
 
-Este RFC no cambia ese comportamiento. La implementación native no debe
-copiarlo como `ptr null` silencioso. Antes de promover classes será obligatorio
-caracterizar constructores que leen o dejan sin escribir fields class/interface
-y elegir, en la capa de lenguaje correspondiente, entre definite
-initialization o un default válido explícitamente especificado. Mientras esa
-decisión no exista, el capability gate debe mantener esos programas fuera de
-native.
+Una class sin constructor explícito conserva el constructor posicional: recibe
+exactamente un argumento por field en orden fuente. El fallback AST `None` para
+fields class no nullable queda inaccesible para programas typechecked.
 
 ## 6. `null` y nullable
 
@@ -823,26 +827,29 @@ interface con cleanup pendiente.
 4. structs/collections con nullable cuando `T` sea representable;
 5. paridad AST/IR/SSA/LLVM y capability promotion explícita.
 
-Esta rama puede ejecutarse antes de classes. El registry genérico debe aceptar
-`ClassRefType` e `InterfaceType` automáticamente cuando esas ramas adquieran
-layout/lifecycle, sin rediseñar nullable.
+Esta rama se implementó antes de classes. El registry genérico ya acepta
+`ClassRefType`; `InterfaceType` se incorporará cuando adquiera layout/lifecycle,
+sin rediseñar nullable.
 
-### 12.3 Classes — fundación 5.3A y siguiente 5.3B
+### 12.3 Classes — estado tras 5.3B
 
 Fase 5.3A completa descriptor/header, runtime ARC, layout nominal, allocation
 checked, transporte por parámetros/returns/phis, containment, aliasing,
 self-assignment e igualdad por identidad en el subset IR/SSA/LLVM interno.
 
-Fase 5.3B debe implementar, sin reabrir esa representación:
+Fase 5.3B completa layout de payload, `class_get`, `class_set`, constructor
+posicional/explicit, `this.field`, field implícito, definite initialization,
+ownership de reemplazo y destructor recursivo. `this` se pasa borrowed y una
+construcción exitosa entrega exactamente el owner de la allocation.
 
-1. lowering source de constructores auto/explicit y cleanup parcial;
-2. layout de payload a partir de fields declarados;
-3. field get/set y reglas `const` ya resueltas por frontend;
-4. destructor recursivo real para cada field y paths de fallo de constructor;
-5. ABI directo de métodos, `this` y mutación de la instancia;
-6. imports y IDs nominales cross-module en objetos source;
-7. diagnósticos/promoción capability E2E para cada operación admitida;
-8. pruebas source/native de fields y constructores bajo O0/O1/O2.
+El intérprete IR libera sólo los fields inicializados si un constructor falla.
+El runtime LLVM actual usa fallos abortivos sin unwind; el sistema operativo
+reclama el proceso completo en esos paths. El estado explícito de
+inicialización vive en el análisis/lowering, no en los bytes a cero.
+
+Fase 5.3C queda limitada a ABI directo de métodos, `this` fuera de
+constructores, calls estáticas de método e imports de métodos. No debe
+reutilizar `MethodResultType`, reservado a value receivers struct.
 
 ### 12.4 Fase siguiente D — interfaces
 
@@ -901,7 +908,7 @@ Fase 5.3B debe implementar, sin reabrir esa representación:
 | Paridad | Sigue el grafo auditado: reference layout/lifecycle antes de class; erased ABI antes de interface; nullable como rama independiente. |
 | Const | Reproduce la restricción por access path y el corte al atravesar class que aplica el frontend actual. |
 | Igualdad | Phase 5.3A agrega Eq por identidad al tipo IR class; interfaces y equality definida por usuario siguen fuera. |
-| Perfil native | Nullable es E2E; la fundación class 5.3A es interna y la superficie class/interface continúa gated. |
+| Perfil native | Nullable y class state/constructors son E2E; métodos class e interfaces continúan gated. |
 
 ## 15. Criterios de entrada para implementación
 
@@ -917,9 +924,9 @@ Antes de comenzar código de una de las ramas debe aprobarse:
 - tests de nullable para cada familia de layout;
 - criterio explícito de capability promotion y rollback.
 
-`NullableType` tiene soporte native E2E. `ClassRefType` tiene layout,
-allocation interna, lifecycle y transporte ejecutables desde 5.3A;
-`InterfaceType` sigue sin layout. Esto no habilita construcción class source.
+`NullableType` tiene soporte native E2E. `ClassRefType` tiene layout, payload,
+construcción source, lifecycle y transporte ejecutables desde 5.3B;
+`InterfaceType` sigue sin layout.
 
 ## 16. Fuera de alcance
 
@@ -942,19 +949,15 @@ Cada una de esas features requiere un RFC separado. El descriptor y los thunks
 de este diseño dejan puntos de extensión, pero no anticipan semántica que el
 lenguaje actual no posee.
 
-## 17. Estado y frontera de Phase 5.3A
+## 17. Estado y frontera de Phase 5.3B
 
-Completado: handle class nominal no nulo; `class_new` de objeto vacío; DTO y
-verificación Python/Rust; locals, assignment, parámetros, returns, temporales,
-CFG/phis; ARC checked; igualdad por identidad; `T?`, structs, Array y List;
-destrucción final por descriptor; LLVM válido en O0/O1/O2.
+Completado: handle nominal; allocation de objeto completo; layout determinista
+de fields; DTO y verificación Python/Rust; constructor posicional y explícito;
+`this.field` y acceso implícito; reads/writes con aliasing; definite
+initialization; ARC de fields; destrucción recursiva por descriptor; classes en
+nullable, structs, Array y List; LLVM válido en O0/O1/O2.
 
-`class_new` es un opcode interno, no un constructor nuevo del lenguaje. El
-frontend native rechaza claramente declaraciones y operaciones que necesiten
-constructor, fields, métodos o `this`, sin fallback AST.
-
-Phase 5.3B debe implementar definiciones/layouts con fields, definite
-initialization, lowering de constructor, cleanup parcial, acceso/mutación de
-fields y destructores recursivos reales. Interfaces, inheritance, dispatch,
-weak refs, GC y cycle collection siguen posteriores. ARC fuerte puede filtrar
-ciclos cuando existan grafos de objetos.
+La superficie native admite classes con fields y constructores, pero no métodos
+generales. Interfaces, inheritance, dispatch, destructores de usuario,
+exceptions/unwind, weak refs, GC y cycle collection siguen posteriores. ARC
+fuerte no recolecta ciclos.

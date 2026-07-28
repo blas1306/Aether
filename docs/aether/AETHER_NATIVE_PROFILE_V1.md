@@ -49,7 +49,7 @@ The following block is generated from `NATIVE_CAPABILITY_PROFILE` in
 <!-- BEGIN GENERATED CAPABILITY PROFILE -->
 Profile schema/version: `22`.
 
-Inventory: 28 COMPLETE, 31 PARTIAL, 8 UNSUPPORTED.
+Inventory: 30 COMPLETE, 31 PARTIAL, 6 UNSUPPORTED.
 
 | Capability | State | Contract area |
 | --- | --- | --- |
@@ -89,8 +89,8 @@ Inventory: 28 COMPLETE, 31 PARTIAL, 8 UNSUPPORTED.
 | `structs` | **PARTIAL** | Struct values and fields. |
 | `struct-constructors` | **PARTIAL** | Struct constructors. |
 | `struct-methods` | **PARTIAL** | Struct methods and this. |
-| `classes` | **UNSUPPORTED** | Reference-semantics classes. |
-| `class-constructors` | **UNSUPPORTED** | Class constructors. |
+| `classes` | **COMPLETE** | Reference-semantics classes. |
+| `class-constructors` | **COMPLETE** | Class constructors. |
 | `class-methods` | **UNSUPPORTED** | Class methods and this. |
 | `interfaces` | **UNSUPPORTED** | Interfaces, conformance, and dispatch. |
 | `enums` | **COMPLETE** | Enums without payloads. |

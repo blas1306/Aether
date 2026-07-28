@@ -142,8 +142,6 @@
       ],
       "run": true,
       "outside_v1_features": [
-        "AE-BACKEND-CLASSES",
-        "AE-BACKEND-CLASS_CONSTRUCTORS",
         "AE-BACKEND-CLASS_METHODS",
         "AE-BACKEND-VARIABLES_AND_CONST"
       ]
@@ -161,8 +159,6 @@
       ],
       "run": true,
       "outside_v1_features": [
-        "AE-BACKEND-CLASSES",
-        "AE-BACKEND-CLASS_CONSTRUCTORS",
         "AE-BACKEND-CLASS_METHODS",
         "AE-BACKEND-VARIABLES_AND_CONST"
       ]
@@ -180,8 +176,6 @@
       ],
       "run": true,
       "outside_v1_features": [
-        "AE-BACKEND-CLASSES",
-        "AE-BACKEND-CLASS_CONSTRUCTORS",
         "AE-BACKEND-CLASS_METHODS",
         "AE-BACKEND-VARIABLES_AND_CONST"
       ]
@@ -199,8 +193,6 @@
       ],
       "run": true,
       "outside_v1_features": [
-        "AE-BACKEND-CLASSES",
-        "AE-BACKEND-CLASS_CONSTRUCTORS",
         "AE-BACKEND-CLASS_METHODS",
         "AE-BACKEND-INTERFACES",
         "AE-BACKEND-PRIMITIVE_TYPES",
@@ -220,8 +212,6 @@
       ],
       "run": true,
       "outside_v1_features": [
-        "AE-BACKEND-CLASSES",
-        "AE-BACKEND-CLASS_CONSTRUCTORS",
         "AE-BACKEND-CLASS_METHODS",
         "AE-BACKEND-VARIABLES_AND_CONST"
       ]
@@ -239,8 +229,6 @@
       ],
       "run": true,
       "outside_v1_features": [
-        "AE-BACKEND-CLASSES",
-        "AE-BACKEND-CLASS_CONSTRUCTORS",
         "AE-BACKEND-CLASS_METHODS",
         "AE-BACKEND-VARIABLES_AND_CONST"
       ]
@@ -258,8 +246,6 @@
       ],
       "run": true,
       "outside_v1_features": [
-        "AE-BACKEND-CLASSES",
-        "AE-BACKEND-CLASS_CONSTRUCTORS",
         "AE-BACKEND-CLASS_METHODS",
         "AE-BACKEND-VARIABLES_AND_CONST"
       ]

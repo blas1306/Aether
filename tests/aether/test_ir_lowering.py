@@ -599,7 +599,10 @@ int sumTo(int n) {
 @pytest.mark.parametrize(
     ("source", "node_name"),
     [
-        ("class Counter { int value; }", "ClassDeclaration"),
+        (
+            "class Counter { int value; public int getValue() { return value; } }",
+            "FunctionDeclaration",
+        ),
     ],
 )
 def test_unsupported_constructs_have_clear_lowering_errors(
@@ -611,6 +614,6 @@ def test_unsupported_constructs_have_clear_lowering_errors(
 
     with pytest.raises(
         IRBackendUnsupportedFeatureError,
-        match=rf"IR backend does not support .*{node_name.replace('Declaration', '').lower()}",
+        match=rf"IR backend does not support {node_name}",
     ):
         IRLowerer().lower(program)

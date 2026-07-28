@@ -406,6 +406,8 @@ const fn instruction_kind_wire_name(kind: InstructionKind) -> &'static str {
         InstructionKind::IRPrint => "print",
         InstructionKind::IRStructNew => "struct_new",
         InstructionKind::IRClassNew => "class_new",
+        InstructionKind::IRClassGet => "class_get",
+        InstructionKind::IRClassSet => "class_set",
         InstructionKind::IRStructGet => "struct_get",
         InstructionKind::IRStructSet => "struct_set",
         InstructionKind::IRMethodResultNew => "method_result_new",
@@ -616,6 +618,8 @@ mod tests {
             (InstructionKind::IRPrint, "print"),
             (InstructionKind::IRStructNew, "struct_new"),
             (InstructionKind::IRClassNew, "class_new"),
+            (InstructionKind::IRClassGet, "class_get"),
+            (InstructionKind::IRClassSet, "class_set"),
             (InstructionKind::IRStructGet, "struct_get"),
             (InstructionKind::IRStructSet, "struct_set"),
             (InstructionKind::IRMethodResultNew, "method_result_new"),
@@ -671,7 +675,7 @@ mod tests {
             (InstructionKind::IRReturn, "return"),
         ];
 
-        assert_eq!(cases.len(), 68);
+        assert_eq!(cases.len(), 71);
         for (kind, spelling) in cases {
             assert_eq!(instruction_kind_wire_name(kind), spelling);
         }

@@ -1673,7 +1673,9 @@ impl<'module> LifecycleTypeRegistry<'module> {
             },
             IRType::Nullable(nullable) => {
                 let inner = self.compute(&nullable.inner, active);
-                if !inner.trivially_relocatable {
+                if inner.trivially_relocatable {
+                    LifecycleTraits::valid(true, true, inner.needs_destroy)
+                } else {
                     LifecycleTraits::invalid(
                         "nullable payload lifecycle is unavailable",
                         format!(
@@ -1681,17 +1683,13 @@ impl<'module> LifecycleTypeRegistry<'module> {
                             inner.reason
                         ),
                     )
-                } else {
-                    LifecycleTraits::valid(true, true, inner.needs_destroy)
                 }
             }
             IRType::ClassRef(_) => LifecycleTraits::valid(true, false, true),
-            IRType::Interface(_) => {
-                LifecycleTraits::invalid(
-                    "lifecycle layout is not defined",
-                    format!("lifecycle layout for '{type}' is not defined"),
-                )
-            }
+            IRType::Interface(_) => LifecycleTraits::invalid(
+                "lifecycle layout is not defined",
+                format!("lifecycle layout for '{type}' is not defined"),
+            ),
             IRType::Void(_) => {
                 LifecycleTraits::invalid("void has no storage", "void has no storage")
             }
