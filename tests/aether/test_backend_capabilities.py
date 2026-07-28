@@ -184,9 +184,7 @@ int main() {
     issues = backend_capability_issues(typed, BackendIdentity.NATIVE)
 
     assert [issue.requirement.capability for issue in issues].count(Capability.SCALAR_MATH) == 0
-    assert {issue.requirement.capability for issue in issues} >= {
-        Capability.CLASS_METHODS
-    }
+    assert issues == ()
     assert Capability.ENUMS not in {issue.requirement.capability for issue in issues}
 
 
@@ -199,23 +197,14 @@ def test_ast_accepts_abbreviated_function_as_normal_typed_function() -> None:
     assert run_aether("square(int x) = x * x; println(square(3));").output == "9\n"
 
 
-def test_native_rejects_unsupported_feature_before_ir_lowering(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fail_if_lowered(*_args, **_kwargs):
-        raise AssertionError("IR lowering must not run")
-
-    monkeypatch.setattr("aether.ir.lowering.IRLowerer.lower", fail_if_lowered)
-    typed = _typed("class Box { int value; int get() { return value; } }")
-
-    with pytest.raises(BackendCapabilityError) as captured:
-        LLVMBuilder().emit_llvm(typed)
-
-    issue = next(
-        issue
-        for issue in captured.value.issues
-        if issue.requirement.capability is Capability.CLASS_METHODS
+def test_native_accepts_class_methods_through_ir_lowering() -> None:
+    typed = _typed(
+        "class Box { int value; public int get() { return value; } } "
+        "int main() { Box box = Box(7); return box.get(); }"
     )
-    assert issue.diagnostic_code == "AE-BACKEND-CLASS_METHODS"
-    assert "valid Aether" in issue.hint
+
+    assert backend_capability_issues(typed, BackendIdentity.NATIVE) == ()
+    assert "define i32 @Box.get(ptr %this)" in LLVMBuilder().emit_llvm(typed)
 
 
 def test_native_still_emits_supported_program_and_runs_ssa_verifier(

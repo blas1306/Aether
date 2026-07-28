@@ -353,6 +353,7 @@ _NATIVE_COMPLETE = {
     Capability.BORROWED_FOR_IN_ELEMENTS,
     Capability.CLASSES,
     Capability.CLASS_CONSTRUCTORS,
+    Capability.CLASS_METHODS,
     Capability.STRUCTURAL_EQUALITY,
     Capability.EQ_COLLECTION_SEARCH,
     Capability.ALPT1_ENCODE,
@@ -362,7 +363,6 @@ _NATIVE_COMPLETE = {
 }
 _NATIVE_UNSUPPORTED = {
     Capability.INPUT,
-    Capability.CLASS_METHODS,
     Capability.INTERFACES,
     Capability.GENERICS,
     Capability.ERROR_HANDLING,
@@ -492,6 +492,7 @@ E2E_TESTED_CAPABILITIES: Mapping[BackendIdentity, frozenset[Capability]] = Mappi
                 Capability.EQ_COLLECTION_SEARCH,
                 Capability.CLASSES,
                 Capability.CLASS_CONSTRUCTORS,
+                Capability.CLASS_METHODS,
                 Capability.FILES,
                 Capability.TEXT_FILE_READ,
                 Capability.TEXT_FILE_WRITE,

@@ -48,7 +48,7 @@ Leyenda de `Spec`:
 | Vector<Column> | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Completa con optimizer parcial |
 | Matrix | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ✅ documentada | Parcial backend |
 | Optional/Nullable (`T?`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ `{i1,T}` | ✅ parser/type/IR/SSA/ABI/E2E | ✅ documentada | Completa para payloads native representables; sin flow narrowing |
-| Class | ✅ | ✅ | ✅ definite init | ✅ new/get/set | ✅ refs/phis | ✅ lifecycle effectful | ✅ payload/header/ARC | ✅ AST + native O0/O1/O2 | ✅ documentada | State/constructors 5.3B; métodos gated |
+| Class | ✅ | ✅ | ✅ definite init/métodos | ✅ new/get/set/calls directas | ✅ refs/phis/recursión | ✅ lifecycle effectful | ✅ payload/header/ARC + ABI métodos | ✅ AST + native O0/O1/O2 | ✅ documentada | Métodos concretos 5.3C; interfaces gated |
 | Struct | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
 | Interface | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
 | Enum | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
@@ -62,10 +62,11 @@ Notas:
   `T`. No existe niche `ptr null`, boxing ni allocation nullable.
 - El typechecker no implementa smart casts después de `x != null`: asignar
   `T?` a `T` continúa siendo un error. El narrowing queda como trabajo futuro.
-- Class 5.3B cubre representación nominal no nula, payload en orden fuente,
+- Class 5.3C cubre representación nominal no nula, payload en orden fuente,
   constructores auto/explicit, get/set, definite initialization, ARC,
-  transporte, identidad, nullable y containment. Métodos generales e
-  interfaces siguen rechazados explícitamente.
+  transporte, identidad, nullable, containment y métodos concretos directos
+  con `this` borrowed. Interfaces y dispatch dinámico siguen rechazados
+  explícitamente.
 - `string` baja como valor/literal/call/return/phi, pero LLVM no soporta
   operaciones string (`+`, comparaciones, impresion, length, indexing, runtime).
 - `List<T>` tiene backend fases 1, 2, 3a, `indexOf` de fase 3b, `clear` de fase 4a, `push`/growth de fase 4b, `pop` de fase 4c, `insert` de fase 4d y `removeAt` de fase 4e para literal con tipo esperado,

@@ -84,7 +84,7 @@ linkage LLVM; eso es un detalle accidental, no una exportación FFI.
 | `Vector<T>` | `ptr` | una palabra target | handle por valor | provisional/shape incompleto |
 | `Matrix<T>` | `ptr` | una palabra target | handle por valor | provisional/shape externo |
 | struct | `%struct.Name = type { fields... }` | padding/alignment del target | por valor | layout source-order, no ABI pública |
-| class | `ptr` no nulo a `{header, fields...}` nominal | una palabra target | handle por valor | state/constructors 5.3B |
+| class | `ptr` no nulo a `{header, fields...}` nominal | una palabra target | handle por valor | state/constructors/methods 5.3C |
 | interface | sin LLVM ABI | — | — | unsupported native |
 | nullable `T?` | `%nullable.<T> = type { i1, T }` | target-dependent, incluido padding | aggregate por valor | implementado para payload representable |
 | tuple source | sin LLVM ABI general | — | — | unsupported native |
@@ -275,7 +275,7 @@ Para `T?`, parámetros siguen borrowed y retornos siguen owned cuando el tag
 está presente. Copy/destroy/retain/release inspeccionan primero el tag y
 delegan a `T` únicamente para present; absent no ejecuta lifecycle del payload.
 
-### 10.1 Class references and payload (Phase 5.3B)
+### 10.1 Class references and payload (Phase 5.3C)
 
 Una class cruza calls como el mismo `ptr` opaco; nunca se copia el payload.
 Parámetros son borrowed durante la call. Un callee que almacena el handle hace
@@ -299,8 +299,22 @@ parámetros siguen borrowed y los returns owned.
 
 `==`/`!=` de `ClassRefType(C)` usan `icmp eq/ne ptr` sólo para el mismo tipo
 nominal. `C?` sigue siendo `{i1, ptr}`; `ptr null` no es un valor `C` ni un
-niche nullable. Esta ABI interna habilita fields y constructores source, pero
-no métodos generales ni interfaces.
+niche nullable.
+
+### 10.2 Concrete class methods (Phase 5.3C)
+
+Un método concreto usa `R C.method(ptr borrowed_this, P1, ...)`. `this` no se
+retiene por ser referenciado, no se copia a storage owning y no puede
+reasignarse. Los parámetros ordinarios son borrowed durante la call; almacenar
+o retornar uno adquiere/transfiere el owner exigido por su tipo. Un resultado
+no trivial es owned por el caller.
+
+Las calls son directas y estáticas, incluidos self-calls, recursión y métodos
+importados. Reads y writes reutilizan `class_get`/`class_set`, por lo que una
+mutación es visible a través de todos los aliases. A diferencia de los métodos
+de struct, un método de class retorna `R` directamente y nunca
+`MethodResultType`: el objeto compartido ya contiene el receiver actualizado.
+Interfaces, witness tables y dispatch virtual siguen fuera de esta ABI.
 
 ## 11. Panic, IO y proceso
 
@@ -341,7 +355,7 @@ manifest de imports runtime, son detectados a partir del LLVM textual.
 | bool/double | valores públicos | reglas exactas de paso target | target matrix |
 | strings | UTF-8, equality, ARC observable indirecto | header, flags, helper names | handle ABI/accessors/threading |
 | Array/List | aliasing, copy/slice, Eq, lifecycle | headers, counters, helpers | ABI version + alloc/error policy |
-| class ref | identidad, aliasing, ARC, fields, constructores y Eq identidad | header/descriptor/helpers/payload 5.3B | ABI version, métodos, ciclos |
+| class ref | identidad, aliasing, ARC, fields, constructores, métodos directos y Eq identidad | header/descriptor/helpers/payload 5.3C | ABI version, dispatch dinámico, ciclos |
 | structs/enums | orden de fields/variants y value semantics | concrete target ABI/mangling | object compatibility policy |
 | callables/method results | comportamiento source subset | representación | closure/method ABI |
 | panic | output/code según spec | `puts/exit`, no unwind | error ABI y threading |

@@ -265,6 +265,7 @@ class _FunctionContext:
     next_loop: int = 0
     method_owner: _StructInfo | None = None
     source_return_type: IRType | None = None
+    class_method: bool = False
     constructor_class: _StructInfo | None = None
     initialized_fields: set[str] = field(default_factory=set)
     maybe_initialized_fields: set[str] = field(default_factory=set)
@@ -377,12 +378,9 @@ class IRLowerer:
                 if statement.constructor is not None:
                     functions.append(self._lower_constructor(statement.constructor, info))
             elif isinstance(statement, ast.ClassDeclaration):
-                if statement.methods:
-                    self._unsupported(
-                        statement.methods[0],
-                        "general class methods (Phase 5.3C)",
-                    )
                 info = self._structs[statement.name]
+                for method in statement.methods:
+                    functions.append(self._lower_function(method, info))
                 if statement.constructor is not None:
                     functions.append(
                         self._lower_class_constructor(statement.constructor, info)
@@ -425,11 +423,19 @@ class IRLowerer:
                     self._method_names[(statement.name, "__ctor")] = name
             elif isinstance(statement, ast.ClassDeclaration):
                 owner = ClassRefType(statement.name)
-                if statement.methods:
-                    self._unsupported(
-                        statement.methods[0],
-                        "general class methods (Phase 5.3C)",
+                for method in statement.methods:
+                    name = self._method_function_name(statement.name, method.name)
+                    signatures[name] = _FunctionSignature(
+                        (
+                            owner,
+                            *(
+                                self._lower_type(parameter.type_name)
+                                for parameter in method.parameters
+                            ),
+                        ),
+                        self._lower_type(method.return_type),
                     )
+                    self._method_names[(statement.name, method.name)] = name
                 if statement.constructor is not None:
                     name = self._method_function_name(statement.name, "__ctor")
                     signatures[name] = _FunctionSignature(
@@ -478,8 +484,12 @@ class IRLowerer:
             parameters={parameter.name: parameter for parameter in parameters},
             method_owner=owner,
             source_return_type=(self._lower_type(declaration.return_type) if owner is not None else None),
+            class_method=(
+                owner is not None
+                and isinstance(owner.declaration, ast.ClassDeclaration)
+            ),
         )
-        if owner is not None:
+        if owner is not None and not context.class_method:
             this_parameter = context.parameters["this"]
             this_slot = self._storage("this", this_parameter.type, context)
             context.locals["this"] = this_slot
@@ -499,7 +509,10 @@ class IRLowerer:
             self._lower_statement(statement, context)
 
         if not self._is_terminated(context.block):
-            if owner is not None and isinstance(context.source_return_type, VoidType):
+            if context.class_method and isinstance(context.source_return_type, VoidType):
+                self._emit_cleanup(context)
+                context.block.instructions.append(IRReturn())
+            elif owner is not None and isinstance(context.source_return_type, VoidType):
                 value = self._method_result(context, None)
                 self._emit_cleanup(context)
                 context.block.instructions.append(IRReturn(value))
@@ -628,6 +641,10 @@ class IRLowerer:
                 return
             if not isinstance(statement.name, str):
                 self._fail("IR backend requires a variable or aggregate element assignment target.", statement)
+            if statement.name == "this" and (
+                context.class_method or context.constructor_class is not None
+            ):
+                self._fail("Cannot reassign borrowed class receiver 'this'.", statement)
             slot = context.locals.get(statement.name)
             if (
                 slot is None
@@ -715,6 +732,17 @@ class IRLowerer:
                 self._require_constructor_complete(context, statement)
                 self._emit_cleanup(context)
                 context.block.instructions.append(IRReturn())
+                return
+            if context.class_method:
+                if statement.expression is None:
+                    if not isinstance(context.source_return_type, VoidType):
+                        self._fail("IR backend cannot return void from a non-void method.", statement)
+                    self._emit_cleanup(context)
+                    context.block.instructions.append(IRReturn())
+                    return
+                if isinstance(context.source_return_type, VoidType):
+                    self._fail("IR backend cannot return a value from a void method.", statement)
+                self._lower_owned_return(statement.expression, statement, context)
                 return
             if context.method_owner is not None:
                 if statement.expression is None:
@@ -2771,7 +2799,7 @@ class IRLowerer:
                 )
             )
             return result if result_required else None
-        if not isinstance(receiver.type, StructType):
+        if not isinstance(receiver.type, (StructType, ClassRefType)):
             self._unsupported(node, f"method '{method_name}' on '{receiver.type}'")
         function_name = self._method_names.get((receiver.type.name, method_name))
         if function_name is None:
@@ -2780,6 +2808,46 @@ class IRLowerer:
                 node,
             )
         signature = self._signatures[function_name]
+        if isinstance(receiver.type, ClassRefType):
+            if len(argument_expressions) != len(signature.parameters) - 1:
+                self._fail(
+                    f"Checked class method call '{receiver.type.name}.{method_name}' "
+                    "has invalid arity.",
+                    node,
+                )
+            arguments = tuple(
+                self._lower_expression(argument, context, target_type=parameter_type)
+                for argument, parameter_type in zip(
+                    argument_expressions,
+                    signature.parameters[1:],
+                )
+            )
+            for index, (argument, parameter_type) in enumerate(
+                zip(arguments, signature.parameters[1:]),
+                start=1,
+            ):
+                self._require_same_type(
+                    argument.type,
+                    parameter_type,
+                    f"argument {index} to '{receiver.type.name}.{method_name}' "
+                    "requires an implicit conversion",
+                )
+            if isinstance(signature.return_type, VoidType):
+                if result_required:
+                    self._fail(
+                        f"IR backend cannot use void method '{method_name}' as a value.",
+                        node,
+                    )
+                context.block.instructions.append(
+                    IRCall(function_name, (receiver, *arguments))
+                )
+                return None
+            result = context.temporary(signature.return_type)
+            context.block.instructions.append(
+                IRCall(function_name, (receiver, *arguments), result)
+            )
+            return result if result_required else None
+
         source_return = signature.return_type.value
         arguments = tuple(
             self._lower_expression(argument, context, target_type=parameter_type)

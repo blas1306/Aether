@@ -133,8 +133,11 @@ class _ModuleRewriter:
                 )
             finally:
                 self.local_names = previous_local_names
-        if isinstance(node, ast.StructDeclaration):
-            symbol = self._own_symbol(node.name, "struct") if top_level else None
+        if isinstance(node, (ast.StructDeclaration, ast.ClassDeclaration)):
+            symbol_kind = (
+                "class" if isinstance(node, ast.ClassDeclaration) else "struct"
+            )
+            symbol = self._own_symbol(node.name, symbol_kind) if top_level else None
             previous_method_names = self.method_names
             previous_field_names = self.field_names
             self.method_names = {method.name for method in node.methods}
@@ -261,7 +264,7 @@ class _ModuleRewriter:
             callee = (
                 mangle_symbol(symbol.id)
                 if symbol is not None
-                and symbol.id.kind in {"function", "struct", "alias"}
+                and symbol.id.kind in {"function", "struct", "class", "alias"}
                 and not ("." not in node.callee and node.callee in self.method_names)
                 else node.callee
             )

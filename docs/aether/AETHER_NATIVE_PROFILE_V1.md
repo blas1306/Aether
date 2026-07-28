@@ -49,7 +49,7 @@ The following block is generated from `NATIVE_CAPABILITY_PROFILE` in
 <!-- BEGIN GENERATED CAPABILITY PROFILE -->
 Profile schema/version: `22`.
 
-Inventory: 30 COMPLETE, 31 PARTIAL, 6 UNSUPPORTED.
+Inventory: 31 COMPLETE, 31 PARTIAL, 5 UNSUPPORTED.
 
 | Capability | State | Contract area |
 | --- | --- | --- |
@@ -91,7 +91,7 @@ Inventory: 30 COMPLETE, 31 PARTIAL, 6 UNSUPPORTED.
 | `struct-methods` | **PARTIAL** | Struct methods and this. |
 | `classes` | **COMPLETE** | Reference-semantics classes. |
 | `class-constructors` | **COMPLETE** | Class constructors. |
-| `class-methods` | **UNSUPPORTED** | Class methods and this. |
+| `class-methods` | **COMPLETE** | Class methods and this. |
 | `interfaces` | **UNSUPPORTED** | Interfaces, conformance, and dispatch. |
 | `enums` | **COMPLETE** | Enums without payloads. |
 | `array` | **PARTIAL** | Array values and operations. |
@@ -181,11 +181,12 @@ negative corpus is part of this profile.
 
 ## 5. Excluded capabilities
 
-Profile 22 rejects `input`, classes and their constructors/methods,
-interfaces, user generics, `throw`/`try`/`catch`, and the historical combined
-`string-split-trim` capability. These and every other `OUTSIDE_V1` audit row
-are not Aether 1.0 features even when an experimental frontend or AST path
-recognizes them.
+Profile 22 supports concrete classes, constructors and statically dispatched
+instance methods. It rejects `input`, interfaces and dynamic dispatch, user
+generics, `throw`/`try`/`catch`, and the historical combined
+`string-split-trim` capability. These rejected surfaces and every other
+`OUTSIDE_V1` audit row are not Aether 1.0 features even when an experimental
+frontend or AST path recognizes them.
 
 ## 6. Platform and toolchain
 

@@ -187,30 +187,16 @@ int outer() {
         IRBackend().lower(_typed(compiled_source))
 
 
-@pytest.mark.parametrize(
-    ("declaration", "expected_output", "unsupported"),
-    [
-        (
-            """
+def test_backend_parity_class_methods_are_shared() -> None:
+    declaration = """
 class Counter {
     int value;
     public int getValue() { return value; }
 }
-Counter c = Counter(7);
-println(c.getValue());
-""",
-            "7\n",
-            "general class methods",
-        ),
-    ],
-    ids=("class",),
-)
-def test_backend_parity_characterization_user_types_are_ast_only(
-    declaration: str,
-    expected_output: str,
-    unsupported: str,
-) -> None:
-    assert run_aether(declaration).output == expected_output
-
-    with pytest.raises(IRBackendUnsupportedFeatureError, match=unsupported):
-        IRBackend().lower(_typed(declaration))
+"""
+    _assert_ast_ir_native_output(
+        declaration + "Counter c = Counter(7); println(c.getValue());",
+        declaration
+        + "int main() { Counter c = Counter(7); println(c.getValue()); return 0; }",
+        "7\n",
+    )

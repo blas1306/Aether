@@ -194,29 +194,27 @@ def test_backend_ast_remains_explicit_file_execution(tmp_path: Path) -> None:
     assert ast_stderr == ""
 
 
-def test_default_native_backend_reports_unsupported_class_method_before_codegen(
+def test_default_native_backend_compiles_class_methods(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     program = tmp_path / "native_class.ae"
     program.write_text(
-        "class Counter { int value; int get() { return value; } }\n",
+        "class Counter { int value; public int get() { return value; } }\n"
+        "int main() { Counter c = Counter(7); println(c.get()); return 0; }\n",
         encoding="utf-8",
     )
-
-    def fail_if_codegen_runs(*_args, **_kwargs):
-        raise AssertionError("native codegen must not run")
-
-    monkeypatch.setattr("aether.ir.lowering.IRLowerer.lower", fail_if_codegen_runs)
+    clang_commands, _ = fake_native_toolchain(
+        monkeypatch,
+        returncode=0,
+        stdout_bytes=b"7\n",
+    )
     exit_code, stdout, stderr = run_cli([str(program)])
 
-    assert exit_code == EXIT_LANGUAGE_ERROR
-    assert stdout == ""
-    assert "AE-BACKEND-CLASS_METHODS" in stderr
-    assert "LLVM/native backend does not support capability 'class-methods'" in stderr
-    assert "--backend=ast" in stderr
-    assert "line 1, column 32" in stderr
-    assert "Traceback" not in stderr
+    assert exit_code == EXIT_SUCCESS
+    assert stdout == "7\n"
+    assert stderr == ""
+    assert len(clang_commands) == 1
 
 
 def test_default_llvm_execution_preserves_program_stdout_and_stderr(
@@ -313,19 +311,19 @@ def test_invalid_backend_reports_clear_usage_error(tmp_path: Path) -> None:
     assert "wat" in stderr
 
 
-def test_backend_ir_unsupported_feature_reports_without_traceback(tmp_path: Path) -> None:
-    program = tmp_path / "unsupported_ir.ae"
+def test_backend_ir_executes_class_methods(tmp_path: Path) -> None:
+    program = tmp_path / "class_method_ir.ae"
     program.write_text(
-        "class Counter { int value; int get() { return value; } }\n",
+        "class Counter { int value; public int get() { return value; } }\n"
+        "int main() { Counter c = Counter(7); println(c.get()); return 0; }\n",
         encoding="utf-8",
     )
 
     exit_code, stdout, stderr = run_cli(["--backend=ir", str(program)])
 
-    assert exit_code == EXIT_LANGUAGE_ERROR
-    assert stdout == ""
-    assert "class methods" in stderr
-    assert "Traceback" not in stderr
+    assert exit_code == EXIT_SUCCESS
+    assert stdout == "7\n"
+    assert stderr == ""
 
 
 def test_repl_rejects_ir_backend_for_now() -> None:
@@ -2922,19 +2920,20 @@ int main() {
     assert stderr == ""
 
 
-def test_emit_ir_unsupported_feature_reports_clear_error(tmp_path: Path) -> None:
-    program = tmp_path / "emit_ir_unsupported.ae"
+def test_emit_ir_includes_class_methods(tmp_path: Path) -> None:
+    program = tmp_path / "emit_ir_class_method.ae"
     program.write_text(
-        "class Counter { int value; int get() { return value; } }\n",
+        "class Counter { int value; public int get() { return value; } }\n"
+        "int main() { Counter c = Counter(7); return c.get(); }\n",
         encoding="utf-8",
     )
 
     exit_code, stdout, stderr = run_cli(["--emit-ir", str(program)])
 
-    assert exit_code == EXIT_LANGUAGE_ERROR
-    assert stdout == ""
-    assert "class methods" in stderr
-    assert "Traceback" not in stderr
+    assert exit_code == EXIT_SUCCESS
+    assert "func @Counter.get" in stdout
+    assert "class_get" in stdout
+    assert stderr == ""
 
 
 def test_repl_uses_persistent_session() -> None:

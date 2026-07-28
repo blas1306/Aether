@@ -37,7 +37,7 @@ def main() -> int:
         _require("Traceback" not in error, "syntax leaked traceback")
 
         capability = root / "capability.ae"
-        capability.write_text("class Counter { int value; }\n", encoding="utf-8")
+        capability.write_text("interface Counter { int get(); }\n", encoding="utf-8")
         code, _out, error = _run(["--check", str(capability)])
         _require(
             code == 1 and "Aether capability error" in error,

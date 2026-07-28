@@ -511,11 +511,12 @@ def test_ir_backend_matches_ast_for_supported_subset(source: str, call: str) -> 
     assert ir_env.values[IR_MAIN_RESULT_NAME].value == ast_result.exit_code
 
 
-def test_ir_backend_reports_unsupported_features_clearly() -> None:
+def test_ir_backend_executes_class_methods() -> None:
     typed_program = prepare_typed_program(
-        "class Counter { int value; public int getValue() { return value; } }",
+        "class Counter { int value; public int getValue() { return value; } } "
+        "int main() { Counter value = Counter(7); return value.getValue(); }",
         TypeChecker(),
     )
 
-    with pytest.raises(IRBackendUnsupportedFeatureError, match="general class methods"):
-        IRBackend().run(typed_program)
+    result = IRBackend().run(typed_program)
+    assert result.values[IR_MAIN_RESULT_NAME].value == 7

@@ -131,54 +131,42 @@
     },
     {
       "path": "examples/classes/const_with_mutable_alias.ae",
-      "condition": "ast_execution",
+      "condition": "native_execution",
       "expected_exit_code": 0,
       "stdout_sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "classification": "AST_ONLY_EXPERIMENTAL",
+      "classification": "V1_NATIVE",
       "backends": [
-        "ast"
+        "native"
       ],
-      "run": true,
-      "outside_v1_features": [
-        "AE-BACKEND-CLASS_METHODS",
-        "AE-BACKEND-VARIABLES_AND_CONST"
-      ]
+      "run": true
     },
     {
       "path": "examples/classes/counter_basic.ae",
-      "condition": "ast_execution",
+      "condition": "native_execution",
       "expected_exit_code": 0,
       "stdout_sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "classification": "AST_ONLY_EXPERIMENTAL",
+      "classification": "V1_NATIVE",
       "backends": [
-        "ast"
+        "native"
       ],
-      "run": true,
-      "outside_v1_features": [
-        "AE-BACKEND-CLASS_METHODS",
-        "AE-BACKEND-VARIABLES_AND_CONST"
-      ]
+      "run": true
     },
     {
       "path": "examples/classes/custom_constructor.ae",
-      "condition": "ast_execution",
+      "condition": "native_execution",
       "expected_exit_code": 0,
       "stdout_sha256": "06e9d52c1720fca412803e3b07c4b228ff113e303f4c7ab94665319d832bbfb7",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "classification": "AST_ONLY_EXPERIMENTAL",
+      "classification": "V1_NATIVE",
       "backends": [
-        "ast"
+        "native"
       ],
-      "run": true,
-      "outside_v1_features": [
-        "AE-BACKEND-CLASS_METHODS",
-        "AE-BACKEND-VARIABLES_AND_CONST"
-      ]
+      "run": true
     },
     {
       "path": "examples/classes/implements_interface.ae",
@@ -193,62 +181,48 @@
       ],
       "run": true,
       "outside_v1_features": [
-        "AE-BACKEND-CLASS_METHODS",
         "AE-BACKEND-INTERFACES",
-        "AE-BACKEND-PRIMITIVE_TYPES",
-        "AE-BACKEND-VARIABLES_AND_CONST"
+        "AE-BACKEND-PRIMITIVE_TYPES"
       ]
     },
     {
       "path": "examples/classes/invalid_cases.ae",
-      "condition": "ast_execution",
+      "condition": "native_execution",
       "expected_exit_code": 0,
       "stdout_sha256": "1121cfccd5913f0a63fec40a6ffd44ea64f9dc135c66634ba001d10bcf4302a2",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "classification": "AST_ONLY_EXPERIMENTAL",
+      "classification": "V1_NATIVE",
       "backends": [
-        "ast"
+        "native"
       ],
-      "run": true,
-      "outside_v1_features": [
-        "AE-BACKEND-CLASS_METHODS",
-        "AE-BACKEND-VARIABLES_AND_CONST"
-      ]
+      "run": true
     },
     {
       "path": "examples/classes/private_field_public_methods.ae",
-      "condition": "ast_execution",
+      "condition": "native_execution",
       "expected_exit_code": 0,
       "stdout_sha256": "c93ac6ed67738e8c6cefa08855e65a897b09741df0d7cd913171f4a2a706cdad",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "classification": "AST_ONLY_EXPERIMENTAL",
+      "classification": "V1_NATIVE",
       "backends": [
-        "ast"
+        "native"
       ],
-      "run": true,
-      "outside_v1_features": [
-        "AE-BACKEND-CLASS_METHODS",
-        "AE-BACKEND-VARIABLES_AND_CONST"
-      ]
+      "run": true
     },
     {
       "path": "examples/classes/reference_aliasing.ae",
-      "condition": "ast_execution",
+      "condition": "native_execution",
       "expected_exit_code": 0,
       "stdout_sha256": "133f46e9df9c594a4bd844a0ad79a12dfa578d0d86f881d0b0d4c016068a4b90",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "classification": "AST_ONLY_EXPERIMENTAL",
+      "classification": "V1_NATIVE",
       "backends": [
-        "ast"
+        "native"
       ],
-      "run": true,
-      "outside_v1_features": [
-        "AE-BACKEND-CLASS_METHODS",
-        "AE-BACKEND-VARIABLES_AND_CONST"
-      ]
+      "run": true
     },
     {
       "path": "examples/esPrimo2.ae",

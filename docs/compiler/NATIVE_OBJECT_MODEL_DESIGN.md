@@ -1,9 +1,9 @@
 # Modelo nativo de objetos por referencia
 
-> Clasificación: **Design/RFC — Phase 5.1, implementación Phase 5.3B**.
+> Clasificación: **Design/RFC — Phase 5.1, implementación Phase 5.3C**.
 > Actualizado: **28 de julio de 2026**. Referencias, payload, fields,
-> constructores y ARC class están implementados en native. Métodos generales,
-> interfaces y dispatch continúan gated.
+> constructores, métodos concretos y ARC class están implementados en native.
+> Interfaces y dispatch continúan gated.
 
 ## 1. Alcance y fuentes de verdad
 
@@ -831,7 +831,7 @@ Esta rama se implementó antes de classes. El registry genérico ya acepta
 `ClassRefType`; `InterfaceType` se incorporará cuando adquiera layout/lifecycle,
 sin rediseñar nullable.
 
-### 12.3 Classes — estado tras 5.3B
+### 12.3 Classes — estado tras 5.3C
 
 Fase 5.3A completa descriptor/header, runtime ARC, layout nominal, allocation
 checked, transporte por parámetros/returns/phis, containment, aliasing,
@@ -847,9 +847,13 @@ El runtime LLVM actual usa fallos abortivos sin unwind; el sistema operativo
 reclama el proceso completo en esos paths. El estado explícito de
 inicialización vive en el análisis/lowering, no en los bytes a cero.
 
-Fase 5.3C queda limitada a ABI directo de métodos, `this` fuera de
-constructores, calls estáticas de método e imports de métodos. No debe
-reutilizar `MethodResultType`, reservado a value receivers struct.
+Fase 5.3C completa el ABI directo de métodos, `this` fuera de constructores,
+calls estáticas, recursión e imports de métodos. Cada método baja como
+`R C.method(ptr borrowed_this, P1, ...)`: el receiver no crea un owner ni un
+slot local, las mutaciones usan `class_set` sobre el objeto compartido y los
+resultados owning se transfieren al caller. No reutiliza `MethodResultType`,
+reservado a value receivers struct. Las calls ordinarias conservan efectos de
+memoria y lifecycle a través de IR, SSA, optimizadores y LLVM.
 
 ### 12.4 Fase siguiente D — interfaces
 
@@ -908,7 +912,7 @@ reutilizar `MethodResultType`, reservado a value receivers struct.
 | Paridad | Sigue el grafo auditado: reference layout/lifecycle antes de class; erased ABI antes de interface; nullable como rama independiente. |
 | Const | Reproduce la restricción por access path y el corte al atravesar class que aplica el frontend actual. |
 | Igualdad | Phase 5.3A agrega Eq por identidad al tipo IR class; interfaces y equality definida por usuario siguen fuera. |
-| Perfil native | Nullable y class state/constructors son E2E; métodos class e interfaces continúan gated. |
+| Perfil native | Nullable y class state/constructors/methods son E2E; interfaces continúan gated. |
 
 ## 15. Criterios de entrada para implementación
 
@@ -925,8 +929,8 @@ Antes de comenzar código de una de las ramas debe aprobarse:
 - criterio explícito de capability promotion y rollback.
 
 `NullableType` tiene soporte native E2E. `ClassRefType` tiene layout, payload,
-construcción source, lifecycle y transporte ejecutables desde 5.3B;
-`InterfaceType` sigue sin layout.
+construcción source, métodos directos, lifecycle y transporte ejecutables
+desde 5.3C; `InterfaceType` sigue sin layout.
 
 ## 16. Fuera de alcance
 
@@ -949,15 +953,17 @@ Cada una de esas features requiere un RFC separado. El descriptor y los thunks
 de este diseño dejan puntos de extensión, pero no anticipan semántica que el
 lenguaje actual no posee.
 
-## 17. Estado y frontera de Phase 5.3B
+## 17. Estado y frontera de Phase 5.3C
 
 Completado: handle nominal; allocation de objeto completo; layout determinista
 de fields; DTO y verificación Python/Rust; constructor posicional y explícito;
 `this.field` y acceso implícito; reads/writes con aliasing; definite
 initialization; ARC de fields; destrucción recursiva por descriptor; classes en
-nullable, structs, Array y List; LLVM válido en O0/O1/O2.
+nullable, structs, Array y List; métodos directos con parámetros, returns,
+recursión, calls anidadas, `this` explícito/implícito y alias-visible mutation;
+LLVM válido en O0/O1/O2.
 
-La superficie native admite classes con fields y constructores, pero no métodos
-generales. Interfaces, inheritance, dispatch, destructores de usuario,
-exceptions/unwind, weak refs, GC y cycle collection siguen posteriores. ARC
-fuerte no recolecta ciclos.
+La superficie native admite classes concretas con fields, constructores y
+métodos de dispatch estático. Interfaces, inheritance, dispatch dinámico,
+destructores de usuario, exceptions/unwind, weak refs, GC y cycle collection
+siguen posteriores. ARC fuerte no recolecta ciclos.

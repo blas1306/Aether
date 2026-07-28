@@ -596,24 +596,15 @@ int sumTo(int n) {
     )
 
 
-@pytest.mark.parametrize(
-    ("source", "node_name"),
-    [
-        (
-            "class Counter { int value; public int getValue() { return value; } }",
-            "FunctionDeclaration",
-        ),
-    ],
-)
-def test_unsupported_constructs_have_clear_lowering_errors(
-    source: str,
-    node_name: str,
-) -> None:
-    program = parse_source(source)
-    TypeChecker().check(program)
+def test_class_methods_lower_as_native_functions() -> None:
+    module = _lower(
+        "class Counter { int value; public int getValue() { return value; } }"
+    )
 
-    with pytest.raises(
-        IRBackendUnsupportedFeatureError,
-        match=rf"IR backend does not support {node_name}",
-    ):
-        IRLowerer().lower(program)
+    method = next(
+        function
+        for function in module.functions
+        if function.name == "Counter.getValue"
+    )
+    assert [parameter.name for parameter in method.parameters] == ["this"]
+    assert method.return_type == IntType()
