@@ -84,6 +84,7 @@ from .model import (
     IRValue,
     IRWitnessMethodSlot,
     IRWitnessTable,
+    IRErasedBoxLayout,
     IRVectorAdd,
     IRVectorDot,
     IRVectorGet,
@@ -334,7 +335,7 @@ def _witness_to_dto(
             f"Unsupported witness metadata for schema v{IR_SCHEMA_VERSION}: "
             f"{type(witness).__name__}"
         )
-    return {
+    dto = {
         "symbol": _expect_string(witness.symbol, "IR witness symbol"),
         "interface_id": _expect_string(
             witness.interface_id, "IR witness interface_id"
@@ -372,6 +373,25 @@ def _witness_to_dto(
             for slot in witness.method_slots
         ],
     }
+    if witness.box_layout is not None:
+        layout = witness.box_layout
+        dto["box_layout"] = {
+            "payload_size": _expect_i64(layout.payload_size, "IR box payload_size"),
+            "payload_alignment": _expect_i64(
+                layout.payload_alignment, "IR box payload_alignment"
+            ),
+            "payload_offset": _expect_i64(
+                layout.payload_offset, "IR box payload_offset"
+            ),
+            "ownership": _expect_string(layout.ownership, "IR box ownership"),
+            "copy_owned_symbol": _expect_string(
+                layout.copy_owned_symbol, "IR box copy_owned_symbol"
+            ),
+            "drop_owned_symbol": _expect_string(
+                layout.drop_owned_symbol, "IR box drop_owned_symbol"
+            ),
+        }
+    return dto
 
 
 def _witness_from_dto(
@@ -380,18 +400,19 @@ def _witness_from_dto(
     schema_version: int,
 ) -> IRWitnessTable:
     mapping = _expect_mapping(value, "IR witness")
-    _expect_fields(
-        mapping,
-        {
-            "symbol",
-            "interface_id",
-            "concrete_type_id",
-            "carrier_kind",
-            "abi_version",
-            "method_slots",
-        },
-        "IR witness",
-    )
+    required_fields = {
+        "symbol",
+        "interface_id",
+        "concrete_type_id",
+        "carrier_kind",
+        "abi_version",
+        "method_slots",
+    }
+    optional_fields = {"box_layout"}
+    if set(mapping) - required_fields - optional_fields:
+        _expect_fields(mapping, required_fields, "IR witness")
+    if not required_fields.issubset(mapping):
+        _expect_fields(mapping, required_fields, "IR witness")
     raw_slots = _expect_sequence(mapping["method_slots"], "IR witness method_slots")
     slots: list[IRWitnessMethodSlot] = []
     for slot_index, raw_slot in enumerate(raw_slots):
@@ -439,6 +460,35 @@ def _witness_from_dto(
                 ),
             )
         )
+    box_layout = None
+    if "box_layout" in mapping:
+        raw_layout = _expect_mapping(mapping["box_layout"], "IR box layout")
+        _expect_fields(
+            raw_layout,
+            {
+                "payload_size",
+                "payload_alignment",
+                "payload_offset",
+                "ownership",
+                "copy_owned_symbol",
+                "drop_owned_symbol",
+            },
+            "IR box layout",
+        )
+        box_layout = IRErasedBoxLayout(
+            _expect_i64(raw_layout["payload_size"], "IR box payload_size"),
+            _expect_i64(
+                raw_layout["payload_alignment"], "IR box payload_alignment"
+            ),
+            _expect_i64(raw_layout["payload_offset"], "IR box payload_offset"),
+            _expect_string(raw_layout["ownership"], "IR box ownership"),
+            _expect_string(
+                raw_layout["copy_owned_symbol"], "IR box copy_owned_symbol"
+            ),
+            _expect_string(
+                raw_layout["drop_owned_symbol"], "IR box drop_owned_symbol"
+            ),
+        )
     return IRWitnessTable(
         _expect_string(mapping["symbol"], "IR witness symbol"),
         _expect_string(mapping["interface_id"], "IR witness interface_id"),
@@ -448,6 +498,7 @@ def _witness_from_dto(
         _expect_string(mapping["carrier_kind"], "IR witness carrier_kind"),
         tuple(slots),
         _expect_i64(mapping["abi_version"], "IR witness abi_version"),
+        box_layout,
     )
 
 

@@ -160,6 +160,27 @@ pub struct IRWitnessTableDTO {
     pub method_slots: Vec<IRWitnessMethodSlotDTO>,
     /// Native interface ABI version.
     pub abi_version: i64,
+    /// Private erased box layout for struct-backed carriers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub box_layout: Option<IRErasedBoxLayoutDTO>,
+}
+
+/// Strict wire representation of erased struct box metadata.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct IRErasedBoxLayoutDTO {
+    /// Bytes occupied by the concrete payload.
+    pub payload_size: i64,
+    /// Required payload alignment.
+    pub payload_alignment: i64,
+    /// Byte offset from box base to payload.
+    pub payload_offset: i64,
+    /// Canonical ownership policy.
+    pub ownership: String,
+    /// Stable erased clone adapter.
+    pub copy_owned_symbol: String,
+    /// Stable erased destruction adapter.
+    pub drop_owned_symbol: String,
 }
 
 /// One declaration-ordered future dispatch slot.

@@ -375,8 +375,8 @@ header:
     concrete_type_id: ptr
     abi_version: i32
     method_slot_count: i32
-    future_copy_owned: ptr = null
-    future_drop_owned: ptr = null
+    copy_owned: ptr
+    drop_owned: ptr
 method_slots[N]:
     index: i32
     method_id: ptr
@@ -414,19 +414,25 @@ Cuando una class implementa la interface:
 No se reserva una caja adicional en esta conversión. La identidad de la class
 no cambia ni se introduce una segunda capa de objeto.
 
-### 7.3 Carrier de struct
+### 7.3 Carrier de struct (Phase 5.4C)
 
-Un puntero a un struct temporal o de stack no puede escapar dentro de una
-interface. Phase 5.4A reserva el carrier como puntero a una futura caja
-existential, pero rechaza toda conversión struct→interface con un diagnóstico
-de Phase 5.4C. El layout `{carrier,witness}` no cambiará cuando se agregue:
+Un puntero a un struct temporal o de stack no escapa dentro de una interface.
+Phase 5.4C implementa el carrier como puntero a una caja existential privada,
+sin cambiar el layout público `{carrier,witness}`:
 
 ```text
 struct-interface box:
-    private management/descriptor data
+    i64 payload_size
+    i32 payload_alignment
+    i32 payload_offset
+    padding hasta payload_offset
     concrete struct payload
 ```
 
+El header ocupa 16 bytes. `payload_offset = align_up(16,
+payload_alignment)`; size/alignment se validan mediante el contrato LP64 del
+DTO y LLVM vuelve a calcular el tamaño total con DataLayout. Ownership es
+`owned_value`; descriptor, adapters y layout permanecen internos al backend.
 La caja contiene una copia lógica viva del struct. Sus operaciones son:
 
 - `copy_owned`: reserva otra caja y ejecuta `copy_init` del payload;
@@ -443,10 +449,10 @@ Una optimización puede evitar la caja para un interface estrictamente borrowed,
 no escapable y con lifetime probado, pero la forma owned canónica siempre es la
 caja. La optimización no puede cambiar aliasing, dispatch ni cleanup.
 
-### 7.4 Lifecycle dinámico futuro (Phase 5.4C)
+### 7.4 Lifecycle dinámico (Phase 5.4C)
 
-Cuando se admita carrier struct, el tipo estático interface no conocerá si el
-concreto es class o struct. El contrato futuro será:
+El tipo estático interface no conoce si el concreto es class o struct. El
+contrato implementado es:
 
 ```text
 copy_init(dst, src):

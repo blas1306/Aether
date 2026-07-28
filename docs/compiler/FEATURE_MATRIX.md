@@ -50,7 +50,7 @@ Leyenda de `Spec`:
 | Optional/Nullable (`T?`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ `{i1,T}` | ✅ parser/type/IR/SSA/ABI/E2E | ✅ documentada | Completa para payloads native representables; sin flow narrowing |
 | Class | ✅ | ✅ | ✅ definite init/métodos | ✅ new/get/set/calls directas | ✅ refs/phis/recursión | ✅ lifecycle effectful | ✅ payload/header/ARC + ABI métodos | ✅ AST + native O0/O1/O2 | ✅ documentada | Métodos concretos 5.3C; dispatch interface class-carrier 5.4B |
 | Struct | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
-| Interface ABI/dispatch class | ✅ | ✅ class→interface | ✅ construcción/dispatch | ✅ `InterfaceType`, witness e `interface_call` DTO | ✅ valores/phis/calls | ✅ preserva efectos indirectos | ✅ `{ptr,ptr}`, thunks y calls indirectas | ✅ O0/O1/O2 | ✅ ABI/verifiers | 5.4A/5.4B completas; boxing struct no |
+| Interface ABI/dispatch class+struct | ✅ | ✅ class/struct→interface | ✅ construcción/dispatch | ✅ witness, box layout y adapters DTO | ✅ valores/phis/calls | ✅ preserva boxing/copy/drop/dispatch | ✅ `{ptr,ptr}`, cajas, thunks y lifecycle borrado | ✅ O0/O1/O2 | ✅ Python/Rust/LLVM | 5.4A/5.4B/5.4C completas |
 | Enum | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
 
 Notas:
@@ -68,7 +68,8 @@ Notas:
   con `this` borrowed. Phase 5.4A agrega valores interface `{carrier,witness}`
   con carrier class y lifecycle/DTO/SSA/LLVM. Phase 5.4B agrega dispatch
   witness-driven con thunks, mutación alias-visible, parámetros/returns,
-  colecciones, recursión e imports. Boxing struct (5.4C) sigue rechazado.
+  colecciones, recursión e imports. Phase 5.4C agrega boxing de struct,
+  `copy_owned`/`drop_owned`, value semantics, nullable y colecciones.
 - `string` baja como valor/literal/call/return/phi, pero LLVM no soporta
   operaciones string (`+`, comparaciones, impresion, length, indexing, runtime).
 - `List<T>` tiene backend fases 1, 2, 3a, `indexOf` de fase 3b, `clear` de fase 4a, `push`/growth de fase 4b, `pop` de fase 4c, `insert` de fase 4d y `removeAt` de fase 4e para literal con tipo esperado,

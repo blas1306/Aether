@@ -411,6 +411,7 @@ fn interface_construct_requires_class_carrier_and_ordered_witness_metadata() {
             receiver_ownership: "borrowed".to_owned(),
         }],
         abi_version: 1,
+        box_layout: None,
     };
     let mut valid = module_with_instruction(IRInstruction::IRInterfaceConstruct {
         result: value("interface", interface_type.clone()),

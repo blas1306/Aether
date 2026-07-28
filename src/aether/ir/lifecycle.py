@@ -42,6 +42,8 @@ from .model import (
     IRArrayGet,
     IRLoad,
     IRMethodResultNew,
+    IRMethodResultReceiver,
+    IRMethodResultValue,
     IRModule,
     IRMoveInit,
     IRPrint,
@@ -306,6 +308,9 @@ class LifecycleExpander:
                 elif isinstance(instruction, IRStructNew):
                     if self.registry.traits(instruction.result.type).needs_destroy:
                         self._owned_values.add(instruction.result)
+                elif isinstance(instruction, IRMethodResultNew):
+                    if self.registry.traits(instruction.result.type).needs_destroy:
+                        self._owned_values.add(instruction.result)
                 elif isinstance(instruction, IRClassNew):
                     self._owned_values.add(instruction.result)
                 elif isinstance(instruction, IRInterfaceConstruct):
@@ -384,18 +389,30 @@ class LifecycleExpander:
             and isinstance(instruction.result.type, NullableType)
             and self.registry.traits(instruction.result.type).needs_destroy
         ):
-            emitted: list[IRInstruction] = [instruction]
             if instruction.value in self._owned_values:
                 self._owned_values.remove(instruction.value)
-            else:
-                emitted.append(
-                    IRCall(
-                        "__aether_retain",
-                        (instruction.result,),
-                        None,
-                        "__aether_retain",
-                    )
+                self._owned_values.add(instruction.result)
+                return self._release_unused_result(instruction, [instruction])
+            if self._contains_interface(instruction.result.type):
+                raw = self._temporary(instruction.result.type)
+                cast = IRCast(raw, instruction.value)
+                copy = IRCall(
+                    "__aether_interface_copy_owned",
+                    (raw,),
+                    instruction.result,
+                    "__aether_interface_copy_owned",
                 )
+                self._owned_values.add(instruction.result)
+                return self._release_unused_result(instruction, [cast, copy])
+            emitted: list[IRInstruction] = [
+                instruction,
+                IRCall(
+                    "__aether_retain",
+                    (instruction.result,),
+                    None,
+                    "__aether_retain",
+                ),
+            ]
             self._owned_values.add(instruction.result)
             return self._release_unused_result(instruction, emitted)
         if (
@@ -424,10 +441,56 @@ class LifecycleExpander:
                     )
             emitted.append(instruction)
             return self._release_unused_result(instruction, emitted)
+        if isinstance(instruction, IRMethodResultNew):
+            emitted: list[IRInstruction] = []
+            fields = (
+                (instruction.receiver,)
+                if instruction.value is None
+                else (instruction.receiver, instruction.value)
+            )
+            for field in fields:
+                if not self.registry.traits(field.type).needs_destroy:
+                    continue
+                if field in self._owned_values:
+                    self._owned_values.remove(field)
+                else:
+                    emitted.append(
+                        IRCall(
+                            "__aether_retain",
+                            (field,),
+                            None,
+                            "__aether_retain",
+                        )
+                    )
+            emitted.append(instruction)
+            return self._release_unused_result(instruction, emitted)
+        if isinstance(instruction, IRMethodResultReceiver):
+            if instruction.method_result in self._owned_values:
+                self._owned_values.remove(instruction.method_result)
+            if self.registry.traits(instruction.result.type).needs_destroy:
+                self._owned_values.add(instruction.result)
+            return self._release_unused_result(instruction, [instruction])
+        if isinstance(instruction, IRMethodResultValue):
+            if self.registry.traits(instruction.result.type).needs_destroy:
+                self._owned_values.add(instruction.result)
+            return self._release_unused_result(instruction, [instruction])
         if isinstance(instruction, IRClassNew):
             return self._release_unused_result(instruction, [instruction])
         if isinstance(instruction, IRInterfaceConstruct):
             emitted: list[IRInstruction] = []
+            if isinstance(instruction.carrier.type, StructType):
+                emitted.append(instruction)
+                if instruction.carrier in self._owned_values:
+                    self._owned_values.remove(instruction.carrier)
+                    emitted.append(
+                        IRCall(
+                            "__aether_release",
+                            (instruction.carrier,),
+                            None,
+                            "__aether_release",
+                        )
+                    )
+                return self._release_unused_result(instruction, emitted)
             if instruction.carrier in self._owned_values:
                 self._owned_values.remove(instruction.carrier)
             else:
@@ -554,6 +617,18 @@ class LifecycleExpander:
             if source in self._owned_values:
                 self._owned_values.remove(source)
                 return [*source_instructions, IRStore(instruction.destination, source)]
+            if self._contains_interface(source.type):
+                copy = self._temporary(source.type)
+                return [
+                    *source_instructions,
+                    IRCall(
+                        "__aether_interface_copy_owned",
+                        (source,),
+                        copy,
+                        "__aether_interface_copy_owned",
+                    ),
+                    IRStore(instruction.destination, copy),
+                ]
             return [
                 *source_instructions,
                 IRCall("__aether_retain", (source,), None, "__aether_retain"),
@@ -567,6 +642,20 @@ class LifecycleExpander:
             retain = []
             if source in self._owned_values:
                 self._owned_values.remove(source)
+            elif self._contains_interface(source.type):
+                copy = self._temporary(source.type)
+                return [
+                    *source_instructions,
+                    IRCall(
+                        "__aether_interface_copy_owned",
+                        (source,),
+                        copy,
+                        "__aether_interface_copy_owned",
+                    ),
+                    IRLoad(old, instruction.destination),
+                    IRStore(instruction.destination, copy),
+                    IRCall("__aether_release", (old,), None, "__aether_release"),
+                ]
             else:
                 retain.append(IRCall("__aether_retain", (source,), None, "__aether_retain"))
             return [
@@ -742,6 +831,28 @@ class LifecycleExpander:
                 self._used_names.add(name)
                 return IRValue(name, type_)
 
+    def _contains_interface(
+        self,
+        type_: IRType,
+        active: frozenset[str] = frozenset(),
+    ) -> bool:
+        if isinstance(type_, InterfaceType):
+            return True
+        if isinstance(type_, NullableType):
+            return self._contains_interface(type_.inner, active)
+        if isinstance(type_, MethodResultType):
+            return self._contains_interface(
+                type_.receiver, active
+            ) or self._contains_interface(type_.value, active)
+        if isinstance(type_, StructType) and type_.name not in active:
+            traits = self.registry.traits(type_)
+            nested = active | {type_.name}
+            return any(
+                self._contains_interface(field_type, nested)
+                for _name, field_type in traits.fields
+            )
+        return False
+
 
 def expand_lifecycle(module: IRModule) -> IRModule:
     # Compiler pipelines may receive an already-expanded module (for example
@@ -751,7 +862,12 @@ def expand_lifecycle(module: IRModule) -> IRModule:
     # second time.
     if any(
         isinstance(instruction, IRCall)
-        and instruction.builtin in {"__aether_retain", "__aether_release"}
+        and instruction.builtin
+        in {
+            "__aether_retain",
+            "__aether_release",
+            "__aether_interface_copy_owned",
+        }
         for function in module.functions
         for block in function.blocks
         for instruction in block.instructions

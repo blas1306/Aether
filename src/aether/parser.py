@@ -230,9 +230,12 @@ class Parser:
             raise self._error(self._previous(), "Struct declarations are only supported at top level.")
         name_token = self._consume(TokenType.IDENTIFIER, "Expected struct name.")
         implements: list[str] = []
-        if self._match(TokenType.IMPLEMENTS):
+        if self._match(TokenType.IMPLEMENTS) or self._match(TokenType.COLON):
             while True:
-                interface_token = self._consume(TokenType.IDENTIFIER, "Expected interface name after 'implements'.")
+                interface_token = self._consume(
+                    TokenType.IDENTIFIER,
+                    "Expected interface name after struct conformance marker.",
+                )
                 if self._check(TokenType.LESS):
                     raise self._error(self._peek(), "Generic interfaces are not supported yet.")
                 implements.append(interface_token.lexeme)
@@ -306,9 +309,12 @@ class Parser:
             raise self._error(self._previous(), "Class declarations are only supported at top level.")
         name_token = self._consume(TokenType.IDENTIFIER, "Expected class name.")
         implements: list[str] = []
-        if self._match(TokenType.IMPLEMENTS):
+        if self._match(TokenType.IMPLEMENTS) or self._match(TokenType.COLON):
             while True:
-                interface_token = self._consume(TokenType.IDENTIFIER, "Expected interface name after 'implements'.")
+                interface_token = self._consume(
+                    TokenType.IDENTIFIER,
+                    "Expected interface name after class conformance marker.",
+                )
                 if self._check(TokenType.LESS):
                     raise self._error(self._peek(), "Generic interfaces are not supported yet.")
                 implements.append(interface_token.lexeme)

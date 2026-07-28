@@ -314,10 +314,11 @@ importados. Reads y writes reutilizan `class_get`/`class_set`, por lo que una
 mutación es visible a través de todos los aliases. A diferencia de los métodos
 de struct, un método de class retorna `R` directamente y nunca
 `MethodResultType`: el objeto compartido ya contiene el receiver actualizado.
-Interface dispatch reutiliza esta ABI mediante thunks borrados; boxing sigue
-fuera de la ABI. La representación y metadata se definen en 10.3.
+Interface dispatch reutiliza esta ABI mediante thunks borrados; boxing es
+privado al backend y no modifica la firma pública. La representación y metadata
+se definen en 10.3.
 
-### 10.3 Native Interface ABI y dispatch class-carrier (Phases 5.4A/5.4B)
+### 10.3 Native Interface ABI, dispatch y boxing (Phases 5.4A–5.4C)
 
 Un valor `interface I` es exactamente `{ptr carrier, ptr witness}`. Para una
 class, `carrier` es el mismo handle no nulo a la instancia; no hay allocation
@@ -340,8 +341,8 @@ por `(interface_id, concrete_type_id)`:
 ```
 
 El header guarda los IDs UTF-8 de interface y concreto, ABI version, cantidad
-de métodos y dos `ptr null` reservados para `copy_owned`/`drop_owned` de Phase
-5.4C. Cada slot guarda índice, ID nominal del método y un puntero a un thunk
+de métodos y punteros no nulos a `copy_owned(ptr)->ptr` y
+`drop_owned(ptr)->void`. Cada slot guarda índice, ID nominal del método y un puntero a un thunk
 nativo privado. Los slots conservan el orden de declaración;
 las tablas se emiten en orden determinista y el mangling es path-independent.
 
@@ -352,16 +353,19 @@ recupera el handle class del carrier y llama `R C.method(ptr this, P1, ...)`.
 thunk y hace una llamada indirecta. El call site no contiene RTTI, type switch,
 búsqueda, devirtualización ni referencia al tipo concreto.
 
-Ownership class-carrier: retain/copy del interface retiene solamente
-el carrier; release/destroy libera solamente el carrier. El witness nunca se
-retiene ni destruye. `I?` envuelve las dos palabras completas en el nullable
+Para class-carrier, los adapters retienen/liberan el handle class. Para
+struct-carrier, `carrier` apunta a una caja `{header, padding, payload}`;
+`copy_owned` clona recursivamente el payload en una caja nueva y `drop_owned`
+destruye recursivamente el payload y libera la caja exactamente una vez. El
+witness nunca se retiene ni destruye. `I?` envuelve las dos palabras completas en el nullable
 tagged existente. No se permite usar `ptr null` como interface o nullable.
 El receiver de dispatch es borrowed; los argumentos y el resultado conservan
 el ABI existente, sin retain/release adicional introducido por la llamada.
 
-Conversión de struct, boxing y clone/drop adapters se rechazan como Phase
-5.4C. Phase 5.4B completa dispatch para carriers class, incluidos parámetros,
-returns, temporales, recursión, colecciones e implementaciones importadas.
+Phase 5.4C completa conversión struct→interface, nullable y colecciones. El
+thunk de struct hace unboxing, invoca el método concreto y escribe el receiver
+actualizado en el payload. Copias de interfaces y elementos de colección
+siempre usan `copy_owned`, por lo que no comparten una caja mutable.
 
 ## 11. Panic, IO y proceso
 
@@ -403,7 +407,7 @@ manifest de imports runtime, son detectados a partir del LLVM textual.
 | strings | UTF-8, equality, ARC observable indirecto | header, flags, helper names | handle ABI/accessors/threading |
 | Array/List | aliasing, copy/slice, Eq, lifecycle | headers, counters, helpers | ABI version + alloc/error policy |
 | class ref | identidad, aliasing, ARC, fields, constructores, métodos directos y Eq identidad | header/descriptor/helpers/payload 5.3C | ABI version, dispatch dinámico, ciclos |
-| interface | dos palabras, carrier class, witness identity y ownership carrier-only | símbolos/tablas privadas 5.4A | dispatch 5.4B; boxing/adapters 5.4C |
+| interface | dos palabras `{carrier,witness}` y lifecycle dinámico por adapters | símbolos/tablas/cajas privadas 5.4A–5.4C | ABI interno aún no versionado externamente |
 | structs/enums | orden de fields/variants y value semantics | concrete target ABI/mangling | object compatibility policy |
 | callables/method results | comportamiento source subset | representación | closure/method ABI |
 | panic | output/code según spec | `puts/exit`, no unwind | error ABI y threading |

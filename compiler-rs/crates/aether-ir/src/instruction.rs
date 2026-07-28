@@ -19,6 +19,23 @@ pub struct IRWitnessMethodSlot {
     pub receiver_ownership: String,
 }
 
+/// Deterministic layout and lifecycle metadata for one erased struct payload.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IRErasedBoxLayout {
+    /// Bytes occupied by the concrete payload.
+    pub payload_size: i64,
+    /// Required payload alignment in the native LP64 contract.
+    pub payload_alignment: i64,
+    /// Byte offset from box base to payload.
+    pub payload_offset: i64,
+    /// Canonical ownership policy.
+    pub ownership: String,
+    /// Stable erased clone adapter.
+    pub copy_owned_symbol: String,
+    /// Stable erased destruction adapter.
+    pub drop_owned_symbol: String,
+}
+
 /// Canonical metadata for one concrete/interface implementation pair.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IRWitnessTable {
@@ -34,6 +51,8 @@ pub struct IRWitnessTable {
     pub method_slots: Vec<IRWitnessMethodSlot>,
     /// Native interface ABI version.
     pub abi_version: i64,
+    /// Present only for struct-backed boxed carriers.
+    pub box_layout: Option<IRErasedBoxLayout>,
 }
 
 /// An instruction in the initial, pre-SSA Aether IR.

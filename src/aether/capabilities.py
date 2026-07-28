@@ -910,18 +910,6 @@ class _CapabilityDetector:
                     concrete is not None
                     and interface_target.name in concrete.implements
                 ):
-                    if concrete.kind == "class":
-                        return
-                    self._record(
-                        Capability.INTERFACES,
-                        node,
-                        detail=(
-                            f"struct conversion from '{source}' to "
-                            f"'{interface_target}' requires boxing; boxing and "
-                            "struct adapters belong to Phase 5.4C"
-                        ),
-                        requires_complete_support=True,
-                    )
                     return
         if isinstance(target, NullableType):
             source_payload = source.base_type if isinstance(source, NullableType) else source

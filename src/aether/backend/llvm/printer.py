@@ -6,7 +6,12 @@ import struct
 from typing import Any, Callable
 
 from aether.ir.model import IREnumConstant, IRWitnessMethodSlot, IRWitnessTable
-from aether.interface_abi import interface_type_symbol
+from aether.interface_abi import (
+    box_type_symbol,
+    copy_owned_symbol,
+    drop_owned_symbol,
+    interface_type_symbol,
+)
 from aether.integer_arithmetic import INT_MAX, INT_MIN, is_aether_int
 from aether.string_value import STRING_SPLIT_BUILTIN, STRING_TRIM_BUILTIN
 from aether.ir.types import ArrayType, BoolType, ClassRefType, DoubleType, EnumType, FloatType, FunctionType, IntType, InterfaceType, ListType, MatrixType, MethodResultType, NullableType, StringType, StructType, VectorType, VoidType
@@ -232,6 +237,7 @@ class LLVMPrinter:
         self._nullable_arc_helpers: set[tuple[NullableType, bool]] = set()
         self._witnesses: dict[str, IRWitnessTable] = {}
         self._uses_interface_dispatch = False
+        self._uses_interface_boxing = False
         # Discover reference layouts before deciding which common runtime
         # declarations are needed.  Some nested uses surface only while
         # recursively materializing aggregate helpers later in this method.
@@ -259,6 +265,9 @@ class LLVMPrinter:
             + " }"
             for definition in module.structs
         ]
+        # Ownership adapters may discover nested ARC helpers and class
+        # descriptors.  Materialize them before freezing runtime requirements.
+        witness_globals = self._print_witness_metadata()
         array_runtime = LLVMArrayRuntime(
             uses_type=self._uses_array_type,
             uses_allocation=self._uses_array_allocation,
@@ -290,6 +299,7 @@ class LLVMPrinter:
             or self._uses_list_slicing
             or uses_list_growth
             or self._sequence_sort_types
+            or self._uses_interface_boxing
         )
         common_runtime = LLVMRuntimeCommon(
             uses_allocation=uses_allocation,
@@ -335,6 +345,7 @@ class LLVMPrinter:
                     not retain
                     for _kind, _element, retain in self._collection_object_arc_helpers
                 )
+                or self._uses_interface_boxing
             ),
             uses_memmove=self._uses_list_insert or self._uses_list_remove_at,
             sequence_sort_types=frozenset(self._sequence_sort_types),
@@ -561,7 +572,6 @@ class LLVMPrinter:
             for global_ in self._string_globals_by_value.values()
             if (rendered := self._print_string_global(global_))
         ]
-        witness_globals = self._print_witness_metadata()
         # Named aggregate bodies must precede every helper that performs a
         # typed GEP/load.  This also makes collection layout independent of
         # which user function happened to mention a struct first.
@@ -1827,6 +1837,29 @@ class LLVMPrinter:
                 retain=instruction.builtin == "__aether_retain",
             )
             return "\n  ".join(lines) if lines else "; trivial lifecycle"
+        if instruction.builtin == "__aether_interface_copy_owned":
+            if (
+                instruction.result is None
+                or len(instruction.arguments) != 1
+                or instruction.result.type != instruction.arguments[0].type
+            ):
+                raise LLVMBackendError(
+                    "LLVM copy_owned requires one same-typed owned result"
+                )
+            argument = instruction.arguments[0]
+            if isinstance(argument.type, InterfaceType):
+                return "\n  ".join(
+                    self._print_interface_copy_owned(argument, instruction.result)
+                )
+            lines: list[str] = []
+            copied = self._emit_arc_value(
+                lines, self._operand(argument), argument.type, retain=True
+            )
+            result = self._new_temp(instruction.result)
+            lines.append(
+                f"{result} = freeze {llvm_type(argument.type)} {copied}"
+            )
+            return "\n  ".join(lines)
         if instruction.builtin is not None:
             return self._print_scalar_math_call(instruction)
         arguments = ", ".join(
@@ -1852,35 +1885,70 @@ class LLVMPrinter:
         type_: object,
         *,
         retain: bool,
-    ) -> None:
+    ) -> str:
         if isinstance(type_, NullableType):
             self._nullable_arc_helpers.add((type_, retain))
             operation = "retain" if retain else "release"
+            if retain:
+                copied = self._synthetic_temp("nullable.copy")
+                lines.append(
+                    f"{copied} = call {llvm_type(type_)} "
+                    f"@__ae_nullable_{operation}_{aggregate_helper_suffix(type_)}("
+                    f"{llvm_type(type_)} {operand})"
+                )
+                return copied
             lines.append(
                 f"call void @__ae_nullable_{operation}_{aggregate_helper_suffix(type_)}("
                 f"{llvm_type(type_)} {operand})"
             )
-            return
+            return operand
         if isinstance(type_, StringType):
             self._uses_string_runtime = True
             operation = "retain" if retain else "release"
             lines.append(f"call void @aether_string_{operation}(ptr {operand})")
-            return
+            return operand
         if isinstance(type_, ClassRefType):
             self._class_types.add(type_)
             operation = "retain" if retain else "release"
             lines.append(f"call void @aether_class_{operation}(ptr {operand})")
-            return
+            return operand
         if isinstance(type_, InterfaceType):
-            operation = "retain" if retain else "release"
+            self._uses_interface_dispatch = True
+            operation = "copy_owned" if retain else "drop_owned"
             carrier = self._synthetic_temp(f"interface.{operation}.carrier")
+            witness = self._synthetic_temp(f"interface.{operation}.witness")
+            adapter_pointer = self._synthetic_temp(
+                f"interface.{operation}.adapter.ptr"
+            )
+            adapter = self._synthetic_temp(f"interface.{operation}.adapter")
             lines.append(
                 f"{carrier} = extractvalue {llvm_type(type_)} {operand}, 0"
             )
-            # Phase 5.4A admits class carriers only.  The witness is immortal
-            # metadata and therefore never retained or released.
-            lines.append(f"call void @aether_class_{operation}(ptr {carrier})")
-            return
+            lines.append(
+                f"{witness} = extractvalue {llvm_type(type_)} {operand}, 1"
+            )
+            adapter_index = 4 if retain else 5
+            lines.append(
+                f"{adapter_pointer} = getelementptr %AetherWitnessHeader, "
+                f"ptr {witness}, i32 0, i32 {adapter_index}"
+            )
+            lines.append(f"{adapter} = load ptr, ptr {adapter_pointer}")
+            if retain:
+                copied = self._synthetic_temp("interface.copy_owned.carrier")
+                lines.append(f"{copied} = call ptr {adapter}(ptr {carrier})")
+                inserted = self._synthetic_temp("interface.copy_owned.inserted")
+                result = self._synthetic_temp("interface.copy_owned.value")
+                rendered = llvm_type(type_)
+                lines.extend(
+                    [
+                        f"{inserted} = insertvalue {rendered} undef, ptr {copied}, 0",
+                        f"{result} = insertvalue {rendered} {inserted}, ptr {witness}, 1",
+                    ]
+                )
+                return result
+            else:
+                lines.append(f"call void {adapter}(ptr {carrier})")
+            return operand
         if isinstance(type_, (ArrayType, ListType)):
             kind = "array" if isinstance(type_, ArrayType) else "list"
             helper = self._require_collection_object_arc_helper(
@@ -1889,7 +1957,7 @@ class LLVMPrinter:
                 retain=retain,
             )
             lines.append(f"call void @{helper}(ptr {operand})")
-            return
+            return operand
         if isinstance(type_, StructType):
             definition = self._structs.get(type_.name)
             if definition is None:
@@ -1897,27 +1965,47 @@ class LLVMPrinter:
             fields = list(enumerate(definition.fields))
             if not retain:
                 fields.reverse()
+            current = operand
             for index, (_name, field_type) in fields:
                 if not self._layouts.layout(field_type).needs_destroy:
                     continue
                 field = self._synthetic_temp("arc.field")
                 lines.append(
-                    f"{field} = extractvalue {llvm_type(type_)} {operand}, {index}"
+                    f"{field} = extractvalue {llvm_type(type_)} {current}, {index}"
                 )
-                self._emit_arc_value(lines, field, field_type, retain=retain)
-            return
+                copied_field = self._emit_arc_value(
+                    lines, field, field_type, retain=retain
+                )
+                if retain and copied_field != field:
+                    updated = self._synthetic_temp("arc.struct.copy")
+                    lines.append(
+                        f"{updated} = insertvalue {llvm_type(type_)} {current}, "
+                        f"{llvm_type(field_type)} {copied_field}, {index}"
+                    )
+                    current = updated
+            return current
         if isinstance(type_, MethodResultType):
             fields = ((0, type_.receiver), (1, type_.value))
             ordered = fields if retain else tuple(reversed(fields))
+            current = operand
             for index, field_type in ordered:
                 if not self._layouts.layout(field_type).needs_destroy:
                     continue
                 field = self._synthetic_temp("arc.method.field")
                 lines.append(
-                    f"{field} = extractvalue {llvm_type(type_)} {operand}, {index}"
+                    f"{field} = extractvalue {llvm_type(type_)} {current}, {index}"
                 )
-                self._emit_arc_value(lines, field, field_type, retain=retain)
-            return
+                copied_field = self._emit_arc_value(
+                    lines, field, field_type, retain=retain
+                )
+                if retain and copied_field != field:
+                    updated = self._synthetic_temp("arc.method.copy")
+                    lines.append(
+                        f"{updated} = insertvalue {llvm_type(type_)} {current}, "
+                        f"{llvm_type(field_type)} {copied_field}, {index}"
+                    )
+                    current = updated
+            return current
         raise LLVMBackendError(
             f"LLVM lifecycle builtin does not support type {type_}"
         )
@@ -1952,8 +2040,9 @@ class LLVMPrinter:
         operation = "retain" if retain else "release"
         name = f"__ae_nullable_{operation}_{aggregate_helper_suffix(type_)}"
         llvm = llvm_type(type_)
+        return_type = llvm if retain else "void"
         lines = [
-            f"define private void @{name}({llvm} %value) {{",
+            f"define private {return_type} @{name}({llvm} %value) {{",
             "entry:",
             f"  %present = extractvalue {llvm} %value, 0",
             "  br i1 %present, label %payload, label %done",
@@ -1961,17 +2050,27 @@ class LLVMPrinter:
             f"  %inner = extractvalue {llvm} %value, 1",
         ]
         payload_lines: list[str] = []
-        self._emit_arc_value(
+        copied_inner = self._emit_arc_value(
             payload_lines,
             "%inner",
             type_.inner,
             retain=retain,
         )
         lines.extend(f"  {line}" for line in payload_lines)
+        if retain:
+            lines.append(
+                f"  %updated = insertvalue {llvm} %value, "
+                f"{llvm_type(type_.inner)} {copied_inner}, 1"
+            )
         lines.extend([
             "  br label %done",
             "done:",
-            "  ret void",
+            (
+                f"  %result = phi {llvm} [ %value, %entry ], [ %updated, %payload ]\n"
+                f"  ret {llvm} %result"
+                if retain
+                else "  ret void"
+            ),
             "}",
         ])
         return "\n".join(lines)
@@ -2094,8 +2193,11 @@ class LLVMPrinter:
         assert size is not None
         allocation = "aether_array_new" if kind == "array" else "aether_list_new"
         copy_lines: list[str] = []
+        copied_element = "%element"
         if element_layout.needs_retain:
-            self._emit_arc_value(copy_lines, "%element", element_type, retain=True)
+            copied_element = self._emit_arc_value(
+                copy_lines, "%element", element_type, retain=True
+            )
         return "\n".join([
             f"define private ptr @{name}(ptr %source) {{",
             "entry:",
@@ -2116,7 +2218,7 @@ class LLVMPrinter:
             f"  %element = load {rendered}, ptr %source_element_ptr",
             *(f"  {line}" for line in copy_lines),
             f"  %copy_element_ptr = getelementptr {rendered}, ptr %copy_data, i64 %index",
-            f"  store {rendered} %element, ptr %copy_element_ptr",
+            f"  store {rendered} {copied_element}, ptr %copy_element_ptr",
             "  %next = add i64 %index, 1",
             "  br label %copy.loop",
             "exit:",
@@ -2147,7 +2249,9 @@ class LLVMPrinter:
         data_index = 1 if kind == "array" else 2
         rendered = llvm_type(element_type)
         arc_lines: list[str] = []
-        self._emit_arc_value(arc_lines, "%element", element_type, retain=retain)
+        updated_element = self._emit_arc_value(
+            arc_lines, "%element", element_type, retain=retain
+        )
         return "\n".join([
             f"define private void @{name}(ptr %sequence) {{",
             "entry:",
@@ -2164,6 +2268,11 @@ class LLVMPrinter:
             f"  %element_ptr = getelementptr {rendered}, ptr %data, i64 %index",
             f"  %element = load {rendered}, ptr %element_ptr",
             *(f"  {line}" for line in arc_lines),
+            *(
+                [f"  store {rendered} {updated_element}, ptr %element_ptr"]
+                if retain and updated_element != "%element"
+                else []
+            ),
             "  br label %advance",
             "advance:",
             "  %next = add i64 %index, 1",
@@ -2639,10 +2748,11 @@ class LLVMPrinter:
             f"i32 {instruction.field_index + 1}"
         ]
         needs_destroy = self._layouts.layout(field_type).needs_destroy
+        stored_value = self._operand(instruction.value)
         if needs_destroy:
-            self._emit_arc_value(
+            stored_value = self._emit_arc_value(
                 lines,
-                self._operand(instruction.value),
+                stored_value,
                 field_type,
                 retain=True,
             )
@@ -2651,7 +2761,7 @@ class LLVMPrinter:
             old = self._synthetic_temp("class.field.old")
             lines.append(f"{old} = load {llvm_type(field_type)}, ptr {pointer}")
         lines.append(
-            f"store {llvm_type(field_type)} {self._operand(instruction.value)}, "
+            f"store {llvm_type(field_type)} {stored_value}, "
             f"ptr {pointer}"
         )
         if old is not None:
@@ -2666,10 +2776,9 @@ class LLVMPrinter:
             raise LLVMBackendError(
                 "LLVM interface_construct result must be an InterfaceType"
             )
-        if not isinstance(instruction.carrier.type, ClassRefType):
+        if not isinstance(instruction.carrier.type, (ClassRefType, StructType)):
             raise LLVMBackendError(
-                "LLVM interface_construct supports class carriers only; "
-                "boxing belongs to Phase 5.4C"
+                "LLVM interface_construct requires a class or struct carrier"
             )
         existing = self._witnesses.get(instruction.witness.symbol)
         if existing is not None and existing != instruction.witness:
@@ -2678,13 +2787,82 @@ class LLVMPrinter:
             )
         self._witnesses[instruction.witness.symbol] = instruction.witness
         result_type = llvm_type(instruction.result.type)
+        carrier = self._operand(instruction.carrier)
+        lines: list[str] = []
+        if isinstance(instruction.carrier.type, StructType):
+            layout = instruction.witness.box_layout
+            if instruction.witness.carrier_kind != "box" or layout is None:
+                raise LLVMBackendError(
+                    "LLVM struct-backed interface requires canonical box metadata"
+                )
+            self._uses_interface_boxing = True
+            box_type = box_type_symbol(
+                instruction.witness.interface_id,
+                instruction.witness.concrete_type_id,
+            )
+            box_size = (
+                f"ptrtoint (ptr getelementptr ({box_type}, ptr null, i64 1) to i64)"
+            )
+            box = self._synthetic_temp("interface.box")
+            size_ptr = self._synthetic_temp("interface.box.size.ptr")
+            alignment_ptr = self._synthetic_temp("interface.box.alignment.ptr")
+            offset_ptr = self._synthetic_temp("interface.box.offset.ptr")
+            payload_ptr = self._synthetic_temp("interface.box.payload.ptr")
+            lines.extend(
+                [
+                    f"{box} = call ptr @aether_alloc(i64 {box_size})",
+                    f"{size_ptr} = getelementptr {box_type}, ptr {box}, i32 0, i32 0",
+                    f"store i64 {layout.payload_size}, ptr {size_ptr}",
+                    f"{alignment_ptr} = getelementptr {box_type}, ptr {box}, i32 0, i32 1",
+                    f"store i32 {layout.payload_alignment}, ptr {alignment_ptr}",
+                    f"{offset_ptr} = getelementptr {box_type}, ptr {box}, i32 0, i32 2",
+                    f"store i32 {layout.payload_offset}, ptr {offset_ptr}",
+                ]
+            )
+            carrier = self._emit_arc_value(
+                lines, carrier, instruction.carrier.type, retain=True
+            )
+            lines.extend(
+                [
+                    f"{payload_ptr} = getelementptr {box_type}, ptr {box}, i32 0, i32 4",
+                    f"store {llvm_type(instruction.carrier.type)} {carrier}, ptr {payload_ptr}",
+                ]
+            )
+            carrier = box
         carrier_insert = self._synthetic_temp("interface.carrier")
         result = self._new_temp(instruction.result)
-        return [
+        lines.extend([
             f"{carrier_insert} = insertvalue {result_type} undef, "
-            f"ptr {self._operand(instruction.carrier)}, 0",
+            f"ptr {carrier}, 0",
             f"{result} = insertvalue {result_type} {carrier_insert}, "
             f"ptr @{instruction.witness.symbol}, 1",
+        ])
+        return lines
+
+    def _print_interface_copy_owned(
+        self,
+        source: SSAValue,
+        result_value: SSAValue,
+    ) -> list[str]:
+        rendered = llvm_type(source.type)
+        source_operand = self._operand(source)
+        carrier = self._synthetic_temp("interface.copy.carrier")
+        witness = self._synthetic_temp("interface.copy.witness")
+        adapter_pointer = self._synthetic_temp("interface.copy.adapter.ptr")
+        adapter = self._synthetic_temp("interface.copy.adapter")
+        copied_carrier = self._synthetic_temp("interface.copy.carrier.new")
+        inserted = self._synthetic_temp("interface.copy.inserted")
+        result = self._new_temp(result_value)
+        self._uses_interface_dispatch = True
+        return [
+            f"{carrier} = extractvalue {rendered} {source_operand}, 0",
+            f"{witness} = extractvalue {rendered} {source_operand}, 1",
+            f"{adapter_pointer} = getelementptr %AetherWitnessHeader, "
+            f"ptr {witness}, i32 0, i32 4",
+            f"{adapter} = load ptr, ptr {adapter_pointer}",
+            f"{copied_carrier} = call ptr {adapter}(ptr {carrier})",
+            f"{inserted} = insertvalue {rendered} undef, ptr {copied_carrier}, 0",
+            f"{result} = insertvalue {rendered} {inserted}, ptr {witness}, 1",
         ]
 
     def _print_interface_call(
@@ -2826,9 +3004,12 @@ class LLVMPrinter:
             lines.append(
                 self._element_pointer_line(element_ptr, element_type, data, index)
             )
+            stored = self._operand(element)
             if layout.needs_retain:
-                self._emit_arc_value(lines, self._operand(element), element.type, retain=True)
-            lines.append(self._store_element_line(element_type, self._operand(element), element_ptr))
+                stored = self._emit_arc_value(
+                    lines, stored, element.type, retain=True
+                )
+            lines.append(self._store_element_line(element_type, stored, element_ptr))
 
         self._for_each_element(length, emit_element)
         return "\n  ".join(lines)
@@ -2928,10 +3109,13 @@ class LLVMPrinter:
             *self._load_list_data(data, list_value, data_field),
             f"{element_ptr} = getelementptr {element_type}, ptr {data}, i64 {old_length}",
         ]
+        stored = self._operand(instruction.value)
         if self._layouts.layout(instruction.value.type).needs_retain:
-            self._emit_arc_value(lines, self._operand(instruction.value), instruction.value.type, retain=True)
+            stored = self._emit_arc_value(
+                lines, stored, instruction.value.type, retain=True
+            )
         lines.extend([
-            f"store {element_type} {self._operand(instruction.value)}, ptr {element_ptr}",
+            f"store {element_type} {stored}, ptr {element_ptr}",
             f"{new_length} = add i64 {old_length}, 1",
             *self._store_list_length(new_length, list_value, length_field),
         ])
@@ -2972,10 +3156,13 @@ class LLVMPrinter:
             f"call void @llvm.memmove.p0.p0.i64(ptr {destination}, ptr {source}, i64 {bytes_to_move}, i1 false)",
             f"{element_ptr} = getelementptr {element_type}, ptr {data}, i64 {index64}",
         ]
+        stored = self._operand(instruction.value)
         if self._layouts.layout(instruction.value.type).needs_retain:
-            self._emit_arc_value(lines, self._operand(instruction.value), instruction.value.type, retain=True)
+            stored = self._emit_arc_value(
+                lines, stored, instruction.value.type, retain=True
+            )
         lines.extend([
-            f"store {element_type} {self._operand(instruction.value)}, ptr {element_ptr}",
+            f"store {element_type} {stored}, ptr {element_ptr}",
             f"{new_length} = add i64 {old_length}, 1",
             *self._store_list_length(new_length, list_value, length_field),
         ])
@@ -3874,9 +4061,12 @@ class LLVMPrinter:
             lines.append(
                 self._element_pointer_line(element_ptr, element_type, data, index)
             )
+            stored = self._operand(element)
             if element_layout.needs_retain:
-                self._emit_arc_value(lines, self._operand(element), element.type, retain=True)
-            lines.append(self._store_element_line(element_type, self._operand(element), element_ptr))
+                stored = self._emit_arc_value(
+                    lines, stored, element.type, retain=True
+                )
+            lines.append(self._store_element_line(element_type, stored, element_ptr))
 
         self._for_each_element(length, emit_element)
         return "\n  ".join(lines)
@@ -3997,7 +4187,11 @@ class LLVMPrinter:
             not instruction.borrowed
             and self._layouts.layout(instruction.result.type).needs_retain
         ):
-            self._emit_arc_value(lines, result, instruction.result.type, retain=True)
+            copied = self._emit_arc_value(
+                lines, result, instruction.result.type, retain=True
+            )
+            if copied != result:
+                self._values[self._key(instruction.result)] = copied
         return lines
 
     def _print_array_slice(self, instruction: SSAArraySlice) -> str:
@@ -4056,7 +4250,11 @@ class LLVMPrinter:
             not instruction.borrowed
             and self._layouts.layout(instruction.result.type).needs_retain
         ):
-            self._emit_arc_value(lines, result, instruction.result.type, retain=True)
+            copied = self._emit_arc_value(
+                lines, result, instruction.result.type, retain=True
+            )
+            if copied != result:
+                self._values[self._key(instruction.result)] = copied
         return lines
 
     def _print_vector_get(self, instruction: SSAVectorGet) -> list[str]:
@@ -4114,9 +4312,14 @@ class LLVMPrinter:
         layout = self._layouts.layout(instruction.value.type)
         if layout.needs_retain:
             old = self._synthetic_temp("array.set.old")
-            self._emit_arc_value(lines, self._operand(instruction.value), instruction.value.type, retain=True)
+            stored = self._emit_arc_value(
+                lines,
+                self._operand(instruction.value),
+                instruction.value.type,
+                retain=True,
+            )
             lines.append(f"{old} = load {element_type}, ptr {element_ptr.value}")
-            lines.append(f"store {element_type} {self._operand(instruction.value)}, ptr {element_ptr.value}")
+            lines.append(f"store {element_type} {stored}, ptr {element_ptr.value}")
             self._emit_arc_value(lines, old, instruction.value.type, retain=False)
             return lines
         lines.append(f"store {element_type} {self._operand(instruction.value)}, ptr {element_ptr.value}")
@@ -4140,9 +4343,14 @@ class LLVMPrinter:
         layout = self._layouts.layout(instruction.value.type)
         if layout.needs_retain:
             old = self._synthetic_temp("list.set.old")
-            self._emit_arc_value(lines, self._operand(instruction.value), instruction.value.type, retain=True)
+            stored = self._emit_arc_value(
+                lines,
+                self._operand(instruction.value),
+                instruction.value.type,
+                retain=True,
+            )
             lines.append(f"{old} = load {element_type}, ptr {element_ptr.value}")
-            lines.append(f"store {element_type} {self._operand(instruction.value)}, ptr {element_ptr.value}")
+            lines.append(f"store {element_type} {stored}, ptr {element_ptr.value}")
             self._emit_arc_value(lines, old, instruction.value.type, retain=False)
             return lines
         lines.append(f"store {element_type} {self._operand(instruction.value)}, ptr {element_ptr.value}")
@@ -4166,9 +4374,14 @@ class LLVMPrinter:
         layout = self._layouts.layout(instruction.value.type)
         if layout.needs_retain:
             old = self._synthetic_temp("list.set.old")
-            self._emit_arc_value(lines, self._operand(instruction.value), instruction.value.type, retain=True)
+            stored = self._emit_arc_value(
+                lines,
+                self._operand(instruction.value),
+                instruction.value.type,
+                retain=True,
+            )
             lines.append(f"{old} = load {element_type}, ptr {element_ptr.value}")
-            lines.append(f"store {element_type} {self._operand(instruction.value)}, ptr {element_ptr.value}")
+            lines.append(f"store {element_type} {stored}, ptr {element_ptr.value}")
             self._emit_arc_value(lines, old, instruction.value.type, retain=False)
             return lines
         lines.append(f"store {element_type} {self._operand(instruction.value)}, ptr {element_ptr.value}")
@@ -4726,6 +4939,22 @@ class LLVMPrinter:
                 item.symbol,
             ),
         ):
+            if witness.carrier_kind == "box":
+                layout = witness.box_layout
+                if layout is None:
+                    raise LLVMBackendError(
+                        f"Box witness '{witness.symbol}' has no erased layout"
+                    )
+                padding = layout.payload_offset - 16
+                if padding < 0:
+                    raise LLVMBackendError(
+                        f"Box witness '{witness.symbol}' has an invalid payload offset"
+                    )
+                sections.append(
+                    f"{box_type_symbol(witness.interface_id, witness.concrete_type_id)} "
+                    f"= type {{ i64, i32, i32, [{padding} x i8], "
+                    f"{llvm_type(StructType(witness.concrete_type_id))} }}"
+                )
             identifiers = [
                 (f"@{witness.symbol}.interface_id", witness.interface_id),
                 (f"@{witness.symbol}.concrete_type_id", witness.concrete_type_id),
@@ -4750,7 +4979,8 @@ class LLVMPrinter:
                 f"ptr @{witness.symbol}.concrete_type_id, i64 0, i64 0), "
                 f"i32 {witness.abi_version}, "
                 f"i32 {len(witness.method_slots)}, "
-                "ptr null, ptr null }"
+                f"ptr @{copy_owned_symbol(witness.interface_id, witness.concrete_type_id)}, "
+                f"ptr @{drop_owned_symbol(witness.interface_id, witness.concrete_type_id)} }}"
             )
             slot_type = (
                 f"[{len(witness.method_slots)} x %AetherWitnessSlot]"
@@ -4774,9 +5004,92 @@ class LLVMPrinter:
                 f"{{ %AetherWitnessHeader, {slot_type} }} "
                 f"{{ {header}, {slots} }}"
             )
+            sections.extend(self._print_ownership_adapters(witness))
             for slot in witness.method_slots:
                 sections.append(self._print_dispatch_thunk(witness, slot))
         return sections
+
+    def _print_ownership_adapters(self, witness: IRWitnessTable) -> list[str]:
+        copy_symbol = copy_owned_symbol(
+            witness.interface_id, witness.concrete_type_id
+        )
+        drop_symbol = drop_owned_symbol(
+            witness.interface_id, witness.concrete_type_id
+        )
+        if witness.carrier_kind == "class":
+            class_type = ClassRefType(witness.concrete_type_id)
+            self._class_types.add(class_type)
+            return [
+                "\n".join(
+                    [
+                        f"define private ptr @{copy_symbol}(ptr %carrier) {{",
+                        "entry:",
+                        "  call void @aether_class_retain(ptr %carrier)",
+                        "  ret ptr %carrier",
+                        "}",
+                    ]
+                ),
+                "\n".join(
+                    [
+                        f"define private void @{drop_symbol}(ptr %carrier) {{",
+                        "entry:",
+                        "  call void @aether_class_release(ptr %carrier)",
+                        "  ret void",
+                        "}",
+                    ]
+                ),
+            ]
+        if witness.carrier_kind != "box" or witness.box_layout is None:
+            raise LLVMBackendError(
+                f"Unsupported ownership carrier kind '{witness.carrier_kind}'"
+            )
+        self._uses_interface_boxing = True
+        concrete = StructType(witness.concrete_type_id)
+        rendered = llvm_type(concrete)
+        box_type = box_type_symbol(witness.interface_id, witness.concrete_type_id)
+        layout = witness.box_layout
+        box_size = (
+            f"ptrtoint (ptr getelementptr ({box_type}, ptr null, i64 1) to i64)"
+        )
+        copy_lines: list[str] = [
+            f"define private ptr @{copy_symbol}(ptr %carrier) {{",
+            "entry:",
+            f"  %source_payload_ptr = getelementptr {box_type}, ptr %carrier, i32 0, i32 4",
+            f"  %payload = load {rendered}, ptr %source_payload_ptr",
+        ]
+        payload_copy: list[str] = []
+        copied_payload = self._emit_arc_value(
+            payload_copy, "%payload", concrete, retain=True
+        )
+        copy_lines.extend(f"  {line}" for line in payload_copy)
+        copy_lines.extend(
+            [
+                f"  %box = call ptr @aether_alloc(i64 {box_size})",
+                f"  %size_ptr = getelementptr {box_type}, ptr %box, i32 0, i32 0",
+                f"  store i64 {layout.payload_size}, ptr %size_ptr",
+                f"  %alignment_ptr = getelementptr {box_type}, ptr %box, i32 0, i32 1",
+                f"  store i32 {layout.payload_alignment}, ptr %alignment_ptr",
+                f"  %offset_ptr = getelementptr {box_type}, ptr %box, i32 0, i32 2",
+                f"  store i32 {layout.payload_offset}, ptr %offset_ptr",
+                f"  %payload_ptr = getelementptr {box_type}, ptr %box, i32 0, i32 4",
+                f"  store {rendered} {copied_payload}, ptr %payload_ptr",
+                "  ret ptr %box",
+                "}",
+            ]
+        )
+        destroy_lines: list[str] = []
+        self._emit_arc_value(destroy_lines, "%payload", concrete, retain=False)
+        drop_lines = [
+            f"define private void @{drop_symbol}(ptr %carrier) {{",
+            "entry:",
+            f"  %payload_ptr = getelementptr {box_type}, ptr %carrier, i32 0, i32 4",
+            f"  %payload = load {rendered}, ptr %payload_ptr",
+            *(f"  {line}" for line in destroy_lines),
+            "  call void @free(ptr %carrier)",
+            "  ret void",
+            "}",
+        ]
+        return ["\n".join(copy_lines), "\n".join(drop_lines)]
 
     def _print_dispatch_thunk(
         self,
@@ -4790,15 +5103,20 @@ class LLVMPrinter:
         method_name = slot.method_id.rsplit(".", 1)[-1]
         target_name = f"{witness.concrete_type_id}.{method_name}"
         target = self._functions_by_name.get(target_name)
-        expected_parameters = (
-            ClassRefType(witness.concrete_type_id),
-            *slot.parameter_types,
-        )
+        concrete_receiver: object
+        expected_return: object
+        if witness.carrier_kind == "box":
+            concrete_receiver = StructType(witness.concrete_type_id)
+            expected_return = MethodResultType(concrete_receiver, slot.return_type)
+        else:
+            concrete_receiver = ClassRefType(witness.concrete_type_id)
+            expected_return = slot.return_type
+        expected_parameters = (concrete_receiver, *slot.parameter_types)
         if (
             target is None
             or tuple(parameter.type for parameter in target.parameters)
             != expected_parameters
-            or target.return_type != slot.return_type
+            or target.return_type != expected_return
         ):
             raise LLVMBackendError(
                 f"Interface thunk '{slot.thunk_symbol}' target signature mismatch"
@@ -4818,15 +5136,47 @@ class LLVMPrinter:
             ],
         ]
         rendered_return = llvm_type(slot.return_type)
-        call = (
-            f"call {rendered_return} {self._global_name(target_name)}"
-            f"({', '.join(arguments)})"
-        )
-        body = (
-            f"  {call}\n  ret void"
-            if isinstance(slot.return_type, VoidType)
-            else f"  %result = {call}\n  ret {rendered_return} %result"
-        )
+        if witness.carrier_kind == "box":
+            box_type = box_type_symbol(
+                witness.interface_id, witness.concrete_type_id
+            )
+            receiver_type = StructType(witness.concrete_type_id)
+            receiver_llvm = llvm_type(receiver_type)
+            result_pair = llvm_type(
+                MethodResultType(receiver_type, slot.return_type)
+            )
+            source_arguments = [
+                f"{receiver_llvm} %receiver",
+                *arguments[1:],
+            ]
+            result_body = [
+                f"  %payload_ptr = getelementptr {box_type}, ptr %carrier, i32 0, i32 4",
+                f"  %receiver = load {receiver_llvm}, ptr %payload_ptr",
+                f"  %pair = call {result_pair} {self._global_name(target_name)}"
+                f"({', '.join(source_arguments)})",
+                f"  %updated = extractvalue {result_pair} %pair, 0",
+                f"  store {receiver_llvm} %updated, ptr %payload_ptr",
+            ]
+            if isinstance(slot.return_type, VoidType):
+                result_body.append("  ret void")
+            else:
+                result_body.extend(
+                    [
+                        f"  %result = extractvalue {result_pair} %pair, 1",
+                        f"  ret {rendered_return} %result",
+                    ]
+                )
+            body = "\n".join(result_body)
+        else:
+            call = (
+                f"call {rendered_return} {self._global_name(target_name)}"
+                f"({', '.join(arguments)})"
+            )
+            body = (
+                f"  {call}\n  ret void"
+                if isinstance(slot.return_type, VoidType)
+                else f"  %result = {call}\n  ret {rendered_return} %result"
+            )
         return (
             f"define private {rendered_return} @{slot.thunk_symbol}"
             f"({', '.join(parameters)}) {{\nentry:\n{body}\n}}"

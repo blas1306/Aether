@@ -3,10 +3,9 @@
 use std::collections::{HashMap, HashSet};
 
 use aether_ir::{
-    ArrayType, BoolType, ClassRefType, ComplexType, DoubleType, FloatType, FunctionType,
-    IRBasicBlock, IRConstant, IRFunction, IRInstruction, IRModule, IRStructDefinition, IRType,
-    IRValue, IntType, LifecycleSource, ListType, MatrixType, StringType, StructType, VectorType,
-    VoidType,
+    ArrayType, BoolType, ComplexType, DoubleType, FloatType, FunctionType, IRBasicBlock,
+    IRConstant, IRFunction, IRInstruction, IRModule, IRStructDefinition, IRType, IRValue, IntType,
+    LifecycleSource, ListType, MatrixType, StringType, StructType, VectorType, VoidType,
 };
 
 use crate::error::{
@@ -69,6 +68,57 @@ impl<'module> TypeVerifier<'module> {
         Self {
             module,
             lifecycle: LifecycleTypeRegistry::new(&module.structs),
+        }
+    }
+
+    fn align_up(value: i64, alignment: i64) -> i64 {
+        (value + alignment - 1) / alignment * alignment
+    }
+
+    fn erased_layout(&self, type_: &IRType, active: &mut Vec<String>) -> Option<(i64, i64)> {
+        match type_ {
+            IRType::Bool(_) => Some((1, 1)),
+            IRType::Int(_) | IRType::Float(_) | IRType::Enum(_) => Some((4, 4)),
+            IRType::Double(_)
+            | IRType::String(_)
+            | IRType::ClassRef(_)
+            | IRType::Array(_)
+            | IRType::List(_)
+            | IRType::Vector(_)
+            | IRType::Matrix(_)
+            | IRType::Function(_) => Some((8, 8)),
+            IRType::Interface(_) => Some((16, 8)),
+            IRType::Nullable(nullable) => {
+                let (size, alignment) = self.erased_layout(&nullable.inner, active)?;
+                let offset = Self::align_up(1, alignment);
+                Some((Self::align_up(offset + size, alignment), alignment))
+            }
+            IRType::Struct(payload) => {
+                if active.contains(&payload.name) {
+                    return None;
+                }
+                let definition = self
+                    .module
+                    .structs
+                    .iter()
+                    .find(|definition| definition.name == payload.name)?;
+                active.push(payload.name.clone());
+                let mut offset = 0;
+                let mut alignment = 1;
+                for (_, field_type) in &definition.fields {
+                    let Some((field_size, field_alignment)) =
+                        self.erased_layout(field_type, active)
+                    else {
+                        active.pop();
+                        return None;
+                    };
+                    offset = Self::align_up(offset, field_alignment) + field_size;
+                    alignment = alignment.max(field_alignment);
+                }
+                active.pop();
+                Some((Self::align_up(offset, alignment), alignment))
+            }
+            IRType::Void(_) | IRType::Complex(_) | IRType::MethodResult(_) => None,
         }
     }
 
@@ -503,14 +553,23 @@ impl<'module> TypeVerifier<'module> {
                 carrier,
                 witness,
             } => {
-                let (IRType::Interface(interface), IRType::ClassRef(class)) =
-                    (&result.r#type, &carrier.r#type)
-                else {
+                let IRType::Interface(interface) = &result.r#type else {
                     return Err(constraint(
-                        "carrier",
-                        TypeExpectation::ClassReference,
-                        &carrier.r#type,
+                        "result",
+                        TypeExpectation::Valid,
+                        &result.r#type,
                     ));
+                };
+                let (concrete_name, expected_kind) = match &carrier.r#type {
+                    IRType::ClassRef(class) => (class.name.as_str(), "class"),
+                    IRType::Struct(r#struct) => (r#struct.name.as_str(), "box"),
+                    _ => {
+                        return Err(constraint(
+                            "carrier",
+                            TypeExpectation::Valid,
+                            &carrier.r#type,
+                        ));
+                    }
                 };
                 let ordered = witness
                     .method_slots
@@ -525,10 +584,10 @@ impl<'module> TypeVerifier<'module> {
                     },
                 );
                 if witness.abi_version != 1
-                    || witness.carrier_kind != "class"
+                    || witness.carrier_kind != expected_kind
                     || witness.symbol.is_empty()
                     || witness.interface_id != interface.name
-                    || witness.concrete_type_id != class.name
+                    || witness.concrete_type_id != concrete_name
                     || !ordered
                     || !unique
                     || witness
@@ -546,6 +605,45 @@ impl<'module> TypeVerifier<'module> {
                         &result.r#type,
                     ));
                 }
+                match (&carrier.r#type, &witness.box_layout) {
+                    (IRType::ClassRef(_), None) => {}
+                    (IRType::Struct(payload), Some(layout)) => {
+                        let Some((payload_size, payload_alignment)) =
+                            self.erased_layout(&carrier.r#type, &mut Vec::new())
+                        else {
+                            return Err(constraint(
+                                "witness",
+                                TypeExpectation::Valid,
+                                &result.r#type,
+                            ));
+                        };
+                        let payload_offset =
+                            Self::align_up(16, payload_alignment);
+                        if layout.payload_size != payload_size
+                            || layout.payload_alignment != payload_alignment
+                            || layout.payload_offset != payload_offset
+                            || layout.ownership != "owned_value"
+                            || layout.copy_owned_symbol
+                                != format!("{}.copy_owned", witness.symbol)
+                            || layout.drop_owned_symbol
+                                != format!("{}.drop_owned", witness.symbol)
+                            || payload.name != witness.concrete_type_id
+                        {
+                            return Err(constraint(
+                                "witness",
+                                TypeExpectation::Valid,
+                                &result.r#type,
+                            ));
+                        }
+                    }
+                    _ => {
+                        return Err(constraint(
+                            "witness",
+                            TypeExpectation::Valid,
+                            &result.r#type,
+                        ));
+                    }
+                }
                 for slot in &witness.method_slots {
                     for parameter in &slot.parameter_types {
                         self.require_valid_type("witness.parameter_types", parameter)?;
@@ -562,15 +660,24 @@ impl<'module> TypeVerifier<'module> {
                         .functions
                         .iter()
                         .find(|candidate| candidate.name == target_name);
+                    let expected_receiver = carrier.r#type.clone();
+                    let expected_return = if witness.carrier_kind == "box" {
+                        IRType::MethodResult(aether_ir::MethodResultType {
+                            receiver: match &carrier.r#type {
+                                IRType::Struct(receiver) => receiver.clone(),
+                                _ => unreachable!(),
+                            },
+                            value: Box::new(slot.return_type.clone()),
+                        })
+                    } else {
+                        slot.return_type.clone()
+                    };
                     let compatible = target.is_some_and(|target| {
-                        target.return_type == slot.return_type
+                        target.return_type == expected_return
                             && target.parameters.len()
                                 == slot.parameter_types.len() + 1
                             && target.parameters.first().is_some_and(|receiver| {
-                                receiver.r#type
-                                    == IRType::ClassRef(ClassRefType {
-                                        name: witness.concrete_type_id.clone(),
-                                    })
+                                receiver.r#type == expected_receiver
                             })
                             && target
                                 .parameters
@@ -1526,6 +1633,20 @@ impl<'module> TypeVerifier<'module> {
 
         if matches!(builtin, "__aether_retain" | "__aether_release") {
             return self.verify_retain_release_builtin(arguments, result, builtin);
+        }
+        if builtin == "__aether_interface_copy_owned" {
+            if arguments.len() == 1
+                && self.lifecycle.needs_destroy(&arguments[0].r#type)
+                && result
+                    .as_ref()
+                    .is_some_and(|value| value.r#type == arguments[0].r#type)
+            {
+                return Ok(());
+            }
+            let actual = arguments
+                .first()
+                .map_or_else(|| IRType::Void(VoidType), |value| value.r#type.clone());
+            return Err(constraint("arguments", TypeExpectation::Valid, &actual));
         }
 
         match builtin {

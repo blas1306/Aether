@@ -10,10 +10,10 @@ use crate::wire::{
 };
 use crate::{
     ArrayType, BoolType, ClassRefType, ComplexType, DoubleType, EnumType, FloatType, FunctionType,
-    IRBasicBlock, IRConstant, IREnumConstant, IRFunction, IRInstruction, IRModule, IRParameter,
-    IRSourceLocation, IRStorage, IRStructDefinition, IRType, IRValue, IRWitnessMethodSlot,
-    IRWitnessTable, IntType, InterfaceType, LifecycleSource, ListType, MatrixType,
-    MethodResultType, NullableType, StringType, StructType, VectorType, VoidType,
+    IRBasicBlock, IRConstant, IREnumConstant, IRErasedBoxLayout, IRFunction, IRInstruction,
+    IRModule, IRParameter, IRSourceLocation, IRStorage, IRStructDefinition, IRType, IRValue,
+    IRWitnessMethodSlot, IRWitnessTable, IntType, InterfaceType, LifecycleSource, ListType,
+    MatrixType, MethodResultType, NullableType, StringType, StructType, VectorType, VoidType,
 };
 
 /// A structural failure while importing a wire DTO into the owned Rust IR.
@@ -727,6 +727,14 @@ impl TryFrom<&IRInstructionDTO> for IRInstruction {
                         })
                         .collect::<Result<Vec<_>, IRImportError>>()?,
                     abi_version: witness.abi_version,
+                    box_layout: witness.box_layout.as_ref().map(|layout| IRErasedBoxLayout {
+                        payload_size: layout.payload_size,
+                        payload_alignment: layout.payload_alignment,
+                        payload_offset: layout.payload_offset,
+                        ownership: layout.ownership.clone(),
+                        copy_owned_symbol: layout.copy_owned_symbol.clone(),
+                        drop_owned_symbol: layout.drop_owned_symbol.clone(),
+                    }),
                 },
             }),
             IRInstructionDTO::InterfaceCall {

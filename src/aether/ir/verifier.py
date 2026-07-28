@@ -6,10 +6,14 @@ from typing import NoReturn
 from aether.range_safety import RANGE_STEP_NONZERO_BUILTIN
 from aether.integer_arithmetic import INT_MAX, INT_MIN, is_aether_int
 from aether.interface_abi import (
+    ERASED_BOX_HEADER_SIZE,
     INTERFACE_ABI_VERSION,
+    copy_owned_symbol,
     dispatch_thunk_symbol,
+    drop_owned_symbol,
     witness_symbol,
 )
+from .erased_layout import ErasedLayoutError, align_up, erased_size_alignment
 
 from .model import (
     IRAssign,
@@ -680,6 +684,7 @@ class IRVerifier:
                 "io.appendText": "IRV-062",
                 "__aether_retain": "IRV-066",
                 "__aether_release": "IRV-066",
+                "__aether_interface_copy_owned": "IRV-066",
             }
             invariant_id = builtin_rules.get(instruction.builtin, "IRV-067")
             if instruction.builtin in TEXT_CODEC_BUILTINS:
@@ -1048,21 +1053,52 @@ class IRVerifier:
             self._require_defined(instruction.carrier, state, value_types)
             if not isinstance(instruction.result.type, InterfaceType):
                 self._fail("Interface construct result must have interface type")
-            if not isinstance(instruction.carrier.type, ClassRefType):
-                self._fail(
-                    "Interface construct carrier must be a native class reference; "
-                    "struct boxing belongs to Phase 5.4C"
-                )
+            if not isinstance(instruction.carrier.type, (ClassRefType, StructType)):
+                self._fail("Interface construct carrier must be a native class or struct")
             witness = instruction.witness
+            expected_kind = (
+                "class"
+                if isinstance(instruction.carrier.type, ClassRefType)
+                else "box"
+            )
             if (
                 witness.abi_version != INTERFACE_ABI_VERSION
-                or witness.carrier_kind != "class"
+                or witness.carrier_kind != expected_kind
                 or witness.interface_id != instruction.result.type.name
                 or witness.concrete_type_id != instruction.carrier.type.name
                 or witness.symbol
                 != witness_symbol(witness.interface_id, witness.concrete_type_id)
             ):
                 self._fail("Interface construct has inconsistent witness identity metadata")
+            if isinstance(instruction.carrier.type, StructType):
+                layout = witness.box_layout
+                try:
+                    payload_size, payload_alignment = erased_size_alignment(
+                        instruction.carrier.type, self._structs
+                    )
+                except ErasedLayoutError as exc:
+                    self._fail(f"Interface box has unsupported erased payload: {exc}")
+                if (
+                    layout is None
+                    or layout.payload_size != payload_size
+                    or layout.payload_alignment != payload_alignment
+                    or layout.payload_offset
+                    != align_up(ERASED_BOX_HEADER_SIZE, payload_alignment)
+                    or layout.ownership != "owned_value"
+                    or layout.copy_owned_symbol
+                    != copy_owned_symbol(
+                        witness.interface_id, witness.concrete_type_id
+                    )
+                    or layout.drop_owned_symbol
+                    != drop_owned_symbol(
+                        witness.interface_id, witness.concrete_type_id
+                    )
+                ):
+                    self._fail(
+                        "Interface box has invalid payload layout or ownership adapters"
+                    )
+            elif witness.box_layout is not None:
+                self._fail("Class-backed interface witness must not declare a box layout")
             if tuple(slot.index for slot in witness.method_slots) != tuple(
                 range(len(witness.method_slots))
             ):
@@ -1108,14 +1144,21 @@ class IRVerifier:
                         f"Interface witness slot '{slot.method_id}' has no "
                         "native class implementation"
                     )
-                expected_parameters = (
-                    ClassRefType(witness.concrete_type_id),
-                    *slot.parameter_types,
-                )
+                concrete_receiver: IRType
+                expected_return: IRType
+                if witness.carrier_kind == "box":
+                    concrete_receiver = StructType(witness.concrete_type_id)
+                    expected_return = MethodResultType(
+                        concrete_receiver, slot.return_type
+                    )
+                else:
+                    concrete_receiver = ClassRefType(witness.concrete_type_id)
+                    expected_return = slot.return_type
+                expected_parameters = (concrete_receiver, *slot.parameter_types)
                 if (
                     tuple(parameter.type for parameter in implementation.parameters)
                     != expected_parameters
-                    or implementation.return_type != slot.return_type
+                    or implementation.return_type != expected_return
                 ):
                     self._fail(
                         f"Interface witness slot '{slot.method_id}' is "
@@ -1605,6 +1648,21 @@ class IRVerifier:
                 ):
                     self._fail(
                         f"Lifecycle builtin does not support argument type {argument_type}"
+                    )
+                return
+            if instruction.builtin == "__aether_interface_copy_owned":
+                if (
+                    instruction.function != instruction.builtin
+                    or len(instruction.arguments) != 1
+                    or instruction.result is None
+                    or instruction.result.type != instruction.arguments[0].type
+                    or not self._lifecycle_traits(
+                        instruction.arguments[0].type
+                    ).needs_destroy
+                ):
+                    self._fail(
+                        "copy_owned builtin requires one owned argument and "
+                        "a same-typed result"
                     )
                 return
             if instruction.result is None:

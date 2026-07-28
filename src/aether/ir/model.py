@@ -218,6 +218,13 @@ class IRCall(IRInstruction):
                 reads_memory=True,
                 writes_memory=True,
             )
+        if self.builtin == "__aether_interface_copy_owned":
+            return InstructionEffects(
+                has_side_effects=True,
+                may_trap=True,
+                reads_memory=True,
+                allocates=True,
+            )
         if self.builtin == "__aether_range_step_nonzero":
             return InstructionEffects(has_side_effects=True, may_trap=True)
         if self.builtin is None:
@@ -301,6 +308,18 @@ class IRWitnessMethodSlot:
 
 
 @dataclass(frozen=True)
+class IRErasedBoxLayout:
+    """Target-independent LP64 facts used to validate a private erased box."""
+
+    payload_size: int
+    payload_alignment: int
+    payload_offset: int
+    ownership: str
+    copy_owned_symbol: str
+    drop_owned_symbol: str
+
+
+@dataclass(frozen=True)
 class IRWitnessTable:
     """Canonical witness metadata embedded in an interface construction."""
 
@@ -310,6 +329,7 @@ class IRWitnessTable:
     carrier_kind: str
     method_slots: tuple[IRWitnessMethodSlot, ...]
     abi_version: int = 1
+    box_layout: IRErasedBoxLayout | None = None
 
 
 @dataclass(frozen=True)

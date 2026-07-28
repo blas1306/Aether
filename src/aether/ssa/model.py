@@ -136,6 +136,13 @@ class SSACall(SSAInstruction):
                 reads_memory=True,
                 writes_memory=True,
             )
+        if self.builtin == "__aether_interface_copy_owned":
+            return InstructionEffects(
+                has_side_effects=True,
+                may_trap=True,
+                reads_memory=True,
+                allocates=True,
+            )
         if self.builtin == "__aether_range_step_nonzero":
             return InstructionEffects(has_side_effects=True, may_trap=True)
         if self.builtin is None:

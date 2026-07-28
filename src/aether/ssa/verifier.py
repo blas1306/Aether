@@ -40,10 +40,14 @@ from aether.process_arguments import PROCESS_ARGS_BUILTIN
 from aether.range_safety import RANGE_STEP_NONZERO_BUILTIN
 from aether.integer_arithmetic import INT_MAX, INT_MIN, is_aether_int
 from aether.interface_abi import (
+    ERASED_BOX_HEADER_SIZE,
     INTERFACE_ABI_VERSION,
+    copy_owned_symbol,
     dispatch_thunk_symbol,
+    drop_owned_symbol,
     witness_symbol,
 )
+from aether.ir.erased_layout import ErasedLayoutError, align_up, erased_size_alignment
 from aether.text_file_io import (
     FILE_READ_RESULT_TYPE,
     FILE_STATUS_TYPE,
@@ -601,15 +605,19 @@ class SSAVerifier:
                 self._require_defined(instruction.carrier, value_types)
                 if not isinstance(instruction.result.type, InterfaceType):
                     self._fail("Interface construct result must have interface type")
-                if not isinstance(instruction.carrier.type, ClassRefType):
+                if not isinstance(instruction.carrier.type, (ClassRefType, StructType)):
                     self._fail(
-                        "Interface construct carrier must be a native class reference; "
-                        "struct boxing belongs to Phase 5.4C"
+                        "Interface construct carrier must be a native class or struct"
                     )
                 witness = instruction.witness
+                expected_kind = (
+                    "class"
+                    if isinstance(instruction.carrier.type, ClassRefType)
+                    else "box"
+                )
                 if (
                     witness.abi_version != INTERFACE_ABI_VERSION
-                    or witness.carrier_kind != "class"
+                    or witness.carrier_kind != expected_kind
                     or witness.interface_id != instruction.result.type.name
                     or witness.concrete_type_id != instruction.carrier.type.name
                     or witness.symbol
@@ -619,6 +627,39 @@ class SSAVerifier:
                 ):
                     self._fail(
                         "Interface construct has inconsistent witness identity metadata"
+                    )
+                if isinstance(instruction.carrier.type, StructType):
+                    layout = witness.box_layout
+                    try:
+                        payload_size, payload_alignment = erased_size_alignment(
+                            instruction.carrier.type, self._structs
+                        )
+                    except ErasedLayoutError as exc:
+                        self._fail(
+                            f"Interface box has unsupported erased payload: {exc}"
+                        )
+                    if (
+                        layout is None
+                        or layout.payload_size != payload_size
+                        or layout.payload_alignment != payload_alignment
+                        or layout.payload_offset
+                        != align_up(ERASED_BOX_HEADER_SIZE, payload_alignment)
+                        or layout.ownership != "owned_value"
+                        or layout.copy_owned_symbol
+                        != copy_owned_symbol(
+                            witness.interface_id, witness.concrete_type_id
+                        )
+                        or layout.drop_owned_symbol
+                        != drop_owned_symbol(
+                            witness.interface_id, witness.concrete_type_id
+                        )
+                    ):
+                        self._fail(
+                            "Interface box has invalid payload layout or ownership adapters"
+                        )
+                elif witness.box_layout is not None:
+                    self._fail(
+                        "Class-backed interface witness must not declare a box layout"
                     )
                 if tuple(slot.index for slot in witness.method_slots) != tuple(
                     range(len(witness.method_slots))
@@ -1105,6 +1146,31 @@ class SSAVerifier:
                 ):
                     self._fail(
                         f"Lifecycle builtin does not support argument type {argument_type}"
+                    )
+                return
+            if instruction.builtin == "__aether_interface_copy_owned":
+                if (
+                    instruction.function != instruction.builtin
+                    or len(instruction.arguments) != 1
+                    or instruction.result is None
+                    or instruction.result.type != instruction.arguments[0].type
+                    or not isinstance(
+                        instruction.arguments[0].type,
+                        (
+                            StringType,
+                            StructType,
+                            MethodResultType,
+                            ArrayType,
+                            ListType,
+                            NullableType,
+                            ClassRefType,
+                            InterfaceType,
+                        ),
+                    )
+                ):
+                    self._fail(
+                        "copy_owned builtin requires one owned argument and "
+                        "a same-typed result"
                     )
                 return
             if instruction.result is None:

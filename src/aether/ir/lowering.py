@@ -9,8 +9,11 @@ from .. import ast
 from ..errors import IRBackendUnsupportedFeatureError
 from ..integer_arithmetic import INT_MAX, INT_MIN, is_aether_int
 from ..interface_abi import (
+    ERASED_BOX_HEADER_SIZE,
     INTERFACE_ABI_VERSION,
+    copy_owned_symbol,
     dispatch_thunk_symbol,
+    drop_owned_symbol,
     witness_symbol,
 )
 from ..scalar_math import NATIVE_SCALAR_MATH_FUNCTIONS, SCALAR_MATH_CONSTANTS
@@ -75,6 +78,7 @@ from .model import (
     IRClassSet,
     IRInterfaceConstruct,
     IRInterfaceCall,
+    IRErasedBoxLayout,
     IRCompareOp,
     IRConst,
     IRCopyInit,
@@ -163,6 +167,7 @@ from .types import (
     VoidType,
 )
 from .scalar_math import scalar_math_result_type
+from .erased_layout import align_up, erased_size_alignment, ErasedLayoutError
 from .equality import ir_eq_capability
 
 
@@ -3112,6 +3117,10 @@ class IRLowerer:
             result = context.temporary(type_)
             context.block.instructions.append(IRListNew(result, ()))
             return result
+        if isinstance(type_, NullableType):
+            result = context.temporary(type_)
+            context.block.instructions.append(IRConst(result, None))
+            return result
         if isinstance(type_, BoolType):
             literal: object = False
         elif isinstance(type_, StringType):
@@ -3669,21 +3678,15 @@ class IRLowerer:
                 "Native interface-to-interface casts are unsupported in Phase 5.4B; "
                 "interface adaptation belongs to Phase 5.4C."
             )
-        if isinstance(value.type, StructType):
-            self._fail(
-                f"Native conversion from struct '{value.type.name}' to interface "
-                f"'{target_type.name}' requires boxing; boxing and struct adapters "
-                "belong to Phase 5.4C."
-            )
-        if not isinstance(value.type, ClassRefType):
+        if not isinstance(value.type, (StructType, ClassRefType)):
             self._fail(
                 f"Native cast from '{value.type}' to interface '{target_type.name}' "
-                "is unsupported in Phase 5.4B; no fallback conversion is available."
+                "has no representable erased carrier; no fallback conversion is available."
             )
         info = self._structs.get(value.type.name)
         if info is None or target_type.name not in info.declaration.implements:
             self._fail(
-                f"Native class '{value.type.name}' does not implement interface "
+                f"Native type '{value.type.name}' does not implement interface "
                 f"'{target_type.name}'; unsupported interface casts never fall back."
             )
         witness = self._witness_for(value.type, target_type)
@@ -3695,7 +3698,7 @@ class IRLowerer:
 
     def _witness_for(
         self,
-        concrete_type: ClassRefType,
+        concrete_type: StructType | ClassRefType,
         interface_type: InterfaceType,
     ) -> IRWitnessTable:
         key = (interface_type.name, concrete_type.name)
@@ -3728,13 +3731,42 @@ class IRLowerer:
                     ),
                 )
             )
+        box_layout = None
+        carrier_kind = "class"
+        if isinstance(concrete_type, StructType):
+            try:
+                payload_size, payload_alignment = erased_size_alignment(
+                    concrete_type,
+                    {
+                        name: IRStructDefinition(name, info.fields)
+                        for name, info in self._structs.items()
+                        if name in self._struct_names
+                    },
+                )
+            except ErasedLayoutError as exc:
+                self._fail(
+                    f"Cannot box struct '{concrete_type.name}': {exc}."
+                )
+            payload_offset = align_up(
+                ERASED_BOX_HEADER_SIZE, payload_alignment
+            )
+            carrier_kind = "box"
+            box_layout = IRErasedBoxLayout(
+                payload_size,
+                payload_alignment,
+                payload_offset,
+                "owned_value",
+                copy_owned_symbol(interface_type.name, concrete_type.name),
+                drop_owned_symbol(interface_type.name, concrete_type.name),
+            )
         witness = IRWitnessTable(
             witness_symbol(interface_type.name, concrete_type.name),
             interface_type.name,
             concrete_type.name,
-            "class",
+            carrier_kind,
             tuple(slots),
             INTERFACE_ABI_VERSION,
+            box_layout,
         )
         self._witnesses[key] = witness
         return witness

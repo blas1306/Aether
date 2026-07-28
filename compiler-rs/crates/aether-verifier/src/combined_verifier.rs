@@ -921,7 +921,7 @@ fn classify_call(builtin: Option<&str>, rule: &TypeRuleError) -> Classification 
         | "text.formatInt"
         | "text.formatDouble"
         | "text.concatFragments" => "IRV-065",
-        "__aether_retain" | "__aether_release" => "IRV-066",
+        "__aether_retain" | "__aether_release" | "__aether_interface_copy_owned" => "IRV-066",
         _ => "IRV-067",
     };
     classified(invariant, VerificationErrorCategory::Builtins)

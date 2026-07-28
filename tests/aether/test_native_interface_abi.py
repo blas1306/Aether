@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 
 from aether.backend.llvm import LLVMBuilder
-from aether.capabilities import BackendCapabilityError
 from aether.interface_abi import interface_type_symbol, witness_symbol
 from aether.ir import (
     ClassRefType,
@@ -246,11 +245,17 @@ def test_python_verifier_rejects_noncanonical_witness_identity() -> None:
         IRVerifier(invalid_module).verify()
 
 
-def test_struct_boxing_still_fails_explicitly_as_phase_5_4c() -> None:
+def test_struct_boxing_uses_native_erased_ownership_adapters() -> None:
     source = (
         "interface I { int get(); } "
         "struct S implements I { int get() { return 1; } } "
         "int main() { S s = S(); I i = s; return 0; }"
     )
-    with pytest.raises(BackendCapabilityError, match="Phase 5.4C"):
-        LLVMBuilder().emit_llvm(_typed(source))
+    module = IRBackend().lower_verified(_typed(source))
+    construct = _constructs(module)[0]
+    assert construct.witness.carrier_kind == "box"
+    assert construct.witness.box_layout is not None
+    assert construct.witness.box_layout.ownership == "owned_value"
+    llvm = LLVMBuilder().emit_llvm(_typed(source))
+    assert f"ptr @{construct.witness.box_layout.copy_owned_symbol}" in llvm
+    assert f"ptr @{construct.witness.box_layout.drop_owned_symbol}" in llvm
