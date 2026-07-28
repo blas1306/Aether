@@ -23,6 +23,7 @@ from .model import (
     IRClassGet,
     IRClassNew,
     IRClassSet,
+    IRInterfaceCall,
     IRInterfaceConstruct,
     IRCast,
     IRCompareOp,
@@ -360,6 +361,13 @@ def _witness_to_dto(
                 "return_type": ir_type_to_dto(
                     slot.return_type, schema_version=schema_version
                 ),
+                "thunk_symbol": _expect_string(
+                    slot.thunk_symbol, "IR witness slot thunk_symbol"
+                ),
+                "receiver_ownership": _expect_string(
+                    slot.receiver_ownership,
+                    "IR witness slot receiver_ownership",
+                ),
             }
             for slot in witness.method_slots
         ],
@@ -390,7 +398,14 @@ def _witness_from_dto(
         slot = _expect_mapping(raw_slot, f"IR witness method_slots[{slot_index}]")
         _expect_fields(
             slot,
-            {"index", "method_id", "parameter_types", "return_type"},
+            {
+                "index",
+                "method_id",
+                "parameter_types",
+                "return_type",
+                "thunk_symbol",
+                "receiver_ownership",
+            },
             f"IR witness method_slots[{slot_index}]",
         )
         raw_parameters = _expect_sequence(
@@ -413,6 +428,14 @@ def _witness_from_dto(
                 ),
                 ir_type_from_dto(
                     slot["return_type"], schema_version=schema_version
+                ),
+                _expect_string(
+                    slot["thunk_symbol"],
+                    f"IR witness method_slots[{slot_index}].thunk_symbol",
+                ),
+                _expect_string(
+                    slot["receiver_ownership"],
+                    f"IR witness method_slots[{slot_index}].receiver_ownership",
                 ),
             )
         )
@@ -930,6 +953,38 @@ def _encode_instruction_to_dto(
             ),
             "witness": _witness_to_dto(
                 instruction.witness, schema_version=schema_version
+            ),
+        }
+    if type(instruction) is IRInterfaceCall:
+        return {
+            "kind": kind,
+            "receiver": ir_value_to_dto(
+                instruction.receiver, schema_version=schema_version
+            ),
+            "arguments": [
+                ir_value_to_dto(argument, schema_version=schema_version)
+                for argument in instruction.arguments
+            ],
+            "slot": {
+                "index": instruction.slot.index,
+                "method_id": instruction.slot.method_id,
+                "parameter_types": [
+                    ir_type_to_dto(type_, schema_version=schema_version)
+                    for type_ in instruction.slot.parameter_types
+                ],
+                "return_type": ir_type_to_dto(
+                    instruction.slot.return_type,
+                    schema_version=schema_version,
+                ),
+                "thunk_symbol": instruction.slot.thunk_symbol,
+                "receiver_ownership": instruction.slot.receiver_ownership,
+            },
+            "result": (
+                None
+                if instruction.result is None
+                else ir_value_to_dto(
+                    instruction.result, schema_version=schema_version
+                )
             ),
         }
     if type(instruction) is IRStructGet:
@@ -1720,6 +1775,76 @@ def _decode_instruction_from_dto(
             ir_value_from_dto(mapping["carrier"], schema_version=schema_version),
             _witness_from_dto(mapping["witness"], schema_version=schema_version),
         )
+    if kind == "interface_call":
+        _expect_fields(
+            mapping,
+            {"kind", "receiver", "arguments", "slot", "result"},
+            "IR instruction 'interface_call'",
+        )
+        raw_slot = _expect_mapping(
+            mapping["slot"], "IR instruction 'interface_call'.slot"
+        )
+        _expect_fields(
+            raw_slot,
+            {
+                "index",
+                "method_id",
+                "parameter_types",
+                "return_type",
+                "thunk_symbol",
+                "receiver_ownership",
+            },
+            "IR instruction 'interface_call'.slot",
+        )
+        raw_arguments = _expect_sequence(
+            mapping["arguments"],
+            "IR instruction 'interface_call'.arguments",
+        )
+        raw_parameter_types = _expect_sequence(
+            raw_slot["parameter_types"],
+            "IR instruction 'interface_call'.slot.parameter_types",
+        )
+        return IRInterfaceCall(
+            ir_value_from_dto(
+                mapping["receiver"], schema_version=schema_version
+            ),
+            tuple(
+                ir_value_from_dto(argument, schema_version=schema_version)
+                for argument in raw_arguments
+            ),
+            IRWitnessMethodSlot(
+                _expect_i64(
+                    raw_slot["index"],
+                    "IR instruction 'interface_call'.slot.index",
+                ),
+                _expect_string(
+                    raw_slot["method_id"],
+                    "IR instruction 'interface_call'.slot.method_id",
+                ),
+                tuple(
+                    ir_type_from_dto(type_, schema_version=schema_version)
+                    for type_ in raw_parameter_types
+                ),
+                ir_type_from_dto(
+                    raw_slot["return_type"], schema_version=schema_version
+                ),
+                _expect_string(
+                    raw_slot["thunk_symbol"],
+                    "IR instruction 'interface_call'.slot.thunk_symbol",
+                ),
+                _expect_string(
+                    raw_slot["receiver_ownership"],
+                    "IR instruction 'interface_call'.slot.receiver_ownership",
+                ),
+            ),
+            (
+                None
+                if mapping["result"] is None
+                else ir_value_from_dto(
+                    mapping["result"], schema_version=schema_version
+                )
+            ),
+        )
     if kind == "struct_get":
         _expect_fields(
             mapping,
@@ -2453,6 +2578,11 @@ IR_INSTRUCTION_DTO_REGISTRY: tuple[IRInstructionDTORegistryEntry, ...] = (
         IRInterfaceConstruct,
         "interface_construct",
         "IRInterfaceConstruct",
+    ),
+    _instruction_dto_entry(
+        IRInterfaceCall,
+        "interface_call",
+        "IRInterfaceCall",
     ),
     _instruction_dto_entry(IRStructGet, "struct_get", "IRStructGet"),
     _instruction_dto_entry(IRStructSet, "struct_set", "IRStructSet"),

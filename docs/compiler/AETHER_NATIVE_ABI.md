@@ -85,7 +85,7 @@ linkage LLVM; eso es un detalle accidental, no una exportación FFI.
 | `Matrix<T>` | `ptr` | una palabra target | handle por valor | provisional/shape externo |
 | struct | `%struct.Name = type { fields... }` | padding/alignment del target | por valor | layout source-order, no ABI pública |
 | class | `ptr` no nulo a `{header, fields...}` nominal | una palabra target | handle por valor | state/constructors/methods 5.3C |
-| interface `I` | `%interface.<id> = type { ptr, ptr }` | dos palabras target; alineación de `ptr` | aggregate por valor | Native Interface ABI 5.4A; sin dispatch |
+| interface `I` | `%interface.<id> = type { ptr, ptr }` | dos palabras target; alineación de `ptr` | aggregate por valor | ABI 5.4A + dispatch class-carrier 5.4B |
 | nullable `T?` | `%nullable.<T> = type { i1, T }` | target-dependent, incluido padding | aggregate por valor | implementado para payload representable |
 | tuple source | sin LLVM ABI general | — | — | unsupported native |
 | method result | `{ %struct.Receiver [, Value] }` | target-dependent | por valor | detalle de lowering |
@@ -314,10 +314,10 @@ importados. Reads y writes reutilizan `class_get`/`class_set`, por lo que una
 mutación es visible a través de todos los aliases. A diferencia de los métodos
 de struct, un método de class retorna `R` directamente y nunca
 `MethodResultType`: el objeto compartido ya contiene el receiver actualizado.
-Interface dispatch, thunks y boxing siguen fuera de esta ABI de métodos
-concretos. La representación y metadata de interfaces se definen en 10.3.
+Interface dispatch reutiliza esta ABI mediante thunks borrados; boxing sigue
+fuera de la ABI. La representación y metadata se definen en 10.3.
 
-### 10.3 Native Interface ABI (Phase 5.4A)
+### 10.3 Native Interface ABI y dispatch class-carrier (Phases 5.4A/5.4B)
 
 Un valor `interface I` es exactamente `{ptr carrier, ptr witness}`. Para una
 class, `carrier` es el mismo handle no nulo a la instancia; no hay allocation
@@ -341,18 +341,27 @@ por `(interface_id, concrete_type_id)`:
 
 El header guarda los IDs UTF-8 de interface y concreto, ABI version, cantidad
 de métodos y dos `ptr null` reservados para `copy_owned`/`drop_owned` de Phase
-5.4C. Cada slot guarda índice, ID nominal del método y un `ptr null`
-reservado para dispatch futuro. Los slots conservan el orden de declaración;
+5.4C. Cada slot guarda índice, ID nominal del método y un puntero a un thunk
+nativo privado. Los slots conservan el orden de declaración;
 las tablas se emiten en orden determinista y el mangling es path-independent.
 
-Ownership en 5.4A es class-only: retain/copy del interface retiene solamente
+El ABI borrado de todo slot es `R thunk(ptr borrowed_carrier, P1, ...)`, donde
+`P1...` y `R` conservan el ABI del método de interface. El thunk no aloca,
+recupera el handle class del carrier y llama `R C.method(ptr this, P1, ...)`.
+`interface_call` extrae carrier y witness, calcula el slot conocido, carga el
+thunk y hace una llamada indirecta. El call site no contiene RTTI, type switch,
+búsqueda, devirtualización ni referencia al tipo concreto.
+
+Ownership class-carrier: retain/copy del interface retiene solamente
 el carrier; release/destroy libera solamente el carrier. El witness nunca se
 retiene ni destruye. `I?` envuelve las dos palabras completas en el nullable
 tagged existente. No se permite usar `ptr null` como interface o nullable.
+El receiver de dispatch es borrowed; los argumentos y el resultado conservan
+el ABI existente, sin retain/release adicional introducido por la llamada.
 
 Conversión de struct, boxing y clone/drop adapters se rechazan como Phase
-5.4C. Calls de métodos interface, carga de slots, calls indirectas y virtuales
-se rechazan como Phase 5.4B. Los placeholders no ejecutan métodos.
+5.4C. Phase 5.4B completa dispatch para carriers class, incluidos parámetros,
+returns, temporales, recursión, colecciones e implementaciones importadas.
 
 ## 11. Panic, IO y proceso
 

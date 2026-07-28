@@ -96,6 +96,7 @@ from .model import (
     IREnumConstant,
     IRFunction,
     IRFunctionRef,
+    IRInterfaceCall,
     IRInterfaceConstruct,
     IRInstruction,
     IRInitDefault,
@@ -721,10 +722,56 @@ class IRInterpreter:
             return False, None, None
 
         if isinstance(instruction, IRInterfaceConstruct):
-            raise IRExecutionError(
-                "Native interface execution is unavailable in Phase 5.4A; "
-                "interface dispatch belongs to Phase 5.4B"
+            carrier = self._value(instruction.carrier, frame)
+            if not isinstance(carrier, NativeClassObject):
+                raise IRExecutionError(
+                    "IR interface_construct requires a class carrier"
+                )
+            frame.values[instruction.result] = (carrier, instruction.witness)
+            return False, None, None
+
+        if isinstance(instruction, IRInterfaceCall):
+            interface = self._value(instruction.receiver, frame)
+            if (
+                not isinstance(interface, tuple)
+                or len(interface) != 2
+                or not isinstance(interface[0], NativeClassObject)
+            ):
+                raise IRExecutionError(
+                    "IR interface_call requires a native interface value"
+                )
+            carrier, witness = interface
+            if (
+                instruction.slot.index < 0
+                or instruction.slot.index >= len(witness.method_slots)
+            ):
+                raise IRExecutionError("IR interface_call slot is out of bounds")
+            witness_slot = witness.method_slots[instruction.slot.index]
+            if (
+                witness_slot.method_id != instruction.slot.method_id
+                or witness_slot.parameter_types != instruction.slot.parameter_types
+                or witness_slot.return_type != instruction.slot.return_type
+            ):
+                raise IRExecutionError(
+                    "IR interface_call signature does not match its witness slot"
+                )
+            concrete_method = (
+                f"{witness.concrete_type_id}."
+                f"{witness_slot.method_id.rsplit('.', 1)[-1]}"
             )
+            result = self.call(
+                concrete_method,
+                [
+                    carrier,
+                    *(
+                        self._value(argument, frame)
+                        for argument in instruction.arguments
+                    ),
+                ],
+            )
+            if instruction.result is not None:
+                frame.values[instruction.result] = result
+            return False, None, None
 
         if isinstance(instruction, IRClassGet):
             object_ = self._value(instruction.object, frame)

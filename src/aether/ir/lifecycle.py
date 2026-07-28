@@ -18,6 +18,7 @@ from .model import (
     IRClassGet,
     IRClassSet,
     IRClassNew,
+    IRInterfaceCall,
     IRInterfaceConstruct,
     IRCompareOp,
     IRCopyInit,
@@ -282,7 +283,7 @@ class LifecycleExpander:
                 self._remaining_uses.update(
                     self._instruction_operand_occurrences(instruction)
                 )
-                if isinstance(instruction, (IRCall, IRCallIndirect)) and instruction.result is not None:
+                if isinstance(instruction, (IRCall, IRCallIndirect, IRInterfaceCall)) and instruction.result is not None:
                     if self.registry.traits(instruction.result.type).needs_destroy:
                         self._owned_values.add(instruction.result)
                 elif (
@@ -575,7 +576,7 @@ class LifecycleExpander:
                 IRStore(instruction.destination, source),
                 IRCall("__aether_release", (old,), None, "__aether_release"),
             ]
-        if isinstance(instruction, (IRCall, IRCallIndirect)):
+        if isinstance(instruction, (IRCall, IRCallIndirect, IRInterfaceCall)):
             emitted: list[IRInstruction] = [instruction]
             arguments = instruction.arguments
             for index, argument in enumerate(arguments):
@@ -592,6 +593,19 @@ class LifecycleExpander:
                     emitted.append(
                         IRCall("__aether_release", (argument,), None, "__aether_release")
                     )
+            if (
+                isinstance(instruction, IRInterfaceCall)
+                and instruction.receiver in self._owned_values
+            ):
+                self._owned_values.remove(instruction.receiver)
+                emitted.append(
+                    IRCall(
+                        "__aether_release",
+                        (instruction.receiver,),
+                        None,
+                        "__aether_release",
+                    )
+                )
             return self._release_unused_result(instruction, emitted)
         if isinstance(instruction, IRPrint):
             emitted = [instruction]

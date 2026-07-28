@@ -380,7 +380,7 @@ header:
 method_slots[N]:
     index: i32
     method_id: ptr
-    future_dispatch: ptr = null
+    dispatch_thunk: ptr
 ```
 
 Los slots siguen el orden de declaración de la interface. Como no existe
@@ -392,11 +392,12 @@ recorrido. Las tablas se imprimen ordenadas por `(interface_id,
 concrete_type_id, symbol)`.
 
 En IR, `interface_construct result, carrier, witness` conserva el par y lleva
-la metadata completa por DTO. En SSA el par sigue siendo un único valor
-agregado nominal; parámetros, returns y phis transportan ese valor sin separar
-ni reconstruir sus componentes. Optimización puede eliminar una construcción
-sólo cuando todo el valor está muerto; si está vivo debe preservar carrier e
-identidad exacta del witness.
+la metadata completa por DTO. `interface_call receiver, slot, args` conserva
+la firma borrada y baja exclusivamente a witness→slot→thunk. En SSA el par
+sigue siendo un único valor agregado nominal; parámetros, returns y phis lo
+transportan sin separar ni reconstruir sus componentes. Optimización puede
+eliminar una construcción sólo cuando todo el valor está muerto; las calls
+indirectas conservan efectos de memoria, ARC y panic.
 
 ### 7.2 Carrier de class
 
@@ -880,12 +881,15 @@ memoria y lifecycle a través de IR, SSA, optimizadores y LLVM.
 
 **Phase 5.4A completada:** ABI `{carrier,witness}`, witness tables
 deterministas, carrier class sin box, IR/SSA/DTO/verifiers Python y Rust,
-LLVM, lifecycle class-only, nullable y colecciones. El witness conserva slots
-de dispatch nulos como reserva ABI.
+LLVM, lifecycle class-only, nullable y colecciones.
 
-**Phase 5.4B pendiente:** poblar slots con thunks, calls indirectas,
-validación de firma/slot, mutación y ownership a través de dispatch. No incluye
-boxing.
+**Phase 5.4B completada:** slots poblados con thunks
+`R(ptr borrowed_carrier, args...)`, opcode `interface_call`, carga
+witness→slot→thunk y call indirecta LLVM. Python y Rust validan orden,
+cantidad, firma borrada, ownership y compatibilidad con el método class.
+Mutación conserva aliasing y el call no introduce ARC adicional. Incluye
+parámetros, returns, temporales, recursión, colecciones e imports; no incluye
+boxing, devirtualización ni inlining.
 
 **Phase 5.4C pendiente:** caja struct, clone/drop adapters y lifecycle
 dinámico decidido por witness, sin cambiar las dos palabras del valor.
@@ -928,15 +932,15 @@ dinámico decidido por witness, sin cambiar las dos palabras del valor.
 | Restricción del repositorio | Comprobación |
 | --- | --- |
 | Backend LLVM actual | Usa opaque pointers, named aggregates, target layout e indirect calls ya compatibles. No exige cambio inmediato. |
-| IR existente | `InterfaceType` y `interface_construct` conservan carrier+witness y metadata ABI. Dispatch sigue sin opcode. |
-| SSA/verifiers | Lifecycle antes de SSA, phis agregados y verificación coordinada Python/Rust implementados para carrier class. |
+| IR existente | `InterfaceType`, `interface_construct` e `interface_call` conservan carrier+witness, slot y firma borrada. |
+| SSA/verifiers | Lifecycle antes de SSA, phis agregados y verificación coordinada Python/Rust implementados para construcción y dispatch class-carrier. |
 | Structs | No cambia layout, paso/return, copy recursivo ni MethodResultType. La caja interface vive fuera del struct. |
 | String ARC | Mantiene handle no nulo, header propio y retain/release. `string?` usa wrapper/tag independiente como requería su RFC. |
 | Array/List | Mantiene aliasing, headers y RC. Nuevos elementos usarán hooks type-directed. |
 | Paridad | Sigue el grafo auditado: reference layout/lifecycle antes de class; erased ABI antes de interface; nullable como rama independiente. |
 | Const | Reproduce la restricción por access path y el corte al atravesar class que aplica el frontend actual. |
 | Igualdad | Phase 5.3A agrega Eq por identidad al tipo IR class; interfaces y equality definida por usuario siguen fuera. |
-| Perfil native | Nullable, classes y Native Interface ABI son E2E; interface dispatch y boxing continúan gated. |
+| Perfil native | Nullable, classes, Native Interface ABI y dispatch class-carrier son E2E; boxing struct continúa gated como 5.4C. |
 
 ## 15. Criterios de entrada para implementación
 

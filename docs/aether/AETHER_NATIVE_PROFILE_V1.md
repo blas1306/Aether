@@ -93,7 +93,7 @@ Inventory: 32 COMPLETE, 31 PARTIAL, 5 UNSUPPORTED.
 | `class-constructors` | **COMPLETE** | Class constructors. |
 | `class-methods` | **COMPLETE** | Class methods and this. |
 | `native-interface-abi` | **COMPLETE** | Native interface values, class carriers, and witness metadata. |
-| `interfaces` | **UNSUPPORTED** | Interface dispatch, boxing, and adapters beyond the native ABI foundation. |
+| `interfaces` | **UNSUPPORTED** | Struct-backed interface boxing and unsupported interface adapters. |
 | `enums` | **COMPLETE** | Enums without payloads. |
 | `array` | **PARTIAL** | Array values and operations. |
 | `array-slicing` | **PARTIAL** | Array and collection slicing. |

@@ -5,7 +5,11 @@ from typing import NoReturn
 
 from aether.range_safety import RANGE_STEP_NONZERO_BUILTIN
 from aether.integer_arithmetic import INT_MAX, INT_MIN, is_aether_int
-from aether.interface_abi import INTERFACE_ABI_VERSION, witness_symbol
+from aether.interface_abi import (
+    INTERFACE_ABI_VERSION,
+    dispatch_thunk_symbol,
+    witness_symbol,
+)
 
 from .model import (
     IRAssign,
@@ -24,6 +28,7 @@ from .model import (
     IRClassGet,
     IRClassNew,
     IRClassSet,
+    IRInterfaceCall,
     IRInterfaceConstruct,
     IRCompareOp,
     IRConst,
@@ -698,6 +703,7 @@ class IRVerifier:
             (IRClassGet, "IRV-126", VerifierCategory.STRUCTS),
             (IRClassSet, "IRV-127", VerifierCategory.STRUCTS),
             (IRInterfaceConstruct, "IRV-128", VerifierCategory.INSTRUCTIONS),
+            (IRInterfaceCall, "IRV-129", VerifierCategory.CALLS),
             (IRStructGet, "IRV-080", VerifierCategory.STRUCTS),
             (IRStructSet, "IRV-081", VerifierCategory.STRUCTS),
             (IRMethodResultNew, "IRV-082", VerifierCategory.METHOD_RESULTS),
@@ -1070,6 +1076,20 @@ class IRVerifier:
             for slot in witness.method_slots:
                 if not slot.method_id:
                     self._fail("Interface witness method identifier must not be empty")
+                expected_thunk = dispatch_thunk_symbol(
+                    witness.interface_id,
+                    witness.concrete_type_id,
+                    slot.index,
+                    slot.method_id,
+                )
+                if (
+                    slot.receiver_ownership != "borrowed"
+                    or slot.thunk_symbol != expected_thunk
+                ):
+                    self._fail(
+                        f"Interface witness slot '{slot.method_id}' has an "
+                        "invalid erased ABI or thunk signature"
+                    )
                 for parameter_type in slot.parameter_types:
                     self._verify_type(
                         parameter_type,
@@ -1079,6 +1099,67 @@ class IRVerifier:
                     slot.return_type,
                     f"return metadata for witness slot '{slot.method_id}'",
                 )
+                method_name = slot.method_id.rsplit(".", 1)[-1]
+                implementation = self._functions.get(
+                    f"{witness.concrete_type_id}.{method_name}"
+                )
+                if implementation is None:
+                    self._fail(
+                        f"Interface witness slot '{slot.method_id}' has no "
+                        "native class implementation"
+                    )
+                expected_parameters = (
+                    ClassRefType(witness.concrete_type_id),
+                    *slot.parameter_types,
+                )
+                if (
+                    tuple(parameter.type for parameter in implementation.parameters)
+                    != expected_parameters
+                    or implementation.return_type != slot.return_type
+                ):
+                    self._fail(
+                        f"Interface witness slot '{slot.method_id}' is "
+                        "incompatible with its native thunk target"
+                    )
+            return self._define_value(state, instruction.result)
+
+        if isinstance(instruction, IRInterfaceCall):
+            self._require_defined(instruction.receiver, state, value_types)
+            if not isinstance(instruction.receiver.type, InterfaceType):
+                self._fail("Interface call receiver must have interface type")
+            expected_prefix = f"{instruction.receiver.type.name}."
+            if (
+                instruction.slot.index < 0
+                or not instruction.slot.method_id.startswith(expected_prefix)
+                or instruction.slot.receiver_ownership != "borrowed"
+                or instruction.slot.thunk_symbol
+            ):
+                self._fail("Interface call has invalid erased slot metadata")
+            if len(instruction.arguments) != len(
+                instruction.slot.parameter_types
+            ):
+                self._fail("Interface call argument count does not match slot signature")
+            for index, (argument, parameter_type) in enumerate(
+                zip(instruction.arguments, instruction.slot.parameter_types),
+                start=1,
+            ):
+                self._require_defined(argument, state, value_types)
+                self._require_type(
+                    argument.type,
+                    parameter_type,
+                    f"Interface call argument {index} type mismatch",
+                )
+            if isinstance(instruction.slot.return_type, VoidType):
+                if instruction.result is not None:
+                    self._fail("Void interface call cannot produce a result")
+                return state
+            if instruction.result is None:
+                self._fail("Non-void interface call must produce a result")
+            self._require_type(
+                instruction.result.type,
+                instruction.slot.return_type,
+                "Interface call result type mismatch",
+            )
             return self._define_value(state, instruction.result)
 
         if isinstance(instruction, IRStructGet):
@@ -2850,6 +2931,8 @@ class IRVerifier:
         if isinstance(instruction, IRCall):
             return instruction.result
         if isinstance(instruction, IRCallIndirect):
+            return instruction.result
+        if isinstance(instruction, IRInterfaceCall):
             return instruction.result
         if isinstance(
             instruction,

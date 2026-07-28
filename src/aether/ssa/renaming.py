@@ -21,6 +21,7 @@ from aether.ir.model import (
     IRClassGet,
     IRClassNew,
     IRClassSet,
+    IRInterfaceCall,
     IRInterfaceConstruct,
     IRCompareOp,
     IRConst,
@@ -95,6 +96,7 @@ from .model import (
     SSAClassGet,
     SSAClassNew,
     SSAClassSet,
+    SSAInterfaceCall,
     SSAInterfaceConstruct,
     SSACompareOp,
     SSAConst,
@@ -390,6 +392,23 @@ class SSARenamer:
                 result,
                 self._resolve_value(instruction.carrier),
                 instruction.witness,
+            )
+        if isinstance(instruction, IRInterfaceCall):
+            result = (
+                None
+                if instruction.result is None
+                else self._define_value(instruction.result)
+            )
+            if result is not None:
+                self._bind_value(result.name, result, bound_values)
+            return SSAInterfaceCall(
+                self._resolve_value(instruction.receiver),
+                tuple(
+                    self._resolve_value(argument)
+                    for argument in instruction.arguments
+                ),
+                instruction.slot,
+                result,
             )
         if isinstance(instruction, IRStructGet):
             result = self._define_value(instruction.result)

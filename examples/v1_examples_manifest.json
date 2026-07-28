@@ -205,19 +205,16 @@
     },
     {
       "path": "examples/classes/implements_interface.ae",
-      "condition": "ast_execution",
+      "condition": "native_execution",
       "expected_exit_code": 0,
       "stdout_sha256": "52f96c26a39ed25108a6db43d6e11c6051eba8a498a5baab1891adfa7ac7c262",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "classification": "AST_ONLY_EXPERIMENTAL",
+      "classification": "V1_NATIVE",
       "backends": [
-        "ast"
+        "native"
       ],
-      "run": true,
-      "outside_v1_features": [
-        "AE-BACKEND-INTERFACES"
-      ]
+      "run": true
     },
     {
       "path": "examples/classes/invalid_cases.ae",

@@ -290,12 +290,14 @@ class IRClassSet(MemoryWriteMixin, IRInstruction):
 
 @dataclass(frozen=True)
 class IRWitnessMethodSlot:
-    """Immutable metadata for one future interface-dispatch slot."""
+    """Immutable metadata for one erased interface-dispatch slot."""
 
     index: int
     method_id: str
     parameter_types: tuple[IRType, ...]
     return_type: IRType
+    thunk_symbol: str = ""
+    receiver_ownership: str = "borrowed"
 
 
 @dataclass(frozen=True)
@@ -321,6 +323,16 @@ class IRInterfaceConstruct(SideEffectMixin, IRInstruction):
     result: IRValue
     carrier: IRValue
     witness: IRWitnessTable
+
+
+@dataclass(frozen=True)
+class IRInterfaceCall(UnknownCallMixin, IRInstruction):
+    """Witness-driven call through a declaration-ordered interface slot."""
+
+    receiver: IRValue
+    arguments: tuple[IRValue, ...]
+    slot: IRWitnessMethodSlot
+    result: IRValue | None = None
 
 
 @dataclass(frozen=True)

@@ -185,11 +185,39 @@ fn instruction_cases() -> Vec<Value> {
                             "index": 0,
                             "method_id": "Readable.read",
                             "parameter_types": [],
-                            "return_type": {"tag": "int"}
+                            "return_type": {"tag": "int"},
+                            "thunk_symbol": "__ae_interface_thunk_s0__test",
+                            "receiver_ownership": "borrowed"
                         }],
                         "abi_version": 1
                     }),
                 ),
+            ],
+        ),
+        instruction(
+            "interface_call",
+            &[
+                (
+                    "receiver",
+                    json!({
+                        "tag": "value",
+                        "name": "interface",
+                        "type": {"tag": "interface", "name": "Readable"}
+                    }),
+                ),
+                ("arguments", json!([])),
+                (
+                    "slot",
+                    json!({
+                        "index": 0,
+                        "method_id": "Readable.read",
+                        "parameter_types": [],
+                        "return_type": {"tag": "int"},
+                        "thunk_symbol": "",
+                        "receiver_ownership": "borrowed"
+                    }),
+                ),
+                ("result", value()),
             ],
         ),
         instruction(
@@ -594,6 +622,7 @@ instruction_variant_mapping! {
     ClassGet => IRClassGet,
     ClassSet => IRClassSet,
     InterfaceConstruct => IRInterfaceConstruct,
+    InterfaceCall => IRInterfaceCall,
     StructGet => IRStructGet,
     StructSet => IRStructSet,
     MethodResultNew => IRMethodResultNew,
@@ -671,9 +700,9 @@ fn every_instruction_tag_deserializes_imports_and_round_trips() {
         .map(|case| case["kind"].as_str().expect("kind is a string"))
         .collect::<BTreeSet<_>>();
 
-    assert_eq!(cases.len(), 72);
-    assert_eq!(tags.len(), 72);
-    assert_eq!(INSTRUCTION_VARIANT_MAPPING_COUNT, 72);
+    assert_eq!(cases.len(), 73);
+    assert_eq!(tags.len(), 73);
+    assert_eq!(INSTRUCTION_VARIANT_MAPPING_COUNT, 73);
     for case in cases {
         let tag = case["kind"].as_str().expect("kind is a string");
         let dto: IRInstructionDTO = serde_json::from_value(case.clone())

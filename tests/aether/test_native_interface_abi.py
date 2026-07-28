@@ -246,23 +246,11 @@ def test_python_verifier_rejects_noncanonical_witness_identity() -> None:
         IRVerifier(invalid_module).verify()
 
 
-@pytest.mark.parametrize(
-    ("source", "phase"),
-    [
-        (
-            "interface I { int get(); } "
-            "class C implements I { public int get() { return 1; } } "
-            "int main() { C c = C(); I i = c; return i.get(); }",
-            "Phase 5.4B",
-        ),
-        (
-            "interface I { int get(); } "
-            "struct S implements I { int get() { return 1; } } "
-            "int main() { S s = S(); I i = s; return 0; }",
-            "Phase 5.4C",
-        ),
-    ],
-)
-def test_dispatch_and_struct_boxing_fail_explicitly(source: str, phase: str) -> None:
-    with pytest.raises(BackendCapabilityError, match=phase):
+def test_struct_boxing_still_fails_explicitly_as_phase_5_4c() -> None:
+    source = (
+        "interface I { int get(); } "
+        "struct S implements I { int get() { return 1; } } "
+        "int main() { S s = S(); I i = s; return 0; }"
+    )
+    with pytest.raises(BackendCapabilityError, match="Phase 5.4C"):
         LLVMBuilder().emit_llvm(_typed(source))

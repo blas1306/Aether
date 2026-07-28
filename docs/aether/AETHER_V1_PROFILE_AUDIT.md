@@ -19,8 +19,8 @@ que el gate native acepte y luego miscompile.
 
 > Seguimiento: esta tabla conserva el snapshot del 2026-07-18 que abrió B12 y
 > B13. Los planes R1/F02 y R2/F01 se cerraron después mediante gates dedicados.
-> Tras la reconciliación del 2026-07-28, el catálogo actual tiene 88
-> `V1_NATIVE`, 17 `AST_ONLY_EXPERIMENTAL` y cero `BROKEN`; véase
+> Tras la reconciliación del 2026-07-28, el catálogo actual tiene 89
+> `V1_NATIVE`, 16 `AST_ONLY_EXPERIMENTAL` y cero `BROKEN`; véase
 > `AETHER_EXAMPLES_CATALOG_AUDIT.md`.
 
 La evidencia ejecutada en este corte fue:

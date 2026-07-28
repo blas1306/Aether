@@ -266,8 +266,8 @@ representación y lifecycle ya están activos en esta matriz.
 | Classes por referencia | C | C | C visibilidad/alias/definite init | C | C new/get/set | C fields/constructores | C nominal/fields | C aliasing | C refs/phis | C | C preserva writes/ARC | C payload/header/ARC | descriptor destroy | AST+IR+SSA+clang O0/O1/O2 | C | State native | 5.3B completa fields, constructors y containment; ciclos ARC no se recolectan. |
 | Constructores/`this` de class | C | C | C | C | C | C | C | C | C | C | C | C | ARC | E2E | C | Completo subset | `this` sólo dentro del constructor; parámetros borrowed, resultado owned. |
 | Métodos de class | C | C | C | C | N | N | N | N | N | N | N | N | AST | amplia AST | C | Solo AST | Phase 5.3C; diagnóstico `AE-BACKEND-CLASS_METHODS`. |
-| Native Interface ABI | C | C | C conformidad | C class→interface | C tipo/instrucción/witness DTO | C valor/phi | C | C preserva carrier+witness | C | C `{ptr,ptr}`/tablas | C carrier-only | C Python/Rust | AST + construcción native | ABI/ownership/DTO/LLVM | C | Completa 5.4A | Dispatch y boxing separados. |
-| Interface dispatch/boxing | C | C | C | C AST | diagnóstico 5.4B/5.4C | N | N | N | N | slots null | N | rechaza | AST | negativos | C | Solo AST | No calls, virtual dispatch ni boxing native. |
+| Native Interface ABI | C | C | C conformidad | C class→interface | C tipo/instrucción/witness DTO | C valor/phi | C | C preserva carrier+witness | C | C `{ptr,ptr}`/tablas | C carrier-only | C Python/Rust | AST + construcción native | ABI/ownership/DTO/LLVM | C | Completa 5.4A | Base estable para dispatch y futuro boxing. |
+| Interface dispatch class-carrier | C | C | C firmas | C AST | C `interface_call`/slot/firma | C | C Python/Rust | C witness-driven | C | C efectos conservadores | C thunks/call indirecta | receiver borrowed | AST+native | O0/O1/O2, mutación, imports, colecciones | C | Completa 5.4B | Sin RTTI/devirtualización; boxing struct sigue 5.4C. |
 | Enums sin payload | C | C | C identidad módulo/declaración | C valor nominal+discriminante | C `enum Name` + constante nominal | C | C miembros/discriminantes/tipos | C | C phis/tipos | C nominal/dominancia | C folding preserva tipo | C `i32` ABI interno | metadata de impresión | AST+IR+SSA+clang O0/O1/O2 | C | Completo | Sin payload, ADT, casts implícitos, bit flags ni pattern matching nuevo. Imports, aliases, homónimos, structs, arrays/list compatibles y callables funcionan. |
 | Genéricos de usuario | P: se reconocen para rechazo | P | N | N | N | N | N | N | N | N | N | N | N | negativos | C como no soportado | No implementado | Array/List/Vector/Matrix son genéricos privilegiados, no evidencia de generics generales. |
 
@@ -364,8 +364,8 @@ agrupa el resultado actual sin convertir un nodo/opcode nominal en soporte:
 | `complex` / `im` | Parser/checker/AST C | Sin lowering fuente ni ABI/runtime native | Gate |
 | `null` y `T?` | Parser/checker/AST C | Sin narrowing, layout/lifecycle ni lowering | Gate |
 | Tuples/destructuring | Parser/checker/AST C | Sin modelo/lowering IR estable | Gate |
-| Classes | Parser/checker/AST + IR/SSA/LLVM 5.3B | Métodos generales, interfaces y dispatch pendientes | Gate `AE-BACKEND-CLASS_METHODS` por métodos |
-| Native Interface ABI | Construcción class→interface, IR/SSA/DTO/verifiers/LLVM C | Sin dispatch ni boxing | ABI habilitada; gate `AE-BACKEND-INTERFACES` sólo para 5.4B/5.4C |
+| Classes | Parser/checker/AST + IR/SSA/LLVM 5.3C y dispatch interface 5.4B | Sin inheritance ni destructores definidos por usuario | Gates específicos para features posteriores |
+| Native Interface ABI/dispatch | Construcción y dispatch class-carrier, IR/SSA/DTO/verifiers/LLVM C | Sin boxing/adapters struct | 5.4A/5.4B habilitadas; gate `AE-BACKEND-INTERFACES` reservado a 5.4C |
 | Métodos enlazados, callable retornado, builtin como valor | Subsets reconocidos; callable top-level ya C | Sin environment/ABI/lowering para esas formas | Rechazo de tipo/gate |
 | Interpolación y formatting general | Parser/checker/AST C para el experimento | Sin IR/lowering/runtime native | Gate `AE-BACKEND-STRINGS` |
 | `input` tipado | Nodo/checker/AST C | Sin opcode/runtime native | Gate `AE-BACKEND-INPUT` |
@@ -395,7 +395,7 @@ TypeLayout + lifecycle de referencias
     -> layout/ownership de class native
 
 TypeLayout/lifecycle de valor borrado + carrier/witness (5.4A completado)
-    -> witness slots/thunks + dynamic dispatch native (5.4B)
+    -> witness slots/thunks + dynamic dispatch native (5.4B completado)
     -> boxing y adapters struct (5.4C)
 
 Range value IR (fuera del lowering especial de for)
@@ -519,8 +519,8 @@ auditoría.
    completados.
 7. **5.4A — Native Interface ABI:** `{carrier,witness}`, construcción
    class-only, DTO/SSA/verifiers/LLVM y lifecycle completados.
-8. **5.4B — Dispatch:** poblar witnesses y añadir dispatch sólo
-   después de que sus receivers y ABI callable tengan lifecycle verificable.
+8. **5.4B — Dispatch (completada):** witnesses poblados, thunks y calls
+   indirectas para carrier class con lifecycle y firmas verificadas.
 
 Nullable, tuples, `float`/`complex`, excepciones, strings adicionales,
 iteración general y álgebra avanzada son raíces o ramas independientes. No

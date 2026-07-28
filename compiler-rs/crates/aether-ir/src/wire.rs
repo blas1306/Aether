@@ -174,6 +174,10 @@ pub struct IRWitnessMethodSlotDTO {
     pub parameter_types: Vec<IRTypeDTO>,
     /// Erased result type.
     pub return_type: IRTypeDTO,
+    /// Stable private erased thunk symbol.
+    pub thunk_symbol: String,
+    /// Receiver ownership in the erased ABI.
+    pub receiver_ownership: String,
 }
 
 /// Function container in the wire schema.
@@ -464,6 +468,12 @@ pub enum IRInstructionDTO {
         result: IRValueDTO,
         carrier: IRValueDTO,
         witness: IRWitnessTableDTO,
+    },
+    InterfaceCall {
+        receiver: IRValueDTO,
+        arguments: Vec<IRValueDTO>,
+        slot: IRWitnessMethodSlotDTO,
+        result: NullableDTO<IRValueDTO>,
     },
     StructGet {
         result: IRValueDTO,

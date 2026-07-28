@@ -5,7 +5,7 @@ import re
 import struct
 from typing import Any, Callable
 
-from aether.ir.model import IREnumConstant, IRWitnessTable
+from aether.ir.model import IREnumConstant, IRWitnessMethodSlot, IRWitnessTable
 from aether.interface_abi import interface_type_symbol
 from aether.integer_arithmetic import INT_MAX, INT_MIN, is_aether_int
 from aether.string_value import STRING_SPLIT_BUILTIN, STRING_TRIM_BUILTIN
@@ -26,6 +26,7 @@ from aether.ssa.model import (
     SSAClassGet,
     SSAClassNew,
     SSAClassSet,
+    SSAInterfaceCall,
     SSAInterfaceConstruct,
     SSACompareOp,
     SSAConst,
@@ -217,6 +218,9 @@ class LLVMPrinter:
         self._uses_double_pow = False
         self._scalar_math_calls: set[tuple[str, tuple[object, ...], object]] = set()
         self._structs = {definition.name: definition for definition in module.structs}
+        self._functions_by_name = {
+            function.name: function for function in module.functions
+        }
         self._layouts = LLVMTypeLayouts(module.structs)
         self._struct_sequence_equality_types: set[tuple[str, object]] = set()
         self._eq_helper_types: set[object] = set()
@@ -227,6 +231,7 @@ class LLVMPrinter:
         self._nullable_print_types: set[NullableType] = set()
         self._nullable_arc_helpers: set[tuple[NullableType, bool]] = set()
         self._witnesses: dict[str, IRWitnessTable] = {}
+        self._uses_interface_dispatch = False
         # Discover reference layouts before deciding which common runtime
         # declarations are needed.  Some nested uses surface only while
         # recursively materializing aggregate helpers later in this method.
@@ -792,6 +797,8 @@ class LLVMPrinter:
             return "\n  ".join(self._print_class_set(instruction))
         if isinstance(instruction, SSAInterfaceConstruct):
             return "\n  ".join(self._print_interface_construct(instruction))
+        if isinstance(instruction, SSAInterfaceCall):
+            return "\n  ".join(self._print_interface_call(instruction))
         if isinstance(instruction, SSAStructGet):
             return self._print_struct_get(instruction)
         if isinstance(instruction, SSAStructSet):
@@ -904,6 +911,8 @@ class LLVMPrinter:
         if isinstance(instruction, SSAFunctionRef):
             return instruction.result
         if isinstance(instruction, SSACallIndirect):
+            return instruction.result
+        if isinstance(instruction, SSAInterfaceCall):
             return instruction.result
         if isinstance(
             instruction,
@@ -2677,6 +2686,55 @@ class LLVMPrinter:
             f"{result} = insertvalue {result_type} {carrier_insert}, "
             f"ptr @{instruction.witness.symbol}, 1",
         ]
+
+    def _print_interface_call(
+        self,
+        instruction: SSAInterfaceCall,
+    ) -> list[str]:
+        if not isinstance(instruction.receiver.type, InterfaceType):
+            raise LLVMBackendError(
+                "LLVM interface_call receiver must have interface type"
+            )
+        self._uses_interface_dispatch = True
+        if instruction.slot.receiver_ownership != "borrowed":
+            raise LLVMBackendError(
+                "LLVM interface_call receiver must use borrowed erased ABI"
+            )
+        rendered_interface = llvm_type(instruction.receiver.type)
+        receiver = self._operand(instruction.receiver)
+        carrier = self._synthetic_temp("interface.call.carrier")
+        witness = self._synthetic_temp("interface.call.witness")
+        slots = self._synthetic_temp("interface.call.slots")
+        slot_pointer = self._synthetic_temp("interface.call.slot")
+        thunk_pointer = self._synthetic_temp("interface.call.thunk.ptr")
+        thunk = self._synthetic_temp("interface.call.thunk")
+        lines = [
+            f"{carrier} = extractvalue {rendered_interface} {receiver}, 0",
+            f"{witness} = extractvalue {rendered_interface} {receiver}, 1",
+            f"{slots} = getelementptr %AetherWitnessHeader, "
+            f"ptr {witness}, i32 1",
+            f"{slot_pointer} = getelementptr %AetherWitnessSlot, "
+            f"ptr {slots}, i64 {instruction.slot.index}",
+            f"{thunk_pointer} = getelementptr %AetherWitnessSlot, "
+            f"ptr {slot_pointer}, i32 0, i32 2",
+            f"{thunk} = load ptr, ptr {thunk_pointer}",
+        ]
+        arguments = ", ".join(
+            [
+                f"ptr {carrier}",
+                *[
+                    f"{llvm_type(argument.type)} {self._operand(argument)}"
+                    for argument in instruction.arguments
+                ],
+            ]
+        )
+        return_type = llvm_type(instruction.slot.return_type)
+        if instruction.result is None:
+            lines.append(f"call {return_type} {thunk}({arguments})")
+        else:
+            result = self._new_temp(instruction.result)
+            lines.append(f"{result} = call {return_type} {thunk}({arguments})")
+        return lines
 
     def _print_struct_set(self, instruction: SSAStructSet) -> str:
         result = self._new_temp(instruction.result)
@@ -4654,7 +4712,7 @@ class LLVMPrinter:
         return global_
 
     def _print_witness_metadata(self) -> list[str]:
-        if not self._witnesses:
+        if not self._witnesses and not self._uses_interface_dispatch:
             return []
         sections = [
             "%AetherWitnessHeader = type { ptr, ptr, i32, i32, ptr, ptr }",
@@ -4706,7 +4764,7 @@ class LLVMPrinter:
                         f"i32 {slot.index}, "
                         f"ptr getelementptr ([{method_size} x i8], "
                         f"ptr @{witness.symbol}.method.{slot.index}.id, "
-                        "i64 0, i64 0), ptr null }"
+                        f"i64 0, i64 0), ptr @{slot.thunk_symbol} }}"
                     )
                 slots = f"{slot_type} [ " + ", ".join(slot_values) + " ]"
             else:
@@ -4716,7 +4774,63 @@ class LLVMPrinter:
                 f"{{ %AetherWitnessHeader, {slot_type} }} "
                 f"{{ {header}, {slots} }}"
             )
+            for slot in witness.method_slots:
+                sections.append(self._print_dispatch_thunk(witness, slot))
         return sections
+
+    def _print_dispatch_thunk(
+        self,
+        witness: IRWitnessTable,
+        slot: IRWitnessMethodSlot,
+    ) -> str:
+        if not slot.thunk_symbol:
+            raise LLVMBackendError(
+                f"Interface witness slot '{slot.method_id}' has no dispatch thunk"
+            )
+        method_name = slot.method_id.rsplit(".", 1)[-1]
+        target_name = f"{witness.concrete_type_id}.{method_name}"
+        target = self._functions_by_name.get(target_name)
+        expected_parameters = (
+            ClassRefType(witness.concrete_type_id),
+            *slot.parameter_types,
+        )
+        if (
+            target is None
+            or tuple(parameter.type for parameter in target.parameters)
+            != expected_parameters
+            or target.return_type != slot.return_type
+        ):
+            raise LLVMBackendError(
+                f"Interface thunk '{slot.thunk_symbol}' target signature mismatch"
+            )
+        parameters = [
+            "ptr %carrier",
+            *[
+                f"{llvm_type(type_)} %arg{index}"
+                for index, type_ in enumerate(slot.parameter_types)
+            ],
+        ]
+        arguments = [
+            "ptr %carrier",
+            *[
+                f"{llvm_type(type_)} %arg{index}"
+                for index, type_ in enumerate(slot.parameter_types)
+            ],
+        ]
+        rendered_return = llvm_type(slot.return_type)
+        call = (
+            f"call {rendered_return} {self._global_name(target_name)}"
+            f"({', '.join(arguments)})"
+        )
+        body = (
+            f"  {call}\n  ret void"
+            if isinstance(slot.return_type, VoidType)
+            else f"  %result = {call}\n  ret {rendered_return} %result"
+        )
+        return (
+            f"define private {rendered_return} @{slot.thunk_symbol}"
+            f"({', '.join(parameters)}) {{\nentry:\n{body}\n}}"
+        )
 
     @staticmethod
     def _print_string_global(global_: _StringGlobal) -> str:

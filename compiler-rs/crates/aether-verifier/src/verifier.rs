@@ -3,9 +3,10 @@
 use std::collections::{HashMap, HashSet};
 
 use aether_ir::{
-    ArrayType, BoolType, ComplexType, DoubleType, FloatType, FunctionType, IRBasicBlock,
-    IRConstant, IRFunction, IRInstruction, IRModule, IRStructDefinition, IRType, IRValue, IntType,
-    LifecycleSource, ListType, MatrixType, StringType, StructType, VectorType, VoidType,
+    ArrayType, BoolType, ClassRefType, ComplexType, DoubleType, FloatType, FunctionType,
+    IRBasicBlock, IRConstant, IRFunction, IRInstruction, IRModule, IRStructDefinition, IRType,
+    IRValue, IntType, LifecycleSource, ListType, MatrixType, StringType, StructType, VectorType,
+    VoidType,
 };
 
 use crate::error::{
@@ -533,7 +534,11 @@ impl<'module> TypeVerifier<'module> {
                     || witness
                         .method_slots
                         .iter()
-                        .any(|slot| slot.method_id.is_empty())
+                        .any(|slot| {
+                            slot.method_id.is_empty()
+                                || slot.thunk_symbol.is_empty()
+                                || slot.receiver_ownership != "borrowed"
+                        })
                 {
                     return Err(constraint(
                         "witness",
@@ -546,8 +551,100 @@ impl<'module> TypeVerifier<'module> {
                         self.require_valid_type("witness.parameter_types", parameter)?;
                     }
                     self.require_valid_type("witness.return_type", &slot.return_type)?;
+                    let method_name = slot
+                        .method_id
+                        .rsplit_once('.')
+                        .map_or(slot.method_id.as_str(), |(_, name)| name);
+                    let target_name =
+                        format!("{}.{}", witness.concrete_type_id, method_name);
+                    let target = self
+                        .module
+                        .functions
+                        .iter()
+                        .find(|candidate| candidate.name == target_name);
+                    let compatible = target.is_some_and(|target| {
+                        target.return_type == slot.return_type
+                            && target.parameters.len()
+                                == slot.parameter_types.len() + 1
+                            && target.parameters.first().is_some_and(|receiver| {
+                                receiver.r#type
+                                    == IRType::ClassRef(ClassRefType {
+                                        name: witness.concrete_type_id.clone(),
+                                    })
+                            })
+                            && target
+                                .parameters
+                                .iter()
+                                .skip(1)
+                                .map(|parameter| &parameter.r#type)
+                                .eq(slot.parameter_types.iter())
+                    });
+                    if !compatible {
+                        return Err(constraint(
+                            "witness",
+                            TypeExpectation::Valid,
+                            &result.r#type,
+                        ));
+                    }
                 }
                 Ok(())
+            }
+            IRInstruction::IRInterfaceCall {
+                receiver,
+                arguments,
+                slot,
+                result,
+            } => {
+                let IRType::Interface(interface) = &receiver.r#type else {
+                    return Err(constraint(
+                        "receiver",
+                        TypeExpectation::Valid,
+                        &receiver.r#type,
+                    ));
+                };
+                if slot.index < 0
+                    || !slot
+                        .method_id
+                        .starts_with(&format!("{}.", interface.name))
+                    || arguments.len() != slot.parameter_types.len()
+                    || !slot.thunk_symbol.is_empty()
+                    || slot.receiver_ownership != "borrowed"
+                {
+                    return Err(constraint(
+                        "slot",
+                        TypeExpectation::Valid,
+                        &receiver.r#type,
+                    ));
+                }
+                for parameter in &slot.parameter_types {
+                    self.require_valid_type("slot.parameter_types", parameter)?;
+                }
+                self.require_valid_type("slot.return_type", &slot.return_type)?;
+                for (argument, parameter) in
+                    arguments.iter().zip(&slot.parameter_types)
+                {
+                    if argument.r#type != *parameter {
+                        return Err(constraint(
+                            "arguments",
+                            TypeExpectation::Exact(parameter.clone()),
+                            &argument.r#type,
+                        ));
+                    }
+                }
+                match (matches!(slot.return_type, IRType::Void(_)), result) {
+                    (true, None) => Ok(()),
+                    (false, Some(value)) if value.r#type == slot.return_type => Ok(()),
+                    (_, Some(value)) => Err(constraint(
+                        "result",
+                        TypeExpectation::Exact(slot.return_type.clone()),
+                        &value.r#type,
+                    )),
+                    (false, None) => Err(constraint(
+                        "result",
+                        TypeExpectation::Exact(slot.return_type.clone()),
+                        &slot.return_type,
+                    )),
+                }
             }
             IRInstruction::IRStructGet {
                 result,
@@ -938,6 +1035,13 @@ impl<'module> TypeVerifier<'module> {
             IRInstruction::IRInterfaceConstruct { carrier, .. } => {
                 vec![("carrier", carrier)]
             }
+            IRInstruction::IRInterfaceCall {
+                receiver,
+                arguments,
+                ..
+            } => std::iter::once(("receiver", receiver))
+                .chain(arguments.iter().map(|argument| ("arguments", argument)))
+                .collect(),
             IRInstruction::IRStructSet {
                 r#struct, value, ..
             } => vec![("struct", r#struct), ("value", value)],
@@ -2842,9 +2946,9 @@ pub(crate) fn instruction_result(instruction: &IRInstruction) -> Option<&IRValue
         | IRInstruction::IRArrayLength { result, .. }
         | IRInstruction::IRListLength { result, .. }
         | IRInstruction::IRListIsEmpty { result, .. } => Some(result),
-        IRInstruction::IRCall { result, .. } | IRInstruction::IRCallIndirect { result, .. } => {
-            result.as_ref()
-        }
+        IRInstruction::IRCall { result, .. }
+        | IRInstruction::IRCallIndirect { result, .. }
+        | IRInstruction::IRInterfaceCall { result, .. } => result.as_ref(),
         _ => None,
     }
 }
@@ -2874,6 +2978,7 @@ pub(crate) fn instruction_kind(instruction: &IRInstruction) -> InstructionKind {
         IRInstruction::IRClassGet { .. } => InstructionKind::IRClassGet,
         IRInstruction::IRClassSet { .. } => InstructionKind::IRClassSet,
         IRInstruction::IRInterfaceConstruct { .. } => InstructionKind::IRInterfaceConstruct,
+        IRInstruction::IRInterfaceCall { .. } => InstructionKind::IRInterfaceCall,
         IRInstruction::IRStructGet { .. } => InstructionKind::IRStructGet,
         IRInstruction::IRStructSet { .. } => InstructionKind::IRStructSet,
         IRInstruction::IRMethodResultNew { .. } => InstructionKind::IRMethodResultNew,

@@ -721,11 +721,35 @@ impl TryFrom<&IRInstructionDTO> for IRInstruction {
                                     .map(IRType::try_from)
                                     .collect::<Result<Vec<_>, _>>()?,
                                 return_type: IRType::try_from(&slot.return_type)?,
+                                thunk_symbol: slot.thunk_symbol.clone(),
+                                receiver_ownership: slot.receiver_ownership.clone(),
                             })
                         })
                         .collect::<Result<Vec<_>, IRImportError>>()?,
                     abi_version: witness.abi_version,
                 },
+            }),
+            IRInstructionDTO::InterfaceCall {
+                receiver,
+                arguments,
+                slot,
+                result,
+            } => Ok(Self::IRInterfaceCall {
+                receiver: import_instruction_value(kind, "receiver", receiver)?,
+                arguments: import_instruction_values(kind, "arguments", arguments)?,
+                slot: IRWitnessMethodSlot {
+                    index: slot.index,
+                    method_id: slot.method_id.clone(),
+                    parameter_types: slot
+                        .parameter_types
+                        .iter()
+                        .map(IRType::try_from)
+                        .collect::<Result<Vec<_>, _>>()?,
+                    return_type: IRType::try_from(&slot.return_type)?,
+                    thunk_symbol: slot.thunk_symbol.clone(),
+                    receiver_ownership: slot.receiver_ownership.clone(),
+                },
+                result: import_optional_instruction_value(kind, "result", result)?,
             }),
             IRInstructionDTO::StructGet {
                 result,
@@ -1603,6 +1627,7 @@ const fn wire_instruction_kind(instruction: &IRInstructionDTO) -> &'static str {
         IRInstructionDTO::ClassGet { .. } => "class_get",
         IRInstructionDTO::ClassSet { .. } => "class_set",
         IRInstructionDTO::InterfaceConstruct { .. } => "interface_construct",
+        IRInstructionDTO::InterfaceCall { .. } => "interface_call",
         IRInstructionDTO::StructGet { .. } => "struct_get",
         IRInstructionDTO::StructSet { .. } => "struct_set",
         IRInstructionDTO::MethodResultNew { .. } => "method_result_new",

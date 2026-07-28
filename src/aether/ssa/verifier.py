@@ -39,7 +39,11 @@ from aether.string_value import STRING_SPLIT_BUILTIN, STRING_TRIM_BUILTIN
 from aether.process_arguments import PROCESS_ARGS_BUILTIN
 from aether.range_safety import RANGE_STEP_NONZERO_BUILTIN
 from aether.integer_arithmetic import INT_MAX, INT_MIN, is_aether_int
-from aether.interface_abi import INTERFACE_ABI_VERSION, witness_symbol
+from aether.interface_abi import (
+    INTERFACE_ABI_VERSION,
+    dispatch_thunk_symbol,
+    witness_symbol,
+)
 from aether.text_file_io import (
     FILE_READ_RESULT_TYPE,
     FILE_STATUS_TYPE,
@@ -71,6 +75,7 @@ from .model import (
     SSAClassGet,
     SSAClassNew,
     SSAClassSet,
+    SSAInterfaceCall,
     SSAInterfaceConstruct,
     SSACompareOp,
     SSAConst,
@@ -630,6 +635,20 @@ class SSAVerifier:
                         self._fail(
                             "Interface witness method identifier must not be empty"
                         )
+                    if (
+                        slot.receiver_ownership != "borrowed"
+                        or slot.thunk_symbol
+                        != dispatch_thunk_symbol(
+                            witness.interface_id,
+                            witness.concrete_type_id,
+                            slot.index,
+                            slot.method_id,
+                        )
+                    ):
+                        self._fail(
+                            f"Interface witness slot '{slot.method_id}' has an "
+                            "invalid erased ABI or thunk signature"
+                        )
                     for parameter_type in slot.parameter_types:
                         self._verify_type(
                             parameter_type,
@@ -638,6 +657,48 @@ class SSAVerifier:
                     self._verify_type(
                         slot.return_type,
                         f"return metadata for witness slot '{slot.method_id}'",
+                    )
+                continue
+
+            if isinstance(instruction, SSAInterfaceCall):
+                self._require_defined(instruction.receiver, value_types)
+                if not isinstance(instruction.receiver.type, InterfaceType):
+                    self._fail("Interface call receiver must have interface type")
+                if (
+                    instruction.slot.index < 0
+                    or not instruction.slot.method_id.startswith(
+                        f"{instruction.receiver.type.name}."
+                    )
+                    or instruction.slot.receiver_ownership != "borrowed"
+                    or instruction.slot.thunk_symbol
+                ):
+                    self._fail("Interface call has invalid erased slot metadata")
+                if len(instruction.arguments) != len(
+                    instruction.slot.parameter_types
+                ):
+                    self._fail(
+                        "Interface call argument count does not match slot signature"
+                    )
+                for index, (argument, parameter_type) in enumerate(
+                    zip(instruction.arguments, instruction.slot.parameter_types),
+                    start=1,
+                ):
+                    self._require_defined(argument, value_types)
+                    self._require_type(
+                        argument.type,
+                        parameter_type,
+                        f"Interface call argument {index} type mismatch",
+                    )
+                if isinstance(instruction.slot.return_type, VoidType):
+                    if instruction.result is not None:
+                        self._fail("Void interface call cannot produce a result")
+                else:
+                    if instruction.result is None:
+                        self._fail("Non-void interface call must produce a result")
+                    self._require_type(
+                        instruction.result.type,
+                        instruction.slot.return_type,
+                        "Interface call result type mismatch",
                     )
                 continue
 
@@ -2322,6 +2383,8 @@ class SSAVerifier:
         if isinstance(instruction, SSACall):
             return instruction.result
         if isinstance(instruction, SSACallIndirect):
+            return instruction.result
+        if isinstance(instruction, SSAInterfaceCall):
             return instruction.result
         if isinstance(
             instruction,

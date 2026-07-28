@@ -133,6 +133,7 @@ def _instruction_sample(entry_index: int) -> ir_model.IRInstruction:
                     method_id="Readable.read",
                     parameter_types=(),
                     return_type=INT,
+                    thunk_symbol="__ae_interface_thunk_s0__contract",
                 ),
             ),
         ),
@@ -185,6 +186,18 @@ def _instruction_sample(entry_index: int) -> ir_model.IRInstruction:
         values["row"] = _value("outer.row", ROW)
     if tag == "compare_op":
         values["operator"] = "eq"
+    if tag == "interface_call":
+        values["receiver"] = _value(
+            "interface_call.receiver",
+            InterfaceType("Readable"),
+        )
+        values["arguments"] = ()
+        values["slot"] = ir_model.IRWitnessMethodSlot(
+            index=0,
+            method_id="Readable.read",
+            parameter_types=(),
+            return_type=INT,
+        )
 
     constructor_fields = {field.name for field in fields(entry.instruction_type)}
     return entry.instruction_type(
@@ -273,7 +286,7 @@ def _complete_module() -> ir_model.IRModule:
     )
 
 
-def test_complete_realistic_module_round_trip_covers_authoritative_72_variants() -> None:
+def test_complete_realistic_module_round_trip_covers_authoritative_73_variants() -> None:
     module = _complete_module()
 
     decoded = ir_module_from_dto(ir_module_to_dto(module))
@@ -289,7 +302,7 @@ def test_complete_realistic_module_round_trip_covers_authoritative_72_variants()
         for instruction in block.instructions
     }
     assert covered == {entry.instruction_type for entry in IR_INSTRUCTION_DTO_REGISTRY}
-    assert len(IR_INSTRUCTION_DTO_REGISTRY) == 72
+    assert len(IR_INSTRUCTION_DTO_REGISTRY) == 73
 
 
 def _type_samples() -> list[IRType]:

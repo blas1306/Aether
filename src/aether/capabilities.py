@@ -237,7 +237,7 @@ CAPABILITY_CATALOG: Mapping[Capability, CapabilityDefinition] = MappingProxyType
             ),
             _definition(
                 Capability.INTERFACES,
-                "Interface dispatch, boxing, and adapters beyond the native ABI foundation.",
+                "Struct-backed interface boxing and unsupported interface adapters.",
             ),
             _definition(Capability.ENUMS, "Enums without payloads."),
             _definition(Capability.ARRAY, "Array values and operations."),
@@ -892,7 +892,7 @@ class _CapabilityDetector:
                     node,
                     detail=(
                         f"nullable conversion from '{source}' to '{target}' "
-                        "requires payload adaptation in Phase 5.4B"
+                        "requires payload adaptation in Phase 5.4C"
                     ),
                     requires_complete_support=True,
                 )
@@ -1349,15 +1349,7 @@ class _CapabilityDetector:
             if isinstance(target_type, str) and target_type in self.checker.interfaces:
                 target_type = InterfaceType(target_type)
             if isinstance(target_type, InterfaceType):
-                self._record(
-                    Capability.INTERFACES,
-                    node,
-                    detail=(
-                        "interface dispatch is not implemented in Phase 5.4A; "
-                        "it belongs to Phase 5.4B"
-                    ),
-                    requires_complete_support=True,
-                )
+                self._record(Capability.NATIVE_INTERFACE_ABI, node)
             struct_name = target_type if isinstance(target_type, str) else None
             symbol = self.checker.structs.get(struct_name) if struct_name is not None else None
             if symbol is not None:
@@ -1465,15 +1457,7 @@ class _CapabilityDetector:
             if isinstance(target_type, str) and target_type in self.checker.interfaces:
                 target_type = InterfaceType(target_type)
             if isinstance(target_type, InterfaceType):
-                self._record(
-                    Capability.INTERFACES,
-                    call,
-                    detail=(
-                        "interface dispatch is not implemented in Phase 5.4A; "
-                        "it belongs to Phase 5.4B"
-                    ),
-                    requires_complete_support=True,
-                )
+                self._record(Capability.NATIVE_INTERFACE_ABI, call)
             struct_name = target_type if isinstance(target_type, str) else None
             symbol = (
                 self.checker.structs.get(struct_name)

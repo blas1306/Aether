@@ -22,6 +22,7 @@ from aether.ir.model import (
     IRCopyInit,
     IRFunction,
     IRInstruction,
+    IRInterfaceCall,
     IRListGet,
     IRListCopy,
     IRListSlice,
@@ -297,6 +298,15 @@ class AlgebraicSimplifier:
             return replace(
                 instruction,
                 callee=self._resolve(instruction.callee, replacements),
+                arguments=tuple(
+                    self._resolve(argument, replacements)
+                    for argument in instruction.arguments
+                ),
+            )
+        if isinstance(instruction, IRInterfaceCall):
+            return replace(
+                instruction,
+                receiver=self._resolve(instruction.receiver, replacements),
                 arguments=tuple(
                     self._resolve(argument, replacements)
                     for argument in instruction.arguments

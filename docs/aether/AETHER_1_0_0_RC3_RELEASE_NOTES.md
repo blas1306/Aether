@@ -11,7 +11,7 @@ estable. La identidad de paquete Python es `1.0.0rc3` y el tag previsto es
 
 - La especificación normativa v1 y el perfil native v1 cierran la frontera
   exacta del lenguaje 1.0.
-- El catálogo schema 2 clasifica 88 ejemplos como `V1_NATIVE`, 17 como
+- El catálogo schema 2 clasifica 89 ejemplos como `V1_NATIVE`, 16 como
   `AST_ONLY_EXPERIMENTAL` y ninguno como `BROKEN`.
 - Los diagnósticos públicos son estructurados y documentan categorías, códigos
   y exit codes. Los ICE no muestran traceback por defecto; `--debug` conserva

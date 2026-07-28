@@ -27,6 +27,7 @@ from aether.ssa.model import (
     SSAConst,
     SSAFunction,
     SSAInstruction,
+    SSAInterfaceCall,
     SSAInterfaceConstruct,
     SSAJump,
     SSAListGet,
@@ -475,6 +476,8 @@ class SCCPAnalyzer:
             return (instruction.object, instruction.value)
         if isinstance(instruction, SSAInterfaceConstruct):
             return (instruction.carrier,)
+        if isinstance(instruction, SSAInterfaceCall):
+            return (instruction.receiver, *instruction.arguments)
         if isinstance(instruction, SSAStructNew):
             return instruction.fields
         if isinstance(instruction, SSAStructGet):

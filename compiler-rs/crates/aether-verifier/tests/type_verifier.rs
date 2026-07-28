@@ -407,23 +407,35 @@ fn interface_construct_requires_class_carrier_and_ordered_witness_metadata() {
             method_id: "Readable.read".to_owned(),
             parameter_types: Vec::new(),
             return_type: IntType.into(),
+            thunk_symbol: "__ae_interface_thunk_s0__test".to_owned(),
+            receiver_ownership: "borrowed".to_owned(),
         }],
         abi_version: 1,
     };
-    let valid = module_with_instruction(IRInstruction::IRInterfaceConstruct {
+    let mut valid = module_with_instruction(IRInstruction::IRInterfaceConstruct {
         result: value("interface", interface_type.clone()),
         carrier: value("box", carrier_type.clone()),
         witness: witness.clone(),
     });
+    valid.functions.push(IRFunction::new(
+        "Box.read",
+        vec![IRParameter::new("this", carrier_type.clone())],
+        IntType.into(),
+    ));
     assert_eq!(verify_module_types(&valid), Ok(()));
 
     let mut invalid_witness = witness;
     invalid_witness.method_slots[0].index = 1;
-    let invalid = module_with_instruction(IRInstruction::IRInterfaceConstruct {
+    let mut invalid = module_with_instruction(IRInstruction::IRInterfaceConstruct {
         result: value("interface", interface_type),
-        carrier: value("box", carrier_type),
+        carrier: value("box", carrier_type.clone()),
         witness: invalid_witness,
     });
+    invalid.functions.push(IRFunction::new(
+        "Box.read",
+        vec![IRParameter::new("this", carrier_type)],
+        IntType.into(),
+    ));
     assert!(matches!(
         instruction_rule(&verify_module_types(&invalid).unwrap_err()),
         TypeRuleError::TypeConstraint { field, .. } if field == "witness"

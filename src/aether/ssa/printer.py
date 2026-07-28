@@ -23,6 +23,7 @@ from .model import (
     SSAConst,
     SSAFunction,
     SSAFunctionRef,
+    SSAInterfaceCall,
     SSAInterfaceConstruct,
     SSAInstruction,
     SSAJump,
@@ -174,6 +175,18 @@ class SSAPrinter:
                 f"[{instruction.witness.interface_id} <- "
                 f"{instruction.witness.concrete_type_id}]"
             )
+        if isinstance(instruction, SSAInterfaceCall):
+            arguments = ", ".join(
+                self._value(argument) for argument in instruction.arguments
+            )
+            call = (
+                f"interface_call {self._value(instruction.receiver)} "
+                f"slot {instruction.slot.index} "
+                f"[{instruction.slot.method_id}]({arguments})"
+            )
+            if instruction.result is None:
+                return call
+            return f"{self._typed_value(instruction.result)} = {call}"
         if isinstance(instruction, SSAClassGet):
             return (
                 f"{self._typed_value(instruction.result)} = class_get "

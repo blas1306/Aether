@@ -302,6 +302,13 @@ pub(crate) fn ssa_operands(instruction: &IRInstruction) -> Vec<SSAOperand<'_>> {
         IRInstruction::IRInterfaceConstruct { carrier, .. } => {
             vec![operand("carrier", carrier)]
         }
+        IRInstruction::IRInterfaceCall {
+            receiver,
+            arguments,
+            ..
+        } => std::iter::once(operand("receiver", receiver))
+            .chain(arguments.iter().map(|value| operand("arguments", value)))
+            .collect(),
         IRInstruction::IRStructSet {
             r#struct, value, ..
         } => vec![operand("struct", r#struct), operand("value", value)],

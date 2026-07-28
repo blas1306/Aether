@@ -24,7 +24,7 @@ from aether.instruction_effects import (
     InstructionEffects,
 )
 from aether.scalar_math import scalar_math_may_trap
-from aether.ir.model import IRWitnessTable
+from aether.ir.model import IRWitnessMethodSlot, IRWitnessTable
 from aether.ir.types import ArrayType, IRType, ListType, MatrixType, StringType, StructType, VectorType
 
 
@@ -205,6 +205,16 @@ class SSAInterfaceConstruct(SideEffectMixin, SSAInstruction):
     result: SSAValue
     carrier: SSAValue
     witness: IRWitnessTable
+
+
+@dataclass(frozen=True)
+class SSAInterfaceCall(UnknownCallMixin, SSAInstruction):
+    """Witness-driven erased call; conservatively preserves all call effects."""
+
+    receiver: SSAValue
+    arguments: tuple[SSAValue, ...]
+    slot: IRWitnessMethodSlot
+    result: SSAValue | None = None
 
 
 @dataclass(frozen=True)

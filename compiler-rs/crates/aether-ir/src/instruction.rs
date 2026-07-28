@@ -13,6 +13,10 @@ pub struct IRWitnessMethodSlot {
     pub parameter_types: Vec<IRType>,
     /// Erased method return type.
     pub return_type: IRType,
+    /// Stable private erased thunk symbol.
+    pub thunk_symbol: String,
+    /// Receiver ownership in the erased ABI.
+    pub receiver_ownership: String,
 }
 
 /// Canonical metadata for one concrete/interface implementation pair.
@@ -154,6 +158,13 @@ pub enum IRInstruction {
         result: IRValue,
         carrier: IRValue,
         witness: IRWitnessTable,
+    },
+    /// Calls a declaration-ordered slot through a native interface witness.
+    IRInterfaceCall {
+        receiver: IRValue,
+        arguments: Vec<IRValue>,
+        slot: IRWitnessMethodSlot,
+        result: Option<IRValue>,
     },
     /// Reads a named struct field.
     IRStructGet {

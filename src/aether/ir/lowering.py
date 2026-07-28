@@ -8,7 +8,11 @@ from typing import NoReturn
 from .. import ast
 from ..errors import IRBackendUnsupportedFeatureError
 from ..integer_arithmetic import INT_MAX, INT_MIN, is_aether_int
-from ..interface_abi import INTERFACE_ABI_VERSION, witness_symbol
+from ..interface_abi import (
+    INTERFACE_ABI_VERSION,
+    dispatch_thunk_symbol,
+    witness_symbol,
+)
 from ..scalar_math import NATIVE_SCALAR_MATH_FUNCTIONS, SCALAR_MATH_CONSTANTS
 from ..string_parsing import (
     DOUBLE_PARSE_RESULT_TYPE,
@@ -70,6 +74,7 @@ from .model import (
     IRClassNew,
     IRClassSet,
     IRInterfaceConstruct,
+    IRInterfaceCall,
     IRCompareOp,
     IRConst,
     IRCopyInit,
@@ -2789,11 +2794,70 @@ class IRLowerer:
     ) -> IRValue | None:
         receiver = self._lower_expression(target_expression, context)
         if isinstance(receiver.type, InterfaceType):
-            self._fail(
-                "Native interface dispatch is not implemented in Phase 5.4A; "
-                "interface method calls belong to Phase 5.4B.",
-                node,
+            declaration = self._interfaces.get(receiver.type.name)
+            if declaration is None:
+                self._fail(
+                    f"IR backend cannot resolve interface '{receiver.type.name}'.",
+                    node,
+                )
+            try:
+                slot_index, method = next(
+                    (index, candidate)
+                    for index, candidate in enumerate(declaration.methods)
+                    if candidate.name == method_name
+                )
+            except StopIteration:
+                self._fail(
+                    f"IR backend cannot resolve interface method "
+                    f"'{receiver.type.name}.{method_name}'.",
+                    node,
+                )
+            parameter_types = tuple(
+                self._lower_type(parameter.type_name)
+                for parameter in method.parameters
             )
+            if len(argument_expressions) != len(parameter_types):
+                self._fail(
+                    f"Checked interface call '{receiver.type.name}.{method_name}' "
+                    "has invalid arity.",
+                    node,
+                )
+            arguments = tuple(
+                self._lower_expression(expression, context, target_type=type_)
+                for expression, type_ in zip(argument_expressions, parameter_types)
+            )
+            for index, (argument, parameter_type) in enumerate(
+                zip(arguments, parameter_types), start=1
+            ):
+                self._require_same_type(
+                    argument.type,
+                    parameter_type,
+                    f"argument {index} to '{receiver.type.name}.{method_name}' "
+                    "requires an implicit conversion",
+                )
+            return_type = self._lower_type(method.return_type)
+            slot = IRWitnessMethodSlot(
+                slot_index,
+                f"{receiver.type.name}.{method.name}",
+                parameter_types,
+                return_type,
+            )
+            if isinstance(return_type, VoidType):
+                if result_required:
+                    self._fail(
+                        f"IR backend cannot use void interface method "
+                        f"'{method_name}' as a value.",
+                        node,
+                    )
+                context.block.instructions.append(
+                    IRInterfaceCall(receiver, arguments, slot)
+                )
+                return None
+            result = context.temporary(return_type)
+            context.block.instructions.append(
+                IRInterfaceCall(receiver, arguments, slot, result)
+            )
+            return result if result_required else None
         if method_name == "trim" and isinstance(receiver.type, StringType):
             if argument_expressions:
                 self._fail("IR string.trim() expects zero arguments.", node)
@@ -3602,8 +3666,8 @@ class IRLowerer:
             if value.type == target_type:
                 return value
             self._fail(
-                "Native interface-to-interface casts are unsupported in Phase 5.4A; "
-                "interface adaptation belongs to Phase 5.4B."
+                "Native interface-to-interface casts are unsupported in Phase 5.4B; "
+                "interface adaptation belongs to Phase 5.4C."
             )
         if isinstance(value.type, StructType):
             self._fail(
@@ -3614,7 +3678,7 @@ class IRLowerer:
         if not isinstance(value.type, ClassRefType):
             self._fail(
                 f"Native cast from '{value.type}' to interface '{target_type.name}' "
-                "is unsupported in Phase 5.4A; no fallback conversion is available."
+                "is unsupported in Phase 5.4B; no fallback conversion is available."
             )
         info = self._structs.get(value.type.name)
         if info is None or target_type.name not in info.declaration.implements:
@@ -3644,24 +3708,32 @@ class IRLowerer:
                 f"IR backend cannot resolve interface '{interface_type.name}' "
                 "while generating witness metadata."
             )
-        slots = tuple(
-            IRWitnessMethodSlot(
-                index,
-                f"{interface_type.name}.{method.name}",
-                tuple(
-                    self._lower_type(parameter.type_name)
-                    for parameter in method.parameters
-                ),
-                self._lower_type(method.return_type),
+        slots: list[IRWitnessMethodSlot] = []
+        for index, method in enumerate(declaration.methods):
+            method_id = f"{interface_type.name}.{method.name}"
+            slots.append(
+                IRWitnessMethodSlot(
+                    index,
+                    method_id,
+                    tuple(
+                        self._lower_type(parameter.type_name)
+                        for parameter in method.parameters
+                    ),
+                    self._lower_type(method.return_type),
+                    dispatch_thunk_symbol(
+                        interface_type.name,
+                        concrete_type.name,
+                        index,
+                        method_id,
+                    ),
+                )
             )
-            for index, method in enumerate(declaration.methods)
-        )
         witness = IRWitnessTable(
             witness_symbol(interface_type.name, concrete_type.name),
             interface_type.name,
             concrete_type.name,
             "class",
-            slots,
+            tuple(slots),
             INTERFACE_ABI_VERSION,
         )
         self._witnesses[key] = witness

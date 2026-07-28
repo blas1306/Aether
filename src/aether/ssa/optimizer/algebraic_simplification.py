@@ -20,6 +20,7 @@ from aether.ssa.model import (
     SSAConst,
     SSAFunction,
     SSAInstruction,
+    SSAInterfaceCall,
     SSAJump,
     SSAListGet,
     SSAListCopy,
@@ -312,6 +313,16 @@ class SSAAlgebraicSimplifier:
                     self._resolve(argument, replacements)
                     for argument in instruction.arguments
                 ),
+                instruction.result,
+            )
+        if isinstance(instruction, SSAInterfaceCall):
+            return SSAInterfaceCall(
+                self._resolve(instruction.receiver, replacements),
+                tuple(
+                    self._resolve(argument, replacements)
+                    for argument in instruction.arguments
+                ),
+                instruction.slot,
                 instruction.result,
             )
 
