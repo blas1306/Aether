@@ -6,14 +6,36 @@
 El catálogo ejecutable autoritativo es
 [`../../examples/v1_examples_manifest.json`](../../examples/v1_examples_manifest.json).
 La auditoría inicial contenía 78 `V1_NATIVE`, 21 `AST_ONLY_EXPERIMENTAL` y
-cuatro `BROKEN`. El resultado es 78 `V1_NATIVE`, 23
+cuatro `BROKEN`. Su cierre dejó 78 `V1_NATIVE`, 23
 `AST_ONLY_EXPERIMENTAL`, un `INVALID_FIXTURE`, un archivo `REMOVED` y cero
 `BROKEN` dentro de 101 ejemplos públicos.
 
-De los 23 experimentales, 14 tienen ejecución AST automatizada con exit code y
-hashes de stdout/stderr; los nueve restantes son cuatro programas interactivos,
-tres sesiones de plotting y dos módulos auxiliares. Todos pasan frontend y
-declaran el conjunto exacto de capabilities que native rechaza antes de IR.
+El mantenimiento del 2026-07-28 incorporó cuatro ejemplos públicos añadidos
+después de ese cierre, promovió `Sorts/Main.ae` y `Sorts/Sortings.ae` de acuerdo
+con el soporte native observado, y preservó las promociones de clases ya
+registradas por el manifiesto. El catálogo actual contiene 105 rutas: 88
+`V1_NATIVE`, 17 `AST_ONLY_EXPERIMENTAL` y cero `BROKEN`. De los 17
+experimentales, nueve tienen ejecución AST automatizada con exit code y hashes
+de stdout/stderr; los ocho restantes son entradas frontend, interactivas, de
+plotting o módulos auxiliares. Todos pasan frontend y declaran el conjunto
+exacto de capabilities que native rechaza antes de IR.
+
+## Reconciliación de mantenimiento del 2026-07-28
+
+Los SHA-256 de archivo de esta tabla se calcularon sobre los bytes crudos del
+checkout y son evidencia de auditoría, no campos del manifiesto. Los hashes que
+sí forman parte del manifiesto corresponden a observaciones stdout/stderr
+normalizadas como documenta `examples/README.md`.
+
+| Fallo original | Entrada anterior / archivo SHA-256 | Comportamiento observado | Causa y resolución |
+| --- | --- | --- | --- |
+| Inventario autoritativo | Sin entrada: `LeetCode/isPalindrome.ae` (`edafdae8966f606c7834075443386952cc3629681868662df5a052ed45c88fb5`), `LeetCode/twoSum.ae` (`1b64daeaa15a92fcd91cf2f37c297084899b9e152472dcf89069ac418137ee28`), `SNL.ae` (`9070d715e8448f7ebec91dff49641e4d01dd35d9b9845851cd6af7b7fb240504`) y `nonlinear_systems/nr2.ae` (`18b58084c7600a3342aa844e5b11e96dcb86c45c9cac026d71382dbd2cec1a7c`). | Los dos LeetCode pasan gate, IR, SSA, LLVM y ejecución native. `SNL` es AST-only por `ARITHMETIC`, `MATRIX` y `VECTOR`; `nr2` por `MATRIX` y `VECTOR`; ambos ejecutan con exit 0. | Inventario faltante. Se añadieron cuatro entradas explícitas en orden determinista. |
+| Clasificación de `Sorts/Main.ae` | `AST_ONLY_EXPERIMENTAL`; archivo `d3d8bf37281b38bb96402f1eec9fddd34ce77dc5df6d9b431d5aa47975597838`. | Sin rechazos de capability; pasa IR, SSA, LLVM y ejecución native con exit 0. | Clasificación obsoleta. Se promovió a `V1_NATIVE`. |
+| Clasificación de `Sorts/Sortings.ae` | `AST_ONLY_EXPERIMENTAL`; archivo `4b208cb588b35cccad6ddc20f024c877669f131f01561f422b5bfe3009024acc`. | Sin rechazos de capability; emite como módulo native y no declara entry point. | Clasificación obsoleta. Se promovió a `V1_NATIVE` con `native_module_emission`. |
+| Capabilities de `nonlinear_systems/newton_system.ae` | Faltaban `FUNCTION_VALUES` y `MODULES`; archivo `308c89b86dce3b6c9b7999a15dd5605ec7eb58530e2ced6b585036eedf4e2305`. | Sigue siendo AST-only; el gate reporta exactamente seis códigos, antes de IR. | Metadatos de clasificación obsoletos. Se sincronizó `outside_v1_features`. |
+| Hash native de `nose.ae` | stdout `8060aa…7cc3`; archivo `7a82fe147bdae21eaec574d5a9a0182477ae174cde41e9a970cf1e68fd057396`. | Exit 0, stdout `10000000\n`, SHA-256 `de6aeb89…4bbf0`, stderr vacío. | Observación obsoleta tras cambiar el ejemplo. Se actualizó el hash. |
+| Hash de `Sorts/Main.ae` | stdout AST `0fa8c62f…1502`; mismo archivo auditado arriba. | La salida actual tiene SHA-256 `b82b299c…8714b` y coincide con native. | Observación obsoleta y backend obsoleto. Se registró la observación native canónica. |
+| Hash AST de `nonlinear_systems/newton_system.ae` | stdout `aea58ea9…f51f`; mismo archivo auditado arriba. | Exit 0, stdout SHA-256 `3ac3e5b9…76e33`, stderr vacío. | Observación obsoleta. Se actualizó el hash sin modificar el ejemplo. |
 
 ## Decisión sobre los cuatro archivos rotos
 

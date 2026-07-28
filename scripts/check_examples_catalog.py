@@ -4,12 +4,17 @@
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
 import hashlib
 from io import StringIO
 import json
-from pathlib import Path
+import os
+from pathlib import Path, PurePosixPath
+import re
 import shutil
 import sys
+import tempfile
+from typing import Callable
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,19 +29,46 @@ from aether.typechecker import TypeChecker  # noqa: E402
 
 MANIFEST_PATH = ROOT / "examples" / "v1_examples_manifest.json"
 VALID_CLASSIFICATIONS = {"V1_NATIVE", "AST_ONLY_EXPERIMENTAL"}
+SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 REQUIRED_FIELDS = {
     "path",
     "classification",
     "backends",
     "run",
     "expected_exit_code",
+    "stdout_sha256",
+    "stderr_sha256",
     "timeout_seconds",
     "condition",
+}
+ENTRY_CONTRACTS = {
+    ("V1_NATIVE", True): ("native_execution", ["native"]),
+    ("V1_NATIVE", False): ("native_module_emission", ["native"]),
+    ("AST_ONLY_EXPERIMENTAL", True): ("ast_execution", ["ast"]),
+    ("AST_ONLY_EXPERIMENTAL", False): ("frontend_acceptance", ["ast"]),
 }
 
 
 def load_manifest() -> dict[str, object]:
     return json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+
+
+def observation_sha256(text: str) -> str:
+    """Hash canonical UTF-8 observation text with LF line endings."""
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def canonical_manifest_text(manifest: dict[str, object]) -> str:
+    return json.dumps(manifest, ensure_ascii=False, indent=2) + "\n"
+
+
+def write_manifest(manifest: dict[str, object], path: Path = MANIFEST_PATH) -> bool:
+    rendered = canonical_manifest_text(manifest)
+    if path.is_file() and path.read_text(encoding="utf-8") == rendered:
+        return False
+    path.write_text(rendered, encoding="utf-8", newline="\n")
+    return True
 
 
 def typed_entry(entry: dict[str, object]):
@@ -70,6 +102,17 @@ def structural_errors(manifest: dict[str, object]) -> list[str]:
             errors.append(f"entry {index} has a non-string path")
             continue
         paths.append(path)
+        normalized = PurePosixPath(path)
+        if (
+            "\\" in path
+            or normalized.is_absolute()
+            or "." in normalized.parts
+            or ".." in normalized.parts
+            or normalized.as_posix() != path
+            or not path.startswith("examples/")
+            or normalized.suffix != ".ae"
+        ):
+            errors.append(f"manifest path is not a normalized public example path: {path}")
         if not (ROOT / path).is_file():
             errors.append(f"manifest path does not exist: {path}")
         classification = entry.get("classification")
@@ -90,22 +133,48 @@ def structural_errors(manifest: dict[str, object]) -> list[str]:
                 errors.append(f"runnable entry needs expected_exit_code: {path}")
             for stream in ("stdout", "stderr"):
                 digest = entry.get(f"{stream}_sha256")
-                if not isinstance(digest, str) or len(digest) != 64:
+                if not isinstance(digest, str) or SHA256_PATTERN.fullmatch(digest) is None:
                     errors.append(f"runnable entry needs {stream}_sha256: {path}")
+        else:
+            if entry.get("expected_exit_code") is not None:
+                errors.append(f"non-runnable entry must use a null expected_exit_code: {path}")
+            for stream in ("stdout", "stderr"):
+                if entry.get(f"{stream}_sha256") is not None:
+                    errors.append(f"non-runnable entry must use a null {stream}_sha256: {path}")
         if not isinstance(entry.get("timeout_seconds"), int) or entry.get("timeout_seconds", 0) <= 0:
             errors.append(f"entry timeout_seconds must be positive: {path}")
+        if classification in VALID_CLASSIFICATIONS and isinstance(entry.get("run"), bool):
+            expected_condition, expected_backends = ENTRY_CONTRACTS[
+                (str(classification), bool(entry["run"]))
+            ]
+            if entry.get("condition") != expected_condition:
+                errors.append(
+                    f"entry condition mismatch for {path}: "
+                    f"expected={expected_condition!r}, actual={entry.get('condition')!r}"
+                )
+            if entry.get("backends") != expected_backends:
+                errors.append(
+                    f"entry backend mismatch for {path}: "
+                    f"expected={expected_backends!r}, actual={entry.get('backends')!r}"
+                )
         if classification == "V1_NATIVE":
             if "native" not in entry.get("backends", []):
                 errors.append(f"V1_NATIVE entry must declare native: {path}")
+            if "outside_v1_features" in entry:
+                errors.append(f"V1_NATIVE entry cannot declare outside_v1_features: {path}")
         if classification == "AST_ONLY_EXPERIMENTAL":
             features = entry.get("outside_v1_features")
             if not isinstance(features, list) or not features or not all(
                 isinstance(feature, str) and feature for feature in features
             ):
                 errors.append(f"experimental entry lacks outside_v1_features: {path}")
+            elif features != sorted(set(features)):
+                errors.append(f"experimental capabilities must be sorted and unique: {path}")
             if "native" in entry.get("backends", []):
                 errors.append(f"experimental entry cannot declare native: {path}")
 
+    if paths != sorted(paths):
+        errors.append("manifest entries must use deterministic path ordering")
     duplicates = sorted({path for path in paths if paths.count(path) > 1})
     for path in duplicates:
         errors.append(f"duplicate manifest path: {path}")
@@ -129,6 +198,31 @@ def structural_errors(manifest: dict[str, object]) -> list[str]:
     )
     if count_line not in readme:
         errors.append("examples README count does not match the manifest")
+    documentation_claims = {
+        ROOT / "docs" / "aether" / "AETHER_EXAMPLES_CATALOG_AUDIT.md": (
+            f"catálogo actual contiene {len(entries)} rutas: "
+            f"{counts['V1_NATIVE']} `V1_NATIVE`, "
+            f"{counts['AST_ONLY_EXPERIMENTAL']} `AST_ONLY_EXPERIMENTAL`"
+        ),
+        ROOT / "docs" / "aether" / "AETHER_V1_PROFILE_AUDIT.md": (
+            f"catálogo actual tiene {counts['V1_NATIVE']} `V1_NATIVE`, "
+            f"{counts['AST_ONLY_EXPERIMENTAL']} `AST_ONLY_EXPERIMENTAL`"
+        ),
+        ROOT / "docs" / "aether" / "AETHER_1_0_0_RC3_RELEASE_NOTES.md": (
+            f"catálogo schema 2 clasifica {counts['V1_NATIVE']} ejemplos como "
+            f"`V1_NATIVE`, {counts['AST_ONLY_EXPERIMENTAL']} como "
+            f"`AST_ONLY_EXPERIMENTAL`"
+        ),
+    }
+    for document, claim in documentation_claims.items():
+        text = " ".join(
+            line.lstrip("> ").strip()
+            for line in document.read_text(encoding="utf-8").splitlines()
+        )
+        if claim not in text:
+            errors.append(
+                f"example count is stale in {document.relative_to(ROOT).as_posix()}"
+            )
     stale_references = {
         "examples/minimos_cuadrados/interactive.ae",
         "examples/pruebaListas.ae",
@@ -160,23 +254,17 @@ def compiler_errors(manifest: dict[str, object]) -> list[str]:
                         f"expected={sorted(expected_codes)}, actual={sorted(actual_codes)}"
                     )
                 if entry["run"]:
-                    stdout = StringIO()
-                    stderr = StringIO()
-                    exit_code = cli_main(
-                        ["--backend", "ast", str(ROOT / path)],
-                        stdout=stdout,
-                        stderr=stderr,
-                    )
+                    exit_code, stdout, stderr = runtime_observation(entry)
                     observations = (
                         ("exit code", exit_code, entry["expected_exit_code"]),
                         (
                             "stdout sha256",
-                            hashlib.sha256(stdout.getvalue().encode()).hexdigest(),
+                            observation_sha256(stdout),
                             entry.get("stdout_sha256"),
                         ),
                         (
                             "stderr sha256",
-                            hashlib.sha256(stderr.getvalue().encode()).hexdigest(),
+                            observation_sha256(stderr),
                             entry.get("stderr_sha256"),
                         ),
                     )
@@ -186,7 +274,7 @@ def compiler_errors(manifest: dict[str, object]) -> list[str]:
                                 f"{path} AST {label}: "
                                 f"expected={expected!r}, actual={actual!r}"
                             )
-                    if "Traceback" in stderr.getvalue():
+                    if "Traceback" in stderr:
                         errors.append(f"AST execution leaked a traceback: {path}")
                 continue
             if issues:
@@ -217,8 +305,8 @@ def native_errors(manifest: dict[str, object]) -> list[str]:
             continue
         observations = (
             ("exit code", exit_code, entry["expected_exit_code"]),
-            ("stdout sha256", hashlib.sha256(stdout.getvalue().encode()).hexdigest(), entry.get("stdout_sha256")),
-            ("stderr sha256", hashlib.sha256(stderr.getvalue().encode()).hexdigest(), entry.get("stderr_sha256")),
+            ("stdout sha256", observation_sha256(stdout.getvalue()), entry.get("stdout_sha256")),
+            ("stderr sha256", observation_sha256(stderr.getvalue()), entry.get("stderr_sha256")),
         )
         for label, actual, expected in observations:
             if actual != expected:
@@ -226,17 +314,124 @@ def native_errors(manifest: dict[str, object]) -> list[str]:
     return errors
 
 
+ObservationProvider = Callable[[dict[str, object]], tuple[int, str, str]]
+
+
+def runtime_observation(entry: dict[str, object]) -> tuple[int, str, str]:
+    stdout = StringIO()
+    stderr = StringIO()
+    if entry["classification"] == "V1_NATIVE":
+        exit_code = LLVMRunner().run(typed_entry(entry), stdout=stdout, stderr=stderr)
+    else:
+        previous_mode = os.environ.get("AETHER_PLOT_MODE")
+        previous_directory = os.environ.get("AETHER_PLOT_DIR")
+        with tempfile.TemporaryDirectory(prefix="aether-example-plots-") as plot_directory:
+            os.environ["AETHER_PLOT_MODE"] = "document"
+            os.environ["AETHER_PLOT_DIR"] = plot_directory
+            try:
+                exit_code = cli_main(
+                    ["--backend", "ast", str(ROOT / str(entry["path"]))],
+                    stdout=stdout,
+                    stderr=stderr,
+                )
+            finally:
+                if previous_mode is None:
+                    os.environ.pop("AETHER_PLOT_MODE", None)
+                else:
+                    os.environ["AETHER_PLOT_MODE"] = previous_mode
+                if previous_directory is None:
+                    os.environ.pop("AETHER_PLOT_DIR", None)
+                else:
+                    os.environ["AETHER_PLOT_DIR"] = previous_directory
+    return exit_code, stdout.getvalue(), stderr.getvalue()
+
+
+def refreshed_manifest(
+    manifest: dict[str, object],
+    observation_provider: ObservationProvider = runtime_observation,
+) -> dict[str, object]:
+    refreshed = deepcopy(manifest)
+    entries = refreshed["entries"]
+    assert isinstance(entries, list)
+    entries.sort(key=lambda entry: str(entry["path"]))
+    for raw_entry in entries:
+        assert isinstance(raw_entry, dict)
+        entry = raw_entry
+        typed = typed_entry(entry)
+        issues = backend_capability_issues(typed, BackendIdentity.NATIVE)
+        actual_codes = sorted(issue.diagnostic_code for issue in issues)
+        if entry["classification"] == "V1_NATIVE":
+            if issues:
+                raise ValueError(
+                    f"refusing to demote V1_NATIVE entry automatically: {entry['path']} "
+                    f"has {actual_codes}"
+                )
+            IRBackend().lower_verified(typed)
+            SSAPipeline().run(typed)
+            LLVMBuilder().emit_llvm(typed)
+        else:
+            if not issues:
+                raise ValueError(
+                    f"refusing to promote AST_ONLY_EXPERIMENTAL entry automatically: "
+                    f"{entry['path']} is accepted by native"
+                )
+            entry["outside_v1_features"] = actual_codes
+
+        if not entry["run"]:
+            entry["expected_exit_code"] = None
+            entry["stdout_sha256"] = None
+            entry["stderr_sha256"] = None
+            continue
+        exit_code, stdout, stderr = observation_provider(entry)
+        if "Traceback" in stderr or (
+            exit_code == 130 and "Aether interrupted." in stderr
+        ):
+            raise ValueError(f"refusing interrupted or traceback observation: {entry['path']}")
+        entry["expected_exit_code"] = exit_code
+        entry["stdout_sha256"] = observation_sha256(stdout)
+        entry["stderr_sha256"] = observation_sha256(stderr)
+    return refreshed
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--structure-only", action="store_true", help="Skip compiler validation.")
-    parser.add_argument("--run-native", action="store_true", help="Compile and run all runnable V1_NATIVE entries.")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--structure-only", action="store_true", help="Skip compiler validation.")
+    mode.add_argument(
+        "--update",
+        action="store_true",
+        help="Refresh capability codes and canonical runtime observations.",
+    )
+    parser.add_argument(
+        "--run-native",
+        action="store_true",
+        help="Compile and run all runnable V1_NATIVE entries.",
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.update and args.run_native:
+        raise SystemExit("--update already runs native observations")
     manifest = load_manifest()
     errors = structural_errors(manifest)
+    if args.update:
+        if errors:
+            for error in errors:
+                print(f"FAIL: {error}", file=sys.stderr)
+            return 1
+        if shutil.which("clang") is None:
+            print("FAIL: clang is required to update native observations", file=sys.stderr)
+            return 1
+        try:
+            refreshed = refreshed_manifest(manifest)
+        except Exception as exc:
+            print(f"FAIL: manifest update failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+            return 1
+        changed = write_manifest(refreshed)
+        print("Updated examples manifest." if changed else "PASS: examples manifest is already current.")
+        return 0
     if not args.structure_only:
         errors.extend(compiler_errors(manifest))
     if args.run_native:

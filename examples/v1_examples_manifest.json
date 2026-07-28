@@ -2,7 +2,7 @@
   "schema_version": 2,
   "language_version": "1.0.0-rc.3",
   "native_capability_profile": "22",
-  "audit_date": "2026-07-19",
+  "audit_date": "2026-07-28",
   "profile_definitions": {
     "V1_NATIVE": "Normative Aether 1.0 example accepted by native capability profile 22.",
     "AST_ONLY_EXPERIMENTAL": "Non-normative frontend/AST experiment with an explicit native capability exclusion."
@@ -13,6 +13,32 @@
       "condition": "native_execution",
       "expected_exit_code": 0,
       "stdout_sha256": "47919faa811c0fb6b9de1df114c464bac01749a6dfa3ccb8b3cba73ca126e0e0",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "timeout_seconds": 20,
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
+    },
+    {
+      "path": "examples/LeetCode/isPalindrome.ae",
+      "condition": "native_execution",
+      "expected_exit_code": 0,
+      "stdout_sha256": "da1e490f62de0122031e3cdc7e030ded5979526f4cd248bb97ae7618104a6116",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "timeout_seconds": 20,
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
+    },
+    {
+      "path": "examples/LeetCode/twoSum.ae",
+      "condition": "native_execution",
+      "expected_exit_code": 0,
+      "stdout_sha256": "45f0323484ad24fa18ac74255293e3ef2ef7d78fa27603a5bceac81ff3eb9ec4",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
       "classification": "V1_NATIVE",
@@ -66,6 +92,24 @@
       "run": true
     },
     {
+      "path": "examples/SNL.ae",
+      "condition": "ast_execution",
+      "expected_exit_code": 0,
+      "stdout_sha256": "e119b706df06d360a8ecfc190bcc637ed280d7840c31e1fd264087f26a65a879",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "timeout_seconds": 20,
+      "classification": "AST_ONLY_EXPERIMENTAL",
+      "backends": [
+        "ast"
+      ],
+      "run": true,
+      "outside_v1_features": [
+        "AE-BACKEND-ARITHMETIC",
+        "AE-BACKEND-MATRIX",
+        "AE-BACKEND-VECTOR"
+      ]
+    },
+    {
       "path": "examples/Sorts/IllegalArgumentException.ae",
       "condition": "frontend_acceptance",
       "expected_exit_code": null,
@@ -83,38 +127,29 @@
     },
     {
       "path": "examples/Sorts/Main.ae",
-      "condition": "ast_execution",
+      "condition": "native_execution",
       "expected_exit_code": 0,
-      "stdout_sha256": "0fa8c62f61e2586983e7f142dcb69977218f68746d3fc13841bf5ceaa48f1502",
+      "stdout_sha256": "b82b299c45bdcb7a8005858f2539dde9da8fdad81bd28e4cee337a8b6a78714b",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
-      "classification": "AST_ONLY_EXPERIMENTAL",
+      "classification": "V1_NATIVE",
       "backends": [
-        "ast"
+        "native"
       ],
-      "run": true,
-      "outside_v1_features": [
-        "AE-BACKEND-ARRAY",
-        "AE-BACKEND-PRIMITIVE_TYPES",
-        "AE-BACKEND-VARIABLES_AND_CONST"
-      ]
+      "run": true
     },
     {
       "path": "examples/Sorts/Sortings.ae",
-      "condition": "frontend_acceptance",
+      "condition": "native_module_emission",
       "expected_exit_code": null,
       "stdout_sha256": null,
       "stderr_sha256": null,
       "timeout_seconds": 20,
-      "classification": "AST_ONLY_EXPERIMENTAL",
+      "classification": "V1_NATIVE",
       "backends": [
-        "ast"
+        "native"
       ],
-      "run": false,
-      "outside_v1_features": [
-        "AE-BACKEND-ARRAY",
-        "AE-BACKEND-PRIMITIVE_TYPES"
-      ]
+      "run": false
     },
     {
       "path": "examples/aggregate_collections/particles.ae",
@@ -1208,7 +1243,7 @@
       "path": "examples/nonlinear_systems/newton_system.ae",
       "condition": "ast_execution",
       "expected_exit_code": 0,
-      "stdout_sha256": "aea58ea9793f7b4398d241695f97ae67731f17e50c3c33650ff1e8c4ef4bf51f",
+      "stdout_sha256": "3ac3e5b9d2a453d2fa4c273bb5e2dd07260b462dcde2c8efe25b0b1ecec76e33",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
       "classification": "AST_ONLY_EXPERIMENTAL",
@@ -1218,8 +1253,27 @@
       "run": true,
       "outside_v1_features": [
         "AE-BACKEND-ARITHMETIC",
+        "AE-BACKEND-FUNCTION_VALUES",
         "AE-BACKEND-MATRIX",
+        "AE-BACKEND-MODULES",
         "AE-BACKEND-VARIABLES_AND_CONST",
+        "AE-BACKEND-VECTOR"
+      ]
+    },
+    {
+      "path": "examples/nonlinear_systems/nr2.ae",
+      "condition": "ast_execution",
+      "expected_exit_code": 0,
+      "stdout_sha256": "3ac3e5b9d2a453d2fa4c273bb5e2dd07260b462dcde2c8efe25b0b1ecec76e33",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "timeout_seconds": 20,
+      "classification": "AST_ONLY_EXPERIMENTAL",
+      "backends": [
+        "ast"
+      ],
+      "run": true,
+      "outside_v1_features": [
+        "AE-BACKEND-MATRIX",
         "AE-BACKEND-VECTOR"
       ]
     },
@@ -1227,7 +1281,7 @@
       "path": "examples/nose.ae",
       "condition": "native_execution",
       "expected_exit_code": 0,
-      "stdout_sha256": "8060aa0ac20a3e5db2b67325c98a0122f2d09a612574458225dcb9a086f87cc3",
+      "stdout_sha256": "de6aeb89b0d91519a443ac503ea9e652f130752e5ecc78cbcffc3e0f04e4bbf0",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
       "classification": "V1_NATIVE",

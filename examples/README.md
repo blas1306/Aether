@@ -4,7 +4,7 @@ This directory contains two deliberately separate catalogs. The machine-readable
 source of truth is [`v1_examples_manifest.json`](v1_examples_manifest.json);
 this README explains the policy but does not duplicate its path list.
 
-Catalog count: **101 total = 78 V1_NATIVE + 23 AST_ONLY_EXPERIMENTAL; BROKEN = 0**.
+Catalog count: **105 total = 88 V1_NATIVE + 17 AST_ONLY_EXPERIMENTAL; BROKEN = 0**.
 
 ## Official Aether 1.0 examples
 
@@ -59,6 +59,18 @@ was removed; the catalog audit records why it was not preserved as a fixture.
 
 ## Validation
 
+Every `.ae` file recursively contained in `examples/` must appear exactly once
+in the manifest; there are no exclusions inside this directory. Paths are
+normalized repository-relative POSIX paths and entries are ordered
+lexicographically by path. A runnable entry's condition and sole backend must
+match its classification. Non-runnable entries use null exit-code and stream
+observations.
+
+Runtime hashes are SHA-256 digests of the captured stdout or stderr text after
+normalizing CRLF and CR to LF, encoded as UTF-8. Paths and source-file bytes do
+not participate in these observation hashes. This makes the same semantic
+output portable across supported host line-ending conventions.
+
 Fast catalog structure check:
 
 ```bash
@@ -76,3 +88,14 @@ Full native observations (requires clang):
 ```bash
 .venv/bin/python scripts/check_examples_catalog.py --run-native
 ```
+
+Explicitly refresh capability codes and runtime observations with:
+
+```bash
+.venv/bin/python scripts/check_examples_catalog.py --update
+```
+
+The update command uses canonical JSON rendering and is idempotent. It refuses
+to invent inventory policy or silently promote/demote an example: additions,
+removals, and support-boundary changes require an intentional manifest edit
+before observations can be refreshed.

@@ -17,11 +17,11 @@ encontraron **2 P1, 6 P2 y 3 P3**. Los dos estados `BROKEN` son superficies de
 producto —coherencia documental y catálogo de ejemplos—, no construcciones
 que el gate native acepte y luego miscompile.
 
-> Seguimiento del 2026-07-18: esta tabla conserva el snapshot que abrió B12 y
+> Seguimiento: esta tabla conserva el snapshot del 2026-07-18 que abrió B12 y
 > B13. Los planes R1/F02 y R2/F01 se cerraron después mediante gates dedicados.
-> El catálogo actual tiene 78 `V1_NATIVE`, 23 `AST_ONLY_EXPERIMENTAL` y cero
-> `BROKEN`; véase `AETHER_EXAMPLES_CATALOG_AUDIT.md`. El siguiente bloqueador de
-> RC3 es la normalización pública de verification/ICE.
+> Tras la reconciliación del 2026-07-28, el catálogo actual tiene 88
+> `V1_NATIVE`, 17 `AST_ONLY_EXPERIMENTAL` y cero `BROKEN`; véase
+> `AETHER_EXAMPLES_CATALOG_AUDIT.md`.
 
 La evidencia ejecutada en este corte fue:
 

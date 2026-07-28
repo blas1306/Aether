@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import hashlib
+from copy import deepcopy
 from io import StringIO
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import shutil
 
 import pytest
@@ -18,6 +18,11 @@ from aether.capabilities import (
 from aether.cli import main as cli_main
 from aether.pipeline import IRBackend, SSAPipeline, prepare_typed_program
 from aether.typechecker import TypeChecker
+from scripts.check_examples_catalog import (
+    observation_sha256,
+    structural_errors,
+    write_manifest,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -46,12 +51,17 @@ def test_example_manifest_is_complete_authoritative_and_uses_closed_states() -> 
     assert MANIFEST["native_capability_profile"] == "22"
     assert len(manifest_paths) == len(set(manifest_paths))
     assert set(manifest_paths) == actual_paths
+    assert manifest_paths == sorted(manifest_paths)
+    assert all(
+        PurePosixPath(path).as_posix() == path
+        and path.startswith("examples/")
+        and path.endswith(".ae")
+        for path in manifest_paths
+    )
     assert {entry["classification"] for entry in ENTRIES} == {
         "V1_NATIVE",
         "AST_ONLY_EXPERIMENTAL",
     }
-    assert sum(entry["classification"] == "V1_NATIVE" for entry in ENTRIES) == 78
-    assert sum(entry["classification"] == "AST_ONLY_EXPERIMENTAL" for entry in ENTRIES) == 23
     assert not any(entry.get("classification") == "BROKEN" for entry in ENTRIES)
     assert all(
         {"path", "classification", "backends", "run", "expected_exit_code", "timeout_seconds"}
@@ -65,6 +75,34 @@ def test_example_manifest_is_complete_authoritative_and_uses_closed_states() -> 
         if entry["classification"] == "AST_ONLY_EXPERIMENTAL"
     )
     assert not any(str(entry["path"]).startswith("tests/fixtures/") for entry in ENTRIES)
+
+
+def test_manifest_structure_matches_the_canonical_validator() -> None:
+    assert structural_errors(MANIFEST) == []
+
+
+def test_manifest_validator_rejects_duplicate_paths() -> None:
+    duplicate = deepcopy(MANIFEST)
+    duplicate["entries"].insert(1, deepcopy(duplicate["entries"][0]))
+
+    assert "duplicate manifest path: examples/FormulaNumerosPrimos.ae" in structural_errors(
+        duplicate
+    )
+
+
+def test_observation_hashes_are_utf8_and_line_ending_portable() -> None:
+    expected = observation_sha256("áether\nline two\n")
+
+    assert observation_sha256("áether\r\nline two\r\n") == expected
+    assert observation_sha256("áether\rline two\r") == expected
+
+
+def test_canonical_manifest_writer_is_idempotent(tmp_path: Path) -> None:
+    generated = tmp_path / "v1_examples_manifest.json"
+
+    assert write_manifest(MANIFEST, generated)
+    assert not write_manifest(MANIFEST, generated)
+    assert generated.read_bytes().endswith(b"\n")
 
 
 @pytest.mark.parametrize(
@@ -110,8 +148,8 @@ def test_v1_native_example_observations_match_manifest(entry: dict[str, object])
     exit_code = LLVMRunner().run(_typed(entry), stdout=stdout, stderr=stderr)
 
     assert exit_code == entry["expected_exit_code"]
-    assert hashlib.sha256(stdout.getvalue().encode()).hexdigest() == entry["stdout_sha256"]
-    assert hashlib.sha256(stderr.getvalue().encode()).hexdigest() == entry["stderr_sha256"]
+    assert observation_sha256(stdout.getvalue()) == entry["stdout_sha256"]
+    assert observation_sha256(stderr.getvalue()) == entry["stderr_sha256"]
 
 
 @pytest.mark.parametrize(
@@ -140,8 +178,8 @@ def test_runnable_ast_experimental_observations_match_manifest(
     )
 
     assert exit_code == entry["expected_exit_code"]
-    assert hashlib.sha256(stdout.getvalue().encode()).hexdigest() == entry["stdout_sha256"]
-    assert hashlib.sha256(stderr.getvalue().encode()).hexdigest() == entry["stderr_sha256"]
+    assert observation_sha256(stdout.getvalue()) == entry["stdout_sha256"]
+    assert observation_sha256(stderr.getvalue()) == entry["stderr_sha256"]
     assert "Traceback" not in stderr.getvalue()
 
 
