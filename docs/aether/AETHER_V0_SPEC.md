@@ -2,7 +2,7 @@
 # Aether v0 Language Specification
 
 > Classification: **Historical**. This document records prototype behavior and
-> is deprecated as a current contract. For Aether `1.0.0-rc.3`, use
+> is deprecated as a current contract. For Aether `1.0.0-rc.4`, use
 > [Aether Language Specification v1](AETHER_LANGUAGE_SPEC_V1.md).
 
 ## Status

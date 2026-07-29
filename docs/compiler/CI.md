@@ -23,12 +23,23 @@ non-zero exit code.
 The stages run in this order:
 
 1. `git diff --check` detects whitespace errors.
-2. `PYTHONPATH=src .venv/bin/pytest` runs the complete test suite.
-3. Three representative scalar, control-flow, and vector benchmarks run with
+2. `scripts/check_capability_consistency.py` checks capability consistency
+   against the catalog, E2E evidence and representative native interface
+   lowering.
+3. `scripts/check_release_docs.py` checks documentation consistency, current
+   release/profile identities, normative generated content, and historical
+   classification.
+4. `scripts/check_examples_catalog.py` checks every public example against its
+   compiler classification and expected observation.
+5. The diagnostics contract and Python compileall checks run.
+6. `PYTHONPATH=src .venv/bin/python -m pytest` runs the complete test suite, including
+   optimizer operand coverage and profile/document regression tests.
+7. Three representative scalar, control-flow, and vector benchmarks run with
    `--iterations 1 --backend both`.
-4. The same categories of examples pass through `aether --emit-llvm` as an
+8. The same categories of examples pass through `aether --emit-llvm` as an
    LLVM-emission smoke check.
-5. Those examples are compiled to temporary native executables with `aether
+9. Differential parity compares AST/native observations when clang exists.
+10. Those examples are compiled to temporary native executables with `aether
    build` and clang.
 
 The native outputs live in a temporary directory and are removed when the
@@ -54,8 +65,9 @@ failed stage.
 
 Run the local CI command before committing or handing off compiler changes. It
 is also a convenient final validation after a refactor because it combines
-repository hygiene, correctness tests, quick pipeline timings, LLVM emission,
-and native compilation behind one command.
+repository hygiene, capability/documentation/example consistency, correctness
+tests, quick pipeline timings, LLVM emission, and native compilation behind
+one command.
 
 Use `pytest` directly while developing or diagnosing a specific behavior. It
 is the correctness suite and provides focused test selection, fixtures, and

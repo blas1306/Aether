@@ -45,7 +45,7 @@ def _required(source: str, *, source_root: Path | None = None):
 
 
 def test_profiles_are_versioned_identified_and_cover_the_canonical_catalog() -> None:
-    assert CAPABILITY_PROFILE_VERSION == "22"
+    assert CAPABILITY_PROFILE_VERSION == "23"
     assert AST_CAPABILITY_PROFILE.backend is BackendIdentity.AST
     assert NATIVE_CAPABILITY_PROFILE.backend is BackendIdentity.NATIVE
     assert AST_CAPABILITY_PROFILE.version == CAPABILITY_PROFILE_VERSION
@@ -76,6 +76,12 @@ def test_profiles_are_versioned_identified_and_cover_the_canonical_catalog() -> 
         NATIVE_CAPABILITY_PROFILE.support_for(Capability.FOR).state
         is CapabilityState.PARTIAL
     )
+    assert (
+        NATIVE_CAPABILITY_PROFILE.support_for(Capability.INTERFACES).state
+        is CapabilityState.COMPLETE
+    )
+    assert "native-interface-abi" not in {capability.value for capability in Capability}
+    assert "string-split-trim" not in {capability.value for capability in Capability}
     for capability in (
         Capability.ATOMIC_TEXT_FILE_WRITE,
         Capability.DURABLE_TEXT_FILE_WRITE,
@@ -144,7 +150,7 @@ def test_detector_reports_import_and_deduplicates_repeated_imports(tmp_path: Pat
     ("source", "capability"),
     [
         ("class Box { int value; }", Capability.CLASSES),
-        ("interface Value { int get(); }", Capability.NATIVE_INTERFACE_ABI),
+        ("interface Value { int get(); }", Capability.INTERFACES),
         ("enum Color { Red, Blue }", Capability.ENUMS),
         ("int main() { double x = sqrt(4.0); return 0; }", Capability.SCALAR_MATH),
         ("import Math; int main() { double x = Math.pi; return 0; }", Capability.SCALAR_MATH),

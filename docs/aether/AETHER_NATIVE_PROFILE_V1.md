@@ -1,8 +1,8 @@
 # Aether Native Profile v1
 
 > Classification: **Normative**. Language contract **Aether 1.0 stable
-> profile**; native capability profile schema/version `22`. This profile is
-> frozen for the `1.0.0-rc.3` candidate; the language and capability profile
+> profile**; native capability profile schema/version `23`. This profile is
+> frozen for the `1.0.0-rc.4` candidate; the language and capability profile
 > versions are independent identifiers.
 
 ## 1. Conformance language
@@ -13,15 +13,16 @@ explicitly labelled informative is not a conformance requirement.
 This document gives the executable LLVM/native capability refinement of the
 language specified by
 [Aether 1.0 Language Specification](AETHER_LANGUAGE_SPEC_V1.md). It neither
-widens nor narrows the 75-row stable language inventory. Frontend-only
-experiments are outside Aether 1.0.
+widens nor narrows that current language contract. Frontend-only experiments
+are outside Aether 1.0. The dated profile-22 audit is historical evidence and
+is not an authority over this current reference.
 
 ## 2. Conforming implementation
 
 A conforming Aether v1 native implementation:
 
 - **MUST** parse and type-check before backend selection;
-- **MUST** run the profile-22 capability detector before IR lowering;
+- **MUST** run the profile-23 capability detector before IR lowering;
 - **MUST** accept a program only when every detected use is inside the native
   subset, including the restrictions described below;
 - **MUST** reject an excluded use with an `AE-BACKEND-*` diagnostic, source
@@ -47,9 +48,9 @@ The following block is generated from `NATIVE_CAPABILITY_PROFILE` in
 - **UNSUPPORTED**: every detected use is rejected before lowering.
 
 <!-- BEGIN GENERATED CAPABILITY PROFILE -->
-Profile schema/version: `22`.
+Profile schema/version: `23`.
 
-Inventory: 32 COMPLETE, 31 PARTIAL, 5 UNSUPPORTED.
+Inventory: 32 COMPLETE, 31 PARTIAL, 3 UNSUPPORTED.
 
 | Capability | State | Contract area |
 | --- | --- | --- |
@@ -79,7 +80,6 @@ Inventory: 32 COMPLETE, 31 PARTIAL, 5 UNSUPPORTED.
 | `double-string-parsing` | **COMPLETE** | Strict structured locale-independent parsing from string to double. |
 | `string-trim` | **COMPLETE** | Explicit trimming of Aether v1 ASCII whitespace. |
 | `string-split` | **COMPLETE** | Exact byte-based string splitting into owned fields. |
-| `string-split-trim` | **UNSUPPORTED** | Public split and trim text algorithms. |
 | `print` | **PARTIAL** | print and println output. |
 | `input` | **UNSUPPORTED** | Typed input calls. |
 | `process-arguments` | **PARTIAL** | Access to process arguments. |
@@ -92,8 +92,7 @@ Inventory: 32 COMPLETE, 31 PARTIAL, 5 UNSUPPORTED.
 | `classes` | **COMPLETE** | Reference-semantics classes. |
 | `class-constructors` | **COMPLETE** | Class constructors. |
 | `class-methods` | **COMPLETE** | Class methods and this. |
-| `native-interface-abi` | **COMPLETE** | Native interface values, class carriers, and witness metadata. |
-| `interfaces` | **UNSUPPORTED** | Struct-backed interface boxing and unsupported interface adapters. |
+| `interfaces` | **COMPLETE** | Nominal interfaces with class carriers, struct boxing, witness dispatch, and ownership. |
 | `enums` | **COMPLETE** | Enums without payloads. |
 | `array` | **PARTIAL** | Array values and operations. |
 | `array-slicing` | **PARTIAL** | Array and collection slicing. |
@@ -131,9 +130,9 @@ negative corpus is part of this profile.
 
 - Primitive types, variables, arithmetic, functions, calls and comparisons
   support `int`, `double`, and `boolean`, plus the explicitly complete string,
-  enum, struct and collection cases below. Native **MUST reject** `float`,
-  `complex`, nullable values, tuples/destructuring and any conversion, cast,
-  operator, builtin, print shape or ABI position without native lowering.
+  nullable, enum, struct, class, interface and collection cases below. Native
+  **MUST reject** `float`, `complex`, tuples/destructuring and any conversion,
+  cast, operator, builtin, print shape or ABI position without native lowering.
   The supported numeric subset includes contextual `int -> double`, mixed
   `int`/`double` arithmetic and comparisons, identity `int`/`double` casts,
   checked `int ^ int`, and libm-backed power whenever either operand is
@@ -155,8 +154,12 @@ negative corpus is part of this profile.
 - Structs are acyclic nominal value layouts composed only of backend-supported
   fields. Construction, methods, assignment/copy, parameters, owned returns,
   printing and equality are supported when every transitive field has layout,
-  lifecycle and `Eq` where required. Classes and interfaces have no native
-  layout or dispatch.
+  lifecycle and `Eq` where required.
+- Nullable `T?` is a tagged `{present,payload}` value for every representable
+  payload. Classes are non-null reference handles with ARC, definite field
+  initialization, identity equality, constructors and static method dispatch.
+  Interfaces are `{carrier,witness}` values with witness-driven calls,
+  class-carrier aliasing, owned struct boxes, and type-directed copy/drop.
 - `Array<T>` and `List<T>` support reference assignment, lifecycle, explicit
   shallow `copy()`, copying slices, const aliases, borrowed `for-in`, structural
   equality and the registered operations when `T` has a supported native
@@ -182,12 +185,18 @@ negative corpus is part of this profile.
 
 ## 5. Excluded capabilities
 
-Profile 22 supports concrete classes, constructors and statically dispatched
-instance methods. It rejects `input`, interfaces and dynamic dispatch, user
-generics, `throw`/`try`/`catch`, and the historical combined
-`string-split-trim` capability. These rejected surfaces and every other
-`OUTSIDE_V1` audit row are not Aether 1.0 features even when an experimental
-frontend or AST path recognizes them.
+Profile 23 supports tagged nullable values, concrete classes, constructors,
+statically dispatched class methods, and nominal interfaces. Interface support
+includes class carriers, owned struct boxes, declaration-ordered witness
+dispatch, nullable and collection transport, and type-directed copy/drop.
+
+It rejects `input`, user generics, and `throw`/`try`/`catch`. Interface
+inheritance/default methods, class inheritance/override, downcasts, reflection,
+user destructors, weak references, exceptions/unwind, and stable FFI remain
+outside the profile. The obsolete staging capability `native-interface-abi`
+and combined capability `string-split-trim` are not catalog entries in profile
+23; `interfaces`, `string-split`, and `string-trim` are the authoritative
+granular capabilities.
 
 ## 6. Platform and toolchain
 
@@ -208,7 +217,7 @@ second language or release platform.
 
 ## 7. Observable parity guarantee
 
-For every program accepted by profile 22, AST and native execution **MUST**
+For every program accepted by profile 23, AST and native execution **MUST**
 agree on:
 
 - stdout bytes and stderr bytes, including the public formatting of values;
@@ -223,6 +232,8 @@ NOT** remove or reorder observable traps, allocation, IO, or lifecycle effects.
 
 ## 8. Informative implementation note
 
-Profile 22 is a feature-contract version, not the Aether language version and
+Profile 23 is a feature-contract version, not the Aether language version and
 not an ABI version. Increasing it records a changed capability boundary. It
-does not by itself change package metadata or plugin compatibility.
+does not by itself change package metadata or plugin compatibility. Profile 23
+was bumped because Phase 5.2–5.4 materially added nullable, class, and complete
+interface execution to the native boundary after profile 22 was frozen.

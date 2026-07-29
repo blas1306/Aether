@@ -1,299 +1,71 @@
-# Matriz de cobertura del compilador
+# Compiler Feature Matrix
 
-Ultima revision: 2026-07-27.
+> Classification: **Current reference**. Last reconciled: 2026-07-28.
+> Capability states and typed subset rules are normative in
+> [Aether Native Profile v1](../aether/AETHER_NATIVE_PROFILE_V1.md), profile
+> 23. This matrix summarizes implementation stages; it does not create
+> language features.
 
-Esta matriz es la referencia oficial del estado visible de implementacion del
-compilador de Aether. Resume la cobertura por etapa del pipeline actual:
-parser, typechecker, interprete AST, IR, SSA, optimizadores IR/SSA y backend
-LLVM.
+Legend: **C** complete for the typed profile subset, **P** partial/gated subset,
+**N** absent. “Optimizer C” means every instruction participates in structural
+operand traversal and effect-aware preservation; it does not mean a
+feature-specific strength optimization exists.
 
-Alcance y criterios:
+| Feature family | Parser/typechecker | AST | IR/SSA | Optimizers | LLVM/native | Capability |
+| --- | --- | --- | --- | --- | --- | --- |
+| `int`, `double`, `boolean`, `void` | C | C | C | C | C | mixed granular C/P |
+| `float`, `complex` | C experimental | C | P nominal | C preservation | N/gated | P under primitive/numeric families |
+| string transport/lifecycle/equality/concat/byteLength/parse/trim/split | C | C | C | C | C | granular C; broad `strings` P |
+| `null` and `T?` | C | C | C tagged | C | C `{i1,T}` | `primitive-types` P |
+| enums without payload | C | C | C | C | C `i32` | `enums` C |
+| structs, constructors, methods, value semantics | C | C | C | C | C for representable layouts | granular P |
+| classes, fields, constructors, methods, identity/ARC | C | C | C | C | C | granular C |
+| interfaces with class carrier or struct box | C | C | C witness-based | C | C | `interfaces` C |
+| Array/List core, slicing, lifecycle, Eq/search | C | C | C | C | C typed subset | granular C/P |
+| Vector/Matrix core | C | C | C | C | C shaped subset | P |
+| top-level function values | C | C | C indirect call | C conservative | C exact signature | P |
+| functions, recursion, return, `if`/`while`/`for`, break/continue | C | C | C CFG/phi | C | C typed subset | granular C/P |
+| modules/imports/visibility | C | C | C combined module | C | P: no imported storage/init | P |
+| process arguments and UTF-8 text files | C | C | C | C effects | C Linux subset | granular C/P |
+| input and exceptions | C | C | N | N/A | N/gated | unsupported |
+| user generics, closures/lambdas, class/interface inheritance, reflection | N or experiment | N/P | N | N/A | N | unsupported/outside profile |
+| optimization profiles | C CLI | N/A | C | P: `-O2` aliases `-O1` | C emission | P |
 
-- `AST Interpreter` es el interprete de la superficie completa del lenguaje.
-- `LLVM` es el backend compilado y cubre un subconjunto de la superficie.
-- `Optimizer` indica si los optimizadores IR/SSA conocen correctamente la
-  representacion de la feature. Si una feature no baja a IR/SSA, se marca como
-  no implementada para optimizer.
-- `Tests` indica cobertura observable en tests o ejemplos automatizados.
-- `Spec` indica documentacion oficial de lenguaje en
-  `docs/aether/AETHER_V0_SPEC.md` y documentos de lenguaje relacionados.
-- `phi` no es una feature de superficie: aparece como infraestructura interna
-  de SSA/LLVM.
+## Object and interface boundary
 
-Leyenda:
+- `T?` is always tagged; `ptr null` is not a nullable representation.
+- A class value is a non-null one-word handle to an ARC object. Concrete method
+  dispatch is static.
+- An interface value is `{carrier,witness}`. A class carrier preserves object
+  identity; a struct carrier is an owned box whose copy operation clones the
+  value payload.
+- Interface calls are indirect and conservatively effectful. Interface
+  inheritance, default methods, downcasts, reflection, user destructors, weak
+  references, unwind, and cycle collection are not implemented.
 
-- ✅ implementado/cubierto
-- ⚠️ parcial o limitado a un subconjunto
-- ❌ no implementado/no cubierto
-- ? evidencia insuficiente
-- N/A no aplica a esa etapa
+## Optimizer coverage
 
-Leyenda de `Spec`:
+IR and SSA value uses are derived from dataclass instruction fields, excluding
+the conventional `result` definition. Nested tuples cover calls and phi
+incoming pairs. Dead-phi elimination, trivial-phi replacement, algebraic
+replacement, DCE, SCCP use tracking, and copy-like propagation consume this
+structural traversal. A hierarchy validation test rejects an instruction model
+that cannot participate, and sentinel rewrite tests cover class/interface
+operands that previously regressed.
 
-- ✅ documentada
-- ⚠️ parcialmente documentada
-- ❌ no documentada
+Feature-specific folding remains intentionally limited to operations with
+proved semantics. Unknown calls, interface calls, allocation, lifecycle,
+memory access, traps, and mutation retain their declared effects.
 
-## Tipos
+## Authorities
 
-| Feature | Parser | Typechecker | AST Interpreter | IR | SSA | Optimizer | LLVM | Tests | Spec | Estado |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| int | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Completa |
-| double | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Completa |
-| bool/boolean | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Completa |
-| string | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ✅ | ✅ documentada | Parcial backend |
-| List | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ✅ | ✅ documentada | Parcial backend fase 4e |
-| Array | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ⚠️ sin bounds/narrowing checked | ✅ | ⚠️ parcialmente documentada | Inconsistente entre AST/IR y LLVM |
-| Vector<Row> | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Completa con optimizer parcial |
-| Vector<Column> | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Completa con optimizer parcial |
-| Matrix | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ✅ documentada | Parcial backend |
-| Optional/Nullable (`T?`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ `{i1,T}` | ✅ parser/type/IR/SSA/ABI/E2E | ✅ documentada | Completa para payloads native representables; sin flow narrowing |
-| Class | ✅ | ✅ | ✅ definite init/métodos | ✅ new/get/set/calls directas | ✅ refs/phis/recursión | ✅ lifecycle effectful | ✅ payload/header/ARC + ABI métodos | ✅ AST + native O0/O1/O2 | ✅ documentada | Métodos concretos 5.3C; dispatch interface class-carrier 5.4B |
-| Struct | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
-| Interface ABI/dispatch class+struct | ✅ | ✅ class/struct→interface | ✅ construcción/dispatch | ✅ witness, box layout y adapters DTO | ✅ valores/phis/calls | ✅ preserva boxing/copy/drop/dispatch | ✅ `{ptr,ptr}`, cajas, thunks y lifecycle borrado | ✅ O0/O1/O2 | ✅ Python/Rust/LLVM | 5.4A/5.4B/5.4C completas |
-| Enum | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Frontend solamente |
-
-Notas:
-
-- `T?` usa en todas las etapas un tag explícito y payload
-  `{ i1 has_value, T value }`. `null` produce el estado absent canonical,
-  `T -> T?` construye present, la igualdad sólo lee/compara el payload cuando
-  ambos tags están presentes y lifecycle/ARC se delega condicionalmente a
-  `T`. No existe niche `ptr null`, boxing ni allocation nullable.
-- El typechecker no implementa smart casts después de `x != null`: asignar
-  `T?` a `T` continúa siendo un error. El narrowing queda como trabajo futuro.
-- Class 5.3C cubre representación nominal no nula, payload en orden fuente,
-  constructores auto/explicit, get/set, definite initialization, ARC,
-  transporte, identidad, nullable, containment y métodos concretos directos
-  con `this` borrowed. Phase 5.4A agrega valores interface `{carrier,witness}`
-  con carrier class y lifecycle/DTO/SSA/LLVM. Phase 5.4B agrega dispatch
-  witness-driven con thunks, mutación alias-visible, parámetros/returns,
-  colecciones, recursión e imports. Phase 5.4C agrega boxing de struct,
-  `copy_owned`/`drop_owned`, value semantics, nullable y colecciones.
-- `string` baja como valor/literal/call/return/phi, pero LLVM no soporta
-  operaciones string (`+`, comparaciones, impresion, length, indexing, runtime).
-- `List<T>` tiene backend fases 1, 2, 3a, `indexOf` de fase 3b, `clear` de fase 4a, `push`/growth de fase 4b, `pop` de fase 4c, `insert` de fase 4d y `removeAt` de fase 4e para literal con tipo esperado,
-  `.length`, `.is_empty`, `for x in xs` / `for T x in xs`, lectura indexada y
-  asignacion indexada, `copy()`, `contains()`, `indexOf()`, `reverse()` y
-  `clear()`, `push()`, `pop()`, `insert()` y `removeAt()`. No incluye shrinking,
-  reserva publica, ownership general ni runtime dinamico completo. El backend
-  agrega bounds checks propios para `ListGet`/`ListSet` antes de acceder a
-  `data`; las mutaciones de longitud validan sus indices antes de modificar la
-  lista.
-- `ListNew`, `ListCopy` y el buffer temporal de `List/Array.sort` validan
-  multiplicaciones i64 antes de reservar o copiar. `List.length` e `indexOf`
-  rechazan resultados fuera de i32; `contains` consume la busqueda i64 sin
-  narrowing.
-- En el frontend/interprete, los agregados mutables (`List`, `Array`,
-  `Vector`, `Matrix`) aliasan por asignacion, parametros y return cuando no hay
-  conversion de elementos; `copy()` crea el contenedor independiente explicito.
-- `Array<T>` tiene backend para literales con tipo esperado, indexing,
-  assignment y length; no tiene API completa de colecciones. LLVM no valida
-  bounds de get/set, ArrayNew no comprueba overflow de bytes y `.length` trunca
-  i64 a i32 sin check. El detalle y roadmap estan en
-  [`ARRAY_SUBSYSTEM_AUDIT.md`](ARRAY_SUBSYSTEM_AUDIT.md).
-
-## Expresiones
-
-| Feature | Parser | Typechecker | AST Interpreter | IR | SSA | Optimizer | LLVM | Tests | Spec | Estado |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| unary `-` | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ✅ | ⚠️ parcialmente documentada | Parcial backend |
-| `!` negación lógica prefija | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Completa |
-| `+` | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ✅ | ✅ documentada | Parcial backend |
-| `-` | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ✅ | ✅ documentada | Parcial backend |
-| `*` | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ✅ | ⚠️ parcialmente documentada | Parcial backend |
-| `/` | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ✅ | ✅ documentada | Parcial backend |
-| `%` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ documentada | Pendiente LLVM |
-| `==` | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ✅ | ✅ documentada | Parcial backend |
-| `!=` | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ✅ | ✅ documentada | Parcial backend |
-| `<` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Completa |
-| `<=` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Completa |
-| `>` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Completa |
-| `>=` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Completa |
-| `&&` | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ no documentada | Pendiente IR |
-| <code>&#124;&#124;</code> | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ no documentada | Pendiente IR |
-| ternario | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ no documentada | No implementado |
-
-Notas:
-
-- `!` solo acepta un operando `boolean`, se representa explícitamente en
-  IR/SSA y baja a `xor i1 ..., true`; no existe una forma postfix.
-- `&&` y `||` tienen short-circuit en el interprete AST, pero no bajan a IR.
-- `%` baja como `rem`; los optimizadores IR/SSA conocen `mod`/`rem`. LLVM solo
-  tiene `srem` para enteros en el backend actual.
-- `==`/`!=` estan muy cubiertos en frontend; IR/SSA cubren escalares
-  seleccionados y string, pero LLVM no soporta comparaciones string.
-- `*` esta parcialmente documentado porque la spec aun conserva restricciones
-  de matrix/vector `*` que no describen todo el backend actual.
-
-## Control de flujo
-
-| Feature | Parser | Typechecker | AST Interpreter | IR | SSA | Optimizer | LLVM | Tests | Spec | Estado |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| if | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Completa |
-| while | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Completa |
-| for | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Completa |
-| break | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Completa |
-| continue | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Completa |
-| return | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Completa |
-
-Notas:
-
-- `for` baja a CFG explicito con bloques de condicion, cuerpo, incremento y
-  salida. El backend cubre rangos `int` y colecciones indexables ya soportadas
-  por IR/LLVM: arrays, vectores y listas fase 1.
-- `break` y `continue` no agregan sintaxis ni opcodes especiales: se materializan
-  como saltos IR/SSA a los destinos activos del loop.
-- Auditoria tecnica relacionada:
-  [CONTROL_FLOW_AUDIT.md](CONTROL_FLOW_AUDIT.md).
-
-## Funciones
-
-| Feature | Parser | Typechecker | AST Interpreter | IR | SSA | Optimizer | LLVM | Tests | Spec | Estado |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| llamadas | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Completa con optimizer parcial |
-| parametros | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ✅ | ✅ documentada | Parcial backend |
-| recursion | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ⚠️ parcialmente documentada | Pendiente tests |
-
-Notas:
-
-- Recursion: el frontend y el interprete AST tienen tests. Por inspeccion
-  ejecutable local, una funcion recursiva simple baja a IR, ejecuta en el IR
-  interpreter, construye SSA, pasa por el optimizer SSA y emite una llamada
-  LLVM recursiva. Falta un test dedicado de backend.
-- Los optimizadores conservan llamadas de forma conservadora; no hacen analisis
-  interprocedural.
-
-## Colecciones
-
-### List
-
-| Feature | Parser | Typechecker | AST Interpreter | IR | SSA | Optimizer | LLVM | Tests | Spec | Estado |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| List literal `{...}` con tipo esperado | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Parcial backend fase 1 |
-| List.length / length | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ may-trap | ✅ checked i64→i32 | ✅ | ✅ documentada | `.length` segura; builtin global aun no baja a IR |
-| List.is_empty / is_empty | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Parcial backend fase 1 |
-| for sobre List | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Parcial backend fase 1 |
-| List index read (`xs[i]`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ may-trap | ✅ bounds + panic | ✅ | ✅ documentada | Seguro: `0 <= i < length` en AST/IR/native |
-| List index assignment (`xs[i] = value`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ side-effect | ✅ bounds + panic | ✅ | ✅ documentada | Seguro: check antes del store |
-| List.copy | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ helper tipado por T | ✅ | ✅ documentada | Objeto/buffer nuevos; capacity=size; copy_init por elemento |
-| List.contains | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ búsqueda i64 | ✅ | ✅ documentada | No depende del narrowing de indexOf |
-| List.indexOf | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ may-trap | ✅ checked i64→i32 | ✅ | ✅ documentada | `-1` ausente; panic si índice > INT32_MAX |
-| List.push | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 4b con growth interno |
-| List.pop | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 4c |
-| List.insert | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 4d |
-| List.removeAt / remove_at | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 4e sin shrinking |
-| List.clear | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 4a |
-| List.reverse | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ documentada | Implementado fase 3a |
-| List.sort | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ checked temp/offsets | ✅ | ✅ documentada | `IRSequenceSort` estable compartido, sin wraparound |
-
-### Array
-
-| Feature | Parser | Typechecker | AST Interpreter | IR | SSA | Optimizer | LLVM | Tests | Spec | Estado |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Array literal `{...}` con tipo esperado | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ allocation conservadora | ⚠️ OOM checked, bytes sin overflow check | ✅ | ✅ documentada | Funcional con riesgo de allocation |
-| Array.length / length | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ lectura eliminable | ⚠️ trunc i64→i32 sin check | ✅ caminos normales | ⚠️ parcialmente documentada | Narrowing nativo inseguro |
-| for sobre Array | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ hereda ArrayGet | ⚠️ loop acotado, get sin check propio | ⚠️ | ⚠️ parcialmente documentada | Funcional, safety parcial |
-| Array index read (`a[i]`) | ✅ | ✅ | ✅ bounds | ✅ bounds en interpreter | ✅ | ❌ DCE elimina get may-trap | ❌ sin bounds ni panic | ⚠️ AST/validos native | ⚠️ parcialmente documentada | Inseguro en LLVM |
-| Array index assignment (`a[i] = value`) | ✅ | ✅ | ✅ bounds | ✅ bounds en interpreter | ✅ | ✅ side-effect | ❌ sin bounds; store directo | ⚠️ AST/validos native | ⚠️ parcialmente documentada | Inseguro en LLVM |
-| Array.isEmpty | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ no documentada | No implementado |
-| Array.copy | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ helper tipado por T | ✅ | ✅ documentada | Copia exterior shallow E2E, resultado owned |
-| Array.contains | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ no documentada | No implementado |
-| Array.indexOf | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ no documentada | No implementado |
-| Array.swap | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ no documentada | No implementado |
-| Array.reverse | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ no documentada | No implementado |
-| Array.sort | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ checked temp/offsets | ✅ | ✅ documentada | Mismo helper estable y seguro que List.sort |
-
-La semantica unica implementada de `List.sort` y `Array.sort` esta en
-[`AETHER_SEQUENCE_SORT_DESIGN.md`](../aether/AETHER_SEQUENCE_SORT_DESIGN.md).
-Ambos contenedores comparten IR, politica de comparacion y helpers LLVM; solo
-difieren al extraer el puntero de datos y la longitud de sus cabeceras.
-
-El crecimiento y las mutaciones de longitud de `List<T>` tienen su
-contrato de implementacion en
-[`AETHER_LIST_GROWTH_DESIGN.md`](../aether/AETHER_LIST_GROWTH_DESIGN.md). Las
-filas `insert` y `removeAt` permanecen sin backend. `clear` y `pop` conservan
-capacidad y buffer; `push` implementa reserve/growth interno y preserva header.
-
-## Algebra lineal
-
-| Feature | Parser | Typechecker | AST Interpreter | IR | SSA | Optimizer | LLVM | Tests | Spec | Estado |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Vector literal | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Completa con optimizer parcial |
-| Matrix literal | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Completa con optimizer parcial |
-| vector index | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Completa con optimizer parcial |
-| matrix index | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Completa con optimizer parcial |
-| vector assignment | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ⚠️ parcialmente documentada | Completa con optimizer parcial |
-| matrix assignment | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ⚠️ parcialmente documentada | Completa con optimizer parcial |
-| vector add | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Completa con optimizer parcial |
-| vector sub | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Completa con optimizer parcial |
-| vector scale | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Completa con optimizer parcial |
-| matrix add | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Completa con optimizer parcial |
-| matrix sub | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Completa con optimizer parcial |
-| matrix scale | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Completa con optimizer parcial |
-| dot product | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Completa con optimizer parcial |
-| outer product | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ⚠️ parcialmente documentada | Completa con optimizer parcial |
-| matrix multiplication | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ⚠️ parcialmente documentada | Completa con optimizer parcial |
-| matrix-column multiplication | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Completa con optimizer parcial |
-| row-matrix multiplication | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Completa con optimizer parcial |
-| transpose builtin | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ documentada | Pendiente IR |
-
-Notas:
-
-- Los optimizadores IR/SSA preservan operaciones de algebra lineal y reescriben
-  usos cuando corresponde, pero no aplican optimizaciones algebraicas
-  especificas para agregados.
-- La spec documenta `Math.LinearAlgebra.matmul(...)`; la documentacion de
-  operadores `*` para todos los casos de algebra lineal esta desalineada con el
-  backend actual y por eso algunas filas quedan parcialmente documentadas.
-
-## Backend LLVM e infraestructura interna
-
-| Feature | Parser | Typechecker | AST Interpreter | IR | SSA | Optimizer | LLVM | Tests | Spec | Estado |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| build | N/A | N/A | N/A | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ no documentada | Completa |
-| run | N/A | N/A | N/A | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ no documentada | Completa |
-| emit-llvm | N/A | N/A | N/A | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ no documentada | Completa |
-| phi | N/A | N/A | N/A | N/A | ✅ | ✅ | ✅ | ✅ | ❌ no documentada | Infraestructura backend |
-| call | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ documentada | Completa con optimizer parcial |
-| casts | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ✅ | ✅ documentada | Parcial backend |
-| string globals | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ⚠️ parcialmente documentada | Parcial optimizer |
-
-Notas:
-
-- `phi` esta implementado y probado en SSA/LLVM. No corresponde a parser,
-  typechecker ni interprete AST porque no es sintaxis Aether.
-- `casts` estan documentados como `int`, `float`, `double`, `complex`,
-  `string`, `boolean`, pero IR/LLVM solo soportan de forma efectiva casts
-  numericos seleccionados, especialmente `int <-> double`.
-- `string globals` cubre literales string como valores LLVM `ptr`; no implica
-  runtime string completo.
-
-## Prioridades recomendadas
-
-1. Bajar `&&` y `||` a IR/SSA/LLVM preservando short-circuit.
-2. Completar `%` en LLVM para `double` o limitar explicitamente el subconjunto
-   compilable.
-3. Completar strings en backend: concatenacion, comparaciones, impresion,
-   length/indexing y runtime/ownership.
-4. Completar `List<T>` con las mutaciones de longitud restantes, crecimiento,
-   `realloc` y ownership; `clear` y `sort` ya estan implementados.
-5. Agregar `NullableType`/`null` al IR, SSA, optimizadores y LLVM, incluyendo
-   comparaciones con `null`.
-6. Migrar structs, classes, interfaces y enums al backend o definir
-   explicitamente que son solo del interprete AST.
-7. Alinear la spec con el estado real de operadores de algebra lineal,
-   especialmente `*`, outer product y matrix multiplication.
-8. Bajar `transpose`/`conjtranspose` y demas builtins de algebra lineal que hoy
-   dependen del interprete AST.
-9. Agregar tests dedicados de recursividad en IR/SSA/LLVM.
-10. Completar o descartar formalmente APIs faltantes de colecciones:
-    `Array.isEmpty`, `Array.contains`, `Array.swap` y `Array.reverse`;
-    `Array.sort` ya esta implementado.
-
-## Revisar manualmente
-
-- Ninguna fila queda en `?` tras esta revision.
-- Mantener esta matriz sincronizada con cambios en `docs/aether/` y con las
-  pruebas de backend; varias filas son parciales por disonancia entre spec,
-  frontend y subconjunto LLVM.
+- Current language contract:
+  [AETHER_LANGUAGE_SPEC_V1.md](../aether/AETHER_LANGUAGE_SPEC_V1.md)
+- Current executable capability contract:
+  [AETHER_NATIVE_PROFILE_V1.md](../aether/AETHER_NATIVE_PROFILE_V1.md)
+- Current object representation:
+  [NATIVE_OBJECT_MODEL_DESIGN.md](NATIVE_OBJECT_MODEL_DESIGN.md)
+- Provisional internal ABI:
+  [AETHER_NATIVE_ABI.md](AETHER_NATIVE_ABI.md)
+- Dated parity evidence:
+  [docs/aether/BACKEND_FEATURE_PARITY.md](../aether/BACKEND_FEATURE_PARITY.md)

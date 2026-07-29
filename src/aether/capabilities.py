@@ -48,7 +48,7 @@ if TYPE_CHECKING:
     from .pipeline import TypedProgram
 
 
-CAPABILITY_PROFILE_VERSION = "22"
+CAPABILITY_PROFILE_VERSION = "23"
 
 
 class BackendIdentity(str, Enum):
@@ -89,7 +89,6 @@ class Capability(str, Enum):
     DOUBLE_STRING_PARSING = "double-string-parsing"
     STRING_TRIM = "string-trim"
     STRING_SPLIT = "string-split"
-    STRING_SPLIT_TRIM = "string-split-trim"
     PRINT = "print"
     INPUT = "input"
     PROCESS_ARGUMENTS = "process-arguments"
@@ -102,7 +101,6 @@ class Capability(str, Enum):
     CLASSES = "classes"
     CLASS_CONSTRUCTORS = "class-constructors"
     CLASS_METHODS = "class-methods"
-    NATIVE_INTERFACE_ABI = "native-interface-abi"
     INTERFACES = "interfaces"
     ENUMS = "enums"
     ARRAY = "array"
@@ -215,7 +213,6 @@ CAPABILITY_CATALOG: Mapping[Capability, CapabilityDefinition] = MappingProxyType
             _definition(Capability.DOUBLE_STRING_PARSING, "Strict structured locale-independent parsing from string to double."),
             _definition(Capability.STRING_TRIM, "Explicit trimming of Aether v1 ASCII whitespace."),
             _definition(Capability.STRING_SPLIT, "Exact byte-based string splitting into owned fields."),
-            _definition(Capability.STRING_SPLIT_TRIM, "Public split and trim text algorithms."),
             _definition(Capability.PRINT, "print and println output."),
             _definition(Capability.INPUT, "Typed input calls."),
             _definition(Capability.PROCESS_ARGUMENTS, "Access to process arguments."),
@@ -232,12 +229,8 @@ CAPABILITY_CATALOG: Mapping[Capability, CapabilityDefinition] = MappingProxyType
             _definition(Capability.CLASS_CONSTRUCTORS, "Class constructors."),
             _definition(Capability.CLASS_METHODS, "Class methods and this."),
             _definition(
-                Capability.NATIVE_INTERFACE_ABI,
-                "Native interface values, class carriers, and witness metadata.",
-            ),
-            _definition(
                 Capability.INTERFACES,
-                "Struct-backed interface boxing and unsupported interface adapters.",
+                "Nominal interfaces with class carriers, struct boxing, witness dispatch, and ownership.",
             ),
             _definition(Capability.ENUMS, "Enums without payloads."),
             _definition(Capability.ARRAY, "Array values and operations."),
@@ -312,7 +305,6 @@ def _profile(
 _AST_UNSUPPORTED = {
     Capability.GENERICS,
     Capability.OPTIMIZATION_PROFILES,
-    Capability.STRING_SPLIT_TRIM,
 }
 _AST_PARTIAL = {
     Capability.FUNCTION_VALUES,
@@ -362,7 +354,7 @@ _NATIVE_COMPLETE = {
     Capability.CLASSES,
     Capability.CLASS_CONSTRUCTORS,
     Capability.CLASS_METHODS,
-    Capability.NATIVE_INTERFACE_ABI,
+    Capability.INTERFACES,
     Capability.STRUCTURAL_EQUALITY,
     Capability.EQ_COLLECTION_SEARCH,
     Capability.ALPT1_ENCODE,
@@ -372,10 +364,8 @@ _NATIVE_COMPLETE = {
 }
 _NATIVE_UNSUPPORTED = {
     Capability.INPUT,
-    Capability.INTERFACES,
     Capability.GENERICS,
     Capability.ERROR_HANDLING,
-    Capability.STRING_SPLIT_TRIM,
 }
 NATIVE_CAPABILITY_PROFILE = _profile(
     BackendIdentity.NATIVE,
@@ -446,7 +436,6 @@ E2E_TESTED_CAPABILITIES: Mapping[BackendIdentity, frozenset[Capability]] = Mappi
                 Capability.CLASSES,
                 Capability.CLASS_CONSTRUCTORS,
                 Capability.CLASS_METHODS,
-                Capability.NATIVE_INTERFACE_ABI,
                 Capability.INTERFACES,
                 Capability.ENUMS,
                 Capability.ARRAY,
@@ -503,7 +492,7 @@ E2E_TESTED_CAPABILITIES: Mapping[BackendIdentity, frozenset[Capability]] = Mappi
                 Capability.CLASSES,
                 Capability.CLASS_CONSTRUCTORS,
                 Capability.CLASS_METHODS,
-                Capability.NATIVE_INTERFACE_ABI,
+                Capability.INTERFACES,
                 Capability.FILES,
                 Capability.TEXT_FILE_READ,
                 Capability.TEXT_FILE_WRITE,
@@ -886,17 +875,6 @@ class _CapabilityDetector:
             else None
         )
         if isinstance(interface_target, InterfaceType):
-            if isinstance(source, NullableType):
-                self._record(
-                    Capability.INTERFACES,
-                    node,
-                    detail=(
-                        f"nullable conversion from '{source}' to '{target}' "
-                        "requires payload adaptation in Phase 5.4C"
-                    ),
-                    requires_complete_support=True,
-                )
-                return
             if isinstance(source, ClassType):
                 concrete = self.checker.structs.get(source.name)
                 if (
@@ -1204,7 +1182,7 @@ class _CapabilityDetector:
                 self._record_type(field.type_name, field)
             return
         if isinstance(node, ast.InterfaceDeclaration):
-            self._record(Capability.NATIVE_INTERFACE_ABI, node)
+            self._record(Capability.INTERFACES, node)
             return
         if isinstance(node, ast.EnumDeclaration):
             self._record(Capability.ENUMS, node)
@@ -1337,7 +1315,7 @@ class _CapabilityDetector:
             if isinstance(target_type, str) and target_type in self.checker.interfaces:
                 target_type = InterfaceType(target_type)
             if isinstance(target_type, InterfaceType):
-                self._record(Capability.NATIVE_INTERFACE_ABI, node)
+                self._record(Capability.INTERFACES, node)
             struct_name = target_type if isinstance(target_type, str) else None
             symbol = self.checker.structs.get(struct_name) if struct_name is not None else None
             if symbol is not None:
@@ -1445,7 +1423,7 @@ class _CapabilityDetector:
             if isinstance(target_type, str) and target_type in self.checker.interfaces:
                 target_type = InterfaceType(target_type)
             if isinstance(target_type, InterfaceType):
-                self._record(Capability.NATIVE_INTERFACE_ABI, call)
+                self._record(Capability.INTERFACES, call)
             struct_name = target_type if isinstance(target_type, str) else None
             symbol = (
                 self.checker.structs.get(struct_name)
@@ -1965,7 +1943,7 @@ class _CapabilityDetector:
             self._record(Capability.CLASSES, node)
             return
         if isinstance(type_name, InterfaceType):
-            self._record(Capability.NATIVE_INTERFACE_ABI, node)
+            self._record(Capability.INTERFACES, node)
             return
         if isinstance(type_name, EnumType):
             self._record(Capability.ENUMS, node)

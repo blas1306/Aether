@@ -1,10 +1,10 @@
 {
   "schema_version": 2,
-  "language_version": "1.0.0-rc.3",
-  "native_capability_profile": "22",
+  "language_version": "1.0.0-rc.4",
+  "native_capability_profile": "23",
   "audit_date": "2026-07-28",
   "profile_definitions": {
-    "V1_NATIVE": "Normative Aether 1.0 example accepted by native capability profile 22.",
+    "V1_NATIVE": "Normative Aether 1.0 example accepted by native capability profile 23.",
     "AST_ONLY_EXPERIMENTAL": "Non-normative frontend/AST experiment with an explicit native capability exclusion."
   },
   "entries": [

@@ -1,7 +1,7 @@
 # ABI native de Aether
 
 > Estado: **descriptivo y provisional**, 28 de julio de 2026. Documenta el
-> contrato observado del profile native 22. No define una ABI pública, una FFI
+> contrato observado del profile native 23. No define una ABI pública, una FFI
 > ni compatibilidad binaria entre releases.
 
 ## 1. Dominios de compatibilidad
@@ -10,7 +10,7 @@ Es necesario distinguir cuatro contratos:
 
 | Dominio | Estado actual | Compatibilidad prometida |
 | --- | --- | --- |
-| semántica observable AST/native | normativa para programas admitidos por profile 22 | stdout/stderr, exit code, panic y archivos según la spec/profile |
+| semántica observable AST/native | normativa para programas admitidos por profile 23 | stdout/stderr, exit code, panic y archivos según la spec/profile |
 | ABI interna del compilador | tipos, firmas y nombres dentro de un módulo LLVM combinado | ninguna entre versiones |
 | ABI del runtime | helpers LLVM `private` generados dentro del módulo | no existe como ABI enlazable separada |
 | FFI / objetos precompilados | no implementados | ninguna |
@@ -73,7 +73,7 @@ linkage LLVM; eso es un detalle accidental, no una exportación FFI.
 | `int` | `i32` signed | 4 bytes en `TypeLayout` | por valor | semántica estable; ABI interna |
 | enum sin payload | `i32` | 4 bytes | por valor | discriminante provisional |
 | `boolean` | `i1` | layout lógico 1 byte en storage registry | por valor | ABI interna; C `bool` no asumido |
-| `float` | `float` en mapper | 4 bytes | profile 22 lo rechaza | no ABI native estable |
+| `float` | `float` en mapper | 4 bytes | profile 23 lo rechaza | no ABI native estable |
 | `double` | `double` IEEE binary64 | 8 bytes | por valor | semántica estable; ABI target-dependent |
 | `complex` | sin representación | — | — | AST/IR-only |
 | `void` | `void` | unsized | retorno sin valor | interna |
@@ -85,7 +85,7 @@ linkage LLVM; eso es un detalle accidental, no una exportación FFI.
 | `Matrix<T>` | `ptr` | una palabra target | handle por valor | provisional/shape externo |
 | struct | `%struct.Name = type { fields... }` | padding/alignment del target | por valor | layout source-order, no ABI pública |
 | class | `ptr` no nulo a `{header, fields...}` nominal | una palabra target | handle por valor | state/constructors/methods 5.3C |
-| interface `I` | `%interface.<id> = type { ptr, ptr }` | dos palabras target; alineación de `ptr` | aggregate por valor | ABI 5.4A + dispatch class-carrier 5.4B |
+| interface `I` | `%interface.<id> = type { ptr, ptr }` | dos palabras target; alineación de `ptr` | aggregate por valor | ABI/dispatch/boxing 5.4A–5.4C |
 | nullable `T?` | `%nullable.<T> = type { i1, T }` | target-dependent, incluido padding | aggregate por valor | implementado para payload representable |
 | tuple source | sin LLVM ABI general | — | — | unsupported native |
 | method result | `{ %struct.Receiver [, Value] }` | target-dependent | por valor | detalle de lowering |

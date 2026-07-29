@@ -4,6 +4,11 @@
 > Los contratos vigentes están en [la spec v1](AETHER_LANGUAGE_SPEC_V1.md) y
 > [el perfil native v1](AETHER_NATIVE_PROFILE_V1.md).
 
+> Estado posterior: `1.0.0-rc.4` usa profile 23 y soporta nullable, classes e
+> interfaces native. Las filas profile-22 que indican “unsupported native” son
+> históricas y no deben usarse como release readiness actual. La readiness de
+> RC4 se determina por los gates ejecutables de CI/release y sus resultados.
+
 > Auditoría relacionada posterior al corte: [control de flujo e
 > iteración](CONTROL_FLOW_AND_ITERATION_AUDIT.md). Ese documento caracteriza la
 > implementación rc.1 y diseña la transición rc.2; no modifica este dictamen ni

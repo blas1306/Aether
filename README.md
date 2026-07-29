@@ -10,8 +10,8 @@ de lenguaje y sin relegar módulos, tipos, errores o IO a soluciones
 improvisadas. Aether no intenta reemplazar a Python, Julia, C++, Rust, Java o
 C# en todos los escenarios.
 
-Aether está preparando **`1.0.0-rc.3`**. Es un candidato para validar el
-contrato v1 y el perfil native 22, no una release final ni una declaración de
+Aether está preparando **`1.0.0-rc.4`**. Es un candidato para validar el
+contrato v1 y el perfil native 23, no una release final ni una declaración de
 production-readiness. El frontend/intérprete AST cubre una superficie mayor
 que el compilador native; la frontera aceptada está definida por la
 [especificación normativa v1](docs/aether/AETHER_LANGUAGE_SPEC_V1.md) y el
@@ -61,6 +61,8 @@ imprime `25`.
   payloads length-prefixed, rechazo fail-closed y save atómico/durable POSIX;
 - structs por valor, constructores, métodos, `this`, copia, igualdad e
   impresión para el subconjunto de campos soportado por backend;
+- nullable tagged, classes por referencia con ARC/fields/constructores/métodos
+  e interfaces con witness dispatch, carriers class y boxing owned de structs;
 - núcleo compilado de Array/List con bounds, overflow y allocation checks;
 - literales y operaciones básicas compiladas de Vector/Matrix con índices
   públicos 1-based;
@@ -88,10 +90,9 @@ implica ABI estable, seguridad para producción ni v1 final terminada.
 ### Experimental o solo AST
 
 - módulos de archivo, packages, imports/aliases y visibilidad son parciales en native;
-- classes por referencia e interfaces siguen solo AST;
 - enums nominales sin payload son completos en AST/native (`i32` interno en LLVM);
 - funciones abreviadas tipadas `f(double x) = ...`, tuples y destructuring;
-- `input`, `throw`/`try`/`catch`, nullable y `complex`;
+- `input`, `throw`/`try`/`catch` y `complex`;
 - builtins matemáticos escalares y álgebra lineal avanzada;
 - REPL persistente y plotting.
 
@@ -100,7 +101,7 @@ compilación nativa completa.
 
 ### Planeado
 
-- globals/inicialización de módulos y tipos de referencia en native;
+- globals/inicialización de módulos;
 - input native, archivos binarios/streams/directorios y environment variables;
 - módulo `testing` y una stdlib Aether distribuible;
 - frontera futura de interoperabilidad por ABI C.
@@ -112,7 +113,7 @@ reimplementaciones de NumPy/SciPy/BLAS/LAPACK.
 ## Documentos de consolidación v1
 
 - [Especificación normativa Aether v1](docs/aether/AETHER_LANGUAGE_SPEC_V1.md)
-- [Perfil native normativo v1 / capability profile 22](docs/aether/AETHER_NATIVE_PROFILE_V1.md)
+- [Perfil native normativo v1 / capability profile 23](docs/aether/AETHER_NATIVE_PROFILE_V1.md)
 - [Índice y clasificación documental](docs/aether/README.md)
 - [Alcance formal de Aether v1](docs/aether/AETHER_V1_SCOPE.md)
 - [Auditoría completa de paridad](docs/aether/BACKEND_FEATURE_PARITY.md)
@@ -133,15 +134,15 @@ Desde un wheel RC construido localmente (no se publica automáticamente):
 
 ```bash
 python3 -m venv .venv
-.venv/bin/python -m pip install dist/aether_language-1.0.0rc3-py3-none-any.whl
+.venv/bin/python -m pip install dist/aether_language-1.0.0rc4-py3-none-any.whl
 .venv/bin/aether --version
 ```
 
 El resultado esperado identifica por separado lenguaje y perfil:
 
 ```text
-Aether 1.0.0-rc.3
-Native capability profile 22
+Aether 1.0.0-rc.4
+Native capability profile 23
 ```
 
 Para un checkout de desarrollo:
@@ -213,9 +214,9 @@ válida solo en AST llega al compilador, el CLI falla con un diagnóstico.
 Lexer -> Parser -> TypeChecker -> EntryPointNormalizer -> AST Interpreter
 ```
 
-Es el backend con mayor cobertura y el usado por el REPL. Incluye módulos,
-classes, interfaces, exceptions, input y builtins científicos que aún no
-compilan.
+Es el backend con mayor cobertura y el usado por el REPL. Incluye
+inicialización de módulos, exceptions, input y builtins científicos que aún no
+compilan; classes, nullable e interfaces también compilan en native.
 
 ### IR interpreter
 
@@ -247,7 +248,8 @@ también el `.ll`.
 
 El runtime LLVM actual aporta IO, contexto de argumentos y helpers checked para
 aritmética entera, strings UTF-8, allocations, Array, List, Vector, Matrix,
-sort y ciertos agregados. No tiene GC, ownership completo de classes ni FFI
+sort, nullable, classes e interfaces. Classes usan ARC fuerte y las interfaces
+ownership dinámico por witness; los ciclos no se recolectan y no hay FFI
 pública.
 
 ## Herramientas del compilador
@@ -270,7 +272,9 @@ aether --debug --emit-llvm program.ae
 
 `GeneralSSABuilder` es el builder predeterminado. Usa CFG, dominadores y
 fronteras de dominancia. El builder `pattern` se conserva como comparación
-temporal y soporta menos formas.
+temporal y soporta menos formas. Los visitantes de operandos IR/SSA son
+estructurales y la suite verifica que una instrucción nueva no quede fuera de
+DCE, SCCP o las reescrituras de valores.
 
 Los niveles del optimizer IR se conectan únicamente a `--emit-ir`:
 
@@ -321,7 +325,7 @@ aether --backend=ast examples/numerical_methods/main.ae
 ## Módulos y imports
 
 El frontend resuelve un módulo `A.B` como `A/B.ae` desde el directorio del
-archivo de entrada. AST soporta inicialización de módulo y native profile 22
+archivo de entrada. AST soporta inicialización de módulo y native profile 23
 compila el subconjunto de declaraciones sin storage/import-time execution:
 
 - `package A.B;`

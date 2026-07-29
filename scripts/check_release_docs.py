@@ -10,6 +10,12 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from aether.capabilities import CAPABILITY_PROFILE_VERSION  # noqa: E402
+from aether.version import LANGUAGE_VERSION, PACKAGE_VERSION  # noqa: E402
+
+
 NORMATIVE = (
     ROOT / "docs" / "aether" / "AETHER_LANGUAGE_SPEC_V1.md",
     ROOT / "docs" / "aether" / "AETHER_NATIVE_PROFILE_V1.md",
@@ -30,7 +36,20 @@ CLASSIFIED = {
     ROOT / "docs" / "aether" / "AETHER_IR_DESIGN.md": "Design/RFC",
     ROOT / "docs" / "aether" / "AETHER_FRONTEND_EXPERIMENTS.md": "Non-normative",
     ROOT / "docs" / "aether" / "AETHER_EXAMPLES_CATALOG_AUDIT.md": "Audit",
+    ROOT / "docs" / "aether" / "AETHER_V1_PROFILE_AUDIT.md": "Audit",
+    ROOT / "docs" / "aether" / "AETHER_V1_PROFILE_DECISION.md": "Audit",
+    ROOT / "docs" / "compiler" / "BACKEND_FEATURE_PARITY.md": "Audit",
 }
+CURRENT_REFERENCE = (
+    ROOT / "README.md",
+    *NORMATIVE,
+    ROOT / "docs" / "aether" / "README.md",
+    ROOT / "docs" / "compiler" / "FEATURE_MATRIX.md",
+    ROOT / "docs" / "compiler" / "NATIVE_OBJECT_MODEL_DESIGN.md",
+    ROOT / "docs" / "compiler" / "AETHER_NATIVE_ABI.md",
+    ROOT / "docs" / "compiler" / "CI.md",
+    ROOT / "docs" / "aether" / "AETHER_1_0_0_RC4_RELEASE_NOTES.md",
+)
 
 
 def _local_markdown_links(path: Path) -> tuple[Path, ...]:
@@ -88,75 +107,28 @@ def check() -> list[str]:
     spec = NORMATIVE[0].read_text(encoding="utf-8")
     required_contracts = (
         "Aether 1.0 is the single language profile",
-        "exactly the 75",
         "zero-based, half-open `[start,end)`",
         "Array/List assignment is O(1) reference assignment",
         "A string is immutable valid UTF-8",
         "Native v1 panics do not unwind",
         "Windows and macOS are not supported native platforms",
-        "C01 C03-C05 C07-C12 C14 C16-C23 C25",
-        "C02 C06 C13 C15 C24 C26",
+        "A `class` is a nominal mutable reference type",
+        "An `interface` is a nominal method contract",
+        "Profile 23 supports tagged nullable values",
     )
     combined = spec + "\n" + NORMATIVE[1].read_text(encoding="utf-8")
     for contract in required_contracts:
         if contract not in combined:
             errors.append(f"normative contract is missing: {contract!r}")
 
-    audit = (ROOT / "docs" / "aether" / "AETHER_V1_PROFILE_AUDIT.md").read_text(
-        encoding="utf-8"
-    )
-    audited: dict[str, set[str]] = {
-        "SUPPORTED": set(),
-        "OUTSIDE_V1": set(),
-        "BROKEN": set(),
-        "UNDECIDED": set(),
-    }
-    for row_id, state in re.findall(
-        r"^\| ([CTERB]\d{2}) \|.*\| (SUPPORTED|OUTSIDE_V1|BROKEN|UNDECIDED) \|.*$",
-        audit,
-        flags=re.MULTILINE,
-    ):
-        audited[state].add(row_id)
-
-    inventory_blocks = re.findall(r"```text\n((?:[CTERB]\d{2}[^\n]*\n)+)```", spec)
-    try:
-        normative_sets = [_expand_audit_ids(block) for block in inventory_blocks]
-    except ValueError as exc:
-        errors.append(str(exc))
-        normative_sets = []
-    if len(normative_sets) != 2:
-        errors.append(
-            "normative spec must contain exactly two audit-ID blocks "
-            "(SUPPORTED and OUTSIDE_V1)"
-        )
-    else:
-        for state, actual in zip(("SUPPORTED", "OUTSIDE_V1"), normative_sets):
-            expected = frozenset(audited[state])
-            if actual != expected:
-                missing = sorted(expected - actual)
-                extra = sorted(actual - expected)
-                errors.append(
-                    f"normative {state} inventory differs from audit: "
-                    f"missing={missing}, extra={extra}"
-                )
-    observed_counts = {state: len(rows) for state, rows in audited.items()}
-    expected_counts = {"SUPPORTED": 75, "OUTSIDE_V1": 46, "BROKEN": 2, "UNDECIDED": 0}
-    if observed_counts != expected_counts:
-        errors.append(
-            f"profile audit counts changed: expected={expected_counts}, "
-            f"actual={observed_counts}"
-        )
-    if audited["BROKEN"] != {"B12", "B13"}:
-        errors.append(f"unexpected BROKEN audit rows: {sorted(audited['BROKEN'])}")
-
     contradictions = (
         "The AST profile is the semantic reference for the full frontend surface",
         "The native profile is a normative, deliberately smaller implementation subset",
-        "Classes are defined by the language",
-        "Interfaces are defined by the language",
         "Tuple values and destructuring are defined",
         "`${expression}` interpolation is part of the language",
         "The production and default backend is the AST backend",
+        "classes por referencia e interfaces siguen solo AST",
+        "interfaces` | **UNSUPPORTED**",
     )
     normative_text = "\n".join(
         document.read_text(encoding="utf-8") for document in NORMATIVE
@@ -167,6 +139,67 @@ def check() -> list[str]:
     for contradiction in contradictions:
         if contradiction in normative_text or contradiction in ir_design:
             errors.append(f"known documentation contradiction: {contradiction!r}")
+
+    release_document_id = (
+        LANGUAGE_VERSION.replace("-rc.", "_RC").replace(".", "_").upper()
+    )
+    expected_release_note = (
+        ROOT
+        / "docs"
+        / "aether"
+        / f"AETHER_{release_document_id}_RELEASE_NOTES.md"
+    )
+    if expected_release_note not in CURRENT_REFERENCE or not expected_release_note.is_file():
+        errors.append(
+            "current release notes do not match canonical language version: "
+            f"{expected_release_note.relative_to(ROOT)}"
+        )
+
+    current_text = {
+        document: document.read_text(encoding="utf-8")
+        for document in CURRENT_REFERENCE
+    }
+    identity_claims = {
+        ROOT / "README.md": (LANGUAGE_VERSION, CAPABILITY_PROFILE_VERSION),
+        NORMATIVE[0]: (LANGUAGE_VERSION, CAPABILITY_PROFILE_VERSION),
+        NORMATIVE[1]: (LANGUAGE_VERSION, CAPABILITY_PROFILE_VERSION),
+        expected_release_note: (
+            LANGUAGE_VERSION,
+            PACKAGE_VERSION,
+            CAPABILITY_PROFILE_VERSION,
+        ),
+    }
+    for document, expected in identity_claims.items():
+        for identity in expected:
+            if identity not in current_text[document]:
+                errors.append(
+                    f"{document.relative_to(ROOT)} is missing current identity {identity!r}"
+                )
+
+    compiler_claims = {
+        ROOT / "docs" / "compiler" / "FEATURE_MATRIX.md": (
+            "`interfaces` C",
+            "structural\noperand traversal",
+        ),
+        ROOT / "docs" / "compiler" / "NATIVE_OBJECT_MODEL_DESIGN.md": (
+            "boxing owned",
+            "Phase 5.4C",
+        ),
+        ROOT / "docs" / "compiler" / "AETHER_NATIVE_ABI.md": (
+            "profile native 23",
+            "dispatch/boxing 5.4A–5.4C",
+        ),
+        ROOT / "docs" / "compiler" / "CI.md": (
+            "capability consistency",
+            "documentation consistency",
+        ),
+    }
+    for document, claims in compiler_claims.items():
+        for claim in claims:
+            if claim not in current_text[document]:
+                errors.append(
+                    f"{document.relative_to(ROOT)} is missing compiler claim {claim!r}"
+                )
 
     readme = (ROOT / "docs" / "aether" / "README.md").read_text(encoding="utf-8")
     required_index_links = (

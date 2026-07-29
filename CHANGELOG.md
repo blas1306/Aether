@@ -9,6 +9,33 @@ Aether sigue en desarrollo y no tiene una release estable. La especificación
 v0 se conserva como historia; desde el primer candidato v1, el contrato vigente
 es la spec v1 junto con el perfil native normativo.
 
+## 1.0.0-rc.4 — 2026-07-28
+
+Cuarto candidato de Aether 1.0. Continúa sin declarar estabilidad de producción
+ni ABI/FFI pública.
+
+### Contrato y metadata
+
+- Capability profile **23** reemplaza profile 22 porque la frontera native
+  cambió materialmente después de Phase 5.4: nullable, classes, constructores,
+  métodos de class e interfaces class/struct son E2E.
+- La identidad canónica pasa a paquete `1.0.0rc4`, lenguaje
+  `1.0.0-rc.4` y tag previsto `v1.0.0-rc.4`.
+- Se eliminan del catálogo las capacidades históricas
+  `native-interface-abi` y `string-split-trim`; `interfaces`, `string-split` y
+  `string-trim` describen directamente el compilador.
+
+### Correcciones
+
+- Dead-phi, trivial-phi, simplificación algebraica IR/SSA, DCE y SCCP usan
+  recorrido estructural completo de operandos. Las instrucciones de classes,
+  interfaces, nullable/boxing y lifecycle ya no pueden quedar omitidas por un
+  switch manual.
+- CI valida cobertura de operandos, coherencia de capacidades, documentos,
+  perfil/release y catálogo de ejemplos antes de release.
+- Los documentos normativos y referencias actuales se separan explícitamente
+  de auditorías fechadas de profile 22.
+
 ## 1.0.0-rc.3 — 2026-07-19
 
 Tercer candidato para validar el perfil Aether 1.0 antes de la versión final.

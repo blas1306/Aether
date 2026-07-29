@@ -4,6 +4,14 @@
 > reemplaza [la spec v1](AETHER_LANGUAGE_SPEC_V1.md) ni
 > [el perfil native normativo](AETHER_NATIVE_PROFILE_V1.md).
 
+Actualización Phase 6.1 (28-07-2026): la referencia vigente es capability
+profile 23. Nullable, classes, constructores/métodos de class e interfaces con
+carrier class, boxing struct, witness dispatch y lifecycle son native E2E. La
+capacidad granular `interfaces` es COMPLETE; los nombres históricos
+`native-interface-abi` y `string-split-trim` ya no forman parte del catálogo.
+Las filas y conclusiones fechadas que siguen son evidencia histórica cuando
+contradicen esta actualización o el perfil normativo.
+
 Actualización Fase 5.2 (27-07-2026): nullable es E2E para todo payload con
 layout native representable. Parser/typechecker/AST, IR y DTO, verificadores
 Python/Rust, intérprete IR, SSA/optimizadores y LLVM/native conservan el mismo

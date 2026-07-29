@@ -1,8 +1,8 @@
 # Aether 1.0 Language Specification
 
 > Classification: **Normative**. Contract: **Aether 1.0 stable profile**.
-> Native capability profile: **22**. This is the profile frozen for the
-> `1.0.0-rc.3` release candidate; publishing this document does not by itself
+> Native capability profile: **23**. This is the profile frozen for the
+> `1.0.0-rc.4` release candidate; publishing this document does not by itself
 > change the package version.
 
 ## 1. Scope and conformance
@@ -13,10 +13,10 @@ requirements. Text explicitly labelled informative is not a requirement.
 Aether 1.0 is the single language profile defined by this document and refined
 by [Aether Native Profile v1](AETHER_NATIVE_PROFILE_V1.md). It is not the union
 of every construction recognized by the parser, type checker, AST interpreter,
-or internal compiler layers. The authoritative freeze contains exactly the 75
-`SUPPORTED` rows in the
-[Aether v1 Profile Audit](AETHER_V1_PROFILE_AUDIT.md); the row identifiers are
-listed in section 15.
+or internal compiler layers. The profile-22
+[Aether v1 Profile Audit](AETHER_V1_PROFILE_AUDIT.md) is dated historical
+evidence. The current executable boundary is profile 23 and is summarized in
+section 15.
 
 A conforming Aether 1.0 implementation:
 
@@ -58,16 +58,16 @@ and are not normalized implicitly.
 The stable grammar uses these reserved words:
 
 ```text
-alias as boolean break const constructor continue double else enum false for
-from function if import in int List Matrix package private public return string
-struct true Vector void while Array ParseStatus IntParseResult
+alias as boolean break class const constructor continue double else enum false
+for from function if implements import in int interface List Matrix null
+package private public return string struct true Vector void while Array ParseStatus IntParseResult
 DoubleParseResult FileStatus FileReadResult
 ```
 
-The implementation also reserves the experimental spellings `catch`, `class`,
-`complex`, `Exception`, `float`, `implements`, `interface`, `null`, `static`,
-`throw`, and `try`. Reservation prevents their use as identifiers; it does not
-make their associated constructions part of Aether 1.0.
+The implementation also reserves the experimental spellings `catch`,
+`complex`, `Exception`, `float`, `static`, `throw`, and `try`. Reservation
+prevents their use as identifiers; it does not make their associated
+constructions part of Aether 1.0.
 
 ### 2.2 Literals
 
@@ -121,9 +121,10 @@ One source file is one module. It MAY start with one
 Aether 1.0 does not define multi-file package merging.
 
 Stable top-level items are imports, type aliases, payload-free enums, structs,
-typed functions, abbreviated expression functions, and executable statements
-for a synthetic entry point. Structs and enums **MUST** be top-level. Nested
-functions are not permitted by the stable profile.
+classes, interfaces, typed functions, abbreviated expression functions, and
+executable statements for a synthetic entry point. Nominal type declarations
+**MUST** be top-level. Nested functions are not permitted by the stable
+profile.
 
 In a packaged module, only `public` top-level declarations are exported.
 Unmarked and `private` declarations remain module-private. Visibility does not
@@ -177,7 +178,11 @@ functions are ordinary qualified functions and never become the root entry.
 - `string` is an immutable, non-null UTF-8 value.
 - `void` denotes no value and is valid only as a function return type.
 
-There are no other primitive or nullable types in Aether 1.0.
+For a representable non-void type `T`, `T?` contains either absent `null` or a
+present `T`. `null` has no standalone runtime object identity. Assigning `T`
+to `T?` creates present; assigning `T?` to `T` is invalid without an explicit
+language operation. Equality compares tags and only compares payloads when
+both values are present. Flow-sensitive smart casts are not defined.
 
 ### 4.2 Enums and structs
 
@@ -187,7 +192,7 @@ Source order assigns deterministic discriminants, but Aether 1.0 defines no
 numeric conversion, bit flags, payloads, or pattern matching for enums.
 
 A `struct` is a nominal value type with declared fields whose transitive layout
-is supported by profile 22. Recursive by-value layouts are invalid. Struct
+is supported by profile 23. Recursive by-value layouts are invalid. Struct
 assignment, parameter passing, and return use value semantics while applying
 the lifecycle rules of every field.
 
@@ -197,20 +202,41 @@ methods. Within a constructor or method, fields may be referenced directly;
 `this.field` is the explicit equivalent. Construction **MUST** initialize every
 field before use.
 
-### 4.3 Callable values
+### 4.3 Classes and interfaces
+
+A `class` is a nominal mutable reference type. Construction creates a distinct
+non-null identity. Assignment, parameter passing and return preserve aliasing;
+`==` and `!=` compare identity for values of the same class. Fields require
+definite initialization. A class MAY declare one constructor and typed
+instance methods; method dispatch on a concrete class is static. Strong ARC
+manages ownership, but cycles are not collected.
+
+An `interface` is a nominal method contract. A class or struct declares
+`implements I` and **MUST** provide every method with the exact parameter and
+return types. Conversion to `I` preserves class identity and boxes a struct as
+an owned value snapshot. Calls dispatch through declaration-ordered witness
+metadata. Copying an interface retains a class carrier or logically copies a
+struct box. Interface inheritance, default methods, reflection, downcast/type
+tests, and interface equality are not defined.
+
+Inheritance, `extends`, `super`, override, user destructors, weak references,
+and user-defined equality remain outside Aether 1.0.
+
+### 4.4 Callable values
 
 The structural callable spelling is `R(P1, P2, ...)`. A callable value is only
 a capture-free reference to a top-level user function with the exact signature.
 Callable assignment, parameters, local selection, imports, and indirect calls
 are supported. Section 8 gives the remaining restrictions.
 
-### 4.4 Collections
+### 4.5 Collections
 
 `Array<T>` is a mutable fixed-length reference collection. `List<T>` is a
 mutable variable-length reference collection. Both use zero-based indexing.
 Their stable element types are `int`, `double`, `boolean`, `string`,
-payload-free enums, and registered acyclic structs when profile 22 provides
-every required layout and lifecycle hook.
+payload-free enums, nullable values, classes, interfaces, and registered
+acyclic structs when profile 23 provides every required layout and lifecycle
+hook.
 
 Nested Array/List element layouts, shaped Vector/Matrix elements, and every
 unregistered aggregate layout are outside Aether 1.0. An operation requiring
@@ -222,7 +248,7 @@ shaped mathematical values with one-based indexes. A vector orientation is
 not source-level genericity and **MUST NOT** cross a function, struct,
 collection, or callable ABI boundary.
 
-### 4.5 Bootstrap result types
+### 4.6 Bootstrap result types
 
 The base library exposes the nominal types `ParseStatus`, `IntParseResult`,
 `DoubleParseResult`, `FileStatus`, and `FileReadResult` defined in section 12.
@@ -436,7 +462,7 @@ contract exists.
 ## 11. Vector and Matrix core
 
 The stable local core is limited to shaped `int`/`double` values admitted by
-profile 22:
+profile 23:
 
 - construction from rectangular literals;
 - one-based checked element read and write;
@@ -574,37 +600,22 @@ Windows and macOS are not supported native platforms. Missing `clang` is a
 release-gate failure and **MUST** be diagnosed rather than converted to an AST
 fallback.
 
-## 15. Closed profile inventory and exclusions
+## 15. Current profile inventory and exclusions
 
-The stable inventory is exactly these 75 audit rows:
+The stable executable inventory is the capability catalog and typed subset in
+[Aether Native Profile v1](AETHER_NATIVE_PROFILE_V1.md), version 23. The
+profile-22 audit row inventory is retained only as a dated audit and **MUST
+NOT** override the current compiler/profile contract.
 
-```text
-C01 C03-C05 C07-C12 C14 C16-C23 C25
-T01 T03-T08 T14 T16 T19 T21 T23 T25 T29
-E01 E03-E11 E13-E14 E16 E18 E20 E22-E24 E26
-R01 R04-R06 R08 R10-R11 R13 R16 R19 R21 R23
-B01-B05 B07-B11
-```
-
-Ranges in this list are inclusive. The following 46 rows are explicitly
-outside Aether 1.0 and **MUST NOT** be inferred from frontend/AST acceptance:
-
-```text
-C02 C06 C13 C15 C24 C26
-T02 T09-T13 T15 T17-T18 T20 T22 T24 T26-T28
-E02 E12 E15 E17 E19 E21 E25 E27-E29
-R02-R03 R07 R09 R12 R14-R15 R17-R18 R20 R22 R24
-B06 B14-B15
-```
-
-They include inferred local declarations, non-`+=` compounds, stored or
-non-int ranges, nested functions, imported storage/initialization, `float`,
-`complex`, classes, interfaces, tuples, nullable/null, `Any`, user generics,
-lambdas/closures, nested or unregistered collections, advanced Vector/Matrix,
-string interpolation/general formatting, input, general persistence/DB,
-plotting, binary/stream/process IO, exceptions, GC, panic unwind, controlled
-stack overflow, a distinct O2, cross-platform native support, `long`,
-do-while, and match.
+Current exclusions include inferred local declarations, non-`+=` compounds,
+stored or non-int ranges, nested functions, imported storage/initialization,
+`float`, `complex`, tuples, `Any`, user generics, lambdas/closures, unsupported
+or recursive collection layouts, advanced Vector/Matrix, string
+interpolation/general formatting, input, general persistence/DB, plotting,
+binary/stream/process IO, exceptions, class/interface inheritance, default
+interface methods, reflection/downcasts, weak references, user destructors,
+GC/cycle collection, panic unwind, controlled stack overflow, a distinct O2,
+cross-platform native support, `long`, do-while, and match.
 
 The expected rejection categories are specified by
 [Aether Native Profile v1](AETHER_NATIVE_PROFILE_V1.md) and the negative corpus.
@@ -615,7 +626,7 @@ records recognized implementation experiments without assigning them Aether
 ## Appendix A — Document authority (informative)
 
 This specification and the native profile are the normative release contract.
-The profile audit and profile decision are dated closure evidence. Design/RFC,
-readiness, parity, and v0 documents are historical or informative and do not
-expand Aether 1.0. Where such a document conflicts with this specification,
-this specification prevails.
+The profile audit and profile decision are dated profile-22 closure evidence.
+Design/RFC, readiness, parity, and v0 documents are historical or informative
+and do not expand Aether 1.0. Where such a document conflicts with this
+specification, this specification prevails.

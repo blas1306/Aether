@@ -24,9 +24,9 @@ def _load_script(name: str):
 
 
 def test_canonical_version_maps_public_and_python_metadata() -> None:
-    assert PACKAGE_VERSION == "1.0.0rc3"
-    assert LANGUAGE_VERSION == "1.0.0-rc.3"
-    assert RELEASE_TAG == "v1.0.0-rc.3"
+    assert PACKAGE_VERSION == "1.0.0rc4"
+    assert LANGUAGE_VERSION == "1.0.0-rc.4"
+    assert RELEASE_TAG == "v1.0.0-rc.4"
     assert __version__ == PACKAGE_VERSION
 
 
@@ -48,7 +48,7 @@ def test_cli_version_uses_language_and_capability_identities() -> None:
     assert stderr.getvalue() == ""
 
 
-def test_native_profile_document_is_generated_from_profile_22() -> None:
+def test_native_profile_document_is_generated_from_current_profile() -> None:
     renderer = _load_script("render_native_profile.py")
 
     assert renderer.check_document()
@@ -59,6 +59,30 @@ def test_native_profile_document_is_generated_from_profile_22() -> None:
 def test_normative_documents_and_historical_classification_are_integral() -> None:
     checker = _load_script("check_release_docs.py")
     assert checker.check() == []
+
+
+def test_documentation_checker_rejects_interface_status_contradiction(
+    monkeypatch,
+) -> None:
+    checker = _load_script("check_release_docs.py")
+    native_profile = ROOT / "docs" / "aether" / "AETHER_NATIVE_PROFILE_V1.md"
+    original_read_text = Path.read_text
+
+    def contradictory_read_text(path: Path, *args, **kwargs) -> str:
+        text = original_read_text(path, *args, **kwargs)
+        if path == native_profile:
+            return text.replace(
+                "| `interfaces` | **COMPLETE**",
+                "| `interfaces` | **UNSUPPORTED**",
+            )
+        return text
+
+    monkeypatch.setattr(Path, "read_text", contradictory_read_text)
+
+    assert any(
+        "known documentation contradiction" in error
+        for error in checker.check()
+    )
 
 
 def test_release_manifest_uses_canonical_versions_and_platform(tmp_path: Path) -> None:
@@ -99,7 +123,7 @@ def test_packaging_declares_dynamic_canonical_version_and_essential_docs() -> No
     assert '"docs/aether/AETHER_NATIVE_PROFILE_V1.md"' in metadata
     assert '"docs/aether/AETHER_FRONTEND_EXPERIMENTS.md"' in metadata
     assert '"docs/aether/AETHER_DIAGNOSTICS.md"' in metadata
-    assert '"docs/aether/AETHER_1_0_0_RC3_RELEASE_NOTES.md"' in metadata
+    assert '"docs/aether/AETHER_1_0_0_RC4_RELEASE_NOTES.md"' in metadata
     assert '"CHANGELOG.md"' in metadata
     assert '"LICENSE"' in metadata
     assert '"README.md"' in metadata

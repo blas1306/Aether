@@ -7,21 +7,24 @@ the release contract.
 
 - [Aether 1.0 Language Specification](AETHER_LANGUAGE_SPEC_V1.md)
 - [Aether Native Profile v1](AETHER_NATIVE_PROFILE_V1.md)
-- [Aether 1.0.0-rc.3 release notes](AETHER_1_0_0_RC3_RELEASE_NOTES.md)
+- [Aether 1.0.0-rc.4 release notes](AETHER_1_0_0_RC4_RELEASE_NOTES.md)
 
-These two documents define the single stable Aether 1.0 profile frozen for the
-`1.0.0-rc.3` candidate. Frontend or AST acceptance does not widen it. The ALPT1
+The language specification and native profile define the current Aether 1.0
+contract for the `1.0.0-rc.4` candidate. Frontend or AST acceptance does not
+widen it. The ALPT1
 byte contract in
 [Persistence Format Design](PERSISTENCE_FORMAT_DESIGN.md) remains normative for
 that format only; it is not a second language specification.
 
 The [native profile](AETHER_NATIVE_PROFILE_V1.md) is the executable capability
 refinement. The [profile audit](AETHER_V1_PROFILE_AUDIT.md) and
-[closed decision](AETHER_V1_PROFILE_DECISION.md) provide the 123-row closure
-evidence. The reproducible example classification is in the
+[closed decision](AETHER_V1_PROFILE_DECISION.md) are historical profile-22
+closure evidence; they do not override profile 23. The reproducible example
+classification is in the
 [v1 examples manifest](../../examples/v1_examples_manifest.json), with the
 four formerly broken cases resolved in the
-[RC3 catalog audit](AETHER_EXAMPLES_CATALOG_AUDIT.md).
+[RC3 catalog audit](AETHER_EXAMPLES_CATALOG_AUDIT.md), retained as a dated
+audit.
 
 ## Design / RFC
 

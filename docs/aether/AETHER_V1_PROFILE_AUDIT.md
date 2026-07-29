@@ -1,9 +1,14 @@
 # Auditoría final del perfil Aether 1.0
 
+> Clasificación: **Audit / historical**. Esta fotografía de profile 22 no es
+> normativa y no describe la frontera actual. Para decisiones de release use
+> [la spec v1](AETHER_LANGUAGE_SPEC_V1.md) y
+> [el perfil native 23](AETHER_NATIVE_PROFILE_V1.md).
+
 Fecha de corte: **2026-07-18**. Release observada: **1.0.0-rc.2**. Perfil
 native observado: **22**. Plataforma native validada: **Linux x86_64 + clang**.
 
-Este documento es la matriz autoritativa de cierre. A diferencia de las
+Este documento fue la matriz autoritativa de aquel cierre. A diferencia de las
 matrices históricas, el estado final nunca usa `PARTIAL`: cada subconjunto
 concreto es `SUPPORTED`, `OUTSIDE_V1`, `BROKEN` o `UNDECIDED`. El perfil
 estable recomendado es deliberadamente menor que toda la superficie que el

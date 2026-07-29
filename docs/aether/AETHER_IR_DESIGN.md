@@ -33,7 +33,7 @@ The `aether.ir` package introduced the initial typed IR data model, a
 deterministic debug printer, an IR verifier, and a minimal IR interpreter in
 Python. The current pipeline has an explicit frontend/backend boundary: source
 is tokenized, parsed, typechecked, and checked against native capability
-profile 22 before stable lowering. LLVM/native is the production and default
+profile 23 before stable lowering. LLVM/native is the production and default
 backend. `aether --backend=ast` explicitly selects the auxiliary interpreter;
 `aether --backend=ir` explicitly selects narrow internal infrastructure.
 There is no silent fallback between them. Later sections retain historical

@@ -14,7 +14,7 @@ from aether.differential import DEFAULT_CORPUS_ROOT, OPTIMIZATION_LEVELS, discov
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Compare AST and native observations for capability profile 22.",
+        description="Compare AST and native observations for the current capability profile.",
     )
     parser.add_argument("--corpus", type=Path, default=DEFAULT_CORPUS_ROOT)
     parser.add_argument("--timeout", type=float, default=20.0)

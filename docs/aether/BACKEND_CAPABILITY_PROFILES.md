@@ -9,6 +9,11 @@ distinguir una feature válida del lenguaje de una feature ejecutable por un
 backend concreto. El catálogo, los estados y los perfiles versionados viven en
 `src/aether/capabilities.py`.
 
+La versión vigente es **23**. Promueve nullable, classes e interfaces
+class/struct ya implementadas y elimina los nombres de staging
+`native-interface-abi` y `string-split-trim`. Las secciones numeradas por
+versiones anteriores son historia de evolución, no estados actuales.
+
 El perfil **no** redefine la gramática ni el sistema de tipos, no negocia
 features dinámicamente y no sustituye los verificadores de IR o SSA. El parser
 y el typechecker siguen decidiendo si un programa es Aether válido. Después del
@@ -85,8 +90,8 @@ retorno de callables ni funciones genéricas no especializadas. Los enums sin
 payload son `COMPLETE`: conservan identidad módulo/declaración en frontend,
 IR y SSA, usan discriminantes deterministas por orden fuente, cruzan firmas,
 structs, colecciones compatibles, imports/aliases y se imprimen como
-`EnumName.VariantName`; LLVM los representa como `i32`. Classes, interfaces,
-input y errores siguen no soportados. Strings, primitivos,
+`EnumName.VariantName`; LLVM los representa como `i32`. Nullable, classes e
+interfaces son E2E; input y errores siguen no soportados. Strings, primitivos,
 arithmetic, structs y colecciones quedan parciales porque sus subconjuntos
 compilables son reales pero no cubren toda la superficie AST. Los archivos de
 texto son completos en AST y parciales en native por plataforma. Los argumentos
@@ -155,13 +160,13 @@ código `AE-BACKEND-*`, ubicación fuente y detalle tipado.
 La emisión LLVM de un módulo de declaraciones sin `main` produce ahora una
 librería válida, sin inventar un wrapper ejecutable. `build` valida primero el
 perfil y después exige el entry point, ambos antes del lowering. La evidencia
-del perfil 22 incluye regresiones negativas que sustituyen fallos tardíos de
+iniciada en el perfil 22 incluye regresiones negativas que sustituyen fallos tardíos de
 lowering/verifier/printer/clang y compilación con clang O0/O1/O2 de todo el
 corpus de ejemplos aceptado por native.
 
 El cierre P0.2 no cambia estados ni versión del perfil: corrige semántica dentro
 de capacidades ya aceptadas. `scripts/differential_parity.py` descubre 12
-programas del corpus, valida profile 22 y compara AST contra clang O0/O1/O2 en
+programas del corpus, valida el perfil vigente y compara AST contra clang O0/O1/O2 en
 36 ejecuciones. El contrato compara stdout/stderr como bytes, exit code y
 archivos finales bajo environment/locale controlados. El formato público double
 es distinto del codec ALPT1; panics públicos conservan mensaje, canal y code.

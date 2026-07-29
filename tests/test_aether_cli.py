@@ -387,7 +387,7 @@ def test_version_reports_language_version() -> None:
     exit_code, stdout, stderr = run_cli(["--version"])
 
     assert exit_code == EXIT_SUCCESS
-    assert stdout == "Aether 1.0.0-rc.3\nNative capability profile 22\n"
+    assert stdout == "Aether 1.0.0-rc.4\nNative capability profile 23\n"
     assert stderr == ""
 
 
@@ -2943,7 +2943,7 @@ def test_repl_uses_persistent_session() -> None:
     )
 
     assert exit_code == EXIT_SUCCESS
-    assert "Aether 1.0.0-rc.3 REPL" in stdout
+    assert "Aether 1.0.0-rc.4 REPL" in stdout
     assert "5\n" in stdout
     assert stdout.count("aether> ") == 3
     assert stderr == ""

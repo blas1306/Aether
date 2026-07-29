@@ -1,5 +1,8 @@
 # Decisión cerrada del perfil Aether 1.0
 
+> Clasificación: **Audit / historical**. Registra la decisión de profile 22 del
+> 18 de julio; no es la referencia vigente después de Phase 5.4/profile 23.
+
 Fecha: **2026-07-18**. Esta decisión interpreta “Aether 1.0” como un perfil
 estable único y verificable, no como la unión de todo lo que alguna capa puede
 reconocer.

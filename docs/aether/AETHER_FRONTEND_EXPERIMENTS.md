@@ -26,7 +26,7 @@ Current implementation experiments include some of the following:
 - `throw`, `try`, and `catch`.
 
 The frontend's current experimental interpolation spelling is `$expression$`,
-not `${expression}`. Native profile 22 rejects the resulting interpolated
+not `${expression}`. Native profile 23 rejects the resulting interpolated
 string with `AE-BACKEND-STRINGS`; stable Aether source uses concatenation and
 explicit supported formatting helpers instead.
 

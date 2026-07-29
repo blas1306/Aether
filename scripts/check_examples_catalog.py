@@ -21,10 +21,15 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from aether.backend.llvm import LLVMBuilder, LLVMRunner  # noqa: E402
-from aether.capabilities import BackendIdentity, backend_capability_issues  # noqa: E402
+from aether.capabilities import (  # noqa: E402
+    CAPABILITY_PROFILE_VERSION,
+    BackendIdentity,
+    backend_capability_issues,
+)
 from aether.cli import main as cli_main  # noqa: E402
 from aether.pipeline import IRBackend, SSAPipeline, prepare_typed_program  # noqa: E402
 from aether.typechecker import TypeChecker  # noqa: E402
+from aether.version import LANGUAGE_VERSION  # noqa: E402
 
 
 MANIFEST_PATH = ROOT / "examples" / "v1_examples_manifest.json"
@@ -83,6 +88,16 @@ def structural_errors(manifest: dict[str, object]) -> list[str]:
     errors: list[str] = []
     if manifest.get("schema_version") != 2:
         errors.append("manifest schema_version must be 2")
+    if manifest.get("language_version") != LANGUAGE_VERSION:
+        errors.append(
+            "manifest language_version must match the compiler: "
+            f"{LANGUAGE_VERSION}"
+        )
+    if manifest.get("native_capability_profile") != CAPABILITY_PROFILE_VERSION:
+        errors.append(
+            "manifest native_capability_profile must match the compiler: "
+            f"{CAPABILITY_PROFILE_VERSION}"
+        )
     entries = manifest.get("entries")
     if not isinstance(entries, list):
         return [*errors, "manifest entries must be a list"]
@@ -208,9 +223,9 @@ def structural_errors(manifest: dict[str, object]) -> list[str]:
             f"catálogo actual tiene {counts['V1_NATIVE']} `V1_NATIVE`, "
             f"{counts['AST_ONLY_EXPERIMENTAL']} `AST_ONLY_EXPERIMENTAL`"
         ),
-        ROOT / "docs" / "aether" / "AETHER_1_0_0_RC3_RELEASE_NOTES.md": (
-            f"catálogo schema 2 clasifica {counts['V1_NATIVE']} ejemplos como "
-            f"`V1_NATIVE`, {counts['AST_ONLY_EXPERIMENTAL']} como "
+        ROOT / "docs" / "aether" / "AETHER_1_0_0_RC4_RELEASE_NOTES.md": (
+            f"schema-2 catalog classifies {counts['V1_NATIVE']} examples as "
+            f"`V1_NATIVE`, {counts['AST_ONLY_EXPERIMENTAL']} as "
             f"`AST_ONLY_EXPERIMENTAL`"
         ),
     }

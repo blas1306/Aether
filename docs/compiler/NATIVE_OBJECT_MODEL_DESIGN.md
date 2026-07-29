@@ -1,10 +1,10 @@
 # Modelo nativo de objetos por referencia
 
-> Clasificación: **Design/RFC — Phase 5.1, implementación Phase 5.4A**.
+> Clasificación: **Current reference / Design — implementación Phase 5.4C**.
 > Actualizado: **28 de julio de 2026**. Referencias, payload, fields,
 > constructores, métodos concretos y ARC class están implementados en native.
-> El ABI de interfaces y witness tables está implementado en 5.4A. Dispatch
-> dinámico continúa gated para 5.4B y boxing de structs para 5.4C.
+> Interfaces incluyen witness dispatch para carrier class y boxing owned de
+> structs, con lifecycle, nullable y colecciones.
 
 ## 1. Alcance y fuentes de verdad
 
@@ -67,10 +67,10 @@ todos sus fields tienen el mismo contenido que otra instancia. La identidad:
 - puede reutilizar una dirección sólo después de terminada esa vida.
 
 La dirección estable se usa para retain/release, self-assignment e identidad.
-Phase 5.3A fija `Eq(ClassRefType(C))` en el subset IR native: `==`/`!=`
-comparan los handles de dos valores del mismo `C`, nunca sus fields. La
-superficie class continúa fuera del perfil native hasta que exista lowering de
-constructores; no se agrega igualdad definida por usuario.
+Phase 5.3A fijó `Eq(ClassRefType(C))` en el subset IR native: `==`/`!=`
+comparan los handles de dos valores del mismo `C`, nunca sus fields. El
+lowering posterior de constructores y métodos promovió la superficie class;
+no se agrega igualdad definida por usuario.
 
 ### 3.2 Semántica de referencia, mutabilidad y aliasing
 
@@ -855,9 +855,9 @@ interface con cleanup pendiente.
 4. structs/collections con nullable cuando `T` sea representable;
 5. paridad AST/IR/SSA/LLVM y capability promotion explícita.
 
-Esta rama se implementó antes de classes. El registry genérico ya acepta
-`ClassRefType`; `InterfaceType` se incorporará cuando adquiera layout/lifecycle,
-sin rediseñar nullable.
+Esta rama se implementó antes de classes. El registry genérico acepta
+`ClassRefType` e `InterfaceType` con sus layouts/lifecycle actuales, sin
+rediseñar nullable.
 
 ### 12.3 Classes — estado tras 5.3C
 
@@ -885,9 +885,10 @@ memoria y lifecycle a través de IR, SSA, optimizadores y LLVM.
 
 ### 12.4 Interfaces
 
-**Phase 5.4A completada:** ABI `{carrier,witness}`, witness tables
-deterministas, carrier class sin box, IR/SSA/DTO/verifiers Python y Rust,
-LLVM, lifecycle class-only, nullable y colecciones.
+**Phase 5.4A–5.4C completadas:** ABI `{carrier,witness}`, witness tables
+deterministas, carrier class sin box, box owned para struct,
+IR/SSA/DTO/verifiers Python y Rust, LLVM, lifecycle dinámico, nullable y
+colecciones.
 
 **Phase 5.4B completada:** slots poblados con thunks
 `R(ptr borrowed_carrier, args...)`, opcode `interface_call`, carga
@@ -946,7 +947,7 @@ dinámico decidido por witness, sin cambiar las dos palabras del valor.
 | Paridad | Sigue el grafo auditado: reference layout/lifecycle antes de class; erased ABI antes de interface; nullable como rama independiente. |
 | Const | Reproduce la restricción por access path y el corte al atravesar class que aplica el frontend actual. |
 | Igualdad | Phase 5.3A agrega Eq por identidad al tipo IR class; interfaces y equality definida por usuario siguen fuera. |
-| Perfil native | Nullable, classes, Native Interface ABI y dispatch class-carrier son E2E; boxing struct continúa gated como 5.4C. |
+| Perfil native | Profile 23: nullable, classes e interfaces class/struct son E2E; `interfaces` es la capacidad granular COMPLETE. |
 
 ## 15. Criterios de entrada para implementación
 
@@ -964,8 +965,8 @@ Antes de comenzar código de una de las ramas debe aprobarse:
 
 `NullableType` tiene soporte native E2E. `ClassRefType` tiene layout, payload,
 construcción source, métodos directos, lifecycle y transporte ejecutables
-desde 5.3C. `InterfaceType` tiene desde 5.4A layout, construcción class-only,
-lifecycle, DTO, SSA, LLVM y verifier; no tiene dispatch ni boxing.
+desde 5.3C. `InterfaceType` tiene layout, construcción class/struct, dispatch,
+lifecycle, DTO, SSA, LLVM y verificación coordinada Python/Rust.
 
 ## 16. Fuera de alcance
 
@@ -988,7 +989,7 @@ Cada una de esas features requiere un RFC separado. El descriptor y los thunks
 de este diseño dejan puntos de extensión, pero no anticipan semántica que el
 lenguaje actual no posee.
 
-## 17. Estado y frontera de Phase 5.4A
+## 17. Estado y frontera tras Phase 5.4C
 
 Completado: handle nominal; allocation de objeto completo; layout determinista
 de fields; DTO y verificación Python/Rust; constructor posicional y explícito;
@@ -999,8 +1000,9 @@ recursión, calls anidadas, `this` explícito/implícito y alias-visible mutatio
 LLVM válido en O0/O1/O2.
 
 La superficie native admite classes concretas con fields, constructores y
-métodos de dispatch estático, y convertir una class a un valor interface
-transportable `{carrier,witness}`. Interface method calls, inheritance,
-dispatch dinámico, boxing/adapters de struct, destructores de usuario,
-exceptions/unwind, weak refs, GC y cycle collection siguen posteriores. ARC
-fuerte no recolecta ciclos.
+métodos de dispatch estático, y convierte classes o structs a valores
+interface `{carrier,witness}`. Las llamadas de interface hacen dispatch
+witness-driven; los structs usan cajas owned con copy/drop dinámico.
+Inheritance/default methods, destructores de usuario, exceptions/unwind, weak
+refs, GC y cycle collection siguen posteriores. ARC fuerte no recolecta
+ciclos.

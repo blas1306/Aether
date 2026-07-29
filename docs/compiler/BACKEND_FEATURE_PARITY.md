@@ -1,6 +1,10 @@
-# Auditoría de paridad de features por backend (ubicación histórica)
+# Auditoría de paridad de features por backend (historical audit)
 
-La auditoría canónica, actualizada el 15 de julio de 2026 y desglosada por
+> Clasificación: **Audit / historical**. No es una referencia de estado
+> actual. La fuente vigente es el
+> [perfil native 23](../aether/AETHER_NATIVE_PROFILE_V1.md).
+
+La auditoría canónica histórica, actualizada el 15 de julio de 2026 y desglosada por
 lexer/parser, AST, typechecker, intérpretes, IR, SSA, optimizadores,
 LLVM/native, runtime, tests y documentación, está en:
 

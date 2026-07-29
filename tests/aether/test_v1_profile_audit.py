@@ -47,8 +47,8 @@ def test_example_manifest_is_complete_authoritative_and_uses_closed_states() -> 
     manifest_paths = [str(entry["path"]) for entry in ENTRIES]
 
     assert MANIFEST["schema_version"] == 2
-    assert MANIFEST["language_version"] == "1.0.0-rc.3"
-    assert MANIFEST["native_capability_profile"] == "22"
+    assert MANIFEST["language_version"] == "1.0.0-rc.4"
+    assert MANIFEST["native_capability_profile"] == "23"
     assert len(manifest_paths) == len(set(manifest_paths))
     assert set(manifest_paths) == actual_paths
     assert manifest_paths == sorted(manifest_paths)
@@ -79,6 +79,20 @@ def test_example_manifest_is_complete_authoritative_and_uses_closed_states() -> 
 
 def test_manifest_structure_matches_the_canonical_validator() -> None:
     assert structural_errors(MANIFEST) == []
+
+
+def test_manifest_validator_rejects_stale_release_and_profile_versions() -> None:
+    stale = deepcopy(MANIFEST)
+    stale["language_version"] = "1.0.0-rc.3"
+    stale["native_capability_profile"] = "22"
+
+    errors = structural_errors(stale)
+
+    assert any("language_version must match the compiler" in error for error in errors)
+    assert any(
+        "native_capability_profile must match the compiler" in error
+        for error in errors
+    )
 
 
 def test_manifest_validator_rejects_duplicate_paths() -> None:

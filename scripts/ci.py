@@ -76,11 +76,7 @@ def _python_env() -> dict[str, str]:
 
 
 def _pytest_command() -> tuple[str, ...]:
-    if os.name == "nt":
-        executable = ROOT / ".venv" / "Scripts" / "pytest.exe"
-    else:
-        executable = ROOT / ".venv" / "bin" / "pytest"
-    return (str(executable),)
+    return (sys.executable, "-m", "pytest")
 
 
 def build_stages(
@@ -93,7 +89,12 @@ def build_stages(
     stages = [
         Stage("whitespace", (("git", "diff", "--check"),)),
         Stage(
-            "documentation",
+            "capability consistency",
+            ((python, str(ROOT / "scripts" / "check_capability_consistency.py")),),
+            env,
+        ),
+        Stage(
+            "documentation consistency",
             ((python, str(ROOT / "scripts" / "check_release_docs.py")),),
             env,
         ),

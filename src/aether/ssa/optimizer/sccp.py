@@ -79,6 +79,7 @@ from aether.ssa.model import (
     SSAVectorNew,
     SSAVectorSet,
 )
+from aether.ssa.operands import instruction_operands, instruction_result
 
 from .result import SSAOptimizationResult
 
@@ -396,171 +397,11 @@ class SCCPAnalyzer:
 
     @staticmethod
     def _instruction_result(instruction: SSAInstruction) -> SSAValue | None:
-        if isinstance(instruction, (SSAConst, SSABinaryOp, SSAUnaryOp, SSACompareOp, SSACast, SSAPhi)):
-            return instruction.result
-        if isinstance(instruction, SSACall):
-            return instruction.result
-        if isinstance(
-            instruction,
-            (
-                SSAArrayNew,
-                SSAClassNew,
-                SSAClassGet,
-                SSAInterfaceConstruct,
-                SSAArrayCopy,
-                SSAArrayGet,
-                SSAArraySlice,
-                SSAListNew,
-                SSAListGet,
-                SSAListCopy,
-                SSAListSlice,
-                SSAListContains,
-                SSAListIndexOf,
-                SSAListPop,
-                SSAListRemoveAt,
-                SSAVectorGet,
-                SSAMatrixGet,
-                SSAArrayLength,
-                SSAListLength,
-                SSAListIsEmpty,
-                SSAVectorLength,
-                SSAMatrixRows,
-                SSAMatrixColumns,
-                SSAVectorNew,
-                SSAMatrixNew,
-                SSAVectorAdd,
-                SSAVectorDot,
-                SSAOuterProduct,
-                SSAVectorScale,
-                SSAMatrixAdd,
-                SSAMatrixMatMul,
-                SSAMatrixVectorMul,
-                SSAVectorMatrixMul,
-                SSAMatrixScale,
-                SSAVectorSub,
-                SSAMatrixSub,
-                SSAStructNew,
-                SSAStructGet,
-                SSAStructSet,
-                SSAMethodResultNew,
-                SSAMethodResultReceiver,
-                SSAMethodResultValue,
-            ),
-        ):
-            return instruction.result
-        return None
+        return instruction_result(instruction)
 
     @staticmethod
     def _instruction_operands(instruction: SSAInstruction) -> tuple[SSAValue, ...]:
-        if isinstance(instruction, SSABinaryOp):
-            return (instruction.left, instruction.right)
-        if isinstance(instruction, SSAUnaryOp):
-            return (instruction.operand,)
-        if isinstance(instruction, SSACompareOp):
-            return (instruction.left, instruction.right)
-        if isinstance(instruction, SSACast):
-            return (instruction.value,)
-        if isinstance(instruction, SSAPhi):
-            return tuple(value for _block_name, value in instruction.incoming)
-        if isinstance(instruction, SSABranch):
-            return (instruction.condition,)
-        if isinstance(instruction, SSACall):
-            return instruction.arguments
-        if isinstance(instruction, SSACallIndirect):
-            return (instruction.callee, *instruction.arguments)
-        if isinstance(instruction, SSAPrint):
-            return (instruction.value,)
-        if isinstance(instruction, SSAClassGet):
-            return (instruction.object,)
-        if isinstance(instruction, SSAClassSet):
-            return (instruction.object, instruction.value)
-        if isinstance(instruction, SSAInterfaceConstruct):
-            return (instruction.carrier,)
-        if isinstance(instruction, SSAInterfaceCall):
-            return (instruction.receiver, *instruction.arguments)
-        if isinstance(instruction, SSAStructNew):
-            return instruction.fields
-        if isinstance(instruction, SSAStructGet):
-            return (instruction.struct,)
-        if isinstance(instruction, SSAStructSet):
-            return (instruction.struct, instruction.value)
-        if isinstance(instruction, SSAMethodResultNew):
-            return (instruction.receiver,) if instruction.value is None else (instruction.receiver, instruction.value)
-        if isinstance(instruction, (SSAMethodResultReceiver, SSAMethodResultValue)):
-            return (instruction.method_result,)
-        if isinstance(instruction, SSAArrayNew):
-            return instruction.elements
-        if isinstance(instruction, SSAListNew):
-            return instruction.elements
-        if isinstance(instruction, SSAArrayCopy):
-            return (instruction.array,)
-        if isinstance(instruction, SSAListCopy):
-            return (instruction.list_value,)
-        if isinstance(instruction, SSAListContains):
-            return (instruction.list_value, instruction.value)
-        if isinstance(instruction, SSAListIndexOf):
-            return (instruction.list_value, instruction.value)
-        if isinstance(instruction, SSAListClear):
-            return (instruction.list_value,)
-        if isinstance(instruction, SSAListPush):
-            return (instruction.list_value, instruction.value)
-        if isinstance(instruction, SSAListInsert):
-            return (instruction.list_value, instruction.index, instruction.value)
-        if isinstance(instruction, SSAListPop):
-            return (instruction.list_value,)
-        if isinstance(instruction, SSAListRemoveAt):
-            return (instruction.list_value, instruction.index)
-        if isinstance(instruction, SSAListReverse):
-            return (instruction.list_value,)
-        if isinstance(instruction, SSASequenceSort):
-            return (instruction.sequence,)
-        if isinstance(instruction, SSAVectorNew):
-            return instruction.elements
-        if isinstance(instruction, SSAMatrixNew):
-            return instruction.elements
-        if isinstance(instruction, (SSAVectorAdd, SSAVectorDot, SSAMatrixAdd, SSAMatrixMatMul, SSAVectorSub, SSAMatrixSub)):
-            return (instruction.left, instruction.right)
-        if isinstance(instruction, SSAOuterProduct):
-            return (instruction.column, instruction.row)
-        if isinstance(instruction, SSAMatrixVectorMul):
-            return (instruction.matrix, instruction.vector)
-        if isinstance(instruction, SSAVectorMatrixMul):
-            return (instruction.vector, instruction.matrix)
-        if isinstance(instruction, SSAVectorScale):
-            return (instruction.vector, instruction.scalar)
-        if isinstance(instruction, SSAMatrixScale):
-            return (instruction.matrix, instruction.scalar)
-        if isinstance(instruction, SSAArrayGet):
-            return (instruction.array, instruction.index)
-        if isinstance(instruction, SSAArraySlice):
-            return (instruction.array, instruction.start, instruction.end)
-        if isinstance(instruction, SSAListSlice):
-            return (instruction.list_value, instruction.start, instruction.end)
-        if isinstance(instruction, SSAListGet):
-            return (instruction.list_value, instruction.index)
-        if isinstance(instruction, SSAVectorGet):
-            return (instruction.vector, instruction.index)
-        if isinstance(instruction, SSAMatrixGet):
-            return (instruction.matrix, instruction.row, instruction.column)
-        if isinstance(instruction, SSAArraySet):
-            return (instruction.array, instruction.index, instruction.value)
-        if isinstance(instruction, SSAListSet):
-            return (instruction.list_value, instruction.index, instruction.value)
-        if isinstance(instruction, SSAVectorSet):
-            return (instruction.vector, instruction.index, instruction.value)
-        if isinstance(instruction, SSAMatrixSet):
-            return (instruction.matrix, instruction.row, instruction.column, instruction.value)
-        if isinstance(instruction, SSAArrayLength):
-            return (instruction.array,)
-        if isinstance(instruction, (SSAListLength, SSAListIsEmpty)):
-            return (instruction.list_value,)
-        if isinstance(instruction, SSAVectorLength):
-            return (instruction.vector,)
-        if isinstance(instruction, (SSAMatrixRows, SSAMatrixColumns)):
-            return (instruction.matrix,)
-        if isinstance(instruction, SSAReturn) and instruction.value is not None:
-            return (instruction.value,)
-        return ()
+        return instruction_operands(instruction)
 
     @staticmethod
     def _evaluate_binary_values(operator: str, left: Any, right: Any) -> Any:
