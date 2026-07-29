@@ -1,4 +1,5 @@
 import Math.LinearAlgebra as LA
+import Plots as pl
 
 Matrix<double> A(Vector<double, Column> x) {
     Matrix<double> A = [x[2] + 1, 1; x[1], -x[2]];
@@ -27,3 +28,11 @@ while (res > tol && iter < maxiter) {
 println("x = ", x);
 println("res = ", res);
 println("iter = ", iter);
+
+f1(double x) = 11 - x^2;
+f2(double x) = sqrt(7 - x);
+
+pl.hold(true);
+pl.grid(true);
+pl.plot(f1, -5, 5);
+pl.plot(f2, -5, 5);

@@ -1,7 +1,0 @@
-resultado = 0;
-
-for (i in 0:1000000) {
-	resultado += 1;
-}
-
-println(resultado);

@@ -1,6 +1,0 @@
-int main() {
-    Array<int> a = {1};
-
-    println(false && a[100] == 1);
-    println(true || a[100] == 1);
-}
