@@ -26,13 +26,13 @@ impl fmt::Display for BranchTarget {
 /// The required terminating shape for every basic block.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TerminatorExpectation {
-    /// Exactly one branch, jump, or return in final position.
+    /// Exactly one control-flow transfer in final position.
     OneFinalControlFlowTerminator,
 }
 
 impl fmt::Display for TerminatorExpectation {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("exactly one final IRBranch, IRJump, or IRReturn")
+        formatter.write_str("exactly one final control-flow terminator")
     }
 }
 
@@ -103,6 +103,13 @@ pub enum ControlFlowRuleError {
         /// Exact unresolved target name.
         target: String,
     },
+    /// An invoke aliases its mutually exclusive successor blocks.
+    InvalidInvokeSuccessors {
+        /// Retained normal target.
+        normal_target: String,
+        /// Retained exceptional target.
+        exceptional_target: String,
+    },
 }
 
 impl fmt::Display for ControlFlowRuleError {
@@ -138,6 +145,13 @@ impl fmt::Display for ControlFlowRuleError {
             Self::UnknownBranchTarget { edge, target } => {
                 write!(formatter, "unknown branch {edge} '{target}'")
             }
+            Self::InvalidInvokeSuccessors {
+                normal_target,
+                exceptional_target,
+            } => write!(
+                formatter,
+                "invoke normal target '{normal_target}' aliases exceptional target '{exceptional_target}'"
+            ),
         }
     }
 }

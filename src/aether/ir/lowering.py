@@ -73,16 +73,23 @@ from .model import (
     IRCast,
     IRCall,
     IRCallIndirect,
+    IRCatchEntry,
     IRClassGet,
     IRClassNew,
     IRClassSet,
     IRInterfaceConstruct,
     IRInterfaceCall,
+    IRInvoke,
+    IRInvokeIndirect,
+    IRInvokeInterface,
     IRErasedBoxLayout,
     IRCompareOp,
     IRConst,
     IRCopyInit,
     IRDestroy,
+    IRExceptionDestroy,
+    IRExceptionMatch,
+    IRExceptionPayload,
     IREnumConstant,
     IRFunction,
     IRFunctionRef,
@@ -120,6 +127,8 @@ from .model import (
     IROuterProduct,
     IRParameter,
     IRPrint,
+    IRPackException,
+    IRPropagate,
     IRStructDefinition,
     IRStructGet,
     IRStructNew,
@@ -128,9 +137,11 @@ from .model import (
     IRMethodResultReceiver,
     IRMethodResultValue,
     IRReturn,
+    IRRethrow,
     IRSourceLocation,
     IRStorage,
     IRStore,
+    IRThrow,
     IRUnaryOp,
     IRValue,
     IRWitnessMethodSlot,
@@ -151,6 +162,7 @@ from .types import (
     ClassRefType,
     ComplexType,
     DoubleType,
+    ExceptionEventType,
     EnumType,
     FloatType,
     FunctionType,
@@ -233,6 +245,19 @@ class _LoopTargets:
 
 
 @dataclass(frozen=True)
+class _ExceptionTarget:
+    block: str
+    event: IRValue
+    scope_depth: int
+
+
+@dataclass(frozen=True)
+class _ActiveCatch:
+    event: IRValue
+    scope_depth: int
+
+
+@dataclass(frozen=True)
 class _WhileBlocks:
     condition: IRBasicBlock
     body: IRBasicBlock
@@ -285,6 +310,11 @@ class _FunctionContext:
     constructor_class: _StructInfo | None = None
     initialized_fields: set[str] = field(default_factory=set)
     maybe_initialized_fields: set[str] = field(default_factory=set)
+    exception_targets: list[_ExceptionTarget] = field(default_factory=list)
+    active_catches: list[_ActiveCatch] = field(default_factory=list)
+    root_exception_target: _ExceptionTarget | None = None
+    next_handler: int = 0
+    next_invoke: int = 0
 
     def temporary(self, type_: IRType) -> IRValue:
         value = IRValue(str(self.next_temporary), type_)
@@ -319,6 +349,8 @@ class IRLowerer:
         self._builtin_aliases: dict[str, str] = {}
         self._builtin_constant_aliases: dict[str, str] = {}
         self._module_bindings: dict[str, str] = {}
+        self._may_throw_functions: set[str] = set()
+        self._exception_ir_enabled = False
 
     def lower_checked_program(self, checked_program: object) -> IRModule:
         """Lower a complete semantic program using the combined-module strategy."""
@@ -376,9 +408,16 @@ class IRLowerer:
             if isinstance(declaration, ast.ClassDeclaration)
         }
         self._interfaces = {
+            "Error": ast.InterfaceDeclaration(
+                "Error",
+                [ast.InterfaceMethodSignature("string", "message", [])],
+                visibility="public",
+            ),
+            **{
             statement.name: statement
             for statement in program.statements
             if isinstance(statement, ast.InterfaceDeclaration)
+            },
         }
         self._interface_names = set(self._interfaces)
         self._witnesses = {}
@@ -393,6 +432,8 @@ class IRLowerer:
             for declaration in declarations
         }
         self._signatures = self._collect_signatures(program)
+        self._may_throw_functions = self._collect_may_throw_functions(program)
+        self._exception_ir_enabled = bool(self._may_throw_functions)
         functions: list[IRFunction] = []
         for statement in program.statements:
             if isinstance(statement, ast.FunctionDeclaration):
@@ -487,6 +528,100 @@ class IRLowerer:
                 self._unsupported(statement)
         return signatures
 
+    def _collect_may_throw_functions(self, program: ast.Program) -> set[str]:
+        """Compute conservative internal throw summaries without changing source types."""
+
+        bodies: dict[str, list[ast.Statement]] = {}
+        owners: dict[str, str | None] = {}
+        callable_parameters: dict[str, set[str]] = {}
+        for statement in program.statements:
+            if isinstance(statement, ast.FunctionDeclaration):
+                bodies[statement.name] = statement.body
+                owners[statement.name] = None
+                callable_parameters[statement.name] = {
+                    parameter.name
+                    for parameter in statement.parameters
+                    if isinstance(parameter.type_name, AetherFunctionType)
+                }
+            elif isinstance(statement, (ast.StructDeclaration, ast.ClassDeclaration)):
+                for method in statement.methods:
+                    name = self._method_function_name(statement.name, method.name)
+                    bodies[name] = method.body
+                    owners[name] = statement.name
+                    callable_parameters[name] = {
+                        parameter.name
+                        for parameter in method.parameters
+                        if isinstance(parameter.type_name, AetherFunctionType)
+                    }
+                if statement.constructor is not None:
+                    name = self._method_function_name(statement.name, "__ctor")
+                    bodies[name] = statement.constructor.body
+                    owners[name] = statement.name
+                    callable_parameters[name] = {
+                        parameter.name
+                        for parameter in statement.constructor.parameters
+                        if isinstance(parameter.type_name, AetherFunctionType)
+                    }
+
+        direct: set[str] = set()
+        indirect_callers: set[str] = set()
+        calls: dict[str, set[str]] = {}
+        for name, body in bodies.items():
+            raw_calls: set[str] = set()
+            if self._exception_facts(body, raw_calls):
+                direct.add(name)
+            if raw_calls & callable_parameters[name]:
+                indirect_callers.add(name)
+            seen_calls: set[str] = set()
+            for callee in raw_calls:
+                if callee in bodies:
+                    seen_calls.add(callee)
+                    continue
+                owner = owners[name]
+                if owner is not None and (owner, callee) in self._method_names:
+                    seen_calls.add(self._method_names[(owner, callee)])
+                method_name = callee.rsplit(".", 1)[-1]
+                seen_calls.update(
+                    canonical
+                    for (candidate_owner, candidate_method), canonical in self._method_names.items()
+                    if candidate_method == method_name
+                    and (callee != method_name or candidate_owner == owner)
+                )
+                constructor = self._method_names.get((callee, "__ctor"))
+                if constructor is not None:
+                    seen_calls.add(constructor)
+            calls[name] = seen_calls
+
+        if direct:
+            direct.update(indirect_callers)
+
+        may_throw = set(direct)
+        changed = True
+        while changed:
+            changed = False
+            for name, callees in calls.items():
+                if name not in may_throw and any(callee in may_throw for callee in callees):
+                    may_throw.add(name)
+                    changed = True
+        return may_throw
+
+    def _exception_facts(self, value: object, calls: set[str]) -> bool:
+        if isinstance(value, (ast.ThrowStatement, ast.RethrowStatement)):
+            return True
+        if isinstance(value, ast.CallExpression):
+            calls.add(value.callee)
+        if isinstance(value, (ast.FunctionDeclaration, ast.ExpressionFunctionDeclaration)):
+            return False
+        found = False
+        if isinstance(value, (list, tuple)):
+            for item in value:
+                found = self._exception_facts(item, calls) or found
+            return found
+        if is_dataclass(value):
+            for descriptor in dataclass_fields(value):
+                found = self._exception_facts(getattr(value, descriptor.name), calls) or found
+        return found
+
     def _lower_function(
         self,
         declaration: ast.FunctionDeclaration,
@@ -555,7 +690,13 @@ class IRLowerer:
                     declaration,
                 )
 
-        return IRFunction(function_name, parameters, signature.return_type, blocks)
+        return IRFunction(
+            function_name,
+            parameters,
+            signature.return_type,
+            blocks,
+            function_name in self._may_throw_functions,
+        )
 
     def _lower_constructor(
         self,
@@ -608,7 +749,13 @@ class IRLowerer:
             self._require_constructor_complete(context, declaration)
             self._emit_cleanup(context)
             context.block.instructions.append(IRReturn())
-        return IRFunction(function_name, parameters, VoidType(), context.blocks)
+        return IRFunction(
+            function_name,
+            parameters,
+            VoidType(),
+            context.blocks,
+            function_name in self._may_throw_functions,
+        )
 
     def _require_constructor_complete(
         self,
@@ -807,6 +954,18 @@ class IRLowerer:
             self._lower_owned_return(statement.expression, statement, context)
             return
 
+        if isinstance(statement, ast.ThrowStatement):
+            self._lower_throw(statement, context)
+            return
+
+        if isinstance(statement, ast.RethrowStatement):
+            self._lower_rethrow(statement, context)
+            return
+
+        if isinstance(statement, ast.TryCatchStatement):
+            self._lower_try_catch(statement, context)
+            return
+
         if isinstance(statement, ast.IfStatement):
             self._lower_if(statement, context)
             return
@@ -846,6 +1005,141 @@ class IRLowerer:
             return
 
         self._unsupported(statement)
+
+    def _lower_throw(
+        self,
+        statement: ast.ThrowStatement,
+        context: _FunctionContext,
+    ) -> None:
+        payload = self._lower_expression(statement.expression, context)
+        event = context.temporary(ExceptionEventType())
+        dynamic_type = (
+            payload.type.name
+            if isinstance(payload.type, (StructType, ClassRefType))
+            else None
+        )
+        context.block.instructions.append(
+            IRPackException(
+                event,
+                payload,
+                dynamic_type,
+                self._source_location(statement),
+            )
+        )
+        target = self._outer_exception_target(context)
+        self._emit_cleanup(
+            context,
+            minimum_scope_depth=target.scope_depth,
+        )
+        context.block.instructions.append(
+            IRThrow(event, target.block, target.event)
+        )
+
+    def _lower_rethrow(
+        self,
+        statement: ast.RethrowStatement,
+        context: _FunctionContext,
+    ) -> None:
+        if not context.active_catches:
+            self._fail("IR bare rethrow requires an active catch event.", statement)
+        active = context.active_catches[-1]
+        target = self._outer_exception_target(context)
+        self._emit_cleanup(
+            context,
+            minimum_scope_depth=active.scope_depth,
+            excluding_events={active.event.name},
+        )
+        context.block.instructions.append(
+            IRRethrow(active.event, target.block, target.event)
+        )
+
+    def _lower_try_catch(
+        self,
+        statement: ast.TryCatchStatement,
+        context: _FunctionContext,
+    ) -> None:
+        index = context.next_handler
+        context.next_handler += 1
+        handler_id = f"handler{index}"
+        handler_event = context.temporary(ExceptionEventType())
+        catch_types = tuple(
+            self._catch_type_id(clause.type_name)
+            for clause in statement.catch_clauses
+        )
+        handler = self._new_block(f"catch.dispatch{index}.0")
+        handler.instructions.append(
+            IRCatchEntry(handler_event, handler_id, catch_types)
+        )
+        self._append_block(context, handler)
+
+        outer = self._outer_exception_target(context)
+        context.exception_targets.append(
+            _ExceptionTarget(handler.name, handler_event, len(context.scopes))
+        )
+        self._lower_statements(statement.try_body, context)
+        try_end = context.block
+        context.exception_targets.pop()
+
+        merge = self._new_block(f"catch.merge{index}")
+        self._emit_jump_if_open(try_end, merge.name)
+
+        dispatch = handler
+        for catch_index, clause in enumerate(statement.catch_clauses):
+            catch_type = self._lower_type(clause.type_name)
+            catch_type_id = self._catch_type_id(clause.type_name)
+            catch_all = (
+                isinstance(catch_type, InterfaceType)
+                and catch_type.name == "Error"
+            )
+            body = self._new_block(f"catch.body{index}.{catch_index}")
+            next_dispatch = self._new_block(
+                f"catch.dispatch{index}.{catch_index + 1}"
+            )
+            matched = context.temporary(BoolType())
+            dispatch.instructions.append(
+                IRExceptionMatch(
+                    matched,
+                    handler_event,
+                    catch_type_id,
+                    catch_all,
+                )
+            )
+            dispatch.instructions.append(
+                IRBranch(matched, body.name, next_dispatch.name)
+            )
+            self._append_and_enter(context, body)
+            borrowed = context.temporary(catch_type)
+            context.block.instructions.append(
+                IRExceptionPayload(
+                    borrowed,
+                    handler_event,
+                    catch_type_id,
+                )
+            )
+            saved_locals = dict(context.locals)
+            context.locals[clause.binder_name] = borrowed
+            context.active_catches.append(
+                _ActiveCatch(handler_event, len(context.scopes))
+            )
+            try:
+                self._lower_statements(clause.body, context)
+            finally:
+                context.active_catches.pop()
+                context.locals = saved_locals
+            self._emit_current_jump_if_open(context, merge.name)
+            self._append_block(context, next_dispatch)
+            dispatch = next_dispatch
+
+        dispatch.instructions.append(
+            IRPropagate(handler_event, outer.block, outer.event)
+        )
+        self._append_and_enter(context, merge)
+
+    def _catch_type_id(self, type_name: AetherType) -> str:
+        lowered = self._lower_type(type_name)
+        if isinstance(lowered, (StructType, ClassRefType, InterfaceType)):
+            return lowered.name
+        self._fail(f"IR catch type '{lowered}' is not nominal.")
 
     @staticmethod
     def _source_location(node: object) -> IRSourceLocation | None:
@@ -893,12 +1187,20 @@ class IRLowerer:
         *,
         minimum_scope_depth: int = 0,
         excluding: set[str] | None = None,
+        excluding_events: set[str] | None = None,
     ) -> None:
         excluded = excluding or set()
         for scope in reversed(context.scopes[minimum_scope_depth:]):
             for storage in reversed(scope.storages):
                 if storage.name not in excluded:
                     context.block.instructions.append(IRDestroy(storage))
+        excluded_event_names = excluding_events or set()
+        for active in reversed(context.active_catches):
+            if (
+                active.scope_depth >= minimum_scope_depth
+                and active.event.name not in excluded_event_names
+            ):
+                context.block.instructions.append(IRExceptionDestroy(active.event))
 
     def _lower_owned_return(
         self,
@@ -980,6 +1282,103 @@ class IRLowerer:
     ) -> IRBasicBlock:
         self._append_block(context, block)
         return self._enter_block(context, block)
+
+    def _outer_exception_target(
+        self,
+        context: _FunctionContext,
+    ) -> _ExceptionTarget:
+        if context.exception_targets:
+            return context.exception_targets[-1]
+        if context.root_exception_target is None:
+            event = context.temporary(ExceptionEventType())
+            block = self._new_block("exception.propagate")
+            block.instructions.append(
+                IRCatchEntry(event, "root", ())
+            )
+            block.instructions.append(IRPropagate(event))
+            self._append_block(context, block)
+            context.root_exception_target = _ExceptionTarget(block.name, event, 0)
+        return context.root_exception_target
+
+    def _emit_invoke(
+        self,
+        context: _FunctionContext,
+        function: str,
+        arguments: tuple[IRValue, ...],
+        result: IRValue | None,
+        node: object,
+    ) -> None:
+        target = self._outer_exception_target(context)
+        index = context.next_invoke
+        context.next_invoke += 1
+        normal = self._new_block(f"invoke.cont{index}")
+        exception = context.temporary(ExceptionEventType())
+        context.block.instructions.append(
+            IRInvoke(
+                function,
+                arguments,
+                result,
+                exception,
+                normal.name,
+                target.block,
+                target.event,
+                None,
+                self._source_location(node),
+            )
+        )
+        self._append_and_enter(context, normal)
+
+    def _emit_indirect_invoke(
+        self,
+        context: _FunctionContext,
+        callee: IRValue,
+        arguments: tuple[IRValue, ...],
+        result: IRValue | None,
+    ) -> None:
+        target = self._outer_exception_target(context)
+        index = context.next_invoke
+        context.next_invoke += 1
+        normal = self._new_block(f"invoke.cont{index}")
+        exception = context.temporary(ExceptionEventType())
+        context.block.instructions.append(
+            IRInvokeIndirect(
+                callee,
+                arguments,
+                result,
+                exception,
+                normal.name,
+                target.block,
+                target.event,
+            )
+        )
+        self._append_and_enter(context, normal)
+
+    def _emit_interface_invoke(
+        self,
+        context: _FunctionContext,
+        receiver: IRValue,
+        arguments: tuple[IRValue, ...],
+        slot: IRWitnessMethodSlot,
+        result: IRValue | None,
+    ) -> None:
+        target = self._outer_exception_target(context)
+        index = context.next_invoke
+        context.next_invoke += 1
+        normal = self._new_block(f"invoke.cont{index}")
+        exception = context.temporary(ExceptionEventType())
+        context.block.instructions.append(
+            IRInvokeInterface(
+                receiver,
+                arguments,
+                slot,
+                result,
+                exception,
+                normal.name,
+                target.block,
+                target.event,
+            )
+        )
+        self._append_and_enter(context, normal)
 
     def _emit_jump_if_open(self, block: IRBasicBlock, target: str) -> bool:
         if self._is_terminated(block):
@@ -2518,11 +2917,17 @@ class IRLowerer:
             )
 
         if isinstance(signature.return_type, VoidType):
-            context.block.instructions.append(IRCall(call.callee, arguments, None))
+            if call.callee in self._may_throw_functions:
+                self._emit_invoke(context, call.callee, arguments, None, call)
+            else:
+                context.block.instructions.append(IRCall(call.callee, arguments, None))
             return None
 
         result = context.temporary(signature.return_type)
-        context.block.instructions.append(IRCall(call.callee, arguments, result))
+        if call.callee in self._may_throw_functions:
+            self._emit_invoke(context, call.callee, arguments, result, call)
+        else:
+            context.block.instructions.append(IRCall(call.callee, arguments, result))
         return result
 
     def _lower_indirect_call(
@@ -2557,10 +2962,16 @@ class IRLowerer:
         if isinstance(signature.return_type, VoidType):
             if result_required:
                 self._fail(f"IR backend cannot use void call '{call.callee}' as a value.", call)
-            context.block.instructions.append(IRCallIndirect(callee, arguments, None))
+            if self._exception_ir_enabled:
+                self._emit_indirect_invoke(context, callee, arguments, None)
+            else:
+                context.block.instructions.append(IRCallIndirect(callee, arguments, None))
             return None
         result = context.temporary(signature.return_type)
-        context.block.instructions.append(IRCallIndirect(callee, arguments, result))
+        if self._exception_ir_enabled:
+            self._emit_indirect_invoke(context, callee, arguments, result)
+        else:
+            context.block.instructions.append(IRCallIndirect(callee, arguments, result))
         return result
 
     def _lower_scalar_math_call(
@@ -2738,7 +3149,18 @@ class IRLowerer:
             for argument, parameter_type in zip(call.arguments, signature.parameters[1:])
         )
         pair = context.temporary(signature.return_type)
-        context.block.instructions.append(IRCall(function_name, (receiver, *arguments), pair))
+        if function_name in self._may_throw_functions:
+            self._emit_invoke(
+                context,
+                function_name,
+                (receiver, *arguments),
+                pair,
+                call,
+            )
+        else:
+            context.block.instructions.append(
+                IRCall(function_name, (receiver, *arguments), pair)
+            )
         result = context.temporary(struct_type)
         context.block.instructions.append(IRMethodResultReceiver(result, pair))
         return result
@@ -2779,12 +3201,19 @@ class IRLowerer:
                     IRClassSet(result, index, field_name, value, True)
                 )
         else:
-            context.block.instructions.append(
-                IRCall(
-                    self._method_names[(info.declaration.name, "__ctor")],
+            function_name = self._method_names[(info.declaration.name, "__ctor")]
+            if function_name in self._may_throw_functions:
+                self._emit_invoke(
+                    context,
+                    function_name,
                     (result, *arguments),
+                    None,
+                    call,
                 )
-            )
+            else:
+                context.block.instructions.append(
+                    IRCall(function_name, (result, *arguments))
+                )
         return result
 
     def _lower_method_call(
@@ -2854,14 +3283,24 @@ class IRLowerer:
                         f"'{method_name}' as a value.",
                         node,
                     )
-                context.block.instructions.append(
-                    IRInterfaceCall(receiver, arguments, slot)
-                )
+                if self._exception_ir_enabled:
+                    self._emit_interface_invoke(
+                        context, receiver, arguments, slot, None
+                    )
+                else:
+                    context.block.instructions.append(
+                        IRInterfaceCall(receiver, arguments, slot)
+                    )
                 return None
             result = context.temporary(return_type)
-            context.block.instructions.append(
-                IRInterfaceCall(receiver, arguments, slot, result)
-            )
+            if self._exception_ir_enabled:
+                self._emit_interface_invoke(
+                    context, receiver, arguments, slot, result
+                )
+            else:
+                context.block.instructions.append(
+                    IRInterfaceCall(receiver, arguments, slot, result)
+                )
             return result if result_required else None
         if method_name == "trim" and isinstance(receiver.type, StringType):
             if argument_expressions:
@@ -2933,14 +3372,32 @@ class IRLowerer:
                         f"IR backend cannot use void method '{method_name}' as a value.",
                         node,
                     )
-                context.block.instructions.append(
-                    IRCall(function_name, (receiver, *arguments))
-                )
+                if function_name in self._may_throw_functions:
+                    self._emit_invoke(
+                        context,
+                        function_name,
+                        (receiver, *arguments),
+                        None,
+                        node,
+                    )
+                else:
+                    context.block.instructions.append(
+                        IRCall(function_name, (receiver, *arguments))
+                    )
                 return None
             result = context.temporary(signature.return_type)
-            context.block.instructions.append(
-                IRCall(function_name, (receiver, *arguments), result)
-            )
+            if function_name in self._may_throw_functions:
+                self._emit_invoke(
+                    context,
+                    function_name,
+                    (receiver, *arguments),
+                    result,
+                    node,
+                )
+            else:
+                context.block.instructions.append(
+                    IRCall(function_name, (receiver, *arguments), result)
+                )
             return result if result_required else None
 
         source_return = signature.return_type.value
@@ -2952,7 +3409,18 @@ class IRLowerer:
             )
         )
         pair = context.temporary(signature.return_type)
-        context.block.instructions.append(IRCall(function_name, (receiver, *arguments), pair))
+        if function_name in self._may_throw_functions:
+            self._emit_invoke(
+                context,
+                function_name,
+                (receiver, *arguments),
+                pair,
+                node,
+            )
+        else:
+            context.block.instructions.append(
+                IRCall(function_name, (receiver, *arguments), pair)
+            )
         updated_receiver = context.temporary(receiver.type)
         context.block.instructions.append(IRMethodResultReceiver(updated_receiver, pair))
         self._store_lvalue(target_expression, updated_receiver, context)
@@ -3962,7 +4430,17 @@ class IRLowerer:
     def _is_terminated(block: IRBasicBlock) -> bool:
         return bool(block.instructions) and isinstance(
             block.instructions[-1],
-            (IRReturn, IRJump, IRBranch),
+            (
+                IRReturn,
+                IRJump,
+                IRBranch,
+                IRInvoke,
+                IRInvokeIndirect,
+                IRInvokeInterface,
+                IRThrow,
+                IRRethrow,
+                IRPropagate,
+            ),
         )
 
     def _assigned_names(self, statements: list[ast.Statement]) -> set[str]:

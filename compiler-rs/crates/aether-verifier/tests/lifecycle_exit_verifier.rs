@@ -98,6 +98,7 @@ fn module(blocks: Vec<IRBasicBlock>, structs: Vec<IRStructDefinition>) -> IRModu
             parameters: Vec::new(),
             return_type: VoidType.into(),
             blocks,
+            may_throw: false,
         }],
         structs,
     }

@@ -65,6 +65,7 @@ fn preserves_representative_fields_exactly_across_instruction_families() {
                     column: i64::MAX,
                     path: None,
                 }),
+                may_throw: false,
             },
         ),
         (

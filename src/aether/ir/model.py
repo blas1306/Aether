@@ -20,8 +20,10 @@ from aether.instruction_effects import (
     MEMORY_READ,
     MEMORY_READ_MAY_TRAP,
     MUTATING_ALLOCATION,
+    NONTHROWING_UNKNOWN_CALL,
     READING_ALLOCATION,
     PURE,
+    UNKNOWN_CALL,
     InstructionEffects,
 )
 from aether.scalar_math import scalar_math_may_trap
@@ -178,6 +180,7 @@ class IRCall(IRInstruction):
     result: IRValue | None = None
     builtin: str | None = None
     source_location: IRSourceLocation | None = None
+    may_throw_effect: bool = False
 
     @property
     def effects(self):
@@ -228,13 +231,30 @@ class IRCall(IRInstruction):
         if self.builtin == "__aether_range_step_nonzero":
             return InstructionEffects(has_side_effects=True, may_trap=True)
         if self.builtin is None:
-            return UnknownCallMixin.effects
+            return UNKNOWN_CALL if self.may_throw_effect else NONTHROWING_UNKNOWN_CALL
         if scalar_math_may_trap(
             self.builtin,
             tuple(argument.type for argument in self.arguments),
         ):
             return InstructionEffects(may_trap=True)
         return PURE
+
+
+@dataclass(frozen=True)
+class IRInvoke(IRInstruction):
+    """Direct call with explicit, mutually exclusive CFG successors."""
+
+    function: str
+    arguments: tuple[IRValue, ...]
+    result: IRValue | None
+    exception: IRValue = field(metadata={"ir_definition": True})
+    normal_target: str
+    exceptional_target: str
+    exceptional_target_event: IRValue
+    builtin: str | None = None
+    source_location: IRSourceLocation | None = None
+
+    effects = UnknownCallMixin.effects
 
 
 @dataclass(frozen=True)
@@ -248,6 +268,23 @@ class IRCallIndirect(UnknownCallMixin, IRInstruction):
     callee: IRValue
     arguments: tuple[IRValue, ...] = ()
     result: IRValue | None = None
+
+    effects = NONTHROWING_UNKNOWN_CALL
+
+
+@dataclass(frozen=True)
+class IRInvokeIndirect(IRInstruction):
+    """Indirect call with explicit normal and exceptional successors."""
+
+    callee: IRValue
+    arguments: tuple[IRValue, ...]
+    result: IRValue | None
+    exception: IRValue = field(metadata={"ir_definition": True})
+    normal_target: str
+    exceptional_target: str
+    exceptional_target_event: IRValue
+
+    effects = UnknownCallMixin.effects
 
 
 @dataclass(frozen=True)
@@ -353,6 +390,24 @@ class IRInterfaceCall(UnknownCallMixin, IRInstruction):
     arguments: tuple[IRValue, ...]
     slot: IRWitnessMethodSlot
     result: IRValue | None = None
+
+    effects = NONTHROWING_UNKNOWN_CALL
+
+
+@dataclass(frozen=True)
+class IRInvokeInterface(IRInstruction):
+    """Interface call with explicit normal and exceptional successors."""
+
+    receiver: IRValue
+    arguments: tuple[IRValue, ...]
+    slot: IRWitnessMethodSlot
+    result: IRValue | None
+    exception: IRValue = field(metadata={"ir_definition": True})
+    normal_target: str
+    exceptional_target: str
+    exceptional_target_event: IRValue
+
+    effects = UnknownCallMixin.effects
 
 
 @dataclass(frozen=True)
@@ -753,6 +808,78 @@ class IRListIsEmpty(MemoryReadMixin, IRInstruction):
 
 
 @dataclass(frozen=True)
+class IRPackException(SideEffectMixin, IRInstruction):
+    """Create an opaque event which owns a validated Error payload."""
+
+    result: IRValue
+    payload: IRValue
+    dynamic_type: str | None
+    source_location: IRSourceLocation | None = None
+
+
+@dataclass(frozen=True)
+class IRCatchEntry(SideEffectMixin, IRInstruction):
+    """Handler entry plus its source-ordered catch metadata."""
+
+    event: IRValue = field(metadata={"ir_definition": True})
+    handler_id: str
+    catch_types: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class IRExceptionMatch(IRInstruction):
+    """Exact nominal descriptor match, or the explicit Error catch-all."""
+
+    result: IRValue
+    event: IRValue
+    catch_type: str
+    catch_all: bool = False
+
+
+@dataclass(frozen=True)
+class IRExceptionPayload(MemoryReadMixin, IRInstruction):
+    """Borrow the payload while the owning event remains live."""
+
+    result: IRValue
+    event: IRValue
+    catch_type: str
+
+
+@dataclass(frozen=True)
+class IRExceptionDestroy(SideEffectMixin, IRInstruction):
+    """Consume a handled event exactly once."""
+
+    event: IRValue
+
+
+@dataclass(frozen=True)
+class IRThrow(SideEffectMixin, IRInstruction):
+    """Transfer a newly packed event to a handler or function boundary."""
+
+    event: IRValue
+    target: str | None = None
+    target_event: IRValue | None = None
+
+
+@dataclass(frozen=True)
+class IRRethrow(SideEffectMixin, IRInstruction):
+    """Transfer the active event to the next outer handler."""
+
+    event: IRValue
+    target: str | None = None
+    target_event: IRValue | None = None
+
+
+@dataclass(frozen=True)
+class IRPropagate(SideEffectMixin, IRInstruction):
+    """Transfer an unmatched or call-produced event outward."""
+
+    event: IRValue
+    target: str | None = None
+    target_event: IRValue | None = None
+
+
+@dataclass(frozen=True)
 class IRBranch(SideEffectMixin, IRInstruction):
     condition: IRValue
     true_target: str
@@ -782,6 +909,7 @@ class IRFunction:
     parameters: list[IRParameter]
     return_type: IRType
     blocks: list[IRBasicBlock] = field(default_factory=list)
+    may_throw: bool = False
 
 
 @dataclass(frozen=True)

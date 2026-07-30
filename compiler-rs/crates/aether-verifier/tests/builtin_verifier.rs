@@ -28,6 +28,7 @@ fn call(
         result,
         builtin: Some(builtin.to_owned()),
         source_location: None,
+        may_throw: false,
     }
 }
 

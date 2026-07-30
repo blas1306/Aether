@@ -182,6 +182,7 @@ fn rejects_invalid_direct_call_argument_counts_and_types() {
             result: None,
             builtin: None,
             source_location: None,
+            may_throw: false,
         },
     );
     let bad_type = function_with_instruction(
@@ -193,6 +194,7 @@ fn rejects_invalid_direct_call_argument_counts_and_types() {
             result: None,
             builtin: None,
             source_location: None,
+            may_throw: false,
         },
     );
 

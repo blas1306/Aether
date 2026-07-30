@@ -9,11 +9,12 @@ use crate::wire::{
     IRStructDefinitionDTO, IRTypeDTO, IRValueDTO, NullableDTO,
 };
 use crate::{
-    ArrayType, BoolType, ClassRefType, ComplexType, DoubleType, EnumType, FloatType, FunctionType,
-    IRBasicBlock, IRConstant, IREnumConstant, IRErasedBoxLayout, IRFunction, IRInstruction,
-    IRModule, IRParameter, IRSourceLocation, IRStorage, IRStructDefinition, IRType, IRValue,
-    IRWitnessMethodSlot, IRWitnessTable, IntType, InterfaceType, LifecycleSource, ListType,
-    MatrixType, MethodResultType, NullableType, StringType, StructType, VectorType, VoidType,
+    ArrayType, BoolType, ClassRefType, ComplexType, DoubleType, EnumType, ExceptionEventType,
+    FloatType, FunctionType, IRBasicBlock, IRConstant, IREnumConstant, IRErasedBoxLayout,
+    IRFunction, IRInstruction, IRModule, IRParameter, IRSourceLocation, IRStorage,
+    IRStructDefinition, IRType, IRValue, IRWitnessMethodSlot, IRWitnessTable, IntType,
+    InterfaceType, LifecycleSource, ListType, MatrixType, MethodResultType, NullableType,
+    StringType, StructType, VectorType, VoidType,
 };
 
 /// A structural failure while importing a wire DTO into the owned Rust IR.
@@ -473,6 +474,7 @@ impl TryFrom<&IRFunctionDTO> for IRFunction {
             parameters,
             return_type,
             blocks,
+            may_throw: function.may_throw,
         })
     }
 }
@@ -636,10 +638,37 @@ impl TryFrom<&IRInstructionDTO> for IRInstruction {
                 result,
                 builtin,
                 source_location,
+                may_throw,
             } => Ok(Self::IRCall {
                 function: function.clone(),
                 arguments: import_instruction_values(kind, "arguments", arguments)?,
                 result: import_optional_instruction_value(kind, "result", result)?,
+                builtin: builtin.0.clone(),
+                source_location: import_instruction_source_location(kind, source_location)?,
+                may_throw: *may_throw,
+            }),
+            IRInstructionDTO::Invoke {
+                function,
+                arguments,
+                result,
+                exception,
+                normal_target,
+                exceptional_target,
+                exceptional_target_event,
+                builtin,
+                source_location,
+            } => Ok(Self::IRInvoke {
+                function: function.clone(),
+                arguments: import_instruction_values(kind, "arguments", arguments)?,
+                result: import_optional_instruction_value(kind, "result", result)?,
+                exception: import_instruction_value(kind, "exception", exception)?,
+                normal_target: normal_target.clone(),
+                exceptional_target: exceptional_target.clone(),
+                exceptional_target_event: import_instruction_value(
+                    kind,
+                    "exceptional_target_event",
+                    exceptional_target_event,
+                )?,
                 builtin: builtin.0.clone(),
                 source_location: import_instruction_source_location(kind, source_location)?,
             }),
@@ -655,6 +684,27 @@ impl TryFrom<&IRInstructionDTO> for IRInstruction {
                 callee: import_instruction_value(kind, "callee", callee)?,
                 arguments: import_instruction_values(kind, "arguments", arguments)?,
                 result: import_optional_instruction_value(kind, "result", result)?,
+            }),
+            IRInstructionDTO::InvokeIndirect {
+                callee,
+                arguments,
+                result,
+                exception,
+                normal_target,
+                exceptional_target,
+                exceptional_target_event,
+            } => Ok(Self::IRInvokeIndirect {
+                callee: import_instruction_value(kind, "callee", callee)?,
+                arguments: import_instruction_values(kind, "arguments", arguments)?,
+                result: import_optional_instruction_value(kind, "result", result)?,
+                exception: import_instruction_value(kind, "exception", exception)?,
+                normal_target: normal_target.clone(),
+                exceptional_target: exceptional_target.clone(),
+                exceptional_target_event: import_instruction_value(
+                    kind,
+                    "exceptional_target_event",
+                    exceptional_target_event,
+                )?,
             }),
             IRInstructionDTO::Print {
                 value,
@@ -758,6 +808,40 @@ impl TryFrom<&IRInstructionDTO> for IRInstruction {
                     receiver_ownership: slot.receiver_ownership.clone(),
                 },
                 result: import_optional_instruction_value(kind, "result", result)?,
+            }),
+            IRInstructionDTO::InvokeInterface {
+                receiver,
+                arguments,
+                slot,
+                result,
+                exception,
+                normal_target,
+                exceptional_target,
+                exceptional_target_event,
+            } => Ok(Self::IRInvokeInterface {
+                receiver: import_instruction_value(kind, "receiver", receiver)?,
+                arguments: import_instruction_values(kind, "arguments", arguments)?,
+                slot: IRWitnessMethodSlot {
+                    index: slot.index,
+                    method_id: slot.method_id.clone(),
+                    parameter_types: slot
+                        .parameter_types
+                        .iter()
+                        .map(IRType::try_from)
+                        .collect::<Result<Vec<_>, _>>()?,
+                    return_type: IRType::try_from(&slot.return_type)?,
+                    thunk_symbol: slot.thunk_symbol.clone(),
+                    receiver_ownership: slot.receiver_ownership.clone(),
+                },
+                result: import_optional_instruction_value(kind, "result", result)?,
+                exception: import_instruction_value(kind, "exception", exception)?,
+                normal_target: normal_target.clone(),
+                exceptional_target: exceptional_target.clone(),
+                exceptional_target_event: import_instruction_value(
+                    kind,
+                    "exceptional_target_event",
+                    exceptional_target_event,
+                )?,
             }),
             IRInstructionDTO::StructGet {
                 result,
@@ -1191,6 +1275,88 @@ impl TryFrom<&IRInstructionDTO> for IRInstruction {
                 value: import_instruction_value(kind, "value", value)?,
                 cols: *cols,
             }),
+            IRInstructionDTO::ExceptionPack {
+                result,
+                payload,
+                dynamic_type,
+                source_location,
+            } => Ok(Self::IRPackException {
+                result: import_instruction_value(kind, "result", result)?,
+                payload: import_instruction_value(kind, "payload", payload)?,
+                dynamic_type: dynamic_type.0.clone(),
+                source_location: import_instruction_source_location(kind, source_location)?,
+            }),
+            IRInstructionDTO::CatchEntry {
+                event,
+                handler_id,
+                catch_types,
+            } => Ok(Self::IRCatchEntry {
+                event: import_instruction_value(kind, "event", event)?,
+                handler_id: handler_id.clone(),
+                catch_types: catch_types.clone(),
+            }),
+            IRInstructionDTO::ExceptionMatch {
+                result,
+                event,
+                catch_type,
+                catch_all,
+            } => Ok(Self::IRExceptionMatch {
+                result: import_instruction_value(kind, "result", result)?,
+                event: import_instruction_value(kind, "event", event)?,
+                catch_type: catch_type.clone(),
+                catch_all: *catch_all,
+            }),
+            IRInstructionDTO::ExceptionPayload {
+                result,
+                event,
+                catch_type,
+            } => Ok(Self::IRExceptionPayload {
+                result: import_instruction_value(kind, "result", result)?,
+                event: import_instruction_value(kind, "event", event)?,
+                catch_type: catch_type.clone(),
+            }),
+            IRInstructionDTO::ExceptionDestroy { event } => Ok(Self::IRExceptionDestroy {
+                event: import_instruction_value(kind, "event", event)?,
+            }),
+            IRInstructionDTO::Throw {
+                event,
+                target,
+                target_event,
+            } => Ok(Self::IRThrow {
+                event: import_instruction_value(kind, "event", event)?,
+                target: target.0.clone(),
+                target_event: import_optional_instruction_value(
+                    kind,
+                    "target_event",
+                    target_event,
+                )?,
+            }),
+            IRInstructionDTO::Rethrow {
+                event,
+                target,
+                target_event,
+            } => Ok(Self::IRRethrow {
+                event: import_instruction_value(kind, "event", event)?,
+                target: target.0.clone(),
+                target_event: import_optional_instruction_value(
+                    kind,
+                    "target_event",
+                    target_event,
+                )?,
+            }),
+            IRInstructionDTO::Propagate {
+                event,
+                target,
+                target_event,
+            } => Ok(Self::IRPropagate {
+                event: import_instruction_value(kind, "event", event)?,
+                target: target.0.clone(),
+                target_event: import_optional_instruction_value(
+                    kind,
+                    "target_event",
+                    target_event,
+                )?,
+            }),
             IRInstructionDTO::Branch {
                 condition,
                 true_target,
@@ -1241,6 +1407,7 @@ impl TryFrom<IRTypeDTO> for IRType {
             IRTypeDTO::Bool {} => Ok(BoolType.into()),
             IRTypeDTO::String {} => Ok(StringType.into()),
             IRTypeDTO::Void {} => Ok(VoidType.into()),
+            IRTypeDTO::ExceptionEvent {} => Ok(ExceptionEventType.into()),
             IRTypeDTO::Function {
                 parameter_types,
                 return_type,
@@ -1596,6 +1763,7 @@ const fn wire_type_tag(type_: &IRTypeDTO) -> &'static str {
         IRTypeDTO::Bool {} => "bool",
         IRTypeDTO::String {} => "string",
         IRTypeDTO::Void {} => "void",
+        IRTypeDTO::ExceptionEvent {} => "exception_event",
         IRTypeDTO::Function { .. } => "function",
         IRTypeDTO::Complex {} => "complex",
         IRTypeDTO::Nullable { .. } => "nullable",
@@ -1627,8 +1795,10 @@ const fn wire_instruction_kind(instruction: &IRInstructionDTO) -> &'static str {
         IRInstructionDTO::CompareOp { .. } => "compare_op",
         IRInstructionDTO::Cast { .. } => "cast",
         IRInstructionDTO::Call { .. } => "call",
+        IRInstructionDTO::Invoke { .. } => "invoke",
         IRInstructionDTO::FunctionRef { .. } => "function_ref",
         IRInstructionDTO::CallIndirect { .. } => "call_indirect",
+        IRInstructionDTO::InvokeIndirect { .. } => "invoke_indirect",
         IRInstructionDTO::Print { .. } => "print",
         IRInstructionDTO::StructNew { .. } => "struct_new",
         IRInstructionDTO::ClassNew { .. } => "class_new",
@@ -1636,6 +1806,7 @@ const fn wire_instruction_kind(instruction: &IRInstructionDTO) -> &'static str {
         IRInstructionDTO::ClassSet { .. } => "class_set",
         IRInstructionDTO::InterfaceConstruct { .. } => "interface_construct",
         IRInstructionDTO::InterfaceCall { .. } => "interface_call",
+        IRInstructionDTO::InvokeInterface { .. } => "invoke_interface",
         IRInstructionDTO::StructGet { .. } => "struct_get",
         IRInstructionDTO::StructSet { .. } => "struct_set",
         IRInstructionDTO::MethodResultNew { .. } => "method_result_new",
@@ -1663,6 +1834,14 @@ const fn wire_instruction_kind(instruction: &IRInstructionDTO) -> &'static str {
         IRInstructionDTO::ArrayLength { .. } => "array_length",
         IRInstructionDTO::ListLength { .. } => "list_length",
         IRInstructionDTO::ListIsEmpty { .. } => "list_is_empty",
+        IRInstructionDTO::ExceptionPack { .. } => "exception_pack",
+        IRInstructionDTO::CatchEntry { .. } => "catch_entry",
+        IRInstructionDTO::ExceptionMatch { .. } => "exception_match",
+        IRInstructionDTO::ExceptionPayload { .. } => "exception_payload",
+        IRInstructionDTO::ExceptionDestroy { .. } => "exception_destroy",
+        IRInstructionDTO::Throw { .. } => "throw",
+        IRInstructionDTO::Rethrow { .. } => "rethrow",
+        IRInstructionDTO::Propagate { .. } => "propagate",
         IRInstructionDTO::VectorNew { .. } => "vector_new",
         IRInstructionDTO::MatrixNew { .. } => "matrix_new",
         IRInstructionDTO::VectorAdd { .. } => "vector_add",

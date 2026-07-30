@@ -17,6 +17,7 @@ from .model import (
     IRCast,
     IRCall,
     IRCallIndirect,
+    IRCatchEntry,
     IRClassGet,
     IRClassNew,
     IRClassSet,
@@ -24,11 +25,17 @@ from .model import (
     IRConst,
     IRCopyInit,
     IRDestroy,
+    IRExceptionDestroy,
+    IRExceptionMatch,
+    IRExceptionPayload,
     IREnumConstant,
     IRFunction,
     IRFunctionRef,
     IRInterfaceCall,
     IRInterfaceConstruct,
+    IRInvoke,
+    IRInvokeIndirect,
+    IRInvokeInterface,
     IRInstruction,
     IRInitDefault,
     IRJump,
@@ -63,6 +70,8 @@ from .model import (
     IRModule,
     IRMoveInit,
     IRPrint,
+    IRPackException,
+    IRPropagate,
     IRStructGet,
     IRStructNew,
     IRStructSet,
@@ -70,8 +79,10 @@ from .model import (
     IRMethodResultReceiver,
     IRMethodResultValue,
     IRReturn,
+    IRRethrow,
     IRRelocate,
     IRStore,
+    IRThrow,
     IRUnaryOp,
     IRValue,
     IRVectorGet,
@@ -101,7 +112,11 @@ class IRPrinter:
 
     def _print_function(self, function: IRFunction) -> str:
         parameters = ", ".join(self._typed_value(parameter) for parameter in function.parameters)
-        lines = [f"func {self._global_name(function.name)}({parameters}) -> {function.return_type} {{"]
+        effect = " may_throw" if function.may_throw else ""
+        lines = [
+            f"func {self._global_name(function.name)}({parameters}) -> "
+            f"{function.return_type}{effect} {{"
+        ]
 
         for index, block in enumerate(function.blocks):
             if index:
@@ -179,6 +194,22 @@ class IRPrinter:
             if instruction.result is None:
                 return call
             return f"{self._typed_value(instruction.result)} = {call}"
+        if isinstance(instruction, IRInvoke):
+            arguments = ", ".join(
+                self._value(argument) for argument in instruction.arguments
+            )
+            result = (
+                "void"
+                if instruction.result is None
+                else self._typed_value(instruction.result)
+            )
+            return (
+                f"invoke @{instruction.function}({arguments}) -> normal "
+                f"{instruction.normal_target} [{result}], exceptional "
+                f"{instruction.exceptional_target} "
+                f"[{self._typed_value(instruction.exception)} => "
+                f"{self._value(instruction.exceptional_target_event)}]"
+            )
         if isinstance(instruction, IRFunctionRef):
             return (
                 f"{self._typed_value(instruction.result)} = function_ref "
@@ -190,6 +221,22 @@ class IRPrinter:
             if instruction.result is None:
                 return call
             return f"{self._typed_value(instruction.result)} = {call}"
+        if isinstance(instruction, IRInvokeIndirect):
+            arguments = ", ".join(
+                self._value(argument) for argument in instruction.arguments
+            )
+            result = (
+                "void"
+                if instruction.result is None
+                else self._typed_value(instruction.result)
+            )
+            return (
+                f"invoke_indirect {self._value(instruction.callee)}({arguments}) "
+                f"-> normal {instruction.normal_target} [{result}], exceptional "
+                f"{instruction.exceptional_target} "
+                f"[{self._typed_value(instruction.exception)} => "
+                f"{self._value(instruction.exceptional_target_event)}]"
+            )
         if isinstance(instruction, IRPrint):
             operation = "println" if instruction.newline else "print"
             shape = (
@@ -223,6 +270,18 @@ class IRPrinter:
             if instruction.result is None:
                 return call
             return f"{self._typed_value(instruction.result)} = {call}"
+        if isinstance(instruction, IRInvokeInterface):
+            arguments = ", ".join(
+                self._value(argument) for argument in instruction.arguments
+            )
+            return (
+                f"invoke_interface {self._value(instruction.receiver)} "
+                f"slot {instruction.slot.index}({arguments}) -> normal "
+                f"{instruction.normal_target}, exceptional "
+                f"{instruction.exceptional_target} "
+                f"[{self._value(instruction.exception)} => "
+                f"{self._value(instruction.exceptional_target_event)}]"
+            )
         if isinstance(instruction, IRClassGet):
             return (
                 f"{self._typed_value(instruction.result)} = class_get "
@@ -444,6 +503,45 @@ class IRPrinter:
             return f"{self._typed_value(instruction.result)} = list_length {self._value(instruction.list_value)}"
         if isinstance(instruction, IRListIsEmpty):
             return f"{self._typed_value(instruction.result)} = list_is_empty {self._value(instruction.list_value)}"
+        if isinstance(instruction, IRPackException):
+            dynamic = instruction.dynamic_type or "<dynamic>"
+            return (
+                f"{self._typed_value(instruction.result)} = exception_pack "
+                f"{self._value(instruction.payload)} descriptor @{dynamic}"
+            )
+        if isinstance(instruction, IRCatchEntry):
+            catches = ", ".join(f"@{item}" for item in instruction.catch_types)
+            return (
+                f"catch_entry {instruction.handler_id} "
+                f"{self._typed_value(instruction.event)} [{catches}]"
+            )
+        if isinstance(instruction, IRExceptionMatch):
+            operation = "catch_all" if instruction.catch_all else "exact"
+            return (
+                f"{self._typed_value(instruction.result)} = exception_match "
+                f"{operation} {self._value(instruction.event)}, "
+                f"@{instruction.catch_type}"
+            )
+        if isinstance(instruction, IRExceptionPayload):
+            return (
+                f"{self._typed_value(instruction.result)} = exception_borrow "
+                f"{self._value(instruction.event)} as @{instruction.catch_type}"
+            )
+        if isinstance(instruction, IRExceptionDestroy):
+            return f"exception_destroy {self._value(instruction.event)}"
+        if isinstance(instruction, (IRThrow, IRRethrow, IRPropagate)):
+            operation = {
+                IRThrow: "throw",
+                IRRethrow: "rethrow",
+                IRPropagate: "propagate",
+            }[type(instruction)]
+            if instruction.target is None:
+                return f"{operation} {self._value(instruction.event)} -> unwind"
+            return (
+                f"{operation} {self._value(instruction.event)} -> exceptional "
+                f"{instruction.target} "
+                f"[{self._value(instruction.target_event)}]"
+            )
         if isinstance(instruction, IRVectorLength):
             return f"{self._typed_value(instruction.result)} = vector_length {self._value(instruction.vector)}"
         if isinstance(instruction, IRMatrixRows):

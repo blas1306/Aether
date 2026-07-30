@@ -1641,6 +1641,7 @@ impl<'module> LifecycleTypeRegistry<'module> {
             | IRType::Bool(_)
             | IRType::Complex(_)
             | IRType::Enum(_) => LifecycleTraits::valid(true, true, false),
+            IRType::ExceptionEvent(_) => LifecycleTraits::valid(true, false, false),
             IRType::String(_) | IRType::Array(_) | IRType::List(_) => {
                 LifecycleTraits::valid(true, true, true)
             }

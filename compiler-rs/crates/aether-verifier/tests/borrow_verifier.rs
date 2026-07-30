@@ -91,6 +91,7 @@ fn function(
         parameters,
         return_type,
         blocks,
+        may_throw: false,
     }
 }
 
@@ -254,6 +255,7 @@ fn accepts_same_block_retain_before_managed_store() {
                     result: None,
                     builtin: Some("__aether_retain".to_owned()),
                     source_location: None,
+                    may_throw: false,
                 },
                 IRInstruction::IRStore {
                     slot: value("saved", &string_type),
@@ -409,6 +411,7 @@ fn store_acquisition_is_same_block_only() {
                         result: None,
                         builtin: Some("__aether_retain".to_owned()),
                         source_location: None,
+                        may_throw: false,
                     },
                     IRInstruction::IRJump {
                         target: "store".to_owned(),
@@ -464,6 +467,7 @@ fn rejects_direct_return_even_after_retain() {
                     result: None,
                     builtin: Some("__aether_retain".to_owned()),
                     source_location: None,
+                    may_throw: false,
                 },
                 ret(Some(borrowed)),
             ],
@@ -696,6 +700,7 @@ fn preserves_python_boundaries_for_aggregate_call_copy_and_multiple_uses() {
                     result: None,
                     builtin: None,
                     source_location: None,
+                    may_throw: false,
                 },
                 IRInstruction::IRCopyInit {
                     destination: IRStorage::new("copy", element_type),
@@ -773,6 +778,7 @@ fn invalid_collection_source_and_unknown_call_remain_non_borrow_type_rules() {
                     result: None,
                     builtin: None,
                     source_location: None,
+                    may_throw: false,
                 },
                 ret(None),
             ],

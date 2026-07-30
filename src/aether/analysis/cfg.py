@@ -21,6 +21,7 @@ class CFGNode:
 class CFGEdge:
     source: str
     target: str
+    kind: str = "normal"
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,26 @@ class CFGBuilder:
             elif terminator_name == "IRBranch":
                 edges.append(CFGEdge(block.name, terminator.true_target))
                 edges.append(CFGEdge(block.name, terminator.false_target))
+            elif terminator_name in {
+                "IRInvoke",
+                "IRInvokeIndirect",
+                "IRInvokeInterface",
+            }:
+                edges.append(
+                    CFGEdge(block.name, terminator.normal_target, "normal")
+                )
+                edges.append(
+                    CFGEdge(
+                        block.name,
+                        terminator.exceptional_target,
+                        "exceptional",
+                    )
+                )
+            elif terminator_name in {"IRThrow", "IRRethrow", "IRPropagate"}:
+                if terminator.target is not None:
+                    edges.append(
+                        CFGEdge(block.name, terminator.target, "exceptional")
+                    )
             elif terminator_name == "IRReturn":
                 continue
 
@@ -67,7 +88,14 @@ class DOTPrinter:
             lines.append("")
 
         for edge in cfg.edges:
-            lines.append(f"    {_dot_id(edge.source)} -> {_dot_id(edge.target)};")
+            suffix = (
+                ' [label="exceptional"]'
+                if edge.kind == "exceptional"
+                else ""
+            )
+            lines.append(
+                f"    {_dot_id(edge.source)} -> {_dot_id(edge.target)}{suffix};"
+            )
 
         lines.append("}")
         return "\n".join(lines)

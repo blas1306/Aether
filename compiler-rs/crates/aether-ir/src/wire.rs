@@ -11,6 +11,10 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 /// The frozen Python/Rust interchange schema version represented here.
 pub const IR_SCHEMA_VERSION: i64 = 1;
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum NullableDTORepresentation<T> {
@@ -213,6 +217,9 @@ pub struct IRFunctionDTO {
     pub return_type: IRTypeDTO,
     /// Basic blocks in retained order.
     pub blocks: Vec<IRBasicBlockDTO>,
+    /// Conservative internal catchable-exception effect.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub may_throw: bool,
 }
 
 /// Basic block in the wire schema.
@@ -236,6 +243,7 @@ pub enum IRTypeDTO {
     Bool {},
     String {},
     Void {},
+    ExceptionEvent {},
     Function {
         parameter_types: Vec<Self>,
         return_type: Box<Self>,
@@ -450,6 +458,19 @@ pub enum IRInstructionDTO {
         result: NullableDTO<IRValueDTO>,
         builtin: NullableDTO<String>,
         source_location: NullableDTO<IRSourceLocationDTO>,
+        #[serde(default, skip_serializing_if = "is_false")]
+        may_throw: bool,
+    },
+    Invoke {
+        function: String,
+        arguments: Vec<IRValueDTO>,
+        result: NullableDTO<IRValueDTO>,
+        exception: IRValueDTO,
+        normal_target: String,
+        exceptional_target: String,
+        exceptional_target_event: IRValueDTO,
+        builtin: NullableDTO<String>,
+        source_location: NullableDTO<IRSourceLocationDTO>,
     },
     FunctionRef {
         result: IRValueDTO,
@@ -459,6 +480,15 @@ pub enum IRInstructionDTO {
         callee: IRValueDTO,
         arguments: Vec<IRValueDTO>,
         result: NullableDTO<IRValueDTO>,
+    },
+    InvokeIndirect {
+        callee: IRValueDTO,
+        arguments: Vec<IRValueDTO>,
+        result: NullableDTO<IRValueDTO>,
+        exception: IRValueDTO,
+        normal_target: String,
+        exceptional_target: String,
+        exceptional_target_event: IRValueDTO,
     },
     Print {
         value: IRValueDTO,
@@ -495,6 +525,16 @@ pub enum IRInstructionDTO {
         arguments: Vec<IRValueDTO>,
         slot: IRWitnessMethodSlotDTO,
         result: NullableDTO<IRValueDTO>,
+    },
+    InvokeInterface {
+        receiver: IRValueDTO,
+        arguments: Vec<IRValueDTO>,
+        slot: IRWitnessMethodSlotDTO,
+        result: NullableDTO<IRValueDTO>,
+        exception: IRValueDTO,
+        normal_target: String,
+        exceptional_target: String,
+        exceptional_target_event: IRValueDTO,
     },
     StructGet {
         result: IRValueDTO,
@@ -747,6 +787,46 @@ pub enum IRInstructionDTO {
         column: IRValueDTO,
         value: IRValueDTO,
         shape: [i64; 1],
+    },
+    ExceptionPack {
+        result: IRValueDTO,
+        payload: IRValueDTO,
+        dynamic_type: NullableDTO<String>,
+        source_location: NullableDTO<IRSourceLocationDTO>,
+    },
+    CatchEntry {
+        event: IRValueDTO,
+        handler_id: String,
+        catch_types: Vec<String>,
+    },
+    ExceptionMatch {
+        result: IRValueDTO,
+        event: IRValueDTO,
+        catch_type: String,
+        catch_all: bool,
+    },
+    ExceptionPayload {
+        result: IRValueDTO,
+        event: IRValueDTO,
+        catch_type: String,
+    },
+    ExceptionDestroy {
+        event: IRValueDTO,
+    },
+    Throw {
+        event: IRValueDTO,
+        target: NullableDTO<String>,
+        target_event: NullableDTO<IRValueDTO>,
+    },
+    Rethrow {
+        event: IRValueDTO,
+        target: NullableDTO<String>,
+        target_event: NullableDTO<IRValueDTO>,
+    },
+    Propagate {
+        event: IRValueDTO,
+        target: NullableDTO<String>,
+        target_event: NullableDTO<IRValueDTO>,
     },
     Branch {
         condition: IRValueDTO,

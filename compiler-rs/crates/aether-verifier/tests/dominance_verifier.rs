@@ -76,6 +76,7 @@ fn function(name: &str, parameters: Vec<IRParameter>, blocks: Vec<IRBasicBlock>)
         parameters,
         return_type: IntType.into(),
         blocks,
+        may_throw: false,
     }
 }
 
@@ -536,6 +537,7 @@ fn type_and_lifecycle_rules_remain_outside_this_pass() {
                 ret(Some("wrongly_typed")),
             ],
         )],
+        may_throw: false,
     };
     assert_eq!(verify_function_dominance(&type_invalid), Ok(()));
 
@@ -554,6 +556,7 @@ fn type_and_lifecycle_rules_remain_outside_this_pass() {
                 ret(Some("result")),
             ],
         )],
+        may_throw: false,
     };
     assert_eq!(verify_function_dominance(&lifecycle_invalid), Ok(()));
 }

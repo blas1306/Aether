@@ -39,6 +39,8 @@ class DeadStoreEliminator:
         )
 
     def _eliminate_function(self, function: IRFunction) -> tuple[IRFunction, int]:
+        if function.may_throw:
+            return function, 0
         removed_stores = 0
         blocks: list[IRBasicBlock] = []
         for block in function.blocks:
@@ -51,6 +53,7 @@ class DeadStoreEliminator:
                 list(function.parameters),
                 function.return_type,
                 blocks,
+                function.may_throw,
             ),
             removed_stores,
         )

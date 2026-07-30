@@ -107,6 +107,7 @@ fn module(blocks: Vec<IRBasicBlock>) -> IRModule {
             parameters: Vec::new(),
             return_type: VoidType.into(),
             blocks,
+            may_throw: false,
         }],
         structs: Vec::new(),
     }

@@ -86,6 +86,7 @@ from .model import (
     IRCast,
     IRCall,
     IRCallIndirect,
+    IRCatchEntry,
     IRClassGet,
     IRClassNew,
     IRClassSet,
@@ -93,11 +94,17 @@ from .model import (
     IRConst,
     IRCopyInit,
     IRDestroy,
+    IRExceptionDestroy,
+    IRExceptionMatch,
+    IRExceptionPayload,
     IREnumConstant,
     IRFunction,
     IRFunctionRef,
     IRInterfaceCall,
     IRInterfaceConstruct,
+    IRInvoke,
+    IRInvokeIndirect,
+    IRInvokeInterface,
     IRInstruction,
     IRInitDefault,
     IRJump,
@@ -132,6 +139,8 @@ from .model import (
     IRMoveInit,
     IROuterProduct,
     IRPrint,
+    IRPackException,
+    IRPropagate,
     IRStructGet,
     IRStructNew,
     IRStructSet,
@@ -139,9 +148,11 @@ from .model import (
     IRMethodResultReceiver,
     IRMethodResultValue,
     IRReturn,
+    IRRethrow,
     IRRelocate,
     IRStorage,
     IRStore,
+    IRThrow,
     IRUnaryOp,
     IRValue,
     IRVectorGet,
@@ -153,6 +164,7 @@ from .model import (
     IRVectorLength,
     IRVectorNew,
     IRVectorSet,
+    IRWitnessMethodSlot,
 )
 from .types import (
     ArrayType,
@@ -190,6 +202,28 @@ class _IRFunctionReference:
     function: IRFunction
 
 
+@dataclass
+class _IRExceptionEvent:
+    payload: Any
+    dynamic_type: str
+    line: int
+    column: int
+    consumed: bool = False
+
+
+class _IRThrownSignal(IRExecutionError):
+    def __init__(self, event: _IRExceptionEvent) -> None:
+        self.event = event
+        super().__init__(
+            f"Unhandled {event.dynamic_type} at {event.line}:{event.column}"
+        )
+
+
+@dataclass(frozen=True)
+class _IRBorrowedExceptionPayload:
+    event: _IRExceptionEvent
+
+
 class IRInterpreter:
     """Execute the initial Aether IR control-flow subset."""
 
@@ -206,6 +240,7 @@ class IRInterpreter:
         self.output = ""
         self._output_writer = write_output
         self._program_arguments = normalize_program_arguments(program_arguments)
+        self._call_depth = 0
 
     def call(self, function_name: str, arguments: Sequence[Any] = ()) -> Any:
         """Call an IR function by name using raw Python scalar values."""
@@ -229,7 +264,22 @@ class IRInterpreter:
                 for parameter, argument in zip(function.parameters, arguments)
             },
         )
-        return self._execute(function, frame)
+        root_call = self._call_depth == 0
+        self._call_depth += 1
+        try:
+            return self._execute(function, frame)
+        except _IRThrownSignal as signal:
+            if not root_call:
+                raise
+            event = signal.event
+            message = (
+                f"Unhandled {event.dynamic_type} exception at "
+                f"{event.line}:{event.column}"
+            )
+            self._destroy_exception_event(event)
+            raise IRExecutionError(message) from None
+        finally:
+            self._call_depth -= 1
 
     def _format_print_value(
         self,
@@ -668,6 +718,24 @@ class IRInterpreter:
                 frame.values[instruction.result] = result
             return False, None, None
 
+        if isinstance(instruction, IRInvoke):
+            arguments = [
+                self._value(argument, frame) for argument in instruction.arguments
+            ]
+            try:
+                if instruction.builtin is not None:
+                    raise IRExecutionError(
+                        "Catchable builtin invokes are not implemented"
+                    )
+                result = self.call(instruction.function, arguments)
+            except _IRThrownSignal as signal:
+                frame.values[instruction.exception] = signal.event
+                frame.values[instruction.exceptional_target_event] = signal.event
+                return False, None, instruction.exceptional_target
+            if instruction.result is not None:
+                frame.values[instruction.result] = result
+            return False, None, instruction.normal_target
+
         if isinstance(instruction, IRFunctionRef):
             function = self._functions.get(instruction.function)
             if function is None:
@@ -688,6 +756,25 @@ class IRInterpreter:
             if instruction.result is not None:
                 frame.values[instruction.result] = result
             return False, None, None
+
+        if isinstance(instruction, IRInvokeIndirect):
+            reference = self._value(instruction.callee, frame)
+            if not isinstance(reference, _IRFunctionReference):
+                raise IRExecutionError(
+                    "IR indirect invoke callee is not a function reference"
+                )
+            arguments = [
+                self._value(argument, frame) for argument in instruction.arguments
+            ]
+            try:
+                result = self.call(reference.function.name, arguments)
+            except _IRThrownSignal as signal:
+                frame.values[instruction.exception] = signal.event
+                frame.values[instruction.exceptional_target_event] = signal.event
+                return False, None, instruction.exceptional_target
+            if instruction.result is not None:
+                frame.values[instruction.result] = result
+            return False, None, instruction.normal_target
 
         if isinstance(instruction, IRPrint):
             value = self._value(instruction.value, frame)
@@ -731,47 +818,35 @@ class IRInterpreter:
             return False, None, None
 
         if isinstance(instruction, IRInterfaceCall):
-            interface = self._value(instruction.receiver, frame)
-            if (
-                not isinstance(interface, tuple)
-                or len(interface) != 2
-                or not isinstance(interface[0], NativeClassObject)
-            ):
-                raise IRExecutionError(
-                    "IR interface_call requires a native interface value"
-                )
-            carrier, witness = interface
-            if (
-                instruction.slot.index < 0
-                or instruction.slot.index >= len(witness.method_slots)
-            ):
-                raise IRExecutionError("IR interface_call slot is out of bounds")
-            witness_slot = witness.method_slots[instruction.slot.index]
-            if (
-                witness_slot.method_id != instruction.slot.method_id
-                or witness_slot.parameter_types != instruction.slot.parameter_types
-                or witness_slot.return_type != instruction.slot.return_type
-            ):
-                raise IRExecutionError(
-                    "IR interface_call signature does not match its witness slot"
-                )
-            concrete_method = (
-                f"{witness.concrete_type_id}."
-                f"{witness_slot.method_id.rsplit('.', 1)[-1]}"
-            )
-            result = self.call(
-                concrete_method,
+            result = self._call_interface(
+                self._value(instruction.receiver, frame),
+                instruction.slot,
                 [
-                    carrier,
-                    *(
-                        self._value(argument, frame)
-                        for argument in instruction.arguments
-                    ),
+                    self._value(argument, frame)
+                    for argument in instruction.arguments
                 ],
             )
             if instruction.result is not None:
                 frame.values[instruction.result] = result
             return False, None, None
+
+        if isinstance(instruction, IRInvokeInterface):
+            try:
+                result = self._call_interface(
+                    self._value(instruction.receiver, frame),
+                    instruction.slot,
+                    [
+                        self._value(argument, frame)
+                        for argument in instruction.arguments
+                    ],
+                )
+            except _IRThrownSignal as signal:
+                frame.values[instruction.exception] = signal.event
+                frame.values[instruction.exceptional_target_event] = signal.event
+                return False, None, instruction.exceptional_target
+            if instruction.result is not None:
+                frame.values[instruction.result] = result
+            return False, None, instruction.normal_target
 
         if isinstance(instruction, IRClassGet):
             object_ = self._value(instruction.object, frame)
@@ -1158,6 +1233,70 @@ class IRInterpreter:
             frame.values[instruction.result] = len(list_value) == 0
             return False, None, None
 
+        if isinstance(instruction, IRPackException):
+            payload = self._value(instruction.payload, frame)
+            dynamic_type = instruction.dynamic_type
+            if dynamic_type is None:
+                if isinstance(payload, NativeClassObject):
+                    dynamic_type = payload.type_name
+                elif (
+                    isinstance(payload, tuple)
+                    and len(payload) == 2
+                    and hasattr(payload[1], "concrete_type_id")
+                ):
+                    dynamic_type = payload[1].concrete_type_id
+                    payload = payload[0]
+                else:
+                    raise IRExecutionError(
+                        "Cannot determine the dynamic exception payload type"
+                    )
+            location = instruction.source_location
+            frame.values[instruction.result] = _IRExceptionEvent(
+                copy_init_value(payload),
+                dynamic_type,
+                location.line if location is not None else 1,
+                location.column if location is not None else 1,
+            )
+            return False, None, None
+
+        if isinstance(instruction, IRCatchEntry):
+            event = self._exception_event(instruction.event, frame)
+            if event.consumed:
+                raise IRExecutionError("Catch entry received a consumed event")
+            return False, None, None
+
+        if isinstance(instruction, IRExceptionMatch):
+            event = self._exception_event(instruction.event, frame)
+            frame.values[instruction.result] = (
+                instruction.catch_all
+                or event.dynamic_type == instruction.catch_type
+            )
+            return False, None, None
+
+        if isinstance(instruction, IRExceptionPayload):
+            event = self._exception_event(instruction.event, frame)
+            if instruction.catch_type == "Error":
+                frame.values[instruction.result] = _IRBorrowedExceptionPayload(event)
+            else:
+                frame.values[instruction.result] = event.payload
+            return False, None, None
+
+        if isinstance(instruction, IRExceptionDestroy):
+            event = self._exception_event(instruction.event, frame)
+            self._destroy_exception_event(event)
+            return False, None, None
+
+        if isinstance(instruction, (IRThrow, IRRethrow, IRPropagate)):
+            event = self._exception_event(instruction.event, frame)
+            if instruction.target is None:
+                raise _IRThrownSignal(event)
+            if instruction.target_event is None:
+                raise IRExecutionError(
+                    "Exceptional transfer target is missing its event value"
+                )
+            frame.values[instruction.target_event] = event
+            return False, None, instruction.target
+
         if isinstance(instruction, IRBranch):
             condition = self._value(instruction.condition, frame)
             if not isinstance(condition, bool):
@@ -1182,6 +1321,22 @@ class IRInterpreter:
                 )
             return frame.slots[value]
         return self._value(value, frame)
+
+    @staticmethod
+    def _exception_event(value: IRValue, frame: _Frame) -> _IRExceptionEvent:
+        event = IRInterpreter._value(value, frame)
+        if not isinstance(event, _IRExceptionEvent):
+            raise IRExecutionError("IR exception operand is not an event")
+        if event.consumed:
+            raise IRExecutionError("IR exception event was already consumed")
+        return event
+
+    @staticmethod
+    def _destroy_exception_event(event: _IRExceptionEvent) -> None:
+        if event.consumed:
+            raise IRExecutionError("IR exception event was destroyed twice")
+        event.consumed = True
+        destroy_value(event.payload)
 
     def _default_lifecycle_value(self, type_: object) -> Any:
         if isinstance(type_, StructType):
@@ -1388,6 +1543,51 @@ class IRInterpreter:
                 total = self._binary("add", total, self._binary("mul", vector_value, matrix_value))
             result.append(total)
         frame.values[instruction.result] = result
+
+    def _call_interface(
+        self,
+        interface: Any,
+        slot: IRWitnessMethodSlot,
+        arguments: list[Any],
+    ) -> Any:
+        if isinstance(interface, _IRBorrowedExceptionPayload):
+            event = interface.event
+            concrete_method = (
+                f"{event.dynamic_type}.{slot.method_id.rsplit('.', 1)[-1]}"
+            )
+            result = self.call(concrete_method, [event.payload, *arguments])
+            if (
+                isinstance(result, tuple)
+                and len(result) == 2
+                and not isinstance(event.payload, NativeClassObject)
+            ):
+                return result[1]
+            return result
+        if (
+            not isinstance(interface, tuple)
+            or len(interface) != 2
+            or not isinstance(interface[0], NativeClassObject)
+        ):
+            raise IRExecutionError(
+                "IR interface call requires a native interface value"
+            )
+        carrier, witness = interface
+        if slot.index < 0 or slot.index >= len(witness.method_slots):
+            raise IRExecutionError("IR interface call slot is out of bounds")
+        witness_slot = witness.method_slots[slot.index]
+        if (
+            witness_slot.method_id != slot.method_id
+            or witness_slot.parameter_types != slot.parameter_types
+            or witness_slot.return_type != slot.return_type
+        ):
+            raise IRExecutionError(
+                "IR interface call signature does not match its witness slot"
+            )
+        concrete_method = (
+            f"{witness.concrete_type_id}."
+            f"{witness_slot.method_id.rsplit('.', 1)[-1]}"
+        )
+        return self.call(concrete_method, [carrier, *arguments])
 
     @staticmethod
     def _target_block(

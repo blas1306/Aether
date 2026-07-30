@@ -29,15 +29,22 @@ from .model import (
     IRCast,
     IRCall,
     IRCallIndirect,
+    IRCatchEntry,
     IRClassGet,
     IRClassNew,
     IRClassSet,
     IRInterfaceCall,
     IRInterfaceConstruct,
+    IRInvoke,
+    IRInvokeIndirect,
+    IRInvokeInterface,
     IRCompareOp,
     IRConst,
     IRCopyInit,
     IRDestroy,
+    IRExceptionDestroy,
+    IRExceptionMatch,
+    IRExceptionPayload,
     IREnumConstant,
     IRFunction,
     IRFunctionRef,
@@ -75,6 +82,8 @@ from .model import (
     IRMoveInit,
     IROuterProduct,
     IRPrint,
+    IRPackException,
+    IRPropagate,
     IRStructGet,
     IRStructNew,
     IRStructSet,
@@ -82,9 +91,11 @@ from .model import (
     IRMethodResultReceiver,
     IRMethodResultValue,
     IRReturn,
+    IRRethrow,
     IRRelocate,
     IRStorage,
     IRStore,
+    IRThrow,
     IRUnaryOp,
     IRValue,
     IRVectorGet,
@@ -127,6 +138,7 @@ from .types import (
     ClassRefType,
     ComplexType,
     DoubleType,
+    ExceptionEventType,
     EnumType,
     FloatType,
     FunctionType,
@@ -183,7 +195,17 @@ class _State:
 class IRVerifier:
     """Validate the initial executable Aether IR subset."""
 
-    _TERMINATORS = (IRReturn, IRJump, IRBranch)
+    _TERMINATORS = (
+        IRReturn,
+        IRJump,
+        IRBranch,
+        IRInvoke,
+        IRInvokeIndirect,
+        IRInvokeInterface,
+        IRThrow,
+        IRRethrow,
+        IRPropagate,
+    )
     _NUMERIC_TYPES = (IntType, FloatType, DoubleType, ComplexType)
     _REAL_TYPES = (IntType, FloatType, DoubleType)
 
@@ -292,6 +314,7 @@ class IRVerifier:
             )
 
         self._verify_block_structure(function, blocks)
+        self._verify_exception_structure(function, blocks)
 
         value_types = self._collect_value_types(function)
         slot_types = self._collect_slot_types(function)
@@ -299,6 +322,202 @@ class IRVerifier:
         self._verify_borrowed_elements(function)
         self._verify_reachable_values(function, blocks, value_types, slot_types)
         self._verify_all_non_void_paths_return(function, blocks)
+
+    def _verify_exception_structure(
+        self,
+        function: IRFunction,
+        blocks: dict[str, IRBasicBlock],
+    ) -> None:
+        if type(function.may_throw) is not bool:
+            self._fail(
+                f"Function '{function.name}' may_throw metadata must be boolean",
+                rule=("IRV-130", VerifierCategory.TYPES),
+            )
+
+        handler_events: dict[str, IRValue] = {}
+        catch_event_names: set[str] = set()
+        handler_ids: set[str] = set()
+        for block in function.blocks:
+            entries = [
+                instruction
+                for instruction in block.instructions
+                if isinstance(instruction, IRCatchEntry)
+            ]
+            if not entries:
+                continue
+            if len(entries) != 1 or not isinstance(block.instructions[0], IRCatchEntry):
+                self._fail(
+                    f"Handler entry in block '{block.name}' must be its first and only catch_entry",
+                    rule=("IRV-131", VerifierCategory.CFG),
+                )
+            entry = entries[0]
+            if not isinstance(entry.event.type, ExceptionEventType):
+                self._fail(
+                    f"Handler '{entry.handler_id}' event must have exception_event type",
+                    rule=("IRV-132", VerifierCategory.TYPES),
+                )
+            if not entry.handler_id or entry.handler_id in handler_ids:
+                self._fail(
+                    f"Duplicate or empty exception handler id '{entry.handler_id}'",
+                    rule=("IRV-133", VerifierCategory.DEFINITIONS),
+                )
+            handler_ids.add(entry.handler_id)
+            if len(set(entry.catch_types)) != len(entry.catch_types):
+                self._fail(
+                    f"Handler '{entry.handler_id}' contains duplicate catch metadata",
+                    rule=("IRV-134", VerifierCategory.INSTRUCTIONS),
+                )
+            if "Error" in entry.catch_types and entry.catch_types[-1] != "Error":
+                self._fail(
+                    f"Handler '{entry.handler_id}' has catches after Error",
+                    rule=("IRV-135", VerifierCategory.INSTRUCTIONS),
+                )
+            handler_events[block.name] = entry.event
+            if entry.handler_id != "root":
+                catch_event_names.add(entry.event.name)
+
+        exceptional_predecessors: dict[str, int] = {
+            name: 0 for name in handler_events
+        }
+        normal_predecessors: dict[str, int] = {
+            name: 0 for name in handler_events
+        }
+        has_exception_ir = False
+        for block in function.blocks:
+            terminator = block.instructions[-1]
+            if isinstance(terminator, (IRInvoke, IRInvokeIndirect, IRInvokeInterface)):
+                has_exception_ir = True
+                if terminator.normal_target == terminator.exceptional_target:
+                    self._fail(
+                        "Invoke normal and exceptional successors must be distinct",
+                        rule=("IRV-136", VerifierCategory.CFG),
+                    )
+                if not isinstance(terminator.exception.type, ExceptionEventType):
+                    self._fail(
+                        "Invoke exception result must have exception_event type",
+                        rule=("IRV-137", VerifierCategory.TYPES),
+                    )
+                expected = handler_events.get(terminator.exceptional_target)
+                if expected is None or expected != terminator.exceptional_target_event:
+                    self._fail(
+                        "Invoke exceptional edge must supply the target handler event",
+                        rule=("IRV-138", VerifierCategory.CFG),
+                    )
+                exceptional_predecessors[terminator.exceptional_target] += 1
+                if terminator.normal_target in normal_predecessors:
+                    normal_predecessors[terminator.normal_target] += 1
+            elif isinstance(terminator, (IRThrow, IRRethrow, IRPropagate)):
+                has_exception_ir = True
+                if not isinstance(terminator.event.type, ExceptionEventType):
+                    self._fail(
+                        "Exceptional transfer operand must have exception_event type",
+                        rule=("IRV-139", VerifierCategory.TYPES),
+                    )
+                if (terminator.target is None) != (terminator.target_event is None):
+                    self._fail(
+                        "Exceptional transfer target and target event must appear together",
+                        rule=("IRV-140", VerifierCategory.CFG),
+                    )
+                if terminator.target is not None:
+                    expected = handler_events.get(terminator.target)
+                    if expected is None or expected != terminator.target_event:
+                        self._fail(
+                            "Exceptional transfer must supply the target handler event",
+                            rule=("IRV-141", VerifierCategory.CFG),
+                        )
+                    exceptional_predecessors[terminator.target] += 1
+            else:
+                for successor in self._successors(block):
+                    if successor in normal_predecessors:
+                        normal_predecessors[successor] += 1
+
+            for instruction in block.instructions:
+                if isinstance(
+                    instruction,
+                    (
+                        IRPackException,
+                        IRCatchEntry,
+                        IRExceptionMatch,
+                        IRExceptionPayload,
+                        IRExceptionDestroy,
+                    ),
+                ):
+                    has_exception_ir = True
+
+        for handler, event in handler_events.items():
+            if exceptional_predecessors[handler] == 0:
+                self._fail(
+                    f"Exception handler block '{handler}' is not reachable from an exceptional edge",
+                    rule=("IRV-142", VerifierCategory.CFG),
+                )
+            if normal_predecessors[handler]:
+                self._fail(
+                    f"Exception handler block '{handler}' has a normal predecessor",
+                    rule=("IRV-143", VerifierCategory.CFG),
+                )
+            if not isinstance(event.type, ExceptionEventType):
+                raise AssertionError("handler event type checked above")
+
+        if has_exception_ir and not function.may_throw:
+            self._fail(
+                f"Function '{function.name}' contains exception IR but may_throw is false",
+                rule=("IRV-144", VerifierCategory.CALLS),
+            )
+
+        for block in function.blocks:
+            consumed_events: set[str] = set()
+            for instruction in block.instructions:
+                event = (
+                    instruction.event
+                    if isinstance(
+                        instruction,
+                        (
+                            IRExceptionMatch,
+                            IRExceptionPayload,
+                            IRExceptionDestroy,
+                            IRThrow,
+                            IRRethrow,
+                            IRPropagate,
+                        ),
+                    )
+                    else None
+                )
+                if event is not None and event.name in consumed_events:
+                    self._fail(
+                        f"Exception event '%{event.name}' is used after consumption",
+                        rule=("IRV-148", VerifierCategory.LIFECYCLE),
+                    )
+                if isinstance(instruction, IRRethrow) and (
+                    instruction.event.name not in catch_event_names
+                ):
+                    self._fail(
+                        "Rethrow requires an event introduced by an active catch handler",
+                        rule=("IRV-147", VerifierCategory.INSTRUCTIONS),
+                    )
+                if isinstance(
+                    instruction,
+                    (IRExceptionDestroy, IRThrow, IRRethrow, IRPropagate),
+                ):
+                    consumed_events.add(instruction.event.name)
+                if isinstance(instruction, IRCall) and instruction.builtin is None:
+                    if instruction.may_throw_effect:
+                        self._fail(
+                            "A call marked may_throw must use invoke",
+                            rule=("IRV-145", VerifierCategory.CALLS),
+                        )
+                    callee = self._functions.get(instruction.function)
+                    if callee is not None and callee.may_throw:
+                        self._fail(
+                            f"Call to may_throw function '{callee.name}' must use invoke",
+                            rule=("IRV-145", VerifierCategory.CALLS),
+                        )
+                if isinstance(instruction, IRInvoke):
+                    callee = self._functions.get(instruction.function)
+                    if callee is None or not callee.may_throw:
+                        self._fail(
+                            f"Invoke target '{instruction.function}' is not a may_throw function",
+                            rule=("IRV-146", VerifierCategory.CALLS),
+                        )
 
     def _verify_borrowed_elements(self, function: IRFunction) -> None:
         borrowed: dict[str, str] = {}
@@ -453,6 +672,26 @@ class IRVerifier:
                         f"Unknown branch target '{target}' in function '{function.name}'",
                         rule=("IRV-020", VerifierCategory.CFG),
                     )
+            return
+
+        if isinstance(instruction, (IRInvoke, IRInvokeIndirect, IRInvokeInterface)):
+            for target in (
+                instruction.normal_target,
+                instruction.exceptional_target,
+            ):
+                if target not in blocks:
+                    self._fail(
+                        f"Unknown invoke target '{target}' in function '{function.name}'",
+                        rule=("IRV-020", VerifierCategory.CFG),
+                    )
+            return
+
+        if isinstance(instruction, (IRThrow, IRRethrow, IRPropagate)):
+            if instruction.target is not None and instruction.target not in blocks:
+                self._fail(
+                    f"Unknown exceptional target '{instruction.target}' in function '{function.name}'",
+                    rule=("IRV-020", VerifierCategory.CFG),
+                )
 
     def _collect_value_types(self, function: IRFunction) -> dict[str, IRType]:
         value_types: dict[str, IRType] = {}
@@ -461,21 +700,19 @@ class IRVerifier:
 
         for block in function.blocks:
             for instruction in block.instructions:
-                result = self._instruction_result(instruction)
-                if result is None:
-                    continue
-                location = self._instruction_location(instruction)
-                self._verify_type(
-                    result.type,
-                    f"value '{self._value(result)}'",
-                    primary_location=location,
-                )
-                self._define_value_type(
-                    value_types,
-                    result,
-                    function,
-                    primary_location=location,
-                )
+                for result in self._instruction_results(instruction):
+                    location = self._instruction_location(instruction)
+                    self._verify_type(
+                        result.type,
+                        f"value '{self._value(result)}'",
+                        primary_location=location,
+                    )
+                    self._define_value_type(
+                        value_types,
+                        result,
+                        function,
+                        primary_location=location,
+                    )
 
         return value_types
 
@@ -564,6 +801,11 @@ class IRVerifier:
             )
 
             for successor in self._successors(block):
+                successor_output = self._state_for_successor(
+                    block,
+                    successor,
+                    output,
+                )
                 existing = inputs.get(successor)
                 if existing is not None:
                     lifecycle_slots = {
@@ -571,16 +813,23 @@ class IRVerifier:
                         for name in slot_types
                         if self._is_lifecycle_storage(function, name)
                     }
-                    if (existing.slots & lifecycle_slots) != (output.slots & lifecycle_slots):
+                    if (existing.slots & lifecycle_slots) != (
+                        successor_output.slots & lifecycle_slots
+                    ):
                         inconsistent = sorted(
-                            (existing.slots ^ output.slots) & lifecycle_slots
+                            (existing.slots ^ successor_output.slots)
+                            & lifecycle_slots
                         )[0]
                         self._fail(
                             f"Lifecycle state for storage '%{inconsistent}' is inconsistent "
                             f"across control-flow paths entering block '{successor}'",
                             rule=("IRV-036", VerifierCategory.LIFECYCLE),
                         )
-                updated = output if existing is None else existing.intersect(output)
+                updated = (
+                    successor_output
+                    if existing is None
+                    else existing.intersect(successor_output)
+                )
                 if updated != existing:
                     inputs[successor] = updated
                     worklist.append(successor)
@@ -600,6 +849,46 @@ class IRVerifier:
                     value_types,
                     slot_types,
                 )
+
+    @staticmethod
+    def _state_for_successor(
+        block: IRBasicBlock,
+        successor: str,
+        state: _State,
+    ) -> _State:
+        terminator = block.instructions[-1]
+        if not isinstance(
+            terminator,
+            (IRInvoke, IRInvokeIndirect, IRInvokeInterface),
+        ):
+            if (
+                isinstance(terminator, (IRThrow, IRRethrow, IRPropagate))
+                and terminator.target == successor
+                and terminator.target_event is not None
+            ):
+                return _State(
+                    state.values | {terminator.target_event.name},
+                    state.slots,
+                    state.moved,
+                    state.destroyed,
+                )
+            return state
+
+        values = set(state.values)
+        if successor == terminator.normal_target:
+            values.discard(terminator.exception.name)
+            values.discard(terminator.exceptional_target_event.name)
+        elif successor == terminator.exceptional_target:
+            if terminator.result is not None:
+                values.discard(terminator.result.name)
+            values.add(terminator.exception.name)
+            values.add(terminator.exceptional_target_event.name)
+        return _State(
+            frozenset(values),
+            state.slots,
+            state.moved,
+            state.destroyed,
+        )
 
     @staticmethod
     def _is_lifecycle_storage(function: IRFunction, name: str) -> bool:
@@ -1418,6 +1707,112 @@ class IRVerifier:
         if isinstance(instruction, IRListIsEmpty):
             self._verify_list_is_empty(instruction, state, value_types)
             return self._define_value(state, instruction.result)
+
+        if isinstance(instruction, IRInvoke):
+            proxy = IRCall(
+                instruction.function,
+                instruction.arguments,
+                instruction.result,
+                instruction.builtin,
+                instruction.source_location,
+                True,
+            )
+            self._verify_call(proxy, state, value_types)
+            current = state
+            if instruction.result is not None:
+                current = self._define_value(current, instruction.result)
+            return self._define_value(current, instruction.exception)
+
+        if isinstance(instruction, IRInvokeIndirect):
+            proxy = IRCallIndirect(
+                instruction.callee,
+                instruction.arguments,
+                instruction.result,
+            )
+            self._verify_indirect_call(proxy, state, value_types)
+            current = state
+            if instruction.result is not None:
+                current = self._define_value(current, instruction.result)
+            return self._define_value(current, instruction.exception)
+
+        if isinstance(instruction, IRInvokeInterface):
+            proxy = IRInterfaceCall(
+                instruction.receiver,
+                instruction.arguments,
+                instruction.slot,
+                instruction.result,
+            )
+            current = self._transfer_instruction(
+                function,
+                proxy,
+                state,
+                value_types,
+                slot_types,
+            )
+            return self._define_value(current, instruction.exception)
+
+        if isinstance(instruction, IRCatchEntry):
+            if not isinstance(instruction.event.type, ExceptionEventType):
+                self._fail("catch_entry event must have exception_event type")
+            self._require_defined(instruction.event, state, value_types)
+            return state
+
+        if isinstance(instruction, IRPackException):
+            self._require_defined(instruction.payload, state, value_types)
+            if not isinstance(
+                instruction.payload.type,
+                (StructType, ClassRefType, InterfaceType),
+            ):
+                self._fail("exception_pack payload must be a nominal Error value")
+            if not isinstance(instruction.result.type, ExceptionEventType):
+                self._fail("exception_pack result must have exception_event type")
+            if (
+                instruction.dynamic_type is not None
+                and isinstance(instruction.payload.type, (StructType, ClassRefType))
+                and instruction.dynamic_type != instruction.payload.type.name
+            ):
+                self._fail("exception_pack descriptor does not match payload type")
+            return self._define_value(state, instruction.result)
+
+        if isinstance(instruction, IRExceptionMatch):
+            self._require_defined(instruction.event, state, value_types)
+            if not isinstance(instruction.event.type, ExceptionEventType):
+                self._fail("exception_match operand must have exception_event type")
+            if not isinstance(instruction.result.type, BoolType):
+                self._fail("exception_match result must be bool")
+            if not instruction.catch_type:
+                self._fail("exception_match catch type must not be empty")
+            if instruction.catch_all != (instruction.catch_type == "Error"):
+                self._fail("Only Error may be represented as a catch-all match")
+            return self._define_value(state, instruction.result)
+
+        if isinstance(instruction, IRExceptionPayload):
+            self._require_defined(instruction.event, state, value_types)
+            if not isinstance(instruction.event.type, ExceptionEventType):
+                self._fail("exception_borrow operand must have exception_event type")
+            expected_name = getattr(instruction.result.type, "name", None)
+            if expected_name != instruction.catch_type:
+                self._fail("exception_borrow result type must match its catch descriptor")
+            return self._define_value(state, instruction.result)
+
+        if isinstance(instruction, IRExceptionDestroy):
+            self._require_defined(instruction.event, state, value_types)
+            if not isinstance(instruction.event.type, ExceptionEventType):
+                self._fail("exception_destroy operand must have exception_event type")
+            return state
+
+        if isinstance(instruction, (IRThrow, IRRethrow, IRPropagate)):
+            self._require_defined(instruction.event, state, value_types)
+            if isinstance(instruction, IRRethrow):
+                handler_events = {
+                    item.event.name
+                    for candidate in function.blocks
+                    for item in candidate.instructions[:1]
+                    if isinstance(item, IRCatchEntry)
+                }
+                if instruction.event.name not in handler_events:
+                    self._fail("rethrow operand is not an active handler event")
+            return state
 
         if isinstance(instruction, IRBranch):
             self._require_defined(instruction.condition, state, value_types)
@@ -3040,6 +3435,26 @@ class IRVerifier:
             return instruction.result
         return None
 
+    @classmethod
+    def _instruction_results(
+        cls,
+        instruction: IRInstruction,
+    ) -> tuple[IRValue, ...]:
+        if isinstance(instruction, (IRInvoke, IRInvokeIndirect, IRInvokeInterface)):
+            return (
+                *((instruction.result,) if instruction.result is not None else ()),
+                instruction.exception,
+            )
+        if isinstance(instruction, IRCatchEntry):
+            return (instruction.event,)
+        if isinstance(
+            instruction,
+            (IRPackException, IRExceptionMatch, IRExceptionPayload),
+        ):
+            return (instruction.result,)
+        result = cls._instruction_result(instruction)
+        return () if result is None else (result,)
+
     def _numeric_binary_result_type(self, left: IRType, right: IRType) -> IRType:
         if not isinstance(left, self._NUMERIC_TYPES) or not isinstance(right, self._NUMERIC_TYPES):
             self._fail(f"Numeric operation requires numeric operands, got {left} and {right}")
@@ -3058,6 +3473,10 @@ class IRVerifier:
             return (terminator.target,)
         if isinstance(terminator, IRBranch):
             return (terminator.true_target, terminator.false_target)
+        if isinstance(terminator, (IRInvoke, IRInvokeIndirect, IRInvokeInterface)):
+            return (terminator.normal_target, terminator.exceptional_target)
+        if isinstance(terminator, (IRThrow, IRRethrow, IRPropagate)):
+            return () if terminator.target is None else (terminator.target,)
         return ()
 
     def _verify_type(
@@ -3088,6 +3507,7 @@ class IRVerifier:
                 BoolType,
                 StringType,
                 VoidType,
+                ExceptionEventType,
                 ComplexType,
                 ClassRefType,
                 InterfaceType,

@@ -238,7 +238,11 @@ Status:
 - **Consequences:** Potentially throwing operations terminate blocks and cleanup
   paths are explicit.
 - **Dependencies:** Exception-effect decision and IR schema revision.
-- **Final status:** **Pending Decision**
+- **Final status:** **Accepted**
+- **Resolution:** Initial IR uses real, distinguishable normal and exceptional
+  edges. Potentially throwing operations terminate their blocks, and all CFG
+  consumers traverse normal then exceptional successors deterministically.
+- **Record:** `adr/ADR-EXCEPTION-INITIAL-IR.md`
 
 ### IR2. `invoke`
 
@@ -250,7 +254,11 @@ Status:
 - **Consequences:** All direct, indirect, method, interface, constructor, and
   imported calls must carry accurate exception effects.
 - **Dependencies:** IR1, checked-effects decision, and callable signatures.
-- **Final status:** **Pending Decision**
+- **Final status:** **Accepted**
+- **Resolution:** Direct, indirect, and interface potentially throwing calls use
+  two-successor `invoke` terminators. Ordinary `call` is the nonthrowing form;
+  `may_throw` remains conservative internal metadata distinct from panic/trap.
+- **Record:** `adr/ADR-EXCEPTION-INITIAL-IR.md`
 
 ### IR3. Exception events
 
@@ -262,7 +270,12 @@ Status:
   of backend transport.
 - **Consequences:** The IR needs an internal event type and ownership checks.
 - **Dependencies:** L1, O2, runtime event contract, and descriptor identity.
-- **Final status:** **Pending Decision**
+- **Final status:** **Accepted**
+- **Resolution:** Initial IR carries a linearly owned opaque
+  `exception_event`, with explicit pack, exact/root match, payload borrow,
+  transfer, rethrow, propagation, and destroy operations. No machine layout or
+  runtime ABI is selected.
+- **Record:** `adr/ADR-EXCEPTION-INITIAL-IR.md`
 
 ## 5. SSA
 

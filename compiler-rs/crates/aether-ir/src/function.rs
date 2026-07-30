@@ -13,6 +13,8 @@ pub struct IRFunction {
     pub return_type: IRType,
     /// Basic blocks in retained module order.
     pub blocks: Vec<IRBasicBlock>,
+    /// Conservative internal catchable-exception effect.
+    pub may_throw: bool,
 }
 
 impl IRFunction {
@@ -23,6 +25,7 @@ impl IRFunction {
             parameters,
             return_type,
             blocks: Vec::new(),
+            may_throw: false,
         }
     }
 }

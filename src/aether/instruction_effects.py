@@ -12,6 +12,7 @@ class InstructionEffects:
 
     has_side_effects: bool = False
     may_trap: bool = False
+    may_throw: bool = False
     reads_memory: bool = False
     writes_memory: bool = False
     allocates: bool = False
@@ -21,6 +22,7 @@ class InstructionEffects:
         return (
             self.has_side_effects
             or self.may_trap
+            or self.may_throw
             or self.writes_memory
             or self.allocates
         )
@@ -52,6 +54,14 @@ MUTATING_ALLOCATION = InstructionEffects(
 UNKNOWN_CALL = InstructionEffects(
     has_side_effects=True,
     may_trap=True,
+    may_throw=True,
+    reads_memory=True,
+    writes_memory=True,
+    allocates=True,
+)
+NONTHROWING_UNKNOWN_CALL = InstructionEffects(
+    has_side_effects=True,
+    may_trap=True,
     reads_memory=True,
     writes_memory=True,
     allocates=True,
@@ -70,6 +80,10 @@ class EffectTrackedInstruction:
     @property
     def may_trap(self) -> bool:
         return self.effects.may_trap
+
+    @property
+    def may_throw(self) -> bool:
+        return self.effects.may_throw
 
     @property
     def reads_memory(self) -> bool:

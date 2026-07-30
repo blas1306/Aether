@@ -335,7 +335,13 @@ class LifecycleExpander:
                     self._instruction_operand_occurrences(instruction)
                 )
             blocks.append(IRBasicBlock(block.name, self._fold_trivial_return_transfer(instructions)))
-        return IRFunction(function.name, list(function.parameters), function.return_type, blocks)
+        return IRFunction(
+            function.name,
+            list(function.parameters),
+            function.return_type,
+            blocks,
+            function.may_throw,
+        )
 
     @staticmethod
     def _fold_trivial_return_transfer(

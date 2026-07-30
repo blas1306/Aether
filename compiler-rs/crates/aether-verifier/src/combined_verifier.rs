@@ -564,6 +564,9 @@ fn classify_structure(error: &ModuleStructureVerificationError) -> Classificatio
                 | ControlFlowRuleError::UnknownBranchTarget { .. } => {
                     classified("IRV-020", VerificationErrorCategory::Cfg)
                 }
+                ControlFlowRuleError::InvalidInvokeSuccessors { .. } => {
+                    classified("IRV-136", VerificationErrorCategory::Cfg)
+                }
             },
         },
     }
@@ -713,10 +716,14 @@ fn classify_instruction(instruction: &IRInstruction, rule: &TypeRuleError) -> Cl
         }
         IRInstruction::IRCast { .. } => classified("IRV-077", VerificationErrorCategory::Types),
         IRInstruction::IRCall { builtin, .. } => classify_call(builtin.as_deref(), rule),
+        IRInstruction::IRInvoke { builtin, .. } => classify_call(builtin.as_deref(), rule),
         IRInstruction::IRFunctionRef { .. } => {
             classified("IRV-051", VerificationErrorCategory::Calls)
         }
         IRInstruction::IRCallIndirect { .. } => {
+            classified("IRV-053", VerificationErrorCategory::Calls)
+        }
+        IRInstruction::IRInvokeIndirect { .. } => {
             classified("IRV-053", VerificationErrorCategory::Calls)
         }
         IRInstruction::IRPrint { .. } => {
@@ -738,6 +745,9 @@ fn classify_instruction(instruction: &IRInstruction, rule: &TypeRuleError) -> Cl
             classified("IRV-128", VerificationErrorCategory::Instructions)
         }
         IRInstruction::IRInterfaceCall { .. } => {
+            classified("IRV-129", VerificationErrorCategory::Calls)
+        }
+        IRInstruction::IRInvokeInterface { .. } => {
             classified("IRV-129", VerificationErrorCategory::Calls)
         }
         IRInstruction::IRStructGet { .. } => {
@@ -790,6 +800,16 @@ fn classify_instruction(instruction: &IRInstruction, rule: &TypeRuleError) -> Cl
         }
         IRInstruction::IRListIsEmpty { .. } => {
             classified("IRV-096", VerificationErrorCategory::Collections)
+        }
+        IRInstruction::IRPackException { .. }
+        | IRInstruction::IRCatchEntry { .. }
+        | IRInstruction::IRExceptionMatch { .. }
+        | IRInstruction::IRExceptionPayload { .. }
+        | IRInstruction::IRExceptionDestroy { .. }
+        | IRInstruction::IRThrow { .. }
+        | IRInstruction::IRRethrow { .. }
+        | IRInstruction::IRPropagate { .. } => {
+            classified("IRV-130", VerificationErrorCategory::Instructions)
         }
         IRInstruction::IRListCopy { .. } => {
             classified("IRV-097", VerificationErrorCategory::Collections)

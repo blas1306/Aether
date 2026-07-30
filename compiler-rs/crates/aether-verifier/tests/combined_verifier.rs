@@ -25,6 +25,7 @@ fn function(return_type: IRType, instructions: Vec<IRInstruction>) -> IRFunction
             name: "entry".to_owned(),
             instructions,
         }],
+        may_throw: false,
     }
 }
 
@@ -183,7 +184,7 @@ fn normalized_message_is_stable_and_human_readable() {
     let expected = "function 0 ('main') failed structure verification: block 0 ('entry') \
                     of function 'main' failed structure verification: structure verification \
                     failed in function 'main' block 'entry': missing terminator: expected exactly \
-                    one final IRBranch, IRJump, or IRReturn, got an empty block";
+                    one final control-flow terminator, got an empty block";
 
     assert_eq!(first.message(), expected);
     assert_eq!(second.message(), expected);

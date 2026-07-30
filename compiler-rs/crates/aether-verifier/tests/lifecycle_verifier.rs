@@ -90,6 +90,7 @@ fn function(name: &str, parameters: Vec<IRParameter>, blocks: Vec<IRBasicBlock>)
         parameters,
         return_type: VoidType.into(),
         blocks,
+        may_throw: false,
     }
 }
 

@@ -56,6 +56,7 @@ class ConstantFolder:
                 list(function.parameters),
                 function.return_type,
                 blocks,
+                function.may_throw,
             ),
             folded,
         )

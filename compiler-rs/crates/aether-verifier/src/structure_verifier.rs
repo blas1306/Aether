@@ -218,6 +218,34 @@ fn verify_targets(
     instruction_index: usize,
     terminator: &IRInstruction,
 ) -> Result<(), BlockStructureVerificationError> {
+    if let IRInstruction::IRInvoke {
+        normal_target,
+        exceptional_target,
+        ..
+    }
+    | IRInstruction::IRInvokeIndirect {
+        normal_target,
+        exceptional_target,
+        ..
+    }
+    | IRInstruction::IRInvokeInterface {
+        normal_target,
+        exceptional_target,
+        ..
+    } = terminator
+    {
+        if normal_target == exceptional_target {
+            return Err(block_error(
+                function,
+                block,
+                Some((instruction_index, terminator)),
+                ControlFlowRuleError::InvalidInvokeSuccessors {
+                    normal_target: normal_target.clone(),
+                    exceptional_target: exceptional_target.clone(),
+                },
+            ));
+        }
+    }
     match terminator_successors(terminator) {
         TerminatorSuccessors::Jump(target) if !blocks.contains(target) => Err(block_error(
             function,
@@ -276,5 +304,11 @@ fn is_terminator(instruction: &IRInstruction) -> bool {
         IRInstruction::IRBranch { .. }
             | IRInstruction::IRJump { .. }
             | IRInstruction::IRReturn { .. }
+            | IRInstruction::IRInvoke { .. }
+            | IRInstruction::IRInvokeIndirect { .. }
+            | IRInstruction::IRInvokeInterface { .. }
+            | IRInstruction::IRThrow { .. }
+            | IRInstruction::IRRethrow { .. }
+            | IRInstruction::IRPropagate { .. }
     )
 }

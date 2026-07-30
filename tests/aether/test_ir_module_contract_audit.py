@@ -42,6 +42,7 @@ from aether.ir.types import (
     ComplexType,
     DoubleType,
     EnumType,
+    ExceptionEventType,
     FloatType,
     FunctionType,
     InterfaceType,
@@ -92,6 +93,10 @@ def _result_type(tag: str) -> IRType:
         return PROFILE
     if tag in {"compare_op", "list_contains", "list_is_empty"}:
         return BoolType()
+    if tag == "exception_pack":
+        return ExceptionEventType()
+    if tag == "exception_match":
+        return BoolType()
     return INT
 
 
@@ -116,6 +121,7 @@ def _instruction_sample(entry_index: int) -> ir_model.IRInstruction:
         "function": "helper",
         "arguments": (_value(f"{tag}.argument"),),
         "builtin": None,
+        "may_throw_effect": False,
         "callee": _value(f"{tag}.callee", FunctionType((INT,), INT)),
         "newline": True,
         "aggregate_shape": (2, 3),
@@ -172,6 +178,20 @@ def _instruction_sample(entry_index: int) -> ir_model.IRInstruction:
         "true_target": "then",
         "false_target": "else",
         "target": "exit",
+        "normal_target": "normal",
+        "exceptional_target": "handler",
+        "exception": _value(f"{tag}.exception", ExceptionEventType()),
+        "exceptional_target_event": _value(
+            f"{tag}.handler_event", ExceptionEventType()
+        ),
+        "event": _value(f"{tag}.event", ExceptionEventType()),
+        "target_event": _value(f"{tag}.target_event", ExceptionEventType()),
+        "handler_id": "handler0",
+        "catch_types": ("FileError", "Error"),
+        "catch_type": "FileError",
+        "catch_all": False,
+        "payload": _value(f"{tag}.payload", StructType("Profile")),
+        "dynamic_type": "Profile",
         "transferred_storage": ir_model.IRStorage(f"{tag}.transfer", result_type),
         "count": 2,
     }
@@ -186,7 +206,7 @@ def _instruction_sample(entry_index: int) -> ir_model.IRInstruction:
         values["row"] = _value("outer.row", ROW)
     if tag == "compare_op":
         values["operator"] = "eq"
-    if tag == "interface_call":
+    if tag in {"interface_call", "invoke_interface"}:
         values["receiver"] = _value(
             "interface_call.receiver",
             InterfaceType("Readable"),
@@ -211,63 +231,26 @@ def _all_instruction_samples() -> list[ir_model.IRInstruction]:
 
 def _complete_module() -> ir_model.IRModule:
     instructions = _all_instruction_samples()
+    groups = [instructions[index::4] for index in range(4)]
     return ir_model.IRModule(
         functions=[
             ir_model.IRFunction(
-                "operations",
-                [ir_model.IRParameter("seed", INT)],
-                INT,
-                [
-                    ir_model.IRBasicBlock(
-                        "entry",
-                        [*instructions[:17], ir_model.IRJump("aggregate")],
-                    ),
-                    ir_model.IRBasicBlock(
-                        "aggregate",
-                        [
-                            *instructions[17:23],
-                            ir_model.IRReturn(
-                                _value("operations.result"),
-                                ir_model.IRStorage("operations.transfer", INT),
-                            ),
-                        ],
-                    ),
-                ],
-            ),
-            ir_model.IRFunction(
-                "collections",
+                f"contract_group_{index}",
                 [],
                 VoidType(),
                 [
-                    ir_model.IRBasicBlock("entry", instructions[23:36]),
+                    ir_model.IRBasicBlock(
+                        "entry",
+                        group[: len(group) // 2],
+                    ),
                     ir_model.IRBasicBlock(
                         "finish",
-                        [*instructions[36:45], ir_model.IRReturn()],
+                        group[len(group) // 2 :],
                     ),
                 ],
-            ),
-            ir_model.IRFunction(
-                "linear_algebra",
-                [ir_model.IRParameter("scale", FLOAT)],
-                MATRIX,
-                [
-                    ir_model.IRBasicBlock("entry", instructions[45:56]),
-                    ir_model.IRBasicBlock(
-                        "finish",
-                        [*instructions[56:65], ir_model.IRReturn(_value("matrix", MATRIX))],
-                    ),
-                ],
-            ),
-            ir_model.IRFunction(
-                "control_flow",
-                [ir_model.IRParameter("condition", BoolType())],
-                INT,
-                [
-                    ir_model.IRBasicBlock("entry", [instructions[65]]),
-                    ir_model.IRBasicBlock("then", instructions[66:70]),
-                    ir_model.IRBasicBlock("else", [instructions[70]]),
-                ],
-            ),
+                may_throw=True,
+            )
+            for index, group in enumerate(groups)
         ],
         structs=[
             ir_model.IRStructDefinition(
@@ -286,7 +269,7 @@ def _complete_module() -> ir_model.IRModule:
     )
 
 
-def test_complete_realistic_module_round_trip_covers_authoritative_73_variants() -> None:
+def test_complete_realistic_module_round_trip_covers_authoritative_84_variants() -> None:
     module = _complete_module()
 
     decoded = ir_module_from_dto(ir_module_to_dto(module))
@@ -302,7 +285,7 @@ def test_complete_realistic_module_round_trip_covers_authoritative_73_variants()
         for instruction in block.instructions
     }
     assert covered == {entry.instruction_type for entry in IR_INSTRUCTION_DTO_REGISTRY}
-    assert len(IR_INSTRUCTION_DTO_REGISTRY) == 73
+    assert len(IR_INSTRUCTION_DTO_REGISTRY) == 84
 
 
 def _type_samples() -> list[IRType]:
@@ -325,6 +308,7 @@ def _type_samples() -> list[IRType]:
         ClassRefType: ClassRefType("Document"),
         InterfaceType: InterfaceType("Printable"),
         EnumType: EnumType("Status", ("ready", "done"), "Status"),
+        ExceptionEventType: ExceptionEventType(),
     }
     assert set(samples) == set(IR_TYPE_TAGS)
     return [samples[type_] for type_ in IR_TYPE_TAGS]

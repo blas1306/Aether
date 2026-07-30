@@ -32,8 +32,10 @@ EXPECTED_CLASS_TAGS: tuple[tuple[str, str], ...] = (
     ("IRCompareOp", "compare_op"),
     ("IRCast", "cast"),
     ("IRCall", "call"),
+    ("IRInvoke", "invoke"),
     ("IRFunctionRef", "function_ref"),
     ("IRCallIndirect", "call_indirect"),
+    ("IRInvokeIndirect", "invoke_indirect"),
     ("IRPrint", "print"),
     ("IRStructNew", "struct_new"),
     ("IRClassNew", "class_new"),
@@ -41,6 +43,7 @@ EXPECTED_CLASS_TAGS: tuple[tuple[str, str], ...] = (
     ("IRClassSet", "class_set"),
     ("IRInterfaceConstruct", "interface_construct"),
     ("IRInterfaceCall", "interface_call"),
+    ("IRInvokeInterface", "invoke_interface"),
     ("IRStructGet", "struct_get"),
     ("IRStructSet", "struct_set"),
     ("IRMethodResultNew", "method_result_new"),
@@ -68,6 +71,14 @@ EXPECTED_CLASS_TAGS: tuple[tuple[str, str], ...] = (
     ("IRArrayLength", "array_length"),
     ("IRListLength", "list_length"),
     ("IRListIsEmpty", "list_is_empty"),
+    ("IRPackException", "exception_pack"),
+    ("IRCatchEntry", "catch_entry"),
+    ("IRExceptionMatch", "exception_match"),
+    ("IRExceptionPayload", "exception_payload"),
+    ("IRExceptionDestroy", "exception_destroy"),
+    ("IRThrow", "throw"),
+    ("IRRethrow", "rethrow"),
+    ("IRPropagate", "propagate"),
     ("IRVectorNew", "vector_new"),
     ("IRMatrixNew", "matrix_new"),
     ("IRVectorAdd", "vector_add"),
@@ -153,13 +164,13 @@ def _expected_python_types() -> tuple[type[ir_model.IRInstruction], ...]:
     return tuple(getattr(ir_model, name) for name, _ in EXPECTED_CLASS_TAGS)
 
 
-def test_registry_is_the_exact_stable_73_variant_contract() -> None:
+def test_registry_is_the_exact_stable_84_variant_contract() -> None:
     actual = tuple(
         (entry.instruction_type.__name__, entry.tag)
         for entry in IR_INSTRUCTION_DTO_REGISTRY
     )
 
-    assert len(EXPECTED_CLASS_TAGS) == 73
+    assert len(EXPECTED_CLASS_TAGS) == 84
     assert actual == EXPECTED_CLASS_TAGS
     assert tuple(entry.rust_variant for entry in IR_INSTRUCTION_DTO_REGISTRY) == tuple(
         name for name, _ in EXPECTED_CLASS_TAGS
@@ -172,8 +183,8 @@ def test_registry_classes_and_tags_are_unique_and_bidirectional() -> None:
     )
     tags = tuple(entry.tag for entry in IR_INSTRUCTION_DTO_REGISTRY)
 
-    assert len(instruction_types) == len(set(instruction_types)) == 73
-    assert len(tags) == len(set(tags)) == 73
+    assert len(instruction_types) == len(set(instruction_types)) == 84
+    assert len(tags) == len(set(tags)) == 84
     assert set(IR_INSTRUCTION_TAGS.items()) == set(zip(instruction_types, tags))
     assert set(IR_INSTRUCTION_DTO_BY_TAG) == set(tags)
     assert all(
@@ -190,7 +201,7 @@ def test_every_concrete_python_instruction_has_dto_support() -> None:
     model_types = _all_instruction_subclasses()
     expected_types = set(_expected_python_types())
 
-    assert len(model_types) == 73
+    assert len(model_types) == 84
     assert model_types == expected_types
     validate_instruction_dto_registry(
         IR_INSTRUCTION_DTO_REGISTRY,
@@ -204,7 +215,7 @@ def test_registry_is_synchronized_with_rust_instruction_enum() -> None:
         RUST_INSTRUCTION_SOURCE.read_text(encoding="utf-8")
     )
 
-    assert len(rust_variants) == 73
+    assert len(rust_variants) == 84
     validate_instruction_dto_registry(
         IR_INSTRUCTION_DTO_REGISTRY,
         rust_variants=rust_variants,

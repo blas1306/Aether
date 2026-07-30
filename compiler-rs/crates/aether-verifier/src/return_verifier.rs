@@ -114,6 +114,21 @@ fn find_valueless_return(
                 enqueue_unvisited(successors[1], &mut visited, &mut worklist);
                 enqueue_unvisited(successors[0], &mut visited, &mut worklist);
             }
+            IRInstruction::IRInvoke { .. }
+            | IRInstruction::IRInvokeIndirect { .. }
+            | IRInstruction::IRInvokeInterface { .. } => {
+                let successors = cfg.successors(block_index);
+                enqueue_unvisited(successors[1], &mut visited, &mut worklist);
+                enqueue_unvisited(successors[0], &mut visited, &mut worklist);
+            }
+            IRInstruction::IRThrow { target, .. }
+            | IRInstruction::IRRethrow { target, .. }
+            | IRInstruction::IRPropagate { target, .. } => {
+                if target.is_some() {
+                    let successor = cfg.successors(block_index)[0];
+                    enqueue_unvisited(successor, &mut visited, &mut worklist);
+                }
+            }
             _ => unreachable!("structural prerequisite guarantees a control-flow terminator"),
         }
     }

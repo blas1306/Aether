@@ -25,7 +25,7 @@ def instruction_operands(
     _require_dataclass_instruction(instruction)
     operands: list[ValueT] = []
     for field in fields(instruction):
-        if field.name == "result":
+        if field.name == "result" or field.metadata.get("ir_definition", False):
             continue
         _collect_values(getattr(instruction, field.name), value_type, operands)
     return tuple(operands)
@@ -42,7 +42,7 @@ def rewrite_instruction_operands(
     updates: dict[str, Any] = {}
     rewritten_uses = 0
     for field in fields(instruction):
-        if field.name == "result":
+        if field.name == "result" or field.metadata.get("ir_definition", False):
             continue
         value = getattr(instruction, field.name)
         rewritten, count = _rewrite_nested(value, value_type, rewrite_value)

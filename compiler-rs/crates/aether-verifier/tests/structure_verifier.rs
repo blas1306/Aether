@@ -61,6 +61,7 @@ fn function(name: &str, blocks: Vec<IRBasicBlock>) -> IRFunction {
         parameters: Vec::new(),
         return_type: VoidType.into(),
         blocks,
+        may_throw: false,
     }
 }
 

@@ -58,6 +58,7 @@ fn function(
         parameters,
         return_type,
         blocks,
+        may_throw: false,
     }
 }
 

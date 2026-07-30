@@ -419,6 +419,7 @@ fn function_failure_retains_module_function_and_complete_nested_source_chain() {
                 }],
                 return_type: IRTypeDTO::Void {},
                 blocks: vec![],
+                may_throw: false,
             },
         ],
         structs: vec![],

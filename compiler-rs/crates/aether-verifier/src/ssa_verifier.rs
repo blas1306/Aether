@@ -90,42 +90,57 @@ pub(crate) fn collect_definitions(
 
     for (block_index, block) in function.blocks.iter().enumerate() {
         for (instruction_index, instruction) in block.instructions.iter().enumerate() {
-            let Some(result) = instruction_result(instruction) else {
-                continue;
-            };
-            let instruction_location =
-                instruction_location(block_index, block, instruction_index, instruction);
-            let location = SSADefinitionLocation::Instruction(instruction_location.clone());
-            if let Some(previous) = definitions.get(&result.name) {
-                let source = SSADefinitionError::DuplicateDefinition {
-                    ssa_identifier: result.name.clone(),
-                    defining_location: previous.location.clone(),
-                    duplicate_definition_location: location,
-                };
-                return Err(FunctionSSAError::Block {
-                    function_name: function.name.clone(),
-                    block_index,
-                    block_name: block.name.clone(),
-                    source: Box::new(BlockSSAError {
-                        function_name: function.name.clone(),
-                        block_name: block.name.clone(),
-                        instruction_index,
-                        instruction_kind: instruction_kind(instruction),
+            for result in ssa_definitions(instruction) {
+                let instruction_location =
+                    instruction_location(block_index, block, instruction_index, instruction);
+                let location = SSADefinitionLocation::Instruction(instruction_location.clone());
+                if let Some(previous) = definitions.get(&result.name) {
+                    let source = SSADefinitionError::DuplicateDefinition {
                         ssa_identifier: result.name.clone(),
-                        source,
-                    }),
-                });
+                        defining_location: previous.location.clone(),
+                        duplicate_definition_location: location,
+                    };
+                    return Err(FunctionSSAError::Block {
+                        function_name: function.name.clone(),
+                        block_index,
+                        block_name: block.name.clone(),
+                        source: Box::new(BlockSSAError {
+                            function_name: function.name.clone(),
+                            block_name: block.name.clone(),
+                            instruction_index,
+                            instruction_kind: instruction_kind(instruction),
+                            ssa_identifier: result.name.clone(),
+                            source,
+                        }),
+                    });
+                }
+                definitions.insert(
+                    result.name.clone(),
+                    Definition {
+                        r#type: result.r#type.clone(),
+                        location,
+                    },
+                );
             }
-            definitions.insert(
-                result.name.clone(),
-                Definition {
-                    r#type: result.r#type.clone(),
-                    location,
-                },
-            );
         }
     }
     Ok(definitions)
+}
+
+fn ssa_definitions(instruction: &IRInstruction) -> Vec<&IRValue> {
+    let mut definitions = instruction_result(instruction)
+        .into_iter()
+        .collect::<Vec<_>>();
+    match instruction {
+        IRInstruction::IRInvoke { exception, .. }
+        | IRInstruction::IRInvokeIndirect { exception, .. }
+        | IRInstruction::IRInvokeInterface { exception, .. }
+        | IRInstruction::IRCatchEntry {
+            event: exception, ..
+        } => definitions.push(exception),
+        _ => {}
+    }
+    definitions
 }
 
 fn verify_block(
@@ -251,6 +266,7 @@ pub(crate) fn ssa_operands(instruction: &IRInstruction) -> Vec<SSAOperand<'_>> {
         | IRInstruction::IRFunctionRef { .. }
         | IRInstruction::IRClassNew { .. }
         | IRInstruction::IRJump { .. }
+        | IRInstruction::IRCatchEntry { .. }
         | IRInstruction::IRCopyInit {
             source: LifecycleSource::Storage(_),
             ..
@@ -285,7 +301,14 @@ pub(crate) fn ssa_operands(instruction: &IRInstruction) -> Vec<SSAOperand<'_>> {
             .iter()
             .map(|value| operand("arguments", value))
             .collect(),
+        IRInstruction::IRInvoke { arguments, .. } => arguments
+            .iter()
+            .map(|value| operand("arguments", value))
+            .collect(),
         IRInstruction::IRCallIndirect {
+            callee, arguments, ..
+        }
+        | IRInstruction::IRInvokeIndirect {
             callee, arguments, ..
         } => std::iter::once(operand("callee", callee))
             .chain(arguments.iter().map(|value| operand("arguments", value)))
@@ -306,9 +329,21 @@ pub(crate) fn ssa_operands(instruction: &IRInstruction) -> Vec<SSAOperand<'_>> {
             receiver,
             arguments,
             ..
+        }
+        | IRInstruction::IRInvokeInterface {
+            receiver,
+            arguments,
+            ..
         } => std::iter::once(operand("receiver", receiver))
             .chain(arguments.iter().map(|value| operand("arguments", value)))
             .collect(),
+        IRInstruction::IRPackException { payload, .. } => vec![operand("payload", payload)],
+        IRInstruction::IRExceptionMatch { event, .. }
+        | IRInstruction::IRExceptionPayload { event, .. }
+        | IRInstruction::IRExceptionDestroy { event }
+        | IRInstruction::IRThrow { event, .. }
+        | IRInstruction::IRRethrow { event, .. }
+        | IRInstruction::IRPropagate { event, .. } => vec![operand("event", event)],
         IRInstruction::IRStructSet {
             r#struct, value, ..
         } => vec![operand("struct", r#struct), operand("value", value)],

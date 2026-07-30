@@ -749,6 +749,7 @@ fn imports_call_family_exactly_through_owned_and_borrowed_paths() {
                 result: None,
                 builtin: None,
                 source_location: None,
+                may_throw: false,
             },
         ),
         (
@@ -777,6 +778,7 @@ fn imports_call_family_exactly_through_owned_and_borrowed_paths() {
                 result: Some(IRValue::new("call::result", BoolType.into())),
                 builtin: Some(" builtin::identifier\0raw ".to_owned()),
                 source_location: Some(present_location),
+                may_throw: false,
             },
         ),
         (
@@ -815,6 +817,7 @@ fn imports_call_family_exactly_through_owned_and_borrowed_paths() {
                 result: None,
                 builtin: Some(String::new()),
                 source_location: Some(location(0, -9, None)),
+                may_throw: false,
             },
         ),
         (

@@ -31,8 +31,8 @@ pub use module::IRModule;
 pub use source::IRSourceLocation;
 pub use structure::IRStructDefinition;
 pub use types::{
-    ArrayType, BoolType, ClassRefType, ComplexType, DoubleType, EnumType, FloatType, FunctionType,
-    IRType, IntType, InterfaceType, ListType, MatrixType, MethodResultType, NullableType,
-    StringType, StructType, VectorType, VoidType,
+    ArrayType, BoolType, ClassRefType, ComplexType, DoubleType, EnumType, ExceptionEventType,
+    FloatType, FunctionType, IRType, IntType, InterfaceType, ListType, MatrixType,
+    MethodResultType, NullableType, StringType, StructType, VectorType, VoidType,
 };
 pub use value::{IRParameter, IRStorage, IRValue, LifecycleSource};

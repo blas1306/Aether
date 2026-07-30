@@ -57,6 +57,7 @@ fn function(name: &str, return_type: aether_ir::IRType, blocks: Vec<IRBasicBlock
         parameters: Vec::new(),
         return_type,
         blocks,
+        may_throw: false,
     }
 }
 

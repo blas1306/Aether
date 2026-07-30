@@ -81,6 +81,7 @@ fn imports_raw_name_with_no_parameters_and_no_blocks() {
             parameters: vec![],
             return_type: IRType::Void(aether_ir::VoidType),
             blocks: vec![],
+            may_throw: false,
         })
     );
 }
@@ -99,6 +100,7 @@ fn imports_one_parameter_through_owned_and_borrowed_paths_without_mutating_dto()
         parameters: vec![IRParameter::new("argument", IntType.into())],
         return_type: BoolType.into(),
         blocks: vec![IRBasicBlock::new("entry")],
+        may_throw: false,
     };
 
     assert_eq!(import_function(&wire), Ok(expected.clone()));
@@ -371,6 +373,7 @@ fn block_failure_retains_function_index_block_and_complete_instruction_error_cha
                 ],
             },
         ],
+        may_throw: false,
     };
     let float_error = IRImportError::NonFiniteConstantFloat { field: "value" };
     let field_error = IRImportError::InstructionField {

@@ -24,6 +24,10 @@ fn parameter() -> Value {
     json!({"tag": "parameter", "name": "parameter", "type": {"tag": "bool"}})
 }
 
+fn exception_event() -> Value {
+    json!({"tag": "value", "name": "event", "type": {"tag": "exception_event"}})
+}
+
 fn location() -> Value {
     json!({"tag": "source_location", "line": 3, "column": 5, "path": "sample.ae"})
 }
@@ -131,6 +135,20 @@ fn instruction_cases() -> Vec<Value> {
             ],
         ),
         instruction(
+            "invoke",
+            &[
+                ("function", json!("callee")),
+                ("arguments", json!([value()])),
+                ("result", Value::Null),
+                ("exception", exception_event()),
+                ("normal_target", json!("normal")),
+                ("exceptional_target", json!("handler")),
+                ("exceptional_target_event", exception_event()),
+                ("builtin", Value::Null),
+                ("source_location", location()),
+            ],
+        ),
+        instruction(
             "function_ref",
             &[("result", value()), ("function", json!("callee"))],
         ),
@@ -140,6 +158,18 @@ fn instruction_cases() -> Vec<Value> {
                 ("callee", value()),
                 ("arguments", json!([value()])),
                 ("result", Value::Null),
+            ],
+        ),
+        instruction(
+            "invoke_indirect",
+            &[
+                ("callee", value()),
+                ("arguments", json!([value()])),
+                ("result", Value::Null),
+                ("exception", exception_event()),
+                ("normal_target", json!("normal")),
+                ("exceptional_target", json!("handler")),
+                ("exceptional_target_event", exception_event()),
             ],
         ),
         instruction(
@@ -218,6 +248,36 @@ fn instruction_cases() -> Vec<Value> {
                     }),
                 ),
                 ("result", value()),
+            ],
+        ),
+        instruction(
+            "invoke_interface",
+            &[
+                (
+                    "receiver",
+                    json!({
+                        "tag": "value",
+                        "name": "interface",
+                        "type": {"tag": "interface", "name": "Readable"}
+                    }),
+                ),
+                ("arguments", json!([])),
+                (
+                    "slot",
+                    json!({
+                        "index": 0,
+                        "method_id": "Readable.read",
+                        "parameter_types": [],
+                        "return_type": {"tag": "int"},
+                        "thunk_symbol": "",
+                        "receiver_ownership": "borrowed"
+                    }),
+                ),
+                ("result", value()),
+                ("exception", exception_event()),
+                ("normal_target", json!("normal")),
+                ("exceptional_target", json!("handler")),
+                ("exceptional_target_event", exception_event()),
             ],
         ),
         instruction(
@@ -397,6 +457,65 @@ fn instruction_cases() -> Vec<Value> {
         instruction(
             "list_is_empty",
             &[("result", value()), ("list_value", value())],
+        ),
+        instruction(
+            "exception_pack",
+            &[
+                ("result", exception_event()),
+                ("payload", value()),
+                ("dynamic_type", json!("FileError")),
+                ("source_location", location()),
+            ],
+        ),
+        instruction(
+            "catch_entry",
+            &[
+                ("event", exception_event()),
+                ("handler_id", json!("handler0")),
+                ("catch_types", json!(["FileError", "Error"])),
+            ],
+        ),
+        instruction(
+            "exception_match",
+            &[
+                ("result", parameter()),
+                ("event", exception_event()),
+                ("catch_type", json!("FileError")),
+                ("catch_all", json!(false)),
+            ],
+        ),
+        instruction(
+            "exception_payload",
+            &[
+                ("result", value()),
+                ("event", exception_event()),
+                ("catch_type", json!("FileError")),
+            ],
+        ),
+        instruction("exception_destroy", &[("event", exception_event())]),
+        instruction(
+            "throw",
+            &[
+                ("event", exception_event()),
+                ("target", json!("handler")),
+                ("target_event", exception_event()),
+            ],
+        ),
+        instruction(
+            "rethrow",
+            &[
+                ("event", exception_event()),
+                ("target", Value::Null),
+                ("target_event", Value::Null),
+            ],
+        ),
+        instruction(
+            "propagate",
+            &[
+                ("event", exception_event()),
+                ("target", Value::Null),
+                ("target_event", Value::Null),
+            ],
         ),
         instruction(
             "vector_new",
@@ -614,8 +733,10 @@ instruction_variant_mapping! {
     CompareOp => IRCompareOp,
     Cast => IRCast,
     Call => IRCall,
+    Invoke => IRInvoke,
     FunctionRef => IRFunctionRef,
     CallIndirect => IRCallIndirect,
+    InvokeIndirect => IRInvokeIndirect,
     Print => IRPrint,
     StructNew => IRStructNew,
     ClassNew => IRClassNew,
@@ -623,6 +744,7 @@ instruction_variant_mapping! {
     ClassSet => IRClassSet,
     InterfaceConstruct => IRInterfaceConstruct,
     InterfaceCall => IRInterfaceCall,
+    InvokeInterface => IRInvokeInterface,
     StructGet => IRStructGet,
     StructSet => IRStructSet,
     MethodResultNew => IRMethodResultNew,
@@ -650,6 +772,14 @@ instruction_variant_mapping! {
     ArrayLength => IRArrayLength,
     ListLength => IRListLength,
     ListIsEmpty => IRListIsEmpty,
+    ExceptionPack => IRPackException,
+    CatchEntry => IRCatchEntry,
+    ExceptionMatch => IRExceptionMatch,
+    ExceptionPayload => IRExceptionPayload,
+    ExceptionDestroy => IRExceptionDestroy,
+    Throw => IRThrow,
+    Rethrow => IRRethrow,
+    Propagate => IRPropagate,
     VectorNew => IRVectorNew,
     MatrixNew => IRMatrixNew,
     VectorAdd => IRVectorAdd,
@@ -700,9 +830,9 @@ fn every_instruction_tag_deserializes_imports_and_round_trips() {
         .map(|case| case["kind"].as_str().expect("kind is a string"))
         .collect::<BTreeSet<_>>();
 
-    assert_eq!(cases.len(), 73);
-    assert_eq!(tags.len(), 73);
-    assert_eq!(INSTRUCTION_VARIANT_MAPPING_COUNT, 73);
+    assert_eq!(cases.len(), 84);
+    assert_eq!(tags.len(), 84);
+    assert_eq!(INSTRUCTION_VARIANT_MAPPING_COUNT, 84);
     for case in cases {
         let tag = case["kind"].as_str().expect("kind is a string");
         let dto: IRInstructionDTO = serde_json::from_value(case.clone())

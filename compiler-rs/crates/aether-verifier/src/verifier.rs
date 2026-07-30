@@ -3,9 +3,10 @@
 use std::collections::{HashMap, HashSet};
 
 use aether_ir::{
-    ArrayType, BoolType, ComplexType, DoubleType, FloatType, FunctionType, IRBasicBlock,
-    IRConstant, IRFunction, IRInstruction, IRModule, IRStructDefinition, IRType, IRValue, IntType,
-    LifecycleSource, ListType, MatrixType, StringType, StructType, VectorType, VoidType,
+    ArrayType, BoolType, ComplexType, DoubleType, ExceptionEventType, FloatType, FunctionType,
+    IRBasicBlock, IRConstant, IRFunction, IRInstruction, IRModule, IRStructDefinition, IRType,
+    IRValue, IntType, LifecycleSource, ListType, MatrixType, StringType, StructType, VectorType,
+    VoidType,
 };
 
 use crate::error::{
@@ -86,7 +87,8 @@ impl<'module> TypeVerifier<'module> {
             | IRType::List(_)
             | IRType::Vector(_)
             | IRType::Matrix(_)
-            | IRType::Function(_) => Some((8, 8)),
+            | IRType::Function(_)
+            | IRType::ExceptionEvent(_) => Some((8, 8)),
             IRType::Interface(_) => Some((16, 8)),
             IRType::Nullable(nullable) => {
                 let (size, alignment) = self.erased_layout(&nullable.inner, active)?;
@@ -457,6 +459,76 @@ impl<'module> TypeVerifier<'module> {
             | IRInstruction::IRRelocate { .. }
             // CFG and terminator validation are deferred.
             | IRInstruction::IRJump { .. } => Ok(()),
+            IRInstruction::IRInvokeIndirect {
+                exception,
+                exceptional_target_event,
+                ..
+            }
+            | IRInstruction::IRInvokeInterface {
+                exception,
+                exceptional_target_event,
+                ..
+            } => {
+                self.require_exact(
+                    "exception",
+                    &ExceptionEventType.into(),
+                    &exception.r#type,
+                )?;
+                self.require_exact(
+                    "exceptional_target_event",
+                    &ExceptionEventType.into(),
+                    &exceptional_target_event.r#type,
+                )
+            }
+            IRInstruction::IRCatchEntry { event, .. } => {
+                self.require_exact("event", &ExceptionEventType.into(), &event.r#type)
+            }
+            IRInstruction::IRInvoke {
+                function: callee,
+                arguments,
+                result,
+                exception,
+                exceptional_target_event,
+                builtin,
+                ..
+            } => {
+                self.require_exact(
+                    "exception",
+                    &ExceptionEventType.into(),
+                    &exception.r#type,
+                )?;
+                self.require_exact(
+                    "exceptional_target_event",
+                    &ExceptionEventType.into(),
+                    &exceptional_target_event.r#type,
+                )?;
+                if builtin.is_none()
+                    && !self
+                        .function(callee)
+                        .is_some_and(|function| function.may_throw)
+                {
+                    return Err(TypeRuleError::MetadataMismatch {
+                        field: "may_throw".to_owned(),
+                        expected: "may_throw callee".to_owned(),
+                        actual: "nonthrowing callee".to_owned(),
+                    });
+                }
+                self.verify_call(callee, arguments, result.as_ref(), builtin.as_deref())
+            }
+            IRInstruction::IRPackException { result, .. } => {
+                self.require_exact("result", &ExceptionEventType.into(), &result.r#type)
+            }
+            IRInstruction::IRExceptionMatch { result, event, .. } => {
+                self.require_exact("event", &ExceptionEventType.into(), &event.r#type)?;
+                self.expect_bool("result", &result.r#type)
+            }
+            IRInstruction::IRExceptionPayload { event, .. }
+            | IRInstruction::IRExceptionDestroy { event }
+            | IRInstruction::IRThrow { event, .. }
+            | IRInstruction::IRRethrow { event, .. }
+            | IRInstruction::IRPropagate { event, .. } => {
+                self.require_exact("event", &ExceptionEventType.into(), &event.r#type)
+            }
             IRInstruction::IRBinaryOp {
                 result,
                 operator,
@@ -482,8 +554,25 @@ impl<'module> TypeVerifier<'module> {
                 arguments,
                 result,
                 builtin,
+                may_throw,
                 ..
-            } => self.verify_call(callee, arguments, result.as_ref(), builtin.as_deref()),
+            } => {
+                if *may_throw
+                    || (
+                        builtin.is_none()
+                            && self
+                                .function(callee)
+                                .is_some_and(|function| function.may_throw)
+                    )
+                {
+                    return Err(TypeRuleError::MetadataMismatch {
+                        field: "may_throw".to_owned(),
+                        expected: "invoke".to_owned(),
+                        actual: "call".to_owned(),
+                    });
+                }
+                self.verify_call(callee, arguments, result.as_ref(), builtin.as_deref())
+            }
             IRInstruction::IRFunctionRef { result, function } => {
                 self.verify_function_ref(result, function)
             }
@@ -1102,7 +1191,8 @@ impl<'module> TypeVerifier<'module> {
             | IRInstruction::IRRelocate { .. }
             | IRInstruction::IRFunctionRef { .. }
             | IRInstruction::IRClassNew { .. }
-            | IRInstruction::IRJump { .. } => Vec::new(),
+            | IRInstruction::IRJump { .. }
+            | IRInstruction::IRCatchEntry { .. } => Vec::new(),
             IRInstruction::IRBranch { condition, .. } => vec![("condition", condition)],
             IRInstruction::IRLoad { slot, .. } => vec![("slot", slot)],
             IRInstruction::IRStore { slot, value } => {
@@ -1126,7 +1216,14 @@ impl<'module> TypeVerifier<'module> {
                 .iter()
                 .map(|argument| ("arguments", argument))
                 .collect(),
+            IRInstruction::IRInvoke { arguments, .. } => arguments
+                .iter()
+                .map(|argument| ("arguments", argument))
+                .collect(),
             IRInstruction::IRCallIndirect {
+                callee, arguments, ..
+            }
+            | IRInstruction::IRInvokeIndirect {
                 callee, arguments, ..
             } => std::iter::once(("callee", callee))
                 .chain(arguments.iter().map(|argument| ("arguments", argument)))
@@ -1146,9 +1243,21 @@ impl<'module> TypeVerifier<'module> {
                 receiver,
                 arguments,
                 ..
+            }
+            | IRInstruction::IRInvokeInterface {
+                receiver,
+                arguments,
+                ..
             } => std::iter::once(("receiver", receiver))
                 .chain(arguments.iter().map(|argument| ("arguments", argument)))
                 .collect(),
+            IRInstruction::IRPackException { payload, .. } => vec![("payload", payload)],
+            IRInstruction::IRExceptionMatch { event, .. }
+            | IRInstruction::IRExceptionPayload { event, .. }
+            | IRInstruction::IRExceptionDestroy { event }
+            | IRInstruction::IRThrow { event, .. }
+            | IRInstruction::IRRethrow { event, .. }
+            | IRInstruction::IRPropagate { event, .. } => vec![("event", event)],
             IRInstruction::IRStructSet {
                 r#struct, value, ..
             } => vec![("struct", r#struct), ("value", value)],
@@ -2573,7 +2682,8 @@ impl<'module> TypeVerifier<'module> {
             | IRType::Function(_)
             | IRType::Complex(_)
             | IRType::ClassRef(_)
-            | IRType::Interface(_) => true,
+            | IRType::Interface(_)
+            | IRType::ExceptionEvent(_) => true,
         }
     }
 
@@ -3066,10 +3176,16 @@ pub(crate) fn instruction_result(instruction: &IRInstruction) -> Option<&IRValue
         | IRInstruction::IRMatrixColumns { result, .. }
         | IRInstruction::IRArrayLength { result, .. }
         | IRInstruction::IRListLength { result, .. }
-        | IRInstruction::IRListIsEmpty { result, .. } => Some(result),
+        | IRInstruction::IRListIsEmpty { result, .. }
+        | IRInstruction::IRPackException { result, .. }
+        | IRInstruction::IRExceptionMatch { result, .. }
+        | IRInstruction::IRExceptionPayload { result, .. } => Some(result),
         IRInstruction::IRCall { result, .. }
         | IRInstruction::IRCallIndirect { result, .. }
-        | IRInstruction::IRInterfaceCall { result, .. } => result.as_ref(),
+        | IRInstruction::IRInterfaceCall { result, .. }
+        | IRInstruction::IRInvoke { result, .. }
+        | IRInstruction::IRInvokeIndirect { result, .. }
+        | IRInstruction::IRInvokeInterface { result, .. } => result.as_ref(),
         _ => None,
     }
 }
@@ -3091,8 +3207,10 @@ pub(crate) fn instruction_kind(instruction: &IRInstruction) -> InstructionKind {
         IRInstruction::IRCompareOp { .. } => InstructionKind::IRCompareOp,
         IRInstruction::IRCast { .. } => InstructionKind::IRCast,
         IRInstruction::IRCall { .. } => InstructionKind::IRCall,
+        IRInstruction::IRInvoke { .. } => InstructionKind::IRInvoke,
         IRInstruction::IRFunctionRef { .. } => InstructionKind::IRFunctionRef,
         IRInstruction::IRCallIndirect { .. } => InstructionKind::IRCallIndirect,
+        IRInstruction::IRInvokeIndirect { .. } => InstructionKind::IRInvokeIndirect,
         IRInstruction::IRPrint { .. } => InstructionKind::IRPrint,
         IRInstruction::IRStructNew { .. } => InstructionKind::IRStructNew,
         IRInstruction::IRClassNew { .. } => InstructionKind::IRClassNew,
@@ -3100,6 +3218,7 @@ pub(crate) fn instruction_kind(instruction: &IRInstruction) -> InstructionKind {
         IRInstruction::IRClassSet { .. } => InstructionKind::IRClassSet,
         IRInstruction::IRInterfaceConstruct { .. } => InstructionKind::IRInterfaceConstruct,
         IRInstruction::IRInterfaceCall { .. } => InstructionKind::IRInterfaceCall,
+        IRInstruction::IRInvokeInterface { .. } => InstructionKind::IRInvokeInterface,
         IRInstruction::IRStructGet { .. } => InstructionKind::IRStructGet,
         IRInstruction::IRStructSet { .. } => InstructionKind::IRStructSet,
         IRInstruction::IRMethodResultNew { .. } => InstructionKind::IRMethodResultNew,
@@ -3147,6 +3266,14 @@ pub(crate) fn instruction_kind(instruction: &IRInstruction) -> InstructionKind {
         IRInstruction::IRArrayLength { .. } => InstructionKind::IRArrayLength,
         IRInstruction::IRListLength { .. } => InstructionKind::IRListLength,
         IRInstruction::IRListIsEmpty { .. } => InstructionKind::IRListIsEmpty,
+        IRInstruction::IRPackException { .. } => InstructionKind::IRPackException,
+        IRInstruction::IRCatchEntry { .. } => InstructionKind::IRCatchEntry,
+        IRInstruction::IRExceptionMatch { .. } => InstructionKind::IRExceptionMatch,
+        IRInstruction::IRExceptionPayload { .. } => InstructionKind::IRExceptionPayload,
+        IRInstruction::IRExceptionDestroy { .. } => InstructionKind::IRExceptionDestroy,
+        IRInstruction::IRThrow { .. } => InstructionKind::IRThrow,
+        IRInstruction::IRRethrow { .. } => InstructionKind::IRRethrow,
+        IRInstruction::IRPropagate { .. } => InstructionKind::IRPropagate,
         IRInstruction::IRBranch { .. } => InstructionKind::IRBranch,
         IRInstruction::IRJump { .. } => InstructionKind::IRJump,
         IRInstruction::IRReturn { .. } => InstructionKind::IRReturn,

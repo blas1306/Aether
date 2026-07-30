@@ -47,6 +47,14 @@ class VoidType(IRType):
 
 
 @dataclass(frozen=True)
+class ExceptionEventType(IRType):
+    """Opaque, linearly owned catchable-exception event."""
+
+    def __str__(self) -> str:
+        return "exception_event"
+
+
+@dataclass(frozen=True)
 class FunctionType(IRType):
     parameter_types: tuple[IRType, ...]
     return_type: IRType

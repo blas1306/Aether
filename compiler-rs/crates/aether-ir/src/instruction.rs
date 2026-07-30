@@ -135,6 +135,19 @@ pub enum IRInstruction {
         result: Option<IRValue>,
         builtin: Option<String>,
         source_location: Option<IRSourceLocation>,
+        may_throw: bool,
+    },
+    /// Calls a potentially throwing direct function.
+    IRInvoke {
+        function: String,
+        arguments: Vec<IRValue>,
+        result: Option<IRValue>,
+        exception: IRValue,
+        normal_target: String,
+        exceptional_target: String,
+        exceptional_target_event: IRValue,
+        builtin: Option<String>,
+        source_location: Option<IRSourceLocation>,
     },
     /// Creates a typed reference to a directly named function.
     IRFunctionRef { result: IRValue, function: String },
@@ -143,6 +156,16 @@ pub enum IRInstruction {
         callee: IRValue,
         arguments: Vec<IRValue>,
         result: Option<IRValue>,
+    },
+    /// Calls a potentially throwing function value.
+    IRInvokeIndirect {
+        callee: IRValue,
+        arguments: Vec<IRValue>,
+        result: Option<IRValue>,
+        exception: IRValue,
+        normal_target: String,
+        exceptional_target: String,
+        exceptional_target_event: IRValue,
     },
     /// Prints a scalar or aggregate value.
     IRPrint {
@@ -184,6 +207,17 @@ pub enum IRInstruction {
         arguments: Vec<IRValue>,
         slot: IRWitnessMethodSlot,
         result: Option<IRValue>,
+    },
+    /// Calls a potentially throwing interface slot.
+    IRInvokeInterface {
+        receiver: IRValue,
+        arguments: Vec<IRValue>,
+        slot: IRWitnessMethodSlot,
+        result: Option<IRValue>,
+        exception: IRValue,
+        normal_target: String,
+        exceptional_target: String,
+        exceptional_target_event: IRValue,
     },
     /// Reads a named struct field.
     IRStructGet {
@@ -475,6 +509,52 @@ pub enum IRInstruction {
     IRListIsEmpty {
         result: IRValue,
         list_value: IRValue,
+    },
+    /// Packs a validated Error value into an opaque event.
+    IRPackException {
+        result: IRValue,
+        payload: IRValue,
+        dynamic_type: Option<String>,
+        source_location: Option<IRSourceLocation>,
+    },
+    /// Declares a handler event and ordered catch descriptors.
+    IRCatchEntry {
+        event: IRValue,
+        handler_id: String,
+        catch_types: Vec<String>,
+    },
+    /// Matches an event descriptor.
+    IRExceptionMatch {
+        result: IRValue,
+        event: IRValue,
+        catch_type: String,
+        catch_all: bool,
+    },
+    /// Borrows an event payload.
+    IRExceptionPayload {
+        result: IRValue,
+        event: IRValue,
+        catch_type: String,
+    },
+    /// Consumes a handled event.
+    IRExceptionDestroy { event: IRValue },
+    /// Transfers a newly created event.
+    IRThrow {
+        event: IRValue,
+        target: Option<String>,
+        target_event: Option<IRValue>,
+    },
+    /// Transfers an active caught event.
+    IRRethrow {
+        event: IRValue,
+        target: Option<String>,
+        target_event: Option<IRValue>,
+    },
+    /// Transfers an unmatched event outward.
+    IRPropagate {
+        event: IRValue,
+        target: Option<String>,
+        target_event: Option<IRValue>,
     },
     /// Selects one of two successor blocks.
     IRBranch {

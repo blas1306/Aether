@@ -20,16 +20,23 @@ from .model import (
     IRBranch,
     IRCall,
     IRCallIndirect,
+    IRCatchEntry,
     IRClassGet,
     IRClassNew,
     IRClassSet,
     IRInterfaceCall,
     IRInterfaceConstruct,
+    IRInvoke,
+    IRInvokeIndirect,
+    IRInvokeInterface,
     IRCast,
     IRCompareOp,
     IRConst,
     IRCopyInit,
     IRDestroy,
+    IRExceptionDestroy,
+    IRExceptionMatch,
+    IRExceptionPayload,
     IREnumConstant,
     IRFunction,
     IRFunctionRef,
@@ -70,12 +77,16 @@ from .model import (
     IROuterProduct,
     IRParameter,
     IRPrint,
+    IRPackException,
+    IRPropagate,
     IRRelocate,
     IRReturn,
+    IRRethrow,
     IRSequenceSort,
     IRSourceLocation,
     IRStorage,
     IRStore,
+    IRThrow,
     IRStructDefinition,
     IRStructGet,
     IRStructNew,
@@ -101,6 +112,7 @@ from .types import (
     ClassRefType,
     ComplexType,
     DoubleType,
+    ExceptionEventType,
     EnumType,
     FloatType,
     FunctionType,
@@ -165,6 +177,7 @@ IR_TYPE_TAGS: Mapping[type[IRType], str] = MappingProxyType(
         BoolType: "bool",
         StringType: "string",
         VoidType: "void",
+        ExceptionEventType: "exception_event",
         FunctionType: "function",
         ComplexType: "complex",
         NullableType: "nullable",
@@ -245,6 +258,7 @@ def ir_type_from_dto(
         "string": StringType,
         "void": VoidType,
         "complex": ComplexType,
+        "exception_event": ExceptionEventType,
     }
     if tag in scalar_types:
         _expect_fields(mapping, {"tag"}, f"IR type '{tag}'")
@@ -880,7 +894,7 @@ def _encode_instruction_to_dto(
             "value": ir_value_to_dto(instruction.value, schema_version=schema_version),
         }
     if type(instruction) is IRCall:
-        return {
+        dto = {
             "kind": kind,
             "function": _expect_string(
                 instruction.function,
@@ -899,6 +913,37 @@ def _encode_instruction_to_dto(
                 instruction.builtin,
                 "IR instruction 'call'.builtin",
             ),
+            "source_location": ir_source_location_to_dto(
+                instruction.source_location,
+                schema_version=schema_version,
+            ),
+        }
+        if instruction.may_throw_effect:
+            dto["may_throw"] = True
+        return dto
+    if type(instruction) is IRInvoke:
+        return {
+            "kind": kind,
+            "function": instruction.function,
+            "arguments": [
+                ir_value_to_dto(value, schema_version=schema_version)
+                for value in instruction.arguments
+            ],
+            "result": (
+                None
+                if instruction.result is None
+                else ir_value_to_dto(instruction.result, schema_version=schema_version)
+            ),
+            "exception": ir_value_to_dto(
+                instruction.exception, schema_version=schema_version
+            ),
+            "normal_target": instruction.normal_target,
+            "exceptional_target": instruction.exceptional_target,
+            "exceptional_target_event": ir_value_to_dto(
+                instruction.exceptional_target_event,
+                schema_version=schema_version,
+            ),
+            "builtin": instruction.builtin,
             "source_location": ir_source_location_to_dto(
                 instruction.source_location,
                 schema_version=schema_version,
@@ -925,6 +970,31 @@ def _encode_instruction_to_dto(
                 None
                 if instruction.result is None
                 else ir_value_to_dto(instruction.result, schema_version=schema_version)
+            ),
+        }
+    if type(instruction) is IRInvokeIndirect:
+        return {
+            "kind": kind,
+            "callee": ir_value_to_dto(
+                instruction.callee, schema_version=schema_version
+            ),
+            "arguments": [
+                ir_value_to_dto(value, schema_version=schema_version)
+                for value in instruction.arguments
+            ],
+            "result": (
+                None
+                if instruction.result is None
+                else ir_value_to_dto(instruction.result, schema_version=schema_version)
+            ),
+            "exception": ir_value_to_dto(
+                instruction.exception, schema_version=schema_version
+            ),
+            "normal_target": instruction.normal_target,
+            "exceptional_target": instruction.exceptional_target,
+            "exceptional_target_event": ir_value_to_dto(
+                instruction.exceptional_target_event,
+                schema_version=schema_version,
             ),
         }
     if type(instruction) is IRPrint:
@@ -1036,6 +1106,45 @@ def _encode_instruction_to_dto(
                 else ir_value_to_dto(
                     instruction.result, schema_version=schema_version
                 )
+            ),
+        }
+    if type(instruction) is IRInvokeInterface:
+        return {
+            "kind": kind,
+            "receiver": ir_value_to_dto(
+                instruction.receiver, schema_version=schema_version
+            ),
+            "arguments": [
+                ir_value_to_dto(value, schema_version=schema_version)
+                for value in instruction.arguments
+            ],
+            "slot": {
+                "index": instruction.slot.index,
+                "method_id": instruction.slot.method_id,
+                "parameter_types": [
+                    ir_type_to_dto(type_, schema_version=schema_version)
+                    for type_ in instruction.slot.parameter_types
+                ],
+                "return_type": ir_type_to_dto(
+                    instruction.slot.return_type,
+                    schema_version=schema_version,
+                ),
+                "thunk_symbol": instruction.slot.thunk_symbol,
+                "receiver_ownership": instruction.slot.receiver_ownership,
+            },
+            "result": (
+                None
+                if instruction.result is None
+                else ir_value_to_dto(instruction.result, schema_version=schema_version)
+            ),
+            "exception": ir_value_to_dto(
+                instruction.exception, schema_version=schema_version
+            ),
+            "normal_target": instruction.normal_target,
+            "exceptional_target": instruction.exceptional_target,
+            "exceptional_target_event": ir_value_to_dto(
+                instruction.exceptional_target_event,
+                schema_version=schema_version,
             ),
         }
     if type(instruction) is IRStructGet:
@@ -1489,6 +1598,76 @@ def _encode_instruction_to_dto(
                 schema_version=schema_version,
             ),
         }
+    if type(instruction) is IRPackException:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(
+                instruction.result, schema_version=schema_version
+            ),
+            "payload": ir_value_to_dto(
+                instruction.payload, schema_version=schema_version
+            ),
+            "dynamic_type": instruction.dynamic_type,
+            "source_location": ir_source_location_to_dto(
+                instruction.source_location,
+                schema_version=schema_version,
+            ),
+        }
+    if type(instruction) is IRCatchEntry:
+        return {
+            "kind": kind,
+            "event": ir_value_to_dto(
+                instruction.event, schema_version=schema_version
+            ),
+            "handler_id": instruction.handler_id,
+            "catch_types": list(instruction.catch_types),
+        }
+    if type(instruction) is IRExceptionMatch:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(
+                instruction.result, schema_version=schema_version
+            ),
+            "event": ir_value_to_dto(
+                instruction.event, schema_version=schema_version
+            ),
+            "catch_type": instruction.catch_type,
+            "catch_all": instruction.catch_all,
+        }
+    if type(instruction) is IRExceptionPayload:
+        return {
+            "kind": kind,
+            "result": ir_value_to_dto(
+                instruction.result, schema_version=schema_version
+            ),
+            "event": ir_value_to_dto(
+                instruction.event, schema_version=schema_version
+            ),
+            "catch_type": instruction.catch_type,
+        }
+    if type(instruction) is IRExceptionDestroy:
+        return {
+            "kind": kind,
+            "event": ir_value_to_dto(
+                instruction.event, schema_version=schema_version
+            ),
+        }
+    if type(instruction) in {IRThrow, IRRethrow, IRPropagate}:
+        return {
+            "kind": kind,
+            "event": ir_value_to_dto(
+                instruction.event, schema_version=schema_version
+            ),
+            "target": instruction.target,
+            "target_event": (
+                None
+                if instruction.target_event is None
+                else ir_value_to_dto(
+                    instruction.target_event,
+                    schema_version=schema_version,
+                )
+            ),
+        }
     if type(instruction) is IRBranch:
         return {
             "kind": kind,
@@ -1688,9 +1867,14 @@ def _decode_instruction_from_dto(
             ir_value_from_dto(mapping["value"], schema_version=schema_version),
         )
     if kind == "call":
+        call_fields = {
+            "kind", "function", "arguments", "result", "builtin", "source_location"
+        }
+        if "may_throw" in mapping:
+            call_fields.add("may_throw")
         _expect_fields(
             mapping,
-            {"kind", "function", "arguments", "result", "builtin", "source_location"},
+            call_fields,
             "IR instruction 'call'",
         )
         arguments = _expect_sequence(mapping["arguments"], "IR instruction 'call'.arguments")
@@ -1708,6 +1892,47 @@ def _decode_instruction_from_dto(
             ),
             _expect_optional_string(mapping["builtin"], "IR instruction 'call'.builtin"),
             ir_source_location_from_dto(mapping["source_location"], schema_version=schema_version),
+            (
+                _expect_bool(mapping["may_throw"], "IR instruction 'call'.may_throw")
+                if "may_throw" in mapping
+                else False
+            ),
+        )
+    if kind == "invoke":
+        _expect_fields(
+            mapping,
+            {
+                "kind", "function", "arguments", "result", "exception",
+                "normal_target", "exceptional_target",
+                "exceptional_target_event", "builtin", "source_location",
+            },
+            "IR instruction 'invoke'",
+        )
+        arguments = _expect_sequence(
+            mapping["arguments"], "IR instruction 'invoke'.arguments"
+        )
+        return IRInvoke(
+            _expect_string(mapping["function"], "IR instruction 'invoke'.function"),
+            tuple(
+                ir_value_from_dto(item, schema_version=schema_version)
+                for item in arguments
+            ),
+            (
+                None
+                if mapping["result"] is None
+                else ir_value_from_dto(mapping["result"], schema_version=schema_version)
+            ),
+            ir_value_from_dto(mapping["exception"], schema_version=schema_version),
+            _expect_string(mapping["normal_target"], "IR instruction 'invoke'.normal_target"),
+            _expect_string(mapping["exceptional_target"], "IR instruction 'invoke'.exceptional_target"),
+            ir_value_from_dto(
+                mapping["exceptional_target_event"],
+                schema_version=schema_version,
+            ),
+            _expect_optional_string(mapping["builtin"], "IR instruction 'invoke'.builtin"),
+            ir_source_location_from_dto(
+                mapping["source_location"], schema_version=schema_version
+            ),
         )
     if kind == "function_ref":
         _expect_fields(
@@ -1743,6 +1968,38 @@ def _decode_instruction_from_dto(
                 None
                 if raw_result is None
                 else ir_value_from_dto(raw_result, schema_version=schema_version)
+            ),
+        )
+    if kind == "invoke_indirect":
+        _expect_fields(
+            mapping,
+            {
+                "kind", "callee", "arguments", "result", "exception",
+                "normal_target", "exceptional_target",
+                "exceptional_target_event",
+            },
+            "IR instruction 'invoke_indirect'",
+        )
+        arguments = _expect_sequence(
+            mapping["arguments"], "IR instruction 'invoke_indirect'.arguments"
+        )
+        return IRInvokeIndirect(
+            ir_value_from_dto(mapping["callee"], schema_version=schema_version),
+            tuple(
+                ir_value_from_dto(item, schema_version=schema_version)
+                for item in arguments
+            ),
+            (
+                None
+                if mapping["result"] is None
+                else ir_value_from_dto(mapping["result"], schema_version=schema_version)
+            ),
+            ir_value_from_dto(mapping["exception"], schema_version=schema_version),
+            _expect_string(mapping["normal_target"], "IR instruction 'invoke_indirect'.normal_target"),
+            _expect_string(mapping["exceptional_target"], "IR instruction 'invoke_indirect'.exceptional_target"),
+            ir_value_from_dto(
+                mapping["exceptional_target_event"],
+                schema_version=schema_version,
             ),
         )
     if kind == "print":
@@ -1894,6 +2151,66 @@ def _decode_instruction_from_dto(
                 else ir_value_from_dto(
                     mapping["result"], schema_version=schema_version
                 )
+            ),
+        )
+    if kind == "invoke_interface":
+        _expect_fields(
+            mapping,
+            {
+                "kind", "receiver", "arguments", "slot", "result",
+                "exception", "normal_target", "exceptional_target",
+                "exceptional_target_event",
+            },
+            "IR instruction 'invoke_interface'",
+        )
+        raw_slot = _expect_mapping(
+            mapping["slot"], "IR instruction 'invoke_interface'.slot"
+        )
+        _expect_fields(
+            raw_slot,
+            {
+                "index", "method_id", "parameter_types", "return_type",
+                "thunk_symbol", "receiver_ownership",
+            },
+            "IR instruction 'invoke_interface'.slot",
+        )
+        raw_arguments = _expect_sequence(
+            mapping["arguments"],
+            "IR instruction 'invoke_interface'.arguments",
+        )
+        raw_parameter_types = _expect_sequence(
+            raw_slot["parameter_types"],
+            "IR instruction 'invoke_interface'.slot.parameter_types",
+        )
+        slot = IRWitnessMethodSlot(
+            _expect_i64(raw_slot["index"], "IR instruction 'invoke_interface'.slot.index"),
+            _expect_string(raw_slot["method_id"], "IR instruction 'invoke_interface'.slot.method_id"),
+            tuple(
+                ir_type_from_dto(type_, schema_version=schema_version)
+                for type_ in raw_parameter_types
+            ),
+            ir_type_from_dto(raw_slot["return_type"], schema_version=schema_version),
+            _expect_string(raw_slot["thunk_symbol"], "IR instruction 'invoke_interface'.slot.thunk_symbol"),
+            _expect_string(raw_slot["receiver_ownership"], "IR instruction 'invoke_interface'.slot.receiver_ownership"),
+        )
+        return IRInvokeInterface(
+            ir_value_from_dto(mapping["receiver"], schema_version=schema_version),
+            tuple(
+                ir_value_from_dto(item, schema_version=schema_version)
+                for item in raw_arguments
+            ),
+            slot,
+            (
+                None
+                if mapping["result"] is None
+                else ir_value_from_dto(mapping["result"], schema_version=schema_version)
+            ),
+            ir_value_from_dto(mapping["exception"], schema_version=schema_version),
+            _expect_string(mapping["normal_target"], "IR instruction 'invoke_interface'.normal_target"),
+            _expect_string(mapping["exceptional_target"], "IR instruction 'invoke_interface'.exceptional_target"),
+            ir_value_from_dto(
+                mapping["exceptional_target_event"],
+                schema_version=schema_version,
             ),
         )
     if kind == "struct_get":
@@ -2526,6 +2843,94 @@ def _decode_instruction_from_dto(
             ir_value_from_dto(mapping["result"], schema_version=schema_version),
             ir_value_from_dto(mapping["list_value"], schema_version=schema_version),
         )
+    if kind == "exception_pack":
+        _expect_fields(
+            mapping,
+            {"kind", "result", "payload", "dynamic_type", "source_location"},
+            "IR instruction 'exception_pack'",
+        )
+        return IRPackException(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_value_from_dto(mapping["payload"], schema_version=schema_version),
+            _expect_optional_string(
+                mapping["dynamic_type"],
+                "IR instruction 'exception_pack'.dynamic_type",
+            ),
+            ir_source_location_from_dto(
+                mapping["source_location"], schema_version=schema_version
+            ),
+        )
+    if kind == "catch_entry":
+        _expect_fields(
+            mapping,
+            {"kind", "event", "handler_id", "catch_types"},
+            "IR instruction 'catch_entry'",
+        )
+        catch_types = _expect_sequence(
+            mapping["catch_types"], "IR instruction 'catch_entry'.catch_types"
+        )
+        return IRCatchEntry(
+            ir_value_from_dto(mapping["event"], schema_version=schema_version),
+            _expect_string(mapping["handler_id"], "IR instruction 'catch_entry'.handler_id"),
+            tuple(
+                _expect_string(item, "IR instruction 'catch_entry'.catch_types")
+                for item in catch_types
+            ),
+        )
+    if kind == "exception_match":
+        _expect_fields(
+            mapping,
+            {"kind", "result", "event", "catch_type", "catch_all"},
+            "IR instruction 'exception_match'",
+        )
+        return IRExceptionMatch(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_value_from_dto(mapping["event"], schema_version=schema_version),
+            _expect_string(mapping["catch_type"], "IR instruction 'exception_match'.catch_type"),
+            _expect_bool(mapping["catch_all"], "IR instruction 'exception_match'.catch_all"),
+        )
+    if kind == "exception_payload":
+        _expect_fields(
+            mapping,
+            {"kind", "result", "event", "catch_type"},
+            "IR instruction 'exception_payload'",
+        )
+        return IRExceptionPayload(
+            ir_value_from_dto(mapping["result"], schema_version=schema_version),
+            ir_value_from_dto(mapping["event"], schema_version=schema_version),
+            _expect_string(mapping["catch_type"], "IR instruction 'exception_payload'.catch_type"),
+        )
+    if kind == "exception_destroy":
+        _expect_fields(
+            mapping,
+            {"kind", "event"},
+            "IR instruction 'exception_destroy'",
+        )
+        return IRExceptionDestroy(
+            ir_value_from_dto(mapping["event"], schema_version=schema_version)
+        )
+    if kind in {"throw", "rethrow", "propagate"}:
+        _expect_fields(
+            mapping,
+            {"kind", "event", "target", "target_event"},
+            f"IR instruction '{kind}'",
+        )
+        instruction_type = {
+            "throw": IRThrow,
+            "rethrow": IRRethrow,
+            "propagate": IRPropagate,
+        }[kind]
+        return instruction_type(
+            ir_value_from_dto(mapping["event"], schema_version=schema_version),
+            _expect_optional_string(mapping["target"], f"IR instruction '{kind}'.target"),
+            (
+                None
+                if mapping["target_event"] is None
+                else ir_value_from_dto(
+                    mapping["target_event"], schema_version=schema_version
+                )
+            ),
+        )
     if kind == "branch":
         _expect_fields(
             mapping,
@@ -2618,8 +3023,14 @@ IR_INSTRUCTION_DTO_REGISTRY: tuple[IRInstructionDTORegistryEntry, ...] = (
     _instruction_dto_entry(IRCompareOp, "compare_op", "IRCompareOp"),
     _instruction_dto_entry(IRCast, "cast", "IRCast"),
     _instruction_dto_entry(IRCall, "call", "IRCall"),
+    _instruction_dto_entry(IRInvoke, "invoke", "IRInvoke"),
     _instruction_dto_entry(IRFunctionRef, "function_ref", "IRFunctionRef"),
     _instruction_dto_entry(IRCallIndirect, "call_indirect", "IRCallIndirect"),
+    _instruction_dto_entry(
+        IRInvokeIndirect,
+        "invoke_indirect",
+        "IRInvokeIndirect",
+    ),
     _instruction_dto_entry(IRPrint, "print", "IRPrint"),
     _instruction_dto_entry(IRStructNew, "struct_new", "IRStructNew"),
     _instruction_dto_entry(IRClassNew, "class_new", "IRClassNew"),
@@ -2634,6 +3045,11 @@ IR_INSTRUCTION_DTO_REGISTRY: tuple[IRInstructionDTORegistryEntry, ...] = (
         IRInterfaceCall,
         "interface_call",
         "IRInterfaceCall",
+    ),
+    _instruction_dto_entry(
+        IRInvokeInterface,
+        "invoke_interface",
+        "IRInvokeInterface",
     ),
     _instruction_dto_entry(IRStructGet, "struct_get", "IRStructGet"),
     _instruction_dto_entry(IRStructSet, "struct_set", "IRStructSet"),
@@ -2674,6 +3090,30 @@ IR_INSTRUCTION_DTO_REGISTRY: tuple[IRInstructionDTORegistryEntry, ...] = (
     _instruction_dto_entry(IRArrayLength, "array_length", "IRArrayLength"),
     _instruction_dto_entry(IRListLength, "list_length", "IRListLength"),
     _instruction_dto_entry(IRListIsEmpty, "list_is_empty", "IRListIsEmpty"),
+    _instruction_dto_entry(
+        IRPackException,
+        "exception_pack",
+        "IRPackException",
+    ),
+    _instruction_dto_entry(IRCatchEntry, "catch_entry", "IRCatchEntry"),
+    _instruction_dto_entry(
+        IRExceptionMatch,
+        "exception_match",
+        "IRExceptionMatch",
+    ),
+    _instruction_dto_entry(
+        IRExceptionPayload,
+        "exception_payload",
+        "IRExceptionPayload",
+    ),
+    _instruction_dto_entry(
+        IRExceptionDestroy,
+        "exception_destroy",
+        "IRExceptionDestroy",
+    ),
+    _instruction_dto_entry(IRThrow, "throw", "IRThrow"),
+    _instruction_dto_entry(IRRethrow, "rethrow", "IRRethrow"),
+    _instruction_dto_entry(IRPropagate, "propagate", "IRPropagate"),
     _instruction_dto_entry(IRVectorNew, "vector_new", "IRVectorNew"),
     _instruction_dto_entry(IRMatrixNew, "matrix_new", "IRMatrixNew"),
     _instruction_dto_entry(IRVectorAdd, "vector_add", "IRVectorAdd"),
@@ -2979,7 +3419,7 @@ def ir_function_to_dto(
         )
     parameters = _expect_sequence(function.parameters, "IR function parameters")
     blocks = _expect_sequence(function.blocks, "IR function blocks")
-    return {
+    dto = {
         "name": _expect_string(function.name, "IR function name"),
         "parameters": [
             ir_parameter_to_dto(parameter, schema_version=schema_version)
@@ -2994,6 +3434,9 @@ def ir_function_to_dto(
             for block in blocks
         ],
     }
+    if function.may_throw:
+        dto["may_throw"] = True
+    return dto
 
 
 def ir_function_from_dto(
@@ -3005,11 +3448,10 @@ def ir_function_from_dto(
 
     _require_schema_version(schema_version)
     mapping = _expect_mapping(dto, "IR function")
-    _expect_fields(
-        mapping,
-        {"name", "parameters", "return_type", "blocks"},
-        "IR function",
-    )
+    function_fields = {"name", "parameters", "return_type", "blocks"}
+    if "may_throw" in mapping:
+        function_fields.add("may_throw")
+    _expect_fields(mapping, function_fields, "IR function")
     parameters = _expect_sequence(mapping["parameters"], "IR function.parameters")
     blocks = _expect_sequence(mapping["blocks"], "IR function.blocks")
     return IRFunction(
@@ -3023,6 +3465,11 @@ def ir_function_from_dto(
             ir_basic_block_from_dto(block, schema_version=schema_version)
             for block in blocks
         ],
+        (
+            _expect_bool(mapping["may_throw"], "IR function.may_throw")
+            if "may_throw" in mapping
+            else False
+        ),
     )
 
 

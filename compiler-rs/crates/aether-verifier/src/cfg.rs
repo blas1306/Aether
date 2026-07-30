@@ -66,6 +66,36 @@ pub(crate) fn terminator_successors(instruction: &IRInstruction) -> TerminatorSu
             true_target,
             false_target,
         },
+        IRInstruction::IRInvoke {
+            normal_target,
+            exceptional_target,
+            ..
+        }
+        | IRInstruction::IRInvokeIndirect {
+            normal_target,
+            exceptional_target,
+            ..
+        }
+        | IRInstruction::IRInvokeInterface {
+            normal_target,
+            exceptional_target,
+            ..
+        } => TerminatorSuccessors::Branch {
+            true_target: normal_target,
+            false_target: exceptional_target,
+        },
+        IRInstruction::IRThrow {
+            target: Some(target),
+            ..
+        }
+        | IRInstruction::IRRethrow {
+            target: Some(target),
+            ..
+        }
+        | IRInstruction::IRPropagate {
+            target: Some(target),
+            ..
+        } => TerminatorSuccessors::Jump(target),
         _ => TerminatorSuccessors::None,
     }
 }

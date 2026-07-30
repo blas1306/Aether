@@ -17,6 +17,8 @@ pub enum IRType {
     String(StringType),
     /// The absence of a value.
     Void(VoidType),
+    /// An opaque, linearly owned catchable-exception event.
+    ExceptionEvent(ExceptionEventType),
     /// A typed function reference.
     Function(FunctionType),
     /// A double-precision complex value.
@@ -66,6 +68,10 @@ pub struct StringType;
 /// The `void` IR type.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct VoidType;
+
+/// The opaque `exception_event` IR type.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct ExceptionEventType;
 
 /// The `complex` IR type.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -174,6 +180,7 @@ impl_ir_type_conversion!(DoubleType, Double);
 impl_ir_type_conversion!(BoolType, Bool);
 impl_ir_type_conversion!(StringType, String);
 impl_ir_type_conversion!(VoidType, Void);
+impl_ir_type_conversion!(ExceptionEventType, ExceptionEvent);
 impl_ir_type_conversion!(FunctionType, Function);
 impl_ir_type_conversion!(ComplexType, Complex);
 impl_ir_type_conversion!(NullableType, Nullable);
@@ -196,6 +203,7 @@ impl fmt::Display for IRType {
             Self::Bool(_) => formatter.write_str("bool"),
             Self::String(_) => formatter.write_str("string"),
             Self::Void(_) => formatter.write_str("void"),
+            Self::ExceptionEvent(_) => formatter.write_str("exception_event"),
             Self::Complex(_) => formatter.write_str("complex"),
             Self::Function(function) => {
                 write!(formatter, "{}(", function.return_type)?;

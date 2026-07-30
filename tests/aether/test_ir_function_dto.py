@@ -412,12 +412,14 @@ def test_python_and_rust_function_shapes_are_synchronized() -> None:
         "parameters": list[IRParameter],
         "return_type": IRType,
         "blocks": list[IRBasicBlock],
+        "may_throw": bool,
     }
     expected_rust = {
         "name": "String",
         "parameters": "Vec<IRParameter>",
         "return_type": "IRType",
         "blocks": "Vec<IRBasicBlock>",
+        "may_throw": "bool",
     }
     python_fields = [field.name for field in fields(IRFunction)]
     python_hints = get_type_hints(IRFunction)
