@@ -156,7 +156,11 @@ def test_detector_reports_import_and_deduplicates_repeated_imports(tmp_path: Pat
         ("import Math; int main() { double x = Math.pi; return 0; }", Capability.SCALAR_MATH),
         ("import Math as M; int main() { int x = M.factorial(4); return 0; }", Capability.SCALAR_MATH),
         ('int main() { string x = input("x: "); return 0; }', Capability.INPUT),
-        ('int main() { try { throw "bad"; } catch (error) { println(error); } return 0; }', Capability.ERROR_HANDLING),
+        (
+            'struct E implements Error { string message() { return "bad"; } } '
+            "int main() { try { throw E(); } catch (error) { println(error.message()); } return 0; }",
+            Capability.ERROR_HANDLING,
+        ),
     ],
 )
 def test_detector_reports_major_ast_only_features(source: str, capability: Capability) -> None:
@@ -168,9 +172,13 @@ def test_approved_exception_syntax_remains_unsupported_and_never_reaches_ir(
 ) -> None:
     typed = _typed(
         """
+struct FileError implements Error {
+    string message() { return "file"; }
+}
+
 int main() {
     try {
-        throw "legacy placeholder";
+        throw FileError();
     } catch (FileError file_error) {
         println(file_error);
     } catch (Error error) {
@@ -444,9 +452,10 @@ def test_native_scalar_math_profile_accepts_consolidated_and_rejects_experimenta
             "unsupported element type 'Array<int>'",
         ),
         (
-            'int main() { Exception error = Exception("bad"); return 0; }',
+            'struct E implements Error { string message() { return "bad"; } } '
+            "int main() { try { throw E(); } catch (Error error) { return 0; } }",
             Capability.ERROR_HANDLING,
-            "Exception",
+            "",
         ),
     ],
     ids=(

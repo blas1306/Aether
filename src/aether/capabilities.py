@@ -1151,6 +1151,12 @@ class _CapabilityDetector:
             return
         if isinstance(node, ast.StructDeclaration):
             self._record(Capability.STRUCTS, node)
+            if "Error" in node.implements:
+                self._record(
+                    Capability.ERROR_HANDLING,
+                    node,
+                    detail="Error-conforming struct",
+                )
             if node.constructor is not None:
                 self._record(Capability.STRUCT_CONSTRUCTORS, node.constructor)
             if node.methods:
@@ -1174,6 +1180,12 @@ class _CapabilityDetector:
             return
         if isinstance(node, ast.ClassDeclaration):
             self._record(Capability.CLASSES, node)
+            if "Error" in node.implements:
+                self._record(
+                    Capability.ERROR_HANDLING,
+                    node,
+                    detail="Error-conforming class",
+                )
             if node.constructor is not None:
                 self._record(Capability.CLASS_CONSTRUCTORS, node.constructor)
             if node.methods:
@@ -1448,13 +1460,6 @@ class _CapabilityDetector:
                         tuple(parameter.type_name for parameter in method.parameters),
                     )
         canonical = self._canonical_name(call.callee)
-        if canonical == "Exception":
-            self._record(
-                Capability.ERROR_HANDLING,
-                call,
-                detail="Exception construction",
-                requires_complete_support=True,
-            )
         if canonical in {"int", "float", "double", "string", "boolean"}:
             argument_type = (
                 self._resolve_alias(self.checker.type_of_expression(call.arguments[0]))
@@ -1982,14 +1987,6 @@ class _CapabilityDetector:
                 requires_complete_support=True,
             )
             return
-        if type_name == "Exception":
-            self._record(
-                Capability.ERROR_HANDLING,
-                node,
-                detail="Exception values",
-                requires_complete_support=True,
-            )
-            return
         if isinstance(type_name, str) and type_name in {
             "int",
             "double",
@@ -2109,7 +2106,6 @@ class _CapabilityDetector:
         if isinstance(type_name, (NullType, TupleType)) or type_name in {
             "complex",
             "void",
-            "Exception",
         }:
             return f"type '{type_name}' has no sized collection-element ABI in LLVM/native"
         if not isinstance(type_name, str):

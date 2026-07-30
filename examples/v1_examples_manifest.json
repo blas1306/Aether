@@ -1402,7 +1402,7 @@
       "condition": "ast_execution",
       "expected_exit_code": 1,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stderr_sha256": "f423d18146ed25a065dd0a63d9fae57212a6cc7b6b2df9e7a09344539fa20d4f",
+      "stderr_sha256": "a59ba7efad1d9481892d0f201a054e96b25b9f6a3fe94a89cd7a1b74c0616df7",
       "timeout_seconds": 20,
       "classification": "AST_ONLY_EXPERIMENTAL",
       "backends": [

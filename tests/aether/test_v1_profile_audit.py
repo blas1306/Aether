@@ -237,7 +237,8 @@ def test_removed_broken_examples_are_not_public_or_manifested() -> None:
         ('int main() { string value = input("value: "); return 0; }', "AE-BACKEND-INPUT"),
         ('int main() { int n = 2; println("n=$n$"); return 0; }', "AE-BACKEND-STRINGS"),
         (
-            'int main() { try { throw "bad"; } catch (error) { println(error); } return 0; }',
+            'struct E implements Error { string message() { return "bad"; } } '
+            "int main() { try { throw E(); } catch (error) { println(error.message()); } return 0; }",
             "AE-BACKEND-ERROR_HANDLING",
         ),
     ],

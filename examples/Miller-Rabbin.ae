@@ -1,7 +1,8 @@
 import Math
 
-public Exception Pelotudo(string message) {
-    return Exception(message);
+public struct Pelotudo implements Error {
+    string text;
+    string message() { return text; }
 }
 
 int powMod(int base, int exp, int m) {

@@ -88,7 +88,6 @@ AETHER_TYPES = {
     "Matrix",
     "Vector",
     "Error",
-    "Exception",
     "void",
     "ParseStatus",
     "IntParseResult",

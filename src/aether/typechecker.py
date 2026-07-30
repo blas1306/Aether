@@ -74,6 +74,7 @@ LINEAR_ALGEBRA_MATMUL = "Math.LinearAlgebra.matmul"
 LINEAR_ALGEBRA_SOLVE = "Math.LinearAlgebra.solve"
 LINEAR_ALGEBRA_CONJTRANSPOSE = "Math.LinearAlgebra.conjtranspose"
 SCALAR_INPUT_TARGET_TYPES = {"int", "float", "string", "boolean"}
+ERROR_INTERFACE_NAME = "Error"
 
 
 def _constant_range_int(expression: ast.Expression) -> int | None:
@@ -98,6 +99,7 @@ class TypeChecker:
         self.structs: dict[str, StructSymbol] = {}
         self.enums: dict[str, EnumSymbol] = {}
         self.interfaces: dict[str, InterfaceSymbol] = {}
+        self._install_builtin_interfaces()
         self.expression_functions: dict[str, ast.ExpressionFunctionDeclaration] = {}
         self._local_function_declarations: dict[
             str, ast.FunctionDeclaration | ast.ExpressionFunctionDeclaration
@@ -114,6 +116,7 @@ class TypeChecker:
         self.current_function_name: str | None = None
         self.current_method_struct: StructSymbol | None = None
         self.loop_depth = 0
+        self.catch_depth = 0
         self.loop_variable_stack: list[tuple[str, Scope[VariableSymbol]]] = []
         # Direct collection lvalues currently being traversed by ``for-in``.
         # This is semantic AST state (path + resolved root scope), not a source
@@ -146,6 +149,14 @@ class TypeChecker:
         self.private_imported_symbols: dict[str, set[str]] = {}
         self._diagnostic_errors: list[AetherTypeError] | None = None
         self._module_identity = import_stack[-1] if import_stack else "__entry__"
+
+    def _install_builtin_interfaces(self) -> None:
+        """Install language-defined interfaces through the ordinary symbol model."""
+        self.interfaces[ERROR_INTERFACE_NAME] = InterfaceSymbol(
+            ERROR_INTERFACE_NAME,
+            (FunctionSymbol("message", "string", ()),),
+            "public",
+        )
 
     @property
     def loaded_file_modules(self) -> dict[str, tuple[ast.Program, "TypeChecker"]]:
@@ -792,29 +803,112 @@ class TypeChecker:
                 raise AetherTypeError("continue used outside of a loop.", line=statement.line, column=statement.column)
             return
         if isinstance(statement, ast.ThrowStatement):
+            self._require_error_interface(statement)
             thrown_type = self._expression_type(statement.expression, scope)
-            if thrown_type is not UNKNOWN_TYPE and thrown_type not in {"string", "Exception"}:
+            if thrown_type is UNKNOWN_TYPE:
                 raise AetherTypeError(
-                    f"throw expects string or Exception, got '{type_to_string(thrown_type)}'.",
-                    line=statement.line,
-                    column=statement.column,
+                    "Cannot determine the type of the thrown expression.",
+                    line=statement.expression.line,
+                    column=statement.expression.column,
+                    kind="exception",
+                )
+            resolved_type = self._resolve_type_aliases(thrown_type, statement.expression)
+            if isinstance(resolved_type, (NullType, NullableType)):
+                raise AetherTypeError(
+                    "Cannot throw null or a nullable value.",
+                    line=statement.expression.line,
+                    column=statement.expression.column,
+                    hint="throw a non-null value whose type implements Error.",
+                    kind="exception",
+                )
+            if not self._type_implements_error(resolved_type):
+                raise AetherTypeError(
+                    f"Thrown value of type '{type_to_string(resolved_type)}' does not implement Error.",
+                    line=statement.expression.line,
+                    column=statement.expression.column,
+                    hint="declare a struct or class that implements Error.",
+                    kind="exception",
                 )
             return
         if isinstance(statement, ast.RethrowStatement):
-            # Rethrow legality and event typing belong to exception Milestone 2.
+            if self.catch_depth == 0:
+                raise AetherTypeError(
+                    "Bare rethrow is only valid inside an active catch body.",
+                    line=statement.line,
+                    column=statement.column,
+                    hint="use 'throw error;' to create a new exception event.",
+                    kind="exception",
+                )
             return
         if isinstance(statement, ast.TryCatchStatement):
+            self._require_error_interface(statement)
             self._check_statements(statement.try_body, Scope(parent=scope))
+            seen_types: dict[tuple[str, str], ast.CatchClause] = {}
+            root_catch: ast.CatchClause | None = None
             for catch_clause in statement.catch_clauses:
-                catch_scope: Scope[VariableSymbol] = Scope(parent=scope)
-                # Keep the legacy placeholder type until Milestone 2 installs
-                # Error conformance, exact catch typing, and catch borrows.
-                catch_scope.define_local(
-                    catch_clause.binder_name,
-                    VariableSymbol(catch_clause.binder_name, "Exception"),
-                    forbid_shadowing=True,
+                catch_type = self._resolve_type_aliases(
+                    catch_clause.type_name,
+                    catch_clause,
                 )
-                self._check_statements(catch_clause.body, catch_scope)
+                catch_key = self._catch_type_key(catch_clause.type_name, catch_type)
+                is_root = isinstance(catch_type, InterfaceType) and catch_type.name == ERROR_INTERFACE_NAME
+                if not is_root and not self._type_implements_error(catch_type):
+                    raise AetherTypeError(
+                        f"Catch type '{type_to_string(catch_type)}' does not implement Error.",
+                        line=catch_clause.line,
+                        column=catch_clause.column,
+                        hint="catch a concrete Error implementation or Error itself.",
+                        kind="exception",
+                    )
+                duplicate = seen_types.get(catch_key)
+                if duplicate is not None:
+                    raise AetherTypeError(
+                        f"Duplicate catch for exact type '{type_to_string(catch_type)}'.",
+                        line=catch_clause.line,
+                        column=catch_clause.column,
+                        hint=(
+                            f"the first catch for this type is at line {duplicate.line}, "
+                            f"column {duplicate.column}."
+                        ),
+                        kind="exception",
+                    )
+                if root_catch is not None:
+                    raise AetherTypeError(
+                        f"Catch for '{type_to_string(catch_type)}' is unreachable because Error is already caught.",
+                        line=catch_clause.line,
+                        column=catch_clause.column,
+                        hint=(
+                            f"the Error catch starts at line {root_catch.line}, "
+                            f"column {root_catch.column} and must be last."
+                        ),
+                        kind="exception",
+                    )
+                seen_types[catch_key] = catch_clause
+                if is_root:
+                    root_catch = catch_clause
+                catch_scope: Scope[VariableSymbol] = Scope(parent=scope)
+                try:
+                    catch_scope.define_local(
+                        catch_clause.binder_name,
+                        VariableSymbol(
+                            catch_clause.binder_name,
+                            catch_type,
+                            is_const=True,
+                            is_borrowed_catch=True,
+                        ),
+                        forbid_shadowing=True,
+                        is_const=True,
+                    )
+                except AetherTypeError as exc:
+                    raise exc.with_location(
+                        catch_clause.line,
+                        catch_clause.column,
+                    ) from None
+                self.catch_depth += 1
+                try:
+                    self._check_statements(catch_clause.body, catch_scope)
+                finally:
+                    self.catch_depth -= 1
             return
         raise AetherRuntimeError(f"Unsupported statement {statement!r}.")
 
@@ -1915,13 +2009,16 @@ class TypeChecker:
             object.__setattr__(statement, "return_type", inferred_return_type)
         previous_return_type = self.current_return_type
         previous_function_name = self.current_function_name
+        previous_catch_depth = self.catch_depth
         self.current_return_type = symbol.return_type
         self.current_function_name = statement.name
+        self.catch_depth = 0
         try:
             self._check_statements(statement.body, function_scope)
         finally:
             self.current_return_type = previous_return_type
             self.current_function_name = previous_function_name
+            self.catch_depth = previous_catch_depth
         if (
             symbol.return_type != "void"
             and statement.name != "main"
@@ -2004,15 +2101,18 @@ class TypeChecker:
             previous_return_type = self.current_return_type
             previous_function_name = self.current_function_name
             previous_method_struct = self.current_method_struct
+            previous_catch_depth = self.catch_depth
             self.current_return_type = symbol.return_type
             self.current_function_name = f"{struct.name}.{method.name}"
             self.current_method_struct = struct
+            self.catch_depth = 0
             try:
                 self._check_statements(method.body, method_scope)
             finally:
                 self.current_return_type = previous_return_type
                 self.current_function_name = previous_function_name
                 self.current_method_struct = previous_method_struct
+                self.catch_depth = previous_catch_depth
             if symbol.return_type != "void" and not self._statements_always_return(method.body):
                 raise AetherTypeError(
                     f"Method '{struct.name}.{method.name}' may not return a value on all paths.",
@@ -2036,9 +2136,11 @@ class TypeChecker:
         previous_return_type = self.current_return_type
         previous_function_name = self.current_function_name
         previous_method_struct = self.current_method_struct
+        previous_catch_depth = self.catch_depth
         self.current_return_type = "void"
         self.current_function_name = f"{struct.name}.constructor"
         self.current_method_struct = struct
+        self.catch_depth = 0
         try:
             self._check_statements(constructor.body, constructor_scope)
             if isinstance(declaration, ast.ClassDeclaration):
@@ -2050,6 +2152,7 @@ class TypeChecker:
             self.current_return_type = previous_return_type
             self.current_function_name = previous_function_name
             self.current_method_struct = previous_method_struct
+            self.catch_depth = previous_catch_depth
 
     def _check_class_constructor_initialization(
         self,
@@ -2797,24 +2900,6 @@ class TypeChecker:
         canonical_callee = self._resolve_module_member(expression.callee)
         builtin_name = self.builtin_aliases.get(expression.callee, canonical_callee or expression.callee)
         builtin_is_visible = "." not in expression.callee or canonical_callee is not None
-        if expression.callee == "Exception":
-            if expression.keyword_arguments:
-                raise AetherTypeError("Exception(...) does not accept keyword arguments.")
-            if len(expression.arguments) != 1:
-                raise AetherTypeError(
-                    f"Exception(...) expects 1 argument but got {len(expression.arguments)}.",
-                    line=expression.line,
-                    column=expression.column,
-                    kind="arity",
-                )
-            argument_type = self._expression_type(expression.arguments[0], scope)
-            if argument_type is not UNKNOWN_TYPE and argument_type != "string":
-                raise AetherTypeError(
-                    f"Exception(...) message must be string, got '{type_to_string(argument_type)}'.",
-                    line=expression.line,
-                    column=expression.column,
-                )
-            return "Exception"
         if builtin_is_visible and is_builtin(builtin_name):
             self._check_builtin_keyword_arguments(builtin_name, expression, scope)
             self._check_builtin_function_arguments(builtin_name, expression)
@@ -3365,14 +3450,6 @@ class TypeChecker:
                 line=getattr(location, "line", None),
                 column=getattr(location, "column", None),
             )
-        if resolved == "Exception":
-            if field_name in {"message", "kind"}:
-                return "string"
-            raise AetherTypeError(
-                f"Exception has no field '{field_name}'.",
-                line=getattr(location, "line", None),
-                column=getattr(location, "column", None),
-            )
         members = native_member_set(resolved)
         if members is not None:
             native = native_property(resolved, field_name)
@@ -3648,6 +3725,64 @@ class TypeChecker:
                 return struct is not None and target_type.name in struct.implements
             return False
         return can_implicitly_convert(value_type, target_type)
+
+    def _require_error_interface(self, location: object) -> InterfaceSymbol:
+        interface = self.interfaces.get(ERROR_INTERFACE_NAME)
+        if interface is None:
+            raise AetherTypeError(
+                "Built-in Error interface is undefined.",
+                line=getattr(location, "line", None),
+                column=getattr(location, "column", None),
+                hint="restore the compiler-provided Error interface.",
+                kind="exception",
+            )
+        return interface
+
+    def _type_implements_error(self, type_name: AetherType) -> bool:
+        if isinstance(type_name, InterfaceType):
+            return type_name.name == ERROR_INTERFACE_NAME
+        if isinstance(type_name, ClassType):
+            struct = self.structs.get(type_name.name)
+            return (
+                struct is not None
+                and ERROR_INTERFACE_NAME in struct.implements
+            )
+        if isinstance(type_name, str):
+            struct = self.structs.get(type_name)
+            return (
+                struct is not None
+                and ERROR_INTERFACE_NAME in struct.implements
+            )
+        return False
+
+    def _catch_type_key(
+        self,
+        source_type: AetherType,
+        resolved_type: AetherType,
+    ) -> tuple[str, str]:
+        if isinstance(resolved_type, InterfaceType):
+            return ("interface", resolved_type.name)
+        if isinstance(source_type, str):
+            symbol = self.structs.get(source_type)
+            if symbol is not None:
+                canonical = self.imported_symbol_origins.get(
+                    source_type,
+                    symbol.name,
+                )
+                return (symbol.kind, canonical)
+        if isinstance(resolved_type, ClassType):
+            symbol = self.structs.get(resolved_type.name)
+            canonical = (
+                symbol.name if symbol is not None else resolved_type.name
+            )
+            return ("class", canonical)
+        if isinstance(resolved_type, str):
+            symbol = self.structs.get(resolved_type)
+            return (
+                symbol.kind if symbol is not None else "type",
+                symbol.name if symbol is not None else resolved_type,
+            )
+        return ("type", type_to_string(resolved_type))
 
     def _raise_implicit_conversion_error(
         self,
@@ -3992,7 +4127,10 @@ class TypeChecker:
         return self._statements_always_return(statements)
 
     def _statement_always_returns(self, statement: ast.Statement) -> bool:
-        if isinstance(statement, ast.ReturnStatement):
+        if isinstance(
+            statement,
+            (ast.ReturnStatement, ast.ThrowStatement, ast.RethrowStatement),
+        ):
             return True
         if isinstance(statement, ast.IfStatement):
             if statement.else_body is None:

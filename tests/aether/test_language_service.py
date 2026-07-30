@@ -56,7 +56,8 @@ def test_analyze_source_accepts_valid_program() -> None:
 
 def test_analyze_source_accepts_parser_phase_multiple_catches_and_rethrow() -> None:
     diagnostics = analyze_source(
-        'try { throw "legacy placeholder"; } '
+        'struct FileError implements Error { string message() { return "file"; } } '
+        'try { throw FileError(); } '
         "catch (FileError file_error) { } "
         "catch (Error error) { throw; }"
     )

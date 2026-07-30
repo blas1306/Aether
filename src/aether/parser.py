@@ -232,9 +232,8 @@ class Parser:
         implements: list[str] = []
         if self._match(TokenType.IMPLEMENTS) or self._match(TokenType.COLON):
             while True:
-                interface_token = self._consume(
-                    TokenType.IDENTIFIER,
-                    "Expected interface name after struct conformance marker.",
+                interface_token = self._consume_interface_name(
+                    "Expected interface name after struct conformance marker."
                 )
                 if self._check(TokenType.LESS):
                     raise self._error(self._peek(), "Generic interfaces are not supported yet.")
@@ -311,9 +310,8 @@ class Parser:
         implements: list[str] = []
         if self._match(TokenType.IMPLEMENTS) or self._match(TokenType.COLON):
             while True:
-                interface_token = self._consume(
-                    TokenType.IDENTIFIER,
-                    "Expected interface name after class conformance marker.",
+                interface_token = self._consume_interface_name(
+                    "Expected interface name after class conformance marker."
                 )
                 if self._check(TokenType.LESS):
                     raise self._error(self._peek(), "Generic interfaces are not supported yet.")
@@ -749,6 +747,13 @@ class Parser:
             catch_token.line,
             catch_token.column,
         )
+
+    def _consume_interface_name(self, message: str) -> Token:
+        if self._check(TokenType.IDENTIFIER):
+            return self._advance()
+        if self._check(TokenType.TYPE) and self._peek().lexeme == "Error":
+            return self._advance()
+        raise self._error(self._peek(), message)
 
     def _if_statement(self, if_token: Token) -> ast.IfStatement:
         self._consume_control_left_paren(

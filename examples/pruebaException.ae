@@ -1,5 +1,6 @@
-public Exception ArithmeticException(string mensaje) {
-    return Exception(mensaje);
+public struct ArithmeticException implements Error {
+    string mensaje;
+    string message() { return mensaje; }
 }
 
 public double dividir(double a, double b) {

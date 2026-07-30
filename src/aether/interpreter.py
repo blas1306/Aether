@@ -38,7 +38,6 @@ from .text_file_io import FILE_STATUS_TYPE
 from .collection_value import CollectionObject, destroy_value
 from .types import (
     AetherType,
-    AetherExceptionValue,
     ClassInstance,
     ClassType,
     EnumIdentity,
@@ -92,6 +91,12 @@ from .vector_matrix_safety import (
 LINEAR_ALGEBRA_MODULE = "Math.LinearAlgebra"
 LINEAR_ALGEBRA_SOLVE = "Math.LinearAlgebra.solve"
 LINEAR_ALGEBRA_CONJTRANSPOSE = "Math.LinearAlgebra.conjtranspose"
+ERROR_INTERFACE_NAME = "Error"
+_BUILTIN_ERROR_INTERFACE = ast.InterfaceDeclaration(
+    ERROR_INTERFACE_NAME,
+    [ast.InterfaceMethodSignature("string", "message", [])],
+    visibility="public",
+)
 
 
 @dataclass
@@ -356,9 +361,17 @@ class _ContinueSignal(Exception):
     pass
 
 
+@dataclass(frozen=True)
+class _ExceptionEvent:
+    payload: AetherValue
+    dynamic_type: str
+    line: int
+    column: int
+
+
 class _ThrownExceptionSignal(Exception):
-    def __init__(self, value: AetherValue) -> None:
-        self.value = value
+    def __init__(self, event: _ExceptionEvent) -> None:
+        self.event = event
 
 
 class _FunctionContext:
@@ -496,13 +509,16 @@ class Interpreter:
         self.enums: dict[str, ast.EnumDeclaration] = {}
         self._enum_identity_by_declaration_id: dict[int, EnumIdentity] = {}
         self._module_identity = import_stack[-1] if import_stack else "__entry__"
-        self.interfaces: dict[str, ast.InterfaceDeclaration] = {}
+        self.interfaces: dict[str, ast.InterfaceDeclaration] = {
+            ERROR_INTERFACE_NAME: _BUILTIN_ERROR_INTERFACE,
+        }
         self.source_root = Path(source_root).expanduser().resolve() if source_root is not None else Path.cwd()
         self.import_stack = import_stack
         self.imported_symbol_origins: dict[str, str] = {}
         self.private_imported_symbols: dict[str, set[str]] = {}
         self._interpret_depth = 0
         self.current_return_type: AetherType | None = None
+        self._active_exception_events: list[_ExceptionEvent] = []
         self.last_exit_code = 0
 
     def interpret(self, program: ast.Program) -> Environment:
@@ -521,7 +537,9 @@ class Interpreter:
                 self.last_exit_code = self._invoke_entry_point(program.entry_point)
             return self.global_env
         except _ThrownExceptionSignal as signal:
-            raise self._runtime_error_from_thrown(signal.value) from None
+            error = self._runtime_error_from_thrown(signal.event)
+            destroy_value(signal.event.payload)
+            raise error from None
         finally:
             self._interpret_depth -= 1
             if self._interpret_depth == 0:
@@ -808,30 +826,54 @@ class Interpreter:
         if isinstance(statement, ast.ContinueStatement):
             raise _ContinueSignal()
         if isinstance(statement, ast.ThrowStatement):
-            raise _ThrownExceptionSignal(self._exception_from_value(self._evaluate(statement.expression, env), statement))
-        if isinstance(statement, ast.RethrowStatement):
-            raise AetherRuntimeError(
-                "Bare rethrow execution is not implemented yet.",
-                line=statement.line,
-                column=statement.column,
+            raise _ThrownExceptionSignal(
+                self._exception_event_from_value(
+                    self._evaluate(statement.expression, env),
+                    statement,
+                )
             )
-        if isinstance(statement, ast.TryCatchStatement):
-            if (
-                len(statement.catch_clauses) != 1
-                or statement.catch_clauses[0].type_name != "Error"
-            ):
+        if isinstance(statement, ast.RethrowStatement):
+            if not self._active_exception_events:
                 raise AetherRuntimeError(
-                    "Typed and multiple catch execution is not implemented yet.",
+                    "Bare rethrow is only valid inside an active catch body.",
                     line=statement.line,
                     column=statement.column,
+                    kind="exception",
                 )
-            catch_clause = statement.catch_clauses[0]
+            raise _ThrownExceptionSignal(self._active_exception_events[-1])
+        if isinstance(statement, ast.TryCatchStatement):
             try:
                 self._execute_block(statement.try_body, Environment(parent=env))
             except _ThrownExceptionSignal as signal:
+                catch_clause = next(
+                    (
+                        clause
+                        for clause in statement.catch_clauses
+                        if self._catch_matches(clause, signal.event)
+                    ),
+                    None,
+                )
+                if catch_clause is None:
+                    raise
                 catch_env = Environment(parent=env)
-                catch_env.define(catch_clause.binder_name, signal.value, forbid_shadowing=True)
-                self._execute_block(catch_clause.body, catch_env)
+                catch_env.define(
+                    catch_clause.binder_name,
+                    self._catch_binding_value(catch_clause, signal.event),
+                    forbid_shadowing=True,
+                    is_const=True,
+                    owned=False,
+                )
+                self._active_exception_events.append(signal.event)
+                rethrown = False
+                try:
+                    self._execute_block(catch_clause.body, catch_env)
+                except _ThrownExceptionSignal as outgoing:
+                    rethrown = outgoing.event is signal.event
+                    raise
+                finally:
+                    self._active_exception_events.pop()
+                    if not rethrown:
+                        destroy_value(signal.event.payload)
             return
         raise AetherRuntimeError(f"Unsupported statement {statement!r}.")
 
@@ -1554,11 +1596,6 @@ class Interpreter:
         builtin_name = self.builtin_aliases.get(expression.callee, canonical_callee or expression.callee)
         builtin_is_visible = "." not in expression.callee or canonical_callee is not None
         named_args = {name: self._evaluate(value, env) for name, value in expression.keyword_arguments.items()}
-        if expression.callee == "Exception":
-            if named_args:
-                raise AetherRuntimeError("Exception(...) does not accept keyword arguments.")
-            args = [self._evaluate(arg, env) for arg in expression.arguments]
-            return self._construct_exception(args, expression)
         if builtin_is_visible and builtin_name in self.builtins:
             args = [
                 self._evaluate_builtin_argument(arg, env, builtin_name)
@@ -1834,12 +1871,6 @@ class Interpreter:
 
     def _read_field(self, target: ast.Expression, field_name: str, env: Environment) -> AetherValue:
         struct_value = self._evaluate(target, env)
-        if isinstance(struct_value.value, AetherExceptionValue):
-            if field_name == "message":
-                return AetherValue("string", struct_value.value.message)
-            if field_name == "kind":
-                return AetherValue("string", struct_value.value.kind)
-            raise AetherTypeError(f"Exception has no field '{field_name}'.")
         members = native_member_set(struct_value.type_name)
         if members is not None:
             native = native_property(struct_value.type_name, field_name)
@@ -2481,38 +2512,95 @@ class Interpreter:
         if value.type_name != "boolean":
             raise AetherTypeError(f"The condition of '{construct}' must be boolean, got '{value.type_name}'.")
 
-    def _construct_exception(self, args: list[AetherValue], location: object | None = None) -> AetherValue:
-        if len(args) != 1:
-            raise AetherRuntimeError(
-                f"Exception(...) expects 1 argument but got {len(args)}.",
-                line=getattr(location, "line", None),
-                column=getattr(location, "column", None),
-                kind="arity",
-            )
-        message = args[0]
-        if message.type_name != "string":
+    def _exception_event_from_value(
+        self,
+        value: AetherValue,
+        location: object,
+    ) -> _ExceptionEvent:
+        dynamic_type = self._dynamic_error_type(value)
+        declaration = self.structs.get(dynamic_type)
+        if declaration is None or ERROR_INTERFACE_NAME not in declaration.implements:
             raise AetherTypeError(
-                f"Exception(...) message must be string, got '{type_to_string(message.type_name)}'.",
+                f"Thrown value of type '{type_to_string(value.type_name)}' does not implement Error.",
                 line=getattr(location, "line", None),
                 column=getattr(location, "column", None),
+                kind="exception",
             )
-        return AetherValue("Exception", AetherExceptionValue(str(message.value)))
-
-    def _exception_from_value(self, value: AetherValue, location: object | None = None) -> AetherValue:
-        if value.type_name == "string":
-            return AetherValue("Exception", AetherExceptionValue(str(value.value)))
-        if value.type_name == "Exception" and isinstance(value.value, AetherExceptionValue):
-            return value
-        raise AetherTypeError(
-            f"throw expects string or Exception, got '{type_to_string(value.type_name)}'.",
-            line=getattr(location, "line", None),
-            column=getattr(location, "column", None),
+        payload = value if isinstance(value.value, ClassInstance) else copy_value(value)
+        return _ExceptionEvent(
+            payload,
+            dynamic_type,
+            max(1, int(getattr(location, "line", 1))),
+            max(1, int(getattr(location, "column", 1))),
         )
 
-    def _runtime_error_from_thrown(self, value: AetherValue) -> AetherRuntimeError:
-        if isinstance(value.value, AetherExceptionValue):
-            return AetherRuntimeError(value.value.message, kind=value.value.kind)
-        return AetherRuntimeError(format_value(value), kind="Exception")
+    def _dynamic_error_type(self, value: AetherValue) -> str:
+        if isinstance(value.value, (StructInstance, ClassInstance)):
+            return value.value.type_name
+        if isinstance(value.type_name, ClassType):
+            return value.type_name.name
+        if isinstance(value.type_name, str):
+            return value.type_name
+        return type_to_string(value.type_name)
+
+    def _catch_matches(
+        self,
+        catch_clause: ast.CatchClause,
+        event: _ExceptionEvent,
+    ) -> bool:
+        catch_type = self._resolve_type_aliases(catch_clause.type_name)
+        if (
+            isinstance(catch_type, InterfaceType)
+            and catch_type.name == ERROR_INTERFACE_NAME
+        ):
+            return True
+        if isinstance(catch_type, ClassType):
+            return catch_type.name == event.dynamic_type
+        if isinstance(catch_type, str):
+            declaration = self.structs.get(catch_type)
+            canonical_name = (
+                declaration.name if declaration is not None else catch_type
+            )
+            return canonical_name == event.dynamic_type
+        return False
+
+    def _catch_binding_value(
+        self,
+        catch_clause: ast.CatchClause,
+        event: _ExceptionEvent,
+    ) -> AetherValue:
+        catch_type = self._resolve_type_aliases(catch_clause.type_name)
+        return AetherValue(catch_type, event.payload.value)
+
+    def _runtime_error_from_thrown(
+        self,
+        event: _ExceptionEvent,
+    ) -> AetherRuntimeError:
+        message = format_value(event.payload)
+        method = self._struct_method_function(event.dynamic_type, "message")
+        if method is not None:
+            try:
+                rendered = self._call_struct_method(
+                    event.payload,
+                    method,
+                    [],
+                    {},
+                    self.global_env,
+                )
+                if rendered.type_name == "string":
+                    message = str(rendered.value)
+            except _ThrownExceptionSignal as signal:
+                destroy_value(signal.event.payload)
+                message = (
+                    "Aether panic: Error.message() threw while reporting an "
+                    "unhandled exception"
+                )
+        return AetherRuntimeError(
+            message,
+            line=event.line,
+            column=event.column,
+            kind=event.dynamic_type,
+        )
 
     def _resolve_type_aliases(self, type_name: AetherType | None, resolving: tuple[str, ...] = ()) -> AetherType:
         if type_name is None:

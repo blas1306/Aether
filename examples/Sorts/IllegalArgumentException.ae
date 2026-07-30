@@ -1,3 +1,4 @@
-public Exception IllegalArgumentException(string mensaje) {
-    return IllegalArgumentException(mensaje);
+public struct IllegalArgumentException implements Error {
+    string mensaje;
+    string message() { return mensaje; }
 }

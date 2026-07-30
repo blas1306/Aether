@@ -11,7 +11,7 @@ from .string_value import StringValue, as_string_value
 
 
 TYPE_NAMES = {
-    "int", "float", "double", "complex", "string", "boolean", "Exception",
+    "int", "float", "double", "complex", "string", "boolean",
     "ParseStatus", "IntParseResult", "DoubleParseResult", "FileStatus", "FileReadResult",
 }
 REAL_NUMERIC_TYPES = {"int", "float", "double"}
@@ -450,12 +450,6 @@ class AetherValue:
                     if isinstance(self.type_name, NullableType)
                     else converted,
                 )
-
-
-@dataclass(frozen=True)
-class AetherExceptionValue:
-    message: str
-    kind: str = "Exception"
 
 
 @dataclass

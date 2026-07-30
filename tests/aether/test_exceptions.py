@@ -216,6 +216,10 @@ def test_generic_ast_traversal_reaches_every_catch_and_rethrow() -> None:
 def test_capability_visitor_reaches_later_catches_and_rethrow() -> None:
     typed = prepare_typed_program(
         """
+struct FirstError implements Error {
+    string message() { return "first"; }
+}
+
 int main() {
     try {
         println("try");

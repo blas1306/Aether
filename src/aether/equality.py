@@ -66,7 +66,7 @@ def eq_capability(
     if isinstance(resolved, str):
         if resolved in {"int", "float", "double", "complex", "string", "boolean"}:
             return EqCapability(resolved)
-        if resolved in {"void", "Exception"} or resolve_struct is None:
+        if resolved == "void" or resolve_struct is None:
             return None
         struct = resolve_struct(resolved)
         if struct is None:
@@ -303,4 +303,4 @@ def _runtime_type_has_no_eq(type_name: AetherType) -> bool:
         return _runtime_type_has_no_eq(type_name.element_type)
     if isinstance(type_name, TupleType):
         return any(_runtime_type_has_no_eq(item) for item in type_name.element_types)
-    return type_name in {"void", "Exception"}
+    return type_name == "void"

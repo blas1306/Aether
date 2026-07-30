@@ -12,6 +12,7 @@ class VariableSymbol:
     is_const: bool = False
     visibility: str | None = None
     is_borrowed_iteration: bool = False
+    is_borrowed_catch: bool = False
     collection_origin: int | None = None
 
 
