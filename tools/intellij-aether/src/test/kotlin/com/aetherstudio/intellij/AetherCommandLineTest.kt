@@ -283,6 +283,11 @@ class AetherCommandLineTest {
     }
 
     @Test
+    fun `exception syntax words are maintained highlighting keywords`() {
+        assertTrue(AetherTokenTypes.KEYWORDS.containsAll(setOf("try", "catch", "throw", "Error")))
+    }
+
+    @Test
     fun `highlighting lexer treats apostrophe operator as operator`() {
         val lexer = AetherHighlightingLexer()
 

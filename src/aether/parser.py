@@ -649,20 +649,37 @@ class Parser:
             return ast.ContinueStatement(continue_token.line, continue_token.column)
         if self._match(TokenType.THROW):
             throw_token = self._previous()
+            if self._match(TokenType.SEMICOLON):
+                return ast.RethrowStatement(throw_token.line, throw_token.column)
             if not self._can_start_expression(self._peek()):
-                raise self._error(self._peek(), "Expected expression after 'throw'.")
+                raise self._error(self._peek(), "Expected an expression or ';' after 'throw'.")
             expression = self._expression()
             self._consume(TokenType.SEMICOLON, "Expected ';' after throw statement.")
             return ast.ThrowStatement(expression, throw_token.line, throw_token.column)
         if self._match(TokenType.TRY):
             try_token = self._previous()
             try_body = self._block()
-            self._consume(TokenType.CATCH, "Expected 'catch' after try block.")
-            self._consume(TokenType.LEFT_PAREN, "Expected '(' after 'catch'.")
-            catch_name = self._consume(TokenType.IDENTIFIER, "Expected catch variable name.").lexeme
-            self._consume(TokenType.RIGHT_PAREN, "Expected ')' after catch variable name.")
-            catch_body = self._block()
-            return ast.TryCatchStatement(try_body, catch_name, catch_body, try_token.line, try_token.column)
+            if not self._check(TokenType.CATCH):
+                if self._check_identifier("finally"):
+                    raise self._error(
+                        self._peek(),
+                        "'finally' is not part of Aether 1.x exception syntax.",
+                    )
+                raise self._error(self._peek(), "Expected at least one 'catch' after try block.")
+            catch_clauses: list[ast.CatchClause] = []
+            while self._match(TokenType.CATCH):
+                catch_clauses.append(self._catch_clause(self._previous()))
+            if self._check_identifier("finally"):
+                raise self._error(
+                    self._peek(),
+                    "'finally' is not part of Aether 1.x exception syntax.",
+                )
+            return ast.TryCatchStatement(try_body, catch_clauses, try_token.line, try_token.column)
+        if self._match(TokenType.CATCH):
+            raise self._error(
+                self._previous(),
+                "A 'catch' clause must immediately follow a try block or another catch clause.",
+            )
         if self._match(TokenType.CONST):
             return self._var_declaration(is_const=True)
         if self._looks_like_var_declaration():
@@ -704,6 +721,34 @@ class Parser:
             raise self._error(self._previous(), "Invalid assignment target.")
         self._consume(TokenType.SEMICOLON, "Expected ';' after expression.")
         return ast.ExpressionStatement(expression)
+
+    def _catch_clause(self, catch_token: Token) -> ast.CatchClause:
+        self._consume(TokenType.LEFT_PAREN, "Expected '(' after 'catch'.")
+        if self._check(TokenType.RIGHT_PAREN):
+            raise self._error(
+                self._peek(),
+                "Expected a catch type and binder, or an untyped catch binder.",
+            )
+
+        if self._check(TokenType.IDENTIFIER) and self._check_next(TokenType.RIGHT_PAREN):
+            binder_token = self._advance()
+            type_name: AetherType = "Error"
+        else:
+            type_name = self._parse_type_annotation(
+                "Expected catch type.",
+                allow_unknown_identifier=True,
+            )
+            binder_token = self._consume(TokenType.IDENTIFIER, "Expected catch binder name after catch type.")
+
+        self._consume(TokenType.RIGHT_PAREN, "Expected ')' after catch binder.")
+        body = self._block()
+        return ast.CatchClause(
+            type_name,
+            binder_token.lexeme,
+            body,
+            catch_token.line,
+            catch_token.column,
+        )
 
     def _if_statement(self, if_token: Token) -> ast.IfStatement:
         self._consume_control_left_paren(
@@ -1097,6 +1142,8 @@ class Parser:
     def _synchronize(self) -> None:
         if self._is_at_end():
             return
+        if self._check(TokenType.CATCH):
+            return
         error_line = self._peek().line
         self._advance()
         while not self._is_at_end():
@@ -1127,7 +1174,7 @@ class Parser:
                 TokenType.TRY,
                 TokenType.CATCH,
                 TokenType.THROW,
-            } and self._peek().line > error_line:
+            } and (self._peek().type == TokenType.CATCH or self._peek().line > error_line):
                 return
             self._advance()
 
@@ -1503,6 +1550,9 @@ class Parser:
         if self.current + 1 >= len(self.tokens):
             return False
         return self.tokens[self.current + 1].type in token_types
+
+    def _check_identifier(self, lexeme: str) -> bool:
+        return self._check(TokenType.IDENTIFIER) and self._peek().lexeme == lexeme
 
     def _advance(self) -> Token:
         if not self._is_at_end():

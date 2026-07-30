@@ -13,12 +13,14 @@ function readJson(relativePath: string): unknown {
 test("TextMate grammar is valid JSON with the expected scope", () => {
   const grammar = readJson("syntaxes/aether.tmLanguage.json") as {
     scopeName?: string;
-    repository?: Record<string, unknown>;
+    repository?: Record<string, { match?: string }>;
   };
   assert.equal(grammar.scopeName, "source.aether");
   assert.ok(grammar.repository?.keywords);
   assert.ok(grammar.repository?.strings);
   assert.ok(grammar.repository?.comments);
+  assert.match(grammar.repository?.types?.match ?? "", /\bError\b/);
+  assert.match(JSON.stringify(grammar.repository?.keywords), /try\|catch\|throw/);
 });
 
 test("manifest consistently registers Aether, commands, and defaults", () => {

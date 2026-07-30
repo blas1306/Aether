@@ -297,10 +297,24 @@ class ThrowStatement:
 
 
 @dataclass(frozen=True)
+class RethrowStatement:
+    line: int = 1
+    column: int = 1
+
+
+@dataclass(frozen=True)
+class CatchClause:
+    type_name: AetherType
+    binder_name: str
+    body: list[Statement]
+    line: int = 1
+    column: int = 1
+
+
+@dataclass(frozen=True)
 class TryCatchStatement:
     try_body: list[Statement]
-    catch_name: str
-    catch_body: list[Statement]
+    catch_clauses: list[CatchClause]
     line: int = 1
     column: int = 1
 

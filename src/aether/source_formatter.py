@@ -21,7 +21,117 @@ _BRACED_EXPRESSION_PREDECESSORS = {
 def format_source(source: str) -> str:
     """Canonicalize supported headers while preserving all other source text."""
     migrated = migrate_control_flow_headers(source)[0]
-    return format_abbreviated_function_bodies(migrated)
+    abbreviated = format_abbreviated_function_bodies(migrated)
+    return format_exception_syntax(abbreviated)
+
+
+def format_exception_syntax(source: str) -> str:
+    """Canonicalize spacing for throw and ordered try/catch syntax."""
+    tokens = lex(source)
+    line_offsets = _line_offsets(source)
+    replacements: list[tuple[int, int, str]] = []
+
+    for index, token in enumerate(tokens[:-1]):
+        next_token = tokens[index + 1]
+        if token.type == TokenType.THROW:
+            _replace_whitespace(
+                source,
+                replacements,
+                _token_end(token, line_offsets),
+                _offset(next_token, line_offsets),
+                "" if next_token.type == TokenType.SEMICOLON else " ",
+            )
+            continue
+        if token.type == TokenType.TRY and next_token.type == TokenType.LEFT_BRACE:
+            _replace_whitespace(
+                source,
+                replacements,
+                _token_end(token, line_offsets),
+                _offset(next_token, line_offsets),
+                " ",
+            )
+            continue
+        if token.type != TokenType.CATCH:
+            continue
+
+        if index > 0 and tokens[index - 1].type == TokenType.RIGHT_BRACE:
+            _replace_whitespace(
+                source,
+                replacements,
+                _token_end(tokens[index - 1], line_offsets),
+                _offset(token, line_offsets),
+                " ",
+            )
+        if next_token.type != TokenType.LEFT_PAREN:
+            continue
+        _replace_whitespace(
+            source,
+            replacements,
+            _token_end(token, line_offsets),
+            _offset(next_token, line_offsets),
+            " ",
+        )
+        close_index = _matching_right_paren(tokens, index + 1)
+        if close_index is None:
+            continue
+        if close_index > index + 2:
+            _replace_whitespace(
+                source,
+                replacements,
+                _token_end(next_token, line_offsets),
+                _offset(tokens[index + 2], line_offsets),
+                "",
+            )
+            _replace_whitespace(
+                source,
+                replacements,
+                _token_end(tokens[close_index - 1], line_offsets),
+                _offset(tokens[close_index], line_offsets),
+                "",
+            )
+        if close_index == index + 3:
+            _replace_whitespace(
+                source,
+                replacements,
+                _token_end(tokens[index + 2], line_offsets),
+                _offset(tokens[index + 3], line_offsets),
+                "",
+            )
+        elif close_index == index + 4:
+            _replace_whitespace(
+                source,
+                replacements,
+                _token_end(tokens[index + 2], line_offsets),
+                _offset(tokens[index + 3], line_offsets),
+                " ",
+            )
+        if close_index + 1 < len(tokens) and tokens[close_index + 1].type == TokenType.LEFT_BRACE:
+            _replace_whitespace(
+                source,
+                replacements,
+                _token_end(tokens[close_index], line_offsets),
+                _offset(tokens[close_index + 1], line_offsets),
+                " ",
+            )
+
+    for start, end, replacement in sorted(set(replacements), reverse=True):
+        source = source[:start] + replacement + source[end:]
+    return source
+
+
+def _matching_right_paren(tokens: list[Token], start: int) -> int | None:
+    depth = 0
+    for index in range(start, len(tokens)):
+        token_type = tokens[index].type
+        if token_type == TokenType.LEFT_PAREN:
+            depth += 1
+        elif token_type == TokenType.RIGHT_PAREN:
+            depth -= 1
+            if depth == 0:
+                return index
+        elif token_type == TokenType.EOF:
+            return None
+    return None
 
 
 def format_abbreviated_function_bodies(source: str) -> str:

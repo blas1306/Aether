@@ -800,11 +800,21 @@ class TypeChecker:
                     column=statement.column,
                 )
             return
+        if isinstance(statement, ast.RethrowStatement):
+            # Rethrow legality and event typing belong to exception Milestone 2.
+            return
         if isinstance(statement, ast.TryCatchStatement):
             self._check_statements(statement.try_body, Scope(parent=scope))
-            catch_scope: Scope[VariableSymbol] = Scope(parent=scope)
-            catch_scope.define_local(statement.catch_name, VariableSymbol(statement.catch_name, "Exception"), forbid_shadowing=True)
-            self._check_statements(statement.catch_body, catch_scope)
+            for catch_clause in statement.catch_clauses:
+                catch_scope: Scope[VariableSymbol] = Scope(parent=scope)
+                # Keep the legacy placeholder type until Milestone 2 installs
+                # Error conformance, exact catch typing, and catch borrows.
+                catch_scope.define_local(
+                    catch_clause.binder_name,
+                    VariableSymbol(catch_clause.binder_name, "Exception"),
+                    forbid_shadowing=True,
+                )
+                self._check_statements(catch_clause.body, catch_scope)
             return
         raise AetherRuntimeError(f"Unsupported statement {statement!r}.")
 
@@ -3989,7 +3999,10 @@ class TypeChecker:
                 return False
             return self._statements_always_return(statement.body) and self._statements_always_return(statement.else_body)
         if isinstance(statement, ast.TryCatchStatement):
-            return self._statements_always_return(statement.try_body) and self._statements_always_return(statement.catch_body)
+            return self._statements_always_return(statement.try_body) and all(
+                self._statements_always_return(catch_clause.body)
+                for catch_clause in statement.catch_clauses
+            )
         return False
 
 
@@ -4159,9 +4172,15 @@ class _StructMethodMutationAnalysis:
         if isinstance(statement, ast.ThrowStatement):
             self._scan_expression(statement.expression, locals_in_scope)
             return
+        if isinstance(statement, ast.RethrowStatement):
+            return
         if isinstance(statement, ast.TryCatchStatement):
             self._scan_statements(statement.try_body, [*locals_in_scope, set()])
-            self._scan_statements(statement.catch_body, [*locals_in_scope, {statement.catch_name}])
+            for catch_clause in statement.catch_clauses:
+                self._scan_statements(
+                    catch_clause.body,
+                    [*locals_in_scope, {catch_clause.binder_name}],
+                )
 
     def _scan_expression(self, expression: ast.Expression, locals_in_scope: list[set[str]]) -> None:
         if isinstance(expression, (ast.Literal, ast.FullSlice)):

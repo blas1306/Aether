@@ -809,13 +809,29 @@ class Interpreter:
             raise _ContinueSignal()
         if isinstance(statement, ast.ThrowStatement):
             raise _ThrownExceptionSignal(self._exception_from_value(self._evaluate(statement.expression, env), statement))
+        if isinstance(statement, ast.RethrowStatement):
+            raise AetherRuntimeError(
+                "Bare rethrow execution is not implemented yet.",
+                line=statement.line,
+                column=statement.column,
+            )
         if isinstance(statement, ast.TryCatchStatement):
+            if (
+                len(statement.catch_clauses) != 1
+                or statement.catch_clauses[0].type_name != "Error"
+            ):
+                raise AetherRuntimeError(
+                    "Typed and multiple catch execution is not implemented yet.",
+                    line=statement.line,
+                    column=statement.column,
+                )
+            catch_clause = statement.catch_clauses[0]
             try:
                 self._execute_block(statement.try_body, Environment(parent=env))
             except _ThrownExceptionSignal as signal:
                 catch_env = Environment(parent=env)
-                catch_env.define(statement.catch_name, signal.value, forbid_shadowing=True)
-                self._execute_block(statement.catch_body, catch_env)
+                catch_env.define(catch_clause.binder_name, signal.value, forbid_shadowing=True)
+                self._execute_block(catch_clause.body, catch_env)
             return
         raise AetherRuntimeError(f"Unsupported statement {statement!r}.")
 

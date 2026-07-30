@@ -123,6 +123,17 @@ def test_lsp_formats_abbreviated_function_syntax_idempotently() -> None:
     assert _formatting_edits_for(edits[0]["newText"]) == []
 
 
+def test_lsp_formats_multiple_exception_handlers_idempotently() -> None:
+    source = "try{throw  value;}catch(FileError file){throw file;}catch(Error error){throw ;}\n"
+    edits = _formatting_edits_for(source)
+
+    assert edits[0]["newText"] == (
+        "try {throw value;} catch (FileError file) {throw file;} "
+        "catch (Error error) {throw;}\n"
+    )
+    assert _formatting_edits_for(edits[0]["newText"]) == []
+
+
 def test_lsp_server_keeps_running_when_analyzer_raises(monkeypatch) -> None:
     from aether_lsp import server as lsp_server
 

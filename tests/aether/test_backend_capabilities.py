@@ -163,6 +163,46 @@ def test_detector_reports_major_ast_only_features(source: str, capability: Capab
     assert capability in _required(source)
 
 
+def test_approved_exception_syntax_remains_unsupported_and_never_reaches_ir(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    typed = _typed(
+        """
+int main() {
+    try {
+        throw "legacy placeholder";
+    } catch (FileError file_error) {
+        println(file_error);
+    } catch (Error error) {
+        throw;
+    }
+    return 0;
+}
+"""
+    )
+
+    assert (
+        NATIVE_CAPABILITY_PROFILE.support_for(Capability.ERROR_HANDLING).state
+        is CapabilityState.UNSUPPORTED
+    )
+    issue = next(
+        issue
+        for issue in backend_capability_issues(typed, BackendIdentity.NATIVE)
+        if issue.requirement.capability is Capability.ERROR_HANDLING
+    )
+    assert issue.diagnostic_code == "AE-BACKEND-ERROR_HANDLING"
+
+    def fail_if_lowered(*_args, **_kwargs):
+        raise AssertionError("IR lowering must not run for exception syntax")
+
+    monkeypatch.setattr(
+        "aether.ir.lowering.IRLowerer.lower_checked_program",
+        fail_if_lowered,
+    )
+    with pytest.raises(BackendCapabilityError, match="AE-BACKEND-ERROR_HANDLING"):
+        LLVMBuilder().emit_llvm(typed)
+
+
 def test_detector_reports_function_reference_used_by_plots() -> None:
     source = """
 import Plots;

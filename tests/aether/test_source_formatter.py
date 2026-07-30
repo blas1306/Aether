@@ -54,3 +54,12 @@ def test_token_aware_migrator_does_not_rewrite_c_control_statements() -> None:
     migrated, count = migrate_control_flow_headers(source)
     assert count == 0
     assert migrated == source
+
+
+def test_formatter_canonicalizes_exception_spacing_idempotently() -> None:
+    source = "try{throw  value;}catch ( Error error ){throw ;}"
+
+    formatted = format_source(source)
+
+    assert formatted == "try {throw value;} catch (Error error) {throw;}"
+    assert format_source(formatted) == formatted

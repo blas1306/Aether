@@ -1187,7 +1187,10 @@ class _CapabilityDetector:
         if isinstance(node, ast.EnumDeclaration):
             self._record(Capability.ENUMS, node)
             return
-        if isinstance(node, (ast.ThrowStatement, ast.TryCatchStatement)):
+        if isinstance(
+            node,
+            (ast.ThrowStatement, ast.RethrowStatement, ast.TryCatchStatement),
+        ):
             self._record(Capability.ERROR_HANDLING, node)
             return
         if isinstance(node, ast.InterpolatedString):

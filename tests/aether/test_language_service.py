@@ -54,6 +54,24 @@ def test_analyze_source_accepts_valid_program() -> None:
     assert analyze_source('x = 1; println(x);') == []
 
 
+def test_analyze_source_accepts_parser_phase_multiple_catches_and_rethrow() -> None:
+    diagnostics = analyze_source(
+        'try { throw "legacy placeholder"; } '
+        "catch (FileError file_error) { } "
+        "catch (Error error) { throw; }"
+    )
+
+    assert diagnostics == []
+
+
+def test_analyze_source_reports_malformed_catch_header_without_internal_error() -> None:
+    diagnostics = analyze_source("try { } catch (Error) { }\nthrow;")
+
+    assert diagnostics
+    assert "Expected catch binder name" in diagnostics[0].message
+    assert all("internal compiler error" not in diagnostic.message for diagnostic in diagnostics)
+
+
 def test_analyze_source_resolves_imports_from_source_root(tmp_path: Path) -> None:
     (tmp_path / "Geometry.ae").write_text(
         """
