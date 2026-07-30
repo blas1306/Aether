@@ -227,6 +227,11 @@ class SSABuilder:
         )
 
     def _build_function(self, function: IRFunction) -> SSAFunction:
+        if function.may_throw:
+            self._fail(
+                "The compatibility SSA builder does not support exception-bearing "
+                "IR; use GeneralSSABuilder."
+            )
         parameters = self._parameters(function)
 
         if self._is_linear_function(function):

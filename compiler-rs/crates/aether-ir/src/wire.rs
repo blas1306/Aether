@@ -15,6 +15,19 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 
+fn contains_storage(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Array(items) => items.iter().any(contains_storage),
+        serde_json::Value::Object(mapping) => {
+            matches!(
+                mapping.get("tag"),
+                Some(serde_json::Value::String(tag)) if tag == "storage"
+            ) || mapping.values().any(contains_storage)
+        }
+        _ => false,
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum NullableDTORepresentation<T> {
@@ -125,6 +138,198 @@ pub struct IRModuleDTO {
     pub functions: Vec<IRFunctionDTO>,
     /// Struct definitions in retained module order.
     pub structs: Vec<IRStructDefinitionDTO>,
+}
+
+fn deserialize_ssa_representation<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let representation = String::deserialize(deserializer)?;
+    if representation == "aether_ssa" {
+        Ok(representation)
+    } else {
+        Err(D::Error::custom(format_args!(
+            "unsupported SSA representation '{representation}'; expected 'aether_ssa'"
+        )))
+    }
+}
+
+/// Complete schema-versioned SSA module envelope.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct SSAModuleDTO {
+    /// Interchange schema version.
+    #[serde(deserialize_with = "deserialize_schema_version")]
+    pub schema_version: i64,
+    /// Canonical representation discriminator.
+    #[serde(deserialize_with = "deserialize_ssa_representation")]
+    pub representation: String,
+    /// Functions in retained module order.
+    pub functions: Vec<SSAFunctionDTO>,
+    /// Nominal definitions in retained module order.
+    pub structs: Vec<IRStructDefinitionDTO>,
+}
+
+/// Function container for value-based SSA.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[allow(missing_docs)]
+pub struct SSAFunctionDTO {
+    pub name: String,
+    pub parameters: Vec<IRParameterDTO>,
+    pub return_type: IRTypeDTO,
+    pub blocks: Vec<SSABasicBlockDTO>,
+    pub entry_block: String,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub may_throw: bool,
+}
+
+/// One SSA block in deterministic retained order.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[allow(missing_docs)]
+pub struct SSABasicBlockDTO {
+    pub name: String,
+    pub instructions: Vec<SSAInstructionDTO>,
+}
+
+/// One predecessor-labelled phi incoming value.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[allow(missing_docs)]
+pub struct SSAPhiIncomingDTO {
+    pub block: String,
+    pub value: IRValueDTO,
+}
+
+/// SSA-only instructions and explicit exceptional terminators.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[allow(missing_docs, clippy::large_enum_variant)]
+pub enum SSAControlInstructionDTO {
+    Phi {
+        result: IRValueDTO,
+        incoming: Vec<SSAPhiIncomingDTO>,
+    },
+    Invoke {
+        function: String,
+        arguments: Vec<IRValueDTO>,
+        result: NullableDTO<IRValueDTO>,
+        exception: IRValueDTO,
+        normal_target: String,
+        exceptional_target: String,
+        builtin: NullableDTO<String>,
+        source_location: NullableDTO<IRSourceLocationDTO>,
+        normal_arguments: Vec<IRValueDTO>,
+        exceptional_arguments: Vec<IRValueDTO>,
+    },
+    InvokeIndirect {
+        callee: IRValueDTO,
+        arguments: Vec<IRValueDTO>,
+        result: NullableDTO<IRValueDTO>,
+        exception: IRValueDTO,
+        normal_target: String,
+        exceptional_target: String,
+        normal_arguments: Vec<IRValueDTO>,
+        exceptional_arguments: Vec<IRValueDTO>,
+    },
+    InvokeInterface {
+        receiver: IRValueDTO,
+        arguments: Vec<IRValueDTO>,
+        slot: IRWitnessMethodSlotDTO,
+        result: NullableDTO<IRValueDTO>,
+        exception: IRValueDTO,
+        normal_target: String,
+        exceptional_target: String,
+        normal_arguments: Vec<IRValueDTO>,
+        exceptional_arguments: Vec<IRValueDTO>,
+    },
+    Throw {
+        event: IRValueDTO,
+        target: NullableDTO<String>,
+        exceptional_arguments: Vec<IRValueDTO>,
+    },
+    Rethrow {
+        event: IRValueDTO,
+        target: NullableDTO<String>,
+        exceptional_arguments: Vec<IRValueDTO>,
+    },
+    Propagate {
+        event: IRValueDTO,
+        target: NullableDTO<String>,
+        exceptional_arguments: Vec<IRValueDTO>,
+    },
+}
+
+/// Strict SSA instruction DTO. Ordinary value instructions reuse the frozen IR
+/// DTO variants; SSA-only control instructions use [`SSAControlInstructionDTO`].
+#[derive(Clone, Debug, PartialEq)]
+pub enum SSAInstructionDTO {
+    /// SSA-only control or phi instruction.
+    Control(SSAControlInstructionDTO),
+    /// Ordinary value instruction shared with Initial IR's wire vocabulary.
+    Ordinary(IRInstructionDTO),
+}
+
+impl Serialize for SSAInstructionDTO {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::Control(instruction) => instruction.serialize(serializer),
+            Self::Ordinary(instruction) => instruction.serialize(serializer),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for SSAInstructionDTO {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        if contains_storage(&value) {
+            return Err(D::Error::custom(
+                "owning Initial IR storage is not legal SSA",
+            ));
+        }
+        if let Ok(instruction) = serde_json::from_value::<SSAControlInstructionDTO>(value.clone()) {
+            return Ok(Self::Control(instruction));
+        }
+        let instruction =
+            serde_json::from_value::<IRInstructionDTO>(value).map_err(D::Error::custom)?;
+        if matches!(
+            instruction,
+            IRInstructionDTO::Load { .. }
+                | IRInstructionDTO::Store { .. }
+                | IRInstructionDTO::InitDefault { .. }
+                | IRInstructionDTO::CopyInit { .. }
+                | IRInstructionDTO::MoveInit { .. }
+                | IRInstructionDTO::Assign { .. }
+                | IRInstructionDTO::Destroy { .. }
+                | IRInstructionDTO::Relocate { .. }
+                | IRInstructionDTO::Invoke { .. }
+                | IRInstructionDTO::InvokeIndirect { .. }
+                | IRInstructionDTO::InvokeInterface { .. }
+                | IRInstructionDTO::Throw { .. }
+                | IRInstructionDTO::Rethrow { .. }
+                | IRInstructionDTO::Propagate { .. }
+                | IRInstructionDTO::Call {
+                    may_throw: true,
+                    ..
+                }
+                | IRInstructionDTO::Return {
+                    transferred_storage: NullableDTO(Some(_)),
+                    ..
+                }
+        ) {
+            return Err(D::Error::custom(
+                "Initial IR lifecycle or exceptional-control shape is not legal SSA",
+            ));
+        }
+        Ok(Self::Ordinary(instruction))
+    }
 }
 
 /// Nominal struct definition in the wire schema.

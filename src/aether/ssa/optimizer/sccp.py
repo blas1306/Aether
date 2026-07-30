@@ -29,6 +29,9 @@ from aether.ssa.model import (
     SSAInstruction,
     SSAInterfaceCall,
     SSAInterfaceConstruct,
+    SSAInvoke,
+    SSAInvokeIndirect,
+    SSAInvokeInterface,
     SSAJump,
     SSAListGet,
     SSAListCopy,
@@ -66,7 +69,10 @@ from aether.ssa.model import (
     SSAMethodResultReceiver,
     SSAMethodResultValue,
     SSAPhi,
+    SSAPropagate,
+    SSARethrow,
     SSAReturn,
+    SSAThrow,
     SSAUnaryOp,
     SSAValue,
     SSAVectorGet,
@@ -243,6 +249,26 @@ class SCCPAnalyzer:
         if isinstance(instruction, SSACall):
             if instruction.result is not None:
                 self._set_state(instruction.result, Overdefined())
+            return
+
+        if isinstance(
+            instruction,
+            (SSAInvoke, SSAInvokeIndirect, SSAInvokeInterface),
+        ):
+            if instruction.result is not None:
+                self._set_state(instruction.result, Overdefined())
+            self._set_state(instruction.exception, Overdefined())
+            self._mark_edge_executable(
+                block_name, instruction.normal_target
+            )
+            self._mark_edge_executable(
+                block_name, instruction.exceptional_target
+            )
+            return
+
+        if isinstance(instruction, (SSAThrow, SSARethrow, SSAPropagate)):
+            if instruction.target is not None:
+                self._mark_edge_executable(block_name, instruction.target)
             return
 
         result = getattr(instruction, "result", None)
@@ -535,6 +561,7 @@ class SCCPTransformer:
                 function.return_type,
                 updated_blocks,
                 function.entry_block,
+                function.may_throw,
             ),
             replaced_constants,
             simplified_branches,
@@ -662,6 +689,16 @@ class SCCPTransformer:
             targets = (terminator.target,)
         elif isinstance(terminator, SSABranch):
             targets = (terminator.true_target, terminator.false_target)
+        elif isinstance(
+            terminator,
+            (SSAInvoke, SSAInvokeIndirect, SSAInvokeInterface),
+        ):
+            targets = (
+                terminator.normal_target,
+                terminator.exceptional_target,
+            )
+        elif isinstance(terminator, (SSAThrow, SSARethrow, SSAPropagate)):
+            targets = () if terminator.target is None else (terminator.target,)
         else:
             return
 

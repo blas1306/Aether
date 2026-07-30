@@ -161,3 +161,93 @@ fn rejects_ordinary_call_to_may_throw_function() {
 
     assert!(verify_module(&module(main)).is_err());
 }
+
+#[test]
+fn rejects_propagating_a_new_event_while_the_caught_event_is_live() {
+    let payload = IRParameter::new("payload", error_type().into());
+    let first_invoke_event = event("first_invoke_event");
+    let caught_event = event("caught_event");
+    let nested_invoke_event = event("nested_invoke_event");
+    let cleanup_event = event("cleanup_event");
+    let main = IRFunction {
+        name: "main".to_owned(),
+        parameters: vec![payload.clone()],
+        return_type: VoidType.into(),
+        blocks: vec![
+            IRBasicBlock {
+                name: "entry".to_owned(),
+                instructions: vec![IRInstruction::IRInvoke {
+                    function: "fail".to_owned(),
+                    arguments: vec![payload.clone().into()],
+                    result: None,
+                    exception: first_invoke_event,
+                    normal_target: "normal".to_owned(),
+                    exceptional_target: "handler".to_owned(),
+                    exceptional_target_event: caught_event.clone(),
+                    builtin: None,
+                    source_location: None,
+                }],
+            },
+            IRBasicBlock {
+                name: "normal".to_owned(),
+                instructions: vec![IRInstruction::IRReturn {
+                    value: None,
+                    transferred_storage: None,
+                }],
+            },
+            IRBasicBlock {
+                name: "handler".to_owned(),
+                instructions: vec![
+                    IRInstruction::IRCatchEntry {
+                        event: caught_event,
+                        handler_id: "handler0".to_owned(),
+                        catch_types: vec!["FileError".to_owned()],
+                    },
+                    IRInstruction::IRInvoke {
+                        function: "fail".to_owned(),
+                        arguments: vec![payload.into()],
+                        result: None,
+                        exception: nested_invoke_event,
+                        normal_target: "handled".to_owned(),
+                        exceptional_target: "cleanup".to_owned(),
+                        exceptional_target_event: cleanup_event.clone(),
+                        builtin: None,
+                        source_location: None,
+                    },
+                ],
+            },
+            IRBasicBlock {
+                name: "handled".to_owned(),
+                instructions: vec![
+                    IRInstruction::IRExceptionDestroy {
+                        event: event("caught_event"),
+                    },
+                    IRInstruction::IRReturn {
+                        value: None,
+                        transferred_storage: None,
+                    },
+                ],
+            },
+            IRBasicBlock {
+                name: "cleanup".to_owned(),
+                instructions: vec![
+                    IRInstruction::IRCatchEntry {
+                        event: cleanup_event.clone(),
+                        handler_id: "cleanup".to_owned(),
+                        catch_types: vec![],
+                    },
+                    IRInstruction::IRPropagate {
+                        event: cleanup_event,
+                        target: None,
+                        target_event: None,
+                    },
+                ],
+            },
+        ],
+        may_throw: true,
+    };
+
+    let error =
+        verify_module(&module(main)).expect_err("the old caught event must be destroyed first");
+    assert_eq!(error.invariant_id(), Some("IRV-149"));
+}

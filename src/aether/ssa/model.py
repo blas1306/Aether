@@ -156,6 +156,24 @@ class SSACall(SSAInstruction):
 
 
 @dataclass(frozen=True)
+class SSAInvoke(SSAInstruction):
+    """Direct call whose result and event are defined on distinct CFG edges."""
+
+    function: str
+    arguments: tuple[SSAValue, ...]
+    result: SSAValue | None
+    exception: SSAValue = field(metadata={"ir_definition": True})
+    normal_target: str
+    exceptional_target: str
+    normal_arguments: tuple[SSAValue, ...] = ()
+    exceptional_arguments: tuple[SSAValue, ...] = ()
+    builtin: str | None = None
+    source_location: Any | None = None
+
+    effects = UnknownCallMixin.effects
+
+
+@dataclass(frozen=True)
 class SSAFunctionRef(SSAInstruction):
     result: SSAValue
     function: str
@@ -166,6 +184,22 @@ class SSACallIndirect(UnknownCallMixin, SSAInstruction):
     callee: SSAValue
     arguments: tuple[SSAValue, ...] = ()
     result: SSAValue | None = None
+
+
+@dataclass(frozen=True)
+class SSAInvokeIndirect(SSAInstruction):
+    """Indirect call with explicit normal and exceptional continuations."""
+
+    callee: SSAValue
+    arguments: tuple[SSAValue, ...]
+    result: SSAValue | None
+    exception: SSAValue = field(metadata={"ir_definition": True})
+    normal_target: str
+    exceptional_target: str
+    normal_arguments: tuple[SSAValue, ...] = ()
+    exceptional_arguments: tuple[SSAValue, ...] = ()
+
+    effects = UnknownCallMixin.effects
 
 
 @dataclass(frozen=True)
@@ -222,6 +256,23 @@ class SSAInterfaceCall(UnknownCallMixin, SSAInstruction):
     arguments: tuple[SSAValue, ...]
     slot: IRWitnessMethodSlot
     result: SSAValue | None = None
+
+
+@dataclass(frozen=True)
+class SSAInvokeInterface(SSAInstruction):
+    """Interface dispatch with explicit normal and exceptional continuations."""
+
+    receiver: SSAValue
+    arguments: tuple[SSAValue, ...]
+    slot: IRWitnessMethodSlot
+    result: SSAValue | None
+    exception: SSAValue = field(metadata={"ir_definition": True})
+    normal_target: str
+    exceptional_target: str
+    normal_arguments: tuple[SSAValue, ...] = ()
+    exceptional_arguments: tuple[SSAValue, ...] = ()
+
+    effects = UnknownCallMixin.effects
 
 
 @dataclass(frozen=True)
@@ -583,6 +634,47 @@ class SSAListIsEmpty(MemoryReadMixin, SSAInstruction):
 
 
 @dataclass(frozen=True)
+class SSAPackException(SideEffectMixin, SSAInstruction):
+    """Create one opaque, linearly owned exception event."""
+
+    result: SSAValue
+    payload: SSAValue
+    dynamic_type: str | None
+    source_location: Any | None = None
+
+
+@dataclass(frozen=True)
+class SSACatchEntry(SideEffectMixin, SSAInstruction):
+    """Select the event moved by one exceptional predecessor edge."""
+
+    event: SSAValue = field(metadata={"ir_definition": True})
+    handler_id: str
+    catch_types: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class SSAExceptionMatch(SSAInstruction):
+    result: SSAValue
+    event: SSAValue
+    catch_type: str
+    catch_all: bool = False
+
+
+@dataclass(frozen=True)
+class SSAExceptionPayload(MemoryReadMixin, SSAInstruction):
+    """Borrow a caught language Error without acquiring event ownership."""
+
+    result: SSAValue
+    event: SSAValue
+    catch_type: str
+
+
+@dataclass(frozen=True)
+class SSAExceptionDestroy(SideEffectMixin, SSAInstruction):
+    event: SSAValue
+
+
+@dataclass(frozen=True)
 class SSAPhi(SSAInstruction):
     """Select one value for each distinct CFG predecessor block.
 
@@ -608,6 +700,27 @@ class SSAJump(SideEffectMixin, SSAInstruction):
 
 
 @dataclass(frozen=True)
+class SSAThrow(SideEffectMixin, SSAInstruction):
+    event: SSAValue
+    target: str | None = None
+    exceptional_arguments: tuple[SSAValue, ...] = ()
+
+
+@dataclass(frozen=True)
+class SSARethrow(SideEffectMixin, SSAInstruction):
+    event: SSAValue
+    target: str | None = None
+    exceptional_arguments: tuple[SSAValue, ...] = ()
+
+
+@dataclass(frozen=True)
+class SSAPropagate(SideEffectMixin, SSAInstruction):
+    event: SSAValue
+    target: str | None = None
+    exceptional_arguments: tuple[SSAValue, ...] = ()
+
+
+@dataclass(frozen=True)
 class SSAReturn(SideEffectMixin, SSAInstruction):
     value: SSAValue | None = None
 
@@ -627,6 +740,7 @@ class SSAFunction:
     return_type: IRType
     blocks: list[SSABasicBlock] = field(default_factory=list)
     entry_block: str = "entry"
+    may_throw: bool = False
 
 
 @dataclass

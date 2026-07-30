@@ -1130,6 +1130,10 @@ class IRLowerer:
             self._append_block(context, next_dispatch)
             dispatch = next_dispatch
 
+        dispatch.instructions.extend(
+            IRExceptionDestroy(event)
+            for event in self._caught_events_for_exit(context, outer)
+        )
         dispatch.instructions.append(
             IRPropagate(handler_event, outer.block, outer.event)
         )
@@ -1313,6 +1317,11 @@ class IRLowerer:
         context.next_invoke += 1
         normal = self._new_block(f"invoke.cont{index}")
         exception = context.temporary(ExceptionEventType())
+        exceptional_target = self._invoke_exception_target(
+            context,
+            target,
+            index,
+        )
         context.block.instructions.append(
             IRInvoke(
                 function,
@@ -1320,8 +1329,8 @@ class IRLowerer:
                 result,
                 exception,
                 normal.name,
-                target.block,
-                target.event,
+                exceptional_target.block,
+                exceptional_target.event,
                 None,
                 self._source_location(node),
             )
@@ -1340,6 +1349,11 @@ class IRLowerer:
         context.next_invoke += 1
         normal = self._new_block(f"invoke.cont{index}")
         exception = context.temporary(ExceptionEventType())
+        exceptional_target = self._invoke_exception_target(
+            context,
+            target,
+            index,
+        )
         context.block.instructions.append(
             IRInvokeIndirect(
                 callee,
@@ -1347,8 +1361,8 @@ class IRLowerer:
                 result,
                 exception,
                 normal.name,
-                target.block,
-                target.event,
+                exceptional_target.block,
+                exceptional_target.event,
             )
         )
         self._append_and_enter(context, normal)
@@ -1366,6 +1380,11 @@ class IRLowerer:
         context.next_invoke += 1
         normal = self._new_block(f"invoke.cont{index}")
         exception = context.temporary(ExceptionEventType())
+        exceptional_target = self._invoke_exception_target(
+            context,
+            target,
+            index,
+        )
         context.block.instructions.append(
             IRInvokeInterface(
                 receiver,
@@ -1374,11 +1393,56 @@ class IRLowerer:
                 result,
                 exception,
                 normal.name,
-                target.block,
-                target.event,
+                exceptional_target.block,
+                exceptional_target.event,
             )
         )
         self._append_and_enter(context, normal)
+
+    def _invoke_exception_target(
+        self,
+        context: _FunctionContext,
+        target: _ExceptionTarget,
+        invoke_index: int,
+    ) -> _ExceptionTarget:
+        """Insert the minimal event cleanup ladder for an invoke leaving catches."""
+
+        events = self._caught_events_for_exit(context, target)
+        if not events:
+            return target
+
+        cleanup_event = context.temporary(ExceptionEventType())
+        cleanup = self._new_block(f"invoke.cleanup{invoke_index}")
+        cleanup.instructions.append(
+            IRCatchEntry(
+                cleanup_event,
+                f"invoke_cleanup{invoke_index}",
+                (),
+            )
+        )
+        cleanup.instructions.extend(
+            IRExceptionDestroy(event) for event in events
+        )
+        cleanup.instructions.append(
+            IRPropagate(cleanup_event, target.block, target.event)
+        )
+        self._append_block(context, cleanup)
+        return _ExceptionTarget(
+            cleanup.name,
+            cleanup_event,
+            target.scope_depth,
+        )
+
+    @staticmethod
+    def _caught_events_for_exit(
+        context: _FunctionContext,
+        target: _ExceptionTarget,
+    ) -> tuple[IRValue, ...]:
+        return tuple(
+            active.event
+            for active in reversed(context.active_catches)
+            if active.scope_depth >= target.scope_depth
+        )
 
     def _emit_jump_if_open(self, block: IRBasicBlock, target: str) -> bool:
         if self._is_terminated(block):

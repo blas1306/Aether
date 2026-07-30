@@ -12,3 +12,4 @@ workspace = true
 
 [dependencies]
 aether-ir = { path = "../aether-ir" }
+serde_json = "1"

@@ -18,13 +18,20 @@ from aether.ir.model import (
     IRCast,
     IRCall,
     IRCallIndirect,
+    IRCatchEntry,
     IRClassGet,
     IRClassNew,
     IRClassSet,
     IRInterfaceCall,
     IRInterfaceConstruct,
+    IRInvoke,
+    IRInvokeIndirect,
+    IRInvokeInterface,
     IRCompareOp,
     IRConst,
+    IRExceptionDestroy,
+    IRExceptionMatch,
+    IRExceptionPayload,
     IRFunction,
     IRFunctionRef,
     IRInstruction,
@@ -57,6 +64,7 @@ from aether.ir.model import (
     IRMatrixRows,
     IRMatrixSet,
     IROuterProduct,
+    IRPackException,
     IRPrint,
     IRStructGet,
     IRStructNew,
@@ -65,8 +73,11 @@ from aether.ir.model import (
     IRMethodResultReceiver,
     IRMethodResultValue,
     IRReturn,
+    IRPropagate,
+    IRRethrow,
     IRStore,
     IRUnaryOp,
+    IRThrow,
     IRValue,
     IRVectorGet,
     IRVectorAdd,
@@ -93,13 +104,20 @@ from .model import (
     SSACast,
     SSACall,
     SSACallIndirect,
+    SSACatchEntry,
     SSAClassGet,
     SSAClassNew,
     SSAClassSet,
     SSAInterfaceCall,
     SSAInterfaceConstruct,
+    SSAInvoke,
+    SSAInvokeIndirect,
+    SSAInvokeInterface,
     SSACompareOp,
     SSAConst,
+    SSAExceptionDestroy,
+    SSAExceptionMatch,
+    SSAExceptionPayload,
     SSAFunction,
     SSAFunctionRef,
     SSAInstruction,
@@ -131,6 +149,7 @@ from .model import (
     SSAMatrixRows,
     SSAMatrixSet,
     SSAOuterProduct,
+    SSAPackException,
     SSAPrint,
     SSAStructGet,
     SSAStructNew,
@@ -140,7 +159,10 @@ from .model import (
     SSAMethodResultValue,
     SSAParameter,
     SSAPhi,
+    SSAPropagate,
+    SSARethrow,
     SSAReturn,
+    SSAThrow,
     SSAUnaryOp,
     SSAValue,
     SSAVectorGet,
@@ -232,6 +254,7 @@ class SSARenamer:
             self.function.return_type,
             self._assemble_blocks(),
             entry,
+            self.function.may_throw,
         )
         return SSARenameResult(
             ssa_function,
@@ -339,6 +362,32 @@ class SSARenamer:
                 instruction.source_location,
             )
 
+        if isinstance(instruction, IRInvoke):
+            arguments = tuple(
+                self._resolve_value(argument) for argument in instruction.arguments
+            )
+            result = (
+                None
+                if instruction.result is None
+                else self._define_value(instruction.result)
+            )
+            exception = self._define_value(instruction.exception)
+            if result is not None:
+                self._bind_value(result.name, result, bound_values)
+            self._bind_value(exception.name, exception, bound_values)
+            return SSAInvoke(
+                instruction.function,
+                arguments,
+                result,
+                exception,
+                instruction.normal_target,
+                instruction.exceptional_target,
+                (() if result is None else (result,)),
+                (exception,),
+                instruction.builtin,
+                instruction.source_location,
+            )
+
         if isinstance(instruction, IRFunctionRef):
             result = self._define_value(instruction.result)
             self._bind_value(result.name, result, bound_values)
@@ -354,6 +403,31 @@ class SSARenamer:
                 result = self._define_value(instruction.result)
                 self._bind_value(result.name, result, bound_values)
             return SSACallIndirect(callee, arguments, result)
+
+        if isinstance(instruction, IRInvokeIndirect):
+            callee = self._resolve_value(instruction.callee)
+            arguments = tuple(
+                self._resolve_value(argument) for argument in instruction.arguments
+            )
+            result = (
+                None
+                if instruction.result is None
+                else self._define_value(instruction.result)
+            )
+            exception = self._define_value(instruction.exception)
+            if result is not None:
+                self._bind_value(result.name, result, bound_values)
+            self._bind_value(exception.name, exception, bound_values)
+            return SSAInvokeIndirect(
+                callee,
+                arguments,
+                result,
+                exception,
+                instruction.normal_target,
+                instruction.exceptional_target,
+                (() if result is None else (result,)),
+                (exception,),
+            )
 
         if isinstance(instruction, IRPrint):
             value = self._resolve_value(instruction.value)
@@ -409,6 +483,30 @@ class SSARenamer:
                 ),
                 instruction.slot,
                 result,
+            )
+        if isinstance(instruction, IRInvokeInterface):
+            result = (
+                None
+                if instruction.result is None
+                else self._define_value(instruction.result)
+            )
+            exception = self._define_value(instruction.exception)
+            if result is not None:
+                self._bind_value(result.name, result, bound_values)
+            self._bind_value(exception.name, exception, bound_values)
+            return SSAInvokeInterface(
+                self._resolve_value(instruction.receiver),
+                tuple(
+                    self._resolve_value(argument)
+                    for argument in instruction.arguments
+                ),
+                instruction.slot,
+                result,
+                exception,
+                instruction.normal_target,
+                instruction.exceptional_target,
+                (() if result is None else (result,)),
+                (exception,),
             )
         if isinstance(instruction, IRStructGet):
             result = self._define_value(instruction.result)
@@ -723,6 +821,47 @@ class SSARenamer:
             self._bind_value(result.name, result, bound_values)
             return SSAListIsEmpty(result, list_value)
 
+        if isinstance(instruction, IRPackException):
+            result = self._define_value(instruction.result)
+            self._bind_value(result.name, result, bound_values)
+            return SSAPackException(
+                result,
+                self._resolve_value(instruction.payload),
+                instruction.dynamic_type,
+                instruction.source_location,
+            )
+
+        if isinstance(instruction, IRCatchEntry):
+            event = self._define_value(instruction.event)
+            self._bind_value(event.name, event, bound_values)
+            return SSACatchEntry(
+                event,
+                instruction.handler_id,
+                instruction.catch_types,
+            )
+
+        if isinstance(instruction, IRExceptionMatch):
+            result = self._define_value(instruction.result)
+            self._bind_value(result.name, result, bound_values)
+            return SSAExceptionMatch(
+                result,
+                self._resolve_value(instruction.event),
+                instruction.catch_type,
+                instruction.catch_all,
+            )
+
+        if isinstance(instruction, IRExceptionPayload):
+            result = self._define_value(instruction.result)
+            self._bind_value(result.name, result, bound_values)
+            return SSAExceptionPayload(
+                result,
+                self._resolve_value(instruction.event),
+                instruction.catch_type,
+            )
+
+        if isinstance(instruction, IRExceptionDestroy):
+            return SSAExceptionDestroy(self._resolve_value(instruction.event))
+
         if isinstance(instruction, IRStore):
             value = self._resolve_value(instruction.value)
             if value.type != instruction.slot.type:
@@ -749,6 +888,16 @@ class SSARenamer:
             if instruction.value is not None:
                 value = self._resolve_value(instruction.value)
             return SSAReturn(value)
+
+        if isinstance(instruction, (IRThrow, IRRethrow, IRPropagate)):
+            event = self._resolve_value(instruction.event)
+            arguments = () if instruction.target is None else (event,)
+            transfer_type = {
+                IRThrow: SSAThrow,
+                IRRethrow: SSARethrow,
+                IRPropagate: SSAPropagate,
+            }[type(instruction)]
+            return transfer_type(event, instruction.target, arguments)
 
         if isinstance(instruction, IRBranch):
             condition = self._resolve_value(instruction.condition)

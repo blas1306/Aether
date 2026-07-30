@@ -82,6 +82,7 @@ class SSAAlgebraicSimplifier:
                 function.return_type,
                 blocks,
                 function.entry_block,
+                function.may_throw,
             ),
             simplified_count,
         )

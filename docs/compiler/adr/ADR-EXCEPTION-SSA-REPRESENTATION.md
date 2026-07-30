@@ -1,6 +1,6 @@
 # ADR: Exception SSA Edge and Value Representation
 
-Status: Proposed
+Status: Accepted
 
 ## Context
 
@@ -39,11 +39,74 @@ Authority:
 - Panic remains separate and has no catch-handler edge.
 - Python and Rust verification must enforce the same selected representation.
 
-## Decision: Pending
+## Decision
 
-The decision must identify the canonical exceptional edge/value form, its
-definition and dominance rules, its join representation, and the required
-Python/Rust verifier invariants before Milestone 5 implementation begins.
+Aether SSA uses **special edge-defined invoke values with explicit successor
+arguments** (Option A, using the existing phi convention at ordinary joins).
+This is semantically equivalent to block arguments without introducing a
+second general SSA mechanism.
+
+Each direct, indirect, or interface invoke is a terminator with two ordered
+successors:
+
+1. the normal edge, carrying exactly the non-void call result when one exists;
+2. the exceptional edge, carrying exactly one opaque `exception_event`.
+
+The invoke result is defined only on its normal edge. The invoke event is
+defined only on its exceptional edge. An edge-defined value dominates the
+corresponding successor entry and uses reached exclusively through that edge;
+it does not dominate the invoke block, the other successor, or unrelated
+blocks.
+
+An exceptional successor contains one `catch_entry` as its first non-`phi`
+instruction. Any ordinary predecessor-labelled phis required by the existing
+SSA convention remain at the start of the block. `catch_entry` selects and
+moves the single event supplied by each exceptional predecessor into the
+handler's owned event value. It is the handler-entry parameter form for this
+representation and does not copy the event. Handler blocks accept only
+exceptional predecessors, and every exceptional edge supplies exactly one
+event. Ordinary mutable values visible to the handler and values joining later
+control flow continue to use predecessor-labelled `phi` nodes. Event phis,
+when required at an ordinary join, move one live owner from each predecessor
+and may not duplicate or merge additional owners.
+
+`exception_pack` defines a new owned opaque event. `exception_match` observes
+the exact dynamic nominal type, and `exception_payload` creates only a borrowed
+language `Error` value bounded by the owning event's lifetime.
+`exception_destroy`, `throw`, `rethrow`, and `propagate` are explicit terminal
+ownership actions. `rethrow` consumes the active event introduced by the
+current catch; it does not pack a replacement. A transfer to another handler
+carries its event as the sole exceptional successor argument. A root transfer
+has no successor arguments.
+
+CFG APIs retain an edge kind (`normal` or `exceptional`) and ordered arguments.
+Reachability, predecessor discovery, reverse postorder, dominance, dominance
+frontiers, loop discovery, edge rewriting, and block removal operate on the
+complete graph. Rewriting an edge preserves its kind and arguments.
+
+The verifier treats both edge definitions as SSA definitions with
+edge-qualified availability. It also performs path-sensitive event ownership
+dataflow. Every executable path must have exactly one terminal disposition for
+each live owner; incompatible joins, missing consumption, double consumption,
+ordinary event use, use or borrow after consumption, invalid rethrow, and
+handler/edge-shape mismatches fail closed. Calls to known `may_throw` functions
+must be invokes, invokes of known non-throwing functions are invalid, and a
+function containing exception SSA must retain `may_throw`.
+
+The schema-v1 SSA JSON envelope is distinguished by
+`"representation": "aether_ssa"`. It serializes invoke kind, ordered normal and
+exceptional targets and arguments, handler entry, ownership operations,
+`may_throw`, and predecessor-labelled phi inputs directly. Python and Rust use
+the same strict tagged instruction shapes and reject Initial IR lifecycle or
+exceptional-control forms at the SSA boundary.
+
+The Initial IR-to-SSA renamer creates these edge definitions and arguments
+directly. The compatibility pattern builder rejects exception-bearing input
+and directs it to the general builder.
+
+This decision was accepted after direct, indirect, and interface invoke
+lowering; nested handler execution; ownership-negative cases; CFG analysis;
+serialization round trips; and post-optimization verification passed.
 
 ## Candidate options
 
@@ -68,8 +131,12 @@ before ordinary SSA control continues. Multi-predecessor joins use ordinary phis
 after the trampoline.
 
 The RFC recommends block arguments or semantically equivalent edge-defined
-values, but it deliberately leaves the concrete selection pending. This template
-does not prefer a candidate.
+values. The accepted representation selects Option A. Option B would require
+changing the project's general SSA convention to block arguments. Option C
+would add blocks solely to materialize values and make cleanup and
+critical-edge provenance more complex. Neither provides a correctness
+advantage over the selected edge-qualified definitions and explicit successor
+arguments.
 
 ## Evaluation criteria
 
@@ -95,16 +162,6 @@ The deciding evidence must compare the candidates on:
 
 ## Consequences
 
-Pending the decision:
-
-- Milestone 3 may define implementation-neutral exceptional Initial IR, but it
-  must not commit SSA consumers to an undocumented edge encoding.
-- Milestone 5 SSA implementation and exception-bearing SSA optimizer enablement
-  are blocked.
-- Python/Rust SSA schemas and verifier rules cannot be finalized.
-
-After approval:
-
 - The selected representation becomes an internal compiler contract, not source
   syntax or a public ABI.
 - Every SSA builder, printer, verifier, optimizer, fixture, and Rust mirror must
@@ -126,8 +183,9 @@ After approval:
 - Python/Rust valid-invalid fixture parity, shadow, canary, and schema round trips.
 - Verification before and after every enabled SSA optimizer.
 
-## Decision deadline / owning milestone
+## Decision validation / owning milestone
 
-**Deadline:** before exception-bearing SSA implementation begins.
+**Validated:** by the exception-bearing SSA implementation and its Milestone 4
+test suite before accepting this ADR.
 
-**Owning milestone:** **Milestone 5 — SSA**.
+**Owning milestone:** **Milestone 4 — SSA representation and lowering**.

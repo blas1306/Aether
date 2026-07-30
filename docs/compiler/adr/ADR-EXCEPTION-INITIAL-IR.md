@@ -73,6 +73,17 @@ The Initial IR interpreter executes explicit handler lookup, exact matching,
 propagation, rethrow, and root termination. Panic continues to use the existing
 uncatchable `IRExecutionError` path and is never converted into an event.
 
+Implementation clarification: when a potentially throwing invocation exits a
+catch and propagates a newly produced event, lowering inserts an explicit
+exceptional cleanup block. That block receives the new event, performs the
+terminal destruction required for every caught event whose scope is being
+exited, and only then propagates the new event. Caught events belonging to an
+enclosing catch scope that remains active across a nested handler are retained.
+The same rule applies when an unmatched nested handler propagates a new event
+out of an active catch. This is the explicit cleanup required by the original
+linear-ownership decision; it introduces neither implicit consumption nor a new
+event representation.
+
 ### Verification
 
 The verifier rejects, at minimum:
@@ -123,4 +134,3 @@ field mandatory requires a schema-version increment.
 This ADR does not select SSA edge values, LLVM EH or status lowering, landing
 pads, unwinder integration, runtime event layout/ABI, FFI propagation, or native
 execution.
-

@@ -585,6 +585,9 @@ fn classify_types(
             classified("IRV-005", VerificationErrorCategory::Types)
         }
         ModuleTypeVerificationError::Function { source, .. } => match source {
+            FunctionTypeVerificationError::ExceptionEventOwnership { .. } => {
+                classified("IRV-149", VerificationErrorCategory::Lifecycle)
+            }
             FunctionTypeVerificationError::Parameter { .. }
             | FunctionTypeVerificationError::ReturnType { .. } => {
                 classified("IRV-011", VerificationErrorCategory::Types)
@@ -961,7 +964,8 @@ fn type_rule_field(rule: &TypeRuleError) -> Option<&str> {
         | TypeRuleError::InvalidAggregateShape { field, .. }
         | TypeRuleError::InvalidVectorLength { field, .. }
         | TypeRuleError::InvalidEnumConstant { field, .. } => Some(field),
-        TypeRuleError::StorageReturnOperand { .. }
+        TypeRuleError::ExceptionEventOwnership { .. }
+        | TypeRuleError::StorageReturnOperand { .. }
         | TypeRuleError::BorrowViolation { .. }
         | TypeRuleError::MissingCollectionLifecycleCapability { .. }
         | TypeRuleError::InvalidBuiltinIdentity { .. }

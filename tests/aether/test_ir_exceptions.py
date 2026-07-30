@@ -335,3 +335,151 @@ int main() {
         match=r"is used after consumption",
     ):
         IRVerifier(module).verify()
+
+
+@pytest.mark.parametrize(
+    ("source", "invoke_type"),
+    [
+        (
+            """
+void failNew() {
+    throw NetworkError("direct");
+}
+
+void exercise() {
+    try {
+        throw FileError("old");
+    } catch (FileError old) {
+        failNew();
+    }
+}
+
+int main() {
+    try {
+        exercise();
+    } catch (NetworkError error) {
+        println(error.message());
+    }
+    return 0;
+}
+""",
+            IRInvoke,
+        ),
+        (
+            """
+void failNew() {
+    throw NetworkError("indirect");
+}
+
+void exercise(void() operation) {
+    try {
+        throw FileError("old");
+    } catch (FileError old) {
+        operation();
+    }
+}
+
+int main() {
+    try {
+        exercise(failNew);
+    } catch (NetworkError error) {
+        println(error.message());
+    }
+    return 0;
+}
+""",
+            IRInvokeIndirect,
+        ),
+        (
+            """
+struct ThrowingError implements Error {
+    string text;
+    string message() {
+        throw NetworkError("interface");
+    }
+}
+
+int main() {
+    try {
+        try {
+            throw ThrowingError("old");
+        } catch (Error old) {
+            println(old.message());
+        }
+    } catch (NetworkError error) {
+        println(error.message());
+    }
+    return 0;
+}
+""",
+            IRInvokeInterface,
+        ),
+    ],
+)
+def test_invoke_leaving_catch_destroys_old_event_before_new_propagation(
+    source: str,
+    invoke_type: type[object],
+) -> None:
+    module = _lower(ERROR_TYPES + source)
+    invoke = next(
+        instruction
+        for instruction in _instructions(module)
+        if isinstance(instruction, invoke_type)
+        and instruction.exceptional_target.startswith("invoke.cleanup")
+    )
+    function = next(
+        function
+        for function in module.functions
+        if any(invoke is item for block in function.blocks for item in block.instructions)
+    )
+    cleanup = next(
+        block
+        for block in function.blocks
+        if block.name == invoke.exceptional_target
+    )
+
+    assert isinstance(cleanup.instructions[0], IRCatchEntry)
+    assert isinstance(cleanup.instructions[1], IRExceptionDestroy)
+    assert isinstance(cleanup.instructions[-1], IRPropagate)
+    result, output = _execute(module)
+    assert result == 0
+    assert output in {"direct\n", "indirect\n", "interface\n"}
+
+
+def test_verifier_rejects_missing_caught_event_cleanup_on_invoke_failure() -> None:
+    module = _lower(
+        ERROR_TYPES
+        + """
+void failNew() {
+    throw NetworkError("new");
+}
+
+int main() {
+    try {
+        try {
+            throw FileError("old");
+        } catch (FileError old) {
+            failNew();
+        }
+    } catch (NetworkError error) {
+        println(error.message());
+    }
+    return 0;
+}
+"""
+    )
+    main = next(function for function in module.functions if function.name == "main")
+    cleanup = next(
+        block for block in main.blocks if block.name.startswith("invoke.cleanup")
+    )
+    cleanup.instructions = [
+        instruction
+        for instruction in cleanup.instructions
+        if not isinstance(instruction, IRExceptionDestroy)
+    ]
+
+    with pytest.raises(
+        IRVerificationError,
+        match=r"leaks another owned event|ownership merge",
+    ):
+        IRVerifier(module).verify()

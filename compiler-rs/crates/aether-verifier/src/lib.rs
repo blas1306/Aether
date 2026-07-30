@@ -27,6 +27,7 @@ mod return_error;
 mod return_verifier;
 mod ssa_error;
 mod ssa_verifier;
+mod ssa_wire_verifier;
 mod structure_error;
 mod structure_verifier;
 mod verifier;
@@ -65,6 +66,7 @@ pub use ssa_error::{
     SSAInstructionLocation, SSAUseLocation,
 };
 pub use ssa_verifier::{verify_function_ssa, verify_module_ssa};
+pub use ssa_wire_verifier::{SSAWireVerificationError, verify_ssa_module_dto};
 pub use structure_error::{
     ActualBlockTermination, BlockStructureVerificationError, BranchTarget, ControlFlowRuleError,
     FunctionStructureVerificationError, ModuleStructureVerificationError, TerminatorExpectation,

@@ -315,6 +315,7 @@ class IRVerifier:
 
         self._verify_block_structure(function, blocks)
         self._verify_exception_structure(function, blocks)
+        self._verify_exception_event_ownership(function, blocks)
 
         value_types = self._collect_value_types(function)
         slot_types = self._collect_slot_types(function)
@@ -322,6 +323,174 @@ class IRVerifier:
         self._verify_borrowed_elements(function)
         self._verify_reachable_values(function, blocks, value_types, slot_types)
         self._verify_all_non_void_paths_return(function, blocks)
+
+    def _verify_exception_event_ownership(
+        self,
+        function: IRFunction,
+        blocks: dict[str, IRBasicBlock],
+    ) -> None:
+        """Prove one terminal disposition for every live event on every path."""
+
+        handler_events = {
+            block.name: block.instructions[0].event
+            for block in function.blocks
+            if block.instructions
+            and isinstance(block.instructions[0], IRCatchEntry)
+        }
+        if not handler_events and not any(
+            isinstance(instruction, IRPackException)
+            for block in function.blocks
+            for instruction in block.instructions
+        ):
+            return
+
+        inputs: dict[str, dict[str, frozenset[str]]] = {
+            name: {} for name in blocks
+        }
+        inputs["entry"]["<entry>"] = frozenset()
+        worklist = ["entry"]
+        queued = {"entry"}
+        processed: dict[str, frozenset[str]] = {}
+
+        while worklist:
+            block_name = worklist.pop(0)
+            queued.discard(block_name)
+            predecessor_states = inputs[block_name]
+            if not predecessor_states:
+                continue
+
+            normalized = []
+            for state in predecessor_states.values():
+                live = set(state)
+                handler_event = handler_events.get(block_name)
+                if handler_event is not None:
+                    live.add(handler_event.name)
+                normalized.append(frozenset(live))
+
+            first = normalized[0]
+            if any(state != first for state in normalized[1:]):
+                self._fail(
+                    f"Incompatible exception-event ownership merge at block "
+                    f"'{block_name}'",
+                    rule=("IRV-149", VerifierCategory.LIFECYCLE),
+                )
+            if processed.get(block_name) == first:
+                continue
+            processed[block_name] = first
+
+            outgoing = self._transfer_exception_events(
+                blocks[block_name],
+                set(first),
+            )
+            for target, state in outgoing:
+                frozen = frozenset(state)
+                if inputs[target].get(block_name) == frozen:
+                    continue
+                inputs[target][block_name] = frozen
+                if target not in queued:
+                    worklist.append(target)
+                    queued.add(target)
+
+        for block in function.blocks:
+            if block.name in processed:
+                continue
+            created = {
+                instruction.result.name
+                for instruction in block.instructions
+                if isinstance(instruction, IRPackException)
+            }
+            consumed = {
+                instruction.event.name
+                for instruction in block.instructions
+                if isinstance(
+                    instruction,
+                    (
+                        IRExceptionDestroy,
+                        IRThrow,
+                        IRRethrow,
+                        IRPropagate,
+                    ),
+                )
+            }
+            leaked = created - consumed
+            if leaked:
+                self._fail(
+                    f"Owned exception event '%{min(leaked)}' is created "
+                    "without a terminal disposition",
+                    rule=("IRV-149", VerifierCategory.LIFECYCLE),
+                )
+
+    def _transfer_exception_events(
+        self,
+        block: IRBasicBlock,
+        live: set[str],
+    ) -> list[tuple[str, set[str]]]:
+        for instruction in block.instructions:
+            if isinstance(instruction, IRCatchEntry):
+                continue
+            if isinstance(instruction, IRPackException):
+                live.add(instruction.result.name)
+                continue
+            if isinstance(instruction, (IRExceptionMatch, IRExceptionPayload)):
+                if instruction.event.name not in live:
+                    self._fail(
+                        f"Exception event '{self._value(instruction.event)}' "
+                        "is borrowed after consumption",
+                        rule=("IRV-149", VerifierCategory.LIFECYCLE),
+                    )
+                continue
+            if isinstance(instruction, IRExceptionDestroy):
+                self._consume_exception_event(instruction.event, live)
+                continue
+            if isinstance(instruction, (IRThrow, IRRethrow, IRPropagate)):
+                self._consume_exception_event(instruction.event, live)
+                if instruction.target is None:
+                    if live:
+                        self._fail(
+                            f"Exceptional unwind from block '{block.name}' "
+                            "leaks another owned event",
+                            rule=("IRV-149", VerifierCategory.LIFECYCLE),
+                        )
+                    return []
+                return [(instruction.target, set(live))]
+            if isinstance(
+                instruction,
+                (IRInvoke, IRInvokeIndirect, IRInvokeInterface),
+            ):
+                return [
+                    (instruction.normal_target, set(live)),
+                    (instruction.exceptional_target, set(live)),
+                ]
+            if isinstance(instruction, IRJump):
+                return [(instruction.target, set(live))]
+            if isinstance(instruction, IRBranch):
+                return [
+                    (instruction.true_target, set(live)),
+                    (instruction.false_target, set(live)),
+                ]
+            if isinstance(instruction, IRReturn):
+                if live:
+                    names = ", ".join(f"%{name}" for name in sorted(live))
+                    self._fail(
+                        f"Return from block '{block.name}' leaks owned "
+                        f"exception event(s): {names}",
+                        rule=("IRV-149", VerifierCategory.LIFECYCLE),
+                    )
+                return []
+        raise AssertionError(f"Verified block '{block.name}' has no terminator")
+
+    def _consume_exception_event(
+        self,
+        event: IRValue,
+        live: set[str],
+    ) -> None:
+        if event.name not in live:
+            self._fail(
+                f"Exception event '{self._value(event)}' is consumed more than "
+                "once or after propagation",
+                rule=("IRV-149", VerifierCategory.LIFECYCLE),
+            )
+        live.remove(event.name)
 
     def _verify_exception_structure(
         self,

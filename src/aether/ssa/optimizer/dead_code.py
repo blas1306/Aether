@@ -50,6 +50,7 @@ class SSADeadCodeEliminator:
                         function.return_type,
                         updated_blocks,
                         function.entry_block,
+                        function.may_throw,
                     )
                 )
                 removed += function_removed

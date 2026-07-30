@@ -120,6 +120,13 @@ impl fmt::Display for TypeExpectation {
 /// The leaf cause of a type-verification failure.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TypeRuleError {
+    /// IRV-149: opaque exception-event ownership is not linear on the CFG.
+    ExceptionEventOwnership {
+        /// Block in which the ownership proof failed.
+        block_name: String,
+        /// Stable description of the violated ownership invariant.
+        detail: String,
+    },
     /// IRV-026: storage cannot be returned directly as a value.
     StorageReturnOperand {
         /// Storage identifier without the textual IR `%` prefix.
@@ -304,6 +311,10 @@ impl fmt::Display for TypeRuleError {
     #[allow(clippy::too_many_lines)]
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::ExceptionEventOwnership { block_name, detail } => write!(
+                formatter,
+                "IRV-149 exception-event ownership failed in block '{block_name}': {detail}"
+            ),
             Self::StorageReturnOperand { storage } => write!(
                 formatter,
                 "IRV-026 return operand '%{storage}' is storage; load or explicitly transfer it as a value"
@@ -635,6 +646,13 @@ impl Error for BlockTypeVerificationError {
 /// A function declaration or nested block type failure.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FunctionTypeVerificationError {
+    /// Function-wide opaque exception-event ownership is invalid.
+    ExceptionEventOwnership {
+        /// Function name.
+        function_name: String,
+        /// Typed ownership rule failure.
+        source: TypeRuleError,
+    },
     /// A parameter type is invalid.
     Parameter {
         /// Function name.
@@ -669,6 +687,13 @@ pub enum FunctionTypeVerificationError {
 impl fmt::Display for FunctionTypeVerificationError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::ExceptionEventOwnership {
+                function_name,
+                source,
+            } => write!(
+                formatter,
+                "exception-event ownership of function '{function_name}' failed verification: {source}"
+            ),
             Self::Parameter {
                 function_name,
                 parameter_index,
@@ -701,7 +726,9 @@ impl fmt::Display for FunctionTypeVerificationError {
 impl Error for FunctionTypeVerificationError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::Parameter { source, .. } | Self::ReturnType { source, .. } => Some(source),
+            Self::ExceptionEventOwnership { source, .. }
+            | Self::Parameter { source, .. }
+            | Self::ReturnType { source, .. } => Some(source),
             Self::Block { source, .. } => Some(source),
         }
     }

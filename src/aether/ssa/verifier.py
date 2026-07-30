@@ -12,6 +12,7 @@ from aether.ir.types import (
     ComplexType,
     DoubleType,
     EnumType,
+    ExceptionEventType,
     FloatType,
     FunctionType,
     IntType,
@@ -76,13 +77,20 @@ from .model import (
     SSACast,
     SSACall,
     SSACallIndirect,
+    SSACatchEntry,
     SSAClassGet,
     SSAClassNew,
     SSAClassSet,
     SSAInterfaceCall,
     SSAInterfaceConstruct,
+    SSAInvoke,
+    SSAInvokeIndirect,
+    SSAInvokeInterface,
     SSACompareOp,
     SSAConst,
+    SSAExceptionDestroy,
+    SSAExceptionMatch,
+    SSAExceptionPayload,
     SSAFunction,
     SSAFunctionRef,
     SSAInstruction,
@@ -115,6 +123,7 @@ from .model import (
     SSAMatrixSet,
     SSAModule,
     SSAOuterProduct,
+    SSAPackException,
     SSAPrint,
     SSAStructGet,
     SSAStructNew,
@@ -123,7 +132,10 @@ from .model import (
     SSAMethodResultReceiver,
     SSAMethodResultValue,
     SSAPhi,
+    SSAPropagate,
+    SSARethrow,
     SSAReturn,
+    SSAThrow,
     SSAUnaryOp,
     SSAValue,
     SSAVectorGet,
@@ -146,6 +158,8 @@ class SSAVerificationError(ValueError):
 class _DefinitionSite:
     block_name: str | None
     instruction_index: int | None
+    edge_target: str | None = None
+    edge_kind: str | None = None
 
     @property
     def is_parameter(self) -> bool:
@@ -155,7 +169,17 @@ class _DefinitionSite:
 class SSAVerifier:
     """Validate hand-built Aether SSA modules."""
 
-    _TERMINATORS = (SSABranch, SSAJump, SSAReturn)
+    _TERMINATORS = (
+        SSABranch,
+        SSAJump,
+        SSAReturn,
+        SSAInvoke,
+        SSAInvokeIndirect,
+        SSAInvokeInterface,
+        SSAThrow,
+        SSARethrow,
+        SSAPropagate,
+    )
     _NUMERIC_TYPES = (IntType, FloatType, DoubleType, ComplexType)
     _REAL_TYPES = (IntType, FloatType, DoubleType)
 
@@ -223,6 +247,10 @@ class SSAVerifier:
             visit(name)
 
     def _verify_function(self, function: SSAFunction) -> None:
+        if type(function.may_throw) is not bool:
+            self._fail(
+                f"Function '{function.name}' may_throw metadata must be boolean"
+            )
         self._verify_type(function.return_type, f"return type of function '{function.name}'")
         self._verify_parameters(function)
 
@@ -245,11 +273,388 @@ class SSAVerifier:
             self._verify_phi_placement(function, block)
             self._verify_instructions(function, block, blocks, predecessors, value_types)
 
+        self._verify_exception_structure(function, blocks, value_types)
         dominators = DominatorAnalysis(
             self._cfg(function),
             entry_block=function.entry_block,
         ).compute()
         self._verify_dominance(function, predecessors, definition_sites, dominators)
+        self._verify_event_ownership(function, blocks)
+
+    def _verify_exception_structure(
+        self,
+        function: SSAFunction,
+        blocks: dict[str, SSABasicBlock],
+        value_types: dict[str, IRType],
+    ) -> None:
+        handlers: dict[str, SSACatchEntry] = {}
+        handler_ids: set[str] = set()
+        has_exception_ir = False
+        catch_owned: set[str] = set()
+
+        for block in function.blocks:
+            entries = [
+                instruction
+                for instruction in block.instructions
+                if isinstance(instruction, SSACatchEntry)
+            ]
+            if entries:
+                has_exception_ir = True
+                first_non_phi = next(
+                    (
+                        instruction
+                        for instruction in block.instructions
+                        if not isinstance(instruction, SSAPhi)
+                    ),
+                    None,
+                )
+                if (
+                    len(entries) != 1
+                    or not isinstance(first_non_phi, SSACatchEntry)
+                ):
+                    self._fail(
+                        f"Handler entry in block '{block.name}' must be its "
+                        "first non-phi and only catch_entry"
+                    )
+                entry = entries[0]
+                if not entry.handler_id or entry.handler_id in handler_ids:
+                    self._fail(
+                        f"Duplicate or empty exception handler id "
+                        f"'{entry.handler_id}'"
+                    )
+                handler_ids.add(entry.handler_id)
+                if len(set(entry.catch_types)) != len(entry.catch_types):
+                    self._fail(
+                        f"Handler '{entry.handler_id}' contains duplicate "
+                        "catch metadata"
+                    )
+                if (
+                    "Error" in entry.catch_types
+                    and entry.catch_types[-1] != "Error"
+                ):
+                    self._fail(
+                        f"Handler '{entry.handler_id}' has catches after Error"
+                    )
+                handlers[block.name] = entry
+                if entry.handler_id != "root":
+                    catch_owned.add(entry.event.name)
+
+        incoming_kinds: dict[str, list[str]] = {
+            name: [] for name in blocks
+        }
+        for block in function.blocks:
+            terminator = block.instructions[-1]
+            edges = self._successor_edges(block)
+            for target, kind, arguments in edges:
+                incoming_kinds[target].append(kind)
+                handler = handlers.get(target)
+                if kind == "exceptional":
+                    has_exception_ir = True
+                    if handler is None:
+                        self._fail(
+                            f"Exceptional edge from '{block.name}' must target "
+                            "a catch_entry block"
+                        )
+                    if len(arguments) != 1 or not isinstance(
+                        arguments[0].type, ExceptionEventType
+                    ):
+                        self._fail(
+                            "Exceptional edge must move exactly one "
+                            "exception_event argument"
+                        )
+                elif handler is not None:
+                    self._fail(
+                        f"Handler block '{target}' has a normal predecessor"
+                    )
+
+            if isinstance(
+                terminator,
+                (SSAThrow, SSARethrow, SSAPropagate),
+            ):
+                if terminator.target is None:
+                    if terminator.exceptional_arguments:
+                        self._fail(
+                            "Root exceptional transfer cannot have successor "
+                            "arguments"
+                        )
+                elif terminator.exceptional_arguments != (terminator.event,):
+                    self._fail(
+                        "Exceptional transfer must move exactly its owned event"
+                    )
+
+            for instruction in block.instructions:
+                if isinstance(
+                    instruction,
+                    (
+                        SSAPackException,
+                        SSACatchEntry,
+                        SSAExceptionMatch,
+                        SSAExceptionPayload,
+                        SSAExceptionDestroy,
+                        SSAInvoke,
+                        SSAInvokeIndirect,
+                        SSAInvokeInterface,
+                        SSAThrow,
+                        SSARethrow,
+                        SSAPropagate,
+                    ),
+                ):
+                    has_exception_ir = True
+
+                if isinstance(instruction, SSARethrow):
+                    if instruction.event.name not in catch_owned:
+                        self._fail(
+                            "Rethrow requires the active event introduced by "
+                            "a catch handler"
+                        )
+
+                for operand in self._instruction_operands(instruction):
+                    if not isinstance(operand.type, ExceptionEventType):
+                        continue
+                    if not isinstance(
+                        instruction,
+                        (
+                            SSAExceptionMatch,
+                            SSAExceptionPayload,
+                            SSAExceptionDestroy,
+                            SSAThrow,
+                            SSARethrow,
+                            SSAPropagate,
+                            SSAPhi,
+                        ),
+                    ):
+                        self._fail(
+                            f"Exception event '{self._value(operand)}' cannot "
+                            f"be used by ordinary instruction "
+                            f"'{type(instruction).__name__}'"
+                        )
+
+        for handler_name in handlers:
+            if not incoming_kinds[handler_name]:
+                self._fail(
+                    f"Exception handler block '{handler_name}' is not reachable "
+                    "from an exceptional edge"
+                )
+            if any(kind != "exceptional" for kind in incoming_kinds[handler_name]):
+                self._fail(
+                    f"Exception handler block '{handler_name}' has a normal "
+                    "predecessor"
+                )
+
+        if has_exception_ir and not function.may_throw:
+            self._fail(
+                f"Function '{function.name}' contains exception SSA but "
+                "may_throw is false"
+            )
+
+        # A non-event instruction result may never masquerade as an event.
+        for name, type_ in value_types.items():
+            if isinstance(type_, ExceptionEventType) and not name:
+                self._fail("Exception event SSA identifiers must not be empty")
+
+    def _verify_event_ownership(
+        self,
+        function: SSAFunction,
+        blocks: dict[str, SSABasicBlock],
+    ) -> None:
+        event_phis: dict[str, tuple[SSAPhi, ...]] = {}
+        handler_events: dict[str, SSAValue] = {}
+        borrowed_from: dict[str, str] = {}
+        for block in function.blocks:
+            event_phis[block.name] = tuple(
+                instruction
+                for instruction in block.instructions
+                if isinstance(instruction, SSAPhi)
+                and isinstance(instruction.result.type, ExceptionEventType)
+            )
+            entry = next(
+                (
+                    instruction
+                    for instruction in block.instructions
+                    if not isinstance(instruction, SSAPhi)
+                ),
+                None,
+            )
+            if isinstance(entry, SSACatchEntry):
+                handler_events[block.name] = entry.event
+            for instruction in block.instructions:
+                if isinstance(instruction, SSAExceptionPayload):
+                    borrowed_from[instruction.result.name] = instruction.event.name
+
+        incoming: dict[str, dict[str, frozenset[str]]] = {
+            name: {} for name in blocks
+        }
+        incoming[function.entry_block]["<entry>"] = frozenset()
+        queued = [function.entry_block]
+        queued_set = {function.entry_block}
+        processed_states: dict[str, frozenset[str]] = {}
+
+        while queued:
+            block_name = queued.pop(0)
+            queued_set.discard(block_name)
+            predecessor_states = incoming[block_name]
+            if not predecessor_states:
+                continue
+
+            normalized: list[frozenset[str]] = []
+            for predecessor, state in sorted(predecessor_states.items()):
+                live = set(state)
+                if predecessor != "<entry>":
+                    for phi in event_phis[block_name]:
+                        incoming_value = next(
+                            value
+                            for source, value in phi.incoming
+                            if source == predecessor
+                        )
+                        if incoming_value.name not in live:
+                            self._fail(
+                                f"Event phi '{self._value(phi.result)}' moves "
+                                f"non-live owner '{self._value(incoming_value)}'"
+                            )
+                        live.remove(incoming_value.name)
+                        live.add(phi.result.name)
+                handler_event = handler_events.get(block_name)
+                if handler_event is not None:
+                    live.add(handler_event.name)
+                normalized.append(frozenset(live))
+
+            first = normalized[0]
+            if any(state != first for state in normalized[1:]):
+                self._fail(
+                    f"Incompatible exception-event ownership merge at block "
+                    f"'{block_name}'"
+                )
+            if processed_states.get(block_name) == first:
+                continue
+            processed_states[block_name] = first
+
+            outgoing = self._simulate_event_block(
+                blocks[block_name],
+                set(first),
+                borrowed_from,
+            )
+            for target, state in outgoing:
+                previous = incoming[target].get(block_name)
+                frozen = frozenset(state)
+                if previous == frozen:
+                    continue
+                incoming[target][block_name] = frozen
+                if target not in queued_set:
+                    queued.append(target)
+                    queued_set.add(target)
+
+        # Closed unreachable components are still checked locally for an
+        # obvious created-without-disposition defect.
+        for block in function.blocks:
+            if block.name in processed_states:
+                continue
+            created = {
+                instruction.result.name
+                for instruction in block.instructions
+                if isinstance(instruction, SSAPackException)
+            }
+            consumed = {
+                instruction.event.name
+                for instruction in block.instructions
+                if isinstance(
+                    instruction,
+                    (
+                        SSAExceptionDestroy,
+                        SSAThrow,
+                        SSARethrow,
+                        SSAPropagate,
+                    ),
+                )
+            }
+            leaked = created - consumed
+            if leaked:
+                name = min(leaked)
+                self._fail(
+                    f"Owned exception event '%{name}' is created without a "
+                    "terminal disposition"
+                )
+
+    def _simulate_event_block(
+        self,
+        block: SSABasicBlock,
+        live: set[str],
+        borrowed_from: dict[str, str],
+    ) -> list[tuple[str, set[str]]]:
+        for instruction in block.instructions:
+            if isinstance(instruction, (SSAPhi, SSACatchEntry)):
+                continue
+
+            for operand in self._instruction_operands(instruction):
+                owner = borrowed_from.get(operand.name)
+                if owner is not None and owner not in live:
+                    self._fail(
+                        f"Borrowed catch value '{self._value(operand)}' is used "
+                        "after its event was consumed"
+                    )
+
+            if isinstance(instruction, SSAPackException):
+                if instruction.result.name in live:
+                    self._fail(
+                        f"Exception event '{self._value(instruction.result)}' "
+                        "is defined while already live"
+                    )
+                live.add(instruction.result.name)
+                continue
+            if isinstance(instruction, (SSAExceptionMatch, SSAExceptionPayload)):
+                if instruction.event.name not in live:
+                    self._fail(
+                        f"Exception event '{self._value(instruction.event)}' "
+                        "is borrowed after consumption"
+                    )
+                continue
+            if isinstance(instruction, SSAExceptionDestroy):
+                self._consume_event(instruction.event, live)
+                continue
+            if isinstance(
+                instruction,
+                (SSAThrow, SSARethrow, SSAPropagate),
+            ):
+                self._consume_event(instruction.event, live)
+                if instruction.target is None:
+                    if live:
+                        self._fail(
+                            f"Exceptional unwind from block '{block.name}' "
+                            "leaks another owned event"
+                        )
+                    return []
+                return [(instruction.target, set(live))]
+            if isinstance(
+                instruction,
+                (SSAInvoke, SSAInvokeIndirect, SSAInvokeInterface),
+            ):
+                return [
+                    (instruction.normal_target, set(live)),
+                    (instruction.exceptional_target, set(live)),
+                ]
+            if isinstance(instruction, SSAJump):
+                return [(instruction.target, set(live))]
+            if isinstance(instruction, SSABranch):
+                return [
+                    (instruction.true_target, set(live)),
+                    (instruction.false_target, set(live)),
+                ]
+            if isinstance(instruction, SSAReturn):
+                if live:
+                    names = ", ".join(f"%{name}" for name in sorted(live))
+                    self._fail(
+                        f"Return from block '{block.name}' leaks owned "
+                        f"exception event(s): {names}"
+                    )
+                return []
+        raise AssertionError(f"Verified block '{block.name}' has no terminator")
+
+    def _consume_event(self, event: SSAValue, live: set[str]) -> None:
+        if event.name not in live:
+            self._fail(
+                f"Exception event '{self._value(event)}' is consumed more than once "
+                "or after propagation"
+            )
+        live.remove(event.name)
 
     def _verify_borrowed_elements(self, function: SSAFunction) -> None:
         borrowed: dict[str, str] = {}
@@ -389,6 +794,33 @@ class SSAVerifier:
                     self._fail(
                         f"Unknown branch target '{target}' in function '{function.name}'"
                     )
+            return
+
+        if isinstance(
+            instruction,
+            (SSAInvoke, SSAInvokeIndirect, SSAInvokeInterface),
+        ):
+            if instruction.normal_target == instruction.exceptional_target:
+                self._fail(
+                    "Invoke normal and exceptional successors must be distinct"
+                )
+            for target in (
+                instruction.normal_target,
+                instruction.exceptional_target,
+            ):
+                if target not in blocks:
+                    self._fail(
+                        f"Unknown invoke target '{target}' in function "
+                        f"'{function.name}'"
+                    )
+            return
+
+        if isinstance(instruction, (SSAThrow, SSARethrow, SSAPropagate)):
+            if instruction.target is not None and instruction.target not in blocks:
+                self._fail(
+                    f"Unknown exceptional transfer target '{instruction.target}' "
+                    f"in function '{function.name}'"
+                )
 
     def _predecessors(
         self,
@@ -412,12 +844,17 @@ class SSAVerifier:
 
         for block in function.blocks:
             for index, instruction in enumerate(block.instructions):
-                result = self._instruction_result(instruction)
-                if result is None:
-                    continue
-                self._verify_type(result.type, f"value '{self._value(result)}'")
-                self._define_value_type(value_types, result, function)
-                definition_sites[result.name] = _DefinitionSite(block.name, index)
+                for result, edge_target, edge_kind in self._instruction_definitions(
+                    instruction
+                ):
+                    self._verify_type(result.type, f"value '{self._value(result)}'")
+                    self._define_value_type(value_types, result, function)
+                    definition_sites[result.name] = _DefinitionSite(
+                        block.name,
+                        index,
+                        edge_target,
+                        edge_kind,
+                    )
 
         return value_types, definition_sites
 
@@ -489,6 +926,10 @@ class SSAVerifier:
                 self._verify_call(instruction, value_types)
                 continue
 
+            if isinstance(instruction, SSAInvoke):
+                self._verify_direct_invoke(instruction, value_types)
+                continue
+
             if isinstance(instruction, SSAFunctionRef):
                 callee = self._functions.get(instruction.function)
                 if callee is None:
@@ -506,6 +947,10 @@ class SSAVerifier:
 
             if isinstance(instruction, SSACallIndirect):
                 self._verify_indirect_call(instruction, value_types)
+                continue
+
+            if isinstance(instruction, SSAInvokeIndirect):
+                self._verify_indirect_invoke(instruction, value_types)
                 continue
 
             if isinstance(instruction, SSAPrint):
@@ -743,6 +1188,10 @@ class SSAVerifier:
                     )
                 continue
 
+            if isinstance(instruction, SSAInvokeInterface):
+                self._verify_interface_invoke(instruction, value_types)
+                continue
+
             if isinstance(instruction, SSAStructGet):
                 self._require_defined(instruction.struct, value_types)
                 definition = self._structs.get(instruction.struct.type.name) if isinstance(instruction.struct.type, StructType) else None
@@ -957,6 +1406,56 @@ class SSAVerifier:
                 self._verify_list_is_empty(instruction, value_types)
                 continue
 
+            if isinstance(instruction, SSAPackException):
+                self._require_defined(instruction.payload, value_types)
+                self._require_exception_event(
+                    instruction.result, "exception_pack result"
+                )
+                if (
+                    instruction.dynamic_type is not None
+                    and not instruction.dynamic_type
+                ):
+                    self._fail("exception_pack dynamic type must not be empty")
+                continue
+
+            if isinstance(instruction, SSACatchEntry):
+                self._require_exception_event(
+                    instruction.event, "catch_entry event"
+                )
+                continue
+
+            if isinstance(instruction, SSAExceptionMatch):
+                self._require_defined(instruction.event, value_types)
+                self._require_exception_event(
+                    instruction.event, "exception_match event"
+                )
+                self._require_type(
+                    instruction.result.type,
+                    BoolType(),
+                    "exception_match result type mismatch",
+                )
+                if instruction.catch_all != (instruction.catch_type == "Error"):
+                    self._fail(
+                        "exception_match catch_all must be true exactly for Error"
+                    )
+                continue
+
+            if isinstance(instruction, SSAExceptionPayload):
+                self._require_defined(instruction.event, value_types)
+                self._require_exception_event(
+                    instruction.event, "exception_borrow event"
+                )
+                if not instruction.catch_type:
+                    self._fail("exception_borrow catch type must not be empty")
+                continue
+
+            if isinstance(instruction, SSAExceptionDestroy):
+                self._require_defined(instruction.event, value_types)
+                self._require_exception_event(
+                    instruction.event, "exception_destroy event"
+                )
+                continue
+
             if isinstance(instruction, SSAPhi):
                 self._verify_phi(
                     function,
@@ -975,6 +1474,13 @@ class SSAVerifier:
                 continue
 
             if isinstance(instruction, SSAJump):
+                continue
+
+            if isinstance(instruction, (SSAThrow, SSARethrow, SSAPropagate)):
+                self._require_defined(instruction.event, value_types)
+                self._require_exception_event(
+                    instruction.event, "exceptional transfer event"
+                )
                 continue
 
             if isinstance(instruction, SSAReturn):
@@ -1193,6 +1699,10 @@ class SSAVerifier:
         callee = self._functions.get(instruction.function)
         if callee is None:
             self._fail(f"Call to undefined function '{instruction.function}'")
+        if callee.may_throw:
+            self._fail(
+                f"Call to may_throw function '{instruction.function}' must use invoke"
+            )
 
         expected = len(callee.parameters)
         actual = len(instruction.arguments)
@@ -1267,6 +1777,156 @@ class SSAVerifier:
                 signature.return_type,
                 "Indirect call result type mismatch",
             )
+
+    def _verify_direct_invoke(
+        self,
+        instruction: SSAInvoke,
+        value_types: dict[str, IRType],
+    ) -> None:
+        if instruction.builtin is not None:
+            self._fail("Direct invoke cannot use a nonthrowing builtin")
+        callee = self._functions.get(instruction.function)
+        if callee is None:
+            self._fail(f"Invoke of undefined function '{instruction.function}'")
+        if not callee.may_throw:
+            self._fail(
+                f"Invoke target '{instruction.function}' is not may_throw"
+            )
+        if len(instruction.arguments) != len(callee.parameters):
+            self._fail(
+                f"Function '{instruction.function}' expects "
+                f"{len(callee.parameters)} arguments, got "
+                f"{len(instruction.arguments)}"
+            )
+        for index, (argument, parameter) in enumerate(
+            zip(instruction.arguments, callee.parameters),
+            start=1,
+        ):
+            self._require_defined(argument, value_types)
+            self._require_type(
+                argument.type,
+                parameter.type,
+                f"Invoke argument {index} type mismatch",
+            )
+        self._verify_invoke_results(
+            instruction.result,
+            instruction.exception,
+            instruction.normal_arguments,
+            instruction.exceptional_arguments,
+            callee.return_type,
+        )
+
+    def _verify_indirect_invoke(
+        self,
+        instruction: SSAInvokeIndirect,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.callee, value_types)
+        if not isinstance(instruction.callee.type, FunctionType):
+            self._fail("Indirect invoke requires a callable callee")
+        signature = instruction.callee.type
+        if len(instruction.arguments) != len(signature.parameter_types):
+            self._fail(
+                f"Indirect invoke expects {len(signature.parameter_types)} "
+                f"arguments, got {len(instruction.arguments)}"
+            )
+        for index, (argument, parameter_type) in enumerate(
+            zip(instruction.arguments, signature.parameter_types),
+            start=1,
+        ):
+            self._require_defined(argument, value_types)
+            self._require_type(
+                argument.type,
+                parameter_type,
+                f"Indirect invoke argument {index} type mismatch",
+            )
+        self._verify_invoke_results(
+            instruction.result,
+            instruction.exception,
+            instruction.normal_arguments,
+            instruction.exceptional_arguments,
+            signature.return_type,
+        )
+
+    def _verify_interface_invoke(
+        self,
+        instruction: SSAInvokeInterface,
+        value_types: dict[str, IRType],
+    ) -> None:
+        self._require_defined(instruction.receiver, value_types)
+        if not isinstance(instruction.receiver.type, InterfaceType):
+            self._fail("Interface invoke receiver must have interface type")
+        if (
+            instruction.slot.index < 0
+            or not instruction.slot.method_id.startswith(
+                f"{instruction.receiver.type.name}."
+            )
+            or instruction.slot.receiver_ownership != "borrowed"
+            or instruction.slot.thunk_symbol
+        ):
+            self._fail("Interface invoke has invalid erased slot metadata")
+        if len(instruction.arguments) != len(
+            instruction.slot.parameter_types
+        ):
+            self._fail(
+                "Interface invoke argument count does not match slot signature"
+            )
+        for index, (argument, parameter_type) in enumerate(
+            zip(instruction.arguments, instruction.slot.parameter_types),
+            start=1,
+        ):
+            self._require_defined(argument, value_types)
+            self._require_type(
+                argument.type,
+                parameter_type,
+                f"Interface invoke argument {index} type mismatch",
+            )
+        self._verify_invoke_results(
+            instruction.result,
+            instruction.exception,
+            instruction.normal_arguments,
+            instruction.exceptional_arguments,
+            instruction.slot.return_type,
+        )
+
+    def _verify_invoke_results(
+        self,
+        result: SSAValue | None,
+        exception: SSAValue,
+        normal_arguments: tuple[SSAValue, ...],
+        exceptional_arguments: tuple[SSAValue, ...],
+        return_type: IRType,
+    ) -> None:
+        if isinstance(return_type, VoidType):
+            if result is not None:
+                self._fail("Void invoke cannot produce a normal result")
+            expected_normal: tuple[SSAValue, ...] = ()
+        else:
+            if result is None:
+                self._fail(
+                    f"Non-void invoke must produce a result of type {return_type}"
+                )
+            self._require_type(
+                result.type,
+                return_type,
+                "Invoke result type mismatch",
+            )
+            expected_normal = (result,)
+        self._require_exception_event(exception, "invoke exception result")
+        if normal_arguments != expected_normal:
+            self._fail(
+                "Invoke normal successor arguments must contain exactly its "
+                "normal result"
+            )
+        if exceptional_arguments != (exception,):
+            self._fail(
+                "Invoke exceptional successor arguments must contain exactly "
+                "its owned event"
+            )
+
+    def _require_exception_event(self, value: SSAValue, context: str) -> None:
+        if not isinstance(value.type, ExceptionEventType):
+            self._fail(f"{context} must have exception_event type")
 
     def _verify_array_new(
         self,
@@ -2031,9 +2691,9 @@ class SSAVerifier:
 
     def _cfg(self, function: SSAFunction) -> CFG:
         edges = tuple(
-            CFGEdge(block.name, successor)
+            CFGEdge(block.name, successor, kind)
             for block in function.blocks
-            for successor in self._successors(block)
+            for successor, kind, _arguments in self._successor_edges(block)
         )
         return CFG(
             function.name,
@@ -2077,6 +2737,25 @@ class SSAVerifier:
 
                     assert site.block_name is not None
                     assert site.instruction_index is not None
+                    if site.edge_target is not None:
+                        if (
+                            predecessors[site.edge_target] == {site.block_name}
+                            and (
+                                block.name == site.edge_target
+                                or (
+                                    dominators.is_reachable(block.name)
+                                    and dominators.dominates(
+                                        site.edge_target, block.name
+                                    )
+                                )
+                            )
+                        ):
+                            continue
+                        self._fail(
+                            f"Edge-defined SSA value '{self._value(value)}' "
+                            f"is unavailable outside its {site.edge_kind} edge "
+                            f"to block '{site.edge_target}'"
+                        )
                     if site.block_name == block.name:
                         if site.instruction_index >= use_index:
                             self._fail(
@@ -2117,6 +2796,11 @@ class SSAVerifier:
 
             assert site.block_name is not None
             assert site.instruction_index is not None
+            if (
+                site.edge_target == block.name
+                and site.block_name == predecessor
+            ):
+                continue
             if site.block_name == predecessor:
                 terminator_index = len(blocks[predecessor].instructions) - 1
                 if site.instruction_index < terminator_index:
@@ -2142,9 +2826,19 @@ class SSAVerifier:
 
         operands: list[SSAValue] = []
         for field in fields(instruction):
-            if field.name == "result":
+            if field.name == "result" or field.metadata.get(
+                "ir_definition", False
+            ):
                 continue
             operands.extend(cls._contained_values(getattr(instruction, field.name)))
+        if isinstance(
+            instruction,
+            (SSAInvoke, SSAInvokeIndirect, SSAInvokeInterface),
+        ):
+            definitions = {instruction.exception}
+            if instruction.result is not None:
+                definitions.add(instruction.result)
+            operands = [value for value in operands if value not in definitions]
         return tuple(operands)
 
     @classmethod
@@ -2444,7 +3138,7 @@ class SSAVerifier:
 
     @staticmethod
     def _instruction_result(instruction: SSAInstruction) -> SSAValue | None:
-        if isinstance(instruction, (SSAConst, SSABinaryOp, SSAUnaryOp, SSACompareOp, SSACast, SSAPhi, SSAFunctionRef)):
+        if isinstance(instruction, (SSAConst, SSABinaryOp, SSAUnaryOp, SSACompareOp, SSACast, SSAPhi, SSAFunctionRef, SSAPackException, SSAExceptionMatch, SSAExceptionPayload)):
             return instruction.result
         if isinstance(instruction, SSACall):
             return instruction.result
@@ -2502,6 +3196,35 @@ class SSAVerifier:
             return instruction.result
         return None
 
+    @classmethod
+    def _instruction_definitions(
+        cls,
+        instruction: SSAInstruction,
+    ) -> tuple[tuple[SSAValue, str | None, str | None], ...]:
+        if isinstance(
+            instruction,
+            (SSAInvoke, SSAInvokeIndirect, SSAInvokeInterface),
+        ):
+            definitions: list[
+                tuple[SSAValue, str | None, str | None]
+            ] = []
+            if instruction.result is not None:
+                definitions.append(
+                    (instruction.result, instruction.normal_target, "normal")
+                )
+            definitions.append(
+                (
+                    instruction.exception,
+                    instruction.exceptional_target,
+                    "exceptional",
+                )
+            )
+            return tuple(definitions)
+        if isinstance(instruction, SSACatchEntry):
+            return ((instruction.event, None, None),)
+        result = cls._instruction_result(instruction)
+        return () if result is None else ((result, None, None),)
+
     def _numeric_binary_result_type(self, left: IRType, right: IRType) -> IRType:
         if not isinstance(left, self._NUMERIC_TYPES) or not isinstance(right, self._NUMERIC_TYPES):
             self._fail(f"Numeric operation requires numeric operands, got {left} and {right}")
@@ -2515,11 +3238,49 @@ class SSAVerifier:
 
     @staticmethod
     def _successors(block: SSABasicBlock) -> tuple[str, ...]:
+        return tuple(
+            target
+            for target, _kind, _arguments in SSAVerifier._successor_edges(block)
+        )
+
+    @staticmethod
+    def _successor_edges(
+        block: SSABasicBlock,
+    ) -> tuple[tuple[str, str, tuple[SSAValue, ...]], ...]:
         terminator = block.instructions[-1]
         if isinstance(terminator, SSAJump):
-            return (terminator.target,)
+            return ((terminator.target, "normal", ()),)
         if isinstance(terminator, SSABranch):
-            return (terminator.true_target, terminator.false_target)
+            return (
+                (terminator.true_target, "normal", ()),
+                (terminator.false_target, "normal", ()),
+            )
+        if isinstance(
+            terminator,
+            (SSAInvoke, SSAInvokeIndirect, SSAInvokeInterface),
+        ):
+            return (
+                (
+                    terminator.normal_target,
+                    "normal",
+                    terminator.normal_arguments,
+                ),
+                (
+                    terminator.exceptional_target,
+                    "exceptional",
+                    terminator.exceptional_arguments,
+                ),
+            )
+        if isinstance(terminator, (SSAThrow, SSARethrow, SSAPropagate)):
+            if terminator.target is None:
+                return ()
+            return (
+                (
+                    terminator.target,
+                    "exceptional",
+                    terminator.exceptional_arguments,
+                ),
+            )
         return ()
 
     def _verify_type(self, type_: IRType, context: str) -> None:
@@ -2544,6 +3305,7 @@ class SSAVerifier:
                 ClassRefType,
                 InterfaceType,
                 FunctionType,
+                ExceptionEventType,
             ),
         ):
             return True

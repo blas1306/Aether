@@ -53,6 +53,7 @@ class DeadPhiEliminator:
                         function.return_type,
                         updated_blocks,
                         function.entry_block,
+                        function.may_throw,
                     )
                 )
                 removed_phis += function_removed

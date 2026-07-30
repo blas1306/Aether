@@ -1,6 +1,6 @@
 //! Layered traversal, instruction-local type rules, and borrowed-element rules.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use aether_ir::{
     ArrayType, BoolType, ComplexType, DoubleType, ExceptionEventType, FloatType, FunctionType,
@@ -18,6 +18,31 @@ use crate::lifecycle_verifier::LifecycleTypeRegistry;
 use crate::ssa_error::SSAInstructionLocation;
 use crate::ssa_verifier::instruction_location;
 use crate::{BorrowRule, BorrowRuleError};
+
+fn exception_ownership(block_name: &str, detail: &str) -> TypeRuleError {
+    TypeRuleError::ExceptionEventOwnership {
+        block_name: block_name.to_owned(),
+        detail: detail.to_owned(),
+    }
+}
+
+fn consume_exception_event(
+    block_name: &str,
+    event: &IRValue,
+    live: &mut HashSet<String>,
+) -> Result<(), TypeRuleError> {
+    if live.remove(&event.name) {
+        Ok(())
+    } else {
+        Err(exception_ownership(
+            block_name,
+            &format!(
+                "event '%{}' is consumed more than once or after propagation",
+                event.name
+            ),
+        ))
+    }
+}
 
 #[derive(Clone)]
 struct BorrowDefinition {
@@ -199,6 +224,13 @@ impl<'module> TypeVerifier<'module> {
             })?;
 
         self.verify_borrowed_elements(function)?;
+        self.verify_exception_event_ownership(function)
+            .map_err(
+                |source| FunctionTypeVerificationError::ExceptionEventOwnership {
+                    function_name: function.name.clone(),
+                    source,
+                },
+            )?;
 
         for (block_index, block) in function.blocks.iter().enumerate() {
             self.verify_block(function, block).map_err(|source| {
@@ -211,6 +243,214 @@ impl<'module> TypeVerifier<'module> {
             })?;
         }
         Ok(())
+    }
+
+    fn verify_exception_event_ownership(&self, function: &IRFunction) -> Result<(), TypeRuleError> {
+        let blocks = function
+            .blocks
+            .iter()
+            .map(|block| (block.name.as_str(), block))
+            .collect::<HashMap<_, _>>();
+        let handler_events = function
+            .blocks
+            .iter()
+            .filter_map(|block| match block.instructions.first() {
+                Some(IRInstruction::IRCatchEntry { event, .. }) => {
+                    Some((block.name.as_str(), event.name.as_str()))
+                }
+                _ => None,
+            })
+            .collect::<HashMap<_, _>>();
+        let has_events = !handler_events.is_empty()
+            || function.blocks.iter().any(|block| {
+                block
+                    .instructions
+                    .iter()
+                    .any(|instruction| matches!(instruction, IRInstruction::IRPackException { .. }))
+            });
+        if !has_events {
+            return Ok(());
+        }
+
+        let mut inputs: HashMap<String, HashMap<String, HashSet<String>>> = function
+            .blocks
+            .iter()
+            .map(|block| (block.name.clone(), HashMap::new()))
+            .collect();
+        inputs
+            .entry("entry".to_owned())
+            .or_default()
+            .insert("<entry>".to_owned(), HashSet::new());
+        let mut worklist = VecDeque::from(["entry".to_owned()]);
+        let mut queued = HashSet::from(["entry".to_owned()]);
+        let mut processed: HashMap<String, HashSet<String>> = HashMap::new();
+
+        while let Some(block_name) = worklist.pop_front() {
+            queued.remove(&block_name);
+            let predecessor_states = inputs.get(&block_name).cloned().unwrap_or_default();
+            if predecessor_states.is_empty() {
+                continue;
+            }
+            let mut normalized = Vec::new();
+            for mut state in predecessor_states.into_values() {
+                if let Some(event) = handler_events.get(block_name.as_str()) {
+                    state.insert((*event).to_owned());
+                }
+                normalized.push(state);
+            }
+            let first = normalized[0].clone();
+            if normalized.iter().skip(1).any(|state| state != &first) {
+                return Err(exception_ownership(
+                    &block_name,
+                    "incompatible ownership merge",
+                ));
+            }
+            if processed.get(&block_name) == Some(&first) {
+                continue;
+            }
+            processed.insert(block_name.clone(), first.clone());
+            let Some(block) = blocks.get(block_name.as_str()) else {
+                return Err(exception_ownership(
+                    &block_name,
+                    "ownership analysis reached an unknown block",
+                ));
+            };
+            let outgoing = self.transfer_exception_events(block, first)?;
+            for (target, state) in outgoing {
+                if !inputs.contains_key(&target) {
+                    return Err(exception_ownership(
+                        &block_name,
+                        &format!("ownership edge targets unknown block '{target}'"),
+                    ));
+                }
+                let target_inputs = inputs.entry(target.clone()).or_default();
+                if target_inputs.get(&block_name) == Some(&state) {
+                    continue;
+                }
+                target_inputs.insert(block_name.clone(), state);
+                if queued.insert(target.clone()) {
+                    worklist.push_back(target);
+                }
+            }
+        }
+
+        for block in &function.blocks {
+            if processed.contains_key(&block.name) {
+                continue;
+            }
+            let created = block
+                .instructions
+                .iter()
+                .filter_map(|instruction| match instruction {
+                    IRInstruction::IRPackException { result, .. } => Some(result.name.as_str()),
+                    _ => None,
+                })
+                .collect::<HashSet<_>>();
+            let consumed = block
+                .instructions
+                .iter()
+                .filter_map(|instruction| match instruction {
+                    IRInstruction::IRExceptionDestroy { event }
+                    | IRInstruction::IRThrow { event, .. }
+                    | IRInstruction::IRRethrow { event, .. }
+                    | IRInstruction::IRPropagate { event, .. } => Some(event.name.as_str()),
+                    _ => None,
+                })
+                .collect::<HashSet<_>>();
+            if let Some(leaked) = created.difference(&consumed).next() {
+                return Err(exception_ownership(
+                    &block.name,
+                    &format!("owned exception event '%{leaked}' has no terminal disposition"),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn transfer_exception_events(
+        &self,
+        block: &IRBasicBlock,
+        mut live: HashSet<String>,
+    ) -> Result<Vec<(String, HashSet<String>)>, TypeRuleError> {
+        for instruction in &block.instructions {
+            match instruction {
+                IRInstruction::IRCatchEntry { .. } => {}
+                IRInstruction::IRPackException { result, .. } => {
+                    live.insert(result.name.clone());
+                }
+                IRInstruction::IRExceptionMatch { event, .. }
+                | IRInstruction::IRExceptionPayload { event, .. } => {
+                    if !live.contains(&event.name) {
+                        return Err(exception_ownership(
+                            &block.name,
+                            &format!("event '%{}' is borrowed after consumption", event.name),
+                        ));
+                    }
+                }
+                IRInstruction::IRExceptionDestroy { event } => {
+                    consume_exception_event(&block.name, event, &mut live)?;
+                }
+                IRInstruction::IRThrow { event, target, .. }
+                | IRInstruction::IRRethrow { event, target, .. }
+                | IRInstruction::IRPropagate { event, target, .. } => {
+                    consume_exception_event(&block.name, event, &mut live)?;
+                    if let Some(target) = target {
+                        return Ok(vec![(target.clone(), live)]);
+                    }
+                    if !live.is_empty() {
+                        return Err(exception_ownership(
+                            &block.name,
+                            "exceptional unwind leaks another owned event",
+                        ));
+                    }
+                    return Ok(Vec::new());
+                }
+                IRInstruction::IRInvoke {
+                    normal_target,
+                    exceptional_target,
+                    ..
+                }
+                | IRInstruction::IRInvokeIndirect {
+                    normal_target,
+                    exceptional_target,
+                    ..
+                }
+                | IRInstruction::IRInvokeInterface {
+                    normal_target,
+                    exceptional_target,
+                    ..
+                } => {
+                    return Ok(vec![
+                        (normal_target.clone(), live.clone()),
+                        (exceptional_target.clone(), live),
+                    ]);
+                }
+                IRInstruction::IRJump { target } => {
+                    return Ok(vec![(target.clone(), live)]);
+                }
+                IRInstruction::IRBranch {
+                    true_target,
+                    false_target,
+                    ..
+                } => {
+                    return Ok(vec![
+                        (true_target.clone(), live.clone()),
+                        (false_target.clone(), live),
+                    ]);
+                }
+                IRInstruction::IRReturn { .. } => {
+                    if !live.is_empty() {
+                        return Err(exception_ownership(
+                            &block.name,
+                            "return leaks an owned exception event",
+                        ));
+                    }
+                    return Ok(Vec::new());
+                }
+                _ => {}
+            }
+        }
+        unreachable!("structure verification requires a terminator")
     }
 
     #[allow(clippy::too_many_lines)]

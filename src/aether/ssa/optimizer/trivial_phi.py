@@ -61,6 +61,7 @@ class TrivialPhiEliminator:
                     function.return_type,
                     blocks,
                     function.entry_block,
+                    function.may_throw,
                 )
             )
             removed_phis += function_removed

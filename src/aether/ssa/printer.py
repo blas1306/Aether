@@ -16,15 +16,22 @@ from .model import (
     SSACast,
     SSACall,
     SSACallIndirect,
+    SSACatchEntry,
     SSAClassGet,
     SSAClassNew,
     SSAClassSet,
     SSACompareOp,
     SSAConst,
+    SSAExceptionDestroy,
+    SSAExceptionMatch,
+    SSAExceptionPayload,
     SSAFunction,
     SSAFunctionRef,
     SSAInterfaceCall,
     SSAInterfaceConstruct,
+    SSAInvoke,
+    SSAInvokeIndirect,
+    SSAInvokeInterface,
     SSAInstruction,
     SSAJump,
     SSAListGet,
@@ -55,6 +62,7 @@ from .model import (
     SSAMatrixSet,
     SSAModule,
     SSAOuterProduct,
+    SSAPackException,
     SSAParameter,
     SSAPrint,
     SSAStructGet,
@@ -64,7 +72,10 @@ from .model import (
     SSAMethodResultReceiver,
     SSAMethodResultValue,
     SSAPhi,
+    SSAPropagate,
+    SSARethrow,
     SSAReturn,
+    SSAThrow,
     SSAUnaryOp,
     SSAValue,
     SSAVectorGet,
@@ -94,7 +105,11 @@ class SSAPrinter:
 
     def _print_function(self, function: SSAFunction) -> str:
         parameters = ", ".join(self._typed_value(parameter) for parameter in function.parameters)
-        lines = [f"func {self._global_name(function.name)}({parameters}) -> {function.return_type} {{"]
+        effect = " may_throw" if function.may_throw else ""
+        lines = [
+            f"func {self._global_name(function.name)}({parameters}) -> "
+            f"{function.return_type}{effect} {{"
+        ]
 
         for index, block in enumerate(function.blocks):
             if index:
@@ -144,6 +159,22 @@ class SSAPrinter:
             if instruction.result is None:
                 return call
             return f"{self._typed_value(instruction.result)} = {call}"
+        if isinstance(instruction, SSAInvoke):
+            arguments = ", ".join(
+                self._value(argument) for argument in instruction.arguments
+            )
+            result = (
+                "void"
+                if instruction.result is None
+                else self._typed_value(instruction.result)
+            )
+            return (
+                f"invoke {self._global_name(instruction.function)}({arguments}) -> "
+                f"normal {instruction.normal_target} "
+                f"{self._edge_arguments(instruction.normal_arguments, result)}, "
+                f"exceptional {instruction.exceptional_target} "
+                f"{self._edge_arguments(instruction.exceptional_arguments)}"
+            )
         if isinstance(instruction, SSAFunctionRef):
             return (
                 f"{self._typed_value(instruction.result)} = function_ref "
@@ -155,6 +186,22 @@ class SSAPrinter:
             if instruction.result is None:
                 return call
             return f"{self._typed_value(instruction.result)} = {call}"
+        if isinstance(instruction, SSAInvokeIndirect):
+            arguments = ", ".join(
+                self._value(argument) for argument in instruction.arguments
+            )
+            result = (
+                "void"
+                if instruction.result is None
+                else self._typed_value(instruction.result)
+            )
+            return (
+                f"invoke_indirect {self._value(instruction.callee)}({arguments}) -> "
+                f"normal {instruction.normal_target} "
+                f"{self._edge_arguments(instruction.normal_arguments, result)}, "
+                f"exceptional {instruction.exceptional_target} "
+                f"{self._edge_arguments(instruction.exceptional_arguments)}"
+            )
         if isinstance(instruction, SSAPrint):
             operation = "println" if instruction.newline else "print"
             shape = (
@@ -187,6 +234,24 @@ class SSAPrinter:
             if instruction.result is None:
                 return call
             return f"{self._typed_value(instruction.result)} = {call}"
+        if isinstance(instruction, SSAInvokeInterface):
+            arguments = ", ".join(
+                self._value(argument) for argument in instruction.arguments
+            )
+            result = (
+                "void"
+                if instruction.result is None
+                else self._typed_value(instruction.result)
+            )
+            return (
+                f"invoke_interface {self._value(instruction.receiver)} "
+                f"slot {instruction.slot.index} "
+                f"[{instruction.slot.method_id}]({arguments}) -> "
+                f"normal {instruction.normal_target} "
+                f"{self._edge_arguments(instruction.normal_arguments, result)}, "
+                f"exceptional {instruction.exceptional_target} "
+                f"{self._edge_arguments(instruction.exceptional_arguments)}"
+            )
         if isinstance(instruction, SSAClassGet):
             return (
                 f"{self._typed_value(instruction.result)} = class_get "
@@ -392,6 +457,40 @@ class SSAPrinter:
             return f"{self._typed_value(instruction.result)} = list_length {self._value(instruction.list_value)}"
         if isinstance(instruction, SSAListIsEmpty):
             return f"{self._typed_value(instruction.result)} = list_is_empty {self._value(instruction.list_value)}"
+        if isinstance(instruction, SSAPackException):
+            descriptor = (
+                "dynamic"
+                if instruction.dynamic_type is None
+                else self._global_name(instruction.dynamic_type)
+            )
+            return (
+                f"{self._typed_value(instruction.result)} = exception_pack "
+                f"{self._value(instruction.payload)} descriptor {descriptor}"
+            )
+        if isinstance(instruction, SSACatchEntry):
+            catches = ", ".join(
+                self._global_name(catch_type)
+                for catch_type in instruction.catch_types
+            )
+            return (
+                f"catch_entry {instruction.handler_id} "
+                f"{self._typed_value(instruction.event)} [{catches}]"
+            )
+        if isinstance(instruction, SSAExceptionMatch):
+            mode = "catch_all" if instruction.catch_all else "exact"
+            return (
+                f"{self._typed_value(instruction.result)} = exception_match {mode} "
+                f"{self._value(instruction.event)}, "
+                f"{self._global_name(instruction.catch_type)}"
+            )
+        if isinstance(instruction, SSAExceptionPayload):
+            return (
+                f"{self._typed_value(instruction.result)} = exception_borrow "
+                f"{self._value(instruction.event)} as "
+                f"{self._global_name(instruction.catch_type)}"
+            )
+        if isinstance(instruction, SSAExceptionDestroy):
+            return f"exception_destroy {self._value(instruction.event)}"
         if isinstance(instruction, SSAVectorLength):
             return f"{self._typed_value(instruction.result)} = vector_length {self._value(instruction.vector)}"
         if isinstance(instruction, SSAMatrixRows):
@@ -417,6 +516,19 @@ class SSAPrinter:
             )
         if isinstance(instruction, SSAJump):
             return f"jump {instruction.target}"
+        if isinstance(instruction, (SSAThrow, SSARethrow, SSAPropagate)):
+            operation = {
+                SSAThrow: "throw",
+                SSARethrow: "rethrow",
+                SSAPropagate: "propagate",
+            }[type(instruction)]
+            if instruction.target is None:
+                return f"{operation} {self._value(instruction.event)} -> unwind"
+            return (
+                f"{operation} {self._value(instruction.event)} -> exceptional "
+                f"{instruction.target} "
+                f"{self._edge_arguments(instruction.exceptional_arguments)}"
+            )
         if isinstance(instruction, SSAReturn):
             if instruction.value is None:
                 return "return"
@@ -434,6 +546,15 @@ class SSAPrinter:
     @staticmethod
     def _global_name(name: str) -> str:
         return name if name.startswith("@") else f"@{name}"
+
+    @staticmethod
+    def _edge_arguments(
+        arguments: tuple[SSAValue, ...],
+        empty_label: str | None = None,
+    ) -> str:
+        if arguments:
+            return "[" + ", ".join(SSAPrinter._value(value) for value in arguments) + "]"
+        return f"[{empty_label}]" if empty_label is not None else "[]"
 
     @staticmethod
     def _literal(value: Any) -> str:
