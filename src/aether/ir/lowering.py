@@ -255,6 +255,7 @@ class _ExceptionTarget:
 class _ActiveCatch:
     event: IRValue
     scope_depth: int
+    rethrow_target: _ExceptionTarget
 
 
 @dataclass(frozen=True)
@@ -1043,10 +1044,10 @@ class IRLowerer:
         if not context.active_catches:
             self._fail("IR bare rethrow requires an active catch event.", statement)
         active = context.active_catches[-1]
-        target = self._outer_exception_target(context)
+        target = active.rethrow_target
         self._emit_cleanup(
             context,
-            minimum_scope_depth=active.scope_depth,
+            minimum_scope_depth=target.scope_depth,
             excluding_events={active.event.name},
         )
         context.block.instructions.append(
@@ -1079,6 +1080,10 @@ class IRLowerer:
         self._lower_statements(statement.try_body, context)
         try_end = context.block
         context.exception_targets.pop()
+
+        if not self._has_exceptional_predecessor(context, handler.name):
+            context.blocks.remove(handler)
+            return
 
         merge = self._new_block(f"catch.merge{index}")
         self._emit_jump_if_open(try_end, merge.name)
@@ -1119,7 +1124,11 @@ class IRLowerer:
             saved_locals = dict(context.locals)
             context.locals[clause.binder_name] = borrowed
             context.active_catches.append(
-                _ActiveCatch(handler_event, len(context.scopes))
+                _ActiveCatch(
+                    handler_event,
+                    len(context.scopes),
+                    outer,
+                )
             )
             try:
                 self._lower_statements(clause.body, context)
@@ -1131,13 +1140,37 @@ class IRLowerer:
             dispatch = next_dispatch
 
         dispatch.instructions.extend(
-            IRExceptionDestroy(event)
-            for event in self._caught_events_for_exit(context, outer)
+            self._cleanup_instructions(
+                context,
+                minimum_scope_depth=outer.scope_depth,
+            )
         )
         dispatch.instructions.append(
             IRPropagate(handler_event, outer.block, outer.event)
         )
         self._append_and_enter(context, merge)
+
+    @staticmethod
+    def _has_exceptional_predecessor(
+        context: _FunctionContext,
+        target: str,
+    ) -> bool:
+        """Return whether an emitted exceptional transfer reaches ``target``."""
+
+        for block in context.blocks:
+            if not block.instructions:
+                continue
+            terminator = block.instructions[-1]
+            if isinstance(
+                terminator,
+                (IRInvoke, IRInvokeIndirect, IRInvokeInterface),
+            ):
+                if terminator.exceptional_target == target:
+                    return True
+            elif isinstance(terminator, (IRThrow, IRRethrow, IRPropagate)):
+                if terminator.target == target:
+                    return True
+        return False
 
     def _catch_type_id(self, type_name: AetherType) -> str:
         lowered = self._lower_type(type_name)
@@ -1193,18 +1226,37 @@ class IRLowerer:
         excluding: set[str] | None = None,
         excluding_events: set[str] | None = None,
     ) -> None:
+        context.block.instructions.extend(
+            self._cleanup_instructions(
+                context,
+                minimum_scope_depth=minimum_scope_depth,
+                excluding=excluding,
+                excluding_events=excluding_events,
+            )
+        )
+
+    @staticmethod
+    def _cleanup_instructions(
+        context: _FunctionContext,
+        *,
+        minimum_scope_depth: int = 0,
+        excluding: set[str] | None = None,
+        excluding_events: set[str] | None = None,
+    ) -> list[IRInstruction]:
+        instructions: list[IRInstruction] = []
         excluded = excluding or set()
         for scope in reversed(context.scopes[minimum_scope_depth:]):
             for storage in reversed(scope.storages):
                 if storage.name not in excluded:
-                    context.block.instructions.append(IRDestroy(storage))
+                    instructions.append(IRDestroy(storage))
         excluded_event_names = excluding_events or set()
         for active in reversed(context.active_catches):
             if (
                 active.scope_depth >= minimum_scope_depth
                 and active.event.name not in excluded_event_names
             ):
-                context.block.instructions.append(IRExceptionDestroy(active.event))
+                instructions.append(IRExceptionDestroy(active.event))
+        return instructions
 
     def _lower_owned_return(
         self,

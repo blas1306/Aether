@@ -370,8 +370,14 @@ class _ExceptionEvent:
 
 
 class _ThrownExceptionSignal(Exception):
-    def __init__(self, event: _ExceptionEvent) -> None:
+    def __init__(
+        self,
+        event: _ExceptionEvent,
+        *,
+        rethrow_depth: int | None = None,
+    ) -> None:
         self.event = event
+        self.rethrow_depth = rethrow_depth
 
 
 class _FunctionContext:
@@ -840,11 +846,19 @@ class Interpreter:
                     column=statement.column,
                     kind="exception",
                 )
-            raise _ThrownExceptionSignal(self._active_exception_events[-1])
+            raise _ThrownExceptionSignal(
+                self._active_exception_events[-1],
+                rethrow_depth=len(self._active_exception_events),
+            )
         if isinstance(statement, ast.TryCatchStatement):
             try:
                 self._execute_block(statement.try_body, Environment(parent=env))
             except _ThrownExceptionSignal as signal:
+                if (
+                    signal.rethrow_depth is not None
+                    and len(self._active_exception_events) >= signal.rethrow_depth
+                ):
+                    raise
                 catch_clause = next(
                     (
                         clause
