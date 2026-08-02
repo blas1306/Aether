@@ -5,16 +5,24 @@ import re
 import struct
 from typing import Any, Callable
 
-from aether.ir.model import IREnumConstant, IRWitnessMethodSlot, IRWitnessTable
+from aether.ir.model import (
+    IREnumConstant,
+    IRErasedBoxLayout,
+    IRWitnessMethodSlot,
+    IRWitnessTable,
+)
 from aether.interface_abi import (
     box_type_symbol,
     copy_owned_symbol,
+    dispatch_thunk_symbol,
     drop_owned_symbol,
     interface_type_symbol,
+    witness_symbol,
 )
 from aether.integer_arithmetic import INT_MAX, INT_MIN, is_aether_int
 from aether.string_value import STRING_SPLIT_BUILTIN, STRING_TRIM_BUILTIN
-from aether.ir.types import ArrayType, BoolType, ClassRefType, DoubleType, EnumType, FloatType, FunctionType, IntType, InterfaceType, ListType, MatrixType, MethodResultType, NullableType, StringType, StructType, VectorType, VoidType
+from aether.ir.types import ArrayType, BoolType, ClassRefType, DoubleType, EnumType, ExceptionEventType, FloatType, FunctionType, IntType, InterfaceType, ListType, MatrixType, MethodResultType, NullableType, StringType, StructType, VectorType, VoidType
+from aether.ir.erased_layout import align_up, erased_size_alignment
 from aether.ssa.model import (
     SSAArrayCopy,
     SSAArrayGet,
@@ -33,6 +41,9 @@ from aether.ssa.model import (
     SSAClassSet,
     SSAInterfaceCall,
     SSAInterfaceConstruct,
+    SSAInvoke,
+    SSAInvokeIndirect,
+    SSAInvokeInterface,
     SSACompareOp,
     SSAConst,
     SSAFunction,
@@ -67,6 +78,7 @@ from aether.ssa.model import (
     SSAMatrixSet,
     SSAModule,
     SSAOuterProduct,
+    SSAPackException,
     SSAParameter,
     SSAPrint,
     SSAStructGet,
@@ -76,7 +88,14 @@ from aether.ssa.model import (
     SSAMethodResultReceiver,
     SSAMethodResultValue,
     SSAPhi,
+    SSAPropagate,
+    SSARethrow,
     SSAReturn,
+    SSACatchEntry,
+    SSAExceptionDestroy,
+    SSAExceptionMatch,
+    SSAExceptionPayload,
+    SSAThrow,
     SSAUnaryOp,
     SSAValue,
     SSAVectorGet,
@@ -109,6 +128,11 @@ from .string_runtime import LLVMStringRuntime
 from .class_runtime import class_new_helper, class_object_type, class_runtime_sections
 from .process_runtime import LLVMProcessRuntime
 from .text_file_runtime import LLVMTextFileRuntime
+from .exception_abi import (
+    EXCEPTION_RUNTIME_ABI_VERSION,
+    exception_descriptor_symbol,
+)
+from .exception_runtime import LLVMExceptionRuntime
 from aether.process_arguments import PROCESS_ARGS_BUILTIN
 from aether.range_safety import (
     RANGE_STEP_NONZERO_BUILTIN,
@@ -178,6 +202,19 @@ class LLVMPrinter:
     _IDENTIFIER_RE = re.compile(r"^[A-Za-z_$._][A-Za-z0-9_$._-]*$")
     _LIST_STRUCT_TYPE = "%AetherList"
 
+    def __init__(
+        self,
+        *,
+        exception_runtime_abi_version: int = EXCEPTION_RUNTIME_ABI_VERSION,
+    ) -> None:
+        if exception_runtime_abi_version != EXCEPTION_RUNTIME_ABI_VERSION:
+            raise LLVMBackendError(
+                "LLVM private exception runtime ABI mismatch: "
+                f"compiler requires v{EXCEPTION_RUNTIME_ABI_VERSION}, "
+                f"requested v{exception_runtime_abi_version}"
+            )
+        self._exception_runtime_abi_version = exception_runtime_abi_version
+
     def print_module(self, module: SSAModule, *, native_entry: bool = False) -> str:
         self._native_entry = native_entry
         self._entry_symbol = "__aether_program_main"
@@ -238,6 +275,43 @@ class LLVMPrinter:
         self._witnesses: dict[str, IRWitnessTable] = {}
         self._uses_interface_dispatch = False
         self._uses_interface_boxing = False
+        self._uses_exceptions = any(
+            isinstance(
+                instruction,
+                (
+                    SSAInvoke,
+                    SSAInvokeIndirect,
+                    SSAInvokeInterface,
+                    SSAPackException,
+                    SSACatchEntry,
+                    SSAExceptionMatch,
+                    SSAExceptionPayload,
+                    SSAExceptionDestroy,
+                    SSAThrow,
+                    SSARethrow,
+                    SSAPropagate,
+                ),
+            )
+            for function in module.functions
+            for block in function.blocks
+            for instruction in block.instructions
+        )
+        self._throwing_interface_slots = {
+            instruction.slot.method_id
+            for function in module.functions
+            for block in function.blocks
+            for instruction in block.instructions
+            if isinstance(instruction, SSAInvokeInterface)
+        }
+        if self._uses_exceptions:
+            self._throwing_interface_slots.add("Error.message")
+            self._uses_interface_dispatch = True
+            self._uses_string_runtime = True
+        self._exception_nominal_types = self._collect_exception_nominal_types(module)
+        for nominal_id, concrete_type in sorted(
+            self._exception_nominal_types.items()
+        ):
+            self._require_error_witness(nominal_id, concrete_type)
         # Discover reference layouts before deciding which common runtime
         # declarations are needed.  Some nested uses surface only while
         # recursively materializing aggregate helpers later in this method.
@@ -268,6 +342,7 @@ class LLVMPrinter:
         # Ownership adapters may discover nested ARC helpers and class
         # descriptors.  Materialize them before freezing runtime requirements.
         witness_globals = self._print_witness_metadata()
+        exception_descriptors = self._print_exception_descriptors()
         array_runtime = LLVMArrayRuntime(
             uses_type=self._uses_array_type,
             uses_allocation=self._uses_array_allocation,
@@ -300,6 +375,7 @@ class LLVMPrinter:
             or uses_list_growth
             or self._sequence_sort_types
             or self._uses_interface_boxing
+            or self._uses_exceptions
         )
         common_runtime = LLVMRuntimeCommon(
             uses_allocation=uses_allocation,
@@ -334,6 +410,7 @@ class LLVMPrinter:
                 )
                 or bool(self._class_types)
                 or bool(self._collection_object_arc_helpers)
+                or self._uses_exceptions
             ),
             uses_free_and_memcpy=bool(
                 self._class_types
@@ -346,6 +423,7 @@ class LLVMPrinter:
                     for _kind, _element, retain in self._collection_object_arc_helpers
                 )
                 or self._uses_interface_boxing
+                or self._uses_exceptions
             ),
             uses_memmove=self._uses_list_insert or self._uses_list_remove_at,
             sequence_sort_types=frozenset(self._sequence_sort_types),
@@ -555,6 +633,7 @@ class LLVMPrinter:
             codec=self._uses_text_codec,
         ).append(runtime)
         LLVMTextFileRuntime(self._uses_text_file_io).append(runtime)
+        LLVMExceptionRuntime(self._uses_exceptions).append(runtime)
         LLVMProcessRuntime(
             self._uses_process_context or self._uses_process_arguments,
             snapshots=self._uses_process_arguments,
@@ -585,12 +664,165 @@ class LLVMPrinter:
             + nullable_types
             + struct_types
             + witness_globals
+            + exception_descriptors
             + runtime
             + globals_
             + functions
             + wrappers
         )
         return "\n\n".join(sections)
+
+    def _collect_exception_nominal_types(
+        self,
+        module: SSAModule,
+    ) -> dict[str, StructType | ClassRefType]:
+        """Resolve every concrete Error identity required by native lowering."""
+
+        found: dict[str, StructType | ClassRefType] = {}
+
+        def register(name: str, type_: object) -> None:
+            if not isinstance(type_, (StructType, ClassRefType)):
+                raise LLVMBackendError(
+                    f"LLVM exception descriptor '{name}' has no concrete nominal type"
+                )
+            if type_.name != name:
+                raise LLVMBackendError(
+                    f"LLVM malformed exception descriptor identity: '{name}' "
+                    f"does not match payload type '{type_.name}'"
+                )
+            previous = found.get(name)
+            if previous is not None and previous != type_:
+                raise LLVMBackendError(
+                    f"LLVM exception nominal identity '{name}' is both class and struct"
+                )
+            found[name] = type_
+
+        pending_catches: set[str] = set()
+        for function in module.functions:
+            for block in function.blocks:
+                for instruction in block.instructions:
+                    if isinstance(instruction, SSAPackException):
+                        if isinstance(instruction.payload.type, InterfaceType):
+                            if (
+                                instruction.payload.type.name != "Error"
+                                or instruction.dynamic_type is not None
+                            ):
+                                raise LLVMBackendError(
+                                    "LLVM exception_pack interface payload must be dynamic Error"
+                                )
+                        else:
+                            if instruction.dynamic_type is None:
+                                raise LLVMBackendError(
+                                    "LLVM concrete exception_pack requires a canonical descriptor"
+                                )
+                            register(instruction.dynamic_type, instruction.payload.type)
+                    elif isinstance(instruction, SSAExceptionPayload):
+                        if instruction.catch_type == "Error":
+                            if instruction.result.type != InterfaceType("Error"):
+                                raise LLVMBackendError(
+                                    "LLVM Error catch payload must use interface Error"
+                                )
+                        else:
+                            register(instruction.catch_type, instruction.result.type)
+                    elif isinstance(instruction, SSAExceptionMatch):
+                        if not instruction.catch_all:
+                            pending_catches.add(instruction.catch_type)
+
+        for name in sorted(pending_catches - found.keys()):
+            target = self._functions_by_name.get(f"{name}.message")
+            if target is None or not target.parameters:
+                raise LLVMBackendError(
+                    f"LLVM catch descriptor '{name}' has no canonical Error witness"
+                )
+            register(name, target.parameters[0].type)
+        return found
+
+    def _require_error_witness(
+        self,
+        nominal_id: str,
+        concrete_type: StructType | ClassRefType,
+    ) -> IRWitnessTable:
+        symbol = witness_symbol("Error", nominal_id)
+        existing = self._witnesses.get(symbol)
+        if existing is not None:
+            if existing.concrete_type_id != nominal_id or existing.interface_id != "Error":
+                raise LLVMBackendError(
+                    f"LLVM canonical Error witness collision for '{nominal_id}'"
+                )
+            return existing
+
+        target = self._functions_by_name.get(f"{nominal_id}.message")
+        expected_return: object = StringType()
+        if isinstance(concrete_type, StructType):
+            expected_return = MethodResultType(concrete_type, StringType())
+        if (
+            target is None
+            or tuple(parameter.type for parameter in target.parameters) != (concrete_type,)
+            or target.return_type != expected_return
+        ):
+            raise LLVMBackendError(
+                f"LLVM Error witness target '{nominal_id}.message' has an incompatible signature"
+            )
+
+        box_layout = None
+        carrier_kind = "class"
+        if isinstance(concrete_type, StructType):
+            payload_size, payload_alignment = erased_size_alignment(
+                concrete_type,
+                self._structs,
+            )
+            payload_offset = align_up(16, payload_alignment)
+            carrier_kind = "box"
+            box_layout = IRErasedBoxLayout(
+                payload_size,
+                payload_alignment,
+                payload_offset,
+                "owned_value",
+                copy_owned_symbol("Error", nominal_id),
+                drop_owned_symbol("Error", nominal_id),
+            )
+        slot = IRWitnessMethodSlot(
+            0,
+            "Error.message",
+            (),
+            StringType(),
+            dispatch_thunk_symbol("Error", nominal_id, 0, "Error.message"),
+        )
+        witness = IRWitnessTable(
+            symbol,
+            "Error",
+            nominal_id,
+            carrier_kind,
+            (slot,),
+            1,
+            box_layout,
+        )
+        self._witnesses[symbol] = witness
+        return witness
+
+    def _print_exception_descriptors(self) -> list[str]:
+        if not self._uses_exceptions:
+            return []
+        sections: list[str] = [
+            "%AetherExceptionDescriptorV1 = type { i64, ptr, ptr }",
+            "%AetherExceptionEventV1 = type { i64, i32, i32, ptr, ptr, i32, i32 }",
+        ]
+        for nominal_id, concrete_type in sorted(self._exception_nominal_types.items()):
+            witness = self._require_error_witness(nominal_id, concrete_type)
+            encoded = nominal_id.encode("utf-8") + b"\0"
+            descriptor = exception_descriptor_symbol(nominal_id)
+            sections.extend(
+                [
+                    f"@{descriptor}.name = private unnamed_addr constant "
+                    f"[{len(encoded)} x i8] c\"{self._escape_string_initializer(encoded)}\"",
+                    f"@{descriptor} = private constant %AetherExceptionDescriptorV1 "
+                    f"{{ i64 {EXCEPTION_RUNTIME_ABI_VERSION}, "
+                    f"ptr getelementptr ([{len(encoded)} x i8], "
+                    f"ptr @{descriptor}.name, i64 0, i64 0), "
+                    f"ptr @{witness.symbol} }}",
+                ]
+            )
+        return sections
 
     @staticmethod
     def _collect_nullable_types(module: SSAModule) -> list[NullableType]:
@@ -705,6 +937,8 @@ class LLVMPrinter:
         return sorted(found, key=str), has_array, has_list
 
     def _print_function(self, function: SSAFunction) -> str:
+        self._current_function = function
+        self._current_block = ""
         self._constants: dict[str, str] = {}
         self._function_references: dict[str, str] = {}
         self._values: dict[str, str] = {
@@ -713,14 +947,44 @@ class LLVMPrinter:
         }
         self._next_temp = 0
         self._next_synthetic_temp = 0
+        self._exception_predecessors: dict[str, list[tuple[str, SSAValue]]] = {
+            block.name: [] for block in function.blocks
+        }
+        for predecessor in function.blocks:
+            terminator = predecessor.instructions[-1]
+            if isinstance(terminator, (SSAInvoke, SSAInvokeIndirect, SSAInvokeInterface)):
+                if terminator.exceptional_arguments != (terminator.exception,):
+                    raise LLVMBackendError(
+                        "LLVM invoke exceptional edge must move exactly its event"
+                    )
+                self._exception_predecessors[terminator.exceptional_target].append(
+                    (predecessor.name, terminator.exception)
+                )
+            elif isinstance(terminator, (SSAThrow, SSARethrow, SSAPropagate)):
+                if terminator.target is not None:
+                    if terminator.exceptional_arguments != (terminator.event,):
+                        raise LLVMBackendError(
+                            "LLVM exceptional transfer must move exactly its event"
+                        )
+                    self._exception_predecessors[terminator.target].append(
+                        (predecessor.name, terminator.event)
+                    )
         self._collect_function_values(function)
 
         return_type = llvm_type(function.return_type)
-        parameters = ", ".join(
+        rendered_parameters = [
             f"{llvm_type(parameter.type)} {self._parameter_name(parameter)}"
             for parameter in function.parameters
+        ]
+        if self._function_uses_exception_out(function):
+            rendered_parameters.append("ptr %__ae_exception_out")
+        parameters = ", ".join(rendered_parameters)
+        linkage = (
+            "private "
+            if function.name.startswith("__ae_m")
+            or (function.may_throw and function.name != "main")
+            else ""
         )
-        linkage = "private " if function.name.startswith("__ae_m") else ""
         lines = [
             f"define {linkage}{return_type} {self._global_name(function.name)}({parameters}) {{"
         ]
@@ -743,11 +1007,21 @@ class LLVMPrinter:
                     )
                     continue
 
+                if isinstance(instruction, (SSAInvoke, SSAInvokeIndirect, SSAInvokeInterface)):
+                    if instruction.result is not None:
+                        self._reserve_temp(instruction.result)
+                    self._reserve_temp(instruction.exception)
+                    continue
+                if isinstance(instruction, SSACatchEntry):
+                    self._reserve_temp(instruction.event)
+                    continue
+
                 result = self._instruction_result(instruction)
                 if result is not None:
                     self._reserve_temp(result)
 
     def _print_block(self, block: SSABasicBlock, function: SSAFunction) -> list[str]:
+        self._current_block = block.name
         lines = [self._label_definition(block.name)]
         for instruction in block.instructions:
             emitted = self._print_instruction(instruction, function)
@@ -771,6 +1045,27 @@ class LLVMPrinter:
             return self._print_compare_op(instruction)
         if isinstance(instruction, SSACast):
             return self._print_cast(instruction)
+        if isinstance(instruction, SSAInvoke):
+            return "\n  ".join(self._print_direct_invoke(instruction))
+        if isinstance(instruction, SSAInvokeIndirect):
+            return "\n  ".join(self._print_indirect_invoke(instruction))
+        if isinstance(instruction, SSAInvokeInterface):
+            return "\n  ".join(self._print_interface_invoke(instruction))
+        if isinstance(instruction, SSAPackException):
+            return "\n  ".join(self._print_exception_pack(instruction))
+        if isinstance(instruction, SSACatchEntry):
+            return self._print_catch_entry(instruction)
+        if isinstance(instruction, SSAExceptionMatch):
+            return self._print_exception_match(instruction)
+        if isinstance(instruction, SSAExceptionPayload):
+            return "\n  ".join(self._print_exception_payload(instruction))
+        if isinstance(instruction, SSAExceptionDestroy):
+            return (
+                "call void @__ae_exception_destroy_v1(ptr "
+                f"{self._operand(instruction.event)})"
+            )
+        if isinstance(instruction, (SSAThrow, SSARethrow, SSAPropagate)):
+            return self._print_exception_transfer(instruction, function)
         if isinstance(instruction, SSAReturn):
             return self._print_return(instruction, function)
         if isinstance(instruction, SSAPhi):
@@ -914,7 +1209,7 @@ class LLVMPrinter:
 
     @staticmethod
     def _instruction_result(instruction: SSAInstruction) -> SSAValue | None:
-        if isinstance(instruction, SSABinaryOp | SSAUnaryOp | SSACompareOp | SSACast | SSAPhi):
+        if isinstance(instruction, SSABinaryOp | SSAUnaryOp | SSACompareOp | SSACast | SSAPhi | SSAPackException | SSAExceptionMatch | SSAExceptionPayload):
             return instruction.result
         if isinstance(instruction, SSACall):
             return instruction.result
@@ -1654,6 +1949,330 @@ class LLVMPrinter:
 
     def _print_jump(self, instruction: SSAJump) -> str:
         return f"br {self._label_operand(instruction.target)}"
+
+    @staticmethod
+    def _function_uses_exception_out(function: SSAFunction) -> bool:
+        return function.may_throw and function.name != "main"
+
+    @staticmethod
+    def _exceptional_return(return_type: object) -> str:
+        if isinstance(return_type, VoidType):
+            return "ret void"
+        rendered = llvm_type(return_type)
+        if isinstance(return_type, (IntType, EnumType, BoolType)):
+            return f"ret {rendered} 0"
+        if isinstance(return_type, (DoubleType, FloatType)):
+            return f"ret {rendered} 0.000000e+00"
+        if isinstance(
+            return_type,
+            (StringType, ClassRefType, FunctionType, ArrayType, ListType, VectorType, MatrixType),
+        ):
+            return f"ret {rendered} null"
+        return f"ret {rendered} zeroinitializer"
+
+    def _invoke_call_lines(
+        self,
+        *,
+        callee: str,
+        arguments: tuple[SSAValue, ...],
+        return_type: object,
+        result_value: SSAValue | None,
+        exception_value: SSAValue,
+        normal_target: str,
+        exceptional_target: str,
+        prefix: str,
+    ) -> list[str]:
+        slot = self._synthetic_temp(f"{prefix}.event.out")
+        failed = self._synthetic_temp(f"{prefix}.failed")
+        rendered_arguments = [
+            f"{llvm_type(argument.type)} {self._operand(argument)}"
+            for argument in arguments
+        ]
+        rendered_arguments.append(f"ptr {slot}")
+        lines = [
+            f"{slot} = alloca ptr, align 8",
+            f"store ptr null, ptr {slot}, align 8",
+        ]
+        rendered_return = llvm_type(return_type)
+        call = f"call {rendered_return} {callee}({', '.join(rendered_arguments)})"
+        if isinstance(return_type, VoidType):
+            if result_value is not None:
+                raise LLVMBackendError("LLVM void invoke cannot define a normal result")
+            lines.append(call)
+        else:
+            if result_value is None:
+                raise LLVMBackendError("LLVM non-void invoke requires a normal result")
+            lines.append(f"{self._new_temp(result_value)} = {call}")
+        event = self._new_temp(exception_value)
+        lines.extend(
+            [
+                f"{event} = load ptr, ptr {slot}, align 8",
+                f"{failed} = icmp ne ptr {event}, null",
+                f"br i1 {failed}, {self._label_operand(exceptional_target)}, "
+                f"{self._label_operand(normal_target)}",
+            ]
+        )
+        return lines
+
+    def _print_direct_invoke(self, instruction: SSAInvoke) -> list[str]:
+        target = self._functions_by_name.get(instruction.function)
+        if target is None or not target.may_throw:
+            raise LLVMBackendError(
+                f"LLVM call/invoke mismatch for '{instruction.function}'"
+            )
+        if instruction.function == "main":
+            raise LLVMBackendError(
+                "LLVM raw-C containment forbids invoking the process entry as a throwing callable"
+            )
+        return self._invoke_call_lines(
+            callee=self._global_name(instruction.function),
+            arguments=instruction.arguments,
+            return_type=target.return_type,
+            result_value=instruction.result,
+            exception_value=instruction.exception,
+            normal_target=instruction.normal_target,
+            exceptional_target=instruction.exceptional_target,
+            prefix="invoke.direct",
+        )
+
+    def _print_indirect_invoke(self, instruction: SSAInvokeIndirect) -> list[str]:
+        if not isinstance(instruction.callee.type, FunctionType):
+            raise LLVMBackendError("LLVM indirect invoke requires a callable callee")
+        return self._invoke_call_lines(
+            callee=self._operand(instruction.callee),
+            arguments=instruction.arguments,
+            return_type=instruction.callee.type.return_type,
+            result_value=instruction.result,
+            exception_value=instruction.exception,
+            normal_target=instruction.normal_target,
+            exceptional_target=instruction.exceptional_target,
+            prefix="invoke.indirect",
+        )
+
+    def _print_interface_invoke(self, instruction: SSAInvokeInterface) -> list[str]:
+        if not isinstance(instruction.receiver.type, InterfaceType):
+            raise LLVMBackendError("LLVM interface invoke requires an interface receiver")
+        self._uses_interface_dispatch = True
+        rendered = llvm_type(instruction.receiver.type)
+        receiver = self._operand(instruction.receiver)
+        carrier = self._synthetic_temp("invoke.interface.carrier")
+        witness = self._synthetic_temp("invoke.interface.witness")
+        slots = self._synthetic_temp("invoke.interface.slots")
+        slot_pointer = self._synthetic_temp("invoke.interface.slot")
+        thunk_pointer = self._synthetic_temp("invoke.interface.thunk.ptr")
+        thunk = self._synthetic_temp("invoke.interface.thunk")
+        lines = [
+            f"{carrier} = extractvalue {rendered} {receiver}, 0",
+            f"{witness} = extractvalue {rendered} {receiver}, 1",
+            f"{slots} = getelementptr %AetherWitnessHeader, ptr {witness}, i32 1",
+            f"{slot_pointer} = getelementptr %AetherWitnessSlot, ptr {slots}, i64 {instruction.slot.index}",
+            f"{thunk_pointer} = getelementptr %AetherWitnessSlot, ptr {slot_pointer}, i32 0, i32 2",
+            f"{thunk} = load ptr, ptr {thunk_pointer}",
+        ]
+        slot = self._synthetic_temp("invoke.interface.event.out")
+        failed = self._synthetic_temp("invoke.interface.failed")
+        lines.extend([f"{slot} = alloca ptr, align 8", f"store ptr null, ptr {slot}, align 8"])
+        arguments = [
+            f"ptr {carrier}",
+            *[
+                f"{llvm_type(argument.type)} {self._operand(argument)}"
+                for argument in instruction.arguments
+            ],
+            f"ptr {slot}",
+        ]
+        return_type = instruction.slot.return_type
+        call = f"call {llvm_type(return_type)} {thunk}({', '.join(arguments)})"
+        if isinstance(return_type, VoidType):
+            if instruction.result is not None:
+                raise LLVMBackendError("LLVM void interface invoke cannot define a result")
+            lines.append(call)
+        else:
+            if instruction.result is None:
+                raise LLVMBackendError("LLVM interface invoke requires a normal result")
+            lines.append(f"{self._new_temp(instruction.result)} = {call}")
+        event = self._new_temp(instruction.exception)
+        lines.extend(
+            [
+                f"{event} = load ptr, ptr {slot}, align 8",
+                f"{failed} = icmp ne ptr {event}, null",
+                f"br i1 {failed}, {self._label_operand(instruction.exceptional_target)}, "
+                f"{self._label_operand(instruction.normal_target)}",
+            ]
+        )
+        return lines
+
+    def _print_exception_pack(self, instruction: SSAPackException) -> list[str]:
+        payload_type = instruction.payload.type
+        payload = self._operand(instruction.payload)
+        lines: list[str] = []
+        descriptor: str
+        carrier: str
+        if isinstance(payload_type, (StructType, ClassRefType)):
+            if instruction.dynamic_type != payload_type.name:
+                raise LLVMBackendError(
+                    "LLVM exception_pack descriptor does not match its concrete payload"
+                )
+            witness = self._require_error_witness(payload_type.name, payload_type)
+            descriptor = f"@{exception_descriptor_symbol(payload_type.name)}"
+            if isinstance(payload_type, ClassRefType):
+                carrier = payload
+            else:
+                if witness.box_layout is None:
+                    raise LLVMBackendError("LLVM struct Error witness has no box layout")
+                self._uses_interface_boxing = True
+                box_type = box_type_symbol("Error", payload_type.name)
+                carrier = self._synthetic_temp("exception.box")
+                size = f"ptrtoint (ptr getelementptr ({box_type}, ptr null, i64 1) to i64)"
+                size_ptr = self._synthetic_temp("exception.box.size")
+                alignment_ptr = self._synthetic_temp("exception.box.alignment")
+                offset_ptr = self._synthetic_temp("exception.box.offset")
+                payload_ptr = self._synthetic_temp("exception.box.payload")
+                lines.extend(
+                    [
+                        f"{carrier} = call ptr @aether_alloc(i64 {size})",
+                        f"{size_ptr} = getelementptr {box_type}, ptr {carrier}, i32 0, i32 0",
+                        f"store i64 {witness.box_layout.payload_size}, ptr {size_ptr}",
+                        f"{alignment_ptr} = getelementptr {box_type}, ptr {carrier}, i32 0, i32 1",
+                        f"store i32 {witness.box_layout.payload_alignment}, ptr {alignment_ptr}",
+                        f"{offset_ptr} = getelementptr {box_type}, ptr {carrier}, i32 0, i32 2",
+                        f"store i32 {witness.box_layout.payload_offset}, ptr {offset_ptr}",
+                        f"{payload_ptr} = getelementptr {box_type}, ptr {carrier}, i32 0, i32 4",
+                        f"store {llvm_type(payload_type)} {payload}, ptr {payload_ptr}",
+                    ]
+                )
+        elif isinstance(payload_type, InterfaceType) and payload_type.name == "Error":
+            carrier = self._synthetic_temp("exception.interface.carrier")
+            witness_value = self._synthetic_temp("exception.interface.witness")
+            lines.extend(
+                [
+                    f"{carrier} = extractvalue {llvm_type(payload_type)} {payload}, 0",
+                    f"{witness_value} = extractvalue {llvm_type(payload_type)} {payload}, 1",
+                ]
+            )
+            selected = "null"
+            for nominal_id, concrete_type in sorted(self._exception_nominal_types.items()):
+                witness = self._require_error_witness(nominal_id, concrete_type)
+                matches = self._synthetic_temp("exception.descriptor.match")
+                updated = self._synthetic_temp("exception.descriptor.select")
+                lines.extend(
+                    [
+                        f"{matches} = icmp eq ptr {witness_value}, @{witness.symbol}",
+                        f"{updated} = select i1 {matches}, ptr @{exception_descriptor_symbol(nominal_id)}, ptr {selected}",
+                    ]
+                )
+                selected = updated
+            descriptor = selected
+        else:
+            raise LLVMBackendError(
+                "LLVM exception_pack requires a concrete Error or interface Error payload"
+            )
+        location = instruction.source_location
+        line = getattr(location, "line", 1) if location is not None else 1
+        column = getattr(location, "column", 1) if location is not None else 1
+        result = self._new_temp(instruction.result)
+        lines.append(
+            f"{result} = call ptr @__ae_exception_create_v1(ptr {descriptor}, "
+            f"ptr {carrier}, i32 {max(1, int(line))}, i32 {max(1, int(column))})"
+        )
+        return lines
+
+    def _print_catch_entry(self, instruction: SSACatchEntry) -> str:
+        incoming = self._exception_predecessors.get(self._current_block, [])
+        if not incoming:
+            raise LLVMBackendError(
+                f"LLVM catch_entry '{instruction.handler_id}' has no exceptional predecessor"
+            )
+        result = self._new_temp(instruction.event)
+        values = ", ".join(
+            f"[ {self._operand(event)}, %{self._label_name(predecessor)} ]"
+            for predecessor, event in incoming
+        )
+        return f"{result} = phi ptr {values}"
+
+    def _print_exception_match(self, instruction: SSAExceptionMatch) -> str:
+        result = self._new_temp(instruction.result)
+        event = self._operand(instruction.event)
+        if instruction.catch_all:
+            if instruction.catch_type != "Error":
+                raise LLVMBackendError("LLVM only Error may be an exception catch-all")
+            return f"{result} = icmp ne ptr {event}, null"
+        concrete_type = self._exception_nominal_types.get(instruction.catch_type)
+        if concrete_type is None:
+            raise LLVMBackendError(
+                f"LLVM exception match has malformed descriptor '{instruction.catch_type}'"
+            )
+        descriptor = exception_descriptor_symbol(instruction.catch_type)
+        return (
+            f"{result} = call i1 @__ae_exception_matches_v1(ptr {event}, "
+            f"ptr @{descriptor})"
+        )
+
+    def _print_exception_payload(self, instruction: SSAExceptionPayload) -> list[str]:
+        event = self._operand(instruction.event)
+        carrier = self._synthetic_temp("exception.borrow.carrier")
+        lines = [
+            f"{carrier} = call ptr @__ae_exception_borrow_carrier_v1(ptr {event})"
+        ]
+        result = self._new_temp(instruction.result)
+        if instruction.catch_type == "Error":
+            if instruction.result.type != InterfaceType("Error"):
+                raise LLVMBackendError("LLVM Error borrow must produce interface Error")
+            witness = self._synthetic_temp("exception.borrow.witness")
+            inserted = self._synthetic_temp("exception.borrow.interface")
+            rendered = llvm_type(instruction.result.type)
+            lines.extend(
+                [
+                    f"{witness} = call ptr @__ae_exception_borrow_witness_v1(ptr {event})",
+                    f"{inserted} = insertvalue {rendered} undef, ptr {carrier}, 0",
+                    f"{result} = insertvalue {rendered} {inserted}, ptr {witness}, 1",
+                ]
+            )
+        elif isinstance(instruction.result.type, ClassRefType):
+            if instruction.result.type.name != instruction.catch_type:
+                raise LLVMBackendError("LLVM class exception borrow descriptor mismatch")
+            lines.append(f"{result} = getelementptr i8, ptr {carrier}, i64 0")
+        elif isinstance(instruction.result.type, StructType):
+            if instruction.result.type.name != instruction.catch_type:
+                raise LLVMBackendError("LLVM struct exception borrow descriptor mismatch")
+            box_type = box_type_symbol("Error", instruction.catch_type)
+            payload_ptr = self._synthetic_temp("exception.borrow.payload")
+            lines.extend(
+                [
+                    f"{payload_ptr} = getelementptr {box_type}, ptr {carrier}, i32 0, i32 4",
+                    f"{result} = load {llvm_type(instruction.result.type)}, ptr {payload_ptr}",
+                ]
+            )
+        else:
+            raise LLVMBackendError("LLVM exception payload borrow has unsupported type")
+        return lines
+
+    def _print_exception_transfer(
+        self,
+        instruction: SSAThrow | SSARethrow | SSAPropagate,
+        function: SSAFunction,
+    ) -> str:
+        event = self._operand(instruction.event)
+        if instruction.target is not None:
+            if instruction.exceptional_arguments != (instruction.event,):
+                raise LLVMBackendError(
+                    "LLVM exceptional transfer has invalid successor arguments"
+                )
+            return f"br {self._label_operand(instruction.target)}"
+        if instruction.exceptional_arguments:
+            raise LLVMBackendError("LLVM root propagation cannot carry successor arguments")
+        if function.name == "main":
+            return (
+                f"call void @__ae_exception_root_terminate_v1(ptr {event})\n  "
+                "unreachable"
+            )
+        if not self._function_uses_exception_out(function):
+            raise LLVMBackendError(
+                f"LLVM function '{function.name}' propagates without private event-out ABI"
+            )
+        return (
+            f"store ptr {event}, ptr %__ae_exception_out, align 8\n  "
+            f"{self._exceptional_return(function.return_type)}"
+        )
 
     def _print_call(self, instruction: SSACall) -> str:
         if instruction.builtin == RANGE_STEP_NONZERO_BUILTIN:
@@ -2874,6 +3493,11 @@ class LLVMPrinter:
                 "LLVM interface_call receiver must have interface type"
             )
         self._uses_interface_dispatch = True
+        if instruction.slot.method_id in self._throwing_interface_slots:
+            raise LLVMBackendError(
+                f"LLVM call/invoke mismatch for potentially throwing interface slot "
+                f"'{instruction.slot.method_id}'"
+            )
         if instruction.slot.receiver_ownership != "borrowed":
             raise LLVMBackendError(
                 "LLVM interface_call receiver must use borrowed erased ABI"
@@ -5128,6 +5752,13 @@ class LLVMPrinter:
                 for index, type_ in enumerate(slot.parameter_types)
             ],
         ]
+        throwing_slot = slot.method_id in self._throwing_interface_slots
+        if target.may_throw and not throwing_slot:
+            raise LLVMBackendError(
+                f"LLVM interface slot '{slot.method_id}' lost may_throw metadata"
+            )
+        if throwing_slot:
+            parameters.append("ptr %__ae_exception_out")
         arguments = [
             "ptr %carrier",
             *[
@@ -5135,6 +5766,9 @@ class LLVMPrinter:
                 for index, type_ in enumerate(slot.parameter_types)
             ],
         ]
+        target_arguments = list(arguments)
+        if target.may_throw:
+            target_arguments.append("ptr %__ae_exception_out")
         rendered_return = llvm_type(slot.return_type)
         if witness.carrier_kind == "box":
             box_type = box_type_symbol(
@@ -5147,16 +5781,29 @@ class LLVMPrinter:
             )
             source_arguments = [
                 f"{receiver_llvm} %receiver",
-                *arguments[1:],
+                *target_arguments[1:],
             ]
             result_body = [
                 f"  %payload_ptr = getelementptr {box_type}, ptr %carrier, i32 0, i32 4",
                 f"  %receiver = load {receiver_llvm}, ptr %payload_ptr",
                 f"  %pair = call {result_pair} {self._global_name(target_name)}"
                 f"({', '.join(source_arguments)})",
-                f"  %updated = extractvalue {result_pair} %pair, 0",
-                f"  store {receiver_llvm} %updated, ptr %payload_ptr",
             ]
+            if target.may_throw:
+                result_body.extend(
+                    [
+                        "  %event = load ptr, ptr %__ae_exception_out, align 8",
+                        "  %failed = icmp ne ptr %event, null",
+                        "  br i1 %failed, label %exceptional, label %normal",
+                        "normal:",
+                    ]
+                )
+            result_body.extend(
+                [
+                    f"  %updated = extractvalue {result_pair} %pair, 0",
+                    f"  store {receiver_llvm} %updated, ptr %payload_ptr",
+                ]
+            )
             if isinstance(slot.return_type, VoidType):
                 result_body.append("  ret void")
             else:
@@ -5166,11 +5813,18 @@ class LLVMPrinter:
                         f"  ret {rendered_return} %result",
                     ]
                 )
+            if target.may_throw:
+                result_body.extend(
+                    [
+                        "exceptional:",
+                        f"  {self._exceptional_return(slot.return_type)}",
+                    ]
+                )
             body = "\n".join(result_body)
         else:
             call = (
                 f"call {rendered_return} {self._global_name(target_name)}"
-                f"({', '.join(arguments)})"
+                f"({', '.join(target_arguments)})"
             )
             body = (
                 f"  {call}\n  ret void"

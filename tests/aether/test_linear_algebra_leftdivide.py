@@ -73,6 +73,20 @@ x = Math.LinearAlgebra.solve(A, b);
     _assert_vector_values(result, "x", [0.2, 0.6])
 
 
+def test_linear_algebra_solve_builtin_returns_column_vector() -> None:
+    result = run_aether(
+        """
+import Math.LinearAlgebra
+Matrix<double> A = [2 1; 1 3];
+Vector<double, Column> b = [1; 2];
+Vector<double, Column> x = Math.LinearAlgebra.solve(A, b);
+"""
+    )
+
+    assert result.env["x"].type_name == VectorType("double", 2)
+    assert result.env["x"].type_name.orientation == "column"
+
+
 def test_leftdivide_returns_least_squares_solution_for_overdetermined_system() -> None:
     result = run_aether(
         """

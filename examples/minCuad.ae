@@ -1,0 +1,27 @@
+import Math.LinearAlgebra as LA;
+import Plots as pl;
+
+Vector<double, Column> x = [1, 2, 3, 4];
+Vector<double, Column> y = [1, 4, 9, 16];
+
+Matrix<double> A = [
+    x[1], 1;
+    x[2], 1;
+    x[3], 1;
+    x[4], 1
+];
+
+Vector<double, Column> z = A \ y;
+
+f(double t) = z[1] * t + z[2];
+err = LA.norm(A * z - y);
+
+println("Coefficients: ", z);
+println("Error: ", err);
+
+pl.hold(true);
+pl.grid(true);
+pl.plot(x, y, "o");
+pl.plot(f, 0, 5);
+pl.legend("Datos", "Ajuste");
+pl.title("Minimos Cuadrados");

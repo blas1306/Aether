@@ -235,7 +235,9 @@ def solve_builtin(args: list[AetherValue]) -> AetherValue:
         solution = solution.T
     result_element_type = _promote_numeric_types(left_matrix_type.element_type, right_element_type)
     if rhs_is_vector and solution.shape[1] == 1:
-        return _numeric_array_to_vector_value(solution[:, 0], element_type=result_element_type)
+        return _numeric_array_to_vector_value(
+            solution[:, 0], element_type=result_element_type, orientation="column"
+        )
     return _numeric_array_to_matrix_value(solution, element_type=result_element_type)
 
 
@@ -516,7 +518,11 @@ def _solve_type(arg_types: list[AetherType | None]) -> AetherType | None:
             raise AetherTypeError(
                 f"{SOLVE_NAME}(...) requires rows(A) == rows(b), got {left_matrix_type.rows} and {right_type.length}."
             )
-        return VectorType(_promote_numeric_types(left_matrix_type.element_type, right_type.element_type), left_matrix_type.cols)
+        return VectorType(
+            _promote_numeric_types(left_matrix_type.element_type, right_type.element_type),
+            left_matrix_type.cols,
+            "column",
+        )
     right_matrix_type = _require_numeric_matrix_type(right_type, SOLVE_NAME)
     right_rows, right_cols, result_is_vector = _normalized_rhs_type_shape(left_matrix_type, right_matrix_type)
     if left_matrix_type.rows is not None and right_rows is not None and left_matrix_type.rows != right_rows:
@@ -978,7 +984,12 @@ def _float_array_to_vector_value(values: np.ndarray) -> AetherValue:
     return _numeric_array_to_vector_value(values, element_type="double")
 
 
-def _numeric_array_to_vector_value(values: np.ndarray, *, element_type: str | None = None) -> AetherValue:
+def _numeric_array_to_vector_value(
+    values: np.ndarray,
+    *,
+    element_type: str | None = None,
+    orientation: str | None = None,
+) -> AetherValue:
     cleaned = _clean_numeric_array(np.asarray(values))
     if element_type is None:
         element_type = _array_element_type(cleaned)
@@ -987,7 +998,7 @@ def _numeric_array_to_vector_value(values: np.ndarray, *, element_type: str | No
     else:
         converted = np.real(np.asarray(cleaned, dtype=complex)).astype(float)
     return AetherValue(
-        VectorType(element_type, int(converted.shape[0])),
+        VectorType(element_type, int(converted.shape[0]), orientation),
         [
             AetherValue(element_type, complex(value) if element_type == "complex" else float(value))
             for value in converted
