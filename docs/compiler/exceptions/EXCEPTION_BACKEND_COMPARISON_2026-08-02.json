@@ -1,0 +1,496 @@
+{
+  "commands": {
+    "compile": "clang -O<0|1|2> -c module.ll -o module.o",
+    "link_event_out": "clang module.o -o program",
+    "link_llvm_eh": "clang module.o -o program -l:libstdc++.so.6",
+    "reproduce": "PYTHONPATH=src .venv/bin/python scripts/compare_exception_lowering.py --runs 9"
+  },
+  "host": {
+    "clang": "Ubuntu clang version 21.1.8 (6ubuntu1)",
+    "machine": "x86_64",
+    "platform": "Linux-7.0.0-28-generic-x86_64-with-glibc2.43",
+    "python": "3.14.4 (main, Jun 18 2026, 14:25:02) [GCC 15.2.0]"
+  },
+  "measurements": [
+    {
+      "binary_bytes": 20960,
+      "clang_compile_samples_ms": [
+        24.187,
+        23.963,
+        24.506
+      ],
+      "compile_median_ms": 24.187,
+      "corpus": "normal",
+      "exception_runtime_helpers": 8,
+      "generated_functions": 43,
+      "link_median_ms": 28.371,
+      "link_samples_ms": [
+        27.643,
+        28.371,
+        28.744
+      ],
+      "llvm_bytes": 44184,
+      "llvm_emission_ms": 1.65,
+      "llvm_lines": 1172,
+      "object_bytes": 13960,
+      "optimization": "O0",
+      "returncode": 0,
+      "run_median_ms": 5.078,
+      "runtime_samples_ms": [
+        4.621,
+        5.339,
+        5.078,
+        5.51,
+        5.09,
+        4.891,
+        5.081,
+        4.761,
+        4.986
+      ],
+      "ssa_build_ms": 6.421,
+      "stderr": "",
+      "stdout": "200000\n",
+      "strategy": "event-out"
+    },
+    {
+      "binary_bytes": 16224,
+      "clang_compile_samples_ms": [
+        28.194,
+        27.993,
+        28.823
+      ],
+      "compile_median_ms": 28.194,
+      "corpus": "normal",
+      "exception_runtime_helpers": 8,
+      "generated_functions": 43,
+      "link_median_ms": 28.862,
+      "link_samples_ms": [
+        28.037,
+        29.095,
+        28.862
+      ],
+      "llvm_bytes": 44184,
+      "llvm_emission_ms": 1.65,
+      "llvm_lines": 1172,
+      "object_bytes": 2672,
+      "optimization": "O1",
+      "returncode": 0,
+      "run_median_ms": 0.553,
+      "runtime_samples_ms": [
+        0.948,
+        1.211,
+        0.555,
+        0.553,
+        0.843,
+        0.481,
+        0.486,
+        0.501,
+        0.498
+      ],
+      "ssa_build_ms": 6.421,
+      "stderr": "",
+      "stdout": "200000\n",
+      "strategy": "event-out"
+    },
+    {
+      "binary_bytes": 16176,
+      "clang_compile_samples_ms": [
+        30.703,
+        30.331,
+        30.322
+      ],
+      "compile_median_ms": 30.331,
+      "corpus": "normal",
+      "exception_runtime_helpers": 8,
+      "generated_functions": 43,
+      "link_median_ms": 27.606,
+      "link_samples_ms": [
+        27.606,
+        27.317,
+        28.639
+      ],
+      "llvm_bytes": 44184,
+      "llvm_emission_ms": 1.65,
+      "llvm_lines": 1172,
+      "object_bytes": 2184,
+      "optimization": "O2",
+      "returncode": 0,
+      "run_median_ms": 0.562,
+      "runtime_samples_ms": [
+        1.154,
+        0.52,
+        0.5,
+        0.486,
+        0.463,
+        0.562,
+        0.813,
+        0.864,
+        0.904
+      ],
+      "ssa_build_ms": 6.421,
+      "stderr": "",
+      "stdout": "200000\n",
+      "strategy": "event-out"
+    },
+    {
+      "binary_bytes": 21600,
+      "clang_compile_samples_ms": [
+        24.673,
+        24.995,
+        24.606
+      ],
+      "compile_median_ms": 24.673,
+      "corpus": "normal",
+      "exception_runtime_helpers": 9,
+      "generated_functions": 44,
+      "link_median_ms": 51.432,
+      "link_samples_ms": [
+        51.432,
+        49.243,
+        53.305
+      ],
+      "llvm_bytes": 45506,
+      "llvm_emission_ms": 1.765,
+      "llvm_lines": 1210,
+      "object_bytes": 15560,
+      "optimization": "O0",
+      "returncode": 0,
+      "run_median_ms": 3.198,
+      "runtime_samples_ms": [
+        3.715,
+        3.198,
+        3.501,
+        2.809,
+        2.936,
+        2.932,
+        3.449,
+        3.501,
+        2.801
+      ],
+      "ssa_build_ms": 6.421,
+      "stderr": "",
+      "stdout": "200000\n",
+      "strategy": "llvm-eh-prototype"
+    },
+    {
+      "binary_bytes": 16232,
+      "clang_compile_samples_ms": [
+        28.511,
+        29.122,
+        28.887
+      ],
+      "compile_median_ms": 28.887,
+      "corpus": "normal",
+      "exception_runtime_helpers": 9,
+      "generated_functions": 44,
+      "link_median_ms": 51.546,
+      "link_samples_ms": [
+        51.546,
+        52.803,
+        50.711
+      ],
+      "llvm_bytes": 45506,
+      "llvm_emission_ms": 1.765,
+      "llvm_lines": 1210,
+      "object_bytes": 2728,
+      "optimization": "O1",
+      "returncode": 0,
+      "run_median_ms": 1.287,
+      "runtime_samples_ms": [
+        1.81,
+        1.759,
+        1.287,
+        0.925,
+        1.014,
+        1.714,
+        1.295,
+        1.255,
+        1.277
+      ],
+      "ssa_build_ms": 6.421,
+      "stderr": "",
+      "stdout": "200000\n",
+      "strategy": "llvm-eh-prototype"
+    },
+    {
+      "binary_bytes": 16184,
+      "clang_compile_samples_ms": [
+        30.008,
+        30.624,
+        30.26
+      ],
+      "compile_median_ms": 30.26,
+      "corpus": "normal",
+      "exception_runtime_helpers": 9,
+      "generated_functions": 44,
+      "link_median_ms": 52.334,
+      "link_samples_ms": [
+        52.714,
+        52.334,
+        49.688
+      ],
+      "llvm_bytes": 45506,
+      "llvm_emission_ms": 1.765,
+      "llvm_lines": 1210,
+      "object_bytes": 2240,
+      "optimization": "O2",
+      "returncode": 0,
+      "run_median_ms": 1.443,
+      "runtime_samples_ms": [
+        1.945,
+        1.588,
+        1.618,
+        0.985,
+        0.94,
+        1.629,
+        1.342,
+        1.443,
+        1.084
+      ],
+      "ssa_build_ms": 6.421,
+      "stderr": "",
+      "stdout": "200000\n",
+      "strategy": "llvm-eh-prototype"
+    },
+    {
+      "binary_bytes": 20968,
+      "clang_compile_samples_ms": [
+        23.341,
+        22.756,
+        23.371
+      ],
+      "compile_median_ms": 23.341,
+      "corpus": "exceptional",
+      "exception_runtime_helpers": 8,
+      "generated_functions": 43,
+      "link_median_ms": 28.124,
+      "link_samples_ms": [
+        27.81,
+        28.405,
+        28.124
+      ],
+      "llvm_bytes": 44821,
+      "llvm_emission_ms": 1.681,
+      "llvm_lines": 1183,
+      "object_bytes": 14032,
+      "optimization": "O0",
+      "returncode": 0,
+      "run_median_ms": 0.608,
+      "runtime_samples_ms": [
+        1.485,
+        0.975,
+        0.587,
+        0.667,
+        0.583,
+        1.041,
+        0.543,
+        0.549,
+        0.608
+      ],
+      "ssa_build_ms": 3.479,
+      "stderr": "",
+      "stdout": "2000\n",
+      "strategy": "event-out"
+    },
+    {
+      "binary_bytes": 16232,
+      "clang_compile_samples_ms": [
+        30.274,
+        31.93,
+        31.271
+      ],
+      "compile_median_ms": 31.271,
+      "corpus": "exceptional",
+      "exception_runtime_helpers": 8,
+      "generated_functions": 43,
+      "link_median_ms": 27.733,
+      "link_samples_ms": [
+        27.733,
+        30.299,
+        27.629
+      ],
+      "llvm_bytes": 44821,
+      "llvm_emission_ms": 1.681,
+      "llvm_lines": 1183,
+      "object_bytes": 2680,
+      "optimization": "O1",
+      "returncode": 0,
+      "run_median_ms": 0.66,
+      "runtime_samples_ms": [
+        1.253,
+        0.969,
+        0.553,
+        0.529,
+        0.843,
+        0.841,
+        0.66,
+        0.519,
+        0.638
+      ],
+      "ssa_build_ms": 3.479,
+      "stderr": "",
+      "stdout": "2000\n",
+      "strategy": "event-out"
+    },
+    {
+      "binary_bytes": 16176,
+      "clang_compile_samples_ms": [
+        34.151,
+        33.35,
+        33.426
+      ],
+      "compile_median_ms": 33.426,
+      "corpus": "exceptional",
+      "exception_runtime_helpers": 8,
+      "generated_functions": 43,
+      "link_median_ms": 28.35,
+      "link_samples_ms": [
+        28.35,
+        29.588,
+        27.697
+      ],
+      "llvm_bytes": 44821,
+      "llvm_emission_ms": 1.681,
+      "llvm_lines": 1183,
+      "object_bytes": 2184,
+      "optimization": "O2",
+      "returncode": 0,
+      "run_median_ms": 0.715,
+      "runtime_samples_ms": [
+        1.117,
+        0.602,
+        0.901,
+        0.503,
+        0.525,
+        0.715,
+        0.806,
+        0.921,
+        0.478
+      ],
+      "ssa_build_ms": 3.479,
+      "stderr": "",
+      "stdout": "2000\n",
+      "strategy": "event-out"
+    },
+    {
+      "binary_bytes": 21608,
+      "clang_compile_samples_ms": [
+        23.908,
+        23.587,
+        23.648
+      ],
+      "compile_median_ms": 23.648,
+      "corpus": "exceptional",
+      "exception_runtime_helpers": 9,
+      "generated_functions": 44,
+      "link_median_ms": 51.441,
+      "link_samples_ms": [
+        50.962,
+        51.441,
+        51.879
+      ],
+      "llvm_bytes": 46150,
+      "llvm_emission_ms": 1.92,
+      "llvm_lines": 1221,
+      "object_bytes": 15656,
+      "optimization": "O0",
+      "returncode": 0,
+      "run_median_ms": 3.385,
+      "runtime_samples_ms": [
+        3.528,
+        3.385,
+        3.537,
+        3.581,
+        3.578,
+        3.074,
+        3.035,
+        2.891,
+        3.087
+      ],
+      "ssa_build_ms": 3.479,
+      "stderr": "",
+      "stdout": "2000\n",
+      "strategy": "llvm-eh-prototype"
+    },
+    {
+      "binary_bytes": 17072,
+      "clang_compile_samples_ms": [
+        40.84,
+        41.504,
+        41.04
+      ],
+      "compile_median_ms": 41.04,
+      "corpus": "exceptional",
+      "exception_runtime_helpers": 9,
+      "generated_functions": 44,
+      "link_median_ms": 53.893,
+      "link_samples_ms": [
+        53.957,
+        53.893,
+        53.087
+      ],
+      "llvm_bytes": 46150,
+      "llvm_emission_ms": 1.92,
+      "llvm_lines": 1221,
+      "object_bytes": 9256,
+      "optimization": "O1",
+      "returncode": 0,
+      "run_median_ms": 3.215,
+      "runtime_samples_ms": [
+        3.622,
+        2.592,
+        3.215,
+        3.519,
+        2.971,
+        3.32,
+        3.982,
+        3.201,
+        2.794
+      ],
+      "ssa_build_ms": 3.479,
+      "stderr": "",
+      "stdout": "2000\n",
+      "strategy": "llvm-eh-prototype"
+    },
+    {
+      "binary_bytes": 17072,
+      "clang_compile_samples_ms": [
+        43.268,
+        43.327,
+        46.227
+      ],
+      "compile_median_ms": 43.327,
+      "corpus": "exceptional",
+      "exception_runtime_helpers": 9,
+      "generated_functions": 44,
+      "link_median_ms": 51.822,
+      "link_samples_ms": [
+        51.697,
+        51.822,
+        51.983
+      ],
+      "llvm_bytes": 46150,
+      "llvm_emission_ms": 1.92,
+      "llvm_lines": 1221,
+      "object_bytes": 9008,
+      "optimization": "O2",
+      "returncode": 0,
+      "run_median_ms": 3.286,
+      "runtime_samples_ms": [
+        3.486,
+        3.273,
+        2.518,
+        3.286,
+        3.472,
+        3.45,
+        2.968,
+        3.122,
+        3.506
+      ],
+      "ssa_build_ms": 3.479,
+      "stderr": "",
+      "stdout": "2000\n",
+      "strategy": "llvm-eh-prototype"
+    }
+  ]
+}

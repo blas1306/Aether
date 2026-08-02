@@ -13,7 +13,7 @@ from aether.backend.llvm.printer import LLVMPrinter
 from aether.capabilities import BackendCapabilityError, BackendIdentity, validate_backend_capabilities
 from aether.ir import IRLowerer
 from aether.pipeline import parse_source, prepare_typed_program
-from aether.ssa import GeneralSSABuilder, SSAPackException
+from aether.ssa import GeneralSSABuilder, SSAInvoke, SSAPackException
 from aether.typechecker import TypeChecker
 
 
@@ -50,7 +50,14 @@ def _compile_and_run(
     if clang is None:
         pytest.skip(f"{compiler_name} is not available")
     _program, module = _lower(source)
-    llvm = LLVMBackend(LLVMPrinter(exception_strategy=exception_strategy)).emit(module)
+    llvm = LLVMBackend(
+        LLVMPrinter(
+            exception_strategy=exception_strategy,
+            allow_test_exception_strategy=(
+                exception_strategy is ExceptionLoweringStrategy.LLVM_EH_PROTOTYPE
+            ),
+        )
+    ).emit(module)
     if mutate_llvm is not None:
         llvm = mutate_llvm(llvm)
     tmp_path.mkdir(parents=True, exist_ok=True)
@@ -98,7 +105,8 @@ int main() {
     _program, module = _lower(source)
     llvm = LLVMBackend(
         LLVMPrinter(
-            exception_strategy=ExceptionLoweringStrategy.LLVM_EH_PROTOTYPE
+            exception_strategy=ExceptionLoweringStrategy.LLVM_EH_PROTOTYPE,
+            allow_test_exception_strategy=True,
         )
     ).emit(module)
 
@@ -208,7 +216,15 @@ int main() {
 
 
 @pytest.mark.parametrize("optimization", ["0", "1", "2"])
+@pytest.mark.parametrize(
+    "strategy",
+    [
+        ExceptionLoweringStrategy.EVENT_OUT,
+        ExceptionLoweringStrategy.LLVM_EH_PROTOTYPE,
+    ],
+)
 def test_native_nested_rethrow_and_replacement_are_stable_at_all_optimizations(
+    strategy: ExceptionLoweringStrategy,
     optimization: str,
     tmp_path: Path,
 ) -> None:
@@ -240,7 +256,12 @@ int main() {
     return 0;
 }
 """
-    completed = _compile_and_run(source, tmp_path, optimization=optimization)
+    completed = _compile_and_run(
+        source,
+        tmp_path,
+        optimization=optimization,
+        exception_strategy=strategy,
+    )
 
     assert completed.returncode == 1
     assert completed.stdout == "original\n"
@@ -249,7 +270,17 @@ int main() {
     )
 
 
-def test_native_class_identity_interface_pack_and_exact_matching(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "strategy",
+    [
+        ExceptionLoweringStrategy.EVENT_OUT,
+        ExceptionLoweringStrategy.LLVM_EH_PROTOTYPE,
+    ],
+)
+def test_native_class_identity_interface_pack_and_exact_matching(
+    strategy: ExceptionLoweringStrategy,
+    tmp_path: Path,
+) -> None:
     source = ERROR_TYPES + """
 int main() {
     Error error = NetworkError("offline");
@@ -263,7 +294,12 @@ int main() {
     return 0;
 }
 """
-    completed = _compile_and_run(source, tmp_path, optimization="2")
+    completed = _compile_and_run(
+        source,
+        tmp_path,
+        optimization="2",
+        exception_strategy=strategy,
+    )
 
     assert completed.returncode == 0
     assert completed.stdout == "offline\n"
@@ -320,6 +356,100 @@ int main() {
 
     assert completed.returncode == 0
     assert completed.stdout == "snapshot\nbefore\nbefore\n"
+    assert completed.stderr == ""
+
+
+@pytest.mark.parametrize(
+    "strategy",
+    [
+        ExceptionLoweringStrategy.EVENT_OUT,
+        ExceptionLoweringStrategy.LLVM_EH_PROTOTYPE,
+    ],
+)
+def test_shared_native_recursion_aggregate_and_owned_field_corpus(
+    strategy: ExceptionLoweringStrategy,
+    tmp_path: Path,
+) -> None:
+    """Exercise both transports with one broader verified-SSA program."""
+
+    source = """
+struct FileError implements Error {
+    string text;
+    string message() { return text; }
+}
+class NetworkError implements Error {
+    string text;
+    public string message() { return text; }
+}
+struct Pair {
+    int left;
+    int right;
+}
+struct Counter {
+    int value;
+    int advance(boolean fail) {
+        value = value + 1;
+        if (fail) { throw FileError("method result"); }
+        return value;
+    }
+}
+struct OwnedFields {
+    Array<int> numbers;
+    List<string> names;
+    Error cause;
+    string? note;
+}
+Pair pairOrFail(int value, boolean fail) {
+    if (fail) { throw FileError("aggregate"); }
+    return Pair(value, value + 1);
+}
+int recurse(int depth) {
+    if (depth == 0) { throw FileError("recursive"); }
+    return recurse(depth - 1);
+}
+int mutualA(int depth) {
+    if (depth == 0) { throw NetworkError("mutual"); }
+    return mutualB(depth - 1);
+}
+int mutualB(int depth) {
+    if (depth == 0) { throw NetworkError("mutual"); }
+    return mutualA(depth - 1);
+}
+int main() {
+    Pair pair = pairOrFail(4, false);
+    println(pair.left);
+    try { Pair absent = pairOrFail(0, true); }
+    catch (NetworkError wrong) { println("wrong aggregate"); }
+    catch (FileError exact) { println(exact.message()); }
+
+    try { recurse(6); }
+    catch (FileError exact) { println(exact.message()); }
+    try { mutualA(7); }
+    catch (Error any) { println(any.message()); }
+
+    Counter counter = Counter(10);
+    println(counter.advance(false));
+    try { counter.advance(true); }
+    catch (FileError exact) { println(exact.message()); }
+
+    Error cause = NetworkError("owned interface");
+    OwnedFields fields = OwnedFields({1, 2}, {"a", "b"}, cause, null);
+    println(fields.cause.message());
+    return 0;
+}
+"""
+    completed = _compile_and_run(
+        source,
+        tmp_path,
+        optimization="2",
+        sanitize=True,
+        exception_strategy=strategy,
+    )
+
+    assert completed.returncode == 0
+    assert completed.stdout == (
+        "4\naggregate\nrecursive\nmutual\n11\nmethod result\nowned interface\n"
+    )
     assert completed.stderr == ""
 
 
@@ -514,7 +644,30 @@ int main() {
     assert completed.stderr == ""
 
 
-def test_native_panic_bypasses_catch_and_never_forms_an_event(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("panic_statement", "expected"),
+    [
+        ("int value = 2147483647 + 1;", "Aether panic: Integer overflow\n"),
+        ("int value = 1 % 0;", "Aether panic: Division by zero\n"),
+        (
+            "Array<int> values = {1}; int value = values[1];",
+            "Aether panic: Array index out of bounds\n",
+        ),
+    ],
+)
+@pytest.mark.parametrize(
+    "strategy",
+    [
+        ExceptionLoweringStrategy.EVENT_OUT,
+        ExceptionLoweringStrategy.LLVM_EH_PROTOTYPE,
+    ],
+)
+def test_native_panic_bypasses_catch_and_never_forms_an_event(
+    strategy: ExceptionLoweringStrategy,
+    panic_statement: str,
+    expected: str,
+    tmp_path: Path,
+) -> None:
     source = """
 struct ArithmeticError implements Error {
     string text;
@@ -522,18 +675,73 @@ struct ArithmeticError implements Error {
 }
 int main() {
     try {
-        int value = 2147483647 + 1;
+        PANIC_STATEMENT
         throw ArithmeticError("catchable");
     } catch (Error error) {
         println("caught");
     }
     return 0;
 }
-"""
-    completed = _compile_and_run(source, tmp_path, optimization="2")
+""".replace("PANIC_STATEMENT", panic_statement)
+    completed = _compile_and_run(
+        source,
+        tmp_path,
+        optimization="2",
+        exception_strategy=strategy,
+    )
 
     assert completed.returncode == 1
-    assert completed.stdout == "Aether panic: Integer overflow\n"
+    assert completed.stdout == expected
+    assert completed.stderr == ""
+
+
+@pytest.mark.parametrize(
+    "strategy",
+    [
+        ExceptionLoweringStrategy.EVENT_OUT,
+        ExceptionLoweringStrategy.LLVM_EH_PROTOTYPE,
+    ],
+)
+def test_native_deep_propagation_and_high_volume_events(
+    strategy: ExceptionLoweringStrategy,
+    tmp_path: Path,
+) -> None:
+    source = """
+struct StressError implements Error {
+    string text;
+    string message() { return text; }
+}
+void descend(int depth) {
+    if (depth == 0) { throw StressError("deep"); }
+    descend(depth - 1);
+}
+void fail() { throw StressError("repeat"); }
+void relay() {
+    try { fail(); }
+    catch (StressError error) { throw; }
+}
+int main() {
+    try { descend(64); }
+    catch (StressError error) { println(error.message()); }
+    int count = 0;
+    while (count < 2000) {
+        try { relay(); }
+        catch (StressError error) { count = count + 1; }
+    }
+    println(count);
+    return 0;
+}
+"""
+    completed = _compile_and_run(
+        source,
+        tmp_path,
+        optimization="2",
+        sanitize=True,
+        exception_strategy=strategy,
+    )
+
+    assert completed.returncode == 0
+    assert completed.stdout == "deep\n2000\n"
     assert completed.stderr == ""
 
 
@@ -562,6 +770,110 @@ int main() { throw RootError("root"); }
     assert completed.returncode == 1
     assert completed.stdout == ""
     assert completed.stderr == "Aether panic: exception reporting failed"
+
+
+@pytest.mark.parametrize(
+    ("fault_mask", "expected"),
+    [
+        (1, "Aether panic: invalid private exception event"),
+        (2, "Aether panic: invalid private exception event"),
+        (4, "Aether panic: exception reporting failed"),
+        (8, "Aether panic: exception reporting failed"),
+    ],
+)
+@pytest.mark.parametrize(
+    "strategy",
+    [
+        ExceptionLoweringStrategy.EVENT_OUT,
+        ExceptionLoweringStrategy.LLVM_EH_PROTOTYPE,
+    ],
+)
+def test_private_runtime_fault_injection_is_fail_fast_and_leak_free(
+    strategy: ExceptionLoweringStrategy,
+    fault_mask: int,
+    expected: str,
+    tmp_path: Path,
+) -> None:
+    source = """
+struct RootError implements Error {
+    string text;
+    string message() { return text; }
+}
+int main() { throw RootError("fault"); }
+"""
+
+    def inject_fault(llvm: str) -> str:
+        marker = "@__ae_exception_fault_mask_v1 = private global i32 0"
+        assert marker in llvm
+        return llvm.replace(marker, marker[:-1] + str(fault_mask), 1)
+
+    completed = _compile_and_run(
+        source,
+        tmp_path,
+        mutate_llvm=inject_fault,
+        sanitize=True,
+        exception_strategy=strategy,
+    )
+
+    assert completed.returncode == 1
+    assert completed.stdout == ""
+    assert completed.stderr == expected
+
+
+@pytest.mark.parametrize(
+    "strategy",
+    [
+        ExceptionLoweringStrategy.EVENT_OUT,
+        ExceptionLoweringStrategy.LLVM_EH_PROTOTYPE,
+    ],
+)
+def test_struct_error_payload_allocation_failure_is_fail_fast(
+    strategy: ExceptionLoweringStrategy,
+    tmp_path: Path,
+) -> None:
+    source = """
+struct RootError implements Error {
+    string text;
+    string message() { return text; }
+}
+int main() { throw RootError("payload allocation"); }
+"""
+
+    def fail_payload_allocation(llvm: str) -> str:
+        lines = llvm.splitlines()
+        candidates = [
+            index
+            for index, line in enumerate(lines)
+            if "%exception.box." in line and "call ptr @aether_alloc" in line
+        ]
+        assert len(candidates) == 1
+        index = candidates[0]
+        lines[index] = lines[index].replace(
+            "@aether_alloc",
+            "@__ae_exception_test_payload_alloc_fail_v1",
+            1,
+        )
+        mutated = "\n".join(lines)
+        return mutated + """
+
+define private ptr @__ae_exception_test_payload_alloc_fail_v1(i64 %size) {
+entry:
+  call void @__ae_exception_panic_v1()
+  unreachable
+}
+"""
+
+    completed = _compile_and_run(
+        source,
+        tmp_path,
+        mutate_llvm=fail_payload_allocation,
+        sanitize=True,
+        exception_strategy=strategy,
+    )
+
+    assert completed.returncode == 1
+    assert completed.stdout == ""
+    assert completed.stderr == "Aether panic: invalid private exception event"
 
 
 @pytest.mark.parametrize(
@@ -629,6 +941,42 @@ int main() { throw FileError("bad"); }
         LLVMPrinter(exception_runtime_abi_version=999)
     with pytest.raises(LLVMBackendError, match="unsupported exception lowering"):
         LLVMPrinter(exception_strategy="stack-scanning")
+    with pytest.raises(LLVMBackendError, match="test-only prototype"):
+        LLVMPrinter(
+            exception_strategy=ExceptionLoweringStrategy.LLVM_EH_PROTOTYPE
+        )
+
+
+def test_backend_rejects_malformed_invoke_before_llvm_emission() -> None:
+    _program, module = _lower(
+        """
+struct FileError implements Error {
+    string text;
+    string message() { return text; }
+}
+void fail() { throw FileError("bad invoke"); }
+int main() {
+    try { fail(); }
+    catch (FileError error) { println(error.message()); }
+    return 0;
+}
+"""
+    )
+    block = next(
+        block
+        for function in module.functions
+        for block in function.blocks
+        if isinstance(block.instructions[-1], SSAInvoke)
+    )
+    invoke = block.instructions[-1]
+    assert isinstance(invoke, SSAInvoke)
+    block.instructions[-1] = replace(invoke, exceptional_arguments=())
+
+    with pytest.raises(
+        LLVMBackendError,
+        match="malformed or unverified SSA",
+    ):
+        LLVMBackend().emit(module)
 
 
 def test_stable_native_capability_gate_still_rejects_exceptions() -> None:

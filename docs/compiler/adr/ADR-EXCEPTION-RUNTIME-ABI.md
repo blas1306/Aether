@@ -1,148 +1,158 @@
 # ADR: Private Exception Runtime Event ABI
 
-Status: Proposed
+Status: Accepted
 
-## Context
+## Context and scope
 
-The compiler and native runtime need a narrow private contract for creating,
-identifying, borrowing, transferring, destroying, propagating, reporting, and
-terminating opaque exception events. The contract must support the selected
-backend strategy while keeping payload layout, helper names, propagation state,
-and machine representation outside source semantics and outside any public FFI
-commitment.
+The compiler and embedded native runtime need one private contract for opaque,
+linearly owned exception events. This ADR defines that contract for the accepted
+event-out backend. It is not a public C ABI, object-file compatibility promise or
+source-language representation.
 
-This ADR does not define a public C ABI and does not select new language
-semantics.
+The authority is the frozen exception architecture, the accepted Initial IR/SSA
+ADRs and `ADR-EXCEPTION-BACKEND-LOWERING.md`.
 
-Authority:
+## Version and representation
 
-- `docs/compiler/EXCEPTION_ARCHITECTURE_RESOLUTION.md`
-- `docs/compiler/COMPLETE_EXCEPTION_MODEL_RFC.md`, especially §§12–13
-- `docs/compiler/EXCEPTION_IMPLEMENTATION_PLAN.md`, Milestone 8
-- `docs/compiler/AETHER_NATIVE_ABI.md`
-- `docs/compiler/exceptions/EXCEPTION_FROZEN_SEMANTICS_CHECKLIST.md`
+The compiler and runtime use private exception ABI version 1. The current runtime
+is emitted into one combined LLVM module, so compiler/runtime version mismatch is
+checked before emission. Event and descriptor headers also contain version 1 and
+are validated at every runtime entry that observes an event.
 
-## Frozen constraints
+The logical private layouts are:
 
-- An event owns one non-null struct or class payload implementing `Error`.
-- Struct payloads preserve value/snapshot semantics; class payloads preserve
-  reference identity.
-- The event is opaque and internal.
-- Exactly one event owner moves through propagation.
-- Matching borrows; handling/root termination destroy exactly once; rethrow
-  transfers without repacking or changing provenance.
-- Exact catch matching uses collision-safe canonical nominal identity across
-  modules.
-- `Error` catch-all behavior is compiler-directed; the runtime does not invent
-  source matching policy.
-- The runtime never scans the stack for Aether owners.
-- Compiler-generated cleanup invokes typed lifecycle operations.
-- Panic entry/reporting is separate and never packages a catchable event.
-- Allocation/reporting/internal failures follow the fail-fast policy and cannot
-  recursively throw.
-- No Aether exception crosses raw C.
-- The contract is versioned and private; a stable public exception ABI is out of
-  scope.
+```text
+descriptor v1 = { abi_version, canonical source name, Error witness }
+event v1      = { magic, abi_version, live_state, descriptor, owned carrier,
+                  original line, original column }
+```
 
-## Decision: Pending
+The carrier is a compiler-owned erased box for a struct `Error`, the existing
+class reference for a class `Error`, or the carrier selected from an owned
+`Error` interface value. Struct boxing preserves an owned snapshot; class
+carriers preserve object identity. Source code and public FFI never observe
+these fields.
 
-The approved ADR must specify the private operation set, ownership pre/postconditions,
-event/payload storage choice, canonical descriptor contract, version negotiation or
-schema identity, root termination sequence, failure policy, and relationship to the
-selected backend lowering.
+Live state is private diagnostic hardening. State 1 is live and state 2 is
+consumed. A private live-event counter and fault mask support tests; neither is
+semantic state or a public symbol.
 
-## Candidate options
+## Canonical descriptor identity
 
-The architecture leaves several internal representation axes open. Only options
-explicitly identified by the approved documents are listed.
+Exact matching uses descriptor pointer equality because the current compiler
+combines all source modules into one LLVM module and emits exactly one descriptor
+per canonical nominal ID. Separate object compilation is not supported by the
+current native ABI.
 
-### Payload storage
+The private descriptor symbol contains the byte length and complete UTF-8 nominal
+ID encoded as hex. A SHA-256 prefix is only a readability/linker aid; it is never
+used alone for identity. Consequently distinct nominal IDs cannot collide even
+if their digest prefixes collide. The descriptor also points to the one canonical
+`Error` witness selected for that nominal type. Conflicting struct/class identity,
+missing witnesses and descriptor/payload disagreement fail before emission.
 
-- Store eligible small struct payloads inline in the opaque event.
-- Box payloads in event-owned storage.
-- Move payloads into an existing interface box where that preserves value/reference
-  semantics and ownership.
-- Reuse a carrier reference for class errors.
+If separate compilation or a loadable runtime is introduced, it must first
+guarantee link-time coalescing/registration of one canonical descriptor or adopt
+another collision-safe full-identity comparison. Hash-only matching is forbidden.
+Objects from the unsupported model must not be linked best-effort.
 
-These choices may be combined by payload category; no choice is selected here.
+## Logical operations
 
-### Canonical descriptor identity
+All handles below are private opaque pointers. `owned` is a linear precondition;
+`borrowed` is valid only while its event remains live. Allocation or internal
+failure panics/fails fast and never creates another catchable event.
 
-- Pointer equality when linking/module loading guarantees one canonical descriptor
-  instance.
-- Another collision-safe canonical nominal identity when unique pointer identity
-  is not guaranteed.
+| operation / current helper | arguments and preconditions | return / ownership postcondition | allocation and failure behavior |
+| --- | --- | --- | --- |
+| pack owned struct Error / compiler box + `__ae_exception_create_v1` | canonical descriptor, owned or copied struct carrier, original line/column | one owned live event; carrier ownership moves into it | allocates erased carrier and event; carrier/event allocation failure is panic; an injected pre-event fault drops the carrier first |
+| pack owned class Error / retain-or-move + `create_v1` | non-null class implementing `Error`, matching descriptor | one event owns that class reference and preserves identity | event allocation only; copy form retains before transfer; failure drops the transferred reference before fail-fast |
+| pack owned interface Error / witness selection + `create_v1` | owned non-null interface carrier/witness | one event owns carrier and selected canonical dynamic descriptor | interface copy adapter may allocate; unknown/null descriptor or bad witness fails fast |
+| validate / `__ae_exception_validate_v1` | purported borrowed live event | `void`; ownership unchanged | no allocation; null, magic/version/state/descriptor failure terminates through private panic |
+| canonical exact match / `__ae_exception_matches_v1` | borrowed live event and canonical expected descriptor | `i1`; both remain borrowed | no allocation; validates event; exact pointer equality only |
+| `Error` catch-all | borrowed verified event | compiler emits true for non-null valid event | no runtime allocation or ownership change; only `Error` may request catch-all |
+| payload borrow / `borrow_carrier_v1`, `borrow_witness_v1` | borrowed live event after successful exact/root match | borrowed carrier, and witness for interface catch; no new owner | no allocation; invalid event fails fast |
+| event transfer | one owned event on a verified SSA edge | same sole owner on successor | no runtime call or allocation |
+| rethrow | active catch-owned event | same event/provenance transferred to outer exceptional continuation | no repack, retain, copy, allocation or helper call |
+| destroy / `__ae_exception_destroy_v1` | one owned live event | payload/carrier dropped exactly once, event consumed and freed | no allocation; counter underflow/state/ABI corruption fails fast |
+| outward propagation | owned event at function exceptional exit and valid private event slot | stores event in caller slot; callee has no owner afterward | no allocation; ordinary result is invalid on this edge |
+| root report / `__ae_exception_root_terminate_v1` | sole owned event escaping `main` | no return | validates, borrows canonical name/carrier, invokes `Error.message()` once, writes the frozen diagnostic to stderr, releases message, destroys event and exits 1 |
+| root reporting failure | sole root event | destroys event and terminates; no recoverable return | message/format/write failure uses fail-fast reporting and cannot recursively throw; a message-produced event, if defensively encountered, is destroyed first |
+| compiler/runtime version check | requested ABI version | printer construction succeeds only for v1 | mismatch rejects before LLVM emission |
+| runtime internal failure / `__ae_exception_panic_v1` | none or invalid private state | no return | writes the private invariant panic and exits 1; never packs/catches an event |
 
-Hash-only equality is not a candidate.
+Logical transfer, rethrow and propagation deliberately have no convenience
+runtime helper: the verified CFG and selected event-out convention already
+perform the ownership move. The runtime never scans the stack or invokes
+language-level matching policy.
 
-### Propagation-state organization
+## Root behavior and provenance
 
-- Event-private backend-specific propagation state for native EH.
-- Explicit event handle transfer through status-value or out-parameter lowering.
-- Compiler-owned explicit continuation state for a continuation backend.
+The root owns the only live event after all compiler-generated frame cleanup has
+run. It validates the descriptor, borrows the dynamic canonical source name and
+payload, calls the approved `Error.message()` dispatch, writes exactly:
 
-The backend ADR selects the applicable transport family. The runtime ADR must keep
-the logical pack/match/borrow/transfer/destroy/root contract identical.
+```text
+Aether unhandled exception: <canonical-type>: <message>\n
+```
 
-## Evaluation criteria
+to stderr, releases the returned string, destroys the event once and exits 1.
+The original positive line/column are stored at pack time and survive rethrow and
+propagation; the frozen release diagnostic does not currently print them.
 
-1. Exact ownership preconditions/postconditions for pack, borrow, transfer,
-   destroy, rethrow, propagation, and root handling.
-2. Correct struct snapshot and class identity behavior.
-3. Canonical cross-module descriptor identity without collision ambiguity.
-4. Compatibility with the selected backend and plausible alternate targets.
-5. No runtime stack scanning or duplicated lifecycle policy.
-6. Event allocation cost, small-payload behavior, alignment, and code size.
-7. ARC/lifecycle integration for nested managed payloads and interface boxes.
-8. Safe deterministic handling of allocation, descriptor, message dispatch, and
-   diagnostic formatting failures.
-9. Preservation of original throw provenance without exposing it as public layout.
-10. Separate panic entry points and termination paths.
-11. Internal versioning, symbol namespace, linker behavior, and module loading.
-12. Debug ownership counters, event IDs, and fault-injection hooks without changing
-    production semantics.
-13. FFI containment and future wrapper viability without making the private ABI
-    public.
-14. Sanitizer, stress, reentrancy, and supported threading/task behavior.
+An injected message/report failure is checked before output so the fault result is
+deterministic. Actual stream failure may occur after a partial host write; the
+runtime still releases any message, destroys the event and enters fail-fast
+termination. It never retries by throwing. A source-produced throwing
+`message()` is not part of the frozen source contract, but the prototype
+defensively contains and destroys such an event in internal tests.
+
+## Panic separation and attributes
+
+Packing, matching and destruction invariant failures; allocation failure; ABI
+mismatch; and reporting corruption enter fail-fast panic, never exception
+propagation. Existing overflow, division, bounds, invalid-size, allocator and ARC
+panic helpers have no event-out slot or handler edge. Catches therefore cannot
+intercept them.
+
+`exit`, root termination, event EH raise in the rejected prototype and private
+panic are `noreturn`. No potentially throwing Aether function is declared
+`nounwind`. Runtime match/borrow/destroy helpers are not given speculative
+`readnone`, `readonly` or `willreturn` attributes that would hide validation or
+panic behavior.
+
+## Native boundaries and privacy
+
+Every ABI symbol and layout in this ADR is private to the emitted module. Raw C
+runtime calls cannot receive or propagate an Aether event. Process root consumes
+the event before returning to C. Throwing process entry calls are rejected.
+Throwing exports, C callbacks, separately compiled objects and a stable public
+error handle are unsupported until the later FFI milestone defines containment.
+
+The ABI is collision-safe, opaque and versioned, but versioning is an internal
+fail-closed guard rather than a compatibility promise. Future runtime extraction
+may change every helper name and layout under a coordinated version change.
+
+## Validation evidence
+
+The native suite covers struct/class/interface packing, exact/root match, borrow,
+destroy, propagation, nested and repeated rethrow, root destruction, constructor
+rollback, managed payloads, O0/O1/O2, deterministic output and malformed ABI/
+descriptor rejection. Both event-out and the comparison EH prototype pass the
+same representative corpus under ASan with leak detection and UBSan.
+
+Fault bits cover event allocation, descriptor lookup, message and root reporting.
+The high-volume exceptional benchmark creates and destroys 2,000 events per run;
+recursive tests propagate through multiple frames. Raw measurements and exact
+toolchain commands are retained in
+`docs/compiler/exceptions/EXCEPTION_BACKEND_COMPARISON_2026-08-02.json`.
 
 ## Consequences
 
-Pending the decision:
-
-- M8 runtime implementation is not approved.
-- M7 backend work may prototype only against an explicitly provisional contract.
-- M9 cannot finalize adapter ownership.
-
-After approval:
-
-- Compiler lowering and runtime implementation share one versioned private
-  contract and ABI test suite.
-- Event layout/helper names remain free to evolve through the private versioning
-  policy and are not language guarantees.
-- All event consumers must obey linear ownership; convenience helpers cannot
-  absorb compiler cleanup policy.
-- A later public FFI ABI requires separate design and approval.
-
-## Validation requirements
-
-- Unit tests for pack, descriptor lookup, exact/root match support, borrow,
-  transfer, destroy, rethrow, propagation, and root termination.
-- Struct and class payload tests, including nested managed ownership.
-- Cross-module/link-unit descriptor identity tests and collision-safety tests.
-- Leak, double-destroy, use-after-destroy, and catch-borrow lifetime tests.
-- Fault injection at event allocation, descriptor access, `message()`, diagnostic
-  formatting, and root reporting.
-- Deep propagation, nested/repeated catch-rethrow, high-volume stress, and
-  reentrant paths.
-- Supported sanitizer and platform termination-output tests.
-- Tests proving panic is never an event and that panic during exception processing
-  follows fail-fast behavior.
-- Backend-facing ABI/version mismatch tests that fail closed.
-- FFI containment tests proving raw C frames never observe event propagation.
-
-## Decision deadline / owning milestone
-
-**Deadline:** before the private exception runtime implementation is merged and
-before Milestone 7 backend lowering is finalized against it.
-
-**Owning milestone:** **Milestone 8 — Runtime**.
+- Event ownership remains explicit and linear from SSA through native execution.
+- Runtime helpers do not duplicate cleanup policy or inspect Aether stacks.
+- Pointer matching is accepted only for the current combined-module model.
+- The rejected LLVM EH transport can reuse the same logical event operations in
+  tests, but it is not part of the accepted calling convention.
+- `ERROR_HANDLING` remains unsupported in the stable native capability profile.
+- Public FFI, separate compilation, threading/task guarantees and capability
+  promotion remain future work.

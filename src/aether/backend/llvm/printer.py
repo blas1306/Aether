@@ -208,6 +208,7 @@ class LLVMPrinter:
         *,
         exception_runtime_abi_version: int = EXCEPTION_RUNTIME_ABI_VERSION,
         exception_strategy: ExceptionLoweringStrategy | str = ExceptionLoweringStrategy.EVENT_OUT,
+        allow_test_exception_strategy: bool = False,
     ) -> None:
         if exception_runtime_abi_version != EXCEPTION_RUNTIME_ABI_VERSION:
             raise LLVMBackendError(
@@ -222,6 +223,14 @@ class LLVMPrinter:
             raise LLVMBackendError(
                 f"LLVM unsupported exception lowering strategy '{exception_strategy}'"
             ) from exc
+        if (
+            self._exception_strategy
+            is ExceptionLoweringStrategy.LLVM_EH_PROTOTYPE
+            and not allow_test_exception_strategy
+        ):
+            raise LLVMBackendError(
+                "LLVM EH exception lowering is an internal test-only prototype"
+            )
 
     def print_module(self, module: SSAModule, *, native_entry: bool = False) -> str:
         self._native_entry = native_entry

@@ -14,9 +14,9 @@ EXCEPTION_EVENT_MAGIC = 0x4145544845524558
 class ExceptionLoweringStrategy(str, Enum):
     """Private backend transport choices.
 
-    ``LLVM_EH_PROTOTYPE`` intentionally remains opt-in: it exists only to make
-    the backend ADR comparison executable.  The native backend's default stays
-    on the explicit event-out convention until the ADR is accepted.
+    ``EVENT_OUT`` is the accepted production transport.  ``LLVM_EH_PROTOTYPE``
+    remains behind an additional explicit test-only gate solely to keep the
+    backend ADR comparison reproducible.
     """
 
     EVENT_OUT = "event-out"

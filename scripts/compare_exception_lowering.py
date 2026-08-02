@@ -12,9 +12,11 @@ import argparse
 import json
 from pathlib import Path
 import platform
+import re
 import shutil
 import statistics
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -79,15 +81,23 @@ def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, check=False, capture_output=True, text=True)
 
 
-def _median_runtime(executable: Path, repetitions: int) -> tuple[float, str, str, int]:
-    samples = []
+def _runtime_samples(
+    executable: Path, repetitions: int
+) -> tuple[list[float], str, str, int]:
+    samples: list[float] = []
     last: subprocess.CompletedProcess[str] | None = None
     for _ in range(repetitions):
         started = time.perf_counter_ns()
         last = _run([str(executable)])
         samples.append((time.perf_counter_ns() - started) / 1_000_000)
     assert last is not None
-    return statistics.median(samples), last.stdout, last.stderr, last.returncode
+    return samples, last.stdout, last.stderr, last.returncode
+
+
+def _elapsed_ms(command: list[str]) -> tuple[float, subprocess.CompletedProcess[str]]:
+    started = time.perf_counter_ns()
+    completed = _run(command)
+    return (time.perf_counter_ns() - started) / 1_000_000, completed
 
 
 def main() -> int:
@@ -105,11 +115,13 @@ def main() -> int:
             "platform": platform.platform(),
             "machine": platform.machine(),
             "clang": clang_version,
+            "python": sys.version.splitlines()[0],
         },
         "commands": {
             "reproduce": "PYTHONPATH=src .venv/bin/python scripts/compare_exception_lowering.py --runs 9",
-            "compile_event_out": "clang -O<0|1|2> module.ll -o program",
-            "compile_llvm_eh": "clang -O<0|1|2> module.ll -o program -l:libstdc++.so.6",
+            "compile": "clang -O<0|1|2> -c module.ll -o module.o",
+            "link_event_out": "clang module.o -o program",
+            "link_llvm_eh": "clang module.o -o program -l:libstdc++.so.6",
         },
         "measurements": [],
     }
@@ -117,39 +129,59 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="aether-exception-comparison-") as raw:
         root = Path(raw)
         for corpus_name, source in SOURCES.items():
+            ssa_started = time.perf_counter_ns()
             module = _verified_ssa(source)
+            ssa_ms = (time.perf_counter_ns() - ssa_started) / 1_000_000
             for strategy in ExceptionLoweringStrategy:
+                emission_started = time.perf_counter_ns()
                 llvm = LLVMBackend(
-                    LLVMPrinter(exception_strategy=strategy)
+                    LLVMPrinter(
+                        exception_strategy=strategy,
+                        allow_test_exception_strategy=True,
+                    )
                 ).emit(module)
+                emission_ms = (time.perf_counter_ns() - emission_started) / 1_000_000
                 for optimization in ("0", "1", "2"):
                     stem = f"{corpus_name}-{strategy.value}-O{optimization}"
                     llvm_path = root / f"{stem}.ll"
+                    object_path = root / f"{stem}.o"
                     executable = root / stem
                     llvm_path.write_text(llvm, encoding="utf-8")
-                    command = [
+                    compile_command = [
                         clang,
                         f"-O{optimization}",
                         "-Wno-override-module",
+                        "-c",
                         str(llvm_path),
-                        "-o",
-                        str(executable),
+                        "-o", str(object_path),
                     ]
+                    link_command = [clang, str(object_path), "-o", str(executable)]
                     if strategy is ExceptionLoweringStrategy.LLVM_EH_PROTOTYPE:
-                        command.append("-l:libstdc++.so.6")
-                    compile_samples = []
+                        link_command.append("-l:libstdc++.so.6")
+                    compile_samples: list[float] = []
                     built: subprocess.CompletedProcess[str] | None = None
                     for _ in range(3):
-                        started = time.perf_counter_ns()
-                        built = _run(command)
-                        compile_samples.append(
-                            (time.perf_counter_ns() - started) / 1_000_000
-                        )
+                        elapsed, built = _elapsed_ms(compile_command)
+                        compile_samples.append(elapsed)
                     assert built is not None
                     if built.returncode != 0:
                         raise SystemExit(built.stderr)
-                    runtime_ms, stdout, stderr, returncode = _median_runtime(
+                    link_samples: list[float] = []
+                    linked: subprocess.CompletedProcess[str] | None = None
+                    for _ in range(3):
+                        elapsed, linked = _elapsed_ms(link_command)
+                        link_samples.append(elapsed)
+                    assert linked is not None
+                    if linked.returncode != 0:
+                        raise SystemExit(linked.stderr)
+                    runtime_samples, stdout, stderr, returncode = _runtime_samples(
                         executable, arguments.runs
+                    )
+                    generated_functions = len(
+                        re.findall(r"(?m)^define\s", llvm)
+                    )
+                    runtime_helpers = len(
+                        re.findall(r"(?m)^define private .*@__ae_exception_", llvm)
                     )
                     report["measurements"].append(
                         {
@@ -158,11 +190,30 @@ def main() -> int:
                             "optimization": f"O{optimization}",
                             "llvm_bytes": len(llvm.encode("utf-8")),
                             "llvm_lines": len(llvm.splitlines()),
+                            "object_bytes": object_path.stat().st_size,
                             "binary_bytes": executable.stat().st_size,
+                            "generated_functions": generated_functions,
+                            "exception_runtime_helpers": runtime_helpers,
+                            "ssa_build_ms": round(ssa_ms, 3),
+                            "llvm_emission_ms": round(emission_ms, 3),
+                            "clang_compile_samples_ms": [
+                                round(sample, 3) for sample in compile_samples
+                            ],
                             "compile_median_ms": round(
                                 statistics.median(compile_samples), 3
                             ),
-                            "run_median_ms": round(runtime_ms, 3),
+                            "link_samples_ms": [
+                                round(sample, 3) for sample in link_samples
+                            ],
+                            "link_median_ms": round(
+                                statistics.median(link_samples), 3
+                            ),
+                            "runtime_samples_ms": [
+                                round(sample, 3) for sample in runtime_samples
+                            ],
+                            "run_median_ms": round(
+                                statistics.median(runtime_samples), 3
+                            ),
                             "returncode": returncode,
                             "stdout": stdout,
                             "stderr": stderr,
