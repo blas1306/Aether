@@ -7,6 +7,7 @@ from aether.ir.interpreter import IRExecutionError
 from aether.pipeline import parse_source
 from aether.ssa import (
     GeneralSSABuilder,
+    SSACall,
     SSACatchEntry,
     SSACFGBuilder,
     SSADTOError,
@@ -635,3 +636,60 @@ int main() {
         match=r"Unhandled NetworkError exception",
     ):
         SSAInterpreter(module).call("main")
+
+
+@pytest.mark.parametrize(
+    "corruption",
+    ["missing_exceptional_release", "double_exceptional_release", "normal_use_after_release"],
+)
+def test_ssa_verifier_rejects_malformed_constructor_receiver_cleanup(
+    corruption: str,
+) -> None:
+    _ir, module = _lower(
+        ERROR_TYPES
+        + """
+struct Wrapper {
+    string initialized;
+    Array<string> nested;
+    constructor() {
+        initialized = "owned";
+        nested = {"partial"};
+        throw FileError("constructor");
+    }
+}
+int main() {
+    try { Wrapper value = Wrapper(); }
+    catch (FileError error) { println(error.message()); }
+    return 0;
+}
+"""
+    )
+    function = next(function for function in module.functions if function.name == "main")
+    invoke = next(
+        instruction
+        for block in function.blocks
+        for instruction in block.instructions
+        if isinstance(instruction, SSAInvoke) and instruction.function == "Wrapper.__ctor"
+    )
+    receiver = invoke.arguments[0]
+    blocks = {block.name: block for block in function.blocks}
+    cleanup = blocks[invoke.exceptional_target]
+    normal = blocks[invoke.normal_target]
+
+    if corruption == "missing_exceptional_release":
+        cleanup.instructions.pop(1)
+    elif corruption == "double_exceptional_release":
+        cleanup.instructions.insert(2, cleanup.instructions[1])
+    else:
+        normal.instructions.insert(
+            1,
+            SSACall(
+                "__aether_retain",
+                (receiver,),
+                None,
+                "__aether_retain",
+            ),
+        )
+
+    with pytest.raises(SSAVerificationError, match="[Cc]onstructor receiver|cleanup"):
+        SSAVerifier(module).verify()

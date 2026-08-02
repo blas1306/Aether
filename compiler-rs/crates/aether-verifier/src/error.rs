@@ -120,6 +120,13 @@ impl fmt::Display for TypeExpectation {
 /// The leaf cause of a type-verification failure.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TypeRuleError {
+    /// IRV-150: a constructor receiver is not released exactly once per edge.
+    ConstructorReceiverOwnership {
+        /// Block in which the ownership proof failed.
+        block_name: String,
+        /// Stable description of the violated ownership invariant.
+        detail: String,
+    },
     /// IRV-149: opaque exception-event ownership is not linear on the CFG.
     ExceptionEventOwnership {
         /// Block in which the ownership proof failed.
@@ -311,6 +318,10 @@ impl fmt::Display for TypeRuleError {
     #[allow(clippy::too_many_lines)]
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::ConstructorReceiverOwnership { block_name, detail } => write!(
+                formatter,
+                "IRV-150 constructor-receiver ownership failed in block '{block_name}': {detail}"
+            ),
             Self::ExceptionEventOwnership { block_name, detail } => write!(
                 formatter,
                 "IRV-149 exception-event ownership failed in block '{block_name}': {detail}"
@@ -646,6 +657,13 @@ impl Error for BlockTypeVerificationError {
 /// A function declaration or nested block type failure.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FunctionTypeVerificationError {
+    /// Function-wide constructor-receiver ownership is invalid.
+    ConstructorReceiverOwnership {
+        /// Function name.
+        function_name: String,
+        /// Typed ownership rule failure.
+        source: TypeRuleError,
+    },
     /// Function-wide opaque exception-event ownership is invalid.
     ExceptionEventOwnership {
         /// Function name.
@@ -687,6 +705,13 @@ pub enum FunctionTypeVerificationError {
 impl fmt::Display for FunctionTypeVerificationError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::ConstructorReceiverOwnership {
+                function_name,
+                source,
+            } => write!(
+                formatter,
+                "constructor-receiver ownership of function '{function_name}' failed verification: {source}"
+            ),
             Self::ExceptionEventOwnership {
                 function_name,
                 source,
@@ -726,7 +751,8 @@ impl fmt::Display for FunctionTypeVerificationError {
 impl Error for FunctionTypeVerificationError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::ExceptionEventOwnership { source, .. }
+            Self::ConstructorReceiverOwnership { source, .. }
+            | Self::ExceptionEventOwnership { source, .. }
             | Self::Parameter { source, .. }
             | Self::ReturnType { source, .. } => Some(source),
             Self::Block { source, .. } => Some(source),

@@ -375,7 +375,7 @@ int main() {
 """
     )
     llvm = LLVMBackend().emit(lower_to_verified_ssa(typed))
-    assert "type { %AetherObjectHeader, i1, double, ptr }" in llvm
+    assert "type { %AetherObjectHeader, i1, double, ptr, [3 x i1] }" in llvm
     label_load = llvm.index("%field.2 = load ptr")
     amount_load = llvm.index("%field.1 = load double")
     flag_load = llvm.index("%field.0 = load i1")

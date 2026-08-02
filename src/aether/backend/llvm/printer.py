@@ -130,6 +130,7 @@ from .process_runtime import LLVMProcessRuntime
 from .text_file_runtime import LLVMTextFileRuntime
 from .exception_abi import (
     EXCEPTION_RUNTIME_ABI_VERSION,
+    ExceptionLoweringStrategy,
     exception_descriptor_symbol,
 )
 from .exception_runtime import LLVMExceptionRuntime
@@ -206,6 +207,7 @@ class LLVMPrinter:
         self,
         *,
         exception_runtime_abi_version: int = EXCEPTION_RUNTIME_ABI_VERSION,
+        exception_strategy: ExceptionLoweringStrategy | str = ExceptionLoweringStrategy.EVENT_OUT,
     ) -> None:
         if exception_runtime_abi_version != EXCEPTION_RUNTIME_ABI_VERSION:
             raise LLVMBackendError(
@@ -214,6 +216,12 @@ class LLVMPrinter:
                 f"requested v{exception_runtime_abi_version}"
             )
         self._exception_runtime_abi_version = exception_runtime_abi_version
+        try:
+            self._exception_strategy = ExceptionLoweringStrategy(exception_strategy)
+        except ValueError as exc:
+            raise LLVMBackendError(
+                f"LLVM unsupported exception lowering strategy '{exception_strategy}'"
+            ) from exc
 
     def print_module(self, module: SSAModule, *, native_entry: bool = False) -> str:
         self._native_entry = native_entry
@@ -303,6 +311,22 @@ class LLVMPrinter:
             for instruction in block.instructions
             if isinstance(instruction, SSAInvokeInterface)
         }
+        interface_slots = {
+            instruction.slot.method_id
+            for function in module.functions
+            for block in function.blocks
+            for instruction in block.instructions
+            if isinstance(instruction, (SSAInterfaceCall, SSAInvokeInterface))
+        }
+        self._throwing_interface_slots.update(
+            slot_id
+            for slot_id in interface_slots
+            if any(
+                function.may_throw
+                and function.name.endswith(f".{slot_id.rsplit('.', 1)[-1]}")
+                for function in module.functions
+            )
+        )
         if self._uses_exceptions:
             self._throwing_interface_slots.add("Error.message")
             self._uses_interface_dispatch = True
@@ -633,7 +657,7 @@ class LLVMPrinter:
             codec=self._uses_text_codec,
         ).append(runtime)
         LLVMTextFileRuntime(self._uses_text_file_io).append(runtime)
-        LLVMExceptionRuntime(self._uses_exceptions).append(runtime)
+        LLVMExceptionRuntime(self._uses_exceptions, self._exception_strategy).append(runtime)
         LLVMProcessRuntime(
             self._uses_process_context or self._uses_process_arguments,
             snapshots=self._uses_process_arguments,
@@ -941,6 +965,7 @@ class LLVMPrinter:
         self._current_block = ""
         self._constants: dict[str, str] = {}
         self._function_references: dict[str, str] = {}
+        self._function_reference_targets: dict[str, str] = {}
         self._values: dict[str, str] = {
             self._key(parameter): self._parameter_name(parameter)
             for parameter in function.parameters
@@ -950,6 +975,16 @@ class LLVMPrinter:
         self._exception_predecessors: dict[str, list[tuple[str, SSAValue]]] = {
             block.name: [] for block in function.blocks
         }
+        self._eh_trampoline_by_block: dict[str, str] = {}
+        if self._exception_strategy is ExceptionLoweringStrategy.LLVM_EH_PROTOTYPE:
+            self._eh_trampoline_by_block = {
+                block.name: f"__ae.eh.{index}"
+                for index, block in enumerate(function.blocks)
+                if isinstance(
+                    block.instructions[-1],
+                    (SSAInvoke, SSAInvokeIndirect, SSAInvokeInterface),
+                )
+            }
         for predecessor in function.blocks:
             terminator = predecessor.instructions[-1]
             if isinstance(terminator, (SSAInvoke, SSAInvokeIndirect, SSAInvokeInterface)):
@@ -958,7 +993,17 @@ class LLVMPrinter:
                         "LLVM invoke exceptional edge must move exactly its event"
                     )
                 self._exception_predecessors[terminator.exceptional_target].append(
-                    (predecessor.name, terminator.exception)
+                    (
+                        self._eh_trampoline_by_block.get(
+                            predecessor.name, predecessor.name
+                        )
+                        + (
+                            ".caught"
+                            if predecessor.name in self._eh_trampoline_by_block
+                            else ""
+                        ),
+                        terminator.exception,
+                    )
                 )
             elif isinstance(terminator, (SSAThrow, SSARethrow, SSAPropagate)):
                 if terminator.target is not None:
@@ -970,6 +1015,9 @@ class LLVMPrinter:
                         (predecessor.name, terminator.event)
                     )
         self._collect_function_values(function)
+        self._exception_pack_copy_required = self._find_exception_pack_copies(
+            function
+        )
 
         return_type = llvm_type(function.return_type)
         rendered_parameters = [
@@ -985,15 +1033,160 @@ class LLVMPrinter:
             or (function.may_throw and function.name != "main")
             else ""
         )
+        personality = (
+            " personality ptr @__gxx_personality_v0"
+            if self._exception_strategy
+            is ExceptionLoweringStrategy.LLVM_EH_PROTOTYPE
+            and function.may_throw
+            else ""
+        )
         lines = [
-            f"define {linkage}{return_type} {self._global_name(function.name)}({parameters}) {{"
+            f"define {linkage}{return_type} {self._global_name(function.name)}"
+            f"({parameters}){personality} {{"
         ]
 
         for block in function.blocks:
             lines.extend(self._print_block(block, function))
+            terminator = block.instructions[-1]
+            if (
+                block.name in self._eh_trampoline_by_block
+                and isinstance(
+                    terminator,
+                    (SSAInvoke, SSAInvokeIndirect, SSAInvokeInterface),
+                )
+            ):
+                lines.extend(
+                    self._print_eh_trampoline(
+                        self._eh_trampoline_by_block[block.name],
+                        terminator.exception,
+                        terminator.exceptional_target,
+                    )
+                )
 
         lines.append("}")
         return "\n".join(lines)
+
+    def _find_exception_pack_copies(self, function: SSAFunction) -> set[str]:
+        """Find payload owners that remain live after an exception pack.
+
+        Initial IR permits pack to move a temporary or copy a still-live
+        owner.  SSA makes the distinction observable through later uses on the
+        exceptional continuation.  The native box must acquire ARC ownership
+        only in the latter case.
+        """
+
+        blocks = {block.name: block for block in function.blocks}
+        successors: dict[str, tuple[str, ...]] = {}
+        for block in function.blocks:
+            terminator = block.instructions[-1]
+            if isinstance(terminator, SSAJump):
+                successors[block.name] = (terminator.target,)
+            elif isinstance(terminator, SSABranch):
+                successors[block.name] = (
+                    terminator.true_target,
+                    terminator.false_target,
+                )
+            elif isinstance(
+                terminator,
+                (SSAInvoke, SSAInvokeIndirect, SSAInvokeInterface),
+            ):
+                successors[block.name] = (
+                    terminator.normal_target,
+                    terminator.exceptional_target,
+                )
+            elif isinstance(terminator, (SSAThrow, SSARethrow, SSAPropagate)):
+                successors[block.name] = (
+                    () if terminator.target is None else (terminator.target,)
+                )
+            else:
+                successors[block.name] = ()
+
+        copies: set[str] = set()
+        for block in function.blocks:
+            for index, instruction in enumerate(block.instructions):
+                if not isinstance(instruction, SSAPackException):
+                    continue
+                key = self._key(instruction.payload)
+                if any(
+                    self._instruction_uses_value(item, key)
+                    for item in block.instructions[index + 1 :]
+                    if not isinstance(item, (SSAThrow, SSARethrow, SSAPropagate))
+                ):
+                    copies.add(key)
+                    continue
+                pending = list(successors[block.name])
+                visited: set[str] = set()
+                while pending:
+                    name = pending.pop()
+                    if name in visited:
+                        continue
+                    visited.add(name)
+                    candidate = blocks[name]
+                    if any(
+                        self._instruction_uses_value(item, key)
+                        for item in candidate.instructions
+                    ):
+                        copies.add(key)
+                        break
+                    pending.extend(successors[name])
+        return copies
+
+    def _instruction_uses_value(
+        self,
+        instruction: SSAInstruction,
+        key: str,
+    ) -> bool:
+        def contains(value: object) -> bool:
+            if isinstance(value, SSAValue):
+                return self._key(value) == key
+            if isinstance(value, (tuple, list)):
+                return any(contains(item) for item in value)
+            if is_dataclass(value):
+                return any(contains(getattr(value, item.name)) for item in fields(value))
+            return False
+
+        for item in fields(instruction):
+            if item.name == "result" or item.metadata.get("ir_definition", False):
+                continue
+            if contains(getattr(instruction, item.name)):
+                return True
+        return False
+
+    def _print_eh_trampoline(
+        self,
+        label: str,
+        event_value: SSAValue,
+        exceptional_target: str,
+    ) -> list[str]:
+        """Extract our event and resume any foreign native exception."""
+
+        landing = self._synthetic_temp("eh.landing")
+        native_exception = self._synthetic_temp("eh.native.exception")
+        selector = self._synthetic_temp("eh.selector")
+        expected = self._synthetic_temp("eh.expected.selector")
+        ours = self._synthetic_temp("eh.is.aether")
+        caught = f"{label}.caught"
+        foreign = f"{label}.foreign"
+        wrapper = self._synthetic_temp("eh.wrapper")
+        event = self._new_temp(event_value)
+        return [
+            self._label_definition(label),
+            f"  {landing} = landingpad {{ ptr, i32 }} catch ptr @_ZTIPv",
+            f"  {native_exception} = extractvalue {{ ptr, i32 }} {landing}, 0",
+            f"  {selector} = extractvalue {{ ptr, i32 }} {landing}, 1",
+            f"  {expected} = call i32 @llvm.eh.typeid.for(ptr @_ZTIPv)",
+            f"  {ours} = icmp eq i32 {selector}, {expected}",
+            f"  br i1 {ours}, {self._label_operand(caught)}, {self._label_operand(foreign)}",
+            self._label_definition(caught),
+            f"  {wrapper} = call ptr @__cxa_begin_catch(ptr {native_exception})",
+            # For a C++ ``void*`` exception, begin_catch returns the pointer
+            # value stored in the native wrapper, i.e. our opaque event.
+            f"  {event} = getelementptr i8, ptr {wrapper}, i64 0",
+            "  call void @__cxa_end_catch()",
+            f"  br {self._label_operand(exceptional_target)}",
+            self._label_definition(foreign),
+            f"  resume {{ ptr, i32 }} {landing}",
+        ]
 
     def _collect_function_values(self, function: SSAFunction) -> None:
         for block in function.blocks:
@@ -1005,6 +1198,9 @@ class LLVMPrinter:
                     self._function_references[self._key(instruction.result)] = self._global_name(
                         instruction.function
                     )
+                    self._function_reference_targets[
+                        self._key(instruction.result)
+                    ] = instruction.function
                     continue
 
                 if isinstance(instruction, (SSAInvoke, SSAInvokeIndirect, SSAInvokeInterface)):
@@ -1080,6 +1276,9 @@ class LLVMPrinter:
             self._function_references[self._key(instruction.result)] = self._global_name(
                 instruction.function
             )
+            self._function_reference_targets[
+                self._key(instruction.result)
+            ] = instruction.function
             return None
         if isinstance(instruction, SSACallIndirect):
             return self._print_indirect_call(instruction)
@@ -1950,9 +2149,12 @@ class LLVMPrinter:
     def _print_jump(self, instruction: SSAJump) -> str:
         return f"br {self._label_operand(instruction.target)}"
 
-    @staticmethod
-    def _function_uses_exception_out(function: SSAFunction) -> bool:
-        return function.may_throw and function.name != "main"
+    def _function_uses_exception_out(self, function: SSAFunction) -> bool:
+        return (
+            self._exception_strategy is ExceptionLoweringStrategy.EVENT_OUT
+            and function.may_throw
+            and function.name != "main"
+        )
 
     @staticmethod
     def _exceptional_return(return_type: object) -> str:
@@ -1982,6 +2184,28 @@ class LLVMPrinter:
         exceptional_target: str,
         prefix: str,
     ) -> list[str]:
+        if self._exception_strategy is ExceptionLoweringStrategy.LLVM_EH_PROTOTYPE:
+            rendered_arguments = [
+                f"{llvm_type(argument.type)} {self._operand(argument)}"
+                for argument in arguments
+            ]
+            rendered_return = llvm_type(return_type)
+            trampoline = self._eh_trampoline_by_block.get(self._current_block)
+            if trampoline is None:
+                raise LLVMBackendError("LLVM EH invoke has no landing-pad trampoline")
+            invoke = (
+                f"invoke {rendered_return} {callee}({', '.join(rendered_arguments)}) "
+                f"to {self._label_operand(normal_target)} "
+                f"unwind {self._label_operand(trampoline)}"
+            )
+            if isinstance(return_type, VoidType):
+                if result_value is not None:
+                    raise LLVMBackendError("LLVM void invoke cannot define a normal result")
+                return [invoke]
+            if result_value is None:
+                raise LLVMBackendError("LLVM non-void invoke requires a normal result")
+            return [f"{self._new_temp(result_value)} = {invoke}"]
+
         slot = self._synthetic_temp(f"{prefix}.event.out")
         failed = self._synthetic_temp(f"{prefix}.failed")
         rendered_arguments = [
@@ -2038,6 +2262,15 @@ class LLVMPrinter:
     def _print_indirect_invoke(self, instruction: SSAInvokeIndirect) -> list[str]:
         if not isinstance(instruction.callee.type, FunctionType):
             raise LLVMBackendError("LLVM indirect invoke requires a callable callee")
+        known_target = self._function_reference_targets.get(
+            self._key(instruction.callee)
+        )
+        if known_target is not None:
+            target = self._functions_by_name.get(known_target)
+            if target is None or not target.may_throw:
+                raise LLVMBackendError(
+                    f"LLVM call/invoke mismatch for indirect target '{known_target}'"
+                )
         return self._invoke_call_lines(
             callee=self._operand(instruction.callee),
             arguments=instruction.arguments,
@@ -2069,18 +2302,37 @@ class LLVMPrinter:
             f"{thunk_pointer} = getelementptr %AetherWitnessSlot, ptr {slot_pointer}, i32 0, i32 2",
             f"{thunk} = load ptr, ptr {thunk_pointer}",
         ]
-        slot = self._synthetic_temp("invoke.interface.event.out")
-        failed = self._synthetic_temp("invoke.interface.failed")
-        lines.extend([f"{slot} = alloca ptr, align 8", f"store ptr null, ptr {slot}, align 8"])
         arguments = [
             f"ptr {carrier}",
             *[
                 f"{llvm_type(argument.type)} {self._operand(argument)}"
                 for argument in instruction.arguments
             ],
-            f"ptr {slot}",
         ]
         return_type = instruction.slot.return_type
+        if self._exception_strategy is ExceptionLoweringStrategy.LLVM_EH_PROTOTYPE:
+            trampoline = self._eh_trampoline_by_block.get(self._current_block)
+            if trampoline is None:
+                raise LLVMBackendError("LLVM EH interface invoke has no landing-pad trampoline")
+            call = (
+                f"invoke {llvm_type(return_type)} {thunk}({', '.join(arguments)}) "
+                f"to {self._label_operand(instruction.normal_target)} "
+                f"unwind {self._label_operand(trampoline)}"
+            )
+            if isinstance(return_type, VoidType):
+                if instruction.result is not None:
+                    raise LLVMBackendError("LLVM void interface invoke cannot define a result")
+                lines.append(call)
+            else:
+                if instruction.result is None:
+                    raise LLVMBackendError("LLVM interface invoke requires a normal result")
+                lines.append(f"{self._new_temp(instruction.result)} = {call}")
+            return lines
+
+        slot = self._synthetic_temp("invoke.interface.event.out")
+        failed = self._synthetic_temp("invoke.interface.failed")
+        lines.extend([f"{slot} = alloca ptr, align 8", f"store ptr null, ptr {slot}, align 8"])
+        arguments.append(f"ptr {slot}")
         call = f"call {llvm_type(return_type)} {thunk}({', '.join(arguments)})"
         if isinstance(return_type, VoidType):
             if instruction.result is not None:
@@ -2107,6 +2359,7 @@ class LLVMPrinter:
         lines: list[str] = []
         descriptor: str
         carrier: str
+        copy_payload = self._key(instruction.payload) in self._exception_pack_copy_required
         if isinstance(payload_type, (StructType, ClassRefType)):
             if instruction.dynamic_type != payload_type.name:
                 raise LLVMBackendError(
@@ -2115,6 +2368,8 @@ class LLVMPrinter:
             witness = self._require_error_witness(payload_type.name, payload_type)
             descriptor = f"@{exception_descriptor_symbol(payload_type.name)}"
             if isinstance(payload_type, ClassRefType):
+                if copy_payload:
+                    lines.append(f"call void @aether_class_retain(ptr {payload})")
                 carrier = payload
             else:
                 if witness.box_layout is None:
@@ -2127,6 +2382,11 @@ class LLVMPrinter:
                 alignment_ptr = self._synthetic_temp("exception.box.alignment")
                 offset_ptr = self._synthetic_temp("exception.box.offset")
                 payload_ptr = self._synthetic_temp("exception.box.payload")
+                stored_payload = payload
+                if copy_payload:
+                    stored_payload = self._emit_arc_value(
+                        lines, payload, payload_type, retain=True
+                    )
                 lines.extend(
                     [
                         f"{carrier} = call ptr @aether_alloc(i64 {size})",
@@ -2137,7 +2397,7 @@ class LLVMPrinter:
                         f"{offset_ptr} = getelementptr {box_type}, ptr {carrier}, i32 0, i32 2",
                         f"store i32 {witness.box_layout.payload_offset}, ptr {offset_ptr}",
                         f"{payload_ptr} = getelementptr {box_type}, ptr {carrier}, i32 0, i32 4",
-                        f"store {llvm_type(payload_type)} {payload}, ptr {payload_ptr}",
+                        f"store {llvm_type(payload_type)} {stored_payload}, ptr {payload_ptr}",
                     ]
                 )
         elif isinstance(payload_type, InterfaceType) and payload_type.name == "Error":
@@ -2149,6 +2409,18 @@ class LLVMPrinter:
                     f"{witness_value} = extractvalue {llvm_type(payload_type)} {payload}, 1",
                 ]
             )
+            if copy_payload:
+                copy_pointer = self._synthetic_temp("exception.interface.copy.ptr")
+                copy_adapter = self._synthetic_temp("exception.interface.copy")
+                copied_carrier = self._synthetic_temp("exception.interface.carrier.copy")
+                lines.extend(
+                    [
+                        f"{copy_pointer} = getelementptr %AetherWitnessHeader, ptr {witness_value}, i32 0, i32 4",
+                        f"{copy_adapter} = load ptr, ptr {copy_pointer}",
+                        f"{copied_carrier} = call ptr {copy_adapter}(ptr {carrier})",
+                    ]
+                )
+                carrier = copied_carrier
             selected = "null"
             for nominal_id, concrete_type in sorted(self._exception_nominal_types.items()):
                 witness = self._require_error_witness(nominal_id, concrete_type)
@@ -2266,6 +2538,14 @@ class LLVMPrinter:
                 "unreachable"
             )
         if not self._function_uses_exception_out(function):
+            if (
+                self._exception_strategy
+                is ExceptionLoweringStrategy.LLVM_EH_PROTOTYPE
+            ):
+                return (
+                    f"call void @__ae_exception_eh_raise_v1(ptr {event})\n  "
+                    "unreachable"
+                )
             raise LLVMBackendError(
                 f"LLVM function '{function.name}' propagates without private event-out ABI"
             )
@@ -2904,6 +3184,15 @@ class LLVMPrinter:
     def _print_indirect_call(self, instruction: SSACallIndirect) -> str:
         if not isinstance(instruction.callee.type, FunctionType):
             raise LLVMBackendError("LLVM indirect call requires a callable callee")
+        known_target = self._function_reference_targets.get(
+            self._key(instruction.callee)
+        )
+        if known_target is not None:
+            target = self._functions_by_name.get(known_target)
+            if target is None or target.may_throw:
+                raise LLVMBackendError(
+                    f"LLVM call/invoke mismatch for indirect target '{known_target}'"
+                )
         arguments = ", ".join(
             f"{llvm_type(argument.type)} {self._operand(argument)}"
             for argument in instruction.arguments
@@ -3383,6 +3672,18 @@ class LLVMPrinter:
             f"store {llvm_type(field_type)} {stored_value}, "
             f"ptr {pointer}"
         )
+        if instruction.initialize:
+            initialized_pointer = self._synthetic_temp("class.field.initialized.ptr")
+            lines.extend(
+                [
+                    f"{initialized_pointer} = getelementptr "
+                    f"{class_object_type(instruction.object.type)}, "
+                    f"ptr {self._operand(instruction.object)}, i32 0, "
+                    f"i32 {len(definition.fields) + 1}, "
+                    f"i32 {instruction.field_index}",
+                    f"store i1 true, ptr {initialized_pointer}",
+                ]
+            )
         if old is not None:
             self._emit_arc_value(lines, old, field_type, retain=False)
         return lines
@@ -5757,7 +6058,11 @@ class LLVMPrinter:
             raise LLVMBackendError(
                 f"LLVM interface slot '{slot.method_id}' lost may_throw metadata"
             )
-        if throwing_slot:
+        uses_event_out = (
+            target.may_throw
+            and self._exception_strategy is ExceptionLoweringStrategy.EVENT_OUT
+        )
+        if throwing_slot and self._exception_strategy is ExceptionLoweringStrategy.EVENT_OUT:
             parameters.append("ptr %__ae_exception_out")
         arguments = [
             "ptr %carrier",
@@ -5767,7 +6072,7 @@ class LLVMPrinter:
             ],
         ]
         target_arguments = list(arguments)
-        if target.may_throw:
+        if uses_event_out:
             target_arguments.append("ptr %__ae_exception_out")
         rendered_return = llvm_type(slot.return_type)
         if witness.carrier_kind == "box":
@@ -5789,7 +6094,7 @@ class LLVMPrinter:
                 f"  %pair = call {result_pair} {self._global_name(target_name)}"
                 f"({', '.join(source_arguments)})",
             ]
-            if target.may_throw:
+            if uses_event_out:
                 result_body.extend(
                     [
                         "  %event = load ptr, ptr %__ae_exception_out, align 8",
@@ -5813,7 +6118,7 @@ class LLVMPrinter:
                         f"  ret {rendered_return} %result",
                     ]
                 )
-            if target.may_throw:
+            if uses_event_out:
                 result_body.extend(
                     [
                         "exceptional:",
@@ -5831,9 +6136,16 @@ class LLVMPrinter:
                 if isinstance(slot.return_type, VoidType)
                 else f"  %result = {call}\n  ret {rendered_return} %result"
             )
+        personality = (
+            " personality ptr @__gxx_personality_v0"
+            if target.may_throw
+            and self._exception_strategy
+            is ExceptionLoweringStrategy.LLVM_EH_PROTOTYPE
+            else ""
+        )
         return (
             f"define private {rendered_return} @{slot.thunk_symbol}"
-            f"({', '.join(parameters)}) {{\nentry:\n{body}\n}}"
+            f"({', '.join(parameters)}){personality} {{\nentry:\n{body}\n}}"
         )
 
     @staticmethod

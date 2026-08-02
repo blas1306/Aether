@@ -7,6 +7,7 @@ from aether.ir import (
     BoolType,
     ExceptionEventType,
     IRBasicBlock,
+    IRCall,
     IRCatchEntry,
     IRDestroy,
     IRExceptionDestroy,
@@ -30,6 +31,7 @@ from aether.ir import (
     RustVerifierRejectedOutcome,
     VoidType,
     build_canonical_rust_verifier_request,
+    expand_lifecycle,
     print_ir,
 )
 from aether.ir.dto import ir_module_from_json, ir_module_to_json
@@ -544,6 +546,93 @@ int main() {
     ).verify(build_canonical_rust_verifier_request(module))
 
     assert isinstance(invocation.outcome, RustVerifierAcceptedOutcome)
+
+
+def _expanded_throwing_constructor_module() -> IRModule:
+    return expand_lifecycle(
+        _lower(
+            ERROR_TYPES
+            + """
+struct Wrapper {
+    string initialized;
+    Array<string> nested;
+    constructor() {
+        initialized = "owned";
+        nested = {"partial"};
+        throw FileError("constructor");
+    }
+}
+int main() {
+    try { Wrapper value = Wrapper(); }
+    catch (FileError error) { println(error.message()); }
+    return 0;
+}
+"""
+        )
+    )
+
+
+def test_irv150_accepts_expanded_constructor_cleanup_in_python_and_rust(
+    rust_verifier_executable,
+) -> None:
+    module = _expanded_throwing_constructor_module()
+
+    assert IRVerifier(module).verify() is module
+    decoded = ir_module_from_json(ir_module_to_json(module))
+    assert decoded == module
+    optimized = OptimizerPipeline().run(decoded)
+    assert IRVerifier(optimized).verify() is optimized
+    invocation = SubprocessRustVerifierClient(
+        executable=rust_verifier_executable
+    ).verify(build_canonical_rust_verifier_request(optimized))
+    assert isinstance(invocation.outcome, RustVerifierAcceptedOutcome)
+
+
+@pytest.mark.parametrize(
+    "corruption",
+    ["missing_exceptional_release", "double_exceptional_release", "normal_use_after_release"],
+)
+def test_irv150_rejects_malformed_constructor_cleanup_in_python_and_rust(
+    corruption: str,
+    rust_verifier_executable,
+) -> None:
+    module = _expanded_throwing_constructor_module()
+    invoke = next(
+        instruction
+        for instruction in _instructions(module)
+        if isinstance(instruction, IRInvoke) and instruction.function == "Wrapper.__ctor"
+    )
+    receiver = invoke.arguments[0]
+    function = next(function for function in module.functions if function.name == "main")
+    blocks = {block.name: block for block in function.blocks}
+    cleanup = blocks[invoke.exceptional_target]
+    normal = blocks[invoke.normal_target]
+
+    if corruption == "missing_exceptional_release":
+        cleanup.instructions.pop(1)
+    elif corruption == "double_exceptional_release":
+        cleanup.instructions.insert(2, cleanup.instructions[1])
+    else:
+        normal.instructions.insert(
+            1,
+            IRCall(
+                "__aether_retain",
+                (receiver,),
+                None,
+                "__aether_retain",
+            ),
+        )
+
+    with pytest.raises(IRVerificationError) as failure:
+        IRVerifier(module).verify()
+    assert failure.value.normalized_failure is not None
+    assert failure.value.normalized_failure.invariant_id == "IRV-150"
+
+    invocation = SubprocessRustVerifierClient(
+        executable=rust_verifier_executable
+    ).verify(build_canonical_rust_verifier_request(module))
+    assert isinstance(invocation.outcome, RustVerifierRejectedOutcome)
+    assert invocation.outcome.diagnostic.invariant_id == "IRV-150"
 
 
 def test_error_catch_borrows_payload_and_interface_invoke_executes() -> None:

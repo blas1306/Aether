@@ -403,6 +403,17 @@ retain/release effectful y conserva load/store/default/no-op para tipos
 triviales. En IR, los opcodes declaran efectos obligatorios y DCE no puede
 eliminarlos.
 
+Las llamadas directas a `Name.__ctor` tienen ownership por arista. Para struct,
+el receiver default del caller es distinto del `MethodResult` exitoso y se
+libera tanto en la arista normal como en la excepcional. Para class, receiver
+parcial y resultado exitoso son el mismo objeto: se conserva en normal y se
+libera una sola vez en excepcional. Un trampoline excepcional dedicado limpia
+el receiver antes de propagar el evento al handler previo; `IRV-150` comprueba
+esta forma en Initial IR expandido y el verifier SSA vuelve a comprobarla tras
+renaming/optimización. Los constructores no son valores invocables indirectos
+ni slots de interfaz en la superficie actual, por lo que no existe una variante
+indirect/interface equivalente que deba sintetizar este contrato.
+
 Optimizaciones futuras, no implementadas en esta fase: pairing general probado
 de retain/release, ARC global e inlining/devirtualización de hooks. La expansión
 ya consume temporales owned obvios y mueve locals al return. Todas

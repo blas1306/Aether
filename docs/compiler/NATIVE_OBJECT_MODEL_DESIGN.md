@@ -870,10 +870,12 @@ posicional/explicit, `this.field`, field implícito, definite initialization,
 ownership de reemplazo y destructor recursivo. `this` se pasa borrowed y una
 construcción exitosa entrega exactamente el owner de la allocation.
 
-El intérprete IR libera sólo los fields inicializados si un constructor falla.
-El runtime LLVM actual usa fallos abortivos sin unwind; el sistema operativo
-reclama el proceso completo en esos paths. El estado explícito de
-inicialización vive en el análisis/lowering, no en los bytes a cero.
+`IRClassNew` conserva el estado privado de inicialización del payload y cada
+`class_set initialize=true` publica el bit del field sólo después del store.
+Tanto el intérprete IR como el destructor descriptor-driven de LLVM liberan
+únicamente los fields publicados. Por eso un constructor que propaga una
+excepción puede devolver el owner de la allocation al cleanup del caller sin
+leer fields todavía nulos ni destruir dos veces los ya inicializados.
 
 Fase 5.3C completa el ABI directo de métodos, `this` fuera de constructores,
 calls estáticas, recursión e imports de métodos. Cada método baja como

@@ -29,6 +29,7 @@ from aether.ir.types import (
 )
 from aether.ir.scalar_math import scalar_math_result_type
 from aether.ir.model import IREnumConstant
+from aether.ir.lifecycle import LifecycleTypeRegistry
 from aether.ir.equality import ir_eq_capability
 from aether.string_parsing import (
     DOUBLE_PARSE_RESULT_TYPE,
@@ -187,11 +188,13 @@ class SSAVerifier:
         self.module = module
         self._functions: dict[str, SSAFunction] = {}
         self._structs = {}
+        self._lifecycle: LifecycleTypeRegistry | None = None
 
     def verify(self) -> SSAModule:
         """Verify the module and return it unchanged on success."""
         self._functions = {}
         self._structs = {definition.name: definition for definition in self.module.structs}
+        self._lifecycle = LifecycleTypeRegistry(self.module.structs)
         self._verify_module()
         return self.module
 
@@ -280,6 +283,108 @@ class SSAVerifier:
         ).compute()
         self._verify_dominance(function, predecessors, definition_sites, dominators)
         self._verify_event_ownership(function, blocks)
+        self._verify_constructor_receiver_ownership(function, blocks)
+
+    def _verify_constructor_receiver_ownership(
+        self,
+        function: SSAFunction,
+        blocks: dict[str, SSABasicBlock],
+    ) -> None:
+        """Preserve the constructor receiver cleanup contract through SSA."""
+
+        assert self._lifecycle is not None
+        for block in function.blocks:
+            for index, instruction in enumerate(block.instructions):
+                if not isinstance(instruction, (SSACall, SSAInvoke)):
+                    continue
+                if not instruction.function.endswith(".__ctor") or not instruction.arguments:
+                    continue
+
+                receiver = instruction.arguments[0]
+                if not self._lifecycle.traits(receiver.type).needs_destroy:
+                    continue
+
+                if isinstance(instruction, SSACall):
+                    if isinstance(receiver.type, StructType):
+                        following = block.instructions[index + 1 :]
+                        self._require_single_receiver_release(
+                            receiver,
+                            following,
+                            block.name,
+                        )
+                    continue
+
+                cleanup = blocks.get(instruction.exceptional_target)
+                if cleanup is None or not self._is_constructor_cleanup_block(
+                    cleanup,
+                    receiver,
+                ):
+                    self._fail(
+                        f"Constructor invoke in block '{block.name}' does not have one "
+                        "dedicated exceptional receiver cleanup"
+                    )
+
+                if isinstance(receiver.type, StructType):
+                    normal = blocks.get(instruction.normal_target)
+                    if normal is None:
+                        self._fail(
+                            f"Constructor invoke in block '{block.name}' has no normal block"
+                        )
+                    self._require_single_receiver_release(
+                        receiver,
+                        normal.instructions,
+                        normal.name,
+                    )
+
+    @staticmethod
+    def _is_release_of(instruction: SSAInstruction, receiver: SSAValue) -> bool:
+        return (
+            isinstance(instruction, SSACall)
+            and instruction.builtin == "__aether_release"
+            and instruction.function == "__aether_release"
+            and instruction.arguments == (receiver,)
+            and instruction.result is None
+        )
+
+    def _is_constructor_cleanup_block(
+        self,
+        block: SSABasicBlock,
+        receiver: SSAValue,
+    ) -> bool:
+        instructions = block.instructions
+        return (
+            len(instructions) == 3
+            and isinstance(instructions[0], SSACatchEntry)
+            and self._is_release_of(instructions[1], receiver)
+            and isinstance(instructions[2], SSAPropagate)
+            and instructions[2].event == instructions[0].event
+        )
+
+    def _require_single_receiver_release(
+        self,
+        receiver: SSAValue,
+        instructions: list[SSAInstruction],
+        block_name: str,
+    ) -> None:
+        releases = [
+            index
+            for index, item in enumerate(instructions)
+            if self._is_release_of(item, receiver)
+        ]
+        if len(releases) != 1:
+            self._fail(
+                f"Constructor receiver '{receiver.name}' does not have exactly one "
+                f"normal release in block '{block_name}'"
+            )
+        release_index = releases[0]
+        if any(
+            receiver in self._instruction_operands(item)
+            for item in instructions[release_index + 1 :]
+        ):
+            self._fail(
+                f"Constructor receiver '{receiver.name}' is used after release in "
+                f"block '{block_name}'"
+            )
 
     def _verify_exception_structure(
         self,

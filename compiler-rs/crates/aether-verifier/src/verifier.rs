@@ -16,11 +16,18 @@ use crate::error::{
 };
 use crate::lifecycle_verifier::LifecycleTypeRegistry;
 use crate::ssa_error::SSAInstructionLocation;
-use crate::ssa_verifier::instruction_location;
+use crate::ssa_verifier::{instruction_location, ssa_operands};
 use crate::{BorrowRule, BorrowRuleError};
 
 fn exception_ownership(block_name: &str, detail: &str) -> TypeRuleError {
     TypeRuleError::ExceptionEventOwnership {
+        block_name: block_name.to_owned(),
+        detail: detail.to_owned(),
+    }
+}
+
+fn constructor_ownership(block_name: &str, detail: &str) -> TypeRuleError {
+    TypeRuleError::ConstructorReceiverOwnership {
         block_name: block_name.to_owned(),
         detail: detail.to_owned(),
     }
@@ -231,6 +238,13 @@ impl<'module> TypeVerifier<'module> {
                     source,
                 },
             )?;
+        self.verify_constructor_receiver_ownership(function)
+            .map_err(
+                |source| FunctionTypeVerificationError::ConstructorReceiverOwnership {
+                    function_name: function.name.clone(),
+                    source,
+                },
+            )?;
 
         for (block_index, block) in function.blocks.iter().enumerate() {
             self.verify_block(function, block).map_err(|source| {
@@ -241,6 +255,174 @@ impl<'module> TypeVerifier<'module> {
                     source,
                 }
             })?;
+        }
+        Ok(())
+    }
+
+    fn verify_constructor_receiver_ownership(
+        &self,
+        function: &IRFunction,
+    ) -> Result<(), TypeRuleError> {
+        let lifecycle_expanded = self.module.functions.iter().any(|candidate| {
+            candidate.blocks.iter().any(|block| {
+                block.instructions.iter().any(|instruction| {
+                    matches!(
+                        instruction,
+                        IRInstruction::IRCall { builtin: Some(builtin), .. }
+                            if matches!(
+                                builtin.as_str(),
+                                "__aether_retain"
+                                    | "__aether_release"
+                                    | "__aether_interface_copy_owned"
+                            )
+                    )
+                })
+            })
+        });
+        if !lifecycle_expanded {
+            return Ok(());
+        }
+
+        let blocks = function
+            .blocks
+            .iter()
+            .map(|block| (block.name.as_str(), block))
+            .collect::<HashMap<_, _>>();
+
+        for block in &function.blocks {
+            for (instruction_index, instruction) in block.instructions.iter().enumerate() {
+                let (constructor, arguments) = match instruction {
+                    IRInstruction::IRCall {
+                        function,
+                        arguments,
+                        ..
+                    }
+                    | IRInstruction::IRInvoke {
+                        function,
+                        arguments,
+                        ..
+                    } if function.ends_with(".__ctor") && !arguments.is_empty() => {
+                        (function, arguments)
+                    }
+                    _ => continue,
+                };
+                let receiver = &arguments[0];
+                if !self.lifecycle.needs_destroy(&receiver.r#type) {
+                    continue;
+                }
+
+                match instruction {
+                    IRInstruction::IRCall { .. } => {
+                        if matches!(receiver.r#type, IRType::Struct(_)) {
+                            let following = &block.instructions[instruction_index + 1..];
+                            Self::require_single_receiver_release(
+                                receiver,
+                                following,
+                                &block.name,
+                            )?;
+                        }
+                    }
+                    IRInstruction::IRInvoke {
+                        normal_target,
+                        exceptional_target,
+                        ..
+                    } => {
+                        let cleanup = blocks.get(exceptional_target.as_str()).copied();
+                        if cleanup.is_none_or(|candidate| {
+                            !Self::is_constructor_cleanup_block(candidate, receiver)
+                        }) {
+                            return Err(constructor_ownership(
+                                &block.name,
+                                &format!(
+                                    "constructor '{constructor}' does not have one dedicated exceptional receiver cleanup"
+                                ),
+                            ));
+                        }
+
+                        if matches!(receiver.r#type, IRType::Struct(_)) {
+                            let normal = blocks.get(normal_target.as_str()).copied();
+                            let Some(normal) = normal else {
+                                return Err(constructor_ownership(
+                                    &block.name,
+                                    &format!("constructor '{constructor}' has no normal block"),
+                                ));
+                            };
+                            Self::require_single_receiver_release(
+                                receiver,
+                                &normal.instructions,
+                                &normal.name,
+                            )?;
+                        }
+                    }
+                    _ => unreachable!("constructor instruction was matched above"),
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn is_release_of(instruction: &IRInstruction, receiver: &IRValue) -> bool {
+        matches!(
+            instruction,
+            IRInstruction::IRCall {
+                function,
+                arguments,
+                result: None,
+                builtin: Some(builtin),
+                ..
+            } if function == "__aether_release"
+                && builtin == "__aether_release"
+                && arguments.len() == 1
+                && &arguments[0] == receiver
+        )
+    }
+
+    fn is_constructor_cleanup_block(block: &IRBasicBlock, receiver: &IRValue) -> bool {
+        match block.instructions.as_slice() {
+            [
+                IRInstruction::IRCatchEntry { event, .. },
+                release,
+                IRInstruction::IRPropagate {
+                    event: propagated, ..
+                },
+            ] => Self::is_release_of(release, receiver) && event == propagated,
+            _ => false,
+        }
+    }
+
+    fn require_single_receiver_release(
+        receiver: &IRValue,
+        instructions: &[IRInstruction],
+        block_name: &str,
+    ) -> Result<(), TypeRuleError> {
+        let releases = instructions
+            .iter()
+            .enumerate()
+            .filter_map(|(index, instruction)| {
+                Self::is_release_of(instruction, receiver).then_some(index)
+            })
+            .collect::<Vec<_>>();
+        if releases.len() != 1 {
+            return Err(constructor_ownership(
+                block_name,
+                &format!(
+                    "constructor receiver '%{}' does not have exactly one normal release",
+                    receiver.name
+                ),
+            ));
+        }
+        if instructions[releases[0] + 1..].iter().any(|instruction| {
+            ssa_operands(instruction)
+                .iter()
+                .any(|operand| operand.value == receiver)
+        }) {
+            return Err(constructor_ownership(
+                block_name,
+                &format!(
+                    "constructor receiver '%{}' is used after release",
+                    receiver.name
+                ),
+            ));
         }
         Ok(())
     }

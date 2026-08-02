@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from enum import Enum
 
 
 EXCEPTION_RUNTIME_ABI_VERSION = 1
@@ -8,6 +9,18 @@ EXCEPTION_RUNTIME_ABI_VERSION = 1
 
 EXCEPTION_EVENT_MAGIC = 0x4145544845524558
 """Private ``AETHEREX`` marker used to fail closed on malformed handles."""
+
+
+class ExceptionLoweringStrategy(str, Enum):
+    """Private backend transport choices.
+
+    ``LLVM_EH_PROTOTYPE`` intentionally remains opt-in: it exists only to make
+    the backend ADR comparison executable.  The native backend's default stays
+    on the explicit event-out convention until the ADR is accepted.
+    """
+
+    EVENT_OUT = "event-out"
+    LLVM_EH_PROTOTYPE = "llvm-eh-prototype"
 
 
 def exception_descriptor_symbol(nominal_id: str) -> str:
@@ -20,4 +33,3 @@ def exception_descriptor_symbol(nominal_id: str) -> str:
     encoded = nominal_id.encode("utf-8")
     digest = hashlib.sha256(encoded).hexdigest()[:16]
     return f"__ae_exception_desc_n{len(encoded)}_{encoded.hex()}__{digest}"
-

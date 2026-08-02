@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, is_dataclass
 from typing import NoReturn
 
 from aether.range_safety import RANGE_STEP_NONZERO_BUILTIN
@@ -217,6 +217,7 @@ class IRVerifier:
         self._active_rule: tuple[str, VerifierCategory] | None = None
         self._active_location: VerifierLocation | None = None
         self._active_instruction: IRInstruction | None = None
+        self._lifecycle_expanded = False
 
     def verify(self) -> IRModule:
         """Verify the module and return it unchanged on success."""
@@ -226,6 +227,14 @@ class IRVerifier:
         self._active_rule = None
         self._active_location = None
         self._active_instruction = None
+        self._lifecycle_expanded = any(
+            isinstance(instruction, IRCall)
+            and instruction.builtin
+            in {"__aether_retain", "__aether_release", "__aether_interface_copy_owned"}
+            for function in self.module.functions
+            for block in function.blocks
+            for instruction in block.instructions
+        )
         self._verify_module()
         return self.module
 
@@ -316,6 +325,7 @@ class IRVerifier:
         self._verify_block_structure(function, blocks)
         self._verify_exception_structure(function, blocks)
         self._verify_exception_event_ownership(function, blocks)
+        self._verify_constructor_receiver_ownership(function, blocks)
 
         value_types = self._collect_value_types(function)
         slot_types = self._collect_slot_types(function)
@@ -323,6 +333,146 @@ class IRVerifier:
         self._verify_borrowed_elements(function)
         self._verify_reachable_values(function, blocks, value_types, slot_types)
         self._verify_all_non_void_paths_return(function, blocks)
+
+    def _verify_constructor_receiver_ownership(
+        self,
+        function: IRFunction,
+        blocks: dict[str, IRBasicBlock],
+    ) -> None:
+        """Verify the edge-specific owner transfer synthesized for constructors."""
+
+        if not self._lifecycle_expanded:
+            return
+        assert self._lifecycle is not None
+
+        for block in function.blocks:
+            for index, instruction in enumerate(block.instructions):
+                if not isinstance(instruction, (IRCall, IRInvoke)):
+                    continue
+                if not instruction.function.endswith(".__ctor") or not instruction.arguments:
+                    continue
+
+                receiver = instruction.arguments[0]
+                if not self._lifecycle.traits(receiver.type).needs_destroy:
+                    continue
+
+                if isinstance(instruction, IRCall):
+                    if isinstance(receiver.type, StructType):
+                        following = block.instructions[index + 1 :]
+                        self._require_single_receiver_release(
+                            receiver,
+                            following,
+                            block.name,
+                        )
+                    continue
+
+                cleanup = blocks.get(instruction.exceptional_target)
+                if cleanup is None or not self._is_constructor_cleanup_block(
+                    cleanup,
+                    receiver,
+                ):
+                    self._fail(
+                        f"Constructor invoke in block '{block.name}' does not have one "
+                        "dedicated exceptional receiver cleanup",
+                        rule=("IRV-150", VerifierCategory.LIFECYCLE),
+                    )
+
+                if isinstance(receiver.type, StructType):
+                    normal = blocks.get(instruction.normal_target)
+                    if normal is None:
+                        self._fail(
+                            f"Constructor invoke in block '{block.name}' has no normal block",
+                            rule=("IRV-150", VerifierCategory.LIFECYCLE),
+                        )
+                    self._require_single_receiver_release(
+                        receiver,
+                        normal.instructions,
+                        normal.name,
+                    )
+
+    @staticmethod
+    def _is_release_of(instruction: IRInstruction, receiver: IRValue) -> bool:
+        return (
+            isinstance(instruction, IRCall)
+            and instruction.builtin == "__aether_release"
+            and instruction.function == "__aether_release"
+            and instruction.arguments == (receiver,)
+            and instruction.result is None
+        )
+
+    def _is_constructor_cleanup_block(
+        self,
+        block: IRBasicBlock,
+        receiver: IRValue,
+    ) -> bool:
+        instructions = block.instructions
+        return (
+            len(instructions) == 3
+            and isinstance(instructions[0], IRCatchEntry)
+            and self._is_release_of(instructions[1], receiver)
+            and isinstance(instructions[2], IRPropagate)
+            and instructions[2].event == instructions[0].event
+        )
+
+    def _require_single_receiver_release(
+        self,
+        receiver: IRValue,
+        instructions: list[IRInstruction],
+        block_name: str,
+    ) -> None:
+        releases = [
+            index
+            for index, item in enumerate(instructions)
+            if self._is_release_of(item, receiver)
+        ]
+        if len(releases) != 1:
+            self._fail(
+                f"Constructor receiver '{receiver.name}' does not have exactly one "
+                f"normal release in block '{block_name}'",
+                rule=("IRV-150", VerifierCategory.LIFECYCLE),
+            )
+        release_index = releases[0]
+        if any(
+            receiver in self._instruction_operands(item)
+            for item in instructions[release_index + 1 :]
+        ):
+            self._fail(
+                f"Constructor receiver '{receiver.name}' is used after release in "
+                f"block '{block_name}'",
+                rule=("IRV-150", VerifierCategory.LIFECYCLE),
+            )
+
+    @classmethod
+    def _instruction_operands(cls, instruction: IRInstruction) -> tuple[IRValue, ...]:
+        operands: list[IRValue] = []
+        for field in fields(instruction):
+            if field.name == "result" or field.metadata.get("ir_definition", False):
+                continue
+            operands.extend(cls._contained_values(getattr(instruction, field.name)))
+        if isinstance(instruction, (IRInvoke, IRInvokeIndirect, IRInvokeInterface)):
+            definitions = {instruction.exception}
+            if instruction.result is not None:
+                definitions.add(instruction.result)
+            operands = [value for value in operands if value not in definitions]
+        return tuple(operands)
+
+    @classmethod
+    def _contained_values(cls, value: object) -> list[IRValue]:
+        if isinstance(value, IRValue):
+            return [value]
+        if isinstance(value, (tuple, list)):
+            return [
+                contained
+                for item in value
+                for contained in cls._contained_values(item)
+            ]
+        if is_dataclass(value):
+            return [
+                contained
+                for field in fields(value)
+                for contained in cls._contained_values(getattr(value, field.name))
+            ]
+        return []
 
     def _verify_exception_event_ownership(
         self,

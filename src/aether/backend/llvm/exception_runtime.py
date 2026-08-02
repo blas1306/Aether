@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .exception_abi import EXCEPTION_EVENT_MAGIC, EXCEPTION_RUNTIME_ABI_VERSION
+from .exception_abi import (
+    EXCEPTION_EVENT_MAGIC,
+    EXCEPTION_RUNTIME_ABI_VERSION,
+    ExceptionLoweringStrategy,
+)
 from .runtime_common import LLVMRuntimeCommon
 
 
@@ -15,6 +19,7 @@ class LLVMExceptionRuntime:
     """
 
     enabled: bool
+    strategy: ExceptionLoweringStrategy = ExceptionLoweringStrategy.EVENT_OUT
 
     def append(self, sections: list[str]) -> None:
         if not self.enabled:
@@ -26,6 +31,14 @@ class LLVMExceptionRuntime:
         declare(sections, "declare i32 @fputs(ptr, ptr)")
         declare(sections, "declare void @exit(i32) noreturn")
         declare(sections, "@stderr = external global ptr")
+        if self.strategy is ExceptionLoweringStrategy.LLVM_EH_PROTOTYPE:
+            declare(sections, "declare ptr @__cxa_allocate_exception(i64)")
+            declare(sections, "declare void @__cxa_throw(ptr, ptr, ptr) noreturn")
+            declare(sections, "declare ptr @__cxa_begin_catch(ptr)")
+            declare(sections, "declare void @__cxa_end_catch()")
+            declare(sections, "declare i32 @__gxx_personality_v0(...)")
+            declare(sections, "declare i32 @llvm.eh.typeid.for(ptr)")
+            declare(sections, "@_ZTIPv = external constant ptr")
         sections.extend(
             [
                 "@__ae_exception_live_events_v1 = private global i64 0",
@@ -41,7 +54,31 @@ class LLVMExceptionRuntime:
                 self._borrow(),
                 self._matches(),
                 self._destroy(),
-                self._root_terminate(),
+                self._root_terminate(self.strategy),
+            ]
+        )
+        if self.strategy is ExceptionLoweringStrategy.LLVM_EH_PROTOTYPE:
+            sections.append(self._eh_raise())
+
+    @staticmethod
+    def _eh_raise() -> str:
+        """Raise an owned event through an Itanium C++ ABI wrapper.
+
+        The wrapper is transport storage only.  A landing pad extracts the
+        original Aether event handle, so rethrow never repacks the event or
+        changes its provenance.
+        """
+
+        return "\n".join(
+            [
+                "define private void @__ae_exception_eh_raise_v1(ptr %event) noreturn {",
+                "entry:",
+                "  call void @__ae_exception_validate_v1(ptr %event)",
+                "  %wrapper = call ptr @__cxa_allocate_exception(i64 8)",
+                "  store ptr %event, ptr %wrapper, align 8",
+                "  call void @__cxa_throw(ptr %wrapper, ptr @_ZTIPv, ptr null)",
+                "  unreachable",
+                "}",
             ]
         )
 
@@ -108,12 +145,23 @@ class LLVMExceptionRuntime:
                 "  %faults = load i32, ptr @__ae_exception_fault_mask_v1",
                 "  %allocation_fault_bit = and i32 %faults, 1",
                 "  %allocation_fault = icmp ne i32 %allocation_fault_bit, 0",
-                "  br i1 %allocation_fault, label %panic, label %validate",
+                "  %descriptor_fault_bit = and i32 %faults, 2",
+                "  %descriptor_fault = icmp ne i32 %descriptor_fault_bit, 0",
+                "  %forced_fault = or i1 %allocation_fault, %descriptor_fault",
+                "  br i1 %forced_fault, label %panic, label %validate",
                 "validate:",
                 "  %descriptor_nonnull = icmp ne ptr %descriptor, null",
                 "  %carrier_nonnull = icmp ne ptr %carrier, null",
                 "  %valid = and i1 %descriptor_nonnull, %carrier_nonnull",
-                "  br i1 %valid, label %allocate, label %panic",
+                "  br i1 %valid, label %validate_descriptor, label %panic",
+                "validate_descriptor:",
+                "  %descriptor_version = load i64, ptr %descriptor",
+                f"  %descriptor_version_ok = icmp eq i64 %descriptor_version, {EXCEPTION_RUNTIME_ABI_VERSION}",
+                "  %witness_ptr = getelementptr %AetherExceptionDescriptorV1, ptr %descriptor, i32 0, i32 2",
+                "  %witness = load ptr, ptr %witness_ptr",
+                "  %witness_nonnull = icmp ne ptr %witness, null",
+                "  %descriptor_ok = and i1 %descriptor_version_ok, %witness_nonnull",
+                "  br i1 %descriptor_ok, label %allocate, label %panic",
                 "allocate:",
                 f"  %event = call ptr @aether_alloc(i64 {size})",
                 "  %magic_ptr = getelementptr %AetherExceptionEventV1, ptr %event, i32 0, i32 0",
@@ -221,7 +269,9 @@ class LLVMExceptionRuntime:
         )
 
     @staticmethod
-    def _root_terminate() -> str:
+    def _root_terminate(strategy: ExceptionLoweringStrategy) -> str:
+        if strategy is ExceptionLoweringStrategy.LLVM_EH_PROTOTYPE:
+            return LLVMExceptionRuntime._root_terminate_eh()
         return "\n".join(
             [
                 "define private void @__ae_exception_root_terminate_v1(ptr %event) noreturn {",
@@ -253,6 +303,84 @@ class LLVMExceptionRuntime:
                 "message_threw:",
                 "  call void @__ae_exception_destroy_v1(ptr %message_event)",
                 "  br label %reporting_failure",
+                "report:",
+                "  %stream = load ptr, ptr @stderr",
+                "  %prefix_ok32 = call i32 @fputs(ptr @.ae.exception.prefix, ptr %stream)",
+                "  %name_ok32 = call i32 @fputs(ptr %name, ptr %stream)",
+                "  %separator_ok32 = call i32 @fputs(ptr @.ae.exception.separator, ptr %stream)",
+                "  %length = call i64 @aether_string_byte_length(ptr %text)",
+                "  %data = call ptr @aether_string_data(ptr %text)",
+                "  %written = call i64 @fwrite(ptr %data, i64 1, i64 %length, ptr %stream)",
+                "  %newline_ok32 = call i32 @fputs(ptr @.ae.exception.newline, ptr %stream)",
+                "  %prefix_bad = icmp slt i32 %prefix_ok32, 0",
+                "  %name_bad = icmp slt i32 %name_ok32, 0",
+                "  %separator_bad = icmp slt i32 %separator_ok32, 0",
+                "  %newline_bad = icmp slt i32 %newline_ok32, 0",
+                "  %short_write = icmp ne i64 %written, %length",
+                "  %bad0 = or i1 %prefix_bad, %name_bad",
+                "  %bad1 = or i1 %separator_bad, %newline_bad",
+                "  %bad2 = or i1 %bad0, %bad1",
+                "  %report_bad = or i1 %bad2, %short_write",
+                "  %report_fault_bit = and i32 %faults, 8",
+                "  %report_fault = icmp ne i32 %report_fault_bit, 0",
+                "  %failed = or i1 %report_bad, %report_fault",
+                "  call void @aether_string_release(ptr %text)",
+                "  br i1 %failed, label %reporting_failure, label %finish",
+                "reporting_failure:",
+                "  call void @__ae_exception_destroy_v1(ptr %event)",
+                "  %failure_stream = load ptr, ptr @stderr",
+                "  %ignored = call i32 @fputs(ptr @.ae.exception.reporting, ptr %failure_stream)",
+                "  call void @exit(i32 1)",
+                "  unreachable",
+                "finish:",
+                "  call void @__ae_exception_destroy_v1(ptr %event)",
+                "  call void @exit(i32 1)",
+                "  unreachable",
+                "}",
+            ]
+        )
+
+    @staticmethod
+    def _root_terminate_eh() -> str:
+        """EH-prototype root reporting with recursive-throw containment."""
+
+        return "\n".join(
+            [
+                "define private void @__ae_exception_root_terminate_v1(ptr %event) noreturn personality ptr @__gxx_personality_v0 {",
+                "entry:",
+                "  call void @__ae_exception_validate_v1(ptr %event)",
+                "  %faults = load i32, ptr @__ae_exception_fault_mask_v1",
+                "  %message_fault_bit = and i32 %faults, 4",
+                "  %message_fault = icmp ne i32 %message_fault_bit, 0",
+                "  br i1 %message_fault, label %reporting_failure, label %message",
+                "message:",
+                "  %descriptor_ptr = getelementptr %AetherExceptionEventV1, ptr %event, i32 0, i32 3",
+                "  %descriptor = load ptr, ptr %descriptor_ptr",
+                "  %name_ptr = getelementptr %AetherExceptionDescriptorV1, ptr %descriptor, i32 0, i32 1",
+                "  %name = load ptr, ptr %name_ptr",
+                "  %witness_ptr = getelementptr %AetherExceptionDescriptorV1, ptr %descriptor, i32 0, i32 2",
+                "  %witness = load ptr, ptr %witness_ptr",
+                "  %slots = getelementptr %AetherWitnessHeader, ptr %witness, i32 1",
+                "  %slot = getelementptr %AetherWitnessSlot, ptr %slots, i64 0",
+                "  %thunk_ptr = getelementptr %AetherWitnessSlot, ptr %slot, i32 0, i32 2",
+                "  %thunk = load ptr, ptr %thunk_ptr",
+                "  %carrier_ptr = getelementptr %AetherExceptionEventV1, ptr %event, i32 0, i32 4",
+                "  %carrier = load ptr, ptr %carrier_ptr",
+                "  %text = invoke ptr %thunk(ptr %carrier) to label %report unwind label %message_threw",
+                "message_threw:",
+                "  %landing = landingpad { ptr, i32 } catch ptr @_ZTIPv",
+                "  %native_exception = extractvalue { ptr, i32 } %landing, 0",
+                "  %selector = extractvalue { ptr, i32 } %landing, 1",
+                "  %expected = call i32 @llvm.eh.typeid.for(ptr @_ZTIPv)",
+                "  %ours = icmp eq i32 %selector, %expected",
+                "  br i1 %ours, label %destroy_message_event, label %foreign",
+                "destroy_message_event:",
+                "  %message_event = call ptr @__cxa_begin_catch(ptr %native_exception)",
+                "  call void @__cxa_end_catch()",
+                "  call void @__ae_exception_destroy_v1(ptr %message_event)",
+                "  br label %reporting_failure",
+                "foreign:",
+                "  resume { ptr, i32 } %landing",
                 "report:",
                 "  %stream = load ptr, ptr @stderr",
                 "  %prefix_ok32 = call i32 @fputs(ptr @.ae.exception.prefix, ptr %stream)",

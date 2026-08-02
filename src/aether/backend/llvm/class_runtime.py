@@ -118,21 +118,47 @@ def class_runtime_sections(
         )
         id_size = len(encoded_id) + 1
         payload = "".join(f", {llvm_type(field_type)}" for _name, field_type in fields)
+        # IRClassNew deliberately leaves payload fields uninitialized.  Keep
+        # that state explicit so releasing a constructor receiver can destroy
+        # exactly the fields reached before an exceptional exit.
+        payload += f", [{len(fields)} x i1]"
+        initialized_field_index = len(fields) + 1
         destroy_lines: list[str] = []
         for index, (_field_name, field_type) in reversed(tuple(enumerate(fields))):
+            if destroy_value is None:
+                continue
+            nested: list[str] = []
+            destroy_value(nested, f"%field.{index}", field_type)
+            if not nested:
+                destroy_lines.extend(
+                    [
+                        f"  %field.{index}.ptr = getelementptr {object_type}, ptr %object, "
+                        f"i32 0, i32 {index + 1}",
+                        f"  %field.{index} = load {llvm_type(field_type)}, "
+                        f"ptr %field.{index}.ptr",
+                    ]
+                )
+                continue
+            initialized_ptr = f"%field.{index}.initialized.ptr"
+            initialized = f"%field.{index}.initialized"
+            destroy_label = f"field.{index}.destroy"
+            next_label = f"field.{index}.next"
             field_ptr = f"%field.{index}.ptr"
             field_value = f"%field.{index}"
             destroy_lines.extend(
                 [
+                    f"  {initialized_ptr} = getelementptr {object_type}, ptr %object, "
+                    f"i32 0, i32 {initialized_field_index}, i32 {index}",
+                    f"  {initialized} = load i1, ptr {initialized_ptr}",
+                    f"  br i1 {initialized}, label %{destroy_label}, label %{next_label}",
+                    f"{destroy_label}:",
                     f"  {field_ptr} = getelementptr {object_type}, ptr %object, "
                     f"i32 0, i32 {index + 1}",
                     f"  {field_value} = load {llvm_type(field_type)}, ptr {field_ptr}",
                 ]
             )
-            if destroy_value is not None:
-                nested: list[str] = []
-                destroy_value(nested, field_value, field_type)
-                destroy_lines.extend(f"  {line}" for line in nested)
+            destroy_lines.extend(f"  {line}" for line in nested)
+            destroy_lines.extend([f"  br label %{next_label}", f"{next_label}:"])
         sections.extend(
             [
                 f"{object_type} = type {{ %AetherObjectHeader{payload} }}",

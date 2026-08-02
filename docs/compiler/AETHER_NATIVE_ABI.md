@@ -287,8 +287,11 @@ reserved}`. El descriptor contiene ID nominal, size/alignment calculados por
 LLVM, callbacks destroy/trace, flags y versión. `class_new` usa allocation
 checked, zero-inicializa el objeto completo, fija count 1 y devuelve un handle
 todavía no publicado. Los fields siguen al header en orden fuente y conservan
-el layout/alineación del target. El último release destruye los fields en orden
-inverso y llama `free`; retain/release validan
+el layout/alineación del target. Después del payload hay un mapa privado de
+inicialización, fuera del ABI source-visible: `class_new` lo pone a cero y
+`class_set initialize=true` publica el field después de adquirir y almacenar
+su valor. El último release destruye en orden inverso sólo los fields cuyo bit
+está publicado y llama `free`; retain/release validan
 overflow, zero y underflow.
 
 El constructor recibe `this` borrowed. Cada `class_set` con
@@ -296,6 +299,11 @@ El constructor recibe `this` borrowed. Cada `class_set` con
 asignación protege el valor nuevo, hace commit y luego destruye el anterior,
 por lo que la autoasignación es segura. Construcción devuelve un owner. Los
 parámetros siguen borrowed y los returns owned.
+
+Si el constructor propaga una excepción, el invoke cleanup libera el owner
+prepublicado del caller. Ese mismo release revierte los fields parciales según
+el mapa anterior; no hay unwind de stack, scanning ni cleanup implícito en el
+runtime de excepciones.
 
 `==`/`!=` de `ClassRefType(C)` usan `icmp eq/ne ptr` sólo para el mismo tipo
 nominal. `C?` sigue siendo `{i1, ptr}`; `ptr null` no es un valor `C` ni un

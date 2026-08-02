@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from .model import (
     IRAssign,
@@ -15,11 +15,13 @@ from .model import (
     IRConst,
     IRCall,
     IRCallIndirect,
+    IRCatchEntry,
     IRClassGet,
     IRClassSet,
     IRClassNew,
     IRInterfaceCall,
     IRInterfaceConstruct,
+    IRInvoke,
     IRCompareOp,
     IRCopyInit,
     IRCast,
@@ -47,12 +49,15 @@ from .model import (
     IRModule,
     IRMoveInit,
     IRPrint,
+    IRPropagate,
     IRRelocate,
     IRReturn,
     IRStorage,
     IRStore,
     IRStructDefinition,
+    IRStructGet,
     IRStructNew,
+    IRStructSet,
     IRValue,
     IRVectorNew,
 )
@@ -76,6 +81,7 @@ from .types import (
     StructType,
     VectorType,
     VoidType,
+    ExceptionEventType,
 )
 
 
@@ -308,6 +314,9 @@ class LifecycleExpander:
                 elif isinstance(instruction, IRStructNew):
                     if self.registry.traits(instruction.result.type).needs_destroy:
                         self._owned_values.add(instruction.result)
+                elif isinstance(instruction, IRStructSet):
+                    if self.registry.traits(instruction.result.type).needs_destroy:
+                        self._owned_values.add(instruction.result)
                 elif isinstance(instruction, IRMethodResultNew):
                     if self.registry.traits(instruction.result.type).needs_destroy:
                         self._owned_values.add(instruction.result)
@@ -319,11 +328,18 @@ class LifecycleExpander:
                     if self.registry.traits(instruction.result.type).needs_destroy:
                         self._owned_values.add(instruction.result)
         self._used_names = {parameter.name for parameter in function.parameters}
+
+        def record_names(value: object) -> None:
+            if isinstance(value, IRValue):
+                self._used_names.add(value.name)
+            elif isinstance(value, (tuple, list)):
+                for item in value:
+                    record_names(item)
+
         for block in function.blocks:
             for instruction in block.instructions:
-                result = getattr(instruction, "result", None)
-                if isinstance(result, IRValue):
-                    self._used_names.add(result.name)
+                for value in vars(instruction).values():
+                    record_names(value)
         numeric_names = [int(name) for name in self._used_names if name.isdigit()]
         self._next = max(numeric_names, default=-1) + 1
         blocks = []
@@ -335,11 +351,122 @@ class LifecycleExpander:
                     self._instruction_operand_occurrences(instruction)
                 )
             blocks.append(IRBasicBlock(block.name, self._fold_trivial_return_transfer(instructions)))
-        return IRFunction(
+        expanded = IRFunction(
             function.name,
             list(function.parameters),
             function.return_type,
             blocks,
+            function.may_throw,
+        )
+        return self._repair_constructor_invocation_ownership(expanded)
+
+    def _repair_constructor_invocation_ownership(
+        self,
+        function: IRFunction,
+    ) -> IRFunction:
+        """Give a pre-invoke constructor receiver one disposition per edge.
+
+        A struct constructor borrows the caller's default receiver and returns
+        a distinct updated receiver in ``MethodResultType``.  The caller must
+        therefore release its original on both edges.  A class constructor
+        mutates the same object that becomes the normal result, so its original
+        is released only on the exceptional edge.
+
+        Dedicated exceptional trampolines are required because a handler may
+        have several invoke predecessors with different receiver owners.
+        """
+
+        used_blocks = {block.name for block in function.blocks}
+        cleanup_blocks: list[IRBasicBlock] = []
+        replacements: dict[tuple[str, int], IRInvoke] = {}
+        normal_releases: dict[str, list[IRCall]] = {}
+        cleanup_index = 0
+
+        def unique_block() -> str:
+            nonlocal cleanup_index
+            while True:
+                name = f"constructor.receiver.cleanup{cleanup_index}"
+                cleanup_index += 1
+                if name not in used_blocks:
+                    used_blocks.add(name)
+                    return name
+
+        for block in function.blocks:
+            for instruction_index, instruction in enumerate(block.instructions):
+                if (
+                    not isinstance(instruction, IRInvoke)
+                    or not instruction.function.endswith(".__ctor")
+                    or not instruction.arguments
+                ):
+                    continue
+                receiver = instruction.arguments[0]
+                if not isinstance(receiver.type, (StructType, ClassRefType)):
+                    raise ValueError(
+                        "constructor invoke receiver must be a struct or class owner"
+                    )
+                if not self.registry.traits(receiver.type).needs_destroy:
+                    continue
+
+                if isinstance(receiver.type, StructType):
+                    normal_releases.setdefault(instruction.normal_target, []).append(
+                        IRCall(
+                            "__aether_release",
+                            (receiver,),
+                            None,
+                            "__aether_release",
+                        )
+                    )
+
+                event = self._temporary(ExceptionEventType())
+                cleanup_name = unique_block()
+                cleanup_blocks.append(
+                    IRBasicBlock(
+                        cleanup_name,
+                        [
+                            IRCatchEntry(
+                                event,
+                                f"constructor_receiver_cleanup{cleanup_index - 1}",
+                                (),
+                            ),
+                            IRCall(
+                                "__aether_release",
+                                (receiver,),
+                                None,
+                                "__aether_release",
+                            ),
+                            IRPropagate(
+                                event,
+                                instruction.exceptional_target,
+                                instruction.exceptional_target_event,
+                            ),
+                        ],
+                    )
+                )
+                replacements[(block.name, instruction_index)] = replace(
+                    instruction,
+                    exceptional_target=cleanup_name,
+                    exceptional_target_event=event,
+                )
+
+        if not replacements:
+            return function
+
+        rewritten: list[IRBasicBlock] = []
+        for block in function.blocks:
+            instructions = [
+                replacements.get((block.name, index), instruction)
+                for index, instruction in enumerate(block.instructions)
+            ]
+            releases = normal_releases.get(block.name, ())
+            if releases:
+                instructions = [*releases, *instructions]
+            rewritten.append(IRBasicBlock(block.name, instructions))
+        rewritten.extend(cleanup_blocks)
+        return IRFunction(
+            function.name,
+            list(function.parameters),
+            function.return_type,
+            rewritten,
             function.may_throw,
         )
 
@@ -446,6 +573,63 @@ class LifecycleExpander:
                         IRCall("__aether_retain", (field,), None, "__aether_retain")
                     )
             emitted.append(instruction)
+            return self._release_unused_result(instruction, emitted)
+        if isinstance(instruction, IRStructSet):
+            emitted: list[IRInstruction] = []
+            definition = self.registry.traits(instruction.struct.type)
+            field_type = definition.fields[instruction.field_index][1]
+
+            # Acquire the replacement before dropping the old field so an
+            # assignment such as `value.field = value.field` remains valid.
+            if self.registry.traits(instruction.value.type).needs_destroy:
+                if instruction.value in self._owned_values:
+                    self._owned_values.remove(instruction.value)
+                else:
+                    emitted.append(
+                        IRCall(
+                            "__aether_retain",
+                            (instruction.value,),
+                            None,
+                            "__aether_retain",
+                        )
+                    )
+
+            # The functional struct update produces a new owned aggregate.
+            # Copy preserved fields when the input is borrowed, or consume a
+            # temporary input owner when one is available.  In both cases the
+            # replaced field's old ownership is discharged exactly once.
+            if instruction.struct in self._owned_values:
+                self._owned_values.remove(instruction.struct)
+            elif definition.needs_destroy:
+                emitted.append(
+                    IRCall(
+                        "__aether_retain",
+                        (instruction.struct,),
+                        None,
+                        "__aether_retain",
+                    )
+                )
+            if self.registry.traits(field_type).needs_destroy:
+                old_field = self._temporary(field_type)
+                emitted.extend(
+                    [
+                        IRStructGet(
+                            old_field,
+                            instruction.struct,
+                            instruction.field_index,
+                            instruction.field_name,
+                        ),
+                        IRCall(
+                            "__aether_release",
+                            (old_field,),
+                            None,
+                            "__aether_release",
+                        ),
+                    ]
+                )
+            emitted.append(instruction)
+            if definition.needs_destroy:
+                self._owned_values.add(instruction.result)
             return self._release_unused_result(instruction, emitted)
         if isinstance(instruction, IRMethodResultNew):
             emitted: list[IRInstruction] = []
@@ -688,6 +872,21 @@ class LifecycleExpander:
                     emitted.append(
                         IRCall("__aether_release", (argument,), None, "__aether_release")
                     )
+            if (
+                isinstance(instruction, IRCall)
+                and instruction.function.endswith(".__ctor")
+                and instruction.arguments
+                and isinstance(instruction.arguments[0].type, StructType)
+                and self.registry.traits(instruction.arguments[0].type).needs_destroy
+            ):
+                emitted.append(
+                    IRCall(
+                        "__aether_release",
+                        (instruction.arguments[0],),
+                        None,
+                        "__aether_release",
+                    )
+                )
             if (
                 isinstance(instruction, IRInterfaceCall)
                 and instruction.receiver in self._owned_values
