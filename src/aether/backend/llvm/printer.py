@@ -232,6 +232,14 @@ class LLVMPrinter:
                 "LLVM EH exception lowering is an internal test-only prototype"
             )
 
+    @property
+    def exception_runtime_abi_version(self) -> int:
+        return self._exception_runtime_abi_version
+
+    @property
+    def exception_strategy(self) -> ExceptionLoweringStrategy:
+        return self._exception_strategy
+
     def print_module(self, module: SSAModule, *, native_entry: bool = False) -> str:
         self._native_entry = native_entry
         self._entry_symbol = "__aether_program_main"

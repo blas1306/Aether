@@ -72,6 +72,19 @@ def diagnostic_from_exception(
             source,
             "SSA verification",
         )
+    native_boundary = next(
+        (item for item in chain if type(item).__name__ == "NativeBoundaryVerificationError"),
+        None,
+    )
+    if native_boundary is not None:
+        return CompilerDiagnostic(
+            DiagnosticCategory.INTERNAL_COMPILER_ERROR,
+            "ICE-NATIVE-BOUNDARY-001",
+            "The compiler rejected an unsafe or unsupported native exception boundary",
+            source_path=source,
+            note=str(native_boundary),
+            phase="native boundary verification",
+        )
     if _chain_has_name(chain, "ClangRejectedLLVMError"):
         return _ice(
             "ICE-LLVM-EMIT-001",

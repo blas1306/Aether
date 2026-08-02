@@ -36,6 +36,7 @@ while compiling Aether source is reported publicly as `internal_compiler_error`.
 | `ICE-SSA-BUILD-001` | Aether failed to construct SSA from valid IR. |
 | `ICE-SSA-VERIFY-001` | Aether generated invalid SSA. |
 | `ICE-LLVM-EMIT-001` | LLVM emission was invalid or rejected by Clang. |
+| `ICE-NATIVE-BOUNDARY-001` | Native exception containment verification rejected an unsafe compiler-generated boundary. The note carries the internal `NBV-*` reason documented in `NATIVE_BOUNDARY_CONTAINMENT.md`. |
 | `ICE-OPT-001` | An optimizer invariant failed unexpectedly. |
 | `ICE-UNEXPECTED-001` | An otherwise unclassified compiler exception escaped. |
 
