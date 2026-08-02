@@ -28,7 +28,9 @@ For every implementation PR:
 
 - [ ] `Error` is installed as a built-in interface, not as a base class, magic
       string type, or arbitrary-value marker.
-- [ ] The `Error.message()` contract remains nonthrowing and returns `string`.
+- [ ] The `Error.message()` contract remains semantically non-throwing and
+      returns `string`: it cannot produce an Aether exception; an unrecoverable
+      internal failure panics without a second `Error` or recursive handling.
 - [ ] Only non-null values implementing `Error` are throwable.
 - [ ] Structs may implement `Error` and retain ordinary struct value semantics.
 - [ ] Classes may implement `Error` and retain ordinary class reference identity.

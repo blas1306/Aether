@@ -169,11 +169,18 @@ int main() {
 def test_ssa_interpreter_matches_initial_ir_for_nested_throwing_interface() -> None:
     ir, ssa = _lower(
         """
-struct ThrowingError implements Error {
-    string text;
-    string message() {
+interface ThrowingOperation {
+    string run();
+}
+
+class ThrowingRunner implements ThrowingOperation {
+    public string run() {
         throw NetworkError("new");
     }
+}
+
+struct OldError implements Error {
+    string message() { return "old"; }
 }
 
 struct NetworkError implements Error {
@@ -182,11 +189,12 @@ struct NetworkError implements Error {
 }
 
 int main() {
+    ThrowingOperation operation = ThrowingRunner();
     try {
         try {
-            throw ThrowingError("old");
+            throw OldError();
         } catch (Error old) {
-            println(old.message());
+            println(operation.run());
         }
     } catch (NetworkError error) {
         println(error.message());
@@ -269,19 +277,27 @@ int main() {
         ),
         (
             """
-struct ThrowingError implements Error {
-    string text;
-    string message() {
+interface ThrowingOperation {
+    string run();
+}
+
+class ThrowingRunner implements ThrowingOperation {
+    public string run() {
         throw NetworkError("interface");
     }
 }
 
+struct OldError implements Error {
+    string message() { return "old"; }
+}
+
 int main() {
+    ThrowingOperation operation = ThrowingRunner();
     try {
         try {
-            throw ThrowingError("old");
+            throw OldError();
         } catch (Error old) {
-            println(old.message());
+            println(operation.run());
         }
     } catch (NetworkError error) {
         println(error.message());

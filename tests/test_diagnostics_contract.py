@@ -55,6 +55,28 @@ def test_source_diagnostics_are_categorized_without_traceback(
     assert "Traceback" not in stderr
 
 
+def test_throwing_error_message_has_explicit_semantic_diagnostic(
+    tmp_path: Path,
+) -> None:
+    path = _source(
+        tmp_path,
+        """
+struct BrokenError implements Error {
+    string message() { throw BrokenError(); }
+}
+int main() { return 0; }
+""",
+    )
+
+    code, stdout, stderr = _run(["--check", str(path)])
+
+    assert code == EXIT_LANGUAGE_ERROR
+    assert stdout == ""
+    assert "Aether type error [AE-ERROR-MESSAGE-NONTHROWING]" in stderr
+    assert "Error.message() is non-throwing" in stderr
+    assert "Traceback" not in stderr
+
+
 def test_check_accepts_native_source_without_codegen(tmp_path: Path, monkeypatch) -> None:
     path = _source(tmp_path, "int main() { return 0; }\n")
     monkeypatch.setattr(

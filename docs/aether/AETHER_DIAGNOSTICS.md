@@ -29,6 +29,7 @@ while compiling Aether source is reported publicly as `internal_compiler_error`.
 | --- | --- |
 | `AE-SYNTAX-001` | Syntax error. |
 | `AE-TYPE-001` | Type or static semantic error. |
+| `AE-ERROR-MESSAGE-NONTHROWING` | An `Error.message()` implementation may produce an Aether exception, violating its language-defined non-throwing contract. |
 | `AE-BACKEND-*` | Backend capability rejection; the existing detailed suffix is preserved. |
 | `AE-RUNTIME-001` | Aether runtime error. |
 | `TOOLCHAIN-CLANG-001` | Clang is missing or cannot be invoked. |

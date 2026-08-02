@@ -2605,10 +2605,9 @@ class Interpreter:
                     message = str(rendered.value)
             except _ThrownExceptionSignal as signal:
                 destroy_value(signal.event.payload)
-                message = (
-                    "Aether panic: Error.message() threw while reporting an "
-                    "unhandled exception"
-                )
+                raise AetherRuntimeError(
+                    "Aether panic: invalid non-throwing Error.message() implementation"
+                ) from None
         return AetherRuntimeError(
             message,
             line=event.line,

@@ -1,8 +1,9 @@
 # Aether frontend experiments outside 1.0
 
 > Classification: **Experimental / Non-normative**. This annex describes
-> implementation experiments recognized by parts of the current frontend or
-> AST interpreter. None of them belongs to Aether 1.0.
+> implementation experiments recognized by parts of the current frontend,
+> internal compiler pipeline, or AST interpreter. None of them belongs to
+> Aether 1.0.
 
 The normative contract is the
 [Aether 1.0 Language Specification](AETHER_LANGUAGE_SPEC_V1.md). Parser,
@@ -24,6 +25,11 @@ Current implementation experiments include some of the following:
 - advanced Vector/Matrix operations and host linear algebra;
 - string interpolation, input, plotting, and general formatting;
 - `throw`, `try`, and `catch`.
+
+Exception syntax has an internal Initial IR/SSA/LLVM event-out path used by
+qualification tests. That implementation detail does not make it stable: the
+2026-08-02 qualification found release blockers and native profile 23 continues
+to reject it with `AE-BACKEND-ERROR_HANDLING`.
 
 The frontend's current experimental interpolation spelling is `$expression$`,
 not `${expression}`. Native profile 23 rejects the resulting interpolated

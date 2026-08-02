@@ -2,6 +2,13 @@
 
 > Classification: **Design study — recommendation for decision closure**.
 >
+> Historical status: **superseded** by
+> [Exception Architecture Resolution](EXCEPTION_ARCHITECTURE_RESOLUTION.md),
+> which selected unchecked exceptions. Open questions and checked-`throws`
+> examples below are historical analysis, not current language rules.
+> `Error.message()` is nevertheless semantically non-throwing under the final
+> accepted architecture.
+>
 > Scope: the checked-versus-unchecked question only.
 >
 > Inputs:

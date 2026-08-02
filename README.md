@@ -92,7 +92,8 @@ implica ABI estable, seguridad para producción ni v1 final terminada.
 - módulos de archivo, packages, imports/aliases y visibilidad son parciales en native;
 - enums nominales sin payload son completos en AST/native (`i32` interno en LLVM);
 - funciones abreviadas tipadas `f(double x) = ...`, tuples y destructuring;
-- `input`, `throw`/`try`/`catch` y `complex`;
+- `input`, `throw`/`try`/`catch` y `complex`; las excepciones tienen lowering
+  native interno de calificación, pero el perfil estable aún las rechaza;
 - builtins matemáticos escalares y álgebra lineal avanzada;
 - REPL persistente y plotting.
 
@@ -215,8 +216,10 @@ Lexer -> Parser -> TypeChecker -> EntryPointNormalizer -> AST Interpreter
 ```
 
 Es el backend con mayor cobertura y el usado por el REPL. Incluye
-inicialización de módulos, exceptions, input y builtins científicos que aún no
-compilan; classes, nullable e interfaces también compilan en native.
+inicialización de módulos, exceptions, input y builtins científicos fuera del
+perfil estable. Las excepciones disponen de una ruta native interna, no pública,
+que permanece detrás de `AE-BACKEND-ERROR_HANDLING`; classes, nullable e
+interfaces sí compilan en native estable.
 
 ### IR interpreter
 

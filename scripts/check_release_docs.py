@@ -39,6 +39,7 @@ CLASSIFIED = {
     ROOT / "docs" / "aether" / "AETHER_V1_PROFILE_AUDIT.md": "Audit",
     ROOT / "docs" / "aether" / "AETHER_V1_PROFILE_DECISION.md": "Audit",
     ROOT / "docs" / "compiler" / "BACKEND_FEATURE_PARITY.md": "Audit",
+    ROOT / "docs" / "compiler" / "EXCEPTION_RELEASE_QUALIFICATION.md": "Audit",
 }
 CURRENT_REFERENCE = (
     ROOT / "README.md",
@@ -120,6 +121,13 @@ def check() -> list[str]:
     for contract in required_contracts:
         if contract not in combined:
             errors.append(f"normative contract is missing: {contract!r}")
+    for document in NORMATIVE:
+        text = document.read_text(encoding="utf-8")
+        if "`Error.message()`" not in text or "semantically non-throwing" not in text:
+            errors.append(
+                "normative Error.message() contract is missing: "
+                f"{document.relative_to(ROOT)}"
+            )
 
     contradictions = (
         "The AST profile is the semantic reference for the full frontend surface",

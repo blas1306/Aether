@@ -1,6 +1,6 @@
 # Aether Strategic Roadmap and Architecture Vision
 
-> Status: strategic direction after Phase 6.1.
+> Status: strategic direction after exception release qualification.
 >
 > This document is a roadmap, not a statement that planned features are
 > implemented. The current language contract remains the
@@ -147,8 +147,9 @@ remove the stated platform, ABI, packaging, debugging, and operational limits.
 - tracing GC, optional explicit arenas/regions/allocator-backed buffers, weak
   references, and concurrency-safe ARC in the current contract; the explicit
   facilities and optional tracing remain research areas;
-- native catchable exceptions and exceptional cleanup. Source-level exception
-  semantics do not select or require a specific platform unwinding ABI;
+- promotion of the implemented native catchable-exception path. Its frozen
+  source semantics and private event-out architecture exist, but qualification
+  blockers keep it outside the stable capability profile;
 - async, threads, synchronization primitives, and a formal memory model;
 - macros and general compile-time metaprogramming;
 - debugger integration, stable profiler integration, a package registry, and
@@ -427,7 +428,7 @@ Classification means:
 
 | Language area | Classification | Direction and boundary |
 | --- | --- | --- |
-| Exceptions | **Planned for 1.x** | Promote only the existing basic `throw`/`try`/`catch` concept after specifying native cleanup, panic separation, implementation-neutral source semantics, and parity. Source-level exceptions do not commit Aether to LLVM, Itanium, SEH, setjmp-style, status-lowered, or any other platform unwinding ABI. `finally`, hierarchies, resumable exceptions, and general unwinding are not implied. Result/status types remain preferred for expected numerical failures. |
+| Exceptions | **Implemented internally; promotion blocked for 1.x** | Frozen semantics, explicit cleanup, verified SSA, private event-out lowering, runtime and boundary containment exist. Resolve the capability over-rejection, Initial IR `may_throw`/lifecycle disagreements, public tooling gaps and integrated release evidence before promotion. `finally`, hierarchies, resumable exceptions, public FFI and general unwinding are not implied. Result/status types remain preferred for expected numerical failures. |
 | Basic scalar/payloadless-enum `match` | **Possible for 1.x** | A non-destructuring match over scalar constants and today's payloadless enums may be added compatibly, with exhaustiveness or explicit default rules and ordinary control-flow lowering. It is optional and lower priority than completing the stable foundations. |
 | Full algebraic pattern matching | **Candidate for 2.0** | Payload destructuring, guards, nested patterns, bindings, and exhaustiveness over algebraic data types belong with a future payload-enum/ADT design. Basic `match` does not pre-commit that representation or syntax. |
 | `do-while` | **Planned for 1.x (low priority)** | Add only as compatible loop syntax with the same control-flow, `break`/`continue`, verifier, optimizer, formatter, and tooling guarantees as existing loops. It must not displace higher-priority 1.x work. |

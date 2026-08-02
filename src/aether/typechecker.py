@@ -75,6 +75,7 @@ LINEAR_ALGEBRA_SOLVE = "Math.LinearAlgebra.solve"
 LINEAR_ALGEBRA_CONJTRANSPOSE = "Math.LinearAlgebra.conjtranspose"
 SCALAR_INPUT_TARGET_TYPES = {"int", "float", "string", "boolean"}
 ERROR_INTERFACE_NAME = "Error"
+ERROR_MESSAGE_NONTHROWING_DIAGNOSTIC = "AE-ERROR-MESSAGE-NONTHROWING"
 
 
 def _constant_range_int(expression: ast.Expression) -> int | None:
@@ -182,6 +183,7 @@ class TypeChecker:
         self._infer_struct_method_mutability(program.statements)
         self._check_statements(program.statements, self.global_scope)
         self._finalize_inferred_function_returns(program.statements)
+        self._validate_error_message_contract(program.statements)
         self._validate_type_aliases()
 
     def check_collecting_errors(self, program: ast.Program) -> list[AetherTypeError]:
@@ -206,6 +208,7 @@ class TypeChecker:
                 lambda: self._infer_struct_method_mutability(program.statements),
                 lambda: self._check_statements(program.statements, self.global_scope),
                 lambda: self._finalize_inferred_function_returns(program.statements),
+                lambda: self._validate_error_message_contract(program.statements),
                 self._validate_type_aliases,
             ):
                 try:
@@ -690,6 +693,164 @@ class TypeChecker:
                 for method in struct.methods
             )
             self.structs[declaration.name] = replace(struct, methods=methods)
+
+    def _validate_error_message_contract(
+        self,
+        statements: list[ast.Statement],
+    ) -> None:
+        """Reject Error.message implementations that can form an exception event.
+
+        Exceptions are unchecked in source signatures, but ``Error.message`` is
+        the one language-defined non-throwing method.  This local summary is
+        deliberately conservative: calls whose implementation is unavailable
+        are considered potentially throwing.  Panics are not Aether exceptions
+        and therefore remain permitted.
+        """
+
+        bodies: dict[str, object] = {}
+        method_keys: dict[tuple[str, str], str] = {}
+        constructors: dict[str, str] = {}
+        error_messages: list[tuple[str, ast.FunctionDeclaration]] = []
+
+        for statement in statements:
+            if isinstance(
+                statement,
+                (ast.FunctionDeclaration, ast.ExpressionFunctionDeclaration),
+            ):
+                bodies[statement.name] = (
+                    statement.body
+                    if isinstance(statement, ast.FunctionDeclaration)
+                    else statement.expression
+                )
+                continue
+            if not isinstance(
+                statement,
+                (ast.StructDeclaration, ast.ClassDeclaration),
+            ):
+                continue
+            struct = self.structs.get(statement.name)
+            implements_error = (
+                struct is not None
+                and ERROR_INTERFACE_NAME in struct.implements
+            )
+            for method in statement.methods:
+                key = f"{statement.name}.{method.name}"
+                bodies[key] = method.body
+                method_keys[(statement.name, method.name)] = key
+                if implements_error and method.name == "message":
+                    error_messages.append((key, method))
+            if statement.constructor is not None:
+                key = f"{statement.name}.__ctor"
+                bodies[key] = statement.constructor.body
+                constructors[statement.name] = key
+
+        if not error_messages:
+            return
+
+        direct: set[str] = set()
+        calls: dict[str, set[str]] = {name: set() for name in bodies}
+
+        def scan(value: object, caller: str) -> None:
+            if isinstance(value, (ast.ThrowStatement, ast.RethrowStatement)):
+                direct.add(caller)
+                if isinstance(value, ast.ThrowStatement):
+                    scan(value.expression, caller)
+                return
+            if isinstance(value, ast.CallExpression):
+                callee = self.builtin_aliases.get(value.callee, value.callee)
+                if callee in bodies:
+                    calls[caller].add(callee)
+                elif callee in constructors:
+                    calls[caller].add(constructors[callee])
+                elif (
+                    is_builtin(callee)
+                    or callee in AETHER_TYPES
+                    or callee in self.enums
+                    or callee.split(".", 1)[0] in self.enums
+                    or (callee in self.structs and callee not in constructors)
+                ):
+                    pass
+                else:
+                    # Imported functions and callable values have no source
+                    # throws effect to trust under unchecked semantics.
+                    direct.add(caller)
+                for argument in value.arguments:
+                    scan(argument, caller)
+                for argument in value.keyword_arguments.values():
+                    scan(argument, caller)
+                return
+            if isinstance(value, ast.MethodCall):
+                receiver_type = self._expression_types.get(id(value.target))
+                owner: str | None = None
+                if isinstance(receiver_type, ClassType):
+                    owner = receiver_type.name
+                elif isinstance(receiver_type, str) and receiver_type in self.structs:
+                    owner = receiver_type
+                target = method_keys.get((owner, value.method_name)) if owner else None
+                if target is not None:
+                    calls[caller].add(target)
+                elif (
+                    isinstance(receiver_type, InterfaceType)
+                    and receiver_type.name == ERROR_INTERFACE_NAME
+                    and value.method_name == "message"
+                ):
+                    # Dispatch through Error.message is non-throwing by this
+                    # same semantic contract.
+                    pass
+                elif receiver_type is not None and native_method(
+                    receiver_type,
+                    value.method_name,
+                ) is not None:
+                    pass
+                else:
+                    direct.add(caller)
+                scan(value.target, caller)
+                for argument in value.arguments:
+                    scan(argument, caller)
+                for argument in value.keyword_arguments.values():
+                    scan(argument, caller)
+                return
+            if isinstance(
+                value,
+                (ast.FunctionDeclaration, ast.ExpressionFunctionDeclaration),
+            ):
+                return
+            if isinstance(value, (list, tuple)):
+                for item in value:
+                    scan(item, caller)
+                return
+            if is_dataclass(value):
+                for descriptor in dataclass_fields(value):
+                    scan(getattr(value, descriptor.name), caller)
+
+        for name, body in bodies.items():
+            scan(body, name)
+
+        may_produce_exception = set(direct)
+        changed = True
+        while changed:
+            changed = False
+            for name, callees in calls.items():
+                if name in may_produce_exception:
+                    continue
+                if any(callee in may_produce_exception for callee in callees):
+                    may_produce_exception.add(name)
+                    changed = True
+
+        for name, method in error_messages:
+            if name not in may_produce_exception:
+                continue
+            raise AetherTypeError(
+                "Error.message() is non-throwing; "
+                f"implementation '{name}' may produce an Aether exception.",
+                line=method.line,
+                column=method.column,
+                hint=(
+                    "remove throw/rethrow and calls that may throw; "
+                    "use the existing panic contract for unrecoverable internal failures."
+                ),
+                kind=ERROR_MESSAGE_NONTHROWING_DIAGNOSTIC,
+            )
 
     def _check_statements(self, statements: list[ast.Statement], scope: Scope[VariableSymbol]) -> None:
         for statement in statements:

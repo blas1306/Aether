@@ -11,6 +11,7 @@ from aether.backend.llvm import LLVMBackend, LLVMBackendError
 from aether.backend.llvm.exception_abi import ExceptionLoweringStrategy
 from aether.backend.llvm.printer import LLVMPrinter
 from aether.capabilities import BackendCapabilityError, BackendIdentity, validate_backend_capabilities
+from aether.errors import AetherTypeError
 from aether.ir import IRLowerer
 from aether.pipeline import parse_source, prepare_typed_program
 from aether.ssa import GeneralSSABuilder, SSAInvoke, SSAPackException
@@ -138,9 +139,12 @@ struct DetailError implements Error {
     string text;
     string message() { return text; }
 }
-struct ThrowingMessage implements Error {
+interface MessageProducer {
+    string produce();
+}
+struct ThrowingMessage implements MessageProducer {
     string text;
-    string message() { throw DetailError(text); }
+    string produce() { throw DetailError(text); }
 }
 void directFailure() { throw FileError("direct"); }
 void indirectFailure() { throw NetworkError("indirect"); }
@@ -156,8 +160,8 @@ int main() {
     try { apply(indirectFailure); }
     catch (Error error) { println(error.message()); }
 
-    Error dynamic = ThrowingMessage("interface");
-    try { println(dynamic.message()); }
+    MessageProducer dynamic = ThrowingMessage("interface");
+    try { println(dynamic.produce()); }
     catch (DetailError error) { println(error.message()); }
 
     try { relay(); }
@@ -186,7 +190,7 @@ int main() {
     )
 
 
-def test_exception_lowering_uses_versioned_event_out_for_every_invoke_form() -> None:
+def test_exception_lowering_uses_event_out_except_nonthrowing_error_message() -> None:
     source = ERROR_TYPES + """
 void directFailure() { throw NetworkError("direct"); }
 void indirectFailure() { throw FileError("indirect"); }
@@ -210,7 +214,9 @@ int main() {
     assert "@__ae_exception_destroy_v1" in llvm
     assert "invoke.direct.event.out" in llvm
     assert "invoke.indirect.event.out" in llvm
-    assert "invoke.interface.event.out" in llvm
+    assert "invoke.interface.event.out" not in llvm
+    assert "invoke.error.message.failed" in llvm
+    assert "call ptr %invoke.interface.thunk" in llvm
     assert "landingpad" not in llvm
     assert "personality" not in llvm
 
@@ -614,7 +620,7 @@ int main() {
     assert completed.stderr == ""
 
 
-def test_native_throwing_message_replaces_old_caught_event(tmp_path: Path) -> None:
+def test_throwing_error_message_is_rejected_semantically(tmp_path: Path) -> None:
     source = """
 struct OuterError implements Error {
     string text;
@@ -637,11 +643,11 @@ int main() {
     return 0;
 }
 """
-    completed = _compile_and_run(source, tmp_path, optimization="2", sanitize=True)
-
-    assert completed.returncode == 0
-    assert completed.stdout == "inner\n"
-    assert completed.stderr == ""
+    with pytest.raises(
+        AetherTypeError,
+        match=r"Error\.message\(\) is non-throwing.*OuterError\.message",
+    ):
+        _compile_and_run(source, tmp_path, optimization="2", sanitize=True)
 
 
 @pytest.mark.parametrize(
@@ -883,7 +889,7 @@ entry:
         ExceptionLoweringStrategy.LLVM_EH_PROTOTYPE,
     ],
 )
-def test_throw_during_root_message_is_contained_and_destroys_both_events(
+def test_throw_during_root_message_is_rejected_before_lowering(
     strategy: ExceptionLoweringStrategy,
     tmp_path: Path,
 ) -> None:
@@ -898,16 +904,16 @@ struct ReportingError implements Error {
 }
 int main() { throw RootError("root"); }
 """
-    completed = _compile_and_run(
-        source,
-        tmp_path,
-        sanitize=True,
-        exception_strategy=strategy,
-    )
-
-    assert completed.returncode == 1
-    assert completed.stdout == ""
-    assert completed.stderr == "Aether panic: exception reporting failed"
+    with pytest.raises(
+        AetherTypeError,
+        match=r"Error\.message\(\) is non-throwing.*RootError\.message",
+    ):
+        _compile_and_run(
+            source,
+            tmp_path,
+            sanitize=True,
+            exception_strategy=strategy,
+        )
 
 
 def test_backend_rejects_malformed_descriptor_and_runtime_abi() -> None:
@@ -993,3 +999,112 @@ int main() { throw FileError("still gated"); }
 
     with pytest.raises(BackendCapabilityError, match="AE-BACKEND-ERROR_HANDLING"):
         validate_backend_capabilities(program, BackendIdentity.NATIVE)
+
+
+@pytest.mark.parametrize(
+    "strategy",
+    [
+        ExceptionLoweringStrategy.EVENT_OUT,
+        ExceptionLoweringStrategy.LLVM_EH_PROTOTYPE,
+    ],
+)
+def test_root_reporter_calls_error_message_as_nonthrowing(
+    strategy: ExceptionLoweringStrategy,
+) -> None:
+    _program, module = _lower(
+        """
+struct RootError implements Error {
+    string text;
+    string message() { return text; }
+}
+int main() {
+    try { throw RootError("caught"); }
+    catch (Error caught) { println(caught.message()); }
+    throw RootError("root");
+}
+"""
+    )
+    llvm = LLVMBackend(
+        LLVMPrinter(
+            exception_strategy=strategy,
+            allow_test_exception_strategy=(
+                strategy is ExceptionLoweringStrategy.LLVM_EH_PROTOTYPE
+            ),
+        )
+    ).emit(module)
+
+    root = llvm.split(
+        "define private void @__ae_exception_root_terminate_v1", 1
+    )[1]
+    root = root.split("\n}", 1)[0]
+    assert "%text = call ptr %thunk(ptr %carrier) nounwind" in root
+    assert "%text = invoke ptr %thunk" not in root
+    assert "message_event" not in root
+    assert "message_threw" not in root
+    assert "willreturn" not in root
+    assert (
+        "define { %struct.RootError, ptr } "
+        "@RootError.message(%struct.RootError %this) nounwind {"
+    ) in llvm
+    assert any(
+        line.startswith("define private ptr @__ae_interface_thunk_")
+        and line.endswith(" nounwind {")
+        for line in llvm.splitlines()
+    )
+    assert "invoke.interface.event.out" not in llvm
+    assert "invoke.error.message.failed" in llvm
+    assert "call ptr %invoke.interface.thunk" in llvm
+
+
+def test_backend_rejects_may_throw_error_message_target() -> None:
+    _program, module = _lower(
+        """
+struct BrokenInternalError implements Error {
+    string message() { return "not actually throwing"; }
+}
+int main() { throw BrokenInternalError(); }
+"""
+    )
+    target = next(
+        function
+        for function in module.functions
+        if function.name == "BrokenInternalError.message"
+    )
+    target.may_throw = True
+
+    with pytest.raises(
+        LLVMBackendError,
+        match=r"non-throwing.*Error\.message",
+    ):
+        LLVMBackend().emit(module)
+
+
+@pytest.mark.parametrize(
+    "strategy",
+    [
+        ExceptionLoweringStrategy.EVENT_OUT,
+        ExceptionLoweringStrategy.LLVM_EH_PROTOTYPE,
+    ],
+)
+def test_root_error_message_internal_failure_uses_panic_contract(
+    strategy: ExceptionLoweringStrategy,
+    tmp_path: Path,
+) -> None:
+    completed = _compile_and_run(
+        """
+struct RootError implements Error {
+    Array<int> values;
+    string message() {
+        int impossible = values[1];
+        return "unreachable";
+    }
+}
+int main() { throw RootError({1}); }
+""",
+        tmp_path,
+        exception_strategy=strategy,
+    )
+
+    assert completed.returncode == 1
+    assert completed.stdout == "Aether panic: Array index out of bounds\n"
+    assert completed.stderr == ""

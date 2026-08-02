@@ -28,7 +28,7 @@ the compiler directly.
   checked before the Python suite in local CI.
 - Dated Phase 6.0 and earlier audits are historical evidence, not current
   normative references.
-- The schema-2 catalog classifies 89 examples as `V1_NATIVE`, 16 as
+- The schema-2 catalog classifies 89 examples as `V1_NATIVE`, 18 as
   `AST_ONLY_EXPERIMENTAL`, and none as `BROKEN`.
 
 ## Backends and limits
@@ -40,6 +40,10 @@ owned struct boxes, nullable/collection transport, and type-directed copy/drop.
 Inheritance, interface inheritance, default methods, downcasts, reflection,
 user-defined destructors, exceptions/unwind, weak references, and a stable FFI
 remain outside the profile.
+
+Post-RC4 internal exception work does not change that release boundary. The
+2026-08-02 qualification decision is `DO NOT PROMOTE`; profile 23 continues to
+mark `error-handling` unsupported.
 
 The validated native platform remains Linux x86_64 with `clang` on `PATH`.
 

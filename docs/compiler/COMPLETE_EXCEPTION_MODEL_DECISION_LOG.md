@@ -2,6 +2,12 @@
 
 > Classification: **Design approval checklist**.
 >
+> Historical status: **superseded for final decisions** by
+> [Exception Architecture Resolution](EXCEPTION_ARCHITECTURE_RESOLUTION.md).
+> Pending/recommended entries below record the earlier review state and are not
+> current authority. The accepted `Error.message()` contract is semantically
+> non-throwing.
+>
 > Companion to
 > [Complete Exception Model RFC](COMPLETE_EXCEPTION_MODEL_RFC.md).
 >

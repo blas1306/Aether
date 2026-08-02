@@ -4,7 +4,7 @@ This directory contains two deliberately separate catalogs. The machine-readable
 source of truth is [`v1_examples_manifest.json`](v1_examples_manifest.json);
 this README explains the policy but does not duplicate its path list.
 
-Catalog count: **105 total = 89 V1_NATIVE + 16 AST_ONLY_EXPERIMENTAL; BROKEN = 0**.
+Catalog count: **107 total = 89 V1_NATIVE + 18 AST_ONLY_EXPERIMENTAL; BROKEN = 0**.
 
 ## Official Aether 1.0 examples
 

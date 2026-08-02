@@ -2,8 +2,10 @@
 
 > Milestone: **0 — Preparation**
 >
-> This report classifies the existing frontend/AST experiment as migration input.
-> It does not migrate, delete, enable, or change any behavior.
+> Historical status: **migration snapshot** captured before exception
+> implementation. “Current implementation” below describes that historical
+> baseline, not the post-Hotfix A compiler. This report does not define current
+> semantics; `Error.message()` is now authoritatively semantically non-throwing.
 
 ## Classification rules
 
@@ -155,6 +157,8 @@ No finding in this report authorizes compatibility with the old behavior.
 - **Conflict:** `Error` is an interface with a nonthrowing `string message()`
   contract; ordinary error constructors and witness dispatch apply. A magic field
   or constructor cannot replace interface conformance.
+- **Resolution:** the ordinary interface method is implemented and Hotfix A
+  rejects throwing `Error.message()` bodies/call graphs semantically.
 - **Reusable portions:** existing ordinary struct/class constructor, method, and
   interface dispatch machinery—not the `Exception` branches themselves.
 - **Replace later:** remove/quarantine special branches and route through normal

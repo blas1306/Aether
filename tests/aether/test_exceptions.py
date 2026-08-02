@@ -7,13 +7,17 @@ import pytest
 
 from aether import ast
 from aether.capabilities import Capability, detect_required_capabilities
-from aether.errors import AetherSyntaxError
+from aether.errors import AetherSyntaxError, AetherTypeError
 from aether.lexer import lex
 from aether.parser import Parser
 from aether.pipeline import prepare_typed_program
+from aether.runner import run_aether
 from aether.source_formatter import format_source
 from aether.tokens import TokenType
-from aether.typechecker import TypeChecker
+from aether.typechecker import (
+    ERROR_MESSAGE_NONTHROWING_DIAGNOSTIC,
+    TypeChecker,
+)
 
 
 def _parse(source: str) -> ast.Program:
@@ -346,3 +350,85 @@ def test_formatter_parse_round_trip_preserves_order_and_node_kinds() -> None:
     ]
     assert isinstance(statement.try_body[0], ast.ThrowStatement)
     assert isinstance(statement.catch_clauses[1].body[0], ast.RethrowStatement)
+
+
+@pytest.mark.parametrize("kind", ["struct", "class"])
+def test_error_message_implementation_cannot_throw(kind: str) -> None:
+    visibility = "public " if kind == "class" else ""
+    program = _parse(
+        f"""
+{kind} BrokenError implements Error {{
+    {visibility}string message() {{ throw BrokenError(); }}
+}}
+int main() {{ return 0; }}
+"""
+    )
+
+    with pytest.raises(AetherTypeError) as raised:
+        TypeChecker().check(program)
+
+    assert raised.value.kind == ERROR_MESSAGE_NONTHROWING_DIAGNOSTIC
+    assert raised.value.message == (
+        "Error.message() is non-throwing; implementation "
+        "'BrokenError.message' may produce an Aether exception."
+    )
+
+
+def test_error_message_rejects_transitive_throwing_helper() -> None:
+    program = _parse(
+        """
+struct BrokenError implements Error {
+    string message() { return render(); }
+}
+string render() { throw BrokenError(); }
+int main() { return 0; }
+"""
+    )
+
+    with pytest.raises(
+        AetherTypeError,
+        match=r"Error\.message\(\) is non-throwing.*BrokenError\.message",
+    ) as raised:
+        TypeChecker().check(program)
+
+    assert raised.value.kind == ERROR_MESSAGE_NONTHROWING_DIAGNOSTIC
+
+
+def test_error_message_throws_clause_is_not_silently_ignored() -> None:
+    with pytest.raises(
+        AetherSyntaxError,
+        match=r"Expected '\{' before block.*near 'throws'",
+    ):
+        _parse(
+            """
+struct BrokenError implements Error {
+    string message() throws (BrokenError) { return "bad"; }
+}
+"""
+        )
+
+
+def test_error_message_normal_struct_class_and_interface_dispatch() -> None:
+    result = run_aether(
+        """
+struct StructError implements Error {
+    string text;
+    string message() { return text; }
+}
+class ClassError implements Error {
+    string text;
+    public string message() { return text; }
+}
+int main() {
+    StructError byValue = StructError("struct");
+    ClassError byReference = ClassError("class");
+    Error dynamic = byReference;
+    println(byValue.message());
+    println(byReference.message());
+    println(dynamic.message());
+    return 0;
+}
+"""
+    )
+
+    assert result.output == "struct\nclass\nclass\n"

@@ -75,8 +75,8 @@ failure panics/fails fast and never creates another catchable event.
 | rethrow | active catch-owned event | same event/provenance transferred to outer exceptional continuation | no repack, retain, copy, allocation or helper call |
 | destroy / `__ae_exception_destroy_v1` | one owned live event | payload/carrier dropped exactly once, event consumed and freed | no allocation; counter underflow/state/ABI corruption fails fast |
 | outward propagation | owned event at function exceptional exit and valid private event slot | stores event in caller slot; callee has no owner afterward | no allocation; ordinary result is invalid on this edge |
-| root report / `__ae_exception_root_terminate_v1` | sole owned event escaping `main` | no return | validates, borrows canonical name/carrier, invokes `Error.message()` once, writes the frozen diagnostic to stderr, releases message, destroys event and exits 1 |
-| root reporting failure | sole root event | destroys event and terminates; no recoverable return | message/format/write failure uses fail-fast reporting and cannot recursively throw; a message-produced event, if defensively encountered, is destroyed first |
+| root report / `__ae_exception_root_terminate_v1` | sole owned event escaping `main` | no return | validates, borrows canonical name/carrier, invokes semantically non-throwing `Error.message()` once, writes the frozen diagnostic to stderr, releases message, destroys event and exits 1 |
+| root reporting failure | sole root event | reporter-detected failure destroys the event and terminates; a panic inside `message()` terminates immediately under the panic contract | no recoverable return, second `Error`, or recursive exception handling |
 | compiler/runtime version check | requested ABI version | printer construction succeeds only for v1 | mismatch rejects before LLVM emission |
 | runtime internal failure / `__ae_exception_panic_v1` | none or invalid private state | no return | writes the private invariant panic and exits 1; never packs/catches an event |
 
@@ -89,7 +89,7 @@ language-level matching policy.
 
 The root owns the only live event after all compiler-generated frame cleanup has
 run. It validates the descriptor, borrows the dynamic canonical source name and
-payload, calls the approved `Error.message()` dispatch, writes exactly:
+payload, calls the approved non-throwing `Error.message()` dispatch, writes exactly:
 
 ```text
 Aether unhandled exception: <canonical-type>: <message>\n
@@ -103,8 +103,9 @@ An injected message/report failure is checked before output so the fault result 
 deterministic. Actual stream failure may occur after a partial host write; the
 runtime still releases any message, destroys the event and enters fail-fast
 termination. It never retries by throwing. A source-produced throwing
-`message()` is not part of the frozen source contract, but the prototype
-defensively contains and destroys such an event in internal tests.
+`message()` is rejected semantically, and malformed internal `may_throw`
+witnesses are rejected before LLVM emission. Root reporting therefore has no
+second-event containment path.
 
 ## Panic separation and attributes
 
@@ -116,7 +117,10 @@ intercept them.
 
 `exit`, root termination, event EH raise in the rejected prototype and private
 panic are `noreturn`. No potentially throwing Aether function is declared
-`nounwind`. Runtime match/borrow/destroy helpers are not given speculative
+`nounwind`. The semantically non-throwing concrete `Error.message()` target,
+its witness thunk and the root dispatch call are `nounwind`; they are not
+`willreturn` because panic remains possible. Runtime match/borrow/destroy helpers
+are not given speculative
 `readnone`, `readonly` or `willreturn` attributes that would hide validation or
 panic behavior.
 

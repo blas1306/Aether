@@ -105,7 +105,9 @@
       "run": true,
       "outside_v1_features": [
         "AE-BACKEND-ARITHMETIC",
+        "AE-BACKEND-FUNCTION_VALUES",
         "AE-BACKEND-MATRIX",
+        "AE-BACKEND-MODULES",
         "AE-BACKEND-VECTOR"
       ]
     },
@@ -481,7 +483,7 @@
       "path": "examples/linear_algebra/primes_check.ae",
       "condition": "ast_execution",
       "expected_exit_code": 0,
-      "stdout_sha256": "3d12f6e2defb15a55cb4e8cb4e41c66851827b49b0aed11ef538e860267b81f0",
+      "stdout_sha256": "8690e7b979633a9dfbb5e749600caee0638ae3264bca4011520256e42d834af1",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
       "classification": "AST_ONLY_EXPERIMENTAL",
@@ -1212,6 +1214,45 @@
         "native"
       ],
       "run": true
+    },
+    {
+      "path": "examples/minCuad.ae",
+      "condition": "frontend_acceptance",
+      "expected_exit_code": null,
+      "stdout_sha256": null,
+      "stderr_sha256": null,
+      "timeout_seconds": 20,
+      "classification": "AST_ONLY_EXPERIMENTAL",
+      "backends": [
+        "ast"
+      ],
+      "run": false,
+      "outside_v1_features": [
+        "AE-BACKEND-ARITHMETIC",
+        "AE-BACKEND-FUNCTION_VALUES",
+        "AE-BACKEND-MODULES",
+        "AE-BACKEND-VARIABLES_AND_CONST",
+        "AE-BACKEND-VECTOR"
+      ]
+    },
+    {
+      "path": "examples/minCuad2.ae",
+      "condition": "frontend_acceptance",
+      "expected_exit_code": null,
+      "stdout_sha256": null,
+      "stderr_sha256": null,
+      "timeout_seconds": 20,
+      "classification": "AST_ONLY_EXPERIMENTAL",
+      "backends": [
+        "ast"
+      ],
+      "run": false,
+      "outside_v1_features": [
+        "AE-BACKEND-ARITHMETIC",
+        "AE-BACKEND-FUNCTION_VALUES",
+        "AE-BACKEND-MODULES",
+        "AE-BACKEND-VECTOR"
+      ]
     },
     {
       "path": "examples/minimos_cuadrados/MinimosCuadrados.ae",

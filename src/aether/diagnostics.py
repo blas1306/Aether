@@ -156,7 +156,15 @@ def diagnostic_from_exception(
         )
     if isinstance(exc, AetherTypeError):
         return _from_aether_error(
-            exc, DiagnosticCategory.TYPE, "AE-TYPE-001", source, "type checking"
+            exc,
+            DiagnosticCategory.TYPE,
+            (
+                "AE-ERROR-MESSAGE-NONTHROWING"
+                if exc.kind == "AE-ERROR-MESSAGE-NONTHROWING"
+                else "AE-TYPE-001"
+            ),
+            source,
+            "type checking",
         )
     if isinstance(exc, AetherRuntimeError):
         return _from_aether_error(

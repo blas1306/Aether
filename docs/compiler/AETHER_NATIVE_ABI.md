@@ -13,12 +13,17 @@ Es necesario distinguir cuatro contratos:
 | semántica observable AST/native | normativa para programas admitidos por profile 23 | stdout/stderr, exit code, panic y archivos según la spec/profile |
 | ABI interna del compilador | tipos, firmas y nombres dentro de un módulo LLVM combinado | ninguna entre versiones |
 | ABI del runtime | helpers LLVM `private` generados dentro del módulo | no existe como ABI enlazable separada |
+| ABI privada de eventos de excepción | versionada e interna al módulo combinado; no forma parte del profile estable | ninguna; no se exporta ni cruza C |
 | FFI / objetos precompilados | no implementados | ninguna |
 
 Un cambio de layout puede ser válido hoy si se actualizan compiler, runtime y
 tests juntos y no cambia la semántica. Después de separar el runtime, todo
 cambio de firma, ownership, discriminante, calling convention o layout de un
 tipo cruzando la frontera requerirá una versión ABI.
+
+La arquitectura de excepciones mantiene su ABI de eventos privada y contenida;
+este documento no publica su layout ni sus helpers. La política de frontera
+vigente está en [Native Boundary Containment](NATIVE_BOUNDARY_CONTAINMENT.md).
 
 ## 2. Target y calling convention actuales
 

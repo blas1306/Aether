@@ -27,6 +27,10 @@ silently reinterpret the language design.
 
 - ✓ **`Error` is a built-in interface.** This provides one typed throwable
   boundary without requiring arbitrary values or a class hierarchy.
+- ✓ **`Error.message()` is semantically non-throwing.** It never produces an
+  Aether exception. An unrecoverable internal failure follows the existing
+  fail-fast panic contract without constructing a second `Error` or recursively
+  entering exception handling.
 - ✓ **Structs and classes may implement `Error`.** This preserves ordinary
   struct value semantics and class reference identity for domain-appropriate
   error types.
@@ -74,6 +78,8 @@ silently reinterpret the language design.
 Unchecked source semantics do not weaken compiler correctness: every
 potentially throwing operation remains explicit and conservative in internal
 effects, CFG, ownership analysis, verification, optimization, and lowering.
+The unchecked rule does not apply to the language-defined `Error.message()`
+contract; a throwing implementation is a semantic error.
 
 ## 3. Remaining implementation decisions
 

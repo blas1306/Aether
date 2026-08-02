@@ -1,6 +1,6 @@
 # Compiler Feature Matrix
 
-> Classification: **Current reference**. Last reconciled: 2026-07-28.
+> Classification: **Current reference**. Last reconciled: 2026-08-02.
 > Capability states and typed subset rules are normative in
 > [Aether Native Profile v1](../aether/AETHER_NATIVE_PROFILE_V1.md), profile
 > 23. This matrix summarizes implementation stages; it does not create
@@ -27,7 +27,8 @@ feature-specific strength optimization exists.
 | functions, recursion, return, `if`/`while`/`for`, break/continue | C | C | C CFG/phi | C | C typed subset | granular C/P |
 | modules/imports/visibility | C | C | C combined module | C | P: no imported storage/init | P |
 | process arguments and UTF-8 text files | C | C | C | C effects | C Linux subset | granular C/P |
-| input and exceptions | C | C | N | N/A | N/gated | unsupported |
+| input | C | C | N | N/A | N/gated | unsupported |
+| exceptions | C | C | C explicit event/lifecycle CFG | C conservative preservation | C internal event-out path; stable gate rejects | `error-handling` unsupported |
 | user generics, closures/lambdas, class/interface inheritance, reflection | N or experiment | N/P | N | N/A | N | unsupported/outside profile |
 | optimization profiles | C CLI | N/A | C | P: `-O2` aliases `-O1` | C emission | P |
 
@@ -56,6 +57,12 @@ operands that previously regressed.
 Feature-specific folding remains intentionally limited to operations with
 proved semantics. Unknown calls, interface calls, allocation, lifecycle,
 memory access, traps, and mutation retain their declared effects.
+
+Exception IR is implemented through the private event-out architecture and is
+available only to internal qualification tests. `ERROR_HANDLING` remains
+`UNSUPPORTED`: the 2026-08-02 release qualification found capability and
+Initial IR blockers, plus incomplete public tooling. See
+[Exception Release Qualification](EXCEPTION_RELEASE_QUALIFICATION.md).
 
 ## Authorities
 

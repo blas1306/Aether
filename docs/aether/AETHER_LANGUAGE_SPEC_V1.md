@@ -65,7 +65,7 @@ DoubleParseResult FileStatus FileReadResult
 ```
 
 The implementation also reserves the experimental spellings `catch`,
-`complex`, `Exception`, `float`, `static`, `throw`, and `try`. Reservation
+`complex`, `float`, `static`, `throw`, and `try`. Reservation
 prevents their use as identifiers; it does not make their associated
 constructions part of Aether 1.0.
 
@@ -616,6 +616,14 @@ binary/stream/process IO, exceptions, class/interface inheritance, default
 interface methods, reflection/downcasts, weak references, user destructors,
 GC/cycle collection, panic unwind, controlled stack overflow, a distinct O2,
 cross-platform native support, `long`, do-while, and match.
+
+The excluded exception implementation is still constrained by its accepted
+architecture during qualification: `Error.message()` is semantically non-throwing
+and must never produce an Aether exception. A throwing
+implementation is rejected semantically. An unrecoverable internal failure
+uses the existing panic contract and must not construct a second `Error` or
+recursively invoke exception handling. This rule does not admit exception
+syntax into Aether 1.0 or enable `ERROR_HANDLING` in profile 23.
 
 The expected rejection categories are specified by
 [Aether Native Profile v1](AETHER_NATIVE_PROFILE_V1.md) and the negative corpus.

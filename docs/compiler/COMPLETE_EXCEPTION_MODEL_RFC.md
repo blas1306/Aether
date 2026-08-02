@@ -2,6 +2,12 @@
 
 > Classification: **Design/RFC — proposed**.
 >
+> Historical status: **superseded in part** by
+> [Exception Architecture Resolution](EXCEPTION_ARCHITECTURE_RESOLUTION.md).
+> In particular, the RFC's checked `throws` design is historical; accepted
+> exceptions are unchecked. The accepted `Error.message()` non-throwing rule
+> remains authoritative as clarified by that resolution.
+>
 > Roadmap phase: **Phase 7.1 architecture**.
 >
 > Date: 29 July 2026.
@@ -217,10 +223,13 @@ interface Error {
 }
 ```
 
-`Error.message()` is nonthrowing because the interface method has no `throws`
-effect. It may still panic if it violates a safety invariant; panic remains
-uncatchable. A future effect/purity system may further constrain diagnostic
-methods, but purity is not required by this RFC.
+`Error.message()` is semantically non-throwing: it must never produce an Aether
+exception. This is a language-defined contract, independent of the historical
+checked-`throws` proposal in this RFC. If its implementation encounters an
+unrecoverable internal failure, the existing panic contract takes over
+immediately; no second `Error` is constructed and exception handling is not
+invoked recursively. A future effect/purity system may further constrain
+diagnostic methods, but purity is not required by this RFC.
 
 The base library should provide a final convenience class conceptually
 equivalent to:

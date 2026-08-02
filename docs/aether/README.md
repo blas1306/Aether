@@ -56,6 +56,7 @@ or future work. They do not expand the release profile.
 - [RC3 Examples Catalog Audit](AETHER_EXAMPLES_CATALOG_AUDIT.md)
 - [Aether v1 Release Readiness](AETHER_V1_RELEASE_READINESS.md)
 - [Backend Feature Parity](BACKEND_FEATURE_PARITY.md)
+- [Exception Release Qualification](../compiler/EXCEPTION_RELEASE_QUALIFICATION.md)
 - [Control Flow and Iteration Audit](CONTROL_FLOW_AND_ITERATION_AUDIT.md)
 
 Audit documents are dated snapshots. A closed finding remains useful history

@@ -875,19 +875,27 @@ int main() {
         ),
         (
             """
-struct ThrowingError implements Error {
-    string text;
-    string message() {
+interface ThrowingOperation {
+    string run();
+}
+
+class ThrowingRunner implements ThrowingOperation {
+    public string run() {
         throw NetworkError("interface");
     }
 }
 
+struct OldError implements Error {
+    string message() { return "old"; }
+}
+
 int main() {
+    ThrowingOperation operation = ThrowingRunner();
     try {
         try {
-            throw ThrowingError("old");
+            throw OldError();
         } catch (Error old) {
-            println(old.message());
+            println(operation.run());
         }
     } catch (NetworkError error) {
         println(error.message());

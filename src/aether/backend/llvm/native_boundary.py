@@ -537,10 +537,12 @@ class NativeBoundaryVerifier:
                 or tuple(parameter.type for parameter in target.parameters)
                 != (concrete_type,)
                 or target.return_type != expected_return
+                or target.may_throw
             ):
                 self._fail(
                     NativeBoundaryDiagnostic.DESCRIPTOR_MISMATCH,
-                    f"descriptor '{name}' has no ABI-compatible module-owned Error.message target",
+                    f"descriptor '{name}' has no ABI-compatible non-throwing "
+                    "module-owned Error.message target",
                 )
         self._exception_identities = identities
 

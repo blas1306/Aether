@@ -305,15 +305,8 @@ class LLVMExceptionRuntime:
                 "  %thunk = load ptr, ptr %thunk_ptr",
                 "  %carrier_ptr = getelementptr %AetherExceptionEventV1, ptr %event, i32 0, i32 4",
                 "  %carrier = load ptr, ptr %carrier_ptr",
-                "  %message_event_out = alloca ptr, align 8",
-                "  store ptr null, ptr %message_event_out",
-                "  %text = call ptr %thunk(ptr %carrier, ptr %message_event_out)",
-                "  %message_event = load ptr, ptr %message_event_out",
-                "  %message_failed = icmp ne ptr %message_event, null",
-                "  br i1 %message_failed, label %message_threw, label %report",
-                "message_threw:",
-                "  call void @__ae_exception_destroy_v1(ptr %message_event)",
-                "  br label %reporting_failure",
+                "  %text = call ptr %thunk(ptr %carrier) nounwind",
+                "  br label %report",
                 "report:",
                 "  %stream = load ptr, ptr @stderr",
                 "  %prefix_ok32 = call i32 @fputs(ptr @.ae.exception.prefix, ptr %stream)",
@@ -350,7 +343,7 @@ class LLVMExceptionRuntime:
 
     @staticmethod
     def _root_terminate_eh() -> str:
-        """EH-prototype root reporting with recursive-throw containment."""
+        """EH-prototype root reporting through non-throwing Error.message."""
 
         return "\n".join(
             [
@@ -377,21 +370,8 @@ class LLVMExceptionRuntime:
                 "  %thunk = load ptr, ptr %thunk_ptr",
                 "  %carrier_ptr = getelementptr %AetherExceptionEventV1, ptr %event, i32 0, i32 4",
                 "  %carrier = load ptr, ptr %carrier_ptr",
-                "  %text = invoke ptr %thunk(ptr %carrier) to label %report unwind label %message_threw",
-                "message_threw:",
-                "  %landing = landingpad { ptr, i32 } catch ptr @_ZTIPv",
-                "  %native_exception = extractvalue { ptr, i32 } %landing, 0",
-                "  %selector = extractvalue { ptr, i32 } %landing, 1",
-                "  %expected = call i32 @llvm.eh.typeid.for(ptr @_ZTIPv)",
-                "  %ours = icmp eq i32 %selector, %expected",
-                "  br i1 %ours, label %destroy_message_event, label %foreign",
-                "destroy_message_event:",
-                "  %message_event = call ptr @__cxa_begin_catch(ptr %native_exception)",
-                "  call void @__cxa_end_catch()",
-                "  call void @__ae_exception_destroy_v1(ptr %message_event)",
-                "  br label %reporting_failure",
-                "foreign:",
-                "  resume { ptr, i32 } %landing",
+                "  %text = call ptr %thunk(ptr %carrier) nounwind",
+                "  br label %report",
                 "report:",
                 "  %stream = load ptr, ptr @stderr",
                 "  %prefix_ok32 = call i32 @fputs(ptr @.ae.exception.prefix, ptr %stream)",

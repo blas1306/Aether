@@ -98,7 +98,10 @@ An owned event may exist only on verified exceptional SSA edges, in a private
 event-out slot, or in the root reporter. libc, file, allocation, string and
 collection calls never receive that slot. Interface thunks are accepted only
 when compiler-generated and module-owned. Root reporting validates, borrows the
-payload, reports, destroys the sole event and terminates.
+payload, calls the semantically non-throwing `Error.message()` dispatch, reports,
+destroys the sole event and terminates. The dispatch has no event-out parameter
+or unwind edge. An internal failure follows panic/fail-fast and never creates a
+second Aether exception.
 
 Overflow, division, bounds, allocation failure, invalid size, ARC corruption,
 event/descriptor corruption and ABI mismatch remain panic/fail-fast. Their
@@ -161,4 +164,3 @@ diagnostic readiness, full optimization/capability parity, and a separately
 reviewed FFI/callback containment ABI if native interoperation is introduced.
 This milestone supplies containment proof and rejection policy; it does not by
 itself authorize the capability.
-

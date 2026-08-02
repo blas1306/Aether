@@ -344,8 +344,12 @@ class LLVMPrinter:
                 for function in module.functions
             )
         )
+        # Initial IR/SSA may conservatively retain an exceptional-shaped CFG
+        # edge for unchecked interface dispatch.  Error.message is the one
+        # language-defined exception-free slot, so LLVM lowering never gives
+        # its thunk an event-out parameter or unwind edge.
+        self._throwing_interface_slots.discard("Error.message")
         if self._uses_exceptions:
-            self._throwing_interface_slots.add("Error.message")
             self._uses_interface_dispatch = True
             self._uses_string_runtime = True
         self._exception_nominal_types = self._collect_exception_nominal_types(module)
@@ -804,6 +808,11 @@ class LLVMPrinter:
             raise LLVMBackendError(
                 f"LLVM Error witness target '{nominal_id}.message' has an incompatible signature"
             )
+        if target.may_throw:
+            raise LLVMBackendError(
+                f"LLVM Error witness target '{nominal_id}.message' violates the "
+                "non-throwing Error.message() contract"
+            )
 
         box_layout = None
         carrier_kind = "class"
@@ -1001,6 +1010,11 @@ class LLVMPrinter:
                     block.instructions[-1],
                     (SSAInvoke, SSAInvokeIndirect, SSAInvokeInterface),
                 )
+                and not (
+                    isinstance(block.instructions[-1], SSAInvokeInterface)
+                    and block.instructions[-1].receiver.type == InterfaceType("Error")
+                    and block.instructions[-1].slot.method_id == "Error.message"
+                )
             }
         for predecessor in function.blocks:
             terminator = predecessor.instructions[-1]
@@ -1057,9 +1071,15 @@ class LLVMPrinter:
             and function.may_throw
             else ""
         )
+        error_message_attribute = (
+            " nounwind"
+            if function.name.endswith(".message")
+            and function.name.rsplit(".", 1)[0] in self._exception_nominal_types
+            else ""
+        )
         lines = [
             f"define {linkage}{return_type} {self._global_name(function.name)}"
-            f"({parameters}){personality} {{"
+            f"({parameters}){personality}{error_message_attribute} {{"
         ]
 
         for block in function.blocks:
@@ -2327,6 +2347,38 @@ class LLVMPrinter:
             ],
         ]
         return_type = instruction.slot.return_type
+        if (
+            instruction.receiver.type == InterfaceType("Error")
+            and instruction.slot.method_id == "Error.message"
+        ):
+            call = (
+                f"call {llvm_type(return_type)} {thunk}"
+                f"({', '.join(arguments)}) nounwind"
+            )
+            if isinstance(return_type, VoidType):
+                if instruction.result is not None:
+                    raise LLVMBackendError(
+                        "LLVM void Error.message invoke cannot define a result"
+                    )
+                lines.append(call)
+            else:
+                if instruction.result is None:
+                    raise LLVMBackendError(
+                        "LLVM Error.message invoke requires a normal result"
+                    )
+                lines.append(f"{self._new_temp(instruction.result)} = {call}")
+            event = self._new_temp(instruction.exception)
+            failed = self._synthetic_temp("invoke.error.message.failed")
+            lines.extend(
+                [
+                    f"{event} = select i1 false, ptr null, ptr null",
+                    f"{failed} = icmp ne ptr {event}, null",
+                    f"br i1 {failed}, "
+                    f"{self._label_operand(instruction.exceptional_target)}, "
+                    f"{self._label_operand(instruction.normal_target)}",
+                ]
+            )
+            return lines
         if self._exception_strategy is ExceptionLoweringStrategy.LLVM_EH_PROTOTYPE:
             trampoline = self._eh_trampoline_by_block.get(self._current_block)
             if trampoline is None:
@@ -6160,9 +6212,13 @@ class LLVMPrinter:
             is ExceptionLoweringStrategy.LLVM_EH_PROTOTYPE
             else ""
         )
+        nonthrowing_attribute = (
+            " nounwind" if slot.method_id == "Error.message" else ""
+        )
         return (
             f"define private {rendered_return} @{slot.thunk_symbol}"
-            f"({', '.join(parameters)}){personality} {{\nentry:\n{body}\n}}"
+            f"({', '.join(parameters)}){personality}{nonthrowing_attribute} "
+            f"{{\nentry:\n{body}\n}}"
         )
 
     @staticmethod

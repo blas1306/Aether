@@ -198,6 +198,12 @@ and combined capability `string-split-trim` are not catalog entries in profile
 23; `interfaces`, `string-split`, and `string-trim` are the authoritative
 granular capabilities.
 
+Internal exception qualification does not widen this profile. Its accepted
+contract requires `Error.message()` to be semantically non-throwing: lowering
+must use a call with no Aether exceptional successor, while unrecoverable
+internal failure remains panic/fail-fast. No second `Error` or recursive
+exception handling is permitted. `ERROR_HANDLING` remains `UNSUPPORTED`.
+
 ## 6. Platform and toolchain
 
 The validated RC native platform is **Linux x86_64** with a `clang` executable
