@@ -264,7 +264,10 @@ CAPABILITY_CATALOG: Mapping[Capability, CapabilityDefinition] = MappingProxyType
             _definition(Capability.MATRIX, "Matrix values and operations."),
             _definition(Capability.SCALAR_MATH, "Scalar mathematical functions and constants."),
             _definition(Capability.GENERICS, "User-defined generic declarations."),
-            _definition(Capability.ERROR_HANDLING, "throw and try/catch error handling."),
+            _definition(
+                Capability.ERROR_HANDLING,
+                "Native exception semantics: throw, rethrow, try/catch, and propagation from throwing calls.",
+            ),
             _definition(Capability.FILES, "Language-level file input and output."),
             _definition(Capability.TEXT_FILE_READ, "Complete UTF-8 text-file reads."),
             _definition(Capability.TEXT_FILE_WRITE, "Complete UTF-8 text-file writes."),
@@ -1151,12 +1154,6 @@ class _CapabilityDetector:
             return
         if isinstance(node, ast.StructDeclaration):
             self._record(Capability.STRUCTS, node)
-            if "Error" in node.implements:
-                self._record(
-                    Capability.ERROR_HANDLING,
-                    node,
-                    detail="Error-conforming struct",
-                )
             if node.constructor is not None:
                 self._record(Capability.STRUCT_CONSTRUCTORS, node.constructor)
             if node.methods:
@@ -1180,12 +1177,6 @@ class _CapabilityDetector:
             return
         if isinstance(node, ast.ClassDeclaration):
             self._record(Capability.CLASSES, node)
-            if "Error" in node.implements:
-                self._record(
-                    Capability.ERROR_HANDLING,
-                    node,
-                    detail="Error-conforming class",
-                )
             if node.constructor is not None:
                 self._record(Capability.CLASS_CONSTRUCTORS, node.constructor)
             if node.methods:
@@ -1203,6 +1194,10 @@ class _CapabilityDetector:
             node,
             (ast.ThrowStatement, ast.RethrowStatement, ast.TryCatchStatement),
         ):
+            # ERROR_HANDLING describes observable exception control/effect
+            # semantics.  Error itself remains an ordinary nominal interface;
+            # declarations and values using it are handled by the normal
+            # struct/class/interface capabilities above.
             self._record(Capability.ERROR_HANDLING, node)
             return
         if isinstance(node, ast.InterpolatedString):

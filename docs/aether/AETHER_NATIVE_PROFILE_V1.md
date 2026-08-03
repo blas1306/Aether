@@ -107,7 +107,7 @@ Inventory: 32 COMPLETE, 31 PARTIAL, 3 UNSUPPORTED.
 | `matrix` | **PARTIAL** | Matrix values and operations. |
 | `scalar-math` | **PARTIAL** | Scalar mathematical functions and constants. |
 | `generics` | **UNSUPPORTED** | User-defined generic declarations. |
-| `error-handling` | **UNSUPPORTED** | throw and try/catch error handling. |
+| `error-handling` | **UNSUPPORTED** | Native exception semantics: throw, rethrow, try/catch, and propagation from throwing calls. |
 | `files` | **PARTIAL** | Language-level file input and output. |
 | `text-file-read` | **PARTIAL** | Complete UTF-8 text-file reads. |
 | `text-file-write` | **PARTIAL** | Complete UTF-8 text-file writes. |
@@ -202,7 +202,13 @@ Internal exception qualification does not widen this profile. Its accepted
 contract requires `Error.message()` to be semantically non-throwing: lowering
 must use a call with no Aether exceptional successor, while unrecoverable
 internal failure remains panic/fail-fast. No second `Error` or recursive
-exception handling is permitted. `ERROR_HANDLING` remains `UNSUPPORTED`.
+exception handling is permitted. `ERROR_HANDLING` is required only when
+execution may require native exception semantics: `throw`, rethrow,
+`try`/`catch`, throwing bodies or constructors, and calls/invokes that require
+exception propagation. Merely implementing `Error` or using `Error` values as
+ordinary interface values—including `Error.message()`, parameters, returns,
+storage, nullable values, and containers—does not require the capability.
+`ERROR_HANDLING` remains `UNSUPPORTED`.
 
 ## 6. Platform and toolchain
 

@@ -625,6 +625,14 @@ uses the existing panic contract and must not construct a second `Error` or
 recursively invoke exception handling. This rule does not admit exception
 syntax into Aether 1.0 or enable `ERROR_HANDLING` in profile 23.
 
+`ERROR_HANDLING` is required only when execution may require native exception
+semantics: `throw`, bare rethrow, `try`/`catch`, a throwing constructor or
+function body, or a call/invoke whose semantic effect requires exception
+propagation. The `Error` interface is otherwise an ordinary nominal interface.
+Declaring a struct or class that implements `Error`, calling
+`Error.message()`, or passing, returning, storing, making nullable, or placing
+`Error` values in containers does not require `ERROR_HANDLING`.
+
 The expected rejection categories are specified by
 [Aether Native Profile v1](AETHER_NATIVE_PROFILE_V1.md) and the negative corpus.
 The [non-normative frontend experiments annex](AETHER_FRONTEND_EXPERIMENTS.md)

@@ -60,7 +60,6 @@
       ],
       "run": false,
       "outside_v1_features": [
-        "AE-BACKEND-ERROR_HANDLING",
         "AE-BACKEND-INPUT",
         "AE-BACKEND-STRINGS"
       ]
@@ -113,19 +112,16 @@
     },
     {
       "path": "examples/Sorts/IllegalArgumentException.ae",
-      "condition": "frontend_acceptance",
+      "condition": "native_module_emission",
       "expected_exit_code": null,
       "stdout_sha256": null,
       "stderr_sha256": null,
       "timeout_seconds": 20,
-      "classification": "AST_ONLY_EXPERIMENTAL",
+      "classification": "V1_NATIVE",
       "backends": [
-        "ast"
+        "native"
       ],
-      "run": false,
-      "outside_v1_features": [
-        "AE-BACKEND-ERROR_HANDLING"
-      ]
+      "run": false
     },
     {
       "path": "examples/Sorts/Main.ae",

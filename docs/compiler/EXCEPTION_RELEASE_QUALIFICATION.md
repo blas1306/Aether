@@ -12,10 +12,9 @@
 # DO NOT PROMOTE
 
 `ERROR_HANDLING` remains `UNSUPPORTED` in native capability profile 23.
-Promotion is blocked by semantic and pipeline disagreements, an over-strong
-capability detector, and incomplete public tooling. Internal native execution
-is substantial and the admitted corpus is healthy, but implementation presence
-is not release qualification.
+Promotion remains blocked by incomplete public tooling, integration evidence,
+and packaging. Internal native execution is substantial and the admitted
+corpus is healthy, but implementation presence is not release qualification.
 
 No public FFI was added and no private runtime symbol or layout was promoted to
 a public contract.
@@ -35,6 +34,13 @@ witness-slot metadata; SSA preserves it; Python/Rust verifiers reject
 disagreements; LLVM consumes it without method-name or module-wide inference.
 `Error.message()` now remains an ordinary interface call at every stage.
 
+Hotfix C closes ERQ-004 without changing this promotion decision. Capability
+detection now records observable native exception semantics, not nominal
+compatibility with `Error`. Ordinary `Error` declarations, values, containers,
+nullable values and non-throwing interface dispatch remain within the normal
+struct/class/interface capabilities; exception control flow and propagation
+continue to produce `AE-BACKEND-ERROR_HANDLING` before IR on the stable route.
+
 ## Blocking issues
 
 | ID | Blocking finding | Evidence | Required evidence to close |
@@ -42,12 +48,12 @@ disagreements; LLVM consumes it without method-name or module-wide inference.
 | ERQ-001 | **CLOSED by Hotfix A.** The typechecker had accepted throwing `Error.message()` implementations; interpreter/runtime/backend code and positive IR/SSA/native tests had modeled a second event. | `test_error_message_implementation_cannot_throw`; `test_error_message_rejects_transitive_throwing_helper`; `test_root_reporter_calls_error_message_as_nonthrowing`; negative native qualification tests | The semantic diagnostic, non-throwing root call, backend invariant, panic separation and documentation consistency tests now enforce one rule. |
 | ERQ-002 | **CLOSED by Hotfix B.** Initial IR had selected interface `invoke` from module-wide exception use while function `may_throw` came from a separate call-graph scan, producing IRV-144. | `test_interface_dispatch_only_function_has_consistent_nonthrowing_effect`; `test_interface_exception_effects.py` | The semantic effect summary, carried interface-slot fact, strict IR/SSA verifier checks and LLVM structural regressions now enforce one decision. |
 | ERQ-003 | **CLOSED by Hotfix B.** The recorded case used a later `Error.message()` dispatch whose artificial exceptional edge created the incompatible lifecycle join. The slot is semantically nonthrowing, so correct Initial IR has no such edge. | `test_nested_rethrow_mutation_with_later_error_message_verifies`; AST/IR observation is `24\nlater\n` | The same canonical slot effect that closes ERQ-002 removes the unreachable edge; lifecycle rules and verifier strength are unchanged. |
-| ERQ-004 | `implements Error` alone is classified as native exception syntax. A program that only calls the ordinary `message()` interface is rejected with `AE-BACKEND-ERROR_HANDLING`. | `test_error_conformance_only_records_capability_release_blocker`; detector branches in `capabilities.py` for struct/class conformance | Detect the operations that require exception transport, not ordinary `Error` conformance; prove no false positive or false negative across declarations, modules and all exception statements/calls. |
+| ERQ-004 | **CLOSED by Hotfix C.** `implements Error` had been classified as native exception syntax even when the program used only ordinary interface semantics. | `test_error_conformance_only_is_release_qualified_as_ordinary_interface_use`; focused positive, negative, mixed, nested-interface, container, nullable and example regressions | The detector now emits only for exception control/effect semantics. Struct/class conformance and ordinary `Error` value use no longer produce `AE-BACKEND-ERROR_HANDLING`; throw/rethrow/try/catch and throwing call/invoke cases remain gated. |
 | ERQ-005 | Shipped completion/highlighting still advertises the removed experimental `Exception` type and invalid legacy snippets such as untyped `catch (e)` and `throw "message"`. Catch binders have no dedicated symbol/hover/completion evidence. | `autocomplete_engine.py`, Qt keyword table, VS Code grammar, IntelliJ token table | Replace obsolete guidance with `Error` and typed/root catch forms; add CLI/LSP/Qt/VS Code/IntelliJ fixtures for completion, hover, symbols, recovery and diagnostics. |
 | ERQ-006 | Exceptions are absent from the executable release/differential corpus because the stable gate correctly rejects them; existing native tests bypass the gate. | `differential.py` calls `validate_backend_capabilities`; native exception helpers lower directly | After ERQ-001–005, add an atomic promotion candidate whose public CLI, wheel-installed CLI and differential corpus exercise exceptions at O0/O1/O2 without a bypass. |
 | ERQ-007 | The wheel builds, but release verification rejects it because a public catalog entry is absent from the artifact. | `verify_wheel` reports `wheel is missing public example: examples/LeetCode/isPalindrome.ae`; `pyproject.toml` has no `share/aether/examples/LeetCode` data-file entry | Make wheel contents derive from, or be exhaustively checked against, the authoritative manifest; then verify both wheel and sdist in isolated installed smoke tests. |
 
-Hotfixes A and B close ERQ-001 through ERQ-003 without altering lifecycle,
+Hotfixes A, B and C close ERQ-001 through ERQ-004 without altering lifecycle,
 Initial IR or SSA representation, or the private runtime ABI layout/version.
 
 ## 1. Architecture audit
@@ -57,7 +63,7 @@ Initial IR or SSA representation, or the private runtime ABI layout/version.
 | Frontend | PASS | Expression throw, bare rethrow, typed/root catches, ordering, nesting, recovery and formatting are covered by `test_exceptions.py`, `test_source_formatter.py` and LSP formatter tests. |
 | Typechecker | PASS for Hotfix A; qualification still blocked | Core conformance, exact matching and catch rules pass. Throwing direct/transitive `Error.message()` implementations receive `AE-ERROR-MESSAGE-NONTHROWING`. |
 | AST interpreter | PASS | Representative handling, mutation, dynamic identity and provenance behave deterministically. Former ERQ-003 now agrees with verified Initial IR. |
-| Capability gate | **FAIL** | Fail-closed placement is correct, but ERQ-004 rejects an ordinary interface-only program. |
+| Capability gate | PASS for Hotfix C | The gate remains fail-closed for exception semantics and admits ordinary `Error` interface use without exposing `ERROR_HANDLING`. |
 | Initial IR lowering | PASS for the qualified effect cases | ERQ-002/003 now generate verifier-valid IR because nonthrowing interface dispatch has no exceptional edge. |
 | Lifecycle expansion | PASS for the qualified corpus | Constructor rollback, ordinary exceptional cleanup and the former ERQ-003 case pass without lifecycle changes. |
 | Initial IR verifier | PASS as a detector | It rejects both invalid generated forms with stable `IRV-144`/`IRV-036`; the disagreement is that valid typed source generated them. |
@@ -133,11 +139,15 @@ compatible; future introduction requires a new audit.
 
 - Throw, bare rethrow and try/catch each produce
   `AE-BACKEND-ERROR_HANDLING` before IR on the stable route.
+- Throwing function and constructor bodies, plus direct, indirect and interface
+  calls whose effects require exception propagation, remain gated because the
+  checked program contains native exception semantics.
 - No stable native exception program passes the current gate.
-- The gate is over-strong: struct/class declaration with `implements Error`
-  also records `ERROR_HANDLING`, even without exception control flow
-  (ERQ-004).
-- Therefore capability detection fails the “nothing weaker or stronger” gate.
+- Struct/class conformance to `Error`, `Error.message()` calls, parameters,
+  returns, storage, nullable values, containers and ordinary interface dispatch
+  do not record `ERROR_HANDLING` (ERQ-004 closed).
+- Capability detection now satisfies the “nothing weaker or stronger” gate for
+  the accepted exception architecture.
 - The state remains `UNSUPPORTED`; no profile version or generated capability
   table was changed.
 
@@ -167,12 +177,13 @@ did not change the accepted architecture.
 
 The schema-2 manifest now covers all 107 public `.ae` files:
 
-- 89 `V1_NATIVE`;
-- 18 `AST_ONLY_EXPERIMENTAL`;
+- 90 `V1_NATIVE`;
+- 17 `AST_ONLY_EXPERIMENTAL`;
 - 0 broken/unclassified.
 
-`pruebaException.ae` and `Sorts/IllegalArgumentException.ae` require
-`AE-BACKEND-ERROR_HANDLING` and remain AST-only experimental. The two tracked
+`pruebaException.ae` requires `AE-BACKEND-ERROR_HANDLING` and remains AST-only
+experimental. `Sorts/IllegalArgumentException.ae` only declares an ordinary
+`Error` implementation and is now a non-runnable `V1_NATIVE` module. The two tracked
 least-squares examples `minCuad.ae` and `minCuad2.ae` were missing from the
 manifest; they were added as non-runnable AST-only frontend/plotting
 experiments without modifying either example. Stale capability sets and
@@ -249,15 +260,13 @@ nonthrowing.
 
 ## 11. Remaining milestones and estimated scope
 
-1. **Capability correction (small):** remove ordinary `Error` conformance false
-   positives and add exhaustive syntax/module tests.
-2. **Tooling completion (medium):** completion, hover, symbols, recovery and
+1. **Tooling completion (medium):** completion, hover, symbols, recovery and
    fixtures across LSP, Qt, VS Code and IntelliJ; remove obsolete `Exception`.
-3. **Packaging correction (small):** make the wheel/sdist public example set
+2. **Packaging correction (small):** make the wheel/sdist public example set
    agree with the authoritative manifest and run isolated artifact validation.
-4. **Integrated promotion candidate (medium):** public differential corpus,
+3. **Integrated promotion candidate (medium):** public differential corpus,
    sanitizer jobs, wheel-installed CLI, CI/release gate and diagnostics.
-5. **Repeat release qualification (small after the above):** rerun every matrix;
+4. **Repeat release qualification (small after the above):** rerun every matrix;
    only then may profile state, version, normative spec and examples be changed
    atomically.
 
@@ -273,6 +282,10 @@ interface-slot fact through Initial IR/DTO/SSA, strengthens Python and Rust
 consistency checks, removes LLVM-side inference, and adds focused cross-stage
 regressions. Capability state, public language surface, lifecycle, IR/SSA
 representation and runtime ABI remain unchanged.
+Hotfix C removes nominal `Error` conformance as a capability trigger, adds
+positive/negative/mixed release regressions, and reconciles the public example
+catalog and normative detection rule. It does not promote the capability or
+change exception architecture.
 
 ## 13. Risks retained
 
@@ -292,7 +305,7 @@ representation and runtime ABI remain unchanged.
 | Area | Result |
 | --- | --- |
 | Full Python suite | **4514 passed, 12 failed, 4 skipped**. All 12 failures are pre-existing assertions in `test_import_aliases.py`: the current vector orientation prints a column (`[1.0; 2.0]`) while those tests expect a row (`[1.0 2.0]`). No Hotfix B file touches that behavior. |
-| Qualification/effect regressions | **11 passed**: generated cross-stage/native stress, the former ERQ-002/003 cases, ERQ-004 evidence, documentation authority and six focused semantic/IR/SSA/LLVM interface-effect tests. |
+| Capability/exception/release regressions | **234 passed**: positive, negative, mixed, module, nested-interface, container, nullable, `Error.message()`, propagation, IR/SSA/native and ERQ-004 qualification coverage. |
 | Focused compiler suites | **282 IR**, **72 SSA**, **84 backend/native** and **116 Rust-adapter/shadow** tests passed. |
 | Initial IR / SSA repository regression | 117 programs discovered; 101 lowered to IR, 67 comparable across builders, all admitted general-builder programs verified. |
 | Rust verifier | `cargo test --workspace --locked` passed every unit, integration and documentation test, including exception and SSA wire-verifier suites. |

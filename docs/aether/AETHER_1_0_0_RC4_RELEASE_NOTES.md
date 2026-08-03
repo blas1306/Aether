@@ -28,7 +28,7 @@ the compiler directly.
   checked before the Python suite in local CI.
 - Dated Phase 6.0 and earlier audits are historical evidence, not current
   normative references.
-- The schema-2 catalog classifies 89 examples as `V1_NATIVE`, 18 as
+- The schema-2 catalog classifies 90 examples as `V1_NATIVE`, 17 as
   `AST_ONLY_EXPERIMENTAL`, and none as `BROKEN`.
 
 ## Backends and limits

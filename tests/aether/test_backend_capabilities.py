@@ -211,6 +211,158 @@ int main() {
         LLVMBuilder().emit_llvm(typed)
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        'struct E implements Error { string message() { return "e"; } } '
+        "void fail() { throw E(); } int main() { fail(); return 0; }",
+        "int main() { try { } catch (Error error) { } return 0; }",
+        'struct E implements Error { string message() { return "e"; } } '
+        "int main() { try { throw E(); } catch (E error) { throw; } }",
+        'struct E implements Error { string message() { return "e"; } } '
+        "struct Box { constructor() { throw E(); } } "
+        "int main() { Box value = Box(); return 0; }",
+        'interface Operation { void run(); } '
+        'struct E implements Error { string message() { return "e"; } } '
+        "class ThrowingOperation implements Operation { "
+        "public void run() { throw E(); } } "
+        "void invoke(Operation operation) { operation.run(); } "
+        "int main() { invoke(ThrowingOperation()); return 0; }",
+    ],
+    ids=(
+        "throwing-function-and-propagating-call",
+        "try-catch",
+        "rethrow",
+        "throwing-constructor",
+        "throwing-interface-invoke",
+    ),
+)
+def test_error_handling_capability_tracks_native_exception_semantics(
+    source: str,
+) -> None:
+    required = _required(source)
+
+    assert Capability.ERROR_HANDLING in required
+    assert any(
+        issue.diagnostic_code == "AE-BACKEND-ERROR_HANDLING"
+        for issue in backend_capability_issues(_typed(source), BackendIdentity.NATIVE)
+    )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'struct PlainError implements Error { string message() { return "plain"; } } '
+        "int main() { return 0; }",
+        'class PlainError implements Error { public string message() { return "plain"; } } '
+        "int main() { return 0; }",
+        "struct PlainError implements Error { "
+        "string text; string message() { return text; } } "
+        "Error pass(Error value) { Error stored = value; return stored; } "
+        "int main() { Error value = PlainError(\"plain\"); "
+        "println(pass(value).message()); return 0; }",
+        "struct PlainError implements Error { "
+        "string text; string message() { return text; } } "
+        "Error? maybe(Error value) { return value; } "
+        "int main() { Error value = PlainError(\"plain\"); "
+        "Array<Error> array = {value}; List<Error> list = {value}; "
+        "Error? optional = maybe(value); "
+        "println(array[0].message()); println(list[0].message()); return 0; }",
+        "interface ErrorSource { Error current(); } "
+        'struct PlainError implements Error { string message() { return "plain"; } } '
+        "class Source implements ErrorSource { "
+        "public Error current() { return PlainError(); } } "
+        "Error read(ErrorSource source) { return source.current(); } "
+        "int main() { ErrorSource source = Source(); Error value = read(source); "
+        "println(value.message()); return 0; }",
+    ],
+    ids=(
+        "struct-conformance",
+        "class-conformance",
+        "pass-return-store-and-message",
+        "containers-and-nullable",
+        "nested-ordinary-interfaces",
+    ),
+)
+def test_error_values_and_ordinary_dispatch_do_not_require_error_handling(
+    source: str,
+) -> None:
+    typed = _typed(source)
+    required = {
+        requirement.capability for requirement in detect_required_capabilities(typed)
+    }
+
+    assert Capability.ERROR_HANDLING not in required
+    assert not any(
+        issue.requirement.capability is Capability.ERROR_HANDLING
+        for issue in backend_capability_issues(typed, BackendIdentity.NATIVE)
+    )
+
+
+def test_mixed_error_values_and_exception_execution_require_error_handling() -> None:
+    source = """
+struct PlainError implements Error {
+    string text;
+    string message() { return text; }
+}
+
+Error identity(Error value) { return value; }
+void fail() { throw PlainError("failure"); }
+
+int main() {
+    Error ordinary = identity(PlainError("ordinary"));
+    println(ordinary.message());
+    fail();
+    return 0;
+}
+"""
+
+    requirement = _required(source)[Capability.ERROR_HANDLING]
+
+    assert requirement.line == 8
+
+
+def test_error_handling_capability_detection_crosses_module_boundaries(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "Ordinary.ae").write_text(
+        "package Ordinary; "
+        "public struct ModuleError implements Error { "
+        'string message() { return "module"; } } '
+        "public Error make() { return ModuleError(); } "
+        "public Error identity(Error value) { return value; }",
+        encoding="utf-8",
+    )
+    ordinary = _typed(
+        "import Ordinary; int main() { "
+        "Error value = Ordinary.make(); "
+        "println(Ordinary.identity(value).message()); return 0; }",
+        source_root=tmp_path,
+    )
+
+    assert Capability.ERROR_HANDLING not in {
+        requirement.capability
+        for requirement in detect_required_capabilities(ordinary)
+    }
+
+    (tmp_path / "Throwing.ae").write_text(
+        "package Throwing; "
+        "public struct ModuleError implements Error { "
+        'string message() { return "module"; } } '
+        "public void fail() { throw ModuleError(); }",
+        encoding="utf-8",
+    )
+    throwing = _typed(
+        "import Throwing; int main() { Throwing.fail(); return 0; }",
+        source_root=tmp_path,
+    )
+
+    assert Capability.ERROR_HANDLING in {
+        requirement.capability
+        for requirement in detect_required_capabilities(throwing)
+    }
+
+
 def test_detector_reports_function_reference_used_by_plots() -> None:
     source = """
 import Plots;

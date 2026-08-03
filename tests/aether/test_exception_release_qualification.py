@@ -269,13 +269,13 @@ def test_interface_dispatch_only_function_has_consistent_nonthrowing_effect() ->
     )
 
 
-def test_error_conformance_only_records_capability_release_blocker() -> None:
+def test_error_conformance_only_is_release_qualified_as_ordinary_interface_use() -> None:
     source = '''
 struct PrintableError implements Error {
     string message() { return "ordinary-interface-use"; }
 }
 int main() {
-    PrintableError value = PrintableError();
+    Error value = PrintableError();
     println(value.message());
     return 0;
 }
@@ -287,10 +287,25 @@ int main() {
     }
     issues = backend_capability_issues(typed, BackendIdentity.NATIVE)
 
-    assert Capability.ERROR_HANDLING in requirements
-    assert [issue.diagnostic_code for issue in issues] == [
-        "AE-BACKEND-ERROR_HANDLING"
-    ]
+    assert Capability.ERROR_HANDLING not in requirements
+    assert not any(
+        issue.requirement.capability is Capability.ERROR_HANDLING
+        for issue in issues
+    )
+
+    module = IRLowerer().lower_checked_program(typed.checked_program)
+    main = next(function for function in module.functions if function.name == "main")
+    assert any(
+        isinstance(instruction, IRInterfaceCall)
+        and instruction.slot.method_id == "Error.message"
+        for block in main.blocks
+        for instruction in block.instructions
+    )
+    assert not any(
+        isinstance(instruction, IRInvokeInterface)
+        for block in main.blocks
+        for instruction in block.instructions
+    )
 
 
 def test_error_message_documentation_has_one_authoritative_rule() -> None:
@@ -309,6 +324,19 @@ def test_error_message_documentation_has_one_authoritative_rule() -> None:
         text = document.read_text(encoding="utf-8")
         assert "`Error.message()`" in text, document
         assert "non-throwing" in text, document
+
+    normative_capability_contracts = (
+        root / "docs/aether/AETHER_LANGUAGE_SPEC_V1.md",
+        root / "docs/aether/AETHER_NATIVE_PROFILE_V1.md",
+    )
+    for document in normative_capability_contracts:
+        text = document.read_text(encoding="utf-8")
+        normalized = " ".join(text.split())
+        assert (
+            "`ERROR_HANDLING` is required only when execution may require "
+            "native exception semantics"
+        ) in normalized, document
+        assert "does not require" in normalized, document
 
     historical = (
         root / "docs/compiler/COMPLETE_EXCEPTION_MODEL_RFC.md",

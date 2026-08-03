@@ -270,6 +270,14 @@ def test_finally_is_not_reserved_as_a_new_keyword() -> None:
     )
 
 
+def test_interface_inheritance_from_error_remains_unsupported_syntax() -> None:
+    with pytest.raises(
+        AetherSyntaxError,
+        match=r"Expected '\{' before interface body.*near 'extends'",
+    ):
+        _parse("interface NestedError extends Error { string message(); }")
+
+
 @pytest.mark.parametrize(
     ("source", "message"),
     [
