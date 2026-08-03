@@ -1,0 +1,34 @@
+struct ChainError implements Error {
+    string text;
+    string message() { return text; }
+}
+
+void inner() {
+    try {
+        throw ChainError("original");
+    } catch (ChainError active) {
+        println("handler:inner");
+        throw;
+    } catch (Error sibling) {
+        println("handler:wrong-sibling");
+    }
+}
+
+void relay() {
+    try {
+        inner();
+    } catch (ChainError active) {
+        println("handler:relay");
+        throw;
+    }
+}
+
+int main() {
+    try {
+        relay();
+    } catch (ChainError outer) {
+        println("handler:outer");
+        println(outer.message());
+    }
+    return 0;
+}

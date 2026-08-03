@@ -1,0 +1,14 @@
+struct CatchableError implements Error {
+    string message() { return "catchable"; }
+}
+
+int main() {
+    try {
+        List<int> values = {};
+        values.pop();
+        throw CatchableError();
+    } catch (Error caught) {
+        println("handler:wrong-panic-catch");
+    }
+    return 0;
+}

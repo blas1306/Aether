@@ -52,6 +52,8 @@ version = { attr = "aether.version.PACKAGE_VERSION" }
     "docs/aether/AETHER_FRONTEND_EXPERIMENTS.md",
     "docs/aether/AETHER_DIAGNOSTICS.md",
     "docs/aether/AETHER_1_0_0_RC4_RELEASE_NOTES.md",
+    "docs/compiler/exceptions/EXCEPTION_PROMOTION_EVIDENCE.md",
+    "docs/compiler/exceptions/EXCEPTION_PROMOTION_DIFFERENTIAL_REPORT.json",
 ]
 "share/aether/examples" = [
     "examples/*.ae",
@@ -73,3 +75,9 @@ version = { attr = "aether.version.PACKAGE_VERSION" }
 "share/aether/examples/nonlinear_systems" = ["examples/nonlinear_systems/*.ae"]
 "share/aether/examples/numerical_methods" = ["examples/numerical_methods/*.ae", "examples/numerical_methods/*.md"]
 "share/aether/examples/structs" = ["examples/structs/*.ae"]
+"share/aether/corpus/exceptions" = [
+    "corpus/exceptions/README.md",
+    "corpus/exceptions/catalog.json",
+]
+"share/aether/corpus/exceptions/positive" = ["corpus/exceptions/positive/*.ae"]
+"share/aether/corpus/exceptions/negative" = ["corpus/exceptions/negative/*.ae"]

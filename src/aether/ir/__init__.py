@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from aether.analysis import CFG, CFGBuilder, CFGEdge, CFGNode, DOTPrinter
-from .interpreter import IRExecutionError, IRInterpreter
+from .interpreter import IRExecutionError, IRInterpreter, IRUnhandledExceptionError
 from .lowering import IRLowerer, lower_to_ir
 from .lifecycle import (
     LifecycleExpander,

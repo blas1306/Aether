@@ -1,0 +1,10 @@
+struct DuplicateError implements Error {
+    string message() { return "duplicate"; }
+}
+
+int main() {
+    try { throw DuplicateError(); }
+    catch (DuplicateError first) { }
+    catch (DuplicateError second) { }
+    return 0;
+}

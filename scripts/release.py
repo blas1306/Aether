@@ -49,9 +49,13 @@ REQUIRED_WHEEL_SUFFIXES = (
     "share/doc/aether/AETHER_FRONTEND_EXPERIMENTS.md",
     "share/doc/aether/AETHER_DIAGNOSTICS.md",
     "share/doc/aether/AETHER_1_0_0_RC4_RELEASE_NOTES.md",
+    "share/doc/aether/EXCEPTION_PROMOTION_EVIDENCE.md",
+    "share/doc/aether/EXCEPTION_PROMOTION_DIFFERENTIAL_REPORT.json",
     "share/aether/examples/README.md",
     "share/aether/examples/v1_examples_manifest.json",
     "share/aether/examples/hello.ae",
+    "share/aether/corpus/exceptions/README.md",
+    "share/aether/corpus/exceptions/catalog.json",
 )
 FORBIDDEN_ARCHIVE_PARTS = frozenset(
     {
@@ -178,6 +182,19 @@ def _public_example_paths() -> tuple[str, ...]:
     return tuple(str(entry["path"]) for entry in manifest["entries"])
 
 
+def _exception_corpus_paths() -> tuple[str, ...]:
+    catalog = json.loads(
+        (ROOT / "corpus" / "exceptions" / "catalog.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    return tuple(
+        "corpus/exceptions/" + str(entry["path"])
+        for group in ("positive", "negative")
+        for entry in catalog[group]
+    )
+
+
 def _unsafe_archive_names(names: set[str], *, wheel: bool) -> list[str]:
     unsafe: list[str] = []
     for name in names:
@@ -248,6 +265,12 @@ def verify_wheel(wheel: Path) -> None:
             installed = "share/aether/" + example
             if not any(name.endswith(installed) for name in names):
                 raise ReleaseError(f"wheel is missing public example: {example}")
+        for corpus_path in _exception_corpus_paths():
+            installed = "share/aether/" + corpus_path
+            if not any(name.endswith(installed) for name in names):
+                raise ReleaseError(
+                    f"wheel is missing exception corpus program: {corpus_path}"
+                )
         metadata_names = [name for name in names if name.endswith(".dist-info/METADATA")]
         if len(metadata_names) != 1:
             raise ReleaseError("wheel must contain exactly one METADATA file")
@@ -309,11 +332,16 @@ def verify_sdist(sdist: Path) -> None:
         "/docs/aether/AETHER_DIAGNOSTICS.md",
         "/docs/aether/AETHER_1_0_0_RC4_RELEASE_NOTES.md",
         "/docs/aether/AETHER_EXAMPLES_CATALOG_AUDIT.md",
+        "/docs/compiler/exceptions/EXCEPTION_PROMOTION_EVIDENCE.md",
+        "/docs/compiler/exceptions/EXCEPTION_PROMOTION_DIFFERENTIAL_REPORT.json",
+        "/corpus/exceptions/README.md",
+        "/corpus/exceptions/catalog.json",
         "/examples/README.md",
         "/examples/v1_examples_manifest.json",
         "/scripts/release.py",
         "/scripts/ci.py",
         "/scripts/check_examples_catalog.py",
+        "/scripts/check_exception_promotion.py",
         "/scripts/check_diagnostics_contract.py",
         "/scripts/differential_parity.py",
         "/src/aether/cli.py",
@@ -330,6 +358,11 @@ def verify_sdist(sdist: Path) -> None:
     for example in _public_example_paths():
         if not any(name.endswith("/" + example) for name in names):
             raise ReleaseError(f"sdist is missing public example: {example}")
+    for corpus_path in _exception_corpus_paths():
+        if not any(name.endswith("/" + corpus_path) for name in names):
+            raise ReleaseError(
+                f"sdist is missing exception corpus program: {corpus_path}"
+            )
 
 
 def _venv_commands(environment: Path) -> tuple[Path, Path]:

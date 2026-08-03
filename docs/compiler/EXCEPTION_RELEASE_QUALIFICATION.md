@@ -1,6 +1,7 @@
 # Exception Release Qualification
 
-> Classification: **Audit**. Date: **2026-08-02**.
+> Classification: **Audit**. Date: **2026-08-02**; ERQ-006 update:
+> **2026-08-03**.
 >
 > Baseline: commit `83da5fb` (`feat(exceptions): enforce native boundary
 > containment`). This report qualifies the existing implementation; it does not
@@ -12,10 +13,10 @@
 # DO NOT PROMOTE
 
 `ERROR_HANDLING` remains `UNSUPPORTED` in native capability profile 23.
-Promotion remains blocked by integration evidence and packaging. Public
-tooling qualification ERQ-005 is closed. Internal native execution is
-substantial and the admitted corpus is healthy, but implementation presence is
-not release qualification.
+ERQ-001 through ERQ-007 are now closed by the implementation, tooling,
+integrated corpus and artifact checks. This does not authorize promotion:
+maintainer approval and the atomic capability/profile change remain a separate
+decision.
 
 No public FFI was added and no private runtime symbol or layout was promoted to
 a public contract.
@@ -48,7 +49,11 @@ current `Error`-based exception surface. Unsupported rename, semantic-token,
 incremental-parse and workspace-index behavior is classified explicitly in
 [`EXCEPTION_TOOLING_QUALIFICATION.md`](EXCEPTION_TOOLING_QUALIFICATION.md).
 
-## Blocking issues
+ERQ-006 closes the integrated-evidence gap without changing this promotion
+decision. The packaged public corpus and deterministic report are described in
+[`EXCEPTION_PROMOTION_EVIDENCE.md`](exceptions/EXCEPTION_PROMOTION_EVIDENCE.md).
+
+## Qualification issues
 
 | ID | Blocking finding | Evidence | Required evidence to close |
 | --- | --- | --- | --- |
@@ -57,10 +62,10 @@ incremental-parse and workspace-index behavior is classified explicitly in
 | ERQ-003 | **CLOSED by Hotfix B.** The recorded case used a later `Error.message()` dispatch whose artificial exceptional edge created the incompatible lifecycle join. The slot is semantically nonthrowing, so correct Initial IR has no such edge. | `test_nested_rethrow_mutation_with_later_error_message_verifies`; AST/IR observation is `24\nlater\n` | The same canonical slot effect that closes ERQ-002 removes the unreachable edge; lifecycle rules and verifier strength are unchanged. |
 | ERQ-004 | **CLOSED by Hotfix C.** `implements Error` had been classified as native exception syntax even when the program used only ordinary interface semantics. | `test_error_conformance_only_is_release_qualified_as_ordinary_interface_use`; focused positive, negative, mixed, nested-interface, container, nullable and example regressions | The detector now emits only for exception control/effect semantics. Struct/class conformance and ordinary `Error` value use no longer produce `AE-BACKEND-ERROR_HANDLING`; throw/rethrow/try/catch and throwing call/invoke cases remain gated. |
 | ERQ-005 | **CLOSED by Hotfix D.** Completion/highlighting had advertised `Exception`, only the implicit root-catch sugar, and string throw; catch binders lacked tooling evidence. | `test_completion_items_include_exception_keywords`, `test_lsp_completion_uses_current_exception_surface_only`, `test_lsp_catch_binder_completion_hover_symbols_and_navigation`, VS Code manifest tests and IntelliJ lexer tests | Completion now favors explicit typed/root catches, `Error`, throwable values and bare rethrow while the parser retains approved `catch (name)` sugar; catch binders and `Error.message()` have focused evidence; unsupported protocol features are classified rather than advertised. |
-| ERQ-006 | Exceptions are absent from the executable release/differential corpus because the stable gate correctly rejects them; existing native tests bypass the gate. | `differential.py` calls `validate_backend_capabilities`; native exception helpers lower directly | After ERQ-001–005, add an atomic promotion candidate whose public CLI, wheel-installed CLI and differential corpus exercise exceptions at O0/O1/O2 without a bypass. |
-| ERQ-007 | The wheel builds, but release verification rejects it because a public catalog entry is absent from the artifact. | `verify_wheel` reports `wheel is missing public example: examples/LeetCode/isPalindrome.ae`; `pyproject.toml` has no `share/aether/examples/LeetCode` data-file entry | Make wheel contents derive from, or be exhaustively checked against, the authoritative manifest; then verify both wheel and sdist in isolated installed smoke tests. |
+| ERQ-006 | **CLOSED by integrated release evidence.** The stable route remains gated, while the explicit internal qualification route executes the public corpus without implying promotion. | `corpus/exceptions/catalog.json`; `scripts/check_exception_promotion.py`; `EXCEPTION_PROMOTION_DIFFERENTIAL_REPORT.json` | Eleven positive and nine negative programs pass exhaustive catalog, exact diagnostic, frontend/IR/SSA/native O0/O1/O2 differential and sanitizer gates. |
+| ERQ-007 | **CLOSED by artifact verification.** Public examples and the ERQ-006 corpus are packaged exhaustively. | `pyproject.toml`; `MANIFEST.in`; `release.py::verify_wheel`; `release.py::verify_sdist` | Wheel and sdist content verification passes against both machine-readable catalogs. |
 
-Hotfixes A, B, C and D close ERQ-001 through ERQ-005 without altering lifecycle,
+Hotfixes A–D and ERQ-006 close ERQ-001 through ERQ-007 without altering lifecycle,
 Initial IR or SSA representation, or the private runtime ABI layout/version.
 
 ## 1. Architecture audit
@@ -68,7 +73,7 @@ Initial IR or SSA representation, or the private runtime ABI layout/version.
 | Stage | Result | Finding and evidence |
 | --- | --- | --- |
 | Frontend | PASS | Expression throw, bare rethrow, typed/root catches, ordering, nesting, recovery and formatting are covered by `test_exceptions.py`, `test_source_formatter.py` and LSP formatter tests. |
-| Typechecker | PASS for Hotfix A; qualification still blocked | Core conformance, exact matching and catch rules pass. Throwing direct/transitive `Error.message()` implementations receive `AE-ERROR-MESSAGE-NONTHROWING`. |
+| Typechecker | PASS | Core conformance, exact matching and catch rules pass. Throwing direct/transitive `Error.message()` implementations receive `AE-ERROR-MESSAGE-NONTHROWING`. |
 | AST interpreter | PASS | Representative handling, mutation, dynamic identity and provenance behave deterministically. Former ERQ-003 now agrees with verified Initial IR. |
 | Capability gate | PASS for Hotfix C | The gate remains fail-closed for exception semantics and admits ordinary `Error` interface use without exposing `ERROR_HANDLING`. |
 | Initial IR lowering | PASS for the qualified effect cases | ERQ-002/003 now generate verifier-valid IR because nonthrowing interface dispatch has no exceptional edge. |
@@ -83,7 +88,7 @@ Initial IR or SSA representation, or the private runtime ABI layout/version.
 | Native boundary verifier | PASS | Process root consumes events, raw-C event slots are rejected, foreign/public surfaces fail closed, and the private ABI remains private. |
 | Native execution | PASS for internal admitted corpus | Linux x86_64 clang O0/O1/O2 and sanitizer tests pass, including generated stress. The public capability route remains intentionally blocked. |
 
-Because the table contains semantic disagreements, the architecture gate fails.
+No unresolved semantic disagreement remains in the qualified architecture.
 
 ## 2. Semantic parity matrix
 
@@ -219,14 +224,15 @@ ERQ-005 is closed; the intentionally unsupported areas are not advertised.
 
 - Capability profile 23 and generated native profile agree on
   `error-handling = UNSUPPORTED`.
-- Release scripts run capability, documentation, example, diagnostic,
-  compileall, pytest, parity, LLVM and native gates before packaging.
+- Release scripts run capability, documentation, ERQ-006 exception evidence,
+  example, diagnostic, compileall, pytest, parity, LLVM and native gates before
+  packaging.
 - Wheel/sdist metadata derives from the canonical version and verifies required
   runtime files, normative docs and the complete public example manifest.
-- A clean wheel builds, but its content verification fails because
-  `examples/LeetCode/isPalindrome.ae` is cataloged and not packaged (ERQ-007).
-- No exception qualification gate is yet part of the installed-wheel smoke
-  corpus (ERQ-006).
+- Wheel and sdist content verification cover every public example and every
+  positive/negative ERQ-006 corpus source (ERQ-007 closed).
+- The exception qualification gate is part of local CI and the corpus/report
+  are shipped in release artifacts (ERQ-006 closed).
 - Hosted CI covers Rust verifier operation and VS Code independently, but does
   not run a single required exception promotion matrix across Python, Rust,
   sanitizer, editors, packaging and installed-wheel execution.
@@ -268,16 +274,8 @@ nonthrowing.
 
 ## 11. Remaining milestones and estimated scope
 
-1. **Packaging correction (small):** make the wheel/sdist public example set
-   agree with the authoritative manifest and run isolated artifact validation.
-2. **Integrated promotion candidate (medium):** public differential corpus,
-   sanitizer jobs, wheel-installed CLI, CI/release gate and diagnostics.
-3. **Repeat release qualification (small after the above):** rerun every matrix;
-   only then may profile state, version, normative spec and examples be changed
-   atomically.
-
-Estimated aggregate scope: **medium**, dominated by tooling, packaging and
-integrated cross-tool evidence rather than backend transport.
+ERQ-006 and ERQ-007 have no remaining implementation milestone. Promotion,
+profile/version changes and maintainer approval remain deliberately separate.
 
 ## 12. Files modified by qualification and hotfixes
 
@@ -314,26 +312,25 @@ semantics or the native capability state.
 
 | Area | Result |
 | --- | --- |
-| Full Python suite | **4425 passed, 12 failed, 4 skipped** in the Hotfix D environment. All 12 failures are pre-existing assertions in `test_import_aliases.py`: the current vector orientation prints a column (`[1.0; 2.0]`) while those tests expect a row (`[1.0 2.0]`). No Hotfix D file touches that behavior. |
+| Full Python suite | **4427 passed, 12 failed, 4 skipped** in the ERQ-006 environment. All 12 failures are pre-existing assertions in `test_import_aliases.py`: the current vector orientation prints a column (`[1.0; 2.0]`) while those tests expect a row (`[1.0 2.0]`). No ERQ-006 file touches that behavior. |
 | Hotfix D focused tooling/CLI/release selection | **219 passed**, covering formatter, language service, LSP, CLI, run-file and release-contract behavior. |
 | Capability/exception/release regressions | **234 passed**: positive, negative, mixed, module, nested-interface, container, nullable, `Error.message()`, propagation, IR/SSA/native and ERQ-004 qualification coverage. |
 | Focused compiler suites | **282 IR**, **72 SSA**, **84 backend/native** and **116 Rust-adapter/shadow** tests passed. |
 | Initial IR / SSA repository regression | 117 programs discovered; 101 lowered to IR, 67 comparable across builders, all admitted general-builder programs verified. |
-| Rust verifier | `cargo test --workspace --locked` passed every unit, integration and documentation test, including exception and SSA wire-verifier suites. |
+| Rust verifier | The prior qualification passed the full workspace. The ERQ-006 rerun is an environment limitation because `cargo` is not installed. Python/Rust verifier protocol fixtures and adapter tests still pass in the Python suite. |
 | LLVM/native | Clang 21.1.8 compiled and ran the generated O2 stress program twice with byte-identical output/status; the broader Python native suite introduced no failure. |
 | Optimizers | Initial IR and SSA optimizer suites passed in the full run; generated qualification runs the verifier after optimized IR and after every SSA pass. |
 | Tooling | IntelliJ Gradle tests passed. VS Code tests were not runnable because neither Node nor npm is installed in this environment. Frontend/LSP/formatter/CLI focused tests all passed. |
 | Documentation/capabilities/examples/diagnostics | All four standalone contract checkers passed after manifest/document reconciliation. |
-| Packaging | Wheel build succeeded; `verify_wheel` then failed on the missing public LeetCode example (ERQ-007). |
+| Packaging | Current wheel and sdist content verification pass for public examples, the ERQ-006 corpus and its evidence reports (ERQ-007 closed). |
 | Static hygiene | `compileall` passed for `src`, `tests` and `scripts`; `git diff --check` passed. |
 
 Introduced failures: **0**. Pre-existing failures: **12**. Environment
-limitations: VS Code tooling could not run without Node/npm; execution evidence
-is Linux x86_64 only. The wheel content rejection is a repository release
-defect, not an environment limitation.
+limitations: VS Code tooling could not run without Node/npm, Rust could not
+rerun without Cargo, and native execution evidence is Linux x86_64 only.
 
-Toolchains used: Python 3.14.4, clang 21.1.8, Rust 1.85.1, Java 25.0.3 and
-Gradle 9.3.0. The packaged Rust verifier reports protocol 1 / IR schema 1.
+Toolchains used for the ERQ-006 rerun: Python 3.14.4, clang 21.1.8, Java
+25.0.3 and Gradle 9.3.0. Cargo/Node/npm were unavailable.
 
 ## 15. Commit policy
 

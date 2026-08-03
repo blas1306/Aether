@@ -1,0 +1,11 @@
+struct RootError implements Error {
+    string text;
+    string message() { return text; }
+}
+
+void fail() { throw RootError("uncaught root"); }
+
+int main() {
+    fail();
+    return 0;
+}

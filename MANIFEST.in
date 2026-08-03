@@ -2,7 +2,8 @@ include CHANGELOG.md
 include LICENSE
 include README.md
 include pyproject.toml
-recursive-include docs *.md
+recursive-include docs *.md *.json
+recursive-include corpus *.ae *.json *.md
 recursive-include examples *.ae *.json *.md
 recursive-include scripts *.py
 recursive-include tests *.py *.ae *.json *.md

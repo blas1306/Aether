@@ -60,10 +60,10 @@ memory access, traps, and mutation retain their declared effects.
 
 Exception IR is implemented through the private event-out architecture and is
 available only to internal qualification tests. `ERROR_HANDLING` remains
-`UNSUPPORTED`: the 2026-08-02 release qualification found capability and
-Initial IR blockers that Hotfixes A–C closed, and Hotfix D closed ERQ-005
-tooling drift. Integrated public release evidence and packaging remain. See
-[Exception Release Qualification](EXCEPTION_RELEASE_QUALIFICATION.md).
+`UNSUPPORTED`: Hotfixes A–D closed ERQ-001 through ERQ-005, and ERQ-006 now
+provides the integrated public corpus, cross-stage differential, ownership,
+diagnostic, documentation, catalog and packaging evidence. Capability
+promotion remains a separate decision. See [ERQ-006 release evidence](exceptions/EXCEPTION_PROMOTION_EVIDENCE.md).
 
 ## Authorities
 

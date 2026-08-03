@@ -1,0 +1,10 @@
+struct OrderedError implements Error {
+    string message() { return "ordered"; }
+}
+
+int main() {
+    try { throw OrderedError(); }
+    catch (Error root) { }
+    catch (OrderedError late) { }
+    return 0;
+}

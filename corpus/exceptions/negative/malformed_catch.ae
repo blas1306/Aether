@@ -1,0 +1,5 @@
+int main() {
+    try { println("x"); }
+    catch (Error missingBrace)
+    return 0;
+}

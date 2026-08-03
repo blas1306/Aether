@@ -1,0 +1,33 @@
+struct FileError implements Error {
+    string text;
+    string message() { return text; }
+}
+
+class NetworkError implements Error {
+    string text;
+    public string message() { return text; }
+}
+
+int main() {
+    Error dynamic = NetworkError("offline");
+    try {
+        throw dynamic;
+    } catch (FileError wrong) {
+        println("handler:wrong-file");
+    } catch (NetworkError exact) {
+        println("handler:network");
+        println(exact.message());
+    } catch (Error wrong) {
+        println("handler:wrong-root");
+    }
+
+    try {
+        throw FileError("fallback");
+    } catch (NetworkError wrong) {
+        println("handler:wrong-network");
+    } catch (Error root) {
+        println("handler:error");
+        println(root.message());
+    }
+    return 0;
+}

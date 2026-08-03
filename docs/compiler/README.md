@@ -113,6 +113,9 @@ Current compiler-design documents:
 - [EXCEPTION_TOOLING_QUALIFICATION.md](EXCEPTION_TOOLING_QUALIFICATION.md):
   Hotfix D capability matrix for exception syntax across the CLI, shared LSP,
   VS Code extension and IntelliJ plugin, including explicit unsupported areas.
+- [EXCEPTION_PROMOTION_EVIDENCE.md](exceptions/EXCEPTION_PROMOTION_EVIDENCE.md):
+  ERQ-006 public corpus, cross-stage differential and ownership methodology,
+  release gates, limitations, and the explicit no-promotion boundary.
 - [DOMINATORS.md](DOMINATORS.md): implemented iterative dominator analysis,
   implemented dominance frontiers, and their role in future SSA construction.
 - [SSA_DESIGN.md](SSA_DESIGN.md): initial design notes for future SSA support

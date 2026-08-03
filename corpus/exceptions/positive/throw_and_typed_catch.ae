@@ -1,0 +1,15 @@
+struct BasicError implements Error {
+    string text;
+    string message() { return text; }
+}
+
+int main() {
+    try {
+        BasicError value = BasicError("basic throw");
+        throw value;
+    } catch (BasicError caught) {
+        println("handler:basic");
+        println(caught.message());
+    }
+    return 0;
+}

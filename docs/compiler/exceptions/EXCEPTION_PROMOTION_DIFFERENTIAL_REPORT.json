@@ -1,0 +1,1398 @@
+{
+  "schema_version": 1,
+  "requirement": "ERQ-006",
+  "status": "passed",
+  "capability_promotion": "not-performed",
+  "error_handling_state": "UNSUPPORTED",
+  "backend_strategy": "event-out",
+  "summary": {
+    "positive_programs": 11,
+    "negative_programs": 9,
+    "stages_per_positive": 8,
+    "stage_comparisons": 77,
+    "sanitizer_programs": 7
+  },
+  "stages": [
+    "frontend",
+    "initial-ir",
+    "optimized-initial-ir",
+    "ssa",
+    "optimized-ssa",
+    "native-O0",
+    "native-O1",
+    "native-O2"
+  ],
+  "coverage": {
+    "ARC interaction": [
+      "positive/indirect_call.ae"
+    ],
+    "ARC ownership": [
+      "positive/cleanup_during_unwinding.ae",
+      "positive/owned_aggregates_arc.ae"
+    ],
+    "Error.message()": [
+      "positive/multiple_and_root_catches.ae",
+      "positive/throw_and_typed_catch.ae"
+    ],
+    "arrays/lists inside exceptions": [
+      "positive/owned_aggregates_arc.ae"
+    ],
+    "bare rethrow": [
+      "positive/nested_rethrow_chain.ae"
+    ],
+    "catch(Error)": [
+      "positive/multiple_and_root_catches.ae"
+    ],
+    "class exceptions": [
+      "positive/indirect_call.ae",
+      "positive/multiple_and_root_catches.ae"
+    ],
+    "class methods": [
+      "positive/constructor_failure.ae"
+    ],
+    "cleanup during unwinding": [
+      "positive/cleanup_during_unwinding.ae"
+    ],
+    "constructor failure cleanup": [
+      "positive/constructor_failure.ae"
+    ],
+    "constructors": [
+      "positive/constructor_failure.ae"
+    ],
+    "constructors throwing": [
+      "positive/constructor_failure.ae"
+    ],
+    "exit status": [
+      "positive/root_reporting.ae"
+    ],
+    "indirect calls": [
+      "positive/indirect_call.ae"
+    ],
+    "interface calls": [
+      "positive/method_interface_dispatch.ae"
+    ],
+    "interface implementations": [
+      "positive/method_interface_dispatch.ae",
+      "positive/multiple_and_root_catches.ae"
+    ],
+    "message": [
+      "positive/root_reporting.ae"
+    ],
+    "multiple catches": [
+      "positive/multiple_and_root_catches.ae"
+    ],
+    "nested catches": [
+      "positive/cleanup_during_unwinding.ae"
+    ],
+    "nested owned aggregates": [
+      "positive/cleanup_during_unwinding.ae",
+      "positive/owned_aggregates_arc.ae"
+    ],
+    "nested try/catch": [
+      "positive/nested_rethrow_chain.ae"
+    ],
+    "no double free": [
+      "positive/owned_aggregates_arc.ae"
+    ],
+    "no leaks": [
+      "positive/owned_aggregates_arc.ae"
+    ],
+    "panic behavior": [
+      "positive/panic_vs_exception.ae"
+    ],
+    "panic vs exception": [
+      "positive/panic_vs_exception.ae"
+    ],
+    "propagation across functions": [
+      "positive/function_recursion.ae"
+    ],
+    "propagation across methods": [
+      "positive/method_interface_dispatch.ae"
+    ],
+    "propagation through interface dispatch": [
+      "positive/method_interface_dispatch.ae"
+    ],
+    "recursion": [
+      "positive/function_recursion.ae"
+    ],
+    "rethrow chains": [
+      "positive/nested_rethrow_chain.ae"
+    ],
+    "rethrow ownership": [
+      "positive/cleanup_during_unwinding.ae",
+      "positive/nested_rethrow_chain.ae"
+    ],
+    "root reporting": [
+      "positive/root_reporting.ae"
+    ],
+    "single destruction": [
+      "positive/owned_aggregates_arc.ae"
+    ],
+    "struct exceptions": [
+      "positive/owned_aggregates_arc.ae",
+      "positive/throw_and_typed_catch.ae"
+    ],
+    "termination": [
+      "positive/panic_vs_exception.ae",
+      "positive/root_reporting.ae"
+    ],
+    "throw": [
+      "positive/throw_and_typed_catch.ae"
+    ],
+    "throw expression": [
+      "positive/throw_and_typed_catch.ae"
+    ],
+    "try/catch": [
+      "positive/throw_and_typed_catch.ae"
+    ],
+    "typed catches": [
+      "positive/multiple_and_root_catches.ae",
+      "positive/throw_and_typed_catch.ae"
+    ],
+    "unmatched exceptions": [
+      "positive/nested_rethrow_chain.ae",
+      "positive/root_reporting.ae"
+    ]
+  },
+  "positive_results": [
+    {
+      "path": "positive/cleanup_during_unwinding.ae",
+      "status": "passed",
+      "sanitizer": true,
+      "stages": {
+        "frontend": {
+          "stdout": "handler:cleanup-inner\nhandler:cleanup-outer\ncleanup\n",
+          "stderr": "",
+          "selected_handlers": [
+            "cleanup-inner",
+            "cleanup-outer"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "initial-ir": {
+          "stdout": "handler:cleanup-inner\nhandler:cleanup-outer\ncleanup\n",
+          "stderr": "",
+          "selected_handlers": [
+            "cleanup-inner",
+            "cleanup-outer"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "optimized-initial-ir": {
+          "stdout": "handler:cleanup-inner\nhandler:cleanup-outer\ncleanup\n",
+          "stderr": "",
+          "selected_handlers": [
+            "cleanup-inner",
+            "cleanup-outer"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "ssa": {
+          "stdout": "handler:cleanup-inner\nhandler:cleanup-outer\ncleanup\n",
+          "stderr": "",
+          "selected_handlers": [
+            "cleanup-inner",
+            "cleanup-outer"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "optimized-ssa": {
+          "stdout": "handler:cleanup-inner\nhandler:cleanup-outer\ncleanup\n",
+          "stderr": "",
+          "selected_handlers": [
+            "cleanup-inner",
+            "cleanup-outer"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "native-O0": {
+          "stdout": "handler:cleanup-inner\nhandler:cleanup-outer\ncleanup\n",
+          "stderr": "",
+          "selected_handlers": [
+            "cleanup-inner",
+            "cleanup-outer"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "native-O1": {
+          "stdout": "handler:cleanup-inner\nhandler:cleanup-outer\ncleanup\n",
+          "stderr": "",
+          "selected_handlers": [
+            "cleanup-inner",
+            "cleanup-outer"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "native-O2": {
+          "stdout": "handler:cleanup-inner\nhandler:cleanup-outer\ncleanup\n",
+          "stderr": "",
+          "selected_handlers": [
+            "cleanup-inner",
+            "cleanup-outer"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        }
+      }
+    },
+    {
+      "path": "positive/constructor_failure.ae",
+      "status": "passed",
+      "sanitizer": true,
+      "stages": {
+        "frontend": {
+          "stdout": "handler:constructor\nconstructor failed\n",
+          "stderr": "",
+          "selected_handlers": [
+            "constructor"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "initial-ir": {
+          "stdout": "handler:constructor\nconstructor failed\n",
+          "stderr": "",
+          "selected_handlers": [
+            "constructor"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "optimized-initial-ir": {
+          "stdout": "handler:constructor\nconstructor failed\n",
+          "stderr": "",
+          "selected_handlers": [
+            "constructor"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "ssa": {
+          "stdout": "handler:constructor\nconstructor failed\n",
+          "stderr": "",
+          "selected_handlers": [
+            "constructor"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "optimized-ssa": {
+          "stdout": "handler:constructor\nconstructor failed\n",
+          "stderr": "",
+          "selected_handlers": [
+            "constructor"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "native-O0": {
+          "stdout": "handler:constructor\nconstructor failed\n",
+          "stderr": "",
+          "selected_handlers": [
+            "constructor"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "native-O1": {
+          "stdout": "handler:constructor\nconstructor failed\n",
+          "stderr": "",
+          "selected_handlers": [
+            "constructor"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "native-O2": {
+          "stdout": "handler:constructor\nconstructor failed\n",
+          "stderr": "",
+          "selected_handlers": [
+            "constructor"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        }
+      }
+    },
+    {
+      "path": "positive/function_recursion.ae",
+      "status": "passed",
+      "sanitizer": false,
+      "stages": {
+        "frontend": {
+          "stdout": "handler:recursive\nrecursive propagation\n",
+          "stderr": "",
+          "selected_handlers": [
+            "recursive"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "initial-ir": {
+          "stdout": "handler:recursive\nrecursive propagation\n",
+          "stderr": "",
+          "selected_handlers": [
+            "recursive"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "optimized-initial-ir": {
+          "stdout": "handler:recursive\nrecursive propagation\n",
+          "stderr": "",
+          "selected_handlers": [
+            "recursive"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "ssa": {
+          "stdout": "handler:recursive\nrecursive propagation\n",
+          "stderr": "",
+          "selected_handlers": [
+            "recursive"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "optimized-ssa": {
+          "stdout": "handler:recursive\nrecursive propagation\n",
+          "stderr": "",
+          "selected_handlers": [
+            "recursive"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "native-O0": {
+          "stdout": "handler:recursive\nrecursive propagation\n",
+          "stderr": "",
+          "selected_handlers": [
+            "recursive"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "native-O1": {
+          "stdout": "handler:recursive\nrecursive propagation\n",
+          "stderr": "",
+          "selected_handlers": [
+            "recursive"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "native-O2": {
+          "stdout": "handler:recursive\nrecursive propagation\n",
+          "stderr": "",
+          "selected_handlers": [
+            "recursive"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        }
+      }
+    },
+    {
+      "path": "positive/indirect_call.ae",
+      "status": "passed",
+      "sanitizer": true,
+      "stages": {
+        "frontend": {
+          "stdout": "handler:indirect\nindirect call\n",
+          "stderr": "",
+          "selected_handlers": [
+            "indirect"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "initial-ir": {
+          "stdout": "handler:indirect\nindirect call\n",
+          "stderr": "",
+          "selected_handlers": [
+            "indirect"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "optimized-initial-ir": {
+          "stdout": "handler:indirect\nindirect call\n",
+          "stderr": "",
+          "selected_handlers": [
+            "indirect"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "ssa": {
+          "stdout": "handler:indirect\nindirect call\n",
+          "stderr": "",
+          "selected_handlers": [
+            "indirect"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "optimized-ssa": {
+          "stdout": "handler:indirect\nindirect call\n",
+          "stderr": "",
+          "selected_handlers": [
+            "indirect"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "native-O0": {
+          "stdout": "handler:indirect\nindirect call\n",
+          "stderr": "",
+          "selected_handlers": [
+            "indirect"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "native-O1": {
+          "stdout": "handler:indirect\nindirect call\n",
+          "stderr": "",
+          "selected_handlers": [
+            "indirect"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "native-O2": {
+          "stdout": "handler:indirect\nindirect call\n",
+          "stderr": "",
+          "selected_handlers": [
+            "indirect"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        }
+      }
+    },
+    {
+      "path": "positive/method_interface_dispatch.ae",
+      "status": "passed",
+      "sanitizer": false,
+      "stages": {
+        "frontend": {
+          "stdout": "handler:interface\ninterface dispatch\n",
+          "stderr": "",
+          "selected_handlers": [
+            "interface"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "initial-ir": {
+          "stdout": "handler:interface\ninterface dispatch\n",
+          "stderr": "",
+          "selected_handlers": [
+            "interface"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "optimized-initial-ir": {
+          "stdout": "handler:interface\ninterface dispatch\n",
+          "stderr": "",
+          "selected_handlers": [
+            "interface"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "ssa": {
+          "stdout": "handler:interface\ninterface dispatch\n",
+          "stderr": "",
+          "selected_handlers": [
+            "interface"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "optimized-ssa": {
+          "stdout": "handler:interface\ninterface dispatch\n",
+          "stderr": "",
+          "selected_handlers": [
+            "interface"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "native-O0": {
+          "stdout": "handler:interface\ninterface dispatch\n",
+          "stderr": "",
+          "selected_handlers": [
+            "interface"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "native-O1": {
+          "stdout": "handler:interface\ninterface dispatch\n",
+          "stderr": "",
+          "selected_handlers": [
+            "interface"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "native-O2": {
+          "stdout": "handler:interface\ninterface dispatch\n",
+          "stderr": "",
+          "selected_handlers": [
+            "interface"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        }
+      }
+    },
+    {
+      "path": "positive/multiple_and_root_catches.ae",
+      "status": "passed",
+      "sanitizer": true,
+      "stages": {
+        "frontend": {
+          "stdout": "handler:network\noffline\nhandler:error\nfallback\n",
+          "stderr": "",
+          "selected_handlers": [
+            "network",
+            "error"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "initial-ir": {
+          "stdout": "handler:network\noffline\nhandler:error\nfallback\n",
+          "stderr": "",
+          "selected_handlers": [
+            "network",
+            "error"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "optimized-initial-ir": {
+          "stdout": "handler:network\noffline\nhandler:error\nfallback\n",
+          "stderr": "",
+          "selected_handlers": [
+            "network",
+            "error"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "ssa": {
+          "stdout": "handler:network\noffline\nhandler:error\nfallback\n",
+          "stderr": "",
+          "selected_handlers": [
+            "network",
+            "error"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "optimized-ssa": {
+          "stdout": "handler:network\noffline\nhandler:error\nfallback\n",
+          "stderr": "",
+          "selected_handlers": [
+            "network",
+            "error"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "native-O0": {
+          "stdout": "handler:network\noffline\nhandler:error\nfallback\n",
+          "stderr": "",
+          "selected_handlers": [
+            "network",
+            "error"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "native-O1": {
+          "stdout": "handler:network\noffline\nhandler:error\nfallback\n",
+          "stderr": "",
+          "selected_handlers": [
+            "network",
+            "error"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "native-O2": {
+          "stdout": "handler:network\noffline\nhandler:error\nfallback\n",
+          "stderr": "",
+          "selected_handlers": [
+            "network",
+            "error"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        }
+      }
+    },
+    {
+      "path": "positive/nested_rethrow_chain.ae",
+      "status": "passed",
+      "sanitizer": true,
+      "stages": {
+        "frontend": {
+          "stdout": "handler:inner\nhandler:relay\nhandler:outer\noriginal\n",
+          "stderr": "",
+          "selected_handlers": [
+            "inner",
+            "relay",
+            "outer"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "initial-ir": {
+          "stdout": "handler:inner\nhandler:relay\nhandler:outer\noriginal\n",
+          "stderr": "",
+          "selected_handlers": [
+            "inner",
+            "relay",
+            "outer"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "optimized-initial-ir": {
+          "stdout": "handler:inner\nhandler:relay\nhandler:outer\noriginal\n",
+          "stderr": "",
+          "selected_handlers": [
+            "inner",
+            "relay",
+            "outer"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "ssa": {
+          "stdout": "handler:inner\nhandler:relay\nhandler:outer\noriginal\n",
+          "stderr": "",
+          "selected_handlers": [
+            "inner",
+            "relay",
+            "outer"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "optimized-ssa": {
+          "stdout": "handler:inner\nhandler:relay\nhandler:outer\noriginal\n",
+          "stderr": "",
+          "selected_handlers": [
+            "inner",
+            "relay",
+            "outer"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "native-O0": {
+          "stdout": "handler:inner\nhandler:relay\nhandler:outer\noriginal\n",
+          "stderr": "",
+          "selected_handlers": [
+            "inner",
+            "relay",
+            "outer"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "native-O1": {
+          "stdout": "handler:inner\nhandler:relay\nhandler:outer\noriginal\n",
+          "stderr": "",
+          "selected_handlers": [
+            "inner",
+            "relay",
+            "outer"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "native-O2": {
+          "stdout": "handler:inner\nhandler:relay\nhandler:outer\noriginal\n",
+          "stderr": "",
+          "selected_handlers": [
+            "inner",
+            "relay",
+            "outer"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        }
+      }
+    },
+    {
+      "path": "positive/owned_aggregates_arc.ae",
+      "status": "passed",
+      "sanitizer": true,
+      "stages": {
+        "frontend": {
+          "stdout": "handler:owned\nowned aggregates\n",
+          "stderr": "",
+          "selected_handlers": [
+            "owned"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "initial-ir": {
+          "stdout": "handler:owned\nowned aggregates\n",
+          "stderr": "",
+          "selected_handlers": [
+            "owned"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "optimized-initial-ir": {
+          "stdout": "handler:owned\nowned aggregates\n",
+          "stderr": "",
+          "selected_handlers": [
+            "owned"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "ssa": {
+          "stdout": "handler:owned\nowned aggregates\n",
+          "stderr": "",
+          "selected_handlers": [
+            "owned"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "optimized-ssa": {
+          "stdout": "handler:owned\nowned aggregates\n",
+          "stderr": "",
+          "selected_handlers": [
+            "owned"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "native-O0": {
+          "stdout": "handler:owned\nowned aggregates\n",
+          "stderr": "",
+          "selected_handlers": [
+            "owned"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "native-O1": {
+          "stdout": "handler:owned\nowned aggregates\n",
+          "stderr": "",
+          "selected_handlers": [
+            "owned"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "native-O2": {
+          "stdout": "handler:owned\nowned aggregates\n",
+          "stderr": "",
+          "selected_handlers": [
+            "owned"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        }
+      }
+    },
+    {
+      "path": "positive/panic_vs_exception.ae",
+      "status": "passed",
+      "sanitizer": false,
+      "stages": {
+        "frontend": {
+          "stdout": "Aether panic: pop() cannot be used on an empty List\n",
+          "stderr": "",
+          "selected_handlers": [],
+          "termination": "panic",
+          "message": "pop() cannot be used on an empty List",
+          "exit_status": 1,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "initial-ir": {
+          "stdout": "Aether panic: pop() cannot be used on an empty List\n",
+          "stderr": "",
+          "selected_handlers": [],
+          "termination": "panic",
+          "message": "pop() cannot be used on an empty List",
+          "exit_status": 1,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "optimized-initial-ir": {
+          "stdout": "Aether panic: pop() cannot be used on an empty List\n",
+          "stderr": "",
+          "selected_handlers": [],
+          "termination": "panic",
+          "message": "pop() cannot be used on an empty List",
+          "exit_status": 1,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "ssa": {
+          "stdout": "Aether panic: pop() cannot be used on an empty List\n",
+          "stderr": "",
+          "selected_handlers": [],
+          "termination": "panic",
+          "message": "pop() cannot be used on an empty List",
+          "exit_status": 1,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "optimized-ssa": {
+          "stdout": "Aether panic: pop() cannot be used on an empty List\n",
+          "stderr": "",
+          "selected_handlers": [],
+          "termination": "panic",
+          "message": "pop() cannot be used on an empty List",
+          "exit_status": 1,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "native-O0": {
+          "stdout": "Aether panic: pop() cannot be used on an empty List\n",
+          "stderr": "",
+          "selected_handlers": [],
+          "termination": "panic",
+          "message": "pop() cannot be used on an empty List",
+          "exit_status": 1,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "native-O1": {
+          "stdout": "Aether panic: pop() cannot be used on an empty List\n",
+          "stderr": "",
+          "selected_handlers": [],
+          "termination": "panic",
+          "message": "pop() cannot be used on an empty List",
+          "exit_status": 1,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "native-O2": {
+          "stdout": "Aether panic: pop() cannot be used on an empty List\n",
+          "stderr": "",
+          "selected_handlers": [],
+          "termination": "panic",
+          "message": "pop() cannot be used on an empty List",
+          "exit_status": 1,
+          "cleanup": "verified",
+          "ownership": "verified"
+        }
+      }
+    },
+    {
+      "path": "positive/root_reporting.ae",
+      "status": "passed",
+      "sanitizer": true,
+      "stages": {
+        "frontend": {
+          "stdout": "",
+          "stderr": "Aether unhandled exception: RootError: uncaught root\n",
+          "selected_handlers": [],
+          "termination": "exception",
+          "message": "uncaught root",
+          "exit_status": 1,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "initial-ir": {
+          "stdout": "",
+          "stderr": "Aether unhandled exception: RootError: uncaught root\n",
+          "selected_handlers": [],
+          "termination": "exception",
+          "message": "uncaught root",
+          "exit_status": 1,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "optimized-initial-ir": {
+          "stdout": "",
+          "stderr": "Aether unhandled exception: RootError: uncaught root\n",
+          "selected_handlers": [],
+          "termination": "exception",
+          "message": "uncaught root",
+          "exit_status": 1,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "ssa": {
+          "stdout": "",
+          "stderr": "Aether unhandled exception: RootError: uncaught root\n",
+          "selected_handlers": [],
+          "termination": "exception",
+          "message": "uncaught root",
+          "exit_status": 1,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "optimized-ssa": {
+          "stdout": "",
+          "stderr": "Aether unhandled exception: RootError: uncaught root\n",
+          "selected_handlers": [],
+          "termination": "exception",
+          "message": "uncaught root",
+          "exit_status": 1,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "native-O0": {
+          "stdout": "",
+          "stderr": "Aether unhandled exception: RootError: uncaught root\n",
+          "selected_handlers": [],
+          "termination": "exception",
+          "message": "uncaught root",
+          "exit_status": 1,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "native-O1": {
+          "stdout": "",
+          "stderr": "Aether unhandled exception: RootError: uncaught root\n",
+          "selected_handlers": [],
+          "termination": "exception",
+          "message": "uncaught root",
+          "exit_status": 1,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "native-O2": {
+          "stdout": "",
+          "stderr": "Aether unhandled exception: RootError: uncaught root\n",
+          "selected_handlers": [],
+          "termination": "exception",
+          "message": "uncaught root",
+          "exit_status": 1,
+          "cleanup": "verified",
+          "ownership": "verified"
+        }
+      }
+    },
+    {
+      "path": "positive/throw_and_typed_catch.ae",
+      "status": "passed",
+      "sanitizer": false,
+      "stages": {
+        "frontend": {
+          "stdout": "handler:basic\nbasic throw\n",
+          "stderr": "",
+          "selected_handlers": [
+            "basic"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "initial-ir": {
+          "stdout": "handler:basic\nbasic throw\n",
+          "stderr": "",
+          "selected_handlers": [
+            "basic"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "optimized-initial-ir": {
+          "stdout": "handler:basic\nbasic throw\n",
+          "stderr": "",
+          "selected_handlers": [
+            "basic"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "ssa": {
+          "stdout": "handler:basic\nbasic throw\n",
+          "stderr": "",
+          "selected_handlers": [
+            "basic"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "optimized-ssa": {
+          "stdout": "handler:basic\nbasic throw\n",
+          "stderr": "",
+          "selected_handlers": [
+            "basic"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "native-O0": {
+          "stdout": "handler:basic\nbasic throw\n",
+          "stderr": "",
+          "selected_handlers": [
+            "basic"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "native-O1": {
+          "stdout": "handler:basic\nbasic throw\n",
+          "stderr": "",
+          "selected_handlers": [
+            "basic"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        },
+        "native-O2": {
+          "stdout": "handler:basic\nbasic throw\n",
+          "stderr": "",
+          "selected_handlers": [
+            "basic"
+          ],
+          "termination": "return",
+          "message": null,
+          "exit_status": 0,
+          "cleanup": "verified",
+          "ownership": "verified"
+        }
+      }
+    }
+  ],
+  "negative_results": [
+    {
+      "path": "negative/duplicate_handlers.ae",
+      "status": "rejected-as-expected",
+      "phase": "typechecker",
+      "diagnostic": {
+        "error": "AetherTypeError",
+        "message": "Duplicate catch for exact type 'DuplicateError'.",
+        "line": 8,
+        "column": 5
+      }
+    },
+    {
+      "path": "negative/illegal_rethrow.ae",
+      "status": "rejected-as-expected",
+      "phase": "typechecker",
+      "diagnostic": {
+        "error": "AetherTypeError",
+        "message": "Bare rethrow is only valid inside an active catch body.",
+        "line": 2,
+        "column": 5
+      }
+    },
+    {
+      "path": "negative/invalid_catch_ordering.ae",
+      "status": "rejected-as-expected",
+      "phase": "typechecker",
+      "diagnostic": {
+        "error": "AetherTypeError",
+        "message": "Catch for 'OrderedError' is unreachable because Error is already caught.",
+        "line": 8,
+        "column": 5
+      }
+    },
+    {
+      "path": "negative/invalid_throw.ae",
+      "status": "rejected-as-expected",
+      "phase": "typechecker",
+      "diagnostic": {
+        "error": "AetherTypeError",
+        "message": "Thrown value of type 'int' does not implement Error.",
+        "line": 2,
+        "column": 11
+      }
+    },
+    {
+      "path": "negative/malformed_catch.ae",
+      "status": "rejected-as-expected",
+      "phase": "parser",
+      "diagnostic": {
+        "error": "AetherSyntaxError",
+        "message": "Expected '{' before block. near 'return'.",
+        "line": 4,
+        "column": 5
+      }
+    },
+    {
+      "path": "negative/malformed_throw.ae",
+      "status": "rejected-as-expected",
+      "phase": "parser",
+      "diagnostic": {
+        "error": "AetherSyntaxError",
+        "message": "Expected an expression or ';' after 'throw'. near '}'.",
+        "line": 3,
+        "column": 1
+      }
+    },
+    {
+      "path": "negative/non_error_catch.ae",
+      "status": "rejected-as-expected",
+      "phase": "typechecker",
+      "diagnostic": {
+        "error": "AetherTypeError",
+        "message": "Catch type 'NotAnError' does not implement Error.",
+        "line": 7,
+        "column": 5
+      }
+    },
+    {
+      "path": "negative/non_error_throwable.ae",
+      "status": "rejected-as-expected",
+      "phase": "typechecker",
+      "diagnostic": {
+        "error": "AetherTypeError",
+        "message": "Thrown value of type 'NotAnError' does not implement Error.",
+        "line": 6,
+        "column": 11
+      }
+    },
+    {
+      "path": "negative/null_throw.ae",
+      "status": "rejected-as-expected",
+      "phase": "typechecker",
+      "diagnostic": {
+        "error": "AetherTypeError",
+        "message": "Cannot throw null or a nullable value.",
+        "line": 2,
+        "column": 11
+      }
+    }
+  ],
+  "ownership_evidence": {
+    "initial_ir": "lifecycle and terminal-event verification passed",
+    "ssa": "ownership, event-linearity, and cleanup verification passed",
+    "native": "ASan, UBSan, and leak detection passed for tagged cases"
+  }
+}

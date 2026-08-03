@@ -58,6 +58,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--skip-parity", action="store_true", help="Skip AST/native differential parity."
     )
     parser.add_argument(
+        "--skip-exception-evidence",
+        action="store_true",
+        help="Skip the ERQ-006 exception promotion evidence gate.",
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="Show commands and their output while they run.",
@@ -98,22 +103,36 @@ def build_stages(
             ((python, str(ROOT / "scripts" / "check_release_docs.py")),),
             env,
         ),
-        Stage(
-            "examples catalog",
-            ((python, str(ROOT / "scripts" / "check_examples_catalog.py")),),
-            env,
-        ),
-        Stage(
-            "diagnostics contract",
-            ((python, str(ROOT / "scripts" / "check_diagnostics_contract.py")),),
-            env,
-        ),
-        Stage(
-            "compileall",
-            ((python, "-m", "compileall", "-q", str(ROOT / "src"), str(ROOT / "scripts")),),
-            env,
-        ),
     ]
+
+    if not args.skip_exception_evidence:
+        stages.append(
+            Stage(
+                "exception promotion evidence",
+                ((python, str(ROOT / "scripts" / "check_exception_promotion.py")),),
+                env,
+            )
+        )
+
+    stages.extend(
+        [
+            Stage(
+                "examples catalog",
+                ((python, str(ROOT / "scripts" / "check_examples_catalog.py")),),
+                env,
+            ),
+            Stage(
+                "diagnostics contract",
+                ((python, str(ROOT / "scripts" / "check_diagnostics_contract.py")),),
+                env,
+            ),
+            Stage(
+                "compileall",
+                ((python, "-m", "compileall", "-q", str(ROOT / "src"), str(ROOT / "scripts")),),
+                env,
+            ),
+        ]
+    )
 
     if not args.skip_tests:
         stages.append(Stage("tests", (_pytest_command(),), env))

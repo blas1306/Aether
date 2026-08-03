@@ -1,0 +1,232 @@
+{
+  "schema_version": 1,
+  "corpus": "ERQ-006 exception promotion evidence",
+  "positive": [
+    {
+      "path": "positive/cleanup_during_unwinding.ae",
+      "covers": ["cleanup during unwinding", "ARC ownership", "nested catches", "nested owned aggregates", "rethrow ownership"],
+      "expected": {
+        "stdout": "handler:cleanup-inner\nhandler:cleanup-outer\ncleanup\n",
+        "stderr": "",
+        "selected_handlers": ["cleanup-inner", "cleanup-outer"],
+        "termination": "return",
+        "message": null,
+        "exit_status": 0
+      },
+      "sanitizer": true
+    },
+    {
+      "path": "positive/constructor_failure.ae",
+      "covers": ["constructors", "constructors throwing", "constructor failure cleanup", "class methods"],
+      "expected": {
+        "stdout": "handler:constructor\nconstructor failed\n",
+        "stderr": "",
+        "selected_handlers": ["constructor"],
+        "termination": "return",
+        "message": null,
+        "exit_status": 0
+      },
+      "sanitizer": true
+    },
+    {
+      "path": "positive/function_recursion.ae",
+      "covers": ["propagation across functions", "recursion"],
+      "expected": {
+        "stdout": "handler:recursive\nrecursive propagation\n",
+        "stderr": "",
+        "selected_handlers": ["recursive"],
+        "termination": "return",
+        "message": null,
+        "exit_status": 0
+      },
+      "sanitizer": false
+    },
+    {
+      "path": "positive/indirect_call.ae",
+      "covers": ["indirect calls", "class exceptions", "ARC interaction"],
+      "expected": {
+        "stdout": "handler:indirect\nindirect call\n",
+        "stderr": "",
+        "selected_handlers": ["indirect"],
+        "termination": "return",
+        "message": null,
+        "exit_status": 0
+      },
+      "sanitizer": true
+    },
+    {
+      "path": "positive/method_interface_dispatch.ae",
+      "covers": ["propagation across methods", "propagation through interface dispatch", "interface implementations", "interface calls"],
+      "expected": {
+        "stdout": "handler:interface\ninterface dispatch\n",
+        "stderr": "",
+        "selected_handlers": ["interface"],
+        "termination": "return",
+        "message": null,
+        "exit_status": 0
+      },
+      "sanitizer": false
+    },
+    {
+      "path": "positive/multiple_and_root_catches.ae",
+      "covers": ["multiple catches", "typed catches", "catch(Error)", "class exceptions", "interface implementations", "Error.message()"],
+      "expected": {
+        "stdout": "handler:network\noffline\nhandler:error\nfallback\n",
+        "stderr": "",
+        "selected_handlers": ["network", "error"],
+        "termination": "return",
+        "message": null,
+        "exit_status": 0
+      },
+      "sanitizer": true
+    },
+    {
+      "path": "positive/nested_rethrow_chain.ae",
+      "covers": ["bare rethrow", "nested try/catch", "unmatched exceptions", "rethrow chains", "rethrow ownership"],
+      "expected": {
+        "stdout": "handler:inner\nhandler:relay\nhandler:outer\noriginal\n",
+        "stderr": "",
+        "selected_handlers": ["inner", "relay", "outer"],
+        "termination": "return",
+        "message": null,
+        "exit_status": 0
+      },
+      "sanitizer": true
+    },
+    {
+      "path": "positive/owned_aggregates_arc.ae",
+      "covers": ["struct exceptions", "arrays/lists inside exceptions", "nested owned aggregates", "ARC ownership", "single destruction", "no leaks", "no double free"],
+      "expected": {
+        "stdout": "handler:owned\nowned aggregates\n",
+        "stderr": "",
+        "selected_handlers": ["owned"],
+        "termination": "return",
+        "message": null,
+        "exit_status": 0
+      },
+      "sanitizer": true
+    },
+    {
+      "path": "positive/panic_vs_exception.ae",
+      "covers": ["panic vs exception", "termination", "panic behavior"],
+      "expected": {
+        "stdout": "Aether panic: pop() cannot be used on an empty List\n",
+        "stderr": "",
+        "selected_handlers": [],
+        "termination": "panic",
+        "message": "pop() cannot be used on an empty List",
+        "exit_status": 1
+      },
+      "sanitizer": false
+    },
+    {
+      "path": "positive/root_reporting.ae",
+      "covers": ["unmatched exceptions", "root reporting", "termination", "message", "exit status"],
+      "expected": {
+        "stdout": "",
+        "stderr": "Aether unhandled exception: RootError: uncaught root\n",
+        "selected_handlers": [],
+        "termination": "exception",
+        "message": "uncaught root",
+        "exit_status": 1
+      },
+      "sanitizer": true
+    },
+    {
+      "path": "positive/throw_and_typed_catch.ae",
+      "covers": ["throw", "throw expression", "try/catch", "typed catches", "struct exceptions", "Error.message()"],
+      "expected": {
+        "stdout": "handler:basic\nbasic throw\n",
+        "stderr": "",
+        "selected_handlers": ["basic"],
+        "termination": "return",
+        "message": null,
+        "exit_status": 0
+      },
+      "sanitizer": false
+    }
+  ],
+  "negative": [
+    {
+      "path": "negative/duplicate_handlers.ae",
+      "phase": "typechecker",
+      "error": "AetherTypeError",
+      "message": "Duplicate catch for exact type 'DuplicateError'.",
+      "line": 8,
+      "column": 5,
+      "covers": ["duplicate handlers"]
+    },
+    {
+      "path": "negative/illegal_rethrow.ae",
+      "phase": "typechecker",
+      "error": "AetherTypeError",
+      "message": "Bare rethrow is only valid inside an active catch body.",
+      "line": 2,
+      "column": 5,
+      "covers": ["illegal rethrow"]
+    },
+    {
+      "path": "negative/invalid_catch_ordering.ae",
+      "phase": "typechecker",
+      "error": "AetherTypeError",
+      "message": "Catch for 'OrderedError' is unreachable because Error is already caught.",
+      "line": 8,
+      "column": 5,
+      "covers": ["invalid catch ordering"]
+    },
+    {
+      "path": "negative/invalid_throw.ae",
+      "phase": "typechecker",
+      "error": "AetherTypeError",
+      "message": "Thrown value of type 'int' does not implement Error.",
+      "line": 2,
+      "column": 11,
+      "covers": ["invalid throw"]
+    },
+    {
+      "path": "negative/malformed_catch.ae",
+      "phase": "parser",
+      "error": "AetherSyntaxError",
+      "message": "Expected '{' before block. near 'return'.",
+      "line": 4,
+      "column": 5,
+      "covers": ["malformed programs"]
+    },
+    {
+      "path": "negative/malformed_throw.ae",
+      "phase": "parser",
+      "error": "AetherSyntaxError",
+      "message": "Expected an expression or ';' after 'throw'. near '}'.",
+      "line": 3,
+      "column": 1,
+      "covers": ["malformed programs"]
+    },
+    {
+      "path": "negative/non_error_catch.ae",
+      "phase": "typechecker",
+      "error": "AetherTypeError",
+      "message": "Catch type 'NotAnError' does not implement Error.",
+      "line": 7,
+      "column": 5,
+      "covers": ["non-Error catch"]
+    },
+    {
+      "path": "negative/non_error_throwable.ae",
+      "phase": "typechecker",
+      "error": "AetherTypeError",
+      "message": "Thrown value of type 'NotAnError' does not implement Error.",
+      "line": 6,
+      "column": 11,
+      "covers": ["non-Error throwable"]
+    },
+    {
+      "path": "negative/null_throw.ae",
+      "phase": "typechecker",
+      "error": "AetherTypeError",
+      "message": "Cannot throw null or a nullable value.",
+      "line": 2,
+      "column": 11,
+      "covers": ["null throw"]
+    }
+  ]
+}

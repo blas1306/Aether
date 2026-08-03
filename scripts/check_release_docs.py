@@ -40,6 +40,7 @@ CLASSIFIED = {
     ROOT / "docs" / "aether" / "AETHER_V1_PROFILE_DECISION.md": "Audit",
     ROOT / "docs" / "compiler" / "BACKEND_FEATURE_PARITY.md": "Audit",
     ROOT / "docs" / "compiler" / "EXCEPTION_RELEASE_QUALIFICATION.md": "Audit",
+    ROOT / "docs" / "compiler" / "exceptions" / "EXCEPTION_PROMOTION_EVIDENCE.md": "Release evidence",
 }
 CURRENT_REFERENCE = (
     ROOT / "README.md",

@@ -1,0 +1,28 @@
+struct ServiceError implements Error {
+    string text;
+    string message() { return text; }
+}
+
+interface Operation {
+    void run();
+}
+
+class FailingOperation implements Operation {
+    string text;
+    public void run() { throw ServiceError(text); }
+}
+
+void dispatch(Operation operation) {
+    operation.run();
+}
+
+int main() {
+    Operation dynamic = FailingOperation("interface dispatch");
+    try {
+        dispatch(dynamic);
+    } catch (ServiceError caught) {
+        println("handler:interface");
+        println(caught.message());
+    }
+    return 0;
+}

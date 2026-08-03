@@ -28,6 +28,7 @@ def test_parse_args_supports_all_pipeline_options() -> None:
             "--skip-llvm",
             "--skip-native",
             "--skip-parity",
+            "--skip-exception-evidence",
             "--verbose",
         ]
     )
@@ -37,6 +38,7 @@ def test_parse_args_supports_all_pipeline_options() -> None:
     assert args.skip_llvm
     assert args.skip_native
     assert args.skip_parity
+    assert args.skip_exception_evidence
     assert args.verbose
 
 
@@ -56,13 +58,14 @@ def test_pipeline_runs_stages_in_declared_order(monkeypatch: pytest.MonkeyPatch)
     assert commands[0] == ["git", "diff", "--check"]
     assert commands[1][1].endswith("scripts/check_capability_consistency.py")
     assert commands[2][1].endswith("scripts/check_release_docs.py")
-    assert commands[3][1].endswith("scripts/check_examples_catalog.py")
-    assert commands[4][1].endswith("scripts/check_diagnostics_contract.py")
-    assert commands[5][1:4] == ["-m", "compileall", "-q"]
-    assert commands[6] == [sys.executable, "-m", "pytest"]
-    assert [command[3] for command in commands[7:10]] == ["bench"] * 3
-    llvm_end = 10 + len(ci.LLVM_EXAMPLES)
-    assert [command[3] for command in commands[10:llvm_end]] == ["--emit-llvm"] * len(ci.LLVM_EXAMPLES)
+    assert commands[3][1].endswith("scripts/check_exception_promotion.py")
+    assert commands[4][1].endswith("scripts/check_examples_catalog.py")
+    assert commands[5][1].endswith("scripts/check_diagnostics_contract.py")
+    assert commands[6][1:4] == ["-m", "compileall", "-q"]
+    assert commands[7] == [sys.executable, "-m", "pytest"]
+    assert [command[3] for command in commands[8:11]] == ["bench"] * 3
+    llvm_end = 11 + len(ci.LLVM_EXAMPLES)
+    assert [command[3] for command in commands[11:llvm_end]] == ["--emit-llvm"] * len(ci.LLVM_EXAMPLES)
     assert commands[llvm_end][1].endswith("scripts/differential_parity.py")
     assert [command[3] for command in commands[llvm_end + 1:]] == ["build"] * len(ci.LLVM_EXAMPLES)
     assert output.getvalue().index("OK tests") < output.getvalue().index("OK benchmarks")
@@ -76,7 +79,7 @@ def test_pipeline_stops_and_propagates_command_failure(monkeypatch: pytest.Monke
 
     def fake_run(command: list[str], **_kwargs) -> subprocess.CompletedProcess[str]:
         commands.append(command)
-        if len(commands) == 7:
+        if len(commands) == 8:
             return subprocess.CompletedProcess(command, 7, stdout="", stderr="pytest failed")
         return completed()
 
@@ -86,7 +89,7 @@ def test_pipeline_stops_and_propagates_command_failure(monkeypatch: pytest.Monke
     exit_code = ci.run_pipeline(ci.parse_args([]), which=lambda _name: "/usr/bin/clang", stdout=output)
 
     assert exit_code == 7
-    assert len(commands) == 7
+    assert len(commands) == 8
     assert "pytest failed" in output.getvalue()
     assert "CI failed at stage: tests" in output.getvalue()
 
@@ -99,6 +102,6 @@ def test_pipeline_stops_and_propagates_command_failure(monkeypatch: pytest.Monke
     ],
 )
 def test_pipeline_exit_codes(runner, expected: int) -> None:
-    args = ci.parse_args(["--skip-tests", "--skip-bench", "--skip-llvm", "--skip-native", "--skip-parity"])
+    args = ci.parse_args(["--skip-tests", "--skip-bench", "--skip-llvm", "--skip-native", "--skip-parity", "--skip-exception-evidence"])
 
     assert ci.run_pipeline(args, runner=runner, which=lambda _name: None, stdout=StringIO()) == expected

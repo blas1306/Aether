@@ -1,0 +1,9 @@
+struct NotAnError {
+    string text;
+}
+
+int main() {
+    try { println("ok"); }
+    catch (NotAnError invalid) { }
+    return 0;
+}

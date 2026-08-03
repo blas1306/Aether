@@ -1,0 +1,18 @@
+class IndirectError implements Error {
+    string text;
+    public string message() { return text; }
+}
+
+void fail() { throw IndirectError("indirect call"); }
+
+void apply(void() operation) { operation(); }
+
+int main() {
+    try {
+        apply(fail);
+    } catch (IndirectError caught) {
+        println("handler:indirect");
+        println(caught.message());
+    }
+    return 0;
+}

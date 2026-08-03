@@ -1,0 +1,31 @@
+struct CleanupError implements Error {
+    string text;
+    string message() { return text; }
+}
+
+void raiseCleanup() { throw CleanupError("cleanup"); }
+
+void fail() {
+    string outer = "outer";
+    try { raiseCleanup(); }
+    catch (CleanupError active) {
+        string middle = "middle";
+        try {
+            string inner = "inner";
+            println("handler:cleanup-inner");
+            throw;
+        } catch (Error wrong) {
+            println("handler:wrong-cleanup");
+        }
+    }
+}
+
+int main() {
+    try {
+        fail();
+    } catch (CleanupError caught) {
+        println("handler:cleanup-outer");
+        println(caught.message());
+    }
+    return 0;
+}

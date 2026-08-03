@@ -1,0 +1,33 @@
+struct ConstructionError implements Error {
+    string text;
+    string message() { return text; }
+}
+
+class BrokenChild {
+    string label;
+    Array<string> owned;
+    constructor() {
+        this.label = "child";
+        this.owned = {"partial"};
+        throw ConstructionError("constructor failed");
+    }
+}
+
+class Outer {
+    string label;
+    BrokenChild child;
+    constructor() {
+        this.label = "outer";
+        this.child = BrokenChild();
+    }
+}
+
+int main() {
+    try {
+        Outer value = Outer();
+    } catch (ConstructionError caught) {
+        println("handler:constructor");
+        println(caught.message());
+    }
+    return 0;
+}

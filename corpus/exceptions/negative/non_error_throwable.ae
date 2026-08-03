@@ -1,0 +1,7 @@
+class NotAnError {
+    string text;
+}
+
+int main() {
+    throw NotAnError("no Error implementation");
+}

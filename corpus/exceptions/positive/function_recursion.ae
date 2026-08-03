@@ -1,0 +1,21 @@
+struct DepthError implements Error {
+    string text;
+    string message() { return text; }
+}
+
+void descend(int depth) {
+    if (depth == 0) {
+        throw DepthError("recursive propagation");
+    }
+    descend(depth - 1);
+}
+
+int main() {
+    try {
+        descend(8);
+    } catch (DepthError caught) {
+        println("handler:recursive");
+        println(caught.message());
+    }
+    return 0;
+}

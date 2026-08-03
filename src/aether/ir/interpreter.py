@@ -191,6 +191,25 @@ class IRExecutionError(RuntimeError):
     """Raised when the minimal IR interpreter cannot execute validly."""
 
 
+class IRUnhandledExceptionError(IRExecutionError):
+    """Process-root observation for an unhandled verified exception event."""
+
+    def __init__(
+        self,
+        dynamic_type: str,
+        message: str,
+        line: int,
+        column: int,
+    ) -> None:
+        self.dynamic_type = dynamic_type
+        self.message = message
+        self.line = line
+        self.column = column
+        super().__init__(
+            f"Unhandled {dynamic_type} exception at {line}:{column}: {message}"
+        )
+
+
 @dataclass
 class _Frame:
     values: dict[IRValue, Any] = field(default_factory=dict)
@@ -272,12 +291,16 @@ class IRInterpreter:
             if not root_call:
                 raise
             event = signal.event
-            message = (
-                f"Unhandled {event.dynamic_type} exception at "
-                f"{event.line}:{event.column}"
-            )
-            self._destroy_exception_event(event)
-            raise IRExecutionError(message) from None
+            try:
+                message = self._exception_message(event)
+            finally:
+                self._destroy_exception_event(event)
+            raise IRUnhandledExceptionError(
+                event.dynamic_type,
+                message,
+                event.line,
+                event.column,
+            ) from None
         finally:
             self._call_depth -= 1
 
@@ -1588,6 +1611,21 @@ class IRInterpreter:
             f"{witness_slot.method_id.rsplit('.', 1)[-1]}"
         )
         return self.call(concrete_method, [carrier, *arguments])
+
+    def _exception_message(self, event: _IRExceptionEvent) -> str:
+        """Call the frozen non-throwing Error.message() root-reporting slot."""
+        result = self.call(f"{event.dynamic_type}.message", [event.payload])
+        if (
+            isinstance(result, tuple)
+            and len(result) == 2
+            and not isinstance(event.payload, NativeClassObject)
+        ):
+            result = result[1]
+        if not isinstance(result, (StringValue, str)):
+            raise IRExecutionError(
+                "IR exception Error.message() did not return string"
+            )
+        return str(result)
 
     @staticmethod
     def _target_block(

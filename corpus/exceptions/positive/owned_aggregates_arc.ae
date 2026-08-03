@@ -1,0 +1,32 @@
+struct Details {
+    Array<string> labels;
+    List<int> codes;
+}
+
+struct OwnedError implements Error {
+    string text;
+    Array<int> numbers;
+    List<List<string>> lists;
+    Details details;
+    string message() { return text; }
+}
+
+void fail() {
+    OwnedError error = OwnedError(
+        "owned aggregates",
+        {1, 2, 3, 4},
+        {{"a", "b"}, {"c"}},
+        Details({"nested"}, {7, 8})
+    );
+    throw error;
+}
+
+int main() {
+    try {
+        fail();
+    } catch (OwnedError caught) {
+        println("handler:owned");
+        println(caught.message());
+    }
+    return 0;
+}
