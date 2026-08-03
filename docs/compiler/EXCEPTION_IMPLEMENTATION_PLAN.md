@@ -884,7 +884,7 @@ diagnostic support for the frozen exception syntax and semantics.
 - Formatter golden, idempotence, incomplete-source, and nested-layout tests.
 - LSP diagnostic, semantic-token, hover, completion, navigation, and incremental
   edit tests.
-- Golden tokenization tests for VS Code, IntelliJ, UI, and web definitions.
+- Golden tokenization tests for VS Code and IntelliJ definitions.
 - Cross-tool diagnostic parity tests.
 - IR/CFG/SSA visualization snapshots for normal, caught, rethrown, and unhandled
   paths.

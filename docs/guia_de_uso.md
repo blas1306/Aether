@@ -2,8 +2,7 @@
 
 Esta guia resume la superficie activa de Aether. El producto actual esta
 centrado en archivos `.ae`, el CLI, una REPL persistente, el LSP y sus clientes
-oficiales para VS Code e IntelliJ. El antiguo IDE Qt y los flujos MathTeX/MTeX
-no forman parte del producto activo.
+oficiales para VS Code e IntelliJ.
 
 ## 1. Archivos y ejecucion
 

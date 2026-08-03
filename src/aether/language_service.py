@@ -335,7 +335,9 @@ def _interface_members(source: str) -> dict[str, tuple[tuple[str, str], ...]]:
         program, _errors = Parser(lex(source)).parse_with_recovery()
     except AetherSyntaxError:
         return {}
-    interfaces: dict[str, tuple[tuple[str, str], ...]] = {}
+    interfaces: dict[str, tuple[tuple[str, str], ...]] = {
+        "Error": (("message", "method"),),
+    }
     for statement in program.statements:
         if not isinstance(statement, ast.InterfaceDeclaration):
             continue

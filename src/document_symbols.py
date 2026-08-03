@@ -8,6 +8,7 @@ from typing import Literal
 DocumentSymbolKind = Literal["variable", "function", "module", "type"]
 DocumentSymbolOrigin = Literal[
     "assignment",
+    "catch_binder",
     "function_definition",
     "for_loop_variable",
     "import",
@@ -61,6 +62,11 @@ _IMPORT_RE = re.compile(
 _FROM_IMPORT_RE = re.compile(
     r"^from\s+(?P<module>[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s+import\s+"
     r"(?P<symbol>[A-Za-z_]\w*)(?:\s+as\s+(?P<alias>[A-Za-z_]\w*))?\b",
+    re.IGNORECASE,
+)
+_CATCH_BINDER_RE = re.compile(
+    r"\bcatch\s*\(\s*(?:(?P<type>[A-Za-z_]\w*)\s+)?"
+    r"(?P<name>[A-Za-z_]\w*)\s*\)\s*(?P<brace>\{)",
     re.IGNORECASE,
 )
 
@@ -117,7 +123,8 @@ def extract_document_symbol_occurrences(document_text: str) -> list[DocumentSymb
             symbols.extend(_extract_struct_method_symbols(statement, line_starts))
         if symbol.origin == "interface":
             symbols.extend(_extract_interface_method_symbols(statement, line_starts))
-    return sorted(symbols, key=lambda item: item.statement_index)
+    symbols.extend(_extract_catch_binder_symbols(document_text, line_starts, len(symbols)))
+    return sorted(symbols, key=lambda item: item.selection_start_offset)
 
 
 def symbol_at_position(document_text: str, line: int, character: int) -> DocumentSymbol | None:
@@ -132,7 +139,9 @@ def symbol_before_offset(document_text: str, name: str, offset: int) -> Document
     candidates = [
         symbol
         for symbol in extract_document_symbol_occurrences(document_text)
-        if symbol.name == name and symbol.selection_start_offset <= offset
+        if symbol.name == name
+        and symbol.selection_start_offset <= offset
+        and (symbol.origin != "catch_binder" or offset <= symbol.end_offset)
     ]
     if not candidates:
         return None
@@ -410,6 +419,131 @@ def _extract_interface_method_symbols(statement_span: _StatementSpan, line_start
             )
         )
     return symbols
+
+
+def _extract_catch_binder_symbols(
+    document_text: str,
+    line_starts: list[int],
+    first_index: int,
+) -> list[DocumentSymbol]:
+    symbols: list[DocumentSymbol] = []
+    code_text = _mask_non_code_text(document_text)
+    for match in _CATCH_BINDER_RE.finditer(code_text):
+        body_end = _matching_brace_end(document_text, match.start("brace"))
+        type_name = match.group("type") or "Error"
+        span = _StatementSpan(
+            text=document_text[match.start() : body_end],
+            start_offset=match.start(),
+            end_offset=body_end,
+            statement_index=first_index + len(symbols),
+        )
+        symbols.append(
+            _document_symbol(
+                span,
+                line_starts,
+                name_start=match.start("name") - match.start(),
+                name_end=match.end("name") - match.start(),
+                name=match.group("name"),
+                kind="variable",
+                origin="catch_binder",
+                signature=match.group("name"),
+                detail=f"{type_name} {match.group('name')}",
+                type_name=type_name,
+            )
+        )
+    return symbols
+
+
+def _mask_non_code_text(document_text: str) -> str:
+    masked = list(document_text)
+    index = 0
+    in_string = False
+    escaped = False
+    in_line_comment = False
+    in_block_comment = False
+    while index < len(document_text):
+        char = document_text[index]
+        next_char = document_text[index + 1] if index + 1 < len(document_text) else ""
+        if in_line_comment:
+            if char == "\n":
+                in_line_comment = False
+            else:
+                masked[index] = " "
+        elif in_block_comment:
+            if char != "\n":
+                masked[index] = " "
+            if char == "*" and next_char == "/":
+                masked[index + 1] = " "
+                in_block_comment = False
+                index += 1
+        elif in_string:
+            if char != "\n":
+                masked[index] = " "
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"':
+            masked[index] = " "
+            in_string = True
+        elif char == "#" or (char == "/" and next_char == "/"):
+            masked[index] = " "
+            in_line_comment = True
+            if char == "/":
+                masked[index + 1] = " "
+                index += 1
+        elif char == "/" and next_char == "*":
+            masked[index] = " "
+            masked[index + 1] = " "
+            in_block_comment = True
+            index += 1
+        index += 1
+    return "".join(masked)
+
+
+def _matching_brace_end(document_text: str, opening_offset: int) -> int:
+    depth = 0
+    index = opening_offset
+    in_string = False
+    escaped = False
+    in_line_comment = False
+    in_block_comment = False
+    while index < len(document_text):
+        char = document_text[index]
+        next_char = document_text[index + 1] if index + 1 < len(document_text) else ""
+        if in_line_comment:
+            if char == "\n":
+                in_line_comment = False
+        elif in_block_comment:
+            if char == "*" and next_char == "/":
+                in_block_comment = False
+                index += 1
+        elif in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"':
+            in_string = True
+        elif char == "#" or (char == "/" and next_char == "/"):
+            in_line_comment = True
+            if char == "/":
+                index += 1
+        elif char == "/" and next_char == "*":
+            in_block_comment = True
+            index += 1
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return index + 1
+        index += 1
+    return len(document_text)
 
 
 def _extract_enum_symbol(

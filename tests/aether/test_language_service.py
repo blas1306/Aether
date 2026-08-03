@@ -187,7 +187,15 @@ def test_completion_items_include_exception_keywords() -> None:
     items = completion_items("tr", 1, 2)
     labels = {item.label for item in items}
 
-    assert {"try", "catch", "throw"} <= labels
+    assert {"try", "catch", "throw", "Error"} <= labels
+    assert "Exception" not in labels
+
+
+def test_completion_items_expose_error_message_for_root_catch_binder() -> None:
+    source = "try { work(); } catch (Error error) { error."
+    items = completion_items(source, 1, len(source) + 1)
+
+    assert [(item.label, item.kind) for item in items] == [("message", "method")]
 
 
 def test_completion_items_include_enum_keyword_and_variants_after_dot() -> None:

@@ -25,7 +25,6 @@ object AetherTokenTypes {
         "double",
         "else",
         "Error",
-        "Exception",
         "false",
         "float",
         "for",

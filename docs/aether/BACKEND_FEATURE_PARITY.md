@@ -15,9 +15,10 @@ contradicen esta actualización o el perfil normativo.
 Actualización Exception Release Qualification (02-08-2026): frontend,
 typechecker, AST, Initial IR/lifecycle, SSA, optimizadores, LLVM, runtime y
 contención native tienen una implementación interna de excepciones con event-out.
-La calificación encontró bloqueadores en detección de capability, `may_throw`,
-merge de lifecycle y tooling, por lo que `ERROR_HANDLING` continúa
-`UNSUPPORTED`. Las filas antiguas que dicen que IR/SSA/native no existen son
+Hotfixes A–D cerraron ERQ-001 a ERQ-005, incluidos los desacuerdos internos y
+el drift de tooling, sin promover la capacidad. Evidencia pública integrada y
+packaging siguen pendientes, por lo que `ERROR_HANDLING` continúa `UNSUPPORTED`.
+Las filas antiguas que dicen que IR/SSA/native no existen son
 históricas; no justifican promoción. Véase
 [`EXCEPTION_RELEASE_QUALIFICATION.md`](../compiler/EXCEPTION_RELEASE_QUALIFICATION.md).
 
@@ -316,7 +317,7 @@ representación y lifecycle ya están activos en esta matriz.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Matemática escalar (`sin`, `sqrt`, `abs`, etc.) | calls | C | C | C IEEE/checked + sqrt complejo heredado | C call con id builtin | C reales consolidados | C firmas | C registry AST | C preserva id | C firmas | C efectos/DCE | C int/double | intrinsics, `libm`, helpers checked | AST/IR/SSA/native | C + auditoría | Parcial | `float`, builtins complejos y la divergencia `sqrt(real negativo)` quedan fuera de la paridad completa. |
 | `PI` y `E` | import/member | C | C para `Math.pi` | C para `Math.pi` | C const double | C directa | C | C | C | C | C | C inmediata | sin global/init | AST/IR/native | P | Parcial | Solo `Math.pi`; `PI` global y `E` no existen. |
-| `throw` / `try-catch` | C | C | C | C | C | C | C | C | C | C | C conservador | C interno/gated | runtime event-out privado | frontend/IR/SSA/native internas | C + qualification | No promovido | Implementación interna completa en los casos admitidos; bloqueadores de capability, `may_throw`, lifecycle y tooling mantienen `ERROR_HANDLING` unsupported. |
+| `throw` / `try-catch` | C | C | C | C | C | C | C | C | C | C | C conservador | C interno/gated | runtime event-out privado | frontend/IR/SSA/native internas | C + qualification | No promovido | Implementación interna completa en los casos admitidos; ERQ-001 a ERQ-005 están cerrados, pero faltan evidencia pública integrada y packaging antes de cambiar `ERROR_HANDLING`. |
 | Panics de safety | — | — | tipos preventivos | C | efectos/traps | C | C | C | C | C | C preserva | C | C `puts/exit` | E2E | P dispersa | Completo | Array/List/Vector/Matrix, overflow int y allocation. |
 | CLI run/build/inspect/bench | — | — | usa frontend | AST seleccionable | usa IR | C subset | C | C subset | export/build | C | perfiles parciales | default/build C subset con gate previo | clang | tests CLI | P desactualizada | Parcial | La superficie native es menor que AST, pero el perfil 22 la delimita antes del lowering. |
 | REPL persistente | C por entrada | C | C incremental | C rollback | N | N | N | N | N | N | N | N | AST session | tests | C | Solo AST | `--backend=ast` obligatorio. |
@@ -386,7 +387,7 @@ agrupa el resultado actual sin convertir un nodo/opcode nominal en soporte:
 | Métodos enlazados, callable retornado, builtin como valor | Subsets reconocidos; callable top-level ya C | Sin environment/ABI/lowering para esas formas | Rechazo de tipo/gate |
 | Interpolación y formatting general | Parser/checker/AST C para el experimento | Sin IR/lowering/runtime native | Gate `AE-BACKEND-STRINGS` |
 | `input` tipado | Nodo/checker/AST C | Sin opcode/runtime native | Gate `AE-BACKEND-INPUT` |
-| `throw` / `try-catch` | Parser/checker/AST e IR/SSA/LLVM/runtime internos | Qualification detectó desacuerdos de `may_throw`/lifecycle y tooling incompleto | Gate `AE-BACKEND-ERROR_HANDLING`; no promovido |
+| `throw` / `try-catch` | Parser/checker/AST e IR/SSA/LLVM/runtime internos | ERQ-001 a ERQ-005 cerrados; faltan evidencia pública integrada y packaging | Gate `AE-BACKEND-ERROR_HANDLING`; no promovido |
 | Slicing Vector/Matrix y Matrix `for-in` | Frontend/AST C en los subsets registrados | Sin lowering estable | Gate Vector/Matrix |
 | Álgebra lineal avanzada | Checker/AST host con NumPy/SciPy y tests | La mayoría no tiene IR ni ABI/runtime native | Solo AST |
 | `Range` almacenado | AST tiene `Range<int>` | Native baja sólo `RangeExpression` dentro de `for` | Gate `AE-BACKEND-FOR_IN` |

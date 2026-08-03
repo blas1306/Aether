@@ -194,6 +194,41 @@ def test_backend_ast_remains_explicit_file_execution(tmp_path: Path) -> None:
     assert ast_stderr == ""
 
 
+def test_exception_syntax_is_consistent_across_cli_run_check_build_and_inspection(
+    tmp_path: Path,
+) -> None:
+    program = tmp_path / "exceptions.ae"
+    program.write_text(
+        'struct FileError implements Error { string message() { return "file"; } }\n'
+        'struct NetworkError implements Error { string message() { return "network"; } }\n'
+        "try { throw NetworkError(); }\n"
+        'catch (FileError file) { println(file.message()); }\n'
+        'catch (Error error) { println(error.message()); throw; }\n',
+        encoding="utf-8",
+    )
+
+    ast_run = run_cli(["run", "--backend=ast", str(program)])
+    ast_inspect = run_cli(["--ast", str(program)])
+    stable_actions = (
+        ["--check", str(program)],
+        ["build", str(program), "-o", str(tmp_path / "exceptions")],
+        ["run", str(program)],
+        ["--emit-llvm", str(program)],
+    )
+
+    assert ast_run[0] == EXIT_LANGUAGE_ERROR
+    assert "NetworkError" in ast_run[2]
+    assert "network" in ast_run[2]
+    assert ast_inspect[0] == EXIT_SUCCESS
+    assert "TryCatchStatement" in ast_inspect[1]
+    assert "RethrowStatement" in ast_inspect[1]
+    for argv in stable_actions:
+        exit_code, stdout, stderr = run_cli(argv)
+        assert exit_code == EXIT_LANGUAGE_ERROR
+        assert stdout == ""
+        assert "AE-BACKEND-ERROR_HANDLING" in stderr
+
+
 def test_default_native_backend_compiles_class_methods(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

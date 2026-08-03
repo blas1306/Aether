@@ -356,9 +356,9 @@ completion, hover y símbolos. El plugin IntelliJ vive en
 `tools/intellij-aether/`. La extensión oficial de VS Code, todavía en
 desarrollo y no publicada, vive en `vscode-extension/`; ambos editores usan el
 mismo LSP y mantienen la semántica en Aether. La superficie de herramientas
-soportada es explícitamente CLI, LSP, VS Code e IntelliJ. El antiguo IDE Qt y
-el editor web embebido fueron retirados; no forman parte del paquete ni de la
-matriz de soporte.
+soportada es explícitamente CLI, LSP, VS Code e IntelliJ. La
+[matriz de tooling para excepciones](docs/compiler/EXCEPTION_TOOLING_QUALIFICATION.md)
+clasifica también las capacidades todavía no soportadas.
 
 ## Benchmarks
 

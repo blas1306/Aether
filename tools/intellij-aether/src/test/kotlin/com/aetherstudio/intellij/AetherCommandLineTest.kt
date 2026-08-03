@@ -285,6 +285,19 @@ class AetherCommandLineTest {
     @Test
     fun `exception syntax words are maintained highlighting keywords`() {
         assertTrue(AetherTokenTypes.KEYWORDS.containsAll(setOf("try", "catch", "throw", "Error")))
+        assertTrue("Exception" !in AetherTokenTypes.KEYWORDS)
+
+        val source = "try { throw error; } catch (Error caught) { throw; }"
+        val lexer = AetherHighlightingLexer()
+        lexer.start(source, 0, source.length, 0)
+        val keywords = mutableListOf<String>()
+        while (lexer.tokenType != null) {
+            if (lexer.tokenType == AetherTokenTypes.KEYWORD) {
+                keywords.add(source.substring(lexer.tokenStart, lexer.tokenEnd))
+            }
+            lexer.advance()
+        }
+        assertTrue(keywords.containsAll(setOf("try", "throw", "catch", "Error")))
     }
 
     @Test

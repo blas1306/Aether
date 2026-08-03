@@ -320,6 +320,18 @@ def test_lsp_completion_returns_snippet_placeholders_for_language_snippets() -> 
     assert if_snippet["textEdit"]["newText"].startswith("if (${1:condition}) {")
 
 
+def test_lsp_completion_uses_current_exception_surface_only() -> None:
+    try_items = _completion_items_for("try", line=0, character=3)
+    rethrow_items = _completion_items_for("rethrow", line=0, character=7)
+    type_items = _completion_items_for("E", line=0, character=1)
+
+    try_snippet = next(item for item in try_items if item["kind"] == 15 and item["label"] == "try")
+    assert "catch (Error error)" in try_snippet["textEdit"]["newText"]
+    assert _item_by_label(rethrow_items, "rethrow")["textEdit"]["newText"] == "throw;"
+    assert "Error" in {item["label"] for item in type_items}
+    assert "Exception" not in {item["label"] for item in type_items}
+
+
 def test_lsp_completion_includes_only_document_symbols_before_cursor() -> None:
     source = "localValue = 1;\nlo\nlocalLater = 2;\n"
     items = _completion_items_for(source, line=1, character=2)
@@ -380,6 +392,71 @@ def test_lsp_completion_exposes_string_byte_length_property() -> None:
     assert split["kind"] == 2
     assert split["detail"] == "string.split(string separator) -> Array<string>"
     assert split["textEdit"]["newText"] == "split($0)"
+
+
+def test_lsp_catch_binder_completion_hover_symbols_and_navigation() -> None:
+    source = (
+        "try { work(); }\n"
+        "catch (FileError file) { throw file; }\n"
+        "catch (Error error) { print(error); println(error.message()); throw; }\n"
+        "println(error);\n"
+    )
+    error_use_character = len("catch (Error error) { print(err")
+    hover = _hover_for(source, line=2, character=len("catch (Error err"))
+    definition = _definition_for(source, line=2, character=error_use_character)
+    references = _references_for(source, line=2, character=error_use_character)
+    symbols = _document_symbols_for(source)
+    completion_source = source.splitlines()[0] + "\n" + source.splitlines()[1] + "\ncatch (Error error) { error."
+    completions = _completion_items_for(
+        completion_source,
+        line=2,
+        character=len("catch (Error error) { error."),
+    )
+
+    assert hover is not None
+    assert "Error error" in hover["contents"]["value"]
+    assert definition == {
+        "uri": "file:///tmp/definition.ae",
+        "range": {
+            "start": {"line": 2, "character": len("catch (Error ")},
+            "end": {"line": 2, "character": len("catch (Error error")},
+        },
+    }
+    assert [item["range"]["start"] for item in references] == [
+        {"line": 2, "character": len("catch (Error ")},
+        {"line": 2, "character": len("catch (Error error) { print(")},
+        {"line": 2, "character": len("catch (Error error) { print(error); println(")},
+    ]
+    assert [(item["name"], item.get("detail")) for item in symbols if item["name"] in {"file", "error"}] == [
+        ("file", "FileError file"),
+        ("error", "Error error"),
+    ]
+    assert _item_by_label(completions, "message")["detail"] == "Error.message()"
+    assert _hover_for(source, line=3, character=len("println(err")) is None
+
+
+def test_lsp_hover_documents_error_message_contract() -> None:
+    source = "try { work(); } catch (Error error) { println(error.message()); }"
+    hover = _hover_for(source, line=0, character=len("try { work(); } catch (Error error) { println(error.mess"))
+
+    assert hover is not None
+    assert "Error.message() -> string" in hover["contents"]["value"]
+    assert "Nonthrowing" in hover["contents"]["value"]
+
+
+def test_lsp_catch_symbols_ignore_comments_and_strings() -> None:
+    source = (
+        '// catch (Error commentBinder) { }\n'
+        'string sample = "catch (Error stringBinder) { }";\n'
+        "try { work(); } catch (Error realBinder) { throw; }\n"
+        "try { work(); } catch (rootBinder) { throw; }\n"
+    )
+
+    assert [
+        (item["name"], item["detail"])
+        for item in _document_symbols_for(source)
+        if item["name"].endswith("Binder")
+    ] == [("realBinder", "Error realBinder"), ("rootBinder", "Error rootBinder")]
 
 
 def test_lsp_hover_exposes_string_split_signature() -> None:

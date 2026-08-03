@@ -20,6 +20,7 @@ test("TextMate grammar is valid JSON with the expected scope", () => {
   assert.ok(grammar.repository?.strings);
   assert.ok(grammar.repository?.comments);
   assert.match(grammar.repository?.types?.match ?? "", /\bError\b/);
+  assert.doesNotMatch(grammar.repository?.types?.match ?? "", /\bException\b/);
   assert.match(JSON.stringify(grammar.repository?.keywords), /try\|catch\|throw/);
 });
 

@@ -90,9 +90,9 @@ KEYWORD_SUGGESTIONS: tuple[CommandSuggestion, ...] = (
     _keyword_entry("return", "Return from the current function.", category="control"),
     _keyword_entry("break", "Exit the current loop.", category="control"),
     _keyword_entry("continue", "Continue the current loop.", category="control"),
-    _keyword_entry("try", "Start an exception handling block.", insert_text="try ", signature="try { ... } catch (e) { ... }", category="control"),
-    _keyword_entry("catch", "Handle an exception from a try block.", category="control"),
-    _keyword_entry("throw", "Raise an exception value.", insert_text="throw ", signature='throw "message";', category="control"),
+    _keyword_entry("try", "Start an exception handling block.", insert_text="try ", signature="try { ... } catch (Error error) { ... }", category="control"),
+    _keyword_entry("catch", "Handle an exception with a typed catch binder.", insert_text="catch (Error error) {\n    \n}", signature="catch (Error error) { ... }", category="control"),
+    _keyword_entry("throw", "Raise a value whose type implements Error.", insert_text="throw ", signature="throw error;", category="control"),
     _keyword_entry("true", "Boolean literal.", category="literals", priority=100),
     _keyword_entry("false", "Boolean literal.", category="literals", priority=100),
     _keyword_entry("null", "Null literal for nullable types.", category="literals", priority=100),
@@ -102,7 +102,7 @@ KEYWORD_SUGGESTIONS: tuple[CommandSuggestion, ...] = (
     _keyword_entry("complex", "Complex numeric type.", category="types", priority=105),
     _keyword_entry("string", "String type.", category="types", priority=105),
     _keyword_entry("boolean", "Boolean type.", category="types", priority=105),
-    _keyword_entry("Exception", "Exception value type.", category="types", priority=105),
+    _keyword_entry("Error", "Root interface implemented by throwable values.", category="types", priority=105),
     _keyword_entry("void", "No return value for block functions.", category="types", priority=105),
     _keyword_entry("bool", "Boolean type alias.", insert_text="boolean", signature="boolean", category="types", priority=70),
     _keyword_entry("Array", "Fixed-size mutable collection type.", insert_text="Array<>", category="types", priority=300, cursor_backtrack=1),
@@ -148,7 +148,8 @@ SNIPPET_SUGGESTIONS: tuple[CommandSuggestion, ...] = (
     _snippet_entry("for", "for (x in iterable) {\n    \n}", len("for ("), len("x"), "For loop snippet."),
     _snippet_entry("if", "if (condition) {\n    \n}", len("if ("), len("condition"), "If block snippet."),
     _snippet_entry("while", "while (condition) {\n    \n}", len("while ("), len("condition"), "While loop snippet."),
-    _snippet_entry("try", "try {\n    \n} catch (e) {\n    \n}", len("try {\n    "), 0, "Try/catch snippet."),
+    _snippet_entry("try", "try {\n    \n} catch (Error error) {\n    \n}", len("try {\n    "), 0, "Typed try/catch snippet."),
+    _snippet_entry("rethrow", "throw;", len("throw;"), 0, "Bare rethrow inside an active catch body."),
     _snippet_entry("func", "int name() {\n    \n}", len("int "), len("name"), "Block function snippet."),
     _snippet_entry("struct", "struct Name {\n    double field;\n}", len("struct "), len("Name"), "Data struct snippet."),
     _snippet_entry("interface", "interface Name {\n    double method();\n}", len("interface "), len("Name"), "Interface snippet."),
@@ -633,7 +634,11 @@ def _interface_member_suggestions(qualifier: str, prefix: str, document_text: st
             break
     if type_name is None:
         return []
-    members = _interface_members(document_text).get(re.sub(r"\s+", "", type_name))
+    compact_type = re.sub(r"\s+", "", type_name)
+    if compact_type == "Error":
+        members = ["message"]
+    else:
+        members = _interface_members(document_text).get(compact_type)
     if members is None:
         return []
     return [

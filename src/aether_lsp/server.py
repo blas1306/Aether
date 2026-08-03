@@ -324,6 +324,13 @@ class AetherLanguageServer:
             return None
         name, token_start, token_end = token
 
+        error_member_hover = _error_member_hover_markdown(source, name, token_start)
+        if error_member_hover is not None:
+            return _lsp_hover(
+                error_member_hover,
+                _lsp_range_from_offsets(source, line_starts, token_start, token_end),
+            )
+
         native_hover = _native_member_hover_markdown(source, name, token_start)
         if native_hover is not None:
             return _lsp_hover(
@@ -402,17 +409,27 @@ class AetherLanguageServer:
         declaration = symbol_visible_at_offset(source, name, offset)
         include_declaration = bool(context.get("includeDeclaration", False))
         results: list[JsonObject] = []
-        for match in re.finditer(rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])", source):
+        reference_source = source
+        reference_start = 0
+        if declaration is not None and declaration.origin == "catch_binder":
+            reference_start = declaration.start_offset
+            reference_source = source[reference_start : declaration.end_offset]
+        for match in re.finditer(
+            rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])",
+            reference_source,
+        ):
+            match_start = reference_start + match.start()
+            match_end = reference_start + match.end()
             if (
                 not include_declaration
                 and declaration is not None
-                and match.start() == declaration.selection_start_offset
+                and match_start == declaration.selection_start_offset
             ):
                 continue
             results.append(
                 {
                     "uri": uri,
-                    "range": _lsp_range_from_offsets(source, line_starts, match.start(), match.end()),
+                    "range": _lsp_range_from_offsets(source, line_starts, match_start, match_end),
                 }
             )
         return results
@@ -493,6 +510,8 @@ def _symbol_hover_markdown(symbol) -> str:
     }.get(symbol.kind, "Aether symbol.")
     if symbol.origin == "for_loop_variable":
         description = "Loop variable defined in this document."
+    if symbol.origin == "catch_binder":
+        description = "Typed catch binder visible only in this handler body."
     if symbol.origin == "struct":
         description = "Struct type defined in this document."
     if symbol.origin == "interface":
@@ -500,6 +519,21 @@ def _symbol_hover_markdown(symbol) -> str:
     if symbol.origin == "enum":
         description = "Enum type defined in this document."
     return f"```aether\n{signature}\n```\n\n{description}"
+
+
+def _error_member_hover_markdown(source: str, name: str, token_start: int) -> str | None:
+    if "." not in name:
+        return None
+    receiver_name, member_name = name.rsplit(".", 1)
+    if member_name != "message":
+        return None
+    symbol = symbol_visible_at_offset(source, receiver_name, token_start)
+    if symbol is None or symbol.type_name != "Error":
+        return None
+    return (
+        "```aether\nError.message() -> string\n```\n\n"
+        "Nonthrowing message method of the built-in Error interface."
+    )
 
 
 def _builtin_hover_markdown(name: str, builtin_name: str) -> str:

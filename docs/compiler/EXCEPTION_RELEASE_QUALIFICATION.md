@@ -12,9 +12,10 @@
 # DO NOT PROMOTE
 
 `ERROR_HANDLING` remains `UNSUPPORTED` in native capability profile 23.
-Promotion remains blocked by incomplete public tooling, integration evidence,
-and packaging. Internal native execution is substantial and the admitted
-corpus is healthy, but implementation presence is not release qualification.
+Promotion remains blocked by integration evidence and packaging. Public
+tooling qualification ERQ-005 is closed. Internal native execution is
+substantial and the admitted corpus is healthy, but implementation presence is
+not release qualification.
 
 No public FFI was added and no private runtime symbol or layout was promoted to
 a public contract.
@@ -41,6 +42,12 @@ nullable values and non-throwing interface dispatch remain within the normal
 struct/class/interface capabilities; exception control flow and propagation
 continue to produce `AE-BACKEND-ERROR_HANDLING` before IR on the stable route.
 
+Hotfix D closes ERQ-005 without changing this promotion decision. Completion,
+hover, document symbols and both shipped highlighters now expose only the
+current `Error`-based exception surface. Unsupported rename, semantic-token,
+incremental-parse and workspace-index behavior is classified explicitly in
+[`EXCEPTION_TOOLING_QUALIFICATION.md`](EXCEPTION_TOOLING_QUALIFICATION.md).
+
 ## Blocking issues
 
 | ID | Blocking finding | Evidence | Required evidence to close |
@@ -49,11 +56,11 @@ continue to produce `AE-BACKEND-ERROR_HANDLING` before IR on the stable route.
 | ERQ-002 | **CLOSED by Hotfix B.** Initial IR had selected interface `invoke` from module-wide exception use while function `may_throw` came from a separate call-graph scan, producing IRV-144. | `test_interface_dispatch_only_function_has_consistent_nonthrowing_effect`; `test_interface_exception_effects.py` | The semantic effect summary, carried interface-slot fact, strict IR/SSA verifier checks and LLVM structural regressions now enforce one decision. |
 | ERQ-003 | **CLOSED by Hotfix B.** The recorded case used a later `Error.message()` dispatch whose artificial exceptional edge created the incompatible lifecycle join. The slot is semantically nonthrowing, so correct Initial IR has no such edge. | `test_nested_rethrow_mutation_with_later_error_message_verifies`; AST/IR observation is `24\nlater\n` | The same canonical slot effect that closes ERQ-002 removes the unreachable edge; lifecycle rules and verifier strength are unchanged. |
 | ERQ-004 | **CLOSED by Hotfix C.** `implements Error` had been classified as native exception syntax even when the program used only ordinary interface semantics. | `test_error_conformance_only_is_release_qualified_as_ordinary_interface_use`; focused positive, negative, mixed, nested-interface, container, nullable and example regressions | The detector now emits only for exception control/effect semantics. Struct/class conformance and ordinary `Error` value use no longer produce `AE-BACKEND-ERROR_HANDLING`; throw/rethrow/try/catch and throwing call/invoke cases remain gated. |
-| ERQ-005 | Shipped completion/highlighting still advertises the removed experimental `Exception` type and invalid legacy snippets such as untyped `catch (e)` and `throw "message"`. Catch binders have no dedicated symbol/hover/completion evidence. | `autocomplete_engine.py`, Qt keyword table, VS Code grammar, IntelliJ token table | Replace obsolete guidance with `Error` and typed/root catch forms; add CLI/LSP/Qt/VS Code/IntelliJ fixtures for completion, hover, symbols, recovery and diagnostics. |
+| ERQ-005 | **CLOSED by Hotfix D.** Completion/highlighting had advertised `Exception`, only the implicit root-catch sugar, and string throw; catch binders lacked tooling evidence. | `test_completion_items_include_exception_keywords`, `test_lsp_completion_uses_current_exception_surface_only`, `test_lsp_catch_binder_completion_hover_symbols_and_navigation`, VS Code manifest tests and IntelliJ lexer tests | Completion now favors explicit typed/root catches, `Error`, throwable values and bare rethrow while the parser retains approved `catch (name)` sugar; catch binders and `Error.message()` have focused evidence; unsupported protocol features are classified rather than advertised. |
 | ERQ-006 | Exceptions are absent from the executable release/differential corpus because the stable gate correctly rejects them; existing native tests bypass the gate. | `differential.py` calls `validate_backend_capabilities`; native exception helpers lower directly | After ERQ-001–005, add an atomic promotion candidate whose public CLI, wheel-installed CLI and differential corpus exercise exceptions at O0/O1/O2 without a bypass. |
 | ERQ-007 | The wheel builds, but release verification rejects it because a public catalog entry is absent from the artifact. | `verify_wheel` reports `wheel is missing public example: examples/LeetCode/isPalindrome.ae`; `pyproject.toml` has no `share/aether/examples/LeetCode` data-file entry | Make wheel contents derive from, or be exhaustively checked against, the authoritative manifest; then verify both wheel and sdist in isolated installed smoke tests. |
 
-Hotfixes A, B and C close ERQ-001 through ERQ-004 without altering lifecycle,
+Hotfixes A, B, C and D close ERQ-001 through ERQ-005 without altering lifecycle,
 Initial IR or SSA representation, or the private runtime ABI layout/version.
 
 ## 1. Architecture audit
@@ -194,17 +201,19 @@ runtime hashes were refreshed through the canonical manifest updater.
 | Tool | Result | Qualification |
 | --- | --- | --- |
 | Formatter | PASS | Typed/root/multiple catches and bare rethrow format idempotently. |
-| Syntax highlighting | PARTIAL | Keywords and `Error` are highlighted, but Qt/VS Code/IntelliJ still advertise obsolete `Exception`. |
+| Syntax highlighting | PASS for the supported lexical surface | VS Code and IntelliJ highlight `try`, `catch`, `throw` and `Error`; neither advertises `Exception`. Semantic tokens are explicitly unsupported. |
 | LSP diagnostics | PASS frontend | Reuses parser/typechecker and suppresses host tracebacks; no promoted native exception contract exists. |
 | LSP formatting | PASS | Multiple typed handlers are covered. |
-| LSP hover | INCOMPLETE | No dedicated evidence for catch-binder type or `Error` exception context. |
-| Completion | **FAIL** | Suggests obsolete `Exception`, untyped `catch (e)`, and string throw. |
-| Document symbols | INCOMPLETE | No catch-binder symbol extraction evidence. |
+| LSP hover | PASS for qualified exception contexts | Catch-binder types and root `Error.message()` have focused tests; hover remains document-local. |
+| Completion | PASS for qualified exception contexts | Uses `Error`, typed/root catch snippets, throwable-value syntax and bare rethrow; no checked-exception syntax is suggested. |
+| Document symbols | PASS for catch binders | Typed catch binders are scoped symbols with hover, definition and reference evidence. |
 | Parser recovery | PASS | Malformed typed catches, missing delimiters/expressions and illegal rethrow are covered. |
-| IntelliJ | PARTIAL | Keyword highlighting and general LSP client pass; obsolete `Exception` remains and no semantic catch fixtures exist. |
-| VS Code | PARTIAL / environment-limited | Grammar covers exception keywords but retains `Exception`; Node/npm were unavailable in this environment. |
+| IntelliJ | PASS for qualified integration; structurally partial | Lexer/highlighting and shared-LSP integration cover the exception surface. PSI remains a file shell and is not presented as structural parsing. |
+| VS Code | PASS by source inspection; execution environment pending | Grammar and manifest tests cover the exception surface. Runtime test status is recorded per validation environment. |
 
-Tooling support is not stable and blocks promotion.
+The detailed supported/unsupported matrix is in
+[`EXCEPTION_TOOLING_QUALIFICATION.md`](EXCEPTION_TOOLING_QUALIFICATION.md).
+ERQ-005 is closed; the intentionally unsupported areas are not advertised.
 
 ## 8. Release audit
 
@@ -248,8 +257,8 @@ nonthrowing.
 
 ## 10. Cross-version audit
 
-- The obsolete source-level `Exception` type is no longer a compiler type, but
-  stale editor/completion references remain and are classified under ERQ-005.
+- The obsolete source-level `Exception` type is neither a compiler type nor an
+  editor/completion entry (ERQ-005 closed).
 - The LLVM EH implementation is reachable only through an explicit test-only
   opt-in and is documented as comparison evidence, not production transport.
 - Event-out is the sole production internal lowering strategy.
@@ -259,13 +268,11 @@ nonthrowing.
 
 ## 11. Remaining milestones and estimated scope
 
-1. **Tooling completion (medium):** completion, hover, symbols, recovery and
-   fixtures across LSP, Qt, VS Code and IntelliJ; remove obsolete `Exception`.
-2. **Packaging correction (small):** make the wheel/sdist public example set
+1. **Packaging correction (small):** make the wheel/sdist public example set
    agree with the authoritative manifest and run isolated artifact validation.
-3. **Integrated promotion candidate (medium):** public differential corpus,
+2. **Integrated promotion candidate (medium):** public differential corpus,
    sanitizer jobs, wheel-installed CLI, CI/release gate and diagnostics.
-4. **Repeat release qualification (small after the above):** rerun every matrix;
+3. **Repeat release qualification (small after the above):** rerun every matrix;
    only then may profile state, version, normative spec and examples be changed
    atomically.
 
@@ -285,6 +292,10 @@ Hotfix C removes nominal `Error` conformance as a capability trigger, adds
 positive/negative/mixed release regressions, and reconciles the public example
 catalog and normative detection rule. It does not promote the capability or
 change exception architecture.
+Hotfix D updates only supported tooling sources, documentation and focused
+tests. It removes stale advertised syntax, adds catch-binder language-service
+evidence and records unsupported capabilities without changing compiler
+semantics or the native capability state.
 
 ## 13. Risks retained
 
@@ -303,14 +314,15 @@ change exception architecture.
 
 | Area | Result |
 | --- | --- |
-| Full Python suite | **4514 passed, 12 failed, 4 skipped**. All 12 failures are pre-existing assertions in `test_import_aliases.py`: the current vector orientation prints a column (`[1.0; 2.0]`) while those tests expect a row (`[1.0 2.0]`). No Hotfix B file touches that behavior. |
+| Full Python suite | **4425 passed, 12 failed, 4 skipped** in the Hotfix D environment. All 12 failures are pre-existing assertions in `test_import_aliases.py`: the current vector orientation prints a column (`[1.0; 2.0]`) while those tests expect a row (`[1.0 2.0]`). No Hotfix D file touches that behavior. |
+| Hotfix D focused tooling/CLI/release selection | **219 passed**, covering formatter, language service, LSP, CLI, run-file and release-contract behavior. |
 | Capability/exception/release regressions | **234 passed**: positive, negative, mixed, module, nested-interface, container, nullable, `Error.message()`, propagation, IR/SSA/native and ERQ-004 qualification coverage. |
 | Focused compiler suites | **282 IR**, **72 SSA**, **84 backend/native** and **116 Rust-adapter/shadow** tests passed. |
 | Initial IR / SSA repository regression | 117 programs discovered; 101 lowered to IR, 67 comparable across builders, all admitted general-builder programs verified. |
 | Rust verifier | `cargo test --workspace --locked` passed every unit, integration and documentation test, including exception and SSA wire-verifier suites. |
 | LLVM/native | Clang 21.1.8 compiled and ran the generated O2 stress program twice with byte-identical output/status; the broader Python native suite introduced no failure. |
 | Optimizers | Initial IR and SSA optimizer suites passed in the full run; generated qualification runs the verifier after optimized IR and after every SSA pass. |
-| Tooling | IntelliJ Gradle tests passed. VS Code tests were not runnable because neither Node nor npm is installed in this environment. Frontend/LSP/formatter Python tests passed apart from the unrelated vector assertions above. |
+| Tooling | IntelliJ Gradle tests passed. VS Code tests were not runnable because neither Node nor npm is installed in this environment. Frontend/LSP/formatter/CLI focused tests all passed. |
 | Documentation/capabilities/examples/diagnostics | All four standalone contract checkers passed after manifest/document reconciliation. |
 | Packaging | Wheel build succeeded; `verify_wheel` then failed on the missing public LeetCode example (ERQ-007). |
 | Static hygiene | `compileall` passed for `src`, `tests` and `scripts`; `git diff --check` passed. |

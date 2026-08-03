@@ -80,7 +80,7 @@
     },
     "types": {
       "name": "storage.type.aether",
-      "match": "\\b(?:int|float|double|complex|boolean|string|void|Array|List|Vector|Matrix|Error|Exception|ParseStatus|IntParseResult|DoubleParseResult|FileStatus|FileReadResult)\\b"
+      "match": "\\b(?:int|float|double|complex|boolean|string|void|Array|List|Vector|Matrix|Error|ParseStatus|IntParseResult|DoubleParseResult|FileStatus|FileReadResult)\\b"
     },
     "constants": {
       "name": "constant.language.aether",
