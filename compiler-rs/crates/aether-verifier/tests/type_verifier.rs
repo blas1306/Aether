@@ -3,10 +3,11 @@
 use std::error::Error as _;
 
 use aether_ir::{
-    ArrayType, BoolType, ClassRefType, DoubleType, FloatType, FunctionType, IRBasicBlock,
-    IRConstant, IRFunction, IRInstruction, IRModule, IRParameter, IRStorage, IRStructDefinition,
-    IRType, IRValue, IRWitnessMethodSlot, IRWitnessTable, IntType, InterfaceType, ListType,
-    MatrixType, NullableType, StringType, StructType, VectorType, VoidType,
+    ArrayType, BoolType, ClassRefType, DoubleType, ExceptionEventType, FloatType, FunctionType,
+    IRBasicBlock, IRConstant, IRFunction, IRInstruction, IRModule, IRParameter, IRStorage,
+    IRStructDefinition, IRType, IRValue, IRWitnessMethodSlot, IRWitnessTable, IntType,
+    InterfaceType, ListType, MatrixType, NullableType, StringType, StructType, VectorType,
+    VoidType,
 };
 use aether_verifier::{
     BlockTypeVerificationError, FunctionTypeVerificationError, InstructionKind,
@@ -411,6 +412,7 @@ fn interface_construct_requires_class_carrier_and_ordered_witness_metadata() {
             return_type: IntType.into(),
             thunk_symbol: "__ae_interface_thunk_s0__test".to_owned(),
             receiver_ownership: "borrowed".to_owned(),
+            may_throw: false,
         }],
         abi_version: 1,
         box_layout: None,
@@ -442,6 +444,51 @@ fn interface_construct_requires_class_carrier_and_ordered_witness_metadata() {
     assert!(matches!(
         instruction_rule(&verify_module_types(&invalid).unwrap_err()),
         TypeRuleError::TypeConstraint { field, .. } if field == "witness"
+    ));
+}
+
+#[test]
+fn interface_call_shape_must_match_canonical_slot_effect() {
+    let interface_type: IRType = InterfaceType {
+        name: "Readable".to_owned(),
+    }
+    .into();
+    let slot = IRWitnessMethodSlot {
+        index: 0,
+        method_id: "Readable.read".to_owned(),
+        parameter_types: Vec::new(),
+        return_type: IntType.into(),
+        thunk_symbol: String::new(),
+        receiver_ownership: "borrowed".to_owned(),
+        may_throw: true,
+    };
+    let invalid_call = module_with_instruction(IRInstruction::IRInterfaceCall {
+        receiver: value("receiver", interface_type.clone()),
+        arguments: Vec::new(),
+        slot: slot.clone(),
+        result: Some(value("result", IntType.into())),
+    });
+    assert!(matches!(
+        instruction_rule(&verify_module_types(&invalid_call).unwrap_err()),
+        TypeRuleError::MetadataMismatch { field, .. } if field == "may_throw"
+    ));
+
+    let invalid_invoke = module_with_instruction(IRInstruction::IRInvokeInterface {
+        receiver: value("receiver", interface_type),
+        arguments: Vec::new(),
+        slot: IRWitnessMethodSlot {
+            may_throw: false,
+            ..slot
+        },
+        result: Some(value("result", IntType.into())),
+        exception: value("event", ExceptionEventType.into()),
+        normal_target: "normal".to_owned(),
+        exceptional_target: "exceptional".to_owned(),
+        exceptional_target_event: value("handler_event", ExceptionEventType.into()),
+    });
+    assert!(matches!(
+        instruction_rule(&verify_module_types(&invalid_invoke).unwrap_err()),
+        TypeRuleError::MetadataMismatch { field, .. } if field == "may_throw"
     ));
 }
 

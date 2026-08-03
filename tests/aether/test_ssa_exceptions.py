@@ -14,6 +14,7 @@ from aether.ssa import (
     SSAExceptionDestroy,
     SSAExceptionMatch,
     SSAInterpreter,
+    SSAInterfaceCall,
     SSAInvoke,
     SSAInvokeIndirect,
     SSAInvokeInterface,
@@ -99,7 +100,8 @@ int main() {
     instructions = tuple(_instructions(module))
     assert any(isinstance(item, SSAInvoke) for item in instructions)
     assert any(isinstance(item, SSAInvokeIndirect) for item in instructions)
-    assert any(isinstance(item, SSAInvokeInterface) for item in instructions)
+    assert any(isinstance(item, SSAInterfaceCall) for item in instructions)
+    assert not any(isinstance(item, SSAInvokeInterface) for item in instructions)
     assert all(
         item.normal_arguments
         == (() if item.result is None else (item.result,))

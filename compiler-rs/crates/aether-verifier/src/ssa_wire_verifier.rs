@@ -688,6 +688,30 @@ fn verify_call_invoke_distinction(
                 ));
             }
         }
+        SSAInstructionDTO::Ordinary(IRInstructionDTO::InterfaceCall { slot, .. }) => {
+            if slot.may_throw {
+                return Err(failure(
+                    &function.name,
+                    Some(&block.name),
+                    format!(
+                        "interface call to may_throw slot '{}' must use invoke",
+                        slot.method_id
+                    ),
+                ));
+            }
+        }
+        SSAInstructionDTO::Control(SSAControlInstructionDTO::InvokeInterface { slot, .. }) => {
+            if !slot.may_throw {
+                return Err(failure(
+                    &function.name,
+                    Some(&block.name),
+                    format!(
+                        "interface invoke target '{}' is not may_throw",
+                        slot.method_id
+                    ),
+                ));
+            }
+        }
         _ => {}
     }
     Ok(())

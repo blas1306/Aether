@@ -773,6 +773,7 @@ impl TryFrom<&IRInstructionDTO> for IRInstruction {
                                 return_type: IRType::try_from(&slot.return_type)?,
                                 thunk_symbol: slot.thunk_symbol.clone(),
                                 receiver_ownership: slot.receiver_ownership.clone(),
+                                may_throw: slot.may_throw,
                             })
                         })
                         .collect::<Result<Vec<_>, IRImportError>>()?,
@@ -806,6 +807,7 @@ impl TryFrom<&IRInstructionDTO> for IRInstruction {
                     return_type: IRType::try_from(&slot.return_type)?,
                     thunk_symbol: slot.thunk_symbol.clone(),
                     receiver_ownership: slot.receiver_ownership.clone(),
+                    may_throw: slot.may_throw,
                 },
                 result: import_optional_instruction_value(kind, "result", result)?,
             }),
@@ -832,6 +834,7 @@ impl TryFrom<&IRInstructionDTO> for IRInstruction {
                     return_type: IRType::try_from(&slot.return_type)?,
                     thunk_symbol: slot.thunk_symbol.clone(),
                     receiver_ownership: slot.receiver_ownership.clone(),
+                    may_throw: slot.may_throw,
                 },
                 result: import_optional_instruction_value(kind, "result", result)?,
                 exception: import_instruction_value(kind, "exception", exception)?,

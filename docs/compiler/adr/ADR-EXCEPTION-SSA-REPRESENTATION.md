@@ -93,6 +93,11 @@ handler/edge-shape mismatches fail closed. Calls to known `may_throw` functions
 must be invokes, invokes of known non-throwing functions are invalid, and a
 function containing exception SSA must retain `may_throw`.
 
+Implementation clarification: SSA preserves the Initial IR interface-slot
+`may_throw` fact unchanged. `interface_call` requires a nonthrowing slot and
+`invoke_interface` requires a throwing slot; SSA analysis and optimization do
+not recompute the effect from witnesses, method names, or CFG shape.
+
 The schema-v1 SSA JSON envelope is distinguished by
 `"representation": "aether_ssa"`. It serializes invoke kind, ordered normal and
 exceptional targets and arguments, handler entry, ownership operations,

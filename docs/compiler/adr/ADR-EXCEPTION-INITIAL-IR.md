@@ -58,9 +58,12 @@ scope. An unmatched event propagates to the lexically enclosing handler or root.
 `IRFunction.may_throw` is conservative internal metadata and does not alter
 source function types. `InstructionEffects.may_throw` is distinct from
 `may_trap`: panic/trap remains uncatchable. A call to a known throwing function
-must use `invoke`; unknown indirect and interface calls are represented
-conservatively when exception-bearing IR is present. Ordinary `call` denotes a
-nonthrowing edge shape.
+must use `invoke`. The semantic exception-effect summary is the sole authority
+for `may_throw`: lowering consumes its function and interface-slot facts and
+does not re-infer them. Interface witness slots carry the same fact; a throwing
+slot uses `invoke_interface`, while a nonthrowing slot uses `interface_call`.
+Ordinary `call` denotes a nonthrowing edge shape. `Error.message` is the frozen
+nonthrowing slot.
 
 No optimization is authorized to infer nonthrowing behavior from this metadata
 in Milestone 3.

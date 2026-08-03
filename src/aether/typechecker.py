@@ -6,6 +6,7 @@ from pathlib import Path
 from . import ast
 from .errors import AetherError, AetherRuntimeError, AetherTypeError
 from .equality import eq_capability, types_support_equality
+from .exception_effects import analyze_exception_effects
 from .integer_arithmetic import (
     INT_MAX,
     INT_MIN,
@@ -707,22 +708,9 @@ class TypeChecker:
         and therefore remain permitted.
         """
 
-        bodies: dict[str, object] = {}
-        method_keys: dict[tuple[str, str], str] = {}
-        constructors: dict[str, str] = {}
         error_messages: list[tuple[str, ast.FunctionDeclaration]] = []
 
         for statement in statements:
-            if isinstance(
-                statement,
-                (ast.FunctionDeclaration, ast.ExpressionFunctionDeclaration),
-            ):
-                bodies[statement.name] = (
-                    statement.body
-                    if isinstance(statement, ast.FunctionDeclaration)
-                    else statement.expression
-                )
-                continue
             if not isinstance(
                 statement,
                 (ast.StructDeclaration, ast.ClassDeclaration),
@@ -735,110 +723,19 @@ class TypeChecker:
             )
             for method in statement.methods:
                 key = f"{statement.name}.{method.name}"
-                bodies[key] = method.body
-                method_keys[(statement.name, method.name)] = key
                 if implements_error and method.name == "message":
                     error_messages.append((key, method))
-            if statement.constructor is not None:
-                key = f"{statement.name}.__ctor"
-                bodies[key] = statement.constructor.body
-                constructors[statement.name] = key
 
         if not error_messages:
             return
 
-        direct: set[str] = set()
-        calls: dict[str, set[str]] = {name: set() for name in bodies}
-
-        def scan(value: object, caller: str) -> None:
-            if isinstance(value, (ast.ThrowStatement, ast.RethrowStatement)):
-                direct.add(caller)
-                if isinstance(value, ast.ThrowStatement):
-                    scan(value.expression, caller)
-                return
-            if isinstance(value, ast.CallExpression):
-                callee = self.builtin_aliases.get(value.callee, value.callee)
-                if callee in bodies:
-                    calls[caller].add(callee)
-                elif callee in constructors:
-                    calls[caller].add(constructors[callee])
-                elif (
-                    is_builtin(callee)
-                    or callee in AETHER_TYPES
-                    or callee in self.enums
-                    or callee.split(".", 1)[0] in self.enums
-                    or (callee in self.structs and callee not in constructors)
-                ):
-                    pass
-                else:
-                    # Imported functions and callable values have no source
-                    # throws effect to trust under unchecked semantics.
-                    direct.add(caller)
-                for argument in value.arguments:
-                    scan(argument, caller)
-                for argument in value.keyword_arguments.values():
-                    scan(argument, caller)
-                return
-            if isinstance(value, ast.MethodCall):
-                receiver_type = self._expression_types.get(id(value.target))
-                owner: str | None = None
-                if isinstance(receiver_type, ClassType):
-                    owner = receiver_type.name
-                elif isinstance(receiver_type, str) and receiver_type in self.structs:
-                    owner = receiver_type
-                target = method_keys.get((owner, value.method_name)) if owner else None
-                if target is not None:
-                    calls[caller].add(target)
-                elif (
-                    isinstance(receiver_type, InterfaceType)
-                    and receiver_type.name == ERROR_INTERFACE_NAME
-                    and value.method_name == "message"
-                ):
-                    # Dispatch through Error.message is non-throwing by this
-                    # same semantic contract.
-                    pass
-                elif receiver_type is not None and native_method(
-                    receiver_type,
-                    value.method_name,
-                ) is not None:
-                    pass
-                else:
-                    direct.add(caller)
-                scan(value.target, caller)
-                for argument in value.arguments:
-                    scan(argument, caller)
-                for argument in value.keyword_arguments.values():
-                    scan(argument, caller)
-                return
-            if isinstance(
-                value,
-                (ast.FunctionDeclaration, ast.ExpressionFunctionDeclaration),
-            ):
-                return
-            if isinstance(value, (list, tuple)):
-                for item in value:
-                    scan(item, caller)
-                return
-            if is_dataclass(value):
-                for descriptor in dataclass_fields(value):
-                    scan(getattr(value, descriptor.name), caller)
-
-        for name, body in bodies.items():
-            scan(body, name)
-
-        may_produce_exception = set(direct)
-        changed = True
-        while changed:
-            changed = False
-            for name, callees in calls.items():
-                if name in may_produce_exception:
-                    continue
-                if any(callee in may_produce_exception for callee in callees):
-                    may_produce_exception.add(name)
-                    changed = True
+        summary = analyze_exception_effects(
+            ast.Program(statements),
+            builtin_aliases=self.builtin_aliases,
+        )
 
         for name, method in error_messages:
-            if name not in may_produce_exception:
+            if not summary.function_may_throw(name):
                 continue
             raise AetherTypeError(
                 "Error.message() is non-throwing; "

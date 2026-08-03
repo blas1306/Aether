@@ -215,8 +215,8 @@ int main() {
     assert "invoke.direct.event.out" in llvm
     assert "invoke.indirect.event.out" in llvm
     assert "invoke.interface.event.out" not in llvm
-    assert "invoke.error.message.failed" in llvm
-    assert "call ptr %invoke.interface.thunk" in llvm
+    assert "invoke.error.message.failed" not in llvm
+    assert "call ptr %interface.call.thunk" in llvm
     assert "landingpad" not in llvm
     assert "personality" not in llvm
 
@@ -1052,8 +1052,8 @@ int main() {
         for line in llvm.splitlines()
     )
     assert "invoke.interface.event.out" not in llvm
-    assert "invoke.error.message.failed" in llvm
-    assert "call ptr %invoke.interface.thunk" in llvm
+    assert "invoke.error.message.failed" not in llvm
+    assert "call ptr %interface.call.thunk" in llvm
 
 
 def test_backend_rejects_may_throw_error_message_target() -> None:

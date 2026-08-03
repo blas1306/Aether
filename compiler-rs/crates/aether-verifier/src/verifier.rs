@@ -885,11 +885,6 @@ impl<'module> TypeVerifier<'module> {
                 exception,
                 exceptional_target_event,
                 ..
-            }
-            | IRInstruction::IRInvokeInterface {
-                exception,
-                exceptional_target_event,
-                ..
             } => {
                 self.require_exact(
                     "exception",
@@ -901,6 +896,31 @@ impl<'module> TypeVerifier<'module> {
                     &ExceptionEventType.into(),
                     &exceptional_target_event.r#type,
                 )
+            }
+            IRInstruction::IRInvokeInterface {
+                exception,
+                exceptional_target_event,
+                slot,
+                ..
+            } => {
+                self.require_exact(
+                    "exception",
+                    &ExceptionEventType.into(),
+                    &exception.r#type,
+                )?;
+                self.require_exact(
+                    "exceptional_target_event",
+                    &ExceptionEventType.into(),
+                    &exceptional_target_event.r#type,
+                )?;
+                if !slot.may_throw {
+                    return Err(TypeRuleError::MetadataMismatch {
+                        field: "may_throw".to_owned(),
+                        expected: "may_throw interface slot".to_owned(),
+                        actual: "nonthrowing interface slot".to_owned(),
+                    });
+                }
+                Ok(())
             }
             IRInstruction::IRCatchEntry { event, .. } => {
                 self.require_exact("event", &ExceptionEventType.into(), &event.r#type)
@@ -1213,6 +1233,13 @@ impl<'module> TypeVerifier<'module> {
                 slot,
                 result,
             } => {
+                if slot.may_throw {
+                    return Err(TypeRuleError::MetadataMismatch {
+                        field: "may_throw".to_owned(),
+                        expected: "invoke_interface".to_owned(),
+                        actual: "interface_call".to_owned(),
+                    });
+                }
                 let IRType::Interface(interface) = &receiver.r#type else {
                     return Err(constraint(
                         "receiver",

@@ -13,6 +13,7 @@ from aether.ir import (
     IRExceptionDestroy,
     IRExceptionMatch,
     IRFunction,
+    IRInterfaceCall,
     IRInterpreter,
     IRInvoke,
     IRInvokeIndirect,
@@ -383,7 +384,7 @@ int main() {
             "",
             "",
             "println(active.message());",
-            IRInvokeInterface,
+            IRInterfaceCall,
             "interface\ninterface\n",
         ),
     ],
@@ -395,7 +396,7 @@ def test_direct_indirect_and_interface_invokes_before_nested_rethrow(
     invoke_type: type[object],
     expected: str,
 ) -> None:
-    binder_type = "Error" if invoke_type is IRInvokeInterface else "FileError"
+    binder_type = "Error" if invoke_type is IRInterfaceCall else "FileError"
     argument = "probe" if invoke_type is IRInvokeIndirect else ""
     label = expected.splitlines()[0]
     source = ERROR_TYPES + f"""
@@ -635,7 +636,7 @@ def test_irv150_rejects_malformed_constructor_cleanup_in_python_and_rust(
     assert invocation.outcome.diagnostic.invariant_id == "IRV-150"
 
 
-def test_error_catch_borrows_payload_and_interface_invoke_executes() -> None:
+def test_error_catch_borrows_payload_and_nonthrowing_interface_call_executes() -> None:
     source = (
         ERROR_TYPES
         + """
@@ -651,7 +652,10 @@ int main() {
     )
     module = _lower(source)
 
-    assert any(isinstance(item, IRInvokeInterface) for item in _instructions(module))
+    calls = [item for item in _instructions(module) if isinstance(item, IRInterfaceCall)]
+    assert calls
+    assert all(not call.slot.may_throw for call in calls)
+    assert not any(isinstance(item, IRInvokeInterface) for item in _instructions(module))
     assert _execute(module) == (0, "root\n")
 
 

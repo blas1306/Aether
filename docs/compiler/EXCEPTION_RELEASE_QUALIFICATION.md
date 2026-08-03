@@ -28,22 +28,27 @@ with no event-out slot or unwind edge; malformed internal `may_throw` witnesses
 are rejected before LLVM emission. Panic remains fail-fast and
 `ERROR_HANDLING` remains `UNSUPPORTED`.
 
+Hotfix B closes ERQ-002 without changing this promotion decision. One semantic
+exception-effect summary now owns function and interface-slot `may_throw` facts.
+Initial IR records that decision in function metadata, interface call shape and
+witness-slot metadata; SSA preserves it; Python/Rust verifiers reject
+disagreements; LLVM consumes it without method-name or module-wide inference.
+`Error.message()` now remains an ordinary interface call at every stage.
+
 ## Blocking issues
 
 | ID | Blocking finding | Evidence | Required evidence to close |
 | --- | --- | --- | --- |
 | ERQ-001 | **CLOSED by Hotfix A.** The typechecker had accepted throwing `Error.message()` implementations; interpreter/runtime/backend code and positive IR/SSA/native tests had modeled a second event. | `test_error_message_implementation_cannot_throw`; `test_error_message_rejects_transitive_throwing_helper`; `test_root_reporter_calls_error_message_as_nonthrowing`; negative native qualification tests | The semantic diagnostic, non-throwing root call, backend invariant, panic separation and documentation consistency tests now enforce one rule. |
-| ERQ-002 | An interface-dispatch-only function lowers an exceptional `invoke` while its function metadata says `may_throw = false`; `IRVerifier` rejects it as `IRV-144`. | `test_interface_dispatch_records_missing_may_throw_release_blocker` | Conservative call-effect analysis and regression evidence for direct, indirect and interface dispatch in functions with no explicit `throw`. This requires a future implementation milestone touching Initial IR production, so qualification stops rather than repairing it. |
-| ERQ-003 | A valid AST program with nested rethrow, observable mutation and a later potentially throwing interface call reaches incompatible lifecycle states at shared `exception.propagate`; `IRVerifier` rejects it as `IRV-036`. | `test_nested_rethrow_mutation_records_initial_ir_release_blocker`; AST observation is `24\nlater\n` | Correct cleanup-ladder/state convergence in a future Initial IR/lifecycle milestone, plus Python/Rust verifier, SSA, optimizer and native regressions. |
+| ERQ-002 | **CLOSED by Hotfix B.** Initial IR had selected interface `invoke` from module-wide exception use while function `may_throw` came from a separate call-graph scan, producing IRV-144. | `test_interface_dispatch_only_function_has_consistent_nonthrowing_effect`; `test_interface_exception_effects.py` | The semantic effect summary, carried interface-slot fact, strict IR/SSA verifier checks and LLVM structural regressions now enforce one decision. |
+| ERQ-003 | **CLOSED by Hotfix B.** The recorded case used a later `Error.message()` dispatch whose artificial exceptional edge created the incompatible lifecycle join. The slot is semantically nonthrowing, so correct Initial IR has no such edge. | `test_nested_rethrow_mutation_with_later_error_message_verifies`; AST/IR observation is `24\nlater\n` | The same canonical slot effect that closes ERQ-002 removes the unreachable edge; lifecycle rules and verifier strength are unchanged. |
 | ERQ-004 | `implements Error` alone is classified as native exception syntax. A program that only calls the ordinary `message()` interface is rejected with `AE-BACKEND-ERROR_HANDLING`. | `test_error_conformance_only_records_capability_release_blocker`; detector branches in `capabilities.py` for struct/class conformance | Detect the operations that require exception transport, not ordinary `Error` conformance; prove no false positive or false negative across declarations, modules and all exception statements/calls. |
 | ERQ-005 | Shipped completion/highlighting still advertises the removed experimental `Exception` type and invalid legacy snippets such as untyped `catch (e)` and `throw "message"`. Catch binders have no dedicated symbol/hover/completion evidence. | `autocomplete_engine.py`, Qt keyword table, VS Code grammar, IntelliJ token table | Replace obsolete guidance with `Error` and typed/root catch forms; add CLI/LSP/Qt/VS Code/IntelliJ fixtures for completion, hover, symbols, recovery and diagnostics. |
 | ERQ-006 | Exceptions are absent from the executable release/differential corpus because the stable gate correctly rejects them; existing native tests bypass the gate. | `differential.py` calls `validate_backend_capabilities`; native exception helpers lower directly | After ERQ-001–005, add an atomic promotion candidate whose public CLI, wheel-installed CLI and differential corpus exercise exceptions at O0/O1/O2 without a bypass. |
 | ERQ-007 | The wheel builds, but release verification rejects it because a public catalog entry is absent from the artifact. | `verify_wheel` reports `wheel is missing public example: examples/LeetCode/isPalindrome.ae`; `pyproject.toml` has no `share/aether/examples/LeetCode` data-file entry | Make wheel contents derive from, or be exhaustively checked against, the authoritative manifest; then verify both wheel and sdist in isolated installed smoke tests. |
 
-ERQ-002 and ERQ-003 remain architecture-stage disagreements requiring future
-Initial IR/lifecycle work. Hotfix A repairs only ERQ-001 and does not alter
-Initial IR, lifecycle, SSA, either accepted lowering ADR, or the private runtime
-ABI layout/version.
+Hotfixes A and B close ERQ-001 through ERQ-003 without altering lifecycle,
+Initial IR or SSA representation, or the private runtime ABI layout/version.
 
 ## 1. Architecture audit
 
@@ -51,15 +56,15 @@ ABI layout/version.
 | --- | --- | --- |
 | Frontend | PASS | Expression throw, bare rethrow, typed/root catches, ordering, nesting, recovery and formatting are covered by `test_exceptions.py`, `test_source_formatter.py` and LSP formatter tests. |
 | Typechecker | PASS for Hotfix A; qualification still blocked | Core conformance, exact matching and catch rules pass. Throwing direct/transitive `Error.message()` implementations receive `AE-ERROR-MESSAGE-NONTHROWING`. |
-| AST interpreter | PASS with downstream disagreement | Representative handling, mutation, dynamic identity and provenance behave deterministically. ERQ-003 is accepted and executed here but rejected by Initial IR. |
+| AST interpreter | PASS | Representative handling, mutation, dynamic identity and provenance behave deterministically. Former ERQ-003 now agrees with verified Initial IR. |
 | Capability gate | **FAIL** | Fail-closed placement is correct, but ERQ-004 rejects an ordinary interface-only program. |
-| Initial IR lowering | **FAIL** | The broad admitted corpus lowers, but ERQ-002 and ERQ-003 produce verifier-invalid IR from typed source. |
-| Lifecycle expansion | **FAIL** | Constructor rollback and ordinary exceptional cleanup pass; the shared-propagation merge in ERQ-003 does not. |
+| Initial IR lowering | PASS for the qualified effect cases | ERQ-002/003 now generate verifier-valid IR because nonthrowing interface dispatch has no exceptional edge. |
+| Lifecycle expansion | PASS for the qualified corpus | Constructor rollback, ordinary exceptional cleanup and the former ERQ-003 case pass without lifecycle changes. |
 | Initial IR verifier | PASS as a detector | It rejects both invalid generated forms with stable `IRV-144`/`IRV-036`; the disagreement is that valid typed source generated them. |
 | SSA lowering | PASS for verified inputs | Direct/indirect/interface invokes, edge-defined results/events, handlers and ownership lower correctly for every Initial IR program admitted by the verifier. Blocked Initial IR programs cannot reach SSA. |
 | SSA verifier | PASS for verified inputs | Exceptional CFG, dominance, event linearity and constructor cleanup mutation tests pass in Python and Rust. |
 | SSA interpreter | PASS for verified inputs | Matches Initial IR on the admitted exception corpus and generated stress corpus. |
-| Optimizers | PASS for verified inputs | See the per-pass matrix below. This cannot override ERQ-002/003 because optimizers never receive verifier-rejected input. |
+| Optimizers | PASS for verified inputs | See the per-pass matrix below. |
 | LLVM lowering | PASS internal | Event-out is the production internal transport; the opt-in EH prototype is comparison-only. Both agree on the shared verified corpus. |
 | Runtime | PASS internal | Pack/match/borrow/destroy, root termination, fault injection, provenance, dynamic name and panic separation pass internal tests. Root message dispatch cannot form or recursively handle a second event. |
 | Native boundary verifier | PASS | Process root consumes events, raw-C event slots are rejected, foreign/public surfaces fail closed, and the private ABI remains private. |
@@ -82,22 +87,22 @@ user destructor hook that could print cleanup directly.
 | ordered multiple catches | PASS | Wrong handlers produce no output; exact handler precedes `Error` catch-all. |
 | nested catches | PASS | Generated 24-level no-mutation stress is deterministic across AST/IR/SSA/optimized/native. |
 | rethrow | PASS | Same event and original provenance move outward; sibling catches are skipped. |
-| nested rethrow | **BLOCKED** | Ordinary nested cases pass; ERQ-003 fails when combined with mutation and later exceptional interface dispatch. |
+| nested rethrow | PASS for the qualified cases | Mutation plus later nonthrowing `Error.message()` now verifies and matches AST observation; genuinely throwing invokes retain explicit cleanup edges. |
 | struct payloads | PASS | Owned snapshot semantics and `message()` output agree. |
 | class payloads | PASS | Reference identity and dynamic nominal descriptor agree. |
-| interface dispatch | **BLOCKED** | Dispatch works in already-throwing functions, but ERQ-002 rejects an interface-dispatch-only function. |
+| interface dispatch | PASS internally | Throwing, nonthrowing, mixed, nested, returned-interface, struct/class and multiple-interface dispatch preserve one semantic slot effect through IR, SSA and LLVM. |
 | successful constructors | PASS | Struct/class construction and ordinary results survive event-out and EH comparison. |
 | constructor failure | PASS | Partial fields and caller/callee receivers roll back under ASan/LSan/UBSan. |
 | `MethodResult` | PASS | Receiver/value extraction and exceptional call ABI agree. |
 | owned aggregates | PASS | Struct aggregates, strings, interfaces and nullable fields retain/drop correctly in admitted cases. |
 | `Array` / `List` | PASS | Managed fields, nested values and constructor rollback pass verifier and sanitizer evidence. |
 | nullable | PASS | Tagged nullable payload in owned exception aggregates preserves value/absence and cleanup. |
-| propagation | PASS except ERQ-003 | Deep and mutual recursion, several frames and 2,000 repeated events are deterministic. |
+| propagation | PASS | Deep and mutual recursion, several frames and 2,000 repeated events are deterministic. |
 | root handling | PASS internal | Exact stderr `Aether unhandled exception: <type>: <message>\n`, exit 1 and event destruction. |
 | panic | PASS | Overflow/division/bounds and private invariant failures bypass catches and remain distinct from exception events. |
 | stdout / stderr / exit status | PASS for admitted corpus | Byte-exact assertions exist at AST/IR/SSA/native and O0/O1/O2; generated stress runs twice identically. |
-| observable mutation | **BLOCKED** | Common catch mutation passes, but ERQ-003 demonstrates an AST/Initial IR disagreement. |
-| cleanup order | PASS for admitted corpus; globally blocked | Explicit ladders, event terminal disposition and sanitizer tests pass; ERQ-003 shows incomplete state convergence. |
+| observable mutation | PASS for the qualified cases | Common catch mutation and the former ERQ-003 case agree across AST and verified Initial IR. |
+| cleanup order | PASS for admitted corpus | Explicit ladders, event terminal disposition and sanitizer tests pass; Hotfix B adds no lifecycle rewrite. |
 | `Error.message()` | PASS for Hotfix A | Struct/class/interface dispatch remains normal; throwing bodies and transitive throwing helpers are rejected semantically, root lowering is a non-throwing call, and malformed internal witnesses fail before emission. |
 | dynamic type | PASS | Exact concrete descriptor matching and `Error` catch-all agree for struct/class/interface carriers. |
 | original provenance | PASS internal | Bare rethrow preserves the original line/column; replacement throw creates new provenance. |
@@ -226,8 +231,10 @@ events, constructor failures at multiple initialization points, `MethodResult`,
 nullable/owned aggregates, event allocation/reporting fault injection and
 event-out versus LLVM EH at O0/O1/O2.
 
-Stress testing also produced ERQ-002 and ERQ-003, demonstrating why a green
-happy-path corpus is insufficient for promotion.
+Stress testing originally produced ERQ-002 and ERQ-003, demonstrating why a
+green happy-path corpus is insufficient for promotion. Hotfix B closes both by
+removing exceptional edges from dispatches the semantic authority proves
+nonthrowing.
 
 ## 10. Cross-version audit
 
@@ -242,39 +249,35 @@ happy-path corpus is insufficient for promotion.
 
 ## 11. Remaining milestones and estimated scope
 
-1. **Initial IR/effect correction (medium):** fix conservative `may_throw` for
-   interface/indirect calls and lifecycle convergence for shared propagation;
-   update Python/Rust parity and negative mutation corpus.
-2. **Capability correction (small):** remove ordinary `Error` conformance false
+1. **Capability correction (small):** remove ordinary `Error` conformance false
    positives and add exhaustive syntax/module tests.
-3. **Tooling completion (medium):** completion, hover, symbols, recovery and
+2. **Tooling completion (medium):** completion, hover, symbols, recovery and
    fixtures across LSP, Qt, VS Code and IntelliJ; remove obsolete `Exception`.
-4. **Packaging correction (small):** make the wheel/sdist public example set
+3. **Packaging correction (small):** make the wheel/sdist public example set
    agree with the authoritative manifest and run isolated artifact validation.
-5. **Integrated promotion candidate (medium):** public differential corpus,
+4. **Integrated promotion candidate (medium):** public differential corpus,
    sanitizer jobs, wheel-installed CLI, CI/release gate and diagnostics.
-6. **Repeat release qualification (small after the above):** rerun every matrix;
+5. **Repeat release qualification (small after the above):** rerun every matrix;
    only then may profile state, version, normative spec and examples be changed
    atomically.
 
-Estimated aggregate scope: **medium-to-large**, dominated by Initial IR/
-lifecycle correctness and cross-tool evidence rather than backend transport.
+Estimated aggregate scope: **medium**, dominated by tooling, packaging and
+integrated cross-tool evidence rather than backend transport.
 
-## 12. Files modified by qualification
+## 12. Files modified by qualification and hotfixes
 
-Because promotion was rejected, no capability, language semantic, IR, SSA,
-runtime or backend source file was changed. Qualification changes are limited
-to:
-
-- this audit report and current documentation references;
-- the authoritative example manifest and matching count documentation;
-- `tests/aether/test_exception_release_qualification.py` for generated stress
-  and executable blocker regressions;
-- the release documentation checker classification for this report.
+The original qualification changed only audit/evidence files. Hotfix A added
+the semantic `Error.message()` guard and nonthrowing backend enforcement.
+Hotfix B adds the shared semantic exception-effect summary, carries its
+interface-slot fact through Initial IR/DTO/SSA, strengthens Python and Rust
+consistency checks, removes LLVM-side inference, and adds focused cross-stage
+regressions. Capability state, public language surface, lifecycle, IR/SSA
+representation and runtime ABI remain unchanged.
 
 ## 13. Risks retained
 
-- Additional shared-cleanup merge shapes may exist beyond ERQ-003.
+- Additional shared-cleanup merge shapes remain an audit risk even though the
+  former ERQ-003 shape now contains no artificial exceptional edge.
 - Internal native tests bypassing the stable gate can conceal integration and
   packaging gaps.
 - Historical ERQ-001 evidence can be mistaken for current behavior unless its
@@ -288,10 +291,10 @@ to:
 
 | Area | Result |
 | --- | --- |
-| Full Python suite | **4497 passed, 12 failed, 4 skipped**. All 12 failures are pre-existing assertions in `test_import_aliases.py`: the current vector orientation prints a column (`[1.0; 2.0]`) while those tests expect a row (`[1.0 2.0]`). No qualification file touches that behavior. |
-| Qualification regressions | **4 passed**: generated cross-stage/native stress plus executable records for ERQ-002, ERQ-003 and ERQ-004. |
-| Profile/release targeted suite | **222 passed**, covering the qualification test, profile audit and release contract. |
-| Initial IR / SSA repository regression | 117 programs discovered; 101 lowered to IR, 68 comparable across builders, all admitted general-builder programs verified. |
+| Full Python suite | **4514 passed, 12 failed, 4 skipped**. All 12 failures are pre-existing assertions in `test_import_aliases.py`: the current vector orientation prints a column (`[1.0; 2.0]`) while those tests expect a row (`[1.0 2.0]`). No Hotfix B file touches that behavior. |
+| Qualification/effect regressions | **11 passed**: generated cross-stage/native stress, the former ERQ-002/003 cases, ERQ-004 evidence, documentation authority and six focused semantic/IR/SSA/LLVM interface-effect tests. |
+| Focused compiler suites | **282 IR**, **72 SSA**, **84 backend/native** and **116 Rust-adapter/shadow** tests passed. |
+| Initial IR / SSA repository regression | 117 programs discovered; 101 lowered to IR, 67 comparable across builders, all admitted general-builder programs verified. |
 | Rust verifier | `cargo test --workspace --locked` passed every unit, integration and documentation test, including exception and SSA wire-verifier suites. |
 | LLVM/native | Clang 21.1.8 compiled and ran the generated O2 stress program twice with byte-identical output/status; the broader Python native suite introduced no failure. |
 | Optimizers | Initial IR and SSA optimizer suites passed in the full run; generated qualification runs the verifier after optimized IR and after every SSA pass. |

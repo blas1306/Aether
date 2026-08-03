@@ -321,34 +321,6 @@ class LLVMPrinter:
             for block in function.blocks
             for instruction in block.instructions
         )
-        self._throwing_interface_slots = {
-            instruction.slot.method_id
-            for function in module.functions
-            for block in function.blocks
-            for instruction in block.instructions
-            if isinstance(instruction, SSAInvokeInterface)
-        }
-        interface_slots = {
-            instruction.slot.method_id
-            for function in module.functions
-            for block in function.blocks
-            for instruction in block.instructions
-            if isinstance(instruction, (SSAInterfaceCall, SSAInvokeInterface))
-        }
-        self._throwing_interface_slots.update(
-            slot_id
-            for slot_id in interface_slots
-            if any(
-                function.may_throw
-                and function.name.endswith(f".{slot_id.rsplit('.', 1)[-1]}")
-                for function in module.functions
-            )
-        )
-        # Initial IR/SSA may conservatively retain an exceptional-shaped CFG
-        # edge for unchecked interface dispatch.  Error.message is the one
-        # language-defined exception-free slot, so LLVM lowering never gives
-        # its thunk an event-out parameter or unwind edge.
-        self._throwing_interface_slots.discard("Error.message")
         if self._uses_exceptions:
             self._uses_interface_dispatch = True
             self._uses_string_runtime = True
@@ -1009,11 +981,6 @@ class LLVMPrinter:
                 if isinstance(
                     block.instructions[-1],
                     (SSAInvoke, SSAInvokeIndirect, SSAInvokeInterface),
-                )
-                and not (
-                    isinstance(block.instructions[-1], SSAInvokeInterface)
-                    and block.instructions[-1].receiver.type == InterfaceType("Error")
-                    and block.instructions[-1].slot.method_id == "Error.message"
                 )
             }
         for predecessor in function.blocks:
@@ -2322,6 +2289,10 @@ class LLVMPrinter:
     def _print_interface_invoke(self, instruction: SSAInvokeInterface) -> list[str]:
         if not isinstance(instruction.receiver.type, InterfaceType):
             raise LLVMBackendError("LLVM interface invoke requires an interface receiver")
+        if not instruction.slot.may_throw:
+            raise LLVMBackendError(
+                f"LLVM interface invoke target '{instruction.slot.method_id}' is not may_throw"
+            )
         self._uses_interface_dispatch = True
         rendered = llvm_type(instruction.receiver.type)
         receiver = self._operand(instruction.receiver)
@@ -2347,38 +2318,6 @@ class LLVMPrinter:
             ],
         ]
         return_type = instruction.slot.return_type
-        if (
-            instruction.receiver.type == InterfaceType("Error")
-            and instruction.slot.method_id == "Error.message"
-        ):
-            call = (
-                f"call {llvm_type(return_type)} {thunk}"
-                f"({', '.join(arguments)}) nounwind"
-            )
-            if isinstance(return_type, VoidType):
-                if instruction.result is not None:
-                    raise LLVMBackendError(
-                        "LLVM void Error.message invoke cannot define a result"
-                    )
-                lines.append(call)
-            else:
-                if instruction.result is None:
-                    raise LLVMBackendError(
-                        "LLVM Error.message invoke requires a normal result"
-                    )
-                lines.append(f"{self._new_temp(instruction.result)} = {call}")
-            event = self._new_temp(instruction.exception)
-            failed = self._synthetic_temp("invoke.error.message.failed")
-            lines.extend(
-                [
-                    f"{event} = select i1 false, ptr null, ptr null",
-                    f"{failed} = icmp ne ptr {event}, null",
-                    f"br i1 {failed}, "
-                    f"{self._label_operand(instruction.exceptional_target)}, "
-                    f"{self._label_operand(instruction.normal_target)}",
-                ]
-            )
-            return lines
         if self._exception_strategy is ExceptionLoweringStrategy.LLVM_EH_PROTOTYPE:
             trampoline = self._eh_trampoline_by_block.get(self._current_block)
             if trampoline is None:
@@ -3863,7 +3802,7 @@ class LLVMPrinter:
                 "LLVM interface_call receiver must have interface type"
             )
         self._uses_interface_dispatch = True
-        if instruction.slot.method_id in self._throwing_interface_slots:
+        if instruction.slot.may_throw:
             raise LLVMBackendError(
                 f"LLVM call/invoke mismatch for potentially throwing interface slot "
                 f"'{instruction.slot.method_id}'"
@@ -6122,7 +6061,7 @@ class LLVMPrinter:
                 for index, type_ in enumerate(slot.parameter_types)
             ],
         ]
-        throwing_slot = slot.method_id in self._throwing_interface_slots
+        throwing_slot = slot.may_throw
         if target.may_throw and not throwing_slot:
             raise LLVMBackendError(
                 f"LLVM interface slot '{slot.method_id}' lost may_throw metadata"

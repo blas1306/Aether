@@ -342,6 +342,7 @@ class IRWitnessMethodSlot:
     return_type: IRType
     thunk_symbol: str = ""
     receiver_ownership: str = "borrowed"
+    may_throw: bool = False
 
 
 @dataclass(frozen=True)

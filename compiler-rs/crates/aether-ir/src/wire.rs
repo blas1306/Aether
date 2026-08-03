@@ -408,6 +408,9 @@ pub struct IRWitnessMethodSlotDTO {
     pub thunk_symbol: String,
     /// Receiver ownership in the erased ABI.
     pub receiver_ownership: String,
+    /// Canonical semantic catchable-exception effect for this interface slot.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub may_throw: bool,
 }
 
 /// Function container in the wire schema.

@@ -339,6 +339,72 @@ def ir_enum_constant_to_dto(
     }
 
 
+def _witness_slot_to_dto(
+    slot: IRWitnessMethodSlot,
+    *,
+    schema_version: int,
+) -> dict[str, object]:
+    dto = {
+        "index": _expect_i64(slot.index, "IR witness slot index"),
+        "method_id": _expect_string(slot.method_id, "IR witness slot method_id"),
+        "parameter_types": [
+            ir_type_to_dto(type_, schema_version=schema_version)
+            for type_ in slot.parameter_types
+        ],
+        "return_type": ir_type_to_dto(
+            slot.return_type, schema_version=schema_version
+        ),
+        "thunk_symbol": _expect_string(
+            slot.thunk_symbol, "IR witness slot thunk_symbol"
+        ),
+        "receiver_ownership": _expect_string(
+            slot.receiver_ownership,
+            "IR witness slot receiver_ownership",
+        ),
+    }
+    if slot.may_throw:
+        dto["may_throw"] = True
+    return dto
+
+
+def _witness_slot_from_dto(
+    value: object,
+    *,
+    schema_version: int,
+    context: str,
+) -> IRWitnessMethodSlot:
+    slot = _expect_mapping(value, context)
+    required = {
+        "index",
+        "method_id",
+        "parameter_types",
+        "return_type",
+        "thunk_symbol",
+        "receiver_ownership",
+    }
+    if set(slot) - required - {"may_throw"} or not required.issubset(slot):
+        _expect_fields(slot, required, context)
+    raw_parameters = _expect_sequence(slot["parameter_types"], f"{context}.parameter_types")
+    return IRWitnessMethodSlot(
+        _expect_i64(slot["index"], f"{context}.index"),
+        _expect_string(slot["method_id"], f"{context}.method_id"),
+        tuple(
+            ir_type_from_dto(type_, schema_version=schema_version)
+            for type_ in raw_parameters
+        ),
+        ir_type_from_dto(slot["return_type"], schema_version=schema_version),
+        _expect_string(slot["thunk_symbol"], f"{context}.thunk_symbol"),
+        _expect_string(
+            slot["receiver_ownership"], f"{context}.receiver_ownership"
+        ),
+        (
+            _expect_bool(slot["may_throw"], f"{context}.may_throw")
+            if "may_throw" in slot
+            else False
+        ),
+    )
+
+
 def _witness_to_dto(
     witness: IRWitnessTable,
     *,
@@ -364,26 +430,7 @@ def _witness_to_dto(
             witness.abi_version, "IR witness abi_version"
         ),
         "method_slots": [
-            {
-                "index": _expect_i64(slot.index, "IR witness slot index"),
-                "method_id": _expect_string(
-                    slot.method_id, "IR witness slot method_id"
-                ),
-                "parameter_types": [
-                    ir_type_to_dto(type_, schema_version=schema_version)
-                    for type_ in slot.parameter_types
-                ],
-                "return_type": ir_type_to_dto(
-                    slot.return_type, schema_version=schema_version
-                ),
-                "thunk_symbol": _expect_string(
-                    slot.thunk_symbol, "IR witness slot thunk_symbol"
-                ),
-                "receiver_ownership": _expect_string(
-                    slot.receiver_ownership,
-                    "IR witness slot receiver_ownership",
-                ),
-            }
+            _witness_slot_to_dto(slot, schema_version=schema_version)
             for slot in witness.method_slots
         ],
     }
@@ -430,48 +477,11 @@ def _witness_from_dto(
     raw_slots = _expect_sequence(mapping["method_slots"], "IR witness method_slots")
     slots: list[IRWitnessMethodSlot] = []
     for slot_index, raw_slot in enumerate(raw_slots):
-        slot = _expect_mapping(raw_slot, f"IR witness method_slots[{slot_index}]")
-        _expect_fields(
-            slot,
-            {
-                "index",
-                "method_id",
-                "parameter_types",
-                "return_type",
-                "thunk_symbol",
-                "receiver_ownership",
-            },
-            f"IR witness method_slots[{slot_index}]",
-        )
-        raw_parameters = _expect_sequence(
-            slot["parameter_types"],
-            f"IR witness method_slots[{slot_index}].parameter_types",
-        )
         slots.append(
-            IRWitnessMethodSlot(
-                _expect_i64(
-                    slot["index"],
-                    f"IR witness method_slots[{slot_index}].index",
-                ),
-                _expect_string(
-                    slot["method_id"],
-                    f"IR witness method_slots[{slot_index}].method_id",
-                ),
-                tuple(
-                    ir_type_from_dto(type_, schema_version=schema_version)
-                    for type_ in raw_parameters
-                ),
-                ir_type_from_dto(
-                    slot["return_type"], schema_version=schema_version
-                ),
-                _expect_string(
-                    slot["thunk_symbol"],
-                    f"IR witness method_slots[{slot_index}].thunk_symbol",
-                ),
-                _expect_string(
-                    slot["receiver_ownership"],
-                    f"IR witness method_slots[{slot_index}].receiver_ownership",
-                ),
+            _witness_slot_from_dto(
+                raw_slot,
+                schema_version=schema_version,
+                context=f"IR witness method_slots[{slot_index}]",
             )
         )
     box_layout = None
@@ -1086,20 +1096,9 @@ def _encode_instruction_to_dto(
                 ir_value_to_dto(argument, schema_version=schema_version)
                 for argument in instruction.arguments
             ],
-            "slot": {
-                "index": instruction.slot.index,
-                "method_id": instruction.slot.method_id,
-                "parameter_types": [
-                    ir_type_to_dto(type_, schema_version=schema_version)
-                    for type_ in instruction.slot.parameter_types
-                ],
-                "return_type": ir_type_to_dto(
-                    instruction.slot.return_type,
-                    schema_version=schema_version,
-                ),
-                "thunk_symbol": instruction.slot.thunk_symbol,
-                "receiver_ownership": instruction.slot.receiver_ownership,
-            },
+            "slot": _witness_slot_to_dto(
+                instruction.slot, schema_version=schema_version
+            ),
             "result": (
                 None
                 if instruction.result is None
@@ -1118,20 +1117,9 @@ def _encode_instruction_to_dto(
                 ir_value_to_dto(value, schema_version=schema_version)
                 for value in instruction.arguments
             ],
-            "slot": {
-                "index": instruction.slot.index,
-                "method_id": instruction.slot.method_id,
-                "parameter_types": [
-                    ir_type_to_dto(type_, schema_version=schema_version)
-                    for type_ in instruction.slot.parameter_types
-                ],
-                "return_type": ir_type_to_dto(
-                    instruction.slot.return_type,
-                    schema_version=schema_version,
-                ),
-                "thunk_symbol": instruction.slot.thunk_symbol,
-                "receiver_ownership": instruction.slot.receiver_ownership,
-            },
+            "slot": _witness_slot_to_dto(
+                instruction.slot, schema_version=schema_version
+            ),
             "result": (
                 None
                 if instruction.result is None
@@ -2089,28 +2077,9 @@ def _decode_instruction_from_dto(
             {"kind", "receiver", "arguments", "slot", "result"},
             "IR instruction 'interface_call'",
         )
-        raw_slot = _expect_mapping(
-            mapping["slot"], "IR instruction 'interface_call'.slot"
-        )
-        _expect_fields(
-            raw_slot,
-            {
-                "index",
-                "method_id",
-                "parameter_types",
-                "return_type",
-                "thunk_symbol",
-                "receiver_ownership",
-            },
-            "IR instruction 'interface_call'.slot",
-        )
         raw_arguments = _expect_sequence(
             mapping["arguments"],
             "IR instruction 'interface_call'.arguments",
-        )
-        raw_parameter_types = _expect_sequence(
-            raw_slot["parameter_types"],
-            "IR instruction 'interface_call'.slot.parameter_types",
         )
         return IRInterfaceCall(
             ir_value_from_dto(
@@ -2120,30 +2089,10 @@ def _decode_instruction_from_dto(
                 ir_value_from_dto(argument, schema_version=schema_version)
                 for argument in raw_arguments
             ),
-            IRWitnessMethodSlot(
-                _expect_i64(
-                    raw_slot["index"],
-                    "IR instruction 'interface_call'.slot.index",
-                ),
-                _expect_string(
-                    raw_slot["method_id"],
-                    "IR instruction 'interface_call'.slot.method_id",
-                ),
-                tuple(
-                    ir_type_from_dto(type_, schema_version=schema_version)
-                    for type_ in raw_parameter_types
-                ),
-                ir_type_from_dto(
-                    raw_slot["return_type"], schema_version=schema_version
-                ),
-                _expect_string(
-                    raw_slot["thunk_symbol"],
-                    "IR instruction 'interface_call'.slot.thunk_symbol",
-                ),
-                _expect_string(
-                    raw_slot["receiver_ownership"],
-                    "IR instruction 'interface_call'.slot.receiver_ownership",
-                ),
+            _witness_slot_from_dto(
+                mapping["slot"],
+                schema_version=schema_version,
+                context="IR instruction 'interface_call'.slot",
             ),
             (
                 None
@@ -2163,35 +2112,14 @@ def _decode_instruction_from_dto(
             },
             "IR instruction 'invoke_interface'",
         )
-        raw_slot = _expect_mapping(
-            mapping["slot"], "IR instruction 'invoke_interface'.slot"
-        )
-        _expect_fields(
-            raw_slot,
-            {
-                "index", "method_id", "parameter_types", "return_type",
-                "thunk_symbol", "receiver_ownership",
-            },
-            "IR instruction 'invoke_interface'.slot",
-        )
         raw_arguments = _expect_sequence(
             mapping["arguments"],
             "IR instruction 'invoke_interface'.arguments",
         )
-        raw_parameter_types = _expect_sequence(
-            raw_slot["parameter_types"],
-            "IR instruction 'invoke_interface'.slot.parameter_types",
-        )
-        slot = IRWitnessMethodSlot(
-            _expect_i64(raw_slot["index"], "IR instruction 'invoke_interface'.slot.index"),
-            _expect_string(raw_slot["method_id"], "IR instruction 'invoke_interface'.slot.method_id"),
-            tuple(
-                ir_type_from_dto(type_, schema_version=schema_version)
-                for type_ in raw_parameter_types
-            ),
-            ir_type_from_dto(raw_slot["return_type"], schema_version=schema_version),
-            _expect_string(raw_slot["thunk_symbol"], "IR instruction 'invoke_interface'.slot.thunk_symbol"),
-            _expect_string(raw_slot["receiver_ownership"], "IR instruction 'invoke_interface'.slot.receiver_ownership"),
+        slot = _witness_slot_from_dto(
+            mapping["slot"],
+            schema_version=schema_version,
+            context="IR instruction 'invoke_interface'.slot",
         )
         return IRInvokeInterface(
             ir_value_from_dto(mapping["receiver"], schema_version=schema_version),

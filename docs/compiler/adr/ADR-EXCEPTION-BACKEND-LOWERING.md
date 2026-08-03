@@ -38,6 +38,13 @@ ordinary aggregate returns and constructors retain their existing target ABI;
 only the private event slot is added to calls proven `may_throw`. Recursion and
 mutual recursion need no special state. No global or TLS current event exists.
 
+Implementation clarification: LLVM consumes the verified SSA interface-slot
+`may_throw` fact for thunk signature and call/invoke lowering. It does not infer
+the effect from a concrete implementation name, from the presence of another
+invoke, or from module-wide exception use. Mixed implementations share the
+throwing slot ABI; a nonthrowing target thunk simply leaves the caller's event
+slot null.
+
 Functions and call sites proven nonthrowing keep the ordinary call ABI. `main`
 contains an escaping event at the process root and invokes private root
 termination rather than exposing a throwing C entry point.

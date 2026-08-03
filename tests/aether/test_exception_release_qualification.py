@@ -13,7 +13,14 @@ from aether.capabilities import (
     backend_capability_issues,
     detect_required_capabilities,
 )
-from aether.ir import IRInterpreter, IRLowerer, IRVerificationError, IRVerifier
+from aether.ir import (
+    IRInterfaceCall,
+    IRInterpreter,
+    IRInvokeInterface,
+    IRLowerer,
+    IRVerificationError,
+    IRVerifier,
+)
 from aether.ir.optimizer import OptimizerPipeline
 from aether.pipeline import parse_source, prepare_typed_program
 from aether.runner import run_aether
@@ -202,7 +209,7 @@ def test_generated_exception_stress_is_deterministic_across_all_internal_stages(
     ] == [(0, expected, ""), (0, expected, "")]
 
 
-def test_nested_rethrow_mutation_records_initial_ir_release_blocker() -> None:
+def test_nested_rethrow_mutation_with_later_error_message_verifies() -> None:
     nested = "throw E0();"
     for index in range(24):
         nested = (
@@ -231,24 +238,35 @@ int main() {{
 
     assert run_aether(source).output == "24\nlater\n"
     initial_ir = IRLowerer().lower(program)
-    with pytest.raises(
-        IRVerificationError,
-        match=r"Lifecycle state.*%cleanupCount.*exception\.propagate",
-    ):
-        IRVerifier(initial_ir).verify()
+    assert IRVerifier(initial_ir).verify() is initial_ir
+    interpreter = IRInterpreter(initial_ir)
+    assert interpreter.call("main") == 0
+    assert interpreter.output == "24\nlater\n"
 
 
-def test_interface_dispatch_records_missing_may_throw_release_blocker() -> None:
+def test_interface_dispatch_only_function_has_consistent_nonthrowing_effect() -> None:
     source = _stress_source(seed_interface_throw_fact=False)
     program = parse_source(source)
     TypeChecker().check(program)
 
     initial_ir = IRLowerer().lower(program)
-    with pytest.raises(
-        IRVerificationError,
-        match=r"interfaceStress.*exception IR.*may_throw is false",
-    ):
-        IRVerifier(initial_ir).verify()
+    assert IRVerifier(initial_ir).verify() is initial_ir
+    function = next(
+        function for function in initial_ir.functions if function.name == "interfaceStress"
+    )
+    assert not function.may_throw
+    assert any(
+        isinstance(instruction, IRInterfaceCall)
+        and instruction.slot.method_id == "Error.message"
+        and not instruction.slot.may_throw
+        for block in function.blocks
+        for instruction in block.instructions
+    )
+    assert not any(
+        isinstance(instruction, IRInvokeInterface)
+        for block in function.blocks
+        for instruction in block.instructions
+    )
 
 
 def test_error_conformance_only_records_capability_release_blocker() -> None:

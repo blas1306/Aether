@@ -629,6 +629,11 @@ class NativeBoundaryVerifier:
         instruction: SSAInvokeInterface,
         witnesses: dict[str, IRWitnessTable],
     ) -> None:
+        if not instruction.slot.may_throw:
+            self._fail(
+                NativeBoundaryDiagnostic.EXCEPTION_CROSSING_FOREIGN_BOUNDARY,
+                f"interface invoke '{instruction.slot.method_id}' is not marked may_throw",
+            )
         matching_slots = [
             slot
             for witness in witnesses.values()
@@ -637,18 +642,14 @@ class NativeBoundaryVerifier:
             if slot.method_id == instruction.slot.method_id
         ]
         if not matching_slots:
-            if (
-                instruction.receiver.type == InterfaceType("Error")
-                and instruction.slot.method_id == "Error.message"
-                and bool(getattr(self, "_exception_identities", {}))
-            ):
-                # Error witnesses/descriptors are synthesized from the concrete
-                # pack/catch inventory immediately after this verifier.  Their
-                # targets are nevertheless module-owned functions proven above.
-                return
             self._fail(
                 NativeBoundaryDiagnostic.EXCEPTION_CROSSING_FOREIGN_BOUNDARY,
                 f"interface invoke '{instruction.slot.method_id}' has no compiler-owned dispatch thunk",
+            )
+        if any(slot.may_throw != instruction.slot.may_throw for slot in matching_slots):
+            self._fail(
+                NativeBoundaryDiagnostic.EXCEPTION_CROSSING_FOREIGN_BOUNDARY,
+                f"interface invoke '{instruction.slot.method_id}' disagrees with witness may_throw metadata",
             )
 
     def _verify_exception_exit(self, name: str, may_throw: bool, instruction: object) -> None:

@@ -17,6 +17,8 @@ pub struct IRWitnessMethodSlot {
     pub thunk_symbol: String,
     /// Receiver ownership in the erased ABI.
     pub receiver_ownership: String,
+    /// Canonical semantic catchable-exception effect for this interface slot.
+    pub may_throw: bool,
 }
 
 /// Deterministic layout and lifecycle metadata for one erased struct payload.

@@ -7,6 +7,7 @@ from typing import NoReturn
 
 from .. import ast
 from ..errors import IRBackendUnsupportedFeatureError
+from ..exception_effects import ExceptionEffectSummary, analyze_exception_effects
 from ..integer_arithmetic import INT_MAX, INT_MIN, is_aether_int
 from ..interface_abi import (
     ERASED_BOX_HEADER_SIZE,
@@ -351,7 +352,7 @@ class IRLowerer:
         self._builtin_constant_aliases: dict[str, str] = {}
         self._module_bindings: dict[str, str] = {}
         self._may_throw_functions: set[str] = set()
-        self._exception_ir_enabled = False
+        self._exception_effects = ExceptionEffectSummary(frozenset(), {})
 
     def lower_checked_program(self, checked_program: object) -> IRModule:
         """Lower a complete semantic program using the combined-module strategy."""
@@ -433,8 +434,11 @@ class IRLowerer:
             for declaration in declarations
         }
         self._signatures = self._collect_signatures(program)
-        self._may_throw_functions = self._collect_may_throw_functions(program)
-        self._exception_ir_enabled = bool(self._may_throw_functions)
+        self._exception_effects = analyze_exception_effects(
+            program,
+            builtin_aliases=self._builtin_aliases,
+        )
+        self._may_throw_functions = set(self._exception_effects.functions)
         functions: list[IRFunction] = []
         for statement in program.statements:
             if isinstance(statement, ast.FunctionDeclaration):
@@ -528,100 +532,6 @@ class IRLowerer:
             else:
                 self._unsupported(statement)
         return signatures
-
-    def _collect_may_throw_functions(self, program: ast.Program) -> set[str]:
-        """Compute conservative internal throw summaries without changing source types."""
-
-        bodies: dict[str, list[ast.Statement]] = {}
-        owners: dict[str, str | None] = {}
-        callable_parameters: dict[str, set[str]] = {}
-        for statement in program.statements:
-            if isinstance(statement, ast.FunctionDeclaration):
-                bodies[statement.name] = statement.body
-                owners[statement.name] = None
-                callable_parameters[statement.name] = {
-                    parameter.name
-                    for parameter in statement.parameters
-                    if isinstance(parameter.type_name, AetherFunctionType)
-                }
-            elif isinstance(statement, (ast.StructDeclaration, ast.ClassDeclaration)):
-                for method in statement.methods:
-                    name = self._method_function_name(statement.name, method.name)
-                    bodies[name] = method.body
-                    owners[name] = statement.name
-                    callable_parameters[name] = {
-                        parameter.name
-                        for parameter in method.parameters
-                        if isinstance(parameter.type_name, AetherFunctionType)
-                    }
-                if statement.constructor is not None:
-                    name = self._method_function_name(statement.name, "__ctor")
-                    bodies[name] = statement.constructor.body
-                    owners[name] = statement.name
-                    callable_parameters[name] = {
-                        parameter.name
-                        for parameter in statement.constructor.parameters
-                        if isinstance(parameter.type_name, AetherFunctionType)
-                    }
-
-        direct: set[str] = set()
-        indirect_callers: set[str] = set()
-        calls: dict[str, set[str]] = {}
-        for name, body in bodies.items():
-            raw_calls: set[str] = set()
-            if self._exception_facts(body, raw_calls):
-                direct.add(name)
-            if raw_calls & callable_parameters[name]:
-                indirect_callers.add(name)
-            seen_calls: set[str] = set()
-            for callee in raw_calls:
-                if callee in bodies:
-                    seen_calls.add(callee)
-                    continue
-                owner = owners[name]
-                if owner is not None and (owner, callee) in self._method_names:
-                    seen_calls.add(self._method_names[(owner, callee)])
-                method_name = callee.rsplit(".", 1)[-1]
-                seen_calls.update(
-                    canonical
-                    for (candidate_owner, candidate_method), canonical in self._method_names.items()
-                    if candidate_method == method_name
-                    and (callee != method_name or candidate_owner == owner)
-                )
-                constructor = self._method_names.get((callee, "__ctor"))
-                if constructor is not None:
-                    seen_calls.add(constructor)
-            calls[name] = seen_calls
-
-        if direct:
-            direct.update(indirect_callers)
-
-        may_throw = set(direct)
-        changed = True
-        while changed:
-            changed = False
-            for name, callees in calls.items():
-                if name not in may_throw and any(callee in may_throw for callee in callees):
-                    may_throw.add(name)
-                    changed = True
-        return may_throw
-
-    def _exception_facts(self, value: object, calls: set[str]) -> bool:
-        if isinstance(value, (ast.ThrowStatement, ast.RethrowStatement)):
-            return True
-        if isinstance(value, ast.CallExpression):
-            calls.add(value.callee)
-        if isinstance(value, (ast.FunctionDeclaration, ast.ExpressionFunctionDeclaration)):
-            return False
-        found = False
-        if isinstance(value, (list, tuple)):
-            for item in value:
-                found = self._exception_facts(item, calls) or found
-            return found
-        if is_dataclass(value):
-            for descriptor in dataclass_fields(value):
-                found = self._exception_facts(getattr(value, descriptor.name), calls) or found
-        return found
 
     def _lower_function(
         self,
@@ -3078,13 +2988,13 @@ class IRLowerer:
         if isinstance(signature.return_type, VoidType):
             if result_required:
                 self._fail(f"IR backend cannot use void call '{call.callee}' as a value.", call)
-            if self._exception_ir_enabled:
+            if self._exception_effects.indirect_calls_may_throw:
                 self._emit_indirect_invoke(context, callee, arguments, None)
             else:
                 context.block.instructions.append(IRCallIndirect(callee, arguments, None))
             return None
         result = context.temporary(signature.return_type)
-        if self._exception_ir_enabled:
+        if self._exception_effects.indirect_calls_may_throw:
             self._emit_indirect_invoke(context, callee, arguments, result)
         else:
             context.block.instructions.append(IRCallIndirect(callee, arguments, result))
@@ -3391,6 +3301,9 @@ class IRLowerer:
                 f"{receiver.type.name}.{method.name}",
                 parameter_types,
                 return_type,
+                may_throw=self._exception_effects.interface_slot_may_throw(
+                    f"{receiver.type.name}.{method.name}"
+                ),
             )
             if isinstance(return_type, VoidType):
                 if result_required:
@@ -3399,7 +3312,7 @@ class IRLowerer:
                         f"'{method_name}' as a value.",
                         node,
                     )
-                if self._exception_ir_enabled:
+                if slot.may_throw:
                     self._emit_interface_invoke(
                         context, receiver, arguments, slot, None
                     )
@@ -3409,7 +3322,7 @@ class IRLowerer:
                     )
                 return None
             result = context.temporary(return_type)
-            if self._exception_ir_enabled:
+            if slot.may_throw:
                 self._emit_interface_invoke(
                     context, receiver, arguments, slot, result
                 )
@@ -4312,6 +4225,9 @@ class IRLowerer:
                         concrete_type.name,
                         index,
                         method_id,
+                    ),
+                    may_throw=self._exception_effects.interface_slot_may_throw(
+                        method_id
                     ),
                 )
             )

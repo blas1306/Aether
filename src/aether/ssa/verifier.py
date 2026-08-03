@@ -207,8 +207,50 @@ class SSAVerifier:
             seen.add(function.name)
             self._functions[function.name] = function
 
+        self._verify_interface_effect_metadata()
         for function in self.module.functions:
             self._verify_function(function)
+
+    def _verify_interface_effect_metadata(self) -> None:
+        effects: dict[str, bool] = {}
+        for function in self.module.functions:
+            for block in function.blocks:
+                for instruction in block.instructions:
+                    slots = (
+                        instruction.witness.method_slots
+                        if isinstance(instruction, SSAInterfaceConstruct)
+                        else (
+                            (instruction.slot,)
+                            if isinstance(
+                                instruction,
+                                (SSAInterfaceCall, SSAInvokeInterface),
+                            )
+                            else ()
+                        )
+                    )
+                    for slot in slots:
+                        if type(slot.may_throw) is not bool:
+                            self._fail(
+                                f"Interface slot '{slot.method_id}' may_throw metadata must be boolean"
+                            )
+                        prior = effects.setdefault(slot.method_id, slot.may_throw)
+                        if prior != slot.may_throw:
+                            self._fail(
+                                f"Interface slot '{slot.method_id}' has contradictory may_throw metadata"
+                            )
+                        if slot.method_id == "Error.message" and slot.may_throw:
+                            self._fail("Error.message interface slot must be non-throwing")
+
+                    if isinstance(instruction, SSAInterfaceConstruct):
+                        for slot in instruction.witness.method_slots:
+                            method = slot.method_id.rsplit(".", 1)[-1]
+                            target = self._functions.get(
+                                f"{instruction.witness.concrete_type_id}.{method}"
+                            )
+                            if target is not None and target.may_throw and not slot.may_throw:
+                                self._fail(
+                                    f"Interface witness slot '{slot.method_id}' lost may_throw metadata"
+                                )
 
     def _verify_struct_definitions(self) -> None:
         if len(self._structs) != len(self.module.structs):
@@ -1264,6 +1306,10 @@ class SSAVerifier:
                     or instruction.slot.thunk_symbol
                 ):
                     self._fail("Interface call has invalid erased slot metadata")
+                if instruction.slot.may_throw:
+                    self._fail(
+                        f"Interface call to may_throw slot '{instruction.slot.method_id}' must use invoke"
+                    )
                 if len(instruction.arguments) != len(
                     instruction.slot.parameter_types
                 ):
@@ -1970,6 +2016,10 @@ class SSAVerifier:
             or instruction.slot.thunk_symbol
         ):
             self._fail("Interface invoke has invalid erased slot metadata")
+        if not instruction.slot.may_throw:
+            self._fail(
+                f"Interface invoke target '{instruction.slot.method_id}' is not may_throw"
+            )
         if len(instruction.arguments) != len(
             instruction.slot.parameter_types
         ):
