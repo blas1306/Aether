@@ -94,8 +94,10 @@ El primer núcleo ejecutable se apoyó en un AST y un intérprete escritos en
 Python. Esa etapa permitió estabilizar sintaxis, scopes, tipos y diagnósticos,
 y sigue siendo la superficie con mayor cobertura. Sobre ella aparecieron
 módulos, structs, classes, interfaces, enums, Arrays y Lists. También se separó
-el producto activo de los formatos y runtimes históricos conservados bajo
-`legacy/`.
+el producto activo de MathLab/MathTeX, su IDE y sus formatos documentales. Ese
+material se conservó temporalmente como archivo, pero se retiró del repositorio
+activo cuando la dirección oficial quedó limitada a CLI, LSP, VS Code e
+IntelliJ. Esta nota histórica reemplaza al antiguo árbol de fuentes archivadas.
 
 El paso siguiente fue dejar de identificar «funciona en el intérprete» con
 «está implementado en el lenguaje compilado». La IR introdujo una frontera

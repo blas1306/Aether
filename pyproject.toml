@@ -18,10 +18,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-studio = [
-    "PySide6==6.10.2",
-    "platformdirs==4.4.0",
-]
 release = [
     "build>=1.2,<2",
 ]
@@ -34,15 +30,10 @@ aether-lsp = "aether_lsp.server:main"
 package-dir = { "" = "src" }
 include-package-data = true
 py-modules = [
-    "app_preferences",
     "autocomplete_engine",
     "command_catalog",
     "document_symbols",
-    "language_runtime",
-    "main",
-    "numeric_format",
     "plot_backend",
-    "qt_app",
 ]
 
 [tool.setuptools.packages.find]
@@ -67,6 +58,7 @@ version = { attr = "aether.version.PACKAGE_VERSION" }
     "examples/README.md",
     "examples/v1_examples_manifest.json",
 ]
+"share/aether/examples/LeetCode" = ["examples/LeetCode/*.ae"]
 "share/aether/examples/ProbandoNR" = ["examples/ProbandoNR/*.ae"]
 "share/aether/examples/Sorts" = ["examples/Sorts/*.ae"]
 "share/aether/examples/aggregate_collections" = ["examples/aggregate_collections/*.ae"]

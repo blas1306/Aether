@@ -485,16 +485,12 @@ La migración rc.2 debe actualizar completions/snippets en
 `src/autocomplete_engine.py`, que hoy publican `for x in iterable`,
 `while condition` e `if condition` sin paréntesis.
 
-### 10.3 Aether Studio y web editor
+### 10.3 Herramientas oficiales
 
-El editor Qt tiene listas de keywords y heurísticas propias. Incluye formas
-históricas como `elif`, `repeat`, `until` y `end`, y su smart-enter no modela la
-gramática real. El web editor CodeMirror actual es principalmente una
-superficie de edición genérica; no contiene una gramática Aether que pueda
-resolver la migración.
-
-Aunque `(`, `)` y braces ya tienen auto-pairing, deben actualizarse signatures,
-fixtures de autocomplete y tests de UX para que el código sugerido sea rc.2.
+El IDE Qt y su editor web embebido fueron retirados después de esta auditoría.
+La migración de completions y snippets corresponde ahora al servicio compartido
+y a sus clientes oficiales de VS Code e IntelliJ; no existe una obligación de
+paridad adicional para un editor de escritorio propio.
 
 ### 10.4 IntelliJ
 

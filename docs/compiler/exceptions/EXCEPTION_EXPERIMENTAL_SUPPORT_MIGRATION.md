@@ -385,12 +385,11 @@ No finding in this report authorizes compatibility with the old behavior.
 
 ### Syntax highlighting
 
-- **Paths:** `src/ui/code_editor.py`,
-  `vscode-extension/syntaxes/aether.tmLanguage.json`,
+- **Paths:** `vscode-extension/syntaxes/aether.tmLanguage.json`,
   `tools/intellij-aether/.../AetherTokenTypes.kt`.
 - **Classification:** mixed reusable keyword support and obsolete type support.
-- **Current implementation:** all integrations highlight the three keywords and
-  the `Exception` type.
+- **Current implementation:** both official editor integrations highlight the
+  three keywords and the `Exception` type.
 - **Current semantics:** highlighting only; it does not establish compiler
   support.
 - **Conflict:** keyword spellings remain valid, but root type must be `Error` and
@@ -417,18 +416,6 @@ No finding in this report authorizes compatibility with the old behavior.
 - **Replace later:** add approved exception-aware features; no independent
   matching semantics.
 - **Milestone:** M10.
-
-### Web editor host `try/catch`
-
-- **Paths:** `src/ui/web_editor/editor.js` and generated CodeMirror vendor code.
-- **Classification:** unrelated host implementation detail.
-- **Current implementation:** JavaScript catches initialization/message errors.
-- **Current semantics:** UI containment only.
-- **Conflict:** none.
-- **Reusable portions:** unchanged.
-- **Replace later:** no exception-specific change appears necessary unless shared
-  LSP/completion wiring changes.
-- **Milestone:** M10 audit.
 
 ### Kotlin/TypeScript/Rust/Python `Error` and exception names
 

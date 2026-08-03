@@ -1,6 +1,0 @@
-Probando el pasado a .mtex
-\begin{code}
-A = [1, 2; 3, 4];
-b = [5; 6];
-x = A | b
-\end{code}

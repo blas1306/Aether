@@ -160,8 +160,6 @@ future-pass rule as Initial IR applies.
 | LSP | `src/aether_lsp/server.py`, `run_file.py`, `tests/test_aether_lsp_*` | Diagnostics, formatting, completion, symbols, hover, definition/references/rename, and run-file transport. | Direct: expose compiler semantics/ranges consistently and add semantic exception features. Current server advertises no semantic-token capability. | Reuses compiler parser/typechecker; no exception-specific LSP behavior beyond generic keywords/completion. | M10 |
 | VS Code | `vscode-extension/syntaxes/aether.tmLanguage.json`, `language-configuration.json`, `src/`, `test/`, generated `out/` | TextMate highlighting, language configuration, LSP/CLI client, commands. | Direct: update grammar/types/snippets if added, test source files, then regenerate `out/`; do not hand-edit generated output. | Migration input: highlights `try`/`catch`/`throw` and `Exception`. | M1, M10 |
 | IntelliJ | `tools/intellij-aether/src/main/kotlin/com/aetherstudio/intellij/`, especially `AetherTokenTypes.kt`, highlighting/parser/typing support; tests under `src/test/` | Independent lexer/highlighter/PSI shell, typing helpers, LSP client, run configuration. | Direct: approved keywords/type, catch/rethrow typing/auto-pairing, tests, and LSP parity. | Migration input: keyword list and `Exception` type are hard-coded. Kotlin host exceptions are unrelated. | M1, M10 |
-| Qt/UI editor | `src/ui/code_editor.py`, `src/ui/codemirror_editor.py`, `src/autocomplete_engine.py`, tests `tests/test_qt_*`, `tests/test_editor_api.py` | Syntax highlighting, completion popup, editor abstraction, and embedded editor choice. | Direct: replace legacy type/snippet/highlight assumptions and test incomplete/nested syntax. | Migration input: hard-coded `Exception`, `try`, `catch`, `throw`; generic UI `try/except` blocks are unrelated. | M1, M10 |
-| Web/UI editor | `src/ui/web_editor/{index.html,editor.js,editor.css,README.md}`, `tools/web_editor/src/codemirror-entry.js`, generated `src/ui/web_editor/vendor/codemirror.bundle.js` | Embedded CodeMirror shell and generated editor library asset. Syntax semantics arrive primarily through shared LSP/editor services. | Parity/audit: ensure shared diagnostics/completion/formatting work; rebuild vendor bundle only if dependency/source entry changes. | No Aether grammar in the bundle entry and no exception-specific source logic; JS `try/catch` is unrelated. Bundle rebuild currently appears unnecessary. | M10 |
 
 ## CI, release, documentation, and tests
 
@@ -210,9 +208,9 @@ Inspection supports the following limited conclusions for the current snapshot:
 - No public Aether FFI, raw-C imports/exports, callback adapter, or stable public
   ABI is implemented. M9 must add containment when such paths are introduced;
   there is nothing to migrate in M0.
-- The web editor's CodeMirror bundle entry contains no Aether grammar. It need not
-  be regenerated solely for compiler keyword changes; shared LSP/completion/editor
-  behavior still requires M10 validation.
+- The retired Qt/CodeMirror prototype held no compiler semantics. Shared
+  LSP/completion behavior remains the M10 validation surface for official
+  clients.
 - Existing host-language `try`/`except`/`catch`, Rust `Result<_, Error>`, verifier
   error enums, and compiler diagnostic exceptions do not implement Aether
   exceptions and require no semantic migration.

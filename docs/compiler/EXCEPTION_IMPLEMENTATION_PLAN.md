@@ -190,8 +190,8 @@ and lossless formatting, while leaving semantic validation to later stages.
   catch; verify that `finally` is not accepted as exception syntax in 1.x.
 - AST equality/traversal and source-span tests.
 - Formatter golden tests and parse–format–parse idempotence tests.
-- Token/highlighting tests for the command-line/UI editor, VS Code, IntelliJ, and
-  the web editor source definitions.
+- Token/highlighting tests for VS Code and IntelliJ, plus shared LSP completion
+  and diagnostics tests.
 
 ## Risks
 
@@ -849,8 +849,8 @@ diagnostic support for the frozen exception syntax and semantics.
   legal bare rethrow; do not suggest checked-exception declarations.
 - Keep command-line diagnostics, LSP diagnostics, and AST/typechecker diagnostic
   codes and source ranges consistent.
-- Update VS Code, IntelliJ, UI editor, and web editor syntax sources and tests;
-  regenerate derived bundles only through their documented build process.
+- Update VS Code and IntelliJ syntax sources and tests while keeping their
+  shared LSP completion and diagnostics behavior aligned.
 - Update IR/CFG/SSA visualization labels so exceptional edges and event ownership
   are distinguishable.
 

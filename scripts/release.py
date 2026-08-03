@@ -80,6 +80,15 @@ FORBIDDEN_BINARY_SUFFIXES = (
     ".so",
 )
 FORBIDDEN_TEMP_SUFFIXES = (".bak", ".swp", ".temp", ".tmp", "~")
+DEPRECATED_MODULE_NAMES = frozenset(
+    {
+        "app_preferences.py",
+        "language_runtime.py",
+        "main.py",
+        "numeric_format.py",
+        "qt_app.py",
+    }
+)
 
 
 class ReleaseError(RuntimeError):
@@ -189,7 +198,37 @@ def _unsafe_archive_names(names: set[str], *, wheel: bool) -> list[str]:
             continue
         if basename.endswith(FORBIDDEN_BINARY_SUFFIXES + FORBIDDEN_TEMP_SUFFIXES):
             unsafe.append(name)
+            continue
+        if _is_deprecated_tooling_path(path, wheel=wheel):
+            unsafe.append(name)
     return sorted(unsafe)
+
+
+def _is_deprecated_tooling_path(path: PurePosixPath, *, wheel: bool) -> bool:
+    parts = tuple(part.lower() for part in path.parts)
+    if "legacy" in parts:
+        return True
+    deprecated_sequences = (
+        ("src", "ui"),
+        ("src", "editor"),
+        ("src", "actions"),
+        ("src", "repl"),
+        ("tools", "web_editor"),
+    )
+    if any(
+        parts[index : index + len(sequence)] == sequence
+        for sequence in deprecated_sequences
+        for index in range(len(parts) - len(sequence) + 1)
+    ):
+        return True
+    if wheel and parts and parts[0] in {"ui", "editor", "actions", "repl"}:
+        return True
+    basename = parts[-1] if parts else ""
+    if basename not in DEPRECATED_MODULE_NAMES:
+        return False
+    return (wheel and len(parts) == 1) or (
+        len(parts) >= 2 and parts[-2] == "src"
+    )
 
 
 def verify_wheel(wheel: Path) -> None:
@@ -215,9 +254,19 @@ def verify_wheel(wheel: Path) -> None:
         metadata = archive.read(metadata_names[0]).decode("utf-8")
         if f"Version: {PACKAGE_VERSION}\n" not in metadata:
             raise ReleaseError("wheel metadata does not contain the canonical package version")
+        normalized_metadata = metadata.casefold()
+        if any(
+            dependency in normalized_metadata
+            for dependency in ("pyside", "pyqt", "platformdirs")
+        ):
+            raise ReleaseError("wheel metadata contains a deprecated Qt IDE dependency")
         entry_points = [name for name in names if name.endswith(".dist-info/entry_points.txt")]
-        if len(entry_points) != 1 or b"aether = aether.cli:main" not in archive.read(entry_points[0]):
-            raise ReleaseError("wheel is missing the canonical aether CLI entry point")
+        entry_point_data = archive.read(entry_points[0]) if len(entry_points) == 1 else b""
+        if (
+            b"aether = aether.cli:main" not in entry_point_data
+            or b"aether-lsp = aether_lsp.server:main" not in entry_point_data
+        ):
+            raise ReleaseError("wheel is missing a canonical CLI or LSP entry point")
         leaked = [
             name
             for name in names
@@ -312,7 +361,10 @@ def _write_smoke_sources(root: Path) -> dict[str, Path]:
             'FileReadResult loaded = io.readText("smoke.txt"); '
             "println(saved); println(loaded.content); return 0; }\n"
         ),
-        "rejected": "class Unsupported { int value; }\n",
+        "rejected": (
+            'struct SmokeError implements Error { string message() { return "smoke"; } } '
+            'int main() { throw SmokeError(); }\n'
+        ),
     }
     paths: dict[str, Path] = {}
     for name, source in sources.items():
@@ -387,6 +439,10 @@ def clean_install_smoke(wheel: Path) -> None:
             ),
             env=smoke_env,
         )
+        aether_lsp = aether.with_name(
+            "aether-lsp.exe" if os.name == "nt" else "aether-lsp"
+        )
+        _expect([str(aether_lsp), "--help"], cwd=work, env=smoke_env)
         _expect(
             [str(aether), "--backend=ast", str(paths["hello"])],
             cwd=work,
@@ -421,7 +477,7 @@ def clean_install_smoke(wheel: Path) -> None:
             [str(aether), str(paths["rejected"])],
             cwd=work,
             expected_code=1,
-            stderr_contains="AE-BACKEND-CLASSES",
+            stderr_contains="AE-BACKEND-ERROR_HANDLING",
             env=smoke_env,
         )
         _run([str(python), "-m", "compileall", "-q", str(environment)], cwd=work, env=smoke_env)

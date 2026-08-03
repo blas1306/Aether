@@ -1,15 +1,17 @@
-# Suite de tests de Aether Studio
+# Suite de tests de Aether
 
 ## Proposito
 
-La suite protege contratos reales del lenguaje Aether v0, la REPL, el LSP basico y la superficie activa del editor. La prioridad no es cobertura cosmetica: es mantener estable la superficie activa `.ae` mientras el codigo legacy queda aislado.
+La suite protege contratos reales del lenguaje Aether, el CLI, la REPL, el LSP
+y las capas compartidas usadas por VS Code e IntelliJ. La prioridad no es
+cobertura cosmetica: es mantener estable la superficie activa `.ae`.
 
 ## Como correrla
 
 Suite enfocada de Aether v0:
 
 ```bash
-.venv/bin/python -m pytest -q tests/aether tests/test_aether_lsp_server.py tests/test_repl_controller.py
+.venv/bin/python -m pytest -q tests/aether tests/test_aether_cli.py tests/test_aether_lsp_server.py
 ```
 
 Suite completa:
@@ -23,12 +25,12 @@ Los tests cargan `src/` automaticamente desde `tests/conftest.py`, asi que puede
 ## Areas principales
 
 - Aether v0: parser, typechecker, runtime, stdlib, matrices, algebra lineal, strings, imports rechazados y sesion persistente.
-- Editor/LSP: diagnosticos, completions, REPL controller, resaltado y acciones no visuales.
-- Legacy aislado: las pruebas del runtime historico, documentos antiguos, proyectos, notebooks y PDF viven fuera de la suite activa.
+- Tooling oficial: CLI, diagnosticos, formatting, completions, simbolos y LSP.
+- Integraciones: contratos compartidos que consumen VS Code e IntelliJ.
 
 ## Contratos importantes
 
-- `.ae` es la superficie activa; `.mtx`, `.mtex`, `.mtn`, notebooks y PDF son rutas heredadas fuera del producto activo.
+- `.ae` es la superficie fuente activa.
 - `array(...)` no es builtin publico de Aether v0; usa `Array<T>` para colecciones mutables de tamaño fijo.
 - Las interpolaciones de strings `$expr$` se parsean, typecheckean y formatean como salida Aether normal.
 - Los fallos de una corrida de `AetherSession` no destruyen variables o funciones ya comprometidas.
@@ -39,4 +41,5 @@ Los tests cargan `src/` automaticamente desde `tests/conftest.py`, asi que puede
 - Priorizar contratos reales y regresiones de bugs por encima de cobertura cosmetica.
 - Preferir tests pequenos, deterministas y con poco estado compartido.
 - Agregar tests de integracion solo cuando validen limites entre modulos delicados.
-- Mantener separados los tests de Aether v0 activo y los tests de compatibilidad legacy.
+- No introducir semantica duplicada en clientes: CLI, VS Code e IntelliJ deben
+  reutilizar compiler, language service o LSP segun corresponda.

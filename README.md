@@ -342,7 +342,7 @@ cross-module compatibles con el perfil. Rechaza globals, constantes que
 requieren storage y statements ejecutables importados porque todavía no existe
 inicialización compilada de módulos.
 
-## REPL, LSP y editor
+## REPL, LSP y editores oficiales
 
 ```bash
 aether --repl
@@ -355,16 +355,10 @@ El paquete `src/aether_lsp/` ofrece el servidor compartido de diagnósticos,
 completion, hover y símbolos. El plugin IntelliJ vive en
 `tools/intellij-aether/`. La extensión oficial de VS Code, todavía en
 desarrollo y no publicada, vive en `vscode-extension/`; ambos editores usan el
-mismo LSP y mantienen la semántica en Aether. La aplicación de escritorio
-opcional se inicia con:
-
-```bash
-python3 src/main.py
-```
-
-MathTeX Studio y sus formatos `.mtx`, `.mtex`, `.mtn`, notebooks y PDF son
-código histórico aislado bajo [`legacy/`](legacy/), no parte del runtime Aether
-activo.
+mismo LSP y mantienen la semántica en Aether. La superficie de herramientas
+soportada es explícitamente CLI, LSP, VS Code e IntelliJ. El antiguo IDE Qt y
+el editor web embebido fueron retirados; no forman parte del paquete ni de la
+matriz de soporte.
 
 ## Benchmarks
 
@@ -384,6 +378,7 @@ Véase [benchmarks/README.md](benchmarks/README.md).
 
 - [Changelog de hitos](CHANGELOG.md)
 - [Evolución de Aether](docs/EVOLUTION.md)
+- [Auditoría de retiro de tooling obsoleto](docs/TOOLING_REMOVAL_REPORT.md)
 
 ## Arquitectura del repositorio
 
@@ -393,17 +388,17 @@ Véase [benchmarks/README.md](benchmarks/README.md).
 - `vscode-extension/`: extensión oficial de VS Code en desarrollo, cliente del
   LSP y del CLI externos.
 - `tools/intellij-aether/`: plugin IntelliJ, también cliente del LSP compartido.
-- `src/`: aplicación/editor activos.
-- `tests/`: tests del lenguaje, compiler, CLI, LSP y UI.
+- `tests/`: tests del lenguaje, compiler, CLI y LSP.
 - `examples/`: programas Aether activos.
 - `benchmarks/`: microbenchmarks del pipeline.
 - `docs/aether/`: especificación, alcance y diseños de lenguaje.
 - `docs/compiler/`: implementación y auditorías históricas del compilador.
-- `legacy/`: MathTeX Studio aislado.
 
 El empaquetado activo descubre código bajo `src/`, incluye stdlib, runtime LLVM
-generado y los dos documentos normativos, y pytest recoge `tests/`.
-`src/aether/` y el CLI no importan `legacy/`.
+generado y los dos documentos normativos, y pytest recoge `tests/`. Una nota
+histórica concisa sobre MathLab/MathTeX se conserva en
+[la evolución del proyecto](docs/EVOLUTION.md); sus fuentes archivadas ya no
+forman parte del repositorio activo.
 
 ## Desarrollo y validación
 

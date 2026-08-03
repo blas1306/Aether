@@ -1,11 +1,9 @@
 # Guia de uso de Aether v0
 
 Esta guia resume la superficie activa de Aether. El producto actual esta
-centrado en archivos `.ae`, ejecucion de scripts y una REPL persistente. Los
-flujos heredados de MathTeX Studio, MTeX, `.mtx`, `.mtex`, `.mtn`, proyectos,
-notebooks y PDF estan aislados en `legacy/` y no forman parte de la aplicacion
-activa. Consulta [`docs/legacy/README.md`](legacy/README.md) para su inventario
-y politica de mantenimiento.
+centrado en archivos `.ae`, el CLI, una REPL persistente, el LSP y sus clientes
+oficiales para VS Code e IntelliJ. El antiguo IDE Qt y los flujos MathTeX/MTeX
+no forman parte del producto activo.
 
 ## 1. Archivos y ejecucion
 
@@ -17,10 +15,10 @@ y = 3;
 println(x + y);
 ```
 
-Desde la GUI puedes abrir o crear un archivo `.ae` y ejecutar el script completo o la seleccion. Desde consola:
+Ejecuta un archivo desde consola con el CLI oficial:
 
 ```bash
-python3 src/main.py --cli
+aether programa.ae
 ```
 
 La REPL usa el prompt `aether>` y conserva variables y funciones entre comandos hasta reiniciar la sesion.

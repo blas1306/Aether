@@ -52,7 +52,6 @@ node_modules/
 # =========================
 collect_*.txt
 pytest_*.txt
-qt_*.txt
 tmp_view.txt
 
 # =========================

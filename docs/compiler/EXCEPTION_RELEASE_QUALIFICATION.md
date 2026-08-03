@@ -203,7 +203,6 @@ runtime hashes were refreshed through the canonical manifest updater.
 | Parser recovery | PASS | Malformed typed catches, missing delimiters/expressions and illegal rethrow are covered. |
 | IntelliJ | PARTIAL | Keyword highlighting and general LSP client pass; obsolete `Exception` remains and no semantic catch fixtures exist. |
 | VS Code | PARTIAL / environment-limited | Grammar covers exception keywords but retains `Exception`; Node/npm were unavailable in this environment. |
-| Qt editor | PARTIAL | Keyword highlighting passes; shared completion remains obsolete. |
 
 Tooling support is not stable and blocks promotion.
 

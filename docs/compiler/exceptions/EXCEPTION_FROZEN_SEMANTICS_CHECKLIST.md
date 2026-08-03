@@ -167,8 +167,8 @@ For every implementation PR:
 - [ ] Reference AST, Initial IR interpreter, SSA/optimized paths, and native
       execution agree on results, catch choice, cleanup trace, panic/throw, and
       exit status.
-- [ ] Formatter, language service, LSP, CLI, VS Code, IntelliJ, Qt/UI editor, and
-      web editor implement the same frozen syntax and diagnostics.
+- [ ] Formatter, language service, LSP, CLI, VS Code, and IntelliJ implement the
+      same frozen syntax and diagnostics.
 - [ ] Tooling never suggests checked-exception declarations.
 - [ ] Every enabled optimizer has an explicit exception-safety disposition and
       post-pass verification evidence.

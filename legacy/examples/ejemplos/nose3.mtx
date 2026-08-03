@@ -1,8 +1,0 @@
-function r = nose3(x)
-    if x < 0
-        \error("The argument must be >= 0");
-    end
-    r = \sqrt(x)
-end
-
-r = nose3(-2)

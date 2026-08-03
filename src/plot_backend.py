@@ -107,7 +107,6 @@ class PlotBackend:
         self._figure_states: dict[int, dict[str, Any]] = {}
         self._active_figure_id = 1
         self.on_image = on_image
-        self._external_qt_app = self._detect_existing_qt_app()
         self._interactive_show_requested = False
         self._figure_states[1] = self._new_state()
         self._load_state(1)
@@ -468,20 +467,11 @@ class PlotBackend:
         plt.pause(0.001)
 
     def wait_for_interactive_plots(self) -> None:
-        if self.plot_mode != "interactive" or not self._interactive_show_requested or self._external_qt_app:
+        if self.plot_mode != "interactive" or not self._interactive_show_requested:
             return
         _ensure_matplotlib(prefer_interactive=True)
         self._interactive_show_requested = False
         plt.show(block=True)
-
-    @staticmethod
-    def _detect_existing_qt_app() -> bool:
-        try:
-            from PySide6.QtWidgets import QApplication  # type: ignore
-
-            return QApplication.instance() is not None
-        except Exception:
-            return False
 
     def _redraw_interactive(self) -> None:
         if self.plot_mode != "interactive":

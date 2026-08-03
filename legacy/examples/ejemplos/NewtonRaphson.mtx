@@ -1,7 +1,0 @@
-from Newton import Nr
-
-f(x) = x.^3 + 5*x.^2 + 8*x + - 444;
-x0 = 2;
-tol = 1e-8;
-
-[x, iter, res] = Nr(f,x0,tol)
