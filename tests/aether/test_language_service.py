@@ -54,6 +54,13 @@ def test_analyze_source_accepts_valid_program() -> None:
     assert analyze_source('x = 1; println(x);') == []
 
 
+def test_analyze_source_accepts_abbreviated_function_returning_matrix_literal() -> None:
+    diagnostics = analyze_source("double f(double x) = [1, 2];")
+
+    assert diagnostics
+    assert "Cannot implicitly convert 'Vector<int>' to 'double'" in diagnostics[0].message
+
+
 def test_analyze_source_accepts_parser_phase_multiple_catches_and_rethrow() -> None:
     diagnostics = analyze_source(
         'struct FileError implements Error { string message() { return "file"; } } '

@@ -188,7 +188,7 @@ int main() {
 
 def test_callable_field_collection_copy_uses_capture_free_handle_layout() -> None:
     source = """
-struct Bad { int(int) callback; }
+struct Bad { Function<(int), int> callback; }
 int same(int value) { return value; }
 int main() {
     List<Bad> values = {Bad(same)};

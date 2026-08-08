@@ -1,0 +1,27 @@
+// Control 1 ALN
+
+from PuntoFijo import PuntoFijo;
+from PuntoFijo import PF;
+
+// Ej 2
+
+// 2b)
+
+g1(double x) = 1/(3*x);
+g2(double x) = 0.5*(x + 1/(3*x));
+
+PF pf1 = PuntoFijo(g1, 0.5, 1e-10, 500);
+PF pf2 = PuntoFijo(g2, 0.5, 1e-10, 500);
+
+// 2c)
+
+println("Punto fijo g1: ", pf1.x);  // x_g1 = 0.5
+println("residuo: ", pf1.res);      // res_g1 = 0.166666666666667
+println("iteraciones: ", pf1.iter); // iter_g1 = 500
+println("Punto fijo g2: ", pf2.x);  // x_g2 = 0.577350269189626
+println("residuo: ", pf2.res);      // res_g2 = 0.0
+println("iteraciones: ", pf2.iter); // iter_g2 = 4
+
+// Los resultados obtenidos dan indicio de que usando el primer metodo del punto fijo
+// no se logra converger a la raiz de la funcion o que converge muy lentamente,
+// mientras que usando el segundo metodo si se logra converger a la raiz de la funcion.

@@ -7,7 +7,7 @@ name = "aether-language"
 dynamic = ["version"]
 description = "The Aether language runtime and command-line interface"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = "GPL-3.0-only"
 license-files = ["LICENSE"]
 dependencies = [
@@ -15,6 +15,7 @@ dependencies = [
     "scipy==1.17.1",
     "sympy==1.14.0",
     "matplotlib==3.10.8",
+    "pyqt6>=6.11.0",
 ]
 
 [project.optional-dependencies]

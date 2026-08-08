@@ -66,7 +66,7 @@ pretende sustituir el cleanup abortivo del proceso host.
 
 El perfil AST representa el intérprete de referencia. Incluye módulos,
 imports, classes, interfaces, enums, input, errores y matemática escalar. Las
-funciones como valores son `PARTIAL`: el tipo estructural `R(P1, P2, ...)`
+funciones como valores son `PARTIAL`: el tipo estructural `Function<(P1, P2, ...), R>`
 cubre referencias a funciones top-level de usuario sin captura, variables,
 parámetros, `phi` y llamadas indirectas con compatibilidad exacta. Las
 funciones abreviadas ya desazucaran a declaraciones tipadas normales; el hook

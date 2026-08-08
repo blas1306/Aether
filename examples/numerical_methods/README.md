@@ -34,7 +34,7 @@ callables ni sus resultados; el RC futuro de colecciones permanece pendiente.
 `Functions.ae` declares the structural alias:
 
 ```aether
-public alias ScalarCallable = double(double);
+public alias ScalarCallable = Function<(double), double>;
 ```
 
 The root solvers and integrators receive a `ScalarCallable` and invoke it
@@ -44,7 +44,7 @@ The old `ScalarFunction.evaluate(double)` interface workaround is no longer
 needed.
 
 Typed callables deliberately cover only capture-free user-defined top-level
-functions. A value such as `double(double)` is represented natively by an LLVM
+functions. A value such as `Function<(double), double>` is represented natively by an LLVM
 function pointer and has exact signature compatibility. Closures, lambdas,
 bound methods, builtin references, and returning callable values remain out of
 scope. A top-level wrapper can expose a builtin when needed.

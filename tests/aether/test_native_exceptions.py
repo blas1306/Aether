@@ -148,7 +148,7 @@ struct ThrowingMessage implements MessageProducer {
 }
 void directFailure() { throw FileError("direct"); }
 void indirectFailure() { throw NetworkError("indirect"); }
-void apply(void() operation) { operation(); }
+void apply(Function<(), void> operation) { operation(); }
 void relay() {
     try { directFailure(); }
     catch (FileError error) { throw; }
@@ -194,7 +194,7 @@ def test_exception_lowering_uses_event_out_except_nonthrowing_error_message() ->
     source = ERROR_TYPES + """
 void directFailure() { throw NetworkError("direct"); }
 void indirectFailure() { throw FileError("indirect"); }
-void apply(void() operation) { operation(); }
+void apply(Function<(), void> operation) { operation(); }
 
 int main() {
     try {

@@ -168,7 +168,7 @@ int main() {
 def test_native_enum_arrays_lists_and_typed_callable_abi() -> None:
     source = """
 enum Status { Ready, Waiting }
-alias StatusCallable = Status(Status);
+alias StatusCallable = Function<(Status), Status>;
 
 Status keep(Status value) { return value; }
 Status apply(StatusCallable callable, Status value) { return callable(value); }

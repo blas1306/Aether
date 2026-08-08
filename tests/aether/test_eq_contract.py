@@ -50,8 +50,8 @@ def _all_outputs(source: str) -> tuple[str, str, str]:
             "List<Box>.contains requires Eq(Box).",
         ),
         (
-            "int f(int x){return x;} int main(){ int(int) fn=f; println(fn==fn); return 0; }",
-            "Type int(int) does not define equality.",
+            "int f(int x){return x;} int main(){ Function<(int), int> fn=f; println(fn==fn); return 0; }",
+            "Type Function<(int), int> does not define equality.",
         ),
         (
             "class Box {} struct Bad { Box value; } int main(){ Bad a=Bad(Box()); println(a==a); return 0; }",

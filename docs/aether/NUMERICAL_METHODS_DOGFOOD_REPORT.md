@@ -14,8 +14,8 @@ funciones importadas como valores y ya no depende de una interfaz
 ### F01 — Callables top-level tipados: resuelto para el alcance mínimo
 
 - **Estado:** implementado E2E y registrado como `FUNCTION_VALUES = PARTIAL`.
-- **Sintaxis:** `ReturnType(ParameterType, ...)`; el alias del ejemplo es
-  `double(double)`.
+- **Sintaxis:** `Function<(ParameterType, ...), ReturnType>`; el alias del ejemplo es
+  `Function<(double), double>`.
 - **Semántica:** firma estructural exacta, referencia explícita a una función
   block top-level visible, sin entorno ni captura.
 - **Recorrido:** typechecker, intérprete AST, `function_ref`/`call_indirect` en
@@ -31,7 +31,7 @@ funciones importadas como valores y ya no depende de una interfaz
 La inspección previa confirmó que no existía una producción callable parcial
 reutilizable: solo había funciones block/expresión y el hook ad hoc de
 `Plots`. El cambio de gramática imprescindible fue el sufijo mínimo
-`ReturnType(ParameterType, ...)`, coherente con la sintaxis de declaraciones y
+`Function<(ParameterType, ...), ReturnType>`, coherente con la sintaxis de declaraciones y
 sin introducir una segunda forma `function(...)`.
 
 No existen overloads de funciones en Aether: los nombres duplicados ya son un

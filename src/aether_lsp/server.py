@@ -7,13 +7,17 @@ import re
 import sys
 import threading
 from bisect import bisect_right
-from dataclasses import asdict
+from dataclasses import asdict, fields as dataclass_fields, is_dataclass
 from pathlib import Path
 from typing import Any, BinaryIO
 from urllib.parse import unquote, urlparse
 
-from aether import analyze_source
+from aether import analyze_source, ast
+from aether.lexer import lex
+from aether.parser import Parser
 from aether.source_formatter import format_source
+from aether.typechecker import TypeChecker
+from aether.types import ClassType, InterfaceType
 from aether.version import LANGUAGE_VERSION
 from aether.stdlib.registry import builtin_aliases_for_import, builtin_names, is_builtin_namespace
 from autocomplete_engine import (
@@ -68,6 +72,7 @@ class AetherLanguageServer:
         self.documents: dict[str, str] = {}
         self.document_versions: dict[str, int] = {}
         self.pending_diagnostics: dict[str, threading.Timer] = {}
+        self.semantic_cache: dict[str, tuple[str, object | None, object | None]] = {}
         self.write_lock = threading.RLock()
         self.shutdown_requested = False
 
@@ -111,6 +116,8 @@ class AetherLanguageServer:
             return self._response(message, self._document_symbol_result(message.get("params") or {}))
         if method == "textDocument/hover":
             return self._response(message, self._hover_result(message.get("params") or {}))
+        if method == "textDocument/inlayHint":
+            return self._response(message, self._inlay_hint_result(message.get("params") or {}))
         if method == "textDocument/definition":
             return self._response(message, self._definition_result(message.get("params") or {}))
         if method == "textDocument/references":
@@ -138,6 +145,7 @@ class AetherLanguageServer:
                 "documentFormattingProvider": True,
                 "documentSymbolProvider": True,
                 "hoverProvider": True,
+                "inlayHintProvider": True,
                 "definitionProvider": True,
                 "referencesProvider": True,
             }
@@ -149,6 +157,7 @@ class AetherLanguageServer:
         text = document.get("text", "")
         if isinstance(uri, str) and isinstance(text, str):
             self.documents[uri] = text
+            self.semantic_cache.pop(uri, None)
             version = _document_version(document)
             if version is not None:
                 self.document_versions[uri] = version
@@ -164,6 +173,7 @@ class AetherLanguageServer:
         if isinstance(text, str):
             version = _document_version(document, default=self.document_versions.get(uri))
             self.documents[uri] = text
+            self.semantic_cache.pop(uri, None)
             if version is not None:
                 self.document_versions[uri] = version
             self._schedule_diagnostics(uri, text, version)
@@ -189,6 +199,7 @@ class AetherLanguageServer:
             return
         version = self.document_versions.pop(uri, None)
         self.documents.pop(uri, None)
+        self.semantic_cache.pop(uri, None)
         self._cancel_pending_diagnostics(uri)
         self._write_message(
             {
@@ -366,6 +377,54 @@ class AetherLanguageServer:
 
         return None
 
+    def _inlay_hint_result(self, params: JsonObject) -> list[JsonObject]:
+        document = params.get("textDocument") or {}
+        uri = document.get("uri", "")
+        source = self.documents.get(uri, "")
+        if not source:
+            return []
+
+        program, checker = self._semantic_state_for_document(uri, source)
+        if program is None or checker is None:
+            return []
+
+        requested_range = params.get("range") or {}
+        requested_start = requested_range.get("start") or {}
+        requested_end = requested_range.get("end") or {}
+        start_line = int(requested_start.get("line", 0))
+        start_character = int(requested_start.get("character", 0))
+        end_line = int(requested_end.get("line", 0))
+        end_character = int(requested_end.get("character", 0))
+
+        hints: list[JsonObject] = []
+        for expression in _iter_call_expressions(program):
+            parameters = _resolved_call_parameters(checker, expression)
+            if not parameters or not hasattr(expression, "arguments"):
+                continue
+            if getattr(expression, "keyword_arguments", None):
+                continue
+            if len(expression.arguments) != len(parameters):
+                continue
+            for index, parameter in enumerate(parameters):
+                if index >= len(expression.arguments):
+                    break
+                argument = expression.arguments[index]
+                position = {
+                    "line": max(0, getattr(argument, "line", 1) - 1),
+                    "character": max(0, getattr(argument, "column", 1) - 1),
+                }
+                if not _position_within_range(position, start_line, start_character, end_line, end_character):
+                    continue
+                hints.append(
+                    {
+                        "position": position,
+                        "label": f"{parameter.name}:",
+                        "kind": 2,
+                    }
+                )
+        hints.sort(key=lambda hint: (hint["position"]["line"], hint["position"]["character"]))
+        return hints
+
     def _definition_result(self, params: JsonObject) -> JsonObject | None:
         document = params.get("textDocument") or {}
         position = params.get("position") or {}
@@ -433,6 +492,24 @@ class AetherLanguageServer:
                 }
             )
         return results
+
+    def _semantic_state_for_document(self, uri: str, source: str) -> tuple[object | None, object | None]:
+        cached = self.semantic_cache.get(uri)
+        if cached is not None:
+            cached_source, program, checker = cached
+            if cached_source == source:
+                return program, checker
+
+        try:
+            program, _ = Parser(lex(source)).parse_with_recovery()
+            checker = TypeChecker()
+            checker.check_collecting_errors(program)
+        except Exception:
+            self.semantic_cache[uri] = (source, None, None)
+            return None, None
+
+        self.semantic_cache[uri] = (source, program, checker)
+        return program, checker
 
     def _read_message(self) -> JsonObject | None:
         headers: dict[str, str] = {}
@@ -830,6 +907,118 @@ def _safe_lsp_range(
         "start": {"line": start[0], "character": start[1]},
         "end": {"line": end[0], "character": end[1]},
     }
+
+
+def _iter_call_expressions(node: object):
+    seen: set[int] = set()
+    stack: list[object] = [node]
+    while stack:
+        current = stack.pop()
+        if current is None:
+            continue
+        current_id = id(current)
+        if current_id in seen:
+            continue
+        seen.add(current_id)
+        if isinstance(current, dict):
+            stack.extend(current.values())
+            continue
+        if isinstance(current, (list, tuple, set)):
+            stack.extend(list(current))
+            continue
+        if is_dataclass(current):
+            if isinstance(current, (ast.CallExpression, ast.MethodCall)):
+                yield current
+            stack.extend(getattr(current, field.name) for field in dataclass_fields(current))
+            continue
+
+
+def _resolved_call_parameters(checker: TypeChecker, call):
+    if isinstance(call, ast.MethodCall):
+        target_type = checker.type_of_expression(call.target)
+        if target_type is None:
+            return None
+        try:
+            resolved = checker._resolve_type_aliases(target_type, call)
+        except Exception:
+            return None
+        if isinstance(resolved, ClassType):
+            struct = checker.structs.get(resolved.name)
+            if struct is None or checker._struct_field_symbol(struct, call.method_name) is not None:
+                return None
+            method = checker._struct_method_symbol(struct, call.method_name)
+            if method is None or not checker._can_access_struct_member(struct, method.visibility):
+                return None
+            if checker.type_of_expression(call) is None:
+                return None
+            return method.parameters
+        if isinstance(resolved, str):
+            struct = checker.structs.get(resolved)
+            if struct is not None:
+                if checker._struct_field_symbol(struct, call.method_name) is not None:
+                    return None
+                method = checker._struct_method_symbol(struct, call.method_name)
+                if method is None or not checker._can_access_struct_member(struct, method.visibility):
+                    return None
+                if checker.type_of_expression(call) is None:
+                    return None
+                return method.parameters
+        if isinstance(resolved, InterfaceType):
+            interface = checker.interfaces.get(resolved.name)
+            if interface is None:
+                return None
+            method = checker._interface_method_symbol(interface, call.method_name)
+            if method is None:
+                return None
+            if checker.type_of_expression(call) is None:
+                return None
+            return method.parameters
+        return None
+
+    if not isinstance(call, ast.CallExpression):
+        return None
+
+    constructor = checker._constructor_struct(call.callee)
+    if constructor is not None:
+        if checker.type_of_expression(call) is None:
+            return None
+        parameters = constructor.constructor.parameters if constructor.constructor is not None else constructor.fields
+        return tuple(parameters)
+
+    function = _resolved_function_symbol(checker, call.callee)
+    if function is None:
+        return None
+    if checker.type_of_expression(call) is None:
+        return None
+    return function.parameters
+
+
+def _position_within_range(position: dict, start_line: int, start_character: int, end_line: int, end_character: int) -> bool:
+    line = position.get("line", 0)
+    character = position.get("character", 0)
+    if start_line == end_line == line:
+        return start_character <= character <= end_character
+    if line < start_line or line > end_line:
+        return False
+    if line == start_line:
+        return character >= start_character
+    if line == end_line:
+        return character <= end_character
+    return True
+
+
+def _resolved_function_symbol(checker: TypeChecker, callee: str):
+    if not callee:
+        return None
+    function = checker.functions.get(callee)
+    if function is not None:
+        return function
+    resolved = getattr(checker, "_resolve_module_member", lambda _: None)(callee)
+    if resolved is not None:
+        function = checker.qualified_functions.get(resolved)
+        if function is not None:
+            return function
+    return checker.qualified_functions.get(callee)
 
 
 def _line_start_offsets(source: str) -> list[int]:

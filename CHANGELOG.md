@@ -340,7 +340,7 @@ y no declara ABI estable.
 
 ### Added
 
-- Valores callable estructurales con sintaxis `R(P1, ...)` para referencias a
+- Valores callable estructurales con sintaxis `Function<(P1, ...), R>` para referencias a
   funciones top-level definidas por el usuario.
 - Llamadas indirectas tipadas en AST, IR, SSA y LLVM, incluidas referencias
   importadas, aliases, phis y firmas compatibles con structs por valor.

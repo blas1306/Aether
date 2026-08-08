@@ -1,0 +1,20 @@
+// 1b)
+
+double Biseccion(Function<(double), double> df, double a, double b, double tol) {
+    double x = 0;
+
+    while (b - a > tol) {
+        x = (a + b) / 2;
+
+        if (df(x) == 0) {
+            break;
+        }
+        else if (df(a) * df(x) < 0) {
+            b = x;
+        } else {
+            a = x;
+        }
+    }
+
+    return x;
+}

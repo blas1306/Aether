@@ -1,0 +1,22 @@
+// Control 2 ALN
+
+// 1a)
+
+import Plots as pl
+import Math
+
+double x(double t) {
+    return sin(t);
+}
+
+double y(double t) = cos(t);
+
+struct Point {
+    double xx;
+    double yy;
+}
+
+Point f(double t) = Point(x(t), y(t));
+
+pl.grid(true);
+pl.plot(f, 0, 2*Math.pi);

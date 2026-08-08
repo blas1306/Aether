@@ -24,6 +24,27 @@ test("TextMate grammar is valid JSON with the expected scope", () => {
   assert.match(JSON.stringify(grammar.repository?.keywords), /try\|catch\|throw/);
 });
 
+test("function declarations scope both their return type and function name", () => {
+  const grammar = readJson("syntaxes/aether.tmLanguage.json") as {
+    repository?: {
+      functionDeclarations?: {
+        patterns?: Array<{
+          match?: string;
+          captures?: Record<string, { name?: string }>;
+        }>;
+      };
+    };
+  };
+  const declaration = grammar.repository?.functionDeclarations?.patterns?.[0];
+  assert.ok(declaration?.match);
+  assert.equal(declaration.captures?.["1"]?.name, "storage.type.aether");
+  assert.equal(declaration.captures?.["2"]?.name, "entity.name.function.aether");
+
+  const match = new RegExp(declaration.match).exec("double hola(double x) {");
+  assert.equal(match?.[1], "double");
+  assert.equal(match?.[2], "hola");
+});
+
 test("manifest consistently registers Aether, commands, and defaults", () => {
   const manifest = readJson("package.json") as {
     activationEvents: string[];

@@ -1,0 +1,19 @@
+struct PF {
+    double x;
+    double res;
+    int iter;
+}
+
+PF PuntoFijo(Function<(double), double> g, double x0, double tol, int n_max) {
+    double x = x0;
+    double res = abs(g(x) - x);
+    int iter = 0;
+
+    while (res > tol && iter < n_max) {
+        x = g(x);
+        res = abs(g(x) - x);
+        iter += 1;
+    }
+
+    return PF(x, res, iter);
+}

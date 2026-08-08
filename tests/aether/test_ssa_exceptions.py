@@ -81,7 +81,7 @@ void indirectFailure() {
     throw FileError("indirect");
 }
 
-void apply(void() operation) {
+void apply(Function<(), void> operation) {
     operation();
 }
 
@@ -257,7 +257,7 @@ void failNew() {
     throw NetworkError("indirect");
 }
 
-void exercise(void() operation) {
+void exercise(Function<(), void> operation) {
     try {
         throw FileError("old");
     } catch (FileError old) {

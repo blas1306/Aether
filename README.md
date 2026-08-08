@@ -318,7 +318,7 @@ parte de `Math.LinearAlgebra` son todavía AST-only.
 [`examples/numerical_methods/`](examples/numerical_methods/) contiene
 bisección, Newton-Raphson, secante, trapecios y Simpson con módulos,
 `RootResult`, tolerancia, límites de iteración y validaciones. Usa el alias
-callable `double(double)` y el mismo programa multi-módulo se valida en AST y
+callable `Function<(double), double>` y el mismo programa multi-módulo se valida en AST y
 LLVM/native; no necesita ya la antigua interfaz `ScalarFunction`.
 
 ```bash

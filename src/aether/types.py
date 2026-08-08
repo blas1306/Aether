@@ -362,7 +362,7 @@ class FunctionType:
 
     def __str__(self) -> str:
         parameters = ", ".join(type_to_string(item) for item in self.parameter_types)
-        return f"{type_to_string(self.return_type)}({parameters})"
+        return f"Function<({parameters}), {type_to_string(self.return_type)}>"
 
     def __eq__(self, other: object) -> bool:
         return (

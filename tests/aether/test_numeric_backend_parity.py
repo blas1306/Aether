@@ -71,7 +71,7 @@ struct Point { double x; }
 
 double forwarded() { return later(7); }
 double later(double value) { return value; }
-double invoke(double(double) operation) { return operation(6); }
+double invoke(Function<(double), double> operation) { return operation(6); }
 void consume(double value) { println(value); }
 
 int main() {

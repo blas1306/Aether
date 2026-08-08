@@ -1,0 +1,22 @@
+// Control 1 ALN
+
+import Plots as pl;
+from Biseccion import Biseccion;
+
+// Ej 1
+// 1a)
+
+f(double x) = ln(1 - x + x^3);
+df(double x) = (-1 + 3*x^2)/(1 - x + x^3);
+
+pl.grid(true);
+pl.plot(f, 0, 1);
+pl.plot!(df, 0, 1);
+pl.legend("f(x)", "f'(x)");
+
+// 1c)
+
+double x = Biseccion(df, 0, 1, 1e-10);
+
+println("Punto estacionario de f(x): ", x);
+println("residuo: ", abs(df(x)));

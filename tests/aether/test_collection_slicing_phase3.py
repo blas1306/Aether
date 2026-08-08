@@ -170,9 +170,9 @@ List<Box> boxes = {Box(3), Box(4)};
 List<Box> boxSlice = boxes[0:1];
 Box shared = boxSlice[0];
 shared.value = 8;
-List<int(int)> functions = {twice};
-List<int(int)> functionSlice = functions[0:1];
-int(int) selected = functionSlice[0];
+List<Function<(int), int>> functions = {twice};
+List<Function<(int), int>> functionSlice = functions[0:1];
+Function<(int), int> selected = functionSlice[0];
 println(items[0].name);
 println(boxes[0].value);
 println(selected(5));
@@ -188,9 +188,9 @@ int twice(int value) { return value * 2; }
 int main() {
     Array<State> states = {State.Ready, State.Done};
     Array<State> stateSlice = states[1:2];
-    List<int(int)> functions = {twice};
-    List<int(int)> functionSlice = functions[0:1];
-    int(int) selected = functionSlice[0];
+    List<Function<(int), int>> functions = {twice};
+    List<Function<(int), int>> functionSlice = functions[0:1];
+    Function<(int), int> selected = functionSlice[0];
     return selected(5) - 10;
 }
 """

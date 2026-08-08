@@ -2172,25 +2172,26 @@ Rules:
 ### Typed top-level callables
 
 A capture-free block function may be used as a value when its exact structural
-signature is known. Callable types use the return-type-first spelling already
-used by declarations:
+signature is known. Callable types use the canonical spelling
+`Function<(ParameterType, ...), ReturnType>`:
 
 ```aether
 double square(double x) { return x * x; }
 
-double apply(double(double) operation, double value) {
+double apply(Function<(double), double> operation, double value) {
     return operation(value);
 }
 
 int main() {
-    double(double) saved = square;
+    Function<(double), double> saved = square;
     return int(apply(saved, 4.0));
 }
 ```
 
-The textual form is `ReturnType(ParameterType, ...)`; therefore `void()` is a
-zero-argument procedure, `double(double)` maps one `double` to `double`, and
-`boolean(int, double)` takes two ordered parameters. Type aliases may name a
+The parameter list parentheses are mandatory, including for one parameter:
+`Function<(double), double>` is valid and `Function<double, double>` is not.
+`Function<(), void>` is a zero-argument procedure, and
+`Function<(int, double), boolean>` takes two ordered parameters. Type aliases may name a
 callable. Compatibility is exact: parameter count, each parameter type in
 order, and return type must all match. Callable signatures do not apply the
 ordinary numeric widening rules.

@@ -1,4 +1,4 @@
 package Functions;
 
 // Callable escalar estructural: recibe double y devuelve double.
-public alias ScalarCallable = double(double);
+public alias ScalarCallable = Function<(double), double>;

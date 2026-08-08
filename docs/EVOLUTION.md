@@ -240,7 +240,7 @@ declara parcial.
 
 El primer callable general es deliberadamente pequeño: una referencia a una
 función top-level del usuario, sin captura y con firma estructural exacta
-`R(P1, ...)`. Es suficiente para pasar una función a un solver numérico y tiene
+`Function<(P1, ...), R>`. Es suficiente para pasar una función a un solver numérico y tiene
 una representación native directa como puntero a función.
 
 Esta decisión cerró un caso real sin anticipar closures. Lambdas, captura,

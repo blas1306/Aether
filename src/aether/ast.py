@@ -399,16 +399,22 @@ class InputCall:
 @dataclass(frozen=True)
 class ArrayLiteral:
     elements: list[Expression]
+    line: int = field(default=1, compare=False)
+    column: int = field(default=1, compare=False)
 
 
 @dataclass(frozen=True)
 class ListLiteral:
     elements: list[Expression]
+    line: int = field(default=1, compare=False)
+    column: int = field(default=1, compare=False)
 
 
 @dataclass(frozen=True)
 class TupleLiteral:
     elements: list[Expression]
+    line: int = field(default=1, compare=False)
+    column: int = field(default=1, compare=False)
 
 
 @dataclass(frozen=True)
@@ -417,6 +423,8 @@ class MatrixLiteral:
     vector: bool = False
     orientation: str | None = None
     uses_commas: bool = False
+    line: int = field(default=1, compare=False)
+    column: int = field(default=1, compare=False)
 
 
 @dataclass(frozen=True)

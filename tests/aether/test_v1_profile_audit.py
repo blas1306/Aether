@@ -279,7 +279,7 @@ def test_abbreviated_functions_are_declarations_not_function_values() -> None:
 def test_capture_free_top_level_function_values_are_in_native_v1_subset() -> None:
     source = """
 int twice(int value) = value * 2;
-int apply(int(int) operation, int value) { return operation(value); }
+int apply(Function<(int), int> operation, int value) { return operation(value); }
 int main() { return apply(twice, 4); }
 """
     typed = prepare_typed_program(source, TypeChecker())

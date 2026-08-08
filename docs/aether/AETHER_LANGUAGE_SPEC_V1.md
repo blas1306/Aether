@@ -224,7 +224,9 @@ and user-defined equality remain outside Aether 1.0.
 
 ### 4.4 Callable values
 
-The structural callable spelling is `R(P1, P2, ...)`. A callable value is only
+The structural callable spelling is `Function<(P1, P2, ...), R>`. The
+parentheses around the parameter list are mandatory, including for a single
+parameter; `Function<P1, R>` is invalid. A callable value is only
 a capture-free reference to a top-level user function with the exact signature.
 Callable assignment, parameters, local selection, imports, and indirect calls
 are supported. Section 8 gives the remaining restrictions.

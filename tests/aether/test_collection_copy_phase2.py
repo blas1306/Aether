@@ -239,9 +239,9 @@ int main() {
     nestedCopy[0] = {"replacement"};
     println(nested[0].length == 2 && nestedCopy[0].length == 1);
 
-    List<int(int)> operations = {plusOne, twice};
-    List<int(int)> operationCopy = operations.copy();
-    int(int) selected = operationCopy[1];
+    List<Function<(int), int>> operations = {plusOne, twice};
+    List<Function<(int), int>> operationCopy = operations.copy();
+    Function<(int), int> selected = operationCopy[1];
     println(selected(4) == 8);
     return 0;
 }

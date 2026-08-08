@@ -141,7 +141,7 @@ negative corpus is part of this profile.
   nonzero steps. A statically zero step **MUST** be rejected by the gate; a
   runtime zero step **MUST** panic.
 - Function values are capture-free top-level user functions with an exact
-  structural `R(P1, ...)` signature. Closures, lambdas, bound methods, builtins
+  structural `Function<(P1, ...), R>` signature. Closures, lambdas, bound methods, builtins
   or builtins as values, returned callables, and unspecialized
   generic functions are excluded.
 - Strings support UTF-8 transport, ARC lifecycle, content equality,

@@ -15,7 +15,7 @@ from aether.capabilities import (
     NATIVE_CAPABILITY_PROFILE,
     backend_capability_issues,
 )
-from aether.errors import AetherTypeError
+from aether.errors import AetherSyntaxError, AetherTypeError
 from aether.ir import (
     FunctionType as IRFunctionType,
     IRCallIndirect,
@@ -67,18 +67,45 @@ def test_function_type_is_structural_exact_and_has_stable_text() -> None:
     one = FunctionType(("double",), "double")
     many = FunctionType(("int", "double"), "int")
 
-    assert str(zero) == "void()"
-    assert str(one) == "double(double)"
-    assert str(many) == "int(int, double)"
+    assert str(zero) == "Function<(), void>"
+    assert str(one) == "Function<(double), double>"
+    assert str(many) == "Function<(int, double), int>"
     assert one == FunctionType(("double",), "double")
     assert one != FunctionType(("int",), "double")
 
 
+@pytest.mark.parametrize(
+    "type_source",
+    (
+        "Function<(), void>",
+        "Function<(double), double>",
+        "Function<(double, int), boolean>",
+        "Function<(double, int, string), double>",
+        "Function<(List<double>), double>",
+    ),
+)
+def test_canonical_function_type_syntax_parses(type_source: str) -> None:
+    _typed(f"alias Callback = {type_source}; int main() {{ return 0; }}")
+
+
+def test_function_type_requires_parenthesized_parameter_list() -> None:
+    with pytest.raises(
+        AetherSyntaxError,
+        match=r"Function parameter types must be enclosed in parentheses",
+    ):
+        _typed("alias Callback = Function<double, double>;")
+
+
+def test_legacy_return_type_first_callable_syntax_is_rejected() -> None:
+    with pytest.raises(AetherSyntaxError):
+        _typed("alias Callback = double(double);")
+
+
 def test_callable_alias_zero_multiple_and_void_signatures_typecheck() -> None:
     source = """
-alias Producer = int();
-alias Combiner = int(int, int);
-alias Action = void(int);
+alias Producer = Function<(), int>;
+alias Combiner = Function<(int, int), int>;
+alias Action = Function<(int), void>;
 int produce() { return 3; }
 int combine(int left, int right) { return left + right; }
 void consume(int value) { println(value); }
@@ -103,36 +130,68 @@ int main() { return apply(produce, combine, consume); }
         assert stdout.getvalue() == "7\n"
 
 
+def test_fixed_point_higher_order_program_runs_end_to_end() -> None:
+    source = """
+struct PF { double x; double res; int iter; }
+PF PuntoFijo(Function<(double), double> f, double x0, double tol, int n_max) {
+    double x = x0;
+    double res = abs(f(x) - x);
+    int iter = 0;
+    while (res > tol && iter < n_max) {
+        x = f(x);
+        res = abs(f(x) - x);
+        iter += 1;
+    }
+    return PF(x, res, iter);
+}
+double g1(double x) = 1 / (3 * x);
+double g2(double x) = 0.5 * (x + 1 / (3 * x));
+int main() {
+    PF pf1 = PuntoFijo(g1, 0.5, 1e-10, 500);
+    PF pf2 = PuntoFijo(g2, 0.5, 1e-10, 500);
+    if (pf1.iter == 500 && pf2.res <= 1e-10) { return 0; }
+    return 1;
+}
+"""
+    typed = _typed(source)
+    assert run_aether(source).exit_code == 0
+    ir = _ir(source)
+    assert IRInterpreter(ir).call("main") == 0
+    SSAVerifier(lower_to_verified_ssa(ir)).verify()
+    if _HAS_CLANG:
+        assert LLVMRunner().run(typed) == 0
+
+
 @pytest.mark.parametrize(
     ("source", "message"),
     [
         (
-            "double f(double x){return x;} double apply(int(int) g){return 0.0;} "
+            "double f(double x){return x;} double apply(Function<(int), int> g){return 0.0;} "
             "int main(){apply(f);return 0;}",
-            "Cannot implicitly convert 'double(double)' to 'int(int)'",
+            "Cannot implicitly convert 'Function<(double), double>' to 'Function<(int), int>'",
         ),
         (
             "double f(double x,double y){return x+y;} "
-            "double apply(double(double) g){return g(1.0);} "
+            "double apply(Function<(double), double> g){return g(1.0);} "
             "int main(){apply(f);return 0;}",
-            "Cannot implicitly convert 'double(double, double)' to 'double(double)'",
+            "Cannot implicitly convert 'Function<(double, double), double>' to 'Function<(double), double>'",
         ),
         (
-            "double apply(double(double) f){return f(1.0, 2.0);} int main(){return 0;}",
+            "double apply(Function<(double), double> f){return f(1.0, 2.0);} int main(){return 0;}",
             "Callable 'f' expects 1 arguments but got 2",
         ),
         (
-            "double apply(double(double) f){return f(1.0);} "
+            "double apply(Function<(double), double> f){return f(1.0);} "
             "int main(){double value=3.0; apply(value); return 0;}",
-            "Cannot implicitly convert 'double' to 'double(double)'",
+            "Cannot implicitly convert 'double' to 'Function<(double), double>'",
         ),
         (
-            "double(double) maker(){ return square; } "
+            "Function<(double), double> maker(){ return square; } "
             "double square(double x){return x*x;} int main(){return 0;}",
             "Returning callable values is not supported yet",
         ),
         (
-            "double apply(double(double) f){return f(1.0);} "
+            "double apply(Function<(double), double> f){return f(1.0);} "
             "int main(){apply(sin); return 0;}",
             "Undefined variable 'sin'",
         ),
@@ -157,9 +216,9 @@ int factorial(int value) {
     if (value <= 1) { return 1; }
     return value * factorial(value - 1);
 }
-int apply(int(int) operation, int value) { return operation(value); }
+int apply(Function<(int), int> operation, int value) { return operation(value); }
 int main() {
-    int(int) factorial = factorial;
+    Function<(int), int> factorial = factorial;
     return apply(factorial, 5);
 }
 """
@@ -170,7 +229,7 @@ int main() {
 def test_user_function_reference_is_not_confused_with_same_named_builtin() -> None:
     source = """
 double sin(double value) { return value + 1.0; }
-double apply(double(double) operation, double value) { return operation(value); }
+double apply(Function<(double), double> operation, double value) { return operation(value); }
 int main() { return int(apply(sin, 2.0)); }
 """
 
@@ -184,7 +243,7 @@ def test_ir_ssa_and_optimizers_preserve_refs_indirect_calls_and_callable_phi() -
 double plusOne(double value) { return value + 1.0; }
 double timesTwo(double value) { return value * 2.0; }
 double chooseAndApply(boolean chooseSecond, double value) {
-    double(double) operation = plusOne;
+    Function<(double), double> operation = plusOne;
     if (chooseSecond) { operation = timesTwo; }
     return operation(value);
 }
@@ -223,7 +282,7 @@ int main() { return int(chooseAndApply(true, 4.0)); }
 def test_ir_and_ssa_verifiers_reject_invalid_indirect_callable_operands() -> None:
     source = """
 double identity(double value) { return value; }
-double apply(double(double) operation, double value) { return operation(value); }
+double apply(Function<(double), double> operation, double value) { return operation(value); }
 int main() { return int(apply(identity, 2.0)); }
 """
     ir = _ir(source)
@@ -257,8 +316,8 @@ def test_struct_by_value_and_void_callable_match_ast_ir_and_native() -> None:
 struct Point { int x; int y; }
 int sum(Point point) { return point.x + point.y; }
 void printPoint(Point point) { println(point.x, point.y); }
-int apply(int(Point) operation, Point point) { return operation(point); }
-void invoke(void(Point) action, Point point) { action(point); }
+int apply(Function<(Point), int> operation, Point point) { return operation(point); }
+void invoke(Function<(Point), void> action, Point point) { action(point); }
 int main() {
     Point point = Point(2, 3);
     invoke(printPoint, point);
@@ -304,7 +363,7 @@ def test_imported_alias_homonyms_and_semantic_mangling_match_ast_native(
     source = """
 from Left import transform as increment;
 import Right as R;
-int apply(int(int) operation, int value) { return operation(value); }
+int apply(Function<(int), int> operation, int value) { return operation(value); }
 int main() { return apply(increment, 2) + apply(R.transform, 3); }
 """
     typed = _typed(source, source_root=tmp_path)
@@ -322,7 +381,7 @@ def test_private_imported_function_remains_inaccessible_as_callable(tmp_path: Pa
         "package Hidden; private int secret(int value) { return value; }",
         encoding="utf-8",
     )
-    source = "from Hidden import secret; int apply(int(int) f){return f(1);}"
+    source = "from Hidden import secret; int apply(Function<(int), int> f){return f(1);}"
 
     with pytest.raises(AetherTypeError, match="not public"):
         _typed(source, source_root=tmp_path)
@@ -331,7 +390,7 @@ def test_private_imported_function_remains_inaccessible_as_callable(tmp_path: Pa
 def test_native_capability_profile_accepts_typed_top_level_subset() -> None:
     source = """
 int increment(int value) { return value + 1; }
-int apply(int(int) operation, int value) { return operation(value); }
+int apply(Function<(int), int> operation, int value) { return operation(value); }
 int main() { return apply(increment, 3); }
 """
     typed = _typed(source)

@@ -111,6 +111,14 @@ class Parser:
             return self._enum_declaration()
         if self._match(TokenType.FUNCTION):
             return self._function_declaration()
+        if (
+            self._check(TokenType.TYPE)
+            and self._peek().lexeme == "Function"
+            and self._type_annotation_end_cursor(self.current) is None
+        ):
+            # Parse the malformed type here so its dedicated syntax diagnostic
+            # is not hidden by declaration lookahead.
+            self._parse_type_annotation("Expected Function type.")
         if self._looks_like_function_declaration():
             return self._function_declaration()
         if self._looks_like_abbreviated_function_declaration():
@@ -1190,7 +1198,7 @@ class Parser:
                 raise self._error(token, "'void' cannot be used as an array type.")
             if self._check(TokenType.QUESTION):
                 raise self._error(self._peek(), "'void' cannot be nullable.")
-            return self._callable_type_suffix("void")
+            return "void"
         return self._parse_type_annotation(message, allow_unknown_identifier=True)
 
     def _parse_type_annotation(self, message: str, *, allow_unknown_identifier: bool = True) -> AetherType:
@@ -1204,9 +1212,9 @@ class Parser:
             self._consume(TokenType.RIGHT_PAREN, "Expected ')' after tuple return type.")
             return self._nullable_suffix(TupleType(tuple(element_types)))
         token = self._consume_type(message, allow_unknown_identifier=allow_unknown_identifier)
+        if token.lexeme == "Function":
+            return self._parse_function_type()
         if token.lexeme == "void":
-            if self._check(TokenType.LEFT_PAREN):
-                return self._nullable_suffix(self._callable_type_suffix("void"))
             raise self._error(token, "'void' is only valid as a function return type.")
         if token.lexeme in {"Array", "List"}:
             element_type = "double"
@@ -1239,22 +1247,29 @@ class Parser:
         type_name: AetherType = token.lexeme
         if self._check(TokenType.LEFT_BRACKET):
             raise self._error(self._peek(), "Array type syntax 'T[]' is not public; use Array<T>.")
-        type_name = self._callable_type_suffix(type_name)
         return self._nullable_suffix(type_name)
 
-    def _callable_type_suffix(self, return_type: AetherType) -> AetherType:
+    def _parse_function_type(self) -> AetherType:
+        self._consume(TokenType.LESS, "Expected '<' after 'Function'.")
         if not self._match(TokenType.LEFT_PAREN):
-            return return_type
+            raise self._error(
+                self._peek(),
+                "Function parameter types must be enclosed in parentheses; "
+                "use Function<(T1, ...), R>.",
+            )
         parameter_types: list[AetherType] = []
         if not self._check(TokenType.RIGHT_PAREN):
             while True:
                 parameter_types.append(
-                    self._parse_type_annotation("Expected callable parameter type.")
+                    self._parse_type_annotation("Expected Function parameter type.")
                 )
                 if not self._match(TokenType.COMMA):
                     break
-        self._consume(TokenType.RIGHT_PAREN, "Expected ')' after callable parameter types.")
-        return FunctionType(tuple(parameter_types), return_type)
+        self._consume(TokenType.RIGHT_PAREN, "Expected ')' after Function parameter types.")
+        self._consume(TokenType.COMMA, "Expected ',' before Function return type.")
+        return_type = self._parse_return_type_annotation("Expected Function return type.")
+        self._consume(TokenType.GREATER, "Expected '>' after Function return type.")
+        return self._nullable_suffix(FunctionType(tuple(parameter_types), return_type))
 
     def _nullable_suffix(self, type_name: AetherType) -> AetherType:
         if not self._match(TokenType.QUESTION):
@@ -1375,7 +1390,33 @@ class Parser:
         if self.tokens[start].type not in {TokenType.TYPE, TokenType.IDENTIFIER}:
             return None
         cursor = start + 1
-        if self.tokens[start].lexeme in {"Array", "List"} and cursor < len(self.tokens) and self.tokens[cursor].type == TokenType.LESS:
+        if self.tokens[start].lexeme == "Function":
+            if cursor >= len(self.tokens) or self.tokens[cursor].type != TokenType.LESS:
+                return None
+            cursor += 1
+            if cursor >= len(self.tokens) or self.tokens[cursor].type != TokenType.LEFT_PAREN:
+                return None
+            cursor += 1
+            if cursor < len(self.tokens) and self.tokens[cursor].type == TokenType.RIGHT_PAREN:
+                cursor += 1
+            else:
+                while True:
+                    cursor = self._type_annotation_end_cursor(cursor)
+                    if cursor is None or cursor >= len(self.tokens):
+                        return None
+                    if self.tokens[cursor].type == TokenType.RIGHT_PAREN:
+                        cursor += 1
+                        break
+                    if self.tokens[cursor].type != TokenType.COMMA:
+                        return None
+                    cursor += 1
+            if cursor >= len(self.tokens) or self.tokens[cursor].type != TokenType.COMMA:
+                return None
+            cursor = self._type_annotation_end_cursor(cursor + 1)
+            if cursor is None or cursor >= len(self.tokens) or self.tokens[cursor].type != TokenType.GREATER:
+                return None
+            cursor += 1
+        elif self.tokens[start].lexeme in {"Array", "List"} and cursor < len(self.tokens) and self.tokens[cursor].type == TokenType.LESS:
             cursor = self._type_annotation_end_cursor(cursor + 1)
             if cursor is None or cursor >= len(self.tokens) or self.tokens[cursor].type != TokenType.GREATER:
                 return None
@@ -1398,21 +1439,6 @@ class Parser:
                 cursor += 3
             else:
                 return None
-        if cursor < len(self.tokens) and self.tokens[cursor].type == TokenType.LEFT_PAREN:
-            cursor += 1
-            if cursor < len(self.tokens) and self.tokens[cursor].type == TokenType.RIGHT_PAREN:
-                cursor += 1
-            else:
-                while True:
-                    cursor = self._type_annotation_end_cursor(cursor)
-                    if cursor is None or cursor >= len(self.tokens):
-                        return None
-                    if self.tokens[cursor].type == TokenType.RIGHT_PAREN:
-                        cursor += 1
-                        break
-                    if self.tokens[cursor].type != TokenType.COMMA:
-                        return None
-                    cursor += 1
         if cursor < len(self.tokens) and self.tokens[cursor].type == TokenType.QUESTION:
             cursor += 1
         return cursor
@@ -1433,10 +1459,11 @@ class Parser:
         return cursor
 
     def _matrix_literal(self) -> ast.MatrixLiteral:
+        bracket_token = self._previous()
         self.matrix_literal_depth += 1
         try:
             if self._match(TokenType.RIGHT_BRACKET):
-                return ast.MatrixLiteral([])
+                return ast.MatrixLiteral([], line=bracket_token.line, column=bracket_token.column)
             rows: list[list[ast.Expression]] = []
             has_space_columns = False
             uses_commas = False
@@ -1471,13 +1498,21 @@ class Parser:
                 orientation = "column"
             elif uses_commas:
                 is_vector = False
-            return ast.MatrixLiteral(rows, vector=is_vector, orientation=orientation, uses_commas=uses_commas)
+            return ast.MatrixLiteral(
+                rows,
+                vector=is_vector,
+                orientation=orientation,
+                uses_commas=uses_commas,
+                line=bracket_token.line,
+                column=bracket_token.column,
+            )
         finally:
             self.matrix_literal_depth -= 1
 
     def _list_literal(self) -> ast.ListLiteral:
+        brace_token = self._previous()
         if self._match(TokenType.RIGHT_BRACE):
-            return ast.ListLiteral([])
+            return ast.ListLiteral([], line=brace_token.line, column=brace_token.column)
         elements: list[ast.Expression] = []
         while True:
             if self._check(TokenType.RIGHT_BRACE):
@@ -1493,7 +1528,7 @@ class Parser:
                 raise self._error(self._peek(), "Expected ',' between list elements.")
             raise self._error(self._peek(), "Expected ',' or '}' in list literal.")
         self._consume(TokenType.RIGHT_BRACE, "Expected '}' after list literal.")
-        return ast.ListLiteral(elements)
+        return ast.ListLiteral(elements, line=brace_token.line, column=brace_token.column)
 
     def _is_matrix_signed_column_boundary(self, operator: Token) -> bool:
         if self.matrix_literal_depth == 0 or operator.type != TokenType.MINUS:
