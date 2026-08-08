@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import tomllib
 import venv
 import zipfile
 
@@ -93,6 +94,11 @@ DEPRECATED_MODULE_NAMES = frozenset(
         "qt_app.py",
     }
 )
+EXPECTED_ENTRY_POINTS = {
+    "aether": "aether.cli:main",
+    "aether-lsp": "aether_lsp.server:main",
+}
+FORBIDDEN_DEPENDENCIES = ("pyside", "pyqt", "platformdirs")
 
 
 class ReleaseError(RuntimeError):
@@ -195,6 +201,46 @@ def _exception_corpus_paths() -> tuple[str, ...]:
     )
 
 
+def _project_metadata() -> dict[str, object]:
+    return tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))[
+        "project"
+    ]
+
+
+def _wheel_payload(names: set[str]) -> set[str]:
+    """Return content relevant to runtime/packaging parity, excluding build records."""
+    return {
+        name
+        for name in names
+        if not name.endswith("/")
+        and not name.endswith(".dist-info/RECORD")
+        and not name.endswith(".dist-info/WHEEL")
+    }
+
+
+def compare_wheel_contents(direct: Path, reconstructed: Path) -> None:
+    with zipfile.ZipFile(direct) as direct_archive, zipfile.ZipFile(
+        reconstructed
+    ) as reconstructed_archive:
+        direct_names = _wheel_payload(set(direct_archive.namelist()))
+        reconstructed_names = _wheel_payload(set(reconstructed_archive.namelist()))
+        if direct_names != reconstructed_names:
+            missing = sorted(direct_names - reconstructed_names)
+            extra = sorted(reconstructed_names - direct_names)
+            raise ReleaseError(
+                "wheel rebuilt from sdist has a different content manifest; "
+                f"missing={missing}, extra={extra}"
+            )
+        changed = sorted(
+            name
+            for name in direct_names
+            if direct_archive.read(name) != reconstructed_archive.read(name)
+        )
+        if changed:
+            raise ReleaseError(
+                "wheel rebuilt from sdist has materially different files: "
+                + ", ".join(changed)
+            )
 def _unsafe_archive_names(names: set[str], *, wheel: bool) -> list[str]:
     unsafe: list[str] = []
     for name in names:
@@ -278,18 +324,23 @@ def verify_wheel(wheel: Path) -> None:
         if f"Version: {PACKAGE_VERSION}\n" not in metadata:
             raise ReleaseError("wheel metadata does not contain the canonical package version")
         normalized_metadata = metadata.casefold()
-        if any(
-            dependency in normalized_metadata
-            for dependency in ("pyside", "pyqt", "platformdirs")
-        ):
+        if any(dependency in normalized_metadata for dependency in FORBIDDEN_DEPENDENCIES):
             raise ReleaseError("wheel metadata contains a deprecated Qt IDE dependency")
         entry_points = [name for name in names if name.endswith(".dist-info/entry_points.txt")]
         entry_point_data = archive.read(entry_points[0]) if len(entry_points) == 1 else b""
-        if (
-            b"aether = aether.cli:main" not in entry_point_data
-            or b"aether-lsp = aether_lsp.server:main" not in entry_point_data
-        ):
-            raise ReleaseError("wheel is missing a canonical CLI or LSP entry point")
+        parsed_entry_points = {
+            line.split("=", 1)[0].strip(): line.split("=", 1)[1].strip()
+            for line in entry_point_data.decode("utf-8").splitlines()
+            if "=" in line and not line.lstrip().startswith("[")
+        }
+        if parsed_entry_points != EXPECTED_ENTRY_POINTS:
+            raise ReleaseError(
+                "wheel entry points differ from the supported public surface: "
+                f"{parsed_entry_points}"
+            )
+        project = _project_metadata()
+        if f"Requires-Python: {project['requires-python']}\n" not in metadata:
+            raise ReleaseError("wheel metadata has an unexpected Python requirement")
         leaked = [
             name
             for name in names
@@ -464,6 +515,11 @@ def clean_install_smoke(wheel: Path) -> None:
         )
         paths = _write_smoke_sources(work)
         _expect(
+            [str(aether), "--help"],
+            cwd=work,
+            env=smoke_env,
+        )
+        _expect(
             [str(aether), "--version"],
             cwd=work,
             expected_stdout=(
@@ -476,6 +532,28 @@ def clean_install_smoke(wheel: Path) -> None:
             "aether-lsp.exe" if os.name == "nt" else "aether-lsp"
         )
         _expect([str(aether_lsp), "--help"], cwd=work, env=smoke_env)
+        resource_probe = _run(
+            [
+                str(python),
+                "-c",
+                (
+                    "import json, pathlib, sysconfig; "
+                    "root=pathlib.Path(sysconfig.get_path('data'))/'share'/'aether'; "
+                    "manifest=json.loads((root/'examples'/'v1_examples_manifest.json').read_text()); "
+                    "assert all((root/e['path']).is_file() for e in manifest['entries']); "
+                    "catalog=json.loads((root/'corpus'/'exceptions'/'catalog.json').read_text()); "
+                    "assert all((root/'corpus'/'exceptions'/e['path']).is_file() "
+                    "for group in ('positive','negative') for e in catalog[group]); "
+                    "assert (root/'examples'/'LeetCode'/'isPalindrome.ae').is_file(); "
+                    "import aether; assert 'site-packages' in pathlib.Path(aether.__file__).as_posix(); "
+                    "print(root)"
+                ),
+            ],
+            cwd=work,
+            env=smoke_env,
+            capture=True,
+        )
+        installed_resources = Path(resource_probe.stdout.strip())
         _expect(
             [str(aether), "--backend=ast", str(paths["hello"])],
             cwd=work,
@@ -486,6 +564,11 @@ def clean_install_smoke(wheel: Path) -> None:
             [str(aether), str(paths["hello"])],
             cwd=work,
             expected_stdout="wheel-native\n",
+            env=smoke_env,
+        )
+        _expect(
+            [str(aether), str(installed_resources / "examples/LeetCode/isPalindrome.ae")],
+            cwd=work,
             env=smoke_env,
         )
         _expect(
@@ -530,6 +613,30 @@ def clean_install_smoke(wheel: Path) -> None:
         )
         if probe.stdout.splitlines() != [PACKAGE_VERSION, PACKAGE_VERSION]:
             raise ReleaseError(f"installed package version mismatch: {probe.stdout!r}")
+
+
+def rebuild_wheel_from_sdist(sdist: Path, output: Path, *, env: dict[str, str]) -> Path:
+    output.mkdir(parents=True, exist_ok=True)
+    _run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "wheel",
+            "--disable-pip-version-check",
+            "--no-deps",
+            "--wheel-dir",
+            str(output),
+            str(sdist),
+        ],
+        cwd=output,
+        env=env,
+    )
+    wheels = sorted(output.glob("*.whl"))
+    if len(wheels) != 1:
+        raise ReleaseError("sdist reconstruction must produce exactly one wheel")
+    verify_wheel(wheels[0])
+    return wheels[0]
 
 
 def _copy_artifact(source: Path, destination: Path) -> None:
@@ -625,7 +732,9 @@ def build_release(args: argparse.Namespace) -> tuple[Path, ...]:
                 "--sdist",
                 "--outdir",
                 str(temporary_dist),
+                str(ROOT),
             ],
+            cwd=Path(temporary),
             env=build_env,
         )
         wheels = sorted(temporary_dist.glob("*.whl"))
@@ -644,6 +753,11 @@ def build_release(args: argparse.Namespace) -> tuple[Path, ...]:
         verify_wheel(wheel)
         verify_sdist(sdist)
         clean_install_smoke(wheel)
+        reconstructed = rebuild_wheel_from_sdist(
+            sdist, Path(temporary) / "sdist-wheel", env=build_env
+        )
+        compare_wheel_contents(wheel, reconstructed)
+        clean_install_smoke(reconstructed)
 
         DIST.mkdir(parents=True, exist_ok=True)
         final_wheel = DIST / wheel.name

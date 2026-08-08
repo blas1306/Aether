@@ -28,7 +28,7 @@ double df(double x) {
     return df;
 }
 
-NewtonResultado nr = NR2(f, df, -0.9, 1e-8, 100);
+NewtonResultado nr = NR2(f, df, 1, 1e-8, 100);
 
 println("x = ", nr.raiz);
 println("res = ", nr.res);

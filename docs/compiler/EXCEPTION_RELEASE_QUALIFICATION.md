@@ -3,6 +3,8 @@
 > Classification: **Audit**. Date: **2026-08-02**; ERQ-006 update:
 > **2026-08-03**.
 >
+> ERQ-007 final packaging qualification: **2026-08-08**.
+>
 > Baseline: commit `83da5fb` (`feat(exceptions): enforce native boundary
 > containment`). This report qualifies the existing implementation; it does not
 > change exception semantics, Initial IR, SSA, the accepted ADRs, the private
@@ -187,10 +189,10 @@ did not change the accepted architecture.
 
 ## 6. Example audit
 
-The schema-2 manifest now covers all 107 public `.ae` files:
+The schema-2 manifest now covers all 114 public `.ae` files:
 
-- 90 `V1_NATIVE`;
-- 17 `AST_ONLY_EXPERIMENTAL`;
+- 94 `V1_NATIVE`;
+- 20 `AST_ONLY_EXPERIMENTAL`;
 - 0 broken/unclassified.
 
 `pruebaException.ae` requires `AE-BACKEND-ERROR_HANDLING` and remains AST-only
@@ -240,6 +242,66 @@ ERQ-005 is closed; the intentionally unsupported areas are not advertised.
   diagnostic coverage for a promoted exception profile is incomplete.
 
 No release metadata was changed to imply exception support.
+
+### ERQ-007 final packaging qualification
+
+The original failure is reproduced by the pre-fix packaging configuration: the
+canonical manifest contained `examples/LeetCode/isPalindrome.ae`, while
+`pyproject.toml` had data-file rules for the other example subdirectories but no
+`share/aether/examples/LeetCode` rule. The wheel therefore built successfully
+and `verify_wheel` rejected it. Commit `f068c63` added that missing rule; ERQ-006
+later added the exception corpus and evidence rules, but did not itself establish
+wheel-from-sdist or installed-resource equivalence.
+
+The invariant is now fail-closed: `release.py` reads every expected public
+example directly from `v1_examples_manifest.json` and every exception source
+directly from `corpus/exceptions/catalog.json`. Both wheel and sdist must contain
+all catalogued paths. A direct wheel and a wheel reconstructed through isolated
+PEP 517 processing of the fresh sdist must have identical payload manifests and
+bytes, excluding only the build-generated `RECORD` and `WHEEL` files. Both
+wheels receive the same clean-install smoke suite, and the installed probe finds
+the catalogs and every referenced resource through the environment data prefix,
+not through the checkout. It also executes the formerly missing palindrome
+example from the installed data directory.
+
+The artifact policy is:
+
+- **Wheel and sdist:** all Python runtime/LSP modules, the `aether` and
+  `aether-lsp` entry points, runtime/normative documentation named in package
+  data, the public example manifest and every catalogued public example, and the
+  exception catalog, all its positive/negative sources, promotion evidence and
+  differential report.
+- **Sdist only:** release/check scripts, the full documentation tree, tests and
+  their release fixtures, editor sources, and build metadata needed to recreate
+  and validate the wheel.
+- **Development only:** caches, local environments, build/dist directories,
+  compiler outputs and temporary files. Rust workspace tests and packaging
+  tooling are development/release evidence, not Python wheel payload.
+- **Intentionally excluded:** `legacy/`, `docs/legacy/`, the removed Qt IDE,
+  PySide/PyQt/platformdirs/studio metadata, embedded CodeMirror/web editor,
+  removed studio resources and entry points, test fixtures in the wheel, and
+  native object/shared-library artifacts.
+
+The Rust verifier remains an explicit experimental subprocess/canary selected by
+an externally supplied executable path. The installed stable Python product uses
+the Python verifier and neither discovers nor requires a bundled Rust binary;
+there is therefore no Rust/native executable in the universal `py3-none-any`
+wheel. Packaging a verifier for canary distribution remains the separate,
+versioned workflow in `scripts/package_rust_verifier.py`.
+
+The final 2026-08-08 run built fresh wheel and sdist under `/tmp`, verified both
+catalogs, reconstructed a second wheel from the sdist, and proved semantic
+content equality. Clean environments installed and exercised both wheels with
+no `PYTHONPATH` or user-site access: CLI help/version, LSP help, AST and native
+execution, modules, stdlib collections/strings/files, installed palindrome,
+exception capability rejection, installed-origin/version and compileall all
+passed. A second direct build was used after the gate exposed stale implicit
+namespace metadata; `namespaces = false` now makes regular-package discovery
+explicit and direct/sdist wheels agree. Archive timestamps remain outside the
+semantic comparison, so byte-for-byte archive reproducibility is not claimed.
+
+ERQ-007 is **CLOSED**. `ERROR_HANDLING` remains **UNSUPPORTED**; this packaging
+qualification does not authorize promotion.
 
 ## 9. Stress-test summary
 

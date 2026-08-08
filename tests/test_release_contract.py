@@ -4,6 +4,9 @@ import importlib.util
 from io import StringIO
 from pathlib import Path
 import sys
+import zipfile
+
+import pytest
 
 from aether.capabilities import CAPABILITY_PROFILE_VERSION
 from aether.cli import main as cli_main
@@ -176,3 +179,27 @@ def test_release_archive_policy_rejects_deprecated_tooling_paths() -> None:
     }
 
     assert release._unsafe_archive_names(names, wheel=False) == sorted(names)
+
+
+def test_public_packaging_expectations_come_from_canonical_manifest() -> None:
+    release = _load_script("release.py")
+    paths = release._public_example_paths()
+
+    assert "examples/LeetCode/isPalindrome.ae" in paths
+    assert len(paths) == len(set(paths))
+    assert all((ROOT / path).is_file() for path in paths)
+
+
+def test_wheel_from_sdist_comparison_fails_closed(tmp_path: Path) -> None:
+    release = _load_script("release.py")
+    direct = tmp_path / "direct.whl"
+    rebuilt = tmp_path / "rebuilt.whl"
+    with zipfile.ZipFile(direct, "w") as archive:
+        archive.writestr("aether/cli.py", "direct")
+        archive.writestr("pkg.dist-info/RECORD", "ignored")
+    with zipfile.ZipFile(rebuilt, "w") as archive:
+        archive.writestr("aether/cli.py", "rebuilt")
+        archive.writestr("pkg.dist-info/RECORD", "also ignored")
+
+    with pytest.raises(release.ReleaseError, match="materially different"):
+        release.compare_wheel_contents(direct, rebuilt)

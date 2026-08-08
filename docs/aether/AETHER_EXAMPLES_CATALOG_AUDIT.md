@@ -13,8 +13,8 @@ cuatro `BROKEN`. Su cierre dejó 78 `V1_NATIVE`, 23
 El mantenimiento del 2026-07-28 incorporó cuatro ejemplos públicos añadidos
 después de ese cierre, promovió `Sorts/Main.ae` y `Sorts/Sortings.ae` de acuerdo
 con el soporte native observado, y preservó las promociones de clases ya
-registradas por el manifiesto. El catálogo actual contiene 107 rutas: 90
-`V1_NATIVE`, 17 `AST_ONLY_EXPERIMENTAL` y cero `BROKEN`. De los 17
+registradas por el manifiesto. El catálogo actual contiene 114 rutas: 94
+`V1_NATIVE`, 20 `AST_ONLY_EXPERIMENTAL` y cero `BROKEN`. De los 20
 experimentales, ocho tienen ejecución AST automatizada con exit code y hashes
 de stdout/stderr; los diez restantes son entradas frontend, interactivas, de
 plotting o módulos auxiliares. Todos pasan frontend y declaran el conjunto

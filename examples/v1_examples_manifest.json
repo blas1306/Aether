@@ -9,6 +9,92 @@
   },
   "entries": [
     {
+      "path": "examples/ControlesALN/1erControl/Ej1/Biseccion.ae",
+      "condition": "native_module_emission",
+      "expected_exit_code": null,
+      "stdout_sha256": null,
+      "stderr_sha256": null,
+      "timeout_seconds": 20,
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": false
+    },
+    {
+      "path": "examples/ControlesALN/1erControl/Ej1/ej1.ae",
+      "condition": "frontend_acceptance",
+      "expected_exit_code": null,
+      "stdout_sha256": null,
+      "stderr_sha256": null,
+      "timeout_seconds": 20,
+      "classification": "AST_ONLY_EXPERIMENTAL",
+      "backends": [
+        "ast"
+      ],
+      "run": false,
+      "outside_v1_features": [
+        "AE-BACKEND-FUNCTION_VALUES",
+        "AE-BACKEND-MODULES"
+      ]
+    },
+    {
+      "path": "examples/ControlesALN/1erControl/Ej2/PuntoFijo.ae",
+      "condition": "native_module_emission",
+      "expected_exit_code": null,
+      "stdout_sha256": null,
+      "stderr_sha256": null,
+      "timeout_seconds": 20,
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": false
+    },
+    {
+      "path": "examples/ControlesALN/1erControl/Ej2/ej2.ae",
+      "condition": "native_execution",
+      "expected_exit_code": 0,
+      "stdout_sha256": "f2f575def8ffd1caf75a9eb464b488ee7e4caf21994fa72387db06b82b06ad86",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "timeout_seconds": 20,
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": true
+    },
+    {
+      "path": "examples/ControlesALN/2doControl/Ej1/ej1.ae",
+      "condition": "frontend_acceptance",
+      "expected_exit_code": null,
+      "stdout_sha256": null,
+      "stderr_sha256": null,
+      "timeout_seconds": 20,
+      "classification": "AST_ONLY_EXPERIMENTAL",
+      "backends": [
+        "ast"
+      ],
+      "run": false,
+      "outside_v1_features": [
+        "AE-BACKEND-FUNCTION_VALUES",
+        "AE-BACKEND-MODULES"
+      ]
+    },
+    {
+      "path": "examples/ControlesALN/2doControl/Ej2/ej2.ae",
+      "condition": "native_module_emission",
+      "expected_exit_code": null,
+      "stdout_sha256": null,
+      "stderr_sha256": null,
+      "timeout_seconds": 20,
+      "classification": "V1_NATIVE",
+      "backends": [
+        "native"
+      ],
+      "run": false
+    },
+    {
       "path": "examples/FormulaNumerosPrimos.ae",
       "condition": "native_execution",
       "expected_exit_code": 0,
@@ -1322,6 +1408,23 @@
         "native"
       ],
       "run": true
+    },
+    {
+      "path": "examples/nose2.ae",
+      "condition": "frontend_acceptance",
+      "expected_exit_code": null,
+      "stdout_sha256": null,
+      "stderr_sha256": null,
+      "timeout_seconds": 20,
+      "classification": "AST_ONLY_EXPERIMENTAL",
+      "backends": [
+        "ast"
+      ],
+      "run": false,
+      "outside_v1_features": [
+        "AE-BACKEND-INPUT",
+        "AE-BACKEND-PRIMITIVE_TYPES"
+      ]
     },
     {
       "path": "examples/numerical_methods/Functions.ae",
