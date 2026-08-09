@@ -1,0 +1,374 @@
+{
+  "arc": {
+    "apparent_pair_classification": {
+      "NEEDS_OWNERSHIP_DATAFLOW": 2
+    },
+    "by_function": [
+      {
+        "function": "main",
+        "release": 2,
+        "workload": "benchmarks/array_sum.ae"
+      },
+      {
+        "function": "main",
+        "release": 2,
+        "workload": "benchmarks/list_for_sum.ae"
+      },
+      {
+        "function": "main",
+        "release": 1,
+        "workload": "examples/llvm/array_sum.ae"
+      },
+      {
+        "function": "main",
+        "release": 1,
+        "workload": "examples/llvm/list_index.ae"
+      },
+      {
+        "function": "identity",
+        "retain": 1,
+        "workload": "examples/llvm/list_push_alias.ae"
+      },
+      {
+        "function": "main",
+        "release": 4,
+        "workload": "examples/llvm/list_push_alias.ae"
+      },
+      {
+        "function": "main",
+        "release": 2,
+        "retain": 1,
+        "workload": "examples/llvm/list_set_alias.ae"
+      },
+      {
+        "function": "main",
+        "release": 4,
+        "workload": "tests/fixtures/o2_proof_coverage/slices.ae"
+      }
+    ],
+    "hot_loop_operations": {},
+    "operations": {
+      "release": 16,
+      "retain": 2
+    },
+    "smallest_safe_pass": "same-value local retain/release with ownership dataflow, no escape/consume, dominance and post-dominance, and explicit exceptional-path proof"
+  },
+  "audit": "O2.6.2",
+  "corpus": [
+    "benchmarks/array_sum.ae",
+    "benchmarks/list_for_sum.ae",
+    "benchmarks/matrix_mul.ae",
+    "benchmarks/nested_loops.ae",
+    "benchmarks/vector_dot.ae",
+    "examples/llvm/array_sum.ae",
+    "examples/llvm/for_break_continue.ae",
+    "examples/llvm/list_index.ae",
+    "examples/llvm/list_push_alias.ae",
+    "examples/llvm/list_set_alias.ae",
+    "examples/llvm/matrix_index.ae",
+    "examples/llvm/matrix_matmul.ae",
+    "examples/llvm/vector_add.ae",
+    "examples/numerical_methods/main.ae",
+    "examples/ProbandoNR/probandoNR2.ae",
+    "tests/fixtures/o2_proof_coverage/slices.ae"
+  ],
+  "corpus_failures": [],
+  "corpus_revision": "e5e7a60e1ca968d2b2a276eaf99c52d12b787be7",
+  "field_readiness": {
+    "blocked_candidates": 0,
+    "field_sensitive": false,
+    "location_granularity": "whole semantic object"
+  },
+  "general_memory_reads": {
+    "blockers": {
+      "index_or_base_varies": 5
+    },
+    "candidates": {
+      "ArrayGet": 2,
+      "ListGet": 2,
+      "MatrixGet": 1
+    },
+    "future_policy": "require invariant base/address and bounds_checked=false",
+    "readiness": {
+      "needs_BCE_first": 2
+    }
+  },
+  "immutable_read_licm": {
+    "eligible_by_kind": {
+      "Array.length": 1,
+      "List.length": 1
+    },
+    "pass_statistics": {
+      "array_length_reads_hoisted": 1,
+      "blocked_by_base_variation": 0,
+      "blocked_by_control_speculation": 76,
+      "blocked_by_exceptional_uncertainty": 0,
+      "blocked_by_may_alias": 0,
+      "blocked_by_may_modify": 0,
+      "blocked_by_may_throw": 10,
+      "blocked_by_may_trap": 35,
+      "blocked_by_memory_modref": 0,
+      "blocked_by_ownership": 0,
+      "blocked_by_unknown_call": 0,
+      "blocked_by_unsupported_instruction_kind": 57,
+      "blocked_by_variant_operand": 15,
+      "candidate_instructions": 200,
+      "hoisted_SSAArrayLength": 1,
+      "hoisted_SSAConst": 6,
+      "instructions_hoisted": 7,
+      "list_length_reads_hoisted": 0,
+      "loops_examined": 15,
+      "loops_skipped_irreducible": 0,
+      "loops_without_preheader": 0,
+      "read_candidates": 3,
+      "reads_hoisted": 1,
+      "vector_matrix_metadata_reads_hoisted": 0
+    }
+  },
+  "inlining": {
+    "calls": {
+      "direct": 57,
+      "indirect": 19,
+      "mutually_recursive_pairs": 0
+    },
+    "first_scope": "intra-current-module, direct, nonrecursive, nonthrowing tiny callees only",
+    "function_size_buckets": {
+      "LARGE": 5,
+      "MEDIUM": 5,
+      "SMALL": 3,
+      "TINY": 18
+    },
+    "immediate_candidates": {
+      "nonthrowing_small_or_tiny": 5
+    },
+    "threshold_samples": [
+      {
+        "medium_max": 86,
+        "small_max": 43,
+        "tiny_max": 43
+      },
+      {
+        "medium_max": 78,
+        "small_max": 39,
+        "tiny_max": 39
+      },
+      {
+        "medium_max": 76,
+        "small_max": 38,
+        "tiny_max": 38
+      },
+      {
+        "medium_max": 60,
+        "small_max": 30,
+        "tiny_max": 30
+      },
+      {
+        "medium_max": 20,
+        "small_max": 10,
+        "tiny_max": 10
+      },
+      {
+        "medium_max": 28,
+        "small_max": 14,
+        "tiny_max": 14
+      },
+      {
+        "medium_max": 56,
+        "small_max": 28,
+        "tiny_max": 28
+      },
+      {
+        "medium_max": 16,
+        "small_max": 8,
+        "tiny_max": 8
+      },
+      {
+        "medium_max": 4,
+        "small_max": 2,
+        "tiny_max": 2
+      },
+      {
+        "medium_max": 26,
+        "small_max": 13,
+        "tiny_max": 13
+      },
+      {
+        "medium_max": 18,
+        "small_max": 9,
+        "tiny_max": 9
+      },
+      {
+        "medium_max": 38,
+        "small_max": 19,
+        "tiny_max": 19
+      },
+      {
+        "medium_max": 36,
+        "small_max": 18,
+        "tiny_max": 18
+      },
+      {
+        "medium_max": 66,
+        "small_max": 33,
+        "tiny_max": 3
+      },
+      {
+        "medium_max": 10,
+        "small_max": 5,
+        "tiny_max": 5
+      },
+      {
+        "medium_max": 44,
+        "small_max": 22,
+        "tiny_max": 22
+      }
+    ]
+  },
+  "llvm_overlap": {
+    "basis": "Aether emits ordinary loads/calls and clang -O2 receives the result; validate per-site with optimized LLVM before claiming AETHER_UNIQUE",
+    "classification": "LLVM_CONVERGES"
+  },
+  "methodology": "O1 SSA inventory; proven BCE then isolated LICM statistics; final O2 SSA comparison; read-only static opportunity census",
+  "per_workload": [
+    {
+      "loops_affected_upper_bound": 1,
+      "o1_ssa_instructions": 43,
+      "o2_ssa_instructions": 43,
+      "path": "benchmarks/array_sum.ae",
+      "reads_hoisted": 1
+    },
+    {
+      "loops_affected_upper_bound": 0,
+      "o1_ssa_instructions": 39,
+      "o2_ssa_instructions": 39,
+      "path": "benchmarks/list_for_sum.ae",
+      "reads_hoisted": 0
+    },
+    {
+      "loops_affected_upper_bound": 0,
+      "o1_ssa_instructions": 38,
+      "o2_ssa_instructions": 38,
+      "path": "benchmarks/matrix_mul.ae",
+      "reads_hoisted": 0
+    },
+    {
+      "loops_affected_upper_bound": 0,
+      "o1_ssa_instructions": 30,
+      "o2_ssa_instructions": 30,
+      "path": "benchmarks/nested_loops.ae",
+      "reads_hoisted": 0
+    },
+    {
+      "loops_affected_upper_bound": 0,
+      "o1_ssa_instructions": 30,
+      "o2_ssa_instructions": 30,
+      "path": "benchmarks/vector_dot.ae",
+      "reads_hoisted": 0
+    },
+    {
+      "loops_affected_upper_bound": 0,
+      "o1_ssa_instructions": 14,
+      "o2_ssa_instructions": 14,
+      "path": "examples/llvm/array_sum.ae",
+      "reads_hoisted": 0
+    },
+    {
+      "loops_affected_upper_bound": 0,
+      "o1_ssa_instructions": 28,
+      "o2_ssa_instructions": 28,
+      "path": "examples/llvm/for_break_continue.ae",
+      "reads_hoisted": 0
+    },
+    {
+      "loops_affected_upper_bound": 0,
+      "o1_ssa_instructions": 8,
+      "o2_ssa_instructions": 8,
+      "path": "examples/llvm/list_index.ae",
+      "reads_hoisted": 0
+    },
+    {
+      "loops_affected_upper_bound": 0,
+      "o1_ssa_instructions": 24,
+      "o2_ssa_instructions": 24,
+      "path": "examples/llvm/list_push_alias.ae",
+      "reads_hoisted": 0
+    },
+    {
+      "loops_affected_upper_bound": 0,
+      "o1_ssa_instructions": 13,
+      "o2_ssa_instructions": 13,
+      "path": "examples/llvm/list_set_alias.ae",
+      "reads_hoisted": 0
+    },
+    {
+      "loops_affected_upper_bound": 0,
+      "o1_ssa_instructions": 9,
+      "o2_ssa_instructions": 9,
+      "path": "examples/llvm/matrix_index.ae",
+      "reads_hoisted": 0
+    },
+    {
+      "loops_affected_upper_bound": 0,
+      "o1_ssa_instructions": 19,
+      "o2_ssa_instructions": 19,
+      "path": "examples/llvm/matrix_matmul.ae",
+      "reads_hoisted": 0
+    },
+    {
+      "loops_affected_upper_bound": 0,
+      "o1_ssa_instructions": 18,
+      "o2_ssa_instructions": 18,
+      "path": "examples/llvm/vector_add.ae",
+      "reads_hoisted": 0
+    },
+    {
+      "loops_affected_upper_bound": 0,
+      "o1_ssa_instructions": 507,
+      "o2_ssa_instructions": 507,
+      "path": "examples/numerical_methods/main.ae",
+      "reads_hoisted": 0
+    },
+    {
+      "loops_affected_upper_bound": 0,
+      "o1_ssa_instructions": 56,
+      "o2_ssa_instructions": 56,
+      "path": "examples/ProbandoNR/probandoNR2.ae",
+      "reads_hoisted": 0
+    },
+    {
+      "loops_affected_upper_bound": 0,
+      "o1_ssa_instructions": 22,
+      "o2_ssa_instructions": 22,
+      "path": "tests/fixtures/o2_proof_coverage/slices.ae",
+      "reads_hoisted": 0
+    }
+  ],
+  "primary_recommendation": "IMPROVE_ANALYSIS_FIRST",
+  "primary_scope": "field-sensitive memory locations plus ownership dataflow and exception-aware escape summaries; rerun this audit before enabling a transform",
+  "production_codegen_changed": false,
+  "schema_version": 1,
+  "scoring": {
+    "ARC_optimization": {
+      "LLVM_overlap": "LOW",
+      "complexity": "HIGH",
+      "hot_relevance": "LOW",
+      "repository_candidates": "MEDIUM",
+      "risk": "VERY_HIGH"
+    },
+    "inlining": {
+      "LLVM_overlap": "HIGH",
+      "complexity": "VERY_HIGH",
+      "hot_relevance": "MEDIUM",
+      "repository_candidates": "MEDIUM",
+      "risk": "HIGH"
+    },
+    "memory_read_LICM": {
+      "LLVM_overlap": "HIGH",
+      "complexity": "MEDIUM",
+      "hot_relevance": "MEDIUM",
+      "repository_candidates": "LOW",
+      "risk": "MEDIUM"
+    }
+  },
+  "secondary_recommendation": "Re-audit nontrapping invariant ArrayGet/ListGet after field-sensitive mod/ref; delegate ordinary direct inlining to LLVM meanwhile"
+}
