@@ -24,6 +24,14 @@ from .shapes import (
     ShapeAnalysisResult,
     VectorShapeFact,
 )
+from .proof_coverage import (
+    CheckKind,
+    CheckProof,
+    CheckRecord,
+    CoverageReport,
+    ProofCoverageAudit,
+    UnknownReason,
+)
 
 __all__ = [
     "Constant",
@@ -47,4 +55,10 @@ __all__ = [
     "ShapeAnalysis",
     "ShapeAnalysisResult",
     "VectorShapeFact",
+    "CheckKind",
+    "CheckProof",
+    "CheckRecord",
+    "CoverageReport",
+    "ProofCoverageAudit",
+    "UnknownReason",
 ]

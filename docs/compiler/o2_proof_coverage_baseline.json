@@ -1,0 +1,479 @@
+{
+  "audit": "O2.1.5",
+  "checks": [
+    {
+      "block": "body1",
+      "domain": "Array",
+      "function": "benchmarks/array_sum.ae::main",
+      "instruction": "SSAArrayGet",
+      "instruction_index": 0,
+      "kind": "array_index",
+      "loop_context": "nested_loop",
+      "operands": [
+        "10",
+        "17"
+      ],
+      "panic_behavior": "Aether panic: Array index out of bounds",
+      "proof": "PROVEN_SAFE",
+      "proof_queryable": true,
+      "source_location": null,
+      "unknown_reason": null,
+      "visible_at_ssa": true
+    },
+    {
+      "block": "for.body1",
+      "domain": "List",
+      "function": "benchmarks/list_for_sum.ae::main",
+      "instruction": "SSAListGet",
+      "instruction_index": 0,
+      "kind": "list_index",
+      "loop_context": "nested_loop",
+      "operands": [
+        "5",
+        "16"
+      ],
+      "panic_behavior": "Aether panic: List index out of bounds",
+      "proof": "UNKNOWN",
+      "proof_queryable": false,
+      "source_location": null,
+      "unknown_reason": "UNKNOWN_LENGTH",
+      "visible_at_ssa": true
+    },
+    {
+      "block": "body0",
+      "domain": "Matrix",
+      "function": "benchmarks/matrix_mul.ae::main",
+      "instruction": "SSAMatrixGet",
+      "instruction_index": 3,
+      "kind": "matrix_column",
+      "loop_context": "simple_natural_loop",
+      "operands": [
+        "17",
+        "21"
+      ],
+      "panic_behavior": "Aether panic: Matrix index out of bounds",
+      "proof": "PROVEN_SAFE",
+      "proof_queryable": true,
+      "source_location": null,
+      "unknown_reason": null,
+      "visible_at_ssa": true
+    },
+    {
+      "block": "body0",
+      "domain": "Matrix",
+      "function": "benchmarks/matrix_mul.ae::main",
+      "instruction": "SSAMatrixGet",
+      "instruction_index": 3,
+      "kind": "matrix_row",
+      "loop_context": "simple_natural_loop",
+      "operands": [
+        "17",
+        "20"
+      ],
+      "panic_behavior": "Aether panic: Matrix index out of bounds",
+      "proof": "PROVEN_SAFE",
+      "proof_queryable": true,
+      "source_location": null,
+      "unknown_reason": null,
+      "visible_at_ssa": true
+    },
+    {
+      "block": "entry",
+      "domain": "Array",
+      "function": "examples/llvm/array_sum.ae::main",
+      "instruction": "SSAArrayGet",
+      "instruction_index": 5,
+      "kind": "array_index",
+      "loop_context": "outside_loops",
+      "operands": [
+        "3",
+        "5"
+      ],
+      "panic_behavior": "Aether panic: Array index out of bounds",
+      "proof": "PROVEN_SAFE",
+      "proof_queryable": true,
+      "source_location": null,
+      "unknown_reason": null,
+      "visible_at_ssa": true
+    },
+    {
+      "block": "entry",
+      "domain": "Array",
+      "function": "examples/llvm/array_sum.ae::main",
+      "instruction": "SSAArrayGet",
+      "instruction_index": 7,
+      "kind": "array_index",
+      "loop_context": "outside_loops",
+      "operands": [
+        "3",
+        "8"
+      ],
+      "panic_behavior": "Aether panic: Array index out of bounds",
+      "proof": "PROVEN_SAFE",
+      "proof_queryable": true,
+      "source_location": null,
+      "unknown_reason": null,
+      "visible_at_ssa": true
+    },
+    {
+      "block": "entry",
+      "domain": "Array",
+      "function": "examples/llvm/array_sum.ae::main",
+      "instruction": "SSAArrayGet",
+      "instruction_index": 10,
+      "kind": "array_index",
+      "loop_context": "outside_loops",
+      "operands": [
+        "3",
+        "12"
+      ],
+      "panic_behavior": "Aether panic: Array index out of bounds",
+      "proof": "PROVEN_SAFE",
+      "proof_queryable": true,
+      "source_location": null,
+      "unknown_reason": null,
+      "visible_at_ssa": true
+    },
+    {
+      "block": "entry",
+      "domain": "List",
+      "function": "examples/llvm/list_index.ae::main",
+      "instruction": "SSAListGet",
+      "instruction_index": 5,
+      "kind": "list_index",
+      "loop_context": "outside_loops",
+      "operands": [
+        "3",
+        "5"
+      ],
+      "panic_behavior": "Aether panic: List index out of bounds",
+      "proof": "UNKNOWN",
+      "proof_queryable": false,
+      "source_location": null,
+      "unknown_reason": "UNKNOWN_LENGTH",
+      "visible_at_ssa": true
+    },
+    {
+      "block": "then0",
+      "domain": "List",
+      "function": "examples/llvm/list_push_alias.ae::main",
+      "instruction": "SSAListGet",
+      "instruction_index": 1,
+      "kind": "list_index",
+      "loop_context": "outside_loops",
+      "operands": [
+        "2",
+        "12"
+      ],
+      "panic_behavior": "Aether panic: List index out of bounds",
+      "proof": "UNKNOWN",
+      "proof_queryable": false,
+      "source_location": null,
+      "unknown_reason": "UNKNOWN_LENGTH",
+      "visible_at_ssa": true
+    },
+    {
+      "block": "entry",
+      "domain": "List",
+      "function": "examples/llvm/list_set_alias.ae::main",
+      "instruction": "SSAListSet",
+      "instruction_index": 7,
+      "kind": "list_index",
+      "loop_context": "outside_loops",
+      "operands": [
+        "3",
+        "6"
+      ],
+      "panic_behavior": "Aether panic: List index out of bounds",
+      "proof": "UNKNOWN",
+      "proof_queryable": false,
+      "source_location": null,
+      "unknown_reason": "CALL_INVALIDATION",
+      "visible_at_ssa": true
+    },
+    {
+      "block": "entry",
+      "domain": "List",
+      "function": "examples/llvm/list_set_alias.ae::main",
+      "instruction": "SSAListGet",
+      "instruction_index": 9,
+      "kind": "list_index",
+      "loop_context": "outside_loops",
+      "operands": [
+        "3",
+        "9"
+      ],
+      "panic_behavior": "Aether panic: List index out of bounds",
+      "proof": "UNKNOWN",
+      "proof_queryable": false,
+      "source_location": null,
+      "unknown_reason": "CALL_INVALIDATION",
+      "visible_at_ssa": true
+    },
+    {
+      "block": "entry",
+      "domain": "Matrix",
+      "function": "examples/llvm/matrix_index.ae::main",
+      "instruction": "SSAMatrixGet",
+      "instruction_index": 7,
+      "kind": "matrix_column",
+      "loop_context": "outside_loops",
+      "operands": [
+        "4",
+        "7"
+      ],
+      "panic_behavior": "Aether panic: Matrix index out of bounds",
+      "proof": "PROVEN_SAFE",
+      "proof_queryable": true,
+      "source_location": null,
+      "unknown_reason": null,
+      "visible_at_ssa": true
+    },
+    {
+      "block": "entry",
+      "domain": "Matrix",
+      "function": "examples/llvm/matrix_index.ae::main",
+      "instruction": "SSAMatrixGet",
+      "instruction_index": 7,
+      "kind": "matrix_row",
+      "loop_context": "outside_loops",
+      "operands": [
+        "4",
+        "6"
+      ],
+      "panic_behavior": "Aether panic: Matrix index out of bounds",
+      "proof": "PROVEN_SAFE",
+      "proof_queryable": true,
+      "source_location": null,
+      "unknown_reason": null,
+      "visible_at_ssa": true
+    },
+    {
+      "block": "entry",
+      "domain": "Matrix",
+      "function": "examples/llvm/matrix_matmul.ae::main",
+      "instruction": "SSAMatrixGet",
+      "instruction_index": 17,
+      "kind": "matrix_column",
+      "loop_context": "outside_loops",
+      "operands": [
+        "16",
+        "19"
+      ],
+      "panic_behavior": "Aether panic: Matrix index out of bounds",
+      "proof": "PROVEN_SAFE",
+      "proof_queryable": true,
+      "source_location": null,
+      "unknown_reason": null,
+      "visible_at_ssa": true
+    },
+    {
+      "block": "entry",
+      "domain": "Matrix",
+      "function": "examples/llvm/matrix_matmul.ae::main",
+      "instruction": "SSAMatrixGet",
+      "instruction_index": 17,
+      "kind": "matrix_row",
+      "loop_context": "outside_loops",
+      "operands": [
+        "16",
+        "18"
+      ],
+      "panic_behavior": "Aether panic: Matrix index out of bounds",
+      "proof": "PROVEN_SAFE",
+      "proof_queryable": true,
+      "source_location": null,
+      "unknown_reason": null,
+      "visible_at_ssa": true
+    },
+    {
+      "block": "entry",
+      "domain": "Vector",
+      "function": "examples/llvm/vector_add.ae::main",
+      "instruction": "SSAVectorGet",
+      "instruction_index": 10,
+      "kind": "vector_index",
+      "loop_context": "outside_loops",
+      "operands": [
+        "10",
+        "12"
+      ],
+      "panic_behavior": "Aether panic: Vector index out of bounds",
+      "proof": "PROVEN_SAFE",
+      "proof_queryable": true,
+      "source_location": null,
+      "unknown_reason": null,
+      "visible_at_ssa": true
+    },
+    {
+      "block": "entry",
+      "domain": "Vector",
+      "function": "examples/llvm/vector_add.ae::main",
+      "instruction": "SSAVectorGet",
+      "instruction_index": 12,
+      "kind": "vector_index",
+      "loop_context": "outside_loops",
+      "operands": [
+        "10",
+        "15"
+      ],
+      "panic_behavior": "Aether panic: Vector index out of bounds",
+      "proof": "PROVEN_SAFE",
+      "proof_queryable": true,
+      "source_location": null,
+      "unknown_reason": null,
+      "visible_at_ssa": true
+    },
+    {
+      "block": "entry",
+      "domain": "Vector",
+      "function": "examples/llvm/vector_add.ae::main",
+      "instruction": "SSAVectorGet",
+      "instruction_index": 15,
+      "kind": "vector_index",
+      "loop_context": "outside_loops",
+      "operands": [
+        "10",
+        "19"
+      ],
+      "panic_behavior": "Aether panic: Vector index out of bounds",
+      "proof": "PROVEN_SAFE",
+      "proof_queryable": true,
+      "source_location": null,
+      "unknown_reason": null,
+      "visible_at_ssa": true
+    },
+    {
+      "block": "entry",
+      "domain": "slicing",
+      "function": "tests/fixtures/o2_proof_coverage/slices.ae::main",
+      "instruction": "SSAArraySlice",
+      "instruction_index": 6,
+      "kind": "array_slice",
+      "loop_context": "outside_loops",
+      "operands": [
+        "3",
+        "5",
+        "6"
+      ],
+      "panic_behavior": "Aether panic: Array slice index out of bounds",
+      "proof": "PROVEN_SAFE",
+      "proof_queryable": true,
+      "source_location": null,
+      "unknown_reason": null,
+      "visible_at_ssa": true
+    },
+    {
+      "block": "entry",
+      "domain": "slicing",
+      "function": "tests/fixtures/o2_proof_coverage/slices.ae::main",
+      "instruction": "SSAListSlice",
+      "instruction_index": 13,
+      "kind": "list_slice",
+      "loop_context": "outside_loops",
+      "operands": [
+        "11",
+        "13",
+        "14"
+      ],
+      "panic_behavior": "Aether panic: List slice index out of bounds",
+      "proof": "UNKNOWN",
+      "proof_queryable": false,
+      "source_location": null,
+      "unknown_reason": "UNKNOWN_LENGTH",
+      "visible_at_ssa": true
+    }
+  ],
+  "corpus": [
+    "benchmarks/array_sum.ae",
+    "benchmarks/list_for_sum.ae",
+    "benchmarks/matrix_mul.ae",
+    "benchmarks/nested_loops.ae",
+    "benchmarks/vector_dot.ae",
+    "examples/llvm/array_sum.ae",
+    "examples/llvm/for_break_continue.ae",
+    "examples/llvm/list_index.ae",
+    "examples/llvm/list_push_alias.ae",
+    "examples/llvm/list_set_alias.ae",
+    "examples/llvm/matrix_index.ae",
+    "examples/llvm/matrix_matmul.ae",
+    "examples/llvm/vector_add.ae",
+    "examples/numerical_methods/main.ae",
+    "examples/ProbandoNR/probandoNR2.ae",
+    "tests/fixtures/o2_proof_coverage/slices.ae"
+  ],
+  "corpus_failures": [],
+  "corpus_revision": "0478b475eddefa73f246590a5ecc69258ca57e29",
+  "methodology": "optimized SSA; read-only O2.1 Loop/Range/Shape analyses",
+  "optimization_profile": "O2",
+  "schema_version": 1,
+  "summary": {
+    "domains": {
+      "Array": {
+        "PROVEN_SAFE": 4,
+        "PROVEN_UNSAFE": 0,
+        "UNKNOWN": 0,
+        "safe_percentage": 100.0,
+        "total": 4,
+        "unknown_reasons": {}
+      },
+      "List": {
+        "PROVEN_SAFE": 0,
+        "PROVEN_UNSAFE": 0,
+        "UNKNOWN": 5,
+        "safe_percentage": 0.0,
+        "total": 5,
+        "unknown_reasons": {
+          "CALL_INVALIDATION": 2,
+          "UNKNOWN_LENGTH": 3
+        }
+      },
+      "Matrix": {
+        "PROVEN_SAFE": 6,
+        "PROVEN_UNSAFE": 0,
+        "UNKNOWN": 0,
+        "safe_percentage": 100.0,
+        "total": 6,
+        "unknown_reasons": {}
+      },
+      "Vector": {
+        "PROVEN_SAFE": 3,
+        "PROVEN_UNSAFE": 0,
+        "UNKNOWN": 0,
+        "safe_percentage": 100.0,
+        "total": 3,
+        "unknown_reasons": {}
+      },
+      "slicing": {
+        "PROVEN_SAFE": 1,
+        "PROVEN_UNSAFE": 0,
+        "UNKNOWN": 1,
+        "safe_percentage": 50.0,
+        "total": 2,
+        "unknown_reasons": {
+          "UNKNOWN_LENGTH": 1
+        }
+      }
+    },
+    "loop_contexts": {
+      "nested_loop": {
+        "PROVEN_SAFE": 1,
+        "PROVEN_UNSAFE": 0,
+        "UNKNOWN": 1,
+        "total": 2
+      },
+      "outside_loops": {
+        "PROVEN_SAFE": 11,
+        "PROVEN_UNSAFE": 0,
+        "UNKNOWN": 5,
+        "total": 16
+      },
+      "simple_natural_loop": {
+        "PROVEN_SAFE": 2,
+        "PROVEN_UNSAFE": 0,
+        "UNKNOWN": 0,
+        "total": 2
+      }
+    }
+  }
+}
