@@ -234,8 +234,10 @@ class ModRefAnalysis:
             # Ownership metadata is not Aether-level object/collection state.
             return ModRefDecision(ModRefEffect.NO_ACCESS)
         reads, writes = self._accesses(instruction)
-        read = any(self.aliases.alias(value, target) is not AliasRelation.NO_ALIAS for value in reads)
-        write = any(self.aliases.alias(value, target) is not AliasRelation.NO_ALIAS for value in writes)
+        read_relations = [self.aliases.alias(value, target) for value in reads]
+        write_relations = [self.aliases.alias(value, target) for value in writes]
+        read = any(relation is not AliasRelation.NO_ALIAS for relation in read_relations)
+        write = any(relation is not AliasRelation.NO_ALIAS for relation in write_relations)
         if isinstance(instruction, (m.SSACallIndirect, m.SSAInvokeIndirect)):
             return ModRefDecision(ModRefEffect.UNKNOWN, UnknownReason.UNKNOWN_INDIRECT_TARGET)
         if isinstance(instruction, (m.SSAInterfaceCall, m.SSAInvokeInterface)):
@@ -248,12 +250,25 @@ class ModRefAnalysis:
                 elif instruction.writes_memory:
                     return ModRefDecision(ModRefEffect.UNKNOWN, UnknownReason.UNKNOWN_EXTERNAL_CALL)
             else:
-                read = any(i < len(instruction.arguments) and self.aliases.alias(instruction.arguments[i], target) is not AliasRelation.NO_ALIAS for i in summary.read_parameters)
-                write = any(i < len(instruction.arguments) and self.aliases.alias(instruction.arguments[i], target) is not AliasRelation.NO_ALIAS for i in summary.modified_parameters)
+                read_relations = [
+                    self.aliases.alias(instruction.arguments[i], target)
+                    for i in summary.read_parameters if i < len(instruction.arguments)
+                ]
+                write_relations = [
+                    self.aliases.alias(instruction.arguments[i], target)
+                    for i in summary.modified_parameters if i < len(instruction.arguments)
+                ]
+                read = any(relation is not AliasRelation.NO_ALIAS for relation in read_relations)
+                write = any(relation is not AliasRelation.NO_ALIAS for relation in write_relations)
                 if summary.touches_global_state and _is_reference_like(target.type):
                     return ModRefDecision(ModRefEffect.UNKNOWN, UnknownReason.GLOBAL_STATE)
         effect = ModRefEffect.READ_MODIFY if read and write else ModRefEffect.READ if read else ModRefEffect.MODIFY if write else ModRefEffect.NO_ACCESS
-        return ModRefDecision(effect)
+        reason = (
+            UnknownReason.PARAMETER_ALIAS
+            if write and AliasRelation.MAY_ALIAS in write_relations
+            else None
+        )
+        return ModRefDecision(effect, reason)
 
     def _accesses(self, instruction):
         return _semantic_accesses(instruction)

@@ -1,8 +1,8 @@
 """Conservative, non-speculative loop-invariant code motion for O2.
 
-This first version deliberately moves only scalar SSA operations whose effect
-metadata says that evaluation is pure, nonthrowing, nontrapping, and does not
-touch memory.  A source block must dominate every loop exit and latch; this
+Besides the original scalar class, this pass moves the narrow class of
+collection length reads whose base is invariant and whose semantic length fact
+is preserved by every instruction in the loop.  A source block must dominate every loop exit and latch; this
 keeps instructions from conditional paths in place.  Zero-iteration motion is
 safe for this closed instruction set because evaluating these operations has
 no observable effect or failure mode.
@@ -20,7 +20,7 @@ from aether.ir.types import (
     StructType,
     VectorType,
 )
-from aether.ssa.analysis import LoopAnalysis
+from aether.ssa.analysis import LoopAnalysis, ModRefAnalysis, SummaryAnalysis
 from aether.ssa.cfg import SSACFGBuilder
 from aether.ssa.model import (
     SSABasicBlock,
@@ -30,6 +30,11 @@ from aether.ssa.model import (
     SSAConst,
     SSAFunction,
     SSAInstruction,
+    SSAArrayLength,
+    SSAListLength,
+    SSAVectorLength,
+    SSAMatrixRows,
+    SSAMatrixColumns,
     SSAModule,
     SSAUnaryOp,
 )
@@ -47,10 +52,14 @@ _AGGREGATE_TYPES = (
     VectorType,
 )
 _SUPPORTED = (SSAConst, SSABinaryOp, SSAUnaryOp, SSACompareOp, SSACast)
+_SUPPORTED_READS = (
+    SSAArrayLength, SSAListLength, SSAVectorLength, SSAMatrixRows,
+    SSAMatrixColumns,
+)
 
 
 class LoopInvariantCodeMotion:
-    """Hoist the initial, scalar-only LICM eligibility class to preheaders."""
+    """Hoist conservative scalar and alias-proven immutable read candidates."""
 
     def run(self, module: SSAModule) -> SSAOptimizationResult:
         stats: Counter[str] = Counter(
@@ -60,6 +69,16 @@ class LoopInvariantCodeMotion:
                 "loops_without_preheader": 0,
                 "candidate_instructions": 0,
                 "instructions_hoisted": 0,
+                "read_candidates": 0,
+                "reads_hoisted": 0,
+                "array_length_reads_hoisted": 0,
+                "list_length_reads_hoisted": 0,
+                "vector_matrix_metadata_reads_hoisted": 0,
+                "blocked_by_may_alias": 0,
+                "blocked_by_may_modify": 0,
+                "blocked_by_unknown_call": 0,
+                "blocked_by_base_variation": 0,
+                "blocked_by_exceptional_uncertainty": 0,
                 "blocked_by_may_trap": 0,
                 "blocked_by_may_throw": 0,
                 "blocked_by_control_speculation": 0,
@@ -69,12 +88,13 @@ class LoopInvariantCodeMotion:
                 "blocked_by_unsupported_instruction_kind": 0,
             }
         )
-        functions = [self._run_function(function, stats) for function in module.functions]
+        summaries = SummaryAnalysis().compute(module)
+        functions = [self._run_function(function, stats, summaries) for function in module.functions]
         changed = stats["instructions_hoisted"] != 0
         optimized = SSAModule(functions, list(module.structs)) if changed else module
         return SSAOptimizationResult(optimized, changed, dict(stats))
 
-    def _run_function(self, function: SSAFunction, stats: Counter[str]) -> SSAFunction:
+    def _run_function(self, function: SSAFunction, stats: Counter[str], summaries) -> SSAFunction:
         analysis = LoopAnalysis().compute(function)
         stats["loops_skipped_irreducible"] += len(analysis.irreducible_regions)
         if not analysis.loops:
@@ -98,6 +118,15 @@ class LoopInvariantCodeMotion:
             if loop.preheader is None:
                 stats["loops_without_preheader"] += 1
                 continue
+            current_function = SSAFunction(
+                function.name, list(function.parameters), function.return_type,
+                [blocks[block.name] for block in function.blocks],
+                function.entry_block, function.may_throw,
+            )
+            modref = ModRefAnalysis(current_function, summaries)
+            loop_instructions = [
+                item for name in loop.body for item in blocks[name].instructions
+            ]
             definitions = self._definitions(blocks)
             invariant = {
                 name
@@ -122,9 +151,14 @@ class LoopInvariantCodeMotion:
                             continue
                         if identity not in counted:
                             stats["candidate_instructions"] += 1
+                            if isinstance(instruction, _SUPPORTED_READS):
+                                stats["read_candidates"] += 1
                             counted.add(identity)
                         seen.add(identity)
-                        reason = self._blocked_reason(instruction, block_name, loop, dom, invariant)
+                        reason = self._blocked_reason(
+                            instruction, block_name, loop, dom, invariant,
+                            loop_instructions, modref,
+                        )
                         if reason is not None:
                             blocked[identity] = reason
                             # Variant operands can become invariant at the next fixed-point step.
@@ -135,6 +169,16 @@ class LoopInvariantCodeMotion:
                         blocked.pop(identity, None)
                         invariant.add(result.name)
                         stats["instructions_hoisted"] += 1
+                        if isinstance(instruction, _SUPPORTED_READS):
+                            stats["reads_hoisted"] += 1
+                            key = (
+                                "array_length_reads_hoisted"
+                                if isinstance(instruction, SSAArrayLength)
+                                else "list_length_reads_hoisted"
+                                if isinstance(instruction, SSAListLength)
+                                else "vector_matrix_metadata_reads_hoisted"
+                            )
+                            stats[key] += 1
                         stats[f"hoisted_{type(instruction).__name__}"] += 1
                         progress = True
 
@@ -181,18 +225,24 @@ class LoopInvariantCodeMotion:
 
     @staticmethod
     def _blocked_reason(
-        instruction, block_name, loop, dom, invariant: set[str]
+        instruction, block_name, loop, dom, invariant: set[str], loop_instructions,
+        modref: ModRefAnalysis,
     ) -> str | None:
         effects = instruction.effects
+        is_read = isinstance(instruction, _SUPPORTED_READS)
         if effects.may_throw:
             return "blocked_by_may_throw"
-        if effects.may_trap:
+        # Length conversion cannot fail for a valid live collection: Aether's
+        # allocation limits are within the language Int range.  The generic
+        # may-trap bit also covers invalid/null runtime values, which typed SSA
+        # and its lifetime verifier exclude here.
+        if effects.may_trap and not is_read:
             return "blocked_by_may_trap"
-        if effects.reads_memory or effects.writes_memory:
+        if effects.writes_memory or (effects.reads_memory and not is_read):
             return "blocked_by_memory_modref"
         if effects.allocates or effects.has_side_effects:
             return "blocked_by_ownership"
-        if not isinstance(instruction, _SUPPORTED):
+        if not isinstance(instruction, _SUPPORTED + _SUPPORTED_READS):
             return "blocked_by_unsupported_instruction_kind"
         result = instruction_result(instruction)
         if result is None or isinstance(result.type, _AGGREGATE_TYPES):
@@ -201,5 +251,30 @@ class LoopInvariantCodeMotion:
         if any(not dom.dominates(block_name, target) for target in required):
             return "blocked_by_control_speculation"
         if any(operand.name not in invariant for operand in instruction_operands(instruction)):
-            return "blocked_by_variant_operand"
+            return "blocked_by_base_variation" if is_read else "blocked_by_variant_operand"
+        if is_read:
+            base = (
+                instruction.array if isinstance(instruction, SSAArrayLength)
+                else instruction.list_value if isinstance(instruction, SSAListLength)
+                else instruction.vector if isinstance(instruction, SSAVectorLength)
+                else instruction.matrix
+            )
+            for item in loop_instructions:
+                if item is instruction:
+                    continue
+                decision = modref.effects(item, base)
+                if decision.effect.name == "UNKNOWN":
+                    return "blocked_by_unknown_call"
+                preserves = (
+                    modref.preserves_length_fact(item, base)
+                    if isinstance(instruction, (SSAArrayLength, SSAListLength, SSAVectorLength))
+                    else modref.preserves_shape_fact(item, base)
+                )
+                if not preserves:
+                    return (
+                        "blocked_by_may_alias"
+                        if decision.reason is not None
+                        and decision.reason.name in {"PARAMETER_ALIAS", "PHI_MERGE"}
+                        else "blocked_by_may_modify"
+                    )
         return None

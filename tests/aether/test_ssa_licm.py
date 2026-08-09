@@ -1,9 +1,14 @@
 from __future__ import annotations
 
-from aether.ir.types import BoolType, DoubleType, IntType, VoidType
+from aether.ir.types import (
+    ArrayType, BoolType, DoubleType, IntType, ListType, MatrixType, VectorType,
+    VoidType,
+)
 from aether.ssa.model import (
-    SSABasicBlock, SSABinaryOp, SSABranch, SSACompareOp, SSAConst,
-    SSAFunction, SSAJump, SSAModule, SSAPhi, SSAReturn, SSAValue,
+    SSAArrayLength, SSABasicBlock, SSABinaryOp, SSABranch, SSACompareOp,
+    SSAConst, SSAFunction, SSAJump, SSAListLength, SSAListNew, SSAListPush,
+    SSAMatrixRows, SSAModule, SSAParameter, SSAPhi, SSAReturn, SSAValue,
+    SSAVectorLength,
 )
 from aether.ssa.optimizer import LoopInvariantCodeMotion
 from aether.ssa.verifier import SSAVerifier
@@ -97,3 +102,52 @@ def test_nested_value_moves_only_to_inner_preheader() -> None:
     result = run(fn)
     assert product in [getattr(item, "result", None) for item in block(result, "inner_pre").instructions]
     assert product not in [getattr(item, "result", None) for item in block(result, "entry").instructions]
+
+
+def collection_loop(parameter, *body_instructions):
+    condition = SSAParameter("condition", B)
+    return SSAFunction("collection_loop", [parameter, condition], VoidType(), [
+        SSABasicBlock("entry", [SSAJump("header")]),
+        SSABasicBlock("header", [*body_instructions, SSABranch(condition, "latch", "exit")]),
+        SSABasicBlock("latch", [SSAJump("header")]),
+        SSABasicBlock("exit", [SSAReturn()]),
+    ])
+
+
+def test_hoists_array_and_readonly_list_lengths() -> None:
+    array = SSAParameter("array", ArrayType(I)); array_length = v("array_length")
+    result = run(collection_loop(array, SSAArrayLength(array_length, array)))
+    assert array_length in [getattr(item, "result", None) for item in block(result, "entry").instructions]
+    assert result.stats["array_length_reads_hoisted"] == 1
+
+    listing = SSAParameter("listing", ListType(I)); list_length = v("list_length")
+    result = run(collection_loop(listing, SSAListLength(list_length, listing)))
+    assert list_length in [getattr(item, "result", None) for item in block(result, "entry").instructions]
+    assert result.stats["list_length_reads_hoisted"] == 1
+
+
+def test_list_length_respects_alias_specific_mutation() -> None:
+    list_type = ListType(I)
+    listing, other, item, length = v("listing", list_type), v("other", list_type), v("item"), v("length")
+    fn = SSAFunction("no_alias", [], VoidType(), [
+        SSABasicBlock("entry", [SSAListNew(listing), SSAListNew(other), SSAConst(item, 1), SSAJump("header")]),
+        SSABasicBlock("header", [SSAListLength(length, listing), SSAListPush(other, item), SSAJump("latch")]),
+        SSABasicBlock("latch", [SSAJump("header")]),
+    ])
+    result = run(fn)
+    assert length in [getattr(value, "result", None) for value in block(result, "entry").instructions]
+
+    parameter = SSAParameter("parameter", list_type); blocked_length = v("blocked_length")
+    blocked = run(collection_loop(parameter, SSAListLength(blocked_length, parameter), SSAListPush(parameter, blocked_length)))
+    assert blocked_length in [getattr(value, "result", None) for value in block(blocked, "header").instructions]
+    assert blocked.stats["blocked_by_may_modify"] == 1
+
+
+def test_hoists_existing_vector_and_matrix_metadata_reads() -> None:
+    vector = SSAParameter("vector", VectorType(I)); vector_length = v("vector_length")
+    result = run(collection_loop(vector, SSAVectorLength(vector_length, vector)))
+    assert result.stats["vector_matrix_metadata_reads_hoisted"] == 1
+
+    matrix = SSAParameter("matrix", MatrixType(I)); rows = v("rows")
+    result = run(collection_loop(matrix, SSAMatrixRows(rows, matrix, 2)))
+    assert rows in [getattr(item, "result", None) for item in block(result, "entry").instructions]

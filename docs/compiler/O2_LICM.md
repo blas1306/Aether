@@ -1,4 +1,4 @@
-# O2.6 conservative loop-invariant code motion
+# O2.6.1 alias-proven immutable read LICM
 
 O2 runs `LoopInvariantCodeMotion` after proven Array/List/Vector/Matrix BCE and
 before final SSA DCE. O0 and O1 do not contain it. It uses the existing natural
@@ -6,12 +6,18 @@ loops, dominators, and canonical preheaders; no CFG canonicalization is added.
 
 ## Safety contract
 
-An instruction moves only when effect metadata says it is pure, nonthrowing,
-nontrapping, nonallocating, and memory-free; every operand is defined outside
+Scalar instructions move only when effect metadata says they are pure,
+nonthrowing, nontrapping, nonallocating, and memory-free. The separate
+`READ_ELIGIBLE_IF_MODREF_PROVES_INVARIANT` class contains only
+`SSAArrayLength`, `SSAListLength`, `SSAVectorLength`, `SSAMatrixRows`, and
+`SSAMatrixColumns`. Every operand must be defined outside
 the loop or by an already selected instruction; and its block dominates every
 loop latch and exiting block. This rejects conditional and early-exit paths.
-Zero-trip evaluation is harmless for this closed set because it has no effect
-or failure mode. Stable inner-to-outer, block, and instruction order supplies
+Length reads are nonfailing for valid, live typed collection values: allocation
+limits keep their conversion within Aether `Int`. The lifetime/SSA verifier
+excludes invalid references. The same control criterion is nevertheless used,
+so conditional reads and zero-trip speculation remain rejected. Stable
+inner-to-outer, block, and instruction order supplies
 fixed-point dependency order. Movement is immediately before the preheader
 terminator. Source metadata stays on the unchanged instruction object.
 
@@ -43,25 +49,34 @@ FMA contraction, reduction reordering, or fast-math.
 `SSAVectorScale`, `SSAVectorDot`, `SSAOuterProduct`, `SSAMatrixAdd`,
 `SSAMatrixSub`, `SSAMatrixScale`, `SSAMatrixMatMul`, `SSAMatrixVectorMul`,
 `SSAVectorMatrixMul`, `SSAArrayGet`, `SSAArraySlice`, `SSAListSlice`,
-`SSAListGet`, `SSAVectorGet`, `SSAMatrixGet`, `SSAVectorLength`,
-`SSAMatrixRows`, `SSAMatrixColumns`, `SSAArraySet`, `SSAListSet`,
-`SSAVectorSet`, `SSAMatrixSet`, `SSAArrayLength`, `SSAListLength`,
+`SSAListGet`, `SSAVectorGet`, `SSAMatrixGet`, `SSAArraySet`, `SSAListSet`,
+`SSAVectorSet`, `SSAMatrixSet`,
 `SSAListIsEmpty`, `SSAPackException`, `SSACatchEntry`, `SSAExceptionMatch`,
 `SSAExceptionPayload`, `SSAExceptionDestroy`, `SSAPhi`, `SSABranch`, `SSAJump`,
 `SSAThrow`, `SSARethrow`, `SSAPropagate`, and `SSAReturn`.
 
-Thus all calls, allocations, aggregates, memory and metadata reads, writes,
+Thus all calls, allocations, arbitrary element/field reads, writes,
 ARC/lifecycle, ownership transfer, phis, terminators, and exception operations
-are excluded. Array/List length and Vector/Matrix metadata are deferred, so
-O2.6 does not need an alias/mod-ref query. O2.4 remains the basis for a future
-memory-read LICM extension.
+are excluded. Array length is immutable for an Array identity. List length is
+hoisted only when O2.4 proves that every loop instruction preserves that exact
+semantic length fact; aliasing mutations and unknown indirect/interface calls
+therefore block it, while mutations of proven-disjoint fresh Lists and known
+read-only direct calls do not. Vector/Matrix shape uses the existing shape
+preservation query; no field-sensitive heap analysis is added.
+
+Vector length is an explicit SSA read. Matrix rows and columns are explicit SSA
+metadata instructions whose dimensions are carried as compile-time integers;
+O2.6.1 does not invent any additional runtime read.
 
 ## Statistics and follow-up
 
-Statistics cover loops, irreducible regions, absent preheaders, candidates,
-hoists, each blocking reason (trap, throw, control, variant, memory/mod-ref,
-ownership/effects, unsupported kind), and hoists per class.
+Statistics additionally report read candidates/hoists, per-collection hoists,
+and conservative blockers for modification, unknown calls, base variation,
+control/speculation, alias, and exceptional uncertainty.
 
-LLVM may later perform the same scalar motion; O2.6 merely exposes simpler SSA
-earlier. Memory-read LICM is recommended next. Calls, speculation, ARC
-optimization, GVN/CSE, and loop canonicalization remain deferred.
+The fixed O2 order remains BCE -> LICM -> DCE. LICM constructs fresh mod/ref
+queries after BCE rather than reusing analysis state from before transformation.
+LLVM may duplicate some length-load motion; Aether's semantic List summaries
+can prove preservation across operations whose native aliasing is less clear.
+Calls themselves, speculation, ARC optimization, GVN/CSE, and loop
+canonicalization remain deferred.
