@@ -1,0 +1,182 @@
+{
+  "audit": "O2.5.5",
+  "corpus": [
+    "benchmarks/array_sum.ae",
+    "benchmarks/list_for_sum.ae",
+    "benchmarks/matrix_mul.ae",
+    "benchmarks/nested_loops.ae",
+    "benchmarks/vector_dot.ae",
+    "examples/llvm/array_sum.ae",
+    "examples/llvm/for_break_continue.ae",
+    "examples/llvm/list_index.ae",
+    "examples/llvm/list_push_alias.ae",
+    "examples/llvm/list_set_alias.ae",
+    "examples/llvm/matrix_index.ae",
+    "examples/llvm/matrix_matmul.ae",
+    "examples/llvm/vector_add.ae",
+    "examples/numerical_methods/main.ae",
+    "examples/ProbandoNR/probandoNR2.ae",
+    "tests/fixtures/o2_proof_coverage/slices.ae"
+  ],
+  "corpus_failures": [],
+  "corpus_revision": "5f4b2f35695246301a77398c6e72a1e6fea97243",
+  "licm_candidates": {
+    "by_blocker": {
+      "immediately_hoistable": 42,
+      "loop_variant_operand": 51,
+      "may_throw": 17,
+      "may_trap": 32
+    },
+    "by_instruction": {
+      "array_list_length": {
+        "may_trap": 3
+      },
+      "calls": {
+        "may_throw": 17
+      },
+      "comparisons": {
+        "loop_variant_operand": 30
+      },
+      "scalar_arithmetic": {
+        "immediately_hoistable": 42,
+        "loop_variant_operand": 21,
+        "may_trap": 29
+      }
+    }
+  },
+  "list_coverage": {
+    "checks": [
+      {
+        "block": "for.body1",
+        "domain": "List",
+        "function": "benchmarks/list_for_sum.ae::main",
+        "instruction": "SSAListGet",
+        "instruction_index": 0,
+        "kind": "list_index",
+        "loop_context": "nested_loop",
+        "operands": [
+          "5",
+          "16"
+        ],
+        "panic_behavior": "Aether panic: List index out of bounds",
+        "proof": "UNKNOWN",
+        "proof_queryable": false,
+        "source_location": null,
+        "unknown_reason": "UNKNOWN_LENGTH",
+        "visible_at_ssa": true
+      },
+      {
+        "block": "entry",
+        "domain": "List",
+        "function": "examples/llvm/list_index.ae::main",
+        "instruction": "SSAListGet",
+        "instruction_index": 5,
+        "kind": "list_index",
+        "loop_context": "outside_loops",
+        "operands": [
+          "3",
+          "5"
+        ],
+        "panic_behavior": "Aether panic: List index out of bounds",
+        "proof": "PROVEN_SAFE",
+        "proof_queryable": true,
+        "source_location": null,
+        "unknown_reason": null,
+        "visible_at_ssa": true
+      },
+      {
+        "block": "then0",
+        "domain": "List",
+        "function": "examples/llvm/list_push_alias.ae::main",
+        "instruction": "SSAListGet",
+        "instruction_index": 1,
+        "kind": "list_index",
+        "loop_context": "outside_loops",
+        "operands": [
+          "2",
+          "12"
+        ],
+        "panic_behavior": "Aether panic: List index out of bounds",
+        "proof": "PROVEN_SAFE",
+        "proof_queryable": true,
+        "source_location": null,
+        "unknown_reason": null,
+        "visible_at_ssa": true
+      },
+      {
+        "block": "entry",
+        "domain": "List",
+        "function": "examples/llvm/list_set_alias.ae::main",
+        "instruction": "SSAListSet",
+        "instruction_index": 7,
+        "kind": "list_index",
+        "loop_context": "outside_loops",
+        "operands": [
+          "3",
+          "6"
+        ],
+        "panic_behavior": "Aether panic: List index out of bounds",
+        "proof": "PROVEN_SAFE",
+        "proof_queryable": true,
+        "source_location": null,
+        "unknown_reason": null,
+        "visible_at_ssa": true
+      },
+      {
+        "block": "entry",
+        "domain": "List",
+        "function": "examples/llvm/list_set_alias.ae::main",
+        "instruction": "SSAListGet",
+        "instruction_index": 9,
+        "kind": "list_index",
+        "loop_context": "outside_loops",
+        "operands": [
+          "3",
+          "9"
+        ],
+        "panic_behavior": "Aether panic: List index out of bounds",
+        "proof": "PROVEN_SAFE",
+        "proof_queryable": true,
+        "source_location": null,
+        "unknown_reason": null,
+        "visible_at_ssa": true
+      }
+    ],
+    "current": {
+      "PROVEN_SAFE": 4,
+      "PROVEN_UNSAFE": 0,
+      "UNKNOWN": 1,
+      "safe_percentage": 80.0,
+      "total": 5,
+      "unknown_reasons": {
+        "UNKNOWN_LENGTH": 1
+      }
+    },
+    "gains": {
+      "NO_ALIAS_mutation_preservation": 1,
+      "direct_call_nonmodifying_summary": 1,
+      "improved_length_provenance": 2
+    },
+    "historical_O2.1.5": {
+      "PROVEN_SAFE": 0,
+      "PROVEN_UNSAFE": 0,
+      "UNKNOWN": 5,
+      "safe_percentage": 0.0,
+      "total": 5
+    }
+  },
+  "loops": {
+    "irreducible": 0,
+    "natural": 15,
+    "with_preheader": 15
+  },
+  "methodology": "O1 SSA is the pre-BCE inventory; O2 SSA is inspected after BCE; all analyses are read-only",
+  "o1_o2_list_checks": {
+    "O1": 5,
+    "O2": 1,
+    "preserved": 1,
+    "removed": 4
+  },
+  "recommendation": "PROCEED_TO_LICM",
+  "schema_version": 1
+}
