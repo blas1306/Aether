@@ -32,6 +32,11 @@ from .proof_coverage import (
     ProofCoverageAudit,
     UnknownReason,
 )
+from .alias_modref import (
+    AliasAnalysis, AliasRelation, FunctionSummary, ModRefAnalysis,
+    ModRefDecision, ModRefEffect, Provenance, ProvenanceRoot, RootKind,
+    SummaryAnalysis, UnknownReason as AliasUnknownReason,
+)
 
 __all__ = [
     "Constant",
@@ -61,4 +66,7 @@ __all__ = [
     "CoverageReport",
     "ProofCoverageAudit",
     "UnknownReason",
+    "AliasAnalysis", "AliasRelation", "FunctionSummary", "ModRefAnalysis",
+    "ModRefDecision", "ModRefEffect", "Provenance", "ProvenanceRoot",
+    "RootKind", "SummaryAnalysis", "AliasUnknownReason",
 ]

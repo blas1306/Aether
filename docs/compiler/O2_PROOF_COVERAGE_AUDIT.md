@@ -96,6 +96,12 @@ implementation is a local check rewrite; do not require a global percentage.
 List work should wait when invalidation dominates, and shape work should wait
 until a real runtime check exists.
 
+O2.4 follow-up: its read-only alias/mod-ref API can preserve List length across
+a proven unrelated mutation or summarized nonmodifying direct call. The
+baseline remains unchanged because O2.4 is not connected to BCE. The two List
+records attributed to call invalidation are the immediate re-audit pool, not a
+claim that both are now provable.
+
 ## Recommendation
 
 **PROCEED_TO_O2_2_BCE**

@@ -111,9 +111,9 @@ The classifications describe usefulness for optimization, not test quality.
 | Mutation/effects | **PARTIAL** | Typed checks include struct-method mutation analysis and collection iteration restrictions; instruction read/write flags exist. No mod/ref regions, call summaries, or mutation epochs. |
 | Type/layout | **COMPLETE** for lowering, **PARTIAL** for optimization | Nominal and collection/shape types, lifecycle traits, interface carrier/layout and LLVM layouts are present. Dynamic collection length/capacity and field-sensitive value facts are absent. |
 | Interface dispatch | **PARTIAL** | Witness has interface/concrete identity, carrier kind, deterministic slots, box layout and ownership adapters. No propagated exact-type set or closed/open-world summary. |
-| Call graph | **ABSENT** | Direct symbols and function refs exist, but no graph/SCC/call-site summary analysis. |
+| Call graph | **PARTIAL (O2.4)** | Direct calls participate in deterministic recursive mod/ref summaries; indirect target sets remain open. |
 | Escape/capture | **ABSENT** | Borrow verifier handles one prohibited escape case; it is not allocation escape analysis. |
-| Alias | **ABSENT** | Same lvalue checks and storage identity are correctness helpers, not optimizer alias sets/mod-ref. |
+| Alias | **PARTIAL (O2.4)** | Conservative SSA provenance, three-way alias queries and target-relative mod/ref exist as opt-in analysis; fields, globals, escape and exact indirect targets remain coarse/absent. |
 | Loop discovery/canonical form | **ABSENT** | CFG and dominance can support natural-loop discovery, but there are no backedge, loop forest, irreducibility, preheader, latch or exit analyses/transforms. |
 | Integer range/value range | **ABSENT** | SCCP constants and typechecking of literal ranges are not interval analysis. |
 | Collection shape | **PARTIAL / LOCAL ONLY** | Static Vector/Matrix shapes and dynamic Array/List length operations exist; no SSA shape equivalence or mutation invalidation. |

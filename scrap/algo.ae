@@ -38,7 +38,7 @@ metodo probando(Matrix<double> A, Vector<double, Column> b, Vector<double, Colum
 }
 
 int main() {
-    Matrix<double> A = [3.0 2.0; 1.0 0.0; 0.0 1.0];
+    Matrix<double> A = [3.0 1.0 2.0; 3.0 5.0 1.0; 1.0 1.0 3.0];
     Vector<double, Column> b = [4.0; 7.0; 3.0];
     Vector<double, Column> x0 = [0.0; 0.0; 0.0];
     double tol = 1e-6;

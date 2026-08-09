@@ -37,8 +37,10 @@ Exceptional invoke edges never receive branch-only refinement.
 
 `ShapeAnalysis` records length provenance for Array/List and static or stable
 Vector/Matrix shapes. Structural List operations invalidate their List fact.
-Calls with memory-write effects invalidate every possibly aliased List length
-because there is no mod/ref or noalias analysis. Array length and value-shape
+The original transfer invalidates every List length at a writing call. O2.4 now
+provides an opt-in alias/mod-ref preservation API for unrelated mutations and
+summarized nonmodifying calls; it is not wired into production shape transfer
+or BCE. Array length and value-shape
 facts remain stable under the operations currently represented by SSA. Slices
 receive a distinct result provenance, without asserting an unproved numeric
 length.
@@ -53,3 +55,5 @@ the CFG size. Their lattices only lose precision at joins/invalidation; loop
 IVs are widened immediately to one-sided bounds, preventing accidental
 iteration-count-dependent finite ranges. All capped or unsupported cases fail
 closed to unknown facts.
+
+See `O2_ALIAS_MODREF_ANALYSIS.md` for the O2.4 semantic model and summaries.

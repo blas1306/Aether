@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from aether.ir.types import ArrayType, ListType, MatrixType, VectorType
 from aether.ssa.cfg import predecessors, reverse_postorder
@@ -13,6 +14,9 @@ from aether.ssa.model import (
     SSAMatrixColumns, SSAMatrixNew, SSAMatrixRows, SSAValue, SSAVectorLength,
     SSAVectorNew,
 )
+
+if TYPE_CHECKING:
+    from .alias_modref import ModRefAnalysis
 
 
 @dataclass(frozen=True)
@@ -73,7 +77,11 @@ class ShapeAnalysisResult:
 
 class ShapeAnalysis:
     """Forward must-fact analysis; unknown calls invalidate mutable List facts."""
-    def compute(self, function: SSAFunction) -> ShapeAnalysisResult:
+    def compute(
+        self,
+        function: SSAFunction,
+        modref: "ModRefAnalysis | None" = None,
+    ) -> ShapeAnalysisResult:
         blocks = {block.name: block for block in function.blocks}; pred = predecessors(function); order = reverse_postorder(function)
         lengths = {name: {} for name in blocks}; vectors = {name: {} for name in blocks}; matrices = {name: {} for name in blocks}
         changed = True; iterations = 0; limit = max(1, len(blocks) * 4)
@@ -118,9 +126,19 @@ class ShapeAnalysis:
                         rows = getattr(instruction, "rows"); columns = getattr(instruction, "cols", None)
                         ms[result] = MatrixShapeFact(result, rows, columns, "instruction-metadata")
                     if isinstance(instruction, (SSAListClear, SSAListPush, SSAListInsert, SSAListRemoveAt, SSAListPop)):
-                        target = instruction.list_value; ls.pop(target, None)
+                        if modref is None:
+                            ls.pop(instruction.list_value, None)
+                        else:
+                            ls = {
+                                value: fact for value, fact in ls.items()
+                                if modref.preserves_length_fact(instruction, value)
+                            }
                     if isinstance(instruction, (SSACall, SSACallIndirect, SSAInterfaceCall, SSAInvoke, SSAInvokeIndirect, SSAInvokeInterface)) and instruction.writes_memory:
-                        ls = {value: fact for value, fact in ls.items() if not isinstance(value.type, ListType)}
+                        ls = {
+                            value: fact for value, fact in ls.items()
+                            if not isinstance(value.type, ListType)
+                            or (modref is not None and modref.preserves_length_fact(instruction, value))
+                        }
                 if ls != lengths[name] or vs != vectors[name] or ms != matrices[name]:
                     lengths[name], vectors[name], matrices[name] = ls, vs, ms; changed = True
         result = ShapeAnalysisResult(lengths, vectors, matrices)

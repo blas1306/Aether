@@ -1,0 +1,25 @@
+boolean esSimetrica(Matrix<int> A) {
+    int m = A.rows;
+    int n = A.columns;
+
+    if (m != n) {
+        return false;
+    }
+
+    for (int i in 2:m) {
+        for (int j in 1:i-1) {
+            if (A[i, j] != A[j, i]) {
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
+int main() {
+    Matrix<int> A = [1 2 3; 2 4 5; 3 5 6];
+    println(esSimetrica(A));
+
+    return 0;
+}
