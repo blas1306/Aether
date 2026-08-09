@@ -1,7 +1,7 @@
 # Aether 1.0 Language Specification
 
 > Classification: **Normative**. Contract: **Aether 1.0 stable profile**.
-> Native capability profile: **23**. This is the profile frozen for the
+> Native capability profile: **24**. This is the profile frozen for the
 > `1.0.0-rc.4` release candidate; publishing this document does not by itself
 > change the package version.
 
@@ -15,7 +15,7 @@ by [Aether Native Profile v1](AETHER_NATIVE_PROFILE_V1.md). It is not the union
 of every construction recognized by the parser, type checker, AST interpreter,
 or internal compiler layers. The profile-22
 [Aether v1 Profile Audit](AETHER_V1_PROFILE_AUDIT.md) is dated historical
-evidence. The current executable boundary is profile 23 and is summarized in
+evidence. The current executable boundary is profile 24 and is summarized in
 section 15.
 
 A conforming Aether 1.0 implementation:
@@ -192,7 +192,7 @@ Source order assigns deterministic discriminants, but Aether 1.0 defines no
 numeric conversion, bit flags, payloads, or pattern matching for enums.
 
 A `struct` is a nominal value type with declared fields whose transitive layout
-is supported by profile 23. Recursive by-value layouts are invalid. Struct
+is supported by profile 24. Recursive by-value layouts are invalid. Struct
 assignment, parameter passing, and return use value semantics while applying
 the lifecycle rules of every field.
 
@@ -237,7 +237,7 @@ are supported. Section 8 gives the remaining restrictions.
 mutable variable-length reference collection. Both use zero-based indexing.
 Their stable element types are `int`, `double`, `boolean`, `string`,
 payload-free enums, nullable values, classes, interfaces, and registered
-acyclic structs when profile 23 provides every required layout and lifecycle
+acyclic structs when profile 24 provides every required layout and lifecycle
 hook.
 
 Nested Array/List element layouts, shaped Vector/Matrix elements, and every
@@ -464,7 +464,7 @@ contract exists.
 ## 11. Vector and Matrix core
 
 The stable local core is limited to shaped `int`/`double` values admitted by
-profile 23:
+profile 24:
 
 - construction from rectangular literals;
 - one-based checked element read and write;
@@ -614,18 +614,18 @@ stored or non-int ranges, nested functions, imported storage/initialization,
 `float`, `complex`, tuples, `Any`, user generics, lambdas/closures, unsupported
 or recursive collection layouts, advanced Vector/Matrix, string
 interpolation/general formatting, input, general persistence/DB, plotting,
-binary/stream/process IO, exceptions, class/interface inheritance, default
+binary/stream/process IO, class/interface inheritance, default
 interface methods, reflection/downcasts, weak references, user destructors,
 GC/cycle collection, panic unwind, controlled stack overflow, a distinct O2,
 cross-platform native support, `long`, do-while, and match.
 
-The excluded exception implementation is still constrained by its accepted
-architecture during qualification: `Error.message()` is semantically non-throwing
+The stable native exception implementation is constrained by its accepted
+architecture: `Error.message()` is semantically non-throwing
 and must never produce an Aether exception. A throwing
 implementation is rejected semantically. An unrecoverable internal failure
 uses the existing panic contract and must not construct a second `Error` or
-recursively invoke exception handling. This rule does not admit exception
-syntax into Aether 1.0 or enable `ERROR_HANDLING` in profile 23.
+recursively invoke exception handling. This rule remains part of the promoted
+`ERROR_HANDLING` contract in profile 24.
 
 `ERROR_HANDLING` is required only when execution may require native exception
 semantics: `throw`, bare rethrow, `try`/`catch`, a throwing constructor or
@@ -634,6 +634,12 @@ propagation. The `Error` interface is otherwise an ordinary nominal interface.
 Declaring a struct or class that implements `Error`, calling
 `Error.message()`, or passing, returning, storing, making nullable, or placing
 `Error` values in containers does not require `ERROR_HANDLING`.
+
+Native `ERROR_HANDLING` is `COMPLETE` on Linux x86_64. The production lowering
+uses a private event-out representation; LLVM EH is comparison/test-only and no
+exception runtime layout is a public language or FFI ABI. Panic remains
+uncatchable. Throwable foreign calls and callbacks remain unsupported and fail
+closed. No support is claimed for Windows, macOS, WASI, or other native targets.
 
 The expected rejection categories are specified by
 [Aether Native Profile v1](AETHER_NATIVE_PROFILE_V1.md) and the negative corpus.

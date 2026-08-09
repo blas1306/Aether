@@ -157,6 +157,6 @@ toolchain commands are retained in
 - Pointer matching is accepted only for the current combined-module model.
 - The rejected LLVM EH transport can reuse the same logical event operations in
   tests, but it is not part of the accepted calling convention.
-- `ERROR_HANDLING` remains unsupported in the stable native capability profile.
-- Public FFI, separate compilation, threading/task guarantees and capability
-  promotion remain future work.
+- `ERROR_HANDLING` is `COMPLETE` in stable native capability profile 24.
+- Public FFI, separate compilation, and threading/task guarantees remain future
+  work; capability promotion does not expose this ABI.

@@ -1,19 +1,17 @@
 # Exception Release Qualification v2
 
-> Classification: independent audit. Date: 2026-08-08.
-> Tested revision: `d7b959559d37c294afe7dda3246489622c6c0c71` plus the
-> qualification-only corpus and lockfile corrections listed below.
+> Classification: accepted promotion audit. Revalidated: 2026-08-09.
+> Qualified revision: `7d59895781ccb5678d131cdfd1184ce73ae34a71`.
 
 ## Decision
 
-# DO NOT PROMOTE
+# PROMOTE
 
-The implementation evidence rebuilt by this audit is clean, but the release
-decision cannot be `PROMOTE`: the complete Python suite did not finish and the
-current VS Code and IntelliJ clients could not be executed in this environment.
-Those missing current results leave the requested full-suite and supported-tooling
-claims incomplete. `ERROR_HANDLING` remains `UNSUPPORTED`; this audit makes no
-capability/profile or exception-semantics change.
+The previously incomplete release evidence was rerun successfully: 4468 Python
+tests passed with 4 skips, VS Code passed 15/15, IntelliJ passed, native
+sanitizers passed 54/54 outside ptrace, ERQ-006 passed 77 comparisons, Rust
+passed, and ERQ-007 is closed. No architecture defect or release blocker
+remains. Profile 24 atomically promotes native `ERROR_HANDLING` to `COMPLETE`.
 
 ## ERQ revalidation
 
@@ -23,7 +21,7 @@ capability/profile or exception-semantics change.
 | ERQ-002 | Interface invoke selection and function `may_throw` authority disagreed (IRV-144). | One semantic effect summary is carried through interface slots, IR, SSA and LLVM. | `test_interface_exception_effects.py`, IR/SSA/native suites, Rust type verifier. | Focused tests and Rust workspace passed. | CLOSED |
 | ERQ-003 | A spurious exceptional `Error.message()` edge produced a lifecycle join inconsistency. | Canonical nonthrowing slot removes that edge; lifecycle verification remains strict. | Nested rethrow/mutation regressions and lifecycle/native constructor cases. | Focused tests and 54/54 sanitizer-backed native tests passed. | CLOSED |
 | ERQ-004 | Merely implementing or carrying `Error` falsely required `ERROR_HANDLING`. | Capability detection records executable exception control/effect semantics only. | Capability qualification tests and `check_capability_consistency.py`. | PASS. | CLOSED |
-| ERQ-005 | Tooling advertised stale exception names/forms and lacked catch-binder evidence. | CLI/LSP/highlighters use the frozen `Error` surface and binder contracts. | Focused CLI/LSP/tooling tests; client manifests; Gradle/npm suites. | Exception-focused CLI/LSP tests pass; VS Code/IntelliJ current executions unavailable. | CLOSED, tooling rerun incomplete |
+| ERQ-005 | Tooling advertised stale exception names/forms and lacked catch-binder evidence. | CLI/LSP/highlighters use the frozen `Error` surface and binder contracts. | Focused CLI/LSP/tooling tests; client manifests; Gradle/npm suites. | CLI/LSP pass; VS Code 15/15 and IntelliJ BUILD SUCCESSFUL. | CLOSED |
 | ERQ-006 | No public, reproducible cross-stage promotion corpus/evidence. | Packaged 11-positive/9-negative corpus and deterministic differential/sanitizer gate. | `scripts/check_exception_promotion.py`. | Initially regressed on obsolete `void()` syntax; corrected to `Function<(), void>`, then PASS: 77 comparisons. | CLOSED after qualification correction |
 | ERQ-007 | Artifacts did not prove exhaustive examples/corpus contents and clean installation. | Manifest-driven wheel/sdist checks, rebuild-from-sdist and isolated smoke installs. | `scripts/release.py` verification. | PASS on fresh artifacts under `/tmp/aether-erq-v2-dist`. | CLOSED |
 
@@ -94,17 +92,15 @@ a real release-evidence regression and was repaired before accepting the result.
 `check_capability_consistency.py` passed. Ordinary `Error` declarations, values,
 arguments, results, containers, nullable values and nonthrowing interface use do
 not trigger the capability. Throw/rethrow/try/catch and throwing calls do. The
-stable native route still rejects all executable exception programs with
-`AE-BACKEND-ERROR_HANDLING`.
+stable native route admits executable exception programs under the `COMPLETE`
+profile-24 capability.
 
 ## Tooling and packaging
 
-CLI and exception-focused LSP contracts passed. Seven unrelated LSP inlay-hint
-tests currently return no hints; they do not affect exception correctness but
-are current tooling regressions. Node/npm are unavailable, so the VS Code suite
-was not rerun. IntelliJ could not run because the configured Gradle user cache is
-read-only; repository CI definitions are corroborating, not a substitute for a
-current successful execution. Qt/CodeMirror/MathTeX obligations were not revived.
+CLI and exception-focused LSP contracts passed. The corrected inlay-hint suite
+passes. VS Code compilation and 15/15 tests passed with Node 26.4.0/npm 12.0.2;
+IntelliJ passed with Gradle 9.6.1 and the JDK 17 toolchain. Qt/CodeMirror/MathTeX
+obligations were not revived.
 
 Fresh wheel and sdist verification passed: canonical 114-example manifest,
 public exception corpus and evidence, `LeetCode/isPalindrome.ae`, dependency
@@ -132,43 +128,31 @@ broadened.
 | --- | --- | --- |
 | ERQ-006 promotion gate | PASS: 11 positive, 9 negative, 77 comparisons | Current exception evidence |
 | Native exception suite | PASS: 54/54 outside ptrace | Current exception evidence |
-| Focused exception/release/tooling selection | 437 passed, with 24 sanitizer failures under ptrace and 7 unrelated LSP inlay-hint failures | Environment limitation plus unrelated current tooling failures; native rerun passed |
-| Complete Python suite | Interrupted at 64% after 411.33 s: 2898 passed, 12 failed | Incomplete release evidence |
-| Twelve Python failures | `test_import_aliases.py` expects row output while current semantics prints a column | Pre-existing and unrelated to exceptions |
+| Focused exception/release/tooling selection | PASS | Current promotion evidence |
+| Complete Python suite | 4468 passed, 4 skipped, 0 failed | Current maintainer evidence |
 | Rust workspace | PASS | Current verifier evidence |
 | Capability, docs, examples, diagnostics | PASS for all four standalone gates | Current release evidence |
 | Packaging | PASS on fresh wheel/sdist/rebuilt wheel/installations | Current packaging evidence |
 | `compileall` and `git diff --check` | PASS | Static hygiene |
-| VS Code | Not run: Node/npm unavailable | Environment limitation; blocks complete tooling claim |
-| IntelliJ | Not run: Gradle cache read-only | Environment limitation; blocks complete tooling claim |
+| VS Code | Compile PASS; 15/15 tests PASS | Current maintainer evidence |
+| IntelliJ | Gradle test PASS; BUILD SUCCESSFUL | Current maintainer evidence |
 
-The complete Python run was interrupted after making no progress for several
-minutes in an interpreter test. Its only reported failures were the twelve known
-vector-orientation assertions, but unexecuted tests cannot be called passing.
+The complete current Python suite passed. Ptrace-restricted executions may still
+show 24 LSan environment failures; the identical suite passes outside ptrace.
 
 ## Contradictions, limitations and remaining risks
 
-Source/document searches found no normative contradiction that promotes
-`ERROR_HANDLING`, makes `Error.message()` throwing, exposes LLVM EH as stable,
+Source/document searches found no normative contradiction that makes
+`Error.message()` throwing, exposes LLVM EH as stable,
 or revives Qt/legacy tooling. Historical/experimental documents remain labeled
 as such. The principal new contradiction was operational: committed ERQ-006
 evidence said PASS while its callable corpus source no longer parsed; the source
 is corrected in this qualification.
 
-Remaining blockers to a `PROMOTE` decision are exact and evidence-related:
+There are no remaining promotion blockers. Platform and FFI exclusions remain
+intentional profile boundaries rather than incomplete exception semantics.
 
-1. complete the current Python suite and classify its terminal result;
-2. run the current VS Code suite with Node/npm;
-3. run the current IntelliJ suite with a writable Gradle environment;
-4. preferably repair or explicitly baseline the seven unrelated LSP inlay-hint
-   failures before making a broad supported-tooling release claim.
-
-These limitations are blockers under the qualification decision rule because
-the task explicitly requires current full-suite and supported-tooling evidence.
-They do not establish a new exception semantic, ownership, backend or runtime
-defect.
-
-## Files changed during qualification
+## Historical qualification-only corrections
 
 - `corpus/exceptions/positive/indirect_call.ae`: migrated the ERQ-006 indirect
   callable to canonical `Function<(), void>` syntax.
@@ -176,5 +160,5 @@ defect.
   surface while preparing a clean release environment.
 - `docs/compiler/EXCEPTION_RELEASE_QUALIFICATION_V2.md`: this report.
 
-No accepted ADR was modified. `ERROR_HANDLING` remains `UNSUPPORTED`. No commit
-was created.
+Accepted ADR architecture decisions remain unchanged; status references record
+the completed promotion. `ERROR_HANDLING` is `COMPLETE` in profile 24.

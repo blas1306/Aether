@@ -45,7 +45,7 @@ def _required(source: str, *, source_root: Path | None = None):
 
 
 def test_profiles_are_versioned_identified_and_cover_the_canonical_catalog() -> None:
-    assert CAPABILITY_PROFILE_VERSION == "23"
+    assert CAPABILITY_PROFILE_VERSION == "24"
     assert AST_CAPABILITY_PROFILE.backend is BackendIdentity.AST
     assert NATIVE_CAPABILITY_PROFILE.backend is BackendIdentity.NATIVE
     assert AST_CAPABILITY_PROFILE.version == CAPABILITY_PROFILE_VERSION
@@ -167,9 +167,7 @@ def test_detector_reports_major_ast_only_features(source: str, capability: Capab
     assert capability in _required(source)
 
 
-def test_approved_exception_syntax_remains_unsupported_and_never_reaches_ir(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_approved_exception_syntax_is_admitted_and_reaches_native_ir() -> None:
     typed = _typed(
         """
 struct FileError implements Error {
@@ -191,24 +189,24 @@ int main() {
 
     assert (
         NATIVE_CAPABILITY_PROFILE.support_for(Capability.ERROR_HANDLING).state
-        is CapabilityState.UNSUPPORTED
+        is CapabilityState.COMPLETE
     )
-    issue = next(
-        issue
-        for issue in backend_capability_issues(typed, BackendIdentity.NATIVE)
-        if issue.requirement.capability is Capability.ERROR_HANDLING
-    )
-    assert issue.diagnostic_code == "AE-BACKEND-ERROR_HANDLING"
+    assert not backend_capability_issues(typed, BackendIdentity.NATIVE)
+    llvm = LLVMBuilder().emit_llvm(typed)
+    assert "__ae_exception" in llvm
 
-    def fail_if_lowered(*_args, **_kwargs):
-        raise AssertionError("IR lowering must not run for exception syntax")
 
-    monkeypatch.setattr(
-        "aether.ir.lowering.IRLowerer.lower_checked_program",
-        fail_if_lowered,
+def test_promoted_exception_is_not_a_native_soundness_issue() -> None:
+    typed = _typed(
+        'struct E implements Error { string message() { return "bad"; } } '
+        "int main() { try { throw E(); } catch (Error error) { return 0; } }"
     )
-    with pytest.raises(BackendCapabilityError, match="AE-BACKEND-ERROR_HANDLING"):
-        LLVMBuilder().emit_llvm(typed)
+
+    assert Capability.ERROR_HANDLING in _required(
+        'struct E implements Error { string message() { return "bad"; } } '
+        "int main() { try { throw E(); } catch (Error error) { return 0; } }"
+    )
+    assert not backend_capability_issues(typed, BackendIdentity.NATIVE)
 
 
 @pytest.mark.parametrize(
@@ -243,10 +241,7 @@ def test_error_handling_capability_tracks_native_exception_semantics(
     required = _required(source)
 
     assert Capability.ERROR_HANDLING in required
-    assert any(
-        issue.diagnostic_code == "AE-BACKEND-ERROR_HANDLING"
-        for issue in backend_capability_issues(_typed(source), BackendIdentity.NATIVE)
-    )
+    assert not backend_capability_issues(_typed(source), BackendIdentity.NATIVE)
 
 
 @pytest.mark.parametrize(
@@ -603,12 +598,6 @@ def test_native_scalar_math_profile_accepts_consolidated_and_rejects_experimenta
             Capability.PRINT,
             "unsupported element type 'Array<int>'",
         ),
-        (
-            'struct E implements Error { string message() { return "bad"; } } '
-            "int main() { try { throw E(); } catch (Error error) { return 0; } }",
-            Capability.ERROR_HANDLING,
-            "",
-        ),
     ],
     ids=(
         "boolean-cast",
@@ -621,7 +610,6 @@ def test_native_scalar_math_profile_accepts_consolidated_and_rejects_experimenta
         "shape-bearing-collection",
         "empty-print",
         "nested-collection-print",
-        "exception-value",
     ),
 )
 def test_native_soundness_regressions_reject_before_lowering(

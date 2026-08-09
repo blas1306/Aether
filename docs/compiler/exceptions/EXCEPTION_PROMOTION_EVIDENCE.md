@@ -1,8 +1,8 @@
 # ERQ-006 exception promotion evidence
 
 > Classification: **Release evidence**  
-> Scope: correctness evidence only; this document does not promote a language
-> feature, native capability, ABI, or public FFI surface.
+> Scope: stable-route correctness evidence for the profile-24 promotion. It
+> does not define a public ABI or FFI surface.
 
 ## Result
 
@@ -33,8 +33,9 @@ lifecycle/event linearity supplies the structural ownership evidence at IR and
 SSA. Any mismatch names the case, stage, field, expected value, and actual
 value.
 
-The same check proves that every positive case still requires
-`AE-BACKEND-ERROR_HANDLING`, every negative diagnostic remains exact, all
+The same check proves that every positive case requires the promoted
+`ERROR_HANDLING` capability and is admitted by the stable native route, every
+negative diagnostic remains exact, all
 documentation references resolve, and every `.ae` file is cataloged. Run:
 
 ```bash
@@ -43,10 +44,9 @@ PYTHONPATH=src .venv/bin/python scripts/check_exception_promotion.py
 
 ## Availability and limitations
 
-`ERROR_HANDLING` remains **UNSUPPORTED** in native capability profile 23. The
-stable CLI therefore continues to reject exception execution; the native rows
-use the established internal qualification route after verified SSA. This is
-intentional and is checked by the gate. Promotion remains a separate decision.
+`ERROR_HANDLING` is **COMPLETE** in native capability profile 24. The stable CLI
+uses the qualified event-out route after verified SSA; the gate rejects any
+regression back to a capability diagnostic or non-stable execution path.
 
 Native execution evidence is limited to the supported Linux x86_64/clang
 environment. Sanitizer instrumentation is applied at O0 to the ownership-tagged
@@ -59,4 +59,4 @@ Features excluded by the accepted exception design remain unsupported and are
 not blockers for this evidence: `finally`, exception hierarchies, checked or
 resumable exceptions, arbitrary thrown values, raw-C unwinding, and public
 exception ABI/FFI. No remaining implementation blocker is claimed by ERQ-006;
-capability promotion and maintainer approval are deliberately outside scope.
+the completed promotion does not broaden any of those exclusions.

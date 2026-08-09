@@ -1,7 +1,7 @@
 # Aether Native Profile v1
 
 > Classification: **Normative**. Language contract **Aether 1.0 stable
-> profile**; native capability profile schema/version `23`. This profile is
+> profile**; native capability profile schema/version `24`. This profile is
 > frozen for the `1.0.0-rc.4` candidate; the language and capability profile
 > versions are independent identifiers.
 
@@ -22,7 +22,7 @@ is not an authority over this current reference.
 A conforming Aether v1 native implementation:
 
 - **MUST** parse and type-check before backend selection;
-- **MUST** run the profile-23 capability detector before IR lowering;
+- **MUST** run the profile-24 capability detector before IR lowering;
 - **MUST** accept a program only when every detected use is inside the native
   subset, including the restrictions described below;
 - **MUST** reject an excluded use with an `AE-BACKEND-*` diagnostic, source
@@ -48,9 +48,9 @@ The following block is generated from `NATIVE_CAPABILITY_PROFILE` in
 - **UNSUPPORTED**: every detected use is rejected before lowering.
 
 <!-- BEGIN GENERATED CAPABILITY PROFILE -->
-Profile schema/version: `23`.
+Profile schema/version: `24`.
 
-Inventory: 32 COMPLETE, 31 PARTIAL, 3 UNSUPPORTED.
+Inventory: 33 COMPLETE, 31 PARTIAL, 2 UNSUPPORTED.
 
 | Capability | State | Contract area |
 | --- | --- | --- |
@@ -107,7 +107,7 @@ Inventory: 32 COMPLETE, 31 PARTIAL, 3 UNSUPPORTED.
 | `matrix` | **PARTIAL** | Matrix values and operations. |
 | `scalar-math` | **PARTIAL** | Scalar mathematical functions and constants. |
 | `generics` | **UNSUPPORTED** | User-defined generic declarations. |
-| `error-handling` | **UNSUPPORTED** | Native exception semantics: throw, rethrow, try/catch, and propagation from throwing calls. |
+| `error-handling` | **COMPLETE** | Native exception semantics: throw, rethrow, try/catch, and propagation from throwing calls. |
 | `files` | **PARTIAL** | Language-level file input and output. |
 | `text-file-read` | **PARTIAL** | Complete UTF-8 text-file reads. |
 | `text-file-write` | **PARTIAL** | Complete UTF-8 text-file writes. |
@@ -185,21 +185,21 @@ negative corpus is part of this profile.
 
 ## 5. Excluded capabilities
 
-Profile 23 supports tagged nullable values, concrete classes, constructors,
+Profile 24 supports tagged nullable values, concrete classes, constructors,
 statically dispatched class methods, and nominal interfaces. Interface support
 includes class carriers, owned struct boxes, declaration-ordered witness
 dispatch, nullable and collection transport, and type-directed copy/drop.
 
-It rejects `input`, user generics, and `throw`/`try`/`catch`. Interface
+It rejects `input` and user generics. Interface
 inheritance/default methods, class inheritance/override, downcasts, reflection,
-user destructors, weak references, exceptions/unwind, and stable FFI remain
+user destructors, weak references, foreign exception unwinding, and stable FFI remain
 outside the profile. The obsolete staging capability `native-interface-abi`
 and combined capability `string-split-trim` are not catalog entries in profile
-23; `interfaces`, `string-split`, and `string-trim` are the authoritative
+24; `interfaces`, `string-split`, and `string-trim` are the authoritative
 granular capabilities.
 
-Internal exception qualification does not widen this profile. Its accepted
-contract requires `Error.message()` to be semantically non-throwing: lowering
+Native exceptions are supported on Linux x86_64 through the qualified private
+event-out implementation. `Error.message()` remains semantically non-throwing: lowering
 must use a call with no Aether exceptional successor, while unrecoverable
 internal failure remains panic/fail-fast. No second `Error` or recursive
 exception handling is permitted. `ERROR_HANDLING` is required only when
@@ -208,7 +208,10 @@ execution may require native exception semantics: `throw`, rethrow,
 exception propagation. Merely implementing `Error` or using `Error` values as
 ordinary interface values—including `Error.message()`, parameters, returns,
 storage, nullable values, and containers—does not require the capability.
-`ERROR_HANDLING` remains `UNSUPPORTED`.
+`ERROR_HANDLING` is `COMPLETE`. LLVM EH remains comparison/test-only machinery;
+the event-out representation and runtime ABI are private and are not a public
+language, object, C, or FFI ABI. Throwable foreign calls and callbacks remain
+unsupported and fail closed at the native boundary.
 
 ## 6. Platform and toolchain
 
@@ -229,7 +232,7 @@ second language or release platform.
 
 ## 7. Observable parity guarantee
 
-For every program accepted by profile 23, AST and native execution **MUST**
+For every program accepted by profile 24, AST and native execution **MUST**
 agree on:
 
 - stdout bytes and stderr bytes, including the public formatting of values;
@@ -244,8 +247,8 @@ NOT** remove or reorder observable traps, allocation, IO, or lifecycle effects.
 
 ## 8. Informative implementation note
 
-Profile 23 is a feature-contract version, not the Aether language version and
+Profile 24 is a feature-contract version, not the Aether language version and
 not an ABI version. Increasing it records a changed capability boundary. It
-does not by itself change package metadata or plugin compatibility. Profile 23
-was bumped because Phase 5.2–5.4 materially added nullable, class, and complete
-interface execution to the native boundary after profile 22 was frozen.
+does not by itself change package metadata or plugin compatibility. Profile 24
+promotes the qualified native exception implementation after profile 23 added
+nullable, class, and complete interface execution.

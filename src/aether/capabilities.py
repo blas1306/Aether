@@ -48,7 +48,7 @@ if TYPE_CHECKING:
     from .pipeline import TypedProgram
 
 
-CAPABILITY_PROFILE_VERSION = "23"
+CAPABILITY_PROFILE_VERSION = "24"
 
 
 class BackendIdentity(str, Enum):
@@ -364,11 +364,11 @@ _NATIVE_COMPLETE = {
     Capability.ALPT1_DECODE,
     Capability.EXPENSE_LEDGER_LOAD,
     Capability.EXPENSE_LEDGER_SAVE,
+    Capability.ERROR_HANDLING,
 }
 _NATIVE_UNSUPPORTED = {
     Capability.INPUT,
     Capability.GENERICS,
-    Capability.ERROR_HANDLING,
 }
 NATIVE_CAPABILITY_PROFILE = _profile(
     BackendIdentity.NATIVE,
@@ -496,6 +496,7 @@ E2E_TESTED_CAPABILITIES: Mapping[BackendIdentity, frozenset[Capability]] = Mappi
                 Capability.CLASS_CONSTRUCTORS,
                 Capability.CLASS_METHODS,
                 Capability.INTERFACES,
+                Capability.ERROR_HANDLING,
                 Capability.FILES,
                 Capability.TEXT_FILE_READ,
                 Capability.TEXT_FILE_WRITE,

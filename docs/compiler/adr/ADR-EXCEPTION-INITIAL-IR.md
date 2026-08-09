@@ -126,11 +126,10 @@ field mandatory requires a schema-version increment.
   semantics.
 - Printers, operand traversal, CFG analysis, optimizers, the interpreter, and
   Python/Rust interchange must preserve exceptional constructs.
-- Exception-bearing Initial IR must not be passed to unchanged SSA or native
-  lowering. Those stages remain gated and are governed by their own pending
-  ADRs.
-- `ERROR_HANDLING` remains unsupported until the implementation plan's
-  capability-promotion milestone.
+- Exception-bearing Initial IR passes only to the accepted exception-aware SSA
+  and native lowering defined by their own ADRs.
+- Profile 24 promotes native `ERROR_HANDLING` after completion of the
+  implementation plan's capability-promotion milestone.
 
 ## Out of scope
 

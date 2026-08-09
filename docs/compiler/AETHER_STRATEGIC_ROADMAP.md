@@ -6,7 +6,7 @@
 > implemented. The current language contract remains the
 > [Aether 1.0 Language Specification](../aether/AETHER_LANGUAGE_SPEC_V1.md) and
 > the current executable boundary remains
-> [native capability profile 23](../aether/AETHER_NATIVE_PROFILE_V1.md).
+> [native capability profile 24](../aether/AETHER_NATIVE_PROFILE_V1.md).
 >
 > No date in this document is a delivery commitment. Priorities express order
 > and dependency, not schedule.
@@ -22,7 +22,7 @@ simulation. Its enduring objective is:
 The project has reached a credible release-candidate architecture. The
 frontend, typed Initial IR, lifecycle expansion, verified SSA, conservative
 optimizers, textual LLVM generation, capability gate, and AST/native
-differential tests form a coherent compiler. Native profile 23 supports a
+differential tests form a coherent compiler. Native profile 24 supports a
 closed end-to-end subset on Linux x86_64, including checked scalars, functions,
 control flow, strings, modules without imported initialization, value structs,
 reference classes, nominal interfaces, nullable values, collections, and a
@@ -69,7 +69,7 @@ core.
 ### 1.1 Release and language state
 
 The repository identifies the current candidate as `1.0.0-rc.4` with native
-capability profile 23. The candidate is explicitly not a declaration of
+capability profile 24. The candidate is explicitly not a declaration of
 production readiness and defines no public ABI. The normative profile reports
 32 complete, 31 partial, and 3 unsupported capability families. “Partial”
 means that a typed detector admits a precisely documented subset; it is not
@@ -88,7 +88,7 @@ by example count.
 | Language implementation | Python lexer, parser, AST, multi-phase typechecker, module resolver, entry-point normalization, AST interpreter, REPL/session model, and an explicit native capability detector. The AST accepts a wider experimental surface than native. | **Mature within the v1 profile.** The closed native subset is coherent. AST-only behavior is experimental and must not silently define future language semantics. |
 | Compiler pipeline | `source -> typed program -> Initial IR -> lifecycle expansion -> verified SSA -> optimization -> LLVM -> clang`. The general dominance-frontier SSA builder is the default; the pattern builder is retained for comparison. | **Mature architecture, release-candidate implementation.** Internal Python object boundaries and duplicated type/layout knowledge still limit portability and independent components. |
 | Runtime | LLVM text is generated into each module. It supplies checked integer operations, allocation checks, panics, UTF-8 strings with non-atomic ARC, process arguments, text files, Array/List, Vector/Matrix, nullable, class, and interface helpers. | **Mature for the admitted Linux profile, not a production runtime product.** It is not a separate artifact, has no stable ABI, uses target-dependent layouts, and lacks concurrency-safe ownership. |
-| LLVM backend | Textual LLVM consumes verified optimized SSA and invokes clang. It covers profile 23 and is exercised at clang `-O0`, `-O1`, and `-O2`. | **Mature for Linux x86_64 profile 23.** Target triple/data layout, debug metadata, cross-compilation, object compatibility, public linking, and multi-platform runtime boundaries are absent. |
+| LLVM backend | Textual LLVM consumes verified optimized SSA and invokes clang. It covers profile 24 and is exercised at clang `-O0`, `-O1`, and `-O2`. | **Mature for Linux x86_64 profile 24.** Target triple/data layout, debug metadata, cross-compilation, object compatibility, public linking, and multi-platform runtime boundaries are absent. |
 | Initial IR verifier | Python verifier is the ordinary product authority. A versioned JSON IR schema, Rust importer/verifier, strict subprocess protocol, shadow comparison, packaging checks, cross-platform snapshot workflow, soak tooling, and a Rust-authority canary exist. | **Python path: mature. Rust path: advanced experimental/canary.** Rust is not the default product authority and cannot be promoted merely because the implementation exists. |
 | SSA verifier | Verifies structure, definitions and uses, dominance, phi edges, types, terminators, and unreachable-block policy; it runs before LLVM and in optimizer tests. | **Mature internal component.** Its model remains an internal Python representation with no public compatibility promise. |
 | Documentation | Normative v1 specification, native profile, diagnostics contract, ABI description, design RFCs, audits, release notes, and implementation guides are extensive. Consistency scripts validate release identities and generated profile content. | **Mature with an explicit authority hierarchy.** Historical matrices and implementation snapshots are explicitly non-normative; current generated summaries should continue to derive from authoritative capability data. |
@@ -103,7 +103,7 @@ These labels apply to public use, not merely to code quality.
 #### Production-ready
 
 No end-to-end Aether distribution or public compiler/runtime ABI is currently
-production-ready. Profile 23 is a release-candidate contract on one native
+production-ready. Profile 24 is a release-candidate contract on one native
 platform. Individual gates are release-grade engineering, but they do not
 remove the stated platform, ABI, packaging, debugging, and operational limits.
 
@@ -112,7 +112,7 @@ remove the stated platform, ABI, packaging, debugging, and operational limits.
 - lexical analysis, parsing, source locations, type checking, entry-point
   normalization, and the stable frontend diagnostics path;
 - the closed capability gate and fail-early rejection of native exclusions;
-- the profile-23 path through Initial IR, lifecycle, general SSA, verification,
+- the profile-24 path through Initial IR, lifecycle, general SSA, verification,
   conservative optimization, LLVM, and clang on Linux x86_64;
 - checked integer, bounds, allocation, string, collection, nullable, class,
   and interface invariants within the supported profile;
@@ -428,7 +428,7 @@ Classification means:
 
 | Language area | Classification | Direction and boundary |
 | --- | --- | --- |
-| Exceptions | **Implemented internally; not promoted for 1.x** | Frozen semantics, explicit cleanup, verified SSA, private event-out lowering, runtime and boundary containment exist. Hotfixes A–D closed ERQ-001 through ERQ-005; ERQ-006 adds the packaged public corpus and integrated differential/ownership release evidence without changing the capability profile. Promotion remains a separate maintainer decision. `finally`, hierarchies, resumable exceptions, public FFI and general unwinding are not implied. Result/status types remain preferred for expected numerical failures. |
+| Exceptions | **Stable in profile 24 on Linux x86_64** | Frozen semantics, explicit cleanup, verified SSA, private event-out lowering, runtime and boundary containment are promoted after ERQ-001 through ERQ-007 closed. LLVM EH remains test-only; `finally`, hierarchies, resumable exceptions, public FFI and general unwinding are not implied. Result/status types remain preferred for expected numerical failures. |
 | Basic scalar/payloadless-enum `match` | **Possible for 1.x** | A non-destructuring match over scalar constants and today's payloadless enums may be added compatibly, with exhaustiveness or explicit default rules and ordinary control-flow lowering. It is optional and lower priority than completing the stable foundations. |
 | Full algebraic pattern matching | **Candidate for 2.0** | Payload destructuring, guards, nested patterns, bindings, and exhaustiveness over algebraic data types belong with a future payload-enum/ADT design. Basic `match` does not pre-commit that representation or syntax. |
 | `do-while` | **Planned for 1.x (low priority)** | Add only as compatible loop syntax with the same control-flow, `break`/`continue`, verifier, optimizer, formatter, and tooling guarantees as existing loops. It must not displace higher-priority 1.x work. |
@@ -876,7 +876,7 @@ verification and regression gates.
 
 ### 14.1 Near-term
 
-1. **Finish stable 1.0 qualification.** Re-run all profile-23, parity,
+1. **Finish stable 1.0 qualification.** Re-run all profile-24, parity,
    optimizer, clean-install, documentation, and supported-platform gates with
    no accepted-program backend failures. This turns the current RC architecture
    into a defensible baseline.

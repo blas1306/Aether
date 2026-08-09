@@ -23,7 +23,7 @@ explicitly unsupported capability, and **N/A** is not applicable.
 
 | Capability | CLI / formatter | Language service / LSP | VS Code | IntelliJ |
 | --- | --- | --- | --- | --- |
-| `throw` of an `Error` implementation | Yes in frontend, AST run and inspection; stable native run/build/check reject it with `AE-BACKEND-ERROR_HANDLING` | Yes: completion, parsing, diagnostics and recovery | Delegated; keyword highlighted | Delegated; keyword highlighted |
+| `throw` of an `Error` implementation | Yes in frontend and stable native run/build/check/inspection | Yes: completion, parsing, diagnostics and recovery | Delegated; keyword highlighted | Delegated; keyword highlighted |
 | bare rethrow (`throw;`) | Same as `throw`; AST inspection distinguishes it | Yes; completion inserts `throw;`, diagnostics enforce catch context | Delegated; `throw` highlighted | Delegated; `throw` highlighted |
 | `try` / `catch` | Yes in frontend, AST run, inspection and formatter | Yes | Delegated; both highlighted | Delegated; both highlighted |
 | multiple catches | Yes; source order is preserved and formatted | Yes: parser/type diagnostics and full-document synchronization | Delegated | Delegated |
@@ -52,8 +52,8 @@ native capability remains disabled:
 - `aether run --backend=ast FILE` executes exception syntax and reports handled
   or unhandled events through normal diagnostics.
 - native `run`, `build`, `--check`, and `--emit-llvm` consistently reject
-  exception control/effect semantics with `AE-BACKEND-ERROR_HANDLING`; there is
-  no silent AST fallback.
+  exception control/effect semantics for the promoted native route; there is no
+  silent AST fallback.
 - inspection flags such as `--tokens` and `--ast` expose the accepted frontend
   syntax. IR/SSA/native inspection remains subject to its existing backend
   capability boundary.

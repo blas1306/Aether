@@ -2,8 +2,8 @@
   "schema_version": 1,
   "requirement": "ERQ-006",
   "status": "passed",
-  "capability_promotion": "not-performed",
-  "error_handling_state": "UNSUPPORTED",
+  "capability_promotion": "performed",
+  "error_handling_state": "COMPLETE",
   "backend_strategy": "event-out",
   "summary": {
     "positive_programs": 11,

@@ -593,7 +593,7 @@ def clean_install_smoke(wheel: Path) -> None:
             [str(aether), str(paths["rejected"])],
             cwd=work,
             expected_code=1,
-            stderr_contains="AE-BACKEND-ERROR_HANDLING",
+            stderr_contains="Aether unhandled exception: SmokeError: smoke",
             env=smoke_env,
         )
         _run([str(python), "-m", "compileall", "-q", str(environment)], cwd=work, env=smoke_env)

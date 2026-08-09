@@ -48,7 +48,7 @@ def test_example_manifest_is_complete_authoritative_and_uses_closed_states() -> 
 
     assert MANIFEST["schema_version"] == 2
     assert MANIFEST["language_version"] == "1.0.0-rc.4"
-    assert MANIFEST["native_capability_profile"] == "23"
+    assert MANIFEST["native_capability_profile"] == "24"
     assert len(manifest_paths) == len(set(manifest_paths))
     assert set(manifest_paths) == actual_paths
     assert manifest_paths == sorted(manifest_paths)
@@ -243,11 +243,6 @@ def test_removed_broken_examples_are_not_public_or_manifested() -> None:
         ),
         ('int main() { string value = input("value: "); return 0; }', "AE-BACKEND-INPUT"),
         ('int main() { int n = 2; println("n=$n$"); return 0; }', "AE-BACKEND-STRINGS"),
-        (
-            'struct E implements Error { string message() { return "bad"; } } '
-            "int main() { try { throw E(); } catch (error) { println(error.message()); } return 0; }",
-            "AE-BACKEND-ERROR_HANDLING",
-        ),
     ],
 )
 def test_outside_v1_surfaces_fail_at_capability_gate_before_lowering(
@@ -268,6 +263,18 @@ def test_outside_v1_surfaces_fail_at_capability_gate_before_lowering(
         LLVMBuilder().emit_llvm(typed)
 
     assert expected_code in {issue.diagnostic_code for issue in captured.value.issues}
+
+
+def test_exception_surface_is_inside_profile24_and_reaches_lowering() -> None:
+    typed = prepare_typed_program(
+        'struct E implements Error { string message() { return "stable"; } } '
+        "int main() { try { throw E(); } catch (Error error) { "
+        "println(error.message()); } return 0; }",
+        TypeChecker(),
+    )
+
+    assert not backend_capability_issues(typed, BackendIdentity.NATIVE)
+    assert "__ae_exception" in LLVMBuilder().emit_llvm(typed)
 
 
 def test_abbreviated_functions_are_declarations_not_function_values() -> None:

@@ -196,15 +196,21 @@ def test_backend_ast_remains_explicit_file_execution(tmp_path: Path) -> None:
 
 def test_exception_syntax_is_consistent_across_cli_run_check_build_and_inspection(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     program = tmp_path / "exceptions.ae"
     program.write_text(
         'struct FileError implements Error { string message() { return "file"; } }\n'
         'struct NetworkError implements Error { string message() { return "network"; } }\n'
-        "try { throw NetworkError(); }\n"
+        "int main() { try { throw NetworkError(); }\n"
         'catch (FileError file) { println(file.message()); }\n'
-        'catch (Error error) { println(error.message()); throw; }\n',
+        'catch (Error error) { println(error.message()); } return 0; }\n',
         encoding="utf-8",
+    )
+    clang_commands, _ = fake_native_toolchain(
+        monkeypatch,
+        returncode=0,
+        stdout_bytes=b"network\n",
     )
 
     ast_run = run_cli(["run", "--backend=ast", str(program)])
@@ -213,20 +219,21 @@ def test_exception_syntax_is_consistent_across_cli_run_check_build_and_inspectio
         ["--check", str(program)],
         ["build", str(program), "-o", str(tmp_path / "exceptions")],
         ["run", str(program)],
+        ["--emit-ir", str(program)],
+        ["--emit-ssa", str(program)],
         ["--emit-llvm", str(program)],
     )
 
-    assert ast_run[0] == EXIT_LANGUAGE_ERROR
-    assert "NetworkError" in ast_run[2]
-    assert "network" in ast_run[2]
+    assert ast_run == (EXIT_SUCCESS, "network\n", "")
     assert ast_inspect[0] == EXIT_SUCCESS
     assert "TryCatchStatement" in ast_inspect[1]
-    assert "RethrowStatement" in ast_inspect[1]
     for argv in stable_actions:
         exit_code, stdout, stderr = run_cli(argv)
-        assert exit_code == EXIT_LANGUAGE_ERROR
-        assert stdout == ""
-        assert "AE-BACKEND-ERROR_HANDLING" in stderr
+        assert exit_code == EXIT_SUCCESS
+        assert stderr == ""
+        if argv[0] == "run":
+            assert stdout == "network\n"
+    assert len(clang_commands) == 2
 
 
 def test_default_native_backend_compiles_class_methods(
@@ -422,7 +429,7 @@ def test_version_reports_language_version() -> None:
     exit_code, stdout, stderr = run_cli(["--version"])
 
     assert exit_code == EXIT_SUCCESS
-    assert stdout == "Aether 1.0.0-rc.4\nNative capability profile 23\n"
+    assert stdout == "Aether 1.0.0-rc.4\nNative capability profile 24\n"
     assert stderr == ""
 
 

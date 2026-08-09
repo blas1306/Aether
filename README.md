@@ -114,7 +114,7 @@ reimplementaciones de NumPy/SciPy/BLAS/LAPACK.
 ## Documentos de consolidación v1
 
 - [Especificación normativa Aether v1](docs/aether/AETHER_LANGUAGE_SPEC_V1.md)
-- [Perfil native normativo v1 / capability profile 23](docs/aether/AETHER_NATIVE_PROFILE_V1.md)
+- [Perfil native normativo v1 / capability profile 24](docs/aether/AETHER_NATIVE_PROFILE_V1.md)
 - [Índice y clasificación documental](docs/aether/README.md)
 - [Alcance formal de Aether v1](docs/aether/AETHER_V1_SCOPE.md)
 - [Auditoría completa de paridad](docs/aether/BACKEND_FEATURE_PARITY.md)
@@ -143,7 +143,7 @@ El resultado esperado identifica por separado lenguaje y perfil:
 
 ```text
 Aether 1.0.0-rc.4
-Native capability profile 23
+Native capability profile 24
 ```
 
 Para un checkout de desarrollo:
@@ -216,10 +216,10 @@ Lexer -> Parser -> TypeChecker -> EntryPointNormalizer -> AST Interpreter
 ```
 
 Es el backend con mayor cobertura y el usado por el REPL. Incluye
-inicialización de módulos, exceptions, input y builtins científicos fuera del
-perfil estable. Las excepciones disponen de una ruta native interna, no pública,
-que permanece detrás de `AE-BACKEND-ERROR_HANDLING`; classes, nullable e
-interfaces sí compilan en native estable.
+inicialización de módulos, input y builtins científicos fuera del perfil
+estable. Las excepciones compilan y ejecutan en native estable sobre Linux
+x86_64 mediante la implementación event-out privada; no existe ABI pública de
+excepciones ni fallback silencioso a AST.
 
 ### IR interpreter
 
@@ -328,7 +328,7 @@ aether --backend=ast examples/numerical_methods/main.ae
 ## Módulos y imports
 
 El frontend resuelve un módulo `A.B` como `A/B.ae` desde el directorio del
-archivo de entrada. AST soporta inicialización de módulo y native profile 23
+archivo de entrada. AST soporta inicialización de módulo y native profile 24
 compila el subconjunto de declaraciones sin storage/import-time execution:
 
 - `package A.B;`

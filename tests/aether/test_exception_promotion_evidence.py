@@ -23,8 +23,8 @@ def test_exception_promotion_release_contract_is_complete_and_fail_closed() -> N
     report = json.loads(REPORT_PATH.read_text(encoding="utf-8"))
     assert report["requirement"] == "ERQ-006"
     assert report["status"] == "passed"
-    assert report["capability_promotion"] == "not-performed"
-    assert report["error_handling_state"] == "UNSUPPORTED"
+    assert report["capability_promotion"] == "performed"
+    assert report["error_handling_state"] == "COMPLETE"
     assert report["summary"]["positive_programs"] == len(positives)
     assert report["summary"]["negative_programs"] == len(negatives)
     assert report["summary"]["stage_comparisons"] == 77

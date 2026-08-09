@@ -21,8 +21,8 @@ For every implementation PR:
 - [ ] Mark an item not applicable only with a component-specific explanation.
 - [ ] Treat any semantic deviation as an implementation defect unless a new RFC
       explicitly changes the architecture.
-- [ ] Keep `ERROR_HANDLING` disabled in the stable native capability profile
-      until Milestone 12 promotes the complete system atomically.
+- [x] `ERROR_HANDLING` remained disabled until Milestone 12 promoted the complete
+      system atomically in profile 24.
 
 ## Source-language model
 
@@ -172,10 +172,9 @@ For every implementation PR:
 - [ ] Tooling never suggests checked-exception declarations.
 - [ ] Every enabled optimizer has an explicit exception-safety disposition and
       post-pass verification evidence.
-- [ ] Exceptions remain rejected by the stable native capability profile until
-      lexer-through-runtime, FFI, tooling, parity, and release evidence are
-      complete.
-- [ ] Promotion is atomic in Milestone 12; there is no parser-only,
+- [x] Exceptions remained rejected until lexer-through-runtime, FFI containment,
+      tooling, parity, and release evidence were complete.
+- [x] Promotion is atomic in Milestone 12; there is no parser-only,
       interpreter-only, or backend-only stable promotion.
 - [ ] Documentation distinguishes experimental legacy behavior from the approved
       architecture throughout migration.

@@ -3,7 +3,7 @@
 > Classification: **Current reference**. Last reconciled: 2026-08-02.
 > Capability states and typed subset rules are normative in
 > [Aether Native Profile v1](../aether/AETHER_NATIVE_PROFILE_V1.md), profile
-> 23. This matrix summarizes implementation stages; it does not create
+> 24. This matrix summarizes implementation stages; it does not create
 > language features.
 
 Legend: **C** complete for the typed profile subset, **P** partial/gated subset,
@@ -28,7 +28,7 @@ feature-specific strength optimization exists.
 | modules/imports/visibility | C | C | C combined module | C | P: no imported storage/init | P |
 | process arguments and UTF-8 text files | C | C | C | C effects | C Linux subset | granular C/P |
 | input | C | C | N | N/A | N/gated | unsupported |
-| exceptions | C | C | C explicit event/lifecycle CFG | C conservative preservation | C internal event-out path; stable gate rejects | `error-handling` unsupported |
+| exceptions | C | C | C explicit event/lifecycle CFG | C conservative preservation | C private event-out path | `error-handling` C |
 | user generics, closures/lambdas, class/interface inheritance, reflection | N or experiment | N/P | N | N/A | N | unsupported/outside profile |
 | optimization profiles | C CLI | N/A | C | P: `-O2` aliases `-O1` | C emission | P |
 
@@ -58,12 +58,12 @@ Feature-specific folding remains intentionally limited to operations with
 proved semantics. Unknown calls, interface calls, allocation, lifecycle,
 memory access, traps, and mutation retain their declared effects.
 
-Exception IR is implemented through the private event-out architecture and is
-available only to internal qualification tests. `ERROR_HANDLING` remains
-`UNSUPPORTED`: Hotfixes A–D closed ERQ-001 through ERQ-005, and ERQ-006 now
-provides the integrated public corpus, cross-stage differential, ownership,
-diagnostic, documentation, catalog and packaging evidence. Capability
-promotion remains a separate decision. See [ERQ-006 release evidence](exceptions/EXCEPTION_PROMOTION_EVIDENCE.md).
+Exception IR is implemented through the private event-out architecture.
+`ERROR_HANDLING` is `COMPLETE` in profile 24 on Linux x86_64. ERQ-001 through
+ERQ-007 and the integrated public corpus provide cross-stage differential,
+ownership, diagnostic, documentation, catalog and packaging evidence. LLVM EH
+remains comparison/test-only and the runtime ABI remains private. See
+[ERQ-006 release evidence](exceptions/EXCEPTION_PROMOTION_EVIDENCE.md).
 
 ## Authorities
 

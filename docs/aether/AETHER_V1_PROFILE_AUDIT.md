@@ -3,7 +3,7 @@
 > Clasificación: **Audit / historical**. Esta fotografía de profile 22 no es
 > normativa y no describe la frontera actual. Para decisiones de release use
 > [la spec v1](AETHER_LANGUAGE_SPEC_V1.md) y
-> [el perfil native 23](AETHER_NATIVE_PROFILE_V1.md).
+> [el perfil native 24](AETHER_NATIVE_PROFILE_V1.md).
 
 Fecha de corte: **2026-07-18**. Release observada: **1.0.0-rc.2**. Perfil
 native observado: **22**. Plataforma native validada: **Linux x86_64 + clang**.
@@ -24,8 +24,8 @@ que el gate native acepte y luego miscompile.
 
 > Seguimiento: esta tabla conserva el snapshot del 2026-07-18 que abrió B12 y
 > B13. Los planes R1/F02 y R2/F01 se cerraron después mediante gates dedicados.
-> Tras la reconciliación del 2026-08-08, el catálogo actual tiene 94
-> `V1_NATIVE`, 20 `AST_ONLY_EXPERIMENTAL` y cero `BROKEN`; véase
+> Tras la promoción del 2026-08-09, el catálogo actual tiene 95
+> `V1_NATIVE`, 19 `AST_ONLY_EXPERIMENTAL` y cero `BROKEN`; véase
 > `AETHER_EXAMPLES_CATALOG_AUDIT.md`.
 
 La evidencia ejecutada en este corte fue:

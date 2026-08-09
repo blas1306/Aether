@@ -257,8 +257,8 @@ def catalog_errors(path: Path = CATALOG_PATH) -> list[str]:
 def capability_errors(cases: Iterable[PositiveCase]) -> list[str]:
     errors: list[str] = []
     support = NATIVE_CAPABILITY_PROFILE.support_for(Capability.ERROR_HANDLING)
-    if support.state is not CapabilityState.UNSUPPORTED:
-        errors.append("ERROR_HANDLING must remain UNSUPPORTED during ERQ-006")
+    if support.state is not CapabilityState.COMPLETE:
+        errors.append("ERROR_HANDLING must be COMPLETE for stable ERQ-006 evidence")
     for case in cases:
         try:
             typed = prepare_typed_program(
@@ -282,12 +282,10 @@ def capability_errors(cases: Iterable[PositiveCase]) -> list[str]:
             issue.diagnostic_code
             for issue in backend_capability_issues(typed, BackendIdentity.NATIVE)
         }
-        expected_codes = {"AE-BACKEND-ERROR_HANDLING"}
-        if diagnostic_codes != expected_codes:
+        if diagnostic_codes:
             errors.append(
-                f"stable native capability mismatch for {case.relative_path}: "
-                f"expected={sorted(expected_codes)!r}, "
-                f"actual={sorted(diagnostic_codes)!r}"
+                f"stable native route rejects promoted case {case.relative_path}: "
+                f"diagnostics={sorted(diagnostic_codes)!r}"
             )
     return errors
 
@@ -445,8 +443,8 @@ def build_report(
         "schema_version": 1,
         "requirement": "ERQ-006",
         "status": "passed",
-        "capability_promotion": "not-performed",
-        "error_handling_state": "UNSUPPORTED",
+        "capability_promotion": "performed",
+        "error_handling_state": "COMPLETE",
         "backend_strategy": "event-out",
         "summary": {
             "positive_programs": len(results),

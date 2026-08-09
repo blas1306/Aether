@@ -949,7 +949,7 @@ dinámico decidido por witness, sin cambiar las dos palabras del valor.
 | Paridad | Sigue el grafo auditado: reference layout/lifecycle antes de class; erased ABI antes de interface; nullable como rama independiente. |
 | Const | Reproduce la restricción por access path y el corte al atravesar class que aplica el frontend actual. |
 | Igualdad | Phase 5.3A agrega Eq por identidad al tipo IR class; interfaces y equality definida por usuario siguen fuera. |
-| Perfil native | Profile 23: nullable, classes e interfaces class/struct son E2E; `interfaces` es la capacidad granular COMPLETE. |
+| Perfil native | Profile 24: nullable, classes, interfaces class/struct y excepciones son E2E; `interfaces` y `error-handling` son capacidades granulares COMPLETE. |
 
 ## 15. Criterios de entrada para implementación
 

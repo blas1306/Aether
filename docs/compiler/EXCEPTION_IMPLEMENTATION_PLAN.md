@@ -22,10 +22,9 @@ implementation ADRs, not language RFCs: they may choose different mechanisms on
 different backends only if all approved source semantics, ownership rules, cleanup
 ordering, diagnostics, and FFI containment remain identical.
 
-Exceptions remain behind the `ERROR_HANDLING` capability until Milestone 12. No
-intermediate milestone may silently enable partially implemented behavior in the
-stable capability profile. Tests are added with the milestone that introduces the
-behavior; Milestone 11 closes cross-layer gaps and supplies system-level evidence.
+Exceptions remained behind the `ERROR_HANDLING` capability through Milestone 11.
+Milestone 12 is complete: profile 24 atomically promotes the qualified native
+implementation without enabling any partial or fallback route.
 
 ## Milestone dependency graph
 
@@ -981,7 +980,7 @@ cannot certify obsolete behavior.
 - Excessive presubmit cost can encourage disabling tests; tiered smoke/nightly
   budgets should be explicit.
 
-# Milestone 12 — Capability Promotion
+# Milestone 12 — Capability Promotion — COMPLETE
 
 ## Goal
 
@@ -1020,29 +1019,29 @@ implementation and its evidence are complete, reviewed, documented, and green.
 
 The following checklist is exact; every item must be checked before promotion:
 
-- [ ] Implementation is complete from lexer through native runtime and tooling.
-- [ ] Frozen language semantics are implemented without exceptions or undocumented
+- [x] Implementation is complete from lexer through native runtime and tooling.
+- [x] Frozen language semantics are implemented without exceptions or undocumented
       extensions.
-- [ ] Initial IR, lifecycle, SSA, and Python/Rust verification are complete.
-- [ ] Every enabled optimizer has passed its exception-safety audit.
-- [ ] Backend lowering and runtime ownership are verified on every supported target.
-- [ ] FFI imports, exports, and callbacks contain exceptions at raw C boundaries.
-- [ ] Reference, IR, optimized, and native parity is complete at supported
+- [x] Initial IR, lifecycle, SSA, and Python/Rust verification are complete.
+- [x] Every enabled optimizer has passed its exception-safety audit.
+- [x] Backend lowering and runtime ownership are verified on every supported target.
+- [x] FFI imports, exports, and callbacks contain exceptions at raw C boundaries.
+- [x] Reference, IR, optimized, and native parity is complete at supported
       optimization levels.
-- [ ] Ownership, partial-initialization, stress, fuzz-smoke, and sanitizer suites
+- [x] Ownership, partial-initialization, stress, fuzz-smoke, and sanitizer suites
       are green.
-- [ ] Formatter, LSP, completion, diagnostics, and shipped syntax highlighters are
+- [x] Formatter, LSP, completion, diagnostics, and shipped syntax highlighters are
       complete.
-- [ ] Language, compiler, runtime, FFI, diagnostic, and roadmap documentation is
+- [x] Language, compiler, runtime, FFI, diagnostic, and roadmap documentation is
       updated.
-- [ ] SSA representation, backend lowering, and private runtime ABI ADRs are
+- [x] SSA representation, backend lowering, and private runtime ABI ADRs are
       approved.
-- [ ] Capability manifests and generated profiles agree.
-- [ ] Presubmit, nightly, release, and platform CI are green with no core exception
+- [x] Capability manifests and generated profiles agree.
+- [x] Presubmit, nightly, release, and platform CI are green with no core exception
       skips.
-- [ ] No unresolved correctness, ownership, verifier, parity, or boundary-containment
+- [x] No unresolved correctness, ownership, verifier, parity, or boundary-containment
       defect remains.
-- [ ] Stable capability promotion has received the required maintainer approval.
+- [x] Stable capability promotion has received the required maintainer approval.
 
 ## Required tests
 

@@ -116,7 +116,7 @@ def check() -> list[str]:
         "Windows and macOS are not supported native platforms",
         "A `class` is a nominal mutable reference type",
         "An `interface` is a nominal method contract",
-        "Profile 23 supports tagged nullable values",
+        "Profile 24 supports tagged nullable values",
     )
     combined = spec + "\n" + NORMATIVE[1].read_text(encoding="utf-8")
     for contract in required_contracts:
@@ -195,7 +195,7 @@ def check() -> list[str]:
             "Phase 5.4C",
         ),
         ROOT / "docs" / "compiler" / "AETHER_NATIVE_ABI.md": (
-            "profile native 23",
+            "profile native 24",
             "dispatch/boxing 5.4A–5.4C",
         ),
         ROOT / "docs" / "compiler" / "CI.md": (

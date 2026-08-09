@@ -1,10 +1,10 @@
 {
   "schema_version": 2,
   "language_version": "1.0.0-rc.4",
-  "native_capability_profile": "23",
-  "audit_date": "2026-07-28",
+  "native_capability_profile": "24",
+  "audit_date": "2026-08-09",
   "profile_definitions": {
-    "V1_NATIVE": "Normative Aether 1.0 example accepted by native capability profile 23.",
+    "V1_NATIVE": "Normative Aether 1.0 example accepted by native capability profile 24.",
     "AST_ONLY_EXPERIMENTAL": "Non-normative frontend/AST experiment with an explicit native capability exclusion."
   },
   "entries": [
@@ -1540,19 +1540,16 @@
     },
     {
       "path": "examples/pruebaException.ae",
-      "condition": "ast_execution",
+      "condition": "native_execution",
       "expected_exit_code": 1,
       "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stderr_sha256": "a59ba7efad1d9481892d0f201a054e96b25b9f6a3fe94a89cd7a1b74c0616df7",
+      "stderr_sha256": "3d81cad27180fffc73293935143bd74b617ff2f82d4967ff35957552932dff99",
       "timeout_seconds": 20,
-      "classification": "AST_ONLY_EXPERIMENTAL",
+      "classification": "V1_NATIVE",
       "backends": [
-        "ast"
+        "native"
       ],
-      "run": true,
-      "outside_v1_features": [
-        "AE-BACKEND-ERROR_HANDLING"
-      ]
+      "run": true
     },
     {
       "path": "examples/structs/Geometry.ae",

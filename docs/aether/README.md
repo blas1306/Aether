@@ -19,7 +19,7 @@ that format only; it is not a second language specification.
 The [native profile](AETHER_NATIVE_PROFILE_V1.md) is the executable capability
 refinement. The [profile audit](AETHER_V1_PROFILE_AUDIT.md) and
 [closed decision](AETHER_V1_PROFILE_DECISION.md) are historical profile-22
-closure evidence; they do not override profile 23. The reproducible example
+closure evidence; they do not override profile 24. The reproducible example
 classification is in the
 [v1 examples manifest](../../examples/v1_examples_manifest.json), with the
 four formerly broken cases resolved in the

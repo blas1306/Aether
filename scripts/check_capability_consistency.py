@@ -67,9 +67,9 @@ int main() {
 
 def check() -> list[str]:
     errors: list[str] = []
-    if CAPABILITY_PROFILE_VERSION != "23":
+    if CAPABILITY_PROFILE_VERSION != "24":
         errors.append(
-            f"expected capability profile 23, got {CAPABILITY_PROFILE_VERSION}"
+            f"expected capability profile 24, got {CAPABILITY_PROFILE_VERSION}"
         )
     if set(CAPABILITY_CATALOG) != set(Capability):
         errors.append("capability catalog does not exactly cover the enum")

@@ -1,7 +1,7 @@
 # ABI native de Aether
 
 > Estado: **descriptivo y provisional**, 28 de julio de 2026. Documenta el
-> contrato observado del profile native 23. No define una ABI pública, una FFI
+> contrato observado del profile native 24. No define una ABI pública, una FFI
 > ni compatibilidad binaria entre releases.
 
 ## 1. Dominios de compatibilidad
@@ -10,7 +10,7 @@ Es necesario distinguir cuatro contratos:
 
 | Dominio | Estado actual | Compatibilidad prometida |
 | --- | --- | --- |
-| semántica observable AST/native | normativa para programas admitidos por profile 23 | stdout/stderr, exit code, panic y archivos según la spec/profile |
+| semántica observable AST/native | normativa para programas admitidos por profile 24 | stdout/stderr, exit code, panic y archivos según la spec/profile |
 | ABI interna del compilador | tipos, firmas y nombres dentro de un módulo LLVM combinado | ninguna entre versiones |
 | ABI del runtime | helpers LLVM `private` generados dentro del módulo | no existe como ABI enlazable separada |
 | ABI privada de eventos de excepción | versionada e interna al módulo combinado; no forma parte del profile estable | ninguna; no se exporta ni cruza C |
@@ -78,7 +78,7 @@ linkage LLVM; eso es un detalle accidental, no una exportación FFI.
 | `int` | `i32` signed | 4 bytes en `TypeLayout` | por valor | semántica estable; ABI interna |
 | enum sin payload | `i32` | 4 bytes | por valor | discriminante provisional |
 | `boolean` | `i1` | layout lógico 1 byte en storage registry | por valor | ABI interna; C `bool` no asumido |
-| `float` | `float` en mapper | 4 bytes | profile 23 lo rechaza | no ABI native estable |
+| `float` | `float` en mapper | 4 bytes | profile 24 lo rechaza | no ABI native estable |
 | `double` | `double` IEEE binary64 | 8 bytes | por valor | semántica estable; ABI target-dependent |
 | `complex` | sin representación | — | — | AST/IR-only |
 | `void` | `void` | unsized | retorno sin valor | interna |

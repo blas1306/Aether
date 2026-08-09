@@ -211,7 +211,7 @@ required. Catches cannot intercept either path.
 - The LLVM EH code remains test-only comparison evidence and may be removed when
   maintaining it no longer pays for its evidence value.
 - Cleanup correctness remains exclusively upstream of LLVM.
-- Stable native `ERROR_HANDLING` remains unsupported; internal tests bypass the
-  capability gate explicitly.
+- Stable native `ERROR_HANDLING` is `COMPLETE` in profile 24; the promoted route
+  uses this same private event-out strategy.
 - Separate compilation, stable objects, public FFI handles and callback wrappers
   remain later milestones.

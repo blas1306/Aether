@@ -985,7 +985,7 @@ int main() {
         LLVMBackend().emit(module)
 
 
-def test_stable_native_capability_gate_still_rejects_exceptions() -> None:
+def test_stable_native_capability_profile_admits_exceptions() -> None:
     program = prepare_typed_program(
         """
 struct FileError implements Error {
@@ -997,8 +997,7 @@ int main() { throw FileError("still gated"); }
         TypeChecker(),
     )
 
-    with pytest.raises(BackendCapabilityError, match="AE-BACKEND-ERROR_HANDLING"):
-        validate_backend_capabilities(program, BackendIdentity.NATIVE)
+    validate_backend_capabilities(program, BackendIdentity.NATIVE)
 
 
 @pytest.mark.parametrize(

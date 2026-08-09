@@ -23,16 +23,14 @@ Current implementation experiments include some of the following:
 - classes, interfaces, constructors, methods, and dispatch;
 - nested/unregistered collection layouts;
 - advanced Vector/Matrix operations and host linear algebra;
-- string interpolation, input, plotting, and general formatting;
-- `throw`, `try`, and `catch`.
+- string interpolation, input, plotting, and general formatting.
 
-Exception syntax has an internal Initial IR/SSA/LLVM event-out path used by
-qualification tests. That implementation detail does not make it stable: the
-2026-08-02 qualification found release blockers and native profile 23 continues
-to reject it with `AE-BACKEND-ERROR_HANDLING`.
+Exception syntax is no longer an experiment: profile 24 supports the qualified
+private event-out path on Linux x86_64. This annex does not describe or broaden
+that stable contract.
 
 The frontend's current experimental interpolation spelling is `$expression$`,
-not `${expression}`. Native profile 23 rejects the resulting interpolated
+not `${expression}`. Native profile 24 rejects the resulting interpolated
 string with `AE-BACKEND-STRINGS`; stable Aether source uses concatenation and
 explicit supported formatting helpers instead.
 

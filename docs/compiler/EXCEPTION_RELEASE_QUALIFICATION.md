@@ -1,6 +1,8 @@
 # Exception Release Qualification
 
-> Classification: **Audit**. Date: **2026-08-02**; ERQ-006 update:
+> Classification: **Audit / historical, superseded by
+> [Exception Release Qualification v2](EXCEPTION_RELEASE_QUALIFICATION_V2.md)**.
+> Date: **2026-08-02**; ERQ-006 update:
 > **2026-08-03**.
 >
 > ERQ-007 final packaging qualification: **2026-08-08**.

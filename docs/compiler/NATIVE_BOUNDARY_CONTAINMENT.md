@@ -5,9 +5,8 @@ Status: Milestone 6 implementation audit (2026-08-02)
 This document records the fail-closed native policy implemented by
 `NativeBoundaryVerifier`. It does not define an FFI, does not expose the private
 runtime event ABI, and does not change source, Initial IR, lifecycle or SSA
-semantics. The stable native capability profile continues to mark
-`ERROR_HANDLING` unsupported; exception-bearing native programs remain available
-only to internal tests.
+semantics. Profile 24 marks native `ERROR_HANDLING` `COMPLETE` on Linux x86_64
+while retaining every fail-closed foreign-boundary rule documented here.
 
 ## Boundary inventory
 
@@ -156,11 +155,9 @@ ownership; object compatibility checks; and cross-DSO lifetime/thread rules.
 The linker must reject incompatible versions and duplicate canonical IDs with
 different layouts. Hash-only identity and best-effort linking remain forbidden.
 
-## Remaining work before `ERROR_HANDLING`
+## Boundaries retained after `ERROR_HANDLING` promotion
 
-The stable capability must stay disabled until the broader exception release
-criteria are met, including supported-platform validation, public tooling and
-diagnostic readiness, full optimization/capability parity, and a separately
-reviewed FFI/callback containment ABI if native interoperation is introduced.
-This milestone supplies containment proof and rejection policy; it does not by
-itself authorize the capability.
+Profile 24 promotes stable native exceptions without promoting foreign
+interoperation. A separately reviewed FFI/callback containment ABI remains
+required before throwable native interoperation can be introduced. Windows,
+macOS, WASI, separate objects, and other native targets remain unclaimed.
