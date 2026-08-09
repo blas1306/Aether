@@ -13,6 +13,7 @@ from aether.optimization import (
     IR_O1_PASSES,
     PROFILES,
     SSA_O1_PASSES,
+    SSA_O2_PASSES,
     OptimizationLevel,
     optimization_profile,
 )
@@ -29,7 +30,10 @@ def test_registry_defines_truthful_middle_end_and_clang_mapping() -> None:
     assert PROFILES[OptimizationLevel.O1].ir_passes == IR_O1_PASSES
     assert PROFILES[OptimizationLevel.O2].ir_passes == IR_O1_PASSES
     assert PROFILES[OptimizationLevel.O1].ssa_passes == SSA_O1_PASSES
-    assert PROFILES[OptimizationLevel.O2].ssa_passes == SSA_O1_PASSES
+    assert PROFILES[OptimizationLevel.O2].ssa_passes == SSA_O2_PASSES
+    assert SSA_O2_PASSES == SSA_O1_PASSES + (
+        "ProvenBoundsCheckEliminator", "SSADeadCodeEliminator"
+    )
 
 
 @pytest.mark.parametrize("level", OptimizationLevel)

@@ -13,6 +13,7 @@ from .constant_folding import SSAConstantFolder
 from .dead_code import SSADeadCodeEliminator
 from .dead_phi import DeadPhiEliminator
 from .global_constant_propagation import SSAGlobalConstantPropagator
+from .proven_bounds import ProvenBoundsCheckEliminator
 from .result import SSAOptimizationResult, SSAOptimizationTraceStep
 from .sccp_pass import SCCPPass
 from .trivial_phi import TrivialPhiEliminator
@@ -173,6 +174,7 @@ def build_ssa_optimizer_pipeline(
         "TrivialPhiEliminator": TrivialPhiEliminator,
         "DeadPhiEliminator": DeadPhiEliminator,
         "SSADeadCodeEliminator": SSADeadCodeEliminator,
+        "ProvenBoundsCheckEliminator": ProvenBoundsCheckEliminator,
     }
     return SSAOptimizerPipeline(
         passes=(factories[name]() for name in selected.ssa_passes),

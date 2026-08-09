@@ -128,7 +128,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Compilation profile (default: O0): O0 disables optional Aether passes; "
             "O1 uses the conservative middle-end and clang O1; O2 uses the same "
-            "Aether middle-end and clang O2."
+            "Aether middle-end plus proven bounds-check elimination and clang O2."
         ),
     )
     parser.add_argument(

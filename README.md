@@ -285,7 +285,7 @@ El perfil de optimización se aplica a toda la compilación (por defecto O0):
 - `-O0`: sin pases opcionales Aether y clang O0;
 - `-O1`: folding, propagación local, simplificación algebraica, dead code y
   dead stores hasta punto fijo;
-- `-O2`: el middle-end probado de O1 más clang O2; no añade pases Aether ficticios.
+- `-O2`: el middle-end de O1 más eliminación de bounds checks con prueba formal y clang O2.
 
 `--opt` se conserva como alias obsoleto de `-O1`. La definición completa y el
 orden canónico de pases están en

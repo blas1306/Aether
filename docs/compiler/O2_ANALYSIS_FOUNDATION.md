@@ -1,5 +1,8 @@
 # O2 loop, range, and shape analysis foundation
 
+O2.2 consumes these immutable results in `ProvenBoundsCheckEliminator`; see
+`O2_BOUNDS_CHECK_ELIMINATION.md`. It does not weaken or extend the analysis.
+
 Status: implemented as read-only SSA analyses. No pass pipeline or observable
 program behaviour is changed, and no check or instruction is removed.
 

@@ -5,6 +5,7 @@ from .constant_folding import SSAConstantFolder
 from .dead_code import SSADeadCodeEliminator
 from .dead_phi import DeadPhiEliminator
 from .global_constant_propagation import SSAGlobalConstantPropagator
+from .proven_bounds import ProvenBoundsCheckEliminator
 from .pipeline import (
     SSAOptimizationConvergenceError,
     SSAOptimizationPass,
@@ -26,6 +27,7 @@ __all__ = [
     "SSAConstantFolder",
     "SSADeadCodeEliminator",
     "SSAGlobalConstantPropagator",
+    "ProvenBoundsCheckEliminator",
     "SSAOptimizationConvergenceError",
     "SSAOptimizationPass",
     "SSAOptimizationResult",

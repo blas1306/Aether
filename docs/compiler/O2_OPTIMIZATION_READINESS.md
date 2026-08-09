@@ -1,5 +1,9 @@
 # O2 optimization readiness audit
 
+Update for O2.2: the first proof-gated transform is enabled only in O2. The
+exact scope, ordering, and conservative limitations are documented in
+`O2_BOUNDS_CHECK_ELIMINATION.md`; the broader readiness cautions below remain.
+
 Status: audit complete, 2026-08-09. This document describes the compiler at
 the audited revision; it does not change the optimization-profile contract and
 does not implement an optimization family.

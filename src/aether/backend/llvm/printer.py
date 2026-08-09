@@ -5113,7 +5113,7 @@ class LLVMPrinter:
             self._operand(instruction.array),
             instruction.index,
             instruction.result.type,
-            check_bounds=True,
+            check_bounds=instruction.bounds_checked,
         )
         lines = element_ptr.lines + [f"{result} = load {element_type}, ptr {element_ptr.value}"]
         if (
@@ -5202,6 +5202,7 @@ class LLVMPrinter:
             self._operand(instruction.vector),
             instruction.index,
             instruction.result.type,
+            check_bounds=instruction.bounds_checked,
         )
         return element_ptr.lines + [
             f"{result} = load {element_type}, ptr {element_ptr.value}"
@@ -5223,6 +5224,7 @@ class LLVMPrinter:
             instruction.column,
             instruction.cols,
             instruction.result.type,
+            check_bounds=instruction.bounds_checked,
         )
         return element_ptr.lines + [
             f"{result} = load {element_type}, ptr {element_ptr.value}"
@@ -5239,7 +5241,7 @@ class LLVMPrinter:
             self._operand(instruction.array),
             instruction.index,
             instruction.value.type,
-            check_bounds=True,
+            check_bounds=instruction.bounds_checked,
         )
         lines = list(element_ptr.lines)
         layout = self._layouts.layout(instruction.value.type)
@@ -5271,6 +5273,7 @@ class LLVMPrinter:
             self._operand(instruction.vector),
             instruction.index,
             instruction.value.type,
+            check_bounds=instruction.bounds_checked,
         )
         lines = list(element_ptr.lines)
         layout = self._layouts.layout(instruction.value.type)
@@ -5337,6 +5340,7 @@ class LLVMPrinter:
             instruction.column,
             instruction.cols,
             instruction.value.type,
+            check_bounds=instruction.bounds_checked,
         )
         return element_ptr.lines + [
             f"store {element_type} {self._operand(instruction.value)}, ptr {element_ptr.value}"
@@ -5596,6 +5600,8 @@ class LLVMPrinter:
         vector: str,
         index: SSAValue,
         element_type: object,
+        *,
+        check_bounds: bool = True,
     ) -> _ArrayPointer:
         data = self._synthetic_temp("vector.data")
         public_index64 = self._synthetic_temp("vector.index64")
@@ -5603,9 +5609,12 @@ class LLVMPrinter:
         element_ptr = self._synthetic_temp("vector.elem")
         llvm_element_type = llvm_type(element_type)
         lines = [LLVMArrayRuntime.index64_line(public_index64, self._operand(index))]
-        lines.append(
-            f"{offset} = call i64 @aether_vector_check_index(ptr {vector}, i64 {public_index64})"
-        )
+        if check_bounds:
+            lines.append(
+                f"{offset} = call i64 @aether_vector_check_index(ptr {vector}, i64 {public_index64})"
+            )
+        else:
+            lines.append(f"{offset} = sub i64 {public_index64}, 1")
         lines.extend(self._array_data_pointer(data, vector))
         lines.append(
             f"{element_ptr} = getelementptr {llvm_element_type}, ptr {data}, i64 {offset}"
@@ -5619,6 +5628,8 @@ class LLVMPrinter:
         column: SSAValue,
         cols: int,
         element_type: object,
+        *,
+        check_bounds: bool = True,
     ) -> _ArrayPointer:
         data = self._synthetic_temp("matrix.data")
         row64 = self._synthetic_temp("matrix.row64")
@@ -5628,10 +5639,21 @@ class LLVMPrinter:
         llvm_element_type = llvm_type(element_type)
         lines = [f"{row64} = sext i32 {self._operand(row)} to i64"]
         lines.append(f"{column64} = sext i32 {self._operand(column)} to i64")
-        lines.append(
-            f"{linear_index} = call i64 @aether_matrix_check_index("
-            f"ptr {matrix}, i64 {row64}, i64 {column64}, i64 {cols})"
-        )
+        if check_bounds:
+            lines.append(
+                f"{linear_index} = call i64 @aether_matrix_check_index("
+                f"ptr {matrix}, i64 {row64}, i64 {column64}, i64 {cols})"
+            )
+        else:
+            row_offset = self._synthetic_temp("matrix.row.offset")
+            column_offset = self._synthetic_temp("matrix.column.offset")
+            row_start = self._synthetic_temp("matrix.row.start")
+            lines.extend([
+                f"{row_offset} = sub i64 {row64}, 1",
+                f"{column_offset} = sub i64 {column64}, 1",
+                f"{row_start} = mul i64 {row_offset}, {cols}",
+                f"{linear_index} = add i64 {row_start}, {column_offset}",
+            ])
         lines.extend(self._array_data_pointer(data, matrix))
         lines.append(
             f"{element_ptr} = getelementptr {llvm_element_type}, ptr {data}, i64 {linear_index}"

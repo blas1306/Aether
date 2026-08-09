@@ -523,6 +523,7 @@ class SSAArrayGet(MemoryReadMayTrapMixin, SSAInstruction):
     index: SSAValue
     borrowed: bool = False
     borrow_scope: str | None = None
+    bounds_checked: bool = True
 
 
 @dataclass(frozen=True)
@@ -554,6 +555,7 @@ class SSAVectorGet(MemoryReadMayTrapMixin, SSAInstruction):
     result: SSAValue
     vector: SSAValue
     index: SSAValue
+    bounds_checked: bool = True
 
 
 @dataclass(frozen=True)
@@ -563,6 +565,7 @@ class SSAMatrixGet(MemoryReadMayTrapMixin, SSAInstruction):
     row: SSAValue
     column: SSAValue
     cols: int
+    bounds_checked: bool = True
 
 
 @dataclass(frozen=True)
@@ -590,6 +593,7 @@ class SSAArraySet(MemoryWriteMayTrapMixin, SSAInstruction):
     array: SSAValue
     index: SSAValue
     value: SSAValue
+    bounds_checked: bool = True
 
 
 @dataclass(frozen=True)
@@ -604,6 +608,7 @@ class SSAVectorSet(MemoryWriteMayTrapMixin, SSAInstruction):
     vector: SSAValue
     index: SSAValue
     value: SSAValue
+    bounds_checked: bool = True
 
 
 @dataclass(frozen=True)
@@ -613,6 +618,7 @@ class SSAMatrixSet(MemoryWriteMayTrapMixin, SSAInstruction):
     column: SSAValue
     value: SSAValue
     cols: int
+    bounds_checked: bool = True
 
 
 @dataclass(frozen=True)

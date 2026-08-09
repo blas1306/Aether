@@ -162,6 +162,8 @@ def _empty_metrics() -> dict[str, Any]:
 
 
 def _check_specs(instruction):
+    if hasattr(instruction, "bounds_checked") and not instruction.bounds_checked:
+        return []
     if isinstance(instruction, (SSAArrayGet, SSAArraySet)):
         return [(CheckKind.ARRAY_INDEX, instruction.array, (instruction.index,), 0)]
     if isinstance(instruction, (SSAListGet, SSAListSet)):

@@ -400,6 +400,7 @@ class SSAPrinter:
                 f"{self._typed_value(instruction.result)} = "
                 f"{'borrow_element array' if instruction.borrowed else 'array_get'} "
                 f"{self._value(instruction.array)}, {self._value(instruction.index)}"
+                f"{' unchecked' if not instruction.bounds_checked else ''}"
             )
         if isinstance(instruction, SSAArraySlice):
             return (
@@ -423,17 +424,20 @@ class SSAPrinter:
             return (
                 f"{self._typed_value(instruction.result)} = vector_get "
                 f"{self._value(instruction.vector)}, {self._value(instruction.index)} base 1"
+                f"{' unchecked' if not instruction.bounds_checked else ''}"
             )
         if isinstance(instruction, SSAMatrixGet):
             return (
                 f"{self._typed_value(instruction.result)} = matrix_get "
                 f"{self._value(instruction.matrix)}, {self._value(instruction.row)}, "
                 f"{self._value(instruction.column)} cols {instruction.cols} base 1"
+                f"{' unchecked' if not instruction.bounds_checked else ''}"
             )
         if isinstance(instruction, SSAArraySet):
             return (
                 f"array_set {self._value(instruction.array)}, "
                 f"{self._value(instruction.index)}, {self._value(instruction.value)}"
+                f"{' unchecked' if not instruction.bounds_checked else ''}"
             )
         if isinstance(instruction, SSAListSet):
             return (
@@ -444,12 +448,14 @@ class SSAPrinter:
             return (
                 f"vector_set {self._value(instruction.vector)}, "
                 f"{self._value(instruction.index)}, {self._value(instruction.value)} base 1"
+                f"{' unchecked' if not instruction.bounds_checked else ''}"
             )
         if isinstance(instruction, SSAMatrixSet):
             return (
                 f"matrix_set {self._value(instruction.matrix)}, {self._value(instruction.row)}, "
                 f"{self._value(instruction.column)}, {self._value(instruction.value)} "
                 f"cols {instruction.cols} base 1"
+                f"{' unchecked' if not instruction.bounds_checked else ''}"
             )
         if isinstance(instruction, SSAArrayLength):
             return f"{self._typed_value(instruction.result)} = array_length {self._value(instruction.array)}"

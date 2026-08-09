@@ -54,16 +54,18 @@ SSA_O1_PASSES = (
     "DeadPhiEliminator",
     "SSADeadCodeEliminator",
 )
+SSA_O2_PASSES = SSA_O1_PASSES + (
+    "ProvenBoundsCheckEliminator",
+    "SSADeadCodeEliminator",
+)
 
 PROFILES = {
     OptimizationLevel.O0: OptimizationProfile(OptimizationLevel.O0, (), (), "0"),
     OptimizationLevel.O1: OptimizationProfile(
         OptimizationLevel.O1, IR_O1_PASSES, SSA_O1_PASSES, "1"
     ),
-    # O2 truthfully reuses the proven Aether O1 middle-end and requests a
-    # stronger downstream backend optimization. It adds no fictional passes.
     OptimizationLevel.O2: OptimizationProfile(
-        OptimizationLevel.O2, IR_O1_PASSES, SSA_O1_PASSES, "2"
+        OptimizationLevel.O2, IR_O1_PASSES, SSA_O2_PASSES, "2"
     ),
 }
 DEFAULT_OPTIMIZATION_PROFILE = PROFILES[OptimizationLevel.O0]

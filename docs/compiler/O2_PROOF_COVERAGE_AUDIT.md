@@ -1,5 +1,9 @@
 # O2.1.5 proof coverage audit
 
+O2.2 now transforms the supported Array, Vector, and Matrix index candidates
+classified `PROVEN_SAFE`. List, slicing, and non-SSA-visible general shape
+checks remain transformation limitations. This analysis baseline is unchanged.
+
 Baseline revision: `0478b475eddefa73f246590a5ecc69258ca57e29`.
 
 The checked machine-readable baseline is
