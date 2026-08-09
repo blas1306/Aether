@@ -5177,6 +5177,7 @@ class LLVMPrinter:
             self._operand(instruction.list_value),
             instruction.index,
             instruction.result.type,
+            check_bounds=instruction.bounds_checked,
         )
         lines = element_ptr.lines + [f"{result} = load {element_type}, ptr {element_ptr.value}"]
         if (
@@ -5305,6 +5306,7 @@ class LLVMPrinter:
             self._operand(instruction.list_value),
             instruction.index,
             instruction.value.type,
+            check_bounds=instruction.bounds_checked,
         )
         lines = list(element_ptr.lines)
         layout = self._layouts.layout(instruction.value.type)
@@ -5582,13 +5584,16 @@ class LLVMPrinter:
         list_value: str,
         index: SSAValue,
         element_type: object,
+        *,
+        check_bounds: bool = True,
     ) -> _ArrayPointer:
         data = self._synthetic_temp("list.data")
         index64 = self._synthetic_temp("list.index64")
         element_ptr = self._synthetic_temp("list.elem")
         llvm_element_type = llvm_type(element_type)
         lines = [self._list_index64_line(index64, self._operand(index))]
-        lines.append(f"call void @aether_list_check_index(ptr {list_value}, i64 {index64})")
+        if check_bounds:
+            lines.append(f"call void @aether_list_check_index(ptr {list_value}, i64 {index64})")
         lines.extend(self._list_data_pointer(data, list_value))
         lines.append(
             f"{element_ptr} = getelementptr {llvm_element_type}, ptr {data}, i64 {index64}"

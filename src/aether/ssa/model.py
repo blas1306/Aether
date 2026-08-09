@@ -548,6 +548,7 @@ class SSAListGet(MemoryReadMayTrapMixin, SSAInstruction):
     index: SSAValue
     borrowed: bool = False
     borrow_scope: str | None = None
+    bounds_checked: bool = True
 
 
 @dataclass(frozen=True)
@@ -601,6 +602,7 @@ class SSAListSet(MemoryWriteMayTrapMixin, SSAInstruction):
     list_value: SSAValue
     index: SSAValue
     value: SSAValue
+    bounds_checked: bool = True
 
 
 @dataclass(frozen=True)

@@ -419,6 +419,7 @@ class SSAPrinter:
                 f"{self._typed_value(instruction.result)} = "
                 f"{'borrow_element list' if instruction.borrowed else 'list_get'} "
                 f"{self._value(instruction.list_value)}, {self._value(instruction.index)}"
+                f"{' unchecked' if not instruction.bounds_checked else ''}"
             )
         if isinstance(instruction, SSAVectorGet):
             return (
@@ -443,6 +444,7 @@ class SSAPrinter:
             return (
                 f"list_set {self._value(instruction.list_value)}, "
                 f"{self._value(instruction.index)}, {self._value(instruction.value)}"
+                f"{' unchecked' if not instruction.bounds_checked else ''}"
             )
         if isinstance(instruction, SSAVectorSet):
             return (

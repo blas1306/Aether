@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from aether.ssa.analysis.proof_coverage import CheckProof, ProofCoverageAudit
+from aether.ssa.analysis.alias_modref import SummaryAnalysis
 from aether.ssa.model import (
     SSAArrayGet,
     SSAArraySet,
@@ -11,6 +12,8 @@ from aether.ssa.model import (
     SSAFunction,
     SSAMatrixGet,
     SSAMatrixSet,
+    SSAListGet,
+    SSAListSet,
     SSAModule,
     SSAVectorGet,
     SSAVectorSet,
@@ -24,16 +27,18 @@ class ProvenBoundsCheckEliminator:
 
     Matrix checks use one runtime helper, so both independently audited row and
     column obligations must be safe before that helper is removed. Slicing and
-    List checks deliberately remain outside the O2.2 transformation scope.
+    List checks additionally require O2.4 alias/mod-ref fact preservation.
     """
 
     _SUPPORTED = (
         SSAArrayGet, SSAArraySet, SSAVectorGet, SSAVectorSet,
         SSAMatrixGet, SSAMatrixSet,
+        SSAListGet, SSAListSet,
     )
 
     def run(self, module: SSAModule) -> SSAOptimizationResult:
-        report = ProofCoverageAudit().audit(module)
+        summaries = SummaryAnalysis().compute(module)
+        report = ProofCoverageAudit().audit(module, summaries=summaries)
         by_site: dict[tuple[str, str, int], list] = {}
         for check in report.checks:
             by_site.setdefault(
@@ -53,6 +58,23 @@ class ProvenBoundsCheckEliminator:
             ),
             "array_checks_removed": 0,
             "list_checks_removed": 0,
+            "list_checks_examined": sum(check.domain == "List" for check in report.checks),
+            "list_checks_preserved_unknown": sum(
+                check.domain == "List" and check.proof == CheckProof.UNKNOWN.value
+                for check in report.checks
+            ),
+            "list_checks_alias_invalidated": sum(
+                check.domain == "List" and check.unknown_reason == "ALIAS_UNCERTAINTY"
+                for check in report.checks
+            ),
+            "list_checks_modref_invalidated": sum(
+                check.domain == "List" and check.unknown_reason == "MUTATION_INVALIDATION"
+                for check in report.checks
+            ),
+            "list_checks_call_invalidated": sum(
+                check.domain == "List" and check.unknown_reason in {"CALL_INVALIDATION", "EXCEPTION_EDGE"}
+                for check in report.checks
+            ),
             "vector_checks_removed": 0,
             "matrix_checks_removed": 0,
             "slicing_checks_removed": 0,

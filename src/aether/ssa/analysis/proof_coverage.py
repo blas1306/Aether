@@ -22,6 +22,7 @@ from aether.ssa.model import (
 from .loops import LoopAnalysis
 from .ranges import ProofResult, RangeAnalysis
 from .shapes import LengthFact, ShapeAnalysis
+from .alias_modref import ModRefAnalysis, FunctionSummary
 
 
 class CheckKind(str, Enum):
@@ -116,17 +117,26 @@ class CoverageReport:
 class ProofCoverageAudit:
     """Inventory and classify SSA-visible runtime checks without mutation."""
 
-    def audit(self, module: SSAModule | Iterable[SSAFunction]) -> CoverageReport:
+    def audit(
+        self,
+        module: SSAModule | Iterable[SSAFunction],
+        summaries: dict[str, FunctionSummary] | None = None,
+    ) -> CoverageReport:
         functions = module.functions if isinstance(module, SSAModule) else module
         records: list[CheckRecord] = []
         for function in sorted(functions, key=lambda item: item.name):
-            records.extend(self._function(function))
+            records.extend(self._function(function, summaries))
         records.sort(key=lambda item: (item.function, item.block, item.instruction_index, item.kind))
         return CoverageReport(1, tuple(records))
 
-    def _function(self, function: SSAFunction) -> list[CheckRecord]:
+    def _function(
+        self,
+        function: SSAFunction,
+        summaries: dict[str, FunctionSummary] | None = None,
+    ) -> list[CheckRecord]:
         ranges = RangeAnalysis().compute(function)
-        shapes = ShapeAnalysis().compute(function)
+        modref = ModRefAnalysis(function, summaries) if summaries is not None else None
+        shapes = ShapeAnalysis().compute(function, modref)
         loops = LoopAnalysis().compute(function)
         result: list[CheckRecord] = []
         for block in function.blocks:
@@ -141,7 +151,10 @@ class ProofCoverageAudit:
                         allow_end=kind is CheckKind.LIST_INSERT_INDEX,
                     )
                     if proof is CheckProof.UNKNOWN:
-                        reason = _refine_reason(reason, function, block.name, position, collection, loops)
+                        reason = _refine_reason(
+                            reason, function, block.name, position, collection,
+                            loops, modref,
+                        )
                     result.append(CheckRecord(
                         kind.value, _domain(kind), function.name, block.name, position,
                         type(instruction).__name__, _panic(kind),
@@ -239,16 +252,24 @@ def _classify(values, base, fact, ranges, block, *, is_slice=False, allow_end=Fa
     return next((item for item in proofs if item[0] is CheckProof.UNKNOWN), (CheckProof.UNKNOWN, UnknownReason.OTHER))
 
 
-def _refine_reason(reason, function, block, position, collection, loops):
+def _refine_reason(reason, function, block, position, collection, loops, modref=None):
     if any(block in region.blocks for region in loops.irreducible_regions): return UnknownReason.IRREDUCIBLE_CFG
     current = next(item for item in function.blocks if item.name == block)
     before = current.instructions[:position]
     mutations = (SSAListClear, SSAListPush, SSAListInsert, SSAListRemoveAt, SSAListPop)
-    if any(isinstance(item, mutations) and item.list_value == collection for item in before):
-        return UnknownReason.MUTATION_INVALIDATION
+    for item in before:
+        if isinstance(item, mutations):
+            if item.list_value == collection:
+                return UnknownReason.MUTATION_INVALIDATION
+            if modref is not None and modref.may_modify(item, collection):
+                return UnknownReason.ALIAS_UNCERTAINTY
     if any(isinstance(item, (SSAInvoke, SSAInvokeIndirect, SSAInvokeInterface)) for item in before): return UnknownReason.EXCEPTION_EDGE
     calls = (SSACall, SSACallIndirect, SSAInterfaceCall, SSAInvoke, SSAInvokeIndirect, SSAInvokeInterface)
-    if any(isinstance(item, calls) and item.writes_memory for item in before): return UnknownReason.CALL_INVALIDATION
+    if any(
+        isinstance(item, calls)
+        and (modref.may_modify(item, collection) if modref is not None else item.writes_memory)
+        for item in before
+    ): return UnknownReason.CALL_INVALIDATION
     by_name = {item.name: item for item in function.blocks}
     for edge in predecessors(function).get(block, ()):
         terminator = by_name[edge.source].instructions[-1]
