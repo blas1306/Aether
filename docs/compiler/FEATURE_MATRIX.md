@@ -30,7 +30,7 @@ feature-specific strength optimization exists.
 | input | C | C | N | N/A | N/gated | unsupported |
 | exceptions | C | C | C explicit event/lifecycle CFG | C conservative preservation | C private event-out path | `error-handling` C |
 | user generics, closures/lambdas, class/interface inheritance, reflection | N or experiment | N/P | N | N/A | N | unsupported/outside profile |
-| optimization profiles | C CLI | N/A | C | P: `-O2` aliases `-O1` | C emission | P |
+| optimization profiles | C CLI | N/A | C | C: canonical O0/O1/O2 profiles | C emission | C |
 
 ## Object and interface boundary
 

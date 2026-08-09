@@ -33,8 +33,8 @@ BENCHMARK_PATHS = sorted(Path("benchmarks").glob("*.ae"))
     ("backend", "expected_names"),
     [
         ("ast", {"AST parse/typecheck", "AST execute"}),
-        ("ir", {"IR lower/verify", "IR execute", "IR O1 optimize"}),
-        ("both", {"AST parse/typecheck", "AST execute", "IR lower/verify", "IR execute", "IR O1 optimize"}),
+        ("ir", {"IR lower/verify", "IR execute", "IR O0 optimize"}),
+        ("both", {"AST parse/typecheck", "AST execute", "IR lower/verify", "IR execute", "IR O0 optimize"}),
         ("ssa", {"SSA build", "SSA optimize"}),
         ("llvm", {"LLVM emit"}),
     ],
@@ -62,7 +62,7 @@ def test_native_build_iterations_and_runtime_setup_are_separate(
     build_paths: list[Path] = []
     run_commands: list[list[str]] = []
 
-    def fake_build(_source: str, _path: Path, output_path: Path) -> None:
+    def fake_build(_source: str, _path: Path, output_path: Path, _profile) -> None:
         build_paths.append(output_path)
         output_path.touch()
 
@@ -91,7 +91,7 @@ def test_native_build_iterations_and_runtime_setup_are_separate(
 def test_missing_clang_marks_native_profiles_unsupported(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def missing_clang(_source: str, _path: Path, _output_path: Path) -> None:
+    def missing_clang(_source: str, _path: Path, _output_path: Path, _profile) -> None:
         raise LLVMBuildError("clang is required to build native executables.")
 
     monkeypatch.setattr("aether.benchmark._build_native", missing_clang)
@@ -114,7 +114,7 @@ def test_native_executable_exit_code_can_be_validated_or_explicitly_ignored(
     expected_exit_code: int | None,
     has_failure: bool,
 ) -> None:
-    def fake_build(_source: str, _path: Path, output_path: Path) -> None:
+    def fake_build(_source: str, _path: Path, output_path: Path, _profile) -> None:
         output_path.touch()
 
     def failed_run(command: list[str], **_kwargs) -> subprocess.CompletedProcess[bytes]:
@@ -141,7 +141,7 @@ def test_native_executable_exit_code_can_be_validated_or_explicitly_ignored(
 def test_all_non_native_profiles_continue_when_native_is_unsupported(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def missing_clang(_source: str, _path: Path, _output_path: Path) -> None:
+    def missing_clang(_source: str, _path: Path, _output_path: Path, _profile) -> None:
         raise LLVMBuildError("clang is required to build native executables.")
 
     monkeypatch.setattr("aether.benchmark._build_native", missing_clang)

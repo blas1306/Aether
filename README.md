@@ -85,7 +85,8 @@ implica ABI estable, seguridad para producción ni v1 final terminada.
   builtins como valores y retorno de callables;
 - CLI/tooling: el CLI es funcional, pero el backend LLVM predeterminado cubre
   menos lenguaje que AST; LSP e IntelliJ son todavía incrementales;
-- niveles `-O`: existen para `--emit-ir`; `-O2` actualmente equivale a `-O1`.
+- perfiles `-O0/-O1/-O2` coherentes para run, build, emit y bench; ver
+  [perfiles de optimización](docs/compiler/OPTIMIZATION_PROFILES.md).
 
 ### Experimental o solo AST
 
@@ -279,12 +280,16 @@ temporal y soporta menos formas. Los visitantes de operandos IR/SSA son
 estructurales y la suite verifica que una instrucción nueva no quede fuera de
 DCE, SCCP o las reescrituras de valores.
 
-Los niveles del optimizer IR se conectan únicamente a `--emit-ir`:
+El perfil de optimización se aplica a toda la compilación (por defecto O0):
 
-- `-O0`: sin pases;
+- `-O0`: sin pases opcionales Aether y clang O0;
 - `-O1`: folding, propagación local, simplificación algebraica, dead code y
   dead stores hasta punto fijo;
-- `-O2`: alias actual de `-O1`, reservado para un nivel futuro más fuerte.
+- `-O2`: el middle-end probado de O1 más clang O2; no añade pases Aether ficticios.
+
+`--opt` se conserva como alias obsoleto de `-O1`. La definición completa y el
+orden canónico de pases están en
+[docs/compiler/OPTIMIZATION_PROFILES.md](docs/compiler/OPTIMIZATION_PROFILES.md).
 
 El pipeline native siempre ejecuta su pipeline SSA actual; esas flags no lo
 configuran. Los efectos comunes de instrucciones (`may_trap`, reads/writes,

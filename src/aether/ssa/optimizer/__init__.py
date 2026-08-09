@@ -9,6 +9,7 @@ from .pipeline import (
     SSAOptimizationConvergenceError,
     SSAOptimizationPass,
     SSAOptimizerPipeline,
+    build_ssa_optimizer_pipeline,
 )
 from .result import SSAOptimizationResult, SSAOptimizationTraceStep
 from .sccp import SCCPAnalyzer, SCCPResult, SCCPTransformer
@@ -30,5 +31,6 @@ __all__ = [
     "SSAOptimizationResult",
     "SSAOptimizationTraceStep",
     "SSAOptimizerPipeline",
+    "build_ssa_optimizer_pipeline",
     "TrivialPhiEliminator",
 ]

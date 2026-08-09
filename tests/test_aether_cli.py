@@ -1601,7 +1601,7 @@ int main() {
     exit_code, stdout, stderr = run_cli(["--emit-llvm", str(program)])
 
     assert exit_code == EXIT_SUCCESS
-    assert "  br label %then0\n" in stdout
+    assert "  br i1 1, label %then0, label %else0\n" in stdout
     assert stderr == ""
 
 
@@ -1900,7 +1900,7 @@ def test_build_accepts_output_option(
     assert len(commands) == 1
     assert commands[0][0] == "/usr/bin/clang"
     assert commands[0][1].endswith(".ll")
-    assert commands[0][2:] == ["-o", str(output.resolve())]
+    assert commands[0][2:] == ["-o", str(output.resolve()), "-O0"]
     assert stdout == f"Built executable: {output.resolve()}\n"
     assert stderr == ""
 
@@ -2018,7 +2018,7 @@ def test_build_default_output_uses_build_directory(
     exit_code, stdout, stderr = run_cli(["build", str(program)])
 
     assert exit_code == EXIT_SUCCESS
-    assert commands[0][-1] == str(expected_output.resolve())
+    assert commands[0][-2:] == [str(expected_output.resolve()), "-O0"]
     assert stdout == f"Built executable: {expected_output.resolve()}\n"
     assert stderr == ""
 
@@ -2406,7 +2406,7 @@ int main() {
 
     assert exit_code == EXIT_USAGE_ERROR
     assert stdout == ""
-    assert "--show-passes requires --emit-ir --opt." in stderr
+    assert "--show-passes requires --emit-ir." in stderr
 
 
 def test_emit_cfg_missing_file_reports_read_error(tmp_path: Path) -> None:
@@ -2808,7 +2808,7 @@ int main() {
     assert stderr == ""
 
 
-def test_opt_without_emit_ir_reports_clear_usage_error(tmp_path: Path) -> None:
+def test_opt_alias_is_supported_for_execution(tmp_path: Path) -> None:
     program = tmp_path / "opt_without_emit_ir.ae"
     program.write_text(
         """
@@ -2819,14 +2819,14 @@ int main() {
         encoding="utf-8",
     )
 
-    exit_code, stdout, stderr = run_cli(["--opt", str(program)])
+    exit_code, stdout, stderr = run_cli(["--backend=ir", "--opt", str(program)])
 
-    assert exit_code == EXIT_USAGE_ERROR
+    assert exit_code == 14
     assert stdout == ""
-    assert "--opt is currently only supported with --emit-ir." in stderr
+    assert stderr == ""
 
 
-def test_o_flag_without_emit_ir_reports_clear_usage_error(tmp_path: Path) -> None:
+def test_o_flag_is_supported_for_execution(tmp_path: Path) -> None:
     program = tmp_path / "o_without_emit_ir.ae"
     program.write_text(
         """
@@ -2837,11 +2837,11 @@ int main() {
         encoding="utf-8",
     )
 
-    exit_code, stdout, stderr = run_cli(["-O1", str(program)])
+    exit_code, stdout, stderr = run_cli(["--backend=ir", "-O1", str(program)])
 
-    assert exit_code == EXIT_USAGE_ERROR
+    assert exit_code == 14
     assert stdout == ""
-    assert "-O flags are currently only supported with --emit-ir." in stderr
+    assert stderr == ""
 
 
 def test_opt_level_long_form_is_supported(tmp_path: Path) -> None:
@@ -2881,10 +2881,10 @@ int main() {
 
     assert exit_code == EXIT_USAGE_ERROR
     assert stdout == ""
-    assert "--show-passes requires --emit-ir --opt." in stderr
+    assert "--show-passes requires --emit-ir." in stderr
 
 
-def test_show_passes_with_emit_ir_but_without_opt_reports_clear_usage_error(
+def test_show_passes_with_emit_ir_uses_default_o0_profile(
     tmp_path: Path,
 ) -> None:
     program = tmp_path / "show_passes_without_opt.ae"
@@ -2899,9 +2899,10 @@ int main() {
 
     exit_code, stdout, stderr = run_cli(["--emit-ir", "--show-passes", str(program)])
 
-    assert exit_code == EXIT_USAGE_ERROR
-    assert stdout == ""
-    assert "--show-passes requires --emit-ir --opt." in stderr
+    assert exit_code == EXIT_SUCCESS
+    assert "=== Lowered IR ===" in stdout
+    assert "=== Final IR ===" in stdout
+    assert stderr == ""
 
 
 def test_backend_ir_does_not_run_optimizer_yet(tmp_path: Path, monkeypatch) -> None:
@@ -3013,7 +3014,7 @@ def test_bench_sum_to_default_both_backends() -> None:
     assert "AST execute:" in stdout
     assert "IR lower/verify:" in stdout
     assert "IR execute:" in stdout
-    assert "IR O1 optimize:" in stdout
+    assert "IR O0 optimize:" in stdout
     assert stdout.count("  total: ") == 5
     assert stdout.count("  avg: ") == 5
     assert stderr == ""
@@ -3051,7 +3052,7 @@ def test_bench_backend_ir_only() -> None:
     assert exit_code == EXIT_SUCCESS
     assert "AST execute:" not in stdout
     assert "IR execute:" in stdout
-    assert "IR O1 optimize:" in stdout
+    assert "IR O0 optimize:" in stdout
     assert stderr == ""
 
 
@@ -3063,7 +3064,7 @@ def test_bench_backend_both_explicit() -> None:
     assert exit_code == EXIT_SUCCESS
     assert "AST execute:" in stdout
     assert "IR execute:" in stdout
-    assert "IR O1 optimize:" in stdout
+    assert "IR O0 optimize:" in stdout
     assert stderr == ""
 
 

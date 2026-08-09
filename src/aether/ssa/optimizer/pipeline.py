@@ -6,6 +6,7 @@ from typing import Protocol
 from aether.errors import AetherRuntimeError
 from aether.ssa.model import SSAModule
 from aether.ssa.verifier import SSAVerificationError, SSAVerifier
+from aether.optimization import OptimizationProfile, optimization_profile
 
 from .algebraic_simplification import SSAAlgebraicSimplifier
 from .constant_folding import SSAConstantFolder
@@ -156,3 +157,25 @@ class SSAOptimizerPipeline:
         if isinstance(result, SSAOptimizationResult):
             return result
         return SSAOptimizationResult(result, changed=result != module, stats={})
+
+
+def build_ssa_optimizer_pipeline(
+    profile: OptimizationProfile | str,
+    *,
+    verify_after_each: bool = True,
+) -> SSAOptimizerPipeline:
+    selected = optimization_profile(profile)
+    factories = {
+        "SSAConstantFolder": SSAConstantFolder,
+        "SSAGlobalConstantPropagator": SSAGlobalConstantPropagator,
+        "SSAAlgebraicSimplifier": SSAAlgebraicSimplifier,
+        "SCCPPass": SCCPPass,
+        "TrivialPhiEliminator": TrivialPhiEliminator,
+        "DeadPhiEliminator": DeadPhiEliminator,
+        "SSADeadCodeEliminator": SSADeadCodeEliminator,
+    }
+    return SSAOptimizerPipeline(
+        passes=(factories[name]() for name in selected.ssa_passes),
+        iterative=bool(selected.ssa_passes),
+        verify_after_each=verify_after_each,
+    )

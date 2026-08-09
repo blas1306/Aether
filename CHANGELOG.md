@@ -9,6 +9,13 @@ Aether sigue en desarrollo y no tiene una release estable. La especificación
 v0 se conserva como historia; desde el primer candidato v1, el contrato vigente
 es la spec v1 junto con el perfil native normativo.
 
+## Unreleased
+
+- Consolidated `-O0/-O1/-O2` into one compilation-wide profile used by run,
+  build, IR/SSA/LLVM inspection, benchmarks, and clang. O2 is explicitly the
+  conservative Aether O1 middle-end plus clang O2; `--opt` remains a deprecated
+  alias for O1.
+
 ## 1.0.0-rc.4 — 2026-07-28
 
 Cuarto candidato de Aether 1.0. Continúa sin declarar estabilidad de producción

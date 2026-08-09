@@ -34,9 +34,14 @@ from .tokens import Token
 from .typechecker import TypeChecker
 from .capabilities import CAPABILITY_PROFILE_VERSION
 from .version import LANGUAGE_VERSION
+from .optimization import (
+    DEFAULT_OPTIMIZATION_PROFILE,
+    OptimizationProfile,
+    optimization_profile,
+)
 
 if TYPE_CHECKING:
-    from .ir.optimizer import OptimizationProfile, OptimizationTraceStep
+    from .ir.optimizer import OptimizationTraceStep
 
 EXIT_SUCCESS = 0
 EXIT_LANGUAGE_ERROR = 1
@@ -89,7 +94,7 @@ def build_parser() -> argparse.ArgumentParser:
     modes.add_argument(
         "--emit-llvm",
         action="store_true",
-        help="Lower the file through optimized SSA and print textual LLVM IR.",
+        help="Print LLVM IR produced with the selected optimization profile.",
     )
     modes.add_argument(
         "--check",
@@ -113,7 +118,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--opt",
         action="store_true",
-        help="Optimize emitted IR. Currently only supported with --emit-ir.",
+        help="Deprecated alias for -O1.",
     )
     parser.add_argument(
         "-O",
@@ -121,14 +126,15 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("0", "1", "2"),
         default=None,
         help=(
-            "Optimization level for --emit-ir: 0 disables optimization, "
-            "1 uses the current pipeline, 2 is reserved and aliases 1."
+            "Compilation profile (default: O0): O0 disables optional Aether passes; "
+            "O1 uses the conservative middle-end and clang O1; O2 uses the same "
+            "Aether middle-end and clang O2."
         ),
     )
     parser.add_argument(
         "--show-passes",
         action="store_true",
-        help="With --emit-ir and an optimization level, print optimizer pass IR.",
+        help="With --emit-ir, print the IR stages for the selected profile.",
     )
     parser.add_argument(
         "--backend",
@@ -156,6 +162,10 @@ def build_bench_parser() -> argparse.ArgumentParser:
         description="Measure Aether programs through development backends.",
     )
     parser.add_argument("file", help="Aether source file to benchmark.")
+    parser.add_argument(
+        "-O", "--opt-level", choices=("0", "1", "2"), default="0",
+        help="Compilation profile for optimization-sensitive measurements (default: O0).",
+    )
     parser.add_argument(
         "--debug",
         action="store_true",
@@ -194,6 +204,10 @@ def build_native_parser() -> argparse.ArgumentParser:
         description="Build an Aether source file to a native executable with clang.",
     )
     parser.add_argument("file", help="Aether source file to build.")
+    parser.add_argument(
+        "-O", "--opt-level", choices=("0", "1", "2"), default="0",
+        help="Compilation profile (default: O0).",
+    )
     parser.add_argument(
         "--debug",
         action="store_true",
@@ -244,18 +258,16 @@ def main(
         except SystemExit as exc:
             return int(exc.code)
 
-    if args.opt_level is not None and not args.emit_ir:
-        print(
-            "aether: error: -O flags are currently only supported with --emit-ir.",
-            file=stderr,
-        )
-        return EXIT_USAGE_ERROR
-    if args.opt and not args.emit_ir:
-        print("aether: error: --opt is currently only supported with --emit-ir.", file=stderr)
-        return EXIT_USAGE_ERROR
     if args.ssa_builder is not None and not args.emit_ssa:
         print(
             "aether: error: --ssa-builder is only supported with --emit-ssa.",
+            file=stderr,
+        )
+        return EXIT_USAGE_ERROR
+    if args.opt and args.opt_level not in (None, "1"):
+        print(
+            "aether: error: --opt is an alias for -O1 and conflicts with "
+            f"-O{args.opt_level}.",
             file=stderr,
         )
         return EXIT_USAGE_ERROR
@@ -271,12 +283,9 @@ def main(
             file=stderr,
         )
         return EXIT_USAGE_ERROR
-    if args.show_passes and not (
-        args.emit_ir and (args.opt or args.opt_level is not None)
-    ):
+    if args.show_passes and not args.emit_ir:
         print(
-            "aether: error: --show-passes requires --emit-ir --opt. "
-            "Use -O0/-O1/-O2 as an alternative to --opt.",
+            "aether: error: --show-passes requires --emit-ir.",
             file=stderr,
         )
         return EXIT_USAGE_ERROR
@@ -300,6 +309,7 @@ def main(
         return EXIT_USAGE_ERROR
 
     path = Path(args.file)
+    profile = _optimization_profile_from_args(opt=args.opt, opt_level=args.opt_level)
     source = _read_source(path, stderr=stderr)
     if source is None:
         return EXIT_USAGE_ERROR
@@ -326,10 +336,7 @@ def main(
                 source,
                 path=path,
                 stdout=stdout,
-                optimization_profile=_optimization_profile_from_args(
-                    opt=args.opt,
-                    opt_level=args.opt_level,
-                ),
+                optimization_profile=profile,
                 show_passes=args.show_passes,
             ),
             stderr=stderr,
@@ -356,6 +363,7 @@ def main(
                 path=path,
                 stdout=stdout,
                 builder=args.ssa_builder or DEFAULT_SSA_BUILDER,
+                optimization_profile=profile,
             ),
             stderr=stderr,
             path=path,
@@ -364,7 +372,7 @@ def main(
         )
     if args.emit_llvm:
         return _run_language_action(
-            lambda: _emit_llvm(source, path=path, stdout=stdout),
+            lambda: _emit_llvm(source, path=path, stdout=stdout, optimization_profile=profile),
             stderr=stderr,
             path=path,
             phase="LLVM emission",
@@ -387,6 +395,7 @@ def main(
             stdout=stdout,
             stderr=stderr,
             program_arguments=program_arguments,
+            optimization_profile=profile,
         ),
         stdout=stdout,
         stderr=stderr,
@@ -419,6 +428,7 @@ def _main_bench(argv: Sequence[str], *, stdout: TextIO, stderr: TextIO) -> int:
             iterations=args.iterations,
             backend=args.backend,
             expected_exit_code=None if args.ignore_exit_code else args.expected_exit_code,
+            optimization_profile=optimization_profile(args.opt_level),
         )
     except KeyboardInterrupt:
         return _render_interrupted(stderr)
@@ -492,6 +502,7 @@ def _main_build(argv: Sequence[str], *, stdout: TextIO, stderr: TextIO) -> int:
             path=path,
             output_path=output_path,
             keep_llvm=args.keep_llvm,
+            optimization_profile=optimization_profile(args.opt_level),
         )
     except KeyboardInterrupt:
         return _render_interrupted(stderr)
@@ -577,6 +588,7 @@ def _execute_file(
     stdout: TextIO,
     stderr: TextIO,
     program_arguments: Sequence[str] = (),
+    optimization_profile: OptimizationProfile = DEFAULT_OPTIMIZATION_PROFILE,
 ) -> int:
     if backend == "llvm":
         return _run_native(
@@ -585,6 +597,7 @@ def _execute_file(
             stdout=stdout,
             stderr=stderr,
             program_arguments=program_arguments,
+            optimization_profile=optimization_profile,
         )
     if backend == "ast":
         result = run_aether(
@@ -596,15 +609,29 @@ def _execute_file(
         )
         return result.exit_code
     if backend == "ir":
-        env = IRBackend(
+        ir_backend = IRBackend(
             output_writer=stdout.write,
             program_arguments=program_arguments,
-        ).run(
-            prepare_typed_program(
-                source,
-                TypeChecker(source_root=path.parent, entry_path=path),
-            )
         )
+        typed_program = prepare_typed_program(
+            source,
+            TypeChecker(source_root=path.parent, entry_path=path),
+        )
+        if optimization_profile.ir_passes:
+            from .ir.interpreter import IRInterpreter
+            from .ir.optimizer import build_optimizer_pipeline
+            module = ir_backend.lower_verified(typed_program)
+            module = ir_backend.optimize_verified(
+                module, optimizer=build_optimizer_pipeline(optimization_profile)
+            )
+            entry = next(item for item in module.functions if item.name == "main")
+            value = IRInterpreter(
+                module,
+                write_output=stdout.write,
+                program_arguments=program_arguments,
+            ).call(entry.name)
+            return int(value) if value is not None else EXIT_SUCCESS
+        env = ir_backend.run(typed_program)
         result = env.lookup(IR_MAIN_RESULT_NAME)
         return int(result.value) if result is not None else EXIT_SUCCESS
     raise ValueError(f"Unknown backend '{backend}'")
@@ -630,7 +657,7 @@ def _emit_ir(
     *,
     path: Path,
     stdout: TextIO,
-    optimization_profile: "OptimizationProfile" = "O0",
+    optimization_profile: OptimizationProfile = DEFAULT_OPTIMIZATION_PROFILE,
     show_passes: bool = False,
 ) -> None:
     typed_program = prepare_typed_program(
@@ -649,7 +676,7 @@ def _emit_ir(
         backend.verify(trace[-1].module)
         _print_ir_trace(trace, stdout=stdout)
         return
-    if optimization_profile != "O0":
+    if optimization_profile.ir_passes:
         from .ir.optimizer import build_optimizer_pipeline
 
         module = backend.optimize_verified(
@@ -694,6 +721,7 @@ def _emit_ssa(
     path: Path,
     stdout: TextIO,
     builder: str = DEFAULT_SSA_BUILDER,
+    optimization_profile: OptimizationProfile = DEFAULT_OPTIMIZATION_PROFILE,
 ) -> None:
     from .errors import AetherRuntimeError
     from .ssa import GeneralSSABuildError, SSABuildError
@@ -703,7 +731,16 @@ def _emit_ssa(
         TypeChecker(source_root=path.parent, entry_path=path),
     )
     try:
-        module = lower_to_verified_ssa(typed_program, builder=builder)
+        backend = IRBackend()
+        ir_module = backend.lower_verified(typed_program)
+        if optimization_profile.ir_passes:
+            from .ir.optimizer import build_optimizer_pipeline
+            ir_module = backend.optimize_verified(
+                ir_module, optimizer=build_optimizer_pipeline(optimization_profile)
+            )
+        module = lower_to_verified_ssa(ir_module, builder=builder)
+        from .ssa.optimizer import build_ssa_optimizer_pipeline
+        module = build_ssa_optimizer_pipeline(optimization_profile).run(module)
     except SSABuildError as exc:
         raise AetherRuntimeError(str(exc), kind="ssa") from exc
     except GeneralSSABuildError as exc:
@@ -714,19 +751,28 @@ def _emit_ssa(
     print(print_ssa(module), file=stdout)
 
 
-def _emit_llvm(source: str, *, path: Path, stdout: TextIO) -> None:
+def _emit_llvm(source: str, *, path: Path, stdout: TextIO, optimization_profile: OptimizationProfile = DEFAULT_OPTIMIZATION_PROFILE) -> None:
     from .backend.llvm import LLVMBackend, LLVMBackendError
     from .capabilities import BackendIdentity, validate_backend_capabilities
     from .errors import AetherRuntimeError
-    from .ssa.optimizer import SSAOptimizerPipeline
 
     typed_program = prepare_typed_program(
         source,
         TypeChecker(source_root=path.parent, entry_path=path),
     )
     validate_backend_capabilities(typed_program, BackendIdentity.NATIVE)
-    module = lower_to_verified_ssa(typed_program, builder=DEFAULT_SSA_BUILDER)
-    module = SSAOptimizerPipeline(verify_after_each=True).run(module)
+    ir_backend = IRBackend()
+    ir_module = ir_backend.lower_verified(typed_program)
+    if optimization_profile.ir_passes:
+        from .ir.optimizer import build_optimizer_pipeline
+        ir_module = ir_backend.optimize_verified(
+            ir_module, optimizer=build_optimizer_pipeline(optimization_profile)
+        )
+    module = lower_to_verified_ssa(ir_module, builder=DEFAULT_SSA_BUILDER)
+    from .ssa.optimizer import build_ssa_optimizer_pipeline
+    module = build_ssa_optimizer_pipeline(
+        optimization_profile, verify_after_each=True
+    ).run(module)
     try:
         from .ssa import SSACall
 
@@ -755,6 +801,7 @@ def _build_native(
     path: Path,
     output_path: Path,
     keep_llvm: bool,
+    optimization_profile: OptimizationProfile = DEFAULT_OPTIMIZATION_PROFILE,
 ):
     from .backend.llvm import LLVMBackendError, LLVMBuilder
     from .errors import AetherRuntimeError
@@ -764,7 +811,7 @@ def _build_native(
         TypeChecker(source_root=path.parent, entry_path=path),
     )
     try:
-        return LLVMBuilder().build(
+        return LLVMBuilder(optimization_profile=optimization_profile).build(
             typed_program,
             output_path=output_path,
             keep_llvm=keep_llvm,
@@ -780,8 +827,9 @@ def _run_native(
     stdout: TextIO,
     stderr: TextIO,
     program_arguments: Sequence[str] = (),
+    optimization_profile: OptimizationProfile = DEFAULT_OPTIMIZATION_PROFILE,
 ) -> int:
-    from .backend.llvm import LLVMBackendError, LLVMRunError, LLVMRunner
+    from .backend.llvm import LLVMBackendError, LLVMBuilder, LLVMRunError, LLVMRunner
     from .errors import AetherRuntimeError
 
     typed_program = prepare_typed_program(
@@ -789,7 +837,9 @@ def _run_native(
         TypeChecker(source_root=path.parent, entry_path=path),
     )
     try:
-        return LLVMRunner().run(
+        return LLVMRunner(
+            builder=LLVMBuilder(optimization_profile=optimization_profile)
+        ).run(
             typed_program,
             stdout=stdout,
             stderr=stderr,
@@ -805,16 +855,16 @@ def _optimization_profile_from_args(
     *,
     opt: bool,
     opt_level: str | None,
-) -> "OptimizationProfile":
+) -> OptimizationProfile:
     if opt_level == "0":
-        return "O0"
+        return optimization_profile("O0")
     if opt_level == "1":
-        return "O1"
+        return optimization_profile("O1")
     if opt_level == "2":
-        return "O2"
+        return optimization_profile("O2")
     if opt:
-        return "O1"
-    return "O0"
+        return optimization_profile("O1")
+    return DEFAULT_OPTIMIZATION_PROFILE
 
 
 def _split_program_arguments(argv: Sequence[str]) -> tuple[list[str], list[str]]:
@@ -865,6 +915,7 @@ def _print_benchmark_report(
 ) -> None:
     print(f"Benchmark: {report.path}", file=stdout)
     print(f"Iterations: {report.iterations}", file=stdout)
+    print(f"Optimization profile: {report.optimization_profile.name}", file=stdout)
     print(f"Failures: {len(report.failures)}", file=stdout)
     for timing in report.timings:
         print(file=stdout)

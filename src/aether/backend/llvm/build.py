@@ -11,8 +11,15 @@ import tempfile
 from aether import ast
 from aether.errors import AetherTypeError
 from aether.pipeline import DEFAULT_SSA_BUILDER, lower_to_verified_ssa
+from aether.pipeline import IRBackend
+from aether.optimization import (
+    DEFAULT_OPTIMIZATION_PROFILE,
+    OptimizationProfile,
+    optimization_profile as resolve_optimization_profile,
+)
+from aether.ir.optimizer import build_optimizer_pipeline
 from aether.capabilities import BackendIdentity, validate_backend_capabilities
-from aether.ssa.optimizer import SSAOptimizerPipeline
+from aether.ssa.optimizer import build_ssa_optimizer_pipeline
 from aether.ssa import SSACall
 from aether.text_file_io import TEXT_FILE_BUILTINS
 
@@ -51,14 +58,25 @@ class LLVMBuilder:
         *,
         backend: LLVMBackend | None = None,
         clang: str = "clang",
+        optimization_profile: OptimizationProfile | str = DEFAULT_OPTIMIZATION_PROFILE,
     ) -> None:
         self._backend = backend or LLVMBackend()
         self._clang = clang
+        self.optimization_profile = resolve_optimization_profile(optimization_profile)
 
     def emit_llvm(self, typed_program: object) -> str:
         validate_backend_capabilities(typed_program, BackendIdentity.NATIVE)
-        module = lower_to_verified_ssa(typed_program, builder=DEFAULT_SSA_BUILDER)
-        module = SSAOptimizerPipeline(verify_after_each=True).run(module)
+        ir_backend = IRBackend()
+        ir_module = ir_backend.lower_verified(typed_program)
+        if self.optimization_profile.ir_passes:
+            ir_module = ir_backend.optimize_verified(
+                ir_module,
+                optimizer=build_optimizer_pipeline(self.optimization_profile),
+            )
+        module = lower_to_verified_ssa(ir_module, builder=DEFAULT_SSA_BUILDER)
+        module = build_ssa_optimizer_pipeline(
+            self.optimization_profile, verify_after_each=True
+        ).run(module)
         instructions = (
             instruction
             for function in module.functions
@@ -142,7 +160,13 @@ class LLVMBuilder:
             )
 
         try:
-            command = [clang_path, str(llvm_path), "-o", str(output_path)]
+            command = [
+                clang_path,
+                str(llvm_path),
+                "-o",
+                str(output_path),
+                f"-O{self.optimization_profile.clang_level}",
+            ]
             if sys.platform != "win32" and self._requires_libm(llvm_path):
                 command.append("-lm")
             completed = subprocess.run(

@@ -13,6 +13,7 @@ from .errors import AetherError, AetherRuntimeError
 from .interpreter import Interpreter
 from .pipeline import ASTBackend, IRBackend, SSAPipeline, prepare_typed_program
 from .typechecker import TypeChecker
+from .optimization import DEFAULT_OPTIMIZATION_PROFILE, OptimizationProfile
 
 if TYPE_CHECKING:
     from .ir.model import IRModule
@@ -45,6 +46,7 @@ class BenchReport:
     iterations: int
     timings: tuple[BenchTiming, ...]
     failures: tuple[BenchFailure, ...]
+    optimization_profile: OptimizationProfile = DEFAULT_OPTIMIZATION_PROFILE
 
 
 def run_benchmark(
@@ -54,6 +56,7 @@ def run_benchmark(
     iterations: int,
     backend: BenchBackend,
     expected_exit_code: int | None = 0,
+    optimization_profile: OptimizationProfile = DEFAULT_OPTIMIZATION_PROFILE,
 ) -> BenchReport:
     """Measure the requested compiler profiles without combining build and runtime."""
     if iterations < 1:
@@ -115,10 +118,10 @@ def run_benchmark(
         _append_measurement(
             timings,
             failures,
-            "IR O1 optimize",
+            f"IR {optimization_profile.name} optimize",
             "middle-end",
             iterations,
-            lambda: _run_ir_o1_optimizer(source, path),
+            lambda: _run_ir_optimizer(source, path, optimization_profile),
         )
     if backend in {"ssa", "all"}:
         _append_measurement(
@@ -127,7 +130,7 @@ def run_benchmark(
             "SSA build",
             "middle-end",
             iterations,
-            lambda: _build_ssa(source, path),
+            lambda: _build_ssa(source, path, optimization_profile),
         )
         _append_measurement(
             timings,
@@ -135,7 +138,7 @@ def run_benchmark(
             "SSA optimize",
             "middle-end",
             iterations,
-            lambda: _optimize_ssa(source, path),
+            lambda: _optimize_ssa(source, path, optimization_profile),
         )
     if backend in {"llvm", "all"}:
         _append_measurement(
@@ -144,7 +147,7 @@ def run_benchmark(
             "LLVM emit",
             "codegen",
             iterations,
-            lambda: _emit_llvm(source, path),
+            lambda: _emit_llvm(source, path, optimization_profile),
         )
 
     if backend in {"native", "all"}:
@@ -155,9 +158,10 @@ def run_benchmark(
             expected_exit_code=expected_exit_code,
             timings=timings,
             failures=failures,
+            optimization_profile=optimization_profile,
         )
 
-    return BenchReport(path, iterations, tuple(timings), tuple(failures))
+    return BenchReport(path, iterations, tuple(timings), tuple(failures), optimization_profile)
 
 
 def _measure(
@@ -231,47 +235,49 @@ def _run_ir(module: IRModule) -> None:
         raise AetherRuntimeError(f"IR interpreter failed: {exc}", kind="ir") from exc
 
 
-def _run_ir_o1_optimizer(source: str, path: Path) -> None:
+def _run_ir_optimizer(source: str, path: Path, profile: OptimizationProfile) -> None:
     from .ir.optimizer import build_optimizer_pipeline
 
     backend = IRBackend()
     module = backend.lower_verified(_typed_program(source, path))
-    backend.optimize_verified(module, optimizer=build_optimizer_pipeline("O1"))
+    backend.optimize_verified(module, optimizer=build_optimizer_pipeline(profile))
 
 
-def _build_ssa(source: str, path: Path) -> None:
-    SSAPipeline().run(_typed_program(source, path))
+def _build_ssa(source: str, path: Path, profile: OptimizationProfile) -> None:
+    _optimized_ssa(source, path, profile)
 
 
-def _optimized_ssa(source: str, path: Path) -> SSAModule:
+def _optimized_ssa(source: str, path: Path, profile: OptimizationProfile) -> SSAModule:
     from .ssa import SSAVerifier
-    from .ssa.optimizer import SSAOptimizerPipeline
+    from .ssa.optimizer import build_ssa_optimizer_pipeline
 
-    module = SSAPipeline().run(_typed_program(source, path)).ssa_module
-    return SSAVerifier(SSAOptimizerPipeline().run(module)).verify()
+    typed = _typed_program(source, path)
+    ir_backend = IRBackend()
+    ir = ir_backend.lower_verified(typed)
+    if profile.ir_passes:
+        from .ir.optimizer import build_optimizer_pipeline
+        ir = ir_backend.optimize_verified(ir, optimizer=build_optimizer_pipeline(profile))
+    module = SSAPipeline().run(ir).ssa_module
+    return SSAVerifier(build_ssa_optimizer_pipeline(profile).run(module)).verify()
 
 
-def _optimize_ssa(source: str, path: Path) -> None:
-    _optimized_ssa(source, path)
+def _optimize_ssa(source: str, path: Path, profile: OptimizationProfile) -> None:
+    _optimized_ssa(source, path, profile)
 
 
-def _emit_llvm(source: str, path: Path) -> None:
-    from .backend.llvm import LLVMBackend
+def _emit_llvm(source: str, path: Path, profile: OptimizationProfile) -> None:
+    from .backend.llvm import LLVMBuilder
     from .capabilities import BackendIdentity, validate_backend_capabilities
-    from .ssa import SSAVerifier
-    from .ssa.optimizer import SSAOptimizerPipeline
 
     typed_program = _typed_program(source, path)
     validate_backend_capabilities(typed_program, BackendIdentity.NATIVE)
-    module = SSAPipeline().run(typed_program).ssa_module
-    module = SSAVerifier(SSAOptimizerPipeline().run(module)).verify()
-    LLVMBackend().emit(module)
+    LLVMBuilder(optimization_profile=profile).emit_llvm(typed_program)
 
 
-def _build_native(source: str, path: Path, output_path: Path) -> None:
+def _build_native(source: str, path: Path, output_path: Path, profile: OptimizationProfile) -> None:
     from .backend.llvm import LLVMBuilder
 
-    LLVMBuilder().build(
+    LLVMBuilder(optimization_profile=profile).build(
         _typed_program(source, path),
         output_path=output_path,
         keep_llvm=False,
@@ -286,6 +292,7 @@ def _measure_native_profiles(
     expected_exit_code: int | None,
     timings: list[BenchTiming],
     failures: list[BenchFailure],
+    optimization_profile: OptimizationProfile,
 ) -> None:
     suffix = ".exe" if os.name == "nt" else ""
     with tempfile.TemporaryDirectory(prefix="aether-bench-") as temporary_dir:
@@ -294,7 +301,7 @@ def _measure_native_profiles(
             "Native build",
             "codegen",
             iterations,
-            lambda: _build_native(source, path, executable),
+            lambda: _build_native(source, path, executable, optimization_profile),
         )
         if build_timing is not None:
             timings.append(build_timing)
@@ -304,7 +311,7 @@ def _measure_native_profiles(
         # Native runtime has a separate, untimed setup build. Compilation is
         # deliberately never part of the runtime interval.
         try:
-            _build_native(source, path, executable)
+            _build_native(source, path, executable, optimization_profile)
         except Exception as exc:
             failures.append(
                 BenchFailure(

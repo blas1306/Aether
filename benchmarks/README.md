@@ -15,7 +15,7 @@ The profiles are grouped as `frontend`, `middle-end`, `codegen`, and `runtime`:
 
 - `ast` measures AST parsing/typechecking and AST execution separately.
 - `ir` measures IR lowering/verification, IR execution, and the non-executed
-  IR O1 optimizer profile. `both` retains its original meaning: `ast` + `ir`.
+  IR optimizer profile selected with `-O` (O0 by default). `both` retains its original meaning: `ast` + `ir`.
 - `ssa` measures verified general SSA construction and verified SSA
   optimization.
 - `llvm` measures the pipeline through optimized SSA and LLVM emission.
@@ -32,6 +32,10 @@ non-native profiles continue. Temporary LLVM and executable files are removed.
 
 Use enough iterations that timer noise is small relative to the workload, but
 remember that `Native build` invokes clang once per iteration.
+
+Benchmark reports include the selected optimization profile. Compilation-aware
+measurements use the same Aether pass registry and clang mapping as run/build;
+select it with `-O0`, `-O1`, or `-O2`.
 
 ## Python IR verifier baseline
 
