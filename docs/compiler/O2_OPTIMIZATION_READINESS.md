@@ -572,3 +572,9 @@ observed in Aether output. Capability consistency and release-documentation
 integrity passed, as did `git diff --check`. The two O1/O2 native smoke pairs
 above had zero failures. Because production code and benchmark semantics are
 unchanged, a complete suite was not run.
+
+## O2.6 update
+
+O2 now adds conservative non-speculative scalar LICM after proven BCE and
+before DCE. O0/O1 remain unchanged. See `O2_LICM.md`; it supersedes historical
+statements in this readiness audit that LICM is not implemented.

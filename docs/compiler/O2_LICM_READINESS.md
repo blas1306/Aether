@@ -107,3 +107,8 @@ Start with non-speculative, nontrapping, nonthrowing scalar pure instructions
 with invariant operands and existing canonical preheaders. Preheader
 canonicalization is not required first. No production behavior changed and no
 commit was created by this audit.
+
+## O2.6 implementation status
+
+The recommended scalar-only slice is implemented. `O2_LICM.md` is the current
+contract for eligibility, control safety, ordering, statistics, and deferrals.

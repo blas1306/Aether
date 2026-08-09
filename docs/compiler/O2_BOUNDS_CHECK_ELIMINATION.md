@@ -46,3 +46,8 @@ the pass and after cleanup, including exceptional CFG and lifecycle rules.
 The proof-coverage baseline remains the O2.1.5 analysis baseline and is not
 rewritten; transformation coverage is tested separately.
 
+## O2.6 pass order
+
+The O2 SSA suffix is proven BCE, conservative scalar LICM, then DCE. BCE runs
+first so removed checks may expose safe scalar work; initial LICM still refuses
+all collection loads and does not alter BCE's proof contract.

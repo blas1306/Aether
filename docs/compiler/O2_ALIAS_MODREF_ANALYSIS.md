@@ -71,3 +71,9 @@ escape analysis, no exact indirect target sets, no closed interface world, and
 no caller provenance for summarized return aliases. The recommended next
 consumer is List BCE after integrating and measuring fact transfer. LICM, ARC,
 and escape transformations remain later work.
+
+## O2.6 consumer status
+
+Initial LICM intentionally excludes every memory-derived instruction, so it
+does not yet query mod/ref. These APIs remain the required authority for the
+recommended follow-up memory-read LICM; no logic was duplicated in O2.6.

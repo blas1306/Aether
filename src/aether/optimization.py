@@ -56,6 +56,7 @@ SSA_O1_PASSES = (
 )
 SSA_O2_PASSES = SSA_O1_PASSES + (
     "ProvenBoundsCheckEliminator",
+    "LoopInvariantCodeMotion",
     "SSADeadCodeEliminator",
 )
 
