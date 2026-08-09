@@ -1,0 +1,53 @@
+import Math.LinearAlgebra as la
+
+struct metodo {
+    Vector<double> x;
+    double res;
+    int iter;
+}
+
+metodo probando(Matrix<double> A, Vector<double, Column> b, Vector<double, Column> x0, double tol, int maxiter) {
+    int m = A.rows;
+    int n = A.columns;
+
+    Matrix<double> C = la.zeros(m, n);
+    Matrix<double> D = la.zeros(m, n);
+
+    for (int i in 1:m) {
+        for (int j in 1:n) {
+            if (i == j) {
+                D[i, j] = A[i, j];
+            } else {
+                C[i, j] = A[i, j];
+            }
+        }
+    }
+
+    Vector<double, Column> x = x0;
+    Vector<double, Column> c = b - C*x;
+    double res = la.norm(D*x - c);
+    int iter = 0;
+
+    while (res > tol && iter < maxiter) {
+        x = D \ c;
+        res = la.norm(D*x - c);
+        iter += 1;
+    }
+
+    return metodo(x, res, iter);
+}
+
+int main() {
+    Matrix<double> A = [3.0 2.0; 1.0 0.0; 0.0 1.0];
+    Vector<double, Column> b = [4.0; 7.0; 3.0];
+    Vector<double, Column> x0 = [0.0; 0.0; 0.0];
+    double tol = 1e-6;
+    int maxiter = 100;
+
+    metodo result = probando(A, b, x0, tol, maxiter);
+    println("Solution: ", result.x);
+    println("Residual: ", result.res);
+    println("Iterations: ", result.iter);
+
+    return 0;
+}
