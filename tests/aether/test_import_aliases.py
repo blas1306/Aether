@@ -28,7 +28,7 @@ SOLVE_INPUT = "[2 0; 0 4], [2; 8]"
 def test_import_forms_resolve_solve(import_source: str, call: str) -> None:
     result = run_aether(f"{import_source}\nprintln({call}({SOLVE_INPUT}));")
 
-    assert result.output == "[1.0 2.0]\n"
+    assert result.output == "[1.0; 2.0]\n"
 
 
 def test_import_ast_preserves_paths_aliases_and_locations() -> None:
@@ -88,7 +88,7 @@ def test_canonical_and_alias_module_bindings_can_coexist() -> None:
         f"println(Math.LinearAlgebra.solve({SOLVE_INPUT})); println(LA.solve({SOLVE_INPUT}));"
     )
 
-    assert result.output == "[1.0 2.0]\n[1.0 2.0]\n"
+    assert result.output == "[1.0; 2.0]\n[1.0; 2.0]\n"
 
 
 @pytest.mark.parametrize(
@@ -127,7 +127,7 @@ def test_wildcard_and_multiple_symbol_imports_are_rejected() -> None:
 def test_any_successful_provider_import_enables_leftdivide(import_source: str) -> None:
     result = run_aether(f"{import_source}\nx = [2 0; 0 4] \\ [2; 8];\nprintln(x);")
 
-    assert result.output == "[1.0 2.0]\n"
+    assert result.output == "[1.0; 2.0]\n"
 
 
 def test_file_module_exports_are_explicitly_bound(tmp_path: Path) -> None:

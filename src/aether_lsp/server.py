@@ -388,13 +388,14 @@ class AetherLanguageServer:
         if program is None or checker is None:
             return []
 
-        requested_range = params.get("range") or {}
-        requested_start = requested_range.get("start") or {}
-        requested_end = requested_range.get("end") or {}
-        start_line = int(requested_start.get("line", 0))
-        start_character = int(requested_start.get("character", 0))
-        end_line = int(requested_end.get("line", 0))
-        end_character = int(requested_end.get("character", 0))
+        requested_range = params.get("range")
+        if requested_range is not None:
+            requested_start = requested_range.get("start") or {}
+            requested_end = requested_range.get("end") or {}
+            start_line = int(requested_start.get("line", 0))
+            start_character = int(requested_start.get("character", 0))
+            end_line = int(requested_end.get("line", 0))
+            end_character = int(requested_end.get("character", 0))
 
         hints: list[JsonObject] = []
         for expression in _iter_call_expressions(program):
@@ -413,7 +414,13 @@ class AetherLanguageServer:
                     "line": max(0, getattr(argument, "line", 1) - 1),
                     "character": max(0, getattr(argument, "column", 1) - 1),
                 }
-                if not _position_within_range(position, start_line, start_character, end_line, end_character):
+                if requested_range is not None and not _position_within_range(
+                    position,
+                    start_line,
+                    start_character,
+                    end_line,
+                    end_character,
+                ):
                     continue
                 hints.append(
                     {
@@ -935,48 +942,18 @@ def _iter_call_expressions(node: object):
 
 def _resolved_call_parameters(checker: TypeChecker, call):
     if isinstance(call, ast.MethodCall):
-        target_type = checker.type_of_expression(call.target)
-        if target_type is None:
+        if checker.type_of_expression(call) is None:
             return None
-        try:
-            resolved = checker._resolve_type_aliases(target_type, call)
-        except Exception:
-            return None
-        if isinstance(resolved, ClassType):
-            struct = checker.structs.get(resolved.name)
-            if struct is None or checker._struct_field_symbol(struct, call.method_name) is not None:
-                return None
-            method = checker._struct_method_symbol(struct, call.method_name)
-            if method is None or not checker._can_access_struct_member(struct, method.visibility):
-                return None
-            if checker.type_of_expression(call) is None:
-                return None
-            return method.parameters
-        if isinstance(resolved, str):
-            struct = checker.structs.get(resolved)
-            if struct is not None:
-                if checker._struct_field_symbol(struct, call.method_name) is not None:
-                    return None
-                method = checker._struct_method_symbol(struct, call.method_name)
-                if method is None or not checker._can_access_struct_member(struct, method.visibility):
-                    return None
-                if checker.type_of_expression(call) is None:
-                    return None
-                return method.parameters
-        if isinstance(resolved, InterfaceType):
-            interface = checker.interfaces.get(resolved.name)
-            if interface is None:
-                return None
-            method = checker._interface_method_symbol(interface, call.method_name)
-            if method is None:
-                return None
-            if checker.type_of_expression(call) is None:
-                return None
-            return method.parameters
-        return None
+        return _resolved_method_parameters(checker, call)
 
     if not isinstance(call, ast.CallExpression):
         return None
+
+    desugared_method = checker.desugared_method_call(call)
+    if desugared_method is not None:
+        if checker.type_of_expression(call) is None:
+            return None
+        return _resolved_method_parameters(checker, desugared_method)
 
     constructor = checker._constructor_struct(call.callee)
     if constructor is not None:
@@ -991,6 +968,32 @@ def _resolved_call_parameters(checker: TypeChecker, call):
     if checker.type_of_expression(call) is None:
         return None
     return function.parameters
+
+
+def _resolved_method_parameters(checker: TypeChecker, call: ast.MethodCall):
+    target_type = checker.type_of_expression(call.target)
+    if target_type is None:
+        return None
+    try:
+        resolved = checker._resolve_type_aliases(target_type, call)
+    except Exception:
+        return None
+    aggregate_name = resolved.name if isinstance(resolved, ClassType) else resolved if isinstance(resolved, str) else None
+    if aggregate_name is not None:
+        struct = checker.structs.get(aggregate_name)
+        if struct is None or checker._struct_field_symbol(struct, call.method_name) is not None:
+            return None
+        method = checker._struct_method_symbol(struct, call.method_name)
+        if method is None or not checker._can_access_struct_member(struct, method.visibility):
+            return None
+        return method.parameters
+    if isinstance(resolved, InterfaceType):
+        interface = checker.interfaces.get(resolved.name)
+        if interface is None:
+            return None
+        method = checker._interface_method_symbol(interface, call.method_name)
+        return None if method is None else method.parameters
+    return None
 
 
 def _position_within_range(position: dict, start_line: int, start_character: int, end_line: int, end_character: int) -> bool:

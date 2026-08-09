@@ -5,7 +5,7 @@ class IndirectError implements Error {
 
 void fail() { throw IndirectError("indirect call"); }
 
-void apply(void() operation) { operation(); }
+void apply(Function<(), void> operation) { operation(); }
 
 int main() {
     try {

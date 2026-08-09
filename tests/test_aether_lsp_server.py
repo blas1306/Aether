@@ -620,11 +620,40 @@ def test_lsp_inlay_hints_for_multiline_and_nested_calls() -> None:
     hints = _inlay_hints_for(source)
     labels = [hint["label"] for hint in hints]
 
-    assert labels == ["a:", "b:", "x:", "y:"]
-    assert hints[0]["position"]["line"] == 3
-    assert hints[1]["position"]["line"] == 3
+    assert labels == ["x:", "a:", "b:", "y:"]
+    assert hints[0]["position"]["line"] == 4
+    assert hints[1]["position"]["line"] == 4
     assert hints[2]["position"]["line"] == 4
     assert hints[3]["position"]["line"] == 5
+
+
+def test_lsp_inlay_hints_respect_an_explicit_requested_range() -> None:
+    from aether_lsp.server import AetherLanguageServer
+
+    source = (
+        "int add(int a, int b) { return a + b; }\n"
+        "int main() {\n"
+        "    int first = add(1, 2);\n"
+        "    int second = add(3, 4);\n"
+        "    return first + second;\n"
+        "}\n"
+    )
+    uri = "file:///tmp/inlay_range.ae"
+    server = AetherLanguageServer(reader=BytesIO(), writer=BytesIO())
+    server.documents[uri] = source
+
+    hints = server._inlay_hint_result(
+        {
+            "textDocument": {"uri": uri},
+            "range": {
+                "start": {"line": 3, "character": 0},
+                "end": {"line": 3, "character": len("    int second = add(3, 4);")},
+            },
+        }
+    )
+
+    assert [hint["label"] for hint in hints] == ["a:", "b:"]
+    assert [hint["position"]["line"] for hint in hints] == [3, 3]
 
 
 def test_lsp_inlay_hints_ignore_functions_without_parameters() -> None:
@@ -664,7 +693,7 @@ def test_lsp_inlay_hints_ignore_wrong_arity_and_keep_same_file_multiple_calls() 
     labels = [hint["label"] for hint in hints]
 
     assert labels == ["x:", "y:", "a:", "b:"]
-    assert [hint["position"]["line"] for hint in hints] == [3, 3, 4, 4]
+    assert [hint["position"]["line"] for hint in hints] == [4, 4, 4, 4]
 
 
 def test_lsp_inlay_hints_multiple_calls_in_same_file() -> None:
@@ -686,14 +715,14 @@ def test_lsp_inlay_hints_multiple_calls_in_same_file() -> None:
 
 def test_lsp_inlay_hints_support_struct_and_class_methods_and_constructors() -> None:
     source = (
-        "struct Vector {\n"
+        "struct Offset {\n"
         "    double x;\n"
         "    double y;\n"
         "    void translate(double dx, double dy) { this.x = this.x + dx; this.y = this.y + dy; }\n"
         "}\n"
         "class Camera {\n"
         "    int zoom;\n"
-        "    void focus(int step, int strength) { this.zoom = step + strength; }\n"
+        "    public void focus(int step, int strength) { this.zoom = step + strength; }\n"
         "}\n"
         "struct Point {\n"
         "    double x;\n"
@@ -705,9 +734,9 @@ def test_lsp_inlay_hints_support_struct_and_class_methods_and_constructors() -> 
         "    double y;\n"
         "}\n"
         "int main() {\n"
-        "    Vector v = Vector(0.0, 0.0);\n"
+        "    Offset v = Offset(0.0, 0.0);\n"
         "    v.translate(2.0, 3.0);\n"
-        "    Camera c = Camera();\n"
+        "    Camera c = Camera(0);\n"
         "    c.focus(4, 5);\n"
         "    Point p = Point(10.0, 20.0);\n"
         "    Origin origin = Origin(9.0, 8.0);\n"
@@ -718,7 +747,7 @@ def test_lsp_inlay_hints_support_struct_and_class_methods_and_constructors() -> 
     hints = _inlay_hints_for(source)
     labels = [hint["label"] for hint in hints]
 
-    assert labels == ["x:", "y:", "dx:", "dy:", "step:", "strength:", "x0:", "y0:", "x:", "y:"]
+    assert labels == ["x:", "y:", "dx:", "dy:", "zoom:", "step:", "strength:", "x0:", "y0:", "x:", "y:"]
     assert any(hint["label"] == "dx:" for hint in hints)
     assert any(hint["label"] == "x0:" for hint in hints)
 
