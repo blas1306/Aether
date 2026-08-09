@@ -158,6 +158,14 @@ def structural_errors(manifest: dict[str, object]) -> list[str]:
                     errors.append(f"non-runnable entry must use a null {stream}_sha256: {path}")
         if not isinstance(entry.get("timeout_seconds"), int) or entry.get("timeout_seconds", 0) <= 0:
             errors.append(f"entry timeout_seconds must be positive: {path}")
+        if "ast_parity" in entry and not isinstance(entry["ast_parity"], bool):
+            errors.append(f"entry ast_parity must be boolean: {path}")
+        if entry.get("ast_parity") is False and (
+            classification != "V1_NATIVE" or entry.get("run") is not True
+        ):
+            errors.append(
+                f"AST parity exclusion requires a runnable V1_NATIVE entry: {path}"
+            )
         if classification in VALID_CLASSIFICATIONS and isinstance(entry.get("run"), bool):
             expected_condition, expected_backends = ENTRY_CONTRACTS[
                 (str(classification), bool(entry["run"]))
@@ -314,7 +322,12 @@ def native_errors(manifest: dict[str, object]) -> list[str]:
         stdout = StringIO()
         stderr = StringIO()
         try:
-            exit_code = LLVMRunner().run(typed_entry(entry), stdout=stdout, stderr=stderr)
+            exit_code = LLVMRunner().run(
+                typed_entry(entry),
+                stdout=stdout,
+                stderr=stderr,
+                timeout_seconds=int(entry["timeout_seconds"]),
+            )
         except Exception as exc:
             errors.append(f"native execution failed for {entry['path']}: {type(exc).__name__}: {exc}")
             continue
@@ -336,7 +349,12 @@ def runtime_observation(entry: dict[str, object]) -> tuple[int, str, str]:
     stdout = StringIO()
     stderr = StringIO()
     if entry["classification"] == "V1_NATIVE":
-        exit_code = LLVMRunner().run(typed_entry(entry), stdout=stdout, stderr=stderr)
+        exit_code = LLVMRunner().run(
+            typed_entry(entry),
+            stdout=stdout,
+            stderr=stderr,
+            timeout_seconds=int(entry["timeout_seconds"]),
+        )
     else:
         previous_mode = os.environ.get("AETHER_PLOT_MODE")
         previous_directory = os.environ.get("AETHER_PLOT_DIR")

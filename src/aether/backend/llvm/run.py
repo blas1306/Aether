@@ -27,6 +27,7 @@ class LLVMRunner:
         stdout: TextIO | BinaryIO | None = None,
         stderr: TextIO | BinaryIO | None = None,
         program_arguments: Sequence[str] = (),
+        timeout_seconds: float | None = None,
     ) -> int:
         suffix = ".exe" if os.name == "nt" else ""
         with tempfile.TemporaryDirectory(prefix="aether-run-") as temporary_dir:
@@ -45,6 +46,7 @@ class LLVMRunner:
                 stdout=stdout,
                 stderr=stderr,
                 program_arguments=program_arguments,
+                timeout_seconds=timeout_seconds,
             )
 
     def _run_executable(
@@ -54,6 +56,7 @@ class LLVMRunner:
         stdout: TextIO | BinaryIO | None,
         stderr: TextIO | BinaryIO | None,
         program_arguments: Sequence[str] = (),
+        timeout_seconds: float | None = None,
     ) -> int:
         stdout_target = _subprocess_stream(stdout)
         stderr_target = _subprocess_stream(stderr)
@@ -66,7 +69,12 @@ class LLVMRunner:
                 check=False,
                 stdout=subprocess.PIPE if capture_stdout else stdout_target,
                 stderr=subprocess.PIPE if capture_stderr else stderr_target,
+                timeout=timeout_seconds,
             )
+        except subprocess.TimeoutExpired as exc:
+            raise LLVMRunError(
+                f"native program exceeded the {timeout_seconds:g} second timeout"
+            ) from exc
         except OSError as exc:
             raise LLVMRunError(f"failed to execute temporary native program: {exc}") from exc
 

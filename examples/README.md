@@ -71,6 +71,12 @@ normalizing CRLF and CR to LF, encoded as UTF-8. Paths and source-file bytes do
 not participate in these observation hashes. This makes the same semantic
 output portable across supported host line-ending conventions.
 
+Runnable native examples execute under their catalog `timeout_seconds` limit.
+Numeric dogfood normally also compares its native output with the AST
+interpreter. An explicitly expensive native workload may set `ast_parity: false`
+to retain its full native execution while excluding the unsuitable interpreted
+performance run; this is an execution-policy distinction, not a semantic one.
+
 Fast catalog structure check:
 
 ```bash

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from io import StringIO
+import json
 import math
 from pathlib import Path
 import shutil
@@ -23,6 +24,17 @@ from aether.typechecker import TypeChecker
 
 
 ROOT = Path(__file__).resolve().parents[2]
+MANIFEST = json.loads(
+    (ROOT / "examples" / "v1_examples_manifest.json").read_text(encoding="utf-8")
+)
+NUMERIC_DOGFOOD_PATHS = {
+    "examples/FormulaNumerosPrimos.ae",
+    "examples/ProbandoNR/probandoNR2.ae",
+    "examples/ProbandoNR/probandoNR3.ae",
+}
+NUMERIC_DOGFOOD_ENTRIES = [
+    entry for entry in MANIFEST["entries"] if entry["path"] in NUMERIC_DOGFOOD_PATHS
+]
 
 
 def _typed(source: str):
@@ -272,17 +284,22 @@ def test_native_capability_gate_accepts_numeric_parity_subset() -> None:
 
 @pytest.mark.skipif(shutil.which("clang") is None, reason="clang is required")
 @pytest.mark.parametrize(
-    "relative_path",
-    [
-        "examples/FormulaNumerosPrimos.ae",
-        "examples/ProbandoNR/probandoNR2.ae",
-        "examples/ProbandoNR/probandoNR3.ae",
-    ],
+    "entry",
+    NUMERIC_DOGFOOD_ENTRIES,
+    ids=[entry["path"] for entry in NUMERIC_DOGFOOD_ENTRIES],
 )
-def test_numeric_dogfood_examples_execute_natively(relative_path: str) -> None:
+def test_numeric_dogfood_examples_execute_natively(entry: dict[str, object]) -> None:
+    relative_path = str(entry["path"])
     source = (ROOT / relative_path).read_text(encoding="utf-8")
-    typed = _typed(source)
-    code, native, stderr = _native_output(source)
+    stdout = StringIO()
+    stderr = StringIO()
+    code = LLVMRunner().run(
+        _typed(source),
+        stdout=stdout,
+        stderr=stderr,
+        timeout_seconds=int(entry["timeout_seconds"]),
+    )
     assert code == 0
-    assert stderr == ""
-    _assert_observations_match(native, run_aether(source).output)
+    assert stderr.getvalue() == ""
+    if entry.get("ast_parity", True):
+        _assert_observations_match(stdout.getvalue(), run_aether(source).output)

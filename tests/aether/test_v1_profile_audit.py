@@ -97,11 +97,13 @@ def test_manifest_validator_rejects_stale_release_and_profile_versions() -> None
 
 def test_manifest_validator_rejects_duplicate_paths() -> None:
     duplicate = deepcopy(MANIFEST)
-    duplicate["entries"].insert(1, deepcopy(duplicate["entries"][0]))
-
-    assert "duplicate manifest path: examples/FormulaNumerosPrimos.ae" in structural_errors(
-        duplicate
+    fixture_path = "examples/FormulaNumerosPrimos.ae"
+    fixture = next(
+        entry for entry in duplicate["entries"] if entry["path"] == fixture_path
     )
+    duplicate["entries"].append(deepcopy(fixture))
+
+    assert f"duplicate manifest path: {fixture_path}" in structural_errors(duplicate)
 
 
 def test_observation_hashes_are_utf8_and_line_ending_portable() -> None:
@@ -159,7 +161,12 @@ def test_every_example_matches_its_manifest_classification(entry: dict[str, obje
 def test_v1_native_example_observations_match_manifest(entry: dict[str, object]) -> None:
     stdout = StringIO()
     stderr = StringIO()
-    exit_code = LLVMRunner().run(_typed(entry), stdout=stdout, stderr=stderr)
+    exit_code = LLVMRunner().run(
+        _typed(entry),
+        stdout=stdout,
+        stderr=stderr,
+        timeout_seconds=int(entry["timeout_seconds"]),
+    )
 
     assert exit_code == entry["expected_exit_code"]
     assert observation_sha256(stdout.getvalue()) == entry["stdout_sha256"]

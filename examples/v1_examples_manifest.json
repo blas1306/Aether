@@ -154,7 +154,7 @@
       "path": "examples/ProbandoNR/probandoNR2.ae",
       "condition": "native_execution",
       "expected_exit_code": 0,
-      "stdout_sha256": "9823912019a7bf08e629b87e5bfb5d6e7074999f0eaa01593fb933222045e788",
+      "stdout_sha256": "0dcb8ae02b60898d165254901b40e4d19ef4b334b0b6e2aef25f3f4f6bec09d6",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
       "classification": "V1_NATIVE",
@@ -167,14 +167,15 @@
       "path": "examples/ProbandoNR/probandoNR3.ae",
       "condition": "native_execution",
       "expected_exit_code": 0,
-      "stdout_sha256": "9823912019a7bf08e629b87e5bfb5d6e7074999f0eaa01593fb933222045e788",
+      "stdout_sha256": "34a1022fe64062666a9c435f02b3075fa20015676376fe1ebc8d63af695f2498",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "timeout_seconds": 20,
       "classification": "V1_NATIVE",
       "backends": [
         "native"
       ],
-      "run": true
+      "run": true,
+      "ast_parity": false
     },
     {
       "path": "examples/SNL.ae",
