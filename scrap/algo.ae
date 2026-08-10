@@ -1,12 +1,39 @@
 import Math.LinearAlgebra as la
 
-struct metodo {
+struct MetodoJacobi {
     Vector<double> x;
     double res;
     int iter;
 }
 
-metodo probando(Matrix<double> A, Vector<double, Column> b, Vector<double, Column> x0, double tol, int maxiter) {
+struct MetodoPotencias {
+    double vap;
+    Vector<double> vep;
+}
+
+MetodoPotencias Potencias(Matrix<double> A, Vector<double, Column> x0, double tol, int maxiter) {
+    norma = la.norm(x0);
+    Vector<double, Column> x = (1/la.norm(x0)) * x0;
+    double vapOld = x' * A * x;
+    int iter = 0;
+
+    for (k in 1:maxiter) {
+        Vector<double, Column> y = A * x;
+        x = (1/la.norm(y)) * y;
+
+        vap = x' * A * x;
+
+        if (abs(vap - vapOld) < tol) {
+            break;
+        }
+
+        vapOld = vap;
+    }
+
+    return MetodoPotencias(vapOld, x);
+}
+
+MetodoJacobi Jacobi(Matrix<double> A, Vector<double, Column> b, Vector<double, Column> x0, double tol, int maxiter) {
     int m = A.rows;
     int n = A.columns;
 
@@ -34,18 +61,30 @@ metodo probando(Matrix<double> A, Vector<double, Column> b, Vector<double, Colum
         iter += 1;
     }
 
-    return metodo(x, res, iter);
+    return MetodoJacobi(x, res, iter);
 }
 
 int main() {
-    Matrix<double> A = [3.0 1.0 2.0; 3.0 5.0 1.0; 1.0 1.0 3.0];
+    Matrix<double> A = [1.0 2.0 3.0; 2.0 4.0 5.0; 3.0 5.0 6.0];
     Vector<double, Column> b = [4.0; 7.0; 3.0];
-    Vector<double, Column> x0 = [0.0; 0.0; 0.0];
+    Vector<double, Column> x0 = [1.0; 0.0; 0.0];
 
-    metodo result = probando(A, b, x0, 1e-8, 100);
-    println("Solution: ", result.x);
-    println("Residual: ", result.res);
-    println("Iterations: ", result.iter);
+    MetodoPotencias potencias = Potencias(A, x0, 1e-8, 100);
+    MetodoJacobi resultado = Jacobi(A, b, x0, 1e-8, 100);
+
+    if (potencias.vap >= 1) {
+        println("vap: ", potencias.vap);
+        println("Jacobi puede no converger");
+        println("Solution: ", resultado.x);
+        println("Residual: ", resultado.res);
+        println("Iterations: ", resultado.iter);
+    } else {
+        println("vap: ", potencias.vap);
+        println("Jacobi converge");
+        println("Solution: ", resultado.x);
+        println("Residual: ", resultado.res);
+        println("Iterations: ", resultado.iter);
+    }
 
     return 0;
 }

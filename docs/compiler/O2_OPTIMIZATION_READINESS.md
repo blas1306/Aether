@@ -113,7 +113,7 @@ The classifications describe usefulness for optimization, not test quality.
 | Interface dispatch | **PARTIAL** | Witness has interface/concrete identity, carrier kind, deterministic slots, box layout and ownership adapters. No propagated exact-type set or closed/open-world summary. |
 | Call graph | **PARTIAL (O2.4)** | Direct calls participate in deterministic recursive mod/ref summaries; indirect target sets remain open. |
 | Escape/capture | **ABSENT** | Borrow verifier handles one prohibited escape case; it is not allocation escape analysis. |
-| Alias | **PARTIAL (O2.4)** | Conservative SSA provenance, three-way alias queries and target-relative mod/ref exist as opt-in analysis; fields, globals, escape and exact indirect targets remain coarse/absent. |
+| Alias | **PARTIAL (O2.7)** | Conservative SSA provenance, nominal one-level field locations, three-way alias queries and target-relative mod/ref exist as opt-in analysis; deep paths, globals, escape and exact indirect targets remain coarse/absent. |
 | Loop discovery/canonical form | **ABSENT** | CFG and dominance can support natural-loop discovery, but there are no backedge, loop forest, irreducibility, preheader, latch or exit analyses/transforms. |
 | Integer range/value range | **ABSENT** | SCCP constants and typechecking of literal ranges are not interval analysis. |
 | Collection shape | **PARTIAL / LOCAL ONLY** | Static Vector/Matrix shapes and dynamic Array/List length operations exist; no SSA shape equivalence or mutation invalidation. |

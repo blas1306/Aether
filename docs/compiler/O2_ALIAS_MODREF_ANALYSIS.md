@@ -29,10 +29,11 @@ returns, and non-identical phi root sets may alias. Phi joins union roots and
 fail closed. Roots distinguish fresh objects/storage, parameters, values,
 interface carriers, and unknowns.
 
-Locations are whole class objects, Array/List storage, Vector/Matrix value
-storage, interface carriers/boxes, and unknown global state. Field operations
-currently invalidate the whole object. This intentionally coarse model does not
-claim deep struct noalias or field disjointness.
+O2.7 adds nominal, one-level field locations alongside whole class objects,
+Array/List storage and length, Vector/Matrix values, interface carriers/boxes,
+and unknown global state. Class fields on a proven common base are disjoint;
+struct updates reconstruct values. Whole-object effects still overlap every
+field. See `O2_FIELD_SENSITIVE_MODREF.md`.
 
 ## Mod/ref and summaries
 
@@ -66,7 +67,7 @@ a bounded monotone SSA scan. Summary convergence height is proportional to
 parameter-effect bits and scans instructions per iteration. Loop queries are
 linear in loop instructions.
 
-Limitations: whole-object field sensitivity, no global-location inventory, no
+Limitations: no deep field paths, no global-location inventory, no
 escape analysis, no exact indirect target sets, no closed interface world, and
 no caller provenance for summarized return aliases. The recommended next
 consumer is List BCE after integrating and measuring fact transfer. LICM, ARC,

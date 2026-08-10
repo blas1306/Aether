@@ -176,6 +176,13 @@ and correctness gaps without duplicating LLVM.
 `ArrayGet`/`ListGet` after field-sensitive mod/ref exists. Continue delegating
 ordinary direct inlining to LLVM meanwhile.
 
+O2.7 follow-up: nominal field precision now exposes synthetic `obj.a` reads as
+preserved across writes/calls limited to `obj.b`. No measured general-read
+candidate is immediately implementable yet because nested loaded-reference
+provenance, speculation/trap safety, and ownership/escape facts remain missing.
+The old immediately-ready count was 0 and remains 0; field sensitivity is the
+specific newly satisfied prerequisite, not a transformation authorization.
+
 No stop condition was observed: current LICM/BCE and ARC generation did not
 show semantic divergence or unsoundness, and metadata did not contradict
 execution. The audit does identify insufficient ownership analysis for ARC

@@ -34,7 +34,10 @@ from .proof_coverage import (
 )
 from .alias_modref import (
     AliasAnalysis, AliasRelation, FunctionSummary, ModRefAnalysis,
-    ModRefDecision, ModRefEffect, Provenance, ProvenanceRoot, RootKind,
+    CollectionLengthLocation, CollectionStorageLocation, FieldIdentity,
+    FieldLocation, MemoryLocation, ModRefDecision, ModRefEffect,
+    ObjectLocation, ParameterFieldEffect, Provenance, ProvenanceRoot, RootKind,
+    StructFieldLocation,
     SummaryAnalysis, UnknownReason as AliasUnknownReason,
 )
 
@@ -68,5 +71,8 @@ __all__ = [
     "UnknownReason",
     "AliasAnalysis", "AliasRelation", "FunctionSummary", "ModRefAnalysis",
     "ModRefDecision", "ModRefEffect", "Provenance", "ProvenanceRoot",
-    "RootKind", "SummaryAnalysis", "AliasUnknownReason",
+    "RootKind", "SummaryAnalysis", "AliasUnknownReason", "FieldIdentity",
+    "FieldLocation", "StructFieldLocation", "ObjectLocation",
+    "CollectionStorageLocation", "CollectionLengthLocation", "MemoryLocation",
+    "ParameterFieldEffect",
 ]

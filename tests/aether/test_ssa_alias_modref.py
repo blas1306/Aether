@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-from aether.ir.types import ClassRefType, IntType, ListType, VoidType
+from aether.ir.types import ClassRefType, IntType, ListType, StructType, VoidType
 from aether.ssa.analysis import (
     AliasAnalysis, AliasRelation, AliasUnknownReason, ModRefAnalysis,
-    ModRefEffect, ShapeAnalysis, SummaryAnalysis,
+    FieldIdentity, FieldLocation, ModRefEffect, ShapeAnalysis,
+    StructFieldLocation, SummaryAnalysis,
 )
 from aether.ssa.model import (
-    SSAClassNew, SSAConst, SSAFunction, SSAInvokeIndirect, SSAListCopy,
+    SSAClassGet, SSAClassNew, SSAClassSet, SSAConst, SSAFunction, SSAInvokeIndirect, SSAListCopy,
     SSAListGet, SSAListLength, SSAListNew, SSAListPush, SSAModule, SSAParameter,
-    SSAPhi, SSAReturn, SSABasicBlock, SSACall, SSAValue,
+    SSAPhi, SSAReturn, SSABasicBlock, SSACall, SSAStructGet, SSAStructSet, SSAValue,
 )
 
 I = IntType()
@@ -93,3 +94,73 @@ def test_known_readonly_call_preserves_list_fact() -> None:
     assert summaries["reader"].read_parameters == frozenset({0})
     assert analysis.preserves_length_fact(call, listing)
     assert ShapeAnalysis().compute(caller, analysis).length_of(listing, "entry") is not None
+
+
+def test_nominal_field_locations_compose_with_base_aliases() -> None:
+    box = ClassRefType("Box"); obj = value("obj", box); alias = value("alias", box)
+    merged = SSAPhi(alias, (("left", obj), ("right", obj)))
+    function = SSAFunction("fields", [], VoidType(), [SSABasicBlock("entry", [
+        SSAClassNew(obj), merged, SSAReturn(),
+    ])])
+    aliases = AliasAnalysis(function)
+    a = FieldIdentity("Box", "a", 0); b = FieldIdentity("Box", "b", 1)
+    assert aliases.location_alias(FieldLocation(obj, a), FieldLocation(alias, a)) is AliasRelation.MUST_ALIAS
+    assert aliases.location_alias(FieldLocation(obj, a), FieldLocation(alias, b)) is AliasRelation.NO_ALIAS
+    assert FieldIdentity("Other", "a", 0) != a
+
+    left = SSAParameter("left", box); right = SSAParameter("right", box)
+    parameter_function = SSAFunction("parameter_fields", [left, right], VoidType(), [
+        SSABasicBlock("entry", [SSAReturn()]),
+    ])
+    parameter_aliases = AliasAnalysis(parameter_function)
+    assert parameter_aliases.location_alias(FieldLocation(left, a), FieldLocation(right, a)) is AliasRelation.MAY_ALIAS
+    assert parameter_aliases.location_alias(FieldLocation(left, a), FieldLocation(right, b)) is AliasRelation.NO_ALIAS
+    parameter_aliases.verify_locations((FieldLocation(left, a), FieldLocation(right, a)))
+    assert "Box.a#0" in parameter_aliases.location_debug_string(FieldLocation(left, a))
+
+
+def test_class_field_modref_preserves_distinct_field_fact() -> None:
+    box = ClassRefType("Box"); obj = value("obj", box); item = value("item"); got = value("got")
+    set_b = SSAClassSet(obj, 1, "b", item)
+    get_a = SSAClassGet(got, obj, 0, "a")
+    function = SSAFunction("field_effects", [], VoidType(), [SSABasicBlock("entry", [
+        SSAClassNew(obj), SSAConst(item, 1), get_a, set_b, SSAReturn(),
+    ])])
+    analysis = ModRefAnalysis(function)
+    a = FieldIdentity("Box", "a", 0); b = FieldIdentity("Box", "b", 1)
+    assert analysis.effects(get_a, FieldLocation(obj, a)).effect is ModRefEffect.READ
+    assert analysis.effects(set_b, FieldLocation(obj, a)).effect is ModRefEffect.NO_ACCESS
+    assert analysis.effects(set_b, FieldLocation(obj, b)).effect is ModRefEffect.MODIFY
+    assert analysis.preserves_field_fact(set_b, obj, a)
+
+
+def test_direct_summary_retains_field_precision_and_exceptional_effects() -> None:
+    box = ClassRefType("Box"); parameter = SSAParameter("box", box); one = value("one")
+    writer = SSAFunction("writer", [parameter], VoidType(), [SSABasicBlock("entry", [
+        SSAConst(one, 1), SSAClassSet(parameter, 1, "b", one), SSAReturn(),
+    ])], may_throw=True)
+    obj = value("obj", box); call = SSACall("writer", (obj,))
+    caller = SSAFunction("caller_fields", [], VoidType(), [SSABasicBlock("entry", [
+        SSAClassNew(obj), call, SSAReturn(),
+    ])])
+    summaries = SummaryAnalysis().compute(SSAModule([writer, caller]))
+    summary = summaries["writer"]
+    assert summary.modified_parameters == frozenset()
+    assert summary.may_throw
+    analysis = ModRefAnalysis(caller, summaries)
+    assert analysis.preserves_field_fact(call, obj, FieldIdentity("Box", "a", 0))
+    assert not analysis.preserves_field_fact(call, obj, FieldIdentity("Box", "b", 1))
+
+
+def test_struct_set_reconstructs_without_mutating_input_field_storage() -> None:
+    pair = StructType("Pair"); original = value("original", pair); updated = value("updated", pair)
+    item = value("item"); got = value("got")
+    set_right = SSAStructSet(updated, original, 1, "right", item)
+    get_left = SSAStructGet(got, original, 0, "left")
+    function = SSAFunction("struct_fields", [], VoidType(), [SSABasicBlock("entry", [
+        SSAConst(item, 1), get_left, set_right, SSAReturn(),
+    ])])
+    analysis = ModRefAnalysis(function)
+    left = StructFieldLocation(original, FieldIdentity("Pair", "left", 0))
+    assert analysis.effects(get_left, left).effect is ModRefEffect.READ
+    assert analysis.preserves_memory_fact(set_right, left)

@@ -11,6 +11,7 @@ from enum import Enum
 
 from aether.ir.types import (
     ArrayType, ClassRefType, InterfaceType, ListType, NullableType, StringType,
+    StructType,
 )
 from aether.ssa import model as m
 
@@ -45,6 +46,12 @@ class UnknownReason(Enum):
     PARAMETER_ALIAS = "parameter-alias"
     GLOBAL_STATE = "global-state"
     FIELD_INSENSITIVITY = "field-insensitivity"
+    FIELD_BASE_MAY_ALIAS = "field-base-may-alias"
+    WHOLE_OBJECT_MUTATION = "whole-object-mutation"
+    UNKNOWN_FIELD_EFFECT = "unknown-field-effect"
+    INTERFACE_FIELD_LAYOUT_UNKNOWN = "interface-field-layout-unknown"
+    NESTED_PATH_UNSUPPORTED = "nested-path-unsupported"
+    EXTERNAL_FIELD_EFFECT = "external-field-effect"
     UNSUPPORTED_INSTRUCTION = "unsupported-instruction"
     OTHER = "other"
 
@@ -79,11 +86,61 @@ class ModRefDecision:
     reason: UnknownReason | None = None
 
 
+@dataclass(frozen=True, order=True)
+class FieldIdentity:
+    """Canonical nominal field identity; spelling alone is never identity."""
+    owner: str
+    name: str
+    index: int
+
+    def __str__(self) -> str:
+        return f"{self.owner}.{self.name}#{self.index}"
+
+
+@dataclass(frozen=True)
+class ObjectLocation:
+    base: m.SSAValue
+
+
+@dataclass(frozen=True)
+class FieldLocation:
+    base: m.SSAValue
+    field: FieldIdentity
+
+
+@dataclass(frozen=True)
+class StructFieldLocation:
+    base: m.SSAValue
+    field: FieldIdentity
+
+
+@dataclass(frozen=True)
+class CollectionStorageLocation:
+    base: m.SSAValue
+
+
+@dataclass(frozen=True)
+class CollectionLengthLocation:
+    base: m.SSAValue
+
+
+MemoryLocation = (ObjectLocation | FieldLocation | StructFieldLocation
+                  | CollectionStorageLocation | CollectionLengthLocation)
+
+
+@dataclass(frozen=True, order=True)
+class ParameterFieldEffect:
+    parameter: int
+    field: FieldIdentity
+
+
 @dataclass(frozen=True)
 class FunctionSummary:
     function: str
     read_parameters: frozenset[int] = frozenset()
     modified_parameters: frozenset[int] = frozenset()
+    read_fields: frozenset[ParameterFieldEffect] = frozenset()
+    modified_fields: frozenset[ParameterFieldEffect] = frozenset()
     returned_alias_parameters: frozenset[int] = frozenset()
     returns_fresh: bool = False
     allocates: bool = False
@@ -95,8 +152,11 @@ class FunctionSummary:
     def debug_string(self) -> str:
         def indexes(values): return "[" + ",".join(map(str, sorted(values))) + "]"
         reasons = ",".join(item.value for item in sorted(self.unknown_reasons, key=lambda x: x.value))
+        def fields(values):
+            return "[" + ",".join(f"{item.parameter}:{item.field}" for item in sorted(values)) + "]"
         return (f"{self.function}: read={indexes(self.read_parameters)} "
-                f"modify={indexes(self.modified_parameters)} return_alias={indexes(self.returned_alias_parameters)} "
+                f"modify={indexes(self.modified_parameters)} read_fields={fields(self.read_fields)} "
+                f"modify_fields={fields(self.modified_fields)} return_alias={indexes(self.returned_alias_parameters)} "
                 f"fresh={str(self.returns_fresh).lower()} allocates={str(self.allocates).lower()} "
                 f"global={str(self.touches_global_state).lower()} throw={str(self.may_throw).lower()} "
                 f"trap={str(self.may_trap).lower()} unknown=[{reasons}]")
@@ -199,6 +259,31 @@ class AliasAnalysis:
             return AliasRelation.NO_ALIAS
         return AliasRelation.MAY_ALIAS
 
+    def location_alias(self, left: MemoryLocation, right: MemoryLocation) -> AliasRelation:
+        """Alias semantic locations without making byte-layout assumptions."""
+        left_base, right_base = left.base, right.base
+        base_relation = self.alias(left_base, right_base)
+        if base_relation is AliasRelation.NO_ALIAS:
+            return AliasRelation.NO_ALIAS
+        left_field = getattr(left, "field", None)
+        right_field = getattr(right, "field", None)
+        if left_field is not None and right_field is not None:
+            if left_field != right_field:
+                # Nominal fields are distinct cells even through aliases.
+                return AliasRelation.NO_ALIAS
+            return base_relation
+        if type(left) is type(right):
+            return base_relation
+        # Whole-object writes overlap fields. Collection storage includes its
+        # logical length, while a field cell is separate from a referenced
+        # collection subsequently loaded from it.
+        if isinstance(left, ObjectLocation) or isinstance(right, ObjectLocation):
+            return base_relation
+        collection_locations = (CollectionStorageLocation, CollectionLengthLocation)
+        if isinstance(left, collection_locations) and isinstance(right, collection_locations):
+            return base_relation
+        return AliasRelation.NO_ALIAS
+
     def verify(self) -> None:
         values = tuple(self._provenance)
         for value in values:
@@ -208,6 +293,23 @@ class AliasAnalysis:
             for right in values[index:]:
                 if self.alias(left, right) is not self.alias(right, left):
                     raise ValueError("alias relation must be symmetric")
+
+    def verify_locations(self, locations: tuple[MemoryLocation, ...]) -> None:
+        for location in locations:
+            if self.location_alias(location, location) is not AliasRelation.MUST_ALIAS:
+                raise ValueError("a semantic memory location must alias itself")
+        for index, left in enumerate(locations):
+            for right in locations[index:]:
+                if self.location_alias(left, right) is not self.location_alias(right, left):
+                    raise ValueError("location alias relation must be symmetric")
+
+    def location_debug_string(self, location: MemoryLocation) -> str:
+        kind = type(location).__name__
+        field = getattr(location, "field", None)
+        suffix = f", field={field}" if field is not None else ""
+        provenance = self.provenance(location.base)
+        roots = ",".join(f"{root.kind.value}:{root.identity}" for root in sorted(provenance.roots))
+        return f"{kind}(base={location.base.name}[{roots}]{suffix})"
 
     def debug_string(self) -> str:
         lines = []
@@ -227,7 +329,9 @@ class ModRefAnalysis:
         self.aliases = AliasAnalysis(function)
         self.summaries = summaries or {}
 
-    def effects(self, instruction, target: m.SSAValue) -> ModRefDecision:
+    def effects(self, instruction, target: m.SSAValue | MemoryLocation) -> ModRefDecision:
+        if not isinstance(target, m.SSAValue):
+            return self._location_effects(instruction, target)
         if isinstance(instruction, (m.SSACall, m.SSAInvoke)) and instruction.builtin in {
             "__aether_retain", "__aether_release"
         }:
@@ -252,11 +356,13 @@ class ModRefAnalysis:
             else:
                 read_relations = [
                     self.aliases.alias(instruction.arguments[i], target)
-                    for i in summary.read_parameters if i < len(instruction.arguments)
+                    for i in (summary.read_parameters | frozenset(item.parameter for item in summary.read_fields))
+                    if i < len(instruction.arguments)
                 ]
                 write_relations = [
                     self.aliases.alias(instruction.arguments[i], target)
-                    for i in summary.modified_parameters if i < len(instruction.arguments)
+                    for i in (summary.modified_parameters | frozenset(item.parameter for item in summary.modified_fields))
+                    if i < len(instruction.arguments)
                 ]
                 read = any(relation is not AliasRelation.NO_ALIAS for relation in read_relations)
                 write = any(relation is not AliasRelation.NO_ALIAS for relation in write_relations)
@@ -270,12 +376,73 @@ class ModRefAnalysis:
         )
         return ModRefDecision(effect, reason)
 
+    def _location_effects(self, instruction, target: MemoryLocation) -> ModRefDecision:
+        if isinstance(instruction, (m.SSACall, m.SSAInvoke)) and instruction.builtin in {
+            "__aether_retain", "__aether_release"
+        }:
+            return ModRefDecision(ModRefEffect.NO_ACCESS)
+        if isinstance(instruction, (m.SSACallIndirect, m.SSAInvokeIndirect)):
+            return ModRefDecision(ModRefEffect.UNKNOWN, UnknownReason.UNKNOWN_INDIRECT_TARGET)
+        if isinstance(instruction, (m.SSAInterfaceCall, m.SSAInvokeInterface)):
+            return ModRefDecision(ModRefEffect.UNKNOWN, UnknownReason.INTERFACE_FIELD_LAYOUT_UNKNOWN)
+        accesses = self._location_accesses(instruction)
+        read_relations = [self.aliases.location_alias(location, target) for location in accesses[0]]
+        write_relations = [self.aliases.location_alias(location, target) for location in accesses[1]]
+        read = any(item is not AliasRelation.NO_ALIAS for item in read_relations)
+        write = any(item is not AliasRelation.NO_ALIAS for item in write_relations)
+        if isinstance(instruction, (m.SSACall, m.SSAInvoke)):
+            summary = self.summaries.get(instruction.function)
+            if summary is None:
+                if instruction.writes_memory:
+                    return ModRefDecision(ModRefEffect.UNKNOWN, UnknownReason.EXTERNAL_FIELD_EFFECT)
+            else:
+                for item in summary.read_fields:
+                    if item.parameter < len(instruction.arguments):
+                        location = FieldLocation(instruction.arguments[item.parameter], item.field)
+                        read |= self.aliases.location_alias(location, target) is not AliasRelation.NO_ALIAS
+                for item in summary.modified_fields:
+                    if item.parameter < len(instruction.arguments):
+                        location = FieldLocation(instruction.arguments[item.parameter], item.field)
+                        write |= self.aliases.location_alias(location, target) is not AliasRelation.NO_ALIAS
+                # Coarse parameter effects mean the callee could touch any field.
+                for index in summary.read_parameters:
+                    if index < len(instruction.arguments):
+                        read |= self.aliases.location_alias(ObjectLocation(instruction.arguments[index]), target) is not AliasRelation.NO_ALIAS
+                for index in summary.modified_parameters:
+                    if index < len(instruction.arguments):
+                        write |= self.aliases.location_alias(ObjectLocation(instruction.arguments[index]), target) is not AliasRelation.NO_ALIAS
+                if summary.touches_global_state:
+                    return ModRefDecision(ModRefEffect.UNKNOWN, UnknownReason.GLOBAL_STATE)
+        effect = (ModRefEffect.READ_MODIFY if read and write else ModRefEffect.READ if read
+                  else ModRefEffect.MODIFY if write else ModRefEffect.NO_ACCESS)
+        reason = UnknownReason.FIELD_BASE_MAY_ALIAS if write and AliasRelation.MAY_ALIAS in write_relations else None
+        return ModRefDecision(effect, reason)
+
+    def _location_accesses(self, instruction):
+        if isinstance(instruction, m.SSAClassGet):
+            return ([FieldLocation(instruction.object, _field_identity(instruction.object, instruction))], [])
+        if isinstance(instruction, m.SSAClassSet):
+            return ([], [FieldLocation(instruction.object, _field_identity(instruction.object, instruction))])
+        if isinstance(instruction, m.SSAStructGet):
+            return ([StructFieldLocation(instruction.struct, _field_identity(instruction.struct, instruction))], [])
+        # struct_set reconstructs a new SSA aggregate; it reads the old field
+        # set but does not mutate the input value's storage.
+        if isinstance(instruction, m.SSAStructSet):
+            return ([ObjectLocation(instruction.struct)], [])
+        reads, writes = _semantic_accesses(instruction)
+        return ([ObjectLocation(value) for value in reads], [ObjectLocation(value) for value in writes])
+
     def _accesses(self, instruction):
         return _semantic_accesses(instruction)
 
     def may_read(self, instruction, target): return self.effects(instruction, target).effect.may_read
     def may_modify(self, instruction, target): return self.effects(instruction, target).effect.may_modify
     def preserves_memory_fact(self, instruction, target): return not self.may_modify(instruction, target)
+    def preserves_field_fact(self, instruction, base, field):
+        return self.preserves_memory_fact(instruction, FieldLocation(base, field))
+    def field_effects(self, summary: FunctionSummary, parameter: int):
+        return (frozenset(item.field for item in summary.read_fields if item.parameter == parameter),
+                frozenset(item.field for item in summary.modified_fields if item.parameter == parameter))
     def preserves_length_fact(self, instruction, collection):
         return isinstance(collection.type, ArrayType) or not self.may_modify(instruction, collection)
     def preserves_shape_fact(self, instruction, value): return not self.may_modify(instruction, value)
@@ -292,6 +459,16 @@ def _semantic_accesses(instruction):
     return read, write
 
 
+def _field_identity(base: m.SSAValue, instruction) -> FieldIdentity:
+    type_ = base.type.inner if isinstance(base.type, NullableType) else base.type
+    if isinstance(type_, (ClassRefType, StructType)):
+        owner = type_.name
+    else:
+        # This cannot make two unrelated nominal types compatible.
+        owner = f"<{type(type_).__name__}>"
+    return FieldIdentity(owner, instruction.field_name, instruction.field_index)
+
+
 class SummaryAnalysis:
     """Deterministic monotone fixed point over direct calls.
 
@@ -303,7 +480,8 @@ class SummaryAnalysis:
         functions = {function.name: function for function in module.functions}
         summaries = {name: FunctionSummary(name, may_throw=fn.may_throw) for name, fn in functions.items()}
         total_parameters = sum(len(fn.parameters) for fn in functions.values())
-        for _ in range(max(1, total_parameters + len(functions) * 8 + 1)):
+        total_instructions = sum(len(block.instructions) for fn in functions.values() for block in fn.blocks)
+        for _ in range(max(1, total_parameters + total_instructions + len(functions) * 8 + 1)):
             updated = {name: self._summarize(fn, summaries, functions) for name, fn in sorted(functions.items())}
             if updated == summaries: return updated
             summaries = updated
@@ -311,15 +489,25 @@ class SummaryAnalysis:
 
     def _summarize(self, function, summaries, functions):
         aliases = AliasAnalysis(function); parameters = list(function.parameters)
-        read, modified, returned = set(), set(), set(); allocates = global_state = False
+        read, modified, returned = set(), set(), set()
+        read_fields, modified_fields = set(), set()
+        allocates = global_state = False
         may_throw = function.may_throw; may_trap = False; reasons = set()
         for block in function.blocks:
             for instruction in block.instructions:
                 may_throw |= instruction.may_throw; may_trap |= instruction.may_trap; allocates |= instruction.allocates
                 accesses = _semantic_accesses(instruction)
+                field_read = isinstance(instruction, m.SSAClassGet)
+                field_write = isinstance(instruction, m.SSAClassSet)
                 for index, parameter in enumerate(parameters):
-                    if any(aliases.alias(parameter, value) is not AliasRelation.NO_ALIAS for value in accesses[0]): read.add(index)
-                    if any(aliases.alias(parameter, value) is not AliasRelation.NO_ALIAS for value in accesses[1]): modified.add(index)
+                    if field_read and aliases.alias(parameter, instruction.object) is not AliasRelation.NO_ALIAS:
+                        read_fields.add(ParameterFieldEffect(index, _field_identity(instruction.object, instruction)))
+                    elif any(aliases.alias(parameter, value) is not AliasRelation.NO_ALIAS for value in accesses[0]):
+                        read.add(index)
+                    if field_write and aliases.alias(parameter, instruction.object) is not AliasRelation.NO_ALIAS:
+                        modified_fields.add(ParameterFieldEffect(index, _field_identity(instruction.object, instruction)))
+                    elif any(aliases.alias(parameter, value) is not AliasRelation.NO_ALIAS for value in accesses[1]):
+                        modified.add(index)
                 if isinstance(instruction, (m.SSACall, m.SSAInvoke)):
                     callee = summaries.get(instruction.function)
                     if callee is None:
@@ -339,6 +527,12 @@ class SummaryAnalysis:
                             if callee_index < len(instruction.arguments) and aliases.alias(parameter, instruction.arguments[callee_index]) is not AliasRelation.NO_ALIAS: read.add(caller_index)
                         for callee_index in callee.modified_parameters:
                             if callee_index < len(instruction.arguments) and aliases.alias(parameter, instruction.arguments[callee_index]) is not AliasRelation.NO_ALIAS: modified.add(caller_index)
+                        for effect in callee.read_fields:
+                            if effect.parameter < len(instruction.arguments) and aliases.alias(parameter, instruction.arguments[effect.parameter]) is not AliasRelation.NO_ALIAS:
+                                read_fields.add(ParameterFieldEffect(caller_index, effect.field))
+                        for effect in callee.modified_fields:
+                            if effect.parameter < len(instruction.arguments) and aliases.alias(parameter, instruction.arguments[effect.parameter]) is not AliasRelation.NO_ALIAS:
+                                modified_fields.add(ParameterFieldEffect(caller_index, effect.field))
                 elif isinstance(instruction, (m.SSACallIndirect, m.SSAInvokeIndirect)):
                     global_state = True; reasons.add(UnknownReason.UNKNOWN_INDIRECT_TARGET)
                     for index, parameter in enumerate(parameters):
@@ -354,7 +548,14 @@ class SummaryAnalysis:
         returns = [item.value for block in function.blocks for item in block.instructions if isinstance(item, m.SSAReturn) and item.value]
         if returns:
             fresh = all(any(root.kind is RootKind.FRESH for root in aliases.provenance(value).roots) and aliases.provenance(value).exact for value in returns)
-        return FunctionSummary(function.name, frozenset(read), frozenset(modified), frozenset(returned), fresh, allocates, global_state, may_throw, may_trap, frozenset(reasons))
+        return FunctionSummary(
+            function=function.name, read_parameters=frozenset(read),
+            modified_parameters=frozenset(modified), read_fields=frozenset(read_fields),
+            modified_fields=frozenset(modified_fields),
+            returned_alias_parameters=frozenset(returned), returns_fresh=fresh,
+            allocates=allocates, touches_global_state=global_state,
+            may_throw=may_throw, may_trap=may_trap, unknown_reasons=frozenset(reasons),
+        )
 
     @staticmethod
     def debug_string(summaries):

@@ -55,6 +55,9 @@ FMA contraction, reduction reordering, or fast-math.
 `SSAExceptionPayload`, `SSAExceptionDestroy`, `SSAPhi`, `SSABranch`, `SSAJump`,
 `SSAThrow`, `SSARethrow`, `SSAPropagate`, and `SSAReturn`.
 
+O2.7 supplies one-level nominal field mod/ref proofs, but LICM deliberately does
+not consume them: `SSAClassGet` and `SSAStructGet` remain in the never-hoist set.
+
 Thus all calls, allocations, arbitrary element/field reads, writes,
 ARC/lifecycle, ownership transfer, phis, terminators, and exception operations
 are excluded. Array length is immutable for an Array identity. List length is
