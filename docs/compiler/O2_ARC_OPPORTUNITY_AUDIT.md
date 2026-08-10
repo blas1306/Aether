@@ -9,7 +9,12 @@ no escape or consume between retain and release, complete dominance and
 post-dominance, and no ambiguous phi, nested aggregate, call, store, invoke,
 throw, cleanup, catch, or rethrow. The measured upper bound is 12 real pairs;
 the deliberately stricter same-block/no-effect fast path contains 5 pairs.
-This audit implements no such pass.
+This audit implemented no such pass. O2.9 subsequently implements only this
+Phase-1 class; this document and its 53/924 historical JSON baseline are
+intentionally not overwritten. Post-O2.9 measurement is 49 retains and 920
+releases: four pairs disappear. The old five-site count included identities
+that fail the transformation's stricter exact-provenance/no-phi rule. Loop ARC
+remains 11 retains and 55 releases.
 
 ## Methodology and corpus
 

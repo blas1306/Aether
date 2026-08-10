@@ -7,6 +7,7 @@ from .dead_phi import DeadPhiEliminator
 from .global_constant_propagation import SSAGlobalConstantPropagator
 from .proven_bounds import ProvenBoundsCheckEliminator
 from .licm import LoopInvariantCodeMotion
+from .local_arc import LocalARCEliminator
 from .pipeline import (
     SSAOptimizationConvergenceError,
     SSAOptimizationPass,
@@ -30,6 +31,7 @@ __all__ = [
     "SSAGlobalConstantPropagator",
     "ProvenBoundsCheckEliminator",
     "LoopInvariantCodeMotion",
+    "LocalARCEliminator",
     "SSAOptimizationConvergenceError",
     "SSAOptimizationPass",
     "SSAOptimizationResult",

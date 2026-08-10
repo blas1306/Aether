@@ -204,3 +204,12 @@ summaries, post-dominance, and diagnostic ARC pairing are now implemented. No
 transform consumes them. The conclusion remains
 `IMPROVE_OWNERSHIP_ANALYSIS_FIRST` pending nested aggregate and constructor
 precision plus production-corpus metrics.
+
+## O2.9 follow-up
+
+The narrow same-block pass is now enabled only in O2. On the O2.8.5 productive
+corpus it removes four pairs (53/924 becomes 49/920); the previous fifth
+audit-level site fails the transformation's exact-provenance/no-phi gate. No
+multi-block, call, exception, MethodResult/constructor, nested aggregate, or
+interface case is optimized. The next audit must improve proof precision, not
+relax Phase 1.

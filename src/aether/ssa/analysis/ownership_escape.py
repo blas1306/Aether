@@ -339,6 +339,17 @@ class OwnershipEscapeAnalysis:
                                                    classification, frozenset(reasons)))
         return tuple(result)
 
+    def classify_pair(self, pair: ArcPairCandidate) -> ArcPairClassification:
+        """Return the authoritative O2.8 classification for ``pair``.
+
+        Transformations deliberately query this method instead of trusting a
+        classification copied or reconstructed by a caller.
+        """
+        for candidate in self.candidate_arc_pairs():
+            if candidate == pair:
+                return candidate.classification
+        return ArcPairClassification.NOT_REDUNDANT
+
     def verify(self) -> None:
         for frame in (*self._in.values(), *self._out.values()):
             for value, state in frame.states:

@@ -15,6 +15,7 @@ from .dead_phi import DeadPhiEliminator
 from .global_constant_propagation import SSAGlobalConstantPropagator
 from .proven_bounds import ProvenBoundsCheckEliminator
 from .licm import LoopInvariantCodeMotion
+from .local_arc import LocalARCEliminator
 from .result import SSAOptimizationResult, SSAOptimizationTraceStep
 from .sccp_pass import SCCPPass
 from .trivial_phi import TrivialPhiEliminator
@@ -177,6 +178,7 @@ def build_ssa_optimizer_pipeline(
         "SSADeadCodeEliminator": SSADeadCodeEliminator,
         "ProvenBoundsCheckEliminator": ProvenBoundsCheckEliminator,
         "LoopInvariantCodeMotion": LoopInvariantCodeMotion,
+        "LocalARCEliminator": LocalARCEliminator,
     }
     return SSAOptimizerPipeline(
         passes=(factories[name]() for name in selected.ssa_passes),

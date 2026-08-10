@@ -34,6 +34,7 @@ def test_registry_defines_truthful_middle_end_and_clang_mapping() -> None:
     assert SSA_O2_PASSES == SSA_O1_PASSES + (
         "ProvenBoundsCheckEliminator",
         "LoopInvariantCodeMotion",
+        "LocalARCEliminator",
         "SSADeadCodeEliminator",
     )
 

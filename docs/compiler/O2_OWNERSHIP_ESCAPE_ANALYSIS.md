@@ -1,7 +1,8 @@
 # O2.8 Ownership and escape analysis
 
-O2.8 is analysis infrastructure only. It does not remove ARC operations,
-promote allocations, alter SSA/LLVM, or change optimization profiles.
+O2.8 is the ownership proof authority. O2.9 now consumes it for the narrowly
+scoped O2-only transformation in `O2_LOCAL_ARC_ELIMINATION.md`; the analysis
+itself still inserts or removes nothing.
 
 ## Current model
 
@@ -73,9 +74,8 @@ post-dominance, and mutual-recursion probes pass together with O2.7 (13 tests).
 Historical O2.6.2 traffic remains 2 retains, 16 releases, and 0 proven pairs;
 that audit is not rewritten. A production corpus counter is not yet wired.
 
-Decision: **IMPROVE_OWNERSHIP_ANALYSIS_FIRST**. An eventual smallest safe pass
-is same-identity local pair removal with no escape/consume and complete
-dominance, post-dominance, and exceptional-path proof. Nested aggregates,
-constructors/MethodResult, and corpus metrics need improvement first. Stack
-promotion and box elimination gain prerequisite queries but are not ready;
-memory-read LICM and inlining remain unchanged.
+O2.9 follow-up: **same-block local ARC elimination is enabled**. Four of the
+five historical fast-path sites meet its additional exact-provenance/no-phi
+contract; the fifth remains preserved. Broader ownership precision is still
+required before multi-block, aggregate, constructor, interface, or exceptional
+cases can be transformed. Stack promotion and box elimination remain deferred.
