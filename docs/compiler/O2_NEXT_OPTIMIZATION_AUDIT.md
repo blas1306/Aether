@@ -196,3 +196,11 @@ alias/mod-ref, BCE, ownership/lifecycle, exception promotion, optimization
 profile, capability, documentation, compileall and diff checks form the
 validation set. No historical baseline was modified and no commit was created.
 Production code generation and O0/O1/O2 pass membership are unchanged.
+
+## O2.8 follow-up
+
+Separate ownership/escape domains, exceptional CFG dataflow, recursive direct
+summaries, post-dominance, and diagnostic ARC pairing are now implemented. No
+transform consumes them. The conclusion remains
+`IMPROVE_OWNERSHIP_ANALYSIS_FIRST` pending nested aggregate and constructor
+precision plus production-corpus metrics.

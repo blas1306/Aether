@@ -578,3 +578,9 @@ unchanged, a complete suite was not run.
 O2 now adds conservative non-speculative scalar LICM after proven BCE and
 before DCE. O0/O1 remain unchanged. See `O2_LICM.md`; it supersedes historical
 statements in this readiness audit that LICM is not implemented.
+
+## O2.8 update
+
+Exception-aware ownership/escape analysis now exists without enabling a
+transform. Status is `IMPROVE_OWNERSHIP_ANALYSIS_FIRST`; see
+`O2_OWNERSHIP_ESCAPE_ANALYSIS.md`.

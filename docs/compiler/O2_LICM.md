@@ -83,3 +83,6 @@ LLVM may duplicate some length-load motion; Aether's semantic List summaries
 can prove preservation across operations whose native aliasing is less clear.
 Calls themselves, speculation, ARC optimization, GVN/CSE, and loop
 canonicalization remain deferred.
+
+O2.8 supplies future ownership/escape queries, but LICM does not consume them
+and never moves ARC operations. Generated SSA remains unchanged.

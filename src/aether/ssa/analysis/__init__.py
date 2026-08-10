@@ -40,6 +40,12 @@ from .alias_modref import (
     StructFieldLocation,
     SummaryAnalysis, UnknownReason as AliasUnknownReason,
 )
+from .ownership_escape import (
+    ArcPairCandidate, ArcPairClassification, EscapeFact, EscapeMode,
+    OwnershipEscapeAnalysis, OwnershipFrame, OwnershipFunctionSummary,
+    OwnershipState, OwnershipSummaryAnalysis, OwnershipUnknownReason,
+    PostDominatorAnalysis, is_reference_like,
+)
 
 __all__ = [
     "Constant",
@@ -75,4 +81,8 @@ __all__ = [
     "FieldLocation", "StructFieldLocation", "ObjectLocation",
     "CollectionStorageLocation", "CollectionLengthLocation", "MemoryLocation",
     "ParameterFieldEffect",
+    "ArcPairCandidate", "ArcPairClassification", "EscapeFact", "EscapeMode",
+    "OwnershipEscapeAnalysis", "OwnershipFrame", "OwnershipFunctionSummary",
+    "OwnershipState", "OwnershipSummaryAnalysis", "OwnershipUnknownReason",
+    "PostDominatorAnalysis", "is_reference_like",
 ]

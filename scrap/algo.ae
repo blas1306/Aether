@@ -12,12 +12,12 @@ struct MetodoPotencias {
 }
 
 MetodoPotencias Potencias(Matrix<double> A, Vector<double, Column> x0, double tol, int maxiter) {
-    norma = la.norm(x0);
+    double norma = la.norm(x0);
     Vector<double, Column> x = (1/la.norm(x0)) * x0;
     double vapOld = x' * A * x;
     int iter = 0;
 
-    for (k in 1:maxiter) {
+    while (iter < maxiter) {
         Vector<double, Column> y = A * x;
         x = (1/la.norm(y)) * y;
 
@@ -73,13 +73,13 @@ int main() {
     MetodoJacobi resultado = Jacobi(A, b, x0, 1e-8, 100);
 
     if (potencias.vap >= 1) {
-        println("vap: ", potencias.vap);
+        println("radio espectral: ", sqrt(potencias.vap));
         println("Jacobi puede no converger");
         println("Solution: ", resultado.x);
         println("Residual: ", resultado.res);
         println("Iterations: ", resultado.iter);
     } else {
-        println("vap: ", potencias.vap);
+        println("radio espectral: ", sqrt(potencias.vap));
         println("Jacobi converge");
         println("Solution: ", resultado.x);
         println("Residual: ", resultado.res);

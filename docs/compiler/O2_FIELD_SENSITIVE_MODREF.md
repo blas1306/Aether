@@ -65,3 +65,8 @@ including a known direct call that writes only `b`. It does not enable field-loa
 LICM, BCE, ARC removal, escape analysis, inlining, or devirtualization. The next
 recommended milestone is ownership/escape analysis: the measured general-read
 LICM set still lacks a complete nontrapping loaded-reference provenance story.
+
+## O2.8 integration
+
+`obj.a = value` now records a field escape of `value` without conflating a
+write to `obj.b`. Arbitrary nested loaded-reference paths remain conservative.

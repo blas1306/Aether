@@ -78,3 +78,9 @@ and escape transformations remain later work.
 Initial LICM intentionally excludes every memory-derived instruction, so it
 does not yet query mod/ref. These APIs remain the required authority for the
 recommended follow-up memory-read LICM; no logic was duplicated in O2.6.
+
+## O2.8 integration
+
+Ownership/escape reuses provenance and nominal locations but maintains a
+separate ownership graph. `NO_ALIAS` is not ARC redundancy and `MUST_ALIAS` is
+not equal ownership count. A field store separately marks its value as escaping.
