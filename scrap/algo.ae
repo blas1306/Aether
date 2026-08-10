@@ -28,6 +28,8 @@ MetodoPotencias Potencias(Matrix<double> A, Vector<double, Column> x0, double to
         }
 
         vapOld = vap;
+
+        iter += 1;
     }
 
     return MetodoPotencias(vapOld, x);

@@ -584,3 +584,11 @@ statements in this readiness audit that LICM is not implemented.
 Exception-aware ownership/escape analysis now exists without enabling a
 transform. Status is `IMPROVE_OWNERSHIP_ANALYSIS_FIRST`; see
 `O2_OWNERSHIP_ESCAPE_ANALYSIS.md`.
+
+## O2.8.5 update
+
+The productive-corpus ARC opportunity audit found a nonzero conservative local
+scope. Status is `PROCEED_TO_LOCAL_ARC_ELIMINATION`, limited to exact-identity,
+exception-free pairs satisfying all O2.8 proof gates. See
+`O2_ARC_OPPORTUNITY_AUDIT.md`; this milestone changes no ARC operation or
+optimization-profile membership.

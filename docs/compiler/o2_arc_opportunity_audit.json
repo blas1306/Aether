@@ -1,0 +1,602 @@
+{
+  "arc_changed": false,
+  "arc_counts": {
+    "initial_ir": {
+      "release": 0,
+      "retain": 0
+    },
+    "lifecycle_expanded_ir": {
+      "release": 924,
+      "retain": 53
+    },
+    "llvm": {
+      "classification": "LLVM_CANNOT_SEE_OWNERSHIP",
+      "source_operations": 977
+    },
+    "ssa": {
+      "release": 924,
+      "retain": 53
+    }
+  },
+  "audit": "O2.8.5",
+  "blocker_reasons": {
+    "interface-escape": 1,
+    "unknown-call-escape": 4
+  },
+  "candidate_classifications": {
+    "BLOCKED_ESCAPE_UNKNOWN": 3,
+    "BLOCKED_INTERFACE_BOX": 1,
+    "BLOCKED_METHODRESULT": 3,
+    "BLOCKED_NESTED_AGGREGATE": 4,
+    "BLOCKED_NORMAL_JOIN": 3,
+    "PROVABLE_NOW": 12
+  },
+  "candidate_count": 26,
+  "candidates": [
+    {
+      "classification": "BLOCKED_METHODRESULT",
+      "context": "METHODRESULT",
+      "function": "ConstructionError.message",
+      "loop_depth": 0,
+      "release": "entry:5",
+      "relevance": "LOW",
+      "retain": "entry:2",
+      "unknown_reasons": [],
+      "value": "this",
+      "workload": "corpus/exceptions/positive/constructor_failure.ae",
+      "workload_kind": "REAL_WORKLOAD"
+    },
+    {
+      "classification": "BLOCKED_METHODRESULT",
+      "context": "METHODRESULT",
+      "function": "ServiceError.message",
+      "loop_depth": 0,
+      "release": "entry:5",
+      "relevance": "LOW",
+      "retain": "entry:2",
+      "unknown_reasons": [],
+      "value": "this",
+      "workload": "corpus/exceptions/positive/method_interface_dispatch.ae",
+      "workload_kind": "REAL_WORKLOAD"
+    },
+    {
+      "classification": "BLOCKED_METHODRESULT",
+      "context": "METHODRESULT",
+      "function": "OwnedError.message",
+      "loop_depth": 0,
+      "release": "entry:5",
+      "relevance": "LOW",
+      "retain": "entry:2",
+      "unknown_reasons": [],
+      "value": "this",
+      "workload": "corpus/exceptions/positive/owned_aggregates_arc.ae",
+      "workload_kind": "REAL_WORKLOAD"
+    },
+    {
+      "classification": "BLOCKED_INTERFACE_BOX",
+      "context": "INTERFACE_BOX",
+      "function": "main",
+      "loop_depth": 0,
+      "release": "entry:12",
+      "relevance": "LOW",
+      "retain": "entry:3",
+      "unknown_reasons": [
+        "interface-escape",
+        "unknown-call-escape"
+      ],
+      "value": "1",
+      "workload": "examples/classes/implements_interface.ae",
+      "workload_kind": "REAL_WORKLOAD"
+    },
+    {
+      "classification": "PROVABLE_NOW",
+      "context": "EXCEPTION",
+      "function": "__ae_m11_Persistence__function_10_loadLedger",
+      "loop_depth": 0,
+      "release": "then0:6",
+      "relevance": "LOW",
+      "retain": "then0:4",
+      "unknown_reasons": [],
+      "value": "5",
+      "workload": "examples/expense_tracker/Main.ae",
+      "workload_kind": "REAL_WORKLOAD"
+    },
+    {
+      "classification": "BLOCKED_NORMAL_JOIN",
+      "context": "EXCEPTION",
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "loop_depth": 2,
+      "release": "then77:3",
+      "relevance": "HIGH",
+      "retain": "merge75:0",
+      "unknown_reasons": [],
+      "value": "626",
+      "workload": "examples/expense_tracker/Main.ae",
+      "workload_kind": "REAL_WORKLOAD"
+    },
+    {
+      "classification": "BLOCKED_NORMAL_JOIN",
+      "context": "EXCEPTION",
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "loop_depth": 2,
+      "release": "then79:3",
+      "relevance": "HIGH",
+      "retain": "merge77:0",
+      "unknown_reasons": [],
+      "value": "626",
+      "workload": "examples/expense_tracker/Main.ae",
+      "workload_kind": "REAL_WORKLOAD"
+    },
+    {
+      "classification": "PROVABLE_NOW",
+      "context": "LOCAL",
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "loop_depth": 2,
+      "release": "merge61:14",
+      "relevance": "HIGH",
+      "retain": "merge79:0",
+      "unknown_reasons": [],
+      "value": "626",
+      "workload": "examples/expense_tracker/Main.ae",
+      "workload_kind": "REAL_WORKLOAD"
+    },
+    {
+      "classification": "PROVABLE_NOW",
+      "context": "LOCAL",
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "loop_depth": 1,
+      "release": "merge87:12",
+      "relevance": "MEDIUM",
+      "retain": "merge87:0",
+      "unknown_reasons": [],
+      "value": "cond2.description.phi",
+      "workload": "examples/expense_tracker/Main.ae",
+      "workload_kind": "REAL_WORKLOAD"
+    },
+    {
+      "classification": "PROVABLE_NOW",
+      "context": "LOCAL",
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "loop_depth": 1,
+      "release": "merge87:13",
+      "relevance": "MEDIUM",
+      "retain": "merge87:1",
+      "unknown_reasons": [],
+      "value": "cond2.category.phi",
+      "workload": "examples/expense_tracker/Main.ae",
+      "workload_kind": "REAL_WORKLOAD"
+    },
+    {
+      "classification": "PROVABLE_NOW",
+      "context": "LOCAL",
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "loop_depth": 1,
+      "release": "merge87:11",
+      "relevance": "MEDIUM",
+      "retain": "merge87:2",
+      "unknown_reasons": [],
+      "value": "cond2.date.phi",
+      "workload": "examples/expense_tracker/Main.ae",
+      "workload_kind": "REAL_WORKLOAD"
+    },
+    {
+      "classification": "PROVABLE_NOW",
+      "context": "LOCAL",
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "loop_depth": 0,
+      "release": "merge90:5",
+      "relevance": "LOW",
+      "retain": "merge90:2",
+      "unknown_reasons": [],
+      "value": "430",
+      "workload": "examples/expense_tracker/Main.ae",
+      "workload_kind": "REAL_WORKLOAD"
+    },
+    {
+      "classification": "BLOCKED_ESCAPE_UNKNOWN",
+      "context": "LOCAL",
+      "function": "__ae_m11_Persistence__function_12_encodeLedger",
+      "loop_depth": 1,
+      "release": "then6:2",
+      "relevance": "MEDIUM",
+      "retain": "merge5:1",
+      "unknown_reasons": [
+        "unknown-call-escape"
+      ],
+      "value": "67",
+      "workload": "examples/expense_tracker/Main.ae",
+      "workload_kind": "REAL_WORKLOAD"
+    },
+    {
+      "classification": "PROVABLE_NOW",
+      "context": "LOCAL",
+      "function": "__ae_m11_Persistence__function_13_decodeFailure",
+      "loop_depth": 0,
+      "release": "entry:3",
+      "relevance": "LOW",
+      "retain": "entry:1",
+      "unknown_reasons": [],
+      "value": "0",
+      "workload": "examples/expense_tracker/Main.ae",
+      "workload_kind": "REAL_WORKLOAD"
+    },
+    {
+      "classification": "PROVABLE_NOW",
+      "context": "LOCAL",
+      "function": "__ae_m11_Persistence__function_15_readControlLine",
+      "loop_depth": 0,
+      "release": "merge2:7",
+      "relevance": "LOW",
+      "retain": "merge2:5",
+      "unknown_reasons": [],
+      "value": "29",
+      "workload": "examples/expense_tracker/Main.ae",
+      "workload_kind": "REAL_WORKLOAD"
+    },
+    {
+      "classification": "PROVABLE_NOW",
+      "context": "LOCAL",
+      "function": "__ae_m11_Persistence__function_17_requireHeaderLine",
+      "loop_depth": 0,
+      "release": "merge5:5",
+      "relevance": "LOW",
+      "retain": "merge5:3",
+      "unknown_reasons": [],
+      "value": "54",
+      "workload": "examples/expense_tracker/Main.ae",
+      "workload_kind": "REAL_WORKLOAD"
+    },
+    {
+      "classification": "BLOCKED_NESTED_AGGREGATE",
+      "context": "NESTED_AGGREGATE",
+      "function": "__ae_m7_Reports__function_16_transactionLabel",
+      "loop_depth": 0,
+      "release": "entry:7",
+      "relevance": "LOW",
+      "retain": "entry:0",
+      "unknown_reasons": [],
+      "value": "transaction",
+      "workload": "examples/expense_tracker/Main.ae",
+      "workload_kind": "REAL_WORKLOAD"
+    },
+    {
+      "classification": "PROVABLE_NOW",
+      "context": "LOCAL",
+      "function": "__ae_m9___entry____function_14_loadForCommand",
+      "loop_depth": 0,
+      "release": "then0:5",
+      "relevance": "LOW",
+      "retain": "then0:3",
+      "unknown_reasons": [],
+      "value": "5",
+      "workload": "examples/expense_tracker/Main.ae",
+      "workload_kind": "REAL_WORKLOAD"
+    },
+    {
+      "classification": "BLOCKED_NESTED_AGGREGATE",
+      "context": "NESTED_AGGREGATE",
+      "function": "__ae_m9___entry____function_17_reportLoadFailure",
+      "loop_depth": 0,
+      "release": "entry:10",
+      "relevance": "LOW",
+      "retain": "entry:0",
+      "unknown_reasons": [],
+      "value": "loaded",
+      "workload": "examples/expense_tracker/Main.ae",
+      "workload_kind": "REAL_WORKLOAD"
+    },
+    {
+      "classification": "BLOCKED_NORMAL_JOIN",
+      "context": "LOCAL",
+      "function": "__ae_m9___entry____function_17_runUtilityCommand",
+      "loop_depth": 0,
+      "release": "then4:4",
+      "relevance": "LOW",
+      "retain": "merge3:1",
+      "unknown_reasons": [],
+      "value": "40",
+      "workload": "examples/expense_tracker/Main.ae",
+      "workload_kind": "REAL_WORKLOAD"
+    },
+    {
+      "classification": "PROVABLE_NOW",
+      "context": "EXCEPTION",
+      "function": "__ae_m9___entry____function_7_runDemo",
+      "loop_depth": 0,
+      "release": "logic.merge5:33",
+      "relevance": "LOW",
+      "retain": "entry:2",
+      "unknown_reasons": [],
+      "value": "1",
+      "workload": "examples/expense_tracker/Main.ae",
+      "workload_kind": "REAL_WORKLOAD"
+    },
+    {
+      "classification": "PROVABLE_NOW",
+      "context": "EXCEPTION",
+      "function": "__ae_m9___entry____function_7_runDemo",
+      "loop_depth": 0,
+      "release": "logic.merge5:32",
+      "relevance": "LOW",
+      "retain": "entry:4",
+      "unknown_reasons": [],
+      "value": "2",
+      "workload": "examples/expense_tracker/Main.ae",
+      "workload_kind": "REAL_WORKLOAD"
+    },
+    {
+      "classification": "BLOCKED_ESCAPE_UNKNOWN",
+      "context": "EXCEPTION",
+      "function": "__ae_m9___entry____function_7_runDemo",
+      "loop_depth": 0,
+      "release": "logic.merge5:31",
+      "relevance": "LOW",
+      "retain": "entry:6",
+      "unknown_reasons": [
+        "unknown-call-escape"
+      ],
+      "value": "3",
+      "workload": "examples/expense_tracker/Main.ae",
+      "workload_kind": "REAL_WORKLOAD"
+    },
+    {
+      "classification": "BLOCKED_ESCAPE_UNKNOWN",
+      "context": "EXCEPTION",
+      "function": "__ae_m9___entry____function_7_runDemo",
+      "loop_depth": 0,
+      "release": "logic.merge5:30",
+      "relevance": "LOW",
+      "retain": "entry:8",
+      "unknown_reasons": [
+        "unknown-call-escape"
+      ],
+      "value": "4",
+      "workload": "examples/expense_tracker/Main.ae",
+      "workload_kind": "REAL_WORKLOAD"
+    },
+    {
+      "classification": "BLOCKED_NESTED_AGGREGATE",
+      "context": "NESTED_AGGREGATE",
+      "function": "__ae_m9___entry____function_7_runDemo",
+      "loop_depth": 0,
+      "release": "merge1:58",
+      "relevance": "LOW",
+      "retain": "merge1:56",
+      "unknown_reasons": [],
+      "value": "93",
+      "workload": "examples/expense_tracker/Main.ae",
+      "workload_kind": "REAL_WORKLOAD"
+    },
+    {
+      "classification": "BLOCKED_NESTED_AGGREGATE",
+      "context": "NESTED_AGGREGATE",
+      "function": "__ae_m9___entry____function_7_runDemo",
+      "loop_depth": 0,
+      "release": "merge1:69",
+      "relevance": "LOW",
+      "retain": "merge1:67",
+      "unknown_reasons": [],
+      "value": "106",
+      "workload": "examples/expense_tracker/Main.ae",
+      "workload_kind": "REAL_WORKLOAD"
+    }
+  ],
+  "contexts": {
+    "EXCEPTION": 7,
+    "INTERFACE_BOX": 1,
+    "LOCAL": 11,
+    "METHODRESULT": 3,
+    "NESTED_AGGREGATE": 4
+  },
+  "corpus": [
+    "examples/classes/counter_basic.ae",
+    "examples/classes/custom_constructor.ae",
+    "examples/classes/implements_interface.ae",
+    "examples/structs/custom_constructor_and_equality.ae",
+    "examples/aggregate_collections/particles.ae",
+    "examples/llvm/array_sum.ae",
+    "examples/llvm/list_for_sum.ae",
+    "examples/expense_tracker/Main.ae",
+    "examples/numerical_methods/main.ae",
+    "examples/nonlinear_systems/newton_system.ae",
+    "examples/probandoNR.ae",
+    "tests/aether/parity_corpus/strings.ae",
+    "corpus/exceptions/positive/owned_aggregates_arc.ae",
+    "corpus/exceptions/positive/constructor_failure.ae",
+    "corpus/exceptions/positive/method_interface_dispatch.ae"
+  ],
+  "corpus_failures": [
+    {
+      "error": "IRBackendUnsupportedFeatureError",
+      "message": "IRBackendUnsupportedFeatureError at line 34, column 8:\n  IR backend does not support assignment to 'f1' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- in",
+      "path": "examples/nonlinear_systems/newton_system.ae"
+    },
+    {
+      "error": "IRBackendUnsupportedFeatureError",
+      "message": "IRBackendUnsupportedFeatureError at line 22, column 7:\n  IR backend does not support assignment to 'solNR' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n-",
+      "path": "examples/probandoNR.ae"
+    }
+  ],
+  "corpus_revision": "2d4401cb79a9a786b224d38bfc616fe66ce96b0e",
+  "expected_unlock_count": 12,
+  "lifecycle_operations": {
+    "destroy": 3,
+    "exception_payload_or_event": 25,
+    "interface_box_or_carrier": 3,
+    "method_result": 13
+  },
+  "local_readiness": {
+    "after_exception_region_exclusion": 12,
+    "same_block": 5,
+    "straight_line_multi_block": 3
+  },
+  "loop_arc": {
+    "release": 55,
+    "retain": 11
+  },
+  "methodology": "read-only lifecycle-expanded O2 SSA census with exact-identity O2.8 pairing and complete CFG post-dominance",
+  "optimization_profiles_changed": false,
+  "precision_deltas": {
+    "constructor_methodresult": 3,
+    "exceptional_join": 0,
+    "nested_aggregate": 4,
+    "normal_join": 3
+  },
+  "precision_scorecard": [
+    {
+      "area": "constructor_methodresult",
+      "blocked_candidates": 3,
+      "current_precision": "coarse",
+      "implementation_cost": "MEDIUM",
+      "potential_unlocked": 3,
+      "risk": "MEDIUM"
+    },
+    {
+      "area": "nested_aggregate",
+      "blocked_candidates": 4,
+      "current_precision": "coarse",
+      "implementation_cost": "HIGH",
+      "potential_unlocked": 4,
+      "risk": "MEDIUM"
+    },
+    {
+      "area": "normal_join",
+      "blocked_candidates": 3,
+      "current_precision": "coarse",
+      "implementation_cost": "MEDIUM",
+      "potential_unlocked": 3,
+      "risk": "MEDIUM"
+    },
+    {
+      "area": "exceptional_join",
+      "blocked_candidates": 0,
+      "current_precision": "coarse",
+      "implementation_cost": "HIGH",
+      "potential_unlocked": 0,
+      "risk": "HIGH"
+    },
+    {
+      "area": "call_summaries",
+      "blocked_candidates": 0,
+      "current_precision": "direct-known/indirect-conservative",
+      "implementation_cost": "MEDIUM",
+      "potential_unlocked": 0,
+      "risk": "MEDIUM"
+    },
+    {
+      "area": "interface_boxes",
+      "blocked_candidates": 1,
+      "current_precision": "carrier-only/coarse box",
+      "implementation_cost": "HIGH",
+      "potential_unlocked": 1,
+      "risk": "HIGH"
+    }
+  ],
+  "production_codegen_changed": false,
+  "recommendation": "PROCEED_TO_LOCAL_ARC_ELIMINATION",
+  "schema_version": 1,
+  "workloads": [
+    {
+      "path": "examples/classes/counter_basic.ae",
+      "release": 1,
+      "tags": [
+        "CLASS"
+      ]
+    },
+    {
+      "path": "examples/classes/custom_constructor.ae",
+      "release": 1,
+      "tags": [
+        "CLASS",
+        "STRUCT",
+        "CONSTRUCTOR"
+      ]
+    },
+    {
+      "path": "examples/classes/implements_interface.ae",
+      "release": 2,
+      "retain": 1,
+      "tags": [
+        "CLASS",
+        "INTERFACE"
+      ]
+    },
+    {
+      "path": "examples/structs/custom_constructor_and_equality.ae",
+      "tags": [
+        "STRUCT",
+        "CONSTRUCTOR"
+      ]
+    },
+    {
+      "path": "examples/aggregate_collections/particles.ae",
+      "release": 4,
+      "tags": [
+        "COLLECTION"
+      ]
+    },
+    {
+      "path": "examples/llvm/array_sum.ae",
+      "release": 1,
+      "tags": [
+        "GENERAL"
+      ]
+    },
+    {
+      "path": "examples/llvm/list_for_sum.ae",
+      "release": 1,
+      "tags": [
+        "GENERAL"
+      ]
+    },
+    {
+      "path": "examples/expense_tracker/Main.ae",
+      "release": 889,
+      "retain": 39,
+      "tags": [
+        "EXPENSE_TRACKER"
+      ]
+    },
+    {
+      "path": "examples/numerical_methods/main.ae",
+      "tags": [
+        "NUMERICAL"
+      ]
+    },
+    {
+      "path": "tests/aether/parity_corpus/strings.ae",
+      "release": 6,
+      "retain": 1,
+      "tags": [
+        "STRING"
+      ]
+    },
+    {
+      "path": "corpus/exceptions/positive/owned_aggregates_arc.ae",
+      "release": 6,
+      "retain": 4,
+      "tags": [
+        "EXCEPTION"
+      ]
+    },
+    {
+      "path": "corpus/exceptions/positive/constructor_failure.ae",
+      "release": 8,
+      "retain": 4,
+      "tags": [
+        "STRUCT",
+        "CONSTRUCTOR",
+        "EXCEPTION"
+      ]
+    },
+    {
+      "path": "corpus/exceptions/positive/method_interface_dispatch.ae",
+      "release": 5,
+      "retain": 4,
+      "tags": [
+        "INTERFACE",
+        "EXCEPTION"
+      ]
+    }
+  ]
+}
