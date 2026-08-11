@@ -4,9 +4,11 @@ Update for O2.2: the first proof-gated transform is enabled only in O2. The
 exact scope, ordering, and conservative limitations are documented in
 `O2_BOUNDS_CHECK_ELIMINATION.md`; the broader readiness cautions below remain.
 
-O2.9 update: O2 now adds `LocalARCEliminator` after BCE and LICM and before
-final DCE. It removes only O2.8-authorized exact-provenance, same-block pairs;
-see `O2_LOCAL_ARC_ELIMINATION.md`. O0 and O1 remain unchanged.
+O2.9 update: O2 contains a fail-closed `LocalARCEliminator` after BCE and LICM
+and before final DCE. The corrected canonical semantic audit currently proves
+zero Phase-1 or Phase-2 production candidates, so O2 eliminates zero ARC pairs
+and remains at 53 retains / 924 releases. See
+`O2_ARC_OPPORTUNITY_AUDIT_CURRENT.md`. O0 and O1 remain unchanged.
 
 Status: audit complete, 2026-08-09. This document describes the compiler at
 the audited revision; it does not change the optimization-profile contract and

@@ -9,12 +9,17 @@ no escape or consume between retain and release, complete dominance and
 post-dominance, and no ambiguous phi, nested aggregate, call, store, invoke,
 throw, cleanup, catch, or rethrow. The measured upper bound is 12 real pairs;
 the deliberately stricter same-block/no-effect fast path contains 5 pairs.
-This audit implemented no such pass. O2.9 subsequently implements only this
-Phase-1 class; this document and its 53/924 historical JSON baseline are
-intentionally not overwritten. Post-O2.9 measurement is 49 retains and 920
-releases: four pairs disappear. The old five-site count included identities
-that fail the transformation's stricter exact-provenance/no-phi rule. Loop ARC
-remains 11 retains and 55 releases.
+This audit implemented no such pass. Its `PROVABLE_NOW` result was later found
+to omit mandatory exact-provenance and unsupported-ownership-category checks.
+This document and its 53/924 JSON are retained as historical evidence, not a
+current proof. The corrected report is
+`O2_ARC_OPPORTUNITY_AUDIT_CURRENT.md`: zero pairs are semantically provable and
+current O2 remains at 53 retains / 924 releases.
+
+Phase 2 consumes the same canonical semantic decision as Phase 1 and adds
+dominance, post-dominance, a unique unconditional normal-edge walk, and a
+barrier-free region scan. None of the three historically reported multi-block
+sites passes the corrected semantic prerequisite.
 
 ## Methodology and corpus
 

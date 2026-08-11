@@ -74,8 +74,9 @@ post-dominance, and mutual-recursion probes pass together with O2.7 (13 tests).
 Historical O2.6.2 traffic remains 2 retains, 16 releases, and 0 proven pairs;
 that audit is not rewritten. A production corpus counter is not yet wired.
 
-O2.9 follow-up: **same-block local ARC elimination is enabled**. Four of the
-five historical fast-path sites meet its additional exact-provenance/no-phi
-contract; the fifth remains preserved. Broader ownership precision is still
-required before multi-block, aggregate, constructor, interface, or exceptional
-cases can be transformed. Stack promotion and box elimination remain deferred.
+O2.9 follow-up: same-block and straight-line multi-block infrastructure is
+enabled only in O2, but the corrected canonical semantic authority proves zero
+production candidates. The old audit omitted mandatory exact provenance and
+unsupported-category checks. Current O2 therefore preserves all pairs at
+53/924. Exact provenance is the largest measured precision blocker. Stack
+promotion and box elimination remain deferred.

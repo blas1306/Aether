@@ -8,7 +8,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum, Flag, auto
 
-from aether.ir.types import ArrayType, ClassRefType, InterfaceType, ListType, NullableType, StringType
+from aether.ir.types import (
+    ArrayType, ClassRefType, InterfaceType, ListType, MethodResultType,
+    NullableType, StringType, StructType,
+)
 from aether.ssa import model as m
 from aether.ssa.cfg import predecessors, reachable_blocks, successor_edges
 
@@ -57,6 +60,40 @@ class ArcPairClassification(Enum):
     BLOCKED_BY_EXCEPTION = "blocked-by-exception"
     BLOCKED_BY_ALIAS = "blocked-by-alias"
     NOT_REDUNDANT = "not-redundant"
+
+
+class ArcPairSemanticStatus(Enum):
+    SEMANTICALLY_PROVABLE = "semantically-provable"
+    NOT_SEMANTICALLY_PROVABLE = "not-semantically-provable"
+
+
+class ArcPairSemanticReason(Enum):
+    PROVENANCE_UNKNOWN = "provenance-unknown"
+    METHODRESULT = "methodresult"
+    NESTED_AGGREGATE = "nested-aggregate"
+    INTERFACE = "interface"
+    CONSTRUCTOR_LIFECYCLE = "constructor-lifecycle"
+    ESCAPE = "escape"
+    OWNERSHIP_CONFLICT = "ownership-conflict"
+    EXCEPTION_LIFETIME = "exception-lifetime"
+    NORMAL_JOIN = "normal-join"
+    ALIAS = "alias"
+    NOT_REDUNDANT = "not-redundant"
+
+
+@dataclass(frozen=True)
+class ArcPairSemanticDecision:
+    """Canonical, phase-independent ARC pair safety decision."""
+
+    status: ArcPairSemanticStatus
+    reasons: frozenset[ArcPairSemanticReason] = frozenset()
+    provenance: Provenance | None = None
+    escape: EscapeFact | None = None
+    ownership: OwnershipState = OwnershipState.UNKNOWN
+
+    @property
+    def semantically_provable(self) -> bool:
+        return self.status is ArcPairSemanticStatus.SEMANTICALLY_PROVABLE
 
 
 @dataclass(frozen=True)
@@ -126,6 +163,17 @@ def is_reference_like(type_) -> bool:
     return is_reference_like(type_.inner) if isinstance(type_, NullableType) else isinstance(type_, _REFERENCE_TYPES)
 
 
+def has_unsupported_nested_owned_payload(type_) -> bool:
+    if isinstance(type_, NullableType):
+        return has_unsupported_nested_owned_payload(type_.inner)
+    if isinstance(type_, (ArrayType, ListType)):
+        element = type_.element
+        return (is_reference_like(element)
+                or isinstance(element, (StructType, MethodResultType))
+                or has_unsupported_nested_owned_payload(element))
+    return False
+
+
 def _call_arguments(instruction) -> tuple[m.SSAValue, ...]:
     arguments = getattr(instruction, "arguments", ())
     receiver = getattr(instruction, "receiver", None)
@@ -181,6 +229,7 @@ class OwnershipEscapeAnalysis:
         self._escapes: dict[ProvenanceRoot, EscapeFact] = {}
         self._in: dict[str, OwnershipFrame] = {}
         self._out: dict[str, OwnershipFrame] = {}
+        self._before: dict[tuple[str, int], OwnershipFrame] = {}
         self._exception_reachable = self._exceptional_reachability()
         self._analyze()
 
@@ -215,6 +264,8 @@ class OwnershipEscapeAnalysis:
                 frame = OwnershipFrame(tuple(sorted(state.items(), key=lambda item: item[0].name)))
                 if self._in.get(name) != frame: self._in[name] = frame; changed = True
                 for index, instruction in enumerate(blocks[name].instructions):
+                    self._before[(name, index)] = OwnershipFrame(tuple(sorted(
+                        state.items(), key=lambda item: item[0].name)))
                     self._transfer(instruction, state, name, index)
                 frame = OwnershipFrame(tuple(sorted(state.items(), key=lambda item: item[0].name)))
                 if self._out.get(name) != frame: self._out[name] = frame; changed = True
@@ -302,6 +353,10 @@ class OwnershipEscapeAnalysis:
         if block is not None and block in self._out: return self._out[block].state(value)
         return self._states.get(value, OwnershipState.UNKNOWN)
 
+    def ownership_state_before(self, value: m.SSAValue, block: str,
+                               index: int) -> OwnershipState:
+        return self._before.get((block, index), OwnershipFrame()).state(value)
+
     def provenance(self, value: m.SSAValue) -> Provenance: return self.aliases.provenance(value)
     def is_fresh(self, value: m.SSAValue) -> bool:
         provenance = self.provenance(value)
@@ -349,6 +404,49 @@ class OwnershipEscapeAnalysis:
             if candidate == pair:
                 return candidate.classification
         return ArcPairClassification.NOT_REDUNDANT
+
+    def classify_arc_pair(self, pair: ArcPairCandidate) -> ArcPairSemanticDecision:
+        """Classify mandatory semantic safety before any phase structure check.
+
+        This is the sole authority consumed by audits and productive ARC
+        transforms.  In particular, an unknown provenance reason can never be
+        promoted merely because the retain and release use the same SSA name.
+        """
+        provenance = self.provenance(pair.value)
+        escape = self.escape_fact(pair.value)
+        ownership = self.ownership_state_before(
+            pair.value, pair.retain_block, pair.retain_index,
+        )
+        reasons: set[ArcPairSemanticReason] = set()
+        if not provenance.exact or len(provenance.roots) != 1:
+            reasons.add(ArcPairSemanticReason.PROVENANCE_UNKNOWN)
+        type_ = pair.value.type
+        if isinstance(type_, MethodResultType):
+            reasons.add(ArcPairSemanticReason.METHODRESULT)
+        if isinstance(type_, StructType) or has_unsupported_nested_owned_payload(type_):
+            reasons.add(ArcPairSemanticReason.NESTED_AGGREGATE)
+        if isinstance(type_, InterfaceType):
+            reasons.add(ArcPairSemanticReason.INTERFACE)
+        lowered_name = self.function.name.lower()
+        if "constructor" in lowered_name or lowered_name.endswith(".__init__"):
+            reasons.add(ArcPairSemanticReason.CONSTRUCTOR_LIFECYCLE)
+        classification = self.classify_pair(pair)
+        if escape.may_escape or classification is ArcPairClassification.NEEDS_ESCAPE_INFO:
+            reasons.add(ArcPairSemanticReason.ESCAPE)
+        if escape.exceptional or classification is ArcPairClassification.BLOCKED_BY_EXCEPTION:
+            reasons.add(ArcPairSemanticReason.EXCEPTION_LIFETIME)
+        if classification is ArcPairClassification.NEEDS_PATH_SENSITIVE_OWNERSHIP:
+            reasons.add(ArcPairSemanticReason.NORMAL_JOIN)
+        if classification is ArcPairClassification.BLOCKED_BY_ALIAS:
+            reasons.add(ArcPairSemanticReason.ALIAS)
+        if classification is ArcPairClassification.NOT_REDUNDANT:
+            reasons.add(ArcPairSemanticReason.NOT_REDUNDANT)
+        if ownership in (OwnershipState.CONSUMED, OwnershipState.UNKNOWN):
+            reasons.add(ArcPairSemanticReason.OWNERSHIP_CONFLICT)
+        status = (ArcPairSemanticStatus.NOT_SEMANTICALLY_PROVABLE if reasons
+                  else ArcPairSemanticStatus.SEMANTICALLY_PROVABLE)
+        return ArcPairSemanticDecision(status, frozenset(reasons), provenance,
+                                       escape, ownership)
 
     def verify(self) -> None:
         for frame in (*self._in.values(), *self._out.values()):

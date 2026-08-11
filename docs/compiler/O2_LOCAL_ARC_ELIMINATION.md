@@ -1,4 +1,4 @@
-# O2.9 local ARC elimination, Phase 1
+# O2.9 local ARC elimination, Phases 1 and 2
 
 O2.9 enables `LocalARCEliminator` only in O2, after proven BCE and conservative
 LICM and before final SSA DCE. O0 and O1 are unchanged. The pass removes both
@@ -10,8 +10,17 @@ semantics, stack allocation, CFG, or any other lifecycle operation.
 O2.8 `OwnershipEscapeAnalysis.classify_pair` is the proof authority. A pair
 must be `LOCALLY_PROVABLE` (the programmatic form of the audit's
 `PROVABLE_NOW`) and satisfy a second fail-closed structural audit. Both calls
-must be in one block, ordered retain before release, use the same SSA value,
-and have one exact provenance root. Alias `MUST_ALIAS` is insufficient.
+use the same SSA value with exactly one exact provenance root. Alias
+`MUST_ALIAS` is insufficient.
+
+Phase 1 handles ordered pairs in one block. Phase 2 handles distinct blocks
+only when the retain block dominates the release block, the release block
+post-dominates the retain block, and walking the canonical CFG yields one
+acyclic chain of unconditional normal `jump` edges. Every entered block has
+exactly one predecessor, so branches, joins, alternate exits and loop
+backedges fail closed. The walk uses the existing CFG, dominance,
+post-dominance and reachability infrastructure; it does not infer order from
+the block list.
 
 The intervening region must contain no call/invoke, may-throw operation,
 exception pack/destroy/catch/throw/rethrow/propagation, store, return, interface
@@ -24,26 +33,26 @@ eligible instructions are direct SSA calls whose builtin is exactly
 
 Same-block pairs in loops are permitted because the proof and region are
 recomputed on the complete loop CFG; a loop-carried phi is rejected. Calls are
-always barriers in Phase 1 even when summaries exist. Unknown or contradictory
+always barriers in both phases even when summaries exist. Unknown or contradictory
 facts preserve both calls.
 
 ## Statistics and verification
 
-The pass reports retain instructions examined, candidate pairs, Phase-1
-eligible pairs, pairs eliminated, and blockers for identity, call, escape,
-ownership operation, exception, aggregate, MethodResult/constructor,
-interface, and unsupported structure. SSA verification runs after the pass in
+The pass separately reports same-block and multi-block candidates/eliminations,
+plus blockers for nonunique path, branch, join, dominance, post-dominance,
+backedge, identity, call, escape, ownership operation, exception, aggregate,
+MethodResult/constructor, interface, and unsupported structure. SSA verification runs after the pass in
 the normal optimizer pipeline. Assertions recheck authority, order,
 same-block scope, non-overlap and all-or-nothing removal.
 
 ## Measured delta
 
-The immutable O2.8.5 baseline remains **53 retains / 924 releases**, including
-**11 / 55** in loops and five audit-level same-block candidates. With O2.9 the
-same corpus contains **49 retains / 920 releases**. Four pairs are removed.
-Loop traffic remains **11 / 55**: remaining loop-local audit candidates are
-phi-derived and fail the stricter exact-provenance/no-phi rule. The fifth old
-site is not promoted merely to reach the upper bound.
+The immutable O2.8.5 baseline is **53 retains / 924 releases**. The corrected
+canonical analysis proves zero productive pairs, so current O2 also measures
+**53 / 924** and eliminates zero pairs. Phase 1 and Phase 2 each have zero
+eligible production-corpus candidates. The pass remains enabled as dormant,
+fail-closed infrastructure; no candidate is promoted to preserve a historical
+count. See `O2_ARC_OPPORTUNITY_AUDIT_CURRENT.md`.
 
 LLVM sees typed Aether runtime calls with observable lifecycle semantics and
 cannot generally infer this ownership cancellation. This gives Aether-specific

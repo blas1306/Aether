@@ -3,13 +3,12 @@ from __future__ import annotations
 
 from collections import Counter
 
-from aether.ir.types import (
-    ArrayType, InterfaceType, ListType, MethodResultType, NullableType,
-    StructType,
-)
+from aether.analysis.dominators import DominatorAnalysis
 from aether.ssa import model as m
+from aether.ssa.cfg import SSACFGBuilder, predecessors, successor_edges
 from aether.ssa.analysis import (
-    ArcPairClassification, OwnershipEscapeAnalysis, is_reference_like,
+    ArcPairClassification, ArcPairSemanticReason, OwnershipEscapeAnalysis,
+    OwnershipUnknownReason, PostDominatorAnalysis,
 )
 
 from .result import SSAOptimizationResult
@@ -33,23 +32,19 @@ _METHOD_RESULT = (
 )
 
 
-def _has_nested_owned_payload(type_) -> bool:
-    if isinstance(type_, NullableType):
-        return _has_nested_owned_payload(type_.inner)
-    if isinstance(type_, (ArrayType, ListType)):
-        element = type_.element
-        return is_reference_like(element) or isinstance(
-            element, (StructType, MethodResultType)
-        ) or _has_nested_owned_payload(element)
-    return False
-
-
 class LocalARCEliminator:
-    """Remove only same-block retain/release pairs authorized by O2.8."""
+    """Remove proven same-block and straight-line multi-block ARC pairs."""
 
     _STAT_KEYS = (
         "retain_instructions_examined", "candidate_pairs",
         "phase1_eligible_pairs", "pairs_eliminated",
+        "same_block_candidates", "same_block_eliminated",
+        "multi_block_candidates", "multi_block_eliminated",
+        "blocked_by_nonunique_path", "blocked_by_branch", "blocked_by_join",
+        "blocked_by_missing_dominance", "blocked_by_missing_post_dominance",
+        "blocked_by_loop_backedge",
+        "blocked_by_ownership_interference",
+        "blocked_by_unsupported_ownership_category",
         "blocked_by_different_identity", "blocked_by_call",
         "blocked_by_escape", "blocked_by_ownership_operation",
         "blocked_by_exception", "blocked_by_aggregate",
@@ -71,6 +66,10 @@ class LocalARCEliminator:
     def _run_function(self, function: m.SSAFunction, stats: Counter[str]):
         analysis = OwnershipEscapeAnalysis(function)
         analysis.verify()
+        dominators = DominatorAnalysis(
+            SSACFGBuilder().build(function), entry_block=function.entry_block,
+        ).compute()
+        postdominators = PostDominatorAnalysis(function)
         stats["retain_instructions_examined"] += sum(
             isinstance(i, (m.SSACall, m.SSAInvoke))
             and i.builtin == "__aether_retain"
@@ -81,22 +80,40 @@ class LocalARCEliminator:
         blocks = {block.name: block for block in function.blocks}
         removals: dict[str, set[int]] = {}
         for pair in pairs:
-            reason = self._blocked_reason(function, blocks, analysis, pair)
+            multi_block = pair.retain_block != pair.release_block
+            stats["multi_block_candidates" if multi_block else "same_block_candidates"] += 1
+            reason = self._blocked_reason(
+                function, blocks, analysis, pair, dominators, postdominators,
+            )
             if reason is not None:
                 stats[reason] += 1
+                if reason == "blocked_by_ownership_operation":
+                    stats["blocked_by_ownership_interference"] += 1
+                if reason in {
+                    "blocked_by_aggregate", "blocked_by_methodresult_constructor",
+                    "blocked_by_interface",
+                }:
+                    stats["blocked_by_unsupported_ownership_category"] += 1
                 continue
-            stats["phase1_eligible_pairs"] += 1
+            if not multi_block:
+                stats["phase1_eligible_pairs"] += 1
             # Assertions make the proof boundary explicit in debug/test runs.
             assert analysis.classify_pair(pair) is ArcPairClassification.LOCALLY_PROVABLE
-            assert pair.retain_block == pair.release_block
-            assert pair.retain_index < pair.release_index
-            selected = removals.setdefault(pair.retain_block, set())
-            if pair.retain_index in selected or pair.release_index in selected:
+            assert (pair.retain_block != pair.release_block
+                    or pair.retain_index < pair.release_index)
+            retain_selected = removals.setdefault(pair.retain_block, set())
+            release_selected = removals.setdefault(pair.release_block, set())
+            if (pair.retain_index in retain_selected
+                    or pair.release_index in release_selected):
                 stats["blocked_by_ownership_operation"] += 1
-                stats["phase1_eligible_pairs"] -= 1
+                stats["blocked_by_ownership_interference"] += 1
+                if not multi_block:
+                    stats["phase1_eligible_pairs"] -= 1
                 continue
-            selected.update((pair.retain_index, pair.release_index))
+            retain_selected.add(pair.retain_index)
+            release_selected.add(pair.release_index)
             stats["pairs_eliminated"] += 1
+            stats["multi_block_eliminated" if multi_block else "same_block_eliminated"] += 1
 
         if not removals:
             return function, 0
@@ -109,28 +126,78 @@ class LocalARCEliminator:
             function.name, list(function.parameters), function.return_type,
             new_blocks, function.entry_block, function.may_throw,
         )
-        return rewritten, sum(len(indexes) // 2 for indexes in removals.values())
+        return rewritten, sum(map(len, removals.values())) // 2
 
-    def _blocked_reason(self, function, blocks, analysis, pair) -> str | None:
-        if pair.retain_block != pair.release_block or pair.retain_index >= pair.release_index:
+    def classify_candidate(self, function: m.SSAFunction,
+                           analysis: OwnershipEscapeAnalysis, pair) -> str | None:
+        """Return the productive pass rejection reason, or ``None``."""
+        blocks = {block.name: block for block in function.blocks}
+        dominators = DominatorAnalysis(
+            SSACFGBuilder().build(function), entry_block=function.entry_block,
+        ).compute()
+        postdominators = PostDominatorAnalysis(function)
+        return self._blocked_reason(function, blocks, analysis, pair,
+                                    dominators, postdominators)
+
+    def is_same_block_phase1_eligible(self, function, analysis, pair) -> bool:
+        return (pair.retain_block == pair.release_block
+                and self.classify_candidate(function, analysis, pair) is None)
+
+    def is_linear_multiblock_phase2_eligible(self, function, analysis, pair) -> bool:
+        return (pair.retain_block != pair.release_block
+                and self.classify_candidate(function, analysis, pair) is None)
+
+    def _blocked_reason(self, function, blocks, analysis, pair,
+                        dominators, postdominators) -> str | None:
+        if pair.retain_block == pair.release_block and pair.retain_index >= pair.release_index:
             return "blocked_by_unsupported_structure"
-        provenance = analysis.provenance(pair.value)
-        if not provenance.exact:
-            return "blocked_by_different_identity"
-        type_ = pair.value.type
-        if isinstance(type_, InterfaceType):
-            return "blocked_by_interface"
-        if isinstance(type_, MethodResultType):
-            return "blocked_by_methodresult_constructor"
-        if isinstance(type_, StructType) or _has_nested_owned_payload(type_):
-            return "blocked_by_aggregate"
-        lowered_name = function.name.lower()
-        if "constructor" in lowered_name or lowered_name.endswith(".__init__"):
-            return "blocked_by_methodresult_constructor"
+        semantic = analysis.classify_arc_pair(pair)
+        if not semantic.semantically_provable:
+            reasons = semantic.reasons
+            if ArcPairSemanticReason.PROVENANCE_UNKNOWN in reasons:
+                return "blocked_by_different_identity"
+            if ArcPairSemanticReason.INTERFACE in reasons:
+                return "blocked_by_interface"
+            if ArcPairSemanticReason.NESTED_AGGREGATE in reasons:
+                return "blocked_by_aggregate"
+            if reasons & {ArcPairSemanticReason.METHODRESULT,
+                          ArcPairSemanticReason.CONSTRUCTOR_LIFECYCLE}:
+                return "blocked_by_methodresult_constructor"
+            if ArcPairSemanticReason.EXCEPTION_LIFETIME in reasons:
+                return "blocked_by_exception"
+            if ArcPairSemanticReason.ESCAPE in reasons:
+                if semantic.escape and semantic.escape.reasons & {
+                    OwnershipUnknownReason.UNKNOWN_CALL_ESCAPE,
+                    OwnershipUnknownReason.INDIRECT_CALL_ESCAPE,
+                }:
+                    return "blocked_by_call"
+                return "blocked_by_escape"
+            if ArcPairSemanticReason.OWNERSHIP_CONFLICT in reasons:
+                return "blocked_by_ownership_operation"
+            return "blocked_by_unsupported_structure"
 
-        block = blocks[pair.retain_block]
-        region = block.instructions[pair.retain_index + 1:pair.release_index]
+        if pair.retain_block == pair.release_block:
+            region = blocks[pair.retain_block].instructions[
+                pair.retain_index + 1:pair.release_index
+            ]
+        else:
+            if not dominators.dominates(pair.retain_block, pair.release_block):
+                return "blocked_by_missing_dominance"
+            if not postdominators.post_dominates(pair.release_block, pair.retain_block):
+                return "blocked_by_missing_post_dominance"
+            path, reason = self._straight_line_path(function, blocks, pair)
+            if reason is not None:
+                return reason
+            assert path is not None
+            region = []
+            for index, name in enumerate(path):
+                instructions = blocks[name].instructions
+                start = pair.retain_index + 1 if index == 0 else 0
+                stop = pair.release_index if index == len(path) - 1 else len(instructions) - 1
+                region.extend(instructions[start:stop])
         for instruction in region:
+            if isinstance(instruction, m.SSAPhi):
+                return "blocked_by_nonunique_path"
             if isinstance(instruction, _EXCEPTION_OPERATIONS):
                 return "blocked_by_exception"
             if isinstance(instruction, _CALLS):
@@ -150,3 +217,32 @@ class LocalARCEliminator:
         if analysis.classify_pair(pair) is not ArcPairClassification.LOCALLY_PROVABLE:
             return "blocked_by_escape" if analysis.may_escape(pair.value) else "blocked_by_unsupported_structure"
         return None
+
+    @staticmethod
+    def _straight_line_path(function, blocks, pair):
+        """Prove one acyclic chain of unconditional normal CFG edges."""
+        pred = predecessors(function)
+        current = pair.retain_block
+        path = []
+        seen = set()
+        while True:
+            if current in seen:
+                return None, "blocked_by_loop_backedge"
+            seen.add(current)
+            path.append(current)
+            if current == pair.release_block:
+                return tuple(path), None
+            block = blocks[current]
+            edges = successor_edges(block)
+            if any(edge.kind != "normal" for edge in edges):
+                return None, "blocked_by_exception"
+            if not block.instructions or not isinstance(block.instructions[-1], m.SSAJump):
+                return None, "blocked_by_branch" if len(edges) > 1 else "blocked_by_nonunique_path"
+            if len(edges) != 1:
+                return None, "blocked_by_nonunique_path"
+            target = edges[0].target
+            if target in seen:
+                return None, "blocked_by_loop_backedge"
+            if len(pred.get(target, ())) != 1:
+                return None, "blocked_by_join"
+            current = target

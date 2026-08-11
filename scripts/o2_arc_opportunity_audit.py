@@ -15,8 +15,14 @@ import subprocess
 from aether.benchmark import _optimized_ssa
 from aether.optimization import optimization_profile
 from aether.ir.types import InterfaceType, MethodResultType, StructType, StringType
-from aether.ssa.analysis import ArcPairClassification, LoopAnalysis, OwnershipEscapeAnalysis
+from aether.analysis.dominators import DominatorAnalysis
+from aether.ssa.analysis import (
+    ArcPairSemanticReason, LoopAnalysis, OwnershipEscapeAnalysis,
+    PostDominatorAnalysis,
+)
+from aether.ssa.cfg import SSACFGBuilder
 from aether.ssa.model import SSACall, SSAInvoke
+from aether.ssa.optimizer import LocalARCEliminator
 
 
 DEFAULT_CORPUS = (
@@ -78,23 +84,28 @@ def _context(function, value, retain_block: str, release_block: str) -> str:
     return "LOCAL"
 
 
-def _classification(pair, context: str) -> str:
-    # O2.8's generic exact-value pairing cannot describe ownership of these
-    # packaging constructs yet.  They remain opportunities, never proofs.
-    if context == "METHODRESULT": return "BLOCKED_METHODRESULT"
-    if context == "CONSTRUCTOR_LIFECYCLE": return "BLOCKED_CONSTRUCTOR_LIFECYCLE"
-    if context == "NESTED_AGGREGATE": return "BLOCKED_NESTED_AGGREGATE"
-    if context == "INTERFACE_BOX": return "BLOCKED_INTERFACE_BOX"
-    if pair.classification is ArcPairClassification.LOCALLY_PROVABLE:
-        return "PROVABLE_NOW"
-    if pair.classification is ArcPairClassification.BLOCKED_BY_EXCEPTION:
-        return "BLOCKED_EXCEPTION_JOIN"
-    if pair.classification is ArcPairClassification.NEEDS_PATH_SENSITIVE_OWNERSHIP:
+def _classification(decision) -> str:
+    reasons = decision.reasons
+    if ArcPairSemanticReason.PROVENANCE_UNKNOWN in reasons:
+        return "BLOCKED_PROVENANCE"
+    if ArcPairSemanticReason.METHODRESULT in reasons:
+        return "BLOCKED_METHODRESULT"
+    if ArcPairSemanticReason.CONSTRUCTOR_LIFECYCLE in reasons:
+        return "BLOCKED_CONSTRUCTOR_LIFECYCLE"
+    if ArcPairSemanticReason.NESTED_AGGREGATE in reasons:
+        return "BLOCKED_NESTED_AGGREGATE"
+    if ArcPairSemanticReason.NORMAL_JOIN in reasons:
         return "BLOCKED_NORMAL_JOIN"
-    if pair.classification is ArcPairClassification.BLOCKED_BY_ALIAS:
-        return "BLOCKED_ALIAS_UNKNOWN"
-    if pair.classification is ArcPairClassification.NEEDS_ESCAPE_INFO:
+    if ArcPairSemanticReason.ESCAPE in reasons:
         return "BLOCKED_ESCAPE_UNKNOWN"
+    if ArcPairSemanticReason.INTERFACE in reasons:
+        return "BLOCKED_INTERFACE_BOX"
+    if ArcPairSemanticReason.EXCEPTION_LIFETIME in reasons:
+        return "BLOCKED_EXCEPTION_JOIN"
+    if ArcPairSemanticReason.ALIAS in reasons:
+        return "BLOCKED_ALIAS_UNKNOWN"
+    if decision.semantically_provable:
+        return "PROVABLE_NOW"
     return "NOT_REDUNDANT"
 
 
@@ -109,6 +120,13 @@ def _safe_same_block(function, pair) -> bool:
 def generate(root: Path, corpus: tuple[str, ...] = DEFAULT_CORPUS) -> dict:
     counts, loop_counts, lifecycle, blockers, contexts, escape_reasons = Counter(), Counter(), Counter(), Counter(), Counter(), Counter()
     candidates, workloads, failures = [], [], []
+    historical_path = root / "docs/compiler/o2_arc_opportunity_audit.json"
+    historical = json.loads(historical_path.read_text(encoding="utf-8"))
+    historical_by_site = {
+        (item["workload"], item["function"], item["retain"], item["release"]):
+            item["classification"]
+        for item in historical.get("candidates", ())
+    }
     same_block = straight_line = exception_free = 0
     for relative in corpus:
         path = root / relative
@@ -132,14 +150,28 @@ def generate(root: Path, corpus: tuple[str, ...] = DEFAULT_CORPUS) -> dict:
                         counts[kind] += 1; local[kind] += 1
                         depth = depths.get(block.name, 0)
                         if depth: loop_counts[kind] += 1
+                dominators = DominatorAnalysis(
+                    SSACFGBuilder().build(function),
+                    entry_block=function.entry_block,
+                ).compute()
+                postdominators = PostDominatorAnalysis(function)
+                optimizer = LocalARCEliminator()
                 for pair in analysis.candidate_arc_pairs():
                     context = _context(function, pair.value, pair.retain_block, pair.release_block)
-                    classification = _classification(pair, context)
+                    decision = analysis.classify_arc_pair(pair)
+                    classification = _classification(decision)
+                    productive_rejection = optimizer.classify_candidate(
+                        function, analysis, pair,
+                    )
                     depth = max(depths.get(pair.retain_block, 0), depths.get(pair.release_block, 0))
                     safe = classification == "PROVABLE_NOW"
-                    same = safe and _safe_same_block(function, pair)
-                    multi = safe and pair.retain_block != pair.release_block
-                    has_exception = pair.classification is ArcPairClassification.BLOCKED_BY_EXCEPTION
+                    same = optimizer.is_same_block_phase1_eligible(
+                        function, analysis, pair,
+                    )
+                    multi = optimizer.is_linear_multiblock_phase2_eligible(
+                        function, analysis, pair,
+                    )
+                    has_exception = ArcPairSemanticReason.EXCEPTION_LIFETIME in decision.reasons
                     same_block += int(same); straight_line += int(multi); exception_free += int(safe and not has_exception)
                     blockers[classification] += 1; contexts[context] += 1
                     for reason in pair.reasons: escape_reasons[reason.value] += 1
@@ -149,6 +181,32 @@ def generate(root: Path, corpus: tuple[str, ...] = DEFAULT_CORPUS) -> dict:
                         "retain": f"{pair.retain_block}:{pair.retain_index}",
                         "release": f"{pair.release_block}:{pair.release_index}",
                         "classification": classification, "context": context,
+                        "semantic_status": decision.status.value,
+                        "semantic_reasons": sorted(reason.value for reason in decision.reasons),
+                        "provenance": {
+                            "exact": decision.provenance.exact,
+                            "reason": (decision.provenance.reason.value
+                                       if decision.provenance.reason else None),
+                            "roots": [f"{root.kind.value}:{root.identity}"
+                                      for root in sorted(decision.provenance.roots)],
+                        },
+                        "escape": {
+                            "may_escape": decision.escape.may_escape,
+                            "normal": decision.escape.normal,
+                            "exceptional": decision.escape.exceptional,
+                        },
+                        "ownership_state": decision.ownership.value,
+                        "dominates": dominators.dominates(pair.retain_block, pair.release_block),
+                        "post_dominates": postdominators.post_dominates(
+                            pair.release_block, pair.retain_block),
+                        "productive_classification": ("ELIGIBLE" if productive_rejection is None
+                                                       else "REJECTED"),
+                        "final_rejection_reason": productive_rejection,
+                        "historical_classification": historical_by_site.get((
+                            relative, function.name,
+                            f"{pair.retain_block}:{pair.retain_index}",
+                            f"{pair.release_block}:{pair.release_index}",
+                        )),
                         "loop_depth": depth, "relevance": "HIGH" if depth > 1 else "MEDIUM" if depth == 1 else "LOW",
                         "unknown_reasons": sorted(reason.value for reason in pair.reasons),
                     })
@@ -158,6 +216,7 @@ def generate(root: Path, corpus: tuple[str, ...] = DEFAULT_CORPUS) -> dict:
     candidates.sort(key=lambda x: (x["workload"], x["function"], x["retain"], x["release"]))
     provable = blockers["PROVABLE_NOW"]
     deltas = {
+        "exact_provenance": blockers["BLOCKED_PROVENANCE"],
         "constructor_methodresult": blockers["BLOCKED_CONSTRUCTOR_LIFECYCLE"] + blockers["BLOCKED_METHODRESULT"],
         "nested_aggregate": blockers["BLOCKED_NESTED_AGGREGATE"],
         "normal_join": blockers["BLOCKED_NORMAL_JOIN"],
@@ -167,6 +226,8 @@ def generate(root: Path, corpus: tuple[str, ...] = DEFAULT_CORPUS) -> dict:
     if provable:
         recommendation = "PROCEED_TO_LOCAL_ARC_ELIMINATION"
         expected = provable
+    elif ranked == "exact_provenance" and deltas[ranked]:
+        recommendation = "IMPROVE_EXACT_OWNERSHIP_PROVENANCE"; expected = deltas[ranked]
     elif ranked == "constructor_methodresult" and deltas[ranked]:
         recommendation = "IMPROVE_CONSTRUCTOR_METHODRESULT_OWNERSHIP"; expected = deltas[ranked]
     elif ranked == "nested_aggregate" and deltas[ranked]:
@@ -178,8 +239,8 @@ def generate(root: Path, corpus: tuple[str, ...] = DEFAULT_CORPUS) -> dict:
     revision = subprocess.run(("git", "rev-parse", "HEAD"), cwd=root, check=True,
                               text=True, capture_output=True).stdout.strip()
     return {
-        "audit": "O2.8.5", "schema_version": 1, "corpus_revision": revision,
-        "methodology": "read-only lifecycle-expanded O2 SSA census with exact-identity O2.8 pairing and complete CFG post-dominance",
+        "audit": "O2.8.5-corrected", "schema_version": 2, "corpus_revision": revision,
+        "methodology": "read-only lifecycle-expanded O2 SSA census using the production canonical semantic ARC-pair authority",
         "corpus": list(corpus), "corpus_failures": failures, "workloads": workloads,
         "arc_counts": {"initial_ir": {"retain": 0, "release": 0},
                        "lifecycle_expanded_ir": dict(sorted(counts.items())),
@@ -188,6 +249,25 @@ def generate(root: Path, corpus: tuple[str, ...] = DEFAULT_CORPUS) -> dict:
         "lifecycle_operations": dict(sorted(lifecycle.items())),
         "loop_arc": dict(sorted(loop_counts.items())), "candidate_count": len(candidates),
         "candidate_classifications": dict(sorted(blockers.items())), "candidates": candidates,
+        "historical_provable_reconciliation": [
+            item for item in candidates
+            if item["historical_classification"] == "PROVABLE_NOW"
+        ],
+        "corrected_counts": {
+            "semantically_provable": provable,
+            "blocked_provenance": blockers["BLOCKED_PROVENANCE"],
+            "blocked_methodresult": blockers["BLOCKED_METHODRESULT"],
+            "blocked_nested_aggregate": blockers["BLOCKED_NESTED_AGGREGATE"],
+            "blocked_normal_join": blockers["BLOCKED_NORMAL_JOIN"],
+            "blocked_escape": blockers["BLOCKED_ESCAPE_UNKNOWN"],
+            "blocked_interface": blockers["BLOCKED_INTERFACE_BOX"],
+            "other": (len(candidates) - provable - blockers["BLOCKED_PROVENANCE"]
+                      - blockers["BLOCKED_METHODRESULT"]
+                      - blockers["BLOCKED_NESTED_AGGREGATE"]
+                      - blockers["BLOCKED_NORMAL_JOIN"]
+                      - blockers["BLOCKED_ESCAPE_UNKNOWN"]
+                      - blockers["BLOCKED_INTERFACE_BOX"]),
+        },
         "blocker_reasons": dict(sorted(escape_reasons.items())), "contexts": dict(sorted(contexts.items())),
         "local_readiness": {"same_block": same_block, "straight_line_multi_block": straight_line,
                             "after_exception_region_exclusion": exception_free},

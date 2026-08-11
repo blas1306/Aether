@@ -12,7 +12,6 @@ struct MetodoPotencias {
 }
 
 MetodoPotencias Potencias(Matrix<double> A, Vector<double, Column> x0, double tol, int maxiter) {
-    double norma = la.norm(x0);
     Vector<double, Column> x = (1/la.norm(x0)) * x0;
     double vapOld = x' * A * x;
     int iter = 0;

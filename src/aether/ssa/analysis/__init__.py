@@ -42,9 +42,11 @@ from .alias_modref import (
 )
 from .ownership_escape import (
     ArcPairCandidate, ArcPairClassification, EscapeFact, EscapeMode,
+    ArcPairSemanticDecision, ArcPairSemanticReason, ArcPairSemanticStatus,
     OwnershipEscapeAnalysis, OwnershipFrame, OwnershipFunctionSummary,
     OwnershipState, OwnershipSummaryAnalysis, OwnershipUnknownReason,
-    PostDominatorAnalysis, is_reference_like,
+    PostDominatorAnalysis, has_unsupported_nested_owned_payload,
+    is_reference_like,
 )
 
 __all__ = [
@@ -82,7 +84,9 @@ __all__ = [
     "CollectionStorageLocation", "CollectionLengthLocation", "MemoryLocation",
     "ParameterFieldEffect",
     "ArcPairCandidate", "ArcPairClassification", "EscapeFact", "EscapeMode",
+    "ArcPairSemanticDecision", "ArcPairSemanticReason", "ArcPairSemanticStatus",
     "OwnershipEscapeAnalysis", "OwnershipFrame", "OwnershipFunctionSummary",
     "OwnershipState", "OwnershipSummaryAnalysis", "OwnershipUnknownReason",
-    "PostDominatorAnalysis", "is_reference_like",
+    "PostDominatorAnalysis", "has_unsupported_nested_owned_payload",
+    "is_reference_like",
 ]

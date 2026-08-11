@@ -85,7 +85,7 @@ def test_preserves_pair_across_any_call():
     assert result.stats["blocked_by_call"] == 1
 
 
-def test_preserves_field_escape_and_cross_block_pair():
+def test_preserves_field_escape_and_eliminates_cross_block_pair():
     owner, child = v("owner", BOX), v("child", BOX)
     field = SSAFunction("field", [], VoidType(), [SSABasicBlock("entry", [
         SSAClassNew(owner), SSAClassNew(child), retain(child),
@@ -100,8 +100,66 @@ def test_preserves_field_escape_and_cross_block_pair():
         SSABasicBlock("exit", [release(child), SSAReturn()]),
     ])
     cross_result = run(cross)
-    assert not cross_result.changed
-    assert cross_result.stats["blocked_by_unsupported_structure"] == 1
+    assert cross_result.changed
+    assert arc_builtins(cross_result) == []
+    assert cross_result.stats["multi_block_candidates"] == 1
+    assert cross_result.stats["multi_block_eliminated"] == 1
+
+
+def test_eliminates_three_block_pair_across_scalar_work():
+    obj, one = v("obj", BOX), v("one")
+    function = SSAFunction("linear", [], VoidType(), [
+        SSABasicBlock("entry", [SSAClassNew(obj), retain(obj), SSAJump("work")]),
+        SSABasicBlock("work", [SSAConst(one, 1), SSAJump("exit")]),
+        SSABasicBlock("exit", [release(obj), SSAReturn()]),
+    ])
+    result = run(function)
+    assert arc_builtins(result) == []
+    assert result.stats["multi_block_eliminated"] == 1
+
+
+def test_preserves_multiblock_pair_at_branch_and_join():
+    condition = SSAParameter("condition", B)
+    obj = v("obj", BOX)
+    function = SSAFunction("diamond", [condition], VoidType(), [
+        SSABasicBlock("entry", [SSAClassNew(obj), retain(obj),
+                                SSABranch(condition, "left", "right")]),
+        SSABasicBlock("left", [SSAJump("exit")]),
+        SSABasicBlock("right", [SSAJump("exit")]),
+        SSABasicBlock("exit", [release(obj), SSAReturn()]),
+    ])
+    result = run(function)
+    assert not result.changed
+    assert arc_builtins(result) == ["__aether_retain", "__aether_release"]
+    # Post-dominance holds, but the structural proof independently rejects it.
+    assert result.stats["blocked_by_branch"] == 1
+
+
+def test_preserves_multiblock_pair_with_join_predecessor():
+    condition = SSAParameter("condition", B)
+    obj = v("obj", BOX)
+    function = SSAFunction("join", [condition], VoidType(), [
+        SSABasicBlock("entry", [SSAClassNew(obj),
+                                SSABranch(condition, "retain", "other")]),
+        SSABasicBlock("retain", [retain(obj), SSAJump("exit")]),
+        SSABasicBlock("other", [SSAJump("exit")]),
+        SSABasicBlock("exit", [release(obj), SSAReturn()]),
+    ])
+    result = run(function, verify=False)
+    assert not result.changed
+    assert result.stats["blocked_by_missing_dominance"] == 1
+
+
+def test_preserves_multiblock_pair_across_call():
+    obj = v("obj", BOX)
+    function = SSAFunction("cross_call", [], VoidType(), [
+        SSABasicBlock("entry", [SSAClassNew(obj), retain(obj), SSAJump("work")]),
+        SSABasicBlock("work", [SSACall("observe", (obj,)), SSAJump("exit")]),
+        SSABasicBlock("exit", [release(obj), SSAReturn()]),
+    ])
+    result = run(function, verify=False)
+    assert not result.changed
+    assert result.stats["blocked_by_call"] == 1
 
 
 def test_preserves_phi_aggregate_interface_and_constructor_contexts():
