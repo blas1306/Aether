@@ -38,7 +38,7 @@ def test_alias_lattice_fresh_copies_parameters_and_phi() -> None:
     assert analysis.alias(listing, copied) is AliasRelation.NO_ALIAS
     assert analysis.alias(value("x"), value("y")) is AliasRelation.NO_ALIAS
     analysis.verify()
-    assert "phi-merge" in analysis.debug_string()
+    assert "phi-different-roots" in analysis.debug_string()
 
 
 def test_modref_and_fact_preservation_are_alias_specific() -> None:
@@ -94,6 +94,39 @@ def test_known_readonly_call_preserves_list_fact() -> None:
     assert summaries["reader"].read_parameters == frozenset({0})
     assert analysis.preserves_length_fact(call, listing)
     assert ShapeAnalysis().compute(caller, analysis).length_of(listing, "entry") is not None
+
+
+def test_direct_return_summaries_propagate_parameter_and_unique_fresh_identity() -> None:
+    box = ClassRefType("Box"); parameter = SSAParameter("parameter", box)
+    identity = SSAFunction("identity", [parameter], box, [
+        SSABasicBlock("entry", [SSAReturn(parameter)]),
+    ])
+    allocated = value("allocated", box)
+    factory = SSAFunction("factory", [], box, [
+        SSABasicBlock("entry", [SSAClassNew(allocated), SSAReturn(allocated)]),
+    ])
+    argument = value("argument", box); passed = value("passed", box); fresh = value("fresh", box)
+    caller = SSAFunction("caller", [], box, [SSABasicBlock("entry", [
+        SSAClassNew(argument), SSACall("identity", (argument,), passed),
+        SSACall("factory", (), fresh), SSAReturn(fresh),
+    ])])
+    summaries = SummaryAnalysis().compute(SSAModule([identity, factory, caller]))
+    aliases = AliasAnalysis(caller, summaries)
+    assert aliases.provenance(passed) == aliases.provenance(argument)
+    assert aliases.provenance(fresh).exact
+    assert summaries["factory"].returns_fresh
+
+
+def test_mixed_return_identities_do_not_claim_parameter_or_fresh_summary() -> None:
+    box = ClassRefType("Box"); parameter = SSAParameter("parameter", box)
+    allocated = value("allocated", box)
+    mixed = SSAFunction("mixed", [parameter], box, [
+        SSABasicBlock("entry", [SSAClassNew(allocated), SSAReturn(parameter),
+                                SSAReturn(allocated)]),
+    ])
+    summary = SummaryAnalysis().compute(SSAModule([mixed]))["mixed"]
+    assert summary.returned_alias_parameters == frozenset()
+    assert not summary.returns_fresh
 
 
 def test_nominal_field_locations_compose_with_base_aliases() -> None:

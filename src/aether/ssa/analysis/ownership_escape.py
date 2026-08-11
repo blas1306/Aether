@@ -224,7 +224,7 @@ class OwnershipEscapeAnalysis:
                  summaries: dict[str, OwnershipFunctionSummary] | None = None):
         self.function = function
         self.summaries = summaries or {}
-        self.aliases = AliasAnalysis(function)
+        self.aliases = AliasAnalysis(function, self.summaries)
         self._states: dict[m.SSAValue, OwnershipState] = {}
         self._escapes: dict[ProvenanceRoot, EscapeFact] = {}
         self._in: dict[str, OwnershipFrame] = {}
@@ -297,6 +297,10 @@ class OwnershipEscapeAnalysis:
             elif isinstance(instruction, m.SSAPhi):
                 states = [state.get(value, OwnershipState.UNKNOWN) for _, value in instruction.incoming]
                 state[result] = states[0] if states and all(item is states[0] for item in states) else OwnershipState.UNKNOWN
+            elif isinstance(instruction, m.SSACast):
+                state[result] = state.get(instruction.value, OwnershipState.UNKNOWN)
+            elif isinstance(instruction, m.SSAConst) and isinstance(result.type, StringType):
+                state[result] = OwnershipState.OWNED
             else: state[result] = OwnershipState.UNKNOWN
             previous = self._states.get(result)
             self._states[result] = state[result] if previous is None else self._join_state(previous, state[result])
@@ -493,8 +497,18 @@ class OwnershipSummaryAnalysis:
                     if isinstance(instruction, m.SSAReturn) and instruction.value == parameter: returned.add(index)
                     if analysis.may_escape(parameter): escaping.add(index); reasons.update(analysis.escape_fact(parameter).reasons)
                     if analysis.ownership_state(parameter, block.name) is OwnershipState.CONSUMED: consumed.add(index)
-        returns_fresh = any(isinstance(i, m.SSAReturn) and i.value is not None and analysis.is_fresh(i.value)
-                            for b in function.blocks for i in b.instructions)
+        returns = [i.value for b in function.blocks for i in b.instructions
+                   if isinstance(i, m.SSAReturn) and i.value is not None]
+        returned = {
+            index for index, parameter in enumerate(parameters)
+            if returns and all(analysis.provenance(value) == analysis.provenance(parameter)
+                               for value in returns)
+        }
+        return_provenance = [analysis.provenance(value) for value in returns]
+        returns_fresh = bool(return_provenance) and all(
+            item.exact and next(iter(item.roots)).kind is RootKind.FRESH
+            for item in return_provenance
+        ) and len({next(iter(item.roots)) for item in return_provenance}) == 1
         exceptional = any(analysis.escape_fact(parameter).exceptional for parameter in parameters)
         return OwnershipFunctionSummary(function.name, frozenset(retained), frozenset(consumed), frozenset(field),
             frozenset(collection), frozenset(returned), frozenset(escaping), returns_fresh, exceptional, frozenset(reasons))

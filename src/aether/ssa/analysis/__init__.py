@@ -48,6 +48,10 @@ from .ownership_escape import (
     PostDominatorAnalysis, has_unsupported_nested_owned_payload,
     is_reference_like,
 )
+from .trusted_helpers import (
+    ReturnedIdentity, ReturnedOwnership, TrustedHelperContract,
+    TRUSTED_HELPER_CONTRACTS, trusted_helper_contract,
+)
 
 __all__ = [
     "Constant",
@@ -89,4 +93,6 @@ __all__ = [
     "OwnershipState", "OwnershipSummaryAnalysis", "OwnershipUnknownReason",
     "PostDominatorAnalysis", "has_unsupported_nested_owned_payload",
     "is_reference_like",
+    "ReturnedIdentity", "ReturnedOwnership", "TrustedHelperContract",
+    "TRUSTED_HELPER_CONTRACTS", "trusted_helper_contract",
 ]

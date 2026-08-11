@@ -10,7 +10,7 @@ def test_o285_discovers_arc_pairs_and_uses_closed_classifications() -> None:
         "examples/classes/implements_interface.ae",
         "corpus/exceptions/positive/constructor_failure.ae",
     ))
-    assert report["audit"] == "O2.8.5-corrected"
+    assert report["audit"] == "O2.8.6-exact-provenance"
     assert report["arc_counts"]["ssa"]["retain"] > 0
     assert report["arc_counts"]["ssa"]["release"] > 0
     assert report["candidate_count"] == len(report["candidates"])
@@ -29,6 +29,15 @@ def test_o285_discovers_arc_pairs_and_uses_closed_classifications() -> None:
         for item in report["candidates"]
         if item["classification"] == "PROVABLE_NOW"
     )
+    assert set(report["local_arc_dry_run"]) == {
+        "phase1_semantic_candidates", "phase1_structural_candidates",
+        "phase2_semantic_candidates", "phase2_structural_candidates",
+        "would_eliminate",
+    }
+    assert all(set(item["crosses"]) == {
+        "call", "phi", "field", "collection", "interface", "exception_edge",
+        "method_result", "runtime_helper",
+    } for item in report["candidates"])
     assert all(
         item["classification"] != "PROVABLE_NOW"
         for item in report["candidates"]

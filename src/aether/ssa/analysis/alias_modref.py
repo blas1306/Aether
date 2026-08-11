@@ -40,9 +40,12 @@ class ModRefEffect(Enum):
 
 class UnknownReason(Enum):
     UNKNOWN_EXTERNAL_CALL = "unknown-external-call"
+    UNKNOWN_RUNTIME_HELPER = "unknown-runtime-helper"
     UNKNOWN_INDIRECT_TARGET = "unknown-indirect-target"
     UNKNOWN_INTERFACE_IMPLEMENTATION = "unknown-interface-implementation"
     PHI_MERGE = "phi-merge"
+    PHI_DIFFERENT_ROOTS = "phi-different-roots"
+    PHI_UNKNOWN_INPUT = "phi-unknown-input"
     PARAMETER_ALIAS = "parameter-alias"
     GLOBAL_STATE = "global-state"
     FIELD_INSENSITIVITY = "field-insensitivity"
@@ -53,6 +56,11 @@ class UnknownReason(Enum):
     NESTED_PATH_UNSUPPORTED = "nested-path-unsupported"
     EXTERNAL_FIELD_EFFECT = "external-field-effect"
     UNSUPPORTED_INSTRUCTION = "unsupported-instruction"
+    FIELD_CONTENT_UNKNOWN = "field-content-unknown"
+    COLLECTION_CONTENT_UNKNOWN = "collection-content-unknown"
+    INTERFACE_BOX_BOUNDARY = "interface-box-boundary"
+    EXCEPTION_MERGE = "exception-merge"
+    OWNERSHIP_ROLE_MISMATCH = "ownership-role-mismatch"
     OTHER = "other"
 
 
@@ -178,14 +186,18 @@ class AliasAnalysis:
     only considered disjoint from other fresh roots created in this function;
     parameters and unknown results remain MAY_ALIAS.
     """
-    def __init__(self, function: m.SSAFunction):
+    def __init__(self, function: m.SSAFunction, summaries: dict[str, object] | None = None):
         self.function = function
+        self.summaries = summaries or {}
         self._provenance: dict[m.SSAValue, Provenance] = {}
         self._definitions: dict[m.SSAValue, object] = {}
         for index, parameter in enumerate(function.parameters):
             kind = RootKind.PARAMETER if _is_reference_like(parameter.type) else RootKind.VALUE
-            self._provenance[parameter] = Provenance(frozenset({ProvenanceRoot(kind, str(index))}),
-                UnknownReason.PARAMETER_ALIAS if kind is RootKind.PARAMETER else None)
+            # A parameter has one exact semantic identity even when another
+            # parameter may alias it.  Alias uncertainty is not provenance
+            # uncertainty.
+            self._provenance[parameter] = Provenance(
+                frozenset({ProvenanceRoot(kind, str(index))}))
         self._compute()
 
     def _compute(self) -> None:
@@ -201,20 +213,28 @@ class AliasAnalysis:
                 value = self._instruction_provenance(instruction, result)
                 if value is not None and self._provenance.get(result) != value:
                     self._provenance[result] = value; changed = True
-            if not changed: return
-        # A malformed/nonconverging graph fails closed.
+            if not changed: break
+        # Unresolved cycles and malformed/nonconverging graphs fail closed with
+        # a reason determined by their defining instruction.
         for instruction in instructions:
             result = getattr(instruction, "result", None)
             if isinstance(result, m.SSAValue) and result not in self._provenance:
-                self._provenance[result] = self._unknown(result, UnknownReason.OTHER)
+                reason = (UnknownReason.PHI_UNKNOWN_INPUT
+                          if isinstance(instruction, m.SSAPhi)
+                          else UnknownReason.UNSUPPORTED_INSTRUCTION)
+                self._provenance[result] = self._unknown(result, reason)
 
     def _instruction_provenance(self, instruction, result):
         if not _is_reference_like(result.type):
             return Provenance(frozenset({ProvenanceRoot(RootKind.VALUE, result.name)}))
+        if isinstance(instruction, m.SSAConst) and isinstance(result.type, StringType):
+            return Provenance(frozenset({ProvenanceRoot(RootKind.FRESH, result.name)}))
         if isinstance(instruction, (m.SSAClassNew, m.SSAArrayNew, m.SSAListNew,
                                     m.SSAArrayCopy, m.SSAListCopy, m.SSAArraySlice,
                                     m.SSAListSlice)):
             return Provenance(frozenset({ProvenanceRoot(RootKind.FRESH, result.name)}))
+        if isinstance(instruction, m.SSACast) and _is_reference_like(instruction.value.type):
+            return self._provenance.get(instruction.value)
         if isinstance(instruction, m.SSAInterfaceConstruct):
             carrier = self.provenance(instruction.carrier)
             # Class-backed interfaces retain carrier identity. Struct-backed
@@ -228,12 +248,39 @@ class AliasAnalysis:
             roots = frozenset().union(*(item.roots for item in incoming if item))
             reasons = {item.reason for item in incoming if item and item.reason}
             if len(roots) == 1 and not reasons: return Provenance(roots)
-            return Provenance(roots, UnknownReason.PHI_MERGE)
+            reason = (UnknownReason.PHI_UNKNOWN_INPUT if reasons
+                      else UnknownReason.PHI_DIFFERENT_ROOTS)
+            return Provenance(roots, reason)
+        if isinstance(instruction, m.SSAClassGet):
+            return self._unknown(result, UnknownReason.FIELD_CONTENT_UNKNOWN)
+        if isinstance(instruction, (m.SSAArrayGet, m.SSAListGet)):
+            return self._unknown(result, UnknownReason.COLLECTION_CONTENT_UNKNOWN)
         if isinstance(instruction, (m.SSACall, m.SSAInvoke, m.SSACallIndirect,
                                     m.SSAInvokeIndirect, m.SSAInterfaceCall,
                                     m.SSAInvokeInterface)):
+            if isinstance(instruction, (m.SSACall, m.SSAInvoke)):
+                from .trusted_helpers import ReturnedIdentity, trusted_helper_contract
+                contract = trusted_helper_contract(instruction.builtin)
+                if contract is not None:
+                    if contract.identity is ReturnedIdentity.FRESH:
+                        return Provenance(frozenset({ProvenanceRoot(RootKind.FRESH, result.name)}))
+                    if (contract.identity in (ReturnedIdentity.ARGUMENT, ReturnedIdentity.BORROW)
+                            and contract.argument is not None
+                            and contract.argument < len(instruction.arguments)):
+                        return self._provenance.get(instruction.arguments[contract.argument])
+                summary = self.summaries.get(instruction.function)
+                if summary is not None:
+                    if getattr(summary, "returns_fresh", False):
+                        return Provenance(frozenset({ProvenanceRoot(RootKind.FRESH, result.name)}))
+                    returned = getattr(summary, "returned_alias_parameters",
+                                       getattr(summary, "returned_parameters", frozenset()))
+                    if len(returned) == 1:
+                        index = next(iter(returned))
+                        if index < len(instruction.arguments):
+                            return self._provenance.get(instruction.arguments[index])
             reason = (UnknownReason.UNKNOWN_INDIRECT_TARGET if isinstance(instruction, (m.SSACallIndirect, m.SSAInvokeIndirect))
                       else UnknownReason.UNKNOWN_INTERFACE_IMPLEMENTATION if isinstance(instruction, (m.SSAInterfaceCall, m.SSAInvokeInterface))
+                      else UnknownReason.UNKNOWN_RUNTIME_HELPER if instruction.builtin is not None
                       else UnknownReason.UNKNOWN_EXTERNAL_CALL)
             return self._unknown(result, reason)
         return self._unknown(result, UnknownReason.UNSUPPORTED_INSTRUCTION)
@@ -287,8 +334,21 @@ class AliasAnalysis:
     def verify(self) -> None:
         values = tuple(self._provenance)
         for value in values:
+            provenance = self.provenance(value)
+            if provenance.exact and not provenance.roots:
+                raise ValueError("exact provenance must have one root")
             if self.alias(value, value) is not AliasRelation.MUST_ALIAS:
                 raise ValueError("an SSA value must alias itself")
+            definition = self._definitions.get(value)
+            if isinstance(definition, m.SSACast) and _is_reference_like(definition.value.type):
+                source = self.provenance(definition.value)
+                if source.exact and provenance != source:
+                    raise ValueError("identity-preserving cast changed exact root")
+            if isinstance(definition, m.SSAPhi) and provenance.exact:
+                incoming = [self.provenance(item) for _, item in definition.incoming]
+                if (not incoming or any(not item.exact for item in incoming)
+                        or any(item.roots != provenance.roots for item in incoming)):
+                    raise ValueError("exact phi requires identical exact incoming roots")
         for index, left in enumerate(values):
             for right in values[index:]:
                 if self.alias(left, right) is not self.alias(right, left):
@@ -488,7 +548,7 @@ class SummaryAnalysis:
         raise ValueError("mod/ref summaries did not converge")
 
     def _summarize(self, function, summaries, functions):
-        aliases = AliasAnalysis(function); parameters = list(function.parameters)
+        aliases = AliasAnalysis(function, summaries); parameters = list(function.parameters)
         read, modified, returned = set(), set(), set()
         read_fields, modified_fields = set(), set()
         allocates = global_state = False
@@ -546,8 +606,19 @@ class SummaryAnalysis:
                         if aliases.alias(parameter, instruction.value) is AliasRelation.MUST_ALIAS: returned.add(index)
         fresh = False
         returns = [item.value for block in function.blocks for item in block.instructions if isinstance(item, m.SSAReturn) and item.value]
+        # A return relation is exact only when every returned path has the same
+        # parameter identity.  Seeing a parameter on merely one return path is
+        # not a passthrough summary.
+        returned = {
+            index for index, parameter in enumerate(parameters)
+            if returns and all(aliases.provenance(value) == aliases.provenance(parameter)
+                               for value in returns)
+        }
         if returns:
-            fresh = all(any(root.kind is RootKind.FRESH for root in aliases.provenance(value).roots) and aliases.provenance(value).exact for value in returns)
+            provenances = [aliases.provenance(value) for value in returns]
+            fresh = (all(item.exact and next(iter(item.roots)).kind is RootKind.FRESH
+                         for item in provenances)
+                     and len({next(iter(item.roots)) for item in provenances}) == 1)
         return FunctionSummary(
             function=function.name, read_parameters=frozenset(read),
             modified_parameters=frozenset(modified), read_fields=frozenset(read_fields),

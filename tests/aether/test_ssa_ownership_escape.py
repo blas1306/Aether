@@ -1,12 +1,13 @@
-from aether.ir.types import ClassRefType, IntType, ListType, VoidType
+from aether.ir.types import ClassRefType, IntType, ListType, NullableType, StringType, VoidType
 from aether.ssa.analysis import (
     ArcPairClassification, EscapeMode, OwnershipEscapeAnalysis,
     OwnershipState, OwnershipSummaryAnalysis, PostDominatorAnalysis,
+    AliasUnknownReason, AliasAnalysis,
 )
 from aether.ssa.model import (
-    SSAClassNew, SSAClassSet, SSACall, SSAFunction, SSAInvokeIndirect,
+    SSAClassNew, SSAClassSet, SSACall, SSACast, SSAConst, SSAFunction, SSAInvokeIndirect,
     SSAListNew, SSAListPush, SSAModule, SSAParameter, SSAPropagate,
-    SSAReturn, SSABasicBlock, SSAValue,
+    SSAPhi, SSAReturn, SSABasicBlock, SSAValue,
 )
 
 
@@ -72,3 +73,45 @@ def test_direct_summaries_converge_for_mutual_recursion():
     assert summaries["first"].returned_parameters == frozenset({0})
     assert summaries["second"].escaping_parameters == frozenset({0})
     assert OwnershipSummaryAnalysis.debug_string(summaries) == OwnershipSummaryAnalysis.debug_string(summaries)
+
+
+def test_exact_string_literal_cast_and_same_root_phi_propagate():
+    string = StringType(); nullable = NullableType(string)
+    literal = value("literal", string); adapted = value("adapted", nullable)
+    joined = value("joined", nullable)
+    function = SSAFunction("copies", [], nullable, [SSABasicBlock("entry", [
+        SSAConst(literal, "x"), SSACast(adapted, literal),
+        SSAPhi(joined, (("left", adapted), ("right", adapted))), SSAReturn(joined),
+    ])])
+    aliases = AliasAnalysis(function)
+    assert aliases.provenance(literal).exact
+    assert aliases.provenance(adapted) == aliases.provenance(literal)
+    assert aliases.provenance(joined) == aliases.provenance(literal)
+
+
+def test_phi_different_roots_and_unknown_input_fail_closed_with_precise_reasons():
+    string = StringType(); left = value("left", string); right = value("right", string)
+    different = value("different", string); unknown = value("unknown", string)
+    mixed = value("mixed", string)
+    function = SSAFunction("phis", [], string, [SSABasicBlock("entry", [
+        SSAConst(left, "a"), SSAConst(right, "b"),
+        SSAPhi(different, (("a", left), ("b", right))),
+        SSACall("external", (), unknown),
+        SSAPhi(mixed, (("a", left), ("b", unknown))), SSAReturn(mixed),
+    ])])
+    aliases = AliasAnalysis(function)
+    assert aliases.provenance(different).reason is AliasUnknownReason.PHI_DIFFERENT_ROOTS
+    assert aliases.provenance(mixed).reason is AliasUnknownReason.PHI_UNKNOWN_INPUT
+
+
+def test_trusted_fresh_helper_and_untrusted_runtime_helper_are_distinct():
+    string = StringType(); source = SSAParameter("source", string)
+    fresh = value("fresh", string); unknown = value("unknown", string)
+    function = SSAFunction("helpers", [source], string, [SSABasicBlock("entry", [
+        SSACall("text.formatInt", (value("number"),), fresh,
+                builtin="text.formatInt"),
+        SSACall("mystery", (), unknown, builtin="__aether_mystery"), SSAReturn(fresh),
+    ])])
+    aliases = AliasAnalysis(function)
+    assert aliases.provenance(fresh).exact
+    assert aliases.provenance(unknown).reason is AliasUnknownReason.UNKNOWN_RUNTIME_HELPER

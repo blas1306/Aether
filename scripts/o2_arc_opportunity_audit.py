@@ -21,6 +21,7 @@ from aether.ssa.analysis import (
     PostDominatorAnalysis,
 )
 from aether.ssa.cfg import SSACFGBuilder
+from aether.ssa import model as ssa_model
 from aether.ssa.model import SSACall, SSAInvoke
 from aether.ssa.optimizer import LocalARCEliminator
 
@@ -117,6 +118,55 @@ def _safe_same_block(function, pair) -> bool:
                    i.writes_memory or i.may_throw for i in between)
 
 
+def _provenance_blocker(instruction, reason: str | None) -> str:
+    if isinstance(instruction, ssa_model.SSAPhi): return "PHI_MERGE"
+    if isinstance(instruction, ssa_model.SSAClassGet): return "FIELD_LOAD_UNKNOWN"
+    if isinstance(instruction, (ssa_model.SSAArrayGet, ssa_model.SSAListGet)):
+        return "COLLECTION_LOAD_UNKNOWN"
+    if isinstance(instruction, (ssa_model.SSAInterfaceCall, ssa_model.SSAInvokeInterface)):
+        return "INTERFACE_CARRIER_UNKNOWN"
+    if isinstance(instruction, (ssa_model.SSACallIndirect, ssa_model.SSAInvokeIndirect)):
+        return "CALL_RETURN_UNKNOWN"
+    if isinstance(instruction, (ssa_model.SSACall, ssa_model.SSAInvoke)):
+        return ("RUNTIME_HELPER_RETURN_UNKNOWN" if instruction.builtin is not None
+                else "EXTERNAL_CALL_RETURN_UNKNOWN")
+    if reason == "unsupported-instruction": return "UNSUPPORTED_INSTRUCTION"
+    return "OTHER"
+
+
+def _crossings(function, value) -> dict[str, bool]:
+    instructions = [item for block in function.blocks for item in block.instructions]
+    uses = [item for item in instructions if value in (
+        tuple(getattr(item, "arguments", ()))
+        + tuple(v for _, v in getattr(item, "incoming", ()))
+        + tuple(v for v in (getattr(item, "object", None), getattr(item, "struct", None),
+                            getattr(item, "array", None), getattr(item, "list_value", None),
+                            getattr(item, "carrier", None), getattr(item, "method_result", None),
+                            getattr(item, "event", None), getattr(item, "value", None),
+                            getattr(item, "receiver", None)) if v is not None)
+    )]
+    return {
+        "call": any(isinstance(i, (ssa_model.SSACall, ssa_model.SSAInvoke,
+                                   ssa_model.SSACallIndirect, ssa_model.SSAInvokeIndirect,
+                                   ssa_model.SSAInterfaceCall, ssa_model.SSAInvokeInterface))
+                    and i.builtin not in {"__aether_retain", "__aether_release"} for i in uses),
+        "phi": any(isinstance(i, ssa_model.SSAPhi) for i in uses),
+        "field": any(isinstance(i, (ssa_model.SSAClassGet, ssa_model.SSAClassSet)) for i in uses),
+        "collection": any(isinstance(i, (ssa_model.SSAArrayGet, ssa_model.SSAArraySet,
+                                          ssa_model.SSAListGet, ssa_model.SSAListSet,
+                                          ssa_model.SSAListPush, ssa_model.SSAListInsert)) for i in uses),
+        "interface": any("Interface" in type(i).__name__ for i in uses),
+        "exception_edge": any(isinstance(i, (ssa_model.SSAInvoke, ssa_model.SSAInvokeIndirect,
+                                              ssa_model.SSAInvokeInterface, ssa_model.SSAThrow,
+                                              ssa_model.SSARethrow, ssa_model.SSAPropagate)) for i in uses),
+        "method_result": any("MethodResult" in type(i).__name__ for i in uses),
+        "runtime_helper": any(isinstance(i, (ssa_model.SSACall, ssa_model.SSAInvoke))
+                              and i.builtin is not None
+                              and i.builtin not in {"__aether_retain", "__aether_release"}
+                              for i in uses),
+    }
+
+
 def generate(root: Path, corpus: tuple[str, ...] = DEFAULT_CORPUS) -> dict:
     counts, loop_counts, lifecycle, blockers, contexts, escape_reasons = Counter(), Counter(), Counter(), Counter(), Counter(), Counter()
     candidates, workloads, failures = [], [], []
@@ -128,6 +178,7 @@ def generate(root: Path, corpus: tuple[str, ...] = DEFAULT_CORPUS) -> dict:
         for item in historical.get("candidates", ())
     }
     same_block = straight_line = exception_free = 0
+    phase1_semantic = phase2_semantic = 0
     for relative in corpus:
         path = root / relative
         try:
@@ -156,6 +207,9 @@ def generate(root: Path, corpus: tuple[str, ...] = DEFAULT_CORPUS) -> dict:
                 ).compute()
                 postdominators = PostDominatorAnalysis(function)
                 optimizer = LocalARCEliminator()
+                definitions = {getattr(item, "result", None): item
+                               for block in function.blocks for item in block.instructions
+                               if getattr(item, "result", None) is not None}
                 for pair in analysis.candidate_arc_pairs():
                     context = _context(function, pair.value, pair.retain_block, pair.release_block)
                     decision = analysis.classify_arc_pair(pair)
@@ -172,12 +226,17 @@ def generate(root: Path, corpus: tuple[str, ...] = DEFAULT_CORPUS) -> dict:
                         function, analysis, pair,
                     )
                     has_exception = ArcPairSemanticReason.EXCEPTION_LIFETIME in decision.reasons
+                    phase1_semantic += int(pair.retain_block == pair.release_block
+                                           and decision.semantically_provable)
+                    phase2_semantic += int(pair.retain_block != pair.release_block
+                                           and decision.semantically_provable)
                     same_block += int(same); straight_line += int(multi); exception_free += int(safe and not has_exception)
                     blockers[classification] += 1; contexts[context] += 1
                     for reason in pair.reasons: escape_reasons[reason.value] += 1
                     candidates.append({
                         "workload": relative, "workload_kind": "REAL_WORKLOAD",
                         "function": function.name, "value": pair.value.name,
+                        "type": repr(pair.value.type),
                         "retain": f"{pair.retain_block}:{pair.retain_index}",
                         "release": f"{pair.release_block}:{pair.release_index}",
                         "classification": classification, "context": context,
@@ -196,6 +255,16 @@ def generate(root: Path, corpus: tuple[str, ...] = DEFAULT_CORPUS) -> dict:
                             "exceptional": decision.escape.exceptional,
                         },
                         "ownership_state": decision.ownership.value,
+                        "ownership_category": decision.ownership.value.upper(),
+                        "defining_instruction": (type(definitions[pair.value]).__name__
+                                                 if pair.value in definitions else "PARAMETER"),
+                        "defining_instruction_detail": (repr(definitions[pair.value])
+                                                        if pair.value in definitions else "PARAMETER"),
+                        "provenance_blocker": _provenance_blocker(
+                            definitions.get(pair.value),
+                            decision.provenance.reason.value if decision.provenance.reason else None,
+                        ),
+                        "crosses": _crossings(function, pair.value),
                         "dominates": dominators.dominates(pair.retain_block, pair.release_block),
                         "post_dominates": postdominators.post_dominates(
                             pair.release_block, pair.retain_block),
@@ -239,7 +308,7 @@ def generate(root: Path, corpus: tuple[str, ...] = DEFAULT_CORPUS) -> dict:
     revision = subprocess.run(("git", "rev-parse", "HEAD"), cwd=root, check=True,
                               text=True, capture_output=True).stdout.strip()
     return {
-        "audit": "O2.8.5-corrected", "schema_version": 2, "corpus_revision": revision,
+        "audit": "O2.8.6-exact-provenance", "schema_version": 3, "corpus_revision": revision,
         "methodology": "read-only lifecycle-expanded O2 SSA census using the production canonical semantic ARC-pair authority",
         "corpus": list(corpus), "corpus_failures": failures, "workloads": workloads,
         "arc_counts": {"initial_ir": {"retain": 0, "release": 0},
@@ -271,6 +340,16 @@ def generate(root: Path, corpus: tuple[str, ...] = DEFAULT_CORPUS) -> dict:
         "blocker_reasons": dict(sorted(escape_reasons.items())), "contexts": dict(sorted(contexts.items())),
         "local_readiness": {"same_block": same_block, "straight_line_multi_block": straight_line,
                             "after_exception_region_exclusion": exception_free},
+        "local_arc_dry_run": {
+            "phase1_semantic_candidates": phase1_semantic,
+            "phase1_structural_candidates": same_block,
+            "phase2_semantic_candidates": phase2_semantic,
+            "phase2_structural_candidates": straight_line,
+            "would_eliminate": same_block + straight_line,
+        },
+        "before_o286": {"candidates": 26, "semantically_provable": 0,
+                        "blocked_provenance": 13, "blocked_nested_aggregate": 12,
+                        "blocked_escape": 1},
         "precision_deltas": deltas,
         "precision_scorecard": [
             {"area": area, "current_precision": "coarse", "blocked_candidates": count,
