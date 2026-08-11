@@ -15,7 +15,10 @@ from aether.analysis.dominators import DominatorAnalysis
 from aether.benchmark import _optimized_ssa
 from aether.optimization import optimization_profile
 from aether.ssa import model as m
-from aether.ssa.analysis import LoopAnalysis, OwnershipEscapeAnalysis, PostDominatorAnalysis
+from aether.ssa.analysis import (
+    LoopAnalysis, OwnershipEscapeAnalysis, PostDominatorAnalysis,
+    has_unsupported_nested_owned_payload,
+)
 from aether.ssa.cfg import SSACFGBuilder, predecessors, successor_edges
 from aether.ssa.optimizer import LocalARCEliminator
 
@@ -140,6 +143,9 @@ def generate(root: Path, corpus: tuple[str, ...] = DEFAULT_CORPUS) -> dict:
             for pair in analysis.candidate_arc_pairs():
                 decision = analysis.classify_arc_pair(pair)
                 if not decision.semantically_provable: continue
+                # O2.8.7 is historical: O2.8.8 aggregate-dependent proofs are
+                # reported by the schema-v4 opportunity audit instead.
+                if has_unsupported_nested_owned_payload(pair.value.type): continue
                 names, blocks, paths = _slice(function, pair)
                 relevant_uses = [(name, index) for name, index, instruction in all_instructions
                                  if _uses(instruction, pair.value)]

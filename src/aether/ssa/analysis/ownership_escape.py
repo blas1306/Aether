@@ -15,7 +15,10 @@ from aether.ir.types import (
 from aether.ssa import model as m
 from aether.ssa.cfg import predecessors, reachable_blocks, successor_edges
 
-from .alias_modref import AliasAnalysis, Provenance, ProvenanceRoot, RootKind
+from .alias_modref import (
+    AliasAnalysis, FieldIdentity, Provenance, ProvenanceRoot, RootKind,
+    UnknownReason as AliasUnknownReason,
+)
 
 
 class OwnershipState(Enum):
@@ -23,6 +26,40 @@ class OwnershipState(Enum):
     BORROWED = "borrowed"
     CONSUMED = "consumed"
     UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True, order=True)
+class ComponentPath:
+    """Nominal path to a component of a value-semantic aggregate.
+
+    This is deliberately not a memory address.  Each step includes its nominal
+    owner and index, so equally named fields in unrelated structs cannot be
+    confused.
+    """
+
+    fields: tuple[FieldIdentity, ...]
+
+    def child(self, field: FieldIdentity) -> ComponentPath:
+        return ComponentPath(self.fields + (field,))
+
+    def __str__(self) -> str:
+        return ".".join(str(item) for item in self.fields)
+
+
+@dataclass(frozen=True)
+class ComponentProvenance:
+    provenance: Provenance
+    ownership: OwnershipState = OwnershipState.UNKNOWN
+
+
+@dataclass(frozen=True)
+class AggregateProvenance:
+    """Sparse, deterministic component facts for one aggregate SSA value."""
+
+    components: tuple[tuple[ComponentPath, ComponentProvenance], ...] = ()
+
+    def component(self, path: ComponentPath) -> ComponentProvenance | None:
+        return dict(self.components).get(path)
 
 
 class EscapeMode(Flag):
@@ -221,17 +258,157 @@ class OwnershipEscapeAnalysis:
     """
 
     def __init__(self, function: m.SSAFunction,
-                 summaries: dict[str, OwnershipFunctionSummary] | None = None):
+                 summaries: dict[str, OwnershipFunctionSummary] | None = None,
+                 structs: tuple[object, ...] | list[object] = ()):
         self.function = function
         self.summaries = summaries or {}
         self.aliases = AliasAnalysis(function, self.summaries)
+        self._structs = {item.name: item for item in structs}
+        self._aggregate: dict[m.SSAValue, AggregateProvenance] = {}
+        self._component_results: dict[m.SSAValue, ComponentProvenance] = {}
         self._states: dict[m.SSAValue, OwnershipState] = {}
         self._escapes: dict[ProvenanceRoot, EscapeFact] = {}
         self._in: dict[str, OwnershipFrame] = {}
         self._out: dict[str, OwnershipFrame] = {}
         self._before: dict[tuple[str, int], OwnershipFrame] = {}
         self._exception_reachable = self._exceptional_reachability()
+        self._analyze_aggregate_provenance()
         self._analyze()
+
+    @staticmethod
+    def _component_fact(value: m.SSAValue, aliases: AliasAnalysis,
+                        ownership: OwnershipState = OwnershipState.UNKNOWN) -> ComponentProvenance:
+        provenance = aliases.provenance(value)
+        if ownership is OwnershipState.UNKNOWN and provenance.exact:
+            kind = next(iter(provenance.roots)).kind
+            if kind is RootKind.FRESH: ownership = OwnershipState.OWNED
+            elif kind is RootKind.PARAMETER: ownership = OwnershipState.BORROWED
+        return ComponentProvenance(provenance, ownership)
+
+    @staticmethod
+    def _aggregate_of(items: dict[ComponentPath, ComponentProvenance]) -> AggregateProvenance:
+        return AggregateProvenance(tuple(sorted(items.items(), key=lambda item: item[0])))
+
+    def _field(self, owner, index: int, name: str) -> FieldIdentity:
+        owner_name = owner.name if isinstance(owner, StructType) else str(owner)
+        return FieldIdentity(owner_name, name, index)
+
+    def _prefix(self, field: FieldIdentity, aggregate: AggregateProvenance) -> dict[ComponentPath, ComponentProvenance]:
+        return {ComponentPath((field,) + path.fields): fact
+                for path, fact in aggregate.components}
+
+    def _parameter_components(self, parameter: m.SSAValue, index: int,
+                              type_, active: frozenset[str] = frozenset()) -> dict[ComponentPath, ComponentProvenance]:
+        if not isinstance(type_, StructType) or type_.name in active:
+            return {}
+        definition = self._structs.get(type_.name)
+        if definition is None:
+            return {}
+        result = {}
+        for field_index, (name, field_type) in enumerate(definition.fields):
+            field = self._field(type_, field_index, name); path = ComponentPath((field,))
+            if is_reference_like(field_type):
+                root = ProvenanceRoot(RootKind.PARAMETER, f"{index}:{path}")
+                result[path] = ComponentProvenance(Provenance(frozenset({root})), OwnershipState.BORROWED)
+            elif isinstance(field_type, StructType):
+                nested = self._parameter_components(parameter, index, field_type, active | {type_.name})
+                result.update(self._prefix(field, self._aggregate_of(nested)))
+        return result
+
+    def _analyze_aggregate_provenance(self) -> None:
+        """Monotone, component-wise aggregate propagation over SSA values."""
+        for index, parameter in enumerate(self.function.parameters):
+            facts = self._parameter_components(parameter, index, parameter.type)
+            if facts: self._aggregate[parameter] = self._aggregate_of(facts)
+        instructions = [item for block in self.function.blocks for item in block.instructions]
+        for _ in range(max(1, len(instructions) + 1)):
+            changed = False
+            for instruction in instructions:
+                result = getattr(instruction, "result", None)
+                if not isinstance(result, m.SSAValue): continue
+                facts = self._aggregate_instruction(instruction)
+                if facts is not None and self._aggregate.get(result) != facts:
+                    self._aggregate[result] = facts; changed = True
+            if not changed: break
+
+    def _aggregate_instruction(self, instruction) -> AggregateProvenance | None:
+        result = instruction.result
+        if isinstance(instruction, m.SSAStructNew):
+            items = {}
+            for index, value in enumerate(instruction.fields):
+                name = str(index)
+                definition = self._structs.get(result.type.name) if isinstance(result.type, StructType) else None
+                if definition is not None and index < len(definition.fields): name = definition.fields[index][0]
+                field = self._field(result.type, index, name); path = ComponentPath((field,))
+                if is_reference_like(value.type): items[path] = self._component_fact(value, self.aliases)
+                if value in self._aggregate: items.update(self._prefix(field, self._aggregate[value]))
+            return self._aggregate_of(items)
+        if isinstance(instruction, m.SSAStructSet):
+            base = dict(self._aggregate.get(instruction.struct, AggregateProvenance()).components)
+            field = self._field(instruction.struct.type, instruction.field_index, instruction.field_name)
+            base = {path: fact for path, fact in base.items()
+                    if not path.fields or path.fields[0] != field}
+            path = ComponentPath((field,))
+            if is_reference_like(instruction.value.type):
+                base[path] = self._component_fact(instruction.value, self.aliases)
+            if instruction.value in self._aggregate:
+                base.update(self._prefix(field, self._aggregate[instruction.value]))
+            return self._aggregate_of(base)
+        if isinstance(instruction, m.SSAStructGet):
+            source = self._aggregate.get(instruction.struct)
+            if source is None: return None
+            field = self._field(instruction.struct.type, instruction.field_index, instruction.field_name)
+            direct = source.component(ComponentPath((field,)))
+            if direct is not None:
+                self._component_results[result] = direct
+            if not isinstance(result.type, StructType): return None
+            return self._aggregate_of({ComponentPath(path.fields[1:]): fact
+                for path, fact in source.components if path.fields and path.fields[0] == field
+                and len(path.fields) > 1})
+        if isinstance(instruction, m.SSAMethodResultNew):
+            receiver = FieldIdentity("MethodResult", "receiver", 0)
+            items = self._prefix(receiver, self._aggregate.get(instruction.receiver, AggregateProvenance()))
+            if is_reference_like(instruction.receiver.type):
+                items[ComponentPath((receiver,))] = self._component_fact(instruction.receiver, self.aliases)
+            if instruction.value is not None:
+                value_field = FieldIdentity("MethodResult", "value", 1)
+                if is_reference_like(instruction.value.type):
+                    items[ComponentPath((value_field,))] = self._component_fact(instruction.value, self.aliases)
+                items.update(self._prefix(value_field, self._aggregate.get(instruction.value, AggregateProvenance())))
+            return self._aggregate_of(items)
+        if isinstance(instruction, (m.SSAMethodResultReceiver, m.SSAMethodResultValue)):
+            source = self._aggregate.get(instruction.method_result)
+            if source is None: return None
+            wanted = "receiver" if isinstance(instruction, m.SSAMethodResultReceiver) else "value"
+            direct = next((fact for path, fact in source.components
+                           if len(path.fields) == 1 and path.fields[0].name == wanted), None)
+            if direct is not None:
+                self._component_results[result] = direct
+            if not isinstance(result.type, StructType): return None
+            return self._aggregate_of({ComponentPath(path.fields[1:]): fact
+                for path, fact in source.components if path.fields and path.fields[0].name == wanted
+                and len(path.fields) > 1})
+        if isinstance(instruction, m.SSAPhi) and isinstance(result.type, (StructType, MethodResultType)):
+            incoming = [self._aggregate.get(value) for _, value in instruction.incoming]
+            if not incoming or any(item is None for item in incoming): return None
+            maps = [dict(item.components) for item in incoming if item is not None]
+            paths = set().union(*(item.keys() for item in maps)); merged = {}
+            for path in paths:
+                facts = [item.get(path) for item in maps]
+                if any(item is None for item in facts):
+                    continue
+                provenances = [item.provenance for item in facts if item is not None]
+                ownerships = [item.ownership for item in facts if item is not None]
+                if all(item.exact for item in provenances) and all(item == provenances[0] for item in provenances):
+                    role = ownerships[0] if all(item is ownerships[0] for item in ownerships) else OwnershipState.UNKNOWN
+                    merged[path] = ComponentProvenance(provenances[0], role)
+                else:
+                    roots = frozenset().union(*(item.roots for item in provenances))
+                    merged[path] = ComponentProvenance(Provenance(roots, AliasUnknownReason.PHI_DIFFERENT_ROOTS))
+            return self._aggregate_of(merged)
+        if isinstance(instruction, m.SSACast):
+            return self._aggregate.get(instruction.value)
+        return None
 
     def _exceptional_reachability(self) -> set[str]:
         blocks = {block.name: block for block in self.function.blocks}; work = []
@@ -250,7 +427,8 @@ class OwnershipEscapeAnalysis:
 
     def _analyze(self) -> None:
         for parameter in self.function.parameters:
-            if is_reference_like(parameter.type): self._states[parameter] = OwnershipState.BORROWED
+            if is_reference_like(parameter.type) or isinstance(parameter.type, (StructType, MethodResultType)):
+                self._states[parameter] = OwnershipState.BORROWED
         pred = predecessors(self.function); blocks = {block.name: block for block in self.function.blocks}
         order = reachable_blocks(self.function)
         for _ in range(max(1, len(order) * (len(self._states) + 4))):
@@ -275,9 +453,14 @@ class OwnershipEscapeAnalysis:
 
     def _set_escape(self, value: m.SSAValue, mode: EscapeMode, block: str, index: int,
                     reason: OwnershipUnknownReason, *, exceptional: bool | None = None) -> None:
-        if not is_reference_like(value.type): return
+        aggregate = self._aggregate.get(value)
+        if not is_reference_like(value.type) and aggregate is None: return
         exceptional = block in self._exception_reachable if exceptional is None else exceptional
-        for root in self.aliases.provenance(value).roots:
+        roots = set(self.provenance(value).roots)
+        if aggregate is not None:
+            roots.update(root for _, fact in aggregate.components
+                         for root in fact.provenance.roots)
+        for root in roots:
             old = self._escapes.get(root, EscapeFact())
             point = old.first_point or f"{block}:{index}"
             self._escapes[root] = EscapeFact(old.modes | mode, old.normal or not exceptional,
@@ -302,6 +485,21 @@ class OwnershipEscapeAnalysis:
             elif isinstance(instruction, m.SSAConst) and isinstance(result.type, StringType):
                 state[result] = OwnershipState.OWNED
             else: state[result] = OwnershipState.UNKNOWN
+            previous = self._states.get(result)
+            self._states[result] = state[result] if previous is None else self._join_state(previous, state[result])
+        elif isinstance(result, m.SSAValue) and isinstance(result.type, (StructType, MethodResultType)):
+            if isinstance(instruction, (m.SSAStructNew, m.SSAStructSet, m.SSAMethodResultNew)):
+                state[result] = OwnershipState.OWNED
+            elif isinstance(instruction, (m.SSAStructGet, m.SSAMethodResultReceiver,
+                                          m.SSAMethodResultValue, m.SSACast)):
+                source = getattr(instruction, "struct", getattr(instruction, "method_result",
+                         getattr(instruction, "value", None)))
+                state[result] = state.get(source, OwnershipState.UNKNOWN)
+            elif isinstance(instruction, m.SSAPhi):
+                states = [state.get(value, OwnershipState.UNKNOWN) for _, value in instruction.incoming]
+                state[result] = states[0] if states and all(item is states[0] for item in states) else OwnershipState.UNKNOWN
+            else:
+                state[result] = OwnershipState.UNKNOWN
             previous = self._states.get(result)
             self._states[result] = state[result] if previous is None else self._join_state(previous, state[result])
         if isinstance(instruction, m.SSAReturn) and instruction.value is not None:
@@ -361,7 +559,44 @@ class OwnershipEscapeAnalysis:
                                index: int) -> OwnershipState:
         return self._before.get((block, index), OwnershipFrame()).state(value)
 
-    def provenance(self, value: m.SSAValue) -> Provenance: return self.aliases.provenance(value)
+    def provenance(self, value: m.SSAValue) -> Provenance:
+        component = self._component_results.get(value)
+        return component.provenance if component is not None else self.aliases.provenance(value)
+    def aggregate_provenance(self, value: m.SSAValue) -> AggregateProvenance:
+        return self._aggregate.get(value, AggregateProvenance())
+
+    def component_provenance(self, value: m.SSAValue,
+                             path: ComponentPath) -> ComponentProvenance | None:
+        return self.aggregate_provenance(value).component(path)
+
+    def aggregate_coverage(self) -> dict[str, int]:
+        facts = [fact for aggregate in self._aggregate.values()
+                 for _, fact in aggregate.components]
+        nested = [path for aggregate in self._aggregate.values()
+                  for path, _ in aggregate.components if len(path.fields) > 1]
+        definitions = {getattr(item, "result", None): item
+                       for block in self.function.blocks for item in block.instructions}
+        phi_values = {value for value in self._aggregate
+                      if isinstance(definitions.get(value), m.SSAPhi)}
+        method_values = {value for value in self._aggregate
+                         if isinstance(definitions.get(value), (m.SSAMethodResultNew,
+                                                               m.SSAMethodResultReceiver,
+                                                               m.SSAMethodResultValue))}
+        return {
+            "aggregate_values_inspected": len(self._aggregate),
+            "ownership_bearing_components": len(facts),
+            "exact_components": sum(fact.provenance.exact for fact in facts),
+            "unknown_components": sum(not fact.provenance.exact for fact in facts),
+            "nested_exact_components": sum(1 for aggregate in self._aggregate.values()
+                for path, fact in aggregate.components
+                if len(path.fields) > 1 and fact.provenance.exact),
+            "phi_preserved_components": sum(fact.provenance.exact
+                for value in phi_values for _, fact in self._aggregate[value].components),
+            "call_return_components": 0,
+            "method_result_components": sum(len(self._aggregate[value].components)
+                                            for value in method_values),
+            "constructor_result_components": 0,
+        }
     def is_fresh(self, value: m.SSAValue) -> bool:
         provenance = self.provenance(value)
         return provenance.exact and next(iter(provenance.roots)).kind is RootKind.FRESH
@@ -427,7 +662,10 @@ class OwnershipEscapeAnalysis:
         type_ = pair.value.type
         if isinstance(type_, MethodResultType):
             reasons.add(ArcPairSemanticReason.METHODRESULT)
-        if isinstance(type_, StructType) or has_unsupported_nested_owned_payload(type_):
+        # A collection object's identity is independent of its aggregate
+        # elements.  Element-sensitive provenance remains intentionally out of
+        # scope, but must not poison ARC reasoning about the collection itself.
+        if isinstance(type_, (StructType, MethodResultType)):
             reasons.add(ArcPairSemanticReason.NESTED_AGGREGATE)
         if isinstance(type_, InterfaceType):
             reasons.add(ArcPairSemanticReason.INTERFACE)

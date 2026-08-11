@@ -1,5 +1,10 @@
 # O2 optimization readiness audit
 
+O2.8.8 adds analysis-only nested aggregate provenance. Five collection-object
+candidates become semantically provable, but a qualification barrier keeps
+them frozen. Production stays at 53 retains / 924 releases; O0/O1/O2 membership
+is unchanged. See `O2_NESTED_AGGREGATE_OWNERSHIP_PROVENANCE.md`.
+
 Update for O2.2: the first proof-gated transform is enabled only in O2. The
 exact scope, ordering, and conservative limitations are documented in
 `O2_BOUNDS_CHECK_ELIMINATION.md`; the broader readiness cautions below remain.

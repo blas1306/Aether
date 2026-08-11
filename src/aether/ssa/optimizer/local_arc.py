@@ -9,6 +9,7 @@ from aether.ssa.cfg import SSACFGBuilder, predecessors, successor_edges
 from aether.ssa.analysis import (
     ArcPairClassification, ArcPairSemanticReason, OwnershipEscapeAnalysis,
     OwnershipUnknownReason, PostDominatorAnalysis,
+    has_unsupported_nested_owned_payload,
 )
 
 from .result import SSAOptimizationResult
@@ -152,6 +153,11 @@ class LocalARCEliminator:
         if pair.retain_block == pair.release_block and pair.retain_index >= pair.release_index:
             return "blocked_by_unsupported_structure"
         semantic = analysis.classify_arc_pair(pair)
+        # O2.8.8 is an analysis-only qualification milestone.  Keep every
+        # candidate whose new proof depends on aggregate precision frozen until
+        # a later production-activation milestone audits it explicitly.
+        if has_unsupported_nested_owned_payload(pair.value.type):
+            return "blocked_by_aggregate"
         if not semantic.semantically_provable:
             reasons = semantic.reasons
             if ArcPairSemanticReason.PROVENANCE_UNKNOWN in reasons:

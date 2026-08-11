@@ -134,6 +134,55 @@ def _provenance_blocker(instruction, reason: str | None) -> str:
     return "OTHER"
 
 
+def _aggregate_reconciliation(item: dict) -> dict:
+    type_ = item["type"]
+    defining = item["defining_instruction"]
+    if type_.startswith("ListType"):
+        category = "AGGREGATE_IN_COLLECTION"
+        kind = "COLLECTION_OBJECT_WITH_AGGREGATE_ELEMENTS"
+        component = "<collection-object>"
+    elif defining in {"SSAListGet", "SSAArrayGet"}:
+        category = "AGGREGATE_IN_COLLECTION"
+        kind = "STRUCT_VALUE"
+        component = "<unknown collection element>"
+    elif item["crosses"]["method_result"]:
+        category = "METHOD_RESULT_COMPONENT"
+        kind = "STRUCT_VALUE"
+        component = "MethodResult.receiver"
+    elif defining == "PARAMETER":
+        category = "STRUCT_FIELD_PROVENANCE"
+        kind = "STRUCT_VALUE"
+        component = "<symbolic parameter components>"
+    else:
+        category = "OTHER"
+        kind = "STRUCT_VALUE"
+        component = "<aggregate>"
+    outcome = ("NOW_SEMANTICALLY_PROVABLE" if item["classification"] == "PROVABLE_NOW"
+               else "BLOCKED_BY_OWNERSHIP_ROLE" if "ownership-conflict" in item["semantic_reasons"]
+               else "STILL_AGGREGATE_UNKNOWN")
+    return {
+        "workload": item["workload"], "function": item["function"],
+        "ssa_value": item["value"], "value_type": item["type"],
+        "retain": item["retain"], "release": item["release"],
+        "loop_depth": item["loop_depth"], "aggregate_kind": kind,
+        "aggregate_type": item["type"], "nesting_depth": 1,
+        "component_path": component, "component_type": item["type"],
+        "ownership_role": item["ownership_state"],
+        "provenance": item["provenance"], "exactness": item["provenance"]["exact"],
+        "defining_ssa_instruction": item["defining_instruction_detail"],
+        "instructions_crossed": item["crosses"],
+        "method_result": item["crosses"]["method_result"],
+        "class": item["crosses"]["field"], "interface": item["crosses"]["interface"],
+        "collection": (type_.startswith(("ListType", "ArrayType")) or item["crosses"]["collection"]),
+        "exception": item["crosses"]["exception_edge"],
+        "aggregate_blocker_category": category,
+        "current_primary_blocker": item["classification"],
+        "secondary_blockers": [reason for reason in item["semantic_reasons"]
+                               if reason != "nested-aggregate"],
+        "o288_outcome": outcome,
+    }
+
+
 def _crossings(function, value) -> dict[str, bool]:
     instructions = [item for block in function.blocks for item in block.instructions]
     uses = [item for item in instructions if value in (
@@ -170,6 +219,7 @@ def _crossings(function, value) -> dict[str, bool]:
 def generate(root: Path, corpus: tuple[str, ...] = DEFAULT_CORPUS) -> dict:
     counts, loop_counts, lifecycle, blockers, contexts, escape_reasons = Counter(), Counter(), Counter(), Counter(), Counter(), Counter()
     candidates, workloads, failures = [], [], []
+    aggregate_coverage = Counter()
     historical_path = root / "docs/compiler/o2_arc_opportunity_audit.json"
     historical = json.loads(historical_path.read_text(encoding="utf-8"))
     historical_by_site = {
@@ -186,7 +236,8 @@ def generate(root: Path, corpus: tuple[str, ...] = DEFAULT_CORPUS) -> dict:
             local = Counter()
             for function in module.functions:
                 depths = _loop_depths(function)
-                analysis = OwnershipEscapeAnalysis(function)
+                analysis = OwnershipEscapeAnalysis(function, structs=module.structs)
+                aggregate_coverage.update(analysis.aggregate_coverage())
                 for block in function.blocks:
                     for index, instruction in enumerate(block.instructions):
                         instruction_name = type(instruction).__name__
@@ -307,8 +358,12 @@ def generate(root: Path, corpus: tuple[str, ...] = DEFAULT_CORPUS) -> dict:
         recommendation = "DEFER_ARC_OPTIMIZATION"; expected = 0
     revision = subprocess.run(("git", "rev-parse", "HEAD"), cwd=root, check=True,
                               text=True, capture_output=True).stdout.strip()
+    original_nested = [item for item in candidates if (
+        item["classification"] == "BLOCKED_NESTED_AGGREGATE"
+        or (item["classification"] == "PROVABLE_NOW"
+            and item["type"].startswith(("ListType(element=StructType", "ArrayType(element=StructType"))))]
     return {
-        "audit": "O2.8.6-exact-provenance", "schema_version": 3, "corpus_revision": revision,
+        "audit": "O2.8.8-nested-aggregate-provenance", "schema_version": 4, "corpus_revision": revision,
         "methodology": "read-only lifecycle-expanded O2 SSA census using the production canonical semantic ARC-pair authority",
         "corpus": list(corpus), "corpus_failures": failures, "workloads": workloads,
         "arc_counts": {"initial_ir": {"retain": 0, "release": 0},
@@ -318,6 +373,10 @@ def generate(root: Path, corpus: tuple[str, ...] = DEFAULT_CORPUS) -> dict:
         "lifecycle_operations": dict(sorted(lifecycle.items())),
         "loop_arc": dict(sorted(loop_counts.items())), "candidate_count": len(candidates),
         "candidate_classifications": dict(sorted(blockers.items())), "candidates": candidates,
+        "aggregate_provenance_coverage": dict(sorted(aggregate_coverage.items())),
+        "original_nested_aggregate_reconciliation": [
+            _aggregate_reconciliation(item) for item in original_nested
+        ],
         "historical_provable_reconciliation": [
             item for item in candidates
             if item["historical_classification"] == "PROVABLE_NOW"

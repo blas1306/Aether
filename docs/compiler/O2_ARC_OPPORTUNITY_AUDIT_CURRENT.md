@@ -1,5 +1,12 @@
 # Current O2 ARC semantic reconciliation
 
+O2.8.8 schema-v4 result: 26 candidates = **7 semantically provable**, **7
+provenance**, **7 nested aggregate**, **4 escape**, and **1 normal join**. Five
+of the original 12 aggregate blockers are exact `List<Struct>` object roots and
+are newly provable but productively frozen. Production remains **53 retains /
+924 releases**, with zero new eliminations. See
+`O2_NESTED_AGGREGATE_OWNERSHIP_PROVENANCE.md` for all 12 outcomes and coverage.
+
 This is the corrected current report. The original
 `o2_arc_opportunity_audit.json` remains immutable historical evidence of the
 O2.8.5 audit error.
@@ -54,4 +61,3 @@ python scripts/o2_arc_opportunity_audit.py
 
 Every candidate includes provenance, escape, ownership state,
 dominance/post-dominance, productive classification, and final rejection.
-

@@ -41,6 +41,7 @@ from .alias_modref import (
     SummaryAnalysis, UnknownReason as AliasUnknownReason,
 )
 from .ownership_escape import (
+    AggregateProvenance, ComponentPath, ComponentProvenance,
     ArcPairCandidate, ArcPairClassification, EscapeFact, EscapeMode,
     ArcPairSemanticDecision, ArcPairSemanticReason, ArcPairSemanticStatus,
     OwnershipEscapeAnalysis, OwnershipFrame, OwnershipFunctionSummary,
@@ -88,6 +89,7 @@ __all__ = [
     "CollectionStorageLocation", "CollectionLengthLocation", "MemoryLocation",
     "ParameterFieldEffect",
     "ArcPairCandidate", "ArcPairClassification", "EscapeFact", "EscapeMode",
+    "AggregateProvenance", "ComponentPath", "ComponentProvenance",
     "ArcPairSemanticDecision", "ArcPairSemanticReason", "ArcPairSemanticStatus",
     "OwnershipEscapeAnalysis", "OwnershipFrame", "OwnershipFunctionSummary",
     "OwnershipState", "OwnershipSummaryAnalysis", "OwnershipUnknownReason",

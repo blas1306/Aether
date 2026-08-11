@@ -10,7 +10,7 @@ def test_o285_discovers_arc_pairs_and_uses_closed_classifications() -> None:
         "examples/classes/implements_interface.ae",
         "corpus/exceptions/positive/constructor_failure.ae",
     ))
-    assert report["audit"] == "O2.8.6-exact-provenance"
+    assert report["audit"] == "O2.8.8-nested-aggregate-provenance"
     assert report["arc_counts"]["ssa"]["retain"] > 0
     assert report["arc_counts"]["ssa"]["release"] > 0
     assert report["candidate_count"] == len(report["candidates"])
@@ -24,11 +24,11 @@ def test_o285_discovers_arc_pairs_and_uses_closed_classifications() -> None:
     assert all(item["workload_kind"] == "REAL_WORKLOAD" for item in report["candidates"])
     assert report["production_codegen_changed"] is False
     assert report["arc_changed"] is False
-    assert all(
-        item["productive_classification"] == "ELIGIBLE"
-        for item in report["candidates"]
-        if item["classification"] == "PROVABLE_NOW"
-    )
+    assert all(item["productive_classification"] in {"ELIGIBLE", "REJECTED"}
+               for item in report["candidates"] if item["classification"] == "PROVABLE_NOW")
+    assert report["schema_version"] == 4
+    assert "aggregate_provenance_coverage" in report
+    assert "original_nested_aggregate_reconciliation" in report
     assert set(report["local_arc_dry_run"]) == {
         "phase1_semantic_candidates", "phase1_structural_candidates",
         "phase2_semantic_candidates", "phase2_structural_candidates",

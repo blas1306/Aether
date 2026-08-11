@@ -1,5 +1,10 @@
 # O2.8 Ownership and escape analysis
 
+O2.8.8 adds sparse nominal component provenance for value-semantic aggregates;
+see `O2_NESTED_AGGREGATE_OWNERSHIP_PROVENANCE.md`. Aggregate and component
+identity remain separate. Class fields, collection elements, interface-box
+contents, and partial exception construction stay conservative.
+
 O2.8 is the ownership proof authority. O2.9 now consumes it for the narrowly
 scoped O2-only transformation in `O2_LOCAL_ARC_ELIMINATION.md`; the analysis
 itself still inserts or removes nothing.
