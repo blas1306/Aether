@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import Counter
+import hashlib
 
 from aether.analysis.dominators import DominatorAnalysis
 from aether.ssa import model as m
@@ -11,6 +12,7 @@ from aether.ssa.analysis import (
     OwnershipUnknownReason, PostDominatorAnalysis,
     has_unsupported_nested_owned_payload,
 )
+from aether.ir.types import ArrayType, ListType, StructType
 
 from .result import SSAOptimizationResult
 
@@ -51,21 +53,30 @@ class LocalARCEliminator:
         "blocked_by_exception", "blocked_by_aggregate",
         "blocked_by_methodresult_constructor", "blocked_by_interface",
         "blocked_by_unsupported_structure",
+        "nested_aggregate_candidates", "nested_aggregate_qualified",
+        "nested_aggregate_phase1", "nested_aggregate_phase2",
+        "nested_aggregate_extension",
     )
 
     def run(self, module: m.SSAModule) -> SSAOptimizationResult:
         stats: Counter[str] = Counter({key: 0 for key in self._STAT_KEYS})
         functions: list[m.SSAFunction] = []
+        transformation_log: list[dict[str, str]] = []
         changed = False
         for function in module.functions:
-            rewritten, removed = self._run_function(function, stats)
+            rewritten, removed = self._run_function(
+                function, module.structs, stats, transformation_log,
+            )
             functions.append(rewritten)
             changed |= bool(removed)
         optimized = m.SSAModule(functions, list(module.structs)) if changed else module
-        return SSAOptimizationResult(optimized, changed, dict(stats))
+        return SSAOptimizationResult(
+            optimized, changed, dict(stats), tuple(transformation_log),
+        )
 
-    def _run_function(self, function: m.SSAFunction, stats: Counter[str]):
-        analysis = OwnershipEscapeAnalysis(function)
+    def _run_function(self, function: m.SSAFunction, structs, stats: Counter[str],
+                      transformation_log: list[dict[str, str]]):
+        analysis = OwnershipEscapeAnalysis(function, structs=structs)
         analysis.verify()
         dominators = DominatorAnalysis(
             SSACFGBuilder().build(function), entry_block=function.entry_block,
@@ -81,6 +92,11 @@ class LocalARCEliminator:
         blocks = {block.name: block for block in function.blocks}
         removals: dict[str, set[int]] = {}
         for pair in pairs:
+            nested_qualification = self._nested_component_arc_pair_qualification(
+                function, blocks, analysis, pair,
+            )
+            if has_unsupported_nested_owned_payload(pair.value.type):
+                stats["nested_aggregate_candidates"] += 1
             multi_block = pair.retain_block != pair.release_block
             stats["multi_block_candidates" if multi_block else "same_block_candidates"] += 1
             reason = self._blocked_reason(
@@ -96,10 +112,14 @@ class LocalARCEliminator:
                 }:
                     stats["blocked_by_unsupported_ownership_category"] += 1
                 continue
+            if nested_qualification is not None:
+                stats["nested_aggregate_qualified"] += 1
+                stats[f"nested_aggregate_{nested_qualification['route']}"] += 1
             if not multi_block:
                 stats["phase1_eligible_pairs"] += 1
             # Assertions make the proof boundary explicit in debug/test runs.
-            assert analysis.classify_pair(pair) is ArcPairClassification.LOCALLY_PROVABLE
+            assert (analysis.classify_pair(pair) is ArcPairClassification.LOCALLY_PROVABLE
+                    or nested_qualification is not None)
             assert (pair.retain_block != pair.release_block
                     or pair.retain_index < pair.release_index)
             retain_selected = removals.setdefault(pair.retain_block, set())
@@ -115,6 +135,10 @@ class LocalARCEliminator:
             release_selected.add(pair.release_index)
             stats["pairs_eliminated"] += 1
             stats["multi_block_eliminated" if multi_block else "same_block_eliminated"] += 1
+            if nested_qualification is not None:
+                transformation_log.append(self._transformation_record(
+                    function, pair, nested_qualification,
+                ))
 
         if not removals:
             return function, 0
@@ -156,9 +180,13 @@ class LocalARCEliminator:
         # O2.8.8 is an analysis-only qualification milestone.  Keep every
         # candidate whose new proof depends on aggregate precision frozen until
         # a later production-activation milestone audits it explicitly.
-        if has_unsupported_nested_owned_payload(pair.value.type):
+        nested_qualification = self._nested_component_arc_pair_qualification(
+            function, blocks, analysis, pair,
+        )
+        if (has_unsupported_nested_owned_payload(pair.value.type)
+                and nested_qualification is None):
             return "blocked_by_aggregate"
-        if not semantic.semantically_provable:
+        if not semantic.semantically_provable and nested_qualification is None:
             reasons = semantic.reasons
             if ArcPairSemanticReason.PROVENANCE_UNKNOWN in reasons:
                 return "blocked_by_different_identity"
@@ -202,6 +230,14 @@ class LocalARCEliminator:
                 stop = pair.release_index if index == len(path) - 1 else len(instructions) - 1
                 region.extend(instructions[start:stop])
         for instruction in region:
+            if nested_qualification is not None:
+                if isinstance(instruction, m.SSAStructNew):
+                    continue
+                if (isinstance(instruction, m.SSACall)
+                        and instruction.builtin == "__aether_release"
+                        and instruction.arguments
+                        and instruction.arguments[0] != pair.value):
+                    continue
             if isinstance(instruction, m.SSAPhi):
                 return "blocked_by_nonunique_path"
             if isinstance(instruction, _EXCEPTION_OPERATIONS):
@@ -220,9 +256,127 @@ class LocalARCEliminator:
                 return "blocked_by_ownership_operation"
             if instruction.may_trap:
                 return "blocked_by_exception"
-        if analysis.classify_pair(pair) is not ArcPairClassification.LOCALLY_PROVABLE:
+        if (nested_qualification is None
+                and analysis.classify_pair(pair) is not ArcPairClassification.LOCALLY_PROVABLE):
             return "blocked_by_escape" if analysis.may_escape(pair.value) else "blocked_by_unsupported_structure"
         return None
+
+    def nested_component_arc_pair_is_qualified(
+        self, function: m.SSAFunction, analysis: OwnershipEscapeAnalysis, pair,
+    ) -> bool:
+        """Whether the O2.8.9 aggregate-transfer rule proves this exact pair."""
+        blocks = {block.name: block for block in function.blocks}
+        return self._nested_component_arc_pair_qualification(
+            function, blocks, analysis, pair,
+        ) is not None
+
+    @staticmethod
+    def _nested_component_arc_pair_qualification(function, blocks, analysis, pair):
+        """Qualify only a dead source owner transferred into one struct field.
+
+        A ``List<Struct>``/``Array<Struct>`` is still a reference-like collection
+        object.  This rule reasons about that object's exact root and the one
+        aggregate field ownership edge; it never assigns provenance to an
+        element of the collection.
+        """
+        type_ = pair.value.type
+        if not (isinstance(type_, (ListType, ArrayType))
+                and isinstance(type_.element, StructType)):
+            return None
+        if pair.retain_block != pair.release_block or pair.retain_index >= pair.release_index:
+            return None
+        provenance = analysis.provenance(pair.value)
+        if (not provenance.exact or len(provenance.roots) != 1
+                or not analysis.is_fresh(pair.value)
+                or analysis.ownership_state_before(
+                    pair.value, pair.retain_block, pair.retain_index,
+                ).value != "owned"):
+            return None
+        block = blocks[pair.retain_block]
+        # A backedge would make "dead after release" iteration-sensitive.
+        work = [edge.target for edge in successor_edges(block)]
+        seen = set()
+        while work:
+            name = work.pop()
+            if name == block.name:
+                return None
+            if name in seen:
+                continue
+            seen.add(name)
+            work.extend(edge.target for edge in successor_edges(blocks[name]))
+        region = block.instructions[pair.retain_index + 1:pair.release_index]
+        constructions = [item for item in region
+                         if isinstance(item, m.SSAStructNew)
+                         and item.fields.count(pair.value) == 1]
+        if len(constructions) != 1:
+            return None
+        construction = constructions[0]
+        # The interval may contain only the construction and releases of
+        # independent exact roots.  Calls, stores, traps and aggregate updates
+        # remain rejected by the ordinary LocalARC barrier below.
+        for instruction in region:
+            if instruction is construction:
+                continue
+            if not (isinstance(instruction, m.SSACall)
+                    and instruction.builtin == "__aether_release"
+                    and instruction.arguments
+                    and instruction.arguments[0] != pair.value):
+                return None
+            other = analysis.provenance(instruction.arguments[0])
+            if not other.exact or provenance.roots & other.roots:
+                return None
+        field_index = construction.fields.index(pair.value)
+        components = analysis.aggregate_provenance(construction.result).components
+        matches = [(path, fact) for path, fact in components
+                   if len(path.fields) == 1
+                   and path.fields[0].index == field_index]
+        if (len(matches) != 1 or matches[0][1].provenance != provenance
+                or matches[0][1].ownership.value != "owned"):
+            return None
+        # No direct use of the source owner may follow the balancing release.
+        # Aggregate uses are intentionally not source uses: they consume the
+        # single transferred field edge whose identity was checked above.
+        for instruction in block.instructions[pair.release_index + 1:]:
+            if pair.value in tuple(getattr(instruction, "arguments", ())):
+                return None
+        for name in seen:
+            for instruction in blocks[name].instructions:
+                if pair.value in tuple(getattr(instruction, "arguments", ())):
+                    return None
+                if any(getattr(instruction, attr, None) == pair.value for attr in (
+                    "value", "object", "struct", "array", "list_value", "carrier",
+                    "receiver", "method_result", "event",
+                )):
+                    return None
+            if any(getattr(instruction, name, None) == pair.value for name in (
+                "value", "object", "struct", "array", "list_value", "carrier",
+                "receiver", "method_result", "event",
+            )):
+                return None
+        return {
+            "route": "extension" if len(region) > 1 else "phase1",
+            "component_path": str(matches[0][0]),
+            "root": next(iter(provenance.roots)).identity,
+            "proof": "exact owned collection root transferred to one struct field; source dead after release",
+        }
+
+    @staticmethod
+    def _transformation_record(function, pair, qualification):
+        material = "|".join((function.name, pair.retain_block,
+                             str(pair.retain_index), pair.release_block,
+                             str(pair.release_index), qualification["component_path"],
+                             qualification["root"]))
+        candidate_id = "O2.8.9-" + hashlib.sha256(material.encode()).hexdigest()[:16]
+        return {
+            "candidate_id": candidate_id,
+            "function": function.name,
+            "component_path": qualification["component_path"],
+            "exact_root": qualification["root"],
+            "retain": f"{pair.retain_block}:{pair.retain_index}",
+            "release": f"{pair.release_block}:{pair.release_index}",
+            "route": qualification["route"],
+            "ownership_proof": qualification["proof"],
+        }
 
     @staticmethod
     def _straight_line_path(function, blocks, pair):

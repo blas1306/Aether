@@ -1,10 +1,14 @@
 from __future__ import annotations
 
-from aether.ir.types import BoolType, ClassRefType, IntType, InterfaceType, StructType, VoidType
+from aether.ir.model import IRStructDefinition
+from aether.ir.types import (
+    BoolType, ClassRefType, IntType, InterfaceType, ListType,
+    StructType, VoidType,
+)
 from aether.ssa.model import (
     SSAClassNew, SSAClassSet, SSABasicBlock, SSABranch, SSACall, SSACompareOp,
     SSAConst, SSAFunction, SSAJump, SSAModule, SSAParameter, SSAPhi, SSAReturn,
-    SSAValue,
+    SSAListNew, SSAStructNew, SSAValue,
 )
 from aether.ssa.optimizer import LocalARCEliminator
 from aether.ssa.verifier import SSAVerifier
@@ -25,8 +29,8 @@ def release(value):
     return SSACall("__aether_release", (value,), builtin="__aether_release")
 
 
-def run(function, *, verify=True):
-    result = LocalARCEliminator().run(SSAModule([function]))
+def run(function, *, verify=True, structs=()):
+    result = LocalARCEliminator().run(SSAModule([function], list(structs)))
     if verify:
         SSAVerifier(result.module).verify()
     return result
@@ -185,3 +189,95 @@ def test_preserves_phi_aggregate_interface_and_constructor_contexts():
         result = run(function, verify=False)
         assert not result.changed
         assert result.stats[expected] == 1
+
+
+def test_qualifies_exact_list_of_struct_owner_transferred_to_struct_field():
+    element = StructType("Element")
+    result_type = StructType("Result")
+    list_type = ListType(element)
+    definitions = (IRStructDefinition("Element", ()),
+                   IRStructDefinition("Result", (("items", list_type),)))
+    items, aggregate = v("items", list_type), v("result", result_type)
+    function = SSAFunction("nested_transfer", [], result_type, [SSABasicBlock("entry", [
+        SSAListNew(items), retain(items), SSAStructNew(aggregate, (items,)),
+        release(items), SSAReturn(aggregate),
+    ])])
+
+    result = run(function, structs=definitions)
+
+    assert result.changed
+    assert arc_builtins(result) == []
+    assert result.stats["nested_aggregate_candidates"] == 1
+    assert result.stats["nested_aggregate_qualified"] == 1
+    assert result.stats["nested_aggregate_phase1"] == 1
+    assert len(result.transformation_log) == 1
+    record = result.transformation_log[0]
+    assert record["candidate_id"].startswith("O2.8.9-")
+    assert record["component_path"] == "Result.items#0"
+    assert record["route"] == "phase1"
+    assert run(function, structs=definitions).transformation_log == result.transformation_log
+
+
+def test_aggregate_extension_allows_only_a_disjoint_exact_release():
+    element = StructType("Element")
+    result_type = StructType("Result")
+    list_type = ListType(element)
+    definitions = (IRStructDefinition("Element", ()),
+                   IRStructDefinition("Result", (("items", list_type),)))
+    items, aggregate, other = (v("items", list_type), v("result", result_type),
+                               v("other", BOX))
+    function = SSAFunction("nested_disjoint_release", [], result_type,
+                           [SSABasicBlock("entry", [
+        SSAListNew(items), SSAClassNew(other), retain(items),
+        SSAStructNew(aggregate, (items,)), release(other), release(items),
+        SSAReturn(aggregate),
+    ])])
+
+    result = run(function, structs=definitions)
+
+    assert result.changed
+    assert arc_builtins(result) == ["__aether_release"]
+    assert result.stats["nested_aggregate_extension"] == 1
+    assert result.transformation_log[0]["route"] == "extension"
+
+
+def test_preserves_nested_collection_when_source_is_used_after_transfer():
+    element = StructType("Element")
+    result_type = StructType("Result")
+    list_type = ListType(element)
+    definition = IRStructDefinition("Result", (("items", list_type),))
+    items, aggregate = v("items", list_type), v("result", result_type)
+    function = SSAFunction("nested_live_source", [], result_type, [SSABasicBlock("entry", [
+        SSAListNew(items), retain(items), SSAStructNew(aggregate, (items,)),
+        release(items), SSACall("observe", (items,)), SSAReturn(aggregate),
+    ])])
+
+    result = run(function, verify=False, structs=(definition,))
+
+    assert not result.changed
+    assert arc_builtins(result) == ["__aether_retain", "__aether_release"]
+    assert result.stats["blocked_by_aggregate"] == 1
+
+
+def test_preserves_nested_collection_when_component_root_is_not_exact():
+    condition = SSAParameter("condition", B)
+    element = StructType("Element")
+    result_type = StructType("Result")
+    list_type = ListType(element)
+    definition = IRStructDefinition("Result", (("items", list_type),))
+    left, right, merged = v("left", list_type), v("right", list_type), v("merged", list_type)
+    aggregate = v("result", result_type)
+    function = SSAFunction("nested_unknown", [condition], result_type, [
+        SSABasicBlock("entry", [SSAListNew(left), SSAListNew(right),
+                                SSABranch(condition, "a", "b")]),
+        SSABasicBlock("a", [SSAJump("merge")]),
+        SSABasicBlock("b", [SSAJump("merge")]),
+        SSABasicBlock("merge", [SSAPhi(merged, (("a", left), ("b", right))),
+                                retain(merged), SSAStructNew(aggregate, (merged,)),
+                                release(merged), SSAReturn(aggregate)]),
+    ])
+
+    result = run(function, verify=False, structs=(definition,))
+
+    assert not result.changed
+    assert result.stats["blocked_by_aggregate"] == 1

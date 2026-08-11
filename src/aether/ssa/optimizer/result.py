@@ -12,6 +12,7 @@ class SSAOptimizationResult:
     module: SSAModule
     changed: bool
     stats: dict[str, int] = field(default_factory=dict)
+    transformation_log: tuple[dict[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
