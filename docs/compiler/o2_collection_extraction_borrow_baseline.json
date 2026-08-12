@@ -1,0 +1,1510 @@
+{
+  "audit": "O2.9.3-collection-extraction-borrow",
+  "candidate_count": 19,
+  "candidate_source": "O2.9.2 EXTRACTION_TEMPORARY",
+  "candidates": [
+    {
+      "aggregate_definition": {
+        "block": "logic.rhs37",
+        "instruction": 1
+      },
+      "aggregate_escape": false,
+      "aggregate_level_uses": 1,
+      "aggregate_mutation": false,
+      "alias_modref_uncertainty": false,
+      "arc_operations_attributed": {
+        "release": 1,
+        "retain": 0
+      },
+      "best_future_model": "BORROW_MODEL_BEST",
+      "blocker_reasons": [],
+      "borrow_classification": "BORROWABLE_IMMEDIATE_USE",
+      "borrow_interval": {
+        "end": {
+          "block": "logic.rhs37",
+          "instruction": 2
+        },
+        "kind": "SAME_EXPRESSION",
+        "start": {
+          "block": "logic.rhs37",
+          "instruction": 1
+        }
+      },
+      "bounds_check": "ELIMINATED",
+      "calls_between_extraction_and_last_use": [],
+      "collection_kind": "Array",
+      "collection_mutations_between_extraction_and_last_use": [],
+      "collection_stable": true,
+      "collection_type": "ArrayType(element=StringType())",
+      "component_escape": false,
+      "crosses_backedge": false,
+      "current_escape_classification": "NO_ESCAPE",
+      "destruction_point": {
+        "block": "logic.rhs37",
+        "instruction": 3
+      },
+      "direct_field_reads": 0,
+      "element_aggregate_type": "StringType()",
+      "escape_uses": 0,
+      "exceptional_edges": false,
+      "extraction_instruction": "SSAArrayGet",
+      "field_use_shape": "PASS_AGGREGATE",
+      "first_use": {
+        "block": "logic.rhs37",
+        "instruction": 2
+      },
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "future_arc_operations_potentially_avoidable": {
+        "release": 1,
+        "retain": 0
+      },
+      "index_form": "CONSTANT",
+      "index_ssa_value": "364",
+      "last_use": {
+        "block": "logic.rhs37",
+        "instruction": 2
+      },
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 1,
+      "loop_id": "cond0",
+      "mutation_uses": 0,
+      "nested_owned_component_count": 1,
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%365",
+      "optimization_fit": "A",
+      "owned_field_reads": 0,
+      "primary_blocker": null,
+      "scalar_field_reads": 0,
+      "source_pattern": null,
+      "ssa_value": "365",
+      "structural_hotness": 3,
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "aggregate_definition": {
+        "block": "logic.rhs38",
+        "instruction": 1
+      },
+      "aggregate_escape": false,
+      "aggregate_level_uses": 1,
+      "aggregate_mutation": false,
+      "alias_modref_uncertainty": false,
+      "arc_operations_attributed": {
+        "release": 1,
+        "retain": 0
+      },
+      "best_future_model": "BORROW_MODEL_BEST",
+      "blocker_reasons": [],
+      "borrow_classification": "BORROWABLE_STABLE_REGION",
+      "borrow_interval": {
+        "end": {
+          "block": "logic.rhs38",
+          "instruction": 4
+        },
+        "kind": "SAME_BASIC_BLOCK",
+        "start": {
+          "block": "logic.rhs38",
+          "instruction": 1
+        }
+      },
+      "bounds_check": "RETAINED",
+      "calls_between_extraction_and_last_use": [],
+      "collection_kind": "Array",
+      "collection_mutations_between_extraction_and_last_use": [],
+      "collection_stable": true,
+      "collection_type": "ArrayType(element=StringType())",
+      "component_escape": false,
+      "crosses_backedge": false,
+      "current_escape_classification": "NO_ESCAPE",
+      "destruction_point": {
+        "block": "logic.rhs38",
+        "instruction": 5
+      },
+      "direct_field_reads": 0,
+      "element_aggregate_type": "StringType()",
+      "escape_uses": 0,
+      "exceptional_edges": false,
+      "extraction_instruction": "SSAArrayGet",
+      "field_use_shape": "PASS_AGGREGATE",
+      "first_use": {
+        "block": "logic.rhs38",
+        "instruction": 4
+      },
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "future_arc_operations_potentially_avoidable": {
+        "release": 1,
+        "retain": 0
+      },
+      "index_form": "CONSTANT",
+      "index_ssa_value": "372",
+      "last_use": {
+        "block": "logic.rhs38",
+        "instruction": 4
+      },
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 1,
+      "loop_id": "cond0",
+      "mutation_uses": 0,
+      "nested_owned_component_count": 1,
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%373",
+      "optimization_fit": "A",
+      "owned_field_reads": 0,
+      "primary_blocker": null,
+      "scalar_field_reads": 0,
+      "source_pattern": null,
+      "ssa_value": "373",
+      "structural_hotness": 3,
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "aggregate_definition": {
+        "block": "logic.rhs46",
+        "instruction": 1
+      },
+      "aggregate_escape": false,
+      "aggregate_level_uses": 1,
+      "aggregate_mutation": false,
+      "alias_modref_uncertainty": false,
+      "arc_operations_attributed": {
+        "release": 1,
+        "retain": 0
+      },
+      "best_future_model": "BORROW_MODEL_BEST",
+      "blocker_reasons": [],
+      "borrow_classification": "BORROWABLE_IMMEDIATE_USE",
+      "borrow_interval": {
+        "end": {
+          "block": "logic.rhs46",
+          "instruction": 3
+        },
+        "kind": "SAME_EXPRESSION",
+        "start": {
+          "block": "logic.rhs46",
+          "instruction": 1
+        }
+      },
+      "bounds_check": "ELIMINATED",
+      "calls_between_extraction_and_last_use": [],
+      "collection_kind": "Array",
+      "collection_mutations_between_extraction_and_last_use": [],
+      "collection_stable": true,
+      "collection_type": "ArrayType(element=StringType())",
+      "component_escape": false,
+      "crosses_backedge": false,
+      "current_escape_classification": "NO_ESCAPE",
+      "destruction_point": {
+        "block": "logic.rhs46",
+        "instruction": 4
+      },
+      "direct_field_reads": 0,
+      "element_aggregate_type": "StringType()",
+      "escape_uses": 0,
+      "exceptional_edges": false,
+      "extraction_instruction": "SSAArrayGet",
+      "field_use_shape": "WHOLE_AGGREGATE_READ",
+      "first_use": {
+        "block": "logic.rhs46",
+        "instruction": 3
+      },
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "future_arc_operations_potentially_avoidable": {
+        "release": 1,
+        "retain": 0
+      },
+      "index_form": "CONSTANT",
+      "index_ssa_value": "458",
+      "last_use": {
+        "block": "logic.rhs46",
+        "instruction": 3
+      },
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 1,
+      "loop_id": "cond1",
+      "mutation_uses": 0,
+      "nested_owned_component_count": 1,
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%459",
+      "optimization_fit": "A",
+      "owned_field_reads": 0,
+      "primary_blocker": null,
+      "scalar_field_reads": 0,
+      "source_pattern": null,
+      "ssa_value": "459",
+      "structural_hotness": 3,
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "aggregate_definition": {
+        "block": "logic.rhs47",
+        "instruction": 1
+      },
+      "aggregate_escape": false,
+      "aggregate_level_uses": 1,
+      "aggregate_mutation": false,
+      "alias_modref_uncertainty": false,
+      "arc_operations_attributed": {
+        "release": 1,
+        "retain": 0
+      },
+      "best_future_model": "BORROW_MODEL_BEST",
+      "blocker_reasons": [],
+      "borrow_classification": "BORROWABLE_IMMEDIATE_USE",
+      "borrow_interval": {
+        "end": {
+          "block": "logic.rhs47",
+          "instruction": 3
+        },
+        "kind": "SAME_EXPRESSION",
+        "start": {
+          "block": "logic.rhs47",
+          "instruction": 1
+        }
+      },
+      "bounds_check": "RETAINED",
+      "calls_between_extraction_and_last_use": [],
+      "collection_kind": "Array",
+      "collection_mutations_between_extraction_and_last_use": [],
+      "collection_stable": true,
+      "collection_type": "ArrayType(element=StringType())",
+      "component_escape": false,
+      "crosses_backedge": false,
+      "current_escape_classification": "NO_ESCAPE",
+      "destruction_point": {
+        "block": "logic.rhs47",
+        "instruction": 4
+      },
+      "direct_field_reads": 0,
+      "element_aggregate_type": "StringType()",
+      "escape_uses": 0,
+      "exceptional_edges": false,
+      "extraction_instruction": "SSAArrayGet",
+      "field_use_shape": "WHOLE_AGGREGATE_READ",
+      "first_use": {
+        "block": "logic.rhs47",
+        "instruction": 3
+      },
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "future_arc_operations_potentially_avoidable": {
+        "release": 1,
+        "retain": 0
+      },
+      "index_form": "CONSTANT",
+      "index_ssa_value": "465",
+      "last_use": {
+        "block": "logic.rhs47",
+        "instruction": 3
+      },
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 1,
+      "loop_id": "cond1",
+      "mutation_uses": 0,
+      "nested_owned_component_count": 1,
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%466",
+      "optimization_fit": "A",
+      "owned_field_reads": 0,
+      "primary_blocker": null,
+      "scalar_field_reads": 0,
+      "source_pattern": null,
+      "ssa_value": "466",
+      "structural_hotness": 3,
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "aggregate_definition": {
+        "block": "merge49",
+        "instruction": 1
+      },
+      "aggregate_escape": false,
+      "aggregate_level_uses": 1,
+      "aggregate_mutation": false,
+      "alias_modref_uncertainty": false,
+      "arc_operations_attributed": {
+        "release": 1,
+        "retain": 0
+      },
+      "best_future_model": "BORROW_MODEL_BEST",
+      "blocker_reasons": [],
+      "borrow_classification": "BORROWABLE_IMMEDIATE_USE",
+      "borrow_interval": {
+        "end": {
+          "block": "merge49",
+          "instruction": 2
+        },
+        "kind": "SAME_EXPRESSION",
+        "start": {
+          "block": "merge49",
+          "instruction": 1
+        }
+      },
+      "bounds_check": "RETAINED",
+      "calls_between_extraction_and_last_use": [],
+      "collection_kind": "Array",
+      "collection_mutations_between_extraction_and_last_use": [],
+      "collection_stable": true,
+      "collection_type": "ArrayType(element=StringType())",
+      "component_escape": false,
+      "crosses_backedge": false,
+      "current_escape_classification": "NO_ESCAPE",
+      "destruction_point": {
+        "block": "merge49",
+        "instruction": 3
+      },
+      "direct_field_reads": 0,
+      "element_aggregate_type": "StringType()",
+      "escape_uses": 0,
+      "exceptional_edges": false,
+      "extraction_instruction": "SSAArrayGet",
+      "field_use_shape": "PASS_AGGREGATE",
+      "first_use": {
+        "block": "merge49",
+        "instruction": 2
+      },
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "future_arc_operations_potentially_avoidable": {
+        "release": 1,
+        "retain": 0
+      },
+      "index_form": "CONSTANT",
+      "index_ssa_value": "483",
+      "last_use": {
+        "block": "merge49",
+        "instruction": 2
+      },
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 1,
+      "loop_id": "cond1",
+      "mutation_uses": 0,
+      "nested_owned_component_count": 1,
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%484",
+      "optimization_fit": "A",
+      "owned_field_reads": 0,
+      "primary_blocker": null,
+      "scalar_field_reads": 0,
+      "source_pattern": null,
+      "ssa_value": "484",
+      "structural_hotness": 3,
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "aggregate_definition": {
+        "block": "logic.rhs52",
+        "instruction": 1
+      },
+      "aggregate_escape": false,
+      "aggregate_level_uses": 1,
+      "aggregate_mutation": false,
+      "alias_modref_uncertainty": false,
+      "arc_operations_attributed": {
+        "release": 1,
+        "retain": 0
+      },
+      "best_future_model": "BORROW_MODEL_BEST",
+      "blocker_reasons": [],
+      "borrow_classification": "BORROWABLE_IMMEDIATE_USE",
+      "borrow_interval": {
+        "end": {
+          "block": "logic.rhs52",
+          "instruction": 3
+        },
+        "kind": "SAME_EXPRESSION",
+        "start": {
+          "block": "logic.rhs52",
+          "instruction": 1
+        }
+      },
+      "bounds_check": "ELIMINATED",
+      "calls_between_extraction_and_last_use": [],
+      "collection_kind": "Array",
+      "collection_mutations_between_extraction_and_last_use": [],
+      "collection_stable": true,
+      "collection_type": "ArrayType(element=StringType())",
+      "component_escape": false,
+      "crosses_backedge": false,
+      "current_escape_classification": "NO_ESCAPE",
+      "destruction_point": {
+        "block": "logic.rhs52",
+        "instruction": 4
+      },
+      "direct_field_reads": 0,
+      "element_aggregate_type": "StringType()",
+      "escape_uses": 0,
+      "exceptional_edges": false,
+      "extraction_instruction": "SSAArrayGet",
+      "field_use_shape": "WHOLE_AGGREGATE_READ",
+      "first_use": {
+        "block": "logic.rhs52",
+        "instruction": 3
+      },
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "future_arc_operations_potentially_avoidable": {
+        "release": 1,
+        "retain": 0
+      },
+      "index_form": "CONSTANT",
+      "index_ssa_value": "537",
+      "last_use": {
+        "block": "logic.rhs52",
+        "instruction": 3
+      },
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 2,
+      "loop_id": "cond2",
+      "mutation_uses": 0,
+      "nested_owned_component_count": 1,
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%538",
+      "optimization_fit": "A",
+      "owned_field_reads": 0,
+      "primary_blocker": null,
+      "scalar_field_reads": 0,
+      "source_pattern": null,
+      "ssa_value": "538",
+      "structural_hotness": 5,
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "aggregate_definition": {
+        "block": "merge57",
+        "instruction": 1
+      },
+      "aggregate_escape": false,
+      "aggregate_level_uses": 1,
+      "aggregate_mutation": false,
+      "alias_modref_uncertainty": false,
+      "arc_operations_attributed": {
+        "release": 1,
+        "retain": 0
+      },
+      "best_future_model": "BORROW_MODEL_BEST",
+      "blocker_reasons": [],
+      "borrow_classification": "BORROWABLE_IMMEDIATE_USE",
+      "borrow_interval": {
+        "end": {
+          "block": "merge57",
+          "instruction": 2
+        },
+        "kind": "SAME_EXPRESSION",
+        "start": {
+          "block": "merge57",
+          "instruction": 1
+        }
+      },
+      "bounds_check": "RETAINED",
+      "calls_between_extraction_and_last_use": [],
+      "collection_kind": "Array",
+      "collection_mutations_between_extraction_and_last_use": [],
+      "collection_stable": true,
+      "collection_type": "ArrayType(element=StringType())",
+      "component_escape": false,
+      "crosses_backedge": false,
+      "current_escape_classification": "NO_ESCAPE",
+      "destruction_point": {
+        "block": "merge57",
+        "instruction": 3
+      },
+      "direct_field_reads": 0,
+      "element_aggregate_type": "StringType()",
+      "escape_uses": 0,
+      "exceptional_edges": false,
+      "extraction_instruction": "SSAArrayGet",
+      "field_use_shape": "PASS_AGGREGATE",
+      "first_use": {
+        "block": "merge57",
+        "instruction": 2
+      },
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "future_arc_operations_potentially_avoidable": {
+        "release": 1,
+        "retain": 0
+      },
+      "index_form": "CONSTANT",
+      "index_ssa_value": "586",
+      "last_use": {
+        "block": "merge57",
+        "instruction": 2
+      },
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 2,
+      "loop_id": "cond2",
+      "mutation_uses": 0,
+      "nested_owned_component_count": 1,
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%587",
+      "optimization_fit": "A",
+      "owned_field_reads": 0,
+      "primary_blocker": null,
+      "scalar_field_reads": 0,
+      "source_pattern": null,
+      "ssa_value": "587",
+      "structural_hotness": 5,
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "aggregate_definition": {
+        "block": "merge60",
+        "instruction": 5
+      },
+      "aggregate_escape": false,
+      "aggregate_level_uses": 1,
+      "aggregate_mutation": false,
+      "alias_modref_uncertainty": false,
+      "arc_operations_attributed": {
+        "release": 1,
+        "retain": 0
+      },
+      "best_future_model": "BORROW_MODEL_BEST",
+      "blocker_reasons": [],
+      "borrow_classification": "BORROWABLE_IMMEDIATE_USE",
+      "borrow_interval": {
+        "end": {
+          "block": "merge60",
+          "instruction": 7
+        },
+        "kind": "SAME_EXPRESSION",
+        "start": {
+          "block": "merge60",
+          "instruction": 5
+        }
+      },
+      "bounds_check": "RETAINED",
+      "calls_between_extraction_and_last_use": [],
+      "collection_kind": "Array",
+      "collection_mutations_between_extraction_and_last_use": [],
+      "collection_stable": true,
+      "collection_type": "ArrayType(element=StringType())",
+      "component_escape": false,
+      "crosses_backedge": false,
+      "current_escape_classification": "NO_ESCAPE",
+      "destruction_point": {
+        "block": "merge60",
+        "instruction": 8
+      },
+      "direct_field_reads": 0,
+      "element_aggregate_type": "StringType()",
+      "escape_uses": 0,
+      "exceptional_edges": false,
+      "extraction_instruction": "SSAArrayGet",
+      "field_use_shape": "WHOLE_AGGREGATE_READ",
+      "first_use": {
+        "block": "merge60",
+        "instruction": 7
+      },
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "future_arc_operations_potentially_avoidable": {
+        "release": 1,
+        "retain": 0
+      },
+      "index_form": "CONSTANT",
+      "index_ssa_value": "631",
+      "last_use": {
+        "block": "merge60",
+        "instruction": 7
+      },
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 2,
+      "loop_id": "cond2",
+      "mutation_uses": 0,
+      "nested_owned_component_count": 1,
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%632",
+      "optimization_fit": "A",
+      "owned_field_reads": 0,
+      "primary_blocker": null,
+      "scalar_field_reads": 0,
+      "source_pattern": null,
+      "ssa_value": "632",
+      "structural_hotness": 5,
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "aggregate_definition": {
+        "block": "then61",
+        "instruction": 1
+      },
+      "aggregate_escape": false,
+      "aggregate_level_uses": 1,
+      "aggregate_mutation": false,
+      "alias_modref_uncertainty": false,
+      "arc_operations_attributed": {
+        "release": 1,
+        "retain": 0
+      },
+      "best_future_model": "BORROW_MODEL_BEST",
+      "blocker_reasons": [],
+      "borrow_classification": "BORROWABLE_IMMEDIATE_USE",
+      "borrow_interval": {
+        "end": {
+          "block": "then61",
+          "instruction": 3
+        },
+        "kind": "SAME_EXPRESSION",
+        "start": {
+          "block": "then61",
+          "instruction": 1
+        }
+      },
+      "bounds_check": "RETAINED",
+      "calls_between_extraction_and_last_use": [],
+      "collection_kind": "Array",
+      "collection_mutations_between_extraction_and_last_use": [],
+      "collection_stable": true,
+      "collection_type": "ArrayType(element=StringType())",
+      "component_escape": false,
+      "crosses_backedge": false,
+      "current_escape_classification": "NO_ESCAPE",
+      "destruction_point": {
+        "block": "then61",
+        "instruction": 4
+      },
+      "direct_field_reads": 0,
+      "element_aggregate_type": "StringType()",
+      "escape_uses": 0,
+      "exceptional_edges": false,
+      "extraction_instruction": "SSAArrayGet",
+      "field_use_shape": "WHOLE_AGGREGATE_READ",
+      "first_use": {
+        "block": "then61",
+        "instruction": 3
+      },
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "future_arc_operations_potentially_avoidable": {
+        "release": 1,
+        "retain": 0
+      },
+      "index_form": "CONSTANT",
+      "index_ssa_value": "636",
+      "last_use": {
+        "block": "then61",
+        "instruction": 3
+      },
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 2,
+      "loop_id": "cond2",
+      "mutation_uses": 0,
+      "nested_owned_component_count": 1,
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%637",
+      "optimization_fit": "A",
+      "owned_field_reads": 0,
+      "primary_blocker": null,
+      "scalar_field_reads": 0,
+      "source_pattern": null,
+      "ssa_value": "637",
+      "structural_hotness": 5,
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "aggregate_definition": {
+        "block": "else61",
+        "instruction": 1
+      },
+      "aggregate_escape": false,
+      "aggregate_level_uses": 1,
+      "aggregate_mutation": false,
+      "alias_modref_uncertainty": false,
+      "arc_operations_attributed": {
+        "release": 1,
+        "retain": 0
+      },
+      "best_future_model": "BORROW_MODEL_BEST",
+      "blocker_reasons": [],
+      "borrow_classification": "BORROWABLE_IMMEDIATE_USE",
+      "borrow_interval": {
+        "end": {
+          "block": "else61",
+          "instruction": 3
+        },
+        "kind": "SAME_EXPRESSION",
+        "start": {
+          "block": "else61",
+          "instruction": 1
+        }
+      },
+      "bounds_check": "RETAINED",
+      "calls_between_extraction_and_last_use": [],
+      "collection_kind": "Array",
+      "collection_mutations_between_extraction_and_last_use": [],
+      "collection_stable": true,
+      "collection_type": "ArrayType(element=StringType())",
+      "component_escape": false,
+      "crosses_backedge": false,
+      "current_escape_classification": "NO_ESCAPE",
+      "destruction_point": {
+        "block": "else61",
+        "instruction": 4
+      },
+      "direct_field_reads": 0,
+      "element_aggregate_type": "StringType()",
+      "escape_uses": 0,
+      "exceptional_edges": false,
+      "extraction_instruction": "SSAArrayGet",
+      "field_use_shape": "WHOLE_AGGREGATE_READ",
+      "first_use": {
+        "block": "else61",
+        "instruction": 3
+      },
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "future_arc_operations_potentially_avoidable": {
+        "release": 1,
+        "retain": 0
+      },
+      "index_form": "CONSTANT",
+      "index_ssa_value": "666",
+      "last_use": {
+        "block": "else61",
+        "instruction": 3
+      },
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 2,
+      "loop_id": "cond2",
+      "mutation_uses": 0,
+      "nested_owned_component_count": 1,
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%667",
+      "optimization_fit": "A",
+      "owned_field_reads": 0,
+      "primary_blocker": null,
+      "scalar_field_reads": 0,
+      "source_pattern": null,
+      "ssa_value": "667",
+      "structural_hotness": 5,
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "aggregate_definition": {
+        "block": "then65",
+        "instruction": 1
+      },
+      "aggregate_escape": false,
+      "aggregate_level_uses": 1,
+      "aggregate_mutation": false,
+      "alias_modref_uncertainty": false,
+      "arc_operations_attributed": {
+        "release": 1,
+        "retain": 0
+      },
+      "best_future_model": "BORROW_MODEL_BEST",
+      "blocker_reasons": [],
+      "borrow_classification": "BORROWABLE_IMMEDIATE_USE",
+      "borrow_interval": {
+        "end": {
+          "block": "then65",
+          "instruction": 3
+        },
+        "kind": "SAME_EXPRESSION",
+        "start": {
+          "block": "then65",
+          "instruction": 1
+        }
+      },
+      "bounds_check": "RETAINED",
+      "calls_between_extraction_and_last_use": [],
+      "collection_kind": "Array",
+      "collection_mutations_between_extraction_and_last_use": [],
+      "collection_stable": true,
+      "collection_type": "ArrayType(element=StringType())",
+      "component_escape": false,
+      "crosses_backedge": false,
+      "current_escape_classification": "NO_ESCAPE",
+      "destruction_point": {
+        "block": "then65",
+        "instruction": 4
+      },
+      "direct_field_reads": 0,
+      "element_aggregate_type": "StringType()",
+      "escape_uses": 0,
+      "exceptional_edges": false,
+      "extraction_instruction": "SSAArrayGet",
+      "field_use_shape": "WHOLE_AGGREGATE_READ",
+      "first_use": {
+        "block": "then65",
+        "instruction": 3
+      },
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "future_arc_operations_potentially_avoidable": {
+        "release": 1,
+        "retain": 0
+      },
+      "index_form": "CONSTANT",
+      "index_ssa_value": "671",
+      "last_use": {
+        "block": "then65",
+        "instruction": 3
+      },
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 2,
+      "loop_id": "cond2",
+      "mutation_uses": 0,
+      "nested_owned_component_count": 1,
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%672",
+      "optimization_fit": "A",
+      "owned_field_reads": 0,
+      "primary_blocker": null,
+      "scalar_field_reads": 0,
+      "source_pattern": null,
+      "ssa_value": "672",
+      "structural_hotness": 5,
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "aggregate_definition": {
+        "block": "else65",
+        "instruction": 1
+      },
+      "aggregate_escape": false,
+      "aggregate_level_uses": 1,
+      "aggregate_mutation": false,
+      "alias_modref_uncertainty": false,
+      "arc_operations_attributed": {
+        "release": 1,
+        "retain": 0
+      },
+      "best_future_model": "BORROW_MODEL_BEST",
+      "blocker_reasons": [],
+      "borrow_classification": "BORROWABLE_IMMEDIATE_USE",
+      "borrow_interval": {
+        "end": {
+          "block": "else65",
+          "instruction": 3
+        },
+        "kind": "SAME_EXPRESSION",
+        "start": {
+          "block": "else65",
+          "instruction": 1
+        }
+      },
+      "bounds_check": "RETAINED",
+      "calls_between_extraction_and_last_use": [],
+      "collection_kind": "Array",
+      "collection_mutations_between_extraction_and_last_use": [],
+      "collection_stable": true,
+      "collection_type": "ArrayType(element=StringType())",
+      "component_escape": false,
+      "crosses_backedge": false,
+      "current_escape_classification": "NO_ESCAPE",
+      "destruction_point": {
+        "block": "else65",
+        "instruction": 4
+      },
+      "direct_field_reads": 0,
+      "element_aggregate_type": "StringType()",
+      "escape_uses": 0,
+      "exceptional_edges": false,
+      "extraction_instruction": "SSAArrayGet",
+      "field_use_shape": "WHOLE_AGGREGATE_READ",
+      "first_use": {
+        "block": "else65",
+        "instruction": 3
+      },
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "future_arc_operations_potentially_avoidable": {
+        "release": 1,
+        "retain": 0
+      },
+      "index_form": "CONSTANT",
+      "index_ssa_value": "694",
+      "last_use": {
+        "block": "else65",
+        "instruction": 3
+      },
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 2,
+      "loop_id": "cond2",
+      "mutation_uses": 0,
+      "nested_owned_component_count": 1,
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%695",
+      "optimization_fit": "A",
+      "owned_field_reads": 0,
+      "primary_blocker": null,
+      "scalar_field_reads": 0,
+      "source_pattern": null,
+      "ssa_value": "695",
+      "structural_hotness": 5,
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "aggregate_definition": {
+        "block": "then69",
+        "instruction": 1
+      },
+      "aggregate_escape": false,
+      "aggregate_level_uses": 1,
+      "aggregate_mutation": false,
+      "alias_modref_uncertainty": false,
+      "arc_operations_attributed": {
+        "release": 1,
+        "retain": 0
+      },
+      "best_future_model": "BORROW_MODEL_BEST",
+      "blocker_reasons": [],
+      "borrow_classification": "BORROWABLE_IMMEDIATE_USE",
+      "borrow_interval": {
+        "end": {
+          "block": "then69",
+          "instruction": 3
+        },
+        "kind": "SAME_EXPRESSION",
+        "start": {
+          "block": "then69",
+          "instruction": 1
+        }
+      },
+      "bounds_check": "RETAINED",
+      "calls_between_extraction_and_last_use": [],
+      "collection_kind": "Array",
+      "collection_mutations_between_extraction_and_last_use": [],
+      "collection_stable": true,
+      "collection_type": "ArrayType(element=StringType())",
+      "component_escape": false,
+      "crosses_backedge": false,
+      "current_escape_classification": "NO_ESCAPE",
+      "destruction_point": {
+        "block": "then69",
+        "instruction": 4
+      },
+      "direct_field_reads": 0,
+      "element_aggregate_type": "StringType()",
+      "escape_uses": 0,
+      "exceptional_edges": false,
+      "extraction_instruction": "SSAArrayGet",
+      "field_use_shape": "WHOLE_AGGREGATE_READ",
+      "first_use": {
+        "block": "then69",
+        "instruction": 3
+      },
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "future_arc_operations_potentially_avoidable": {
+        "release": 1,
+        "retain": 0
+      },
+      "index_form": "CONSTANT",
+      "index_ssa_value": "699",
+      "last_use": {
+        "block": "then69",
+        "instruction": 3
+      },
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 2,
+      "loop_id": "cond2",
+      "mutation_uses": 0,
+      "nested_owned_component_count": 1,
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%700",
+      "optimization_fit": "A",
+      "owned_field_reads": 0,
+      "primary_blocker": null,
+      "scalar_field_reads": 0,
+      "source_pattern": null,
+      "ssa_value": "700",
+      "structural_hotness": 5,
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "aggregate_definition": {
+        "block": "else69",
+        "instruction": 1
+      },
+      "aggregate_escape": false,
+      "aggregate_level_uses": 1,
+      "aggregate_mutation": false,
+      "alias_modref_uncertainty": false,
+      "arc_operations_attributed": {
+        "release": 1,
+        "retain": 0
+      },
+      "best_future_model": "BORROW_MODEL_BEST",
+      "blocker_reasons": [],
+      "borrow_classification": "BORROWABLE_IMMEDIATE_USE",
+      "borrow_interval": {
+        "end": {
+          "block": "else69",
+          "instruction": 3
+        },
+        "kind": "SAME_EXPRESSION",
+        "start": {
+          "block": "else69",
+          "instruction": 1
+        }
+      },
+      "bounds_check": "RETAINED",
+      "calls_between_extraction_and_last_use": [],
+      "collection_kind": "Array",
+      "collection_mutations_between_extraction_and_last_use": [],
+      "collection_stable": true,
+      "collection_type": "ArrayType(element=StringType())",
+      "component_escape": false,
+      "crosses_backedge": false,
+      "current_escape_classification": "NO_ESCAPE",
+      "destruction_point": {
+        "block": "else69",
+        "instruction": 4
+      },
+      "direct_field_reads": 0,
+      "element_aggregate_type": "StringType()",
+      "escape_uses": 0,
+      "exceptional_edges": false,
+      "extraction_instruction": "SSAArrayGet",
+      "field_use_shape": "WHOLE_AGGREGATE_READ",
+      "first_use": {
+        "block": "else69",
+        "instruction": 3
+      },
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "future_arc_operations_potentially_avoidable": {
+        "release": 1,
+        "retain": 0
+      },
+      "index_form": "CONSTANT",
+      "index_ssa_value": "737",
+      "last_use": {
+        "block": "else69",
+        "instruction": 3
+      },
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 2,
+      "loop_id": "cond2",
+      "mutation_uses": 0,
+      "nested_owned_component_count": 1,
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%738",
+      "optimization_fit": "A",
+      "owned_field_reads": 0,
+      "primary_blocker": null,
+      "scalar_field_reads": 0,
+      "source_pattern": null,
+      "ssa_value": "738",
+      "structural_hotness": 5,
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "aggregate_definition": {
+        "block": "then74",
+        "instruction": 1
+      },
+      "aggregate_escape": false,
+      "aggregate_level_uses": 1,
+      "aggregate_mutation": false,
+      "alias_modref_uncertainty": false,
+      "arc_operations_attributed": {
+        "release": 1,
+        "retain": 0
+      },
+      "best_future_model": "BORROW_MODEL_BEST",
+      "blocker_reasons": [],
+      "borrow_classification": "BORROWABLE_IMMEDIATE_USE",
+      "borrow_interval": {
+        "end": {
+          "block": "then74",
+          "instruction": 3
+        },
+        "kind": "SAME_EXPRESSION",
+        "start": {
+          "block": "then74",
+          "instruction": 1
+        }
+      },
+      "bounds_check": "RETAINED",
+      "calls_between_extraction_and_last_use": [],
+      "collection_kind": "Array",
+      "collection_mutations_between_extraction_and_last_use": [],
+      "collection_stable": true,
+      "collection_type": "ArrayType(element=StringType())",
+      "component_escape": false,
+      "crosses_backedge": false,
+      "current_escape_classification": "NO_ESCAPE",
+      "destruction_point": {
+        "block": "then74",
+        "instruction": 4
+      },
+      "direct_field_reads": 0,
+      "element_aggregate_type": "StringType()",
+      "escape_uses": 0,
+      "exceptional_edges": false,
+      "extraction_instruction": "SSAArrayGet",
+      "field_use_shape": "WHOLE_AGGREGATE_READ",
+      "first_use": {
+        "block": "then74",
+        "instruction": 3
+      },
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "future_arc_operations_potentially_avoidable": {
+        "release": 1,
+        "retain": 0
+      },
+      "index_form": "CONSTANT",
+      "index_ssa_value": "742",
+      "last_use": {
+        "block": "then74",
+        "instruction": 3
+      },
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 2,
+      "loop_id": "cond2",
+      "mutation_uses": 0,
+      "nested_owned_component_count": 1,
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%743",
+      "optimization_fit": "A",
+      "owned_field_reads": 0,
+      "primary_blocker": null,
+      "scalar_field_reads": 0,
+      "source_pattern": null,
+      "ssa_value": "743",
+      "structural_hotness": 5,
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "aggregate_definition": {
+        "block": "else74",
+        "instruction": 1
+      },
+      "aggregate_escape": false,
+      "aggregate_level_uses": 1,
+      "aggregate_mutation": false,
+      "alias_modref_uncertainty": false,
+      "arc_operations_attributed": {
+        "release": 1,
+        "retain": 0
+      },
+      "best_future_model": "BORROW_MODEL_BEST",
+      "blocker_reasons": [],
+      "borrow_classification": "BORROWABLE_IMMEDIATE_USE",
+      "borrow_interval": {
+        "end": {
+          "block": "else74",
+          "instruction": 3
+        },
+        "kind": "SAME_EXPRESSION",
+        "start": {
+          "block": "else74",
+          "instruction": 1
+        }
+      },
+      "bounds_check": "RETAINED",
+      "calls_between_extraction_and_last_use": [],
+      "collection_kind": "Array",
+      "collection_mutations_between_extraction_and_last_use": [],
+      "collection_stable": true,
+      "collection_type": "ArrayType(element=StringType())",
+      "component_escape": false,
+      "crosses_backedge": false,
+      "current_escape_classification": "NO_ESCAPE",
+      "destruction_point": {
+        "block": "else74",
+        "instruction": 4
+      },
+      "direct_field_reads": 0,
+      "element_aggregate_type": "StringType()",
+      "escape_uses": 0,
+      "exceptional_edges": false,
+      "extraction_instruction": "SSAArrayGet",
+      "field_use_shape": "WHOLE_AGGREGATE_READ",
+      "first_use": {
+        "block": "else74",
+        "instruction": 3
+      },
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "future_arc_operations_potentially_avoidable": {
+        "release": 1,
+        "retain": 0
+      },
+      "index_form": "CONSTANT",
+      "index_ssa_value": "754",
+      "last_use": {
+        "block": "else74",
+        "instruction": 3
+      },
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 2,
+      "loop_id": "cond2",
+      "mutation_uses": 0,
+      "nested_owned_component_count": 1,
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%755",
+      "optimization_fit": "A",
+      "owned_field_reads": 0,
+      "primary_blocker": null,
+      "scalar_field_reads": 0,
+      "source_pattern": null,
+      "ssa_value": "755",
+      "structural_hotness": 5,
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "aggregate_definition": {
+        "block": "then76",
+        "instruction": 1
+      },
+      "aggregate_escape": false,
+      "aggregate_level_uses": 1,
+      "aggregate_mutation": false,
+      "alias_modref_uncertainty": false,
+      "arc_operations_attributed": {
+        "release": 1,
+        "retain": 0
+      },
+      "best_future_model": "BORROW_MODEL_BEST",
+      "blocker_reasons": [],
+      "borrow_classification": "BORROWABLE_IMMEDIATE_USE",
+      "borrow_interval": {
+        "end": {
+          "block": "then76",
+          "instruction": 3
+        },
+        "kind": "SAME_EXPRESSION",
+        "start": {
+          "block": "then76",
+          "instruction": 1
+        }
+      },
+      "bounds_check": "RETAINED",
+      "calls_between_extraction_and_last_use": [],
+      "collection_kind": "Array",
+      "collection_mutations_between_extraction_and_last_use": [],
+      "collection_stable": true,
+      "collection_type": "ArrayType(element=StringType())",
+      "component_escape": false,
+      "crosses_backedge": false,
+      "current_escape_classification": "NO_ESCAPE",
+      "destruction_point": {
+        "block": "then76",
+        "instruction": 4
+      },
+      "direct_field_reads": 0,
+      "element_aggregate_type": "StringType()",
+      "escape_uses": 0,
+      "exceptional_edges": false,
+      "extraction_instruction": "SSAArrayGet",
+      "field_use_shape": "WHOLE_AGGREGATE_READ",
+      "first_use": {
+        "block": "then76",
+        "instruction": 3
+      },
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "future_arc_operations_potentially_avoidable": {
+        "release": 1,
+        "retain": 0
+      },
+      "index_form": "CONSTANT",
+      "index_ssa_value": "759",
+      "last_use": {
+        "block": "then76",
+        "instruction": 3
+      },
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 2,
+      "loop_id": "cond2",
+      "mutation_uses": 0,
+      "nested_owned_component_count": 1,
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%760",
+      "optimization_fit": "A",
+      "owned_field_reads": 0,
+      "primary_blocker": null,
+      "scalar_field_reads": 0,
+      "source_pattern": null,
+      "ssa_value": "760",
+      "structural_hotness": 5,
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "aggregate_definition": {
+        "block": "else76",
+        "instruction": 1
+      },
+      "aggregate_escape": false,
+      "aggregate_level_uses": 1,
+      "aggregate_mutation": false,
+      "alias_modref_uncertainty": false,
+      "arc_operations_attributed": {
+        "release": 1,
+        "retain": 0
+      },
+      "best_future_model": "BORROW_MODEL_BEST",
+      "blocker_reasons": [],
+      "borrow_classification": "BORROWABLE_IMMEDIATE_USE",
+      "borrow_interval": {
+        "end": {
+          "block": "else76",
+          "instruction": 3
+        },
+        "kind": "SAME_EXPRESSION",
+        "start": {
+          "block": "else76",
+          "instruction": 1
+        }
+      },
+      "bounds_check": "RETAINED",
+      "calls_between_extraction_and_last_use": [],
+      "collection_kind": "Array",
+      "collection_mutations_between_extraction_and_last_use": [],
+      "collection_stable": true,
+      "collection_type": "ArrayType(element=StringType())",
+      "component_escape": false,
+      "crosses_backedge": false,
+      "current_escape_classification": "NO_ESCAPE",
+      "destruction_point": {
+        "block": "else76",
+        "instruction": 4
+      },
+      "direct_field_reads": 0,
+      "element_aggregate_type": "StringType()",
+      "escape_uses": 0,
+      "exceptional_edges": false,
+      "extraction_instruction": "SSAArrayGet",
+      "field_use_shape": "WHOLE_AGGREGATE_READ",
+      "first_use": {
+        "block": "else76",
+        "instruction": 3
+      },
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "future_arc_operations_potentially_avoidable": {
+        "release": 1,
+        "retain": 0
+      },
+      "index_form": "CONSTANT",
+      "index_ssa_value": "771",
+      "last_use": {
+        "block": "else76",
+        "instruction": 3
+      },
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 2,
+      "loop_id": "cond2",
+      "mutation_uses": 0,
+      "nested_owned_component_count": 1,
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%772",
+      "optimization_fit": "A",
+      "owned_field_reads": 0,
+      "primary_blocker": null,
+      "scalar_field_reads": 0,
+      "source_pattern": null,
+      "ssa_value": "772",
+      "structural_hotness": 5,
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "aggregate_definition": {
+        "block": "then78",
+        "instruction": 1
+      },
+      "aggregate_escape": false,
+      "aggregate_level_uses": 1,
+      "aggregate_mutation": false,
+      "alias_modref_uncertainty": false,
+      "arc_operations_attributed": {
+        "release": 1,
+        "retain": 0
+      },
+      "best_future_model": "BORROW_MODEL_BEST",
+      "blocker_reasons": [],
+      "borrow_classification": "BORROWABLE_IMMEDIATE_USE",
+      "borrow_interval": {
+        "end": {
+          "block": "then78",
+          "instruction": 3
+        },
+        "kind": "SAME_EXPRESSION",
+        "start": {
+          "block": "then78",
+          "instruction": 1
+        }
+      },
+      "bounds_check": "RETAINED",
+      "calls_between_extraction_and_last_use": [],
+      "collection_kind": "Array",
+      "collection_mutations_between_extraction_and_last_use": [],
+      "collection_stable": true,
+      "collection_type": "ArrayType(element=StringType())",
+      "component_escape": false,
+      "crosses_backedge": false,
+      "current_escape_classification": "NO_ESCAPE",
+      "destruction_point": {
+        "block": "then78",
+        "instruction": 4
+      },
+      "direct_field_reads": 0,
+      "element_aggregate_type": "StringType()",
+      "escape_uses": 0,
+      "exceptional_edges": false,
+      "extraction_instruction": "SSAArrayGet",
+      "field_use_shape": "WHOLE_AGGREGATE_READ",
+      "first_use": {
+        "block": "then78",
+        "instruction": 3
+      },
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "future_arc_operations_potentially_avoidable": {
+        "release": 1,
+        "retain": 0
+      },
+      "index_form": "CONSTANT",
+      "index_ssa_value": "776",
+      "last_use": {
+        "block": "then78",
+        "instruction": 3
+      },
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 2,
+      "loop_id": "cond2",
+      "mutation_uses": 0,
+      "nested_owned_component_count": 1,
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%777",
+      "optimization_fit": "A",
+      "owned_field_reads": 0,
+      "primary_blocker": null,
+      "scalar_field_reads": 0,
+      "source_pattern": null,
+      "ssa_value": "777",
+      "structural_hotness": 5,
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    }
+  ],
+  "classification_counts": {
+    "BORROWABLE_IMMEDIATE_USE": 18,
+    "BORROWABLE_STABLE_REGION": 1
+  },
+  "field_use_shape_counts": {
+    "PASS_AGGREGATE": 4,
+    "WHOLE_AGGREGATE_READ": 15
+  },
+  "methodology": "read-only production O2 lifecycle-expanded SSA analysis",
+  "potential_arc_reduction": {
+    "immediate_use": {
+      "release": 18,
+      "retain": 0
+    },
+    "stable_region": {
+      "release": 1,
+      "retain": 0
+    }
+  },
+  "production_freeze": {
+    "arc_after": {
+      "release": 919,
+      "retain": 48
+    },
+    "arc_before": {
+      "release": 919,
+      "retain": 48
+    },
+    "codegen_changed": false,
+    "collection_semantics_changed": false,
+    "lifecycle_changed": false,
+    "local_arc_changed": false,
+    "optimization_profiles_changed": false
+  },
+  "qualified_future_class": "nonescaping same-expression/same-block extraction with retained bounds check, no mutation, call, exceptional edge, alias uncertainty, component escape, or backedge",
+  "recommendation": "PROCEED_TO_COLLECTION_FIELD_PROJECTION",
+  "revision": "3f15ad0c353ff8d675fa1df4186dd9c388cd7fa2",
+  "schema_version": 1,
+  "strict_any_call_invalidates": true,
+  "trusted_read_only_direct_call_policy_measured": true
+}

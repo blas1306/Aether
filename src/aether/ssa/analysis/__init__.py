@@ -58,6 +58,11 @@ from .aggregate_lifetime import (
     ArcAttribution, ArcEvent, BorrowOpportunity, ComponentLifetime,
     EscapeKind, LifetimeCategory, MaterializationKind, ProgramPoint,
 )
+from .collection_extraction_borrow import (
+    BorrowedAggregateView, BorrowIntervalKind, BorrowInvalidationReason,
+    BorrowPoint, CollectionExtractionBorrowAnalysis, ExtractionBorrowClassification,
+    ExtractionBorrowResult, FieldUseShape,
+)
 
 __all__ = [
     "Constant",
@@ -105,4 +110,7 @@ __all__ = [
     "AggregateLifetimeAnalysis", "AggregateLifetime", "AggregateOrigin",
     "ArcAttribution", "ArcEvent", "BorrowOpportunity", "ComponentLifetime",
     "EscapeKind", "LifetimeCategory", "MaterializationKind", "ProgramPoint",
+    "BorrowedAggregateView", "BorrowIntervalKind", "BorrowInvalidationReason",
+    "BorrowPoint", "CollectionExtractionBorrowAnalysis", "ExtractionBorrowClassification",
+    "ExtractionBorrowResult", "FieldUseShape",
 ]
