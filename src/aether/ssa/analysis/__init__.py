@@ -53,6 +53,11 @@ from .trusted_helpers import (
     ReturnedIdentity, ReturnedOwnership, TrustedHelperContract,
     TRUSTED_HELPER_CONTRACTS, trusted_helper_contract,
 )
+from .aggregate_lifetime import (
+    AggregateLifetimeAnalysis, AggregateLifetime, AggregateOrigin,
+    ArcAttribution, ArcEvent, BorrowOpportunity, ComponentLifetime,
+    EscapeKind, LifetimeCategory, MaterializationKind, ProgramPoint,
+)
 
 __all__ = [
     "Constant",
@@ -97,4 +102,7 @@ __all__ = [
     "is_reference_like",
     "ReturnedIdentity", "ReturnedOwnership", "TrustedHelperContract",
     "TRUSTED_HELPER_CONTRACTS", "trusted_helper_contract",
+    "AggregateLifetimeAnalysis", "AggregateLifetime", "AggregateOrigin",
+    "ArcAttribution", "ArcEvent", "BorrowOpportunity", "ComponentLifetime",
+    "EscapeKind", "LifetimeCategory", "MaterializationKind", "ProgramPoint",
 ]

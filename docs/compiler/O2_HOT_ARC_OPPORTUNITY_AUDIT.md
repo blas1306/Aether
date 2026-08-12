@@ -155,3 +155,12 @@ interface, or exception-aware work would miss the dominant repeated cost. A
 bounded next audit should prove element-copy/nested-field temporary lifetimes,
 and stop if that requires heap SSA, path-sensitive ownership, new exception
 semantics, or changed lifecycle rules.
+
+## O2.9.2 follow-up
+
+Aggregate lifetime analysis now reconciles all 32 sites as 19 extraction
+temporaries, four copy-induced results, and nine escape-required conservative
+sites. The superseding recommendation is
+`PROCEED_TO_COLLECTION_EXTRACTION_BORROW_ANALYSIS`; see
+`O2_AGGREGATE_LIFETIME_ANALYSIS.md`. Historical O2.9.1 evidence above remains
+unchanged.

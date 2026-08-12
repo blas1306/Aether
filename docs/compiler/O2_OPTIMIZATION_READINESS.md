@@ -609,3 +609,11 @@ scope. Status is `PROCEED_TO_LOCAL_ARC_ELIMINATION`, limited to exact-identity,
 exception-free pairs satisfying all O2.8 proof gates. See
 `O2_ARC_OPPORTUNITY_AUDIT.md`; this milestone changes no ARC operation or
 optimization-profile membership.
+
+## O2.9.2 update
+
+Read-only aggregate lifetime analysis now distinguishes aggregate instances,
+nested ownership roots, materialization, escape and ARC attribution. All 32
+O2.9.1 hot aggregate/collection sites are reconciled without a production
+change. Status is `PROCEED_TO_COLLECTION_EXTRACTION_BORROW_ANALYSIS`; see
+`O2_AGGREGATE_LIFETIME_ANALYSIS.md`.
