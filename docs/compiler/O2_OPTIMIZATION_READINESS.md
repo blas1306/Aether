@@ -1,5 +1,11 @@
 # O2 optimization readiness audit
 
+O2.9.1 hot-ARC audit: production remains 48 retains / 919 releases, including
+11 / 55 in natural loops. Collection-element and aggregate-temporary lifecycle
+accounts for 32 of 66 loop operations while no loop pair is currently eligible;
+the recommendation is `PROCEED_TO_AGGREGATE_LIFETIME_ANALYSIS`. See
+`O2_HOT_ARC_OPPORTUNITY_AUDIT.md`. This changes no pass or code generation.
+
 O2.8.8 adds analysis-only nested aggregate provenance. Five collection-object
 candidates become semantically provable, but a qualification barrier keeps
 them frozen. Production stays at 53 retains / 924 releases; O0/O1/O2 membership
