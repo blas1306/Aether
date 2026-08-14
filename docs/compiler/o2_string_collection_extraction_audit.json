@@ -1,0 +1,1083 @@
+{
+  "audit": "O2.9.4-string-collection-extraction-ownership",
+  "candidate_count": 19,
+  "candidates": [
+    {
+      "array_loop_invariant": true,
+      "array_mutation_crossing": false,
+      "array_ssa_root": "357",
+      "avoidable_by_immediate_borrow": {
+        "release": 1,
+        "retain": 1
+      },
+      "avoidable_by_projection": {
+        "release": 0,
+        "retain": 0
+      },
+      "avoidable_by_stable_region_borrow": {
+        "release": 0,
+        "retain": 0
+      },
+      "block": "logic.rhs37",
+      "bounds_check": "ELIMINATED",
+      "call_crossing": false,
+      "current_extraction_arc": {
+        "release": 1,
+        "retain": 1
+      },
+      "current_ownership_category": "IMMEDIATE_BORROW_CANDIDATE",
+      "definition": {
+        "block": "logic.rhs37",
+        "instruction": 1
+      },
+      "element_replacement_in_loop": false,
+      "escape": false,
+      "exceptional_crossing": false,
+      "first_use": {
+        "block": "logic.rhs37",
+        "instruction": 2
+      },
+      "first_use_instruction": "SSACall",
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "independent_string_owner_required": false,
+      "index_form": "CONSTANT",
+      "index_ssa_value": "364",
+      "last_use": {
+        "block": "logic.rhs37",
+        "instruction": 2
+      },
+      "last_use_instruction": "SSACall",
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 1,
+      "loop_id": "cond0",
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%365",
+      "rank": 15,
+      "string_ssa_value": "365",
+      "terminal_call_ownership": "CALLEE_BORROWS_FOR_CALL",
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "array_loop_invariant": true,
+      "array_mutation_crossing": false,
+      "array_ssa_root": "357",
+      "avoidable_by_immediate_borrow": {
+        "release": 0,
+        "retain": 0
+      },
+      "avoidable_by_projection": {
+        "release": 0,
+        "retain": 0
+      },
+      "avoidable_by_stable_region_borrow": {
+        "release": 1,
+        "retain": 1
+      },
+      "block": "logic.rhs38",
+      "bounds_check": "RETAINED",
+      "call_crossing": false,
+      "current_extraction_arc": {
+        "release": 1,
+        "retain": 1
+      },
+      "current_ownership_category": "STABLE_REGION_BORROW_CANDIDATE",
+      "definition": {
+        "block": "logic.rhs38",
+        "instruction": 1
+      },
+      "element_replacement_in_loop": false,
+      "escape": false,
+      "exceptional_crossing": false,
+      "first_use": {
+        "block": "logic.rhs38",
+        "instruction": 4
+      },
+      "first_use_instruction": "SSACall",
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "independent_string_owner_required": false,
+      "index_form": "CONSTANT",
+      "index_ssa_value": "372",
+      "last_use": {
+        "block": "logic.rhs38",
+        "instruction": 4
+      },
+      "last_use_instruction": "SSACall",
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 1,
+      "loop_id": "cond0",
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%373",
+      "rank": 16,
+      "string_ssa_value": "373",
+      "terminal_call_ownership": "CALLEE_BORROWS_FOR_CALL",
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "array_loop_invariant": true,
+      "array_mutation_crossing": false,
+      "array_ssa_root": "451",
+      "avoidable_by_immediate_borrow": {
+        "release": 0,
+        "retain": 0
+      },
+      "avoidable_by_projection": {
+        "release": 1,
+        "retain": 1
+      },
+      "avoidable_by_stable_region_borrow": {
+        "release": 0,
+        "retain": 0
+      },
+      "block": "logic.rhs46",
+      "bounds_check": "ELIMINATED",
+      "call_crossing": false,
+      "current_extraction_arc": {
+        "release": 1,
+        "retain": 1
+      },
+      "current_ownership_category": "DIRECT_PROJECTION_CANDIDATE",
+      "definition": {
+        "block": "logic.rhs46",
+        "instruction": 1
+      },
+      "element_replacement_in_loop": false,
+      "escape": false,
+      "exceptional_crossing": false,
+      "first_use": {
+        "block": "logic.rhs46",
+        "instruction": 3
+      },
+      "first_use_instruction": "SSACompareOp",
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "independent_string_owner_required": false,
+      "index_form": "CONSTANT",
+      "index_ssa_value": "458",
+      "last_use": {
+        "block": "logic.rhs46",
+        "instruction": 3
+      },
+      "last_use_instruction": "SSACompareOp",
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 1,
+      "loop_id": "cond1",
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%459",
+      "rank": 17,
+      "string_ssa_value": "459",
+      "terminal_call_ownership": null,
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "array_loop_invariant": true,
+      "array_mutation_crossing": false,
+      "array_ssa_root": "451",
+      "avoidable_by_immediate_borrow": {
+        "release": 0,
+        "retain": 0
+      },
+      "avoidable_by_projection": {
+        "release": 1,
+        "retain": 1
+      },
+      "avoidable_by_stable_region_borrow": {
+        "release": 0,
+        "retain": 0
+      },
+      "block": "logic.rhs47",
+      "bounds_check": "RETAINED",
+      "call_crossing": false,
+      "current_extraction_arc": {
+        "release": 1,
+        "retain": 1
+      },
+      "current_ownership_category": "DIRECT_PROJECTION_CANDIDATE",
+      "definition": {
+        "block": "logic.rhs47",
+        "instruction": 1
+      },
+      "element_replacement_in_loop": false,
+      "escape": false,
+      "exceptional_crossing": false,
+      "first_use": {
+        "block": "logic.rhs47",
+        "instruction": 3
+      },
+      "first_use_instruction": "SSACompareOp",
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "independent_string_owner_required": false,
+      "index_form": "CONSTANT",
+      "index_ssa_value": "465",
+      "last_use": {
+        "block": "logic.rhs47",
+        "instruction": 3
+      },
+      "last_use_instruction": "SSACompareOp",
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 1,
+      "loop_id": "cond1",
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%466",
+      "rank": 18,
+      "string_ssa_value": "466",
+      "terminal_call_ownership": null,
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "array_loop_invariant": true,
+      "array_mutation_crossing": false,
+      "array_ssa_root": "451",
+      "avoidable_by_immediate_borrow": {
+        "release": 1,
+        "retain": 1
+      },
+      "avoidable_by_projection": {
+        "release": 0,
+        "retain": 0
+      },
+      "avoidable_by_stable_region_borrow": {
+        "release": 0,
+        "retain": 0
+      },
+      "block": "merge49",
+      "bounds_check": "RETAINED",
+      "call_crossing": false,
+      "current_extraction_arc": {
+        "release": 1,
+        "retain": 1
+      },
+      "current_ownership_category": "IMMEDIATE_BORROW_CANDIDATE",
+      "definition": {
+        "block": "merge49",
+        "instruction": 1
+      },
+      "element_replacement_in_loop": false,
+      "escape": false,
+      "exceptional_crossing": false,
+      "first_use": {
+        "block": "merge49",
+        "instruction": 2
+      },
+      "first_use_instruction": "SSACall",
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "independent_string_owner_required": false,
+      "index_form": "CONSTANT",
+      "index_ssa_value": "483",
+      "last_use": {
+        "block": "merge49",
+        "instruction": 2
+      },
+      "last_use_instruction": "SSACall",
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 1,
+      "loop_id": "cond1",
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%484",
+      "rank": 19,
+      "string_ssa_value": "484",
+      "terminal_call_ownership": "CALLEE_BORROWS_FOR_CALL",
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "array_loop_invariant": true,
+      "array_mutation_crossing": false,
+      "array_ssa_root": "530",
+      "avoidable_by_immediate_borrow": {
+        "release": 0,
+        "retain": 0
+      },
+      "avoidable_by_projection": {
+        "release": 1,
+        "retain": 1
+      },
+      "avoidable_by_stable_region_borrow": {
+        "release": 0,
+        "retain": 0
+      },
+      "block": "logic.rhs52",
+      "bounds_check": "ELIMINATED",
+      "call_crossing": false,
+      "current_extraction_arc": {
+        "release": 1,
+        "retain": 1
+      },
+      "current_ownership_category": "DIRECT_PROJECTION_CANDIDATE",
+      "definition": {
+        "block": "logic.rhs52",
+        "instruction": 1
+      },
+      "element_replacement_in_loop": false,
+      "escape": false,
+      "exceptional_crossing": false,
+      "first_use": {
+        "block": "logic.rhs52",
+        "instruction": 3
+      },
+      "first_use_instruction": "SSACompareOp",
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "independent_string_owner_required": false,
+      "index_form": "CONSTANT",
+      "index_ssa_value": "537",
+      "last_use": {
+        "block": "logic.rhs52",
+        "instruction": 3
+      },
+      "last_use_instruction": "SSACompareOp",
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 2,
+      "loop_id": "cond2",
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%538",
+      "rank": 1,
+      "string_ssa_value": "538",
+      "terminal_call_ownership": null,
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "array_loop_invariant": true,
+      "array_mutation_crossing": false,
+      "array_ssa_root": "530",
+      "avoidable_by_immediate_borrow": {
+        "release": 1,
+        "retain": 1
+      },
+      "avoidable_by_projection": {
+        "release": 0,
+        "retain": 0
+      },
+      "avoidable_by_stable_region_borrow": {
+        "release": 0,
+        "retain": 0
+      },
+      "block": "merge57",
+      "bounds_check": "RETAINED",
+      "call_crossing": false,
+      "current_extraction_arc": {
+        "release": 1,
+        "retain": 1
+      },
+      "current_ownership_category": "IMMEDIATE_BORROW_CANDIDATE",
+      "definition": {
+        "block": "merge57",
+        "instruction": 1
+      },
+      "element_replacement_in_loop": false,
+      "escape": false,
+      "exceptional_crossing": false,
+      "first_use": {
+        "block": "merge57",
+        "instruction": 2
+      },
+      "first_use_instruction": "SSACall",
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "independent_string_owner_required": false,
+      "index_form": "CONSTANT",
+      "index_ssa_value": "586",
+      "last_use": {
+        "block": "merge57",
+        "instruction": 2
+      },
+      "last_use_instruction": "SSACall",
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 2,
+      "loop_id": "cond2",
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%587",
+      "rank": 2,
+      "string_ssa_value": "587",
+      "terminal_call_ownership": "CALLEE_BORROWS_FOR_CALL",
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "array_loop_invariant": true,
+      "array_mutation_crossing": false,
+      "array_ssa_root": "530",
+      "avoidable_by_immediate_borrow": {
+        "release": 0,
+        "retain": 0
+      },
+      "avoidable_by_projection": {
+        "release": 1,
+        "retain": 1
+      },
+      "avoidable_by_stable_region_borrow": {
+        "release": 0,
+        "retain": 0
+      },
+      "block": "merge60",
+      "bounds_check": "RETAINED",
+      "call_crossing": false,
+      "current_extraction_arc": {
+        "release": 1,
+        "retain": 1
+      },
+      "current_ownership_category": "DIRECT_PROJECTION_CANDIDATE",
+      "definition": {
+        "block": "merge60",
+        "instruction": 5
+      },
+      "element_replacement_in_loop": false,
+      "escape": false,
+      "exceptional_crossing": false,
+      "first_use": {
+        "block": "merge60",
+        "instruction": 7
+      },
+      "first_use_instruction": "SSACompareOp",
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "independent_string_owner_required": false,
+      "index_form": "CONSTANT",
+      "index_ssa_value": "631",
+      "last_use": {
+        "block": "merge60",
+        "instruction": 7
+      },
+      "last_use_instruction": "SSACompareOp",
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 2,
+      "loop_id": "cond2",
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%632",
+      "rank": 3,
+      "string_ssa_value": "632",
+      "terminal_call_ownership": null,
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "array_loop_invariant": true,
+      "array_mutation_crossing": false,
+      "array_ssa_root": "530",
+      "avoidable_by_immediate_borrow": {
+        "release": 0,
+        "retain": 0
+      },
+      "avoidable_by_projection": {
+        "release": 1,
+        "retain": 1
+      },
+      "avoidable_by_stable_region_borrow": {
+        "release": 0,
+        "retain": 0
+      },
+      "block": "then61",
+      "bounds_check": "RETAINED",
+      "call_crossing": false,
+      "current_extraction_arc": {
+        "release": 1,
+        "retain": 1
+      },
+      "current_ownership_category": "DIRECT_PROJECTION_CANDIDATE",
+      "definition": {
+        "block": "then61",
+        "instruction": 1
+      },
+      "element_replacement_in_loop": false,
+      "escape": false,
+      "exceptional_crossing": false,
+      "first_use": {
+        "block": "then61",
+        "instruction": 3
+      },
+      "first_use_instruction": "SSACompareOp",
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "independent_string_owner_required": false,
+      "index_form": "CONSTANT",
+      "index_ssa_value": "636",
+      "last_use": {
+        "block": "then61",
+        "instruction": 3
+      },
+      "last_use_instruction": "SSACompareOp",
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 2,
+      "loop_id": "cond2",
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%637",
+      "rank": 4,
+      "string_ssa_value": "637",
+      "terminal_call_ownership": null,
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "array_loop_invariant": true,
+      "array_mutation_crossing": false,
+      "array_ssa_root": "530",
+      "avoidable_by_immediate_borrow": {
+        "release": 0,
+        "retain": 0
+      },
+      "avoidable_by_projection": {
+        "release": 1,
+        "retain": 1
+      },
+      "avoidable_by_stable_region_borrow": {
+        "release": 0,
+        "retain": 0
+      },
+      "block": "else61",
+      "bounds_check": "RETAINED",
+      "call_crossing": false,
+      "current_extraction_arc": {
+        "release": 1,
+        "retain": 1
+      },
+      "current_ownership_category": "DIRECT_PROJECTION_CANDIDATE",
+      "definition": {
+        "block": "else61",
+        "instruction": 1
+      },
+      "element_replacement_in_loop": false,
+      "escape": false,
+      "exceptional_crossing": false,
+      "first_use": {
+        "block": "else61",
+        "instruction": 3
+      },
+      "first_use_instruction": "SSACompareOp",
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "independent_string_owner_required": false,
+      "index_form": "CONSTANT",
+      "index_ssa_value": "666",
+      "last_use": {
+        "block": "else61",
+        "instruction": 3
+      },
+      "last_use_instruction": "SSACompareOp",
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 2,
+      "loop_id": "cond2",
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%667",
+      "rank": 5,
+      "string_ssa_value": "667",
+      "terminal_call_ownership": null,
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "array_loop_invariant": true,
+      "array_mutation_crossing": false,
+      "array_ssa_root": "530",
+      "avoidable_by_immediate_borrow": {
+        "release": 0,
+        "retain": 0
+      },
+      "avoidable_by_projection": {
+        "release": 1,
+        "retain": 1
+      },
+      "avoidable_by_stable_region_borrow": {
+        "release": 0,
+        "retain": 0
+      },
+      "block": "then65",
+      "bounds_check": "RETAINED",
+      "call_crossing": false,
+      "current_extraction_arc": {
+        "release": 1,
+        "retain": 1
+      },
+      "current_ownership_category": "DIRECT_PROJECTION_CANDIDATE",
+      "definition": {
+        "block": "then65",
+        "instruction": 1
+      },
+      "element_replacement_in_loop": false,
+      "escape": false,
+      "exceptional_crossing": false,
+      "first_use": {
+        "block": "then65",
+        "instruction": 3
+      },
+      "first_use_instruction": "SSACompareOp",
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "independent_string_owner_required": false,
+      "index_form": "CONSTANT",
+      "index_ssa_value": "671",
+      "last_use": {
+        "block": "then65",
+        "instruction": 3
+      },
+      "last_use_instruction": "SSACompareOp",
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 2,
+      "loop_id": "cond2",
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%672",
+      "rank": 6,
+      "string_ssa_value": "672",
+      "terminal_call_ownership": null,
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "array_loop_invariant": true,
+      "array_mutation_crossing": false,
+      "array_ssa_root": "530",
+      "avoidable_by_immediate_borrow": {
+        "release": 0,
+        "retain": 0
+      },
+      "avoidable_by_projection": {
+        "release": 1,
+        "retain": 1
+      },
+      "avoidable_by_stable_region_borrow": {
+        "release": 0,
+        "retain": 0
+      },
+      "block": "else65",
+      "bounds_check": "RETAINED",
+      "call_crossing": false,
+      "current_extraction_arc": {
+        "release": 1,
+        "retain": 1
+      },
+      "current_ownership_category": "DIRECT_PROJECTION_CANDIDATE",
+      "definition": {
+        "block": "else65",
+        "instruction": 1
+      },
+      "element_replacement_in_loop": false,
+      "escape": false,
+      "exceptional_crossing": false,
+      "first_use": {
+        "block": "else65",
+        "instruction": 3
+      },
+      "first_use_instruction": "SSACompareOp",
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "independent_string_owner_required": false,
+      "index_form": "CONSTANT",
+      "index_ssa_value": "694",
+      "last_use": {
+        "block": "else65",
+        "instruction": 3
+      },
+      "last_use_instruction": "SSACompareOp",
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 2,
+      "loop_id": "cond2",
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%695",
+      "rank": 7,
+      "string_ssa_value": "695",
+      "terminal_call_ownership": null,
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "array_loop_invariant": true,
+      "array_mutation_crossing": false,
+      "array_ssa_root": "530",
+      "avoidable_by_immediate_borrow": {
+        "release": 0,
+        "retain": 0
+      },
+      "avoidable_by_projection": {
+        "release": 1,
+        "retain": 1
+      },
+      "avoidable_by_stable_region_borrow": {
+        "release": 0,
+        "retain": 0
+      },
+      "block": "then69",
+      "bounds_check": "RETAINED",
+      "call_crossing": false,
+      "current_extraction_arc": {
+        "release": 1,
+        "retain": 1
+      },
+      "current_ownership_category": "DIRECT_PROJECTION_CANDIDATE",
+      "definition": {
+        "block": "then69",
+        "instruction": 1
+      },
+      "element_replacement_in_loop": false,
+      "escape": false,
+      "exceptional_crossing": false,
+      "first_use": {
+        "block": "then69",
+        "instruction": 3
+      },
+      "first_use_instruction": "SSACompareOp",
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "independent_string_owner_required": false,
+      "index_form": "CONSTANT",
+      "index_ssa_value": "699",
+      "last_use": {
+        "block": "then69",
+        "instruction": 3
+      },
+      "last_use_instruction": "SSACompareOp",
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 2,
+      "loop_id": "cond2",
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%700",
+      "rank": 8,
+      "string_ssa_value": "700",
+      "terminal_call_ownership": null,
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "array_loop_invariant": true,
+      "array_mutation_crossing": false,
+      "array_ssa_root": "530",
+      "avoidable_by_immediate_borrow": {
+        "release": 0,
+        "retain": 0
+      },
+      "avoidable_by_projection": {
+        "release": 1,
+        "retain": 1
+      },
+      "avoidable_by_stable_region_borrow": {
+        "release": 0,
+        "retain": 0
+      },
+      "block": "else69",
+      "bounds_check": "RETAINED",
+      "call_crossing": false,
+      "current_extraction_arc": {
+        "release": 1,
+        "retain": 1
+      },
+      "current_ownership_category": "DIRECT_PROJECTION_CANDIDATE",
+      "definition": {
+        "block": "else69",
+        "instruction": 1
+      },
+      "element_replacement_in_loop": false,
+      "escape": false,
+      "exceptional_crossing": false,
+      "first_use": {
+        "block": "else69",
+        "instruction": 3
+      },
+      "first_use_instruction": "SSACompareOp",
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "independent_string_owner_required": false,
+      "index_form": "CONSTANT",
+      "index_ssa_value": "737",
+      "last_use": {
+        "block": "else69",
+        "instruction": 3
+      },
+      "last_use_instruction": "SSACompareOp",
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 2,
+      "loop_id": "cond2",
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%738",
+      "rank": 9,
+      "string_ssa_value": "738",
+      "terminal_call_ownership": null,
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "array_loop_invariant": true,
+      "array_mutation_crossing": false,
+      "array_ssa_root": "530",
+      "avoidable_by_immediate_borrow": {
+        "release": 0,
+        "retain": 0
+      },
+      "avoidable_by_projection": {
+        "release": 1,
+        "retain": 1
+      },
+      "avoidable_by_stable_region_borrow": {
+        "release": 0,
+        "retain": 0
+      },
+      "block": "then74",
+      "bounds_check": "RETAINED",
+      "call_crossing": false,
+      "current_extraction_arc": {
+        "release": 1,
+        "retain": 1
+      },
+      "current_ownership_category": "DIRECT_PROJECTION_CANDIDATE",
+      "definition": {
+        "block": "then74",
+        "instruction": 1
+      },
+      "element_replacement_in_loop": false,
+      "escape": false,
+      "exceptional_crossing": false,
+      "first_use": {
+        "block": "then74",
+        "instruction": 3
+      },
+      "first_use_instruction": "SSACompareOp",
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "independent_string_owner_required": false,
+      "index_form": "CONSTANT",
+      "index_ssa_value": "742",
+      "last_use": {
+        "block": "then74",
+        "instruction": 3
+      },
+      "last_use_instruction": "SSACompareOp",
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 2,
+      "loop_id": "cond2",
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%743",
+      "rank": 10,
+      "string_ssa_value": "743",
+      "terminal_call_ownership": null,
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "array_loop_invariant": true,
+      "array_mutation_crossing": false,
+      "array_ssa_root": "530",
+      "avoidable_by_immediate_borrow": {
+        "release": 0,
+        "retain": 0
+      },
+      "avoidable_by_projection": {
+        "release": 1,
+        "retain": 1
+      },
+      "avoidable_by_stable_region_borrow": {
+        "release": 0,
+        "retain": 0
+      },
+      "block": "else74",
+      "bounds_check": "RETAINED",
+      "call_crossing": false,
+      "current_extraction_arc": {
+        "release": 1,
+        "retain": 1
+      },
+      "current_ownership_category": "DIRECT_PROJECTION_CANDIDATE",
+      "definition": {
+        "block": "else74",
+        "instruction": 1
+      },
+      "element_replacement_in_loop": false,
+      "escape": false,
+      "exceptional_crossing": false,
+      "first_use": {
+        "block": "else74",
+        "instruction": 3
+      },
+      "first_use_instruction": "SSACompareOp",
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "independent_string_owner_required": false,
+      "index_form": "CONSTANT",
+      "index_ssa_value": "754",
+      "last_use": {
+        "block": "else74",
+        "instruction": 3
+      },
+      "last_use_instruction": "SSACompareOp",
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 2,
+      "loop_id": "cond2",
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%755",
+      "rank": 11,
+      "string_ssa_value": "755",
+      "terminal_call_ownership": null,
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "array_loop_invariant": true,
+      "array_mutation_crossing": false,
+      "array_ssa_root": "530",
+      "avoidable_by_immediate_borrow": {
+        "release": 0,
+        "retain": 0
+      },
+      "avoidable_by_projection": {
+        "release": 1,
+        "retain": 1
+      },
+      "avoidable_by_stable_region_borrow": {
+        "release": 0,
+        "retain": 0
+      },
+      "block": "then76",
+      "bounds_check": "RETAINED",
+      "call_crossing": false,
+      "current_extraction_arc": {
+        "release": 1,
+        "retain": 1
+      },
+      "current_ownership_category": "DIRECT_PROJECTION_CANDIDATE",
+      "definition": {
+        "block": "then76",
+        "instruction": 1
+      },
+      "element_replacement_in_loop": false,
+      "escape": false,
+      "exceptional_crossing": false,
+      "first_use": {
+        "block": "then76",
+        "instruction": 3
+      },
+      "first_use_instruction": "SSACompareOp",
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "independent_string_owner_required": false,
+      "index_form": "CONSTANT",
+      "index_ssa_value": "759",
+      "last_use": {
+        "block": "then76",
+        "instruction": 3
+      },
+      "last_use_instruction": "SSACompareOp",
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 2,
+      "loop_id": "cond2",
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%760",
+      "rank": 12,
+      "string_ssa_value": "760",
+      "terminal_call_ownership": null,
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "array_loop_invariant": true,
+      "array_mutation_crossing": false,
+      "array_ssa_root": "530",
+      "avoidable_by_immediate_borrow": {
+        "release": 0,
+        "retain": 0
+      },
+      "avoidable_by_projection": {
+        "release": 1,
+        "retain": 1
+      },
+      "avoidable_by_stable_region_borrow": {
+        "release": 0,
+        "retain": 0
+      },
+      "block": "else76",
+      "bounds_check": "RETAINED",
+      "call_crossing": false,
+      "current_extraction_arc": {
+        "release": 1,
+        "retain": 1
+      },
+      "current_ownership_category": "DIRECT_PROJECTION_CANDIDATE",
+      "definition": {
+        "block": "else76",
+        "instruction": 1
+      },
+      "element_replacement_in_loop": false,
+      "escape": false,
+      "exceptional_crossing": false,
+      "first_use": {
+        "block": "else76",
+        "instruction": 3
+      },
+      "first_use_instruction": "SSACompareOp",
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "independent_string_owner_required": false,
+      "index_form": "CONSTANT",
+      "index_ssa_value": "771",
+      "last_use": {
+        "block": "else76",
+        "instruction": 3
+      },
+      "last_use_instruction": "SSACompareOp",
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 2,
+      "loop_id": "cond2",
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%772",
+      "rank": 13,
+      "string_ssa_value": "772",
+      "terminal_call_ownership": null,
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "array_loop_invariant": true,
+      "array_mutation_crossing": false,
+      "array_ssa_root": "530",
+      "avoidable_by_immediate_borrow": {
+        "release": 0,
+        "retain": 0
+      },
+      "avoidable_by_projection": {
+        "release": 1,
+        "retain": 1
+      },
+      "avoidable_by_stable_region_borrow": {
+        "release": 0,
+        "retain": 0
+      },
+      "block": "then78",
+      "bounds_check": "RETAINED",
+      "call_crossing": false,
+      "current_extraction_arc": {
+        "release": 1,
+        "retain": 1
+      },
+      "current_ownership_category": "DIRECT_PROJECTION_CANDIDATE",
+      "definition": {
+        "block": "then78",
+        "instruction": 1
+      },
+      "element_replacement_in_loop": false,
+      "escape": false,
+      "exceptional_crossing": false,
+      "first_use": {
+        "block": "then78",
+        "instruction": 3
+      },
+      "first_use_instruction": "SSACompareOp",
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "independent_string_owner_required": false,
+      "index_form": "CONSTANT",
+      "index_ssa_value": "776",
+      "last_use": {
+        "block": "then78",
+        "instruction": 3
+      },
+      "last_use_instruction": "SSACompareOp",
+      "llvm_overlap": "AETHER_NEEDED",
+      "loop_depth": 2,
+      "loop_id": "cond2",
+      "o2_9_2_identity": "__ae_m11_Persistence__function_12_decodeLedger:%777",
+      "rank": 14,
+      "string_ssa_value": "777",
+      "terminal_call_ownership": null,
+      "use_count": 1,
+      "workload": "examples/expense_tracker/Main.ae"
+    }
+  ],
+  "classification_counts": {
+    "DIRECT_PROJECTION_CANDIDATE": 15,
+    "IMMEDIATE_BORROW_CANDIDATE": 3,
+    "STABLE_REGION_BORROW_CANDIDATE": 1
+  },
+  "corrected_theoretical_arc_reduction": {
+    "release": 19,
+    "retain": 19
+  },
+  "loop_sites": 19,
+  "methodology": "read-only reconstruction of the fixed O2.9.2 identities in production O2 SSA",
+  "o2_9_3_correction": "Each release destroys the owned extraction temporary; its paired ArrayGet retain is also attributable and potentially avoidable. Array-owned final element releases are not included.",
+  "o2_9_3_release_ceiling_verified": 19,
+  "production_freeze": {
+    "arc_after": {
+      "release": 919,
+      "retain": 48
+    },
+    "arc_before": {
+      "release": 919,
+      "retain": 48
+    },
+    "array_string_semantics_changed": false,
+    "codegen_changed": false,
+    "lifecycle_changed": false,
+    "local_arc_changed": false,
+    "optimization_profiles_changed": false,
+    "runtime_abi_changed": false
+  },
+  "qualified_future_class": "owned Array<String> get whose sole use is nonescaping; exact array remains live; no same/unknown-index or alias mutation, destruction, reassignment, exception dependency, unknown/escaping call, or backedge occurs; bounds-check placement is unchanged",
+  "recommendation": "PROCEED_TO_OWNERSHIP_ELIDED_ARRAY_GET",
+  "schema_version": 1
+}

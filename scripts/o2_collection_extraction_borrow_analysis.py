@@ -58,11 +58,16 @@ def _generate_ssa(root: Path, corpus: tuple[str, ...] = DEFAULT_CORPUS):
                     "function": function.name, "collection_type": repr(result.view.collection_root.type),
                     "collection_kind": result.collection_kind, "element_aggregate_type": repr(result.value.type),
                     "extraction_instruction": _instruction(definition), "ssa_value": result.value.name,
+                    "array_ssa_root": result.view.collection_root.name,
                     "loop_id": old["loop_id"], "loop_depth": old["loop_depth"],
                     "index_ssa_value": result.view.element_selector.name, "index_form": result.index_form,
                     "aggregate_definition": _point(result.view.borrow_start),
                     "first_use": _point(result.view.borrow_end) if result.total_uses else None,
                     "last_use": _point(result.view.borrow_end),
+                    "first_use_instruction": (_instruction(analysis.blocks[result.view.borrow_end.block]
+                        .instructions[result.view.borrow_end.instruction]) if result.total_uses else None),
+                    "last_use_instruction": (_instruction(analysis.blocks[result.view.borrow_end.block]
+                        .instructions[result.view.borrow_end.instruction]) if result.total_uses else None),
                     "destruction_point": {"block": old["block"], "instruction": old["instruction_index"]},
                     "nested_owned_component_count": result.nested_owned_component_count,
                     "arc_operations_attributed": arc, "current_escape_classification": old["escape"],

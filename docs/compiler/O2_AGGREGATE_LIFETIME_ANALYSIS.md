@@ -104,3 +104,10 @@ element-sensitive collection analysis. Unknown roots and escapes stay unknown;
 the audit is structural, not dynamic profiling. Production remains 48 retains
 and 919 releases. LocalARC, lifecycle expansion, O0/O1/O2 membership and
 codegen are unchanged.
+
+## O2.9.4 correction
+
+The 19 `EXTRACTION_TEMPORARY` rows above are collection-element ownership
+traffic, specifically `Array<String>` results—not Struct aggregate extraction.
+The category is retained as historical O2.9.2 attribution. Their dedicated
+ownership audit is `O2_STRING_COLLECTION_EXTRACTION_AUDIT.md`.

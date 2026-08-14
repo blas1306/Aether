@@ -617,3 +617,12 @@ nested ownership roots, materialization, escape and ARC attribution. All 32
 O2.9.1 hot aggregate/collection sites are reconciled without a production
 change. Status is `PROCEED_TO_COLLECTION_EXTRACTION_BORROW_ANALYSIS`; see
 `O2_AGGREGATE_LIFETIME_ANALYSIS.md`.
+
+## O2.9.4 update
+
+The exact 19 collection candidates are now reconciled as owned
+`Array<String>` gets: 15 direct comparisons, three immediate borrowing calls,
+and one stable same-block call. The paired theoretical ceiling is 19 retains /
+19 releases; production remains 48 / 919. Status is
+`PROCEED_TO_OWNERSHIP_ELIDED_ARRAY_GET`; see
+`O2_STRING_COLLECTION_EXTRACTION_AUDIT.md`.

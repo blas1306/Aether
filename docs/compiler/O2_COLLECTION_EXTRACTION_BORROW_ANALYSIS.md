@@ -123,3 +123,12 @@ Production remains 48 retains / 919 releases. Collection/index/value semantics,
 lifecycle expansion, LocalARC, codegen, and O0/O1/O2 membership are unchanged.
 No runtime or collection ABI changed, no optimization was implemented, and no
 commit was created.
+
+## O2.9.4 clarification
+
+The historical “extraction temporary” label did not mean Struct extraction:
+all 19 fixed sites are owned `Array<String>` gets. O2.9.4 reconstructed their
+full SSA intervals and classified 15 direct comparisons, three immediate
+borrowing calls, and one stable same-block call. See
+`O2_STRING_COLLECTION_EXTRACTION_AUDIT.md`. This clarification preserves the
+O2.9.3 result and changes no production operation.

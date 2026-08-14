@@ -1,0 +1,27 @@
+import Math.LinearAlgebra as la
+
+Vector<double, Column> F(Vector<double> x) = [x[1]^2 + x[2] - 13; x[1] + x[2]^2 - 19];
+
+Matrix<double> A(Vector<double> x) = [x[1], 1; 1, x[2]];
+
+Vector<double> b = [13; 19];
+
+Vector<double, Column> x0 = [5, 5];
+double tol = 1e-8;
+int maxiter = 1000;
+
+Vector<double, Column> x = x0;
+double res = la.norm(A(x) * x - b);
+int iter = 0;
+
+while (res > tol && iter < maxiter) {
+    x = A(x) \ b;
+    residual = A(x) * x - b;
+    res = la.norm(residual);
+    iter += 1;
+}
+
+println("x = ", x);
+println("res = ", res);
+println("iter = ", iter);
+
