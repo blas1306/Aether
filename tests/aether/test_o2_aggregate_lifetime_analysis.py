@@ -10,12 +10,13 @@ EXPENSE = ("examples/expense_tracker/Main.ae",)
 
 def test_real_hot_workload_reconciles_every_site_deterministically():
     report = generate(ROOT, EXPENSE)
-    assert report["hot_arc_reconciliation_count"] == 32
+    # Current-state census: O2.9.5's 15 releases no longer reach SSA output.
+    assert report["hot_arc_reconciliation_count"] == 17
     assert report["lifetime_classifications"] == {
-        "COPY_INDUCED": 4, "ESCAPE_REQUIRED": 9, "EXTRACTION_TEMPORARY": 19,
+        "COPY_INDUCED": 4, "ESCAPE_REQUIRED": 9, "EXTRACTION_TEMPORARY": 4,
     }
     assert report["attribution_counts"] == {
-        "COLLECTION_EXTRACTION": 27, "TEMPORARY_DESTROY": 5,
+        "COLLECTION_EXTRACTION": 12, "TEMPORARY_DESTROY": 5,
     }
     assert report["recommendation"] == "PROCEED_TO_COLLECTION_EXTRACTION_BORROW_ANALYSIS"
     keys = [(x["workload"], x["function"], x["loop_id"] or "", x["ssa_value"],

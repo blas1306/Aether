@@ -1,0 +1,30 @@
+{
+  "audit": "O2.9.5-qualified-ownership-elided-array-string-get",
+  "schema_version": 2,
+  "target_count": 15, "qualified": 15, "transformed": 15, "rejected": 0,
+  "accounting_scope": "SSA census counts explicit ARC calls; backend_retain records implicit LLVM ArrayGet lowering",
+  "whole_pipeline_ssa_arc": {"before":{"retain":48,"release":919,"total":967},"after":{"retain":48,"release":904,"total":952}},
+  "expense_tracker_ssa_arc": {"before":{"retain":34,"release":884,"total":918},"after":{"retain":34,"release":869,"total":903}},
+  "loop_ssa_arc": {"before":{"retain":11,"release":55,"total":66},"after":{"retain":11,"release":40,"total":51}},
+  "backend_array_get_arc_delta": {"retain_prevented":15,"release_removed_upstream":15},
+  "bounds_checks": {"retained":13,"eliminated":2},
+  "frozen_non_targets_owned": {"immediate_borrow":3,"stable_region_borrow":1},
+  "historical_policy": "O2.9.1/O2.9.2 artifacts remain immutable; current regressions use this companion",
+  "sites": [
+    {"value":"459","array":"451","index":"458","block":"logic.rhs46","depth":1,"pre":{"get":"logic.rhs46:1","backend_retain":"emitted","ssa_release":"logic.rhs46:4"},"post":{"get":"logic.rhs46:1","backend_retain":"prevented","ssa_release":null,"owned_consumers":[]},"array_owner_covers_use":true},
+    {"value":"466","array":"451","index":"465","block":"logic.rhs47","depth":1,"pre":{"get":"logic.rhs47:1","backend_retain":"emitted","ssa_release":"logic.rhs47:4"},"post":{"get":"logic.rhs47:1","backend_retain":"prevented","ssa_release":null,"owned_consumers":[]},"array_owner_covers_use":true},
+    {"value":"538","array":"530","index":"537","block":"logic.rhs52","depth":2,"pre":{"get":"logic.rhs52:1","backend_retain":"emitted","ssa_release":"logic.rhs52:4"},"post":{"get":"logic.rhs52:1","backend_retain":"prevented","ssa_release":null,"owned_consumers":[]},"array_owner_covers_use":true},
+    {"value":"632","array":"530","index":"631","block":"merge60","depth":2,"pre":{"get":"merge60:5","backend_retain":"emitted","ssa_release":"merge60:8"},"post":{"get":"merge60:5","backend_retain":"prevented","ssa_release":null,"owned_consumers":[]},"array_owner_covers_use":true},
+    {"value":"637","array":"530","index":"636","block":"then61","depth":2,"pre":{"get":"then61:1","backend_retain":"emitted","ssa_release":"then61:4"},"post":{"get":"then61:1","backend_retain":"prevented","ssa_release":null,"owned_consumers":[]},"array_owner_covers_use":true},
+    {"value":"667","array":"530","index":"666","block":"else61","depth":2,"pre":{"get":"else61:1","backend_retain":"emitted","ssa_release":"else61:4"},"post":{"get":"else61:1","backend_retain":"prevented","ssa_release":null,"owned_consumers":[]},"array_owner_covers_use":true},
+    {"value":"672","array":"530","index":"671","block":"then65","depth":2,"pre":{"get":"then65:1","backend_retain":"emitted","ssa_release":"then65:4"},"post":{"get":"then65:1","backend_retain":"prevented","ssa_release":null,"owned_consumers":[]},"array_owner_covers_use":true},
+    {"value":"695","array":"530","index":"694","block":"else65","depth":2,"pre":{"get":"else65:1","backend_retain":"emitted","ssa_release":"else65:4"},"post":{"get":"else65:1","backend_retain":"prevented","ssa_release":null,"owned_consumers":[]},"array_owner_covers_use":true},
+    {"value":"700","array":"530","index":"699","block":"then69","depth":2,"pre":{"get":"then69:1","backend_retain":"emitted","ssa_release":"then69:4"},"post":{"get":"then69:1","backend_retain":"prevented","ssa_release":null,"owned_consumers":[]},"array_owner_covers_use":true},
+    {"value":"738","array":"530","index":"737","block":"else69","depth":2,"pre":{"get":"else69:1","backend_retain":"emitted","ssa_release":"else69:4"},"post":{"get":"else69:1","backend_retain":"prevented","ssa_release":null,"owned_consumers":[]},"array_owner_covers_use":true},
+    {"value":"743","array":"530","index":"742","block":"then74","depth":2,"pre":{"get":"then74:1","backend_retain":"emitted","ssa_release":"then74:4"},"post":{"get":"then74:1","backend_retain":"prevented","ssa_release":null,"owned_consumers":[]},"array_owner_covers_use":true},
+    {"value":"755","array":"530","index":"754","block":"else74","depth":2,"pre":{"get":"else74:1","backend_retain":"emitted","ssa_release":"else74:4"},"post":{"get":"else74:1","backend_retain":"prevented","ssa_release":null,"owned_consumers":[]},"array_owner_covers_use":true},
+    {"value":"760","array":"530","index":"759","block":"then76","depth":2,"pre":{"get":"then76:1","backend_retain":"emitted","ssa_release":"then76:4"},"post":{"get":"then76:1","backend_retain":"prevented","ssa_release":null,"owned_consumers":[]},"array_owner_covers_use":true},
+    {"value":"772","array":"530","index":"771","block":"else76","depth":2,"pre":{"get":"else76:1","backend_retain":"emitted","ssa_release":"else76:4"},"post":{"get":"else76:1","backend_retain":"prevented","ssa_release":null,"owned_consumers":[]},"array_owner_covers_use":true},
+    {"value":"777","array":"530","index":"776","block":"then78","depth":2,"pre":{"get":"then78:1","backend_retain":"emitted","ssa_release":"then78:4"},"post":{"get":"then78:1","backend_retain":"prevented","ssa_release":null,"owned_consumers":[]},"array_owner_covers_use":true}
+  ]
+}

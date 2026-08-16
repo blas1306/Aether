@@ -111,3 +111,9 @@ The 19 `EXTRACTION_TEMPORARY` rows above are collection-element ownership
 traffic, specifically `Array<String>` results—not Struct aggregate extraction.
 The category is retained as historical O2.9.2 attribution. Their dedicated
 ownership audit is `O2_STRING_COLLECTION_EXTRACTION_AUDIT.md`.
+
+## O2.9.5 update
+
+The 15 direct String projections are now ownership-elided at O2 after the
+existing lifetime/escape analysis proves their iteration-local intervals. This
+does not generalize aggregate borrowing or change the historical census.

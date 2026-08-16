@@ -134,3 +134,9 @@ sites as borrowed, so the decision is `PROCEED_TO_OWNERSHIP_ELIDED_ARRAY_GET`.
 Production remains **48 retains / 919 releases**. No production optimization,
 String/Array behavior, lifecycle, LocalARC, O0/O1/O2 membership, runtime ABI or
 code generation changed in this milestone.
+
+## O2.9.5 follow-up
+
+The frozen 15 direct projections are now implemented by the O2-only
+`OwnershipElidedArrayGet` pass. See `O2_OWNERSHIP_ELIDED_ARRAY_STRING_GET.md`.
+This section does not alter the historical O2.9.4 measurements above.

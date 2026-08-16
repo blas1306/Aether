@@ -19,11 +19,13 @@ def expense_report() -> dict:
 def test_hot_arc_census_loop_depth_balance_and_closed_taxonomies(expense_report) -> None:
     report = expense_report
     assert report["arc_baseline"] == {
-        "retain": 34, "release": 884, "total": 918,
+        # Current production O2 SSA. O2.9.5 prevents backend ArrayGet retains;
+        # those implicit retains have never been counted by this SSA census.
+        "retain": 34, "release": 869, "total": 903,
         "outside_loops": 852, "functions_with_arc": 17,
     }
     assert report["loop_arc_baseline"] == {
-        "retain": 11, "release": 55, "total": 66, "functions": 2, "workloads": 1,
+        "retain": 11, "release": 40, "total": 51, "functions": 2, "workloads": 1,
     }
     assert all(site["loop_depth"] >= 1 for site in report["loop_arc_sites"])
     assert {site["loop_role"] for site in report["loop_arc_sites"]} <= {
@@ -76,3 +78,5 @@ def test_committed_hot_arc_json_is_stable_and_complete() -> None:
     assert report["loop_arc_baseline"]["release"] == 55
     assert report["production_codegen_changed"] is False
     assert report["arc_changed"] is False
+    # This artifact is the immutable pre-O2.9.5 historical baseline.
+    assert report["arc_baseline"]["total"] == 967

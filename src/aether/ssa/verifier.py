@@ -847,6 +847,13 @@ class SSAVerifier:
         for block in function.blocks:
             for instruction in block.instructions:
                 if (
+                    isinstance(instruction, SSACall)
+                    and instruction.builtin == "__aether_release"
+                    and any(argument.name in borrowed and argument.name not in acquired
+                            for argument in instruction.arguments)
+                ):
+                    self._fail("Borrowed collection element cannot be released as an independent owner")
+                if (
                     isinstance(instruction, SSAReturn)
                     and instruction.value is not None
                     and instruction.value.name in borrowed
@@ -2448,6 +2455,9 @@ class SSAVerifier:
                 f"Array get result type mismatch: expected "
                 f"{instruction.array.type.element}, got {instruction.result.type}"
             )
+        if instruction.borrowed and isinstance(instruction.result.type, StringType):
+            if not isinstance(instruction.array.type.element, StringType):
+                self._fail("Borrowed String array get requires exactly Array<String>")
 
     def _verify_array_slice(
         self,

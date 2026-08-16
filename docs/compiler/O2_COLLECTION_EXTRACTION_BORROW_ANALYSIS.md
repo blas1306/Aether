@@ -132,3 +132,10 @@ full SSA intervals and classified 15 direct comparisons, three immediate
 borrowing calls, and one stable same-block call. See
 `O2_STRING_COLLECTION_EXTRACTION_AUDIT.md`. This clarification preserves the
 O2.9.3 result and changes no production operation.
+
+## O2.9.5 update
+
+O2 now consumes only the 15 direct-comparison results through the explicit
+borrowed `SSAArrayGet` mode. The three call candidates and the stable-region
+candidate remain owned. Historical analysis and counts above are unchanged;
+see `O2_OWNERSHIP_ELIDED_ARRAY_STRING_GET.md` for production results.

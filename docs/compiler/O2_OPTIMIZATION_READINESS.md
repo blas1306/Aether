@@ -626,3 +626,11 @@ and one stable same-block call. The paired theoretical ceiling is 19 retains /
 19 releases; production remains 48 / 919. Status is
 `PROCEED_TO_OWNERSHIP_ELIDED_ARRAY_GET`; see
 `O2_STRING_COLLECTION_EXTRACTION_AUDIT.md`.
+
+## O2.9.5 update
+
+`OwnershipElidedArrayGet` now runs after BCE/LICM and before LocalARC. It
+transforms exactly the 15 frozen direct `Array<String>` comparisons, leaving
+all call and stable-region candidates owned. Direct attributable ARC reduction
+is 15 retains and 15 releases; see
+`O2_OWNERSHIP_ELIDED_ARRAY_STRING_GET.md`.

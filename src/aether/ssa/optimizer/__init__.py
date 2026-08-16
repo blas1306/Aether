@@ -8,6 +8,7 @@ from .global_constant_propagation import SSAGlobalConstantPropagator
 from .proven_bounds import ProvenBoundsCheckEliminator
 from .licm import LoopInvariantCodeMotion
 from .local_arc import LocalARCEliminator
+from .ownership_elided_array_get import OwnershipElidedArrayGet
 from .pipeline import (
     SSAOptimizationConvergenceError,
     SSAOptimizationPass,
@@ -32,6 +33,7 @@ __all__ = [
     "ProvenBoundsCheckEliminator",
     "LoopInvariantCodeMotion",
     "LocalARCEliminator",
+    "OwnershipElidedArrayGet",
     "SSAOptimizationConvergenceError",
     "SSAOptimizationPass",
     "SSAOptimizationResult",
