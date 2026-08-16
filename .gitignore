@@ -17,6 +17,7 @@ node_modules/
 .gradle/
 .intellijPlatform/
 **/build/
+tools/intellij-aether/bin/
 *.egg-info/
 
 # =========================
@@ -73,3 +74,8 @@ CON
 
 # Local, unpublished release artifacts
 dist/
+
+# =========================
+# Local scratch files
+# =========================
+scrap/
