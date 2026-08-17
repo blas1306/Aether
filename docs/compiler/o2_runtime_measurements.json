@@ -1,0 +1,108 @@
+{
+  "environment": {
+    "platform": "Linux-7.1.8-1-cachyos-x86_64-with-glibc2.44",
+    "python": "3.14.6"
+  },
+  "results": [
+    {
+      "command": "aether native build per O-level; direct executable run",
+      "output_parity": true,
+      "outputs": {
+        "O0": {
+          "executable_bytes": 16616,
+          "exit_code": 10,
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "O1": {
+          "executable_bytes": 16272,
+          "exit_code": 10,
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "O2": {
+          "executable_bytes": 16272,
+          "exit_code": 10,
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "repetitions": 3,
+      "timings": {
+        "O0": {
+          "executable_bytes": 16616,
+          "median_wall_seconds": 0.0006508919977932237,
+          "minimum_wall_seconds": 0.0006146250016172417,
+          "samples": [
+            {
+              "sys_seconds": 0.0,
+              "user_seconds": 0.0,
+              "wall_seconds": 0.0006601700006285682
+            },
+            {
+              "sys_seconds": 0.0,
+              "user_seconds": 0.0,
+              "wall_seconds": 0.0006508919977932237
+            },
+            {
+              "sys_seconds": 0.0,
+              "user_seconds": 0.0,
+              "wall_seconds": 0.0006146250016172417
+            }
+          ],
+          "spread_wall_seconds": 0.0006601700006285682
+        },
+        "O1": {
+          "executable_bytes": 16272,
+          "median_wall_seconds": 0.0004513710009632632,
+          "minimum_wall_seconds": 0.0003381100032129325,
+          "samples": [
+            {
+              "sys_seconds": 0.0,
+              "user_seconds": 0.0,
+              "wall_seconds": 0.0005212720061535947
+            },
+            {
+              "sys_seconds": 0.0,
+              "user_seconds": 0.0,
+              "wall_seconds": 0.0004513710009632632
+            },
+            {
+              "sys_seconds": 0.0,
+              "user_seconds": 0.0,
+              "wall_seconds": 0.0003381100032129325
+            }
+          ],
+          "spread_wall_seconds": 0.0005212720061535947
+        },
+        "O2": {
+          "executable_bytes": 16272,
+          "median_wall_seconds": 0.0005331739957910031,
+          "minimum_wall_seconds": 0.0004230190024827607,
+          "samples": [
+            {
+              "sys_seconds": 0.0,
+              "user_seconds": 0.0,
+              "wall_seconds": 0.0004230190024827607
+            },
+            {
+              "sys_seconds": 0.0,
+              "user_seconds": 0.0,
+              "wall_seconds": 0.0005331739957910031
+            },
+            {
+              "sys_seconds": 0.0,
+              "user_seconds": 0.0,
+              "wall_seconds": 0.0005639099981635809
+            }
+          ],
+          "spread_wall_seconds": 0.0005639099981635809
+        }
+      },
+      "warmups": 1,
+      "workload": "examples/ir/sumTo.ae",
+      "workload_size": "source default"
+    }
+  ],
+  "schema_version": 1
+}

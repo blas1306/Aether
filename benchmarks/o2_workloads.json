@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "categories": [
+    "NUMERIC_SCALAR", "NUMERIC_VECTOR", "NUMERIC_MATRIX", "NUMERIC_ITERATIVE",
+    "STRING_HEAVY", "COLLECTION_HEAVY", "STRUCT_HEAVY", "CLASS_HEAVY",
+    "INTERFACE_HEAVY", "ALLOCATION_HEAVY", "BRANCH_HEAVY", "CALL_HEAVY",
+    "RECURSIVE", "GRAPH_OR_SEARCH", "PARSING", "SIMULATION", "MIXED_REAL_PROGRAM"
+  ],
+  "workloads": [
+    {"path":"examples/ir/sumTo.ae","kind":"REALISTIC_KERNEL","category":"NUMERIC_SCALAR","tags":["finite_sum","loop"],"executable":true,"benchmarkable":true,"timeout_seconds":10,"repetitions":20},
+    {"path":"examples/llvm/gcd_iterative.ae","kind":"REALISTIC_KERNEL","category":"NUMERIC_ITERATIVE","tags":["recurrence","branch"],"executable":true,"benchmarkable":true,"timeout_seconds":10,"repetitions":20},
+    {"path":"examples/ControlesALN/1erControl/Ej1/ej1.ae","kind":"REAL_WORKLOAD","category":"NUMERIC_ITERATIVE","tags":["root_finding","bisection"],"executable":true,"benchmarkable":false,"timeout_seconds":15,"repetitions":1},
+    {"path":"examples/ControlesALN/1erControl/Ej2/ej2.ae","kind":"REAL_WORKLOAD","category":"NUMERIC_ITERATIVE","tags":["fixed_point","transcendental"],"executable":true,"benchmarkable":false,"timeout_seconds":15,"repetitions":1},
+    {"path":"examples/numerical_methods/main.ae","kind":"REAL_WORKLOAD","category":"NUMERIC_ITERATIVE","tags":["newton_raphson","fixed_point","transcendental"],"executable":true,"benchmarkable":true,"timeout_seconds":20,"repetitions":5},
+    {"path":"examples/nonlinear_systems/newton_system.ae","kind":"REAL_WORKLOAD","category":"NUMERIC_ITERATIVE","tags":["newton_system","matrix"],"executable":true,"benchmarkable":false,"timeout_seconds":20,"repetitions":1},
+    {"path":"examples/probandoNR.ae","kind":"REAL_WORKLOAD","category":"NUMERIC_ITERATIVE","tags":["newton_raphson","stress"],"executable":true,"benchmarkable":false,"timeout_seconds":20,"repetitions":1},
+    {"path":"benchmarks/vector_dot.ae","kind":"REALISTIC_KERNEL","category":"NUMERIC_VECTOR","tags":["reduction","inner_product","loop"],"executable":true,"benchmarkable":true,"timeout_seconds":10,"repetitions":20},
+    {"path":"benchmarks/matrix_mul.ae","kind":"REALISTIC_KERNEL","category":"NUMERIC_MATRIX","tags":["linear_algebra","nested_loop"],"executable":true,"benchmarkable":true,"timeout_seconds":15,"repetitions":10},
+    {"path":"examples/llvm/vector_matrix_mul.ae","kind":"REALISTIC_KERNEL","category":"NUMERIC_MATRIX","tags":["matrix_vector","loop"],"executable":true,"benchmarkable":true,"timeout_seconds":10,"repetitions":20},
+    {"path":"examples/llvm/array_sum.ae","kind":"REALISTIC_KERNEL","category":"COLLECTION_HEAVY","tags":["array","read_heavy","reduction"],"executable":true,"benchmarkable":true,"timeout_seconds":10,"repetitions":20},
+    {"path":"examples/llvm/list_for_sum.ae","kind":"REALISTIC_KERNEL","category":"COLLECTION_HEAVY","tags":["list","read_heavy","loop"],"executable":true,"benchmarkable":true,"timeout_seconds":10,"repetitions":20},
+    {"path":"benchmarks/list_push.ae","kind":"REALISTIC_KERNEL","category":"COLLECTION_HEAVY","tags":["list","mutation_heavy","allocation"],"executable":true,"benchmarkable":true,"timeout_seconds":10,"repetitions":10},
+    {"path":"examples/llvm/list_sort.ae","kind":"REALISTIC_KERNEL","category":"COLLECTION_HEAVY","tags":["list","sort","mutation"],"executable":true,"benchmarkable":true,"timeout_seconds":10,"repetitions":10},
+    {"path":"examples/aggregate_collections/particles.ae","kind":"REALISTIC_KERNEL","category":"STRUCT_HEAVY","tags":["array_of_struct","simulation","construction"],"executable":true,"benchmarkable":true,"timeout_seconds":10,"repetitions":10},
+    {"path":"examples/structs/custom_constructor_and_equality.ae","kind":"REALISTIC_KERNEL","category":"STRUCT_HEAVY","tags":["scalar_struct","constructor","method"],"executable":true,"benchmarkable":true,"timeout_seconds":10,"repetitions":10},
+    {"path":"corpus/exceptions/positive/owned_aggregates_arc.ae","kind":"SYNTHETIC_PROBE","category":"STRUCT_HEAVY","tags":["owned_struct","nested_aggregate","arc"],"executable":true,"benchmarkable":false,"timeout_seconds":10,"repetitions":1},
+    {"path":"examples/classes/counter_basic.ae","kind":"REALISTIC_KERNEL","category":"CLASS_HEAVY","tags":["field_read","field_write","method"],"executable":true,"benchmarkable":true,"timeout_seconds":10,"repetitions":10},
+    {"path":"examples/classes/custom_constructor.ae","kind":"REALISTIC_KERNEL","category":"CLASS_HEAVY","tags":["allocation","constructor","field"],"executable":true,"benchmarkable":true,"timeout_seconds":10,"repetitions":10},
+    {"path":"examples/classes/implements_interface.ae","kind":"REALISTIC_KERNEL","category":"INTERFACE_HEAVY","tags":["class_backed","dispatch"],"executable":true,"benchmarkable":true,"timeout_seconds":10,"repetitions":10},
+    {"path":"corpus/exceptions/positive/method_interface_dispatch.ae","kind":"SYNTHETIC_PROBE","category":"INTERFACE_HEAVY","tags":["dispatch","exception"],"executable":true,"benchmarkable":false,"timeout_seconds":10,"repetitions":1},
+    {"path":"tests/aether/parity_corpus/strings.ae","kind":"SYNTHETIC_PROBE","category":"STRING_HEAVY","tags":["comparison","formatting","interpolation"],"executable":true,"benchmarkable":false,"timeout_seconds":10,"repetitions":1},
+    {"path":"examples/expense_tracker/Main.ae","kind":"REAL_WORKLOAD","category":"MIXED_REAL_PROGRAM","tags":["parsing","string","list","class","formatting"],"executable":true,"benchmarkable":true,"timeout_seconds":20,"repetitions":3},
+    {"path":"benchmarks/if_else.ae","kind":"REALISTIC_KERNEL","category":"BRANCH_HEAVY","tags":["conditional_loop","classification"],"executable":true,"benchmarkable":true,"timeout_seconds":10,"repetitions":20},
+    {"path":"benchmarks/arithmetic.ae","kind":"REALISTIC_KERNEL","category":"CALL_HEAVY","tags":["small_direct_calls","integer_arithmetic"],"executable":true,"benchmarkable":true,"timeout_seconds":10,"repetitions":20},
+    {"path":"corpus/exceptions/positive/function_recursion.ae","kind":"SYNTHETIC_PROBE","category":"RECURSIVE","tags":["linear_recursion","stack"],"executable":true,"benchmarkable":false,"timeout_seconds":10,"repetitions":1},
+    {"path":"examples/LeetCode/twoSum.ae","kind":"REALISTIC_KERNEL","category":"GRAPH_OR_SEARCH","tags":["search","array","nested_loop"],"executable":true,"benchmarkable":true,"timeout_seconds":10,"repetitions":10},
+    {"path":"examples/Miller-Rabbin.ae","kind":"REAL_WORKLOAD","category":"BRANCH_HEAVY","tags":["primality","modular_arithmetic","loop"],"executable":true,"benchmarkable":false,"timeout_seconds":15,"repetitions":1},
+    {"path":"corpus/exceptions/positive/constructor_failure.ae","kind":"SYNTHETIC_PROBE","category":"ALLOCATION_HEAVY","tags":["class_allocation","cleanup","exception"],"executable":true,"benchmarkable":false,"timeout_seconds":10,"repetitions":1},
+    {"path":"benchmarks/nested_loops.ae","kind":"SYNTHETIC_PROBE","category":"SIMULATION","tags":["nested_loop","structural_hotness"],"executable":true,"benchmarkable":true,"timeout_seconds":10,"repetitions":20}
+  ],
+  "documented_gaps": [{"category":"PARSING","reason":"Covered as a secondary tag by the real expense tracker; no standalone parser added to avoid artificial corpus inflation."}]
+}
