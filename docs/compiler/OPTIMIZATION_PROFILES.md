@@ -9,11 +9,11 @@ execution, `run`, `build`, every `--emit-*` inspection command, and `bench` is
 | --- | --- | --- |
 | O0 | No optional IR or SSA passes | `-O0` |
 | O1 | The proven conservative IR and SSA pass sets below | `-O1` |
-| O2 | O1 plus proven bounds-check elimination and cleanup | `-O2` |
+| O2 | O1 plus the qualified BCE, LICM, Array<String> borrow, LocalARC, and cleanup suffix | `-O2` |
 
-O2's only additional Aether optimization family is the proof-gated bounds-check
-eliminator described in `O2_BOUNDS_CHECK_ELIMINATION.md`. It does not imply a
-broad aggressive middle-end or general shape-check elimination.
+O2's exact additional suffix is frozen by
+`O2_OPTIMIZATION_PROFILE_FREEZE.md`. It does not imply a broad aggressive
+middle-end or general shape-check elimination.
 Exact generated machine code is not a language guarantee.
 
 Correctness-required work is independent of these optional pass lists: parsing,
@@ -30,8 +30,10 @@ following Aether passes in this exact order, iterating to a fixed point:
    `SSAAlgebraicSimplifier`, `SCCPPass`, `TrivialPhiEliminator`,
    `DeadPhiEliminator`, `SSADeadCodeEliminator`.
 
-O2 executes that same IR pipeline and appends
-`ProvenBoundsCheckEliminator`, `SSADeadCodeEliminator` to the O1 SSA order.
+O2 executes that same IR pipeline and appends, in order,
+`ProvenBoundsCheckEliminator`, `LoopInvariantCodeMotion`,
+`OwnershipElidedArrayGet`, `LocalARCEliminator`, and
+`SSADeadCodeEliminator` to the O1 SSA order.
 
 `--emit-ir` prints verified Initial IR after the selected IR passes;
 `--emit-ssa` prints verified SSA after both selected middle-end stages; and

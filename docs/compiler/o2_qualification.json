@@ -1,0 +1,139 @@
+{
+  "exception_gate": {
+    "full_erq_006": "PASS: 11 positive, 9 negative, 77 exact frontend/Initial IR/optimized IR/SSA/optimized SSA/native O0/O1/O2 comparisons",
+    "native": "PASS: 54/54 native exception tests outside ptrace",
+    "status": "PASS"
+  },
+  "external_maintainer_evidence": {
+    "document": "docs/compiler/EXCEPTION_RELEASE_QUALIFICATION_V2.md",
+    "qualified_revision": "7d59895781ccb5678d131cdfd1184ce73ae34a71",
+    "revalidated": "2026-08-09",
+    "scope": "native sanitizers, exception qualification, full ERQ-006, Python, Rust, tooling, packaging"
+  },
+  "final_decision": "O2_FREEZE_QUALIFIED",
+  "historical_artifacts": [
+    "docs/compiler/O2_OPTIMIZATION_READINESS.md",
+    "docs/compiler/O2_ANALYSIS_FOUNDATION.md",
+    "docs/compiler/O2_BOUNDS_CHECK_ELIMINATION.md",
+    "docs/compiler/O2_ALIAS_MODREF_ANALYSIS.md",
+    "docs/compiler/O2_LICM.md",
+    "docs/compiler/O2_OWNERSHIP_ESCAPE_ANALYSIS.md",
+    "docs/compiler/O2_LOCAL_ARC_ELIMINATION.md",
+    "docs/compiler/O2_OPTIMIZATION_MEASUREMENT_AND_WORKLOADS.md",
+    "docs/compiler/O2_SCALAR_REPLACEMENT_READINESS.md",
+    "docs/compiler/O2_AGGREGATE_COPY_ELISION_READINESS.md",
+    "docs/compiler/O2_CONCRETE_OPTIMIZATION_OPPORTUNITY_RECONCILIATION.md",
+    "docs/compiler/o2_measurement_baseline.json"
+  ],
+  "known_limitations": [
+    "Four corpus workloads stop at documented Initial IR support gaps.",
+    "O2 is not a universal speedup guarantee."
+  ],
+  "packaging": {
+    "evidence": "fresh wheel, sdist, rebuilt wheel, clean installations, entry points and content checks",
+    "status": "PASS"
+  },
+  "pipelines": {
+    "O0": {
+      "clang_level": "0",
+      "ir_passes": [],
+      "ssa_passes": []
+    },
+    "O1": {
+      "clang_level": "1",
+      "ir_passes": [
+        "ConstantFolder",
+        "LocalConstantPropagator",
+        "ConstantFolder",
+        "AlgebraicSimplifier",
+        "DeadCodeEliminator",
+        "DeadStoreEliminator",
+        "DeadCodeEliminator"
+      ],
+      "ssa_passes": [
+        "SSAConstantFolder",
+        "SSAGlobalConstantPropagator",
+        "SSAAlgebraicSimplifier",
+        "SCCPPass",
+        "TrivialPhiEliminator",
+        "DeadPhiEliminator",
+        "SSADeadCodeEliminator"
+      ]
+    },
+    "O2": {
+      "clang_level": "2",
+      "ir_passes": [
+        "ConstantFolder",
+        "LocalConstantPropagator",
+        "ConstantFolder",
+        "AlgebraicSimplifier",
+        "DeadCodeEliminator",
+        "DeadStoreEliminator",
+        "DeadCodeEliminator"
+      ],
+      "ssa_passes": [
+        "SSAConstantFolder",
+        "SSAGlobalConstantPropagator",
+        "SSAAlgebraicSimplifier",
+        "SCCPPass",
+        "TrivialPhiEliminator",
+        "DeadPhiEliminator",
+        "SSADeadCodeEliminator",
+        "ProvenBoundsCheckEliminator",
+        "LoopInvariantCodeMotion",
+        "OwnershipElidedArrayGet",
+        "LocalARCEliminator",
+        "SSADeadCodeEliminator"
+      ]
+    }
+  },
+  "python_suite": {
+    "maintainer_result": "4468 passed, 4 skipped, 0 failed",
+    "status": "PASS"
+  },
+  "reopen_criteria_version": 1,
+  "runtime_measurement_summary": {
+    "artifact": "docs/compiler/o2_runtime_measurements.json",
+    "classification": "EQUIVALENT_OR_NOISE",
+    "output_parity": true,
+    "raw_timings_excluded": true
+  },
+  "rust_workspace": {
+    "command": "cargo test --workspace --locked",
+    "status": "PASS: unit, integration, doctests"
+  },
+  "sanitizers": {
+    "diagnostics": "none: no leak, UAF, double-free, undefined behavior or ownership diagnostic",
+    "erq_006_programs": 7,
+    "native_exception_tests": "54/54",
+    "status": "PASS",
+    "tools": [
+      "ASan",
+      "LSan",
+      "UBSan"
+    ]
+  },
+  "schema_version": 1,
+  "static_baseline": {
+    "path": "docs/compiler/o2_measurement_baseline.json",
+    "sha256": "221f8cd92cc348afcdcb2df9ac8d7929b7f0f23788ccbf617df8b297c5abd03d"
+  },
+  "test_results": {
+    "capability_consistency": "PASS",
+    "o2_9_8_snapshot_contract": "PASS: immutable revision provenance normalized during semantic regeneration comparison",
+    "o2_qualification_tests": "PASS",
+    "release_docs": "PASS",
+    "static_qualification": "PASS including byte-for-byte baseline regeneration"
+  },
+  "tested_revision": "df6308750436af888b7d6021c44f026e39a7a30f",
+  "tooling": {
+    "intellij": "PASS: Gradle test/build; maintainer BUILD SUCCESSFUL",
+    "vscode": "PASS: compile; maintainer 15/15 tests"
+  },
+  "workload_counts": {
+    "benchmarkable": 20,
+    "supported": 26,
+    "total": 30,
+    "unsupported": 4
+  }
+}

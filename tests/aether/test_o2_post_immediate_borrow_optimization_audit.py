@@ -55,5 +55,11 @@ def test_recommendation_and_json_regeneration_are_deterministic(current):
     assert current["primary_recommendation"] == PRIMARY_RECOMMENDATION
     assert current["secondary_recommendation"] == SECONDARY_RECOMMENDATION
     assert current["exact_next_milestone"]["kind"] == "ANALYSIS_ONLY"
-    assert REPORT.read_text(encoding="utf-8") == json.dumps(current, indent=2, sort_keys=True) + "\n"
+    # O2.9.8 is an immutable historical snapshot.  Its revision identifies the
+    # audited tree and must not drift merely because the read-only generator is
+    # invoked at a later HEAD.  Compare regenerated semantics while retaining
+    # that frozen provenance field.
+    snapshot = json.loads(REPORT.read_text(encoding="utf-8"))
+    regenerated = {**current, "revision": snapshot["revision"]}
+    assert snapshot == regenerated
     assert not any(current["production_freeze"].values())
