@@ -663,3 +663,13 @@ from both hot layers. Four owned `Array<String>` candidates remain: three
 bounded immediate-use sites and one qualitatively broader stable-region site.
 Status is `PROCEED_TO_IMMEDIATE_ARRAY_STRING_BORROW`; see
 `O2_POST_ARRAYGET_HOT_OWNERSHIP_AUDIT.md`.
+
+## O2.10 update
+
+The four O2.9.8 scalar-replacement candidates are frozen as SR-001..SR-004.
+All are noescape, field-only `ControlLineResult` call results with one owned
+`String` field; none is `SAFE_SCALAR_ONLY`, and they overlap the four aggregate
+copy-elision candidates exactly. Status is
+`PROCEED_TO_AGGREGATE_COPY_ELISION_INSTEAD`; see
+`O2_SCALAR_REPLACEMENT_READINESS.md`. This is analysis only and changes no
+production optimizer, ownership/lifecycle behavior, backend, ABI or profile.

@@ -63,6 +63,11 @@ from .collection_extraction_borrow import (
     BorrowPoint, CollectionExtractionBorrowAnalysis, ExtractionBorrowClassification,
     ExtractionBorrowResult, FieldUseShape,
 )
+from .scalar_replacement import (
+    AggregateUse, FieldUseKind, aggregate_field_uses,
+    aggregate_reconstruction_boundaries, classify_scalar_replacement,
+    scalar_replacement_profitability, scalar_replacement_region,
+)
 
 __all__ = [
     "Constant",
@@ -113,4 +118,7 @@ __all__ = [
     "BorrowedAggregateView", "BorrowIntervalKind", "BorrowInvalidationReason",
     "BorrowPoint", "CollectionExtractionBorrowAnalysis", "ExtractionBorrowClassification",
     "ExtractionBorrowResult", "FieldUseShape",
+    "AggregateUse", "FieldUseKind", "aggregate_field_uses",
+    "aggregate_reconstruction_boundaries", "classify_scalar_replacement",
+    "scalar_replacement_profitability", "scalar_replacement_region",
 ]
