@@ -1,0 +1,1530 @@
+{
+  "analysis_api": [
+    "classify_aggregate_copy",
+    "copy_source_dead_after",
+    "copy_destination_unique",
+    "copy_ownership_transfer",
+    "copy_elision_region",
+    "copy_elision_profitability"
+  ],
+  "audit": "O2.11-aggregate-copy-elision-readiness",
+  "candidate_count": 4,
+  "canonical_copy_categories": [
+    "SEMANTIC_COPY_REQUIRED",
+    "OWNERSHIP_COPY_REQUIRED",
+    "RETURN_TEMPORARY_COPY",
+    "CALL_BOUNDARY_COPY",
+    "LOCAL_TEMPORARY_COPY",
+    "RECONSTRUCTION_COPY",
+    "PHI_MERGE_COPY",
+    "COLLECTION_STORAGE_COPY",
+    "METHOD_RESULT_COPY",
+    "CONSTRUCTOR_COPY",
+    "UNKNOWN"
+  ],
+  "control_line_result_deep_dive": {
+    "candidate_values": [
+      "336",
+      "437",
+      "516",
+      "791"
+    ],
+    "finding": "four hot call-result owners, but zero explicit aggregate-copy edges and zero copy-induced ARC pairs",
+    "layout": [
+      {
+        "defining_value": "CALL_RESULT_COMPONENT_UNKNOWN",
+        "index": 0,
+        "name": "line",
+        "ownership_bearing": true,
+        "type": "StringType()",
+        "used": true
+      },
+      {
+        "defining_value": "CALL_RESULT_COMPONENT_UNKNOWN",
+        "index": 1,
+        "name": "status",
+        "ownership_bearing": false,
+        "type": "EnumType(name='__ae_m11_Persistence__enum_12_LedgerStatus', variants=('Success', 'EmptyFile', 'InvalidMagic', 'UnsupportedFormatVersion', 'UnsupportedSchema', 'UnsupportedSchemaRevision', 'IncompatibleReader', 'InvalidHeader', 'DuplicateHeader', 'InvalidRecordCount', 'InvalidFieldCount', 'InvalidRecordHeader', 'InvalidFieldHeader', 'InvalidLength', 'ResourceLimitExceeded', 'UnexpectedEnd', 'IncompleteRecord', 'DuplicateField', 'MissingField', 'TypeMismatch', 'InvalidInteger', 'InvalidDouble', 'InvalidEnum', 'TrailingData', 'FileNotFound', 'PermissionDenied', 'InvalidPath', 'InvalidUtf8', 'IoError'), display_name='LedgerStatus')",
+        "used": true
+      },
+      {
+        "defining_value": "CALL_RESULT_COMPONENT_UNKNOWN",
+        "index": 2,
+        "name": "startOffset",
+        "ownership_bearing": false,
+        "type": "IntType()",
+        "used": true
+      },
+      {
+        "defining_value": "CALL_RESULT_COMPONENT_UNKNOWN",
+        "index": 3,
+        "name": "nextOffset",
+        "ownership_bearing": false,
+        "type": "IntType()",
+        "used": true
+      }
+    ],
+    "owned_fields": [
+      "line:String"
+    ]
+  },
+  "copy_census": {
+    "call_induced": {
+      "count": 0,
+      "in_loops": 0
+    },
+    "collection_store": {
+      "count": 0,
+      "in_loops": 0
+    },
+    "constructor": {
+      "count": 50,
+      "in_loops": 1
+    },
+    "local_temp": {
+      "count": 0,
+      "in_loops": 0
+    },
+    "method_result": {
+      "count": 4,
+      "in_loops": 0
+    },
+    "other": {
+      "count": 47,
+      "in_loops": 5
+    },
+    "ownership_bearing": {
+      "count": 0,
+      "in_loops": 0
+    },
+    "phi": {
+      "count": 0,
+      "in_loops": 0
+    },
+    "reconstruction": {
+      "count": 10,
+      "in_loops": 0
+    },
+    "return_induced": {
+      "count": 108,
+      "in_loops": 9
+    },
+    "scalar_only": {
+      "count": 0,
+      "in_loops": 0
+    }
+  },
+  "copy_definition": "elide an explicit aggregate source-to-destination copy only when the source edge dies and exactly one destruction responsibility transfers",
+  "corpus_failures": [
+    {
+      "error": "IRBackendUnsupportedFeatureError",
+      "workload": "examples/nonlinear_systems/newton_system.ae"
+    },
+    {
+      "error": "IRBackendUnsupportedFeatureError",
+      "workload": "examples/probandoNR.ae"
+    }
+  ],
+  "exact_four_candidates": [
+    {
+      "aggregate_type": "StructType(name='__ae_m11_Persistence__struct_17_ControlLineResult')",
+      "candidate_id": "ACE-001",
+      "category": "RETURN_TEMPORARY_COPY",
+      "component_ownership_accounting": [
+        {
+          "destination_release_obligation": "EXACTLY_ONE_PER_EXIT_PATH",
+          "destination_retain_obligation": "CALL_RETURN_OWNERSHIP_CONTRACT",
+          "exact": false,
+          "field_index": 0,
+          "field_name": "line",
+          "field_type": "StringType()",
+          "ownership_role": "OWNED_DESTINATION",
+          "provenance_root": "CALL_RESULT_COMPONENT_UNKNOWN",
+          "source_release_obligation": "NO_DISTINCT_CALLER_SOURCE",
+          "source_retain_obligation": "LOWERING_DEPENDENT_UNKNOWN"
+        }
+      ],
+      "copy_chain_length": 0,
+      "copy_materialization_instruction": null,
+      "dead_intermediates": 0,
+      "defining_instruction": {
+        "block": "body0",
+        "callee": "__ae_m11_Persistence__function_15_readControlLine",
+        "instruction_index": 0,
+        "kind": "SSACall"
+      },
+      "destination_lifetime": {
+        "category": "LOOP_CARRIED_AGGREGATE",
+        "crosses_backedge": true,
+        "crosses_branch": true,
+        "crosses_call": true,
+        "crosses_exceptional_edge": false,
+        "crosses_join": true,
+        "first_use": {
+          "block": "body0",
+          "instruction_index": 1
+        },
+        "last_use": {
+          "block": "merge36",
+          "instruction_index": 2
+        }
+      },
+      "destination_uniqueness": "NO_SEPARATE_DESTINATION_EDGE_TO_PROVE",
+      "destination_uses": [
+        {
+          "block": "body0",
+          "field_index": 1,
+          "field_name": "status",
+          "instruction": "SSAStructGet",
+          "instruction_index": 1,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "then35",
+          "field_index": 1,
+          "field_name": "status",
+          "instruction": "SSAStructGet",
+          "instruction_index": 0,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "then35",
+          "field_index": 3,
+          "field_name": "nextOffset",
+          "instruction": "SSAStructGet",
+          "instruction_index": 1,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "then35",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 3,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "merge35",
+          "field_index": 0,
+          "field_name": "line",
+          "instruction": "SSAStructGet",
+          "instruction_index": 0,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "then36",
+          "field_index": 3,
+          "field_name": "nextOffset",
+          "instruction": "SSAStructGet",
+          "instruction_index": 0,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "else36",
+          "field_index": 0,
+          "field_name": "line",
+          "instruction": "SSAStructGet",
+          "instruction_index": 0,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "then43",
+          "field_index": 2,
+          "field_name": "startOffset",
+          "instruction": "SSAStructGet",
+          "instruction_index": 1,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "then43",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 4,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "merge43",
+          "field_index": 2,
+          "field_name": "startOffset",
+          "instruction": "SSAStructGet",
+          "instruction_index": 1,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "merge43",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 4,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "then44",
+          "field_index": 2,
+          "field_name": "startOffset",
+          "instruction": "SSAStructGet",
+          "instruction_index": 1,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "then44",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 4,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "merge44",
+          "field_index": 3,
+          "field_name": "nextOffset",
+          "instruction": "SSAStructGet",
+          "instruction_index": 4,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "merge36",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 2,
+          "kind": "DESTRUCTION"
+        }
+      ],
+      "destruction_points": [
+        {
+          "block": "then35",
+          "instruction_index": 3
+        },
+        {
+          "block": "then43",
+          "instruction_index": 4
+        },
+        {
+          "block": "merge43",
+          "instruction_index": 4
+        },
+        {
+          "block": "then44",
+          "instruction_index": 4
+        },
+        {
+          "block": "merge36",
+          "instruction_index": 2
+        }
+      ],
+      "escape": "NO_ESCAPE",
+      "field_count": 4,
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "involvement": {
+        "call": true,
+        "phi": false,
+        "return": true,
+        "store": false
+      },
+      "legacy_candidate_id": "SR-001",
+      "llvm_overlap": "LLVM_ALREADY_COMPLETE",
+      "loop": {
+        "aggregate_phi": false,
+        "depth": 1,
+        "header": "cond0",
+        "loop_carried_aggregate": true
+      },
+      "ownership_bearing_field_count": 1,
+      "ownership_bearing_field_types": [
+        "StringType()"
+      ],
+      "ownership_transfer": {
+        "blocker": "CALLEE_TO_CALLER_OWNERSHIP_EDGE_IS_NOT_EXPLICIT_IN_SSA",
+        "destination_owned_aggregate_edges": 1,
+        "feasibility": "UNPROVEN",
+        "independent_owner_required": "UNKNOWN",
+        "source_owned_aggregate_edges": "UNKNOWN"
+      },
+      "profitability_proxy": {
+        "aggregate_copy_instructions": 0,
+        "destination_semantic_uses": 10,
+        "field_count": 4,
+        "loop_depth": 1,
+        "owned_field_release_sites": 5,
+        "owned_field_retains_at_copy": 0,
+        "potential_arc_reduction_proven": 0
+      },
+      "reason": "The ABI materializes the returned value directly as the caller SSA result; no retain/copy/release handoff exists to elide at this site.",
+      "reconciliation": "LEGACY_COPY_INDUCED_FALSE_POSITIVE_CALL_RESULT_WITH_NO_EXPLICIT_COPY_EDGE",
+      "safety_class": "OWNERSHIP_BLOCKED",
+      "secondary_properties": [
+        "RETURN_ABI_BOUNDARY",
+        "LOGICAL_HANDOFF_ONLY"
+      ],
+      "source_lifetime": {
+        "classification": "SOURCE_LIFETIME_UNKNOWN",
+        "destruction": "NO_DISTINCT_CALLER_SOURCE_DESTRUCTION",
+        "represented_in_caller_ssa": false
+      },
+      "source_uses_after_copy": "SOURCE_LIFETIME_UNKNOWN",
+      "ssa_destination_value": "336",
+      "ssa_source_value": "CALLEE_RETURN_OWNER_NOT_REPRESENTED_IN_CALLER_SSA",
+      "string_copy_behavior": {
+        "callee_before_return": "OWNS_RETURN_FIELD",
+        "caller_duplicate_retain_observed": false,
+        "caller_receives": "OWNED_AGGREGATE",
+        "caller_source_release_observed": false,
+        "destination_releases": 5
+      },
+      "struct_name": "__ae_m11_Persistence__struct_17_ControlLineResult",
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "aggregate_type": "StructType(name='__ae_m11_Persistence__struct_17_ControlLineResult')",
+      "candidate_id": "ACE-002",
+      "category": "RETURN_TEMPORARY_COPY",
+      "component_ownership_accounting": [
+        {
+          "destination_release_obligation": "EXACTLY_ONE_PER_EXIT_PATH",
+          "destination_retain_obligation": "CALL_RETURN_OWNERSHIP_CONTRACT",
+          "exact": false,
+          "field_index": 0,
+          "field_name": "line",
+          "field_type": "StringType()",
+          "ownership_role": "OWNED_DESTINATION",
+          "provenance_root": "CALL_RESULT_COMPONENT_UNKNOWN",
+          "source_release_obligation": "NO_DISTINCT_CALLER_SOURCE",
+          "source_retain_obligation": "LOWERING_DEPENDENT_UNKNOWN"
+        }
+      ],
+      "copy_chain_length": 0,
+      "copy_materialization_instruction": null,
+      "dead_intermediates": 0,
+      "defining_instruction": {
+        "block": "body1",
+        "callee": "__ae_m11_Persistence__function_15_readControlLine",
+        "instruction_index": 0,
+        "kind": "SSACall"
+      },
+      "destination_lifetime": {
+        "category": "LOOP_CARRIED_AGGREGATE",
+        "crosses_backedge": true,
+        "crosses_branch": true,
+        "crosses_call": true,
+        "crosses_exceptional_edge": false,
+        "crosses_join": true,
+        "first_use": {
+          "block": "body1",
+          "instruction_index": 1
+        },
+        "last_use": {
+          "block": "merge87",
+          "instruction_index": 15
+        }
+      },
+      "destination_uniqueness": "NO_SEPARATE_DESTINATION_EDGE_TO_PROVE",
+      "destination_uses": [
+        {
+          "block": "body1",
+          "field_index": 1,
+          "field_name": "status",
+          "instruction": "SSAStructGet",
+          "instruction_index": 1,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "then45",
+          "field_index": 1,
+          "field_name": "status",
+          "instruction": "SSAStructGet",
+          "instruction_index": 0,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "then45",
+          "field_index": 3,
+          "field_name": "nextOffset",
+          "instruction": "SSAStructGet",
+          "instruction_index": 1,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "then45",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 3,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "merge45",
+          "field_index": 0,
+          "field_name": "line",
+          "instruction": "SSAStructGet",
+          "instruction_index": 0,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "then49",
+          "field_index": 2,
+          "field_name": "startOffset",
+          "instruction": "SSAStructGet",
+          "instruction_index": 1,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "then49",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 4,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "then50",
+          "field_index": 2,
+          "field_name": "startOffset",
+          "instruction": "SSAStructGet",
+          "instruction_index": 1,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "then50",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 4,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "merge50",
+          "field_index": 3,
+          "field_name": "nextOffset",
+          "instruction": "SSAStructGet",
+          "instruction_index": 16,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "then51",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 9,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "then55",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 10,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "then56",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 10,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "then57",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 10,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "then58",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 10,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "then59",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 10,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "then60",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 9,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "then62",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 11,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "then64",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 10,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "then66",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 11,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "else68",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 10,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "then70",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 11,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "then73",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 10,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "then75",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 11,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "then77",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 11,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "then79",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 11,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "then80",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 9,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "then81",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 9,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "then87",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 9,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "merge87",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 15,
+          "kind": "DESTRUCTION"
+        }
+      ],
+      "destruction_points": [
+        {
+          "block": "then45",
+          "instruction_index": 3
+        },
+        {
+          "block": "then49",
+          "instruction_index": 4
+        },
+        {
+          "block": "then50",
+          "instruction_index": 4
+        },
+        {
+          "block": "then51",
+          "instruction_index": 9
+        },
+        {
+          "block": "then55",
+          "instruction_index": 10
+        },
+        {
+          "block": "then56",
+          "instruction_index": 10
+        },
+        {
+          "block": "then57",
+          "instruction_index": 10
+        },
+        {
+          "block": "then58",
+          "instruction_index": 10
+        },
+        {
+          "block": "then59",
+          "instruction_index": 10
+        },
+        {
+          "block": "then60",
+          "instruction_index": 9
+        },
+        {
+          "block": "then62",
+          "instruction_index": 11
+        },
+        {
+          "block": "then64",
+          "instruction_index": 10
+        },
+        {
+          "block": "then66",
+          "instruction_index": 11
+        },
+        {
+          "block": "else68",
+          "instruction_index": 10
+        },
+        {
+          "block": "then70",
+          "instruction_index": 11
+        },
+        {
+          "block": "then73",
+          "instruction_index": 10
+        },
+        {
+          "block": "then75",
+          "instruction_index": 11
+        },
+        {
+          "block": "then77",
+          "instruction_index": 11
+        },
+        {
+          "block": "then79",
+          "instruction_index": 11
+        },
+        {
+          "block": "then80",
+          "instruction_index": 9
+        },
+        {
+          "block": "then81",
+          "instruction_index": 9
+        },
+        {
+          "block": "then87",
+          "instruction_index": 9
+        },
+        {
+          "block": "merge87",
+          "instruction_index": 15
+        }
+      ],
+      "escape": "NO_ESCAPE",
+      "field_count": 4,
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "involvement": {
+        "call": true,
+        "phi": false,
+        "return": true,
+        "store": false
+      },
+      "legacy_candidate_id": "SR-002",
+      "llvm_overlap": "LLVM_ALREADY_COMPLETE",
+      "loop": {
+        "aggregate_phi": false,
+        "depth": 1,
+        "header": "cond1",
+        "loop_carried_aggregate": true
+      },
+      "ownership_bearing_field_count": 1,
+      "ownership_bearing_field_types": [
+        "StringType()"
+      ],
+      "ownership_transfer": {
+        "blocker": "CALLEE_TO_CALLER_OWNERSHIP_EDGE_IS_NOT_EXPLICIT_IN_SSA",
+        "destination_owned_aggregate_edges": 1,
+        "feasibility": "UNPROVEN",
+        "independent_owner_required": "UNKNOWN",
+        "source_owned_aggregate_edges": "UNKNOWN"
+      },
+      "profitability_proxy": {
+        "aggregate_copy_instructions": 0,
+        "destination_semantic_uses": 7,
+        "field_count": 4,
+        "loop_depth": 1,
+        "owned_field_release_sites": 23,
+        "owned_field_retains_at_copy": 0,
+        "potential_arc_reduction_proven": 0
+      },
+      "reason": "The ABI materializes the returned value directly as the caller SSA result; no retain/copy/release handoff exists to elide at this site.",
+      "reconciliation": "LEGACY_COPY_INDUCED_FALSE_POSITIVE_CALL_RESULT_WITH_NO_EXPLICIT_COPY_EDGE",
+      "safety_class": "OWNERSHIP_BLOCKED",
+      "secondary_properties": [
+        "RETURN_ABI_BOUNDARY",
+        "LOGICAL_HANDOFF_ONLY"
+      ],
+      "source_lifetime": {
+        "classification": "SOURCE_LIFETIME_UNKNOWN",
+        "destruction": "NO_DISTINCT_CALLER_SOURCE_DESTRUCTION",
+        "represented_in_caller_ssa": false
+      },
+      "source_uses_after_copy": "SOURCE_LIFETIME_UNKNOWN",
+      "ssa_destination_value": "437",
+      "ssa_source_value": "CALLEE_RETURN_OWNER_NOT_REPRESENTED_IN_CALLER_SSA",
+      "string_copy_behavior": {
+        "callee_before_return": "OWNS_RETURN_FIELD",
+        "caller_duplicate_retain_observed": false,
+        "caller_receives": "OWNED_AGGREGATE",
+        "caller_source_release_observed": false,
+        "destination_releases": 23
+      },
+      "struct_name": "__ae_m11_Persistence__struct_17_ControlLineResult",
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "aggregate_type": "StructType(name='__ae_m11_Persistence__struct_17_ControlLineResult')",
+      "candidate_id": "ACE-003",
+      "category": "RETURN_TEMPORARY_COPY",
+      "component_ownership_accounting": [
+        {
+          "destination_release_obligation": "EXACTLY_ONE_PER_EXIT_PATH",
+          "destination_retain_obligation": "CALL_RETURN_OWNERSHIP_CONTRACT",
+          "exact": false,
+          "field_index": 0,
+          "field_name": "line",
+          "field_type": "StringType()",
+          "ownership_role": "OWNED_DESTINATION",
+          "provenance_root": "CALL_RESULT_COMPONENT_UNKNOWN",
+          "source_release_obligation": "NO_DISTINCT_CALLER_SOURCE",
+          "source_retain_obligation": "LOWERING_DEPENDENT_UNKNOWN"
+        }
+      ],
+      "copy_chain_length": 0,
+      "copy_materialization_instruction": null,
+      "dead_intermediates": 0,
+      "defining_instruction": {
+        "block": "body2",
+        "callee": "__ae_m11_Persistence__function_15_readControlLine",
+        "instruction_index": 0,
+        "kind": "SSACall"
+      },
+      "destination_lifetime": {
+        "category": "LOOP_CARRIED_AGGREGATE",
+        "crosses_backedge": true,
+        "crosses_branch": true,
+        "crosses_call": true,
+        "crosses_exceptional_edge": false,
+        "crosses_join": true,
+        "first_use": {
+          "block": "body2",
+          "instruction_index": 1
+        },
+        "last_use": {
+          "block": "merge61",
+          "instruction_index": 16
+        }
+      },
+      "destination_uniqueness": "NO_SEPARATE_DESTINATION_EDGE_TO_PROVE",
+      "destination_uses": [
+        {
+          "block": "body2",
+          "field_index": 1,
+          "field_name": "status",
+          "instruction": "SSAStructGet",
+          "instruction_index": 1,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "then51",
+          "field_index": 1,
+          "field_name": "status",
+          "instruction": "SSAStructGet",
+          "instruction_index": 0,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "then51",
+          "field_index": 3,
+          "field_name": "nextOffset",
+          "instruction": "SSAStructGet",
+          "instruction_index": 1,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "then51",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 3,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "merge51",
+          "field_index": 0,
+          "field_name": "line",
+          "instruction": "SSAStructGet",
+          "instruction_index": 0,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "then55",
+          "field_index": 2,
+          "field_name": "startOffset",
+          "instruction": "SSAStructGet",
+          "instruction_index": 1,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "then55",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 4,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "then56",
+          "field_index": 2,
+          "field_name": "startOffset",
+          "instruction": "SSAStructGet",
+          "instruction_index": 1,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "then56",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 4,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "then57",
+          "field_index": 2,
+          "field_name": "startOffset",
+          "instruction": "SSAStructGet",
+          "instruction_index": 1,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "then57",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 4,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "then58",
+          "field_index": 2,
+          "field_name": "startOffset",
+          "instruction": "SSAStructGet",
+          "instruction_index": 1,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "then58",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 4,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "merge58",
+          "field_index": 3,
+          "field_name": "nextOffset",
+          "instruction": "SSAStructGet",
+          "instruction_index": 0,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "then59",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 4,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "then60",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 3,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "then62",
+          "field_index": 2,
+          "field_name": "startOffset",
+          "instruction": "SSAStructGet",
+          "instruction_index": 1,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "then62",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 5,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "then64",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 4,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "then66",
+          "field_index": 2,
+          "field_name": "startOffset",
+          "instruction": "SSAStructGet",
+          "instruction_index": 1,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "then66",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 5,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "else68",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 4,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "then70",
+          "field_index": 2,
+          "field_name": "startOffset",
+          "instruction": "SSAStructGet",
+          "instruction_index": 1,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "then70",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 5,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "then73",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 4,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "then75",
+          "field_index": 2,
+          "field_name": "startOffset",
+          "instruction": "SSAStructGet",
+          "instruction_index": 1,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "then75",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 5,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "then77",
+          "field_index": 2,
+          "field_name": "startOffset",
+          "instruction": "SSAStructGet",
+          "instruction_index": 1,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "then77",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 5,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "then79",
+          "field_index": 2,
+          "field_name": "startOffset",
+          "instruction": "SSAStructGet",
+          "instruction_index": 1,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "then79",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 5,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "merge61",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 16,
+          "kind": "DESTRUCTION"
+        }
+      ],
+      "destruction_points": [
+        {
+          "block": "then51",
+          "instruction_index": 3
+        },
+        {
+          "block": "then55",
+          "instruction_index": 4
+        },
+        {
+          "block": "then56",
+          "instruction_index": 4
+        },
+        {
+          "block": "then57",
+          "instruction_index": 4
+        },
+        {
+          "block": "then58",
+          "instruction_index": 4
+        },
+        {
+          "block": "then59",
+          "instruction_index": 4
+        },
+        {
+          "block": "then60",
+          "instruction_index": 3
+        },
+        {
+          "block": "then62",
+          "instruction_index": 5
+        },
+        {
+          "block": "then64",
+          "instruction_index": 4
+        },
+        {
+          "block": "then66",
+          "instruction_index": 5
+        },
+        {
+          "block": "else68",
+          "instruction_index": 4
+        },
+        {
+          "block": "then70",
+          "instruction_index": 5
+        },
+        {
+          "block": "then73",
+          "instruction_index": 4
+        },
+        {
+          "block": "then75",
+          "instruction_index": 5
+        },
+        {
+          "block": "then77",
+          "instruction_index": 5
+        },
+        {
+          "block": "then79",
+          "instruction_index": 5
+        },
+        {
+          "block": "merge61",
+          "instruction_index": 16
+        }
+      ],
+      "escape": "NO_ESCAPE",
+      "field_count": 4,
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "involvement": {
+        "call": true,
+        "phi": false,
+        "return": true,
+        "store": false
+      },
+      "legacy_candidate_id": "SR-003",
+      "llvm_overlap": "LLVM_ALREADY_COMPLETE",
+      "loop": {
+        "aggregate_phi": false,
+        "depth": 2,
+        "header": "cond2",
+        "loop_carried_aggregate": true
+      },
+      "ownership_bearing_field_count": 1,
+      "ownership_bearing_field_types": [
+        "StringType()"
+      ],
+      "ownership_transfer": {
+        "blocker": "CALLEE_TO_CALLER_OWNERSHIP_EDGE_IS_NOT_EXPLICIT_IN_SSA",
+        "destination_owned_aggregate_edges": 1,
+        "feasibility": "UNPROVEN",
+        "independent_owner_required": "UNKNOWN",
+        "source_owned_aggregate_edges": "UNKNOWN"
+      },
+      "profitability_proxy": {
+        "aggregate_copy_instructions": 0,
+        "destination_semantic_uses": 15,
+        "field_count": 4,
+        "loop_depth": 2,
+        "owned_field_release_sites": 17,
+        "owned_field_retains_at_copy": 0,
+        "potential_arc_reduction_proven": 0
+      },
+      "reason": "The ABI materializes the returned value directly as the caller SSA result; no retain/copy/release handoff exists to elide at this site.",
+      "reconciliation": "LEGACY_COPY_INDUCED_FALSE_POSITIVE_CALL_RESULT_WITH_NO_EXPLICIT_COPY_EDGE",
+      "safety_class": "OWNERSHIP_BLOCKED",
+      "secondary_properties": [
+        "RETURN_ABI_BOUNDARY",
+        "LOGICAL_HANDOFF_ONLY"
+      ],
+      "source_lifetime": {
+        "classification": "SOURCE_LIFETIME_UNKNOWN",
+        "destruction": "NO_DISTINCT_CALLER_SOURCE_DESTRUCTION",
+        "represented_in_caller_ssa": false
+      },
+      "source_uses_after_copy": "SOURCE_LIFETIME_UNKNOWN",
+      "ssa_destination_value": "516",
+      "ssa_source_value": "CALLEE_RETURN_OWNER_NOT_REPRESENTED_IN_CALLER_SSA",
+      "string_copy_behavior": {
+        "callee_before_return": "OWNS_RETURN_FIELD",
+        "caller_duplicate_retain_observed": false,
+        "caller_receives": "OWNED_AGGREGATE",
+        "caller_source_release_observed": false,
+        "destination_releases": 17
+      },
+      "struct_name": "__ae_m11_Persistence__struct_17_ControlLineResult",
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "aggregate_type": "StructType(name='__ae_m11_Persistence__struct_17_ControlLineResult')",
+      "candidate_id": "ACE-004",
+      "category": "RETURN_TEMPORARY_COPY",
+      "component_ownership_accounting": [
+        {
+          "destination_release_obligation": "EXACTLY_ONE_PER_EXIT_PATH",
+          "destination_retain_obligation": "CALL_RETURN_OWNERSHIP_CONTRACT",
+          "exact": false,
+          "field_index": 0,
+          "field_name": "line",
+          "field_type": "StringType()",
+          "ownership_role": "OWNED_DESTINATION",
+          "provenance_root": "CALL_RESULT_COMPONENT_UNKNOWN",
+          "source_release_obligation": "NO_DISTINCT_CALLER_SOURCE",
+          "source_retain_obligation": "LOWERING_DEPENDENT_UNKNOWN"
+        }
+      ],
+      "copy_chain_length": 0,
+      "copy_materialization_instruction": null,
+      "dead_intermediates": 0,
+      "defining_instruction": {
+        "block": "exit2",
+        "callee": "__ae_m11_Persistence__function_15_readControlLine",
+        "instruction_index": 0,
+        "kind": "SSACall"
+      },
+      "destination_lifetime": {
+        "category": "LOOP_CARRIED_AGGREGATE",
+        "crosses_backedge": true,
+        "crosses_branch": true,
+        "crosses_call": true,
+        "crosses_exceptional_edge": false,
+        "crosses_join": true,
+        "first_use": {
+          "block": "exit2",
+          "instruction_index": 1
+        },
+        "last_use": {
+          "block": "merge87",
+          "instruction_index": 9
+        }
+      },
+      "destination_uniqueness": "NO_SEPARATE_DESTINATION_EDGE_TO_PROVE",
+      "destination_uses": [
+        {
+          "block": "exit2",
+          "field_index": 1,
+          "field_name": "status",
+          "instruction": "SSAStructGet",
+          "instruction_index": 1,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "then80",
+          "field_index": 1,
+          "field_name": "status",
+          "instruction": "SSAStructGet",
+          "instruction_index": 0,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "then80",
+          "field_index": 3,
+          "field_name": "nextOffset",
+          "instruction": "SSAStructGet",
+          "instruction_index": 1,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "then80",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 3,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "merge80",
+          "field_index": 0,
+          "field_name": "line",
+          "instruction": "SSAStructGet",
+          "instruction_index": 0,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "then81",
+          "field_index": 2,
+          "field_name": "startOffset",
+          "instruction": "SSAStructGet",
+          "instruction_index": 1,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "then81",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 3,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "then87",
+          "field_index": 2,
+          "field_name": "startOffset",
+          "instruction": "SSAStructGet",
+          "instruction_index": 1,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "then87",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 3,
+          "kind": "DESTRUCTION"
+        },
+        {
+          "block": "merge87",
+          "field_index": 3,
+          "field_name": "nextOffset",
+          "instruction": "SSAStructGet",
+          "instruction_index": 6,
+          "kind": "FIELD_READ"
+        },
+        {
+          "block": "merge87",
+          "field_index": null,
+          "field_name": null,
+          "instruction": "SSACall",
+          "instruction_index": 9,
+          "kind": "DESTRUCTION"
+        }
+      ],
+      "destruction_points": [
+        {
+          "block": "then80",
+          "instruction_index": 3
+        },
+        {
+          "block": "then81",
+          "instruction_index": 3
+        },
+        {
+          "block": "then87",
+          "instruction_index": 3
+        },
+        {
+          "block": "merge87",
+          "instruction_index": 9
+        }
+      ],
+      "escape": "NO_ESCAPE",
+      "field_count": 4,
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "involvement": {
+        "call": true,
+        "phi": false,
+        "return": true,
+        "store": false
+      },
+      "legacy_candidate_id": "SR-004",
+      "llvm_overlap": "LLVM_ALREADY_COMPLETE",
+      "loop": {
+        "aggregate_phi": false,
+        "depth": 1,
+        "header": "cond1",
+        "loop_carried_aggregate": true
+      },
+      "ownership_bearing_field_count": 1,
+      "ownership_bearing_field_types": [
+        "StringType()"
+      ],
+      "ownership_transfer": {
+        "blocker": "CALLEE_TO_CALLER_OWNERSHIP_EDGE_IS_NOT_EXPLICIT_IN_SSA",
+        "destination_owned_aggregate_edges": 1,
+        "feasibility": "UNPROVEN",
+        "independent_owner_required": "UNKNOWN",
+        "source_owned_aggregate_edges": "UNKNOWN"
+      },
+      "profitability_proxy": {
+        "aggregate_copy_instructions": 0,
+        "destination_semantic_uses": 7,
+        "field_count": 4,
+        "loop_depth": 1,
+        "owned_field_release_sites": 4,
+        "owned_field_retains_at_copy": 0,
+        "potential_arc_reduction_proven": 0
+      },
+      "reason": "The ABI materializes the returned value directly as the caller SSA result; no retain/copy/release handoff exists to elide at this site.",
+      "reconciliation": "LEGACY_COPY_INDUCED_FALSE_POSITIVE_CALL_RESULT_WITH_NO_EXPLICIT_COPY_EDGE",
+      "safety_class": "OWNERSHIP_BLOCKED",
+      "secondary_properties": [
+        "RETURN_ABI_BOUNDARY",
+        "LOGICAL_HANDOFF_ONLY"
+      ],
+      "source_lifetime": {
+        "classification": "SOURCE_LIFETIME_UNKNOWN",
+        "destruction": "NO_DISTINCT_CALLER_SOURCE_DESTRUCTION",
+        "represented_in_caller_ssa": false
+      },
+      "source_uses_after_copy": "SOURCE_LIFETIME_UNKNOWN",
+      "ssa_destination_value": "791",
+      "ssa_source_value": "CALLEE_RETURN_OWNER_NOT_REPRESENTED_IN_CALLER_SSA",
+      "string_copy_behavior": {
+        "callee_before_return": "OWNS_RETURN_FIELD",
+        "caller_duplicate_retain_observed": false,
+        "caller_receives": "OWNED_AGGREGATE",
+        "caller_source_release_observed": false,
+        "destination_releases": 4
+      },
+      "struct_name": "__ae_m11_Persistence__struct_17_ControlLineResult",
+      "workload": "examples/expense_tracker/Main.ae"
+    }
+  ],
+  "exact_next_scope": {
+    "abi": "exclude call and return boundaries",
+    "aggregate_types": [
+      "StructType"
+    ],
+    "cfg": "straight-line same block; source immediately dead; unique destination",
+    "class": "explicit same-block aggregate copy edges only",
+    "exceptions": "none",
+    "expected_arc_reduction": 0,
+    "expected_real_candidates": 0,
+    "ownership": "exact component provenance and one source/destination owned edge",
+    "verifier": "prove one final release per transferred component"
+  },
+  "excluded_first_scope": [
+    "reconstruction",
+    "phi",
+    "call arguments",
+    "MethodResult",
+    "constructors",
+    "collection storage",
+    "exception-sensitive and path-sensitive transfers"
+  ],
+  "identity_model": {
+    "aggregate_ssa_identity": "distinct SSA results",
+    "nested_component_provenance": "tracked independently per component path",
+    "ownership_edge": "distinct from value/provenance identity",
+    "proof_rule": "same component roots never implies redundant ownership"
+  },
+  "methodology": "read-only lifecycle-expanded production O2 SSA; no transform",
+  "production_freeze": {
+    "abi_changed": false,
+    "codegen_changed": false,
+    "lifecycle_changed": false,
+    "optimization_profiles_changed": false,
+    "ownership_changed": false,
+    "production_behavior_changed": false
+  },
+  "recommendation": "IMPROVE_COPY_ELISION_ANALYSIS_FIRST",
+  "return_materialization_findings": {
+    "callee_temporary": "not paired with a caller copy in current SSA",
+    "caller_temporary_found": false,
+    "logical_copy_found": false,
+    "physical_copy_evidence": "no separate caller source/destination pair",
+    "stage": "CALL_RESULT_SSA_DEFINITION"
+  },
+  "revision": "40d048be6ae38062bd31b982be3ed94a4bb3fff4",
+  "scalar_replacement_overlap": {
+    "conclusion": "O2.10 overlap was based on call-result materialization naming, not an SSA copy edge",
+    "legacy_copy_candidates": 4,
+    "scalar_candidates": 4,
+    "verified_copy_edges": 0
+  },
+  "schema_version": 1,
+  "second_best": "PROCEED_TO_OWNERSHIP_TRANSFER_ANALYSIS",
+  "struct_copy_semantics": {
+    "backend": "return value is transported by value; field ownership cleanup remains explicit",
+    "initial_ir": "IRCopy/aggregate lifecycle operations express value copies",
+    "lifecycle_expansion": "owned nested fields acquire/release ownership",
+    "ssa": "the frozen call results contain no explicit aggregate copy instruction"
+  }
+}

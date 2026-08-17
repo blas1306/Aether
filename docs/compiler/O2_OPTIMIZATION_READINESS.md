@@ -1,5 +1,23 @@
 # O2 optimization readiness audit
 
+## O2.11 update
+
+The aggregate copy-elision reconciliation selects
+`IMPROVE_COPY_ELISION_ANALYSIS_FIRST`. The four historically copy-induced
+`ControlLineResult` sites are direct call-result owners, not explicit SSA copy
+edges: there is no distinct source/destination, copy retain, or dead
+intermediate. The new analysis-only API keeps aggregate identity and ownership
+edges separate; no optimizer consumes it. See
+`O2_AGGREGATE_COPY_ELISION_READINESS.md` and its deterministic JSON. Production
+lifecycle, ownership, ABI, codegen, LocalARC, and optimization profiles remain
+unchanged.
+
+## O2.10 update
+
+Scalar-replacement readiness found four ownership-bearing call-result values
+and no `SAFE_SCALAR_ONLY` case. Its recommendation to investigate aggregate
+copy elision is preserved as historical context and reconciled by O2.11.
+
 ## O2.9.8 update
 
 The post-immediate-borrow audit selects

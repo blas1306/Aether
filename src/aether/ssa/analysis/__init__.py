@@ -68,6 +68,12 @@ from .scalar_replacement import (
     aggregate_reconstruction_boundaries, classify_scalar_replacement,
     scalar_replacement_profitability, scalar_replacement_region,
 )
+from .aggregate_copy_elision import (
+    AggregateCopyCategory, AggregateCopyFact, CopySafetyClass,
+    OwnershipTransferFact, SourceAfterCopy, classify_aggregate_copy,
+    classify_copy_safety, copy_destination_unique, copy_elision_profitability,
+    copy_elision_region, copy_ownership_transfer, copy_source_dead_after,
+)
 
 __all__ = [
     "Constant",
@@ -121,4 +127,8 @@ __all__ = [
     "AggregateUse", "FieldUseKind", "aggregate_field_uses",
     "aggregate_reconstruction_boundaries", "classify_scalar_replacement",
     "scalar_replacement_profitability", "scalar_replacement_region",
+    "AggregateCopyCategory", "AggregateCopyFact", "CopySafetyClass",
+    "OwnershipTransferFact", "SourceAfterCopy", "classify_aggregate_copy",
+    "classify_copy_safety", "copy_destination_unique", "copy_elision_profitability",
+    "copy_elision_region", "copy_ownership_transfer", "copy_source_dead_after",
 ]
