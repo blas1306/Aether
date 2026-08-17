@@ -19,13 +19,13 @@ def expense_report() -> dict:
 def test_hot_arc_census_loop_depth_balance_and_closed_taxonomies(expense_report) -> None:
     report = expense_report
     assert report["arc_baseline"] == {
-        # Current production O2 SSA. O2.9.5 prevents backend ArrayGet retains;
-        # those implicit retains have never been counted by this SSA census.
-        "retain": 34, "release": 869, "total": 903,
+        # Current production O2 SSA after O2.9.7. Backend ArrayGet retains are
+        # accounted separately; the three owned lifecycle releases disappear.
+        "retain": 34, "release": 866, "total": 900,
         "outside_loops": 852, "functions_with_arc": 17,
     }
     assert report["loop_arc_baseline"] == {
-        "retain": 11, "release": 40, "total": 51, "functions": 2, "workloads": 1,
+        "retain": 11, "release": 37, "total": 48, "functions": 2, "workloads": 1,
     }
     assert all(site["loop_depth"] >= 1 for site in report["loop_arc_sites"])
     assert {site["loop_role"] for site in report["loop_arc_sites"]} <= {

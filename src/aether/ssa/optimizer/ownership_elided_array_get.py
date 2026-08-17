@@ -1,4 +1,4 @@
-"""O2.9.5: elide ownership for qualified direct Array<String> projections."""
+"""O2.9.5/O2.9.7 qualified borrowed Array<String> extraction."""
 from __future__ import annotations
 
 from dataclasses import fields, replace
@@ -9,6 +9,9 @@ from aether.ssa.analysis import (
     ExtractionBorrowClassification,
 )
 from aether.ssa.analysis.alias_modref import SummaryAnalysis
+from aether.ssa.analysis.consumer_ownership import (
+    BorrowedArgumentAcceptance, consumer_accepts_borrowed_arg,
+)
 from aether.ssa.model import (
     SSAArrayGet, SSABasicBlock, SSACall, SSACompareOp, SSAFunction, SSAModule,
     SSAValue,
@@ -31,7 +34,7 @@ def _operands(instruction) -> tuple[SSAValue, ...]:
 
 
 class OwnershipElidedArrayGet:
-    """Borrow only the frozen O2.9.4 direct-comparison candidate class."""
+    """Borrow qualified direct projections and immediate String consumers."""
 
     def run(self, module: SSAModule) -> SSAOptimizationResult:
         summaries = SummaryAnalysis().compute(module)
@@ -41,6 +44,11 @@ class OwnershipElidedArrayGet:
             "blocked_escape", "blocked_call", "blocked_mutation", "blocked_alias",
             "blocked_array_lifetime", "blocked_exception", "blocked_backedge",
             "blocked_ownership_use", "blocked_other",
+            "direct_projection_candidates", "direct_projection_transformed",
+            "immediate_candidates_examined", "immediate_qualified",
+            "immediate_transformed", "blocked_multiple_uses",
+            "blocked_consumer_ownership", "blocked_unknown_consumer",
+            "blocked_alias_mutation",
         )}
         functions: list[SSAFunction] = []
         log: list[dict[str, str]] = []
@@ -57,7 +65,7 @@ class OwnershipElidedArrayGet:
                     if self._is_release(instruction):
                         releases.setdefault(instruction.arguments[0], []).append((block.name, index))
 
-            candidates: set[SSAValue] = set()
+            candidates: dict[SSAValue, str] = {}
             for block in function.blocks:
                 for index, instruction in enumerate(block.instructions):
                     if not isinstance(instruction, SSAArrayGet) or instruction.borrowed:
@@ -74,16 +82,23 @@ class OwnershipElidedArrayGet:
                     direct = len(semantic) == 1 and isinstance(semantic[0][2], SSACompareOp)
                     if direct:
                         stats["target_candidates_recognized"] += 1
+                        stats["direct_projection_candidates"] += 1
+                    immediate = self._immediate_consumer(block.name, index, instruction.result, semantic)
+                    if immediate is not None and not direct:
+                        stats["immediate_candidates_examined"] += 1
                     row = analysis._results[instruction.result]
                     blocker = self._blocker(
                         analysis, block.name, row, semantic,
-                        releases.get(instruction.result, ()), direct,
+                        releases.get(instruction.result, ()), direct, immediate,
                     )
                     if blocker:
                         stats[blocker] += 1
                         continue
-                    candidates.add(instruction.result)
+                    mode = "direct_projection" if direct else "immediate_borrow"
+                    candidates[instruction.result] = mode
                     stats["qualified"] += 1
+                    if mode == "immediate_borrow":
+                        stats["immediate_qualified"] += 1
 
             blocks: list[SSABasicBlock] = []
             for block in function.blocks:
@@ -92,6 +107,9 @@ class OwnershipElidedArrayGet:
                     if isinstance(instruction, SSAArrayGet) and instruction.result in candidates:
                         instruction = replace(instruction, borrowed=True, borrow_scope=block.name)
                         stats["transformed"] += 1
+                        mode = candidates[instruction.result]
+                        stats[("direct_projection_transformed" if mode == "direct_projection"
+                               else "immediate_transformed")] += 1
                         stats["retains_removed"] += 1  # retain is implicit in owned lowering
                         log.append({"function": function.name, "block": block.name,
                                     "result": instruction.result.name, "ownership": "borrowed"})
@@ -124,9 +142,30 @@ class OwnershipElidedArrayGet:
                 and len(instruction.arguments) == 1)
 
     @staticmethod
-    def _blocker(analysis, block, row, semantic, releases, direct):
+    def _immediate_consumer(block, get_index, result, semantic):
+        if len(semantic) != 1:
+            return None
+        use_block, use_index, consumer = semantic[0]
+        if use_block != block or use_index != get_index + 1:
+            return None
+        operands = _operands(consumer)
+        positions = [index for index, operand in enumerate(operands) if operand == result]
+        if len(positions) != 1:
+            return None
+        return consumer, positions[0]
+
+    @staticmethod
+    def _blocker(analysis, block, row, semantic, releases, direct, immediate):
         if not direct:
-            return "blocked_ownership_use"
+            if len(semantic) != 1:
+                return "blocked_multiple_uses"
+            if immediate is None:
+                return "blocked_ownership_use"
+            acceptance = consumer_accepts_borrowed_arg(*immediate)
+            if acceptance is BorrowedArgumentAcceptance.UNKNOWN:
+                return "blocked_unknown_consumer"
+            if acceptance is not BorrowedArgumentAcceptance.YES:
+                return "blocked_consumer_ownership"
         reasons = set(row.blocker_reasons)
         if row.classification is not ExtractionBorrowClassification.BORROWABLE_IMMEDIATE_USE:
             if reasons & {BorrowInvalidationReason.AGGREGATE_ESCAPE,

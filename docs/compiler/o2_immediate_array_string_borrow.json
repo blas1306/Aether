@@ -1,0 +1,103 @@
+{
+  "audit": "O2.9.7-immediate-array-string-borrow",
+  "candidate_count": 3,
+  "candidates": [
+    {
+      "array_lifetime_proof": "same-block adjacent consumer; owner analysis proves coverage and no mutation/escape",
+      "candidate_id": "IAB-001",
+      "consumer": "byteLength",
+      "historical_identity": "__ae_m11_Persistence__function_12_decodeLedger:%365",
+      "loop_depth": 1,
+      "no_owned_consumer": true,
+      "post": {
+        "backend_implicit_retain": 0,
+        "borrowed": true,
+        "ssa_lifecycle_release": 0
+      },
+      "pre": {
+        "backend_implicit_retain": 1,
+        "borrowed": false,
+        "ssa_lifecycle_release": 1
+      },
+      "transformed": true
+    },
+    {
+      "array_lifetime_proof": "same-block adjacent consumer; owner analysis proves coverage and no mutation/escape",
+      "candidate_id": "IAB-002",
+      "consumer": "parseInt",
+      "historical_identity": "__ae_m11_Persistence__function_12_decodeLedger:%484",
+      "loop_depth": 1,
+      "no_owned_consumer": true,
+      "post": {
+        "backend_implicit_retain": 0,
+        "borrowed": true,
+        "ssa_lifecycle_release": 0
+      },
+      "pre": {
+        "backend_implicit_retain": 1,
+        "borrowed": false,
+        "ssa_lifecycle_release": 1
+      },
+      "transformed": true
+    },
+    {
+      "array_lifetime_proof": "same-block adjacent consumer; owner analysis proves coverage and no mutation/escape",
+      "candidate_id": "IAB-003",
+      "consumer": "parseInt",
+      "historical_identity": "__ae_m11_Persistence__function_12_decodeLedger:%587",
+      "loop_depth": 2,
+      "no_owned_consumer": true,
+      "post": {
+        "backend_implicit_retain": 0,
+        "borrowed": true,
+        "ssa_lifecycle_release": 0
+      },
+      "pre": {
+        "backend_implicit_retain": 1,
+        "borrowed": false,
+        "ssa_lifecycle_release": 1
+      },
+      "transformed": true
+    }
+  ],
+  "expense_tracker_explicit_ssa": {
+    "release": 866,
+    "retain": 34
+  },
+  "historical_sources": [
+    "O2.9.1",
+    "O2.9.2",
+    "O2.9.6"
+  ],
+  "post_o2_9_7": {
+    "backend_implicit_retain": 69,
+    "explicit_ssa": {
+      "release": 901,
+      "retain": 48
+    },
+    "loop_backend_implicit_retain": 11,
+    "loop_explicit_ssa": {
+      "release": 37,
+      "retain": 11
+    }
+  },
+  "pre_o2_9_7": {
+    "backend_implicit_retain": 72,
+    "explicit_ssa": {
+      "release": 904,
+      "retain": 48
+    },
+    "loop_backend_implicit_retain": 14,
+    "loop_explicit_ssa": {
+      "release": 40,
+      "retain": 11
+    }
+  },
+  "schema_version": 1,
+  "stable_region": {
+    "borrowed": false,
+    "historical_identity": "__ae_m11_Persistence__function_12_decodeLedger:%373",
+    "reason": "consumer is not structurally immediate",
+    "transformed": false
+  }
+}

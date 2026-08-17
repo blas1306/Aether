@@ -1,5 +1,12 @@
 # O2 optimization readiness audit
 
+## O2.9.7 update
+
+`OwnershipElidedArrayGet` now uses a central tri-state immediate-consumer
+ownership contract. The three frozen immediate `Array<String>` sites qualify;
+the stable-region site remains owned. O0/O1, LocalARC, and runtime ABI are
+unchanged. See `O2_IMMEDIATE_ARRAY_STRING_BORROW.md`.
+
 O2.9.1 hot-ARC audit: production remains 48 retains / 919 releases, including
 11 / 55 in natural loops. Collection-element and aggregate-temporary lifecycle
 accounts for 32 of 66 loop operations while no loop pair is currently eligible;

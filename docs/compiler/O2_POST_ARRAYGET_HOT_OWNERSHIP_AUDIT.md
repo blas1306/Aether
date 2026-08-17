@@ -1,5 +1,11 @@
 # O2.9.6 — Post-ArrayGet Hot Ownership Audit
 
+> Historical snapshot. O2.9.7 subsequently qualifies the three frozen
+> immediate candidates and leaves the stable-region candidate owned.
+> This file and its JSON are validated as historical artifacts; the generator
+> observes current production and therefore is not a post-O2.9.7 byte-for-byte
+> regeneration contract for the O2.9.6 JSON.
+
 Status: **`PROCEED_TO_IMMEDIATE_ARRAY_STRING_BORROW`**.
 
 This is a read-only audit of the production O2 pipeline after O2.9.5. It does

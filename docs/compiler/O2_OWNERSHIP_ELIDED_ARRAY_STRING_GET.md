@@ -1,5 +1,8 @@
 # O2.9.5 — Qualified ownership-elided `ArrayGet<String>`
 
+> O2.9.7 adds a distinct immediate-consumer mode. The 15 direct-projection
+> sites remain unchanged; see `O2_IMMEDIATE_ARRAY_STRING_BORROW.md`.
+
 Status: implemented. O2 alone runs the dedicated
 `OwnershipElidedArrayGet` pass after BCE/LICM and before LocalARC/DCE. O0 and
 O1 retain normal owned extraction semantics.

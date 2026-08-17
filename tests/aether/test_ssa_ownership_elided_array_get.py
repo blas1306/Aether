@@ -44,12 +44,23 @@ def test_direct_loop_string_comparison_becomes_borrowed_and_drops_release():
     assert outcome.stats["releases_removed"] == 1
 
 
-def test_immediate_borrowing_call_remains_owned():
+def test_trusted_immediate_borrowing_call_becomes_borrowed():
     module, _ = module_with_use(
         lambda item, other, result: SSACall("length", (item,), value("length", IntType()),
                                      builtin="__aether_string_byte_length")
     )
     outcome = OwnershipElidedArrayGet().run(module)
     loop = outcome.module.functions[0].blocks[1]
+    assert next(item for item in loop.instructions if isinstance(item, SSAArrayGet)).borrowed
+    assert outcome.stats["immediate_candidates_examined"] == 1
+    assert outcome.stats["immediate_qualified"] == outcome.stats["immediate_transformed"] == 1
+
+
+def test_unknown_immediate_call_remains_owned():
+    module, _ = module_with_use(
+        lambda item, other, result: SSACall("observe", (item,), value("length", IntType()))
+    )
+    outcome = OwnershipElidedArrayGet().run(module)
+    loop = outcome.module.functions[0].blocks[1]
     assert not next(item for item in loop.instructions if isinstance(item, SSAArrayGet)).borrowed
-    assert outcome.stats["blocked_ownership_use"] == 1
+    assert outcome.stats["blocked_unknown_consumer"] == 1

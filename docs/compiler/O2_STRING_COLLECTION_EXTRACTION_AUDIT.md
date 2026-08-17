@@ -1,5 +1,8 @@
 # O2.9.4 — String collection extraction ownership audit
 
+> Historical census. O2.9.7 implements only the three immediate candidates;
+> stable-region and other extraction classes remain frozen.
+
 Status: **complete, analysis only**. Decision:
 `PROCEED_TO_OWNERSHIP_ELIDED_ARRAY_GET`.
 
