@@ -74,6 +74,9 @@ from .aggregate_copy_elision import (
     classify_copy_safety, copy_destination_unique, copy_elision_profitability,
     copy_elision_region, copy_ownership_transfer, copy_source_dead_after,
 )
+from .concrete_optimization import (
+    ConcreteCandidateStatus, ConcreteOptimizationCandidate, select_recommendation,
+)
 
 __all__ = [
     "Constant",
@@ -131,4 +134,5 @@ __all__ = [
     "OwnershipTransferFact", "SourceAfterCopy", "classify_aggregate_copy",
     "classify_copy_safety", "copy_destination_unique", "copy_elision_profitability",
     "copy_elision_region", "copy_ownership_transfer", "copy_source_dead_after",
+    "ConcreteCandidateStatus", "ConcreteOptimizationCandidate", "select_recommendation",
 ]

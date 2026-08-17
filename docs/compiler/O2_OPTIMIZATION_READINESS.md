@@ -1,5 +1,14 @@
 # O2 optimization readiness audit
 
+## O2.12 update
+
+The concrete-opportunity reconciliation requires an exact current SSA rewrite
+and complete fail-closed proof before a family can be ranked. The four O2.10
+scalar sites and four O2.11 historical copy sites remain zero concrete
+transformations; the copy sites are call-result false positives. See
+`O2_CONCRETE_OPTIMIZATION_OPPORTUNITY_RECONCILIATION.md`. Production O2 and all
+historical JSON are unchanged.
+
 ## O2.11 update
 
 The aggregate copy-elision reconciliation selects

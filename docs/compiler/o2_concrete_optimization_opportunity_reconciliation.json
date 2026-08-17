@@ -1,0 +1,785 @@
+{
+  "allocation_findings": {
+    "allocation_elision_verified": 0,
+    "census": {
+      "Array storage": 6,
+      "List storage": 35,
+      "String allocation": 62,
+      "aggregate/runtime temporary": 93,
+      "class/object": 6,
+      "interface box": 3,
+      "other": 57
+    },
+    "reason": "no exact supported stack target or removable allocation proven",
+    "stack_promotion_verified": 0
+  },
+  "audit": "O2.12-concrete-optimization-opportunity-reconciliation",
+  "collection_findings": {
+    "families_audited": [
+      "List<String>",
+      "Array<Class>",
+      "List<Class>",
+      "Array<Struct>",
+      "List<Struct>"
+    ],
+    "verified": 0
+  },
+  "current_production_baseline": {
+    "backend_implicit_arc": {
+      "loop_retains": 11,
+      "retains": 69
+    },
+    "explicit_ssa_arc": {
+      "global": {
+        "release": 901,
+        "retain": 48
+      },
+      "loops": {
+        "release": 37,
+        "retain": 11
+      }
+    },
+    "functions": 63,
+    "functions_with_loops": 16,
+    "natural_loops": 18,
+    "o2_instructions": 3932,
+    "representative_workloads": 15,
+    "unsupported_workloads": [
+      {
+        "error": "IRBackendUnsupportedFeatureError",
+        "workload": "examples/nonlinear_systems/newton_system.ae"
+      },
+      {
+        "error": "IRBackendUnsupportedFeatureError",
+        "workload": "examples/probandoNR.ae"
+      }
+    ],
+    "workloads_lowered": 13
+  },
+  "enabling_call_findings": {
+    "stable_373": "text.byteSlice summary improvement suffices; inlining not required"
+  },
+  "enabling_devirtualization_findings": [],
+  "exact_next_milestone": {
+    "expected_real_candidates": 0,
+    "name": "improve concrete opportunity measurement"
+  },
+  "family_matrix": [
+    {
+      "complexity": "LOW",
+      "enabling_value": "LOW",
+      "exact_effect": "none verified",
+      "family": "GVN/CSE",
+      "llvm_overlap": "HIGH",
+      "loop_candidates": 0,
+      "risk": "LOW",
+      "verified_candidates": 0
+    },
+    {
+      "complexity": "HIGH",
+      "enabling_value": "LOW",
+      "exact_effect": "none verified",
+      "family": "memory LICM",
+      "llvm_overlap": "UNKNOWN",
+      "loop_candidates": 0,
+      "risk": "HIGH",
+      "verified_candidates": 0
+    },
+    {
+      "complexity": "HIGH",
+      "enabling_value": "LOW",
+      "exact_effect": "none verified",
+      "family": "IV/loop",
+      "llvm_overlap": "HIGH",
+      "loop_candidates": 0,
+      "risk": "HIGH",
+      "verified_candidates": 0
+    },
+    {
+      "complexity": "HIGH",
+      "enabling_value": "LOW",
+      "exact_effect": "none verified",
+      "family": "allocation/stack",
+      "llvm_overlap": "UNKNOWN",
+      "loop_candidates": 0,
+      "risk": "HIGH",
+      "verified_candidates": 0
+    },
+    {
+      "complexity": "HIGH",
+      "enabling_value": "LOW",
+      "exact_effect": "none verified",
+      "family": "ownership",
+      "llvm_overlap": "UNKNOWN",
+      "loop_candidates": 0,
+      "risk": "HIGH",
+      "verified_candidates": 0
+    },
+    {
+      "complexity": "HIGH",
+      "enabling_value": "LOW",
+      "exact_effect": "none verified",
+      "family": "collection ownership",
+      "llvm_overlap": "UNKNOWN",
+      "loop_candidates": 0,
+      "risk": "HIGH",
+      "verified_candidates": 0
+    },
+    {
+      "complexity": "HIGH",
+      "enabling_value": "LOW",
+      "exact_effect": "none verified",
+      "family": "scalar replacement",
+      "llvm_overlap": "UNKNOWN",
+      "loop_candidates": 0,
+      "risk": "HIGH",
+      "verified_candidates": 0
+    },
+    {
+      "complexity": "HIGH",
+      "enabling_value": "LOW",
+      "exact_effect": "none verified",
+      "family": "copy elision",
+      "llvm_overlap": "UNKNOWN",
+      "loop_candidates": 0,
+      "risk": "HIGH",
+      "verified_candidates": 0
+    }
+  ],
+  "gvn_findings": {
+    "dominator_based": 0,
+    "llvm_overlap": "LLVM_ALREADY_COMPLETE for conservative scalar sites",
+    "memory_aware": 0,
+    "same_block": 0
+  },
+  "historical_reconciliation": [
+    {
+      "current_transformable": 0,
+      "family": "scalar replacement",
+      "finding": "SAFE_SCALAR_ONLY=0",
+      "historical_candidates": 4
+    },
+    {
+      "current_transformable": 0,
+      "family": "aggregate copy elision",
+      "finding": "zero actual SSA copy edges; historical misclassification",
+      "historical_candidates": 4
+    },
+    {
+      "current_transformable": "already implemented",
+      "family": "Array<String> direct borrow",
+      "historical_candidates": 15
+    },
+    {
+      "current_transformable": "already implemented",
+      "family": "Array<String> immediate borrow",
+      "historical_candidates": 3
+    },
+    {
+      "current_transformable": 0,
+      "family": "stable Array<String> borrow",
+      "historical_candidates": 1
+    }
+  ],
+  "licm_findings": {
+    "reason": "no newly verified exact memory movement in this conservative audit",
+    "verified": 0
+  },
+  "llvm_overlap": {
+    "top_family": "LLVM already eliminates conservative scalar CSE; no Aether enabling value established"
+  },
+  "loop_iv_findings": {
+    "loop_census": [
+      {
+        "arithmetic": 2,
+        "bounds_or_traps": 2,
+        "depth": 1,
+        "exits": [
+          "for.exit0"
+        ],
+        "function": "main",
+        "header": "for.cond0",
+        "induction_phis": [
+          {
+            "checked_arithmetic": true,
+            "initial": "22",
+            "step": 1,
+            "type": "IntType()",
+            "update": "31",
+            "value": "24"
+          }
+        ],
+        "instructions": 10,
+        "latches": [
+          "for.inc0"
+        ],
+        "preheader": "entry",
+        "workload": "examples/aggregate_collections/particles.ae"
+      },
+      {
+        "arithmetic": 2,
+        "bounds_or_traps": 3,
+        "depth": 1,
+        "exits": [
+          "for.exit0"
+        ],
+        "function": "main",
+        "header": "for.cond0",
+        "induction_phis": [
+          {
+            "checked_arithmetic": true,
+            "initial": "8",
+            "step": 1,
+            "type": "IntType()",
+            "update": "16",
+            "value": "10"
+          }
+        ],
+        "instructions": 9,
+        "latches": [
+          "for.inc0"
+        ],
+        "preheader": "entry",
+        "workload": "examples/llvm/list_for_sum.ae"
+      },
+      {
+        "arithmetic": 1,
+        "bounds_or_traps": 2,
+        "calls": 1,
+        "depth": 1,
+        "exits": [
+          "exit0"
+        ],
+        "function": "__ae_m11_Persistence__function_15_readControlLine",
+        "header": "cond0",
+        "induction_phis": [
+          {
+            "checked_arithmetic": true,
+            "initial": "offset",
+            "step": 1,
+            "type": "IntType()",
+            "update": "18",
+            "value": "7"
+          }
+        ],
+        "instructions": 14,
+        "latches": [
+          "body0"
+        ],
+        "preheader": "merge0",
+        "workload": "examples/expense_tracker/Main.ae"
+      },
+      {
+        "arithmetic": 1,
+        "bounds_or_traps": 4,
+        "calls": 3,
+        "depth": 1,
+        "exits": [
+          "exit0",
+          "then7"
+        ],
+        "function": "__ae_m11_Persistence__function_12_isIdentifier",
+        "header": "cond0",
+        "induction_phis": [
+          {
+            "checked_arithmetic": true,
+            "initial": "17",
+            "step": 1,
+            "type": "IntType()",
+            "update": "53",
+            "value": "18"
+          }
+        ],
+        "instructions": 40,
+        "latches": [
+          "merge7"
+        ],
+        "preheader": "merge2",
+        "workload": "examples/expense_tracker/Main.ae"
+      },
+      {
+        "arithmetic": 1,
+        "bounds_or_traps": 4,
+        "calls": 3,
+        "depth": 1,
+        "exits": [
+          "exit0",
+          "then3"
+        ],
+        "function": "__ae_m11_Persistence__function_15_isCanonicalUInt",
+        "header": "cond0",
+        "induction_phis": [
+          {
+            "checked_arithmetic": true,
+            "initial": "16",
+            "step": 1,
+            "type": "IntType()",
+            "update": "28",
+            "value": "17"
+          }
+        ],
+        "instructions": 11,
+        "latches": [
+          "merge3"
+        ],
+        "preheader": "merge2",
+        "workload": "examples/expense_tracker/Main.ae"
+      },
+      {
+        "bounds_or_traps": 21,
+        "calls": 13,
+        "depth": 1,
+        "exits": [
+          "exit0",
+          "then35",
+          "then41",
+          "then44"
+        ],
+        "function": "__ae_m11_Persistence__function_12_decodeLedger",
+        "header": "cond0",
+        "induction_phis": [],
+        "instructions": 82,
+        "latches": [
+          "merge36"
+        ],
+        "preheader": "merge34",
+        "release": 7,
+        "workload": "examples/expense_tracker/Main.ae"
+      },
+      {
+        "arithmetic": 6,
+        "bounds_or_traps": 75,
+        "calls": 46,
+        "depth": 1,
+        "exits": [
+          "else68",
+          "exit1",
+          "then45",
+          "then49",
+          "then50",
+          "then51",
+          "then55",
+          "then56",
+          "then57",
+          "then58",
+          "then59",
+          "then60",
+          "then62",
+          "then64",
+          "then66",
+          "then70",
+          "then73",
+          "then75",
+          "then77",
+          "then79",
+          "then80",
+          "then81",
+          "then87"
+        ],
+        "function": "__ae_m11_Persistence__function_12_decodeLedger",
+        "header": "cond1",
+        "induction_phis": [
+          {
+            "checked_arithmetic": true,
+            "initial": "431",
+            "step": 1,
+            "type": "IntType()",
+            "update": "850",
+            "value": "432"
+          }
+        ],
+        "instructions": 406,
+        "latches": [
+          "merge87"
+        ],
+        "preheader": "exit0",
+        "release": 20,
+        "retain": 9,
+        "workload": "examples/expense_tracker/Main.ae"
+      },
+      {
+        "arithmetic": 5,
+        "bounds_or_traps": 48,
+        "calls": 26,
+        "depth": 2,
+        "exits": [
+          "else68",
+          "exit2",
+          "then51",
+          "then55",
+          "then56",
+          "then57",
+          "then58",
+          "then59",
+          "then60",
+          "then62",
+          "then64",
+          "then66",
+          "then70",
+          "then73",
+          "then75",
+          "then77",
+          "then79"
+        ],
+        "function": "__ae_m11_Persistence__function_12_decodeLedger",
+        "header": "cond2",
+        "induction_phis": [
+          {
+            "checked_arithmetic": true,
+            "initial": "510",
+            "step": 1,
+            "type": "IntType()",
+            "update": "789",
+            "value": "511"
+          }
+        ],
+        "instructions": 277,
+        "latches": [
+          "merge61"
+        ],
+        "preheader": "merge50",
+        "release": 11,
+        "retain": 3,
+        "workload": "examples/expense_tracker/Main.ae"
+      },
+      {
+        "arithmetic": 2,
+        "bounds_or_traps": 33,
+        "calls": 23,
+        "depth": 1,
+        "exits": [
+          "for.exit0",
+          "then2",
+          "then5"
+        ],
+        "function": "__ae_m11_Persistence__function_12_encodeLedger",
+        "header": "for.cond0",
+        "induction_phis": [
+          {
+            "checked_arithmetic": true,
+            "initial": "30",
+            "step": 1,
+            "type": "IntType()",
+            "update": "111",
+            "value": "32"
+          }
+        ],
+        "instructions": 99,
+        "latches": [
+          "for.inc0"
+        ],
+        "preheader": "merge0",
+        "release": 10,
+        "retain": 2,
+        "workload": "examples/expense_tracker/Main.ae"
+      },
+      {
+        "arithmetic": 3,
+        "bounds_or_traps": 2,
+        "depth": 1,
+        "exits": [
+          "for.exit0"
+        ],
+        "function": "__ae_m7_Reports__function_9_summarize",
+        "header": "for.cond0",
+        "induction_phis": [
+          {
+            "checked_arithmetic": true,
+            "initial": "4",
+            "step": 1,
+            "type": "IntType()",
+            "update": "19",
+            "value": "6"
+          }
+        ],
+        "instructions": 21,
+        "latches": [
+          "for.inc0"
+        ],
+        "preheader": "entry",
+        "workload": "examples/expense_tracker/Main.ae"
+      },
+      {
+        "arithmetic": 1,
+        "bounds_or_traps": 3,
+        "depth": 1,
+        "exits": [
+          "for.exit0"
+        ],
+        "function": "__ae_m7_Reports__function_12_filterByType",
+        "header": "for.cond0",
+        "induction_phis": [
+          {
+            "checked_arithmetic": true,
+            "initial": "3",
+            "step": 1,
+            "type": "IntType()",
+            "update": "12",
+            "value": "5"
+          }
+        ],
+        "instructions": 12,
+        "latches": [
+          "for.inc0"
+        ],
+        "preheader": "entry",
+        "workload": "examples/expense_tracker/Main.ae"
+      },
+      {
+        "arithmetic": 1,
+        "bounds_or_traps": 2,
+        "depth": 1,
+        "exits": [
+          "for.exit0"
+        ],
+        "function": "__ae_m7_Reports__function_17_printTransactions",
+        "header": "for.cond0",
+        "induction_phis": [
+          {
+            "checked_arithmetic": true,
+            "initial": "2",
+            "step": 1,
+            "type": "IntType()",
+            "update": "20",
+            "value": "4"
+          }
+        ],
+        "instructions": 31,
+        "latches": [
+          "for.inc0"
+        ],
+        "preheader": "entry",
+        "workload": "examples/expense_tracker/Main.ae"
+      },
+      {
+        "arithmetic": 1,
+        "bounds_or_traps": 2,
+        "depth": 1,
+        "exits": [
+          "for.exit0"
+        ],
+        "function": "__ae_m9___entry____function_17_runUtilityCommand",
+        "header": "for.cond0",
+        "induction_phis": [
+          {
+            "checked_arithmetic": true,
+            "initial": "21",
+            "step": 1,
+            "type": "IntType()",
+            "update": "27",
+            "value": "23"
+          }
+        ],
+        "instructions": 8,
+        "latches": [
+          "for.inc0"
+        ],
+        "preheader": "merge1",
+        "workload": "examples/expense_tracker/Main.ae"
+      },
+      {
+        "arithmetic": 4,
+        "bounds_or_traps": 2,
+        "depth": 1,
+        "exits": [
+          "exit0"
+        ],
+        "function": "__ae_m11_Integration__function_9_trapezoid",
+        "header": "cond0",
+        "induction_phis": [
+          {
+            "checked_arithmetic": true,
+            "initial": "14",
+            "step": 1,
+            "type": "IntType()",
+            "update": "27",
+            "value": "15"
+          }
+        ],
+        "instructions": 12,
+        "latches": [
+          "body0"
+        ],
+        "preheader": "merge0",
+        "workload": "examples/numerical_methods/main.ae"
+      },
+      {
+        "arithmetic": 6,
+        "bounds_or_traps": 3,
+        "depth": 1,
+        "exits": [
+          "exit0"
+        ],
+        "function": "__ae_m11_Integration__function_7_simpson",
+        "header": "cond0",
+        "induction_phis": [
+          {
+            "checked_arithmetic": true,
+            "initial": "20",
+            "step": 1,
+            "type": "IntType()",
+            "update": "42",
+            "value": "21"
+          }
+        ],
+        "instructions": 22,
+        "latches": [
+          "merge2"
+        ],
+        "preheader": "merge1",
+        "workload": "examples/numerical_methods/main.ae"
+      },
+      {
+        "arithmetic": 6,
+        "bounds_or_traps": 2,
+        "calls": 2,
+        "depth": 1,
+        "exits": [
+          "exit0",
+          "then7"
+        ],
+        "function": "__ae_m5_Roots__function_9_bisection",
+        "header": "cond0",
+        "induction_phis": [
+          {
+            "checked_arithmetic": true,
+            "initial": "54",
+            "step": 1,
+            "type": "IntType()",
+            "update": "71",
+            "value": "60"
+          }
+        ],
+        "instructions": 36,
+        "latches": [
+          "merge8"
+        ],
+        "preheader": "merge5",
+        "workload": "examples/numerical_methods/main.ae"
+      },
+      {
+        "arithmetic": 3,
+        "bounds_or_traps": 3,
+        "calls": 2,
+        "depth": 1,
+        "exits": [
+          "exit0",
+          "then2",
+          "then3"
+        ],
+        "function": "__ae_m5_Roots__function_6_newton",
+        "header": "cond0",
+        "induction_phis": [
+          {
+            "checked_arithmetic": true,
+            "initial": "10",
+            "step": 1,
+            "type": "IntType()",
+            "update": "40",
+            "value": "11"
+          }
+        ],
+        "instructions": 17,
+        "latches": [
+          "merge3"
+        ],
+        "preheader": "merge1",
+        "workload": "examples/numerical_methods/main.ae"
+      },
+      {
+        "arithmetic": 6,
+        "bounds_or_traps": 2,
+        "calls": 2,
+        "depth": 1,
+        "exits": [
+          "exit0",
+          "then2",
+          "then3"
+        ],
+        "function": "__ae_m5_Roots__function_6_secant",
+        "header": "cond0",
+        "induction_phis": [
+          {
+            "checked_arithmetic": true,
+            "initial": "15",
+            "step": 1,
+            "type": "IntType()",
+            "update": "53",
+            "value": "16"
+          }
+        ],
+        "instructions": 22,
+        "latches": [
+          "merge3"
+        ],
+        "preheader": "merge1",
+        "workload": "examples/numerical_methods/main.ae"
+      }
+    ],
+    "verified_iv_or_strength_reduction": 0
+  },
+  "methodology_version": "CONCRETE_OPPORTUNITY_V1_FAIL_CLOSED",
+  "ownership_findings": {
+    "blocker": "CALL_SUMMARY_EXTENSION",
+    "stable_373": {
+      "alias_uncertainty": false,
+      "array_root": "357",
+      "backedge_involvement": false,
+      "blocks_crossed": 0,
+      "borrow_end": {
+        "block": "logic.rhs38",
+        "consumer": "text.byteSlice",
+        "instruction": 4
+      },
+      "borrow_start": {
+        "block": "logic.rhs38",
+        "instruction": 1
+      },
+      "branches_crossed": 0,
+      "callee_ownership": "CALLEE_BORROWS_FOR_CALL",
+      "calls_crossed": 1,
+      "candidate_id": "__ae_m11_Persistence__function_12_decodeLedger:%373",
+      "classification": "CALL_SUMMARY_EXTENSION",
+      "exception_edges": 0,
+      "function": "__ae_m11_Persistence__function_12_decodeLedger",
+      "index": {
+        "form": "CONSTANT",
+        "ssa_value": "372",
+        "value": 0
+      },
+      "loop_depth": 1,
+      "minimum_machinery": [
+        "extend the immediate-consumer ownership contract to text.byteSlice argument 0",
+        "prove the call does not capture or consume that argument",
+        "retain the Array owner through normal and exceptional completion"
+      ],
+      "mutations": 0,
+      "phis_crossed": 0,
+      "status": "NOT_OPTIMIZED",
+      "stores_crossed": 0,
+      "string_value": "373",
+      "structural_hotness": 4,
+      "theoretical_arc_reduction": {
+        "backend_implicit_retain": 1,
+        "explicit_release": 1
+      },
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    "status": "ANALYSIS_BLOCKED",
+    "verified": 0
+  },
+  "primary_recommendation": "IMPROVE_OPTIMIZATION_MEASUREMENT_FIRST",
+  "production_freeze": {
+    "abi_changed": false,
+    "backend_changed": false,
+    "lifecycle_changed": false,
+    "optimization_profiles_changed": false,
+    "ownership_changed": false,
+    "production_behavior_changed": false
+  },
+  "rejected_hypothesis_candidates": [],
+  "revision": "3f0b8dd6b5e7032b27892c75ce6dc5ff9fd76a90",
+  "schema_version": 1,
+  "secondary_recommendation": null,
+  "verified_candidates": []
+}
