@@ -634,3 +634,13 @@ transforms exactly the 15 frozen direct `Array<String>` comparisons, leaving
 all call and stable-region candidates owned. Direct attributable ARC reduction
 is 15 retains and 15 releases; see
 `O2_OWNERSHIP_ELIDED_ARRAY_STRING_GET.md`.
+
+## O2.9.6 update
+
+The post-ArrayGet audit confirms the production O2 baseline at 48/904 explicit
+SSA retains/releases and 11/40 inside loops, while separately exposing 72
+backend implicit owned-get retains (14 in loops). The 15 O2.9.5 sites are absent
+from both hot layers. Four owned `Array<String>` candidates remain: three
+bounded immediate-use sites and one qualitatively broader stable-region site.
+Status is `PROCEED_TO_IMMEDIATE_ARRAY_STRING_BORROW`; see
+`O2_POST_ARRAYGET_HOT_OWNERSHIP_AUDIT.md`.
