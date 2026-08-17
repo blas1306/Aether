@@ -1,5 +1,17 @@
 # O2 optimization readiness audit
 
+## O2.9.8 update
+
+The post-immediate-borrow audit selects
+`PROCEED_TO_SCALAR_REPLACEMENT_ANALYSIS`: an analysis-only field-use and
+ownership ledger for four nonescaping `ControlLineResult` temporaries in
+`decodeLedger`. Aggregate copy elision is second. The remaining `%373`
+`Array<String>` site is only a one-pair opportunity requiring a
+`text.byteSlice` call-summary extension; generic GVN/CSE and IV work show high
+LLVM overlap. See `O2_POST_IMMEDIATE_BORROW_OPTIMIZATION_AUDIT.md` and its
+deterministic JSON. Production O2 and every earlier O2.9.x artifact remain
+unchanged.
+
 ## O2.9.7 update
 
 `OwnershipElidedArrayGet` now uses a central tri-state immediate-consumer
