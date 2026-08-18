@@ -1,5 +1,10 @@
 # RUST-1 — Initial IR verifier authority readiness
 
+> Historical snapshot: RUST-1.1 subsequently closed the 26 semantic mapping
+> gaps and recorded `RUST_VERIFIER_SEMANTIC_PARITY_COMPLETE`; see
+> [`RUST_INITIAL_IR_VERIFIER_PARITY_CLOSURE.md`](RUST_INITIAL_IR_VERIFIER_PARITY_CLOSURE.md).
+> Authority remains Python and the phase remains RP2 pending operational work.
+
 ## Decision
 
 `KEEP_RUST_SHADOW`

@@ -23,6 +23,7 @@ mod dominance_verifier;
 mod error;
 mod lifecycle_error;
 mod lifecycle_verifier;
+mod parity_registry;
 mod return_error;
 mod return_verifier;
 mod ssa_error;
@@ -57,6 +58,7 @@ pub use lifecycle_verifier::{
     verify_function_lifecycle, verify_function_local_lifecycle, verify_module_lifecycle,
     verify_module_local_lifecycle,
 };
+pub use parity_registry::RUST_1_1_PARITY_MAPPINGS;
 pub use return_error::{
     FunctionReturnVerificationError, ModuleReturnVerificationError, ReturnPathRuleError,
 };

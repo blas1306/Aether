@@ -1,0 +1,522 @@
+{
+  "authority": "python",
+  "canary_results": {
+    "both_accept": 65,
+    "both_semantic_reject": 72,
+    "diagnostic_only_divergence": 3,
+    "infrastructure_failure": 0,
+    "semantic_divergence": 0,
+    "total": 140
+  },
+  "diagnostic_divergences": {
+    "classification": "ACCEPTABLE_EQUIVALENT_CATEGORY_AND_CONTEXT",
+    "count": 3,
+    "exact_wording_required": false
+  },
+  "final_rule_mapping": {
+    "production_rules": 150,
+    "python_evidence": 150,
+    "rust_direct_evidence": 150,
+    "unresolved": 0
+  },
+  "instruction_coverage": {
+    "count": 84,
+    "unsupported_verification_relevant": 0
+  },
+  "migration_phase": "RP2",
+  "mutation_corpus": {
+    "deterministic": true,
+    "families": [
+      "operand_type",
+      "missing_value",
+      "output_type",
+      "successor",
+      "call_signature",
+      "field",
+      "borrowed_release",
+      "ownership",
+      "exception_edge",
+      "return",
+      "duplicate_definition",
+      "aggregate_metadata"
+    ],
+    "seed": 0,
+    "status": "PASS"
+  },
+  "negative_corpus": {
+    "both_semantic_reject": 72,
+    "status": "PASS"
+  },
+  "original_gap_count": 26,
+  "original_gaps": [
+    {
+      "blocker_category": "RULE_MAPPING_ERROR",
+      "final_status": "PARITY_PROVEN",
+      "id": "IRV-012",
+      "likely_blocker": "RUST-1 counted literal Rust rule IDs instead of explicit semantic mappings",
+      "mapping_cardinality": "many_python_rules_to_shared_rust_phase",
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier/src/parity_registry.rs",
+      "rust_status_at_freeze": "IMPLEMENTED_WITHOUT_CANONICAL_MAPPING_EVIDENCE",
+      "semantic_description": "An `EnumType` has a non-empty name, at least one variant, and no duplicate variant names.",
+      "test_coverage": [
+        "compiler-rs/crates/aether-verifier/tests/type_verifier.rs"
+      ],
+      "wire_schema_dependencies": [
+        "IR schema v1; no wire change required"
+      ]
+    },
+    {
+      "blocker_category": "RULE_MAPPING_ERROR",
+      "final_status": "PARITY_PROVEN",
+      "id": "IRV-013",
+      "likely_blocker": "RUST-1 counted literal Rust rule IDs instead of explicit semantic mappings",
+      "mapping_cardinality": "many_python_rules_to_shared_rust_phase",
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier/src/parity_registry.rs",
+      "rust_status_at_freeze": "IMPLEMENTED_WITHOUT_CANONICAL_MAPPING_EVIDENCE",
+      "semantic_description": "A `StructType` has a non-empty name that resolves to a struct definition in the same module.",
+      "test_coverage": [
+        "compiler-rs/crates/aether-verifier/tests/type_verifier.rs"
+      ],
+      "wire_schema_dependencies": [
+        "IR schema v1; no wire change required"
+      ]
+    },
+    {
+      "blocker_category": "RULE_MAPPING_ERROR",
+      "final_status": "PARITY_PROVEN",
+      "id": "IRV-014",
+      "likely_blocker": "RUST-1 counted literal Rust rule IDs instead of explicit semantic mappings",
+      "mapping_cardinality": "many_python_rules_to_shared_rust_phase",
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier/src/parity_registry.rs",
+      "rust_status_at_freeze": "IMPLEMENTED_WITHOUT_CANONICAL_MAPPING_EVIDENCE",
+      "semantic_description": "`NullableType.inner`, list/array/vector/matrix element types, and both method-result component types recursively satisfy the type grammar.",
+      "test_coverage": [
+        "compiler-rs/crates/aether-verifier/tests/type_verifier.rs"
+      ],
+      "wire_schema_dependencies": [
+        "IR schema v1; no wire change required"
+      ]
+    },
+    {
+      "blocker_category": "RULE_MAPPING_ERROR",
+      "final_status": "PARITY_PROVEN",
+      "id": "IRV-015",
+      "likely_blocker": "RUST-1 counted literal Rust rule IDs instead of explicit semantic mappings",
+      "mapping_cardinality": "many_python_rules_to_shared_rust_phase",
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier/src/parity_registry.rs",
+      "rust_status_at_freeze": "IMPLEMENTED_WITHOUT_CANONICAL_MAPPING_EVIDENCE",
+      "semantic_description": "Integer, float, double, bool, string, void, complex, class-reference, interface, and function types are admitted as leaf types. The current verifier does not recursively inspect a `FunctionType` signature.",
+      "test_coverage": [
+        "compiler-rs/crates/aether-verifier/tests/type_verifier.rs"
+      ],
+      "wire_schema_dependencies": [
+        "IR schema v1; no wire change required"
+      ]
+    },
+    {
+      "blocker_category": "RULE_MAPPING_ERROR",
+      "final_status": "PARITY_PROVEN",
+      "id": "IRV-023",
+      "likely_blocker": "RUST-1 counted literal Rust rule IDs instead of explicit semantic mappings",
+      "mapping_cardinality": "many_python_rules_to_shared_rust_phase",
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier/src/parity_registry.rs",
+      "rust_status_at_freeze": "IMPLEMENTED_WITHOUT_CANONICAL_MAPPING_EVIDENCE",
+      "semantic_description": "Every instruction is one of the explicitly handled IR instruction variants; any other instruction class is rejected.",
+      "test_coverage": [
+        "compiler-rs/crates/aether-verifier/tests/type_verifier.rs"
+      ],
+      "wire_schema_dependencies": [
+        "IR schema v1; no wire change required"
+      ]
+    },
+    {
+      "blocker_category": "RULE_MAPPING_ERROR",
+      "final_status": "PARITY_PROVEN",
+      "id": "IRV-031",
+      "likely_blocker": "RUST-1 counted literal Rust rule IDs instead of explicit semantic mappings",
+      "mapping_cardinality": "many_python_rules_to_shared_rust_phase",
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier/src/parity_registry.rs",
+      "rust_status_at_freeze": "IMPLEMENTED_WITHOUT_CANONICAL_MAPPING_EVIDENCE",
+      "semantic_description": "A referenced slot name exists in the collected slot table and the occurrence has its canonical slot type.",
+      "test_coverage": [
+        "compiler-rs/crates/aether-verifier/tests/lifecycle_verifier.rs"
+      ],
+      "wire_schema_dependencies": [
+        "IR schema v1; no wire change required"
+      ]
+    },
+    {
+      "blocker_category": "RULE_MAPPING_ERROR",
+      "final_status": "PARITY_PROVEN",
+      "id": "IRV-035",
+      "likely_blocker": "RUST-1 counted literal Rust rule IDs instead of explicit semantic mappings",
+      "mapping_cardinality": "many_python_rules_to_shared_rust_phase",
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier/src/parity_registry.rs",
+      "rust_status_at_freeze": "IMPLEMENTED_WITHOUT_CANONICAL_MAPPING_EVIDENCE",
+      "semantic_description": "Available values, initialized slots, moved slots, and destroyed slots are intersected across incoming executable paths; availability on only some paths is insufficient.",
+      "test_coverage": [
+        "compiler-rs/crates/aether-verifier/tests/dominance_verifier.rs"
+      ],
+      "wire_schema_dependencies": [
+        "IR schema v1; no wire change required"
+      ]
+    },
+    {
+      "blocker_category": "RULE_MAPPING_ERROR",
+      "final_status": "PARITY_PROVEN",
+      "id": "IRV-036",
+      "likely_blocker": "RUST-1 counted literal Rust rule IDs instead of explicit semantic mappings",
+      "mapping_cardinality": "many_python_rules_to_shared_rust_phase",
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier/src/parity_registry.rs",
+      "rust_status_at_freeze": "IMPLEMENTED_WITHOUT_CANONICAL_MAPPING_EVIDENCE",
+      "semantic_description": "Before intersection, a storage name used by any lifecycle instruction must have the same initialized/not-initialized state on every incoming path to a block.",
+      "test_coverage": [
+        "compiler-rs/crates/aether-verifier/tests/lifecycle_dataflow_verifier.rs"
+      ],
+      "wire_schema_dependencies": [
+        "IR schema v1; no wire change required"
+      ]
+    },
+    {
+      "blocker_category": "RULE_MAPPING_ERROR",
+      "final_status": "PARITY_PROVEN",
+      "id": "IRV-054",
+      "likely_blocker": "RUST-1 counted literal Rust rule IDs instead of explicit semantic mappings",
+      "mapping_cardinality": "many_python_rules_to_shared_rust_phase",
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier/src/parity_registry.rs",
+      "rust_status_at_freeze": "IMPLEMENTED_WITHOUT_CANONICAL_MAPPING_EVIDENCE",
+      "semantic_description": "Every argument to every builtin call is defined and agrees with its recorded value type before builtin-specific validation.",
+      "test_coverage": [
+        "compiler-rs/crates/aether-verifier/tests/builtin_verifier.rs"
+      ],
+      "wire_schema_dependencies": [
+        "IR schema v1; no wire change required"
+      ]
+    },
+    {
+      "blocker_category": "RULE_MAPPING_ERROR",
+      "final_status": "PARITY_PROVEN",
+      "id": "IRV-131",
+      "likely_blocker": "RUST-1 counted literal Rust rule IDs instead of explicit semantic mappings",
+      "mapping_cardinality": "many_python_rules_to_shared_rust_phase",
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier/src/parity_registry.rs",
+      "rust_status_at_freeze": "IMPLEMENTED_WITHOUT_CANONICAL_MAPPING_EVIDENCE",
+      "semantic_description": "Canonical production rule IRV-131",
+      "test_coverage": [
+        "compiler-rs/crates/aether-verifier/tests/exception_verifier.rs"
+      ],
+      "wire_schema_dependencies": [
+        "IR schema v1; no wire change required"
+      ]
+    },
+    {
+      "blocker_category": "RULE_MAPPING_ERROR",
+      "final_status": "PARITY_PROVEN",
+      "id": "IRV-132",
+      "likely_blocker": "RUST-1 counted literal Rust rule IDs instead of explicit semantic mappings",
+      "mapping_cardinality": "many_python_rules_to_shared_rust_phase",
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier/src/parity_registry.rs",
+      "rust_status_at_freeze": "IMPLEMENTED_WITHOUT_CANONICAL_MAPPING_EVIDENCE",
+      "semantic_description": "Canonical production rule IRV-132",
+      "test_coverage": [
+        "compiler-rs/crates/aether-verifier/tests/exception_verifier.rs"
+      ],
+      "wire_schema_dependencies": [
+        "IR schema v1; no wire change required"
+      ]
+    },
+    {
+      "blocker_category": "RULE_MAPPING_ERROR",
+      "final_status": "PARITY_PROVEN",
+      "id": "IRV-133",
+      "likely_blocker": "RUST-1 counted literal Rust rule IDs instead of explicit semantic mappings",
+      "mapping_cardinality": "many_python_rules_to_shared_rust_phase",
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier/src/parity_registry.rs",
+      "rust_status_at_freeze": "IMPLEMENTED_WITHOUT_CANONICAL_MAPPING_EVIDENCE",
+      "semantic_description": "Canonical production rule IRV-133",
+      "test_coverage": [
+        "compiler-rs/crates/aether-verifier/tests/exception_verifier.rs"
+      ],
+      "wire_schema_dependencies": [
+        "IR schema v1; no wire change required"
+      ]
+    },
+    {
+      "blocker_category": "RULE_MAPPING_ERROR",
+      "final_status": "PARITY_PROVEN",
+      "id": "IRV-134",
+      "likely_blocker": "RUST-1 counted literal Rust rule IDs instead of explicit semantic mappings",
+      "mapping_cardinality": "many_python_rules_to_shared_rust_phase",
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier/src/parity_registry.rs",
+      "rust_status_at_freeze": "IMPLEMENTED_WITHOUT_CANONICAL_MAPPING_EVIDENCE",
+      "semantic_description": "Canonical production rule IRV-134",
+      "test_coverage": [
+        "compiler-rs/crates/aether-verifier/tests/exception_verifier.rs"
+      ],
+      "wire_schema_dependencies": [
+        "IR schema v1; no wire change required"
+      ]
+    },
+    {
+      "blocker_category": "RULE_MAPPING_ERROR",
+      "final_status": "PARITY_PROVEN",
+      "id": "IRV-135",
+      "likely_blocker": "RUST-1 counted literal Rust rule IDs instead of explicit semantic mappings",
+      "mapping_cardinality": "many_python_rules_to_shared_rust_phase",
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier/src/parity_registry.rs",
+      "rust_status_at_freeze": "IMPLEMENTED_WITHOUT_CANONICAL_MAPPING_EVIDENCE",
+      "semantic_description": "Canonical production rule IRV-135",
+      "test_coverage": [
+        "compiler-rs/crates/aether-verifier/tests/exception_verifier.rs"
+      ],
+      "wire_schema_dependencies": [
+        "IR schema v1; no wire change required"
+      ]
+    },
+    {
+      "blocker_category": "RULE_MAPPING_ERROR",
+      "final_status": "PARITY_PROVEN",
+      "id": "IRV-137",
+      "likely_blocker": "RUST-1 counted literal Rust rule IDs instead of explicit semantic mappings",
+      "mapping_cardinality": "many_python_rules_to_shared_rust_phase",
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier/src/parity_registry.rs",
+      "rust_status_at_freeze": "IMPLEMENTED_WITHOUT_CANONICAL_MAPPING_EVIDENCE",
+      "semantic_description": "Canonical production rule IRV-137",
+      "test_coverage": [
+        "compiler-rs/crates/aether-verifier/tests/exception_verifier.rs"
+      ],
+      "wire_schema_dependencies": [
+        "IR schema v1; no wire change required"
+      ]
+    },
+    {
+      "blocker_category": "RULE_MAPPING_ERROR",
+      "final_status": "PARITY_PROVEN",
+      "id": "IRV-138",
+      "likely_blocker": "RUST-1 counted literal Rust rule IDs instead of explicit semantic mappings",
+      "mapping_cardinality": "many_python_rules_to_shared_rust_phase",
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier/src/parity_registry.rs",
+      "rust_status_at_freeze": "IMPLEMENTED_WITHOUT_CANONICAL_MAPPING_EVIDENCE",
+      "semantic_description": "Canonical production rule IRV-138",
+      "test_coverage": [
+        "compiler-rs/crates/aether-verifier/tests/exception_verifier.rs"
+      ],
+      "wire_schema_dependencies": [
+        "IR schema v1; no wire change required"
+      ]
+    },
+    {
+      "blocker_category": "RULE_MAPPING_ERROR",
+      "final_status": "PARITY_PROVEN",
+      "id": "IRV-139",
+      "likely_blocker": "RUST-1 counted literal Rust rule IDs instead of explicit semantic mappings",
+      "mapping_cardinality": "many_python_rules_to_shared_rust_phase",
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier/src/parity_registry.rs",
+      "rust_status_at_freeze": "IMPLEMENTED_WITHOUT_CANONICAL_MAPPING_EVIDENCE",
+      "semantic_description": "Canonical production rule IRV-139",
+      "test_coverage": [
+        "compiler-rs/crates/aether-verifier/tests/exception_verifier.rs"
+      ],
+      "wire_schema_dependencies": [
+        "IR schema v1; no wire change required"
+      ]
+    },
+    {
+      "blocker_category": "RULE_MAPPING_ERROR",
+      "final_status": "PARITY_PROVEN",
+      "id": "IRV-140",
+      "likely_blocker": "RUST-1 counted literal Rust rule IDs instead of explicit semantic mappings",
+      "mapping_cardinality": "many_python_rules_to_shared_rust_phase",
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier/src/parity_registry.rs",
+      "rust_status_at_freeze": "IMPLEMENTED_WITHOUT_CANONICAL_MAPPING_EVIDENCE",
+      "semantic_description": "Canonical production rule IRV-140",
+      "test_coverage": [
+        "compiler-rs/crates/aether-verifier/tests/exception_verifier.rs"
+      ],
+      "wire_schema_dependencies": [
+        "IR schema v1; no wire change required"
+      ]
+    },
+    {
+      "blocker_category": "RULE_MAPPING_ERROR",
+      "final_status": "PARITY_PROVEN",
+      "id": "IRV-141",
+      "likely_blocker": "RUST-1 counted literal Rust rule IDs instead of explicit semantic mappings",
+      "mapping_cardinality": "many_python_rules_to_shared_rust_phase",
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier/src/parity_registry.rs",
+      "rust_status_at_freeze": "IMPLEMENTED_WITHOUT_CANONICAL_MAPPING_EVIDENCE",
+      "semantic_description": "Canonical production rule IRV-141",
+      "test_coverage": [
+        "compiler-rs/crates/aether-verifier/tests/exception_verifier.rs"
+      ],
+      "wire_schema_dependencies": [
+        "IR schema v1; no wire change required"
+      ]
+    },
+    {
+      "blocker_category": "RULE_MAPPING_ERROR",
+      "final_status": "PARITY_PROVEN",
+      "id": "IRV-142",
+      "likely_blocker": "RUST-1 counted literal Rust rule IDs instead of explicit semantic mappings",
+      "mapping_cardinality": "many_python_rules_to_shared_rust_phase",
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier/src/parity_registry.rs",
+      "rust_status_at_freeze": "IMPLEMENTED_WITHOUT_CANONICAL_MAPPING_EVIDENCE",
+      "semantic_description": "Canonical production rule IRV-142",
+      "test_coverage": [
+        "compiler-rs/crates/aether-verifier/tests/exception_verifier.rs"
+      ],
+      "wire_schema_dependencies": [
+        "IR schema v1; no wire change required"
+      ]
+    },
+    {
+      "blocker_category": "RULE_MAPPING_ERROR",
+      "final_status": "PARITY_PROVEN",
+      "id": "IRV-143",
+      "likely_blocker": "RUST-1 counted literal Rust rule IDs instead of explicit semantic mappings",
+      "mapping_cardinality": "many_python_rules_to_shared_rust_phase",
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier/src/parity_registry.rs",
+      "rust_status_at_freeze": "IMPLEMENTED_WITHOUT_CANONICAL_MAPPING_EVIDENCE",
+      "semantic_description": "Canonical production rule IRV-143",
+      "test_coverage": [
+        "compiler-rs/crates/aether-verifier/tests/exception_verifier.rs"
+      ],
+      "wire_schema_dependencies": [
+        "IR schema v1; no wire change required"
+      ]
+    },
+    {
+      "blocker_category": "RULE_MAPPING_ERROR",
+      "final_status": "PARITY_PROVEN",
+      "id": "IRV-144",
+      "likely_blocker": "RUST-1 counted literal Rust rule IDs instead of explicit semantic mappings",
+      "mapping_cardinality": "many_python_rules_to_shared_rust_phase",
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier/src/parity_registry.rs",
+      "rust_status_at_freeze": "IMPLEMENTED_WITHOUT_CANONICAL_MAPPING_EVIDENCE",
+      "semantic_description": "Canonical production rule IRV-144",
+      "test_coverage": [
+        "compiler-rs/crates/aether-verifier/tests/exception_verifier.rs"
+      ],
+      "wire_schema_dependencies": [
+        "IR schema v1; no wire change required"
+      ]
+    },
+    {
+      "blocker_category": "RULE_MAPPING_ERROR",
+      "final_status": "PARITY_PROVEN",
+      "id": "IRV-145",
+      "likely_blocker": "RUST-1 counted literal Rust rule IDs instead of explicit semantic mappings",
+      "mapping_cardinality": "many_python_rules_to_shared_rust_phase",
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier/src/parity_registry.rs",
+      "rust_status_at_freeze": "IMPLEMENTED_WITHOUT_CANONICAL_MAPPING_EVIDENCE",
+      "semantic_description": "Canonical production rule IRV-145",
+      "test_coverage": [
+        "compiler-rs/crates/aether-verifier/tests/exception_verifier.rs"
+      ],
+      "wire_schema_dependencies": [
+        "IR schema v1; no wire change required"
+      ]
+    },
+    {
+      "blocker_category": "RULE_MAPPING_ERROR",
+      "final_status": "PARITY_PROVEN",
+      "id": "IRV-146",
+      "likely_blocker": "RUST-1 counted literal Rust rule IDs instead of explicit semantic mappings",
+      "mapping_cardinality": "many_python_rules_to_shared_rust_phase",
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier/src/parity_registry.rs",
+      "rust_status_at_freeze": "IMPLEMENTED_WITHOUT_CANONICAL_MAPPING_EVIDENCE",
+      "semantic_description": "Canonical production rule IRV-146",
+      "test_coverage": [
+        "compiler-rs/crates/aether-verifier/tests/exception_verifier.rs"
+      ],
+      "wire_schema_dependencies": [
+        "IR schema v1; no wire change required"
+      ]
+    },
+    {
+      "blocker_category": "RULE_MAPPING_ERROR",
+      "final_status": "PARITY_PROVEN",
+      "id": "IRV-147",
+      "likely_blocker": "RUST-1 counted literal Rust rule IDs instead of explicit semantic mappings",
+      "mapping_cardinality": "many_python_rules_to_shared_rust_phase",
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier/src/parity_registry.rs",
+      "rust_status_at_freeze": "IMPLEMENTED_WITHOUT_CANONICAL_MAPPING_EVIDENCE",
+      "semantic_description": "Canonical production rule IRV-147",
+      "test_coverage": [
+        "compiler-rs/crates/aether-verifier/tests/exception_verifier.rs"
+      ],
+      "wire_schema_dependencies": [
+        "IR schema v1; no wire change required"
+      ]
+    },
+    {
+      "blocker_category": "RULE_MAPPING_ERROR",
+      "final_status": "PARITY_PROVEN",
+      "id": "IRV-148",
+      "likely_blocker": "RUST-1 counted literal Rust rule IDs instead of explicit semantic mappings",
+      "mapping_cardinality": "many_python_rules_to_shared_rust_phase",
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier/src/parity_registry.rs",
+      "rust_status_at_freeze": "IMPLEMENTED_WITHOUT_CANONICAL_MAPPING_EVIDENCE",
+      "semantic_description": "Canonical production rule IRV-148",
+      "test_coverage": [
+        "compiler-rs/crates/aether-verifier/tests/exception_verifier.rs"
+      ],
+      "wire_schema_dependencies": [
+        "IR schema v1; no wire change required"
+      ]
+    }
+  ],
+  "performance_sanity": {
+    "new_runtime_checks": 0,
+    "status": "PASS_NO_PATHOLOGICAL_REGRESSION"
+  },
+  "positive_corpus": {
+    "both_accept": 65,
+    "status": "PASS"
+  },
+  "remaining_rp3_operational_blockers": [
+    "PACKAGING_PLATFORM_QUALIFICATION",
+    "RP3_AUTHORITY_CI_GATE"
+  ],
+  "revision": "RUST-1.1",
+  "rust_implementation_evidence": {
+    "all_ids_present_in_rust_source": true,
+    "mapping_count": 26,
+    "registry": "compiler-rs/crates/aether-verifier/src/parity_registry.rs"
+  },
+  "schema_version": 1,
+  "semantic_divergences": 0,
+  "semantic_parity_decision": "RUST_VERIFIER_SEMANTIC_PARITY_COMPLETE",
+  "type_coverage": {
+    "count": 19,
+    "lossy_representations": 0,
+    "unsupported_verification_relevant": 0
+  },
+  "wire_changes": []
+}

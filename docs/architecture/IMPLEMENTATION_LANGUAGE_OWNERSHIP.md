@@ -380,6 +380,11 @@ The RUST-1 qualification result is `KEEP_RUST_SHADOW`; see
 and its deterministic JSON artifact. This readiness reference does not change
 the authority recorded in the registry.
 
+RUST-1.1 subsequently established
+`RUST_VERIFIER_SEMANTIC_PARITY_COMPLETE`. Initial IR verification nevertheless
+remains at RP2 with Python authority; packaging/platform qualification and an
+RP3 authority CI gate remain separate operational blockers.
+
 - First Rust: Initial IR verifier authority-readiness audit.
 - First C/C ABI: runtime ABI architecture and canonical schema audit, starting
   with String/Array; no implementation.

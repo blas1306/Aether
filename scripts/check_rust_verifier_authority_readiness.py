@@ -27,6 +27,9 @@ def _rust_text() -> str:
     return "\n".join(
         path.read_text(encoding="utf-8")
         for path in sorted(RUST_VERIFIER.rglob("*.rs"))
+        # RUST-1 is a historical snapshot.  RUST-1.1 closure evidence must not
+        # rewrite its original 124/150 result during deterministic checking.
+        if path.name != "parity_registry.rs"
     )
 
 
