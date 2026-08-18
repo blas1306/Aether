@@ -1,0 +1,130 @@
+{
+  "blockers": [
+    "OP1",
+    "OP5",
+    "OP6",
+    "OP10"
+  ],
+  "clean_install": {
+    "companion_resolution_outside_checkout": "PASS",
+    "released_python_plus_companion_contract": "BLOCKED",
+    "source_tree_leakage": "PASS"
+  },
+  "current_authority": "python",
+  "current_migration_phase": "RP2",
+  "discovery_policy": [
+    "explicit_test_or_development_path",
+    "explicit_versioned_companion_package_directory",
+    "otherwise_fail"
+  ],
+  "failure_policy": {
+    "python_shadow_failure": "FAIL_CLOSED_DURING_RP3_MIGRATION",
+    "rust_authority_infrastructure": "FAIL_CLOSED",
+    "semantic_disagreement": "FATAL_INTERNAL_ERROR"
+  },
+  "final_decision": "RP3_OPERATIONAL_READINESS_BLOCKED",
+  "installed_binary_location": "<companion-root>/0.0.0/<sysconfig-platform>/aether-ir-verifier[.exe]",
+  "operational_gates": [
+    {
+      "evidence": "No versioned companion artifacts have yet been published for every claimed platform.",
+      "id": "OP1",
+      "name": "binary_availability",
+      "status": "BLOCKED"
+    },
+    {
+      "evidence": "discover_packaged_rust_verifier resolves only an explicit manifest directory; developer PATH/repository lookup is opt-in.",
+      "id": "OP2",
+      "name": "discovery",
+      "status": "PASS"
+    },
+    {
+      "evidence": "The --identity handshake requires identity schema 1, package 0.0.0, protocol 1, IR schema 1, and verify capability.",
+      "id": "OP3",
+      "name": "version_protocol_match",
+      "status": "PASS"
+    },
+    {
+      "evidence": "Rust authority fails closed with typed missing, permission, identity, spawn, crash, malformed-output, and timeout failures.",
+      "id": "OP4",
+      "name": "startup_failure_policy",
+      "status": "PASS"
+    },
+    {
+      "evidence": "Model B tooling exists, but the release process does not yet publish or declare the companion as an installation requirement.",
+      "id": "OP5",
+      "name": "packaging",
+      "status": "BLOCKED"
+    },
+    {
+      "evidence": "Linux, Windows, and macOS CI is configured, but checked-in completed release-package evidence for all three is absent.",
+      "id": "OP6",
+      "name": "platform_readiness",
+      "status": "BLOCKED"
+    },
+    {
+      "evidence": "CI gates release Rust-authority/Python-shadow canary and companion packaging on Linux, Windows, and macOS.",
+      "id": "OP7",
+      "name": "ci_rp3_coverage",
+      "status": "PASS"
+    },
+    {
+      "evidence": "One VerifierAuthorityConfiguration change restores PYTHON_AUTHORITY_RUST_SHADOW; the rollback rehearsal tests both transitions.",
+      "id": "OP8",
+      "name": "rollback",
+      "status": "PASS"
+    },
+    {
+      "evidence": "Reports retain authority/shadow roles, comparison, request hash, versions, and bounded failure kind/summary.",
+      "id": "OP9",
+      "name": "diagnostics_reporting",
+      "status": "PASS"
+    },
+    {
+      "evidence": "Clean companion resolution is tested, but no released Python-plus-companion installation contract can yet be qualified.",
+      "id": "OP10",
+      "name": "clean_install",
+      "status": "BLOCKED"
+    }
+  ],
+  "packaging_model": "B_separate_versioned_platform_companion_artifact",
+  "path_lookup_policy": "disabled unless explicitly requested by development code",
+  "performance_sanity": {
+    "status": "NO_PATHOLOGICAL_OVERHEAD",
+    "subprocess_remains_canonical": true,
+    "timings_are_host_local_not_promotion_evidence": true
+  },
+  "platforms": [
+    "linux",
+    "windows",
+    "macos"
+  ],
+  "protocol_policy": {
+    "capabilities": [
+      "verify"
+    ],
+    "identity_schema": 1,
+    "ir_schema": 1,
+    "protocol": 1,
+    "revision_match": "compatible_contract_not_git_sha"
+  },
+  "release_canary": {
+    "accepted_matches": 316,
+    "complete": true,
+    "documented_diagnostic_divergences": 3,
+    "infrastructure_failures": 0,
+    "semantic_mismatches": 0,
+    "semantic_reject_matches": 85,
+    "successful": true,
+    "timeouts": 0,
+    "total": 404,
+    "unexpected": 0
+  },
+  "revision": "RUST-1.2",
+  "rust_2_scope": null,
+  "schema_version": 1,
+  "sdist_strategy": "Source/development distribution only; installation does not implicitly invoke Cargo.",
+  "semantic_parity_evidence": "docs/compiler/rust_initial_ir_verifier_parity_closure.json",
+  "semantic_parity_status": "complete",
+  "timeout_seconds": 5.0,
+  "wheel_strategy": "Python wheel remains platform-independent; it does not silently bundle native bytes."
+}

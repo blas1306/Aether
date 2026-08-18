@@ -9,7 +9,7 @@
     {"component":"name_resolution","current_authority":"python","target_authority":"rust","migration_phase":"RP0","allowed_shadows":[],"boundary":"typed_compiler_api"},
     {"component":"typechecking","current_authority":"python","target_authority":"rust","migration_phase":"RP0","allowed_shadows":[],"boundary":"typed_compiler_api"},
     {"component":"initial_ir_model","current_authority":"python","target_authority":"rust","migration_phase":"RP1","allowed_shadows":["rust"],"boundary":"ir_schema_v1"},
-    {"component":"initial_ir_verification","current_authority":"python","target_authority":"rust","migration_phase":"RP2","semantic_parity_status":"complete_rust_1_1","allowed_shadows":["rust"],"boundary":"verifier_protocol_v1"},
+    {"component":"initial_ir_verification","current_authority":"python","target_authority":"rust","migration_phase":"RP2","semantic_parity_status":"complete_rust_1_1","operational_readiness_status":"blocked_rust_1_2","allowed_shadows":["rust"],"boundary":"verifier_protocol_v1"},
     {"component":"ssa_construction","current_authority":"python","target_authority":"rust","migration_phase":"RP0","allowed_shadows":[],"boundary":"owned_ir_api"},
     {"component":"ssa_verification","current_authority":"python","target_authority":"rust","migration_phase":"RP1","allowed_shadows":["rust"],"boundary":"ssa_wire_schema"},
     {"component":"analyses_optimizer","current_authority":"python","target_authority":"rust","migration_phase":"RP0","allowed_shadows":[],"boundary":"owned_ir_api"},

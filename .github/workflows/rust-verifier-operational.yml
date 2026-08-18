@@ -72,8 +72,7 @@ jobs:
           assert len(payloads) == 1, "Linux, Windows, and macOS snapshots differ"
 
   rust-authority-canary:
-    # Canary failures are visible but cannot change or gate production authority.
-    continue-on-error: true
+    # This is a promotion gate only; production authority remains Python.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -84,16 +83,43 @@ jobs:
         with:
           toolchain: "1.85"
       - run: python -m pip install -r requirements.txt pytest
-      - run: cargo build --locked --package aether-ir-verifier
+      - run: cargo build --release --locked --package aether-ir-verifier
         working-directory: compiler-rs
       - name: Run explicit Rust-authority canary
         run: >-
           python scripts/rust_verifier_canary.py
           --config tests/canary/rust_verifier_canary.json
-          --executable compiler-rs/target/debug/aether-ir-verifier
+          --executable compiler-rs/target/release/aether-ir-verifier
           --output-directory rust-authority-canary-reports
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: rust-authority-canary-reports
           path: rust-authority-canary-reports
+
+  companion-package:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.85"
+      - run: python -m pip install -r requirements.txt pytest
+      - name: Build release companion package
+        run: python scripts/package_rust_verifier.py --output verifier-package
+      - name: Qualify packaged discovery outside the checkout
+        run: >-
+          python -m pytest -q
+          tests/aether/test_rust_verifier_rp3_operational_readiness.py
+          -k packaged_companion_clean_resolution
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-verifier-package-${{ matrix.os }}
+          path: verifier-package

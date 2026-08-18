@@ -592,6 +592,17 @@ class AuthoritativeVerifierUnavailable(AuthoritativeVerificationError):
         )
 
 
+class VerifierSemanticDisagreement(AuthoritativeVerificationError):
+    """Raised when an RP3 canary observes an unreviewed verifier mismatch."""
+
+    def __init__(self, classification: ShadowClassification) -> None:
+        self.classification = classification
+        super().__init__(
+            "Initial IR verifiers disagree "
+            f"({classification.value}); both diagnostics are retained in the report"
+        )
+
+
 @dataclass(frozen=True)
 class _PythonVerifierExecution:
     module: IRModule
@@ -785,6 +796,17 @@ class VerifierAuthorityPipeline:
             if self._strict_sink_errors:
                 sink_error = error
 
+        if (
+            authority_implementation is VerifierImplementation.RUST
+            and comparison.classification
+            in {
+                ShadowClassification.DOCUMENTED_OUTCOME_DIVERGENCE,
+                ShadowClassification.UNEXPECTED_DIAGNOSTIC_DIVERGENCE,
+                ShadowClassification.UNEXPECTED_OUTCOME_DIVERGENCE,
+            }
+        ):
+            raise VerifierSemanticDisagreement(comparison.classification)
+
         verified_module = authority_execution.resolve()
         if sink_error is not None:
             raise sink_error
@@ -972,6 +994,7 @@ __all__ = [
     "VerifierAuthorityEnvironment",
     "VerifierAuthorityMode",
     "VerifierAuthorityPipeline",
+    "VerifierSemanticDisagreement",
     "VerifierImplementation",
     "VerifierObservation",
     "compare_shadow_outcomes",

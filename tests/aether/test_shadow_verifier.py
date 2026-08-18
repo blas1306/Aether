@@ -47,6 +47,7 @@ from aether.ir import (
     VerifierAuthorityEnvironment,
     VerifierAuthorityMode,
     VerifierAuthorityPipeline,
+    VerifierSemanticDisagreement,
     VerifierImplementation,
     VerifierCategory,
     VoidType,
@@ -436,7 +437,7 @@ def test_python_authority_routes_results_and_preserves_default_snapshot() -> Non
     )
 
 
-def test_rust_authority_accepts_while_python_rejection_remains_observable() -> None:
+def test_rust_authority_accept_python_reject_disagreement_is_fatal_and_observable() -> None:
     module = _rejected_module()
     sink = CollectingShadowReportSink()
     pipeline = VerifierAuthorityPipeline(
@@ -448,7 +449,12 @@ def test_rust_authority_accepts_while_python_rejection_remains_observable() -> N
         ),
     )
 
-    assert pipeline.verify(module) is module
+    with pytest.raises(VerifierSemanticDisagreement) as raised:
+        pipeline.verify(module)
+    assert (
+        raised.value.classification
+        is ShadowClassification.UNEXPECTED_OUTCOME_DIVERGENCE
+    )
     report = sink.reports[0]
     assert report.authority_result == AuthorityResult(
         VerifierImplementation.RUST,
@@ -462,7 +468,7 @@ def test_rust_authority_accepts_while_python_rejection_remains_observable() -> N
     )
 
 
-def test_rust_authority_rejection_controls_result_and_keeps_python_shadow() -> None:
+def test_rust_reject_python_accept_disagreement_is_fatal_and_observable() -> None:
     module = _accepted_module()
     sink = CollectingShadowReportSink()
     client = FakeClient(RustVerifierRejectedOutcome(_diagnostic()))
@@ -475,11 +481,13 @@ def test_rust_authority_rejection_controls_result_and_keeps_python_shadow() -> N
         ),
     )
 
-    with pytest.raises(AuthoritativeVerifierRejected) as raised:
+    with pytest.raises(VerifierSemanticDisagreement) as raised:
         pipeline.verify(module)
 
-    assert raised.value.implementation is VerifierImplementation.RUST
-    assert raised.value.diagnostic.invariant_id == "IRV-018"
+    assert (
+        raised.value.classification
+        is ShadowClassification.UNEXPECTED_OUTCOME_DIVERGENCE
+    )
     assert len(client.requests) == 1
     report = sink.reports[0]
     assert report.authority_result.implementation is VerifierImplementation.RUST
