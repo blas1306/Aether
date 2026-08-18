@@ -1,0 +1,112 @@
+name: Rust verifier cross-platform qualification
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/rust-verifier-cross-platform.yml"
+      - "compiler-rs/**"
+      - "scripts/package_rust_verifier.py"
+      - "scripts/qualify_rust_verifier_platform.py"
+      - "scripts/check_rust_verifier_cross_platform_qualification.py"
+      - "src/aether/ir/**"
+      - "tests/aether/test_rust_verifier_cross_platform_qualification.py"
+
+jobs:
+  qualify-platform:
+    name: Qualify ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x86_64
+            os: ubuntu-latest
+            executable: compiler-rs/target/release/aether-ir-verifier
+          - platform: windows-x86_64
+            os: windows-latest
+            executable: compiler-rs/target/release/aether-ir-verifier.exe
+          - platform: macos-arm64
+            os: macos-15
+            executable: compiler-rs/target/release/aether-ir-verifier
+          - platform: macos-x86_64
+            os: macos-15-intel
+            executable: compiler-rs/target/release/aether-ir-verifier
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.85"
+      - name: Record runner identity
+        shell: bash
+        run: |
+          uname -a || true
+          rustc -vV
+          cargo --version
+          python --version
+      - run: python -m pip install -r requirements.txt pytest build
+      - run: cargo build --manifest-path compiler-rs/Cargo.toml --release --locked --package aether-ir-verifier
+      - run: python -m build --wheel --outdir python-dist
+      - name: Qualify native release artifact outside checkout
+        shell: bash
+        run: >-
+          python scripts/qualify_rust_verifier_platform.py
+          --platform "${{ matrix.platform }}"
+          --executable "${{ matrix.executable }}"
+          --wheel python-dist/*.whl
+          --output-dir qualification
+      - name: Run full 404-case Linux canary
+        if: matrix.platform == 'linux-x86_64'
+        run: >-
+          python scripts/rust_verifier_canary.py
+          --config tests/canary/rust_verifier_canary.json
+          --executable "${{ matrix.executable }}"
+          --output-directory qualification/full-canary
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: verifier-qualification-${{ matrix.platform }}
+          path: qualification
+
+  aggregate:
+    needs: qualify-platform
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: verifier-qualification-*
+          path: imported
+      - name: Flatten deterministic platform reports
+        shell: python
+        run: |
+          from pathlib import Path
+          output = Path("evidence")
+          output.mkdir()
+          reports = sorted(Path("imported").glob("**/*-x86_64.json")) + sorted(Path("imported").glob("**/*-arm64.json"))
+          assert len(reports) == 4, reports
+          for report in reports:
+              (output / report.name).write_bytes(report.read_bytes())
+          archives = sorted(Path("imported").glob("**/*.tar.gz")) + sorted(Path("imported").glob("**/*.zip"))
+          assert len(archives) == 4, archives
+          for archive in archives:
+              (output / archive.name).write_bytes(archive.read_bytes())
+              sidecar = archive.with_name(archive.name + ".sha256")
+              (output / sidecar.name).write_bytes(sidecar.read_bytes())
+      - name: Require all official platforms and build aggregate index/report
+        run: >-
+          python scripts/check_rust_verifier_cross_platform_qualification.py
+          --evidence-dir evidence --output-dir qualification
+          --write --require-qualified
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cross-platform-qualification
+          path: |
+            evidence
+            qualification

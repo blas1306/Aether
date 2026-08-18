@@ -1,0 +1,55 @@
+{
+  "blockers": {
+    "linux-x86_64": "executed evidence missing",
+    "macos-arm64": "executed evidence missing",
+    "macos-x86_64": "executed evidence missing",
+    "windows-x86_64": "executed evidence missing"
+  },
+  "build_command": "cargo build --manifest-path compiler-rs/Cargo.toml --release --locked --package aether-ir-verifier",
+  "current_authority": "python",
+  "current_migration_phase": "RP2",
+  "evidence": {
+    "linux-x86_64": {
+      "reason": "executed evidence missing",
+      "status": "BLOCKED"
+    },
+    "macos-arm64": {
+      "reason": "executed evidence missing",
+      "status": "BLOCKED"
+    },
+    "macos-x86_64": {
+      "reason": "executed evidence missing",
+      "status": "BLOCKED"
+    },
+    "windows-x86_64": {
+      "reason": "executed evidence missing",
+      "status": "BLOCKED"
+    }
+  },
+  "final_decision": "CROSS_PLATFORM_COMPANION_BLOCKED",
+  "full_canary_policy": "full 404-case canary on linux-x86_64; representative protocol subset on every official platform",
+  "operational_gates": {
+    "OP1": "BLOCKED",
+    "OP10": "BLOCKED",
+    "OP6": "BLOCKED"
+  },
+  "packaging_command": "python scripts/package_rust_verifier.py --executable <release-binary> --platform <os> --arch <arch> --output-dir <dir>",
+  "platforms": {
+    "linux-x86_64": "x86_64-unknown-linux-gnu",
+    "macos-arm64": "aarch64-apple-darwin",
+    "macos-x86_64": "x86_64-apple-darwin",
+    "windows-x86_64": "x86_64-pc-windows-msvc"
+  },
+  "product_version": "0.1.0",
+  "publication_semantics": "OP10 requires release-artifact clean installation; this workflow does not claim public publication",
+  "release_index": {
+    "artifacts": {},
+    "product": "aether-ir-verifier",
+    "product_version": "0.1.0",
+    "protocol_version": 1,
+    "schema_version": 1
+  },
+  "revision": "RUST-1.2.2",
+  "rust_1_3_handoff": "RP3 Final Promotion Qualification: re-run parity, require OP1-OP10 PASS, verify Python/RP2 and rollback, then produce READY_FOR_RP3_AUTHORITY_SWITCH",
+  "schema_version": 1
+}
