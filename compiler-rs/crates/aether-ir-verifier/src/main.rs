@@ -39,7 +39,9 @@ fn main() -> ExitCode {
 }
 
 fn run_metadata_command(arguments: &[std::ffi::OsString]) -> ExitCode {
-    let encoded = if arguments.len() == 1 && arguments[0] == "--identity" {
+    let encoded = if arguments.len() == 1
+        && (arguments[0] == "--identity" || arguments[0] == "--metadata")
+    {
         encode_executable_identity()
     } else if arguments.len() == 1 && arguments[0] == "--version" {
         Ok(format!(
@@ -50,8 +52,9 @@ fn run_metadata_command(arguments: &[std::ffi::OsString]) -> ExitCode {
         )
         .into_bytes())
     } else {
-        let _ = io::stderr()
-            .write_all(b"aether-ir-verifier: expected no arguments, --identity, or --version\n");
+        let _ = io::stderr().write_all(
+            b"aether-ir-verifier: expected no arguments, --identity, --metadata, or --version\n",
+        );
         return ExitCode::from(2);
     };
     let Ok(encoded) = encoded else {

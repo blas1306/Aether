@@ -74,7 +74,7 @@ fn executable_reports_explicit_version_and_machine_identity() {
     assert_eq!(
         identity.stdout,
         b"{\"identity_schema_version\":1,\"executable\":\"aether-ir-verifier\",\
-          \"version\":\"0.0.0\",\"protocol_versions\":[1],\"ir_schema_versions\":[1],\
+          \"version\":\"0.1.0\",\"protocol_versions\":[1],\"ir_schema_versions\":[1],\
           \"capabilities\":[\"verify\"]}\n"
     );
 
@@ -82,7 +82,7 @@ fn executable_reports_explicit_version_and_machine_identity() {
     assert_normal_process_result(&version);
     assert_eq!(
         version.stdout,
-        b"aether-ir-verifier 0.0.0 (protocol 1, IR schema 1; capabilities: verify)\n"
+        b"aether-ir-verifier 0.1.0 (protocol 1, IR schema 1; capabilities: verify)\n"
     );
 }
 
@@ -94,7 +94,7 @@ fn unknown_arguments_fail_with_one_stable_diagnostic() {
     assert!(output.stdout.is_empty());
     assert_eq!(
         output.stderr,
-        b"aether-ir-verifier: expected no arguments, --identity, or --version\n"
+        b"aether-ir-verifier: expected no arguments, --identity, --metadata, or --version\n"
     );
 }
 

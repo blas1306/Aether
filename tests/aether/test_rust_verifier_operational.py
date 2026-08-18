@@ -29,6 +29,8 @@ from aether.ir import (
     build_canonical_rust_verifier_request,
     discover_packaged_rust_verifier,
     discover_rust_verifier_executable,
+    canonical_rust_verifier_platform_id,
+    RUST_VERIFIER_PACKAGE_VERSION,
     rust_verifier_package_manifest,
     select_rust_verifier_executable,
 )
@@ -38,7 +40,7 @@ from aether.ir.rust_verifier import SubprocessRustVerifierClient
 IDENTITY = {
     "identity_schema_version": 1,
     "executable": "aether-ir-verifier",
-    "version": "0.0.0",
+    "version": RUST_VERIFIER_PACKAGE_VERSION,
     "protocol_versions": [1],
     "ir_schema_versions": [1],
     "capabilities": ["verify"],
@@ -79,7 +81,7 @@ def _write_package(
     shutil.copy2(executable, destination)
     manifest = rust_verifier_package_manifest(
         destination,
-        platform_tag=platform_tag or sysconfig.get_platform(),
+        platform_tag=platform_tag or canonical_rust_verifier_platform_id(),
     )
     (package_directory / "manifest.json").write_text(
         json.dumps(manifest, sort_keys=True) + "\n",
@@ -99,7 +101,7 @@ def test_real_executable_identity_is_explicit_and_content_addressed(
     assert first.identity.capabilities == ("verify",)
     assert first.identity.protocol_versions == (1,)
     assert first.identity.ir_schema_versions == (1,)
-    assert first.identity.version == "0.0.0"
+    assert first.identity.version == RUST_VERIFIER_PACKAGE_VERSION
 
 
 @pytest.mark.parametrize(
@@ -234,7 +236,7 @@ def test_timeout_and_process_crash_diagnostics_are_deterministic() -> None:
     assert str(crash.value) == "Rust verifier process exited with status 23"
 
 
-def test_packaging_script_produces_resolvable_versioned_directory(
+def test_packaging_script_produces_resolvable_release_archive(
     tmp_path: Path,
 ) -> None:
     completed = subprocess.run(
@@ -243,18 +245,22 @@ def test_packaging_script_produces_resolvable_versioned_directory(
             "scripts/package_rust_verifier.py",
             "--output",
             str(tmp_path),
-            "--profile",
-            "debug",
+            "--executable",
+            str(Path.cwd() / "compiler-rs/target/release/aether-ir-verifier"),
+            "--platform",
+            "linux",
+            "--arch",
+            "x86_64",
         ],
         check=True,
         capture_output=True,
         text=True,
     )
-    package_directory = Path(completed.stdout.strip())
-
-    assert package_directory == (
-        tmp_path.resolve() / "0.0.0" / sysconfig.get_platform()
-    )
+    artifact = Path(completed.stdout.strip())
+    package_directory = tmp_path / "installed"
+    package_directory.mkdir()
+    shutil.unpack_archive(artifact, package_directory)
+    assert artifact.name == f"aether-ir-verifier-{RUST_VERIFIER_PACKAGE_VERSION}-linux-x86_64.tar.gz"
     assert discover_packaged_rust_verifier(package_directory).path.is_file()
 
 

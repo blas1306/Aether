@@ -385,6 +385,11 @@ RUST-1.1 subsequently established
 remains at RP2 with Python authority; packaging/platform qualification and an
 RP3 authority CI gate remain separate operational blockers.
 
+RUST-1.2.1 freezes `aether-ir-verifier` as a separately versioned B1 native
+companion archive. Its packaging foundation and dependency contract are ready;
+cross-platform publication and clean-install evidence remain blockers. This
+does not change Python authority or RP2.
+
 - First Rust: Initial IR verifier authority-readiness audit.
 - First C/C ABI: runtime ABI architecture and canonical schema audit, starting
   with String/Array; no implementation.

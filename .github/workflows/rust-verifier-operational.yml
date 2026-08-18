@@ -7,6 +7,8 @@ on:
       - ".github/workflows/rust-verifier-operational.yml"
       - "compiler-rs/**"
       - "scripts/package_rust_verifier.py"
+      - "scripts/check_rust_verifier_companion_packaging.py"
+      - "docs/compiler/rust_verifier_companion_packaging.json"
       - "scripts/rust_verifier_canary.py"
       - "scripts/rust_verifier_platform_snapshot.py"
       - "src/aether/ir/**"
@@ -85,11 +87,22 @@ jobs:
       - run: python -m pip install -r requirements.txt pytest
       - run: cargo build --release --locked --package aether-ir-verifier
         working-directory: compiler-rs
+      - run: python scripts/package_rust_verifier.py --executable compiler-rs/target/release/aether-ir-verifier --platform linux --arch x86_64 --output-dir verifier-package
+      - name: Unpack canonical companion outside checkout
+        shell: python
+        run: |
+          import os, shutil
+          from pathlib import Path
+          artifact = next(Path("verifier-package").glob("*.tar.gz"))
+          installed = Path(os.environ["RUNNER_TEMP"]) / "aether-companion"
+          shutil.unpack_archive(artifact, installed)
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as stream:
+              stream.write(f"PACKAGED_RUST_VERIFIER={installed / 'aether-ir-verifier'}\n")
       - name: Run explicit Rust-authority canary
         run: >-
           python scripts/rust_verifier_canary.py
           --config tests/canary/rust_verifier_canary.json
-          --executable compiler-rs/target/release/aether-ir-verifier
+          --executable "${{ env.PACKAGED_RUST_VERIFIER }}"
           --output-directory rust-authority-canary-reports
       - uses: actions/upload-artifact@v4
         if: always()
@@ -117,8 +130,9 @@ jobs:
       - name: Qualify packaged discovery outside the checkout
         run: >-
           python -m pytest -q
-          tests/aether/test_rust_verifier_rp3_operational_readiness.py
-          -k packaged_companion_clean_resolution
+          tests/aether/test_rust_verifier_companion_packaging.py
+          -k "contract or roundtrip"
+      - run: python scripts/check_rust_verifier_companion_packaging.py --check
       - uses: actions/upload-artifact@v4
         with:
           name: rust-verifier-package-${{ matrix.os }}

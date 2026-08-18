@@ -18,8 +18,9 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
-import sysconfig
+import sys
 import threading
+import tomllib
 from time import monotonic
 from typing import NoReturn, TypeAlias
 
@@ -53,7 +54,18 @@ DEFAULT_RUST_VERIFIER_STDERR_LIMIT_BYTES = 256 * 1024
 
 RUST_VERIFIER_IDENTITY_SCHEMA_VERSION = 1
 RUST_VERIFIER_PACKAGE_MANIFEST_SCHEMA_VERSION = 1
-RUST_VERIFIER_PACKAGE_VERSION = "0.0.0"
+def _cargo_product_version() -> str:
+    """Read the companion product version from its single Cargo authority."""
+
+    cargo = Path(__file__).resolve().parents[3] / "compiler-rs" / "Cargo.toml"
+    with cargo.open("rb") as stream:
+        value = tomllib.load(stream)["workspace"]["package"]["version"]
+    if not isinstance(value, str) or not value:
+        raise RuntimeError("invalid Rust verifier Cargo product version")
+    return value
+
+
+RUST_VERIFIER_PACKAGE_VERSION = _cargo_product_version()
 RUST_VERIFIER_CAPABILITIES = ("verify",)
 
 _READ_CHUNK_BYTES = 64 * 1024
@@ -554,15 +566,25 @@ def rust_verifier_package_manifest(
     executable: str | os.PathLike[str],
     *,
     platform_tag: str | None = None,
+    architecture: str | None = None,
 ) -> dict[str, object]:
     """Build the canonical manifest payload for one validated artifact."""
 
     selection = select_rust_verifier_executable(executable)
     identity = selection.identity
-    return {
+    public_platform = platform_tag or canonical_rust_verifier_platform_id()
+    public_architecture = architecture or public_platform.rsplit("-", 1)[-1]
+    manifest: dict[str, object] = {
         "manifest_schema_version": RUST_VERIFIER_PACKAGE_MANIFEST_SCHEMA_VERSION,
-        "platform": platform_tag or sysconfig.get_platform(),
-        "executable": selection.path.name,
+        "product": _EXECUTABLE_BASENAME,
+        "product_version": identity.version,
+        "protocol_version": identity.protocol_versions[0],
+        "supported_ir_schema_versions": list(identity.ir_schema_versions),
+        "capabilities": list(identity.capabilities),
+        "platform": public_platform,
+        "architecture": public_architecture,
+        "binary": selection.path.name,
+        "build_profile": "release",
         "sha256": selection.sha256,
         "identity": {
             "identity_schema_version": identity.identity_schema_version,
@@ -573,6 +595,50 @@ def rust_verifier_package_manifest(
             "capabilities": list(identity.capabilities),
         },
     }
+    return manifest
+
+
+_PLATFORM_TARGETS = {
+    "linux-x86_64": "x86_64-unknown-linux-gnu",
+    "windows-x86_64": "x86_64-pc-windows-msvc",
+    "macos-arm64": "aarch64-apple-darwin",
+    "macos-x86_64": "x86_64-apple-darwin",
+}
+
+
+def normalize_rust_verifier_architecture(value: str) -> str:
+    """Return the canonical public architecture spelling."""
+
+    normalized = value.lower().replace("-", "_")
+    aliases = {"amd64": "x86_64", "x86_64": "x86_64", "aarch64": "arm64", "arm64": "arm64"}
+    try:
+        return aliases[normalized]
+    except KeyError:
+        raise ValueError(f"unsupported verifier architecture: {value}") from None
+
+
+def canonical_rust_verifier_platform_id(
+    os_name: str | None = None, architecture: str | None = None
+) -> str:
+    """Normalize host or explicit OS/architecture to a public artifact ID."""
+
+    raw_os = (os_name or sys.platform).lower()
+    public_os = "windows" if raw_os.startswith(("win", "mingw")) else "macos" if raw_os in {"darwin", "macos"} else "linux" if raw_os.startswith("linux") else raw_os
+    import platform as host_platform
+    public_arch = normalize_rust_verifier_architecture(architecture or host_platform.machine())
+    platform_id = f"{public_os}-{public_arch}"
+    if platform_id not in _PLATFORM_TARGETS:
+        raise ValueError(f"unsupported verifier platform: {platform_id}")
+    return platform_id
+
+
+def rust_verifier_artifact_name(platform_id: str, version: str = RUST_VERIFIER_PACKAGE_VERSION) -> str:
+    """Return the deterministic native archive name."""
+
+    if platform_id not in _PLATFORM_TARGETS:
+        raise ValueError(f"unsupported verifier platform: {platform_id}")
+    suffix = "zip" if platform_id.startswith("windows-") else "tar.gz"
+    return f"{_EXECUTABLE_BASENAME}-{version}-{platform_id}.{suffix}"
 
 
 def discover_packaged_rust_verifier(
@@ -604,8 +670,15 @@ def discover_packaged_rust_verifier(
             {
                 "manifest_schema_version",
                 "platform",
-                "executable",
+                "product",
+                "product_version",
+                "protocol_version",
+                "supported_ir_schema_versions",
+                "capabilities",
                 "sha256",
+                "architecture",
+                "binary",
+                "build_profile",
                 "identity",
             },
             "package manifest",
@@ -617,8 +690,8 @@ def discover_packaged_rust_verifier(
             raise RustVerifierInvalidResponse("unsupported package manifest schema")
         platform_tag = _expect_string(manifest["platform"], "package manifest.platform")
         executable_name = _expect_string(
-            manifest["executable"],
-            "package manifest.executable",
+            manifest["binary"],
+            "package manifest.binary",
         )
         digest = _expect_string(manifest["sha256"], "package manifest.sha256")
         if re.fullmatch(r"[0-9a-f]{64}", digest) is None:
@@ -626,12 +699,18 @@ def discover_packaged_rust_verifier(
                 "package manifest.sha256 must be lowercase SHA-256"
             )
         declared_identity = _decode_identity_value(manifest["identity"])
+        if manifest["product"] != _EXECUTABLE_BASENAME or manifest["product_version"] != RUST_VERIFIER_PACKAGE_VERSION:
+            raise RustVerifierInvalidResponse("incompatible verifier companion product")
+        if manifest["protocol_version"] != RUST_VERIFIER_PROTOCOL_VERSION or manifest["supported_ir_schema_versions"] != [IR_SCHEMA_VERSION] or manifest["capabilities"] != list(RUST_VERIFIER_CAPABILITIES):
+            raise RustVerifierInvalidResponse("incompatible verifier companion protocol")
+        if manifest["build_profile"] != "release":
+            raise RustVerifierInvalidResponse("verifier companion is not a release build")
     except (RustVerifierInvalidResponse, TypeError, ValueError) as error:
         raise RustVerifierInvalidExecutable(
             "Rust verifier package manifest is invalid"
         ) from error
 
-    if platform_tag != (expected_platform or sysconfig.get_platform()):
+    if platform_tag != (expected_platform or canonical_rust_verifier_platform_id()):
         raise RustVerifierIncompatibleExecutable("platform")
     expected_name = (
         f"{_EXECUTABLE_BASENAME}.exe"
@@ -1309,6 +1388,9 @@ __all__ = [
     "RustVerifierTransportMetadata",
     "discover_packaged_rust_verifier",
     "discover_rust_verifier_executable",
+    "canonical_rust_verifier_platform_id",
+    "normalize_rust_verifier_architecture",
+    "rust_verifier_artifact_name",
     "rust_verifier_package_manifest",
     "select_rust_verifier_executable",
     "verify_module_with_rust",
