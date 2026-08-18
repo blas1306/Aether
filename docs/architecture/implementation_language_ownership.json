@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "principle": "one_canonical_implementation_per_responsibility",
+  "languages": ["aether", "c_abi", "cpp_adapter", "python", "rust"],
+  "migration_phases": ["stable", "RP0", "RP1", "RP2", "RP3", "RP4", "RP5", "planned"],
+  "components": [
+    {"component":"lexer","current_authority":"python","target_authority":"rust","migration_phase":"RP0","allowed_shadows":[],"boundary":"source_to_tokens"},
+    {"component":"parser_ast","current_authority":"python","target_authority":"rust","migration_phase":"RP0","allowed_shadows":[],"boundary":"versioned_syntax_schema"},
+    {"component":"name_resolution","current_authority":"python","target_authority":"rust","migration_phase":"RP0","allowed_shadows":[],"boundary":"typed_compiler_api"},
+    {"component":"typechecking","current_authority":"python","target_authority":"rust","migration_phase":"RP0","allowed_shadows":[],"boundary":"typed_compiler_api"},
+    {"component":"initial_ir_model","current_authority":"python","target_authority":"rust","migration_phase":"RP1","allowed_shadows":["rust"],"boundary":"ir_schema_v1"},
+    {"component":"initial_ir_verification","current_authority":"python","target_authority":"rust","migration_phase":"RP2","allowed_shadows":["rust"],"boundary":"verifier_protocol_v1"},
+    {"component":"ssa_construction","current_authority":"python","target_authority":"rust","migration_phase":"RP0","allowed_shadows":[],"boundary":"owned_ir_api"},
+    {"component":"ssa_verification","current_authority":"python","target_authority":"rust","migration_phase":"RP1","allowed_shadows":["rust"],"boundary":"ssa_wire_schema"},
+    {"component":"analyses_optimizer","current_authority":"python","target_authority":"rust","migration_phase":"RP0","allowed_shadows":[],"boundary":"owned_ir_api"},
+    {"component":"llvm_backend","current_authority":"python","target_authority":"rust","migration_phase":"RP0","allowed_shadows":[],"boundary":"owned_ir_to_llvm"},
+    {"component":"compiler_driver","current_authority":"python","target_authority":"rust","migration_phase":"RP0","allowed_shadows":[],"boundary":"cli_and_compiler_api"},
+    {"component":"diagnostic_semantics","current_authority":"python","target_authority":"rust","migration_phase":"RP0","allowed_shadows":[],"boundary":"versioned_diagnostic_schema"},
+    {"component":"runtime_abi","current_authority":"python","target_authority":"c_abi","migration_phase":"planned","allowed_shadows":[],"boundary":"generated_c_abi"},
+    {"component":"runtime_implementation","current_authority":"python","target_authority":"rust","migration_phase":"planned","allowed_shadows":[],"boundary":"c_abi"},
+    {"component":"stdlib_high_level","current_authority":"python","target_authority":"aether","migration_phase":"planned","allowed_shadows":[],"boundary":"aether_modules"},
+    {"component":"linear_algebra_high_level","current_authority":"python","target_authority":"aether","migration_phase":"planned","allowed_shadows":[],"boundary":"aether_api_to_c_abi"},
+    {"component":"formatter","current_authority":"python","target_authority":"aether","migration_phase":"planned","allowed_shadows":[],"boundary":"versioned_syntax_schema"},
+    {"component":"lsp","current_authority":"python","target_authority":"rust","migration_phase":"planned","allowed_shadows":[],"boundary":"lsp_json_rpc"},
+    {"component":"package_manager","current_authority":"python","target_authority":"aether","migration_phase":"planned","allowed_shadows":[],"boundary":"subprocess_compiler_cli"},
+    {"component":"build_orchestration","current_authority":"python","target_authority":"aether","migration_phase":"planned","allowed_shadows":[],"boundary":"subprocess_compiler_cli"},
+    {"component":"benchmark_analysis","current_authority":"python","target_authority":"python","migration_phase":"stable","allowed_shadows":[],"boundary":"artifact_files"},
+    {"component":"release_automation","current_authority":"python","target_authority":"python","migration_phase":"stable","allowed_shadows":[],"boundary":"repository_artifacts"}
+  ]
+}

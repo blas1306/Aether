@@ -1,5 +1,9 @@
 # Compiler Documentation
 
+The normative implementation-language authority, migration, native-boundary,
+and self-hosting policy is [ARCH-1](../architecture/IMPLEMENTATION_LANGUAGE_OWNERSHIP.md).
+The documents below retain their historical and component-specific scope.
+
 This directory contains technical documentation for the Aether compiler
 implementation.
 
