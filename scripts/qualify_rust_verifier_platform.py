@@ -18,10 +18,10 @@ import venv
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from aether.ir.rust_verifier import discover_packaged_rust_verifier  # noqa: E402
-from scripts.check_rust_verifier_cross_platform_qualification import (  # noqa: E402
+from check_rust_verifier_cross_platform_qualification import (  # noqa: E402
     PLATFORMS, contract_digest,
 )
-from scripts.package_rust_verifier import package_rust_verifier  # noqa: E402
+from package_rust_verifier import package_rust_verifier  # noqa: E402
 
 FIXTURES = ROOT / "compiler-rs/crates/aether-ir-verifier/tests/fixtures"
 
