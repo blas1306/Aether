@@ -374,6 +374,12 @@ expand a retiring Python authority without a migration plan.
 
 ## Immediate milestone decisions
 
+The Initial IR verifier remains at RP2 (Python authority, Rust shadow/canary).
+The RUST-1 qualification result is `KEEP_RUST_SHADOW`; see
+[`RUST_INITIAL_IR_VERIFIER_AUTHORITY_READINESS.md`](../compiler/RUST_INITIAL_IR_VERIFIER_AUTHORITY_READINESS.md)
+and its deterministic JSON artifact. This readiness reference does not change
+the authority recorded in the registry.
+
 - First Rust: Initial IR verifier authority-readiness audit.
 - First C/C ABI: runtime ABI architecture and canonical schema audit, starting
   with String/Array; no implementation.

@@ -1,0 +1,2424 @@
+{
+  "authority_definition": "The authority's semantic result alone decides whether Initial IR compilation continues; shadow results never substitute for authority and authority infrastructure failure fails closed.",
+  "blockers": [
+    {
+      "detail": "Rust has no mapped implementation evidence for 26 production rules: IRV-012, IRV-013, IRV-014, IRV-015, IRV-023, IRV-031, IRV-035, IRV-036, IRV-054, IRV-131, IRV-132, IRV-133, IRV-134, IRV-135, IRV-137, IRV-138, IRV-139, IRV-140, IRV-141, IRV-142, IRV-143, IRV-144, IRV-145, IRV-146, IRV-147, IRV-148.",
+      "severity": "critical",
+      "taxonomy": "RULE_COVERAGE"
+    },
+    {
+      "detail": "No RP3 production-authority gate exists; current Rust authority is test-only canary configuration.",
+      "severity": "critical",
+      "taxonomy": "CI"
+    },
+    {
+      "detail": "Repository evidence does not qualify reliable verifier-binary availability on every supported installation/platform.",
+      "severity": "critical",
+      "taxonomy": "PACKAGING"
+    }
+  ],
+  "ci_status": "RP2_GATES_PRESENT_RP3_GATE_MISSING",
+  "current_authority": "python",
+  "current_migration_phase": "RP2",
+  "diagnostic_readiness": {
+    "exact_text_required": false,
+    "stable_rule_ids": true,
+    "status": "PARTIAL"
+  },
+  "differential_result": {
+    "canary_total": 140,
+    "status": "INCOMPLETE_RULE_COVERAGE"
+  },
+  "exact_rust_2_scope": null,
+  "final_recommendation": "KEEP_RUST_SHADOW",
+  "fuzz_property_result": {
+    "status": "NOT_RUN"
+  },
+  "infrastructure_failure_policy": "FAIL_CLOSED",
+  "instruction_coverage": {
+    "audit_status": "ENUMERATED",
+    "count": 84,
+    "python_instruction_classes": [
+      "IRArrayCopy",
+      "IRArrayGet",
+      "IRArrayLength",
+      "IRArrayNew",
+      "IRArraySet",
+      "IRArraySlice",
+      "IRAssign",
+      "IRBinaryOp",
+      "IRBranch",
+      "IRCall",
+      "IRCallIndirect",
+      "IRCast",
+      "IRCatchEntry",
+      "IRClassGet",
+      "IRClassNew",
+      "IRClassSet",
+      "IRCompareOp",
+      "IRConst",
+      "IRCopyInit",
+      "IRDestroy",
+      "IRExceptionDestroy",
+      "IRExceptionMatch",
+      "IRExceptionPayload",
+      "IRFunctionRef",
+      "IRInitDefault",
+      "IRInterfaceCall",
+      "IRInterfaceConstruct",
+      "IRInvoke",
+      "IRInvokeIndirect",
+      "IRInvokeInterface",
+      "IRJump",
+      "IRListClear",
+      "IRListContains",
+      "IRListCopy",
+      "IRListGet",
+      "IRListIndexOf",
+      "IRListInsert",
+      "IRListIsEmpty",
+      "IRListLength",
+      "IRListNew",
+      "IRListPop",
+      "IRListPush",
+      "IRListRemoveAt",
+      "IRListReverse",
+      "IRListSet",
+      "IRListSlice",
+      "IRLoad",
+      "IRMatrixAdd",
+      "IRMatrixColumns",
+      "IRMatrixGet",
+      "IRMatrixMatMul",
+      "IRMatrixNew",
+      "IRMatrixRows",
+      "IRMatrixScale",
+      "IRMatrixSet",
+      "IRMatrixSub",
+      "IRMatrixVectorMul",
+      "IRMethodResultNew",
+      "IRMethodResultReceiver",
+      "IRMethodResultValue",
+      "IRMoveInit",
+      "IROuterProduct",
+      "IRPackException",
+      "IRPrint",
+      "IRPropagate",
+      "IRRelocate",
+      "IRRethrow",
+      "IRReturn",
+      "IRSequenceSort",
+      "IRStore",
+      "IRStructGet",
+      "IRStructNew",
+      "IRStructSet",
+      "IRThrow",
+      "IRUnaryOp",
+      "IRVectorAdd",
+      "IRVectorDot",
+      "IRVectorGet",
+      "IRVectorLength",
+      "IRVectorMatrixMul",
+      "IRVectorNew",
+      "IRVectorScale",
+      "IRVectorSet",
+      "IRVectorSub"
+    ]
+  },
+  "mutation_result": {
+    "deterministic": true,
+    "status": "BOUNDED_EXISTING_CORPUS_ONLY"
+  },
+  "negative_corpus_result": {
+    "canary_rejections": 72,
+    "diagnostic_only_divergences": 3,
+    "status": "INCOMPLETE"
+  },
+  "packaging_status": "BLOCKED",
+  "performance_summary": {
+    "status": "NO_PATHOLOGICAL_REGRESSION_EVIDENCE",
+    "timings_in_deterministic_record": false
+  },
+  "platform_status": {
+    "status": "NOT_RELEASE_QUALIFIED_FOR_ALL_SUPPORTED_PLATFORMS"
+  },
+  "positive_corpus_result": {
+    "canary_modules": 65,
+    "status": "PASS"
+  },
+  "production_rule_registry": [
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-001",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-001; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-002",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-002; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-003",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-003; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-004",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-004; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-005",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-005; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-006",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-006; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-007",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-007; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-008",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-008; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-009",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-009; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-010",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-010; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-011",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-011; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "missing",
+      "id": "IRV-012",
+      "negative_tests": [],
+      "parity_status": "RUST_WEAKER_INVALID",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": null,
+      "semantic_description": "Canonical production rule IRV-012; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "missing",
+      "id": "IRV-013",
+      "negative_tests": [],
+      "parity_status": "RUST_WEAKER_INVALID",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": null,
+      "semantic_description": "Canonical production rule IRV-013; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "missing",
+      "id": "IRV-014",
+      "negative_tests": [],
+      "parity_status": "RUST_WEAKER_INVALID",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": null,
+      "semantic_description": "Canonical production rule IRV-014; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "missing",
+      "id": "IRV-015",
+      "negative_tests": [],
+      "parity_status": "RUST_WEAKER_INVALID",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": null,
+      "semantic_description": "Canonical production rule IRV-015; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-016",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-016; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-017",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-017; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-018",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-018; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-019",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-019; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-020",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-020; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-021",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-021; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-022",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-022; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "missing",
+      "id": "IRV-023",
+      "negative_tests": [],
+      "parity_status": "RUST_WEAKER_INVALID",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": null,
+      "semantic_description": "Canonical production rule IRV-023; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-024",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-024; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-025",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-025; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-026",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-026; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-027",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-027; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-028",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-028; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-029",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-029; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-030",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-030; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "missing",
+      "id": "IRV-031",
+      "negative_tests": [],
+      "parity_status": "RUST_WEAKER_INVALID",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": null,
+      "semantic_description": "Canonical production rule IRV-031; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-032",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-032; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-033",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-033; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-034",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-034; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "missing",
+      "id": "IRV-035",
+      "negative_tests": [],
+      "parity_status": "RUST_WEAKER_INVALID",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": null,
+      "semantic_description": "Canonical production rule IRV-035; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "missing",
+      "id": "IRV-036",
+      "negative_tests": [],
+      "parity_status": "RUST_WEAKER_INVALID",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": null,
+      "semantic_description": "Canonical production rule IRV-036; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-037",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-037; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-038",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-038; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-039",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-039; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-040",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-040; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-041",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-041; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-042",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-042; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-043",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-043; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-044",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-044; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-045",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-045; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-046",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-046; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-047",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-047; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-048",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-048; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-049",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-049; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-050",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-050; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-051",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-051; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-052",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-052; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-053",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-053; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "missing",
+      "id": "IRV-054",
+      "negative_tests": [],
+      "parity_status": "RUST_WEAKER_INVALID",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": null,
+      "semantic_description": "Canonical production rule IRV-054; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-055",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-055; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-056",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-056; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-057",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-057; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-058",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-058; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-059",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-059; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-060",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-060; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-061",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-061; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-062",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-062; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-063",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-063; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-064",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-064; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-065",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-065; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-066",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-066; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-067",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-067; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-068",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-068; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-069",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-069; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-070",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-070; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-071",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-071; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-072",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-072; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-073",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-073; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-074",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-074; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-075",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-075; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-076",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-076; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-077",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-077; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-078",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-078; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-079",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-079; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-080",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-080; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-081",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-081; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-082",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-082; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-083",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-083; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-084",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-084; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-085",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-085; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-086",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-086; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-087",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-087; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-088",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-088; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-089",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-089; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-090",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-090; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-091",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-091; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-092",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-092; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-093",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-093; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-094",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-094; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-095",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-095; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-096",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-096; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-097",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-097; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-098",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-098; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-099",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-099; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-100",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-100; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-101",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-101; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-102",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-102; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-103",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-103; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-104",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-104; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-105",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-105; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-106",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-106; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-107",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-107; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-108",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-108; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-109",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-109; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-110",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-110; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-111",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-111; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-112",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-112; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-113",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-113; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-114",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-114; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-115",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-115; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-116",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-116; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-117",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-117; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-118",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-118; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-119",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-119; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-120",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-120; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-121",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-121; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-122",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-122; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-123",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-123; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-124",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-124; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-125",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-125; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-126",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-126; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-127",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-127; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-128",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-128; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-129",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-129; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-130",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-130; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "missing",
+      "id": "IRV-131",
+      "negative_tests": [],
+      "parity_status": "RUST_WEAKER_INVALID",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": null,
+      "semantic_description": "Canonical production rule IRV-131; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "missing",
+      "id": "IRV-132",
+      "negative_tests": [],
+      "parity_status": "RUST_WEAKER_INVALID",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": null,
+      "semantic_description": "Canonical production rule IRV-132; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "missing",
+      "id": "IRV-133",
+      "negative_tests": [],
+      "parity_status": "RUST_WEAKER_INVALID",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": null,
+      "semantic_description": "Canonical production rule IRV-133; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "missing",
+      "id": "IRV-134",
+      "negative_tests": [],
+      "parity_status": "RUST_WEAKER_INVALID",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": null,
+      "semantic_description": "Canonical production rule IRV-134; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "missing",
+      "id": "IRV-135",
+      "negative_tests": [],
+      "parity_status": "RUST_WEAKER_INVALID",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": null,
+      "semantic_description": "Canonical production rule IRV-135; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-136",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-136; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "missing",
+      "id": "IRV-137",
+      "negative_tests": [],
+      "parity_status": "RUST_WEAKER_INVALID",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": null,
+      "semantic_description": "Canonical production rule IRV-137; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "missing",
+      "id": "IRV-138",
+      "negative_tests": [],
+      "parity_status": "RUST_WEAKER_INVALID",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": null,
+      "semantic_description": "Canonical production rule IRV-138; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "missing",
+      "id": "IRV-139",
+      "negative_tests": [],
+      "parity_status": "RUST_WEAKER_INVALID",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": null,
+      "semantic_description": "Canonical production rule IRV-139; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "missing",
+      "id": "IRV-140",
+      "negative_tests": [],
+      "parity_status": "RUST_WEAKER_INVALID",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": null,
+      "semantic_description": "Canonical production rule IRV-140; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "missing",
+      "id": "IRV-141",
+      "negative_tests": [],
+      "parity_status": "RUST_WEAKER_INVALID",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": null,
+      "semantic_description": "Canonical production rule IRV-141; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "missing",
+      "id": "IRV-142",
+      "negative_tests": [],
+      "parity_status": "RUST_WEAKER_INVALID",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": null,
+      "semantic_description": "Canonical production rule IRV-142; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "missing",
+      "id": "IRV-143",
+      "negative_tests": [],
+      "parity_status": "RUST_WEAKER_INVALID",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": null,
+      "semantic_description": "Canonical production rule IRV-143; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "missing",
+      "id": "IRV-144",
+      "negative_tests": [],
+      "parity_status": "RUST_WEAKER_INVALID",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": null,
+      "semantic_description": "Canonical production rule IRV-144; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "missing",
+      "id": "IRV-145",
+      "negative_tests": [],
+      "parity_status": "RUST_WEAKER_INVALID",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": null,
+      "semantic_description": "Canonical production rule IRV-145; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "missing",
+      "id": "IRV-146",
+      "negative_tests": [],
+      "parity_status": "RUST_WEAKER_INVALID",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": null,
+      "semantic_description": "Canonical production rule IRV-146; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "missing",
+      "id": "IRV-147",
+      "negative_tests": [],
+      "parity_status": "RUST_WEAKER_INVALID",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": null,
+      "semantic_description": "Canonical production rule IRV-147; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "missing",
+      "id": "IRV-148",
+      "negative_tests": [],
+      "parity_status": "RUST_WEAKER_INVALID",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": null,
+      "semantic_description": "Canonical production rule IRV-148; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-149",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-149; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    },
+    {
+      "diagnostic_category": "stable_irv_rule_family",
+      "differential_coverage": "covered",
+      "id": "IRV-150",
+      "negative_tests": [
+        "benchmarks/ir_verifier.py:rule_manifest"
+      ],
+      "parity_status": "PARITY_PROVEN",
+      "positive_tests": [
+        "benchmarks/ir_verifier.py:migration_corpus"
+      ],
+      "python_implementation": "src/aether/ir/verifier.py",
+      "rust_implementation": "compiler-rs/crates/aether-verifier",
+      "semantic_description": "Canonical production rule IRV-150; normative detail is emitted by the Python verifier and tracked in IR_VERIFIER_INVARIANTS.md."
+    }
+  ],
+  "promotion_gates": {
+    "G1": "FAIL",
+    "G2": "PASS",
+    "G3": "FAIL",
+    "G4": "PASS",
+    "G5": "PASS",
+    "G6": "FAIL",
+    "G7": "PASS",
+    "G8": "FAIL",
+    "G9": "PASS"
+  },
+  "protocol_status": {
+    "failures_distinct_from_rejection": true,
+    "ir_schema_version": 1,
+    "protocol_version": 1,
+    "status": "READY"
+  },
+  "revision": "RUST-1",
+  "rollback_readiness": {
+    "fallback": "explicit rollback only; no per-compilation fallback",
+    "status": "DESIGNED",
+    "switch": "single VerifierAuthorityConfiguration"
+  },
+  "rule_coverage_summary": {
+    "divergent_or_missing": 26,
+    "parity_proven": 124,
+    "production_rules": 150,
+    "python_mapped": 150,
+    "rust_mapped": 124,
+    "unknown": 0
+  },
+  "rust_crates": {
+    "aether-ir": "owned IR, wire DTO and importer",
+    "aether-ir-verifier": "subprocess protocol executable",
+    "aether-python": "future-facing PyO3 boundary; not required by current flow",
+    "aether-verifier": "Initial IR verification"
+  },
+  "schema_version": 1,
+  "shadow_outcomes": [
+    "both_accept",
+    "both_reject",
+    "python_accepts_rust_rejects",
+    "python_rejects_rust_accepts",
+    "rust_infrastructure_failure",
+    "rust_unavailable_or_skipped"
+  ],
+  "type_coverage": {
+    "audit_status": "ENUMERATED",
+    "count": 19,
+    "python_type_classes": [
+      "ArrayType",
+      "BoolType",
+      "ClassRefType",
+      "ComplexType",
+      "DoubleType",
+      "EnumType",
+      "ExceptionEventType",
+      "FloatType",
+      "FunctionType",
+      "IntType",
+      "InterfaceType",
+      "ListType",
+      "MatrixType",
+      "MethodResultType",
+      "NullableType",
+      "StringType",
+      "StructType",
+      "VectorType",
+      "VoidType"
+    ]
+  },
+  "wire_coverage": {
+    "status": "SUPPORTED_BY_IMPORTER_TESTS",
+    "verification_relevant_unknown": 0
+  }
+}
