@@ -7,3 +7,4 @@ recursive-include corpus *.ae *.json *.md
 recursive-include examples *.ae *.json *.md
 recursive-include scripts *.py
 recursive-include tests *.py *.ae *.json *.md
+include compiler-rs/Cargo.toml

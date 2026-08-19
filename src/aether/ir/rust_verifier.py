@@ -54,8 +54,22 @@ DEFAULT_RUST_VERIFIER_STDERR_LIMIT_BYTES = 256 * 1024
 
 RUST_VERIFIER_IDENTITY_SCHEMA_VERSION = 1
 RUST_VERIFIER_PACKAGE_MANIFEST_SCHEMA_VERSION = 1
+
+
 def _cargo_product_version() -> str:
-    """Read the companion product version from its single Cargo authority."""
+    """Resolve the version generated from Cargo, or read Cargo in a checkout."""
+
+    try:
+        from ._rust_verifier_metadata import RUST_VERIFIER_PACKAGE_VERSION
+    except ModuleNotFoundError:
+        pass
+    else:
+        if (
+            not isinstance(RUST_VERIFIER_PACKAGE_VERSION, str)
+            or not RUST_VERIFIER_PACKAGE_VERSION
+        ):
+            raise RuntimeError("invalid packaged Rust verifier product version")
+        return RUST_VERIFIER_PACKAGE_VERSION
 
     cargo = Path(__file__).resolve().parents[3] / "compiler-rs" / "Cargo.toml"
     with cargo.open("rb") as stream:
