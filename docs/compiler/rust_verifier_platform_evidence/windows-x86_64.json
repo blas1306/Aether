@@ -26,7 +26,7 @@
     "unsupported_protocol": "PASS",
     "version": "PASS"
   },
-  "contract_sha256": "e891ab3582700aba7191e055bea5e791d8f42ca6ee2cf7f9d22a2ab7962da1fd",
+  "contract_sha256": "c3138737b026b79b93bcf98afdb0348d9481e71b3fda9d41640fb7d0d8f5c09b",
   "execution": "release_artifact",
   "ir_schema_versions": [
     1

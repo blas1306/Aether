@@ -216,13 +216,23 @@ def render_markdown(record: dict[str, object]) -> str:
         status = "PASS" if isinstance(item, dict) and item.get("execution") == "release_artifact" else "BLOCKED"
         provenance = item.get("provenance", "none") if isinstance(item, dict) else "none"
         rows.append(f"| {platform} | `{target}` | {status} | {provenance} |")
+    qualification_summary = (
+        "All four current-contract reports are imported and OP1, OP6, and OP10 pass."
+        if record["final_decision"] == "CROSS_PLATFORM_COMPANION_QUALIFIED"
+        else "OP1, OP6, and OP10 remain blocked until all four current-contract reports are imported."
+    )
+    next_action = (
+        "The checked aggregate is the canonical RUST-1.2.2 evidence consumed by RUST-1.3."
+        if record["final_decision"] == "CROSS_PLATFORM_COMPANION_QUALIFIED"
+        else "To finish: run the `Rust verifier cross-platform qualification` workflow, download its `cross-platform-qualification` artifact, and run `python scripts/check_rust_verifier_cross_platform_qualification.py --evidence-dir <reports> --write --require-qualified`."
+    )
     return "\n".join([
         "# RUST-1.2.2 — Cross-Platform Release Qualification", "",
         f"Final decision: **{record['final_decision']}**", "", "Authority: **Python**. Migration phase: **RP2**.", "",
         "| Platform | Rust target | Result | Evidence provenance |", "|---|---|---|---|", *rows, "",
-        "The canonical release build and packaging commands are recorded in the machine-readable report. OP1, OP6, and OP10 remain blocked until all four current-contract reports are imported.", "",
+        f"The canonical release build and packaging commands are recorded in the machine-readable report. {qualification_summary}", "",
         "The workflow runs the full 404-case canary on Linux and a representative installed-artifact subset everywhere. It uploads archives, checksums, manifests, and qualification reports; it does not publish a public release.", "",
-        "To finish: run the `Rust verifier cross-platform qualification` workflow, download its `cross-platform-qualification` artifact, and run `python scripts/check_rust_verifier_cross_platform_qualification.py --evidence-dir <reports> --write --require-qualified`.", "",
+        next_action, "",
     ])
 
 

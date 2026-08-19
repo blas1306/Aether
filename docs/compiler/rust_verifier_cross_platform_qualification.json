@@ -1,37 +1,224 @@
 {
-  "blockers": {
-    "linux-x86_64": "executed evidence missing",
-    "macos-arm64": "executed evidence missing",
-    "macos-x86_64": "executed evidence missing",
-    "windows-x86_64": "executed evidence missing"
-  },
+  "blockers": {},
   "build_command": "cargo build --manifest-path compiler-rs/Cargo.toml --release --locked --package aether-ir-verifier",
   "current_authority": "python",
   "current_migration_phase": "RP2",
   "evidence": {
     "linux-x86_64": {
-      "reason": "executed evidence missing",
-      "status": "BLOCKED"
+      "artifact": "aether-ir-verifier-0.1.0-linux-x86_64.tar.gz",
+      "authority": "python",
+      "canary": {
+        "comparisons": 5,
+        "operational_failures": 0,
+        "semantic_mismatches": 0,
+        "unexpected": 0
+      },
+      "capabilities": [
+        "verify"
+      ],
+      "checks": {
+        "accepted_fixture": "PASS",
+        "build": "PASS",
+        "canary": "PASS",
+        "checksum": "PASS",
+        "clean_install": "PASS",
+        "discovery": "PASS",
+        "malformed_protocol": "PASS",
+        "metadata": "PASS",
+        "missing_companion": "PASS",
+        "package": "PASS",
+        "path_isolation": "PASS",
+        "rejected_fixture": "PASS",
+        "unsupported_protocol": "PASS",
+        "version": "PASS"
+      },
+      "contract_sha256": "c3138737b026b79b93bcf98afdb0348d9481e71b3fda9d41640fb7d0d8f5c09b",
+      "execution": "release_artifact",
+      "ir_schema_versions": [
+        1
+      ],
+      "migration_phase": "RP2",
+      "platform": "linux-x86_64",
+      "product": "aether-ir-verifier",
+      "product_version": "0.1.0",
+      "protocol_version": 1,
+      "provenance": "CI execution",
+      "revision": "RUST-1.2.2",
+      "rust_target": "x86_64-unknown-linux-gnu",
+      "schema_version": 1,
+      "sha256": "cd4c83a2cd723fe1ca76276ecec8f5a8b84621a3549c00cd10f08cac8cc6e294",
+      "toolchain": {
+        "architecture": "x86_64",
+        "cargo": "cargo 1.85.1 (d73d2caf9 2024-12-31)",
+        "os": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+        "python": "3.13.15",
+        "rust_host": "x86_64-unknown-linux-gnu",
+        "rustc": "rustc 1.85.1 (4eb161250 2025-03-15)"
+      }
     },
     "macos-arm64": {
-      "reason": "executed evidence missing",
-      "status": "BLOCKED"
+      "artifact": "aether-ir-verifier-0.1.0-macos-arm64.tar.gz",
+      "authority": "python",
+      "canary": {
+        "comparisons": 5,
+        "operational_failures": 0,
+        "semantic_mismatches": 0,
+        "unexpected": 0
+      },
+      "capabilities": [
+        "verify"
+      ],
+      "checks": {
+        "accepted_fixture": "PASS",
+        "build": "PASS",
+        "canary": "PASS",
+        "checksum": "PASS",
+        "clean_install": "PASS",
+        "discovery": "PASS",
+        "malformed_protocol": "PASS",
+        "metadata": "PASS",
+        "missing_companion": "PASS",
+        "package": "PASS",
+        "path_isolation": "PASS",
+        "rejected_fixture": "PASS",
+        "unsupported_protocol": "PASS",
+        "version": "PASS"
+      },
+      "contract_sha256": "c3138737b026b79b93bcf98afdb0348d9481e71b3fda9d41640fb7d0d8f5c09b",
+      "execution": "release_artifact",
+      "ir_schema_versions": [
+        1
+      ],
+      "migration_phase": "RP2",
+      "platform": "macos-arm64",
+      "product": "aether-ir-verifier",
+      "product_version": "0.1.0",
+      "protocol_version": 1,
+      "provenance": "CI execution",
+      "revision": "RUST-1.2.2",
+      "rust_target": "aarch64-apple-darwin",
+      "schema_version": 1,
+      "sha256": "8da18298857da646f5e044650857d81c99eb2ce00e8b2d55b54ecc47d8f770ea",
+      "toolchain": {
+        "architecture": "arm64",
+        "cargo": "cargo 1.85.1 (d73d2caf9 2024-12-31)",
+        "os": "macOS-15.7.7-arm64-arm-64bit-Mach-O",
+        "python": "3.13.14",
+        "rust_host": "aarch64-apple-darwin",
+        "rustc": "rustc 1.85.1 (4eb161250 2025-03-15)"
+      }
     },
     "macos-x86_64": {
-      "reason": "executed evidence missing",
-      "status": "BLOCKED"
+      "artifact": "aether-ir-verifier-0.1.0-macos-x86_64.tar.gz",
+      "authority": "python",
+      "canary": {
+        "comparisons": 5,
+        "operational_failures": 0,
+        "semantic_mismatches": 0,
+        "unexpected": 0
+      },
+      "capabilities": [
+        "verify"
+      ],
+      "checks": {
+        "accepted_fixture": "PASS",
+        "build": "PASS",
+        "canary": "PASS",
+        "checksum": "PASS",
+        "clean_install": "PASS",
+        "discovery": "PASS",
+        "malformed_protocol": "PASS",
+        "metadata": "PASS",
+        "missing_companion": "PASS",
+        "package": "PASS",
+        "path_isolation": "PASS",
+        "rejected_fixture": "PASS",
+        "unsupported_protocol": "PASS",
+        "version": "PASS"
+      },
+      "contract_sha256": "c3138737b026b79b93bcf98afdb0348d9481e71b3fda9d41640fb7d0d8f5c09b",
+      "execution": "release_artifact",
+      "ir_schema_versions": [
+        1
+      ],
+      "migration_phase": "RP2",
+      "platform": "macos-x86_64",
+      "product": "aether-ir-verifier",
+      "product_version": "0.1.0",
+      "protocol_version": 1,
+      "provenance": "CI execution",
+      "revision": "RUST-1.2.2",
+      "rust_target": "x86_64-apple-darwin",
+      "schema_version": 1,
+      "sha256": "0d0d27d0a0b4e7a2374268f1e12ce94e8d7b0d9f0ad141c535ff2dc96b72766c",
+      "toolchain": {
+        "architecture": "x86_64",
+        "cargo": "cargo 1.85.1 (d73d2caf9 2024-12-31)",
+        "os": "macOS-15.7.7-x86_64-i386-64bit-Mach-O",
+        "python": "3.13.14",
+        "rust_host": "x86_64-apple-darwin",
+        "rustc": "rustc 1.85.1 (4eb161250 2025-03-15)"
+      }
     },
     "windows-x86_64": {
-      "reason": "executed evidence missing",
-      "status": "BLOCKED"
+      "artifact": "aether-ir-verifier-0.1.0-windows-x86_64.zip",
+      "authority": "python",
+      "canary": {
+        "comparisons": 5,
+        "operational_failures": 0,
+        "semantic_mismatches": 0,
+        "unexpected": 0
+      },
+      "capabilities": [
+        "verify"
+      ],
+      "checks": {
+        "accepted_fixture": "PASS",
+        "build": "PASS",
+        "canary": "PASS",
+        "checksum": "PASS",
+        "clean_install": "PASS",
+        "discovery": "PASS",
+        "malformed_protocol": "PASS",
+        "metadata": "PASS",
+        "missing_companion": "PASS",
+        "package": "PASS",
+        "path_isolation": "PASS",
+        "rejected_fixture": "PASS",
+        "unsupported_protocol": "PASS",
+        "version": "PASS"
+      },
+      "contract_sha256": "c3138737b026b79b93bcf98afdb0348d9481e71b3fda9d41640fb7d0d8f5c09b",
+      "execution": "release_artifact",
+      "ir_schema_versions": [
+        1
+      ],
+      "migration_phase": "RP2",
+      "platform": "windows-x86_64",
+      "product": "aether-ir-verifier",
+      "product_version": "0.1.0",
+      "protocol_version": 1,
+      "provenance": "CI execution",
+      "revision": "RUST-1.2.2",
+      "rust_target": "x86_64-pc-windows-msvc",
+      "schema_version": 1,
+      "sha256": "6cd06f8b499ee97d506cff28b57dbf1153b973a2ad04292d1c157fc4d30ce98a",
+      "toolchain": {
+        "architecture": "AMD64",
+        "cargo": "cargo 1.85.1 (d73d2caf9 2024-12-31)",
+        "os": "Windows-2025Server-10.0.26100-SP0",
+        "python": "3.13.15",
+        "rust_host": "x86_64-pc-windows-msvc",
+        "rustc": "rustc 1.85.1 (4eb161250 2025-03-15)"
+      }
     }
   },
-  "final_decision": "CROSS_PLATFORM_COMPANION_BLOCKED",
+  "final_decision": "CROSS_PLATFORM_COMPANION_QUALIFIED",
   "full_canary_policy": "full 404-case canary on linux-x86_64; representative protocol subset on every official platform",
   "operational_gates": {
-    "OP1": "BLOCKED",
-    "OP10": "BLOCKED",
-    "OP6": "BLOCKED"
+    "OP1": "PASS",
+    "OP10": "PASS",
+    "OP6": "PASS"
   },
   "packaging_command": "python scripts/package_rust_verifier.py --executable <release-binary> --platform <os> --arch <arch> --output-dir <dir>",
   "platforms": {
@@ -43,7 +230,24 @@
   "product_version": "0.1.0",
   "publication_semantics": "OP10 requires release-artifact clean installation; this workflow does not claim public publication",
   "release_index": {
-    "artifacts": {},
+    "artifacts": {
+      "linux-x86_64": {
+        "artifact": "aether-ir-verifier-0.1.0-linux-x86_64.tar.gz",
+        "sha256": "cd4c83a2cd723fe1ca76276ecec8f5a8b84621a3549c00cd10f08cac8cc6e294"
+      },
+      "macos-arm64": {
+        "artifact": "aether-ir-verifier-0.1.0-macos-arm64.tar.gz",
+        "sha256": "8da18298857da646f5e044650857d81c99eb2ce00e8b2d55b54ecc47d8f770ea"
+      },
+      "macos-x86_64": {
+        "artifact": "aether-ir-verifier-0.1.0-macos-x86_64.tar.gz",
+        "sha256": "0d0d27d0a0b4e7a2374268f1e12ce94e8d7b0d9f0ad141c535ff2dc96b72766c"
+      },
+      "windows-x86_64": {
+        "artifact": "aether-ir-verifier-0.1.0-windows-x86_64.zip",
+        "sha256": "6cd06f8b499ee97d506cff28b57dbf1153b973a2ad04292d1c157fc4d30ce98a"
+      }
+    },
     "product": "aether-ir-verifier",
     "product_version": "0.1.0",
     "protocol_version": 1,

@@ -387,8 +387,12 @@ RP3 authority CI gate remain separate operational blockers.
 
 RUST-1.2.1 freezes `aether-ir-verifier` as a separately versioned B1 native
 companion archive. Its packaging foundation and dependency contract are ready;
-cross-platform publication and clean-install evidence remain blockers. This
-does not change Python authority or RP2.
+RUST-1.2.2 subsequently qualified the four official platform release artifacts
+and clean-install contract. RUST-1.3 now records
+`READY_FOR_RP3_AUTHORITY_SWITCH`; see
+[`RUST_INITIAL_IR_VERIFIER_RP3_FINAL_QUALIFICATION.md`](../compiler/RUST_INITIAL_IR_VERIFIER_RP3_FINAL_QUALIFICATION.md).
+This readiness state does not change Python authority or RP2. Only RUST-2 may
+change the default authority and phase.
 
 - First Rust: Initial IR verifier authority-readiness audit.
 - First C/C ABI: runtime ABI architecture and canonical schema audit, starting

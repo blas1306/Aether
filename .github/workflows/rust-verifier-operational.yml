@@ -8,7 +8,9 @@ on:
       - "compiler-rs/**"
       - "scripts/package_rust_verifier.py"
       - "scripts/check_rust_verifier_companion_packaging.py"
+      - "scripts/check_rust_verifier_rp3_final_qualification.py"
       - "docs/compiler/rust_verifier_companion_packaging.json"
+      - "docs/compiler/rust_initial_ir_verifier_rp3_final_qualification.json"
       - "scripts/rust_verifier_canary.py"
       - "scripts/rust_verifier_platform_snapshot.py"
       - "src/aether/ir/**"
@@ -104,6 +106,10 @@ jobs:
           --config tests/canary/rust_verifier_canary.json
           --executable "${{ env.PACKAGED_RUST_VERIFIER }}"
           --output-directory rust-authority-canary-reports
+      - name: Require deterministic RP3 final qualification
+        run: >-
+          python scripts/check_rust_verifier_rp3_final_qualification.py
+          --check --require-ready
       - uses: actions/upload-artifact@v4
         if: always()
         with:

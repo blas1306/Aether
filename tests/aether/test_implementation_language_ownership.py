@@ -26,6 +26,7 @@ def test_ownership_registry_has_one_legal_authority_per_responsibility() -> None
             "semantic_parity_status",
             "operational_readiness_status",
             "companion_packaging_model",
+            "next_promotion",
         }
         if entry["component"] != "initial_ir_verification":
             assert set(entry) == required
@@ -42,8 +43,9 @@ def test_ownership_registry_has_one_legal_authority_per_responsibility() -> None
     )
     assert initial_verifier["current_authority"] == "python"
     assert initial_verifier["migration_phase"] == "RP2"
+    assert initial_verifier["next_promotion"] == "READY_FOR_RP3_AUTHORITY_SWITCH"
     assert initial_verifier["semantic_parity_status"] == "complete_rust_1_1"
-    assert initial_verifier["operational_readiness_status"] == "companion_packaging_ready_rust_1_2_1_cross_platform_blocked"
+    assert initial_verifier["operational_readiness_status"] == "ready_for_rp3_authority_switch_rust_1_3"
     assert initial_verifier["companion_packaging_model"] == "B1_platform_native_binary_artifact"
 
 
