@@ -87,18 +87,8 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
-          output = Path("evidence")
-          output.mkdir()
-          reports = sorted(Path("imported").glob("**/*-x86_64.json")) + sorted(Path("imported").glob("**/*-arm64.json"))
-          assert len(reports) == 4, reports
-          for report in reports:
-              (output / report.name).write_bytes(report.read_bytes())
-          archives = sorted(Path("imported").glob("**/*.tar.gz")) + sorted(Path("imported").glob("**/*.zip"))
-          assert len(archives) == 4, archives
-          for archive in archives:
-              (output / archive.name).write_bytes(archive.read_bytes())
-              sidecar = archive.with_name(archive.name + ".sha256")
-              (output / sidecar.name).write_bytes(sidecar.read_bytes())
+          from scripts.check_rust_verifier_cross_platform_qualification import flatten_downloaded_evidence
+          flatten_downloaded_evidence(Path("imported"), Path("evidence"))
       - name: Require all official platforms and build aggregate index/report
         run: >-
           python scripts/check_rust_verifier_cross_platform_qualification.py

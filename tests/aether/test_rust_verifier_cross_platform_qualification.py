@@ -10,7 +10,8 @@ import pytest
 from aether.ir import VerifierAuthorityConfiguration, VerifierAuthorityMode
 from aether.ir.rust_verifier import RUST_VERIFIER_PACKAGE_VERSION, rust_verifier_artifact_name
 from scripts.check_rust_verifier_cross_platform_qualification import (
-    PLATFORMS, REQUIRED_CHECKS, build_record, contract_digest, validate_evidence,
+    PLATFORMS, REQUIRED_CHECKS, build_record, contract_digest,
+    flatten_downloaded_evidence, validate_evidence,
 )
 
 
@@ -36,6 +37,23 @@ def write_all(path: Path) -> None:
         item["sha256"] = sha256(artifact.read_bytes()).hexdigest()
         artifact.with_name(artifact.name + ".sha256").write_text(f"{item['sha256']}  {artifact.name}\n")
         (path / f"{platform}.json").write_text(json.dumps(item))
+
+
+def write_downloaded_artifacts(path: Path) -> None:
+    for platform in PLATFORMS:
+        qualification = path / f"verifier-qualification-{platform}"
+        qualification.mkdir(parents=True)
+        write_all_platform = evidence(platform)
+        archive = qualification / str(write_all_platform["artifact"])
+        archive.write_bytes(platform.encode())
+        write_all_platform["sha256"] = sha256(archive.read_bytes()).hexdigest()
+        sidecar = archive.with_name(archive.name + ".sha256")
+        sidecar.write_text(f"{write_all_platform['sha256']}  {archive.name}\n")
+        (qualification / f"{platform}.json").write_text(json.dumps(write_all_platform))
+        package = qualification / "package"
+        package.mkdir()
+        (package / archive.name).write_bytes(archive.read_bytes())
+        (package / sidecar.name).write_bytes(sidecar.read_bytes())
 
 
 def test_matrix_and_targets_are_frozen() -> None:
@@ -93,6 +111,44 @@ def test_archive_checksum_mismatch_blocks_aggregate(tmp_path: Path) -> None:
     item = evidence("linux-x86_64"); item["canary"]["semantic_mismatches"] = 1
     with pytest.raises(ValueError, match="canary"):
         validate_evidence(item, "linux-x86_64")
+
+
+def test_flatten_downloaded_root_and_package_copies_uses_qualification_root(tmp_path: Path) -> None:
+    imported = tmp_path / "imported"
+    imported.mkdir()
+    write_downloaded_artifacts(imported)
+    flattened = tmp_path / "evidence"
+    flatten_downloaded_evidence(imported, flattened)
+    assert build_record(flattened)["final_decision"] == "CROSS_PLATFORM_COMPANION_QUALIFIED"
+    assert len(list(flattened.iterdir())) == len(PLATFORMS) * 3
+
+
+def test_flatten_rejects_mismatched_package_duplicate(tmp_path: Path) -> None:
+    imported = tmp_path / "imported"
+    imported.mkdir()
+    write_downloaded_artifacts(imported)
+    platform = "linux-x86_64"
+    archive = rust_verifier_artifact_name(platform)
+    (imported / f"verifier-qualification-{platform}" / "package" / archive).write_bytes(b"different")
+    with pytest.raises(ValueError, match="differs from canonical"):
+        flatten_downloaded_evidence(imported, tmp_path / "evidence")
+
+
+def test_flatten_rejects_missing_sidecar_and_wrong_platform_archive(tmp_path: Path) -> None:
+    imported = tmp_path / "imported"
+    imported.mkdir()
+    write_downloaded_artifacts(imported)
+    platform = "linux-x86_64"
+    qualification = imported / f"verifier-qualification-{platform}"
+    (qualification / (rust_verifier_artifact_name(platform) + ".sha256")).unlink()
+    with pytest.raises(ValueError, match="canonical qualification file missing"):
+        flatten_downloaded_evidence(imported, tmp_path / "missing-sidecar")
+
+    write_downloaded_artifacts(tmp_path / "second-imported")
+    second = tmp_path / "second-imported" / f"verifier-qualification-{platform}"
+    (second / rust_verifier_artifact_name("windows-x86_64")).write_bytes(b"wrong")
+    with pytest.raises(ValueError, match="wrong-platform"):
+        flatten_downloaded_evidence(tmp_path / "second-imported", tmp_path / "wrong-platform")
 
 
 def test_workflow_contains_every_official_platform() -> None:

@@ -10,6 +10,7 @@ import argparse
 from hashlib import sha256
 import json
 from pathlib import Path
+import shutil
 import sys
 import tomllib
 
@@ -42,6 +43,67 @@ def rust_verifier_artifact_name(platform: str) -> str:
 
 def contract_digest() -> str:
     return sha256(CONTRACT.read_bytes()).hexdigest()
+
+
+def flatten_downloaded_evidence(imported_dir: Path, evidence_dir: Path) -> None:
+    """Flatten canonical qualification-root evidence from downloaded artifacts.
+
+    ``qualify_rust_verifier_platform.py`` creates the archive first in
+    ``qualification/package`` and then publishes the qualified archive,
+    sidecar, and report at the qualification root.  The latter is the
+    qualification artifact contract consumed by aggregation; the package copy
+    is retained only as intermediate packaging evidence.
+    """
+    expected_directories = {
+        f"verifier-qualification-{platform}": platform for platform in PLATFORMS
+    }
+    actual_directories = {path.name: path for path in imported_dir.iterdir() if path.is_dir()}
+    if set(actual_directories) != set(expected_directories):
+        raise ValueError(
+            "downloaded qualification platforms differ from official matrix: "
+            f"expected {sorted(expected_directories)}, got {sorted(actual_directories)}"
+        )
+
+    selected: list[Path] = []
+    for directory_name, platform in expected_directories.items():
+        directory = actual_directories[directory_name]
+        archive = directory / rust_verifier_artifact_name(platform)
+        sidecar = archive.with_name(archive.name + ".sha256")
+        report = directory / f"{platform}.json"
+        for canonical in (report, archive, sidecar):
+            if not canonical.is_file():
+                raise ValueError(f"{platform}: canonical qualification file missing: {canonical.name}")
+
+        package_archive = directory / "package" / archive.name
+        package_sidecar = package_archive.with_name(package_archive.name + ".sha256")
+        if package_archive.exists() or package_sidecar.exists():
+            if not package_archive.is_file() or not package_sidecar.is_file():
+                raise ValueError(f"{platform}: incomplete noncanonical package copy")
+            if package_archive.read_bytes() != archive.read_bytes():
+                raise ValueError(f"{platform}: package archive differs from canonical qualification archive")
+            if package_sidecar.read_bytes() != sidecar.read_bytes():
+                raise ValueError(f"{platform}: package checksum differs from canonical qualification checksum")
+
+        archives = [
+            path for path in directory.rglob("*")
+            if path.is_file() and (path.name.endswith(".tar.gz") or path.name.endswith(".zip"))
+        ]
+        allowed_archives = {archive}
+        if package_archive.is_file():
+            allowed_archives.add(package_archive)
+        unexpected = sorted(path.relative_to(directory) for path in archives if path not in allowed_archives)
+        if unexpected:
+            raise ValueError(f"{platform}: unexpected or wrong-platform archives: {unexpected}")
+        selected.extend((report, archive, sidecar))
+
+    if len(selected) != len(PLATFORMS) * 3:
+        raise AssertionError("exactly one report, archive, and checksum are required per official platform")
+    evidence_dir.mkdir(parents=True, exist_ok=False)
+    for source in selected:
+        destination = evidence_dir / source.name
+        if destination.exists():
+            raise ValueError(f"duplicate canonical evidence name: {source.name}")
+        shutil.copyfile(source, destination)
 
 
 def validate_evidence(value: object, platform: str) -> dict[str, object]:
