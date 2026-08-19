@@ -3,7 +3,10 @@ from __future__ import annotations
 from copy import deepcopy
 from hashlib import sha256
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
@@ -123,6 +126,26 @@ def test_flatten_downloaded_root_and_package_copies_uses_qualification_root(tmp_
     assert len(list(flattened.iterdir())) == len(PLATFORMS) * 3
 
 
+def test_flatten_cli_runs_outside_repository_without_pythonpath(tmp_path: Path) -> None:
+    imported = tmp_path / "imported"
+    imported.mkdir()
+    write_downloaded_artifacts(imported)
+    evidence_dir = tmp_path / "evidence"
+    script = Path(__file__).resolve().parents[2] / "scripts/check_rust_verifier_cross_platform_qualification.py"
+
+    subprocess.run(
+        [
+            sys.executable, str(script), "--flatten-downloaded", str(imported),
+            "--evidence-dir", str(evidence_dir),
+        ],
+        cwd=tmp_path,
+        check=True,
+        env={key: value for key, value in os.environ.items() if key != "PYTHONPATH"},
+    )
+
+    assert build_record(evidence_dir)["final_decision"] == "CROSS_PLATFORM_COMPANION_QUALIFIED"
+
+
 def test_flatten_rejects_mismatched_package_duplicate(tmp_path: Path) -> None:
     imported = tmp_path / "imported"
     imported.mkdir()
@@ -156,3 +179,6 @@ def test_workflow_contains_every_official_platform() -> None:
     for platform in PLATFORMS:
         assert f"platform: {platform}" in workflow
     assert "continue-on-error" not in workflow
+    assert "--flatten-downloaded imported --evidence-dir evidence" in workflow
+    assert "from scripts.check_rust_verifier_cross_platform_qualification import" not in workflow
+    assert "PYTHONPATH" not in workflow

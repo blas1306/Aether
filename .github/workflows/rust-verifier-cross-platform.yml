@@ -84,11 +84,9 @@ jobs:
           pattern: verifier-qualification-*
           path: imported
       - name: Flatten deterministic platform reports
-        shell: python
-        run: |
-          from pathlib import Path
-          from scripts.check_rust_verifier_cross_platform_qualification import flatten_downloaded_evidence
-          flatten_downloaded_evidence(Path("imported"), Path("evidence"))
+        run: >-
+          python scripts/check_rust_verifier_cross_platform_qualification.py
+          --flatten-downloaded imported --evidence-dir evidence
       - name: Require all official platforms and build aggregate index/report
         run: >-
           python scripts/check_rust_verifier_cross_platform_qualification.py

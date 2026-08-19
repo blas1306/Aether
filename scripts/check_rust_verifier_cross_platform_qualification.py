@@ -218,11 +218,24 @@ def render_markdown(record: dict[str, object]) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--evidence-dir", type=Path, default=ROOT / "docs/compiler/rust_verifier_platform_evidence")
+    parser.add_argument(
+        "--flatten-downloaded",
+        type=Path,
+        metavar="IMPORTED_DIR",
+        help="flatten downloaded qualification artifacts into --evidence-dir and exit",
+    )
     parser.add_argument("--write", action="store_true")
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--require-qualified", action="store_true")
     parser.add_argument("--output-dir", type=Path)
     args = parser.parse_args(argv)
+    if args.flatten_downloaded is not None:
+        if args.write or args.check or args.require_qualified or args.output_dir is not None:
+            parser.error("--flatten-downloaded cannot be combined with aggregate report options")
+        flatten_downloaded_evidence(
+            args.flatten_downloaded.resolve(), args.evidence_dir.resolve()
+        )
+        return 0
     record = build_record(args.evidence_dir.resolve())
     rendered_json = json.dumps(record, indent=2, sort_keys=True) + "\n"
     rendered_md = render_markdown(record)
