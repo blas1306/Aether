@@ -68,6 +68,26 @@ def test_matrix_and_targets_are_frozen() -> None:
     }
 
 
+def test_contract_digest_canonicalizes_lf_and_crlf(tmp_path: Path) -> None:
+    lf_contract = tmp_path / "lf.json"
+    crlf_contract = tmp_path / "crlf.json"
+    content = b'{\n  "protocol_version": 1,\n  "authority": "python"\n}\n'
+    lf_contract.write_bytes(content)
+    crlf_contract.write_bytes(content.replace(b"\n", b"\r\n"))
+
+    assert contract_digest(lf_contract) == contract_digest(crlf_contract)
+    assert contract_digest(lf_contract) == sha256(content).hexdigest()
+
+
+def test_contract_checkout_policy_requires_lf() -> None:
+    attributes = Path(__file__).resolve().parents[2] / ".gitattributes"
+    rules = {
+        line.split("#", 1)[0].strip()
+        for line in attributes.read_text(encoding="utf-8").splitlines()
+    }
+    assert "docs/compiler/rust_verifier_companion_packaging.json text eol=lf" in rules
+
+
 def test_missing_evidence_blocks_without_changing_authority(tmp_path: Path) -> None:
     record = build_record(tmp_path)
     assert record["final_decision"] == "CROSS_PLATFORM_COMPANION_BLOCKED"

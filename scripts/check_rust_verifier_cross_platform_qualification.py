@@ -41,8 +41,19 @@ def rust_verifier_artifact_name(platform: str) -> str:
     return f"aether-ir-verifier-{RUST_VERIFIER_PACKAGE_VERSION}-{platform}{extension}"
 
 
-def contract_digest() -> str:
-    return sha256(CONTRACT.read_bytes()).hexdigest()
+def canonical_contract_bytes(contract: Path = CONTRACT) -> bytes:
+    """Return contract bytes with platform-independent LF line endings.
+
+    The packaging contract is UTF-8 JSON text.  Git may materialize that text
+    with CRLF on Windows, but checkout policy is not part of the contract's
+    identity.  Normalize line endings only; every other byte remains covered
+    by the digest.
+    """
+    return contract.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+
+
+def contract_digest(contract: Path = CONTRACT) -> str:
+    return sha256(canonical_contract_bytes(contract)).hexdigest()
 
 
 def flatten_downloaded_evidence(imported_dir: Path, evidence_dir: Path) -> None:
