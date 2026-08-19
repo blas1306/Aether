@@ -1,0 +1,52 @@
+{
+  "artifact": "aether-ir-verifier-0.1.0-windows-x86_64.zip",
+  "authority": "python",
+  "canary": {
+    "comparisons": 5,
+    "operational_failures": 0,
+    "semantic_mismatches": 0,
+    "unexpected": 0
+  },
+  "capabilities": [
+    "verify"
+  ],
+  "checks": {
+    "accepted_fixture": "PASS",
+    "build": "PASS",
+    "canary": "PASS",
+    "checksum": "PASS",
+    "clean_install": "PASS",
+    "discovery": "PASS",
+    "malformed_protocol": "PASS",
+    "metadata": "PASS",
+    "missing_companion": "PASS",
+    "package": "PASS",
+    "path_isolation": "PASS",
+    "rejected_fixture": "PASS",
+    "unsupported_protocol": "PASS",
+    "version": "PASS"
+  },
+  "contract_sha256": "e891ab3582700aba7191e055bea5e791d8f42ca6ee2cf7f9d22a2ab7962da1fd",
+  "execution": "release_artifact",
+  "ir_schema_versions": [
+    1
+  ],
+  "migration_phase": "RP2",
+  "platform": "windows-x86_64",
+  "product": "aether-ir-verifier",
+  "product_version": "0.1.0",
+  "protocol_version": 1,
+  "provenance": "CI execution",
+  "revision": "RUST-1.2.2",
+  "rust_target": "x86_64-pc-windows-msvc",
+  "schema_version": 1,
+  "sha256": "6cd06f8b499ee97d506cff28b57dbf1153b973a2ad04292d1c157fc4d30ce98a",
+  "toolchain": {
+    "architecture": "AMD64",
+    "cargo": "cargo 1.85.1 (d73d2caf9 2024-12-31)",
+    "os": "Windows-2025Server-10.0.26100-SP0",
+    "python": "3.13.15",
+    "rust_host": "x86_64-pc-windows-msvc",
+    "rustc": "rustc 1.85.1 (4eb161250 2025-03-15)"
+  }
+}

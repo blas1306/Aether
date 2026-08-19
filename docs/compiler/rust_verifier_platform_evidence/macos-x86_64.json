@@ -1,0 +1,52 @@
+{
+  "artifact": "aether-ir-verifier-0.1.0-macos-x86_64.tar.gz",
+  "authority": "python",
+  "canary": {
+    "comparisons": 5,
+    "operational_failures": 0,
+    "semantic_mismatches": 0,
+    "unexpected": 0
+  },
+  "capabilities": [
+    "verify"
+  ],
+  "checks": {
+    "accepted_fixture": "PASS",
+    "build": "PASS",
+    "canary": "PASS",
+    "checksum": "PASS",
+    "clean_install": "PASS",
+    "discovery": "PASS",
+    "malformed_protocol": "PASS",
+    "metadata": "PASS",
+    "missing_companion": "PASS",
+    "package": "PASS",
+    "path_isolation": "PASS",
+    "rejected_fixture": "PASS",
+    "unsupported_protocol": "PASS",
+    "version": "PASS"
+  },
+  "contract_sha256": "c3138737b026b79b93bcf98afdb0348d9481e71b3fda9d41640fb7d0d8f5c09b",
+  "execution": "release_artifact",
+  "ir_schema_versions": [
+    1
+  ],
+  "migration_phase": "RP2",
+  "platform": "macos-x86_64",
+  "product": "aether-ir-verifier",
+  "product_version": "0.1.0",
+  "protocol_version": 1,
+  "provenance": "CI execution",
+  "revision": "RUST-1.2.2",
+  "rust_target": "x86_64-apple-darwin",
+  "schema_version": 1,
+  "sha256": "0d0d27d0a0b4e7a2374268f1e12ce94e8d7b0d9f0ad141c535ff2dc96b72766c",
+  "toolchain": {
+    "architecture": "x86_64",
+    "cargo": "cargo 1.85.1 (d73d2caf9 2024-12-31)",
+    "os": "macOS-15.7.7-x86_64-i386-64bit-Mach-O",
+    "python": "3.13.14",
+    "rust_host": "x86_64-apple-darwin",
+    "rustc": "rustc 1.85.1 (4eb161250 2025-03-15)"
+  }
+}
