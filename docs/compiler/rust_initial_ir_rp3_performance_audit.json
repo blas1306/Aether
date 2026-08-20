@@ -1,0 +1,114 @@
+{
+  "schema_version": 1,
+  "milestone": "RUST-2.P1",
+  "measured_at": "2026-08-20",
+  "environment": {
+    "python": "CPython 3.14.7",
+    "os": "Linux 7.1.8-1-cachyos x86_64",
+    "cpu": "AMD Ryzen 5 7535HS with Radeon Graphics",
+    "logical_cpus": 12,
+    "notes": [
+      "PYTHONPATH=.:src and PYTHONDONTWRITEBYTECODE=1 were used to avoid checkout/import-cache contamination.",
+      "Absolute timings are observations, not CI requirements."
+    ]
+  },
+  "collection": {
+    "tests": 4699,
+    "test_files": 208
+  },
+  "full_suite": {
+    "seconds": 1137.36,
+    "passed": 4671,
+    "failed": 24,
+    "skipped": 4,
+    "failure_classification": "environment-specific LeakSanitizer/ptrace incompatibility",
+    "last_failed_rerun": {
+      "seconds": 4.01,
+      "failed": 24,
+      "deselected": 1431,
+      "note": "Every failure emitted 'LeakSanitizer does not work under ptrace'; unlike the earlier host described in RUST-2.P, this managed execution environment reproduces the incompatibility."
+    }
+  },
+  "subsets": {
+    "all_o2_audit_modules": {
+      "tests": 69,
+      "seconds": 770.57,
+      "passed": 69,
+      "share_of_full_suite_percent": 67.75
+    },
+    "numeric_numerical_selected_o2": {
+      "tests": 33,
+      "seconds": 165.32,
+      "passed": 33
+    },
+    "rp3_canary": {
+      "comparisons": 404,
+      "accepted": 316,
+      "rejected": 88,
+      "semantic_mismatches": 0,
+      "infrastructure_failures": 0,
+      "pytest_suite_seconds_sum": 7.25,
+      "pytest_results": "50 passed; 6 passed/1 skipped; 10 passed; 5 passed",
+      "worker_startups": 4,
+      "requests_per_worker_average": 101.0,
+      "python_shadow_invocations": 404,
+      "note": "The canary driver intentionally runs four independent pytest sessions, hence four session-scoped workers."
+    }
+  },
+  "verifier_microbenchmarks": {
+    "migration_corpus_modules": 142,
+    "python": {
+      "requests": 1420,
+      "seconds": 0.139375,
+      "microseconds_per_request": 98.151
+    },
+    "canonical_serialization": {
+      "transportable_requests": 1400,
+      "seconds": 0.085564,
+      "microseconds_per_request": 61.117
+    },
+    "rust_persistent_transport_and_verification": {
+      "requests": 1400,
+      "worker_startups": 1,
+      "seconds": 0.634310,
+      "microseconds_per_request": 453.078
+    },
+    "estimated_dual_verification_microseconds_per_request": 612.346,
+    "estimated_404_request_seconds": 0.247388,
+    "scope": "Warm in-process Python verification and one debug Rust persistent worker; construction/materialization excluded."
+  },
+  "slowest_observed": [
+    {"seconds": 130.93, "phase": "call", "nodeid": "tests/aether/test_o2_measurement.py::test_checked_in_static_baseline_is_exactly_regenerated"},
+    {"seconds": 127.23, "phase": "call", "nodeid": "tests/aether/test_o2_aggregate_copy_elision_readiness.py::test_report_regeneration_is_byte_deterministic"},
+    {"seconds": 96.72, "phase": "setup", "nodeid": "tests/aether/test_o2_post_immediate_borrow_optimization_audit.py::test_current_post_o297_baseline"},
+    {"seconds": 64.81, "phase": "setup", "nodeid": "tests/aether/test_o2_post_arrayget_hot_ownership_audit.py::test_current_post_o297_production_census"},
+    {"seconds": 63.87, "phase": "call", "nodeid": "tests/aether/test_o2_aggregate_lifetime_analysis.py::test_real_hot_workload_reconciles_every_site_deterministically"},
+    {"seconds": 63.49, "phase": "call", "nodeid": "tests/aether/test_o2_arc_structural_eligibility_audit.py::test_json_is_stable_and_audit_is_read_only"},
+    {"seconds": 62.78, "phase": "call", "nodeid": "tests/aether/test_o2_aggregate_copy_elision_readiness.py::test_o211_reconciles_exact_four_real_sites_as_no_explicit_copy_edges"},
+    {"seconds": 32.87, "phase": "call", "nodeid": "tests/aether/test_o2_scalar_replacement_readiness.py::test_o210_freezes_and_classifies_the_exact_o298_candidates"},
+    {"seconds": 32.23, "phase": "setup", "nodeid": "tests/aether/test_o2_hot_arc_opportunity_audit.py::test_hot_arc_census_loop_depth_balance_and_closed_taxonomies"},
+    {"seconds": 31.91, "phase": "call", "nodeid": "tests/aether/test_o2_arc_structural_eligibility_audit.py::test_cfg_dominance_paths_joins_and_phis_are_reported"},
+    {"seconds": 31.87, "phase": "call", "nodeid": "tests/aether/test_o2_arc_structural_eligibility_audit.py::test_exact_pairs_and_structural_blockers"},
+    {"seconds": 30.89, "phase": "call", "nodeid": "tests/aether/test_o2_immediate_array_string_borrow_audit.py::test_exact_three_sites_are_borrowed_and_stable_region_remains_owned"},
+    {"seconds": 2.23, "phase": "call", "nodeid": "tests/aether/test_numeric_backend_parity.py::test_numeric_dogfood_examples_execute_natively[examples/ProbandoNR/probandoNR3.ae]"},
+    {"seconds": 0.21, "phase": "call", "nodeid": "tests/aether/test_numerical_methods_example.py::test_numerical_methods_dogfood_program_matches_native_backend"},
+    {"seconds": 0.19, "phase": "call", "nodeid": "tests/aether/test_o2_measurement.py::test_candidate_fingerprints_and_overlap_are_stable"},
+    {"seconds": 0.11, "phase": "call", "nodeid": "tests/aether/test_numerical_methods_example.py::test_numerical_methods_dogfood_program_validates_all_cases"},
+    {"seconds": 0.09, "phase": "call", "nodeid": "tests/aether/test_o2_measurement.py::test_static_measurement_required_censuses_and_unsupported_reporting"},
+    {"seconds": 0.08, "phase": "call", "nodeid": "tests/aether/test_numeric_backend_parity.py::test_mixed_numeric_operations_match_all_backends_in_both_orders"},
+    {"seconds": 0.08, "phase": "call", "nodeid": "tests/aether/test_numeric_backend_parity.py::test_contextual_int_to_double_promotion_matches_all_backends"},
+    {"seconds": 0.07, "phase": "call", "nodeid": "tests/aether/test_numeric_backend_parity.py::test_numeric_dogfood_examples_execute_natively[examples/FormulaNumerosPrimos.ae]"}
+  ],
+  "threshold_counts_in_measured_ranked_set": {
+    "over_1_second": 13,
+    "over_5_seconds": 12,
+    "over_10_seconds": 12
+  },
+  "attribution": {
+    "dominant": "pre-existing O2 audit/regeneration tests",
+    "rp3_verifier_overhead": "small in controlled canary; absent from the ordinary suite unless the explicit canary harness injects it",
+    "mandatory_shadow_overhead": "approximately 98.151 microseconds/request in the isolated migration corpus",
+    "persistent_lifecycle": "one worker per pytest canary session; 101 requests/worker across four intentional sessions",
+    "historical_baseline_causality": "not established; no reproducible pre-RP3 checkout comparison was made"
+  }
+}
